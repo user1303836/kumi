@@ -1,0 +1,28 @@
+{
+  "learned": 150,
+  "seed": "Dub Techno",
+  "songs": [
+    {
+      "artist": "Basic Channel",
+      "title": "Phylyps Trak",
+      "album": "BCD"
+    },
+    {
+      "artist": "Basic Channel",
+      "title": "Dub Techno Track 30",
+      "album": "BCD"
+    },
+    {
+      "artist": "Rhythm & Sound",
+      "title": "Dub Techno Track 25",
+      "album": "Rhythm & Sound"
+    },
+    {
+      "artist": "Basic Channel",
+      "title": "Dub Techno Track 15",
+      "album": "BCD"
+    }
+  ],
+  "traits": "Moderate (about -12 LUFS, -13 to -11), dark (tilt -2.8 dB/oct), mono lows, open dynamics (peak to loudness 12.5 dB), one level throughout (3 LU), some reverb (1.2 s), echoes at 375 ms.",
+  "note": "The producer's own music: lean on it only where they left the style open, never over what they asked."
+}

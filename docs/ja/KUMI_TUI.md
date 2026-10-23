@@ -101,6 +101,7 @@ REAPER と Renoise でも画面は同じで（[つなぎ方](KUMI_GUIDE.md#reape
 | `/loop <what to reach>` | 判定付きのラウンドで作業する：一つの変更を前後で聴き、狙った項目が良くなり、ほかに悪くなったものがなければ残し、次の目標へ。すべての項目が達成されたとき、変更が効かなくなったとき、または 16 ラウンドか 45 分で止まる。Esc か `/loop stop` でも止まる。合わせたい音（「パッドを ~/ref.wav みたいな音にして」）ならノブ探索になり、`/loop` だけで一時停止した探索を再開し、`/loop stop` で終える |
 | `/goal <what to reach>` | ターンをまたいで一つのゴールを続け、毎ターン確認する（測ったときは判定の数値で）。達成、ブロック、行き詰まり（近づかないターンが 3 回続く）、予算切れまで。`/goal` で表示。`/goal resume`（使い切ったぶんだけ新しい予算）、`/goal edit <words>`、`/goal new: <words>`（終わっていないゴールを置き換える）、`/goal pause`（または Esc）、`/goal clear`（終わっていないゴールがなければ、一時停止中のサウンドマッチの探索を終える） |
 | `/slots` | 聴く仕事（ステム、採譜、リスニング、埋め込み）ごとにどのモデルが担当しているかを表示し、ふつうの言葉で入れ替える：`/slots listening gemini`、`/slots listening off`、`/slots listening <base URL>#<model>`、`/slots embeddings <.onnx ファイルか https のリンク>`。新しいモデルはまず試す。`/slots back <job>` で入れ替えを戻す |
+| `/music` | Kumi があなたの好みをこのコンピューター上で学ぶ、あなた自身の音楽：フォルダー、聴いた曲、進み具合。`/music add <folder>`、`/music remove <folder>`、`/music pause`、`/music resume`、`/music forget`（確認のあと、Kumi が学んだものを削除する）。Kumi があなたの好みを使うとき、曲名とアーティスト名がモデルに届く |
 | `/memory` | Kumi が保存しているすべて：あなたとこの Set についてのメモ、あなたの Set から学んだこと、テクニック、レシピ、教訓。一つ選ぶと忘れさせられる（メモは言葉を変えるかピン留めもでき、レシピは実行するか忘れさせる） |
 | `/note <id> <new words>` | モデルを使わずにメモの言葉を変える。`/memory` でメモの「Change the words」を選ぶと入力が始まる |
 | `/recipes` | あなたのレシピ：実行するか、忘れさせる。空欄のあるレシピは `/recipe` の行を書き始め、ピン留めしたものを埋めておくので、続きを入力する |
@@ -178,7 +179,7 @@ REAPER と Renoise でも画面は同じで（[つなぎ方](KUMI_GUIDE.md#reape
 
 ## プレーンモード
 
-`KUMI_UI=plain`、またはパイプを通した入力や出力では、代わりに一行ずつのプレーンなインターフェースになり、スクリーンリーダーやログに向いています。使えるのは `/help`、`/status`、`/undo`、`/stop`、`/refresh`、`/reconnect`、`/new [name]`、`/resume [番号、ID または名前]`（と `/conversations`）、`/rename <name>`、`/fork [name]`、`/export [md|html|json]`、`/share`（どちらもファイルを保存し、場所を伝えます）、`/daw [name]`、`/model [provider/model]`、`/effort [level|default]`、`/fast`、`/logout <provider>`、`/memory`、`/forget <id>`、`/note <id> <new words>`、`/pin <id>`、`/unpin <id>`、`/recipes`、`/willington`、`/update`、`/changelog`、`/quit` で、`/btw`、`/goal`、`/loop`、`/slots`、`/jobs`、`/copy` はありません。`/resume` はこの Set の会話、次にほかの Set の会話に番号を付けます。別の Set の会話についての Kumi の質問には 1、2、3 で答えます（答えを待つ間もコマンドは使え、ほかの言葉にはもう一度質問します）。バックグラウンドジョブが始まったときと終わったときは知らせ、あなたの依頼に必要なジョブは Kumi が何もしていないときに続きを進めます。サインインはシェルから `kumi login` で行います。Ctrl-C は答えを止め、Kumi が何もしていないときは終了します。
+`KUMI_UI=plain`、またはパイプを通した入力や出力では、代わりに一行ずつのプレーンなインターフェースになり、スクリーンリーダーやログに向いています。使えるのは `/help`、`/status`、`/undo`、`/stop`、`/refresh`、`/reconnect`、`/new [name]`、`/resume [番号、ID または名前]`（と `/conversations`）、`/rename <name>`、`/fork [name]`、`/export [md|html|json]`、`/share`（どちらもファイルを保存し、場所を伝えます）、`/daw [name]`、`/model [provider/model]`、`/effort [level|default]`、`/fast`、`/logout <provider>`、`/memory`、`/forget <id>`、`/note <id> <new words>`、`/pin <id>`、`/unpin <id>`、`/recipes`、`/willington`、`/update`、`/changelog`、`/quit` で、`/btw`、`/goal`、`/loop`、`/slots`、`/music`、`/jobs`、`/copy` はありません。`/resume` はこの Set の会話、次にほかの Set の会話に番号を付けます。別の Set の会話についての Kumi の質問には 1、2、3 で答えます（答えを待つ間もコマンドは使え、ほかの言葉にはもう一度質問します）。バックグラウンドジョブが始まったときと終わったときは知らせ、あなたの依頼に必要なジョブは Kumi が何もしていないときに続きを進めます。サインインはシェルから `kumi login` で行います。Ctrl-C は答えを止め、Kumi が何もしていないときは終了します。
 
 ## Kumi から離れているとき
 

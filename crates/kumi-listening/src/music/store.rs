@@ -401,6 +401,75 @@ impl MusicStore {
         Ok(())
     }
 
+    /// Taste used these songs now: they're heard in full before others.
+    pub fn mark_used(&self, ids: &[i64], at: i64) -> Result<(), MusicError> {
+        for chunk in ids.chunks(500) {
+            let list = chunk.iter().map(i64::to_string).collect::<Vec<_>>().join(",");
+            self.connection.execute(&format!("UPDATE songs SET used_at = ?1 WHERE id IN ({list})"), [at])?;
+        }
+        Ok(())
+    }
+
+    /// The heard songs a name names, and what it named: an artist (or album artist), an album, a song's title (or
+    /// "artist – title"), or a genre tag, tried in that order, any case.
+    pub fn named(&self, name: &str) -> Result<Option<(Named, Vec<Song>)>, MusicError> {
+        let name = name.trim();
+        if name.is_empty() {
+            return Ok(None);
+        }
+        let heard = |condition: &str, values: &[&str]| -> Result<Vec<Song>, MusicError> {
+            let sql = format!("SELECT {SONG_COLUMNS} FROM songs WHERE {LIVE} AND stage >= 1 AND ({condition}) ORDER BY id");
+            let mut statement = self.connection.prepare(&sql)?;
+            let songs = statement.query_map(rusqlite::params_from_iter(values), song_row)?.collect::<Result<_, _>>()?;
+            Ok(songs)
+        };
+        let artist = heard("artist = ?1 COLLATE NOCASE OR album_artist = ?1 COLLATE NOCASE", &[name])?;
+        if !artist.is_empty() {
+            return Ok(Some((Named::Artist, artist)));
+        }
+        let album = heard("album = ?1 COLLATE NOCASE", &[name])?;
+        if !album.is_empty() {
+            return Ok(Some((Named::Album, album)));
+        }
+        let mut song = heard("title = ?1 COLLATE NOCASE", &[name])?;
+        if song.is_empty() {
+            if let Some((by, title)) = name.split_once(" – ").or_else(|| name.split_once(" - ")) {
+                song = heard(
+                    "(artist = ?1 COLLATE NOCASE OR album_artist = ?1 COLLATE NOCASE) AND title = ?2 COLLATE NOCASE",
+                    &[by.trim(), title.trim()],
+                )?;
+            }
+        }
+        if !song.is_empty() {
+            return Ok(Some((Named::Song, song)));
+        }
+        let wanted = folded(name);
+        let genre: Vec<Song> = heard("genre LIKE ?1", &[&format!("%{name}%")])?
+            .into_iter()
+            .filter(|song| song.tags.genre.as_deref().is_some_and(|genre| genre.split("; ").any(|tag| folded(tag) == wanted)))
+            .collect();
+        Ok((!genre.is_empty()).then_some((Named::Genre, genre)))
+    }
+
+    /// The genre tags of the heard songs, each with how many songs carry it (any case: as most of them spell it).
+    pub fn genres(&self) -> Result<Vec<(String, usize)>, MusicError> {
+        let mut statement = self
+            .connection
+            .prepare(&format!("SELECT genre, count(*) FROM songs WHERE {LIVE} AND stage >= 1 AND genre IS NOT NULL GROUP BY genre"))?;
+        let rows: Vec<(String, i64)> = statement.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?.collect::<Result<_, _>>()?;
+        let mut tags: indexmap::IndexMap<String, (usize, String, usize)> = indexmap::IndexMap::new();
+        for (genre, count) in rows {
+            for tag in genre.split("; ").map(str::trim).filter(|tag| !tag.is_empty()) {
+                let entry = tags.entry(folded(tag)).or_insert((0, tag.to_string(), 0));
+                entry.0 += count as usize;
+                if count as usize > entry.2 {
+                    (entry.1, entry.2) = (tag.to_string(), count as usize);
+                }
+            }
+        }
+        Ok(tags.into_values().map(|(count, spelling, _)| (spelling, count)).collect())
+    }
+
     pub fn meta(&self, key: &str) -> Result<Option<String>, MusicError> {
         Ok(self.connection.query_row("SELECT value FROM meta WHERE key = ?1", [key], |row| row.get(0)).optional()?)
     }
@@ -410,6 +479,15 @@ impl MusicStore {
             .execute("INSERT INTO meta (key, value) VALUES (?1, ?2) ON CONFLICT(key) DO UPDATE SET value = excluded.value", [key, value])?;
         Ok(())
     }
+}
+
+/// What a name named among the producer's songs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Named {
+    Artist,
+    Album,
+    Song,
+    Genre,
 }
 
 /// A song that can be heard (or was): known, not gone, not a duplicate, not skipped.

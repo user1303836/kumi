@@ -1,0 +1,471 @@
+//! The taste tool: the producer's own music, learned on their computer, as the songs nearest what they named and what
+//! those songs share in words, for a request that leaves the style open. The first time, it offers (once) to learn
+//! their music, and learns it when they say yes. Offered in every DAW; it works away from the DAW.
+
+use super::{
+    database,
+    describe::describe,
+    folders,
+    hear::{plan, Clap, Style},
+    learning::{Music, MusicState},
+    store::{MusicStore, Named, Song, Stage},
+    tags,
+    vectors::VectorReader,
+};
+use crate::{checklist::Profile, embed, references::tool::names_a_ref};
+use async_trait::async_trait;
+use kumi_common::{
+    abort::{Signal, SignalExt},
+    js::json::stringify,
+    time::now_ms,
+};
+use kumi_library::sources::{expand_folder, homedir};
+use kumi_media::audio::tools::ResolveAudio;
+use kumi_types::{
+    contracts::{JsonObject, KernelTool, Reach, ToolResult, ToolRole},
+    daw::{with_article, DawProfile},
+    errors::RuntimeError,
+};
+use serde_json::{json, Value};
+use std::{path::Path, rc::Rc};
+
+pub const TASTE_TOOL: &str = "taste";
+/// Songs an answer names when the model doesn't say, and at most.
+const COUNT: usize = 8;
+const MOST: usize = 20;
+/// Songs a style's answer names as its examples.
+const SHOWN: usize = 3;
+
+const DESCRIPTION: &str = concat!(
+    "The producer's own music, learned on their computer: their nearest songs and what those songs share, in words. ",
+    "Call it only when a request leaves the style open (\"make me a beat\", \"something dark\"), before choosing sounds or a ",
+    "direction; never when the producer named a reference, specific sounds or exact values. With no like or words, it answers ",
+    "with the main styles in their music. The first time, it may answer with an offer to learn their music: ask the producer ",
+    "that once, in your own words, and call again with learn only if they say yes."
+);
+/// What every answer with songs says of them.
+const NOTE: &str = "The producer's own music: lean on it only where they left the style open, never over what they asked.";
+const OFFER_NOTE: &str = "Ask the producer this once, in your own words, then carry on with their request whatever they say. Only if they say yes, call taste with learn: the folders found.";
+
+fn schema(profile: &DawProfile) -> JsonObject {
+    let (place, clip, clip_ref) = (profile.words.place, with_article(profile.vocab.clip), profile.vocab.clip_ref);
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+            "like": {"type": "string", "minLength": 1, "maxLength": 1024, "description": format!("What the producer named: an artist, album, song or genre tag in their music, an audio file's path, or {clip} in the {place} (its {clip_ref})")},
+            "words": {"type": "string", "minLength": 1, "maxLength": 300, "description": "The producer's own words for the style, when they named nothing (matched against their songs' genre tags)"},
+            "count": {"type": "integer", "minimum": 1, "maximum": MOST, "description": format!("How many songs ({COUNT} when left out)")},
+            "learn": {"type": "array", "minItems": 1, "maxItems": 16, "items": {"type": "string", "minLength": 1, "maxLength": 1024}, "description": "The folders to learn from: only after the producer said yes to the offer"}
+        }
+    })
+    .as_object()
+    .unwrap()
+    .clone()
+}
+
+pub struct TasteTool {
+    music: Rc<Music>,
+    /// A clip in the project as its audio file.
+    resolve: Option<ResolveAudio>,
+    schema: JsonObject,
+}
+
+/// The taste tool, in the DAW's words.
+pub fn taste_tools_for(profile: &DawProfile, music: Rc<Music>, resolve: Option<ResolveAudio>) -> Vec<Rc<dyn KernelTool>> {
+    vec![Rc::new(TasteTool { music, resolve, schema: schema(profile) })]
+}
+
+#[async_trait(?Send)]
+impl KernelTool for TasteTool {
+    fn name(&self) -> &str {
+        TASTE_TOOL
+    }
+    fn description(&self) -> &str {
+        DESCRIPTION
+    }
+    fn input_schema(&self) -> JsonObject {
+        self.schema.clone()
+    }
+    fn reach(&self) -> Reach {
+        Reach::AwayFromDaw
+    }
+    fn deferred(&self) -> bool {
+        false
+    }
+    fn role(&self) -> Option<ToolRole> {
+        None
+    }
+    async fn execute(&self, input: JsonObject, signal: Signal) -> Result<ToolResult, RuntimeError> {
+        let text = |key: &str| input.get(key).and_then(Value::as_str).map(str::trim).filter(|text| !text.is_empty()).map(str::to_string);
+        let count = input.get("count").and_then(Value::as_u64).map_or(COUNT, |count| (count as usize).clamp(1, MOST));
+        if let Some(folders) = input.get("learn").and_then(Value::as_array) {
+            let folders =
+                folders.iter().filter_map(Value::as_str).map(str::trim).filter(|folder| !folder.is_empty()).map(str::to_string).collect();
+            return Ok(self.learn(folders));
+        }
+        if !self.music.agreed() {
+            return Ok(ToolResult::text(stringify(&self.offer().await)));
+        }
+        let answer = self.answer(text("like"), text("words"), count, &signal).await;
+        signal.check()?;
+        Ok(match answer {
+            Ok(answer) => ToolResult::text(stringify(&answer)),
+            Err(why) => ToolResult::error(format!("Kumi couldn't read what it learned of their music: {why}")),
+        })
+    }
+}
+
+/// A folder as the producer reads it: their home as ~.
+pub fn tilde(path: &str) -> String {
+    let home = homedir();
+    match path.strip_prefix(&home) {
+        Some(rest) if !home.is_empty() && (rest.is_empty() || rest.starts_with(['/', '\\'])) => format!("~{rest}"),
+        _ => path.to_string(),
+    }
+}
+
+/// A count of songs in words: exact under a hundred, else about it to two figures ("about 2,400"); past the count's cap,
+/// over a million.
+pub fn about(songs: usize, capped: bool) -> String {
+    if capped {
+        return "over a million".into();
+    }
+    if songs < 100 {
+        return songs.to_string();
+    }
+    let step = 10usize.pow(songs.ilog10() - 1);
+    format!("about {}", grouped((songs + step / 2) / step * step))
+}
+
+/// A number with its thousands apart: 2,400.
+pub fn grouped(value: usize) -> String {
+    let text = value.to_string();
+    let mut grouped = String::new();
+    for (at, digit) in text.chars().enumerate() {
+        if at > 0 && (text.len() - at).is_multiple_of(3) {
+            grouped.push(',');
+        }
+        grouped.push(digit);
+    }
+    grouped
+}
+
+/// A song as an answer names it: its artist, title and album (never its file).
+fn named(song: &Song) -> Value {
+    let mut named = serde_json::Map::new();
+    for (key, value) in [("artist", &song.tags.artist), ("title", &song.tags.title), ("album", &song.tags.album)] {
+        if let Some(value) = value {
+            named.insert(key.into(), json!(value));
+        }
+    }
+    Value::Object(named)
+}
+
+/// What songs share, in words: their profiles combined, as a sentence.
+fn traits(songs: &[Song]) -> Option<String> {
+    let profiles: Vec<Profile> = songs.iter().filter_map(|song| serde_json::from_str(song.profile.as_deref()?).ok()).collect();
+    Profile::combine("their songs", &profiles).map(|profile| describe(&profile))
+}
+
+impl TasteTool {
+    /// The producer said yes: the folders that are there become theirs, and Kumi starts learning.
+    fn learn(&self, folders: Vec<String>) -> ToolResult {
+        let home = homedir();
+        let there: Vec<String> =
+            folders.into_iter().filter(|folder| expand_folder(folder, &home).is_some_and(|path| Path::new(&path).is_dir())).collect();
+        if there.is_empty() {
+            return ToolResult::error("None of those folders is on this computer: ask the producer where their music is.");
+        }
+        if let Err(why) = self.music.learn(there.clone()) {
+            return ToolResult::error(format!("Kumi couldn't keep the folders in its settings: {why}"));
+        }
+        ToolResult::text(stringify(&json!({
+            "learned": 0,
+            "learning": {"heard": 0, "of": 0},
+            "folders": there,
+            "note": "Kumi learns their music in the background from now on, on this computer (/music shows how far it's got). Carry on with their request: taste has nothing to lean on until songs are heard."
+        })))
+    }
+
+    /// Not set up: the offer, once, when a usual place holds songs; else nothing.
+    async fn offer(&self) -> Value {
+        if self.music.offered() {
+            return json!({"learned": 0});
+        }
+        let (places, skip) = (self.music.places(), self.music.library_folders());
+        let Some(found) = tokio::task::spawn_blocking(move || folders::found_in(places, &skip)).await.ok().flatten() else {
+            return json!({"learned": 0});
+        };
+        // Offered once, however the producer answers (a settings file Kumi can't write offers again next time).
+        let _ = self.music.offer_made();
+        let folder = tilde(&found.folder);
+        json!({
+            "learned": 0,
+            "found": {"folders": [folder], "songs": found.songs},
+            "offer": format!(
+                "I found {} {} in {folder}. Learn your taste from {}? It stays on this computer.",
+                about(found.songs, found.capped),
+                if found.songs == 1 { "song" } else { "songs" },
+                if found.songs == 1 { "it" } else { "them" }
+            ),
+            "note": OFFER_NOTE
+        })
+    }
+
+    async fn answer(&self, like: Option<String>, words: Option<String>, count: usize, signal: &Signal) -> Result<Value, String> {
+        let status = self.music.status();
+        let learned = status.heard();
+        let mut answer = json!({"learned": learned});
+        if matches!(status.state, MusicState::Learning | MusicState::Paused) {
+            answer["learning"] = json!({"heard": learned, "of": status.songs});
+        }
+        if learned == 0 {
+            answer["note"] = json!("Kumi is still learning their music: nothing to lean on yet. Carry on without it.");
+            return Ok(answer);
+        }
+        // The style model now (none: the embeddings slot is off).
+        let style: Option<Rc<dyn Style>> = match self.music.style() {
+            Some(style) => Some(style),
+            None => Clap::from_slot(signal).await.map(|clap| Rc::new(clap) as Rc<dyn Style>),
+        };
+        let model = style.as_ref().map(|style| style.model().to_string());
+        // A file to be like: a clip in the project by its ref, or a path.
+        let mut file = None;
+        if let Some(like) = &like {
+            if let Some(resolve) = self.resolve.as_ref().filter(|_| names_a_ref(like)) {
+                match resolve(like.clone(), signal.clone()).await {
+                    Ok(Some(path)) => file = Some(path),
+                    Err(error) if error.is_aborted() => return Err("stopped".into()),
+                    _ => {}
+                }
+            } else {
+                file = expand_folder(like, &homedir()).filter(|path| folders::is_song(path) && Path::new(path).is_file());
+            }
+        }
+        // That file's vector, heard now (unless it's one of their songs, heard already).
+        let dir = self.music.dir();
+        let mut heard_file = None;
+        if let (Some(path), Some(style)) = (&file, &style) {
+            let (store_dir, known) = (dir.clone(), path.clone());
+            let in_library = tokio::task::spawn_blocking(move || {
+                MusicStore::open_read(&database(&store_dir)).ok().flatten().and_then(|store| store.song_at(&known).ok().flatten())
+            })
+            .await
+            .ok()
+            .flatten()
+            .filter(|song| song.stage >= 1);
+            if in_library.is_none() {
+                let folder = Path::new(path).parent().unwrap_or(Path::new(""));
+                let seconds = tags::read(Path::new(path), folder).seconds.unwrap_or(60.);
+                let say = |_: &str| {};
+                heard_file = style
+                    .embed(Path::new(path), &plan(seconds, Stage::Full).windows, None, &say, signal)
+                    .await
+                    .ok()
+                    .map(|(vector, _)| vector);
+            }
+        }
+        let used = tokio::task::spawn_blocking(move || -> Result<(Value, Vec<i64>), String> {
+            let Some(store) = MusicStore::open_read(&database(&dir)).map_err(|error| error.to_string())? else {
+                return Ok((answer, vec![]));
+            };
+            let reader = match &model {
+                Some(model) => Some(VectorReader::open(&dir, &store, model).map_err(|error| error.to_string())?),
+                None => None,
+            };
+            let seed = Seed { like, words, file, heard_file };
+            seed.answer(&store, reader.as_ref(), count, answer)
+        })
+        .await
+        .map_err(|error| error.to_string())??;
+        let (answer, shown) = used;
+        // The songs it named are heard in full first.
+        let dir = self.music.dir();
+        let _ = tokio::task::spawn_blocking(move || MusicStore::open(&database(&dir)).and_then(|store| store.mark_used(&shown, now_ms())))
+            .await;
+        Ok(answer)
+    }
+}
+
+/// What an answer is about: what the producer named, their words, or a file (and its vector, heard now).
+struct Seed {
+    like: Option<String>,
+    words: Option<String>,
+    file: Option<String>,
+    heard_file: Option<Vec<f32>>,
+}
+
+impl Seed {
+    /// The answer, and the songs it named.
+    fn answer(
+        self,
+        store: &MusicStore,
+        reader: Option<&VectorReader>,
+        count: usize,
+        mut answer: Value,
+    ) -> Result<(Value, Vec<i64>), String> {
+        let error = |error: super::store::MusicError| error.to_string();
+        // What the seed is: songs of theirs, a vector, or both.
+        let (name, own, named_as, vector): (String, Vec<Song>, Option<Named>, Option<Vec<f32>>) = if let Some(file) = &self.file {
+            let own: Vec<Song> = store.song_at(file).map_err(error)?.filter(|song| song.stage >= 1).into_iter().collect();
+            let vector = self.heard_file.clone().or_else(|| own.first().and_then(|song| reader?.get(song.id)));
+            (self.like.clone().unwrap_or_else(|| file.clone()), own, Some(Named::Song), vector)
+        } else if let Some(like) = &self.like {
+            match store.named(like).map_err(error)? {
+                Some((named, songs)) => {
+                    let vector =
+                        reader.and_then(|reader| embed::averaged(&songs.iter().filter_map(|song| reader.get(song.id)).collect::<Vec<_>>()));
+                    (like.clone(), songs, Some(named), vector)
+                }
+                None => {
+                    answer["seed"] = json!(like);
+                    answer["songs"] = json!([]);
+                    answer["note"] = json!("None of their songs is by, on or called that, and no genre tag of theirs says it: ask what they mean, or go on without their taste.");
+                    return Ok((answer, vec![]));
+                }
+            }
+        } else if let Some(words) = &self.words {
+            let tag = genre_in(words, &store.genres().map_err(error)?);
+            let found = match tag {
+                Some(tag) => store.named(&tag).map_err(error)?.filter(|(named, _)| *named == Named::Genre).map(|(_, songs)| (tag, songs)),
+                None => None,
+            };
+            match found {
+                Some((genre, songs)) => {
+                    let vector =
+                        reader.and_then(|reader| embed::averaged(&songs.iter().filter_map(|song| reader.get(song.id)).collect::<Vec<_>>()));
+                    answer["words"] = json!(words);
+                    (genre, songs, Some(Named::Genre), vector)
+                }
+                None => {
+                    let (mut answer, shown) = styles(store, reader, answer)?;
+                    answer["words"] = json!(words);
+                    answer["note"] =
+                        json!(format!("None of their genre tags says that, so these are the main styles in their music. {NOTE}"));
+                    return Ok((answer, shown));
+                }
+            }
+        } else {
+            return styles(store, reader, answer);
+        };
+        // The songs nearest the seed. An artist's, an album's or a song's own fill at most half, so the rest show what
+        // else of theirs sounds like it; a genre's are all its own.
+        let songs: Vec<Song> = match (reader, &vector) {
+            (Some(reader), Some(vector)) => {
+                let near = reader.nearest(vector, count * 4 + 20);
+                let ids: Vec<i64> = near.iter().map(|(id, _)| *id).collect();
+                let mut found: Vec<Song> = store.songs_by_id(&ids).map_err(error)?.into_iter().filter(|song| song.stage >= 1).collect();
+                found.sort_by_key(|song| ids.iter().position(|id| *id == song.id));
+                let own_ids: Vec<i64> = own.iter().map(|song| song.id).collect();
+                let most_own = if named_as == Some(Named::Genre) { count } else { count.div_ceil(2) };
+                let (mut chosen, mut owned) = (vec![], 0);
+                for song in found {
+                    let mine = own_ids.contains(&song.id);
+                    if chosen.len() >= count || (mine && owned >= most_own) {
+                        continue;
+                    }
+                    owned += usize::from(mine);
+                    chosen.push(song);
+                }
+                chosen
+            }
+            // No style vectors to go by: the seed's own songs, the latest heard first.
+            _ => {
+                let mut own = own;
+                own.sort_by_key(|song| std::cmp::Reverse(song.heard_at));
+                own.truncate(count);
+                own
+            }
+        };
+        answer["seed"] = json!(name);
+        answer["songs"] = Value::Array(songs.iter().map(named).collect());
+        if let Some(traits) = traits(&songs) {
+            answer["traits"] = json!(traits);
+        }
+        answer["note"] = json!(match vector.is_some() {
+            true => NOTE.to_string(),
+            false => format!(
+                "The embeddings slot is off, so Kumi can't tell which of their songs sound alike: these are the ones it names. {NOTE}"
+            ),
+        });
+        Ok((answer, songs.iter().map(|song| song.id).collect()))
+    }
+}
+
+/// The words of a text, each in one case.
+fn words_of(text: &str) -> Vec<String> {
+    super::store::folded(text).split(|c: char| !c.is_alphanumeric()).filter(|word| !word.is_empty()).map(str::to_string).collect()
+}
+
+/// The genre tag their words say: one whose every word is among them ("dub techno" in "deep dub techno at night"), the
+/// one of most words, then of most songs.
+fn genre_in(words: &str, genres: &[(String, usize)]) -> Option<String> {
+    let wanted = words_of(words);
+    genres
+        .iter()
+        .filter_map(|(tag, songs)| {
+            let tagged = words_of(tag);
+            (!tagged.is_empty() && tagged.iter().all(|word| wanted.contains(word))).then_some((tagged.len(), *songs, tag))
+        })
+        .max_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)).then(b.2.cmp(a.2)))
+        .map(|(_, _, tag)| tag.clone())
+}
+
+/// No seed: the main styles in their music, each with its biggest examples, genre tags and what it shares.
+fn styles(store: &MusicStore, reader: Option<&VectorReader>, mut answer: Value) -> Result<(Value, Vec<i64>), String> {
+    let error = |error: super::store::MusicError| error.to_string();
+    let kept = store.meta("clusters").map_err(error)?.and_then(|text| serde_json::from_str::<Value>(&text).ok());
+    let Some(kept) = kept.filter(|_| reader.is_some()) else {
+        answer["note"] =
+            json!("Kumi hasn't found the styles in their music yet: name an artist or a genre of theirs, or carry on without their taste.");
+        return Ok((answer, vec![]));
+    };
+    let mut shown = vec![];
+    let mut clusters = vec![];
+    for (at, cluster) in kept["clusters"].as_array().into_iter().flatten().enumerate() {
+        let ids: Vec<i64> = cluster["examples"].as_array().into_iter().flatten().filter_map(Value::as_i64).collect();
+        let mut songs = store.songs_by_id(&ids).map_err(error)?;
+        songs.sort_by_key(|song| ids.iter().position(|id| *id == song.id));
+        let examples: Vec<String> = songs
+            .iter()
+            .take(SHOWN)
+            .map(|song| match (&song.tags.artist, &song.tags.title) {
+                (Some(artist), Some(title)) => format!("{artist} – {title}"),
+                (_, title) => title.clone().unwrap_or_default(),
+            })
+            .collect();
+        shown.extend(songs.iter().take(SHOWN).map(|song| song.id));
+        let mut style =
+            json!({"label": format!("c{}", at + 1), "songs": cluster["songs"], "examples": examples, "genres": cluster["genres"]});
+        if let Some(traits) = traits(&songs) {
+            style["traits"] = json!(traits);
+        }
+        clusters.push(style);
+    }
+    answer["clusters"] = Value::Array(clusters);
+    answer["note"] = json!(NOTE);
+    Ok((answer, shown))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn words_find_the_genre_tag_they_say() {
+        let genres = [("Dubstep".to_string(), 40), ("Dub Techno".to_string(), 30), ("Techno".to_string(), 90)];
+        assert_eq!(genre_in("deep dub techno at night", &genres).as_deref(), Some("Dub Techno"), "the tag of most words");
+        assert_eq!(genre_in("some hard TECHNO", &genres).as_deref(), Some("Techno"));
+        assert_eq!(genre_in("dub", &genres), None, "every word of a tag");
+        assert_eq!(genre_in("baroque harpsichord", &genres), None);
+    }
+
+    #[test]
+    fn counts_read_as_a_person_says_them() {
+        assert_eq!(about(7, false), "7");
+        assert_eq!(about(2_391, false), "about 2,400");
+        assert_eq!(about(312_456, false), "about 310,000");
+        assert_eq!(about(1_000_000, true), "over a million");
+    }
+}

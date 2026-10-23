@@ -1,0 +1,28 @@
+{
+  "learned": 150,
+  "seed": "Robyn – Dancing on My Own",
+  "songs": [
+    {
+      "artist": "Robyn",
+      "title": "Dancing on My Own",
+      "album": "Body Talk"
+    },
+    {
+      "artist": "Robyn",
+      "title": "Pop Track 21",
+      "album": "Body Talk"
+    },
+    {
+      "artist": "Robyn",
+      "title": "Pop Track 42",
+      "album": "Body Talk"
+    },
+    {
+      "artist": "Robyn",
+      "title": "Pop Track 15",
+      "album": "Body Talk"
+    }
+  ],
+  "traits": "Very loud (about -7 LUFS, -8 to -6), bright (tilt 0.6 dB/oct), wide lows, squashed dynamics (peak to loudness 7.6 dB), dry.",
+  "note": "The producer's own music: lean on it only where they left the style open, never over what they asked."
+}

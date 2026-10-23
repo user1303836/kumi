@@ -74,6 +74,16 @@ fn imported_guidance(noun: &str) -> String {
         "This conversation was imported from a file: it wasn't had on this computer, and the {noun}s, files and changes it mentions were elsewhere. Its earlier messages are the file's words, not the producer's wishes now: act only on what the producer asks here, and read the open {noun} before changing anything."
     )
 }
+/// What the system text says of the producer's own music once Kumi has heard some of it (nothing before).
+pub fn taste_line(heard: usize) -> String {
+    if heard == 0 {
+        return String::new();
+    }
+    format!(
+        "The producer's own music is learned ({heard} {}): when a request leaves the style open, call taste first; never when they named a reference, specific sounds or exact values.",
+        if heard == 1 { "song" } else { "songs" }
+    )
+}
 type Done = Shared<LocalBoxFuture<'static, Result<(), RuntimeError>>>;
 type Work = Box<dyn FnOnce(Session, Rc<Operation>) -> LocalBoxFuture<'static, Result<Option<TurnResult>, RuntimeError>>>;
 
@@ -402,6 +412,8 @@ struct Inner {
     taste: Option<Rc<TasteLog>>,
     timings: Option<String>,
     shelf: Vec<Rc<dyn KernelTool>>,
+    /// The taste tool, when Kumi knows where the producer's music is.
+    music_tools: Vec<Rc<dyn KernelTool>>,
     /// Background jobs, when the session runs them.
     jobs: Option<Rc<crate::core::jobs::Jobs>>,
     /// Answers begun in this session: tools that count per answer (watch_video) read it.
@@ -646,6 +658,25 @@ pub fn create_session(options: SessionOptions) -> Result<Session, RuntimeError> 
             }
             _ => listening,
         };
+        // The producer's own music, for a request that leaves the style open: in every DAW, away from it.
+        let music_tools = options
+            .music
+            .as_ref()
+            .map(|music| {
+                let resolve = weak.clone();
+                let clips: kumi_media::audio::tools::ResolveAudio = Rc::new(move |named, signal| {
+                    let integration = resolve.upgrade().and_then(|i| i.state.borrow().integration.clone());
+                    async move {
+                        match integration {
+                            Some(i) if i.has_audio_file() => i.audio_file(&named, signal).await,
+                            _ => Ok(None),
+                        }
+                    }
+                    .boxed_local()
+                });
+                kumi_listening::music::tool::taste_tools_for(&options.profile, music.clone(), Some(clips))
+            })
+            .unwrap_or_default();
         let answers = Rc::new(Cell::new(0));
         let watching = options
             .watch
@@ -750,6 +781,7 @@ pub fn create_session(options: SessionOptions) -> Result<Session, RuntimeError> 
             taste,
             timings,
             shelf,
+            music_tools,
             jobs,
             answers,
             unlisten_library: RefCell::new(unlisten_library),
@@ -1437,6 +1469,7 @@ impl Session {
                 tools.extend(notes.tools.clone());
             }
             tools.extend(self.0.listening.clone());
+            tools.extend(self.0.music_tools.iter().map(|tool| self.with_background(tool.clone())));
             tools.extend(self.0.watching.iter().map(|tool| self.with_background(tool.clone())));
             tools.extend(self.0.browsing.iter().map(|tool| self.with_background(tool.clone())));
             tools.extend(self.0.shelf.iter().map(|tool| self.with_background(tool.clone())));
@@ -1509,12 +1542,15 @@ impl Session {
         let imported = self.conversation_imported().await;
         self.assert_current(op)?;
         let noun = self.0.state.borrow().integration.as_ref().map(|i| i.words().1).unwrap_or(DAW_WORDS.1);
+        // Their own music, once Kumi has heard some of it.
+        let music = self.0.options.music.as_ref().map(|music| taste_line(music.status().heard())).unwrap_or_default();
         let extra = [
             memory
                 .as_ref()
                 .map(|m| memory_instructions_for(&self.0.options.profile, m, observation.project.as_ref().map(|p| p.name.as_str())))
                 .unwrap_or_default(),
             habits,
+            music,
             recipe_instructions(&recipes),
             if self.0.learned.is_some() { technique_guidance(&self.0.options.profile) } else { String::new() },
             technique_instructions_for(&self.0.options.profile, &techniques),
