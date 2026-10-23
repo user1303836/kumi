@@ -2,7 +2,7 @@
 # tests beside them can't make them late.
 [[profile.default.overrides]]
 # The Remote Script adapter's tests give each local connection 500 ms.
-filter = 'test(/bounded_latency|reads_in_a_moment|looks_at_each_byte_once|read_in_linear_time|analyzed_quickly_part_by_part|keeps_the_runtime_responsive|returns_promptly|maximum_duplicate_ambiguity/) | binary(remote_adapter)'
+filter = 'test(/bounded_latency|reads_in_a_moment|looks_at_each_byte_once|read_in_linear_time|analyzed_quickly_part_by_part|keeps_the_runtime_responsive|returns_promptly|maximum_duplicate_ambiguity/) | (binary_id(ableton-mcp-server::it) & test(/^remote_adapter::/))'
 threads-required = "num-cpus"
 
 # CI's three sets (.github/workflows/ci.yml and extended.yml). A pull request and each push to main run `ci` on Linux and
@@ -32,7 +32,7 @@ not (
   | binary_id(kumi::daw_words) | binary_id(kumi::app_sessions)
   | (binary_id(kumi-runtime::it) & test(/^listening::/)) | (binary_id(kumi-runtime::it) & test(/^effects::/)) | (binary_id(kumi-runtime::it) & test(/^sound::/))
   | (binary_id(kumi-runtime::it) & test(/^style_references::/)) | (binary_id(kumi-runtime::it) & test(/^ai_sdk::/))
-  | binary_id(ableton-mcp-server::benchmark) | binary_id(ableton-mcp-server::lifecycle_migration)
+  | (binary_id(ableton-mcp-server::it) & test(/^benchmark::/)) | (binary_id(ableton-mcp-server::it) & test(/^lifecycle_migration::/))
   | ((binary_id(kumi-runtime::it) & test(/^mcp::/)) & not test(/read_buffer_looks_at_each_byte/))
   | ((binary_id(kumi-runtime::it) & test(/^media_foundations::/)) & test(/a_quiet_listen_is_one_stretch|a_songs_form_sections_where/))
   | (test(/match(es)?_(the_)?(source|typescript)|source_oracle|oracle|matches?_typescript/)
@@ -55,22 +55,22 @@ fail-fast = false
 [profile.ci-os]
 default-filter = '''
 (
-    binary(install) | binary(cli_binary) | binary(cli) | binary(update) | binary(bridge_setup) | binary(doctor)
+    binary(install) | binary(cli_binary) | (binary(cli) | (binary_id(ableton-mcp-server::it) & test(/^cli::/))) | binary(update) | binary(bridge_setup) | binary(doctor)
   | binary(live_extension) | binary(report) | binary(login) | binary(config) | binary(history) | binary(library)
   | binary(stdin_handoff) | binary(terminal) | binary(tui) | binary(voice_input) | (binary_id(kumi-runtime::it) & test(/^hands_transport::/)) | (binary_id(kumi-runtime::it) & test(/^auth::/))
   | (binary(system) | (binary_id(kumi-runtime::it) & test(/^system::/))) | (binary_id(kumi-runtime::it) & test(/^disk::/)) | (binary_id(kumi-runtime::it) & test(/^samples::/)) | (binary_id(kumi-runtime::it) & test(/^project_runtime::/)) | (binary_id(kumi-runtime::it) & test(/^library_files::/))
-  | (binary_id(kumi-runtime::it) & test(/^library_learn::/)) | (binary(library_search) | (binary_id(kumi-runtime::it) & test(/^library_search::/))) | (binary_id(kumi-runtime::it) & test(/^library_state_plan::/)) | (binary_id(kumi-runtime::it) & test(/^voice::/)) | (binary_id(kumi-runtime::it) & test(/^local_servers::/))
-  | (binary_id(kumi-runtime::it) & test(/^session::/)) | (binary_id(kumi-runtime::it) & test(/^agent::/)) | binary(lifecycle_release) | binary(delivery) | binary(delivery_cli)
-  | binary(extension_launcher) | binary(extension_channel) | binary(stdio) | binary(fixture_paths) | binary(project)
-  | binary(host_probes) | binary(analysis_runner) | binary(sqlite_reader) | binary(native_connected)
-  | binary(remote_adapter) | binary(loopback) | (binary_id(kumi-runtime::it) & test(/^ai_transport::/)) | (binary_id(kumi-runtime::it) & test(/^network::/)) | binary(store)
+  | (binary_id(kumi-runtime::it) & test(/^library_learn::/)) | ((binary_id(ableton-mcp-server::it) & test(/^library_search::/)) | (binary_id(kumi-runtime::it) & test(/^library_search::/))) | (binary_id(kumi-runtime::it) & test(/^library_state_plan::/)) | (binary_id(kumi-runtime::it) & test(/^voice::/)) | (binary_id(kumi-runtime::it) & test(/^local_servers::/))
+  | (binary_id(kumi-runtime::it) & test(/^session::/)) | (binary_id(kumi-runtime::it) & test(/^agent::/)) | (binary_id(ableton-mcp-server::it) & test(/^lifecycle_release::/)) | (binary_id(ableton-mcp-server::it) & test(/^delivery::/)) | (binary_id(ableton-mcp-server::it) & test(/^delivery_cli::/))
+  | (binary_id(ableton-mcp-server::it) & test(/^extension_launcher::/)) | (binary_id(ableton-mcp-server::it) & test(/^extension_channel::/)) | (binary_id(ableton-mcp-server::it) & test(/^stdio::/)) | (binary_id(ableton-mcp-server::it) & test(/^fixture_paths::/)) | (binary_id(ableton-mcp-server::it) & test(/^project::/))
+  | (binary_id(ableton-mcp-server::it) & test(/^host_probes::/)) | (binary_id(ableton-mcp-server::it) & test(/^analysis_runner::/)) | (binary_id(ableton-mcp-server::it) & test(/^sqlite_reader::/)) | (binary_id(ableton-mcp-server::it) & test(/^native_connected::/))
+  | (binary_id(ableton-mcp-server::it) & test(/^remote_adapter::/)) | (binary_id(ableton-mcp-server::it) & test(/^loopback::/)) | (binary_id(kumi-runtime::it) & test(/^ai_transport::/)) | (binary_id(kumi-runtime::it) & test(/^network::/)) | binary(store)
   | binary(willington) | binary(windows_console_control) | binary(windows_stdin) | binary(windows_tty)
   | binary(own_providers) | binary(bridge) | binary(retire) | binary(credit)
 ) & not (
     (binary_id(kumi-runtime::it) & test(/^live_rendering::/)) | (binary_id(kumi-runtime::it) & test(/^form::/)) | (binary_id(kumi-runtime::it) & test(/^video::/))
   | (binary_id(kumi-runtime::it) & test(/^listening::/)) | (binary_id(kumi-runtime::it) & test(/^effects::/)) | (binary_id(kumi-runtime::it) & test(/^sound::/))
   | (binary_id(kumi-runtime::it) & test(/^style_references::/)) | (binary_id(kumi-runtime::it) & test(/^ai_sdk::/))
-  | binary_id(ableton-mcp-server::benchmark) | binary_id(ableton-mcp-server::lifecycle_migration)
+  | (binary_id(ableton-mcp-server::it) & test(/^benchmark::/)) | (binary_id(ableton-mcp-server::it) & test(/^lifecycle_migration::/))
   | ((binary_id(kumi-runtime::it) & test(/^mcp::/)) & not test(/read_buffer_looks_at_each_byte/))
   | ((binary_id(kumi-runtime::it) & test(/^media_foundations::/)) & test(/a_quiet_listen_is_one_stretch|a_songs_form_sections_where/))
   | (test(/match(es)?_(the_)?(source|typescript)|source_oracle|oracle|matches?_typescript/)
