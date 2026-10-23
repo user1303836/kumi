@@ -6,7 +6,7 @@
 use super::{
     database,
     hear::{hear, restyle, Clap, Ears, Heard, Style},
-    scan::{clustered, next as next_song, recluster, spread, tags_pass, Next, TagsPass},
+    scan::{clustered, next as next_song, recluster, spread, tags_pass, Next, TagsPass, STYLE_WORDS},
     store::{MusicError, MusicStore, LIVE},
     vectors::{VectorReader, VectorWriter},
 };
@@ -219,6 +219,39 @@ fn skipped_folders(daws: Daws, library_folders: &[String]) -> Vec<String> {
     skip
 }
 
+/// What the style words mean to a style model: kept in music.db for it (and this list, and this words model), else
+/// heard now (and kept). None when it has no words (its text side can't be had now, or the slot runs another model).
+async fn style_words(
+    store: &MusicStore,
+    style: &dyn Style,
+    say: crate::embed::Say<'_>,
+    signal: &kumi_common::abort::Signal,
+) -> Result<Option<Vec<(String, Vec<f32>)>>, MusicError> {
+    let list: Vec<&str> = STYLE_WORDS.lines().map(str::trim).filter(|word| !word.is_empty()).collect();
+    let key = {
+        use sha2::{Digest, Sha256};
+        let words_model = kumi_ai::models::pinned::CLAP_TEXT.sha256;
+        hex::encode(Sha256::digest(format!("{words_model}\n{STYLE_WORDS}").as_bytes()))[..16].to_string()
+    };
+    let kept = store.meta("style_words")?.and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok());
+    if let Some(kept) = kept.filter(|kept| kept["model"] == style.model() && kept["list"] == key.as_str()) {
+        let vectors: Vec<Vec<f32>> = serde_json::from_value(kept["vectors"].clone()).unwrap_or_default();
+        if vectors.len() == list.len() {
+            return Ok(Some(list.iter().map(|word| word.to_string()).zip(vectors).collect()));
+        }
+    }
+    let mut named = Vec::with_capacity(list.len());
+    for word in &list {
+        match style.words(word, say, signal).await {
+            Ok(vector) => named.push((word.to_string(), vector)),
+            Err(_) => return Ok(None),
+        }
+    }
+    let vectors: Vec<&Vec<f32>> = named.iter().map(|(_, vector)| vector).collect();
+    store.set_meta("style_words", &serde_json::json!({"model": style.model(), "list": key, "vectors": vectors}).to_string())?;
+    Ok(Some(named))
+}
+
 /// The heard songs this style model hasn't heard, those taste used first, then the newest.
 fn missing(store: &MusicStore, reader: &VectorReader) -> Result<VecDeque<i64>, MusicError> {
     let mut statement = store
@@ -292,6 +325,11 @@ pub async fn run(
     let spread = spread(&store)?;
     let mut spread_at = 0;
     let say = |text: &str| report(ScanReply::Said { text: text.to_string() });
+    // What the style words mean to the style model, to name its styles by (none: it has no words).
+    let named: Option<std::sync::Arc<Vec<(String, Vec<f32>)>>> = match &style {
+        Some(style) => style_words(&store, style.as_ref(), &say, &control.stop).await?.map(std::sync::Arc::new),
+        None => None,
+    };
     let ears = Ears { style: style.as_deref(), say: &say, signal: &control.stop };
 
     let mut busy: HashSet<i64> = HashSet::new();
@@ -369,7 +407,8 @@ pub async fn run(
         if styled >= clusters + (clusters / 10).max(10) {
             let (back, made) = blocking(store, {
                 let (dir, model) = (dir.clone(), model.clone());
-                move |store| recluster(store, &dir, &model)
+                let named = named.clone();
+                move |store| recluster(store, &dir, &model, named.as_deref().map(Vec::as_slice))
             })
             .await?;
             (store, clusters) = (back, made);
@@ -385,7 +424,7 @@ pub async fn run(
     if !control.stop.is_cancelled() {
         writer.settle(&store)?;
         if style.is_some() && styled != clusters {
-            let (back, _) = blocking(store, move |store| recluster(store, &dir, &model)).await?;
+            let (back, _) = blocking(store, move |store| recluster(store, &dir, &model, named.as_deref().map(Vec::as_slice))).await?;
             store = back;
         }
         progress.phase = ScanPhase::Done;

@@ -1,0 +1,29 @@
+{
+  "learned": 150,
+  "words": "sunny pop for a summer night",
+  "seed": "sunny pop for a summer night",
+  "songs": [
+    {
+      "artist": "Robyn",
+      "title": "Dancing on My Own",
+      "album": "Body Talk"
+    },
+    {
+      "artist": "Charli XCX",
+      "title": "Pop Track 5",
+      "album": "Brat"
+    },
+    {
+      "artist": "Carly Rae Jepsen",
+      "title": "Pop Track 10",
+      "album": "Emotion"
+    },
+    {
+      "artist": "Robyn",
+      "title": "Pop Track 15",
+      "album": "Body Talk"
+    }
+  ],
+  "traits": "Very loud (about -7 LUFS, -8 to -6), bright (tilt 0.6 dB/oct), wide lows, squashed dynamics (peak to loudness 7.5 dB), dry.",
+  "note": "The producer's own music: lean on it only where they left the style open, never over what they asked."
+}

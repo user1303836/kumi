@@ -96,6 +96,28 @@ pub mod pinned {
         sha256: "fd5c88d90b1f3aff88561a0352b4a91d85174a11bed3e4e19dc2571cbd9c1489",
         size: 71_315_939,
     };
+    /// The same model's text side (laion/larger_clap_music at a0b4534a, its text tower and projection, weights in 8
+    /// bits): a text's token ids and attention mask in, a 512-number embedding beside the audio side's out. What words
+    /// mean, by style and vibe.
+    pub const CLAP_TEXT: Pinned = Pinned {
+        name: "clap-music-text.onnx",
+        url: "https://github.com/user1303836/kumi/releases/download/models-1/clap-music-text.onnx",
+        sha256: "d205464265ac237f0169624737dcf6245ffdde3934987838316c9fad02d5be9e",
+        size: 125_671_756,
+    };
+    /// Its tokenizer's vocabulary and merges (RoBERTa's byte-level BPE), as the model's repository has them.
+    pub const CLAP_VOCAB: Pinned = Pinned {
+        name: "clap-music-vocab.json",
+        url: "https://github.com/user1303836/kumi/releases/download/models-1/clap-music-vocab.json",
+        sha256: "ed19656ea1707df69134c4af35c8ceda2cc9860bf2c3495026153a133670ab5e",
+        size: 798_293,
+    };
+    pub const CLAP_MERGES: Pinned = Pinned {
+        name: "clap-music-merges.txt",
+        url: "https://github.com/user1303836/kumi/releases/download/models-1/clap-music-merges.txt",
+        sha256: "1ce1664773c50f3e0cc8842619a93edc4624525b728b188a9e0be33b7726adc5",
+        size: 456_318,
+    };
     /// AFx-Rep (csteinmetz1/afx-rep): stereo audio at 48 kHz in, its mid's and side's 512-number embeddings out. What
     /// effects a sound went through.
     pub const AFX_REP: Pinned = Pinned {
@@ -435,6 +457,19 @@ pub struct Tensor {
     pub data: Vec<f32>,
 }
 
+/// A tensor of whole numbers (a text's token ids, its attention mask): its shape and its numbers, in order.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Ids {
+    pub shape: Vec<usize>,
+    pub data: Vec<i64>,
+}
+
+/// What a model takes in.
+enum Input {
+    Numbers(Tensor),
+    Ids(Ids),
+}
+
 /// The models loaded, each with when it last ran: one that hasn't run for `IDLE` is let go (AFx-Rep alone holds
 /// about 0.4 GB once loaded).
 static SESSIONS: Mutex<Vec<(PathBuf, ort::session::Session, std::time::Instant)>> = Mutex::new(vec![]);
@@ -462,10 +497,21 @@ pub async fn run(model: &Path, inputs: Vec<(String, Tensor)>, outputs: Vec<Strin
         return Err("Kumi's model runtime isn't ready.".into());
     }
     let model = model.to_path_buf();
+    let inputs = inputs.into_iter().map(|(name, tensor)| (name, Input::Numbers(tensor))).collect();
     tokio::task::spawn_blocking(move || run_now(&model, inputs, &outputs)).await.map_err(|error| format!("The model stopped: {error}"))?
 }
 
-fn run_now(model: &Path, inputs: Vec<(String, Tensor)>, outputs: &[String]) -> Result<Vec<Tensor>, String> {
+/// A model run on whole numbers (a text model's token ids and mask): its outputs, numbers as `run` gives them.
+pub async fn run_ids(model: &Path, inputs: Vec<(String, Ids)>, outputs: Vec<String>) -> Result<Vec<Tensor>, String> {
+    if LOADED.get().is_none_or(|loaded| loaded.is_err()) {
+        return Err("Kumi's model runtime isn't ready.".into());
+    }
+    let model = model.to_path_buf();
+    let inputs = inputs.into_iter().map(|(name, ids)| (name, Input::Ids(ids))).collect();
+    tokio::task::spawn_blocking(move || run_now(&model, inputs, &outputs)).await.map_err(|error| format!("The model stopped: {error}"))?
+}
+
+fn run_now(model: &Path, inputs: Vec<(String, Input)>, outputs: &[String]) -> Result<Vec<Tensor>, String> {
     let mut sessions = SESSIONS.lock().map_err(|_| "Kumi's models were left in a bad state.".to_string())?;
     let index = match sessions.iter().position(|(path, _, _)| path == model) {
         Some(index) => index,
@@ -483,9 +529,16 @@ fn run_now(model: &Path, inputs: Vec<(String, Tensor)>, outputs: &[String]) -> R
     sessions[index].2 = std::time::Instant::now();
     let session = &mut sessions[index].1;
     let mut values: Vec<(String, ort::session::SessionInputValue<'static>)> = vec![];
-    for (name, tensor) in inputs {
-        let value = ort::value::Tensor::from_array((tensor.shape, tensor.data.into_boxed_slice())).map_err(|error| error.to_string())?;
-        values.push((name, value.into()));
+    for (name, input) in inputs {
+        let value: ort::session::SessionInputValue<'static> = match input {
+            Input::Numbers(tensor) => {
+                ort::value::Tensor::from_array((tensor.shape, tensor.data.into_boxed_slice())).map_err(|error| error.to_string())?.into()
+            }
+            Input::Ids(ids) => {
+                ort::value::Tensor::from_array((ids.shape, ids.data.into_boxed_slice())).map_err(|error| error.to_string())?.into()
+            }
+        };
+        values.push((name, value));
     }
     let results = session.run(values).map_err(|error| format!("The model couldn't run: {error}"))?;
     outputs

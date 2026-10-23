@@ -65,7 +65,7 @@ fn schema(profile: &DawProfile) -> JsonObject {
         "additionalProperties": false,
         "properties": {
             "like": {"type": "string", "minLength": 1, "maxLength": 1024, "description": format!("What the producer named: an artist, album, song or genre tag in their music, an audio file's path, {clip} in the {place} (its {clip_ref}), or one of their styles by its label (c1)")},
-            "words": {"type": "string", "minLength": 1, "maxLength": 300, "description": "The producer's own words for the style, when they named nothing (matched against their songs' genre tags)"},
+            "words": {"type": "string", "minLength": 1, "maxLength": 300, "description": "The producer's own words for the style, when they named nothing (\"melancholic dub techno\"): their songs that sound like that"},
             "count": {"type": "integer", "minimum": 1, "maximum": MOST, "description": format!("How many songs ({COUNT} when left out)")},
             "keep": {"type": "boolean", "description": format!("Keep the nearest songs ({KEPT_FEWEST} to {KEPT_MOST}, heard in full) as a reference the judge works toward: the answer names it. Only what they named, or one style (c1 when they named nothing)")},
             "learn": {"type": "array", "minItems": 1, "maxItems": 16, "items": {"type": "string", "minLength": 1, "maxLength": 1024}, "description": "The folders to learn from: only after the producer said yes to the offer"}
@@ -260,6 +260,20 @@ impl TasteTool {
             None => Clap::from_slot(signal).await.map(|clap| Rc::new(clap) as Rc<dyn Style>),
         };
         let model = style.as_ref().map(|style| style.model().to_string());
+        // Their words, as the style model's text side reads them (fetched the first time, and said): only when they
+        // named nothing, as what they named comes first.
+        let fetched = std::cell::RefCell::new(vec![]);
+        let words_vector = match (words.as_ref().filter(|_| like.is_none()), &style) {
+            (Some(words), Some(style)) => {
+                let say = |said: &str| fetched.borrow_mut().push(said.to_string());
+                Some(style.words(words, &say, signal).await)
+            }
+            (Some(_), None) => Some(Err("the embeddings slot is off".to_string())),
+            _ => None,
+        };
+        if !fetched.borrow().is_empty() {
+            answer["fetched"] = json!(fetched.take());
+        }
         // A file to be like: a clip in the project by its ref, or a path.
         let mut file = None;
         if let Some(like) = &like {
@@ -304,7 +318,7 @@ impl TasteTool {
                 Some(model) => Some(VectorReader::open(&dir, &store, model).map_err(|error| error.to_string())?),
                 None => None,
             };
-            let seed = Seed { like, words, file, heard_file };
+            let seed = Seed { like, words, words_vector, file, heard_file };
             seed.answer(&store, reader.as_ref(), count, answer)
         })
         .await
@@ -457,10 +471,12 @@ fn cluster_label(text: &str) -> Option<usize> {
     number.checked_sub(1)
 }
 
-/// What an answer is about: what the producer named, their words, or a file (and its vector, heard now).
+/// What an answer is about: what the producer named, their words (and what they mean to the style model, or why it
+/// couldn't read them), or a file (and its vector, heard now).
 struct Seed {
     like: Option<String>,
     words: Option<String>,
+    words_vector: Option<Result<Vec<f32>, String>>,
     file: Option<String>,
     heard_file: Option<Vec<f32>>,
 }
@@ -508,7 +524,15 @@ impl Seed {
                     return Ok((answer, vec![]));
                 }
             }
+        } else if let (Some(words), Some(Ok(vector))) = (&self.words, &self.words_vector) {
+            // Their words on the style model's map: the songs nearest them.
+            answer["words"] = json!(words);
+            (words.clone(), vec![], None, Some(vector.clone()))
         } else if let Some(words) = &self.words {
+            // The style model can't read words now: their genre tags, then.
+            if let Some(Err(why)) = &self.words_vector {
+                answer["wordsBy"] = json!(format!("their genre tags: {why}"));
+            }
             let tag = genre_in(words, &store.genres().map_err(error)?);
             let found = match tag {
                 Some(tag) => store.named(&tag).map_err(error)?.filter(|(named, _)| *named == Named::Genre).map(|(_, songs)| (tag, songs)),
@@ -621,6 +645,9 @@ fn styles(store: &MusicStore, reader: Option<&VectorReader>, mut answer: Value) 
         shown.extend(songs.iter().take(SHOWN).map(|song| song.id));
         let mut style =
             json!({"label": format!("c{}", at + 1), "songs": cluster["songs"], "examples": examples, "genres": cluster["genres"]});
+        if let Some(names) = cluster.get("names").filter(|names| names.is_array()) {
+            style["names"] = names.clone();
+        }
         if let Some(traits) = traits(&songs) {
             style["traits"] = json!(traits);
         }

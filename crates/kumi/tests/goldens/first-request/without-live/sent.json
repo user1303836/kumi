@@ -157,7 +157,7 @@
           "type": "string",
           "minLength": 1,
           "maxLength": 300,
-          "description": "The producer's own words for the style, when they named nothing (matched against their songs' genre tags)"
+          "description": "The producer's own words for the style, when they named nothing (\"melancholic dub techno\"): their songs that sound like that"
         },
         "count": {
           "type": "integer",
