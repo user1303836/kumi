@@ -1,22 +1,36 @@
 //! Where REAPER keeps its library, for the library to learn: its resource folders with Kumi's extension in them, found
 //! where daw-bridge's detection finds REAPER (a producer who has REAPER but never works in it with Kumi doesn't wait
-//! while its library is measured). How the library is read, by its layout, is the library's own
-//! (`kumi_library::daw_sources`).
+//! while its library is measured), and how it's laid out: its FX chains, track and project templates, JSFX and FX preset
+//! banks.
 
 use std::path::PathBuf;
 
 use daw_bridge::detect::{detect_reaper, Env};
 use daw_bridge::install::reaper_extension_name;
 use kumi_daw_own::library::{os_of, source};
-use kumi_library::daws::LibrarySources;
+use kumi_library::daws::{Layout, LibrarySources};
 use kumi_library::sources::{env_of, home_of, Source, SourceKind, SourceOptions};
-use kumi_types::daw::DawProfile;
+use kumi_types::daw::{DawId, DawProfile};
 
 /// REAPER's library: its resource folders with Kumi's extension in them.
 pub struct ReaperLibrary;
 
 /// REAPER's library, as the registry gives it to the library.
 pub static LIBRARY: ReaperLibrary = ReaperLibrary;
+
+/// REAPER's resource folders Kumi reads, and the file type each holds ("" is a JSFX: its file has no extension); a JSFX's
+/// format is "jsfx", whatever its name ends with.
+static LAYOUT: Layout = Layout {
+    folders: &[
+        ("fxchains", &[".rfxchain"]),
+        ("tracktemplates", &[".rtracktemplate"]),
+        ("projecttemplates", &[".rpp"]),
+        ("effects", &["", ".jsfx"]),
+        ("presets", &[".ini"]),
+    ],
+    sounds: &[],
+    formats: &[("effects", "jsfx")],
+};
 
 impl LibrarySources for ReaperLibrary {
     fn profile(&self) -> &'static DawProfile {
@@ -42,8 +56,12 @@ impl LibrarySources for ReaperLibrary {
                 } else {
                     format!("REAPER ({})", resource.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default())
                 };
-                source(resource.clone(), label, SourceKind::Reaper)
+                source(resource.clone(), label, SourceKind::Daw(DawId::Reaper))
             })
             .collect()
+    }
+
+    fn layout(&self) -> &'static Layout {
+        &LAYOUT
     }
 }

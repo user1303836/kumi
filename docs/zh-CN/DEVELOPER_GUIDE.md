@@ -15,7 +15,7 @@
 | `crates/kumi-media` | 音频（解码、分析、声音匹配、DSP）、语音输入，以及解码媒体的程序（ffmpeg、yt-dlp、whisper.cpp）和视频的画面、字幕与语音 |
 | `crates/kumi-ai` | 模型客户端：各模型提供方的通信、提供方及其模型、登录、Kumi 自己运行的模型（ONNX Runtime）、每轮的用时，以及如何说明一次失败的调用 |
 | `crates/kumi-web` | 网页与视频工具：搜索并阅读网页（页面、PDF、GitHub、Max 补丁），以及观看教程视频，获取其中的讲解、画面和声音 |
-| `crates/kumi-library` | 制作人的素材库（学习、搜索、预设、Set、偏好）、插件的格式与角色，以及在磁盘上查找采样；每个 DAW 说明自己的素材库在哪里 |
+| `crates/kumi-library` | 制作人的素材库（学习、搜索、预设、Set、偏好）、插件的格式与角色，以及在磁盘上查找采样；每个 DAW 说明自己的素材库在哪里、如何组织 |
 | `crates/kumi-listening` | 聆听：一次聆听测量什么、评判及其检查清单、引擎的各轮、聆听模型及其槽位、风格参考和记谱；播放和渲染由各 DAW 负责 |
 | `crates/kumi-daw` | DAW 的 crate 交给应用和从应用得到的东西：DAW 的 provider（DAW 是什么，以及其桥接的查找、安装、检查和移除）、doctor 的检查项、首次设置中 DAW 的一侧，以及各步骤所用的小型端口（输出、提问和运行程序） |
 | `crates/kumi-common` | 共享的运行时工具，以及与原实现兼容的值处理 |

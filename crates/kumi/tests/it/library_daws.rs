@@ -15,7 +15,10 @@ use kumi_library::{
     tools::{library_tools_for, LearningState, LibraryAccess, LibraryToolsOptions},
     LibraryOptions,
 };
-use kumi_types::{daw::DawProfile, errors::RuntimeError};
+use kumi_types::{
+    daw::{DawId, DawProfile},
+    errors::RuntimeError,
+};
 use serde_json::{json, Map, Value};
 use std::{collections::HashMap, path::Path, rc::Rc};
 
@@ -184,10 +187,10 @@ fn a_daws_library_is_a_source_only_where_kumis_bridge_is() {
     let sources = library_sources(&with.options());
     let kinds = kinds_of(&sources);
     assert!(kinds.contains(&(SourceKind::UserLibrary, "User Library".into())), "{kinds:?}");
-    assert!(kinds.contains(&(SourceKind::Reaper, "REAPER".into())), "{kinds:?}");
-    assert!(kinds.contains(&(SourceKind::Renoise, "Renoise Library".into())), "{kinds:?}");
-    assert!(kinds.contains(&(SourceKind::Renoise, "Renoise User Library".into())), "{kinds:?}");
-    let reaper = sources.iter().find(|s| s.kind == SourceKind::Reaper).unwrap();
+    assert!(kinds.contains(&(SourceKind::Daw(DawId::Reaper), "REAPER".into())), "{kinds:?}");
+    assert!(kinds.contains(&(SourceKind::Daw(DawId::Renoise), "Renoise Library".into())), "{kinds:?}");
+    assert!(kinds.contains(&(SourceKind::Daw(DawId::Renoise), "Renoise User Library".into())), "{kinds:?}");
+    let reaper = sources.iter().find(|s| s.kind == SourceKind::Daw(DawId::Reaper)).unwrap();
     assert!(reaper.path.ends_with("REAPER Lab"), "{}", reaper.path);
     // Who sees what: a DAW's own library only there; the producer's folders everywhere; Live's when no DAW is known.
     use kumi_types::daw::DawId::*;
@@ -206,7 +209,7 @@ fn a_daws_library_is_a_source_only_where_kumis_bridge_is() {
 
     let without = Home::new(false);
     let kinds = kinds_of(&library_sources(&without.options()));
-    assert!(!kinds.iter().any(|(kind, _)| matches!(kind, SourceKind::Reaper | SourceKind::Renoise)), "{kinds:?}");
+    assert!(!kinds.iter().any(|(kind, _)| matches!(kind, SourceKind::Daw(DawId::Reaper) | SourceKind::Daw(DawId::Renoise))), "{kinds:?}");
 }
 
 #[test]
@@ -217,7 +220,7 @@ fn a_daws_library_inside_a_folder_the_producer_named_stays_its_own_source() {
     let sources = library_sources(&options);
     let kinds = kinds_of(&sources);
     assert!(kinds.contains(&(SourceKind::Folder, "Documents".into())), "{kinds:?}");
-    assert!(kinds.contains(&(SourceKind::Renoise, "Renoise User Library".into())), "{kinds:?}");
+    assert!(kinds.contains(&(SourceKind::Daw(DawId::Renoise), "Renoise User Library".into())), "{kinds:?}");
 }
 
 /// The library as the tools read it: what was learned.
@@ -267,7 +270,7 @@ fn row<'a>(found: &'a Value, name: &str) -> &'a Value {
 #[tokio::test]
 async fn reaper_and_renoise_presets_are_learned_by_their_layout_and_offered_only_in_their_daw() {
     let home = Home::new(true);
-    learn(LearnOptions::new(home.plan(), Signal::new())).await.unwrap();
+    learn(LearnOptions { daws: kumi::daw::registry::libraries(), ..LearnOptions::new(home.plan(), Signal::new()) }).await.unwrap();
     let logs = library_logs(home.dir.path().to_str().unwrap());
     let presets: Vec<PresetEntry> = logs.presets.load().await.into_values().collect();
     let access = Rc::new(Learned { presets });
@@ -340,7 +343,7 @@ async fn find_sounds_in_each_daw_holds_only_the_sounds_offered_there() {
         .run_until(async {
             let home = Home::new(true);
             put(&home.home.path().join("Music/Ableton/User Library/Samples/My Kick.wav"), wav(&[fixture::kick(50., 0.2)], 44100));
-            learn(LearnOptions::new(home.plan(), Signal::new())).await.unwrap();
+            learn(LearnOptions { daws: kumi::daw::registry::libraries(), ..LearnOptions::new(home.plan(), Signal::new()) }).await.unwrap();
             let library = create_library(LibraryOptions {
                 daws: kumi::daw::registry::libraries(),
                 dir: home.dir.path().to_string_lossy().into(),
@@ -393,7 +396,7 @@ async fn a_daws_library_inside_a_producers_folder_leaves_its_other_sounds_to_tha
             let documents = home.home.path().join("Documents").to_string_lossy().into_owned();
             let mut plan = home.plan();
             plan.sources = library_sources(&SourceOptions { folders: Some(vec![documents.clone()]), ..home.options() });
-            learn(LearnOptions::new(plan, Signal::new())).await.unwrap();
+            learn(LearnOptions { daws: kumi::daw::registry::libraries(), ..LearnOptions::new(plan, Signal::new()) }).await.unwrap();
             let logs = library_logs(home.dir.path().to_str().unwrap());
             let learned: Vec<String> =
                 logs.sounds.load().await.into_keys().map(|p| Path::new(&p).file_stem().unwrap().to_string_lossy().into_owned()).collect();

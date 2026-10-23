@@ -159,6 +159,7 @@ pub fn plugin_preset_folders(home: Option<&str>, platform: Option<&str>) -> Vec<
 use super::{
     classify::{classify, name_hints},
     daw_sources,
+    daws::{Daws, Layout},
     features::{measure_sound, MeasureOptions, FEATURES_VERSION},
     measure_worker::{MeasureJob, MeasurePool},
     presets::{plugin_preset_facts, read_daw_preset, read_live_preset, read_max_device, PresetFacts, PRESET_EXTENSIONS},
@@ -236,10 +237,12 @@ pub struct LearnOptions {
     pub rebuild: bool,
     pub gate: Option<LearnGate>,
     pub on_progress: Option<ProgressCallback>,
+    /// The DAWs whose own libraries the plan may hold, which say how each is laid out.
+    pub daws: Daws,
 }
 impl LearnOptions {
     pub fn new(plan: LearnPlan, signal: Signal) -> Self {
-        Self { plan, signal, rebuild: false, gate: None, on_progress: None }
+        Self { plan, signal, rebuild: false, gate: None, on_progress: None, daws: Daws::default() }
     }
 }
 #[derive(Clone)]
@@ -280,6 +283,7 @@ fn io_error(error: io::Error) -> RuntimeError {
 }
 async fn walk(
     source: &Source,
+    layout: &Layout,
     kinds: Kinds,
     found: &mut Finds,
     signal: &Signal,
@@ -328,7 +332,7 @@ async fn walk(
                     || (parent == "samples" && PROJECT_COPIES.contains(&lower.as_str()))
                     || skip.contains(&full)
                     // (a DAW's library: only the folders its layout says hold what Kumi learns)
-                    || (depth == 0 && daw_library && !daw_sources::walks_into(source, &name))
+                    || (depth == 0 && daw_library && !daw_sources::walks_into(layout, &name))
                 {
                     continue;
                 }
@@ -354,7 +358,7 @@ async fn walk(
                     .and_then(|relative| relative.components().next())
                     .map(|first| first.as_os_str().to_string_lossy().into_owned())
                     .unwrap_or_default();
-                match daw_sources::role_of(source, &top, &ext) {
+                match daw_sources::role_of(layout, &top, &ext) {
                     Some(daw_sources::Role::Sound) if kinds.sounds => &mut found.sounds,
                     Some(daw_sources::Role::Preset) if kinds.presets => &mut found.presets,
                     _ => continue,
@@ -403,8 +407,8 @@ fn order(kind: SourceKind) -> usize {
         SourceKind::Splice => 3,
         SourceKind::Pack => 4,
         SourceKind::Core => 5,
-        SourceKind::Renoise => 6,
-        SourceKind::Reaper => 7,
+        // (a DAW's own libraries: in the DAWs' order, the plan's)
+        SourceKind::Daw(_) => 6,
     }
 }
 fn changed(known: Option<&Entry>, file: &Found) -> bool {
@@ -540,13 +544,15 @@ pub async fn learn(options: LearnOptions) -> Result<LearnProgress, RuntimeError>
     let mut sources = plan.sources.clone();
     sources.sort_by_key(|s| order(s.kind));
     // A DAW's library inside another folder: what its layout reads is its own source's; the rest stays the outer folder's.
-    let daw_libraries: HashSet<String> = sources.iter().filter(|s| s.is_daw_library()).flat_map(daw_sources::owned_folders).collect();
+    let daw_libraries: HashSet<String> =
+        sources.iter().filter(|s| s.is_daw_library()).flat_map(|s| daw_sources::owned_folders(s, options.daws.layout(s))).collect();
     for source in &sources {
         progress.value.borrow_mut().at = Some(source.label.clone());
         progress.tell(false);
         let own = matches!(source.kind, SourceKind::UserLibrary | SourceKind::Place | SourceKind::Folder);
         let skip = if source.is_daw_library() { HashSet::new() } else { daw_libraries.clone() };
-        if walk(source, Kinds { sounds: true, presets: true, sets: own }, &mut found, &options.signal, 16, &skip).await? {
+        let layout = options.daws.layout(source);
+        if walk(source, layout, Kinds { sounds: true, presets: true, sets: own }, &mut found, &options.signal, 16, &skip).await? {
             walked_sounds.push(source.path.clone());
             walked_presets.push(source.path.clone());
             if own {
@@ -560,7 +566,9 @@ pub async fn learn(options: LearnOptions) -> Result<LearnProgress, RuntimeError>
             continue;
         }
         let source = Source { path: path.clone(), label: basename(path), kind: SourceKind::Folder };
-        if walk(&source, Kinds { sounds: false, presets: false, sets: true }, &mut found, &options.signal, 6, &source_paths).await? {
+        if walk(&source, &Layout::NONE, Kinds { sounds: false, presets: false, sets: true }, &mut found, &options.signal, 6, &source_paths)
+            .await?
+        {
             walked_sets.push(path.clone());
         }
     }
@@ -579,7 +587,17 @@ pub async fn learn(options: LearnOptions) -> Result<LearnProgress, RuntimeError>
     }
     for path in &plan.plugin_presets {
         let source = Source { path: path.clone(), label: "Plug-in presets".into(), kind: SourceKind::Folder };
-        if walk(&source, Kinds { sounds: false, presets: true, sets: false }, &mut found, &options.signal, 6, &HashSet::new()).await? {
+        if walk(
+            &source,
+            &Layout::NONE,
+            Kinds { sounds: false, presets: true, sets: false },
+            &mut found,
+            &options.signal,
+            6,
+            &HashSet::new(),
+        )
+        .await?
+        {
             walked_presets.push(path.clone());
         }
     }
@@ -610,7 +628,7 @@ pub async fn learn(options: LearnOptions) -> Result<LearnProgress, RuntimeError>
         let daw_library = file.source.is_daw_library();
         let format = if daw_library {
             let top = file.relative.split(['\\', '/']).next().unwrap_or_default();
-            daw_sources::preset_format(&file.source, top, &ext.to_lowercase())
+            daw_sources::preset_format(options.daws.layout(&file.source), top, &ext.to_lowercase())
         } else {
             ext.to_lowercase().trim_start_matches('.').to_owned()
         };

@@ -41,8 +41,8 @@ It's one Cargo workspace. Each DAW is reached through a bridge that runs inside 
 - `crates/kumi-web`: the web and video tools: searching and reading the web (pages, PDFs, GitHub, Max patches), and
   watching a tutorial for its words, frames and sound.
 - `crates/kumi-library`: the producer's library (learning, search, presets, Sets, taste), the plug-ins' formats and
-  roles, and finding samples on disk. Each DAW says where its library is (`LibrarySources`, implemented in its
-  integration; the registry's `LIBRARIES`).
+  roles, and finding samples on disk. Each DAW says where its library is and how it's laid out (`LibrarySources`,
+  implemented in its integration; the DAW table's `libraries()`).
 - `crates/kumi-listening`: listening: what a listen measures, the judge and its checklist, the engine's rounds, the
   listening models and their slots, style references and notation. Each DAW plays and renders for it (`Renderer`).
 - `crates/kumi-store` (SQLite), `kumi-common` (shared utilities), `kumi-genexpr` (gen~ test interpreter).
