@@ -2,7 +2,7 @@
 
 use async_trait::async_trait;
 use futures::StreamExt;
-use kumi_runtime::ai::{
+use kumi_ai::{
     anthropic::{anthropic, AnthropicSettings},
     error::LanguageModelError,
     http::{Fetch, FetchInit, Response},
@@ -14,7 +14,6 @@ use serde_json::{json, Value};
 use std::{
     cell::RefCell,
     io::Write,
-    path::PathBuf,
     process::{Command, Stdio},
     rc::Rc,
 };
@@ -30,9 +29,10 @@ impl Fetch for Fixture {
     }
 }
 fn oracle(test: &Value) -> Value {
+    // The official SDKs are installed in one npm project, beside kumi-runtime's MCP tests.
     let mut command = Command::new("node");
     command
-        .arg(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/support/ai_sdk_oracle.mjs"))
+        .arg(kumi_testkit::workspace_path("crates/kumi-runtime/tests/support/ai_sdk_oracle.mjs"))
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -373,7 +373,7 @@ async fn responses_accepted_request_yields_after_sdk_grace_period_without_waitin
         .expect("accepted stream should be returned without waiting for model output")
         .unwrap();
     assert_eq!(began.elapsed(), std::time::Duration::from_millis(50));
-    assert!(matches!(stream.into_future().await.0, Some(kumi_runtime::ai::types::StreamPart::StreamStart { .. })));
+    assert!(matches!(stream.into_future().await.0, Some(kumi_ai::types::StreamPart::StreamStart { .. })));
 }
 #[tokio::test]
 async fn responses_invalid_function_frame_cannot_execute_a_tool() {
@@ -391,7 +391,7 @@ async fn responses_invalid_function_frame_cannot_execute_a_tool() {
         }),
     });
     let parts: Vec<_> = model.do_stream(CallOptions::default()).await.unwrap().collect().await;
-    use kumi_runtime::ai::types::{FinishReasonUnified, StreamPart};
+    use kumi_ai::types::{FinishReasonUnified, StreamPart};
     assert!(parts.iter().any(|p| matches!(p, StreamPart::Error { .. })));
     assert!(!parts.iter().any(|p| matches!(p, StreamPart::ToolCall(_))));
     assert!(matches!(parts.last(),Some(StreamPart::Finish{finish_reason,..}) if finish_reason.unified==FinishReasonUnified::Error));

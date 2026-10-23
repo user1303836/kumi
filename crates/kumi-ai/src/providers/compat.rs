@@ -1,4 +1,4 @@
-use crate::ai::{
+use crate::{
     error::LanguageModelError,
     http::{ByteStream, Fetch, FetchInit, Response},
 };

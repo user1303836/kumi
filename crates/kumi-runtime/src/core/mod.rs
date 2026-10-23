@@ -42,7 +42,8 @@ pub mod store_import;
 pub mod store_rows;
 pub mod taste_log;
 pub mod techniques;
-pub mod timing;
+// Where a turn's time went (kumi-ai, whose model calls it times first).
+pub use kumi_ai::timing;
 pub mod to_midi;
 pub mod variations;
 pub mod view;

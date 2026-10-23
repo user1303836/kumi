@@ -81,16 +81,6 @@ pub enum WaitFor {
     Offline,
 }
 
-#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Usage {
-    /// All prompt tokens, including cache reads and writes.
-    pub input_tokens: f64,
-    pub output_tokens: f64,
-    pub cache_read_tokens: f64,
-    pub cache_write_tokens: f64,
-}
-
 /// "max-steps": the model kept calling tools past the per-turn step bound.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]

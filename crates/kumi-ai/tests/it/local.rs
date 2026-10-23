@@ -1,8 +1,8 @@
 //! Stream normalization for local models.
 
 use futures::{stream, StreamExt};
-use kumi_runtime::{
-    ai::http::{ByteStream, Response},
+use kumi_ai::{
+    http::{ByteStream, Response},
     providers::compat::{mend_stream, think_splitter},
 };
 use serde_json::{json, Value};
@@ -80,7 +80,7 @@ async fn mended_streams_preserve_utf8_and_thinking_across_byte_boundaries() {
     let output = mend(&events).await;
     assert_eq!(output[0]["choices"][0]["delta"]["reasoning_content"], "想");
     assert_eq!(output[0]["choices"][0]["delta"]["content"], "答🌱");
-    let body = Box::pin(stream::iter([Err(kumi_runtime::ai::error::LanguageModelError::other("disconnected"))]));
+    let body = Box::pin(stream::iter([Err(kumi_ai::error::LanguageModelError::other("disconnected"))]));
     let output: Vec<_> = mend_stream(body).collect().await;
     assert_eq!(output.len(), 1);
     assert!(output[0].is_err());

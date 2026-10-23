@@ -27,7 +27,7 @@ use super::failure::{
 };
 use crate::ai::error::LanguageModelError;
 use crate::ai::types::{
-    AssistantPart, CallOptions, DataContent, FileData, FilePart, FinishReason, FinishReasonUnified, FunctionTool, Message, Prompt,
+    AssistantPart, CallOptions, DataContent, FileData, FilePart, FinishReason, FinishReasonUnified, FunctionTool, Message,
     ProviderMetadata, ReasoningPart, StreamPart, StreamParts, TextPart, ToolCall, ToolCallPart, ToolPart, ToolResultContentItem,
     ToolResultOutput, ToolResultPart, Usage as ModelUsage, UserPart,
 };
@@ -38,32 +38,8 @@ use crate::core::contracts::{
 use crate::core::daw::DawProfile;
 use crate::core::errors::{FailureKind, KumiError, RuntimeError};
 
-/// A model that streams: `LanguageModelV4.doStream`, the one call Kumi makes.
-#[async_trait(?Send)]
-pub trait LanguageModel {
-    async fn do_stream(&self, options: CallOptions) -> Result<StreamParts, LanguageModelError>;
-}
-
-pub struct ModelRequest {
-    pub instructions: String,
-    /// Conversation so far, without a system message; bindings place instructions where their API expects them.
-    pub messages: Prompt,
-    pub tools: Vec<FunctionTool>,
-    /// Stable for one kernel: provider prompt-cache routing and request correlation.
-    pub session_id: String,
-}
-
-/// A configured model plus its provider-specific request shaping. The loop itself is provider-neutral.
-pub struct ModelBinding {
-    /// "<provider>/<model>" as configured.
-    pub id: String,
-    pub model: Rc<dyn LanguageModel>,
-    pub prepare: Box<dyn Fn(ModelRequest) -> CallOptions>,
-    /// How much conversation fits beside the instructions and tools (`fixed` bytes), for a model that
-    /// reads less at once than the default budget assumes (one on the producer's computer). Asked
-    /// before every call: what the model reads may be known only once its server has answered.
-    pub budget: Option<Box<dyn Fn(usize) -> ContextBudget>>,
-}
+// What the loop asks of a model (kumi-ai), where the kernel's callers have always named it.
+pub use kumi_ai::binding::{LanguageModel, ModelBinding, ModelRequest};
 
 /// Plain JSON, owned by Kumi: settled messages only, including provider replay metadata.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

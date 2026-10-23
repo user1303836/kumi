@@ -1,14 +1,6 @@
 use async_trait::async_trait;
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
-use kumi_common::{
-    abort::{Controller, Signal},
-    time::now_ms,
-};
-use kumi_runtime::{
-    ai::{
-        error::{ApiCallError, LanguageModelError},
-        http::{Fetch, FetchInit, Response},
-    },
+use kumi_ai::{
     auth::{
         openai_codex::{
             account_id_from_token, codex_token_source, login_codex_browser, login_codex_device, read_pi_codex_login, LoginOptions,
@@ -16,6 +8,12 @@ use kumi_runtime::{
         },
         store::{open_credential_store, Credential, CredentialStore, OAuthCredential},
     },
+    error::{ApiCallError, LanguageModelError},
+    http::{Fetch, FetchInit, Response},
+};
+use kumi_common::{
+    abort::{Controller, Signal},
+    time::now_ms,
 };
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -86,7 +84,7 @@ async fn credential_store_is_owner_only_atomic_and_removes_entries_on_request() 
         assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
         assert_eq!(std::fs::metadata(path.parent().unwrap()).unwrap().permissions().mode() & 0o777, 0o700);
         let fresh = temp.path().join("nested/fresh.tmp");
-        drop(kumi_runtime::auth::store::owner_only_new_file(&fresh).unwrap());
+        drop(kumi_ai::auth::store::owner_only_new_file(&fresh).unwrap());
         assert_eq!(std::fs::metadata(&fresh).unwrap().permissions().mode() & 0o777, 0o600, "made 0600 before any write");
     }
     assert_eq!(serde_json::from_slice::<Value>(&std::fs::read(&path).unwrap()).unwrap()["version"], 1);
@@ -99,7 +97,7 @@ async fn credential_store_is_owner_only_atomic_and_removes_entries_on_request() 
 #[cfg(windows)]
 #[tokio::test]
 async fn on_windows_the_credential_file_is_owner_only_wherever_kumi_home_puts_it() {
-    use kumi_runtime::auth::store::windows_owner_only;
+    use kumi_ai::auth::store::windows_owner_only;
     // A folder in the temp folder (as KUMI_HOME can point anywhere) gives its files SYSTEM's and the Administrators'
     // rules too: only the DACL Kumi sets leaves one rule, full control for you, by the bridge's own check.
     let temp = tempfile::tempdir().unwrap();
@@ -112,7 +110,7 @@ async fn on_windows_the_credential_file_is_owner_only_wherever_kumi_home_puts_it
     assert_eq!(store.list().await.unwrap().len(), 2);
     // The next file is owner-only, and open to Kumi alone, before anything is written to it.
     let next = temp.path().join("kumi-home").join("auth.json.next.tmp");
-    let file = kumi_runtime::auth::store::owner_only_new_file(&next).unwrap();
+    let file = kumi_ai::auth::store::owner_only_new_file(&next).unwrap();
     assert!(windows_owner_only(&next));
     assert_eq!(std::fs::metadata(&next).unwrap().len(), 0, "nothing written yet");
     assert!(std::fs::File::open(&next).is_err(), "no other handle while it's written");
@@ -354,7 +352,7 @@ async fn pi_import_reads_only_the_openai_codex_entry_and_derives_a_missing_accou
     assert!(read_pi_codex_login(temp.path().join("missing.json")).await.unwrap_err().to_string().contains("No readable Pi login"));
 }
 local_test!(a_sign_in_that_gets_no_answer_says_why_as_everywhere_else, {
-    let words = |error: kumi_runtime::core::errors::RuntimeError| error.to_string();
+    let words = |error: kumi_types::errors::RuntimeError| error.to_string();
     let device = |cause: &'static str| {
         login_codex_device(LoginOptions { signal: Signal::new(), fetch: Rc::new(Unreachable(cause)) }, Rc::new(|_| {}))
     };

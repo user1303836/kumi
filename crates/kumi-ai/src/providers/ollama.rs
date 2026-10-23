@@ -1,15 +1,12 @@
 use super::compat::{think_splitter, ThinkSplitter};
 use crate::{
-    ai::{
-        error::{ApiCallError, LanguageModelError},
-        http::{ByteStream, Fetch, FetchInit},
-        types::{
-            AssistantPart, CallOptions, DataContent, FileData, FinishReason, FinishReasonUnified, InputTokens, Message, OutputTokens,
-            StreamPart, StreamParts, ToolCall, ToolPart, ToolResultContentItem, ToolResultOutput, Usage, UserPart,
-        },
+    binding::LanguageModel,
+    error::{ApiCallError, LanguageModelError},
+    http::{ByteStream, Fetch, FetchInit},
+    types::{
+        AssistantPart, CallOptions, DataContent, FileData, FinishReason, FinishReasonUnified, InputTokens, Message, OutputTokens,
+        StreamPart, StreamParts, ToolCall, ToolPart, ToolResultContentItem, ToolResultOutput, Usage, UserPart,
     },
-    core::errors::KumiError,
-    kernel::agent::LanguageModel,
 };
 use async_trait::async_trait;
 use base64::{engine::general_purpose::STANDARD, Engine};
@@ -18,6 +15,7 @@ use kumi_common::{
     abort::Signal,
     js::{json::stringify, string::trim},
 };
+use kumi_types::errors::KumiError;
 use serde_json::{json, Value};
 use std::{collections::VecDeque, rc::Rc};
 

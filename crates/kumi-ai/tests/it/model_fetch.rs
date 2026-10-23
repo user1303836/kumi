@@ -1,8 +1,8 @@
 //! Fetching a pinned model file: kept only whole and as pinned, a body longer than the file stopped, and two fetches
 //! of the same file in one Kumi downloading it once.
 
+use kumi_ai::models::{fetch, Pinned};
 use kumi_common::abort::Signal;
-use kumi_runtime::models::{fetch, Pinned};
 use sha2::{Digest, Sha256};
 use std::{
     io::{Read, Write},

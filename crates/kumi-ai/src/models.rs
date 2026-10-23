@@ -2,8 +2,8 @@
 //! `models` in Kumi's folder (KUMI_HOME, or ~/.kumi), each file checked against the SHA-256 pinned here before it's
 //! kept. Nothing native is built into Kumi: ONNX Runtime is loaded from that copy when a model first runs.
 
-use crate::core::disk::free_bytes;
 use kumi_common::abort::{Signal, SignalExt};
+use kumi_types::disk::free_bytes;
 use sha2::{Digest, Sha256};
 use std::{
     path::{Path, PathBuf},
@@ -208,7 +208,7 @@ fn sweep_partials(folder: &Path) {
             continue;
         };
         let pid: Option<u32> = rest.split('-').next().and_then(|pid| pid.parse().ok());
-        if pid.is_some_and(|pid| pid != std::process::id() && !crate::library::state::alive(pid as f64)) {
+        if pid.is_some_and(|pid| pid != std::process::id() && !kumi_types::system::alive(pid as f64)) {
             let _ = if path.is_dir() { std::fs::remove_dir_all(&path) } else { std::fs::remove_file(&path) };
         }
     }
@@ -231,15 +231,15 @@ pub async fn fetch_unpinned(url: &str, to: &Path, signal: &Signal) -> Result<(),
     std::fs::create_dir_all(folder).map_err(|error| format!("Kumi couldn't make {}: {error}", folder.display()))?;
     let partial = to.with_extension(format!("partial-{}", std::process::id()));
     let fetched: Result<(), String> = async {
-        let client = crate::net::client()
-            .user_agent(format!("kumi/{}", crate::version::KUMI_VERSION))
+        let client = kumi_net::client()
+            .user_agent(format!("kumi/{}", kumi_types::version::KUMI_VERSION))
             .https_only(true)
             .connect_timeout(std::time::Duration::from_secs(20))
             .read_timeout(std::time::Duration::from_secs(60))
             .build()
             .map_err(|error| error.to_string())?;
         let mut response = tokio::select! {
-            sent = crate::net::send(client.get(url)) => sent.map_err(|error| error.to_string())?,
+            sent = kumi_net::send(client.get(url)) => sent.map_err(|error| error.to_string())?,
             _ = signal.cancelled() => return Err("stopped".into()),
         };
         if !response.status().is_success() {
@@ -288,14 +288,14 @@ pub async fn fetch_unpinned(url: &str, to: &Path, signal: &Signal) -> Result<(),
 /// A download streamed to `path`, stopped past `most` bytes: its SHA-256 (hex). A stalled connection gives up rather
 /// than wait for Esc.
 async fn download_at_most(url: &str, path: &Path, most: Option<u64>, signal: &Signal) -> Result<String, String> {
-    let client = crate::net::client()
-        .user_agent(format!("kumi/{}", crate::version::KUMI_VERSION))
+    let client = kumi_net::client()
+        .user_agent(format!("kumi/{}", kumi_types::version::KUMI_VERSION))
         .connect_timeout(std::time::Duration::from_secs(20))
         .read_timeout(std::time::Duration::from_secs(60))
         .build()
         .map_err(|error| error.to_string())?;
     let mut response = tokio::select! {
-        sent = crate::net::send(client.get(url)) => sent.map_err(|error| error.to_string())?,
+        sent = kumi_net::send(client.get(url)) => sent.map_err(|error| error.to_string())?,
         _ = signal.cancelled() => return Err("stopped".into()),
     };
     if !response.status().is_success() {

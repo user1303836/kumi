@@ -2,8 +2,7 @@
 
 use async_trait::async_trait;
 use futures::StreamExt;
-use kumi_common::abort::Signal;
-use kumi_runtime::ai::{
+use kumi_ai::{
     anthropic::{anthropic, AnthropicSettings},
     error::LanguageModelError,
     http::{post_json, Fetch, FetchInit, Headers, HttpFetch, Response},
@@ -11,6 +10,7 @@ use kumi_runtime::ai::{
     sse::{json_stream, safe_json, Event, SseParser},
     types::{CallOptions, StreamPart},
 };
+use kumi_common::abort::Signal;
 use serde_json::json;
 use std::rc::Rc;
 use tokio::{

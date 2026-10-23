@@ -1,11 +1,7 @@
 use super::store::{Credential, CredentialStore, OAuthCredential};
 use crate::{
-    ai::{
-        error::LanguageModelError,
-        http::{default_fetch, Fetch, FetchInit, Response},
-    },
-    core::errors::{FailureKind, KumiError, RuntimeError},
-    web::cause::NetCause,
+    error::LanguageModelError,
+    http::{default_fetch, Fetch, FetchInit, Response},
 };
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use futures::future::{FutureExt, LocalBoxFuture, Shared};
@@ -14,6 +10,8 @@ use kumi_common::{
     js::json::stringify,
     time::now_ms,
 };
+use kumi_net::cause::NetCause;
+use kumi_types::errors::{FailureKind, KumiError, RuntimeError};
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -37,7 +35,7 @@ const REFRESH_MARGIN_MS: f64 = 5.0 * 60_000.0;
 const DEVICE_TIMEOUT_MS: i64 = 15 * 60_000;
 pub static LOGIN_HINT: std::sync::LazyLock<String> = std::sync::LazyLock::new(login_hint);
 pub fn login_hint() -> String {
-    format!("Sign in with /login in Kumi, or: {} login openai-codex", *crate::command::KUMI)
+    format!("Sign in with /login in Kumi, or: {} login openai-codex", *kumi_types::command::KUMI)
 }
 #[derive(Clone)]
 pub struct LoginOptions {
@@ -61,17 +59,17 @@ fn fetch_error(error: LanguageModelError) -> RuntimeError {
         LanguageModelError::ApiCall(call) => call.url.clone(),
         _ => TOKEN_URL.into(),
     };
-    let (env, system) = (crate::system::process_env(), crate::net::proxy::current());
+    let (env, system) = (kumi_types::system::process_env(), kumi_net::proxy::current());
     match error {
         LanguageModelError::Kumi(error) => error.into(),
-        error => match crate::web::cause::unreachable_call("auth.openai.com", &url, &error, &env, &system) {
+        error => match kumi_net::cause::unreachable_call("auth.openai.com", &url, &error, &env, &system) {
             Some(words) => KumiError::with_provider(FailureKind::Network, words, OPENAI_CODEX).into(),
             None => RuntimeError::plain(error.to_string()),
         },
     }
 }
 fn unreachable(cause: NetCause) -> RuntimeError {
-    let words = crate::web::cause::unreachable("auth.openai.com", Some(cause), &crate::system::process_env());
+    let words = kumi_net::cause::unreachable("auth.openai.com", Some(cause), &kumi_types::system::process_env());
     KumiError::with_provider(FailureKind::Network, words, OPENAI_CODEX).into()
 }
 fn claims(token: &str) -> Option<Value> {
@@ -254,7 +252,7 @@ pub async fn login_codex_device(options: LoginOptions, on_code: Rc<dyn Fn(Device
         return Err(auth(if start.status == 404 {
             format!(
                 "Signing in with a code isn't available here; use the browser instead (b in Kumi's sign-in, or: {} login openai-codex --browser).",
-                *crate::KUMI
+                *kumi_types::command::KUMI
             )
         } else {
             format!("Device sign-in could not start (HTTP {}).", start.status)

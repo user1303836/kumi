@@ -5,22 +5,20 @@ pub mod ollama;
 pub mod usage;
 
 use crate::{
-    ai::{
-        anthropic::{anthropic, AnthropicSettings},
-        error::LanguageModelError,
-        http::{default_fetch, Fetch, FetchInit, Response},
-        openai_compatible::{openai_compatible, CompatibleSettings},
-        openai_responses::{openai_responses, ResponsesSettings},
-        types::*,
-    },
+    anthropic::{anthropic, AnthropicSettings},
     auth::{
         openai_codex::{codex_token_source, TokenOptions, TokenSource},
         store::{Credential, CredentialStore},
     },
-    core::errors::{FailureKind, KumiError, RuntimeError},
-    kernel::agent::{ModelBinding, ModelRequest},
+    binding::{ModelBinding, ModelRequest},
+    error::LanguageModelError,
+    http::{default_fetch, Fetch, FetchInit, Response},
+    openai_compatible::{openai_compatible, CompatibleSettings},
+    openai_responses::{openai_responses, ResponsesSettings},
+    types::*,
 };
 use async_trait::async_trait;
+use kumi_types::errors::{FailureKind, KumiError, RuntimeError};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use std::{collections::HashMap, fmt, rc::Rc, sync::LazyLock};
@@ -198,7 +196,7 @@ pub static USER_AGENT: LazyLock<String> = LazyLock::new(|| {
     };
     #[cfg(not(any(unix, windows)))]
     let release = String::new();
-    format!("kumi/{} ({platform} {release}; {arch})", crate::version::KUMI_VERSION)
+    format!("kumi/{} ({platform} {release}; {arch})", kumi_types::version::KUMI_VERSION)
 });
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]

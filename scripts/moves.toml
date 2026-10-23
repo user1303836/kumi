@@ -1262,3 +1262,169 @@ to = "kumi_media::speech"
 [[rust]]
 from = "kumi_runtime::video::captions"
 to = "kumi_media::captions"
+
+# kumi-ai: the model clients, their providers and models, signing in, a turn's timing and a failed call's words (2026-10).
+
+[[move]]
+from = "crates/kumi-runtime/src/ai/anthropic.rs"
+to = "crates/kumi-ai/src/anthropic.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/ai/http.rs"
+to = "crates/kumi-ai/src/http.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/ai/mod.rs"
+to = "crates/kumi-ai/src/lib.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/ai/openai_compatible.rs"
+to = "crates/kumi-ai/src/openai_compatible.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/ai/openai_responses.rs"
+to = "crates/kumi-ai/src/openai_responses.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/ai/sse.rs"
+to = "crates/kumi-ai/src/sse.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/ai/types.rs"
+to = "crates/kumi-ai/src/types.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/auth/mod.rs"
+to = "crates/kumi-ai/src/auth/mod.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/auth/openai_codex.rs"
+to = "crates/kumi-ai/src/auth/openai_codex.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/auth/store.rs"
+to = "crates/kumi-ai/src/auth/store.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/core/timing.rs"
+to = "crates/kumi-ai/src/timing.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/kernel/failure.rs"
+to = "crates/kumi-ai/src/failure.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/models.rs"
+to = "crates/kumi-ai/src/models.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/providers/compat.rs"
+to = "crates/kumi-ai/src/providers/compat.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/providers/local.rs"
+to = "crates/kumi-ai/src/providers/local.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/providers/mod.rs"
+to = "crates/kumi-ai/src/providers/mod.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/providers/models.rs"
+to = "crates/kumi-ai/src/providers/models.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/providers/ollama.rs"
+to = "crates/kumi-ai/src/providers/ollama.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/providers/usage.rs"
+to = "crates/kumi-ai/src/providers/usage.rs"
+
+[[move]]
+from = "crates/kumi-runtime/tests/it/ai_sdk.rs"
+to = "crates/kumi-ai/tests/it/ai_sdk.rs"
+
+[[move]]
+from = "crates/kumi-runtime/tests/it/ai_transport.rs"
+to = "crates/kumi-ai/tests/it/ai_transport.rs"
+
+[[move]]
+from = "crates/kumi-runtime/tests/it/auth.rs"
+to = "crates/kumi-ai/tests/it/auth.rs"
+
+[[move]]
+from = "crates/kumi-runtime/tests/it/local.rs"
+to = "crates/kumi-ai/tests/it/local.rs"
+
+[[move]]
+from = "crates/kumi-runtime/tests/it/model_fetch.rs"
+to = "crates/kumi-ai/tests/it/model_fetch.rs"
+
+[[move]]
+from = "crates/kumi-runtime/tests/it/models.rs"
+to = "crates/kumi-ai/tests/it/models.rs"
+
+[[move]]
+from = "crates/kumi-runtime/tests/it/ollama.rs"
+to = "crates/kumi-ai/tests/it/ollama.rs"
+
+[[rust]]
+from = "kumi_runtime::ai"
+to = "kumi_ai"
+
+[[rust]]
+from = "kumi_runtime::auth"
+to = "kumi_ai::auth"
+
+[[rust]]
+from = "kumi_runtime::providers"
+to = "kumi_ai::providers"
+
+[[rust]]
+from = "kumi_runtime::models"
+to = "kumi_ai::models"
+
+[[rust]]
+from = "kumi_runtime::core::timing"
+to = "kumi_ai::timing"
+
+[[rust]]
+from = "kumi_runtime::kernel::failure"
+to = "kumi_ai::failure"
+
+[[rust]]
+from = "kumi_runtime::kernel::agent::LanguageModel"
+to = "kumi_ai::binding::LanguageModel"
+
+[[rust]]
+from = "kumi_runtime::kernel::agent::ModelBinding"
+to = "kumi_ai::binding::ModelBinding"
+
+[[rust]]
+from = "kumi_runtime::kernel::agent::ModelRequest"
+to = "kumi_ai::binding::ModelRequest"
+
+[[rust]]
+from = "kumi_runtime::kernel::budget::ContextBudget"
+to = "kumi_ai::binding::ContextBudget"
+
+[[rust]]
+from = "kumi_runtime::kernel::budget::DEFAULT_BUDGET"
+to = "kumi_ai::binding::DEFAULT_BUDGET"
+
+[[rust]]
+from = "kumi_runtime::kernel::budget::BYTES_PER_TOKEN"
+to = "kumi_ai::binding::BYTES_PER_TOKEN"
+
+[[rust]]
+from = "kumi_runtime::kernel::budget::budget_for"
+to = "kumi_ai::binding::budget_for"
+
+[[rust]]
+from = "kumi_runtime::core::contracts::Usage"
+to = "kumi_types::contracts::Usage"
+
+[[rust]]
+from = "kumi_runtime::library::state::alive"
+to = "kumi_types::system::alive"

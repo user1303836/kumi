@@ -19,27 +19,8 @@ use crate::ai::types::{
 use crate::core::contracts::{TranscriptLine, TranscriptRole};
 use crate::core::playbook::PLAYBOOK_OPEN;
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct ContextBudget {
-    /// Bytes of conversation (as JSON, roughly 3 per token) past which earlier turns are cleared.
-    pub clear_at: f64,
-    /// Bytes never sent: past this, all earlier reads and then this turn's older ones are cleared, then the earliest exchanges dropped.
-    pub limit: f64,
-}
-
-/// Roughly 50k and 130k tokens, leaving room for instructions and tools in every supported model's window.
-pub const DEFAULT_BUDGET: ContextBudget = ContextBudget { clear_at: 160.0 * 1024.0, limit: 400.0 * 1024.0 };
-
-/// Bytes a token stands for, as the budget counts them: JSON runs about 3, words more, so this errs toward room.
-pub const BYTES_PER_TOKEN: f64 = 3.0;
-
-/// The budget for a model that reads `window` tokens at once: what's left once the instructions and
-/// tools (`fixed` bytes) and the answer (`answer` tokens) have their room, cleared from 40% of it as
-/// the default budget is. Never less than a few exchanges, nor more than the default.
-pub fn budget_for(window: f64, fixed: f64, answer: f64) -> ContextBudget {
-    let limit = DEFAULT_BUDGET.limit.min((16.0_f64 * 1024.0).max((window - answer) * BYTES_PER_TOKEN - fixed));
-    ContextBudget { clear_at: (limit * 0.4).floor(), limit }
-}
+// How much conversation a model takes (kumi-ai, where a model's binding names it).
+pub use kumi_ai::binding::{budget_for, ContextBudget, BYTES_PER_TOKEN, DEFAULT_BUDGET};
 
 /// How the session attaches each turn's Live observation to the producer's words.
 pub const OBSERVATION_MARKER: &str = "\n\n<current_observation_untrusted>";
