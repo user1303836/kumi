@@ -172,6 +172,10 @@ jobs:
   rust-platforms:
     # What differs by platform (the `ci-os` set): installing, launching and updating; the terminal and stdin, and the
     # Windows console; Hands; paths, files and child processes; the store. Each platform's every test runs in Extended.
+    # Windows in two parts at once, of about the same test time (each test's time added up, on main's runs of
+    # 2026-10-23): the app's tests, about 190 s, and the rest, about 155 s (Live's bridge 68, kumi-daw-ableton 27, Kumi's
+    # host for REAPER and Renoise 25). As one job it was the slowest of Required CI's (5 to 7.5 minutes on main), its
+    # tests alone about 2 minutes. macOS's tests take about half as long, so it stays one job.
     name: Rust / ${{ matrix.label }}
     needs: changes
     if: needs.changes.outputs.rust == 'true'
@@ -181,7 +185,8 @@ jobs:
       matrix:
         include:
           - { os: macos-15, label: macOS }
-          - { os: windows-2025, label: Windows }
+          - { os: windows-2025, label: Windows, part: "-app", crates: "-p kumi" }
+          - { os: windows-2025, label: "Windows (Kumi's crates and bridges)", part: "-rest", crates: "--exclude kumi" }
     timeout-minutes: 10
     env:
       # Rust's own linker: Microsoft's is a large part of linking two hundred test binaries.
@@ -218,7 +223,7 @@ jobs:
           KUMI_NEXTEST_LIST: ${{ runner.temp }}/nextest-list.json
           # Only the test binaries the profile names are built.
           KUMI_NEXTEST_BUILD_PROFILE: ci-os
-        run: sh scripts/test-isolated.sh --profile ci-os
+        run: sh scripts/test-isolated.sh --profile ci-os ${{ matrix.crates }}
       - name: The tests, in a home of their own (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
@@ -228,11 +233,12 @@ jobs:
           KUMI_NEXTEST_LIST: ${{ runner.temp }}/nextest-list.json
           KUMI_NEXTEST_BUILD_PROFILE: ci-os
           RUST_TEST_NOCAPTURE: '1'
-        run: ./scripts/test-isolated.ps1 --profile ci-os
+        # (the part's packages as separate words: the expression is replaced before PowerShell reads the line)
+        run: ./scripts/test-isolated.ps1 --profile ci-os ${{ matrix.crates }}
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: ${{ !cancelled() }}
         with:
-          name: nextest-list-ci-os-${{ runner.os }}
+          name: nextest-list-ci-os-${{ runner.os }}${{ matrix.part }}
           path: ${{ runner.temp }}/nextest-list.json
           if-no-files-found: ignore
           retention-days: 14
