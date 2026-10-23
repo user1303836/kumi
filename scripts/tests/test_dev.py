@@ -202,6 +202,65 @@ class Check(unittest.TestCase):
         self.assertTrue(any("pwsh" in step and "--profile ci -p" in step for step in self.steps("M\tcrates/store/src/lib.rs", windows=True)))
 
 
+# The layers as Kumi's crates keep them: the app on the DAWs' integrations, the integrations on the agent and daws/own/,
+# the bridges on kumi-common and each other.
+LAYERED = {
+    "kumi": ("crates/kumi", [("kumi-agent", None), ("kumi-daw-reaper", None), ("daw-bridge", None), ("kumi-testkit", "dev")]),
+    "kumi-agent": ("crates/kumi-agent", [("kumi-ai", None), ("kumi-types", None), ("daw-mcp-server", "dev")]),
+    "kumi-ai": ("crates/kumi-ai", [("kumi-net", None)]),
+    "kumi-web": ("crates/kumi-web", []),
+    "kumi-net": ("crates/kumi-net", [("kumi-types", None)]),
+    "kumi-types": ("crates/kumi-types", [("kumi-common", None)]),
+    "kumi-common": ("crates/kumi-common", [("kumi-testkit", "dev")]),
+    "kumi-testkit": ("crates/kumi-testkit", []),
+    "kumi-daw-own": ("daws/own/kumi-daw-own", [("kumi-agent", None), ("daw-bridge", None)]),
+    "kumi-daw-reaper": ("daws/reaper/kumi-daw-reaper", [("kumi-daw-own", None), ("daw-mcp-server", "dev")]),
+    "kumi-daw-renoise": ("daws/renoise/kumi-daw-renoise", [("kumi-daw-own", None)]),
+    "reaper-kumi": ("daws/reaper/reaper-kumi", [("daw-bridge", None), ("kumi-testkit", "dev")]),
+    "daw-mcp-server": ("daws/own/daw-mcp-server", [("daw-bridge", None), ("kumi-common", None)]),
+    "daw-bridge": ("daws/own/daw-bridge", []),
+}
+
+
+class Layers(unittest.TestCase):
+    def breaks(self, **extra: list[tuple[str, str | None]]) -> list[str]:
+        packages = {name: (folder, list(uses) + extra.get(name.replace("-", "_"), [])) for name, (folder, uses) in LAYERED.items()}
+        return dev.layer_breaks(dev.Workspace.from_metadata(metadata(packages)))
+
+    def test_the_crates_as_they_are_keep_their_layers(self):
+        self.assertEqual(self.breaks(), [])
+
+    def test_a_crate_uses_no_crate_above_it_but_one_of_its_layer(self):
+        self.assertEqual(self.breaks(kumi_web=[("kumi-ai", None)]), [])
+        [refused] = self.breaks(kumi_types=[("kumi-net", None)])
+        self.assertIn("kumi-types -> kumi-net: L0 uses L1", refused)
+        # an integration (L4) is above the agent, and below the app
+        self.assertIn("kumi-agent -> kumi-daw-reaper: L3 uses L4", " ".join(self.breaks(kumi_agent=[("kumi-daw-reaper", None)])))
+        # a test may use what it likes of the crates
+        self.assertEqual(self.breaks(kumi_types=[("kumi-net", "dev")]), [])
+
+    def test_only_the_app_and_tests_of_daws_own_reach_into_daws(self):
+        self.assertIn("kumi-agent -> daw-bridge: nothing in crates/ uses daws/", " ".join(self.breaks(kumi_agent=[("daw-bridge", None)])))
+        self.assertIn("kumi-agent -> reaper-kumi (dev)", " ".join(self.breaks(kumi_agent=[("reaper-kumi", "dev")])))
+        self.assertEqual(self.breaks(kumi_ai=[("daw-bridge", "dev")]), [])
+        self.assertIn("kumi -> reaper-kumi", " ".join(self.breaks(kumi=[("reaper-kumi", None)])))
+
+    def test_a_daws_crates_use_no_other_daws(self):
+        [refused] = self.breaks(kumi_daw_reaper=[("kumi-daw-renoise", None)])
+        self.assertIn("kumi-daw-reaper -> kumi-daw-renoise: a DAW's crates use no other DAW's", refused)
+        self.assertTrue(self.breaks(kumi_daw_renoise=[("reaper-kumi", "dev")]))
+
+    def test_a_bridge_uses_nothing_of_kumis_crates_but_kumi_common(self):
+        self.assertIn("reaper-kumi -> kumi-types: a bridge uses nothing", " ".join(self.breaks(reaper_kumi=[("kumi-types", None)])))
+        self.assertIn("daw-mcp-server -> kumi-daw-own", " ".join(self.breaks(daw_mcp_server=[("kumi-daw-own", None)])))
+
+    def test_the_tests_support_is_a_dev_dependency_only_and_a_new_crate_needs_a_layer(self):
+        self.assertIn("kumi-net -> kumi-testkit: kumi-testkit is the tests' support", " ".join(self.breaks(kumi_net=[("kumi-testkit", None)])))
+        packages = dict(LAYERED, **{"kumi-new": ("crates/kumi-new", [])})
+        [refused] = dev.layer_breaks(dev.Workspace.from_metadata(metadata(packages)))
+        self.assertIn("kumi-new (crates/kumi-new) has no layer", refused)
+
+
 class ThisCheckout(unittest.TestCase):
     """scripts/areas.toml against this checkout's files and packages."""
 
@@ -215,6 +274,9 @@ class ThisCheckout(unittest.TestCase):
 
     def test_every_tracked_file_belongs_to_a_package_or_an_area(self):
         self.assertEqual(dev.unplaced(dev.tracked(), self.workspace, self.areas), [])
+
+    def test_the_crates_keep_their_layers(self):
+        self.assertEqual(dev.layer_breaks(self.workspace), [])
 
     def test_every_area_feeds_packages_the_workspace_has(self):
         for area in self.areas:
