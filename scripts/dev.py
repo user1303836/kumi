@@ -103,7 +103,7 @@ LAYERS = {
     "kumi-daw": 4,
     "kumi-agent": 3,
     "kumi-listening": 2, "kumi-library": 2, "kumi-web": 2, "kumi-ai": 2,
-    "kumi-media": 1, "kumi-net": 1, "kumi-store": 1, "kumi-genexpr": 1,
+    "kumi-media": 1, "kumi-net": 1, "kumi-store": 1, "kumi-genexpr": 1, "kumi-layout": 1,
     "kumi-types": 0, "kumi-common": 0,
 }
 INTEGRATION_LAYER = 5

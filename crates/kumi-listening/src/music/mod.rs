@@ -7,6 +7,7 @@ pub mod describe;
 pub mod folders;
 pub mod hear;
 pub mod learning;
+pub mod map;
 pub mod scan;
 pub mod store;
 pub mod tags;
