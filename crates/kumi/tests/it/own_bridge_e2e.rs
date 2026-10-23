@@ -5,6 +5,7 @@ use daw_bridge::{files::ensure_secret, paths::BridgePaths, Daw};
 use daw_mcp_server::{host::Host, reaper::simulator::ReaperScript, renoise::simulator::RenoiseScript, simulator::Simulator};
 use futures::FutureExt;
 use kumi_common::abort::Signal;
+use kumi_daw_reaper::create_reaper_integration;
 use kumi_runtime::core::{
     context::IntegrationContext,
     contracts::*,
@@ -13,7 +14,6 @@ use kumi_runtime::core::{
 };
 use kumi_runtime::integrations::{
     own_bridge::{Connect, OwnOptions},
-    reaper::create_reaper_integration,
     renoise::create_renoise_integration,
 };
 use kumi_runtime::mcp::client::McpEndpoint;

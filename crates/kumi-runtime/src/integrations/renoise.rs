@@ -1,6 +1,6 @@
 //! Renoise, through Kumi's tool and host: its refs (positions, as Renoise numbers them, under the song's epoch), its
 //! read tool and its instructions. The integration itself is the one every bridge of Kumi's own shares (`own_bridge`).
-use super::own_bridge::{create_own_integration, OwnDaw, OwnOptions};
+use super::own_bridge::{create_own_integration, OwnDaw, OwnOptions, OwnTools};
 use super::own_catchup::{as_read, CatchUpWords, Mixer, RecipeKinds};
 use super::own_phrases::{bar_span, slots_spanning, track, OwnPhrases, PhraseLook, Phrased};
 use super::own_views::{self, body_args, focus_track, selected, view};
@@ -411,7 +411,38 @@ pub const VIEW: ViewPresentation = ViewPresentation {
 
 /// Renoise's integration.
 pub fn create_renoise_integration(options: OwnOptions) -> Rc<dyn Integration> {
-    create_own_integration::<RenoiseRefs>(&DAW, options)
+    create_own_integration::<RenoiseRefs>(&DAW, options, |parts| {
+        let caps = &DAW.profile.caps;
+        // (M7) the variations tool: Renoise's patterns and phrases (#401)
+        let variations = caps.variations.then(|| {
+            let backend = super::renoise_variations::RenoiseBackend::new(parts.changes.clone(), parts.renderer.clone());
+            crate::core::variations::tool::Variations::new(backend, parts.kumi_home.clone()).tool()
+        });
+        OwnTools {
+            // (#401) the sample map
+            mapping: caps.sample_mapping.then(|| {
+                let backend = super::renoise_mapping::RenoiseMapping::new(parts.changes.clone(), parts.renderer.clone());
+                crate::core::mapping::tool::Mapping::new(backend).tool()
+            }),
+            // (#401) chopping: its lighter densities go to the variations tool as takes
+            chop: caps.chop.then(|| {
+                let backend = super::renoise_chop::RenoiseChop::new(parts.changes.clone(), parts.renderer.clone());
+                crate::core::chop::tool::Chop::new(backend, variations.clone()).tool()
+            }),
+            // (#401) cleaning up a jam
+            jam: caps.jam.then(|| {
+                let backend = super::renoise_jam::RenoiseJam::new(parts.changes.clone());
+                crate::core::jam::tool::Jam::new(backend).tool()
+            }),
+            // (#401) layering breaks
+            layers: caps.layers.then(|| {
+                let backend = super::renoise_layers::RenoiseLayers::new(parts.changes.clone(), parts.renderer.clone());
+                crate::core::layers::tool::Layers::new(backend).tool()
+            }),
+            variations,
+            ..Default::default()
+        }
+    })
 }
 
 #[cfg(test)]

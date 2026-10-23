@@ -133,7 +133,7 @@ fn recording(into: Rc<Recorded>) -> KernelFactory {
 async fn session(daw: Daw, home: &Path, steps: Vec<Step>, question: &str) -> (Vec<String>, Vec<SessionEvent>) {
     let host = Rc::new(InProcess { host: Arc::new(Host::new(daw, home)), id: Cell::new(0) });
     let (profile, create): (DawProfile, fn(OwnOptions) -> Rc<dyn Integration>) = match daw {
-        Daw::Reaper => (DawProfile::REAPER, kumi_runtime::integrations::reaper::create_reaper_integration),
+        Daw::Reaper => (DawProfile::REAPER, kumi_daw_reaper::create_reaper_integration),
         Daw::Renoise => (DawProfile::RENOISE, kumi_runtime::integrations::renoise::create_renoise_integration),
     };
     let events = Rc::new(RefCell::new(vec![]));

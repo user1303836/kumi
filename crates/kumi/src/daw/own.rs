@@ -56,7 +56,7 @@ pub static REAPER: Own = Own {
     id: DawId::Reaper,
     daw: Daw::Reaper,
     bridge: "Kumi's extension",
-    create: kumi_runtime::integrations::reaper::create_reaper_integration,
+    create: kumi_daw_reaper::create_reaper_integration,
     instructions: "REAPER isn't connected, so Kumi can't see your project: answer from what you know, and say so.",
 };
 

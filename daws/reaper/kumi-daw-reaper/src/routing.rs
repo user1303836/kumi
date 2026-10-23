@@ -3,13 +3,13 @@
 //! the tracks heard nowhere: their hardware outputs), with the FX of the tracks that receive (a bus with a reverb is a send
 //! effect); and the steps that build a sidechain (ReaComp's detector on the sidechain), a parallel bus or stems, run as one
 //! plan: one step of REAPER's undo. Core's tool does the rest.
-use super::own_changes::OwnPlan;
-use crate::core::plan::make_changes;
-use crate::core::refs::RefScheme;
-use crate::core::routing::backend::{Build, RoutingBackend, Steps, Words};
-use crate::core::routing::graph::{Edge, Graph, Node, Route, MASTER};
 use async_trait::async_trait;
 use kumi_common::abort::Signal;
+use kumi_runtime::core::plan::make_changes;
+use kumi_runtime::core::refs::RefScheme;
+use kumi_runtime::core::routing::backend::{Build, RoutingBackend, Steps, Words};
+use kumi_runtime::core::routing::graph::{Edge, Graph, Node, Route, MASTER};
+use kumi_runtime::integrations::own_changes::OwnPlan;
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::rc::Rc;
@@ -354,8 +354,8 @@ impl<S: RefScheme + 'static> RoutingBackend for ReaperRouting<S> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::integrations::reaper_changes::CHANGES;
-    use crate::kernel::schema::problem;
+    use crate::changes::CHANGES;
+    use kumi_runtime::kernel::schema::problem;
 
     fn node(id: &str, place: usize, parent: Option<&str>) -> Node {
         Node { id: id.into(), name: id.into(), place, parent: parent.map(str::to_owned), channels: 2, sounds: true, ..Node::default() }

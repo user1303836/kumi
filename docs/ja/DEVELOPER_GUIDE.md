@@ -25,6 +25,7 @@
 | `daws/ableton/protocol` | `ableton-live-v1.operations.json`。ブリッジと Remote Script が共有する操作のレジストリ |
 | `scripts` | リリースのビルダー、移行用のパッケージング、Mac のヘルパーのビルド、分離テストランナー、そして `npm run kumi` と `npm run setup` が使う `native-kumi.mjs` |
 | `daws/own/daw-mcp-server` | REAPER と Renoise のための Kumi のホスト（`daw-mcp-server --daw reaper\|renoise`）：stdio 上の MCP、変更のジャーナルと取り消し、聴くジョブ、離れていた間の変化。ほかの MCP クライアントからも使えます |
+| `daws/reaper/kumi-daw-reaper` | REAPER のホスト側：Kumi 独自のブリッジを通した連携、REAPER だけのツール（アイテムのバリエーション、書き出し、ルーティング）、ライブラリーの場所 |
 | `daws/reaper/reaper-kumi` | Kumi の REAPER 拡張機能（`reaper_kumi`）。`sdk/` に同梱した REAPER の SDK ヘッダーでビルドします |
 | `daws/own/daw-bridge` | REAPER と Renoise のブリッジが共有するもの：ループバックの通信（`kumi-daw/1`）、そのハンドシェイクと認証、ディスカバリー、DAW の検出、doctor のチェック、ブリッジのファイルのライフサイクル |
 | `daws/renoise` | Kumi の Renoise ツール（`com.kumi.Bridge.xrnx`、Lua）と、Renoise の API のモックに対するそのテスト |

@@ -28,7 +28,7 @@ const MOST_PADS: usize = 64;
 
 /// A part groove read: what its note edits are kept under, and what moving its notes needs.
 #[derive(Debug, Clone)]
-pub(super) enum Part {
+pub enum Part {
     /// A MIDI item: its active take's ref (what a note edit's change names) and its track's.
     Item { take: String, track: Option<String> },
     /// A pattern track: the pattern's ref and the track's (the pattern an alias plays from, where it is one), the pattern
@@ -39,7 +39,7 @@ pub(super) enum Part {
 
 /// A note cell of a pattern track as the line read gives it (a field Renoise shows as ".." left out).
 #[derive(Debug, Clone, PartialEq)]
-pub(super) struct Cell {
+pub struct Cell {
     line: u64,
     col: u64,
     note: String,
@@ -94,7 +94,7 @@ fn field(cell: &Value, key: &str) -> Option<String> {
 /// + its column), with its start
 /// and length in beats (to the next note or OFF in its column, or the pattern's end), and every cell that holds
 /// something.
-pub(super) fn cells_of(rows: &[Value], lines: u64, lpb: f64) -> (Vec<(i64, Cell, Note)>, HashSet<(u64, u64)>) {
+pub fn cells_of(rows: &[Value], lines: u64, lpb: f64) -> (Vec<(i64, Cell, Note)>, HashSet<(u64, u64)>) {
     let mut columns: BTreeMap<u64, Vec<(f64, Option<Cell>)>> = BTreeMap::new();
     let mut taken = HashSet::new();
     for row in rows {
@@ -144,13 +144,7 @@ pub(super) fn cells_of(rows: &[Value], lines: u64, lpb: f64) -> (Vec<(i64, Cell,
 /// The lines notes_write writes to move a pattern track's notes as the patches say: each note to its new line and delay,
 /// a line away at most and only into a cell of its column that holds nothing (else as far as its own line goes), and
 /// its volume for its velocity (one holding an effect stays). Each cell is written whole, as it was read but for those.
-pub(super) fn writes_for(
-    cells: &HashMap<i64, Cell>,
-    taken: &HashSet<(u64, u64)>,
-    patches: &[NotePatch],
-    lpb: f64,
-    lines: u64,
-) -> Vec<Value> {
+pub fn writes_for(cells: &HashMap<i64, Cell>, taken: &HashSet<(u64, u64)>, patches: &[NotePatch], lpb: f64, lines: u64) -> Vec<Value> {
     let mut entries: BTreeMap<u64, Vec<Value>> = BTreeMap::new();
     let mut claimed: HashSet<(u64, u64)> = HashSet::new();
     for patch in patches {
@@ -214,7 +208,7 @@ impl<S: RefScheme + 'static> OwnRenderer<S> {
     }
 
     /// A part's notes, each with the id Kumi moves it by: the ones the DAW plays (not muted, inside the item or pattern).
-    pub(super) async fn part_notes(&self, clip: &str, signal: Signal) -> Result<ClipNotes, String> {
+    pub async fn part_notes(&self, clip: &str, signal: Signal) -> Result<ClipNotes, String> {
         if self.link.book.borrow().scheme.positional() {
             self.pattern_notes(clip, &signal).await
         } else {
@@ -223,7 +217,7 @@ impl<S: RefScheme + 'static> OwnRenderer<S> {
     }
 
     /// The item a MIDI item's or take's ref names, as the item read gives it (a take is found as its item's active one).
-    pub(super) async fn item_row(&self, named: &str, signal: &Signal) -> Result<Value, String> {
+    pub async fn item_row(&self, named: &str, signal: &Signal) -> Result<Value, String> {
         let long = self.long(named);
         let vocab = &self.profile().vocab;
         let cant = |why: String| why;
@@ -365,7 +359,7 @@ impl<S: RefScheme + 'static> OwnRenderer<S> {
 
     /// Where a Renoise pattern (or a pattern track) plays in the song, and for how long: over its first slot in the
     /// pattern sequence. None for anything else, or a pattern no slot plays.
-    pub(super) async fn pattern_window(&self, long: &str, signal: &Signal) -> Option<Window> {
+    pub async fn pattern_window(&self, long: &str, signal: &Signal) -> Option<Window> {
         if !matches!(self.kind_of(long).as_deref(), Some("pattern" | "ptrack")) {
             return None;
         }
@@ -397,7 +391,7 @@ impl<S: RefScheme + 'static> OwnRenderer<S> {
 
     /// Moves a part's notes in one change: notes_change of the take's notes by index (REAPER), notes_write of the pattern
     /// track's lines (Renoise).
-    pub(super) async fn move_notes(&self, clip: &str, patches: &[NotePatch], signal: Signal) -> Result<(), RuntimeError> {
+    pub async fn move_notes(&self, clip: &str, patches: &[NotePatch], signal: Signal) -> Result<(), RuntimeError> {
         if !self.parts.borrow().contains_key(clip) {
             self.part_notes(clip, signal.clone()).await.map_err(RuntimeError::plain)?;
         }
@@ -440,7 +434,7 @@ impl<S: RefScheme + 'static> OwnRenderer<S> {
     }
 
     /// The ref the history keeps a part's note edits under: its take's (REAPER), its pattern track's (Renoise).
-    pub(super) fn part_id(&self, clip: &str) -> Option<String> {
+    pub fn part_id(&self, clip: &str) -> Option<String> {
         self.parts.borrow().get(clip).map(|part| match part {
             Part::Item { take, .. } => take.clone(),
             Part::Lines { place, .. } => place.clone(),
@@ -449,7 +443,7 @@ impl<S: RefScheme + 'static> OwnRenderer<S> {
 
     /// The changes applied since a checkpoint, split into the note edits on the part (by the ref its changes name) and the
     /// rest.
-    pub(super) fn part_changes(&self, checkpoint: &[String], clip: Option<&str>) -> (Vec<(String, String)>, Vec<(String, String)>) {
+    pub fn part_changes(&self, checkpoint: &[String], clip: Option<&str>) -> (Vec<(String, String)>, Vec<(String, String)>) {
         let entries = self.plan.history.entries.borrow();
         self.applied_since(checkpoint).into_iter().partition(|(id, _)| {
             entries.get(id).is_some_and(|entry| {
@@ -462,7 +456,7 @@ impl<S: RefScheme + 'static> OwnRenderer<S> {
 
     /// How a part's notes fall into lanes: by its track's drum kit, when it plays one (REAPER: ReaSamplOmatic5000s, one
     /// note each; Renoise: the part's instrument with a sample on each of its keys).
-    pub(super) async fn part_lanes(&self, clip: &str, signal: Signal) -> Kit {
+    pub async fn part_lanes(&self, clip: &str, signal: Signal) -> Kit {
         let part = self.parts.borrow().get(clip).cloned();
         let pads = match part {
             Some(Part::Item { track: Some(track), .. }) => self.sampler_pads(&track, &signal).await,
@@ -521,7 +515,7 @@ impl<S: RefScheme + 'static> OwnRenderer<S> {
 
     /// The track a drum stem plays on, by name: an audio item's (REAPER), or the track itself (Renoise plays a stem from a
     /// pattern track).
-    pub(super) async fn stem_track_of(&self, audio: &str, signal: Signal) -> Result<String, String> {
+    pub async fn stem_track_of(&self, audio: &str, signal: Signal) -> Result<String, String> {
         let long = self.long(audio);
         let tracks = self.track_rows(&signal).await.map_err(|error| error.to_string())??;
         let track = match self.kind_of(&long).as_deref() {
@@ -536,7 +530,7 @@ impl<S: RefScheme + 'static> OwnRenderer<S> {
     }
 
     /// How many devices these changes added.
-    pub(super) fn devices_added(&self, changes: &[(String, String)]) -> usize {
+    pub fn devices_added(&self, changes: &[(String, String)]) -> usize {
         let entries = self.plan.history.entries.borrow();
         changes
             .iter()
@@ -545,7 +539,7 @@ impl<S: RefScheme + 'static> OwnRenderer<S> {
     }
 
     /// Kumi's track renames since `before`, still applied, oldest first: the track's ref, the name it had and its new one.
-    pub(super) fn renames_since(&self, before: &[String]) -> Vec<(String, String, String)> {
+    pub fn renames_since(&self, before: &[String]) -> Vec<(String, String, String)> {
         let entries = self.plan.history.entries.borrow();
         self.plan
             .renamed

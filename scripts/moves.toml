@@ -3560,3 +3560,77 @@ to = "kumi_daw_ableton::manual::MANUAL_TOOL"
 [[rust]]
 from = "kumi_runtime::library_sources"
 to = "kumi::daw::registry::library_sources"
+
+# kumi-daw-reaper: REAPER, host side; the app takes the tests that need REAPER and Renoise together (2026-10).
+
+[[move]]
+from = "crates/kumi-runtime/examples/accept_reaper.rs"
+to = "daws/reaper/kumi-daw-reaper/examples/accept_reaper.rs"
+
+[[move]]
+from = "crates/kumi-runtime/examples/daw_listening_flow.rs"
+to = "crates/kumi/examples/daw_listening_flow.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/daws_doc.rs"
+to = "crates/kumi/tests/it/daws_doc.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/pack_tests.rs"
+to = "crates/kumi/tests/it/pack_tests.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/reaper.rs"
+to = "daws/reaper/kumi-daw-reaper/src/lib.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/reaper_changes.rs"
+to = "daws/reaper/kumi-daw-reaper/src/changes.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/reaper_delivery.rs"
+to = "daws/reaper/kumi-daw-reaper/src/delivery.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/reaper_routing.rs"
+to = "daws/reaper/kumi-daw-reaper/src/routing.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/reaper_variations.rs"
+to = "daws/reaper/kumi-daw-reaper/src/variations.rs"
+
+[[move]]
+from = "crates/kumi-runtime/tests/it/own_bridge.rs"
+to = "crates/kumi/tests/it/own_bridge.rs"
+
+[[move]]
+from = "crates/kumi-runtime/tests/it/own_bridge_e2e.rs"
+to = "crates/kumi/tests/it/own_bridge_e2e.rs"
+
+[[move]]
+from = "crates/kumi-runtime/tests/it/own_catchup_e2e.rs"
+to = "crates/kumi/tests/it/own_catchup_e2e.rs"
+
+[[move]]
+from = "crates/kumi-runtime/tests/it/own_listening_e2e.rs"
+to = "crates/kumi/tests/it/own_listening_e2e.rs"
+
+[[move]]
+from = "crates/kumi-runtime/tests/it/own_session_catchup.rs"
+to = "crates/kumi/tests/it/own_session_catchup.rs"
+
+[[rust]]
+from = "kumi_runtime::integrations::reaper_changes"
+to = "kumi_daw_reaper::changes"
+
+[[rust]]
+from = "kumi_runtime::integrations::reaper"
+to = "kumi_daw_reaper"
+
+[[rust]]
+from = "kumi_runtime::integrations::own_library::REAPER"
+to = "kumi_daw_reaper::library::LIBRARY"
+
+[[rust]]
+from = "kumi_runtime::integrations::own_library::ReaperLibrary"
+to = "kumi_daw_reaper::library::ReaperLibrary"

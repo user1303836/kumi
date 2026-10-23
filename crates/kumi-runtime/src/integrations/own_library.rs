@@ -1,55 +1,21 @@
-//! Where REAPER and Renoise keep their libraries, for the library to learn: found where daw-bridge's detection finds
-//! each DAW, and only for a DAW whose Kumi bridge is installed there. A producer who has Renoise but never works in it
-//! with Kumi doesn't wait while its factory sounds are measured. How each library is read, by its layout, is the
-//! library's own (`kumi_library::daw_sources`).
+//! Where Renoise keeps its library, for the library to learn, and what REAPER's (kumi-daw-reaper's) shares with it:
+//! found where daw-bridge's detection finds each DAW, and only for a DAW whose Kumi bridge is installed there. A producer
+//! who has Renoise but never works in it with Kumi doesn't wait while its factory sounds are measured. How each library
+//! is read, by its layout, is the library's own (`kumi_library::daw_sources`).
 
 use std::path::PathBuf;
 
-use daw_bridge::detect::{detect_reaper, detect_renoise, Env, Os};
-use daw_bridge::install::{reaper_extension_name, RENOISE_TOOL_FOLDER};
+use daw_bridge::detect::{detect_renoise, Env, Os};
+use daw_bridge::install::RENOISE_TOOL_FOLDER;
 use kumi_library::daws::LibrarySources;
 use kumi_library::sources::{env_of, home_of, is_folder, join, on_disk, platform_of, resolve, Source, SourceKind, SourceOptions};
 
 use crate::core::daw::DawProfile;
 
-/// REAPER's library: its resource folders with Kumi's extension in them.
-pub struct ReaperLibrary;
-
 /// Renoise's library: its own Library and User Library, for the newest version Kumi's tool is in.
 pub struct RenoiseLibrary;
 
-pub static REAPER: ReaperLibrary = ReaperLibrary;
 pub static RENOISE: RenoiseLibrary = RenoiseLibrary;
-
-impl LibrarySources for ReaperLibrary {
-    fn profile(&self) -> &'static DawProfile {
-        &DawProfile::REAPER
-    }
-
-    /// REAPER's resource folders with Kumi's extension in them (the default one, portable installs, or the one
-    /// `KUMI_REAPER_RESOURCE_DIR` names).
-    fn own_library(&self, options: &SourceOptions) -> Vec<Source> {
-        let os = os_of(options);
-        let var = |name: &str| env_of(options, name);
-        let env = Env { os, home: PathBuf::from(home_of(options)), var: &var, root: None };
-        let reapers: Vec<PathBuf> = detect_reaper(&env)
-            .into_iter()
-            .map(|install| install.resource)
-            .filter(|resource| resource.join("UserPlugins").join(reaper_extension_name(os)).is_file())
-            .collect();
-        reapers
-            .iter()
-            .map(|resource| {
-                let label = if reapers.len() == 1 {
-                    "REAPER".to_string()
-                } else {
-                    format!("REAPER ({})", resource.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default())
-                };
-                source(resource.clone(), label, SourceKind::Reaper)
-            })
-            .collect()
-    }
-}
 
 impl LibrarySources for RenoiseLibrary {
     fn profile(&self) -> &'static DawProfile {
@@ -84,7 +50,8 @@ impl LibrarySources for RenoiseLibrary {
     }
 }
 
-fn os_of(options: &SourceOptions) -> Os {
+/// daw-bridge's name for the options' system.
+pub fn os_of(options: &SourceOptions) -> Os {
     match platform_of(options).as_str() {
         "darwin" => Os::Mac,
         "win32" => Os::Windows,
@@ -92,6 +59,7 @@ fn os_of(options: &SourceOptions) -> Os {
     }
 }
 
-fn source(path: PathBuf, label: String, kind: SourceKind) -> Source {
+/// A DAW's library at `path`, as the library keeps it (resolved, spelled as the disk spells it).
+pub fn source(path: PathBuf, label: String, kind: SourceKind) -> Source {
     Source { path: on_disk(&resolve(&path.to_string_lossy())), label, kind }
 }

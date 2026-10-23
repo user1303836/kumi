@@ -45,7 +45,7 @@ use std::{
 };
 
 /// How long a call to Kumi's host waits.
-pub(super) const CALL_MS: u64 = 30_000;
+pub const CALL_MS: u64 = 30_000;
 /// How often FOCUS's focus is read while the app shows it, unless the app says.
 const FOCUS_MS: u64 = 150;
 /// How often the focus is polled when nothing draws it (plain mode).
@@ -291,7 +291,34 @@ const HEARD_KEPT: usize = 512;
 /// How long what the bridge said it can do for listening is taken as standing (REAPER's audio may start or stop).
 const FLAGS_FRESH: std::time::Duration = std::time::Duration::from_secs(20);
 
-pub fn create_own_integration<S: RefScheme + 'static>(daw: &'static OwnDaw, options: OwnOptions) -> Rc<dyn Integration> {
+/// What a DAW's own tools are made from: the shared plan of its changes, the renderer the shared listening plays and
+/// renders with, and Kumi's folder.
+pub struct OwnParts<S: RefScheme + 'static> {
+    pub changes: Rc<OwnPlan<S>>,
+    pub renderer: Rc<super::own_listening::OwnRenderer<S>>,
+    pub kumi_home: PathBuf,
+}
+
+/// The tools a DAW adds to the shared ones, where it offers them (its profile's caps): Renoise's variations of its
+/// patterns and phrases, sample map, chopping, jams and layered breaks; REAPER's variations of its items, delivery and
+/// routing.
+#[derive(Default)]
+pub struct OwnTools {
+    pub variations: Option<Rc<dyn KernelTool>>,
+    pub mapping: Option<Rc<dyn KernelTool>>,
+    pub chop: Option<Rc<dyn KernelTool>>,
+    pub delivery: Option<Rc<dyn KernelTool>>,
+    pub routing: Option<Rc<dyn KernelTool>>,
+    pub jam: Option<Rc<dyn KernelTool>>,
+    pub layers: Option<Rc<dyn KernelTool>>,
+}
+
+/// The shared integration of a DAW whose bridge is Kumi's own, with the tools only that DAW has (`own_tools`).
+pub fn create_own_integration<S: RefScheme + 'static>(
+    daw: &'static OwnDaw,
+    options: OwnOptions,
+    own_tools: impl FnOnce(&OwnParts<S>) -> OwnTools,
+) -> Rc<dyn Integration> {
     let link = Rc::new(Link {
         daw,
         endpoint: Rc::new(RefCell::new(None)),
@@ -328,41 +355,10 @@ pub fn create_own_integration<S: RefScheme + 'static>(daw: &'static OwnDaw, opti
     };
     let changes = OwnPlan::new(link.clone(), context.change_timeout_ms, on_change, context.on_action.clone());
     let listening = OwnListening::new(link.clone(), changes.clone(), context, &options.kumi_home);
-    // (M7) the variations tool, where the DAW offers it: Renoise's patterns and phrases, REAPER's items (#401)
-    let variations: Option<Rc<dyn KernelTool>> = match daw.profile.id.filter(|_| daw.profile.caps.variations) {
-        Some(crate::core::daw::DawId::Renoise) => {
-            let backend = super::renoise_variations::RenoiseBackend::new(changes.clone(), listening.renderer.clone());
-            Some(crate::core::variations::tool::Variations::new(backend, options.kumi_home.clone()).tool())
-        }
-        Some(crate::core::daw::DawId::Reaper) => {
-            let backend = super::reaper_variations::ReaperVariations::new(changes.clone(), listening.renderer.clone());
-            Some(crate::core::variations::tool::Variations::new(backend, options.kumi_home.clone()).tool())
-        }
-        _ => None,
-    };
-    // (#401) the sample map, where the DAW offers it
-    let mapping: Option<Rc<dyn KernelTool>> = (daw.profile.caps.sample_mapping && daw.profile.id == Some(crate::core::daw::DawId::Renoise))
-        .then(|| {
-            let backend = super::renoise_mapping::RenoiseMapping::new(changes.clone(), listening.renderer.clone());
-            crate::core::mapping::tool::Mapping::new(backend).tool()
-        });
-    // (#401) chopping, where the DAW offers it: its lighter densities go to the variations tool as takes
-    let chop: Option<Rc<dyn KernelTool>> = (daw.profile.caps.chop && daw.profile.id == Some(crate::core::daw::DawId::Renoise)).then(|| {
-        let backend = super::renoise_chop::RenoiseChop::new(changes.clone(), listening.renderer.clone());
-        crate::core::chop::tool::Chop::new(backend, variations.clone()).tool()
-    });
-    // (#401) delivery, where the DAW offers it
-    let delivery: Option<Rc<dyn KernelTool>> =
-        (daw.profile.caps.delivery && daw.profile.id == Some(crate::core::daw::DawId::Reaper)).then(|| {
-            let backend = super::reaper_delivery::ReaperDelivery::new(changes.clone(), listening.renderer.clone());
-            crate::core::delivery::tool::Delivery::new(backend).tool()
-        });
-    // (#401) routing, where the DAW offers it
-    let routing: Option<Rc<dyn KernelTool>> =
-        (daw.profile.caps.routing && daw.profile.id == Some(crate::core::daw::DawId::Reaper)).then(|| {
-            let backend = super::reaper_routing::ReaperRouting::new(changes.clone());
-            crate::core::routing::tool::Routing::new(backend).tool()
-        });
+    // (#401) the DAW's own tools, where it offers them: variations, the sample map, chopping, delivery, routing, jams
+    // and layered breaks (each DAW's own, from its own integration)
+    let OwnTools { variations, mapping, chop, delivery, routing, jam, layers } =
+        own_tools(&OwnParts { changes: changes.clone(), renderer: listening.renderer.clone(), kumi_home: options.kumi_home.clone() });
     // (#401) kept scripts, where the DAW offers them: Kumi's copies in its folder, one a DAW
     let scripts: Option<Rc<dyn KernelTool>> = daw.profile.caps.scripts.then(|| {
         let backend = super::own_scripts::OwnScripts::new(changes.clone(), daw.scripts);
@@ -373,17 +369,6 @@ pub fn create_own_integration<S: RefScheme + 'static>(daw: &'static OwnDaw, opti
         let backend = super::own_spec::OwnSpec::new(changes.clone(), listening.renderer.clone(), daw.spec);
         crate::core::spec::tool::DeliverySpec::new(backend).tool()
     });
-    // (#401) cleaning up a jam, where the DAW offers it
-    let jam: Option<Rc<dyn KernelTool>> = (daw.profile.caps.jam && daw.profile.id == Some(crate::core::daw::DawId::Renoise)).then(|| {
-        let backend = super::renoise_jam::RenoiseJam::new(changes.clone());
-        crate::core::jam::tool::Jam::new(backend).tool()
-    });
-    // (#401) layering breaks, where the DAW offers it
-    let layers: Option<Rc<dyn KernelTool>> =
-        (daw.profile.caps.layers && daw.profile.id == Some(crate::core::daw::DawId::Renoise)).then(|| {
-            let backend = super::renoise_layers::RenoiseLayers::new(changes.clone(), listening.renderer.clone());
-            crate::core::layers::tool::Layers::new(backend).tool()
-        });
     // (#401) audio to MIDI, where the DAW offers it through Kumi's own ears
     let to_midi: Option<Rc<dyn KernelTool>> = match (daw.profile.caps.audio_to_midi, daw.profile.id) {
         (true, Some(crate::core::daw::DawId::Reaper)) => Some(super::own_ears::Daw::Reaper),
@@ -469,11 +454,11 @@ const PAGE_TEXT_BYTES: usize = 60 * 1024;
 /// model.
 const PHRASE_PAGES: usize = 40;
 /// A turn's short ref (`track:3`): the shape of a name this turn gave.
-pub(super) static SHORT_REF: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[a-z]+:[0-9]+$").unwrap());
+pub static SHORT_REF: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[a-z]+:[0-9]+$").unwrap());
 
 /// A call's arguments (`args`, in order or by name) with this turn's short refs anywhere in them made long: they sit under no
 /// ref-named field, so the book's own walk passes them by.
-pub(super) fn lengthen_anywhere<S: RefScheme>(book: &Book<S>, value: &Value) -> Value {
+pub fn lengthen_anywhere<S: RefScheme>(book: &Book<S>, value: &Value) -> Value {
     match value {
         Value::String(text) if SHORT_REF.is_match(text) => book.lengthen(&json!({"ref": text}))["ref"].clone(),
         Value::Array(items) => Value::Array(items.iter().map(|item| lengthen_anywhere(book, item)).collect()),
@@ -483,7 +468,7 @@ pub(super) fn lengthen_anywhere<S: RefScheme>(book: &Book<S>, value: &Value) -> 
 }
 
 /// What a call answered (`result`, `out`) with the DAW's refs anywhere in it made this turn's short ones.
-pub(super) fn shorten_anywhere<S: RefScheme>(book: &mut Book<S>, value: &Value) -> Value {
+pub fn shorten_anywhere<S: RefScheme>(book: &mut Book<S>, value: &Value) -> Value {
     match value {
         Value::String(text) if book.scheme.kind_of(text).is_some() => json!(book.short_ref(text)),
         Value::Array(items) => Value::Array(items.iter().map(|item| shorten_anywhere(book, item)).collect()),
@@ -493,20 +478,20 @@ pub(super) fn shorten_anywhere<S: RefScheme>(book: &mut Book<S>, value: &Value) 
 }
 
 /// Why a host tool answered an error: its words, and whether the DAW is there at all (it quit, or its bridge did).
-pub(super) struct Refused {
-    pub(super) why: String,
-    pub(super) there: bool,
+pub struct Refused {
+    pub why: String,
+    pub there: bool,
     /// Busy for now (a dialog, a load, a render): worth waiting for.
-    pub(super) busy: bool,
+    pub busy: bool,
     /// The host's code for it (`stale`, `changed`, `failed`…).
-    pub(super) code: Option<String>,
+    pub code: Option<String>,
     /// The DAW answered, and couldn't say how it ended (an undo it answered `uncertain`), rather than not answering.
-    pub(super) answered: bool,
+    pub answered: bool,
 }
 
 /// A host call's outcome, with a failure that came of the call's own signal (the caller stopped, or its time ran out) as
 /// Aborted: the MCP client reports both as plain errors, and neither means the host is gone.
-pub(super) fn stopped_or<T>(outcome: Result<T, RuntimeError>, signal: &Signal) -> Result<T, RuntimeError> {
+pub fn stopped_or<T>(outcome: Result<T, RuntimeError>, signal: &Signal) -> Result<T, RuntimeError> {
     match outcome {
         Err(_) if signal.is_cancelled() => Err(RuntimeError::Aborted),
         other => other,
@@ -514,7 +499,7 @@ pub(super) fn stopped_or<T>(outcome: Result<T, RuntimeError>, signal: &Signal) -
 }
 
 /// The JSON a host tool answered with, or why it couldn't.
-pub(super) fn answer_of(result: &CallToolResult) -> Result<Value, Refused> {
+pub fn answer_of(result: &CallToolResult) -> Result<Value, Refused> {
     let text = result
         .content
         .iter()
@@ -1642,12 +1627,7 @@ struct ReadTool<S: RefScheme> {
 /// An answer from another epoch than the book's: Renoise moves it for a device, sample, phrase, pattern, instrument or
 /// sequence edit, and no event says so. Positional names are retired, and the book takes the answer's epoch and layout.
 /// (A DAW whose refs hold across epochs keeps its names; `see_epoch` looks after it.)
-pub(super) fn follow_epoch<S: RefScheme>(
-    book: &RefCell<Book<S>>,
-    epoch: &RefCell<Option<String>>,
-    layout: &Cell<Option<u64>>,
-    answer: &Value,
-) {
+pub fn follow_epoch<S: RefScheme>(book: &RefCell<Book<S>>, epoch: &RefCell<Option<String>>, layout: &Cell<Option<u64>>, answer: &Value) {
     let Some(now) = answer.get("epoch").and_then(Value::as_str) else { return };
     if !book.borrow().scheme.positional() || epoch.borrow().as_deref() == Some(now) {
         return;
@@ -1690,7 +1670,7 @@ pub(super) fn follow_epoch<S: RefScheme>(
 
 /// Whether a request names something on a track (a track, a device or a parameter), the refs a track shift moves: only
 /// those carry the layout they were made in.
-pub(super) fn names_tracks<S: RefScheme>(scheme: &S, args: &JsonObject) -> bool {
+pub fn names_tracks<S: RefScheme>(scheme: &S, args: &JsonObject) -> bool {
     // Any string anywhere in it (a change's `group`, a list of refs), as the tool looks; a bare track number too.
     fn walk<S: RefScheme>(scheme: &S, value: &Value, depth: usize) -> bool {
         match value {
@@ -1705,7 +1685,7 @@ pub(super) fn names_tracks<S: RefScheme>(scheme: &S, args: &JsonObject) -> bool 
 
 /// An answer's layout against the book's.
 #[derive(Debug, PartialEq, Eq)]
-pub(super) enum Layout {
+pub enum Layout {
     /// The same (or the DAW's refs aren't positions): its refs name what the book's names do.
     Same,
     /// Newer, and no tracks event brought the book there (one was lost): the book's names went, and it takes the answer's.
@@ -1715,7 +1695,7 @@ pub(super) enum Layout {
 }
 
 /// Where an answer's layout stands against the book's. A tracks event on its way is waited for a moment first.
-pub(super) async fn layout_of<S: RefScheme>(book: &RefCell<Book<S>>, layout: &Cell<Option<u64>>, answered: Option<u64>) -> Layout {
+pub async fn layout_of<S: RefScheme>(book: &RefCell<Book<S>>, layout: &Cell<Option<u64>>, answered: Option<u64>) -> Layout {
     let Some(answered) = answered.filter(|_| book.borrow().scheme.positional()) else { return Layout::Same };
     for _ in 0..4 {
         match layout.get() {
@@ -1736,7 +1716,7 @@ pub(super) async fn layout_of<S: RefScheme>(book: &RefCell<Book<S>>, layout: &Ce
 }
 
 /// Keeps the epoch an answer was read in for each long ref it names.
-pub(super) fn note_epoch(seen_in: &RefCell<HashMap<String, String>>, scheme: &impl RefScheme, answer: &Value) {
+pub fn note_epoch(seen_in: &RefCell<HashMap<String, String>>, scheme: &impl RefScheme, answer: &Value) {
     let Some(epoch) = answer.get("epoch").and_then(Value::as_str) else { return };
     let text = answer.to_string();
     let mut seen_in = seen_in.borrow_mut();

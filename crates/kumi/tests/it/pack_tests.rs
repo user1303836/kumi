@@ -1,8 +1,9 @@
 //! What REAPER's and Renoise's turns tell the model (each DAW's instructions, with its pack of power users' rules, and its
 //! tools' descriptions): held to the budget Live's instructions keep, in the DAW's own words, and claiming nothing the
 //! DAW lacks.
-use super::own_bridge::{instructions_of, OwnDaw};
-use super::{reaper, renoise};
+use kumi_daw_reaper as reaper;
+use kumi_runtime::integrations::own_bridge::{instructions_of, OwnDaw};
+use kumi_runtime::integrations::renoise;
 use regex::Regex;
 
 const DAWS: [&OwnDaw; 2] = [&reaper::DAW, &renoise::DAW];
@@ -134,8 +135,12 @@ fn the_shared_rules_are_written_once_and_composed_into_each_daw() {
         "Describe each change in words",
         "Offer alternatives as separate takes",
     ];
-    let source = |file: &str| std::fs::read_to_string(format!("{}/src/integrations/{file}", env!("CARGO_MANIFEST_DIR"))).unwrap();
-    let sources = [source("own_bridge.rs"), source("reaper.rs"), source("renoise.rs")];
+    let source = |file: &str| std::fs::read_to_string(format!("{}/../../{file}", env!("CARGO_MANIFEST_DIR"))).unwrap();
+    let sources = [
+        source("crates/kumi-runtime/src/integrations/own_bridge.rs"),
+        source("daws/reaper/kumi-daw-reaper/src/lib.rs"),
+        source("crates/kumi-runtime/src/integrations/renoise.rs"),
+    ];
     for rule in RULES.iter().skip(1) {
         let written: usize = sources.iter().map(|text| text.matches(rule).count()).sum();
         assert_eq!(written, 1, "“{rule}” is written once, in own_rules");

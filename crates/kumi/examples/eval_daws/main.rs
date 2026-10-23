@@ -29,6 +29,7 @@ use kumi_common::{
     abort::Signal,
     js::{json::stringify, string::head},
 };
+use kumi_daw_reaper::create_reaper_integration;
 use kumi_runtime::{
     ai::{
         error::LanguageModelError,
@@ -38,7 +39,6 @@ use kumi_runtime::{
     create_agent_kernel, create_memory_store, create_session,
     integrations::{
         own_bridge::{Connect, OwnOptions},
-        reaper::create_reaper_integration,
         renoise::create_renoise_integration,
     },
     kernel::agent::LanguageModel,

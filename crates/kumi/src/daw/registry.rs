@@ -4,11 +4,12 @@
 //! own) don't name each other; this registry names them all.
 
 use kumi_daw_ableton as ableton;
+use kumi_daw_reaper as reaper;
 use kumi_runtime::core::daw::{DawId, DawProfile};
 use kumi_runtime::core::place::Places;
 use kumi_runtime::core::presentation::ToolPresentation;
 use kumi_runtime::core::view::ViewPresentation;
-use kumi_runtime::integrations::{own_library, reaper, renoise};
+use kumi_runtime::integrations::{own_library, renoise};
 use kumi_runtime::library::daws::Daws;
 use kumi_runtime::library::sources::{Source, SourceOptions};
 
@@ -43,7 +44,7 @@ pub fn view(id: DawId) -> Option<&'static ViewPresentation> {
 
 /// What each registered DAW tells the library (its places, its own library, the projects it opened lately, its
 /// manual), in the registry's order.
-pub static LIBRARIES: Daws = Daws(&[&ableton::library::LIBRARY, &own_library::REAPER, &own_library::RENOISE]);
+pub static LIBRARIES: Daws = Daws(&[&ableton::library::LIBRARY, &reaper::library::LIBRARY, &own_library::RENOISE]);
 
 /// Where the DAWs keep the producer's sounds, presets and saved projects, beside the folders named: Live's layout (its
 /// User Library, Places, packs and Core Library), Splice's folder, and REAPER's and Renoise's own libraries.

@@ -249,6 +249,25 @@ pub enum BodyKind {
     Mixer,
 }
 
+impl BodyKind {
+    /// The words that start this FOCUS view's row in the English table of docs/<lang>/DAWS.md, which the app's
+    /// daws_doc test holds the page to. The match names every kind, so a new one can't ship unlisted.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn daws_doc_row(self) -> &'static str {
+        match self {
+            BodyKind::Tree => "A track's devices as a tree",
+            BodyKind::Notes => "The notes in the note editor",
+            BodyKind::Grid => "A launcher grid",
+            BodyKind::Timeline => "The timeline at a glance",
+            BodyKind::Tracker => "The Pattern and Phrase Editors' lines",
+            BodyKind::Matrix => "The Pattern Matrix",
+            BodyKind::Keyzones => "An instrument's keyzones",
+            BodyKind::Routing => "A track's routing",
+            BodyKind::Mixer => "The mixer",
+        }
+    }
+}
+
 /// A body to read: a track's tree, an item's notes, a track's grid around a section, the timeline.
 #[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]

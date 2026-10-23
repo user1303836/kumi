@@ -58,7 +58,7 @@ const JOB_LIMIT: Duration = Duration::from_secs(30 * 60);
 
 /// What Kumi knows of one DAW's listening: what its sources hold, the master's devices that don't make masking unfair,
 /// its gain stage, its equaliser, and the change kinds the listening tools use.
-pub(super) struct Table {
+pub struct Table {
     /// A track renders on its own after its fader and through the master's devices (Renoise's solo), not before its
     /// fader as Live's Ears hears it: its fader and the master's pure gains are in it already.
     pub post_fader: bool,
@@ -128,7 +128,7 @@ fn renoise_aims(device: &str, parameter: &str) -> bool {
 
 /// REAPER (the extension): pre-fader stems in one pass, the master with and without its FX, ReaLimit and JS Volume
 /// Adjustment for the gain stage, ReaEQ for a fit. Device names are what the extension's rows say ([lab] m5-reaper).
-pub(super) const REAPER: Table = Table {
+pub const REAPER: Table = Table {
     post_fader: false,
     no_before_chain: None,
     master_fader: true,
@@ -161,7 +161,7 @@ pub(super) const REAPER: Table = Table {
 
 /// Renoise (the tool): one solo render per track, through its fader and the Master track's devices; the Maximizer and
 /// the Gainer for the gain stage; EQ 10 (or EQ 5) for a fit ([lab] m5-renoise).
-pub(super) const RENOISE: Table = Table {
+pub const RENOISE: Table = Table {
     post_fader: true,
     no_before_chain: Some("Renoise renders the mix after its Master track's devices"),
     master_fader: false,
@@ -192,7 +192,7 @@ pub(super) const RENOISE: Table = Table {
     aims: renoise_aims,
 };
 
-pub(super) fn table(id: Option<DawId>) -> &'static Table {
+pub fn table(id: Option<DawId>) -> &'static Table {
     match id {
         Some(DawId::Renoise) => &RENOISE,
         _ => &REAPER,
@@ -231,9 +231,9 @@ impl Flags {
 
 /// A track as a listen finds it: its ref, name and type, and its fader.
 #[derive(Debug, Clone)]
-pub(super) struct TrackRow {
-    pub(super) reference: String,
-    pub(super) name: String,
+pub struct TrackRow {
+    pub reference: String,
+    pub name: String,
     kind: String,
     volume_db: Option<f64>,
     /// Muted (REAPER), or not active (Renoise's MUTED and OFF).
@@ -242,7 +242,7 @@ pub(super) struct TrackRow {
 
 /// One of a track's devices as listening reads it.
 #[derive(Debug, Clone)]
-pub(super) struct DeviceRow {
+pub struct DeviceRow {
     pub reference: String,
     /// What the producer calls it: for display only.
     pub name: String,
@@ -270,9 +270,9 @@ struct Scratch {
 
 /// The DAW as the listening tools meet it, through Kumi's host.
 pub struct OwnRenderer<S: RefScheme + 'static> {
-    pub(super) link: Rc<Link<S>>,
-    pub(super) plan: Rc<OwnPlan<S>>,
-    pub(super) table: &'static Table,
+    pub link: Rc<Link<S>>,
+    pub plan: Rc<OwnPlan<S>>,
+    pub table: &'static Table,
     on_action: Option<Rc<dyn Fn(ActionEvent)>>,
     change_timeout_ms: u64,
     folder: PathBuf,
@@ -280,20 +280,20 @@ pub struct OwnRenderer<S: RefScheme + 'static> {
     flags: Cell<Flags>,
     beats_per_bar: Cell<f64>,
     /// Scratch copies standing now: each name's ref.
-    pub(super) copies: RefCell<IndexMap<String, String>>,
+    pub copies: RefCell<IndexMap<String, String>>,
     tracks: RefCell<Option<(Instant, Vec<TrackRow>)>>,
     /// The parts groove read, by the name the model gave each.
-    pub(super) parts: RefCell<HashMap<String, Part>>,
+    pub parts: RefCell<HashMap<String, Part>>,
     /// Kumi's listens played out loud (from, to, in ms): what the producer heard of Kumi's work.
-    pub(super) played: RefCell<std::collections::VecDeque<(i64, i64)>>,
+    pub played: RefCell<std::collections::VecDeque<(i64, i64)>>,
     /// The changes that kept the last goal's best on a track of its own (its keep, then the mute a paused goal put on it):
     /// taken back, the last first, when a better one replaces it, by this goal or a resumed one.
-    pub(super) goal_best: RefCell<Vec<String>>,
+    pub goal_best: RefCell<Vec<String>>,
     /// The track that best is on (its short ref, which the book follows): muted again when its mute was taken back and its
     /// keep's undo then refused.
-    pub(super) goal_best_track: RefCell<Option<String>>,
+    pub goal_best_track: RefCell<Option<String>>,
     /// A render stopping Kumi's own play was said in this run (a new answer's run says it again).
-    pub(super) stop_told: Cell<bool>,
+    pub stop_told: Cell<bool>,
     /// The last render's notes, told as it ended: the engine passing them on doesn't tell them again.
     told_notes: RefCell<Vec<String>>,
     /// The tempo renders played into the transport (Renoise's play the song's tempo commands), still to be set back: the
@@ -320,7 +320,7 @@ fn text(value: &Value, key: &str) -> Option<String> {
 }
 
 /// What the bridge noted with an answer (`notes`), in order, each a sentence (REAPER's come without their full stop).
-pub(super) fn notes_of(value: &Value) -> Vec<String> {
+pub fn notes_of(value: &Value) -> Vec<String> {
     let sentence = |note: &str| {
         let note = note.trim();
         if note.ends_with(['.', '!', '?']) {
@@ -349,7 +349,7 @@ fn with_notes(said: String, notes: &[String]) -> String {
 }
 
 /// How many values a stepped parameter has: the texts of its steps (a grid read's `items`), or its own count (`steps`).
-pub(super) fn steps_of(row: &Value) -> Option<u64> {
+pub fn steps_of(row: &Value) -> Option<u64> {
     let items = row.get("items").and_then(Value::as_array).map_or(0, Vec::len) as u64;
     row.get("steps").and_then(Value::as_u64).or((items >= 2).then_some(items)).filter(|steps| *steps >= 2)
 }
@@ -389,7 +389,7 @@ fn stretches(marks: Option<&Value>, rate: f64, held: Option<f64>, beats_per_bar:
 }
 
 impl<S: RefScheme + 'static> OwnRenderer<S> {
-    pub(super) fn new(link: Rc<Link<S>>, plan: Rc<OwnPlan<S>>, context: &IntegrationContext, kumi_home: &std::path::Path) -> Self {
+    pub fn new(link: Rc<Link<S>>, plan: Rc<OwnPlan<S>>, context: &IntegrationContext, kumi_home: &std::path::Path) -> Self {
         let profile = link.daw.profile;
         let folder = kumi_home.join("bridges").join(profile.id.map_or("daw", |id| id.as_str())).join("listening");
         OwnRenderer {
@@ -414,33 +414,33 @@ impl<S: RefScheme + 'static> OwnRenderer<S> {
         }
     }
 
-    pub(super) fn profile(&self) -> &'static DawProfile {
+    pub fn profile(&self) -> &'static DawProfile {
         self.link.daw.profile
     }
 
-    pub(super) fn app(&self) -> &'static str {
+    pub fn app(&self) -> &'static str {
         self.profile().words.app
     }
 
-    pub(super) fn set_flags(&self, flags: Flags) {
+    pub fn set_flags(&self, flags: Flags) {
         self.flags.set(flags);
     }
 
-    pub(super) fn flags(&self) -> Flags {
+    pub fn flags(&self) -> Flags {
         self.flags.get()
     }
 
-    pub(super) fn set_beats_per_bar(&self, beats: f64) {
+    pub fn set_beats_per_bar(&self, beats: f64) {
         if beats.is_finite() && beats > 0. {
             self.beats_per_bar.set(beats);
         }
     }
 
-    pub(super) fn cleanup_signal(&self) -> Signal {
+    pub fn cleanup_signal(&self) -> Signal {
         abort::any([self.link.lifetime.clone(), abort::timeout(self.change_timeout_ms.saturating_mul(3))])
     }
 
-    pub(super) fn tell_app(&self, title: &str) {
+    pub fn tell_app(&self, title: &str) {
         if let Some(on_action) = &self.on_action {
             on_action(ActionEvent { title: title.into(), playing: None, recording: None });
         }
@@ -449,13 +449,13 @@ impl<S: RefScheme + 'static> OwnRenderer<S> {
     /// Why nothing can be heard now, in words: the DAW isn't there, its bridge is older than listening, or it's the demo.
     /// (M7) Kumi is listening to something else now (a judged run, a listen): another check waits its turn.
     /// Kumi's listening folder for this bridge (one the DAW reads).
-    pub(super) fn folder(&self) -> &std::path::Path {
+    pub fn folder(&self) -> &std::path::Path {
         &self.folder
     }
 
     /// (#401) A track rendered alone over `window` at `stage` ("items": REAPER's items before the track's FX; "pre-fader"):
     /// its file, or why not.
-    pub(super) async fn render_track(&self, long: &str, stage: &str, window: Window, signal: &Signal) -> Result<Render, String> {
+    pub async fn render_track(&self, long: &str, stage: &str, window: Window, signal: &Signal) -> Result<Render, String> {
         if self.listening_now() {
             return Err("Kumi is listening to something else just now".into());
         }
@@ -473,16 +473,16 @@ impl<S: RefScheme + 'static> OwnRenderer<S> {
         }
     }
 
-    pub(super) fn listening_now(&self) -> bool {
+    pub fn listening_now(&self) -> bool {
         self.flag.is_on()
     }
 
     /// (M7) Kumi listens now, until the answer is dropped.
-    pub(super) fn begin_listen(&self) -> crate::listening::renderer::ListenNow<'_> {
+    pub fn begin_listen(&self) -> crate::listening::renderer::ListenNow<'_> {
         self.flag.begin()
     }
 
-    pub(super) fn why_not(&self) -> Option<String> {
+    pub fn why_not(&self) -> Option<String> {
         let app = self.app();
         if !self.link.connected.get() || self.link.endpoint.borrow().is_none() {
             return Some(self.profile().vocab.cant_reach.into());
@@ -502,7 +502,7 @@ impl<S: RefScheme + 'static> OwnRenderer<S> {
     }
 
     /// A host tool's answer, with the request placed where its refs came from (their epoch, and Renoise's layout).
-    pub(super) async fn ask(&self, tool: &str, args: Value, signal: Signal) -> Result<Result<Value, Refused>, RuntimeError> {
+    pub async fn ask(&self, tool: &str, args: Value, signal: Signal) -> Result<Result<Value, Refused>, RuntimeError> {
         let mut args = args;
         let input = args.as_object().cloned().unwrap_or_default();
         self.plan.place_request(&mut args, &input);
@@ -511,7 +511,7 @@ impl<S: RefScheme + 'static> OwnRenderer<S> {
 
     /// A read's arguments placed as the model's read places them: the layout Renoise's track refs were made in, and the
     /// epoch a lasting ref (REAPER's) was read in.
-    pub(super) fn read_placed(&self, mut args: Value) -> Value {
+    pub fn read_placed(&self, mut args: Value) -> Value {
         let book = self.link.book.borrow();
         let object = args.as_object().cloned().unwrap_or_default();
         if let Some(layout) = self.link.layout.get().filter(|_| names_tracks(&book.scheme, &object)) {
@@ -527,7 +527,7 @@ impl<S: RefScheme + 'static> OwnRenderer<S> {
     }
 
     /// Every row of a read, following its pages (at most `pages`).
-    pub(super) async fn rows(&self, args: Value, pages: usize, signal: &Signal) -> Result<Result<Vec<Value>, String>, RuntimeError> {
+    pub async fn rows(&self, args: Value, pages: usize, signal: &Signal) -> Result<Result<Vec<Value>, String>, RuntimeError> {
         let mut args = self.read_placed(args);
         let mut rows = vec![];
         for _ in 0..pages {
@@ -545,12 +545,12 @@ impl<S: RefScheme + 'static> OwnRenderer<S> {
     }
 
     /// The tracks are read again next time (they just changed).
-    pub(super) fn forget_tracks(&self) {
+    pub fn forget_tracks(&self) {
         self.tracks.borrow_mut().take();
     }
 
     /// The project's tracks (read once a second at most).
-    pub(super) async fn track_rows(&self, signal: &Signal) -> Result<Result<Vec<TrackRow>, String>, RuntimeError> {
+    pub async fn track_rows(&self, signal: &Signal) -> Result<Result<Vec<TrackRow>, String>, RuntimeError> {
         if let Some((at, rows)) = self.tracks.borrow().as_ref() {
             if at.elapsed() < TRACKS_FRESH {
                 return Ok(Ok(rows.clone()));
@@ -589,7 +589,7 @@ impl<S: RefScheme + 'static> OwnRenderer<S> {
 
     /// Whether two refs name the same thing: Renoise's positional refs by their place, whatever epoch each was read in (a
     /// device added moves the epoch and keeps the tracks); REAPER's as they are.
-    pub(super) fn same_place(&self, a: &str, b: &str) -> bool {
+    pub fn same_place(&self, a: &str, b: &str) -> bool {
         if self.link.book.borrow().scheme.positional() {
             a.split_once(':').map(|(_, rest)| rest) == b.split_once(':').map(|(_, rest)| rest)
         } else {
@@ -598,7 +598,7 @@ impl<S: RefScheme + 'static> OwnRenderer<S> {
     }
 
     /// A ref as a run follows it (a rename's): Renoise's without its epoch.
-    pub(super) fn place_key(&self, long: &str) -> String {
+    pub fn place_key(&self, long: &str) -> String {
         match long.split_once(':') {
             Some((_, rest)) if self.link.book.borrow().scheme.positional() => rest.to_owned(),
             _ => long.to_owned(),
@@ -607,20 +607,20 @@ impl<S: RefScheme + 'static> OwnRenderer<S> {
 
     /// Keeps a scratch copy by its name, its ref registered in the book so it follows what moves the tracks (Renoise's
     /// refs are places); its ref as the book names it.
-    pub(super) fn keep_copy(&self, name: String, long: &str) -> String {
+    pub fn keep_copy(&self, name: String, long: &str) -> String {
         let short = self.link.book.borrow_mut().short_ref(long);
         self.copies.borrow_mut().insert(name, short.clone());
         short
     }
 
     /// A scratch copy's ref now, by its name.
-    pub(super) fn copy_ref(&self, name: &str) -> Option<String> {
+    pub fn copy_ref(&self, name: &str) -> Option<String> {
         let short = self.copies.borrow().get(name).cloned()?;
         Some(self.link.book.borrow().lengthen(&json!({"ref": short}))["ref"].as_str().unwrap_or(&short).to_owned())
     }
 
     /// Says what scratch copies left in the DAW's undo, when they left anything.
-    pub(super) fn tell_scratch_steps(&self, steps: u64) {
+    pub fn tell_scratch_steps(&self, steps: u64) {
         if steps > 0 {
             self.tell_app(&format!(
                 "Kumi's scratch copies left {steps} step{} in {}'s undo",
@@ -632,7 +632,7 @@ impl<S: RefScheme + 'static> OwnRenderer<S> {
 
     /// Drops a make's copies: whether all went; what the bridge noted, or why some stayed, is told. A make the bridge
     /// doesn't know (dropped already, or forgotten after a crash) has nothing to drop.
-    pub(super) async fn drop_make(&self, scratch: &str, steps: u64) -> bool {
+    pub async fn drop_make(&self, scratch: &str, steps: u64) -> bool {
         let dropped = self.link.call("scratch", json!({"action": "drop", "scratchId": scratch}), self.cleanup_signal()).await;
         let (all, notes, more) = match &dropped {
             Ok(Ok(done)) => (
@@ -655,7 +655,7 @@ impl<S: RefScheme + 'static> OwnRenderer<S> {
 
     /// A track by what the model or a round names it (a ref of this turn, a long ref, a scratch copy's or a track's
     /// name): its long ref and its name now.
-    pub(super) async fn resolve(&self, named: &str, signal: &Signal) -> Result<Result<(String, String), String>, RuntimeError> {
+    pub async fn resolve(&self, named: &str, signal: &Signal) -> Result<Result<(String, String), String>, RuntimeError> {
         if let Some(reference) = self.copy_ref(named) {
             return Ok(Ok((reference, named.to_owned())));
         }
@@ -700,7 +700,7 @@ impl<S: RefScheme + 'static> OwnRenderer<S> {
     }
 
     /// A track's devices, in order.
-    pub(super) async fn devices(&self, track: &str, signal: &Signal) -> Result<Result<Vec<DeviceRow>, String>, RuntimeError> {
+    pub async fn devices(&self, track: &str, signal: &Signal) -> Result<Result<Vec<DeviceRow>, String>, RuntimeError> {
         let rows = match self.rows(json!({"kind": self.table.device_kind, "parent": track}), 8, signal).await? {
             Ok(rows) => rows,
             Err(why) => return Ok(Err(why)),
@@ -735,7 +735,7 @@ impl<S: RefScheme + 'static> OwnRenderer<S> {
     }
 
     /// A device's parameters (with their text across the range when `grid`).
-    pub(super) async fn parameters(&self, device: &str, grid: bool, signal: &Signal) -> Result<Result<Vec<Value>, String>, RuntimeError> {
+    pub async fn parameters(&self, device: &str, grid: bool, signal: &Signal) -> Result<Result<Vec<Value>, String>, RuntimeError> {
         let mut args = json!({"kind": "param", "parent": device});
         if grid {
             args["grid"] = GRID.into();
@@ -745,7 +745,7 @@ impl<S: RefScheme + 'static> OwnRenderer<S> {
 
     /// Follows a job to its end: its last status, or why it didn't finish. Stopping the call stops the job, and what it
     /// changed is put back by the bridge.
-    pub(super) async fn wait(&self, started: &Value, signal: &Signal) -> Result<Result<Value, String>, RuntimeError> {
+    pub async fn wait(&self, started: &Value, signal: &Signal) -> Result<Result<Value, String>, RuntimeError> {
         let Some(id) = started.get("jobId").and_then(Value::as_str).map(str::to_owned) else {
             return Ok(Err(format!("{} started no job", self.app())));
         };
@@ -817,7 +817,7 @@ impl<S: RefScheme + 'static> OwnRenderer<S> {
 
     /// Renders these sources over `window` (with a bar before it so effects are warm): the job's files by source id, with
     /// its notes.
-    pub(super) async fn render_sources(
+    pub async fn render_sources(
         &self,
         sources: Vec<Value>,
         window: Window,
@@ -890,7 +890,7 @@ impl<S: RefScheme + 'static> OwnRenderer<S> {
 
     /// Sets back the tempo renders played into the transport, as one setting of each that moved (quietly: Kumi's undo
     /// never takes it back): what to tell, with the steps it left in the DAW's undo. Nothing when no render moved it.
-    pub(super) async fn put_tempo_back(&self) -> Option<String> {
+    pub async fn put_tempo_back(&self) -> Option<String> {
         let back = self.tempo_back.borrow_mut().take()?;
         let mut done = vec![];
         if (back.now_bpm - back.bpm).abs() > 1e-6 {
@@ -920,7 +920,7 @@ impl<S: RefScheme + 'static> OwnRenderer<S> {
 
     /// Kumi's play out loud stops if `signal` (a listening call's, the answer's) is cancelled before it ends: Esc stops
     /// what Kumi plays as it stops the answer, whether the call is still at work or has answered.
-    pub(super) fn stop_play_on(self: &Rc<Self>, signal: &Signal) {
+    pub fn stop_play_on(self: &Rc<Self>, signal: &Signal) {
         let now = chrono::Utc::now().timestamp_millis();
         let Some(until) = self.played.borrow().back().map(|(_, to)| *to).filter(|to| *to > now) else { return };
         let (renderer, signal) = (Rc::downgrade(self), signal.clone());
@@ -943,7 +943,7 @@ impl<S: RefScheme + 'static> OwnRenderer<S> {
     /// Plays a render out loud where the producer listens (its part, at most `PLAYED_SECONDS`), without waiting: whether
     /// it's playing, and what the DAW says of how (Renoise plays the song over that part), or why it isn't. A track's
     /// render from before its fader (`track`, its ref) plays at its fader's level, as Kumi measured it, not louder.
-    pub(super) async fn play(&self, render: &Render, track: Option<&str>) -> (bool, Option<String>) {
+    pub async fn play(&self, render: &Render, track: Option<&str>) -> (bool, Option<String>) {
         // (the song plays at the producer's tempo)
         self.put_tempo_back().await;
         // (tried whatever the flags said last: REAPER opens its audio device for a preview itself, and says why not)
@@ -1062,7 +1062,7 @@ impl<S: RefScheme + 'static> OwnRenderer<S> {
 
     /// Each candidate's stretch: its own part's (an item, a pattern) from its start, else the first part's, else from_beat;
     /// all one length (beats, else the parts', at most `MAX_PART_BEATS`). Parts of different lengths are refused in words.
-    pub(super) async fn part_windows(
+    pub async fn part_windows(
         &self,
         candidates: &[AuditionCandidate],
         from_beat: Option<f64>,
@@ -1102,7 +1102,7 @@ impl<S: RefScheme + 'static> OwnRenderer<S> {
 
     /// Where a candidate's own part (an item, a pattern) plays: None when it names none or from_beat is given. "first" (a
     /// goal heard again names its tracks' parts so) is where the track first plays.
-    pub(super) async fn part_of(
+    pub async fn part_of(
         &self,
         candidate: &AuditionCandidate,
         from_beat: Option<f64>,
@@ -1164,7 +1164,7 @@ impl<S: RefScheme + 'static> OwnRenderer<S> {
     }
 
     /// A change of the DAW's for listening (a gain stage turned, a device added or deleted): its id, or why not.
-    pub(super) async fn change(&self, tool: &str, input: Value, signal: Signal) -> Result<(String, Value), String> {
+    pub async fn change(&self, tool: &str, input: Value, signal: Signal) -> Result<(String, Value), String> {
         let outcome = self.plan.change_by(tool, object(input), signal).await;
         let answer: Value = serde_json::from_str(&outcome.text).unwrap_or(Value::String(outcome.text.clone()));
         if outcome.is_error || outcome.stops {
@@ -1185,13 +1185,13 @@ impl<S: RefScheme + 'static> OwnRenderer<S> {
 }
 
 /// The device a parameter's ref is of, where refs are ids (REAPER's `r:param:{FX GUID}:{index}` is of `r:fx:{FX GUID}`).
-pub(super) fn device_of_param(reference: &str) -> Option<String> {
+pub fn device_of_param(reference: &str) -> Option<String> {
     let (guid, _) = reference.strip_prefix("r:param:")?.rsplit_once(':')?;
     Some(format!("r:fx:{guid}"))
 }
 
 /// The longest part a candidate is heard over (as Live caps a clip), in beats.
-pub(super) const MAX_PART_BEATS: f64 = 32.;
+pub const MAX_PART_BEATS: f64 = 32.;
 
 /// One knob's change: the device as it is now with the knob's number (a knob's own ref can be from before a search's copies
 /// moved Renoise's refs), or the knob's ref where it has no number.
@@ -1241,7 +1241,7 @@ fn pass(rendered: Result<Captured, RuntimeError>, notes: Vec<String>, tried: Opt
 
 /// One band of an equaliser by its knobs: its label, shape, and the knobs of its frequency, gain and width.
 #[derive(Debug)]
-pub(super) struct EqBandKnobs<'a> {
+pub struct EqBandKnobs<'a> {
     pub label: String,
     pub shape: Shape,
     pub frequency: &'a DeviceKnob,
@@ -1253,7 +1253,7 @@ pub(super) struct EqBandKnobs<'a> {
 
 /// An equaliser's bands from its knobs' names: ReaEQ's "Freq-Low Shelf", "Gain-Band 2", "Q-Band 2"; Renoise's "Gain 3",
 /// "Frequency 3", "Bandwidth 3" (shelves at the ends when `shelves_at_ends`).
-pub(super) fn eq_bands(knobs: &[DeviceKnob], shelves_at_ends: bool) -> Vec<EqBandKnobs<'_>> {
+pub fn eq_bands(knobs: &[DeviceKnob], shelves_at_ends: bool) -> Vec<EqBandKnobs<'_>> {
     let mut labels: Vec<String> = vec![];
     let split = |name: &str| -> Option<(String, String)> {
         let name = name.trim();
@@ -2216,7 +2216,7 @@ fn seen(device: &DeviceRow) -> Seen {
 
 /// A plug-in's own name from REAPER's FX name ("VST3: Pro-Q 3 (FabFilter)" is "Pro-Q 3"; "JS: Volume Adjustment" is
 /// "Volume Adjustment"), or the name as it is.
-pub(super) fn plugin_name(name: &str) -> String {
+pub fn plugin_name(name: &str) -> String {
     let name = name.trim();
     let name = ["VST3i: ", "VST3: ", "VSTi: ", "VST: ", "AUi: ", "AU: ", "CLAPi: ", "CLAP: ", "JS: ", "LV2i: ", "LV2: "]
         .iter()
@@ -2240,7 +2240,7 @@ pub struct OwnListening<S: RefScheme + 'static> {
 }
 
 impl<S: RefScheme + 'static> OwnListening<S> {
-    pub(super) fn new(link: Rc<Link<S>>, plan: Rc<OwnPlan<S>>, context: &IntegrationContext, kumi_home: &std::path::Path) -> Rc<Self> {
+    pub fn new(link: Rc<Link<S>>, plan: Rc<OwnPlan<S>>, context: &IntegrationContext, kumi_home: &std::path::Path) -> Rc<Self> {
         let renderer = Rc::new(OwnRenderer::new(link, plan, context, kumi_home));
         let host: Rc<dyn Renderer> = renderer.clone();
         let listening = Listening::new(
