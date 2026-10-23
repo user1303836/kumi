@@ -4864,3 +4864,24 @@ to = "kumi_daw_renoise::PROVIDER"
 [[rust]]
 from = "kumi::daw::own"
 to = "kumi_daw_own::provider"
+
+# REAPER's and Renoise's ears, from kumi-daw-own into their crates (P3.8's later items, 2026-10-23).
+[[rust]]
+from = "kumi_daw_own::ears::reaper_steps"
+to = "kumi_daw_reaper::ears::reaper_steps"
+
+[[rust]]
+from = "kumi_daw_own::ears::reaper_stem_steps"
+to = "kumi_daw_reaper::ears::reaper_stem_steps"
+
+[[rust]]
+from = "kumi_daw_own::ears::renoise_cells"
+to = "kumi_daw_renoise::ears::renoise_cells"
+
+[[rust]]
+from = "kumi_daw_own::ears::renoise_stem_steps"
+to = "kumi_daw_renoise::ears::renoise_stem_steps"
+
+[[rust]]
+from = "kumi_daw_own::ears::Slot"
+to = "kumi_daw_renoise::ears::Slot"

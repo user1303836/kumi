@@ -687,7 +687,7 @@ scene!(picture_routes, DawId::Reaper, PICTURE_SHOTS, |h| {
 scene!(picture_zones, DawId::Renoise, PICTURE_SHOTS, |h| {
     let preview = json!({"display": {"before": {"noteRange": [48, 59], "velocityRange": [0, 127], "baseNote": 48}}});
     let applied = json!({"display": {"after": {"noteRange": [60, 71], "velocityRange": [64, 127], "baseNote": 60}}});
-    let picture = own_pictures::zone(&answers(&preview, &applied));
+    let picture = own_pictures::zone(&answers(&preview, &applied), &kumi_types::daw::DawProfile::RENOISE);
     opened(&h, drawn("c1", "parameter", "“Snare” keyzone: notes 60-71, velocity 64-127, base note 60", picture)).await;
 });
 
@@ -695,7 +695,7 @@ scene!(picture_zones, DawId::Renoise, PICTURE_SHOTS, |h| {
 scene!(picture_zone_keys, DawId::Renoise, PICTURE_SHOTS, |h| {
     let preview = json!({"display": {"before": {"noteRange": [48, 59]}}});
     let applied = json!({"display": {"after": {"noteRange": [60, 71]}}});
-    let picture = own_pictures::zone(&answers(&preview, &applied));
+    let picture = own_pictures::zone(&answers(&preview, &applied), &kumi_types::daw::DawProfile::RENOISE);
     opened(&h, drawn("c1", "parameter", "“Snare” keyzone: notes 60-71", picture)).await;
 });
 

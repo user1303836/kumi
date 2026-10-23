@@ -29,10 +29,7 @@ use kumi_listening::{
 };
 use kumi_types::contracts::*;
 use kumi_types::display::parse_display;
-use kumi_types::{
-    daw::{DawId, DawProfile},
-    errors::RuntimeError,
-};
+use kumi_types::{daw::DawProfile, errors::RuntimeError};
 use serde_json::{json, Value};
 use std::{
     cell::{Cell, RefCell},
@@ -110,90 +107,6 @@ pub struct Table {
     /// Whether a device's parameter aims it somewhere rather than shaping its sound (Renoise's meta devices' Dest. Track,
     /// Effect and Parameter, a #Send's Receiver), by the device's own name and the parameter's: a search never moves it.
     pub aims: fn(&str, &str) -> bool,
-}
-
-/// Renoise's parameters that are places, as the tool keeps them ([lab] M3 checks): a meta device's and #Sidechain's "Dest.
-/// Track/Effect/Parameter" and *Hydra's and *XY Pad's "OutN Track/Effect/Parameter", a #Send's or #Multiband Send's
-/// Receiver.
-fn renoise_aims(device: &str, parameter: &str) -> bool {
-    if device.starts_with("#Send") || device.starts_with("#Multiband Send") {
-        return parameter.starts_with("Receiver");
-    }
-    (device.starts_with('*') || device.starts_with("#Sidechain"))
-        && ["Track", "Effect", "Parameter"].iter().any(|end| parameter.ends_with(end))
-}
-
-/// REAPER (the extension): pre-fader stems in one pass, the master with and without its FX, ReaLimit and JS Volume
-/// Adjustment for the gain stage, ReaEQ for a fit. Device names are what the extension's rows say ([lab] m5-reaper).
-pub const REAPER: Table = Table {
-    post_fader: false,
-    no_before_chain: None,
-    master_fader: true,
-    master_ref: Some("r:track:master"),
-    analyzers: &["Analyzer", "Spectrum", "Spectrograph", "Meter", "Loudness", "Tuner", "Oscilloscope"],
-    gains: &[("Volume Adjustment", "Adjustment (dB)"), ("Volume/Pan", "Volume (dB)")],
-    linear: &[],
-    limiters: &[("ReaLimit", "Threshold", true), ("Master Limiter", "Threshold", true)],
-    gain_device: ("JS: Volume Adjustment", "Volume Adjustment"),
-    safety_limiter: ("VST: ReaLimit (Cockos)", "ReaLimit"),
-    device_kind: "fx",
-    param_tool: "fx_param",
-    params_tool: "fx_params",
-    add_tool: "fx_add",
-    delete_tool: "fx_delete",
-    add_field: "name",
-    raw_field: "normalized",
-    text_field: "value",
-    normalized: true,
-    no_items: None,
-    scratch_field: "normalized",
-    eq: "ReaEQ",
-    eq_shelves_at_ends: false,
-    captures: true,
-    plugin_prefixes: &["VST:", "VSTi:", "VST3:", "VST3i:", "AU:", "AUi:", "CLAP:", "CLAPi:", "LV2:", "LV2i:", "DX:", "DXi:"],
-    stop_notes: &["The audition playing was stopped", "REAPER stopped playback to render"],
-    pseudo_params: &["Bypass", "Wet", "Delta"],
-    aims: |_, _| false,
-};
-
-/// Renoise (the tool): one solo render per track, through its fader and the Master track's devices; the Maximizer and
-/// the Gainer for the gain stage; EQ 10 (or EQ 5) for a fit ([lab] m5-renoise).
-pub const RENOISE: Table = Table {
-    post_fader: true,
-    no_before_chain: Some("Renoise renders the mix after its Master track's devices"),
-    master_fader: false,
-    master_ref: None,
-    analyzers: &["Analyzer", "Scope", "Spectrum"],
-    gains: &[("Gainer", "Gain")],
-    linear: &["Gainer", "EQ", "Filter", "DC Offset", "Stereo Expander", "Mixer", "TrackVolPan", "Track Vol/Pan"],
-    limiters: &[("Maximizer", "Boost", false)],
-    gain_device: ("Audio/Effects/Native/Gainer", "Gainer"),
-    safety_limiter: ("Audio/Effects/Native/Maximizer", "Maximizer"),
-    device_kind: "device",
-    param_tool: "device_param",
-    params_tool: "device_params",
-    add_tool: "device_add",
-    delete_tool: "device_delete",
-    add_field: "path",
-    raw_field: "value",
-    text_field: "valueString",
-    normalized: false,
-    no_items: Some("Renoise's tracks hold no audio of their own: hear a sample's audio with listen (its ref)"),
-    scratch_field: "value",
-    eq: "EQ 10",
-    eq_shelves_at_ends: true,
-    captures: false,
-    plugin_prefixes: &[],
-    stop_notes: &["Renoise stopped playback to render"],
-    pseudo_params: &[],
-    aims: renoise_aims,
-};
-
-pub fn table(id: Option<DawId>) -> &'static Table {
-    match id {
-        Some(DawId::Renoise) => &RENOISE,
-        _ => &REAPER,
-    }
 }
 
 /// What the bridge can do for listening now, as its `status` says (`listening`), and whether it's the Renoise demo.
@@ -390,7 +303,7 @@ impl<S: RefScheme + 'static> OwnRenderer<S> {
         let profile = link.daw.profile;
         let folder = kumi_home.join("bridges").join(profile.id.map_or("daw", |id| id.as_str())).join("listening");
         OwnRenderer {
-            table: table(profile.id),
+            table: link.daw.listening,
             link,
             plan,
             on_action: context.on_action.clone(),

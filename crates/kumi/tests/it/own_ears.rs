@@ -2,8 +2,9 @@
 //! DAWs' integrations meet).
 use kumi_agent::core::to_midi::MidiNote;
 use kumi_agent::kernel::schema::problem;
-use kumi_daw_own::ears::*;
+use kumi_daw_reaper::ears::{reaper_stem_steps, reaper_steps};
 use kumi_daw_renoise::changes::CHANGES as RENOISE;
+use kumi_daw_renoise::ears::{renoise_cells, renoise_stem_steps, Slot};
 use serde_json::{json, Value};
 use std::path::Path;
 
