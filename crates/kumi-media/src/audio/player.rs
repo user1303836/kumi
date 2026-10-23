@@ -1,13 +1,16 @@
 //! Kumi's player: a song or a sound of the producer's, heard through the computer's output. One sound at a time, from a
 //! position for a length; a new one takes over from the one playing, and a stop ends it, each with a fade a few
 //! milliseconds long so nothing clicks. The file is read as Kumi reads any (WAV and AIFF in place, other formats
-//! converted), resampled to the output's rate and handed to it whole.
+//! converted, only the stretch played), resampled to the output's rate and handed to it whole.
 //!
 //! The output is the computer's default one, through cpal: Core Audio on a Mac, WASAPI on Windows. On Linux cpal needs
 //! ALSA's library to build and to run, which Kumi's Linux bundle doesn't carry, so there the player is off unless Kumi
 //! was built with kumi-media's `linux-player`. Nothing opens the output until something plays.
 
-use super::{decode::open_audio_to, dsp::resample};
+use super::{
+    decode::{open_audio_to, prepare_audio_range},
+    dsp::resample,
+};
 use kumi_common::abort::Signal;
 use std::{
     cell::{Cell, RefCell},
@@ -142,13 +145,16 @@ impl Player {
     }
 }
 
-/// A stretch of a file as its channels (one, or the first two) at its own rate.
+/// A stretch of a file as its channels (one, or the first two) at its own rate. Only the stretch is converted (a song's
+/// middle without what comes before it), where the file needs converting.
 async fn read(path: &Path, from: f64, seconds: f64, signal: &Signal) -> Result<(Vec<Vec<f32>>, f64), PlayerError> {
     let (from, seconds) = (from.max(0.), seconds.max(0.));
     let stopped = |error: super::AudioError| if signal.is_cancelled() { PlayerError::Stopped } else { PlayerError::File(error.0) };
-    let mut source = open_audio_to(path, Some(signal.clone()), Some(from + seconds)).await.map_err(stopped)?;
+    let prepared = prepare_audio_range(path, Some(signal.clone()), from, seconds).await.map_err(stopped)?;
+    let mut source = open_audio_to(&prepared.path, Some(signal.clone()), None).await.map_err(stopped)?;
     let rate = source.sample_rate;
-    source.seek(from * rate);
+    // Seconds of the file, as seconds of what was converted.
+    source.seek((from - prepared.start).max(0.) * rate);
     let wanted = (seconds * rate).round() as usize;
     let mut channels: Vec<Vec<f32>> = vec![Vec::with_capacity(wanted); source.channels.clamp(1, 2)];
     let read = async {
@@ -165,6 +171,7 @@ async fn read(path: &Path, from: f64, seconds: f64, signal: &Signal) -> Result<(
     }
     .await;
     let _ = source.close().await;
+    prepared.cleanup().await;
     read?;
     if channels[0].is_empty() {
         return Err(PlayerError::File("There's nothing to play there: it's at or past the end of the file.".into()));
