@@ -412,7 +412,7 @@ fn kept(env: &Env) -> Result<Rc<FileConversationStore>, RuntimeError> {
     Ok(kumi_agent::core::conversations::create_conversation_store_in(
         load_projects_dir(env)?,
         settings.conversations.as_ref().and_then(|c| c.keep_days),
-        crate::daw::registry::PLACES,
+        crate::daw::registry::places(),
     ))
 }
 

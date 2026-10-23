@@ -77,7 +77,11 @@ fn without_any_bridge_kumi_chats_in_lives_words() {
     use kumi::daw::{chosen, providers};
     use kumi_types::daw::{DawId, DawProfile};
     let env = env();
-    assert_eq!(providers().map(|provider| provider.id()), [DawId::Ableton, DawId::Reaper, DawId::Renoise], "Live first");
+    assert_eq!(
+        providers().map(|provider| provider.id()).collect::<Vec<_>>(),
+        [DawId::Ableton, DawId::Reaper, DawId::Renoise],
+        "Live first"
+    );
     let (provider, found) = chosen(None, &env);
     assert_eq!((provider.id(), found), (DawId::Ableton, None));
     let without = provider.without_daw(std::rc::Rc::new(|_| {}));

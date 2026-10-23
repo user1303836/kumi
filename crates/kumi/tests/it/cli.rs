@@ -345,8 +345,11 @@ case!(continue_and_resume_in_live_leave_another_daws_conversation_to_that_daw, a
         serde_json::from_value(json!({"savedAt":at,"checkpoint":{"version":1,"messages":[{"role":"user","content":text},{"role":"assistant","content":"done"}]}}))
             .unwrap()
     };
-    let store =
-        kumi_agent::core::conversations::create_conversation_store_in(f.folder.path().join("projects"), None, kumi::daw::registry::PLACES);
+    let store = kumi_agent::core::conversations::create_conversation_store_in(
+        f.folder.path().join("projects"),
+        None,
+        kumi::daw::registry::places(),
+    );
     store.save(set, "mv66me0m3fa91c", &said("make the bass wider", 1)).await.unwrap();
     store.save(project, "mv66zz0m3fa91c", &said("Mix notes for the song", 2)).await.unwrap();
     drop(store);

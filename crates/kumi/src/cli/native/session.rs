@@ -211,7 +211,7 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
     // go on saving where they're kept, Live or not).
     let keep_days = settings.conversations.as_ref().and_then(|c| c.keep_days);
     let conversations = (bridge_config.is_some() || bridge_missing || resume.is_some())
-        .then(|| kumi_agent::core::conversations::create_conversation_store_in(&projects_dir, keep_days, crate::daw::registry::PLACES));
+        .then(|| kumi_agent::core::conversations::create_conversation_store_in(&projects_dir, keep_days, crate::daw::registry::places()));
     // The conversation asked for is found before anything shows: a word that names none says so, and Kumi stops there.
     // Only this DAW's conversations (and imported ones) go on here: another DAW's goes on in that DAW (review L4).
     let ours = |place: &str| kumi_types::place::kept_for(place, provider.id());
@@ -242,7 +242,7 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
     };
     let tools_dir = load_tools_dir(&io.env)?;
     let library = create_library(LibraryOptions {
-        daws: crate::daw::registry::LIBRARIES,
+        daws: crate::daw::registry::libraries(),
         dir: load_library_dir(&io.env)?,
         folders: Some(settings.library_folders),
         projects_dir: Some(projects_dir.clone()),
@@ -553,10 +553,10 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
     };
     let database = database.ok().map(|(client, _)| client);
     options.memory = Some(match &database {
-        Some(client) => Rc::new(SqliteMemoryStore::with_places(client.clone(), crate::daw::registry::PLACES)) as Rc<dyn MemoryStore>,
+        Some(client) => Rc::new(SqliteMemoryStore::with_places(client.clone(), crate::daw::registry::places())) as Rc<dyn MemoryStore>,
         None => kumi_agent::core::memory::create_memory_store_in(
             MemoryStoreOptions { projects_dir: projects_dir.clone().into(), producer_file: load_memory_file(&io.env)?.into() },
-            crate::daw::registry::PLACES,
+            crate::daw::registry::places(),
         ),
     });
     options.listen = true;

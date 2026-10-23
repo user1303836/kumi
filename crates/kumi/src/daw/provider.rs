@@ -1,5 +1,6 @@
-//! What the app needs of a DAW it works with: finding Kumi's bridge for it, making the session's integration with the
-//! app's neutral context, watching for the DAW to answer, and chatting without it in its words.
+//! What the app needs of a DAW it works with: what it is (its profile, how its tools and focus show, what it tells the
+//! library), finding Kumi's bridge for it, making the session's integration with the app's neutral context, watching
+//! for the DAW to answer, and chatting without it in its words.
 use futures::future::LocalBoxFuture;
 use kumi_agent::{
     core::{
@@ -10,6 +11,7 @@ use kumi_agent::{
     },
     integrations::ProjectStore,
 };
+use kumi_library::daws::LibrarySources;
 use kumi_types::{
     daw::{DawId, DawProfile},
     system::Env,
@@ -166,15 +168,15 @@ pub struct WatchWords {
 
 pub trait DawProvider {
     fn id(&self) -> DawId;
-    fn profile(&self) -> &'static DawProfile {
-        crate::daw::registry::profile(self.id()).expect("a provider's DAW is registered")
-    }
-    fn presentation(&self) -> &'static ToolPresentation {
-        crate::daw::registry::presentation(self.id()).expect("a provider's DAW is registered")
-    }
-    fn view(&self) -> &'static ViewPresentation {
-        crate::daw::registry::view(self.id()).expect("a provider's DAW is registered")
-    }
+    fn profile(&self) -> &'static DawProfile;
+    /// How the app shows the DAW's own tools.
+    fn presentation(&self) -> &'static ToolPresentation;
+    /// How the app reads the DAW's focus and devices.
+    fn view(&self) -> &'static ViewPresentation;
+    /// What the DAW tells the library: its places, its own library, the projects it opened lately, its manual.
+    fn library(&self) -> &'static dyn LibrarySources;
+    /// Where the DAW is downloaded from, as setup names it.
+    fn site(&self) -> &'static str;
     /// Where Kumi's bridge for the DAW says how to reach it, when the bridge is installed.
     fn bridge_config(&self, env: &Env) -> Option<String>;
     /// The version of the bridge this Kumi brings for the DAW.

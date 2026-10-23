@@ -47,7 +47,7 @@ impl Learner {
 fn options(studio: &Studio, paused: bool) -> LearnerOptions {
     LearnerOptions {
         plan: PlanOptions {
-            daws: kumi::daw::registry::LIBRARIES,
+            daws: kumi::daw::registry::libraries(),
             dir: studio.dir.to_string_lossy().into(),
             folders: Some(vec![studio.extra.to_string_lossy().into()]),
             sources: Some(SourceOptions {

@@ -13,7 +13,7 @@ use daw_mcp_server::{
 };
 use futures::stream::{self, StreamExt};
 use futures::FutureExt;
-use kumi::daw::registry::PLACES;
+use kumi::daw::registry::places;
 use kumi_agent::core::context::IntegrationContext;
 use kumi_agent::core::contracts::*;
 use kumi_agent::core::conversations::create_conversation_store_in;
@@ -213,10 +213,10 @@ impl Own {
         options.timeout_ms = Some(20_000);
         options.close_timeout_ms = Some(5_000);
         let projects = dir.join("projects");
-        options.conversations = Some(create_conversation_store_in(&projects, None, PLACES));
+        options.conversations = Some(create_conversation_store_in(&projects, None, places()));
         options.memory = Some(create_memory_store_in(
             MemoryStoreOptions { projects_dir: projects.clone(), producer_file: dir.join("memory.json") },
-            PLACES,
+            places(),
         ));
         // Jobs kept per place between sessions, beside the goals, as the app keeps them.
         options.jobs =
@@ -411,7 +411,7 @@ async fn renoises_fixed_phrases_are_its_changes_and_a_loop_is_whole_slots_of_the
 
 /// The conversations kept in a place: their ids.
 async fn kept_in(dir: &Path, place: &str) -> Vec<String> {
-    let store = create_conversation_store_in(dir.join("projects"), None, PLACES);
+    let store = create_conversation_store_in(dir.join("projects"), None, places());
     store.list(place).await.unwrap().into_iter().map(|row| row.id).collect()
 }
 
@@ -599,7 +599,7 @@ async fn after_a_rollback_and_back_the_index_finds_reaper_and_renoise_conversati
     let ids = ["mf1a2b3c4d5e6", "mf1a2b3c4d5e7", "mf1a2b3c4d5e8", "mf1a2b3c4d5e9"];
     let places = [format!("reaper-{SONG_A}"), format!("renoise-{SONG_B}"), "renoise-unsaved".into(), SONG_A.to_string()];
     {
-        let store = create_conversation_store_in(&projects, None, PLACES);
+        let store = create_conversation_store_in(&projects, None, kumi::daw::registry::places());
         for (at, (place, id)) in places.iter().zip(ids).enumerate() {
             store.save(place, id, &kept_conversation(1_760_000_000_000 + at as i64, &format!("Request {at}"))).await.unwrap();
         }
@@ -616,7 +616,7 @@ async fn after_a_rollback_and_back_the_index_finds_reaper_and_renoise_conversati
         assert!(index["gone"].get(ids[0]).is_some(), "the earlier Kumi took it for let go: {index}");
     }
     // Back on this Kumi.
-    let store = create_conversation_store_in(&projects, None, PLACES);
+    let store = create_conversation_store_in(&projects, None, kumi::daw::registry::places());
     let mut listed: Vec<String> = store.all().await.unwrap().into_iter().map(|row| row.id).collect();
     listed.sort();
     assert_eq!(listed, ids, "every conversation found again");
@@ -844,7 +844,7 @@ async fn a_reaper_session_leaves_lives_conversations_to_live() {
         .run_until(async {
             let dir = tempfile::tempdir().unwrap();
             {
-                let store = create_conversation_store_in(dir.path().join("projects"), None, PLACES);
+                let store = create_conversation_store_in(dir.path().join("projects"), None, places());
                 store.save(SONG_B, "mf1a2b3c4d5e1", &kept_conversation(1_760_000_000_000, "A Live Set's mix")).await.unwrap();
                 store.save("imported", "mf1a2b3c4d5e2", &kept_conversation(1_760_000_000_001, "From a file")).await.unwrap();
             }
