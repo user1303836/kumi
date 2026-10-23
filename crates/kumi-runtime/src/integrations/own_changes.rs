@@ -1674,7 +1674,7 @@ mod tests {
     #[test]
     fn each_daws_kinds_are_exactly_what_its_bridge_makes() {
         let reaper =
-            registered("crates/reaper-kumi/src/changes", "", r#"kind: "([a-z]+(?:-[a-z]+)+)"|"([a-z]+(?:-[a-z]+)+)" => Some\(Kind"#);
+            registered("daws/reaper/reaper-kumi/src/changes", "", r#"kind: "([a-z]+(?:-[a-z]+)+)"|"([a-z]+(?:-[a-z]+)+)" => Some\(Kind"#);
         let renoise = registered("daws/renoise/com.kumi.Bridge.xrnx/payload", "changes", r#"(?:kind = |register\()"([a-z]+(?:-[a-z]+)+)""#);
         for ((app, set), bridge) in sets().into_iter().zip([reaper, renoise]) {
             let ours: BTreeSet<String> = set.kinds.iter().map(|kind| kind.kind.to_string()).collect();

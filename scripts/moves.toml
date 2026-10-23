@@ -172,3 +172,8 @@ in = "daws/own/daw-mcp-server"
 from = "crate::simulator::reaper"
 to = "crate::reaper::simulator"
 in = "daws/own/daw-mcp-server"
+
+# REAPER's extension, into daws/reaper (2026-10).
+[[move]]
+from = "crates/reaper-kumi"
+to = "daws/reaper/reaper-kumi"

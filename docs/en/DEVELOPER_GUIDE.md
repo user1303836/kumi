@@ -18,7 +18,7 @@ How the repository fits together, how to work on each part, and how to release.
 | `daws/ableton/protocol` | `ableton-live-v1.operations.json`, the operation registry the bridge and the Remote Script share |
 | `scripts` | Release builders, migration packaging, the Mac helper's build, the isolated test runners, and `native-kumi.mjs` behind `npm run kumi` and `npm run setup` |
 | `daws/own/daw-mcp-server` | Kumi's host for REAPER and Renoise (`daw-mcp-server --daw reaper\|renoise`): MCP over stdio, the changes' journal and undo, listening jobs, catch-up; also usable by other MCP clients |
-| `crates/reaper-kumi` | Kumi's REAPER extension (`reaper_kumi`), built against REAPER's SDK headers vendored in `sdk/` |
+| `daws/reaper/reaper-kumi` | Kumi's REAPER extension (`reaper_kumi`), built against REAPER's SDK headers vendored in `sdk/` |
 | `daws/own/daw-bridge` | What the REAPER and Renoise bridges share: the loopback wire (`kumi-daw/1`), its handshake and auth, discovery, finding the DAWs, the doctor's checks and the bridge files' lifecycle |
 | `daws/renoise` | Kumi's Renoise tool (`com.kumi.Bridge.xrnx`, Lua) and its tests against a mock of Renoise's API |
 | `install.sh`, `install.ps1` | The installers |
@@ -50,7 +50,7 @@ kumi (crates/kumi, crates/kumi-runtime)
   ▼
 host (daws/own/daw-mcp-server --daw reaper|renoise)
   │  kumi-daw/1: authenticated TCP on 127.0.0.1 (daws/own/daw-bridge)
-  ├──► Kumi's REAPER extension (crates/reaper-kumi), in REAPER's UserPlugins
+  ├──► Kumi's REAPER extension (daws/reaper/reaper-kumi), in REAPER's UserPlugins
   └──► Kumi's Renoise tool (daws/renoise), in Renoise's Scripts/Tools
 ```
 
@@ -306,12 +306,12 @@ python3 scripts/release.py --go     # the release
   (tests and Markdown aside). When the host's dependencies in `Cargo.lock`
   change, the dry run says so; `--bridge` gives the bridge a new version then.
 - **REAPER's extension and Renoise's tool** get new versions the same way, each
-  when a pull request changes what its DAW loads: `crates/reaper-kumi` and
+  when a pull request changes what its DAW loads: `daws/reaper/reaper-kumi` and
   `daws/own/daw-bridge`, or `daws/renoise/com.kumi.Bridge.xrnx`. `--reaper` and
   `--renoise` give one a new version anyway, `--no-reaper` and `--no-renoise`
   keep it; `--no-bridge` is only Live's. A line written `Changelog (reaper):`
   or `Changelog (renoise):` goes under its heading. With `--go` they move in
-  `crates/reaper-kumi/Cargo.toml` and `Cargo.lock`, and in the tool's
+  `daws/reaper/reaper-kumi/Cargo.toml` and `Cargo.lock`, and in the tool's
   `payload/version.lua` and `manifest.xml`, and each one's ships-with line moves
   on in the three `KUMI_GUIDE.md`. One the last release didn't have ships at its
   version, and its line names this release already.

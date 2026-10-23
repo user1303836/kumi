@@ -1,6 +1,6 @@
 //! What Kumi can change in REAPER (M3, M4): tracks, sends, markers and regions, the tempo map and loop, FX in every chain
 //! (containers, presets, chain files, parameter modulation) and their parameters, envelopes and automation items, and a
-//! take's MIDI notes. Each kind is the extension's (`crates/reaper-kumi/src/changes`).
+//! take's MIDI notes. Each kind is the extension's (`daws/reaper/reaper-kumi/src/changes`).
 use super::own_changes::{OwnAction, OwnChangeSet, OwnKind, Picture};
 use crate::core::contracts::ChangeFamily::*;
 

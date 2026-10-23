@@ -65,17 +65,17 @@ https://zenodo.org/record/5578807#.YnRm5vPMKDU
 ## REAPER extension SDK (Cockos), zlib License
 
 REAPER's extension (`reaper_kumi`, in each bundle's `daws/reaper/`) is built against two headers from Cockos' REAPER
-extension SDK, vendored unmodified in `crates/reaper-kumi/sdk/`: `reaper_plugin.h` and `reaper_plugin_functions.h`
+extension SDK, vendored unmodified in `daws/reaper/reaper-kumi/sdk/`: `reaper_plugin.h` and `reaper_plugin_functions.h`
 from https://github.com/justinfrankel/reaper-sdk at commit c0eafe87863b2bf69c5c822760f1b32a753b211b ("sdk 7.82").
 Copyright (C) 2006-2015, Cockos Incorporated (`reaper_plugin.h`), and Copyright 2006 and later, Cockos Incorporated
 (`reaper_plugin_functions.h`). The extension's table of REAPER's functions is generated from them when it's built
-(`crates/reaper-kumi/build.rs`); `crates/reaper-kumi/shim/csurf.cpp` repeats the SDK's `IReaperControlSurface`
-declaration, and `crates/reaper-kumi/shim/preview.cpp` its `preview_register_t`.
+(`daws/reaper/reaper-kumi/build.rs`); `daws/reaper/reaper-kumi/shim/csurf.cpp` repeats the SDK's `IReaperControlSurface`
+declaration, and `daws/reaper/reaper-kumi/shim/preview.cpp` its `preview_register_t`.
 
 The extension was written with reaper-rs (https://github.com/helgoboss/reaper-rs, MIT License) as a reference; it
 carries none of reaper-rs's code.
 
-The SDK's license (`crates/reaper-kumi/sdk/LICENSE`):
+The SDK's license (`daws/reaper/reaper-kumi/sdk/LICENSE`):
 
 ```text
 This software is provided 'as-is', without any express or implied

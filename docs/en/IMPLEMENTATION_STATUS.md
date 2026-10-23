@@ -13,7 +13,7 @@ Each release in the [changelog](../../CHANGELOG.md) names the bridge it ships
 with; [bridge versions](KUMI_CHANGES.md#bridge-versions) lists them all. The
 version numbers themselves live in the crates' `Cargo.toml` files (Kumi, the
 bridge), the root `package.json` (Kumi) and `daws/ableton/live-extension/manifest.json`
-(the extension); REAPER's extension's in `crates/reaper-kumi/Cargo.toml`, and
+(the extension); REAPER's extension's in `daws/reaper/reaper-kumi/Cargo.toml`, and
 Renoise's tool's in `daws/renoise/com.kumi.Bridge.xrnx/payload/version.lua` and
 its `manifest.xml`. [Connect to REAPER or Renoise](KUMI_GUIDE.md#connect-to-reaper-or-renoise)
 says which Kumi ships with which.

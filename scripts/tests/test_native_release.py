@@ -155,7 +155,7 @@ class NativeRelease(unittest.TestCase):
         self.assertEqual(next(p["version"] for p in cargo_lock if p["name"] == "ableton-mcp-server"), bridge)
         # REAPER's extension and Renoise's tool: each version a release can bump, said once (and Renoise's manifest
         # number agreeing with its version file).
-        reaper = cargo_version("crates/reaper-kumi/Cargo.toml")
+        reaper = cargo_version("daws/reaper/reaper-kumi/Cargo.toml")
         self.assertRegex(reaper, r"^\d+\.\d+\.\d+$")
         self.assertEqual(next(p["version"] for p in cargo_lock if p["name"] == "reaper-kumi"), reaper)
         self.assertEqual(release.renoise_tool(root)[1], re.search(r'return "([^"]+)"', (root / release.RENOISE_TOOL_SOURCE / "payload/version.lua").read_text())[1])
@@ -786,7 +786,7 @@ class NativeRelease(unittest.TestCase):
             text = (release.ROOT / release.REAPER_CRATE / "shim" / shim).read_text(encoding="utf-8")
             self.assertIn("../sdk/LICENSE", text, shim)
             self.assertIn("Cockos", text, shim)
-            self.assertIn(f"crates/reaper-kumi/shim/{shim}", section, shim)
+            self.assertIn(f"daws/reaper/reaper-kumi/shim/{shim}", section, shim)
 
     def test_every_packaged_document_rewrites_its_links(self):
         revision = "a" * 40
