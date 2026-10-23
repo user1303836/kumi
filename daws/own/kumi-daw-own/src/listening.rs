@@ -3,38 +3,36 @@
 //! plays, and the main thing heard is played out loud after, so the producer hears what Kumi heard; REAPER also hears
 //! what it plays as it plays. What each DAW's sources hold, its gain stage, its equaliser and its master chain are its
 //! table here; the rest is the same for both.
-use super::own_bridge::{names_tracks, Refused};
-use super::own_changes::{Link, OwnPlan};
-use super::own_groove::Part;
-use crate::{
-    core::{
-        context::IntegrationContext,
-        contracts::*,
-        daw::{DawId, DawProfile},
-        errors::RuntimeError,
-        refs::RefScheme,
-    },
-    integrations::shared::display::parse_display,
-    listening::{
-        checklist::MainState,
-        engine::Listening,
-        fit::{Band, Shape},
-        judging::Placed,
-        knobs::Scale,
-        notes::Kit,
-        renderer::{
-            bars_of, AuditionOptions, AuditionPass, AuditionRender, AuditionSource, Captured, ClipNotes, Copies, DeviceKnob, EqFit,
-            ListenFlag, NotePatch, Pass, Renderer, Window,
-        },
-        tools::{audition_tool, form_tool, groove_tool, judge_tool, render_tool, sound_tool, tune_tool},
-    },
-    plugins::roles::Seen,
-};
+use crate::bridge::{names_tracks, Refused};
+use crate::changes::{Link, OwnPlan};
+use crate::groove::Part;
 use async_trait::async_trait;
 use indexmap::IndexMap;
 use kumi_common::{
     abort::{self, Signal, SignalExt},
     js::string::head,
+};
+use kumi_library::plugins::roles::Seen;
+use kumi_listening::{
+    checklist::MainState,
+    engine::Listening,
+    fit::{Band, Shape},
+    judging::Placed,
+    knobs::Scale,
+    notes::Kit,
+    renderer::{
+        bars_of, AuditionOptions, AuditionPass, AuditionRender, AuditionSource, Captured, ClipNotes, Copies, DeviceKnob, EqFit, ListenFlag,
+        NotePatch, Pass, Renderer, Window,
+    },
+    tools::{audition_tool, form_tool, groove_tool, judge_tool, render_tool, sound_tool, tune_tool},
+};
+use kumi_runtime::{
+    core::{context::IntegrationContext, contracts::*, refs::RefScheme},
+    integrations::shared::display::parse_display,
+};
+use kumi_types::{
+    daw::{DawId, DawProfile},
+    errors::RuntimeError,
 };
 use serde_json::{json, Value};
 use std::{
@@ -478,7 +476,7 @@ impl<S: RefScheme + 'static> OwnRenderer<S> {
     }
 
     /// (M7) Kumi listens now, until the answer is dropped.
-    pub fn begin_listen(&self) -> crate::listening::renderer::ListenNow<'_> {
+    pub fn begin_listen(&self) -> kumi_listening::renderer::ListenNow<'_> {
         self.flag.begin()
     }
 
@@ -1369,7 +1367,7 @@ impl<S: RefScheme + 'static> Renderer for OwnRenderer<S> {
         let long = self.link.book.borrow().lengthen(&json!({"ref": named}))["ref"].as_str().unwrap_or(named).to_owned();
         // A file names itself; only something of the project's, by its ref, has its audio found.
         if self.link.book.borrow().scheme.kind_of(&long).is_none() {
-            if super::own_bridge::SHORT_REF.is_match(named) {
+            if crate::bridge::SHORT_REF.is_match(named) {
                 let place = self.profile().words.place;
                 return Err(RuntimeError::Observation(format!(
                     "{named} isn't one of this turn's refs (it may be from before the {place} changed): read again"
@@ -1734,8 +1732,8 @@ impl<S: RefScheme + 'static> Renderer for OwnRenderer<S> {
         if !kind.contains(eq) && !kind.starts_with("EQ") {
             return Ok(Err(format!(
                 "fit sets {}'s bands: put {} where the fix belongs, then tune it.",
-                crate::core::daw::with_article(eq),
-                crate::core::daw::with_article(eq)
+                kumi_types::daw::with_article(eq),
+                kumi_types::daw::with_article(eq)
             )));
         }
         let all = self.eq_bands_of(knobs);
@@ -2135,7 +2133,7 @@ impl<S: RefScheme + 'static> OwnRenderer<S> {
     /// What a file holds from `offset` for `length` seconds (to its end without one), reversed if asked, written as a WAV
     /// in Kumi's listening folder (the host prunes it with the renders): its path.
     async fn cut(&self, file: &str, offset: f64, length: Option<f64>, reversed: bool, signal: &Signal) -> Result<String, String> {
-        let mut source = crate::audio::decode::open_audio(file, Some(signal.clone())).await.map_err(|error| error.0)?;
+        let mut source = kumi_media::audio::decode::open_audio(file, Some(signal.clone())).await.map_err(|error| error.0)?;
         let rate = source.sample_rate;
         source.seek(offset.max(0.) * rate);
         let frames = length.map_or(usize::MAX, |length| (length.max(0.) * rate) as usize);
@@ -2169,7 +2167,7 @@ impl<S: RefScheme + 'static> OwnRenderer<S> {
             if reversed { " reversed" } else { "" }
         ));
         std::fs::create_dir_all(&self.folder).map_err(|error| error.to_string())?;
-        std::fs::write(&path, crate::audio::decode::float_wav(&channels, rate as u32)).map_err(|error| error.to_string())?;
+        std::fs::write(&path, kumi_media::audio::decode::float_wav(&channels, rate as u32)).map_err(|error| error.to_string())?;
         Ok(path.to_string_lossy().into_owned())
     }
 
@@ -2367,7 +2365,7 @@ impl<S: RefScheme + 'static> OwnListening<S> {
     /// A goal's render rig over these candidates (`/goal`, a match run's search), or why not.
     pub async fn goal(&self, request: &AuditionRequest, signal: Signal) -> Result<Result<Rc<dyn GoalRig>, String>, RuntimeError> {
         let _held = self.hold(&signal).await?;
-        super::own_goal::OwnGoalRig::open(self.renderer.clone(), &self.listening, request, signal).await
+        crate::goal::OwnGoalRig::open(self.renderer.clone(), &self.listening, request, signal).await
     }
 
     /// The listen tool's hearing of the project: what plays now (REAPER, while it plays), or a stretch rendered offline
@@ -2434,7 +2432,7 @@ impl<S: RefScheme + 'static> OwnListening<S> {
             let beats = request.beats.or(looped_beats).unwrap_or(4. * renderer.beats_per_bar.get());
             Window { from, beats }
         };
-        if let Some(why) = crate::listening::engine::too_long(window.beats, tempo, "listen in parts") {
+        if let Some(why) = kumi_listening::engine::too_long(window.beats, tempo, "listen in parts") {
             return Ok(Err(why));
         }
         let candidates: Vec<AuditionCandidate> = if request.mix == Some(true) || request.tracks.is_empty() {

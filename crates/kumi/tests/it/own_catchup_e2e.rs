@@ -11,10 +11,10 @@ use daw_mcp_server::{
 };
 use futures::FutureExt;
 use kumi_common::abort::Signal;
+use kumi_daw_own::bridge::{Connect, OwnOptions};
 use kumi_daw_reaper::create_reaper_integration;
 use kumi_daw_renoise::create_renoise_integration;
 use kumi_runtime::core::{context::IntegrationContext, contracts::*};
-use kumi_runtime::integrations::own_bridge::{Connect, OwnOptions};
 use kumi_runtime::mcp::client::McpEndpoint;
 use regex::Regex;
 use serde_json::{json, Value};

@@ -5,10 +5,10 @@
 use crate::lines::{note_text, Lines};
 use async_trait::async_trait;
 use kumi_common::abort::Signal;
+use kumi_daw_own::changes::OwnPlan;
 use kumi_runtime::core::jam::backend::{Edit, JamBackend, Words};
 use kumi_runtime::core::jam::{Hit, Part, TrackPart};
 use kumi_runtime::core::refs::RefScheme;
-use kumi_runtime::integrations::own_changes::OwnPlan;
 use serde_json::{json, Value};
 use std::rc::Rc;
 

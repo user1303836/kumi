@@ -2,29 +2,10 @@
 //! one integration over the host's tools (`status`, `snapshot`, `read`, `focus`, `focus_body`), each DAW giving its
 //! words, its refs and its instructions.
 use crate::{
-    core::{
-        context::IntegrationContext,
-        contracts::*,
-        daw::DawProfile,
-        errors::{FailureKind, KumiError, RuntimeError},
-        fold::fold_tracks_with,
-        phrases::{Intent, PhraseTrack},
-        place::{is_project_id, unsaved, Place},
-        plan::make_changes,
-        project::{decide_project_with, ProjectRules},
-        refs::{Book, Moved, RefScheme, Shift},
-        view::{BodyKind, BodyRequest, DawFocus, FocusBody},
-    },
-    integrations::{
-        none::no_access,
-        own_catchup::{CatchUpWords, Remembered, WatchTool, CLOSE_MS},
-        own_changes::{Ending, Link, OwnPlan},
-        own_listening::{Flags, OwnListening},
-        own_phrases::{PhraseLook, Phrased},
-    },
-    library::taste,
-    mcp::client::{connect_mcp, BridgeDescriptor, McpEndpoint, Options},
-    mcp::types::{CallToolResult, ContentBlock},
+    catchup::{CatchUpWords, Remembered, WatchTool, CLOSE_MS},
+    changes::{Ending, Link, OwnPlan},
+    listening::{Flags, OwnListening},
+    phrases::{PhraseLook, Phrased},
 };
 use async_trait::async_trait;
 use chrono::{SecondsFormat, Utc};
@@ -33,6 +14,29 @@ use kumi_common::{
     abort::{self, Signal, SignalExt},
     js::json::stringify,
     time::perf_now,
+};
+use kumi_library::taste;
+use kumi_runtime::{
+    core::{
+        context::IntegrationContext,
+        contracts::*,
+        fold::fold_tracks_with,
+        phrases::{Intent, PhraseTrack},
+        plan::make_changes,
+        project::{decide_project_with, ProjectRules},
+        refs::{Book, Moved, RefScheme, Shift},
+        view::{BodyKind, BodyRequest, DawFocus, FocusBody},
+    },
+    integrations::none::no_access,
+    mcp::{
+        client::{connect_mcp, BridgeDescriptor, McpEndpoint, Options},
+        types::{CallToolResult, ContentBlock},
+    },
+};
+use kumi_types::{
+    daw::DawProfile,
+    errors::{FailureKind, KumiError, RuntimeError},
+    place::{is_project_id, unsaved, Place},
 };
 use regex::Regex;
 use serde_json::{json, Value};
@@ -76,15 +80,15 @@ pub struct OwnDaw {
     pub body_request: fn(&BodyRequest) -> Option<JsonObject>,
     pub to_body: fn(&BodyRequest, &Value) -> Option<FocusBody>,
     /// What Kumi can change in it, and how.
-    pub changes: &'static super::own_changes::OwnChangeSet,
+    pub changes: &'static crate::changes::OwnChangeSet,
     /// M6: what catch-up and watch_me say of its projects, and how a watched routine is drafted as a recipe.
     pub catch_up: &'static CatchUpWords,
     /// How it makes the fixed phrases ("tempo 124", "mute drums") with no model call.
-    pub phrases: &'static super::own_phrases::OwnPhrases,
+    pub phrases: &'static crate::phrases::OwnPhrases,
     /// (#401) What its kept scripts are in, become, and take by their place (lint rules).
-    pub scripts: &'static crate::core::scripts::backend::Words,
+    pub scripts: &'static kumi_runtime::core::scripts::backend::Words,
     /// (#401) Its facts for delivery to a spec: its master's row and fader, and what limits or raises the master.
-    pub spec: &'static super::own_spec::OwnSpecFacts,
+    pub spec: &'static crate::spec::OwnSpecFacts,
 }
 
 /// Starts Kumi's host for a DAW: the production one runs `daw-mcp-server`; a test's stand-in answers in its place.
@@ -295,7 +299,7 @@ const FLAGS_FRESH: std::time::Duration = std::time::Duration::from_secs(20);
 /// renders with, and Kumi's folder.
 pub struct OwnParts<S: RefScheme + 'static> {
     pub changes: Rc<OwnPlan<S>>,
-    pub renderer: Rc<super::own_listening::OwnRenderer<S>>,
+    pub renderer: Rc<crate::listening::OwnRenderer<S>>,
     pub kumi_home: PathBuf,
 }
 
@@ -361,33 +365,33 @@ pub fn create_own_integration<S: RefScheme + 'static>(
         own_tools(&OwnParts { changes: changes.clone(), renderer: listening.renderer.clone(), kumi_home: options.kumi_home.clone() });
     // (#401) kept scripts, where the DAW offers them: Kumi's copies in its folder, one a DAW
     let scripts: Option<Rc<dyn KernelTool>> = daw.profile.caps.scripts.then(|| {
-        let backend = super::own_scripts::OwnScripts::new(changes.clone(), daw.scripts);
-        crate::core::scripts::tool::Scripts::new(backend, options.kumi_home.join("scripts").join(daw.host_flag)).tool()
+        let backend = crate::scripts::OwnScripts::new(changes.clone(), daw.scripts);
+        kumi_runtime::core::scripts::tool::Scripts::new(backend, options.kumi_home.join("scripts").join(daw.host_flag)).tool()
     });
     // (#401) delivery to a spec, where the DAW offers it
     let spec: Option<Rc<dyn KernelTool>> = daw.profile.caps.delivery_spec.then(|| {
-        let backend = super::own_spec::OwnSpec::new(changes.clone(), listening.renderer.clone(), daw.spec);
-        crate::core::spec::tool::DeliverySpec::new(backend).tool()
+        let backend = crate::spec::OwnSpec::new(changes.clone(), listening.renderer.clone(), daw.spec);
+        kumi_runtime::core::spec::tool::DeliverySpec::new(backend).tool()
     });
     // (#401) audio to MIDI, where the DAW offers it through Kumi's own ears
     let to_midi: Option<Rc<dyn KernelTool>> = match (daw.profile.caps.audio_to_midi, daw.profile.id) {
-        (true, Some(crate::core::daw::DawId::Reaper)) => Some(super::own_ears::Daw::Reaper),
-        (true, Some(crate::core::daw::DawId::Renoise)) => Some(super::own_ears::Daw::Renoise),
+        (true, Some(kumi_types::daw::DawId::Reaper)) => Some(crate::ears::Daw::Reaper),
+        (true, Some(kumi_types::daw::DawId::Renoise)) => Some(crate::ears::Daw::Renoise),
         _ => None,
     }
     .map(|which| {
-        let backend = super::own_ears::OwnEars::new(changes.clone(), listening.renderer.clone(), which);
-        crate::core::to_midi::tool::ToMidi::new(backend).tool()
+        let backend = crate::ears::OwnEars::new(changes.clone(), listening.renderer.clone(), which);
+        kumi_runtime::core::to_midi::tool::ToMidi::new(backend).tool()
     });
     // (#401) stems, where the DAW splits by Kumi's own splitter
     let stems: Option<Rc<dyn KernelTool>> = match (daw.profile.caps.stems, daw.profile.id) {
-        (true, Some(crate::core::daw::DawId::Reaper)) => Some(super::own_ears::Daw::Reaper),
-        (true, Some(crate::core::daw::DawId::Renoise)) => Some(super::own_ears::Daw::Renoise),
+        (true, Some(kumi_types::daw::DawId::Reaper)) => Some(crate::ears::Daw::Reaper),
+        (true, Some(kumi_types::daw::DawId::Renoise)) => Some(crate::ears::Daw::Renoise),
         _ => None,
     }
     .map(|which| {
-        let backend = super::own_ears::OwnEars::new(changes.clone(), listening.renderer.clone(), which);
-        crate::core::stems::tool::Stems::new(backend).tool()
+        let backend = crate::ears::OwnEars::new(changes.clone(), listening.renderer.clone(), which);
+        kumi_runtime::core::stems::tool::Stems::new(backend).tool()
     });
     let kumi_home = options.kumi_home.clone();
     Rc::new(OwnIntegration::<S> {
@@ -877,7 +881,7 @@ impl<S: RefScheme + 'static> OwnIntegration<S> {
                 }
                 if playing || transport != last_transport {
                     if let Some(on_transport) = &on_transport {
-                        on_transport(crate::integrations::own_views::transport(&focus, perf_now()));
+                        on_transport(crate::views::transport(&focus, perf_now()));
                     }
                     last_transport = transport;
                 }
@@ -1147,7 +1151,7 @@ impl<S: RefScheme + 'static> OwnIntegration<S> {
         observation
     }
 
-    fn id(&self) -> crate::core::daw::DawId {
+    fn id(&self) -> kumi_types::daw::DawId {
         self.daw.profile.id.expect("a DAW with a bridge of Kumi's own is known")
     }
 
@@ -1223,7 +1227,7 @@ impl<S: RefScheme + 'static> OwnIntegration<S> {
         if let Some(total) = total.filter(|total| *total as usize > listed) {
             context["moreTracks"] = json!(format!(
                 "{} tracks in all, {listed} listed here; {read_tool} kind track pages through every one",
-                crate::notation::thousands(total as usize)
+                kumi_listening::notation::thousands(total as usize)
             ));
         } else if snapshot.get("moreTracks") == Some(&Value::Bool(true)) {
             context["moreTracks"] = json!(format!("Not every track is listed here; {read_tool} kind track pages through every one"));
@@ -1238,7 +1242,7 @@ impl<S: RefScheme + 'static> OwnIntegration<S> {
             if total > shown {
                 context["moreMarkers"] = json!(format!(
                     "{} more markers; {read_tool} kind marker pages through every one",
-                    crate::notation::thousands(total - shown)
+                    kumi_listening::notation::thousands(total - shown)
                 ));
             }
         } else if !markers.is_null() {

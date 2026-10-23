@@ -1,12 +1,16 @@
 //! REAPER, through Kumi's extension and host: its refs (REAPER's GUIDs, which hold across reloads), its read tool and
 //! its instructions, the tools only REAPER has (variations of its items, delivery, routing), and where its library is.
-//! The integration itself is the one every bridge of Kumi's own shares (`own_bridge`).
+//! The integration itself is the one every bridge of Kumi's own shares (`kumi_daw_own::bridge`).
 pub mod changes;
 mod delivery;
 pub mod library;
 mod routing;
 mod variations;
 
+use kumi_daw_own::bridge::{create_own_integration, OwnDaw, OwnOptions, OwnTools};
+use kumi_daw_own::catchup::{as_read, CatchUpWords, Mixer, RecipeKinds};
+use kumi_daw_own::phrases::{bar_span, track, OwnPhrases, PhraseLook, Phrased};
+use kumi_daw_own::views::{self as own_views, body_args, focus_track, selected, view};
 use kumi_runtime::core::{
     contracts::{Integration, JsonObject},
     daw::DawProfile,
@@ -16,10 +20,6 @@ use kumi_runtime::core::{
     refs::{Moved, RefScheme, Shift},
     view::{BodyKind, BodyRequest, DawFocus, FocusBody, FocusItem, FocusParameter, ItemKind, ViewKind, ViewPresentation},
 };
-use kumi_runtime::integrations::own_bridge::{create_own_integration, OwnDaw, OwnOptions, OwnTools};
-use kumi_runtime::integrations::own_catchup::{as_read, CatchUpWords, Mixer, RecipeKinds};
-use kumi_runtime::integrations::own_phrases::{bar_span, track, OwnPhrases, PhraseLook, Phrased};
-use kumi_runtime::integrations::own_views::{self, body_args, focus_track, selected, view};
 use kumi_runtime::mcp::client::BridgeDescriptor;
 use regex::Regex;
 use serde_json::{json, Value};
@@ -62,7 +62,7 @@ pub const DAW: OwnDaw = OwnDaw {
 };
 
 /// (#401) Delivery to a spec in REAPER: the master's row and fader, and what limits or raises it.
-static SPEC: kumi_runtime::integrations::own_spec::OwnSpecFacts = kumi_runtime::integrations::own_spec::OwnSpecFacts {
+static SPEC: kumi_daw_own::spec::OwnSpecFacts = kumi_daw_own::spec::OwnSpecFacts {
     words: kumi_runtime::core::spec::backend::Words {
         app: "REAPER",
         fader_most: 24.,

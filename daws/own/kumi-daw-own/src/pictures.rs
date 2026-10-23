@@ -2,10 +2,10 @@
 //! bridge answered: what was there (the preview's `prior` and `display`) and what's there now (the apply's `applied` and
 //! `display`), in the DAW's own words. A tracker's lines, an envelope's or automation's points, the parameters that
 //! moved, a route between tracks, a keyzone, items on the timeline, and the settings that moved.
-use crate::core::{
-    contracts::{ChangePicture, ClipNote, DevicePlacement, PictureItem, PictureLine, PictureRoute, PictureValue, PictureZone, RouteChange},
-    daw::DawProfile,
+use kumi_runtime::core::contracts::{
+    ChangePicture, ClipNote, DevicePlacement, PictureItem, PictureLine, PictureRoute, PictureValue, PictureZone, RouteChange,
 };
+use kumi_types::daw::DawProfile;
 use serde_json::{Map, Value};
 use std::collections::BTreeMap;
 

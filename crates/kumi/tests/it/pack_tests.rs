@@ -1,9 +1,9 @@
 //! What REAPER's and Renoise's turns tell the model (each DAW's instructions, with its pack of power users' rules, and its
 //! tools' descriptions): held to the budget Live's instructions keep, in the DAW's own words, and claiming nothing the
 //! DAW lacks.
+use kumi_daw_own::bridge::{instructions_of, OwnDaw};
 use kumi_daw_reaper as reaper;
 use kumi_daw_renoise as renoise;
-use kumi_runtime::integrations::own_bridge::{instructions_of, OwnDaw};
 use regex::Regex;
 
 const DAWS: [&OwnDaw; 2] = [&reaper::DAW, &renoise::DAW];
@@ -137,7 +137,7 @@ fn the_shared_rules_are_written_once_and_composed_into_each_daw() {
     ];
     let source = |file: &str| std::fs::read_to_string(format!("{}/../../{file}", env!("CARGO_MANIFEST_DIR"))).unwrap();
     let sources = [
-        source("crates/kumi-runtime/src/integrations/own_bridge.rs"),
+        source("daws/own/kumi-daw-own/src/bridge.rs"),
         source("daws/reaper/kumi-daw-reaper/src/lib.rs"),
         source("daws/renoise/kumi-daw-renoise/src/lib.rs"),
     ];

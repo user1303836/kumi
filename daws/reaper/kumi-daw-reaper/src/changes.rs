@@ -1,8 +1,8 @@
 //! What Kumi can change in REAPER (M3, M4): tracks, sends, markers and regions, the tempo map and loop, FX in every chain
 //! (containers, presets, chain files, parameter modulation) and their parameters, envelopes and automation items, and a
 //! take's MIDI notes. Each kind is the extension's (`daws/reaper/reaper-kumi/src/changes`).
+use kumi_daw_own::changes::{OwnAction, OwnChangeSet, OwnKind, Picture};
 use kumi_runtime::core::contracts::ChangeFamily::*;
-use kumi_runtime::integrations::own_changes::{OwnAction, OwnChangeSet, OwnKind, Picture};
 
 const PLAN: &str = "Make changes in REAPER in one call, in order: each step is one of your change tools or a step below with its input, and \"@name\" in an input stands for what an earlier step marked as: \"name\" made (a new track, an added FX, a new marker). A wait step ({\"beats\": 8} or {\"seconds\": 4}) pauses between steps. REAPER takes the whole call back with one undo. It stops at the first step that fails and says what was done. With final: true and every step done, Kumi tells the producer what changed and the answer ends there, with no reply from you: use it when the changes complete the request, even a single change.";
 const UNDO: &str = "Undo one of your changes from this session: pass its change id (such as c3), or \"last\" for the latest one. Kumi puts back exactly what that change set, as a new step of REAPER's undo; it only works while nobody changed the same thing in REAPER since, and if so, say what happened (discard: true puts it back anyway, only when the producer asks). With final: true, when the undo is all that was asked, Kumi tells the producer and the answer ends there, with no reply from you.";

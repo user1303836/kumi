@@ -7,9 +7,9 @@ use std::path::PathBuf;
 
 use daw_bridge::detect::{detect_renoise, Env, Os};
 use daw_bridge::install::RENOISE_TOOL_FOLDER;
+use kumi_daw_own::library::{os_of, source};
 use kumi_library::daws::LibrarySources;
 use kumi_library::sources::{env_of, home_of, is_folder, join, Source, SourceKind, SourceOptions};
-use kumi_runtime::integrations::own_library::{os_of, source};
 use kumi_types::daw::DawProfile;
 
 /// Renoise's library: its own Library and User Library, for the newest version Kumi's tool is in.

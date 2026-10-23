@@ -491,13 +491,13 @@ async fn own_session(
     daw: daw_bridge::Daw,
     profile: DawProfile,
     config: impl FnOnce(daw_bridge::auth::Secret) -> daw_mcp_server::simulator::SimulatorConfig,
-    create: fn(kumi_runtime::integrations::own_bridge::OwnOptions) -> Rc<dyn Integration>,
+    create: fn(kumi_daw_own::bridge::OwnOptions) -> Rc<dyn Integration>,
     steps: Vec<Step>,
 ) -> (Vec<String>, Vec<ChangeRecord>, Option<ChangeRecord>) {
     use daw_bridge::{files::ensure_secret, paths::BridgePaths};
     use daw_mcp_server::{host::Host, simulator::Simulator};
+    use kumi_daw_own::bridge::{Connect, OwnOptions};
     use kumi_runtime::core::context::IntegrationContext;
-    use kumi_runtime::integrations::own_bridge::{Connect, OwnOptions};
     let dir = tempfile::tempdir().unwrap();
     let paths = BridgePaths::new(dir.path(), daw);
     let mut config = config(ensure_secret(&paths.secret()).unwrap());

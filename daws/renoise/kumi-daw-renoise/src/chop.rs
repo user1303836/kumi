@@ -7,11 +7,11 @@
 use crate::lines::note_text;
 use async_trait::async_trait;
 use kumi_common::abort::Signal;
+use kumi_daw_own::changes::OwnPlan;
+use kumi_daw_own::listening::OwnRenderer;
 use kumi_listening::renderer::{Renderer, Window};
 use kumi_runtime::core::chop::backend::{ChopBackend, Key, Laid, Recording, Song, Step, Words};
 use kumi_runtime::core::refs::RefScheme;
-use kumi_runtime::integrations::own_changes::OwnPlan;
-use kumi_runtime::integrations::own_listening::OwnRenderer;
 use serde_json::{json, Value};
 use std::rc::Rc;
 

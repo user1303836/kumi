@@ -2,25 +2,24 @@
 //! each candidate track is searched on a scratch copy of it that never reaches the master, every generation's copies
 //! rendered offline in one job and scored against the reference, so the producer's tracks stay as they are until the
 //! search settles. The best is kept on a track of its own ("Kumi · Goal best") and played out loud: the winner is heard.
-use super::own_listening::{DeviceRow, OwnRenderer};
-use crate::{
-    audio::{
-        self,
-        analyze::Analysis,
-        matching::{closeness, Focus},
-    },
-    core::{contracts::*, errors::RuntimeError, evolve::Knob, refs::RefScheme},
-    listening::{
-        engine::{heard_options, silent_render, Listening},
-        renderer::{Renderer, Window},
-    },
-};
+use crate::listening::{DeviceRow, OwnRenderer};
 use async_trait::async_trait;
 use indexmap::IndexMap;
 use kumi_common::{
     abort::{self, Signal, SignalExt},
     js::number::to_fixed,
 };
+use kumi_listening::{
+    engine::{heard_options, silent_render, Listening},
+    renderer::{Renderer, Window},
+};
+use kumi_media::audio::{
+    self,
+    analyze::Analysis,
+    matching::{closeness, Focus},
+};
+use kumi_runtime::core::{contracts::*, evolve::Knob, refs::RefScheme};
+use kumi_types::errors::RuntimeError;
 use serde_json::{json, Value};
 use std::{
     cell::{Cell, RefCell},
@@ -268,7 +267,7 @@ impl<S: RefScheme + 'static> OwnGoalRig<S> {
         };
         r.keep_copy(copy_name.clone(), &copy_ref);
         r.tell_scratch_steps(made.pointer("/undo/steps").and_then(Value::as_u64).unwrap_or(0));
-        for note in super::own_listening::notes_of(&made) {
+        for note in crate::listening::notes_of(&made) {
             r.tell_app(&note);
         }
         let chain = devices.iter().map(|device| device.name.clone()).collect::<Vec<_>>().join(" → ");
@@ -327,7 +326,7 @@ impl<S: RefScheme + 'static> OwnGoalRig<S> {
                     name,
                     min,
                     max,
-                    step: super::own_listening::steps_of(row).map(|steps| (max - min) / (steps - 1) as f64),
+                    step: crate::listening::steps_of(row).map(|steps| (max - min) / (steps - 1) as f64),
                     value: number("value").unwrap_or(min),
                 };
                 places.insert(key(&knob), (device.index, index));
@@ -572,7 +571,7 @@ impl<S: RefScheme + 'static> OwnGoalRig<S> {
     fn device_now<'a>(&self, knob: &Knob, chain: &'a [DeviceRow]) -> Option<(usize, &'a DeviceRow)> {
         let lasting = !self.renderer.link.book.borrow().scheme.positional();
         if lasting {
-            if let Some(device) = super::own_listening::device_of_param(&knob.r#ref) {
+            if let Some(device) = crate::listening::device_of_param(&knob.r#ref) {
                 return chain.iter().enumerate().find(|(_, row)| row.reference == device);
             }
         }

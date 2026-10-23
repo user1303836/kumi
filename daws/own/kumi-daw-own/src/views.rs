@@ -1,7 +1,7 @@
 //! FOCUS's bodies from Kumi's host's `focus_body` answers (the M2 contract, §5), the same for every DAW whose bridge is
 //! Kumi's own: a device tree from nodes, a take's notes, the timeline with its lanes, a tracker grid, the sequence, an
 //! instrument's keyzones, a track's routing.
-use crate::core::{
+use kumi_runtime::core::{
     contracts::{ClipNote, JsonObject},
     view::*,
 };

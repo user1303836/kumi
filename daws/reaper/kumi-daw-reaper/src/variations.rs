@@ -5,6 +5,8 @@
 //! them, and heard as their track plays them. Core's tool does the rest.
 use async_trait::async_trait;
 use kumi_common::abort::Signal;
+use kumi_daw_own::changes::OwnPlan;
+use kumi_daw_own::listening::OwnRenderer;
 use kumi_runtime::core::{
     contracts::JsonObject,
     refs::RefScheme,
@@ -19,8 +21,6 @@ use kumi_runtime::core::{
         Material, Rng, TakeSet,
     },
 };
-use kumi_runtime::integrations::own_changes::OwnPlan;
-use kumi_runtime::integrations::own_listening::OwnRenderer;
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
