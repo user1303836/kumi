@@ -9,7 +9,7 @@ members = [
     "crates/kumi",
     "daws/own/daw-bridge",
     "daws/own/daw-mcp-server",
-    "crates/reaper-kumi",
+    "daws/reaper/reaper-kumi",
     "crates/kumi-testkit",
 ]
 

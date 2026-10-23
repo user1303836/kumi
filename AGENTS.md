@@ -15,7 +15,8 @@ It's one Cargo workspace. Each DAW is reached through a bridge that runs inside 
   `max-standard/` is the standard Kumi holds Max patches to (data Kumi builds in).
 - `daws/own/`: Kumi's own bridges, for REAPER and Renoise: `daw-bridge/` (the `kumi-daw/1` wire) and
   `daw-mcp-server/` (the host; what's one DAW's alone is in its `src/reaper/` and `src/renoise/`).
-- `crates/reaper-kumi`: REAPER's extension. `daws/renoise/com.kumi.Bridge.xrnx`: Renoise's tool (Lua).
+- `daws/reaper/reaper-kumi`: REAPER's extension (Rust, built against REAPER's SDK headers in its `sdk/`).
+- `daws/renoise/`: Renoise's tool, `com.kumi.Bridge.xrnx` (Lua), and its tests against a mock of Renoise's API.
 - `crates/kumi-store` (SQLite), `kumi-common` (shared utilities), `kumi-genexpr` (gen~ test interpreter).
 - `plugin-formats/`: the plug-in preset formats Kumi reads (data Kumi builds in).
 - `crates/kumi-testkit`: what tests share (a dev-dependency only): `workspace_path`, `chunked!`, `fixture_paths!`,

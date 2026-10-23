@@ -167,7 +167,7 @@ jobs:
         run: |
           set -euo pipefail
           git clone -q --depth 1 https://github.com/justinfrankel/reaper-sdk "$RUNNER_TEMP/reaper-sdk"
-          newest="$RUNNER_TEMP/reaper-sdk/sdk" vendored=crates/reaper-kumi/sdk
+          newest="$RUNNER_TEMP/reaper-sdk/sdk" vendored=daws/reaper/reaper-kumi/sdk
           # Every function a header declares, by its loader table's names; and each one's prototype, spaces folded.
           names() { grep -o '{(void\*\*)&REAPERAPI_FUNCNAME([A-Za-z0-9_]*)' "$1/reaper_plugin_functions.h" | sed 's/.*(//; s/)$//' | LC_ALL=C sort; }
           protos() { grep -E '\(\*REAPERAPI_FUNCNAME\([A-Za-z0-9_]+\)\)\(' "$1/reaper_plugin_functions.h" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+/ /g' | LC_ALL=C sort -u; }

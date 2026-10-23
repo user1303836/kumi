@@ -19,7 +19,7 @@ What ships is read from main since the last release tag:
   and Markdown aside). A dependency change can change the host too: the dry run says so, and --bridge gives the
   bridge a new version then. --no-bridge keeps it.
 - REAPER's extension and Renoise's tool get new versions the same way, each when a pull request changes what its DAW
-  loads: the extension (crates/reaper-kumi, and daw-bridge, which it links) or the tool (daws/renoise's
+  loads: the extension (daws/reaper/reaper-kumi, and daw-bridge, which it links) or the tool (daws/renoise's
   com.kumi.Bridge.xrnx). --reaper and --renoise give one a new version whatever changed; --no-reaper and --no-renoise
   keep it. A pull request that changes one of them and nothing else that ships has its lines under that one's
   heading, as do lines written "Changelog (reaper):" or "Changelog (renoise):". --no-bridge is only Live's.
@@ -56,7 +56,7 @@ if native is None:
 BRIDGE = ("daws/ableton/ableton-mcp-server/", "crates/kumi-common/", "daws/ableton/remote-script/", "daws/ableton/protocol/",
           "daws/ableton/live-extension/", "vendor/willington/")
 # The same for REAPER's extension, and the parts of daw-bridge it links (its own wire, handshake, auth, discovery and
-# files: `rg daw_bridge:: crates/reaper-kumi/src`, and what those use), and for Renoise's tool (their tests and examples
+# files: `rg daw_bridge:: daws/reaper/reaper-kumi/src`, and what those use), and for Renoise's tool (their tests and examples
 # aside too). The rest of daw-bridge (the lifecycle, detection, the doctor, installing) is Kumi's alone.
 REAPER = (native.REAPER_CRATE + "/", "daws/own/daw-bridge/Cargo.toml", *(f"daws/own/daw-bridge/src/{name}.rs" for name in (
     "lib", "auth", "contract", "daw", "files", "frame", "handshake", "loopback", "owner", "paths", "wire")))
@@ -550,7 +550,7 @@ def pr_body(plan: Plan, changes: list[Change], head: str, left: list[str]) -> st
         lines += ["", f"{', '.join(quiet)}: no changelog line (CI, docs, tests or dependencies)."]
     bridge = "" if plan.same_bridge else f" The bridge goes {plan.bridge} → {plan.new_bridge}."
     moved = [f"- {DAWS[name][0]} {plan.daw(name)[0]} → {plan.daw(name)[1]} in "
-             + ("`crates/reaper-kumi/Cargo.toml` and Cargo.lock." if name == "reaper" else "the tool's `payload/version.lua` and its manifest's Version.")
+             + ("`daws/reaper/reaper-kumi/Cargo.toml` and Cargo.lock." if name == "reaper" else "the tool's `payload/version.lua` and its manifest's Version.")
              for name in plan.moved()]
     lines += [
         "", "### Set here",

@@ -250,11 +250,11 @@ class Notes(unittest.TestCase):
 
 class DawSorting(unittest.TestCase):
     def test_what_reaper_and_renoise_load_is_their_bridges(self):
-        for path in ("crates/reaper-kumi/src/lib.rs", "crates/reaper-kumi/build.rs", "crates/reaper-kumi/sdk/reaper_plugin.h",
-                     "crates/reaper-kumi/Cargo.toml", "daws/own/daw-bridge/src/wire.rs"):
+        for path in ("daws/reaper/reaper-kumi/src/lib.rs", "daws/reaper/reaper-kumi/build.rs", "daws/reaper/reaper-kumi/sdk/reaper_plugin.h",
+                     "daws/reaper/reaper-kumi/Cargo.toml", "daws/own/daw-bridge/src/wire.rs"):
             self.assertTrue(release.ships_reaper(path), path)
-        for path in ("crates/reaper-kumi/tests/it/loads.rs", "crates/reaper-kumi/src/changes/tests.rs",
-                     "crates/reaper-kumi/examples/accept_reaper.rs", "crates/reaper-kumi/sdk/SOURCE.md",
+        for path in ("daws/reaper/reaper-kumi/tests/it/loads.rs", "daws/reaper/reaper-kumi/src/changes/tests.rs",
+                     "daws/reaper/reaper-kumi/examples/accept_reaper.rs", "daws/reaper/reaper-kumi/sdk/SOURCE.md",
                      "daws/own/daw-bridge/tests/it/vectors.rs", "daws/own/daw-mcp-server/src/host.rs", "daws/renoise/tests/test_changes.lua"):
             self.assertFalse(release.ships_reaper(path), path)
         # daw-bridge's parts the extension doesn't link are Kumi's alone: a fix there is no new extension.
@@ -266,15 +266,15 @@ class DawSorting(unittest.TestCase):
         for path in ("daws/renoise/com.kumi.Bridge.xrnx/payload/changes.lua", "daws/renoise/com.kumi.Bridge.xrnx/manifest.xml",
                      "daws/renoise/com.kumi.Bridge.xrnx/main.lua"):
             self.assertTrue(release.ships_renoise(path), path)
-        for path in ("daws/renoise/tests/test_changes.lua", "daws/renoise/tests/mock_song.lua", "crates/reaper-kumi/src/lib.rs"):
+        for path in ("daws/renoise/tests/test_changes.lua", "daws/renoise/tests/mock_song.lua", "daws/reaper/reaper-kumi/src/lib.rs"):
             self.assertFalse(release.ships_renoise(path), path)
         # Neither is Live's bridge.
-        self.assertFalse(release.ships_bridge("crates/reaper-kumi/src/lib.rs") or release.ships_bridge("daws/renoise/com.kumi.Bridge.xrnx/main.lua"))
+        self.assertFalse(release.ships_bridge("daws/reaper/reaper-kumi/src/lib.rs") or release.ships_bridge("daws/renoise/com.kumi.Bridge.xrnx/main.lua"))
 
     def test_changelog_lines_go_to_the_daw_whose_bridge_alone_changed(self):
-        reaper, renoise = ["crates/reaper-kumi/src/changes/items.rs"], ["daws/renoise/com.kumi.Bridge.xrnx/payload/changes.lua"]
+        reaper, renoise = ["daws/reaper/reaper-kumi/src/changes/items.rs"], ["daws/renoise/com.kumi.Bridge.xrnx/payload/changes.lua"]
         line = "Changelog: A new thing."
-        self.assertEqual(release.classify(1, line, reaper + ["crates/reaper-kumi/src/changes/tests.rs", "docs/en/X.md"]).lines,
+        self.assertEqual(release.classify(1, line, reaper + ["daws/reaper/reaper-kumi/src/changes/tests.rs", "docs/en/X.md"]).lines,
                          [("reaper", "A new thing.")])
         self.assertEqual(release.classify(2, line, renoise + ["daws/renoise/tests/test_changes.lua"]).lines, [("renoise", "A new thing.")])
         for paths in (reaper + renoise, reaper + ["crates/kumi/src/daw/own.rs"], renoise + ["daws/own/daw-mcp-server/src/tools.rs"],
@@ -302,7 +302,7 @@ class DawPlans(unittest.TestCase):
         with patch.object(release, "versions_at", side_effect=versions_at):
             return release.plan_release(args, "HEAD", "v1.19.3", changes)
 
-    REAPER = ("Changelog: The extension does Y.", ["crates/reaper-kumi/src/changes/items.rs"])
+    REAPER = ("Changelog: The extension does Y.", ["daws/reaper/reaper-kumi/src/changes/items.rs"])
     RENOISE = ("Changelog: The tool does Z.", ["daws/renoise/com.kumi.Bridge.xrnx/payload/changes.lua"])
     LIVE = ("Changelog: The bridge does X.", ["daws/ableton/ableton-mcp-server/src/host/clip.rs"])
     KUMI = ("Changelog: Kumi does W.", ["crates/kumi/src/lib.rs"])
@@ -432,9 +432,9 @@ class DawEdits(unittest.TestCase):
                                brought=["reaper", "renoise"])
         self.assertIn("no restart. Brings REAPER extension **0.1.0** and Renoise tool **1.0.0**: `kumi --daw reaper bridge` and "
                       "`kumi --daw renoise bridge` put them in.\n", release.notes(brought, "Tested with Live.", None))
-        body = release.pr_body(both, [release.classify(7, "Changelog: The extension does Y.", ["crates/reaper-kumi/src/lib.rs"])], "a" * 40, [])
+        body = release.pr_body(both, [release.classify(7, "Changelog: The extension does Y.", ["daws/reaper/reaper-kumi/src/lib.rs"])], "a" * 40, [])
         self.assertIn(f"- **REAPER extension 9.9.9**\n  - #7: The extension does Y.\n- **Renoise tool 1.0.1**\n  - no line of its own", body)
-        self.assertIn(f"- REAPER extension {reaper_now} → 9.9.9 in `crates/reaper-kumi/Cargo.toml` and Cargo.lock.", body)
+        self.assertIn(f"- REAPER extension {reaper_now} → 9.9.9 in `daws/reaper/reaper-kumi/Cargo.toml` and Cargo.lock.", body)
         self.assertIn(f'- "1.20.0" or "{reaper_now}" or "1.0.0" left outside', body)
         # A bridge kept at its version: its lines are listed under Kumi's.
         renoise_only = release.classify(8, "Changelog: The tool does Z.", ["daws/renoise/com.kumi.Bridge.xrnx/payload/changes.lua"])

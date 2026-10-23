@@ -29,7 +29,7 @@ BINARIES = ("kumi", *BRIDGE_BINARIES, "daw-mcp-server", "kumi-harness", "kumi-li
 # id. The extension's version is its crate's, in a file beside it.
 DAWS = "daws"
 REAPER_EXTENSION = "reaper_kumi"
-REAPER_CRATE = "crates/reaper-kumi"
+REAPER_CRATE = "daws/reaper/reaper-kumi"
 RENOISE_TOOL = "com.kumi.Bridge.xrnx"
 RENOISE_TOOL_SOURCE = "daws/renoise/com.kumi.Bridge.xrnx"
 RENOISE_TOOL_ID = "com.kumi.Bridge"

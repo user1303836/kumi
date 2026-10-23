@@ -55,7 +55,7 @@ feeds = ["kumi-runtime", "kumi"]
 
 # REAPER's extension as it ships: its crate and the release script's check of what a bundle may carry.
 [reaper-extension]
-paths = ["crates/reaper-kumi/**", "scripts/build-native-release.py"]
+paths = ["daws/reaper/reaper-kumi/**", "scripts/build-native-release.py"]
 
 # What Kumi builds in as data: the standard Max patchers are held to, and the plug-in formats it reads.
 [data]
@@ -125,11 +125,11 @@ paths = [
   "daws/own/daw-bridge/src/paths.rs",
   "daws/own/daw-mcp-server/Cargo.toml",
   "daws/own/daw-mcp-server/src/bin/**",
-  "crates/reaper-kumi/build.rs",
-  "crates/reaper-kumi/Cargo.toml",
-  "crates/reaper-kumi/shim/**",
-  "crates/reaper-kumi/sdk/**",
-  "crates/reaper-kumi/src/lib.rs",
+  "daws/reaper/reaper-kumi/build.rs",
+  "daws/reaper/reaper-kumi/Cargo.toml",
+  "daws/reaper/reaper-kumi/shim/**",
+  "daws/reaper/reaper-kumi/sdk/**",
+  "daws/reaper/reaper-kumi/src/lib.rs",
   "daws/renoise/com.kumi.Bridge.xrnx/manifest.xml",
   "daws/renoise/com.kumi.Bridge.xrnx/main.lua",
   "daws/renoise/com.kumi.Bridge.xrnx/payload/version.lua",

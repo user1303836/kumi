@@ -17,7 +17,7 @@
 | `daws/ableton/protocol` | `ableton-live-v1.operations.json`。ブリッジと Remote Script が共有する操作のレジストリ |
 | `scripts` | リリースのビルダー、移行用のパッケージング、Mac のヘルパーのビルド、分離テストランナー、そして `npm run kumi` と `npm run setup` が使う `native-kumi.mjs` |
 | `daws/own/daw-mcp-server` | REAPER と Renoise のための Kumi のホスト（`daw-mcp-server --daw reaper\|renoise`）：stdio 上の MCP、変更のジャーナルと取り消し、聴くジョブ、離れていた間の変化。ほかの MCP クライアントからも使えます |
-| `crates/reaper-kumi` | Kumi の REAPER 拡張機能（`reaper_kumi`）。`sdk/` に同梱した REAPER の SDK ヘッダーでビルドします |
+| `daws/reaper/reaper-kumi` | Kumi の REAPER 拡張機能（`reaper_kumi`）。`sdk/` に同梱した REAPER の SDK ヘッダーでビルドします |
 | `daws/own/daw-bridge` | REAPER と Renoise のブリッジが共有するもの：ループバックの通信（`kumi-daw/1`）、そのハンドシェイクと認証、ディスカバリー、DAW の検出、doctor のチェック、ブリッジのファイルのライフサイクル |
 | `daws/renoise` | Kumi の Renoise ツール（`com.kumi.Bridge.xrnx`、Lua）と、Renoise の API のモックに対するそのテスト |
 | `install.sh`、`install.ps1` | インストーラー |
@@ -43,7 +43,7 @@ kumi (crates/kumi, crates/kumi-runtime)
   ▼
 host (daws/own/daw-mcp-server --daw reaper|renoise)
   │  kumi-daw/1: authenticated TCP on 127.0.0.1 (daws/own/daw-bridge)
-  ├──► Kumi's REAPER extension (crates/reaper-kumi), in REAPER's UserPlugins
+  ├──► Kumi's REAPER extension (daws/reaper/reaper-kumi), in REAPER's UserPlugins
   └──► Kumi's Renoise tool (daws/renoise), in Renoise's Scripts/Tools
 ```
 
@@ -169,7 +169,7 @@ python3 scripts/release.py --go     # リリース
 - **出荷するもの**は、前回のタグ以降の `main` から読み取ります。マージされた各プルリクエストの `Changelog:` の行を、書かれたとおりに使います（"none" は何も加えません）。プルリクエストがブリッジを変え、Kumi のクレートやインストーラーを変えていない場合、その行はブリッジの見出しの下に入ります。両方を変えるプルリクエストでは、ブリッジについての行を `Changelog (bridge):` と書きます。ドライランは各行の入る場所を表示します。
 - **What's new**：Kumi は `CHANGELOG.md` を組み込み、アップデート後に初めて起動したとき、リリースのリスト項目を **What's new** として表示します（最大 5 件、新しいリリースから。残りは `/changelog`）。段落（同梱ブリッジやテスト環境の行など）は表示されないので、`Changelog:` の各行がそこで読まれる一つの項目になります。プロデューサーが気づくことを、重要なものから書きます。
 - **ブリッジ**は、プルリクエストが Live の読み込むもの（`daws/ableton/ableton-mcp-server`、ホストがリンクする `crates/kumi-common`、`daws/ableton/remote-script`、`daws/ableton/protocol`、`daws/ableton/live-extension`、`vendor/willington`。テストと Markdown は除く）を変えたときに新しいバージョンになります。`Cargo.lock` にあるホストの依存関係が変わるとドライランがそう伝えるので、そのときは `--bridge` でブリッジを新しいバージョンにします。
-- **REAPER の拡張機能と Renoise のツール**も同じように、プルリクエストがその DAW の読み込むもの（`crates/reaper-kumi` と `daws/own/daw-bridge`、または `daws/renoise/com.kumi.Bridge.xrnx`）を変えたときに新しいバージョンになります。`--reaper` と `--renoise` はどの場合でも新しいバージョンにし、`--no-reaper` と `--no-renoise` はそのままにします。`--no-bridge` は Live のものだけです。`Changelog (reaper):` か `Changelog (renoise):` と書いた行は、その見出しの下に入ります。`--go` では、`crates/reaper-kumi/Cargo.toml` と `Cargo.lock`、ツールの `payload/version.lua` と `manifest.xml` のバージョンが進み、三つの `KUMI_GUIDE.md` にあるそれぞれの ships-with の行も進みます。前のリリースになかったものはそのバージョンのまま出荷され、その行にはすでにこのリリースが書かれています。
+- **REAPER の拡張機能と Renoise のツール**も同じように、プルリクエストがその DAW の読み込むもの（`daws/reaper/reaper-kumi` と `daws/own/daw-bridge`、または `daws/renoise/com.kumi.Bridge.xrnx`）を変えたときに新しいバージョンになります。`--reaper` と `--renoise` はどの場合でも新しいバージョンにし、`--no-reaper` と `--no-renoise` はそのままにします。`--no-bridge` は Live のものだけです。`Changelog (reaper):` か `Changelog (renoise):` と書いた行は、その見出しの下に入ります。`--go` では、`daws/reaper/reaper-kumi/Cargo.toml` と `Cargo.lock`、ツールの `payload/version.lua` と `manifest.xml` のバージョンが進み、三つの `KUMI_GUIDE.md` にあるそれぞれの ships-with の行も進みます。前のリリースになかったものはそのバージョンのまま出荷され、その行にはすでにこのリリースが書かれています。
 - **バージョン**は次のパッチです。`--minor` か `--version X.Y.Z` で別のものを選べます。
 - **`--go` を付けると**、`release/vX.Y.Z` に "Kumi X.Y.Z: the changelog, READMEs and versions" をコミットします。ルートの `package.json`、`crates/kumi-runtime/src/version.rs`、`kumi`、`kumi-common`、`kumi-runtime` の Cargo マニフェスト、`Cargo.lock` のバージョン（パッケージングのテストがこれらが等しいことを確認します）と、変わった場合はブリッジのバージョン、3 つの README の Status の行、3 つの `KUMI_CHANGES.md` の「Bridge versions」の下にある同梱するブリッジの行、`CHANGELOG.md` の `## X.Y.Z — date` の項目です。続いてプルリクエスト "Kumi X.Y.Z" を開き、その CI を待たずに管理者のバイパスで "Kumi X.Y.Z (#PR)" としてマージし、マージコミットに `vX.Y.Z` のタグを付けてプッシュし、リリースノート付きの下書きのリリースを作ります（`--summary` でノートの冒頭に一文を加えられます）。
 - **タグの Installer の実行**が、macOS、Linux、Windows の Intel と ARM 向けのネイティブバンドルをビルドし、インストールと移行をテストし、ターゲットごとのバンドルとマニフェスト、互換用の `kumi.tar.gz`、`kumi-release.json`、`SHA256SUMS`、インストーラーを添付し、`release.py` がノートを書いていて（ノートの最後に `<!-- kumi:release-notes -->` があります）、インストーラーが両方添付されている場合はリリースを公開します。そうして初めて、インストーラー、`kumi update`、更新確認がそのリリースを認識します。手でプッシュした「ノートは後で」のタグなど、ほかの下書きは、だれかが公開するまで下書きのままです。
