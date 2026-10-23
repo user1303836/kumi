@@ -29,27 +29,14 @@ pub const MAX_NOTE: usize = 240;
 pub const REMEMBER_TOOL: &str = "remember";
 pub const FORGET_TOOL: &str = "forget";
 static SPACE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[\s\u{feff}]+").unwrap());
-static SUSPECT: LazyLock<Vec<Regex>> = LazyLock::new(|| {
-    [
-        r"(?i)\b(ignore|disregard|override|forget)\b[^.]{0,40}\b(rules|instructions|prompt|guidelines)\b",
-        r"(?i)\bsystem prompt\b",
-        r"(?i)\b(reveal|print|show|send|share|leak|post)\b[^.]{0,40}\b(api ?keys?|tokens?|passwords?|credentials?|secrets?|auth\w*)\b",
-        r"(?i)\b(api[_-]?key|token|secret|password)\s*[:=]",
-        r"[A-Za-z0-9+/_=\-]{32,}",
-    ]
-    .into_iter()
-    .map(|pattern| Regex::new(pattern).unwrap())
-    .collect()
-});
 
 fn clean(text: &str) -> String {
     let controls: String = text.chars().map(|c| if c <= '\u{1f}' || ('\u{7f}'..='\u{9f}').contains(&c) { ' ' } else { c }).collect();
     // Trimmed again after the cut, so cleaning what was cleaned changes nothing.
     string::head(SPACE.replace_all(&controls, " ").trim(), MAX_NOTE).trim().to_string()
 }
-pub fn suspect_note(text: &str) -> bool {
-    SUSPECT.iter().any(|pattern| pattern.is_match(text))
-}
+// Whether a note reads like an instruction to Kumi or carries a secret (kumi-types, which the library asks too).
+pub use kumi_types::notes::suspect_note;
 /// The note a full store drops to make room: the oldest one not pinned.
 fn droppable(notes: &[MemoryNote]) -> Option<usize> {
     notes.iter().enumerate().filter(|(_, n)| !n.pinned).min_by_key(|(_, n)| n.at).map(|(i, _)| i)

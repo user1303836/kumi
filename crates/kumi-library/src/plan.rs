@@ -1,6 +1,7 @@
 use super::{
+    daws::Daws,
     learn::{plugin_preset_folders, set_folders, LearnPlan},
-    sources::{below, current_platform, homedir, join, SourceKind, SourceOptions},
+    sources::{below, current_platform, homedir, join, library_sources, recent_projects, SourceKind, SourceOptions},
     store::read_json,
 };
 use indexmap::IndexSet;
@@ -23,6 +24,9 @@ pub struct PlanOptions {
     pub find_sets: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workers: Option<usize>,
+    /// What the DAWs the app registers tell the library; a learner process is given its own.
+    #[serde(skip)]
+    pub daws: Daws,
 }
 pub fn remembered_file(dir: &str) -> String {
     join(dir, "folders.json")
@@ -48,7 +52,7 @@ pub async fn kumi_sets(projects_dir: Option<&str>) -> Vec<String> {
     // Node's readdir (unlike opendir) returns names in lexical order.
     names.sort();
     let mut found = vec![];
-    for name in names.into_iter().filter(|name| crate::core::place::is_project_id(name)) {
+    for name in names.into_iter().filter(|name| kumi_types::place::is_project_id(name)) {
         let Ok(mut handle) = tokio::fs::File::open(join(&join(dir, &name), "last-seen.json")).await else { continue };
         let mut buffer = [0; 2048];
         let Ok(bytes) = handle.read(&mut buffer).await else { continue };
@@ -71,7 +75,7 @@ pub async fn plan_learning(options: PlanOptions) -> LearnPlan {
     let platform = original_sources.platform.clone().unwrap_or_else(|| current_platform().into());
     let mut source_options = original_sources.clone();
     source_options.folders = Some(options.folders.unwrap_or_default().into_iter().chain(remembered).collect());
-    let sources = crate::integrations::library_sources(&source_options);
+    let sources = library_sources(options.daws, &source_options);
     let others: Vec<_> = sources
         .iter()
         .filter(|s| matches!(s.kind, SourceKind::Pack | SourceKind::Core | SourceKind::Splice | SourceKind::Reaper | SourceKind::Renoise))
@@ -79,7 +83,7 @@ pub async fn plan_learning(options: PlanOptions) -> LearnPlan {
         .collect();
     let find_sets = options.find_sets != Some(false);
     let recent: Vec<_> = if find_sets {
-        crate::integrations::recent_projects(&original_sources)
+        recent_projects(options.daws, &original_sources)
             .into_iter()
             .chain(kumi_sets(options.projects_dir.as_deref()).await)
             .collect::<IndexSet<_>>()

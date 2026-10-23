@@ -1,13 +1,18 @@
+//! Kumi's library of the producer's sounds, presets and Sets: where they are (each DAW's places, as its integration
+//! says, and the folders the producer names), learning them in the background, searching them, and the taste their
+//! Sets show; with the plug-ins' preset formats and roles, and finding samples on disk.
+
 pub mod classify;
 pub mod daw_sources;
+pub mod daws;
 pub mod features;
 pub mod learn;
 pub mod learner;
 pub mod measure_worker;
-/// Live's manual, at the path it always had.
-pub use crate::integrations::live_manual as manual;
 pub mod plan;
+pub mod plugins;
 pub mod presets;
+pub mod samples;
 pub mod search;
 pub mod sets;
 pub mod sources;
@@ -17,25 +22,21 @@ pub mod taste;
 pub mod tools;
 pub mod xml;
 
-use crate::core::daw::{DawId, DawProfile};
-use crate::{
-    core::{
-        contracts::{KernelTool, LibraryState as StatusState, LibraryStatus},
-        errors::RuntimeError,
-    },
-    web::net::WebClient,
-};
 use async_trait::async_trait;
 pub use classify::{SoundClass, SoundKind, CLASSES};
+use daws::{Daws, ManualOptions};
 use indexmap::IndexMap;
 use kumi_common::{
     abort::{self, Signal},
     time::now_ms,
 };
+use kumi_net::web::WebClient;
+use kumi_types::contracts::{KernelTool, LibraryState as StatusState, LibraryStatus};
+use kumi_types::daw::{DawId, DawProfile};
+use kumi_types::errors::RuntimeError;
 use learn::{learn, Counts, LearnOptions, LearnPhase, PresetEntry, ProgressCallback, SetEntry, SoundEntry, LOG_VERSION};
 pub use learn::{library_logs, LearnProgress};
 use learner::{LearnerMessage, LearnerOptions, LearnerReply};
-pub use manual::MANUAL_TOOL;
 use measure_worker::{measure_reference, worker_binary, MeasureJob};
 use plan::{plan_learning, remembered_file, remembered_folders, PlanOptions};
 use search::SoundIndex;
@@ -80,6 +81,8 @@ pub struct LibraryOptions {
     pub every_ms: Option<u64>,
     pub find_sets: Option<bool>,
     pub web: Option<LibraryWebOptions>,
+    /// What the DAWs the app registers tell the library: their places, projects and manuals.
+    pub daws: Daws,
 }
 pub struct LearnNowOptions {
     pub rebuild: bool,
@@ -184,6 +187,7 @@ impl Library {
             sources: self.options.sources.clone(),
             find_sets: self.options.find_sets,
             workers: self.options.workers,
+            daws: self.options.daws,
         }
     }
     async fn remembering(&self) -> Vec<String> {
@@ -213,7 +217,8 @@ impl Library {
                 .chain(self.remembered.borrow().clone().unwrap_or_default())
                 .collect(),
         );
-        let Ok(sources) = tokio::task::spawn_blocking(move || crate::integrations::library_sources(&options)).await else {
+        let daws = self.options.daws;
+        let Ok(sources) = tokio::task::spawn_blocking(move || sources::library_sources(daws, &options)).await else {
             return self.source_cache.borrow().as_ref().map(|(_, sources)| sources.clone()).unwrap_or_default();
         };
         *self.source_cache.borrow_mut() = Some((now_ms(), sources.clone()));
@@ -569,16 +574,15 @@ impl Library {
     pub fn tools_for(self: &Rc<Self>, profile: &DawProfile, options: LibraryToolsOptions) -> Vec<Rc<dyn KernelTool>> {
         let mut tools = tools::library_tools_for(profile, self.clone(), options.clone());
         if let Some(daw) = profile.id.filter(|_| profile.caps.manual) {
-            let manual = crate::integrations::manual_tool(
-                daw,
-                manual::ManualOptions {
+            let manual = self.options.daws.iter().find(|own| own.profile().id == Some(daw)).and_then(|own| {
+                own.manual_tool(ManualOptions {
                     dir: self.dir.clone(),
                     client: self.options.web.as_ref().map(|w| w.client.clone()),
                     base: self.options.web.as_ref().and_then(|w| w.base.clone()),
                     on_event: options.on_event,
                     now: None,
-                },
-            );
+                })
+            });
             tools.extend(manual);
         }
         tools

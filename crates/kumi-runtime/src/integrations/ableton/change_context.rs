@@ -1,4 +1,5 @@
 //! Sample and parameter services used while preparing a Live change.
+use super::library::{live_preference_folders, read_indexer_log, read_library_config};
 use super::{
     changes::{ChangeContext, NoSample, ParameterRange, SampleFile, SampleSelector},
     parameters::Parameters,
@@ -6,9 +7,8 @@ use super::{
 };
 use crate::{
     core::errors::RuntimeError,
-    library::sources::{
-        below, homedir, library_sources, live_preference_folders, read_indexer_log, read_library_config, SourceKind, SourceOptions,
-    },
+    integrations::library_sources,
+    library::sources::{below, homedir, SourceKind, SourceOptions},
 };
 use async_trait::async_trait;
 use indexmap::IndexMap;

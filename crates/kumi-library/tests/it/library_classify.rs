@@ -1,5 +1,5 @@
 //! Naming and XML cases.
-use kumi_runtime::library::{classify::*, xml::*};
+use kumi_library::{classify::*, xml::*};
 #[test]
 fn names_say_class_kind_tempo_key_and_note() {
     assert_eq!(tokens("KickPunchy_01 F#m 128bpm"), vec!["kick", "punchy", "01", "f#m", "128", "bpm"]);

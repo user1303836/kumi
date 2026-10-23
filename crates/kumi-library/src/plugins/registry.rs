@@ -171,7 +171,7 @@ pub fn folder_for(paths: Option<&OsPaths>) -> Option<String> {
         return None;
     }
     Some(match path.strip_prefix('~') {
-        Some(rest) => crate::library::sources::join(&crate::library::sources::homedir(), rest),
+        Some(rest) => crate::sources::join(&crate::sources::homedir(), rest),
         None => path.to_string(),
     })
 }

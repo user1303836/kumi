@@ -1,0 +1,42 @@
+[package]
+name = "kumi-library"
+version = "0.1.0"
+description = "Kumi's library of the producer's sounds, presets and Sets: learning, searching and taste, with the plug-ins' formats and roles and finding samples on disk. Each DAW says where its own library is (LibrarySources)."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+kumi-common.workspace = true
+kumi-media.workspace = true
+kumi-net.workspace = true
+kumi-types.workspace = true
+async-trait.workspace = true
+base64.workspace = true
+chrono.workspace = true
+fancy-regex.workspace = true
+flate2.workspace = true
+futures.workspace = true
+hex.workspace = true
+home.workspace = true
+indexmap.workspace = true
+md-5.workspace = true
+memchr.workspace = true
+rand.workspace = true
+regex.workspace = true
+ruzstd.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+uuid.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true
+
+[dev-dependencies]
+kumi-testkit.workspace = true
+tempfile.workspace = true
+tokio = { workspace = true, features = ["test-util"] }

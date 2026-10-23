@@ -1,7 +1,7 @@
 # Plug-in formats
 
 Kumi reads third-party plug-ins' presets and saved state itself, and keeps what it knows about each format here
-as data. The Rust readers are in `crates/kumi-runtime/src/plugins/formats/`; they and their tests run off these
+as data. The Rust readers are in `crates/kumi-library/src/plugins/formats/`; they and their tests run off these
 files, and Kumi carries them in its binary.
 
 ```

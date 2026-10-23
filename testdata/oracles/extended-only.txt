@@ -33,8 +33,8 @@ ableton-mcp-server/host-track-view-oracle.json
 ableton-mcp-server/host-transport-action-oracle.json
 ableton-mcp-server/host-ui-oracle.json
 ableton-mcp-server/host-willington-oracle.json
+kumi-library/library-taste-oracle.json
 kumi-runtime/arrange-oracle.json
-kumi-runtime/library-taste-oracle.json
 kumi-runtime/library-tools-oracle.json
 kumi-runtime/references-oracle.json
 kumi-runtime/remember-oracle.json

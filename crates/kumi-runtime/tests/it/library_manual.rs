@@ -1,7 +1,9 @@
 use async_trait::async_trait;
 use kumi_common::abort::Signal;
 use kumi_runtime::{
-    library::manual::{chapter_addresses, chapter_sections, fetch_manual, manual_tool, search_manual, stems, ManualOptions, ManualSection},
+    integrations::live_manual::{
+        chapter_addresses, chapter_sections, fetch_manual, manual_tool, search_manual, stems, ManualOptions, ManualSection,
+    },
     web::net::{WebClient, WebError, WebFailure, WebRequest, WebResponse},
 };
 use serde_json::{json, Value};

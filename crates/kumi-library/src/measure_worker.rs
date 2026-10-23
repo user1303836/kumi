@@ -381,8 +381,8 @@ pub async fn main() -> io::Result<()> {
 pub async fn measure_reference(
     job: MeasureJob,
     signal: kumi_common::abort::Signal,
-) -> Result<SoundEntry, crate::core::errors::RuntimeError> {
-    use crate::core::errors::RuntimeError;
+) -> Result<SoundEntry, kumi_types::errors::RuntimeError> {
+    use kumi_types::errors::RuntimeError;
     let mut worker = Worker::spawn(&worker_binary("kumi-library-measure", "KUMI_LIBRARY_MEASURE_BIN"))
         .map_err(|e| RuntimeError::plain(e.to_string()))?;
     let result = tokio::select! {biased;_=signal.cancelled()=>Err(RuntimeError::Aborted),result=worker.run(&job)=>result.map_err(|e|RuntimeError::plain(e.to_string()))};

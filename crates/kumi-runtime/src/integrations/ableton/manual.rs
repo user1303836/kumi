@@ -1,7 +1,7 @@
 //! Live's manual, cached locally and searched by section with cited passages.
 use crate::library::{
     store::{read_json, write_json},
-    tools::{definition, tell, OnEvent},
+    tools::{definition, tell},
 };
 use crate::{
     core::{
@@ -287,14 +287,8 @@ pub async fn fetch_manual(client: Rc<dyn WebClient>, signal: Signal, base: Optio
     rows.sort_by_key(|r| r.0);
     Ok(rows.into_iter().flat_map(|r| r.1).collect())
 }
-#[derive(Clone, Default)]
-pub struct ManualOptions {
-    pub dir: String,
-    pub client: Option<Rc<dyn WebClient>>,
-    pub on_event: Option<OnEvent>,
-    pub base: Option<String>,
-    pub now: Option<Rc<dyn Fn() -> i64>>,
-}
+// What the library gives a DAW's manual tool (kumi-library).
+pub use crate::library::daws::ManualOptions;
 type Reading = Shared<LocalBoxFuture<'static, Result<Rc<Kept>, WebFailure>>>;
 #[derive(Default)]
 struct ManualState {

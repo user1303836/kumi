@@ -16,6 +16,7 @@ members = [
     "crates/kumi-media",
     "crates/kumi-ai",
     "crates/kumi-web",
+    "crates/kumi-library",
 ]
 
 [workspace.package]
@@ -37,6 +38,7 @@ kumi-net = { path = "crates/kumi-net" }
 kumi-media = { path = "crates/kumi-media" }
 kumi-ai = { path = "crates/kumi-ai" }
 kumi-web = { path = "crates/kumi-web" }
+kumi-library = { path = "crates/kumi-library" }
 
 async-trait = "0.1"
 base64 = "0.22"

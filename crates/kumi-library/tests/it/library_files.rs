@@ -1,7 +1,7 @@
 //! Live files the library reads, plus differential parser cases.
 use base64::{engine::general_purpose::STANDARD, Engine};
 use kumi_common::js::json::stringify;
-use kumi_runtime::library::{
+use kumi_library::{
     presets::{plugin_preset_facts, read_live_preset, read_max_device},
     sets::{device_name, read_set, time_signature},
     xml::{attribute, scan_tags, scan_xml_file, xml_head, ScanOptions, TagHandler, XmlError},
@@ -13,7 +13,7 @@ fn normalized<T: Serialize>(value: T) -> Value {
     serde_json::from_str(&stringify(&serde_json::to_value(value).unwrap())).unwrap()
 }
 fn reference() -> Value {
-    serde_json::from_str(&kumi_testkit::oracle("kumi-runtime/library-files-oracle.json")).unwrap()
+    serde_json::from_str(&kumi_testkit::oracle("kumi-library/library-files-oracle.json")).unwrap()
 }
 #[tokio::test]
 async fn sets_presets_and_max_headers_match_typescript() {

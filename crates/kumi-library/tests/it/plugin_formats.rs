@@ -3,13 +3,13 @@
 //! states were saved by Live 12.4 for the same patches as the preset files, so they also show how a preset and
 //! a host's state relate.
 
-use kumi_runtime::plugins::formats::cbor::{self, Value};
-use kumi_runtime::plugins::formats::ozone12::{self, OzonePreset, OzoneState};
-use kumi_runtime::plugins::formats::serum2::{self, SerumPreset, SerumState, XferFile};
-use kumi_runtime::plugins::formats::structure::{builtin, builtins, for_id, Structure};
-use kumi_runtime::plugins::formats::tree::{Node, PathRule};
-use kumi_runtime::plugins::formats::vital::VitalPreset;
-use kumi_runtime::plugins::formats::vstpreset::{vst2_chunk, VstPreset};
+use kumi_library::plugins::formats::cbor::{self, Value};
+use kumi_library::plugins::formats::ozone12::{self, OzonePreset, OzoneState};
+use kumi_library::plugins::formats::serum2::{self, SerumPreset, SerumState, XferFile};
+use kumi_library::plugins::formats::structure::{builtin, builtins, for_id, Structure};
+use kumi_library::plugins::formats::tree::{Node, PathRule};
+use kumi_library::plugins::formats::vital::VitalPreset;
+use kumi_library::plugins::formats::vstpreset::{vst2_chunk, VstPreset};
 
 fn fixture(plugin: &str, name: &str) -> Vec<u8> {
     let path = kumi_testkit::workspace_path("plugin-formats").join(plugin).join("format-1/fixtures").join(name);

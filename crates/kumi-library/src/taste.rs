@@ -1,7 +1,5 @@
 //! Habits learned from the producer's Sets, each reported with its evidence and a stable id.
 use super::sets::{DeviceRole, SetDevice, SetSummary, SetTrack, TrackKind};
-use crate::core::daw::{DawId, DawProfile, DawWords};
-use crate::core::memory::suspect_note;
 use indexmap::{IndexMap, IndexSet};
 use kumi_common::{
     js::{
@@ -10,6 +8,8 @@ use kumi_common::{
     },
     time::now_ms,
 };
+use kumi_types::daw::{DawId, DawProfile, DawWords};
+use kumi_types::notes::suspect_note;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet},

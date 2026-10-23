@@ -2,7 +2,7 @@
 //! how to configure it, another device on the track doing the job in the agreed order (Ozone 12, the other mapped
 //! plug-ins, Live's own devices; none that's off), Live's own device to add placed where its job goes, a job on Live's
 //! own devices by their Live 12 names, and fixes that name a role.
-use kumi_runtime::plugins::roles::{
+use kumi_library::plugins::roles::{
     agreed_order, find, job_for_item, job_named, nearest_band, plugin_fix, resolve, resolve_near, Found, Resolved, Seen,
 };
 use serde_json::Value;

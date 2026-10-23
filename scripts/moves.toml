@@ -1550,3 +1550,285 @@ to = "kumi_types::amxd::DecodedAmxd"
 [[rust]]
 from = "kumi_runtime::devices::amxd::patcher_chunk"
 to = "kumi_types::amxd::patcher_chunk"
+
+# kumi-library: the library and plug-ins, with samples; each DAW says where its library is (2026-10).
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/shared/samples.rs"
+to = "crates/kumi-library/src/samples.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/library/classify.rs"
+to = "crates/kumi-library/src/classify.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/library/daw_sources.rs"
+to = "crates/kumi-library/src/daw_sources.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/library/device-names.json"
+to = "crates/kumi-library/src/device-names.json"
+
+[[move]]
+from = "crates/kumi-runtime/src/library/features.rs"
+to = "crates/kumi-library/src/features.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/library/learn.rs"
+to = "crates/kumi-library/src/learn.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/library/learner.rs"
+to = "crates/kumi-library/src/learner.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/library/measure_worker.rs"
+to = "crates/kumi-library/src/measure_worker.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/library/mod.rs"
+to = "crates/kumi-library/src/lib.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/library/plan.rs"
+to = "crates/kumi-library/src/plan.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/library/presets.rs"
+to = "crates/kumi-library/src/presets.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/library/search.rs"
+to = "crates/kumi-library/src/search.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/library/sets.rs"
+to = "crates/kumi-library/src/sets.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/library/sources.rs"
+to = "crates/kumi-library/src/sources.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/library/state.rs"
+to = "crates/kumi-library/src/state.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/library/store.rs"
+to = "crates/kumi-library/src/store.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/library/taste-data.json"
+to = "crates/kumi-library/src/taste-data.json"
+
+[[move]]
+from = "crates/kumi-runtime/src/library/taste.rs"
+to = "crates/kumi-library/src/taste.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/library/tool-definitions.json"
+to = "crates/kumi-library/src/tool-definitions.json"
+
+[[move]]
+from = "crates/kumi-runtime/src/library/tools.rs"
+to = "crates/kumi-library/src/tools.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/library/xml.rs"
+to = "crates/kumi-library/src/xml.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/plugins/adapter.rs"
+to = "crates/kumi-library/src/plugins/adapter.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/plugins/adapters/decapitator.rs"
+to = "crates/kumi-library/src/plugins/adapters/decapitator.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/plugins/adapters/mod.rs"
+to = "crates/kumi-library/src/plugins/adapters/mod.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/plugins/adapters/ott.rs"
+to = "crates/kumi-library/src/plugins/adapters/ott.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/plugins/adapters/ozone12.rs"
+to = "crates/kumi-library/src/plugins/adapters/ozone12.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/plugins/adapters/pigments.rs"
+to = "crates/kumi-library/src/plugins/adapters/pigments.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/plugins/adapters/prol2.rs"
+to = "crates/kumi-library/src/plugins/adapters/prol2.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/plugins/adapters/proq4.rs"
+to = "crates/kumi-library/src/plugins/adapters/proq4.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/plugins/adapters/saturn2.rs"
+to = "crates/kumi-library/src/plugins/adapters/saturn2.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/plugins/adapters/serum2.rs"
+to = "crates/kumi-library/src/plugins/adapters/serum2.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/plugins/adapters/supermassive.rs"
+to = "crates/kumi-library/src/plugins/adapters/supermassive.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/plugins/adapters/vital.rs"
+to = "crates/kumi-library/src/plugins/adapters/vital.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/plugins/formats/cbor.rs"
+to = "crates/kumi-library/src/plugins/formats/cbor.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/plugins/formats/mod.rs"
+to = "crates/kumi-library/src/plugins/formats/mod.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/plugins/formats/ozone12.rs"
+to = "crates/kumi-library/src/plugins/formats/ozone12.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/plugins/formats/serum2.rs"
+to = "crates/kumi-library/src/plugins/formats/serum2.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/plugins/formats/structure.rs"
+to = "crates/kumi-library/src/plugins/formats/structure.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/plugins/formats/survey.rs"
+to = "crates/kumi-library/src/plugins/formats/survey.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/plugins/formats/tree.rs"
+to = "crates/kumi-library/src/plugins/formats/tree.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/plugins/formats/vital.rs"
+to = "crates/kumi-library/src/plugins/formats/vital.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/plugins/formats/vstpreset.rs"
+to = "crates/kumi-library/src/plugins/formats/vstpreset.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/plugins/formats/xml.rs"
+to = "crates/kumi-library/src/plugins/formats/xml.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/plugins/mod.rs"
+to = "crates/kumi-library/src/plugins/mod.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/plugins/registry.rs"
+to = "crates/kumi-library/src/plugins/registry.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/plugins/roles.rs"
+to = "crates/kumi-library/src/plugins/roles.rs"
+
+[[move]]
+from = "crates/kumi-runtime/tests/it/library_classify.rs"
+to = "crates/kumi-library/tests/it/library_classify.rs"
+
+[[move]]
+from = "crates/kumi-runtime/tests/it/library_files.rs"
+to = "crates/kumi-library/tests/it/library_files.rs"
+
+[[move]]
+from = "crates/kumi-runtime/tests/it/library_taste.rs"
+to = "crates/kumi-library/tests/it/library_taste.rs"
+
+[[move]]
+from = "crates/kumi-runtime/tests/it/plugin_adapters.rs"
+to = "crates/kumi-library/tests/it/plugin_adapters.rs"
+
+[[move]]
+from = "crates/kumi-runtime/tests/it/plugin_formats.rs"
+to = "crates/kumi-library/tests/it/plugin_formats.rs"
+
+[[move]]
+from = "crates/kumi-runtime/tests/it/plugin_roles.rs"
+to = "crates/kumi-library/tests/it/plugin_roles.rs"
+
+[[move]]
+from = "crates/kumi-runtime/tests/it/plugins.rs"
+to = "crates/kumi-library/tests/it/plugins.rs"
+
+[[move]]
+from = "testdata/oracles/kumi-runtime/library-files-oracle.json"
+to = "testdata/oracles/kumi-library/library-files-oracle.json"
+
+[[move]]
+from = "testdata/oracles/kumi-runtime/library-taste-oracle.json"
+to = "testdata/oracles/kumi-library/library-taste-oracle.json"
+
+[[rust]]
+from = "kumi_runtime::library::manual"
+to = "kumi_runtime::integrations::live_manual"
+
+[[rust]]
+from = "kumi_runtime::library::MANUAL_TOOL"
+to = "kumi_runtime::integrations::live_manual::MANUAL_TOOL"
+
+[[rust]]
+from = "kumi_runtime::library::sources::library_sources"
+to = "kumi_runtime::integrations::library_sources"
+
+[[rust]]
+from = "kumi_runtime::library::library_sources"
+to = "kumi_runtime::integrations::library_sources"
+
+[[rust]]
+from = "kumi_runtime::library::sources::live_preference_folders"
+to = "kumi_runtime::integrations::ableton::library::live_preference_folders"
+
+[[rust]]
+from = "kumi_runtime::library::sources::LibraryConfig"
+to = "kumi_runtime::integrations::ableton::library::LibraryConfig"
+
+[[rust]]
+from = "kumi_runtime::library::sources::read_library_config"
+to = "kumi_runtime::integrations::ableton::library::read_library_config"
+
+[[rust]]
+from = "kumi_runtime::library::sources::IndexerLog"
+to = "kumi_runtime::integrations::ableton::library::IndexerLog"
+
+[[rust]]
+from = "kumi_runtime::library::sources::read_indexer_log"
+to = "kumi_runtime::integrations::ableton::library::read_indexer_log"
+
+[[rust]]
+from = "kumi_runtime::library::sources::recent_sets"
+to = "kumi_runtime::integrations::ableton::library::recent_sets"
+
+[[rust]]
+from = "kumi_runtime::plugins::formats::live_set"
+to = "kumi_runtime::integrations::live_set"
+
+[[rust]]
+from = "kumi_runtime::integrations::shared::samples"
+to = "kumi_library::samples"
+
+[[rust]]
+from = "kumi_runtime::core::memory::suspect_note"
+to = "kumi_types::notes::suspect_note"
+
+[[rust]]
+from = "kumi_runtime::library"
+to = "kumi_library"
+
+[[rust]]
+from = "kumi_runtime::plugins"
+to = "kumi_library::plugins"

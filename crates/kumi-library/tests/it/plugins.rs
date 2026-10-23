@@ -1,10 +1,10 @@
 //! The guide. The plugin tool's test (reading a
 //! plug-in's names through the synthetic bridge and making a wavetable) waits for the integration.
 
-use kumi_runtime::plugins::adapter::{
+use kumi_library::plugins::adapter::{
     pattern, PluginAdapter, PluginKind, PluginParameterHint, PluginRecipe, PluginSection, PluginWavetable, WavetableFormat,
 };
-use kumi_runtime::plugins::registry::{adapter_for, group_names, plugin_guide, ExposedParameter};
+use kumi_library::plugins::registry::{adapter_for, group_names, plugin_guide, ExposedParameter};
 use serde_json::{json, Value};
 
 fn synth() -> PluginAdapter {

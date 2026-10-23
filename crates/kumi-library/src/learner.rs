@@ -1,5 +1,6 @@
 //! A low-priority process that learns, accepts pause/resume/stop, and reports progress over JSON lines.
 use super::{
+    daws::Daws,
     learn::{learn, LearnOptions, LearnPhase, LearnProgress},
     plan::{plan_learning, PlanOptions},
     state::{acquire_lock, write_state},
@@ -65,8 +66,9 @@ fn low_priority() {
 fn send(output: &mpsc::UnboundedSender<Value>, reply: LearnerReply) {
     let _ = output.send(serde_json::to_value(reply).unwrap());
 }
-/// Must run in a LocalSet: pause callbacks share the learner's single event loop.
-pub async fn main() -> io::Result<()> {
+/// Must run in a LocalSet: pause callbacks share the learner's single event loop. `daws` are what the DAWs the app
+/// registers tell the library, as in the app.
+pub async fn main(daws: Daws) -> io::Result<()> {
     low_priority();
     let stop = Signal::new();
     let paused = Rc::new(Cell::new(false));
@@ -115,7 +117,7 @@ pub async fn main() -> io::Result<()> {
             let latest = Rc::new(RefCell::new(None::<LearnProgress>));
             let last = Rc::new(Cell::new(0));
             let (report_latest, report_last, report_output, report_dir) = (latest.clone(), last.clone(), output.clone(), dir.clone());
-            let mut learning = LearnOptions::new(plan_learning(options.plan).await, stop.clone());
+            let mut learning = LearnOptions::new(plan_learning(PlanOptions { daws, ..options.plan }).await, stop.clone());
             learning.rebuild = options.rebuild;
             learning.gate = Some(Rc::new(move || {
                 let (paused, wake) = (paused.clone(), wake.clone());
