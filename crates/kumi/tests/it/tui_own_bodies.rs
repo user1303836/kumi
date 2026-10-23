@@ -8,10 +8,10 @@ mod models;
 mod support;
 use kumi::daw::work_with;
 use kumi::tui::{pictures::Graphics, style::ColorDepth};
+use kumi_daw_own::pictures as own_pictures;
 use kumi_daw_reaper as reaper;
 use kumi_daw_renoise as renoise;
 use kumi_runtime::core::{contracts::*, daw::DawId};
-use kumi_runtime::integrations::own_pictures;
 use serde_json::{json, Value};
 use std::rc::Rc;
 use support::*;
@@ -344,7 +344,7 @@ case!(renoises_cursor_line_stays_in_view_deep_in_a_pattern, async {
 // Whole screens kept as text in tests/goldens/tui/daw (trailing spaces trimmed): at 120×36 and 160×40, narrow (80×30),
 // and in the plain mode (no colour, pictures in words) at 120×36. `KUMI_BLESS=1` writes them again. The bodies come from
 // bridge-shaped answers through each DAW's own reading (`to_body`, `fill_focus`), the pictures through Kumi's
-// (`own_pictures`), so a golden moves when any part of the way does.
+// (`kumi_daw_own::pictures`), so a golden moves when any part of the way does.
 
 fn golden(name: &str, actual: &str) {
     let file = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/goldens/tui/daw").join(name);
@@ -723,7 +723,7 @@ scene!(picture_settings, DawId::Renoise, PICTURE_SHOTS, |h| {
 // The transport in the DAW's words beside the tempo: REAPER's time signature where the playhead is (its tempo map's, no
 // 4/4 assumed), Renoise's lines per beat.
 case!(the_header_says_the_daws_time_beside_the_tempo, async {
-    use kumi_runtime::integrations::own_views;
+    use kumi_daw_own::views as own_views;
     for (daw, transport, said) in [
         (DawId::Reaper, json!({"playing": true, "tempo": 96.0, "beat": 3.5, "beatsPerBar": 3.5, "timeSignature": [7, 8]}), "96 BPM · 7/8"),
         (DawId::Renoise, json!({"playing": true, "tempo": 125.0, "beat": 8.0, "beatsPerBar": 4, "lpb": 4, "tpl": 6}), "125 BPM · LPB 4"),
@@ -743,7 +743,7 @@ case!(the_header_says_the_daws_time_beside_the_tempo, async {
 // REAPER's lights it (review L6).
 case!(lives_beat_light_keeps_whole_beats_in_odd_meters_and_reapers_lights_the_bar_between_them, async {
     use kumi::tui::style::{palette, style_key, Style};
-    use kumi_runtime::integrations::own_views;
+    use kumi_daw_own::views as own_views;
     for (daw, bright) in [(DawId::Ableton, false), (DawId::Reaper, true)] {
         work_with(daw);
         let h = Harness::new(160, 40);

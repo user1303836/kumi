@@ -1,10 +1,10 @@
 //! The own bridges' change engine against REAPER's and Renoise's own sets of changes (from own_changes' tests: the app is where both DAWs' integrations meet).
 use async_trait::async_trait;
 use kumi_common::abort::Signal;
+use kumi_daw_own::bridge::OwnDaw;
+use kumi_daw_own::changes::*;
 use kumi_daw_reaper::changes as reaper_changes;
 use kumi_daw_renoise::changes as renoise_changes;
-use kumi_runtime::integrations::own_bridge::OwnDaw;
-use kumi_runtime::integrations::own_changes::*;
 use kumi_runtime::{
     core::{
         contracts::*,
@@ -294,8 +294,8 @@ async fn renoise_adds_a_few_tracks_an_answer_and_says_so() {
 
 #[test]
 fn an_epoch_renoise_moved_only_for_devices_keeps_the_names_of_what_stayed() {
+    use kumi_daw_own::bridge::follow_epoch;
     use kumi_daw_renoise::RenoiseRefs;
-    use kumi_runtime::integrations::own_bridge::follow_epoch;
     let fresh = || {
         let mut book = Book::<RenoiseRefs>::default();
         for reference in ["1:track:3", "1:device:3.2", "1:seq:1"] {
@@ -322,9 +322,9 @@ fn an_epoch_renoise_moved_only_for_devices_keeps_the_names_of_what_stayed() {
 
 #[test]
 fn a_layout_goes_with_any_request_naming_a_track_anywhere_and_renoises_refs_follow_their_track() {
+    use kumi_daw_own::bridge::names_tracks;
     use kumi_daw_renoise::RenoiseRefs;
     use kumi_runtime::core::refs::{Moved, Shift};
-    use kumi_runtime::integrations::own_bridge::names_tracks;
     let asks = |value: Value| names_tracks(&RenoiseRefs, value.as_object().unwrap());
     assert!(asks(json!({"type": "sequencer", "group": "1:track:2"})), "track_add's group");
     assert!(asks(json!({"lines": [{"line": 1}], "track": "1:track:3", "pattern": "1:pattern:1"})));

@@ -1,7 +1,7 @@
 //! Renoise, through Kumi's tool and host: its refs (positions, as Renoise numbers them, under the song's epoch), its
 //! read tool and its instructions, the tools only Renoise has (variations of its lines and phrases, the sample map,
 //! chopping, jams and layered breaks), and where its library is. The integration itself is the one every bridge of Kumi's
-//! own shares (`own_bridge`).
+//! own shares (`kumi_daw_own::bridge`).
 pub mod changes;
 mod chop;
 mod jam;
@@ -11,6 +11,10 @@ mod lines;
 mod mapping;
 mod variations;
 
+use kumi_daw_own::bridge::{create_own_integration, OwnDaw, OwnOptions, OwnTools};
+use kumi_daw_own::catchup::{as_read, CatchUpWords, Mixer, RecipeKinds};
+use kumi_daw_own::phrases::{bar_span, slots_spanning, track, OwnPhrases, PhraseLook, Phrased};
+use kumi_daw_own::views::{self as own_views, body_args, focus_track, selected, view};
 use kumi_runtime::core::{
     contracts::{Integration, JsonObject},
     describe::ProjectWords,
@@ -19,10 +23,6 @@ use kumi_runtime::core::{
     refs::{moved_index, Moved, RefScheme, Shift},
     view::{BodyKind, BodyRequest, DawFocus, FocusBody, FocusItem, FocusSection, ItemKind, SectionKind, ViewKind, ViewPresentation},
 };
-use kumi_runtime::integrations::own_bridge::{create_own_integration, OwnDaw, OwnOptions, OwnTools};
-use kumi_runtime::integrations::own_catchup::{as_read, CatchUpWords, Mixer, RecipeKinds};
-use kumi_runtime::integrations::own_phrases::{bar_span, slots_spanning, track, OwnPhrases, PhraseLook, Phrased};
-use kumi_runtime::integrations::own_views::{self, body_args, focus_track, selected, view};
 use kumi_runtime::mcp::client::BridgeDescriptor;
 use kumi_types::daw::DawProfile;
 use regex::Regex;
@@ -66,7 +66,7 @@ pub const DAW: OwnDaw = OwnDaw {
 };
 
 /// (#401) Delivery to a spec in Renoise: the master's row and post-FX fader, and what limits or raises it.
-static SPEC: kumi_runtime::integrations::own_spec::OwnSpecFacts = kumi_runtime::integrations::own_spec::OwnSpecFacts {
+static SPEC: kumi_daw_own::spec::OwnSpecFacts = kumi_daw_own::spec::OwnSpecFacts {
     words: kumi_runtime::core::spec::backend::Words {
         app: "Renoise",
         fader_most: 3.,
@@ -480,7 +480,7 @@ mod tests {
             "after": {"name": "Bass", "order": 2},
             "details": [detail("mixer.postVolume", -6.0), detail("mixer.postPan", 0.5), detail("mixer.volume", -3.0)]}],
             "selected": [{"name": "Bass"}]});
-        let reply = kumi_runtime::integrations::own_catchup::watched(&answer, &CATCH_UP);
+        let reply = kumi_daw_own::catchup::watched(&answer, &CATCH_UP);
         assert_eq!(
             reply["recipeSteps"]["steps"],
             json!([

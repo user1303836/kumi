@@ -1,8 +1,8 @@
 //! Kumi's own ears for REAPER and Renoise: their steps fit each DAW's kinds (from own_ears' tests: the app is where both
 //! DAWs' integrations meet).
+use kumi_daw_own::ears::*;
 use kumi_daw_renoise::changes::CHANGES as RENOISE;
 use kumi_runtime::core::to_midi::MidiNote;
-use kumi_runtime::integrations::own_ears::*;
 use kumi_runtime::kernel::schema::problem;
 use serde_json::{json, Value};
 use std::path::Path;
@@ -42,7 +42,7 @@ fn notes_land_on_their_slots_lines_with_a_delay_and_pitched_ones_end_with_an_off
 #[test]
 fn stems_go_on_new_tracks_in_reaper_and_play_as_instruments_in_renoise() {
     use kumi_daw_reaper::changes::CHANGES as REAPER;
-    let fits = |kinds: &[kumi_runtime::integrations::own_changes::OwnKind], step: &Value| {
+    let fits = |kinds: &[kumi_daw_own::changes::OwnKind], step: &Value| {
         let tool = step["tool"].as_str().unwrap();
         let kind = kinds.iter().find(|kind| kind.tool == tool).unwrap_or_else(|| panic!("{tool}"));
         assert_eq!(problem(&Value::Object(kind.input_schema()), &step["input"]), None, "{step}");
@@ -66,7 +66,7 @@ fn stems_go_on_new_tracks_in_reaper_and_play_as_instruments_in_renoise() {
 #[test]
 fn reapers_plan_and_renoises_track_fit_their_kinds() {
     use kumi_daw_reaper::changes::CHANGES as REAPER;
-    let fits = |kinds: &[kumi_runtime::integrations::own_changes::OwnKind], step: &Value| {
+    let fits = |kinds: &[kumi_daw_own::changes::OwnKind], step: &Value| {
         let tool = step["tool"].as_str().unwrap();
         let kind = kinds.iter().find(|kind| kind.tool == tool).unwrap_or_else(|| panic!("{tool}"));
         assert_eq!(problem(&Value::Object(kind.input_schema()), &step["input"]), None, "{step}");

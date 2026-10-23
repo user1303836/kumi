@@ -25,6 +25,7 @@
 | `daws/ableton/protocol` | `ableton-live-v1.operations.json`，桥接与 Remote Script 共用的操作注册表 |
 | `scripts` | 发布构建器、迁移打包、Mac 辅助程序的构建、隔离测试运行器，以及 `npm run kumi` 和 `npm run setup` 背后的 `native-kumi.mjs` |
 | `daws/own/daw-mcp-server` | Kumi 为 REAPER 和 Renoise 准备的宿主程序（`daw-mcp-server --daw reaper\|renoise`）：基于 stdio 的 MCP、修改的日志与撤销、聆听任务、离开期间的变化；其他 MCP 客户端也能使用 |
+| `daws/own/kumi-daw-own` | REAPER 和 Renoise 的集成在主机端共享的部分：通过 Kumi 自有桥接的集成、修改引擎及其撤销、离开期间的变化、聆听、音频转 MIDI 与分离音轨、即时短语、图示与 FOCUS 视图、保留的脚本，以及按规格交付 |
 | `daws/reaper/kumi-daw-reaper` | REAPER 的主机端：通过 Kumi 自有桥接的集成、只有 REAPER 才有的工具（条目的变奏、交付、路由）以及它的素材库位置 |
 | `daws/reaper/reaper-kumi` | Kumi 的 REAPER 扩展（`reaper_kumi`），用 `sdk/` 中附带的 REAPER SDK 头文件构建 |
 | `daws/own/daw-bridge` | REAPER 与 Renoise 桥接共用的部分：回环通信（`kumi-daw/1`）、它的握手与认证、发现、查找 DAW、doctor 的检查，以及桥接文件的生命周期 |

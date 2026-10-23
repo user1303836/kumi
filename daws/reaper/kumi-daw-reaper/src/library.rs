@@ -7,9 +7,9 @@ use std::path::PathBuf;
 
 use daw_bridge::detect::{detect_reaper, Env};
 use daw_bridge::install::reaper_extension_name;
+use kumi_daw_own::library::{os_of, source};
 use kumi_library::daws::LibrarySources;
 use kumi_library::sources::{env_of, home_of, Source, SourceKind, SourceOptions};
-use kumi_runtime::integrations::own_library::{os_of, source};
 use kumi_types::daw::DawProfile;
 
 /// REAPER's library: its resource folders with Kumi's extension in them.

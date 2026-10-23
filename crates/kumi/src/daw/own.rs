@@ -24,13 +24,13 @@ use daw_bridge::{
 };
 use futures::{future::LocalBoxFuture, FutureExt};
 use kumi_common::abort::{self, Signal};
+use kumi_daw_own::bridge::OwnOptions;
 use kumi_runtime::{
     core::{
         context::IntegrationContext,
         contracts::{ConnectionState, Integration, SessionController},
         daw::DawId,
     },
-    integrations::own_bridge::OwnOptions,
     system::Env,
     RuntimeError,
 };

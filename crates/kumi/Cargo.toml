@@ -23,6 +23,7 @@ kumi-runtime.workspace = true
 kumi-daw-ableton.workspace = true
 kumi-daw-reaper.workspace = true
 kumi-daw-renoise.workspace = true
+kumi-daw-own.workspace = true
 ableton-mcp-server.workspace = true
 daw-bridge.workspace = true
 async-trait.workspace = true

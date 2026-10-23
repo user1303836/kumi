@@ -21,6 +21,7 @@ members = [
     "daws/ableton/kumi-daw-ableton",
     "daws/reaper/kumi-daw-reaper",
     "daws/renoise/kumi-daw-renoise",
+    "daws/own/kumi-daw-own",
 ]
 
 [workspace.package]
@@ -47,6 +48,7 @@ kumi-listening = { path = "crates/kumi-listening" }
 kumi-daw-ableton = { path = "daws/ableton/kumi-daw-ableton" }
 kumi-daw-reaper = { path = "daws/reaper/kumi-daw-reaper" }
 kumi-daw-renoise = { path = "daws/renoise/kumi-daw-renoise" }
+kumi-daw-own = { path = "daws/own/kumi-daw-own" }
 
 async-trait = "0.1"
 base64 = "0.22"

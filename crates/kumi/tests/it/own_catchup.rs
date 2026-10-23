@@ -1,6 +1,6 @@
 //! Catch-up drafting with REAPER's and Renoise's own words (from own_catchup's tests: the app is where both DAWs'
 //! integrations meet).
-use kumi_runtime::integrations::own_catchup::*;
+use kumi_daw_own::catchup::*;
 use serde_json::{json, Value};
 
 #[test]

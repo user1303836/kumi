@@ -1,14 +1,19 @@
 //! Kumi's changes in a DAW whose bridge is its own (REAPER's extension, Renoise's tool): each one previewed and applied
 //! through the host's journal (`change_preview`, `change_apply`), kept in HISTORY, and undone as a new step of the
 //! DAW's (`change_undo`), never by the DAW's own undo. Plans run through core's plan engine over the DAW's kinds.
-use super::own_bridge::{
+use crate::bridge::{
     answer_of, follow_epoch, layout_of, names_tracks, note_epoch, stopped_or, Layout, OwnDaw, Refused, CALL_MS, SHORT_REF,
 };
-use crate::{
+use async_trait::async_trait;
+use chrono::Utc;
+use indexmap::IndexMap;
+use kumi_common::{
+    abort::{self, Signal, SignalExt},
+    js::json::stringify,
+};
+use kumi_runtime::{
     core::{
         contracts::*,
-        daw::DawProfile,
-        errors::RuntimeError,
         history::{cant_reach_to_undo, cant_take_back, Applied, ChangeHost, Entry, History, UndoResult},
         plan::{make_changes, stream_changes, ActionOutcome, ActionSummary, Batch, ChangeOutcome, PlanHost, StepKind},
         refs::{Book, RefScheme},
@@ -21,13 +26,7 @@ use crate::{
     kernel::schema,
     mcp::client::McpEndpoint,
 };
-use async_trait::async_trait;
-use chrono::Utc;
-use indexmap::IndexMap;
-use kumi_common::{
-    abort::{self, Signal, SignalExt},
-    js::json::stringify,
-};
+use kumi_types::{daw::DawProfile, errors::RuntimeError};
 use serde_json::{json, Value};
 use std::{
     cell::{Cell, RefCell},
@@ -73,7 +72,7 @@ pub struct OwnKind {
 }
 
 /// What HISTORY draws of a change: a value moved within its span (a fader, a pan), a colour's swatches, or one picture
-/// per family of kinds (`own_pictures`): a tracker's lines, a lane's points, the parameters that moved, a route, a
+/// per family of kinds (`pictures`): a tracker's lines, a lane's points, the parameters that moved, a route, a
 /// keyzone, items on the timeline, the settings that moved, a track's chain of devices.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Picture {
@@ -125,7 +124,7 @@ impl OwnKind {
         self.picture = Picture::Colors { field };
         self
     }
-    /// HISTORY draws it as one of the families' pictures (`own_pictures`).
+    /// HISTORY draws it as one of the families' pictures (`pictures`).
     pub const fn drawn(mut self, picture: Picture) -> Self {
         self.picture = picture;
         self
@@ -135,20 +134,20 @@ impl OwnKind {
     pub fn summary(&self, title: &str, preview: Option<&Value>, applied: Option<&Value>) -> ChangeSummary {
         let mut summary = ChangeSummary::title(title);
         let (Some(preview), Some(applied)) = (preview, applied) else { return summary };
-        let answers = super::own_pictures::Answers { preview, applied };
+        let answers = crate::pictures::Answers { preview, applied };
         summary.picture = match self.picture {
-            Picture::Lines => super::own_pictures::lines(&answers),
-            Picture::Curve => super::own_pictures::curve(&answers),
-            Picture::Params => super::own_pictures::params(&answers),
-            Picture::Route => super::own_pictures::route(&answers),
-            Picture::Zone => super::own_pictures::zone(&answers),
-            Picture::Items => super::own_pictures::items(&answers),
-            Picture::Settings => super::own_pictures::settings(&answers),
-            Picture::Midi => super::own_pictures::midi(&answers),
+            Picture::Lines => crate::pictures::lines(&answers),
+            Picture::Curve => crate::pictures::curve(&answers),
+            Picture::Params => crate::pictures::params(&answers),
+            Picture::Route => crate::pictures::route(&answers),
+            Picture::Zone => crate::pictures::zone(&answers),
+            Picture::Items => crate::pictures::items(&answers),
+            Picture::Settings => crate::pictures::settings(&answers),
+            Picture::Midi => crate::pictures::midi(&answers),
             _ => None,
         };
         if self.picture == Picture::Chain {
-            summary.devices = super::own_pictures::chain(&answers);
+            summary.devices = crate::pictures::chain(&answers);
         }
         let (prior, after) = (preview.get("prior"), applied.get("applied"));
         let (Some(prior), Some(after)) = (prior.filter(|v| v.is_object()), after.filter(|v| v.is_object())) else { return summary };
@@ -882,7 +881,7 @@ impl<S: RefScheme + 'static> OwnPlan<S> {
         let mut long = book.lengthen(&Value::Object(input.clone()));
         // (a call's arguments hold refs under no ref-named field)
         if let Some(args) = long.get("args").cloned() {
-            long["args"] = super::own_bridge::lengthen_anywhere(&book, &args);
+            long["args"] = crate::bridge::lengthen_anywhere(&book, &args);
         }
         let mut unknown = None;
         find_unknown(&long, "", &mut unknown, 0);
@@ -946,8 +945,8 @@ impl<S: RefScheme + 'static> OwnPlan<S> {
     /// One change: previewed, applied in one named step of the DAW's undo, and kept in HISTORY.
     pub async fn one_change(&self, kind: &'static OwnKind, asked: JsonObject, signal: Signal) -> ChangeOutcome {
         let words = self.link().words().words;
-        if self.history.changes_this_turn.get() >= crate::core::plan::MAX_CHANGES {
-            return ChangeOutcome::stop(crate::core::plan::too_many_changes());
+        if self.history.changes_this_turn.get() >= kumi_runtime::core::plan::MAX_CHANGES {
+            return ChangeOutcome::stop(kumi_runtime::core::plan::too_many_changes());
         }
         // Each track a DAW like Renoise adds costs it more in a big song (and it stalls near 600): an answer adds a few.
         let most = self.link().daw.changes.most_track_adds.filter(|_| kind.kind == "track-add");
@@ -1098,7 +1097,7 @@ impl<S: RefScheme + 'static> OwnPlan<S> {
         }
         // Code run in the DAW may have changed anything, outside what HISTORY can take back: a judged run hears again.
         if matches!(kind.kind, "run-lua" | "api-call") {
-            let what = if self.link().daw.profile.id == Some(crate::core::daw::DawId::Renoise) {
+            let what = if self.link().daw.profile.id == Some(kumi_types::daw::DawId::Renoise) {
                 "Lua run in Renoise"
             } else {
                 "Lua or a call to REAPER's API"
@@ -1161,7 +1160,7 @@ impl<S: RefScheme + 'static> OwnPlan<S> {
         // stopped at (what it changed before that stays), with the DAW's refs in them short.
         for key in ["result", "printed", "out", "failed"] {
             if let Some(value) = applied.pointer(&format!("/applied/{key}")) {
-                reply[key] = super::own_bridge::shorten_anywhere(&mut self.link().book.borrow_mut(), value);
+                reply[key] = crate::bridge::shorten_anywhere(&mut self.link().book.borrow_mut(), value);
             }
         }
         ChangeOutcome { text: stringify(&reply), is_error: false, missed: None, stops: false, applied: Some(applied) }
@@ -1202,7 +1201,7 @@ impl<S: RefScheme + 'static> OwnPlan<S> {
                 }
                 for field in ["auditioning", "selected"] {
                     if let Some(value) = answer.get(field) {
-                        text[field] = super::own_bridge::shorten_anywhere(&mut self.link().book.borrow_mut(), value);
+                        text[field] = crate::bridge::shorten_anywhere(&mut self.link().book.borrow_mut(), value);
                     }
                 }
                 if let Some(note) = answer.pointer("/display/note").and_then(Value::as_str) {

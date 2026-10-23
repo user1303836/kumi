@@ -12,6 +12,7 @@ use daw_mcp_server::{
 };
 use futures::stream::{self, StreamExt};
 use futures::FutureExt;
+use kumi_daw_own::bridge::{Connect, OwnOptions};
 use kumi_runtime::ai::error::LanguageModelError;
 use kumi_runtime::ai::types::{
     CallOptions, FinishReason, FinishReasonUnified, InputTokens, OutputTokens, StreamPart, StreamParts, ToolCall, Usage,
@@ -19,7 +20,6 @@ use kumi_runtime::ai::types::{
 use kumi_runtime::core::context::IntegrationContext;
 use kumi_runtime::core::contracts::*;
 use kumi_runtime::core::daw::DawProfile;
-use kumi_runtime::integrations::own_bridge::{Connect, OwnOptions};
 use kumi_runtime::kernel::agent::{create_agent_kernel, AgentKernel, AgentKernelOptions, LanguageModel, ModelBinding, ModelRequest};
 use kumi_runtime::mcp::client::McpEndpoint;
 use kumi_runtime::{create_conversation_store, create_recipe_store, create_session, SessionOptions};

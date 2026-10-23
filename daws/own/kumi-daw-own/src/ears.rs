@@ -4,18 +4,18 @@
 //! source, Renoise in a new track's pattern lines, a note off the grid on its line with a delay and a pitched note ended by an
 //! OFF. Stems: REAPER puts each on a new track under the source, an item over the stretch; Renoise loads each as an instrument
 //! and plays them from the stretch's start on a new track.
-use super::own_changes::OwnPlan;
-use super::own_listening::OwnRenderer;
-use crate::core::contracts::{JsonObject, Render};
-use crate::core::daw::DawProfile;
-use crate::core::plan::make_changes;
-use crate::core::refs::RefScheme;
-use crate::core::stems::backend::{StemsBackend, Words as StemWords};
-use crate::core::to_midi::backend::{ToMidiBackend, Words};
-use crate::core::to_midi::{MidiNote, HAT, KICK, SNARE};
-use crate::listening::renderer::{Renderer, Window};
+use crate::changes::OwnPlan;
+use crate::listening::OwnRenderer;
 use async_trait::async_trait;
 use kumi_common::abort::Signal;
+use kumi_listening::renderer::{Renderer, Window};
+use kumi_runtime::core::contracts::{JsonObject, Render};
+use kumi_runtime::core::plan::make_changes;
+use kumi_runtime::core::refs::RefScheme;
+use kumi_runtime::core::stems::backend::{StemsBackend, Words as StemWords};
+use kumi_runtime::core::to_midi::backend::{ToMidiBackend, Words};
+use kumi_runtime::core::to_midi::{MidiNote, HAT, KICK, SNARE};
+use kumi_types::daw::DawProfile;
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};

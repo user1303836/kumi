@@ -1,14 +1,14 @@
 //! Delivery to a spec through Kumi's own bridges (#401), the same for REAPER and Renoise but for their facts (`OwnDaw::spec`):
 //! the mix rendered offline from the master (the whole song, or a stretch), the master's fader read from its track row and
 //! set by the DAW's track_volume change.
-use super::own_changes::OwnPlan;
-use super::own_listening::OwnRenderer;
-use crate::core::contracts::Render;
-use crate::core::refs::RefScheme;
-use crate::core::spec::backend::{SpecBackend, Words};
-use crate::listening::renderer::Renderer;
+use crate::changes::OwnPlan;
+use crate::listening::OwnRenderer;
 use async_trait::async_trait;
 use kumi_common::abort::Signal;
+use kumi_listening::renderer::Renderer;
+use kumi_runtime::core::contracts::Render;
+use kumi_runtime::core::refs::RefScheme;
+use kumi_runtime::core::spec::backend::{SpecBackend, Words};
 use serde_json::{json, Value};
 use std::rc::Rc;
 
@@ -53,14 +53,14 @@ impl<S: RefScheme + 'static> SpecBackend for OwnSpec<S> {
             return Err(why);
         }
         let window = match stretch {
-            Some((from, beats)) => crate::listening::renderer::Window { from, beats },
+            Some((from, beats)) => kumi_listening::renderer::Window { from, beats },
             None => {
                 let end = self
                     .renderer
                     .song_end(signal.clone())
                     .await
                     .ok_or("Kumi couldn't tell where the song ends: give fromBeat and beats")?;
-                crate::listening::renderer::Window { from: 0., beats: end }
+                kumi_listening::renderer::Window { from: 0., beats: end }
             }
         };
         let _listening = self.renderer.begin_listen();

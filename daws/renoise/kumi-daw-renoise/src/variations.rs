@@ -7,6 +7,8 @@
 use crate::lines::{note_text, note_value, Lines, Op};
 use async_trait::async_trait;
 use kumi_common::abort::Signal;
+use kumi_daw_own::changes::OwnPlan;
+use kumi_daw_own::listening::OwnRenderer;
 use kumi_runtime::core::{
     contracts::JsonObject,
     refs::RefScheme,
@@ -17,8 +19,6 @@ use kumi_runtime::core::{
         Rng, TakeSet, TakeState,
     },
 };
-use kumi_runtime::integrations::own_changes::OwnPlan;
-use kumi_runtime::integrations::own_listening::OwnRenderer;
 use serde_json::{json, Map, Value};
 use std::{collections::BTreeMap, collections::BTreeSet, rc::Rc};
 

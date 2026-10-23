@@ -3696,3 +3696,97 @@ to = "kumi_daw_renoise::library::LIBRARY"
 [[rust]]
 from = "kumi_runtime::integrations::own_library::RenoiseLibrary"
 to = "kumi_daw_renoise::library::RenoiseLibrary"
+
+# kumi-daw-own: what REAPER's and Renoise's integrations share, host side (2026-10).
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/own_bridge.rs"
+to = "daws/own/kumi-daw-own/src/bridge.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/own_catchup.rs"
+to = "daws/own/kumi-daw-own/src/catchup.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/own_changes.rs"
+to = "daws/own/kumi-daw-own/src/changes.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/own_ears.rs"
+to = "daws/own/kumi-daw-own/src/ears.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/own_goal.rs"
+to = "daws/own/kumi-daw-own/src/goal.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/own_groove.rs"
+to = "daws/own/kumi-daw-own/src/groove.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/own_library.rs"
+to = "daws/own/kumi-daw-own/src/library.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/own_listening.rs"
+to = "daws/own/kumi-daw-own/src/listening.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/own_phrases.rs"
+to = "daws/own/kumi-daw-own/src/phrases.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/own_pictures.rs"
+to = "daws/own/kumi-daw-own/src/pictures.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/own_scripts.rs"
+to = "daws/own/kumi-daw-own/src/scripts.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/own_spec.rs"
+to = "daws/own/kumi-daw-own/src/spec.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/own_views.rs"
+to = "daws/own/kumi-daw-own/src/views.rs"
+
+[[rust]]
+from = "kumi_runtime::integrations::own_bridge"
+to = "kumi_daw_own::bridge"
+
+[[rust]]
+from = "kumi_runtime::integrations::own_catchup"
+to = "kumi_daw_own::catchup"
+
+[[rust]]
+from = "kumi_runtime::integrations::own_changes"
+to = "kumi_daw_own::changes"
+
+[[rust]]
+from = "kumi_runtime::integrations::own_ears"
+to = "kumi_daw_own::ears"
+
+[[rust]]
+from = "kumi_runtime::integrations::own_library"
+to = "kumi_daw_own::library"
+
+[[rust]]
+from = "kumi_runtime::integrations::own_listening"
+to = "kumi_daw_own::listening"
+
+[[rust]]
+from = "kumi_runtime::integrations::own_phrases"
+to = "kumi_daw_own::phrases"
+
+[[rust]]
+from = "kumi_runtime::integrations::own_pictures"
+to = "kumi_daw_own::pictures"
+
+[[rust]]
+from = "kumi_runtime::integrations::own_spec"
+to = "kumi_daw_own::spec"
+
+[[rust]]
+from = "kumi_runtime::integrations::own_views"
+to = "kumi_daw_own::views"

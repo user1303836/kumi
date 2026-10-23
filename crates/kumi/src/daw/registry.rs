@@ -66,7 +66,7 @@ pub fn recent_projects(options: &SourceOptions) -> Vec<String> {
 fn each_own_daws_instructions_keep_within_lives() {
     let live = ableton::context::INSTRUCTIONS.len();
     for daw in [&reaper::DAW, &renoise::DAW] {
-        let text = kumi_runtime::integrations::own_bridge::instructions_of(daw);
+        let text = kumi_daw_own::bridge::instructions_of(daw);
         assert!(text.len() <= live, "{}'s instructions are {} bytes, over Live's {live}", daw.profile.words.app, text.len());
     }
 }

@@ -5,15 +5,14 @@
 //! note's delay within its line, or takes it to the line before or after when that cell of its column is free (else as
 //! far as its own line goes), with notes_write.
 
-use super::own_listening::OwnRenderer;
-use crate::{
-    core::{contracts::ChangeState, errors::RuntimeError, refs::RefScheme},
-    listening::{
-        notes::{Kit, Note},
-        renderer::{ClipNotes, NotePatch, Renderer, Window},
-    },
-};
+use crate::listening::OwnRenderer;
 use kumi_common::abort::Signal;
+use kumi_listening::{
+    notes::{Kit, Note},
+    renderer::{ClipNotes, NotePatch, Renderer, Window},
+};
+use kumi_runtime::core::{contracts::ChangeState, refs::RefScheme};
+use kumi_types::errors::RuntimeError;
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, HashMap, HashSet};
 
@@ -485,7 +484,7 @@ impl<S: RefScheme + 'static> OwnRenderer<S> {
             };
             if let (Some(start), Some(end)) = (note("Note range start"), note("Note range end")) {
                 if start == end {
-                    pads.push((super::own_listening::plugin_name(&device.name).to_owned(), start));
+                    pads.push((crate::listening::plugin_name(&device.name).to_owned(), start));
                 }
             }
         }

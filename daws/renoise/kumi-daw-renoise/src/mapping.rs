@@ -5,6 +5,8 @@
 //! does the rest.
 use async_trait::async_trait;
 use kumi_common::abort::Signal;
+use kumi_daw_own::changes::OwnPlan;
+use kumi_daw_own::listening::OwnRenderer;
 use kumi_listening::renderer::Renderer;
 use kumi_runtime::core::{
     mapping::{
@@ -13,8 +15,6 @@ use kumi_runtime::core::{
     },
     refs::RefScheme,
 };
-use kumi_runtime::integrations::own_changes::OwnPlan;
-use kumi_runtime::integrations::own_listening::OwnRenderer;
 use kumi_types::daw::DawProfile;
 use serde_json::{json, Map, Value};
 use std::rc::Rc;

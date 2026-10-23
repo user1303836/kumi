@@ -28,7 +28,7 @@ use crate::update::UpdateIo;
 use kumi_runtime::RuntimeError;
 
 /// How a DAW whose bridge is Kumi's own reaches Kumi's host, by DAW: a test's host in place of `daw-mcp-server`.
-pub type OwnHostFactory = Rc<dyn Fn(DawId) -> kumi_runtime::integrations::own_bridge::Connect>;
+pub type OwnHostFactory = Rc<dyn Fn(DawId) -> kumi_daw_own::bridge::Connect>;
 
 /// Makes each registered DAW's integration from its options: the app's own, or a test's stand-in.
 #[derive(Clone)]

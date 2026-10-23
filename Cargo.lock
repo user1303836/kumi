@@ -1254,6 +1254,7 @@ dependencies = [
  "home",
  "kumi-common",
  "kumi-daw-ableton",
+ "kumi-daw-own",
  "kumi-daw-reaper",
  "kumi-daw-renoise",
  "kumi-runtime",
@@ -1362,6 +1363,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "kumi-daw-own"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "daw-bridge",
+ "daw-mcp-server",
+ "futures",
+ "indexmap",
+ "kumi-common",
+ "kumi-library",
+ "kumi-listening",
+ "kumi-media",
+ "kumi-runtime",
+ "kumi-types",
+ "regex",
+ "serde_json",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "kumi-daw-reaper"
 version = "0.1.0"
 dependencies = [
@@ -1370,6 +1393,7 @@ dependencies = [
  "daw-mcp-server",
  "futures",
  "kumi-common",
+ "kumi-daw-own",
  "kumi-library",
  "kumi-listening",
  "kumi-runtime",
@@ -1389,6 +1413,7 @@ dependencies = [
  "daw-mcp-server",
  "futures",
  "kumi-common",
+ "kumi-daw-own",
  "kumi-library",
  "kumi-listening",
  "kumi-runtime",
