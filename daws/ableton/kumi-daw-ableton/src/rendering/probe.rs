@@ -123,6 +123,24 @@ impl LiveRenderer {
     /// What kind of device it is, as its probes are saved: Live's class for its own devices, the name for a plug-in
     /// or a Max device.
     pub(super) async fn device_kind(&self, device: &str, signal: Signal) -> Option<String> {
+        let (class, name) = self.class_and_name(device, signal).await?;
+        // A plug-in (VST "PluginDevice", AU "AuPluginDevice") or a Max device goes by its name; Live's own by class. A
+        // rack isn't saved: its macros are each rack's own.
+        if class.ends_with("GroupDevice") {
+            return None;
+        }
+        let own = !class.is_empty() && !class.contains("PluginDevice") && !class.starts_with("Mx");
+        Some(if own { class } else { name }).filter(|kind| !kind.is_empty())
+    }
+
+    /// Who a device is, for what Kumi remembers of a search on it (`identity_of`).
+    pub(super) async fn device_identity(&self, device: &str, signal: Signal) -> Option<String> {
+        let (class, name) = self.class_and_name(device, signal).await?;
+        identity_of(&class, &name)
+    }
+
+    /// A device's class and its name in Live.
+    async fn class_and_name(&self, device: &str, signal: Signal) -> Option<(String, String)> {
         let long = self.connection().references.borrow().lengthen(&json!({"deviceRef":device}));
         let long = long["deviceRef"].as_str().unwrap_or(device).to_owned();
         let code = "result = [str(obj.class_name), str(obj.name)]";
@@ -136,13 +154,41 @@ impl LiveRenderer {
         }
         let done = super::super::context::payload(&read).ok()?;
         let pair = done.get("result")?.as_array()?;
-        let (class, name) = (pair.first()?.as_str()?, pair.get(1)?.as_str()?);
-        // A plug-in (VST "PluginDevice", AU "AuPluginDevice") or a Max device goes by its name; Live's own by class. A
-        // rack isn't saved: its macros are each rack's own.
-        if class.ends_with("GroupDevice") {
-            return None;
-        }
-        let own = !class.is_empty() && !class.contains("PluginDevice") && !class.starts_with("Mx");
-        Some(if own { class.to_owned() } else { name.to_owned() }).filter(|kind| !kind.is_empty())
+        Some((pair.first()?.as_str()?.to_owned(), pair.get(1)?.as_str()?.to_owned()))
+    }
+}
+
+/// Who a Live device is, the same in every session and wherever it sits: Live's own device by its class ("Eq8"), a
+/// plug-in by its format and name ("AU: Pro-Q 3": Live doesn't say a plug-in's maker, nor a VST's version), a Max
+/// device and a rack by their names ("Max: …", "Rack: …": a rack's macros are its own).
+pub(super) fn identity_of(class: &str, name: &str) -> Option<String> {
+    let name = name.trim();
+    let named = |kind: &str| (!name.is_empty()).then(|| format!("{kind}: {name}"));
+    if class.ends_with("GroupDevice") {
+        named("Rack")
+    } else if class == "AuPluginDevice" {
+        named("AU")
+    } else if class.contains("PluginDevice") {
+        named("VST")
+    } else if class.starts_with("Mx") {
+        named("Max")
+    } else {
+        (!class.is_empty()).then(|| class.to_owned())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::identity_of;
+
+    #[test]
+    fn a_device_is_who_it_is_not_where_it_sits_or_what_it_was_renamed() {
+        assert_eq!(identity_of("Eq8", "Kick EQ").as_deref(), Some("Eq8"), "Live's own by its class, whatever it's called");
+        assert_eq!(identity_of("AuPluginDevice", "Pro-Q 3").as_deref(), Some("AU: Pro-Q 3"));
+        assert_eq!(identity_of("PluginDevice", "Serum 2").as_deref(), Some("VST: Serum 2"));
+        assert_eq!(identity_of("MxDeviceAudioEffect", "LFO").as_deref(), Some("Max: LFO"));
+        assert_eq!(identity_of("AudioEffectGroupDevice", "Bass Rack").as_deref(), Some("Rack: Bass Rack"));
+        assert_eq!(identity_of("PluginDevice", " "), None, "a plug-in with no name says nothing of who it is");
+        assert_eq!(identity_of("", "EQ Eight"), None);
     }
 }

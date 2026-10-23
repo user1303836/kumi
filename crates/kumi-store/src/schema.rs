@@ -111,7 +111,31 @@ CREATE INDEX observations_project ON observations (project, at);
 CREATE INDEX observations_at ON observations (at);
 ";
 
-const MIGRATIONS: &[&str] = &[V1, V2, V3];
+/// Every setting a search heard on a device (`heard_settings`), with how it sounded: tune's knob search, a match
+/// run's, a goal's. A later search on the same device starts from what worked there. A device keeps its newest rows
+/// (`heard_settings::PER_DEVICE`), a search's best whatever its age.
+const V4: &str = "
+CREATE TABLE heard_settings (
+  id TEXT PRIMARY KEY,
+  at INTEGER NOT NULL,
+  daw TEXT NOT NULL,
+  device TEXT NOT NULL,
+  device_version TEXT,
+  track TEXT,
+  source TEXT NOT NULL CHECK (source IN ('tune', 'match', 'goal')),
+  run_id TEXT NOT NULL,
+  knobs BLOB NOT NULL,
+  target BLOB NOT NULL,
+  before BLOB,
+  measured BLOB NOT NULL,
+  cost REAL NOT NULL,
+  best INTEGER NOT NULL DEFAULT 0 CHECK (best IN (0, 1))
+) STRICT;
+CREATE INDEX heard_settings_device ON heard_settings (daw, device, at);
+CREATE INDEX heard_settings_run ON heard_settings (run_id);
+";
+
+const MIGRATIONS: &[&str] = &[V1, V2, V3, V4];
 /// The schema version this build writes.
 pub const SCHEMA_VERSION: usize = MIGRATIONS.len();
 
@@ -179,5 +203,30 @@ mod tests {
         assert_eq!(connection.query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0)).unwrap(), SCHEMA_VERSION as i64);
         assert_eq!(connection.query_row("SELECT text FROM notes", [], |row| row.get::<_, String>(0)).unwrap(), "Likes dry drums");
         assert_eq!(connection.query_row("SELECT count(*) FROM observations", [], |row| row.get::<_, i64>(0)).unwrap(), 0);
+    }
+
+    #[test]
+    fn a_database_from_before_heard_settings_keeps_its_rows_and_gets_the_table() {
+        let mut connection = Connection::open_in_memory().unwrap();
+        for migration in [V1, V2, V3] {
+            connection.execute_batch(migration).unwrap();
+        }
+        connection.pragma_update(None, "user_version", 3).unwrap();
+        connection
+            .execute(
+                "INSERT INTO observations (id, at, session, kind, subject, facts, context) VALUES ('o1', 1, 's', 'undo', jsonb('{}'), jsonb('{}'), jsonb('{}'))",
+                [],
+            )
+            .unwrap();
+        migrate(&mut connection).unwrap();
+        assert_eq!(connection.query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0)).unwrap(), SCHEMA_VERSION as i64);
+        assert_eq!(connection.query_row("SELECT id FROM observations", [], |row| row.get::<_, String>(0)).unwrap(), "o1");
+        assert_eq!(connection.query_row("SELECT count(*) FROM heard_settings", [], |row| row.get::<_, i64>(0)).unwrap(), 0);
+        // Its sources are the three searches, nothing else.
+        let wrong = connection.execute(
+            "INSERT INTO heard_settings (id, at, daw, device, source, run_id, knobs, target, measured, cost) VALUES ('h1', 1, 'ableton', 'Eq8', 'guess', 'r', jsonb('{}'), jsonb('{}'), jsonb('{}'), 1.0)",
+            [],
+        );
+        assert!(wrong.is_err());
     }
 }

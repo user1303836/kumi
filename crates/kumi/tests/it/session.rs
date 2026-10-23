@@ -1708,7 +1708,13 @@ impl SearchRig {
 #[async_trait(?Send)]
 impl GoalRig for SearchRig {
     fn slots(&self) -> Vec<GoalSlotInfo> {
-        vec![GoalSlotInfo { name: "Candidate".into(), label: "Drift".into(), chain: "Operator".into(), knobs: vec![Self::knob()] }]
+        vec![GoalSlotInfo {
+            name: "Candidate".into(),
+            label: "Drift".into(),
+            chain: "Operator".into(),
+            knobs: vec![Self::knob()],
+            devices: Default::default(),
+        }]
     }
     fn screens(&self) -> bool {
         self.screens
