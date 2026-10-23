@@ -75,7 +75,7 @@ python3 -m compileall -q remote-script/AbletonMcpBridge
 | `KUMI_LEGACY_APP` | 展開済みの Kumi 1.7.5。`python3 scripts/fetch-legacy-release.py [folder]` がダウンロードし、SHA-256 を確認して展開し、そのフォルダーを出力します |
 | `KUMI_NATIVE_RELEASES` | ビルド済みのリリースアーティファクトのフォルダー（[リリース](DEVELOPER_GUIDE.md#リリース)を参照） |
 
-`KUMI_LEGACY_APP` は、ブリッジ自身の移行テスト `crates/ableton-mcp-server/tests/lifecycle_migration.rs` にも使われます。このテストは変数がなくてもスキップされず、公開済みの Kumi 1.7.5 のバンドルをダウンロードして SHA-256 を確認します。変数を設定しておけば、バンドルを一度取得したあとはオフラインで実行できます。
+`KUMI_LEGACY_APP` は、ブリッジ自身の移行テスト `crates/ableton-mcp-server/tests/it/lifecycle_migration.rs` にも使われます。このテストは変数がなくてもスキップされず、公開済みの Kumi 1.7.5 のバンドルをダウンロードして SHA-256 を確認します。変数を設定しておけば、バンドルを一度取得したあとはオフラインで実行できます。
 
 ## Live やモデルを使うチェック
 

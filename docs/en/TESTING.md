@@ -105,7 +105,7 @@ bundles. Without these variables, the tests that need them skip:
 | `KUMI_NATIVE_RELEASES` | A folder of built release artifacts (see [releasing](DEVELOPER_GUIDE.md#releasing)) |
 
 `KUMI_LEGACY_APP` serves the bridge's own migration test too,
-`crates/ableton-mcp-server/tests/lifecycle_migration.rs`. That test doesn't
+`crates/ableton-mcp-server/tests/it/lifecycle_migration.rs`. That test doesn't
 skip without it: it downloads the published Kumi 1.7.5 bundle and checks its
 SHA-256. With the variable set, it runs offline once the bundle is fetched.
 

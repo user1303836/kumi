@@ -75,7 +75,7 @@ python3 -m compileall -q remote-script/AbletonMcpBridge
 | `KUMI_LEGACY_APP` | 解包后的 Kumi 1.7.5：`python3 scripts/fetch-legacy-release.py [folder]` 会下载它、检查其 SHA-256、解包并打印所在文件夹 |
 | `KUMI_NATIVE_RELEASES` | 存放已构建发布产物的文件夹（见[发布](DEVELOPER_GUIDE.md#发布)） |
 
-`KUMI_LEGACY_APP` 也用于桥接自己的迁移测试 `crates/ableton-mcp-server/tests/lifecycle_migration.rs`。缺少该变量时，这个测试不会跳过，而是下载已发布的 Kumi 1.7.5 发行包并检查其 SHA-256。设置该变量后，只要发行包已下载过一次，它就可以离线运行。
+`KUMI_LEGACY_APP` 也用于桥接自己的迁移测试 `crates/ableton-mcp-server/tests/it/lifecycle_migration.rs`。缺少该变量时，这个测试不会跳过，而是下载已发布的 Kumi 1.7.5 发行包并检查其 SHA-256。设置该变量后，只要发行包已下载过一次，它就可以离线运行。
 
 ## 需要 Live 或模型的检查
 
