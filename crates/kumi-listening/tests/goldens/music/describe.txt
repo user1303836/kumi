@@ -3,3 +3,5 @@ Moderate (about -12 LUFS, -13 to -11), dark (tilt -2.8 dB/oct), mono lows, open 
 Very loud (about -7 LUFS, -8 to -6), bright (tilt 0.6 dB/oct), wide lows, squashed dynamics (peak to loudness 7.5 dB), dry.
 Quiet (about -16 LUFS, -17 to -15), dark (tilt -3.5 dB/oct), wide lows, very open dynamics (peak to loudness 16 dB), big contrast between sections (11 LU), dry.
 Very loud (about -6 LUFS, -7 to -5), very bright (tilt 2 dB/oct), mono lows, squashed dynamics (peak to loudness 6 dB), one level throughout (2 LU), long reverb (1.9 s).
+Around 140 BPM in F minor, busy (13 onsets a bar), swung (1.6), laid back (+14 ms), loud (about -9 LUFS, -10 to -8), warm (tilt -2 dB/oct), mono lows, firm dynamics (peak to loudness 9.5 dB), long reverb (2.2 s), echoes at 375 ms.
+Around 96 BPM, sparse (3 onsets a bar), straight, ahead of the beat (-11 ms), very loud (about -7 LUFS, -8 to -6), bright (tilt 0.6 dB/oct), wide lows, squashed dynamics (peak to loudness 7.5 dB), dry.

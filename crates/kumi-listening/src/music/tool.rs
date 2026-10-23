@@ -6,13 +6,20 @@ use super::{
     database,
     describe::describe,
     folders,
-    hear::{plan, Clap, Style},
+    hear::{hear, plan, Clap, Ears, Heard, Style},
     learning::{Music, MusicState},
     store::{MusicStore, Named, Song, Stage},
     tags,
-    vectors::VectorReader,
+    vectors::{VectorReader, VectorWriter},
 };
-use crate::{checklist::Profile, embed, references::tool::names_a_ref};
+use crate::{
+    checklist::Profile,
+    embed,
+    references::{
+        store::{KeptReference, KeptTrack, ReferenceStore, KEPT_VERSION},
+        tool::names_a_ref,
+    },
+};
 use async_trait::async_trait;
 use kumi_common::{
     abort::{Signal, SignalExt},
@@ -40,9 +47,13 @@ const DESCRIPTION: &str = concat!(
     "The producer's own music, learned on their computer: their nearest songs and what those songs share, in words. ",
     "Call it only when a request leaves the style open (\"make me a beat\", \"something dark\"), before choosing sounds or a ",
     "direction; never when the producer named a reference, specific sounds or exact values. With no like or words, it answers ",
-    "with the main styles in their music. The first time, it may answer with an offer to learn their music: ask the producer ",
-    "that once, in your own words, and call again with learn only if they say yes."
+    "with the main styles in their music. keep turns the nearest songs into a reference for the judge. The first time, it may ",
+    "answer with an offer to learn their music: ask the producer that once, in your own words, and call again with learn only ",
+    "if they say yes."
 );
+/// Songs a kept reference is made of, at least and at most.
+const KEPT_FEWEST: usize = 5;
+const KEPT_MOST: usize = 10;
 /// What every answer with songs says of them.
 const NOTE: &str = "The producer's own music: lean on it only where they left the style open, never over what they asked.";
 const OFFER_NOTE: &str = "Ask the producer this once, in your own words, then carry on with their request whatever they say. Only if they say yes, call taste with learn: the folders found.";
@@ -53,9 +64,10 @@ fn schema(profile: &DawProfile) -> JsonObject {
         "type": "object",
         "additionalProperties": false,
         "properties": {
-            "like": {"type": "string", "minLength": 1, "maxLength": 1024, "description": format!("What the producer named: an artist, album, song or genre tag in their music, an audio file's path, or {clip} in the {place} (its {clip_ref})")},
-            "words": {"type": "string", "minLength": 1, "maxLength": 300, "description": "The producer's own words for the style, when they named nothing (matched against their songs' genre tags)"},
+            "like": {"type": "string", "minLength": 1, "maxLength": 1024, "description": format!("What the producer named: an artist, album, song or genre tag in their music, an audio file's path, {clip} in the {place} (its {clip_ref}), or one of their styles by its label (c1)")},
+            "words": {"type": "string", "minLength": 1, "maxLength": 300, "description": "The producer's own words for the style, when they named nothing (\"melancholic dub techno\"): their songs that sound like that"},
             "count": {"type": "integer", "minimum": 1, "maximum": MOST, "description": format!("How many songs ({COUNT} when left out)")},
+            "keep": {"type": "boolean", "description": format!("Keep the nearest songs ({KEPT_FEWEST} to {KEPT_MOST}, heard in full) as a reference the judge works toward: the answer names it. Only what they named, or one style (c1 when they named nothing)")},
             "learn": {"type": "array", "minItems": 1, "maxItems": 16, "items": {"type": "string", "minLength": 1, "maxLength": 1024}, "description": "The folders to learn from: only after the producer said yes to the offer"}
         }
     })
@@ -68,12 +80,19 @@ pub struct TasteTool {
     music: Rc<Music>,
     /// A clip in the project as its audio file.
     resolve: Option<ResolveAudio>,
+    /// Where `keep` keeps a reference for the judge.
+    references: Option<Rc<ReferenceStore>>,
     schema: JsonObject,
 }
 
 /// The taste tool, in the DAW's words.
-pub fn taste_tools_for(profile: &DawProfile, music: Rc<Music>, resolve: Option<ResolveAudio>) -> Vec<Rc<dyn KernelTool>> {
-    vec![Rc::new(TasteTool { music, resolve, schema: schema(profile) })]
+pub fn taste_tools_for(
+    profile: &DawProfile,
+    music: Rc<Music>,
+    resolve: Option<ResolveAudio>,
+    references: Option<Rc<ReferenceStore>>,
+) -> Vec<Rc<dyn KernelTool>> {
+    vec![Rc::new(TasteTool { music, resolve, references, schema: schema(profile) })]
 }
 
 #[async_trait(?Send)]
@@ -98,7 +117,9 @@ impl KernelTool for TasteTool {
     }
     async fn execute(&self, input: JsonObject, signal: Signal) -> Result<ToolResult, RuntimeError> {
         let text = |key: &str| input.get(key).and_then(Value::as_str).map(str::trim).filter(|text| !text.is_empty()).map(str::to_string);
-        let count = input.get("count").and_then(Value::as_u64).map_or(COUNT, |count| (count as usize).clamp(1, MOST));
+        let keep = input.get("keep").and_then(Value::as_bool) == Some(true);
+        let count = input.get("count").and_then(Value::as_u64).map_or(COUNT, |count| count as usize);
+        let count = if keep { count.clamp(KEPT_FEWEST, KEPT_MOST) } else { count.clamp(1, MOST) };
         if let Some(folders) = input.get("learn").and_then(Value::as_array) {
             let folders =
                 folders.iter().filter_map(Value::as_str).map(str::trim).filter(|folder| !folder.is_empty()).map(str::to_string).collect();
@@ -107,7 +128,9 @@ impl KernelTool for TasteTool {
         if !self.music.agreed() {
             return Ok(ToolResult::text(stringify(&self.offer().await)));
         }
-        let answer = self.answer(text("like"), text("words"), count, &signal).await;
+        // Kept as a reference: what they named, or one of their styles (the biggest when they named nothing).
+        let like = text("like").or_else(|| (keep && text("words").is_none()).then(|| "c1".to_string()));
+        let answer = self.answer(like, text("words"), count, keep, &signal).await;
         signal.check()?;
         Ok(match answer {
             Ok(answer) => ToolResult::text(stringify(&answer)),
@@ -213,7 +236,14 @@ impl TasteTool {
         })
     }
 
-    async fn answer(&self, like: Option<String>, words: Option<String>, count: usize, signal: &Signal) -> Result<Value, String> {
+    async fn answer(
+        &self,
+        like: Option<String>,
+        words: Option<String>,
+        count: usize,
+        keep: bool,
+        signal: &Signal,
+    ) -> Result<Value, String> {
         let status = self.music.status();
         let learned = status.heard();
         let mut answer = json!({"learned": learned});
@@ -230,6 +260,20 @@ impl TasteTool {
             None => Clap::from_slot(signal).await.map(|clap| Rc::new(clap) as Rc<dyn Style>),
         };
         let model = style.as_ref().map(|style| style.model().to_string());
+        // Their words, as the style model's text side reads them (fetched the first time, and said): only when they
+        // named nothing, as what they named comes first.
+        let fetched = std::cell::RefCell::new(vec![]);
+        let words_vector = match (words.as_ref().filter(|_| like.is_none()), &style) {
+            (Some(words), Some(style)) => {
+                let say = |said: &str| fetched.borrow_mut().push(said.to_string());
+                Some(style.words(words, &say, signal).await)
+            }
+            (Some(_), None) => Some(Err("the embeddings slot is off".to_string())),
+            _ => None,
+        };
+        if !fetched.borrow().is_empty() {
+            answer["fetched"] = json!(fetched.take());
+        }
         // A file to be like: a clip in the project by its ref, or a path.
         let mut file = None;
         if let Some(like) = &like {
@@ -274,24 +318,165 @@ impl TasteTool {
                 Some(model) => Some(VectorReader::open(&dir, &store, model).map_err(|error| error.to_string())?),
                 None => None,
             };
-            let seed = Seed { like, words, file, heard_file };
+            let seed = Seed { like, words, words_vector, file, heard_file };
             seed.answer(&store, reader.as_ref(), count, answer)
         })
         .await
         .map_err(|error| error.to_string())??;
-        let (answer, shown) = used;
+        let (mut answer, shown) = used;
         // The songs it named are heard in full first.
-        let dir = self.music.dir();
-        let _ = tokio::task::spawn_blocking(move || MusicStore::open(&database(&dir)).and_then(|store| store.mark_used(&shown, now_ms())))
-            .await;
+        let (dir, used) = (self.music.dir(), shown.clone());
+        let _ =
+            tokio::task::spawn_blocking(move || MusicStore::open(&database(&dir)).and_then(|store| store.mark_used(&used, now_ms()))).await;
+        if keep && !shown.is_empty() {
+            let seed = answer["seed"].as_str().unwrap_or("their music").to_string();
+            match self.keep(&shown, &seed, style.as_deref(), signal).await {
+                Ok(name) => {
+                    answer["reference"] = json!(name);
+                    answer["note"] = json!(format!(
+                        "Kept as a reference from these songs, heard in full. To work toward it: judge with goal.reference \"{name}\"; its ranges are their style's. {NOTE}"
+                    ));
+                }
+                Err(why) => answer["keep"] = json!(format!("not kept: {why}")),
+            }
+        }
         Ok(answer)
+    }
+
+    /// The songs kept as a reference the judge works toward, by name ("your music near Archangel"): each heard in full
+    /// first where it was heard lightly, their profiles combined with how they sound to the style model.
+    async fn keep(&self, ids: &[i64], seed: &str, style: Option<&dyn Style>, signal: &Signal) -> Result<String, String> {
+        let references = self.references.clone().ok_or("Kumi keeps no references here")?;
+        let dir = self.music.dir();
+        let (store_dir, wanted) = (dir.clone(), ids.to_vec());
+        let mut songs = tokio::task::spawn_blocking(move || -> Result<Vec<Song>, String> {
+            let store = MusicStore::open_read(&database(&store_dir)).map_err(|error| error.to_string())?.ok_or("there's no music yet")?;
+            store.songs_by_id(&wanted).map_err(|error| error.to_string())
+        })
+        .await
+        .map_err(|error| error.to_string())??;
+        songs.sort_by_key(|song| ids.iter().position(|id| *id == song.id));
+        let model = style.map(|style| style.model().to_string());
+        let say = |_: &str| {};
+        let ears = Ears { style, say: &say, signal };
+        let mut kept = vec![];
+        for song in songs {
+            if song.stage >= Stage::Full as i64 {
+                kept.push(song);
+                continue;
+            }
+            match hear(&song, Stage::Full, &ears).await {
+                Heard::Done { profile, vector, .. } => {
+                    let text = serde_json::to_string(&profile).map_err(|error| error.to_string())?;
+                    let (store_dir, id, model) = (dir.clone(), song.id, model.clone());
+                    tokio::task::spawn_blocking(move || -> Result<(), String> {
+                        let store = MusicStore::open(&database(&store_dir)).map_err(|error| error.to_string())?;
+                        store.heard(id, Stage::Full, &text, now_ms()).map_err(|error| error.to_string())?;
+                        if let (Some((vector, by)), Some(model)) = (vector, model) {
+                            if by == model {
+                                VectorWriter::open(&store_dir, &model)
+                                    .and_then(|mut writer| writer.put(&store, id, &vector))
+                                    .map_err(|error| error.to_string())?;
+                            }
+                        }
+                        Ok(())
+                    })
+                    .await
+                    .map_err(|error| error.to_string())??;
+                    kept.push(Song {
+                        profile: Some(serde_json::to_string(&profile).unwrap_or_default()),
+                        stage: Stage::Full as i64,
+                        ..song
+                    });
+                }
+                Heard::Skipped(_) => {}
+                Heard::Stop(why) => return Err(why),
+            }
+        }
+        if kept.is_empty() {
+            return Err("none of those songs could be heard".into());
+        }
+        // Each song's profile with how it sounds to the style model, for the judge's style guard.
+        let (store_dir, model_now) = (dir.clone(), model.clone());
+        let vectors: Vec<Option<Vec<f32>>> = {
+            let ids: Vec<i64> = kept.iter().map(|song| song.id).collect();
+            tokio::task::spawn_blocking(move || {
+                let store = MusicStore::open_read(&database(&store_dir)).ok().flatten();
+                let reader = match (&store, &model_now) {
+                    (Some(store), Some(model)) => VectorReader::open(&store_dir, store, model).ok(),
+                    _ => None,
+                };
+                ids.iter().map(|id| reader.as_ref().and_then(|reader| reader.get(*id))).collect()
+            })
+            .await
+            .map_err(|error| error.to_string())?
+        };
+        let profiles: Vec<Profile> = kept
+            .iter()
+            .zip(vectors)
+            .filter_map(|(song, vector)| {
+                let profile: Profile = serde_json::from_str(song.profile.as_deref()?).ok()?;
+                let styled = vector.zip(model.clone());
+                Some(Profile {
+                    vibe: styled.as_ref().map(|(vector, _)| vector.clone()),
+                    vibe_model: styled.map(|(_, model)| model),
+                    ..profile
+                })
+            })
+            .collect();
+        let name = format!("your music near {}", near(seed, &kept));
+        let profile = Profile::combine(&name, &profiles).ok_or("none of those songs has a profile")?;
+        let reference = KeptReference {
+            version: KEPT_VERSION,
+            key: ReferenceStore::key(&name),
+            name: name.clone(),
+            kind: "music".into(),
+            tracks: kept
+                .iter()
+                .map(|song| KeptTrack {
+                    artist: song.tags.artist.clone().unwrap_or_default(),
+                    title: song.tags.title.clone().unwrap_or_default(),
+                    source: song.path.clone(),
+                    mbid: None,
+                })
+                .collect(),
+            profile,
+            at: now_ms(),
+            mbid: None,
+            stamp: None,
+        };
+        references.save(&reference).await?;
+        Ok(name)
     }
 }
 
-/// What an answer is about: what the producer named, their words, or a file (and its vector, heard now).
+/// What a kept reference is named near: a style by its first song's title, a file by its own name, else what was named.
+fn near(seed: &str, songs: &[Song]) -> String {
+    if cluster_label(seed).is_some() {
+        if let Some(title) = songs.first().and_then(|song| song.tags.title.clone()) {
+            return title;
+        }
+    }
+    if seed.contains(['/', '\\']) {
+        if let Some(stem) = Path::new(seed).file_stem().and_then(|stem| stem.to_str()) {
+            return stem.to_string();
+        }
+    }
+    seed.to_string()
+}
+
+/// A style's label (c1, c2…) as its place among the clusters.
+fn cluster_label(text: &str) -> Option<usize> {
+    let number: usize = text.trim().strip_prefix(['c', 'C'])?.parse().ok()?;
+    number.checked_sub(1)
+}
+
+/// What an answer is about: what the producer named, their words (and what they mean to the style model, or why it
+/// couldn't read them), or a file (and its vector, heard now).
 struct Seed {
     like: Option<String>,
     words: Option<String>,
+    words_vector: Option<Result<Vec<f32>, String>>,
     file: Option<String>,
     heard_file: Option<Vec<f32>>,
 }
@@ -311,6 +496,20 @@ impl Seed {
             let own: Vec<Song> = store.song_at(file).map_err(error)?.filter(|song| song.stage >= 1).into_iter().collect();
             let vector = self.heard_file.clone().or_else(|| own.first().and_then(|song| reader?.get(song.id)));
             (self.like.clone().unwrap_or_else(|| file.clone()), own, Some(Named::Song), vector)
+        } else if let Some((at, like)) = self.like.as_deref().and_then(|like| Some((cluster_label(like)?, like))) {
+            // One of their styles, by its label: its songs nearest its centre.
+            let kept = store.meta("clusters").map_err(error)?.and_then(|text| serde_json::from_str::<Value>(&text).ok());
+            let Some(cluster) = kept.as_ref().and_then(|kept| kept["clusters"].get(at)) else {
+                answer["seed"] = json!(like);
+                answer["songs"] = json!([]);
+                answer["note"] = json!("Their music has no style by that label: call taste with nothing named to see their styles.");
+                return Ok((answer, vec![]));
+            };
+            let ids: Vec<i64> = cluster["examples"].as_array().into_iter().flatten().filter_map(Value::as_i64).collect();
+            let mut songs = store.songs_by_id(&ids).map_err(error)?;
+            songs.sort_by_key(|song| ids.iter().position(|id| *id == song.id));
+            let centre: Option<Vec<f32>> = kept.as_ref().and_then(|kept| serde_json::from_value(kept["centres"][at].clone()).ok());
+            (like.to_string(), songs, Some(Named::Genre), centre)
         } else if let Some(like) = &self.like {
             match store.named(like).map_err(error)? {
                 Some((named, songs)) => {
@@ -325,7 +524,15 @@ impl Seed {
                     return Ok((answer, vec![]));
                 }
             }
+        } else if let (Some(words), Some(Ok(vector))) = (&self.words, &self.words_vector) {
+            // Their words on the style model's map: the songs nearest them.
+            answer["words"] = json!(words);
+            (words.clone(), vec![], None, Some(vector.clone()))
         } else if let Some(words) = &self.words {
+            // The style model can't read words now: their genre tags, then.
+            if let Some(Err(why)) = &self.words_vector {
+                answer["wordsBy"] = json!(format!("their genre tags: {why}"));
+            }
             let tag = genre_in(words, &store.genres().map_err(error)?);
             let found = match tag {
                 Some(tag) => store.named(&tag).map_err(error)?.filter(|(named, _)| *named == Named::Genre).map(|(_, songs)| (tag, songs)),
@@ -438,6 +645,9 @@ fn styles(store: &MusicStore, reader: Option<&VectorReader>, mut answer: Value) 
         shown.extend(songs.iter().take(SHOWN).map(|song| song.id));
         let mut style =
             json!({"label": format!("c{}", at + 1), "songs": cluster["songs"], "examples": examples, "genres": cluster["genres"]});
+        if let Some(names) = cluster.get("names").filter(|names| names.is_array()) {
+            style["names"] = names.clone();
+        }
         if let Some(traits) = traits(&songs) {
             style["traits"] = json!(traits);
         }

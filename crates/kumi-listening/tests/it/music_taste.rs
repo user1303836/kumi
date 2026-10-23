@@ -112,6 +112,29 @@ impl Style for Fixed {
     }
 }
 
+/// The test's style model with a text side: words for a style point where its songs do.
+struct Worded;
+
+#[async_trait(?Send)]
+impl Style for Worded {
+    fn model(&self) -> &str {
+        MODEL
+    }
+    async fn embed(&self, _: &Path, _: &[f64], _: Option<f64>, _: Say<'_>, _: &Signal) -> Result<(Vec<f32>, String), String> {
+        Ok((direction(3, 0, 0), MODEL.into()))
+    }
+    async fn words(&self, text: &str, _: Say<'_>, _: &Signal) -> Result<Vec<f32>, String> {
+        let style = match text {
+            text if text.contains("pop") || text.contains("bright") => STYLES[2].direction,
+            text if text.contains("techno") || text.contains("dub") => STYLES[1].direction,
+            text if text.contains("halftime") || text.contains("dark") => STYLES[0].direction,
+            // Words for no style of theirs.
+            _ => 400,
+        };
+        Ok(kumi_listening::embed::normalized((0..DIMS).map(|at| if at == style { 1. } else { 0.01 }).collect()))
+    }
+}
+
 /// A unit vector pointing mostly at `at` (a style), leaning toward its artist's own, a little apart for each song.
 fn direction(at: usize, artist: usize, song: usize) -> Vec<f32> {
     let mut vector = vec![0f32; DIMS];
@@ -159,7 +182,7 @@ fn library(root: &Path) -> (PathBuf, String) {
         writer.put(&store, id, &direction(STYLES[*style].direction, *n % 3, *n)).unwrap();
     }
     writer.settle(&store).unwrap();
-    recluster(&mut store, &dir, MODEL).unwrap();
+    recluster(&mut store, &dir, MODEL, None).unwrap();
     (dir, archangel)
 }
 
@@ -194,7 +217,7 @@ async fn counted(music: &Music) {
 }
 
 async fn ask(music: &Rc<Music>, input: Value) -> String {
-    let tool = taste_tools_for(&DawProfile::ABLETON, music.clone(), None).remove(0);
+    let tool = taste_tools_for(&DawProfile::ABLETON, music.clone(), None, None).remove(0);
     assert_eq!(tool.name(), TASTE_TOOL);
     let result = tool.execute(input.as_object().unwrap().clone(), Signal::new()).await.unwrap();
     assert!(!result.is_error, "{result:?}");
@@ -259,7 +282,7 @@ fn a_yes_keeps_the_folders_and_starts_learning_and_forget_takes_it_all_away() {
         assert!(!kumi.exists(), "music.db, the vectors and the map are gone");
         assert_eq!((taste.status().state, taste.agreed(), taste.offered()), (MusicState::Off, false, true));
         assert_eq!(saved.borrow().last(), Some(&(None, true)), "nothing to learn, and no offer again");
-        let refused = taste_tools_for(&DawProfile::ABLETON, taste.clone(), None)
+        let refused = taste_tools_for(&DawProfile::ABLETON, taste.clone(), None, None)
             .remove(0)
             .execute(json!({"learn": ["/no/such/folder"]}).as_object().unwrap().clone(), Signal::new())
             .await
@@ -300,12 +323,47 @@ fn its_answers_say_the_producers_styles_and_their_songs_nearest_what_they_named(
 }
 
 #[test]
+fn words_find_the_songs_that_sound_like_them_and_name_the_styles() {
+    local(async {
+        let dir = tempfile::tempdir().unwrap();
+        let (kumi, _) = library(dir.path());
+        // The style words as the test's model reads them: two for each style, and one for none of them that names none.
+        let words: Vec<(String, Vec<f32>)> = ["sunny pop", "bright", "deep techno", "dub", "dark halftime", "dark", "calm"]
+            .iter()
+            .map(|word| {
+                let vector = futures::executor::block_on(Worded.words(word, &|_| {}, &Signal::new())).unwrap();
+                (word.to_string(), vector)
+            })
+            .collect();
+        let mut store = MusicStore::open(&database(&kumi)).unwrap();
+        recluster(&mut store, &kumi, MODEL, Some(&words)).unwrap();
+        drop(store);
+        let (taste, _) = music(&kumi, Some(vec!["/library".into()]), true, vec![]);
+        let mut options = MusicOptions::new(kumi.clone(), Some(vec!["/library".into()]), Default::default());
+        options.style = Some(Rc::new(Worded) as Rc<dyn Style>);
+        let worded = create_music(options);
+        counted(&worded).await;
+        counted(&taste).await;
+        golden("words-vector.json", &pinned(&ask(&worded, json!({"words": "sunny pop for a summer night", "count": 4})).await, dir.path()));
+        golden("styles-named.json", &pinned(&ask(&worded, json!({})).await, dir.path()));
+    });
+}
+
+#[test]
 fn agreed_but_nothing_heard_yet_it_says_so() {
     local(async {
         let dir = tempfile::tempdir().unwrap();
         let (taste, _) = music(&dir.path().join("kumi/music"), Some(vec!["/library".into()]), true, vec![]);
         golden("nothing-heard.json", &pinned(&ask(&taste, json!({"like": "Burial"})).await, dir.path()));
     });
+}
+
+fn spread(value: f64) -> kumi_listening::checklist::Spread {
+    kumi_listening::checklist::Spread::point(value, 1.)
+}
+
+fn groove(swing: f64, push: f64) -> kumi_listening::checklist::Groove {
+    kumi_listening::checklist::Groove { swing_ratio: spread(swing), push_ms: spread(push) }
 }
 
 #[test]
@@ -316,9 +374,97 @@ fn a_profile_reads_as_one_sentence() {
         (STYLES[2].sound)(0.),
         profile(-16., -3.5, -5., 16., 11., 0.3, None),
         profile(-6., 2., -40., 6., 2., 1.9, Some((250., 40.))),
+        Profile {
+            tempo: Some(spread(140.2)),
+            key: Some("F minor".into()),
+            busyness: Some(spread(13.)),
+            groove: Some(groove(1.6, 14.)),
+            ..(STYLES[0].sound)(0.)
+        },
+        Profile {
+            tempo: Some(spread(96.)),
+            key: None,
+            busyness: Some(spread(3.)),
+            groove: Some(groove(1.02, -11.)),
+            ..(STYLES[2].sound)(0.)
+        },
     ]
     .iter()
     .map(describe)
     .collect();
     golden("describe.txt", &(lines.join("\n") + "\n"));
+}
+
+#[test]
+fn keep_hears_the_nearest_songs_in_full_and_keeps_them_for_the_judge_by_name() {
+    use kumi_listening::{
+        music::worker::{run, Control, ScanOptions},
+        references::store::{ReferenceStore, KEPT_VERSION},
+    };
+    local(async {
+        let dir = tempfile::tempdir().unwrap();
+        let songs = dir.path().join("Music");
+        for (artist, n) in [("Artist A", 1), ("Artist A", 2), ("Artist A", 3), ("Artist B", 1), ("Artist B", 2), ("Artist B", 3)] {
+            let path = songs.join(format!("{artist}/Album/0{n} Song {n}.wav"));
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            let samples: Vec<f32> = (0..8_000 * (31 + n)).map(|t| (t as f32 * 0.03 * n as f32).sin() * 0.3).collect();
+            std::fs::write(&path, kumi_media::audio::decode::float_wav(&[samples], 8_000)).unwrap();
+        }
+        let kumi = dir.path().join("kumi/music");
+        let folder = songs.to_string_lossy().into_owned();
+        let options = ScanOptions { dir: kumi.to_string_lossy().into_owned(), folders: vec![folder.clone()], ..Default::default() };
+        run(&options, Default::default(), &Control::new(false), Some(Rc::new(Fixed)), &|_| {}).await.unwrap();
+        // Two heard only lightly.
+        let store = MusicStore::open(&database(&kumi)).unwrap();
+        store.connection().execute("UPDATE songs SET stage = 1 WHERE title IN ('Song 1')", []).unwrap();
+        drop(store);
+        let references = Rc::new(ReferenceStore::new(dir.path().join("references")));
+        let (taste, _) = music(&kumi, Some(vec![folder]), true, vec![]);
+        counted(&taste).await;
+        let tool = taste_tools_for(&DawProfile::ABLETON, taste.clone(), None, Some(references.clone())).remove(0);
+        let result = tool.execute(json!({"like": "Artist A", "keep": true}).as_object().unwrap().clone(), Signal::new()).await.unwrap();
+        let answer: Value = serde_json::from_str(&result.text).unwrap();
+        assert_eq!(answer["reference"], "your music near Artist A", "{answer}");
+        assert!(answer["note"].as_str().unwrap().contains("judge with goal.reference \"your music near Artist A\""));
+        let kept = references.load("your music near Artist A").await.unwrap();
+        assert_eq!((kept.kind.as_str(), kept.version), ("music", KEPT_VERSION));
+        assert_eq!(kept.tracks.len(), 6, "an artist's three and the three nearest: {:?}", kept.tracks);
+        assert!(kept.tracks.iter().all(|track| Path::new(&track.source).is_file()), "its tracks are the song files");
+        assert_eq!((kept.profile.tracks, kept.profile.vibe_model.as_deref()), (6, Some(MODEL)));
+        assert!(kept.profile.vibe.is_some(), "the judge guards their style");
+        // Heard in full now.
+        let store = MusicStore::open_read(&database(&kumi)).unwrap().unwrap();
+        let light: i64 = store.connection().query_row("SELECT count(*) FROM songs WHERE stage < 2", [], |row| row.get(0)).unwrap();
+        assert_eq!(light, 0);
+        // A style by its label, kept the same way; never the whole library.
+        let result = tool.execute(json!({"keep": true}).as_object().unwrap().clone(), Signal::new()).await.unwrap();
+        let answer: Value = serde_json::from_str(&result.text).unwrap();
+        assert_eq!(answer["seed"], "c1", "{answer}");
+        assert!(answer["reference"].as_str().unwrap().starts_with("your music near "), "{answer}");
+        taste.close().await;
+    });
+}
+
+#[test]
+fn a_reference_kept_by_an_older_kumi_is_measured_again() {
+    use kumi_listening::references::store::{KeptReference, ReferenceStore, KEPT_VERSION};
+    local(async {
+        let dir = tempfile::tempdir().unwrap();
+        let references = ReferenceStore::new(dir.path());
+        let kept = |version: u32| KeptReference {
+            version,
+            key: ReferenceStore::key("dub techno"),
+            name: "dub techno".into(),
+            kind: "genre".into(),
+            tracks: vec![],
+            profile: (STYLES[1].sound)(0.),
+            at: 1,
+            mbid: None,
+            stamp: None,
+        };
+        references.save(&kept(KEPT_VERSION - 1)).await.unwrap();
+        assert!(references.load("dub techno").await.is_none(), "an older one is measured again (its tempo, key and groove)");
+        references.save(&kept(KEPT_VERSION)).await.unwrap();
+        assert!(references.load("dub techno").await.is_some());
+    });
 }

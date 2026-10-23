@@ -19,6 +19,7 @@ kumi-web.workspace = true
 async-trait.workspace = true
 base64.workspace = true
 chrono.workspace = true
+fancy-regex.workspace = true
 futures.workspace = true
 hex.workspace = true
 home.workspace = true
@@ -37,6 +38,7 @@ url.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
+flate2.workspace = true
 libc.workspace = true
 tempfile.workspace = true
 tokio = { workspace = true, features = ["test-util"] }

@@ -677,7 +677,7 @@ pub fn create_session(options: SessionOptions) -> Result<Session, RuntimeError> 
                     }
                     .boxed_local()
                 });
-                kumi_listening::music::tool::taste_tools_for(&options.profile, music.clone(), Some(clips))
+                kumi_listening::music::tool::taste_tools_for(&options.profile, music.clone(), Some(clips), options.references.clone())
             })
             .unwrap_or_default();
         let answers = Rc::new(Cell::new(0));

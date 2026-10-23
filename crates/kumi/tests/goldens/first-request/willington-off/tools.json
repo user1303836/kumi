@@ -3556,7 +3556,7 @@
   },
   {
     "name": "taste",
-    "description": "The producer's own music, learned on their computer: their nearest songs and what those songs share, in words. Call it only when a request leaves the style open (\"make me a beat\", \"something dark\"), before choosing sounds or a direction; never when the producer named a reference, specific sounds or exact values. With no like or words, it answers with the main styles in their music. The first time, it may answer with an offer to learn their music: ask the producer that once, in your own words, and call again with learn only if they say yes.",
+    "description": "The producer's own music, learned on their computer: their nearest songs and what those songs share, in words. Call it only when a request leaves the style open (\"make me a beat\", \"something dark\"), before choosing sounds or a direction; never when the producer named a reference, specific sounds or exact values. With no like or words, it answers with the main styles in their music. keep turns the nearest songs into a reference for the judge. The first time, it may answer with an offer to learn their music: ask the producer that once, in your own words, and call again with learn only if they say yes.",
     "inputSchema": {
       "type": "object",
       "additionalProperties": false,
@@ -3565,19 +3565,23 @@
           "type": "string",
           "minLength": 1,
           "maxLength": 1024,
-          "description": "What the producer named: an artist, album, song or genre tag in their music, an audio file's path, or a clip in the Set (its clipRef)"
+          "description": "What the producer named: an artist, album, song or genre tag in their music, an audio file's path, a clip in the Set (its clipRef), or one of their styles by its label (c1)"
         },
         "words": {
           "type": "string",
           "minLength": 1,
           "maxLength": 300,
-          "description": "The producer's own words for the style, when they named nothing (matched against their songs' genre tags)"
+          "description": "The producer's own words for the style, when they named nothing (\"melancholic dub techno\"): their songs that sound like that"
         },
         "count": {
           "type": "integer",
           "minimum": 1,
           "maximum": 20,
           "description": "How many songs (8 when left out)"
+        },
+        "keep": {
+          "type": "boolean",
+          "description": "Keep the nearest songs (5 to 10, heard in full) as a reference the judge works toward: the answer names it. Only what they named, or one style (c1 when they named nothing)"
         },
         "learn": {
           "type": "array",

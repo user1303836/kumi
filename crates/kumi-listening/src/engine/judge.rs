@@ -970,11 +970,13 @@ impl Listening {
     }
 
     /// A kept reference's style heard again with this run's style model, from its files when they're all still here (a
-    /// file or a folder kept): each heard as the reference tool hears it, at a common loudness, the vibes averaged, with
-    /// how far they lie from that. None when it wasn't kept from files, or one is gone or can't be heard.
+    /// file or a folder kept, or the producer's own songs): each heard as the reference tool hears it, at a common
+    /// loudness, the vibes averaged, with how far they lie from that. None when it wasn't kept from files, or one is gone
+    /// or can't be heard.
     async fn restyled(&self, kept: &KeptReference, signal: &Signal) -> Option<(Vec<f32>, Option<f64>, String)> {
         let (slot, style) = self.style_model.borrow().clone()?;
-        if kept.kind != "files" || kept.tracks.is_empty() || kept.tracks.iter().any(|track| !Path::new(&track.source).is_file()) {
+        let from_files = matches!(kept.kind.as_str(), "files" | "music");
+        if !from_files || kept.tracks.is_empty() || kept.tracks.iter().any(|track| !Path::new(&track.source).is_file()) {
             return None;
         }
         let say = |said: &str| self.tell(said.to_string(), None);

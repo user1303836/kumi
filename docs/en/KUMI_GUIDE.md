@@ -898,6 +898,14 @@ a reference, sounds or values, it goes by those instead.
   waits while Kumi listens or plays and while your computer runs on its battery,
   and carries on where it stopped. Songs under 30 seconds or near silence are
   skipped; Apple's protected purchases are named but never heard.
+- **Like your own music.** Ask for something in your own style ("like my
+  stuff") and Kumi keeps your nearest songs (5 to 10, heard in full) as a
+  reference, then works toward it as it does toward any reference.
+- **In your words.** Describe a style ("melancholic dub techno") and Kumi finds
+  the songs in your music that sound like it, with the style model's words side
+  (fetched the first time, about 127 MB). It names your styles the same way,
+  from about 200 genre and mood words. With another embeddings model in
+  `/slots`, words go by your songs' genre tags instead, and Kumi says so.
 - **What the model sees.** The names of the songs nearest what you asked for
   (artist, title, album) and a sentence about what they share, never your files
   or their fingerprints. Song and artist names reach the model when Kumi uses
