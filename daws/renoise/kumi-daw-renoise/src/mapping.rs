@@ -3,19 +3,19 @@
 //! audio saved to Kumi's folder to be heard, a new instrument of planned files is one instrument_kit change, an instrument's own
 //! samples are laid out by one keyzone_map change, and the song's instruments for the tidy come in pages of reads. Core's tool
 //! does the rest.
-use super::own_changes::OwnPlan;
-use super::own_listening::OwnRenderer;
-use crate::core::{
-    daw::DawProfile,
+use async_trait::async_trait;
+use kumi_common::abort::Signal;
+use kumi_listening::renderer::Renderer;
+use kumi_runtime::core::{
     mapping::{
         backend::{Held, MappingBackend, Words},
         Planned,
     },
     refs::RefScheme,
 };
-use crate::listening::renderer::Renderer;
-use async_trait::async_trait;
-use kumi_common::abort::Signal;
+use kumi_runtime::integrations::own_changes::OwnPlan;
+use kumi_runtime::integrations::own_listening::OwnRenderer;
+use kumi_types::daw::DawProfile;
 use serde_json::{json, Map, Value};
 use std::rc::Rc;
 
@@ -210,9 +210,9 @@ fn map_input(instrument: &str, planned: &Planned) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::mapping::{Found, Placed};
-    use crate::integrations::renoise_changes::CHANGES;
-    use crate::kernel::schema::problem;
+    use crate::changes::CHANGES;
+    use kumi_runtime::core::mapping::{Found, Placed};
+    use kumi_runtime::kernel::schema::problem;
 
     fn placed(id: &str, root: i32, base: i32, zone: (i32, i32), velocity: (u8, u8)) -> Placed {
         Placed { id: id.into(), name: id.into(), root, base, zone, velocity, round_robin: None, found: Found::Named }

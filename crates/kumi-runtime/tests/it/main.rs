@@ -20,7 +20,6 @@ mod pin_wire;
 mod providers;
 mod recall;
 mod recipes;
-mod renoise_device_actions;
 mod store_backed;
 mod store_import;
 mod store_rollback;

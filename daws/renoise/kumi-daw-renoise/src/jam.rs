@@ -2,13 +2,13 @@
 //! with their sequencer tracks' lines (the song's LPB); a track's notes are removed or moved with notes_write (a moved note keeps
 //! its column, its delay saying where in the line it starts), a track becomes an alias with pattern_alias, a slot plays another
 //! pattern with slot_pattern, and a slot goes with slot_delete. Core's tool does the rest.
-use super::own_changes::OwnPlan;
-use super::renoise_lines::{note_text, Lines};
-use crate::core::jam::backend::{Edit, JamBackend, Words};
-use crate::core::jam::{Hit, Part, TrackPart};
-use crate::core::refs::RefScheme;
+use crate::lines::{note_text, Lines};
 use async_trait::async_trait;
 use kumi_common::abort::Signal;
+use kumi_runtime::core::jam::backend::{Edit, JamBackend, Words};
+use kumi_runtime::core::jam::{Hit, Part, TrackPart};
+use kumi_runtime::core::refs::RefScheme;
+use kumi_runtime::integrations::own_changes::OwnPlan;
 use serde_json::{json, Value};
 use std::rc::Rc;
 
@@ -70,7 +70,7 @@ fn apply(lines: &mut Lines, edits: &[Edit], track: &str) -> Vec<String> {
             Edit::Move(hit, to) => (hit, Some(*to)),
         };
         let found = lines.rows.get(&hit.line).and_then(|row| {
-            row.notes.iter().position(|note| note.col == hit.col && super::renoise_lines::note_value(&note.note) == Some(hit.note as u8))
+            row.notes.iter().position(|note| note.col == hit.col && crate::lines::note_value(&note.note) == Some(hit.note as u8))
         });
         let Some(at) = found else { continue };
         let target = to.map(|to| line_and_delay(to, length));
@@ -79,7 +79,7 @@ fn apply(lines: &mut Lines, edits: &[Edit], track: &str) -> Vec<String> {
             if taken {
                 said.push(format!(
                     "{} on \u{201c}{track}\u{201d} stays on line {:02}: column {} of line {line:02} holds a note already",
-                    super::renoise_lines::note_text(hit.note.clamp(0, 119) as u8),
+                    crate::lines::note_text(hit.note.clamp(0, 119) as u8),
                     hit.line,
                     hit.col
                 ));
@@ -259,8 +259,8 @@ impl<S: RefScheme + 'static> RenoiseJam<S> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::integrations::renoise_changes::CHANGES;
-    use crate::kernel::schema::problem;
+    use crate::changes::CHANGES;
+    use kumi_runtime::kernel::schema::problem;
 
     fn lines() -> Lines {
         let rows = vec![

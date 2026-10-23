@@ -1,13 +1,13 @@
 //! Renoise's backend for the variations tool (M7): only Renoise's facts. Its material is a pattern track's lines or a phrase's
-//! (`renoise_lines`), its operators shuffle slices, roll, reverse and move ghosts, and its takes are phrases of an instrument or
+//! (`lines`), its operators shuffle slices, roll, reverse and move ghosts, and its takes are phrases of an instrument or
 //! slots of their own in a "Variations of …" section (a copy of the source pattern whose other tracks are aliases of the source's).
 //! Takes are found by the places the tool's logs follow, else by the names Kumi gave them; the source pattern, track and
 //! instrument the same way. Pattern takes render on the source's track from their slots, phrase takes through players of their
 //! phrases (scratch tracks, gone after). Core's tool does the rest.
-use super::own_changes::OwnPlan;
-use super::own_listening::OwnRenderer;
-use super::renoise_lines::{note_text, note_value, Lines, Op};
-use crate::core::{
+use crate::lines::{note_text, note_value, Lines, Op};
+use async_trait::async_trait;
+use kumi_common::abort::Signal;
+use kumi_runtime::core::{
     contracts::JsonObject,
     refs::RefScheme,
     variations::{
@@ -17,8 +17,8 @@ use crate::core::{
         Rng, TakeSet, TakeState,
     },
 };
-use async_trait::async_trait;
-use kumi_common::abort::Signal;
+use kumi_runtime::integrations::own_changes::OwnPlan;
+use kumi_runtime::integrations::own_listening::OwnRenderer;
 use serde_json::{json, Map, Value};
 use std::{collections::BTreeMap, collections::BTreeSet, rc::Rc};
 
@@ -248,7 +248,7 @@ impl<S: RefScheme + 'static> RenoiseBackend<S> {
     /// One render of the track over `beats` from `from` (beats from the song's start), heard.
     async fn hear(&self, from: f64, beats: f64, track: &str, signal: &Signal) -> Result<Heard, String> {
         let sources = vec![json!({"id": "t", "what": "track", "ref": track, "stage": "pre-fader"})];
-        let window = crate::listening::renderer::Window { from, beats };
+        let window = kumi_listening::renderer::Window { from, beats };
         match self.renderer.render_sources(sources, window, signal).await {
             Ok(Ok((files, _))) => match files.get("t") {
                 Some((render, _)) => heard_of(render, signal).await,
@@ -310,7 +310,7 @@ impl<S: RefScheme + 'static> RenoiseBackend<S> {
                 Some(json!({"id": format!("p{k}"), "what": "track", "ref": copy.get("ref")?.as_str()?, "stage": "pre-fader"}))
             })
             .collect();
-        let window = crate::listening::renderer::Window { from: 0., beats };
+        let window = kumi_listening::renderer::Window { from: 0., beats };
         let rendered = self.renderer.render_sources(sources, window, signal).await;
         self.renderer.drop_make(&id, steps).await;
         let files = match rendered {
@@ -976,7 +976,7 @@ impl<S: RefScheme + 'static> VariationsBackend for RenoiseBackend<S> {
         let info = self.source(&asked, signal).await?;
         let Placement::Phrases { settings, .. } = &info.data.placement else { return Err("extract makes a phrase".into()) };
         let material = info.material.clone().unwrap_or_else(|| empty_lines(1, 4));
-        if crate::core::variations::Material::silent(&material) {
+        if kumi_runtime::core::variations::Material::silent(&material) {
             return Err("those lines have no notes to make a phrase of".into());
         }
         let set: RenoiseSet = TakeSet::new(0, info.clone(), 0);
@@ -989,7 +989,7 @@ impl<S: RefScheme + 'static> VariationsBackend for RenoiseBackend<S> {
             .and_then(Value::as_str)
             .map(str::to_owned)
             .unwrap_or_else(|| info.short.clone());
-        phrase.insert("name".into(), json!(name.chars().take(crate::core::variations::NAME_MOST).collect::<String>()));
+        phrase.insert("name".into(), json!(name.chars().take(kumi_runtime::core::variations::NAME_MOST).collect::<String>()));
         phrase.insert("content".into(), Value::Array(material.cells(0)));
         let (change, applied) = self.change("phrase_add", Value::Object(phrase), signal).await.map_err(|(why, _)| why)?;
         let made = applied.pointer("/created/ref").and_then(Value::as_str).map(|r| self.short(r));
@@ -1266,8 +1266,8 @@ mod tests {
         assert_eq!(edited_around(&json!({"slots": [9]})), None, "a bridge that doesn't say");
     }
 
-    use super::super::renoise_lines::OPS;
     use super::*;
+    use crate::lines::OPS;
 
     #[test]
     fn the_schemas_are_json_and_every_operator_offered_is_one_renoise_has() {
@@ -1286,7 +1286,7 @@ mod tests {
     /// (V9) The tool goes with every Renoise request: its words and schema stay small beside Renoise's other tools (~62 KB).
     #[test]
     fn the_tool_is_small_beside_renoises_other_tools() {
-        use crate::core::variations::tool::{description, schema};
+        use kumi_runtime::core::variations::tool::{description, schema};
         let size = description(&WORDS).len() + kumi_common::js::json::stringify(&Value::Object(schema(&WORDS))).len();
         assert!(size < 9_000, "the variations tool is {size} bytes");
         assert!(description(&WORDS).contains("0Sxx sample offset"), "Renoise's idioms");

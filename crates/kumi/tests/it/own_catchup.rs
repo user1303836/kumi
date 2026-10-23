@@ -33,7 +33,7 @@ fn effects_put_on_a_track_added_while_watching_are_drafted_on_it() {
         {"change": "added", "kind": "device", "item": {"name": "Reverb", "order": 2, "on": "Reverb"}, "madeOf": {"path": "Audio/Effects/Native/Reverb"}},
         {"change": "added", "kind": "track", "item": {"name": "Lead", "order": 3}, "madeOf": {"name": "Lead", "kind": "sequencer"}},
     ]});
-    let drafted = draft(&renoise, &kumi_runtime::integrations::renoise::CATCH_UP).unwrap();
+    let drafted = draft(&renoise, &kumi_daw_renoise::CATCH_UP).unwrap();
     assert_eq!(
         drafted["steps"],
         json!([

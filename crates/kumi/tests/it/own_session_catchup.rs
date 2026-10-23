@@ -134,7 +134,7 @@ async fn session(daw: Daw, home: &Path, steps: Vec<Step>, question: &str) -> (Ve
     let host = Rc::new(InProcess { host: Arc::new(Host::new(daw, home)), id: Cell::new(0) });
     let (profile, create): (DawProfile, fn(OwnOptions) -> Rc<dyn Integration>) = match daw {
         Daw::Reaper => (DawProfile::REAPER, kumi_daw_reaper::create_reaper_integration),
-        Daw::Renoise => (DawProfile::RENOISE, kumi_runtime::integrations::renoise::create_renoise_integration),
+        Daw::Renoise => (DawProfile::RENOISE, kumi_daw_renoise::create_renoise_integration),
     };
     let events = Rc::new(RefCell::new(vec![]));
     let home_path = home.to_path_buf();

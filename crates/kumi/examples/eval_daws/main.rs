@@ -30,6 +30,7 @@ use kumi_common::{
     js::{json::stringify, string::head},
 };
 use kumi_daw_reaper::create_reaper_integration;
+use kumi_daw_renoise::create_renoise_integration;
 use kumi_runtime::{
     ai::{
         error::LanguageModelError,
@@ -37,10 +38,7 @@ use kumi_runtime::{
     },
     core::{context::IntegrationContext, contracts::WatchEvent, daw::DawProfile, memory::MemoryStoreOptions, session::VideoDirectories},
     create_agent_kernel, create_memory_store, create_session,
-    integrations::{
-        own_bridge::{Connect, OwnOptions},
-        renoise::create_renoise_integration,
-    },
+    integrations::own_bridge::{Connect, OwnOptions},
     kernel::agent::LanguageModel,
     mcp::{
         client::McpEndpoint,

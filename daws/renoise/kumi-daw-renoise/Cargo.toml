@@ -1,0 +1,30 @@
+[package]
+name = "kumi-daw-renoise"
+version = "0.1.0"
+description = "Kumi's Renoise integration, host side: its refs, read tool and instructions, its changes, the tools only Renoise has (variations of its lines and phrases, the sample map, chopping, jams, layered breaks), and where its library is."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+kumi-common.workspace = true
+kumi-library.workspace = true
+kumi-listening.workspace = true
+kumi-runtime.workspace = true
+kumi-types.workspace = true
+# Where Renoise keeps its library: the same detection as its bridge's setup.
+daw-bridge.workspace = true
+async-trait.workspace = true
+regex.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+# The device actions' tests and the lab runs against Renoise: Kumi's host, in process.
+daw-mcp-server = { path = "../../own/daw-mcp-server" }
+futures.workspace = true
+kumi-testkit.workspace = true
+tempfile.workspace = true
+tokio.workspace = true
+uuid.workspace = true

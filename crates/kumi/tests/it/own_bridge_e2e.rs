@@ -6,16 +6,14 @@ use daw_mcp_server::{host::Host, reaper::simulator::ReaperScript, renoise::simul
 use futures::FutureExt;
 use kumi_common::abort::Signal;
 use kumi_daw_reaper::create_reaper_integration;
+use kumi_daw_renoise::create_renoise_integration;
 use kumi_runtime::core::{
     context::IntegrationContext,
     contracts::*,
     errors::RuntimeError,
     view::{BodyKind, BodyRequest, DawFocus, FocusBody},
 };
-use kumi_runtime::integrations::{
-    own_bridge::{Connect, OwnOptions},
-    renoise::create_renoise_integration,
-};
+use kumi_runtime::integrations::own_bridge::{Connect, OwnOptions};
 use kumi_runtime::mcp::client::McpEndpoint;
 use serde_json::{json, Value};
 use std::{cell::Cell, cell::RefCell, rc::Rc, sync::Arc};

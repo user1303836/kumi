@@ -5,16 +5,14 @@ use async_trait::async_trait;
 use futures::FutureExt;
 use kumi_common::abort::Signal;
 use kumi_daw_reaper::create_reaper_integration;
+use kumi_daw_renoise::create_renoise_integration;
 use kumi_runtime::core::{
     context::IntegrationContext,
     contracts::*,
     errors::RuntimeError,
     view::{BodyRequest, FocusBody},
 };
-use kumi_runtime::integrations::{
-    own_bridge::{Connect, OwnOptions},
-    renoise::create_renoise_integration,
-};
+use kumi_runtime::integrations::own_bridge::{Connect, OwnOptions};
 use kumi_runtime::mcp::client::{McpEndpoint, StderrStatus};
 use kumi_runtime::mcp::types::{CallToolResult, Implementation, ListToolsResult};
 use serde_json::{json, Value};

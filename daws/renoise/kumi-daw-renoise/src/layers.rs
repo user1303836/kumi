@@ -6,14 +6,14 @@
 //! has none, bypassed by device_bypass and its threshold (dB) set by device_param; the master's dynamics are its active
 //! Maximizer, Compressor, Bus Compressor or Gate 2, or a plug-in named as a limiter, maximizer, compressor or clipper. Core's
 //! tool does the rest.
-use super::own_changes::OwnPlan;
-use super::own_listening::OwnRenderer;
-use crate::core::contracts::Render;
-use crate::core::layers::backend::{Compressor, Dynamics, LayersBackend, Words};
-use crate::core::refs::RefScheme;
-use crate::listening::renderer::Window;
 use async_trait::async_trait;
 use kumi_common::abort::Signal;
+use kumi_listening::renderer::Window;
+use kumi_runtime::core::contracts::Render;
+use kumi_runtime::core::layers::backend::{Compressor, Dynamics, LayersBackend, Words};
+use kumi_runtime::core::refs::RefScheme;
+use kumi_runtime::integrations::own_changes::OwnPlan;
+use kumi_runtime::integrations::own_listening::OwnRenderer;
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::rc::Rc;
@@ -357,8 +357,8 @@ mod tests {
 
     #[test]
     fn every_change_fits_its_renoise_kind() {
-        use crate::integrations::renoise_changes::CHANGES;
-        use crate::kernel::schema::problem;
+        use crate::changes::CHANGES;
+        use kumi_runtime::kernel::schema::problem;
         let schema_of = |tool: &str| {
             Value::Object(CHANGES.kinds.iter().find(|kind| kind.tool == tool).unwrap_or_else(|| panic!("{tool}")).input_schema())
         };

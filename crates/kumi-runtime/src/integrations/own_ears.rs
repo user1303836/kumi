@@ -6,8 +6,8 @@
 //! and plays them from the stretch's start on a new track.
 use super::own_changes::OwnPlan;
 use super::own_listening::OwnRenderer;
-use super::renoise_lines::note_text;
 use crate::core::contracts::{JsonObject, Render};
+use crate::core::daw::DawProfile;
 use crate::core::plan::make_changes;
 use crate::core::refs::RefScheme;
 use crate::core::stems::backend::{StemsBackend, Words as StemWords};
@@ -245,7 +245,8 @@ pub fn renoise_cells(
         };
         // (the volume column's hex, 80 the loudest)
         let volume = format!("{:02X}", (note.velocity as f64 * 128. / 127.).round().min(128.) as u64);
-        let mut cell = json!({"col": col, "note": note_text(note.pitch), "instrumentRef": instrument, "volume": volume});
+        let mut cell =
+            json!({"col": col, "note": DawProfile::RENOISE.note_name(note.pitch), "instrumentRef": instrument, "volume": volume});
         if delay > 0 {
             cell["delay"] = json!(delay);
         }
@@ -315,7 +316,7 @@ impl<S: RefScheme + 'static> ToMidiBackend for OwnEars<S> {
     }
 
     fn note_name(&self, pitch: u8) -> String {
-        note_text(pitch.min(119))
+        DawProfile::RENOISE.note_name(pitch.min(119))
     }
 
     async fn write(
