@@ -217,6 +217,12 @@ When you agree, Kumi hears your own music in the background, to know your taste
   end, dynamics, contrast, reverb and echo.
 - Another embeddings model in `/slots` hears your songs again with it; the
   measurements stay.
+- A song's profile, and every reference the reference tool keeps, also has its
+  tempo, its key, how busy it is (onsets a bar) and its groove (its swing, and
+  how far it sits ahead of or behind the beat). They go into what Kumi says of
+  your music, not into the judge's targets.
+- `taste` with `keep` keeps your nearest 5 to 10 songs, heard in full, as a
+  reference the judge works toward by name ("your music near Archangel").
 
 ## Limits
 

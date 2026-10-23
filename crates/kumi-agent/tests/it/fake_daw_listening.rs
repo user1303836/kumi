@@ -198,3 +198,58 @@ async fn a_daw_that_plays_out_loud_or_offline_is_asked_the_same_and_said_in_its_
         })
         .await;
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_judged_run_works_toward_the_producers_own_music_kept_by_name() {
+    use kumi_listening::{
+        checklist::Profile,
+        measure::measure_samples,
+        references::store::{KeptReference, KeptTrack, ReferenceStore, KEPT_VERSION},
+    };
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            // The learned models off, in a home of the test's own: the run measures, and fetches nothing.
+            let home = tempfile::tempdir().unwrap();
+            std::fs::write(home.path().join("slots.json"), r#"{"embeddings":{"now":{"use":"off"}}}"#).unwrap();
+            std::env::set_var("KUMI_HOME", home.path());
+            // Their songs as `taste` keeps them: a reference of kind music, its tracks their files.
+            let song = home.path().join("Archangel.wav");
+            wav(&song, 4., 0.2);
+            let noise: Vec<f32> = (0..48_000 * 4).map(|n| ((n * 7919 % 1000) as f32 / 1000. - 0.5) * 0.4).collect();
+            let profile = Profile::of("your music near Archangel", &measure_samples(&noise, &noise, 48_000.));
+            let references = Rc::new(ReferenceStore::new(home.path().join("references")));
+            let name = "your music near Archangel";
+            references
+                .save(&KeptReference {
+                    version: KEPT_VERSION,
+                    key: ReferenceStore::key(name),
+                    name: name.into(),
+                    kind: "music".into(),
+                    tracks: vec![KeptTrack {
+                        artist: "Burial".into(),
+                        title: "Archangel".into(),
+                        source: song.to_string_lossy().into_owned(),
+                        mbid: None,
+                    }],
+                    profile,
+                    at: 1,
+                    mbid: None,
+                    stamp: None,
+                })
+                .await
+                .unwrap();
+            let fake = Rc::new(Fake {
+                plays: false,
+                dir: tempfile::tempdir().unwrap(),
+                flag: ListenFlag::default(),
+                asked: RefCell::default(),
+                told: RefCell::default(),
+            });
+            let listening = Listening::new(fake.clone(), None, None, None, Some(references));
+            let input = json!({"goal": {"reference": name}, "from_beat": 0, "beats": 4});
+            let result = listening.call("judge", input.as_object().cloned().unwrap(), Signal::new()).await.expect("judge").unwrap();
+            assert!(!result.is_error, "{}", result.text);
+            assert!(result.text.contains("as the reference"), "judged against their music's profile: {}", result.text);
+        })
+        .await;
+}
