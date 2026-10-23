@@ -14,7 +14,7 @@ use kumi_ai::{
     http::{default_fetch, Fetch, FetchInit},
     providers::{
         api_key_for,
-        local::{local_servers, probe_local},
+        local::{hidden_providers, local_servers, probe_local},
         models::{ApiKeyCheck, Transport},
         table, KeySource, SignIn,
     },
@@ -175,8 +175,12 @@ pub async fn logout(config: &AppConfig, io: AuthIo) -> Result<(), RuntimeError> 
 pub async fn auth_status(config: &AppConfig, io: AuthIo) -> Result<(), RuntimeError> {
     let AppConfig::Auth { auth_file, settings_file } = config else { return Err(RuntimeError::plain("Expected an auth configuration.")) };
     let store = open_credential_store(auth_file);
+    let settings = read_settings(settings_file);
+    let servers = local_servers(&settings.model_servers, &io.env)?;
+    // A provider a custom server hides is that server's, which shows below while it runs.
+    let hidden: Vec<_> = hidden_providers(&servers).into_iter().map(|(provider, _)| provider).collect();
     let mut lines = Vec::new();
-    for provider in table::offered() {
+    for provider in table::offered().into_iter().filter(|provider| !hidden.contains(provider)) {
         let info = provider.row();
         let status = if info.sign_in == SignIn::Chatgpt {
             match store.get(OPENAI_CODEX).await? {
@@ -199,8 +203,7 @@ pub async fn auth_status(config: &AppConfig, io: AuthIo) -> Result<(), RuntimeEr
         };
         lines.push(format!("{} {status}", pad_end(provider.as_str(), 13)));
     }
-    let settings = read_settings(settings_file);
-    for server in local_servers(&settings.model_servers, &io.env)? {
+    for server in servers {
         if probe_local(&server, Transport { fetch: io.fetch.clone(), signal: None }).await {
             lines.push(format!("{} running {}; no sign-in needed", pad_end(&server.id, 13), server.r#where));
         }

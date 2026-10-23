@@ -1348,7 +1348,7 @@ impl Terminal for PlainTerminal {
             "error" => {
                 self.error(&RuntimeError::plain(get("message")));
                 self.0.state.borrow_mut().text.discard();
-                if get("kind") == "auth" && ProviderId::parse(get("provider")).is_some() {
+                if get("kind") == "auth" && self.0.options.models.cloud_provider(get("provider")).is_some() {
                     self.notice(&format!("[login] Sign in from a shell: {} login {}", *KUMI, get("provider")));
                 }
             }

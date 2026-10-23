@@ -3,7 +3,7 @@ use super::{
     compat::mending_fetch,
     models::{EffortInfo, ModelInfo},
     ollama::{ollama_chat, FailurePhase, OllamaChatSettings, OllamaShape},
-    split_model_id, table, words_only, Effort, USER_AGENT,
+    split_model_id, table, words_only, Effort, ProviderId, USER_AGENT,
 };
 use crate::{
     binding::{budget_for, LanguageModel, ModelBinding, ModelRequest, BYTES_PER_TOKEN},
@@ -152,7 +152,9 @@ pub fn local_servers(settings: &[ServerSetting], env: &HashMap<String, String>) 
         server("ollama", LocalKind::Ollama, "Ollama", ollama_address(env.get("OLLAMA_HOST")), None)?,
         server("lmstudio", LocalKind::Lmstudio, "LM Studio", "http://127.0.0.1:1234/v1".into(), env.get("LM_API_TOKEN").cloned())?,
     ];
-    let mut taken: HashSet<String> = table::rows().map(|row| row.id.into()).chain(LOCAL_PROVIDERS.iter().map(|p| (*p).into())).collect();
+    // A custom server never takes one of the first five's IDs; a provider added later doesn't push its ID aside.
+    let mut taken: HashSet<String> =
+        table::rows().filter(|row| row.reserved).map(|row| row.id.into()).chain(LOCAL_PROVIDERS.iter().map(|p| (*p).into())).collect();
     static WORD: LazyLock<regex::Regex> = LazyLock::new(|| regex::Regex::new("[^a-z0-9]+").unwrap());
     for setting in settings {
         let word = head(WORD.replace_all(&setting.name.to_lowercase(), "-").trim_matches('-'), 32);
@@ -173,6 +175,15 @@ pub fn local_servers(settings: &[ServerSetting], env: &HashMap<String, String>) 
         )?);
     }
     Ok(servers)
+}
+/// The providers added after custom servers could be named, each hidden behind the custom server that already has its
+/// ID: the server keeps it, so the models saved as its own stay its own.
+pub fn hidden_providers(servers: &[LocalServer]) -> Vec<(ProviderId, LocalServer)> {
+    servers
+        .iter()
+        .filter(|server| server.kind == LocalKind::OpenaiCompatible)
+        .filter_map(|server| Some((ProviderId::parse(&server.id).filter(|id| !id.row().reserved)?, server.clone())))
+        .collect()
 }
 #[derive(Debug, Clone)]
 pub struct ParsedLocalModelId {

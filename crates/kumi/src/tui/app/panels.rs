@@ -896,7 +896,7 @@ impl TuiApp {
             });
             return;
         }
-        if kind == "network" && provider.is_some_and(|p| ProviderId::parse(p).is_none()) {
+        if kind == "network" && provider.is_some_and(|p| models.cloud_provider(p).is_none()) {
             let name = models.provider_name(provider.unwrap());
             self.pick(
                 Picker::new(
@@ -960,7 +960,7 @@ impl TuiApp {
             );
             return;
         }
-        let Some(provider) = provider.and_then(ProviderId::parse).filter(|_| kind == "auth") else {
+        let Some(provider) = provider.and_then(|p| models.cloud_provider(p)).filter(|_| kind == "auth") else {
             return;
         };
         let info = provider.row();
@@ -1527,8 +1527,7 @@ impl TuiApp {
         Some((format!("plan {}%{resets}", window.used_percent.round()), window.used_percent >= 95.))
     }
     pub(super) fn tokens_used(&self) -> String {
-        let Some(provider) = self.0.options.models.as_ref().and_then(|m| m.current().provider).as_deref().and_then(ProviderId::parse)
-        else {
+        let Some(provider) = self.0.options.models.as_ref().and_then(|m| m.cloud_provider(&m.current().provider?)) else {
             return String::new();
         };
         let state = self.0.state.borrow();
@@ -1682,8 +1681,11 @@ impl TuiApp {
         let note = match models.choose(value).await {
             Ok(note) => note,
             Err(error) => {
-                if let Some(provider) =
-                    error.kumi().filter(|e| e.kind == FailureKind::Auth).and_then(|e| e.provider.as_deref()).and_then(ProviderId::parse)
+                if let Some(provider) = error
+                    .kumi()
+                    .filter(|e| e.kind == FailureKind::Auth)
+                    .and_then(|e| e.provider.as_deref())
+                    .and_then(|p| models.cloud_provider(p))
                 {
                     self.sign_in(
                         provider,

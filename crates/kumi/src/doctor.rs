@@ -18,7 +18,10 @@ use kumi_ai::{
     },
     providers::{
         api_key_for,
-        local::{list_local_models, local_installed, local_servers, parse_local_model_id, probe_local, start_hint, LocalKind, LocalServer},
+        local::{
+            hidden_providers, list_local_models, local_installed, local_servers, parse_local_model_id, probe_local, start_hint, LocalKind,
+            LocalServer,
+        },
         models::{ModelInfo, Transport},
         parse_model_id, table, KeySource, ProviderId, SignIn,
     },
@@ -136,8 +139,10 @@ async fn sign_in_check(env: &Env, servers: &[ServerFinding]) -> Result<Check, Ru
     let store = open_credential_store(load_auth_file(env)?);
     let settings = read_settings(&load_settings_file(env)?);
     let model = env.get("KUMI_MODEL").cloned().or(settings.model.clone());
+    let named = local_servers(&settings.model_servers, env)?;
     let Some(model) = model.filter(|m| !m.is_empty()) else {
-        for provider in table::offered() {
+        let hidden: Vec<_> = hidden_providers(&named).into_iter().map(|(provider, _)| provider).collect();
+        for provider in table::offered().into_iter().filter(|provider| !hidden.contains(provider)) {
             if signed_in(provider, &store, env).await {
                 return Ok(Check::ok(format!(
                     "Signed in to {} · Kumi starts with its first model (/model changes it)",
@@ -153,8 +158,9 @@ async fn sign_in_check(env: &Env, servers: &[ServerFinding]) -> Result<Check, Ru
         }
         return Ok(Check::fix("Not signed in to a provider",Some(format!("{} login openai-codex (a ChatGPT plan), or login anthropic, openai or opencode with an API key; or open Ollama or LM Studio",*KUMI))));
     };
-    let parsed = parse_model_id(&model);
-    let on_server = if parsed.is_none() { parse_local_model_id(&model, &local_servers(&settings.model_servers, env)?) } else { None };
+    // A server first: a custom server keeps an ID that a provider added later has too.
+    let on_server = parse_local_model_id(&model, &named);
+    let parsed = if on_server.is_none() { parse_model_id(&model) } else { None };
     if let Some(on) = on_server {
         let server = on.server;
         let found = servers.iter().find(|f| f.server.id == server.id);
@@ -276,6 +282,14 @@ fn server_checks(servers: &[ServerFinding], env: &Env, said: Option<&str>) -> Ve
         .collect();
     if !named.is_empty() {
         checks.push(Check::ok(format!("Model servers: {}", named.join("; "))))
+    }
+    let listed: Vec<_> = servers.iter().map(|found| found.server.clone()).collect();
+    for (provider, server) in hidden_providers(&listed) {
+        let builtin = provider.row().name;
+        checks.push(Check::note(
+            format!("Your server {}, in settings.json, has the ID {provider}, so Kumi's own {builtin} is hidden", server.name),
+            Some(format!("To use Kumi's {builtin}, rename that server in settings.json (modelServers), then sign in with /login")),
+        ));
     }
     for found in servers {
         let server = &found.server;

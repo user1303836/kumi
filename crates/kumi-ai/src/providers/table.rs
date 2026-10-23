@@ -115,6 +115,30 @@ pub struct ProviderRow {
     pub reserved: bool,
 }
 
+/// What most providers' rows are, the rest of a row saying who the provider is: an API key sent as a Bearer token,
+/// Chat Completions, every model listed at `/models` (which also checks a key), offered after the rest, and not one of
+/// the first five.
+pub const API_KEY_ROW: ProviderRow = ProviderRow {
+    id: "",
+    name: "",
+    short_name: "",
+    sign_in: SignIn::ApiKey,
+    credential: "",
+    shared_by: None,
+    key_env: &[],
+    key_page: None,
+    base_url: "",
+    format: Format::ChatCompletions,
+    format_rules: &[],
+    key_header: KeyHeader::Bearer,
+    list: ("/models", Listing::Ids),
+    key_check: KeyCheck::List,
+    catalog: None,
+    extras: Extras { session_header: None, verbosity: None, service_tier: false },
+    offer: u8::MAX,
+    first_choice: None,
+    reserved: false,
+};
 const RESPONSES_ON_ZEN: [FormatRule; 5] = [
     FormatRule { prefix: "gpt-", format: Ok(Format::Responses) },
     FormatRule { prefix: "grok-", format: Ok(Format::Responses) },

@@ -213,14 +213,20 @@ impl ModelControl {
     }
     fn parse(&self, id: Option<&str>) -> Option<Parsed> {
         let id = id.filter(|s| !s.is_empty())?;
-        if let Some(cloud) = parse_model_id(id) {
-            return Some(Parsed { provider: cloud.provider.to_string(), model: cloud.model, server: None });
+        // A server first: a custom server keeps an ID that a provider added later has too (`hidden_providers`).
+        if let Some(local) = local::parse_local_model_id(id, &self.servers()) {
+            return Some(Parsed { provider: local.server.id.clone(), model: local.model, server: Some(local.server) });
         }
-        local::parse_local_model_id(id, &self.servers()).map(|local| Parsed {
-            provider: local.server.id.clone(),
-            model: local.model,
-            server: Some(local.server),
-        })
+        parse_model_id(id).map(|cloud| Parsed { provider: cloud.provider.to_string(), model: cloud.model, server: None })
+    }
+    /// The cloud provider of the model chosen now, if it's one.
+    fn current_provider(&self) -> Option<ProviderId> {
+        let model = self.inner.state.borrow().model.clone();
+        self.parse(model.as_deref()).filter(|parsed| parsed.server.is_none()).and_then(|parsed| ProviderId::parse(&parsed.provider))
+    }
+    /// The providers a custom server hides, keeping their IDs (`hidden_providers`).
+    fn hidden(&self) -> Vec<ProviderId> {
+        local::hidden_providers(&self.servers()).into_iter().map(|(provider, _)| provider).collect()
     }
     fn info_for(&self, id: Option<&str>) -> Option<ModelInfo> {
         let parsed = self.parse(id)?;
@@ -320,7 +326,8 @@ impl ModelControl {
     }
     pub async fn providers(&self) -> Result<Vec<ProviderStatus>, RuntimeError> {
         let mut statuses = Vec::new();
-        for id in table::offered() {
+        let hidden = self.hidden();
+        for id in table::offered().into_iter().filter(|id| !hidden.contains(id)) {
             let info = id.row();
             let via = if info.sign_in == SignIn::Chatgpt {
                 matches!(self.inner.options.store.get(OPENAI_CODEX).await?, Some(Credential::Oauth(_))).then(|| "chatgpt".into())
@@ -368,11 +375,15 @@ impl ModelControl {
         .collect()
     }
     pub fn provider_name(&self, id: &str) -> String {
-        if let Some(provider) = ProviderId::parse(id) {
-            provider.row().name.into()
+        if let Some(server) = self.servers().into_iter().find(|s| s.id == id) {
+            server.name
         } else {
-            self.servers().into_iter().find(|s| s.id == id).map(|s| s.name).unwrap_or_else(|| id.into())
+            ProviderId::parse(id).map_or_else(|| id.into(), |provider| provider.row().name.into())
         }
+    }
+    /// The cloud provider `id` names, unless it's a custom server's (`hidden_providers`).
+    pub fn cloud_provider(&self, id: &str) -> Option<ProviderId> {
+        ProviderId::parse(id).filter(|_| !self.servers().iter().any(|server| server.id == id))
     }
     pub fn choose_default(&self) -> LocalBoxFuture<'static, Result<Option<DefaultModel>, RuntimeError>> {
         let control = self.clone();
@@ -528,15 +539,14 @@ impl ModelControl {
             .store
             .update(info.credential, Box::new(move |_| async move { Ok(Some(Credential::ApiKey { key })) }.boxed_local()))
             .await?;
-        let current = {
+        {
             let mut state = self.inner.state.borrow_mut();
             // Every provider the key opens lists afresh.
             for row in table::rows().filter(|row| row.credential == info.credential) {
                 state.catalog.remove(row.id);
             }
-            state.model.clone().and_then(|m| parse_model_id(&m)).map(|m| m.provider)
-        };
-        if current.is_some_and(|p| p.row().credential == info.credential) {
+        }
+        if self.current_provider().is_some_and(|p| p.row().credential == info.credential) {
             self.inner.state.borrow_mut().bound = None;
             (self.inner.options.changed)().await?;
         }
@@ -561,7 +571,7 @@ impl ModelControl {
             self.choose_default().await?;
             return Ok(());
         }
-        if model.as_deref().and_then(parse_model_id).is_some_and(|m| m.provider.row().sign_in == SignIn::Chatgpt) {
+        if self.current_provider().is_some_and(|provider| provider.row().sign_in == SignIn::Chatgpt) {
             self.inner.state.borrow_mut().bound = None;
             (self.inner.options.changed)().await?;
         }
@@ -573,12 +583,8 @@ impl ModelControl {
             return Ok(false);
         }
         self.inner.options.store.update(info.credential, Box::new(|_| async { Ok(None) }.boxed_local())).await?;
-        let current = {
-            let mut state = self.inner.state.borrow_mut();
-            state.catalog.remove(provider.as_str());
-            state.model.clone().and_then(|m| parse_model_id(&m)).map(|m| m.provider)
-        };
-        if current.is_some_and(|p| p.row().credential == info.credential) {
+        self.inner.state.borrow_mut().catalog.remove(provider.as_str());
+        if self.current_provider().is_some_and(|p| p.row().credential == info.credential) {
             self.inner.state.borrow_mut().bound = None;
             (self.inner.options.changed)().await?;
         }
@@ -645,6 +651,9 @@ impl ModelControl {
 /// this computer, and when the list can't be read (no sign-in, no network): then nothing new happens.
 pub async fn missing_model(models: &dyn ModelController) -> Option<String> {
     let current = models.current();
+    if current.r#where.is_some() {
+        return None;
+    }
     let (model, provider) = (current.model.filter(|_| !current.pinned)?, current.provider?);
     ProviderId::parse(&provider)?;
     let listed = models.models(&provider, false).await.ok()?;
@@ -662,6 +671,10 @@ pub trait ModelController {
     async fn providers(&self) -> Result<Vec<ProviderStatus>, RuntimeError>;
     async fn local(&self) -> Vec<LocalStatus>;
     fn provider_name(&self, id: &str) -> String;
+    /// The cloud provider `id` names (an error's or a model's provider), unless it's a model server's.
+    fn cloud_provider(&self, id: &str) -> Option<ProviderId> {
+        ProviderId::parse(id)
+    }
     async fn choose_default(&self) -> Result<Option<DefaultModel>, RuntimeError>;
     async fn models(&self, provider: &str, refresh: bool) -> Result<Vec<ModelInfo>, RuntimeError>;
     async fn choose(&self, next: &str) -> Result<Option<String>, RuntimeError>;
@@ -701,6 +714,9 @@ impl ModelController for ModelControl {
     }
     fn provider_name(&self, id: &str) -> String {
         ModelControl::provider_name(self, id)
+    }
+    fn cloud_provider(&self, id: &str) -> Option<ProviderId> {
+        ModelControl::cloud_provider(self, id)
     }
     async fn choose_default(&self) -> Result<Option<DefaultModel>, RuntimeError> {
         ModelControl::choose_default(self).await
