@@ -140,3 +140,30 @@ fn a_knob_live_refused_on_the_leader_never_breaks_a_reseeded_slot() {
     let b = e.slots.iter().find(|s| s.name == "B").unwrap();
     assert_eq!(b.knobs.len(), 4);
 }
+
+#[test]
+fn a_suggested_setting_is_tried_once_the_slots_start_is_heard_and_kept_only_if_better() {
+    let best = vec![0.8, 0.2, 0.65, 0.4, 0.9];
+    let heard = |e: &mut Evolution| {
+        let trials = e.propose();
+        e.scored(&trials, &trials.iter().map(|t| (t.slot.clone(), score(&t.values, 0.0))).collect());
+        trials
+    };
+    let mut e = Evolution::new(seeded(7), EVOLVE);
+    e.add(slot("A", "Operator", &[0.5; 5]));
+    e.suggest("A", best.clone());
+    e.suggest("Gone", best.clone());
+    e.suggest("A", vec![0.5; 2]);
+    assert_eq!(heard(&mut e)[0].how, TrialHow::Start, "its own start first");
+    let tried = heard(&mut e);
+    assert_eq!((tried[0].how, &tried[0].values), (TrialHow::Remembered, &best), "then the setting suggested (one value a knob)");
+    assert_eq!(e.slots[0].elite, best, "it scored better: the slot's best");
+    assert_ne!(heard(&mut e)[0].how, TrialHow::Remembered, "tried once");
+    // One that scores worse isn't kept.
+    let mut e = Evolution::new(seeded(7), EVOLVE);
+    e.add(slot("B", "Operator", &best));
+    heard(&mut e);
+    e.suggest("B", vec![0.0; 5]);
+    assert_eq!(heard(&mut e)[0].how, TrialHow::Remembered);
+    assert_eq!(e.slots[0].elite, best);
+}

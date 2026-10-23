@@ -5,7 +5,7 @@ use kumi_agent::core::{
     search_memory::{trials_heard, SearchMemory, SlotSearch},
     store_client::StoreClient,
 };
-use kumi_listening::heard_settings::{DeviceIdentity, SearchKind, Setting, SettingsHeard};
+use kumi_listening::heard_settings::{DeviceIdentity, SearchKind, Setting, SettingsHeard, SettingsMemory};
 use kumi_store::{
     heard_settings::{self, HeardSetting, Source},
     Store,
@@ -41,6 +41,8 @@ fn generation(run: &str, costs: &[f64]) -> SettingsHeard {
             knobs: IndexMap::from([("Gain-Band 2".to_string(), n as f64 / 10.), ("Freq-Band 2".to_string(), 0.5)]),
             measured: json!({"bass": -9.0 + n as f64, "integrated": -14.2}),
             cost: *cost,
+            generation: Some(1),
+            remembered: None,
         })
         .filter(|setting| setting.cost.is_finite())
         .collect();
@@ -92,7 +94,8 @@ async fn a_tune_search_keeps_a_row_for_each_setting_it_heard_and_marks_its_best(
     let best: Vec<(String, f64)> = rows.iter().filter(|row| row.best).map(|row| (row.run_id.clone(), row.cost)).collect();
     assert_eq!(best, [("tune-1".to_string(), 0.7), ("tune-2".to_string(), 4.0)]);
     assert_eq!(client.store().read(heard_settings::counts).unwrap(), (22, 1));
-    assert_eq!(memory.counts().await.unwrap(), (22, 1));
+    let status = memory.status().await.unwrap();
+    assert_eq!((status.settings, status.devices, status.started, status.won), (22, 1, 0, 0));
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -111,6 +114,8 @@ async fn a_setting_heard_at_full_length_is_a_better_best_than_one_heard_on_the_s
             knobs: IndexMap::from([("Drive".to_string(), cost / 100.)]),
             measured: json!({"screened": screened}),
             cost,
+            generation: None,
+            remembered: None,
         }],
     };
     memory.heard(heard(10., true));
@@ -150,7 +155,7 @@ fn a_goals_trials_are_settings_on_each_device_of_their_chain() {
         ..Default::default()
     };
     let target = json!({"kind": "reference", "reference": "/refs/pad.wav", "goal": "make my pad sound like it"});
-    let heard = trials_heard(SearchKind::Goal, &searches, &trials, &generation, &target);
+    let heard = trials_heard(SearchKind::Goal, &searches, &trials, &generation, &target, Some(3), &[]);
     let run = searches["Candidate"].run.clone();
     let expect = |device: &str, knobs: Value, before: Value| SettingsHeard::Heard {
         run: run.clone(),
@@ -164,6 +169,8 @@ fn a_goals_trials_are_settings_on_each_device_of_their_chain() {
             knobs: knobs.as_object().unwrap().iter().map(|(name, at)| (name.clone(), at.as_f64().unwrap())).collect(),
             measured: json!({"score": 82.5, "screened": true, "gaps": ["brighter"]}),
             cost: 17.5,
+            generation: Some(3),
+            remembered: None,
         }],
     };
     assert_eq!(
@@ -173,4 +180,90 @@ fn a_goals_trials_are_settings_on_each_device_of_their_chain() {
             expect("Glue", json!({"Threshold": 0.5}), json!({"Threshold": 50. / 60.})),
         ]
     );
+}
+
+/// A goal's (or a match's) setting, as a search heard and kept it, from a slot whose knobs are `knobs`.
+fn goal_heard(run: &str, device: &str, knobs: &[(&str, f64)], score: f64, reference: bool) -> SettingsHeard {
+    SettingsHeard::Heard {
+        run: run.into(),
+        kind: SearchKind::Goal,
+        daw: None,
+        device: DeviceIdentity::named(device),
+        track: Some("Pad".into()),
+        target: if reference { json!({"kind": "reference", "reference": "/refs/pad.wav"}) } else { json!({"kind": "region"}) },
+        before: None,
+        settings: vec![Setting {
+            knobs: knobs.iter().map(|(name, at)| (name.to_string(), *at)).collect(),
+            measured: json!({"score": score, "screened": false}),
+            cost: 100. - score,
+            generation: Some(1),
+            remembered: None,
+        }],
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_new_search_reads_each_past_searchs_best_on_its_device() {
+    let dir = tempfile::tempdir().unwrap();
+    let (memory, client) = memory(dir.path());
+    memory.heard(generation("tune-1", &[3.0, 1.0, 2.0]));
+    memory.heard(SettingsHeard::Ended { run: "tune-1".into() });
+    memory.heard(goal_heard("goal-1", "VST: ReaEQ (Cockos)", &[("Gain-Band 2", 0.9)], 80., true));
+    memory.heard(SettingsHeard::Ended { run: "goal-1".into() });
+    client.store().write_wait(|_| Ok(())).unwrap();
+    let tuned = memory.bests(None, "VST: ReaEQ (Cockos)", &[SearchKind::Tune]).await;
+    assert_eq!(tuned.len(), 1, "one search, its best");
+    assert_eq!((tuned[0].kind, tuned[0].cost, tuned[0].track.as_deref()), (SearchKind::Tune, 1.0, Some("Bass")));
+    assert_eq!(tuned[0].knobs, IndexMap::from([("Gain-Band 2".to_string(), 0.1), ("Freq-Band 2".to_string(), 0.5)]));
+    assert_eq!(tuned[0].target["item"], "bass");
+    let searched = memory.bests(Some(DawId::Reaper), "VST: ReaEQ (Cockos)", &[SearchKind::Goal, SearchKind::Match]).await;
+    assert_eq!(searched.iter().map(|best| best.kind).collect::<Vec<_>>(), [SearchKind::Goal]);
+    assert!(memory.bests(Some(DawId::Ableton), "VST: ReaEQ (Cockos)", &[SearchKind::Tune]).await.is_empty(), "another DAW's");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_goals_new_slot_tries_the_closest_match_its_devices_came_to_before() {
+    let dir = tempfile::tempdir().unwrap();
+    let (memory, client) = memory(dir.path());
+    // The EQ's closest match to its reference (90%) beat an older 70%; a region's search isn't a match's.
+    memory.heard(goal_heard("old", "VST3: Pro-Q 3 (FabFilter)", &[("Gain", 0.25)], 70., true));
+    memory.heard(goal_heard("close", "VST3: Pro-Q 3 (FabFilter)", &[("Gain", 0.75), ("Freq", 0.5)], 90., true));
+    memory.heard(goal_heard("region", "VST3: Pro-Q 3 (FabFilter)", &[("Gain", 0.1)], 99., false));
+    for run in ["old", "close", "region"] {
+        memory.heard(SettingsHeard::Ended { run: run.into() });
+    }
+    client.store().write_wait(|_| Ok(())).unwrap();
+    let knobs = vec![
+        knob("0:My EQ", "Gain", -15., 15., 0.),
+        Knob { step: Some(1.), ..knob("0:My EQ", "Freq", 20., 20_000., 1_000.) },
+        knob("1:Glue", "Threshold", -60., 0., -10.),
+    ];
+    let devices = BTreeMap::from([("0:My EQ".to_string(), "VST3: Pro-Q 3 (FabFilter)".to_string())]);
+    let search = SlotSearch::new("Candidate", &knobs, devices);
+    let elite = vec![0., 1_000., -10.];
+    let (values, from) = memory.suggestion(&search, &knobs, &elite).await.expect("a suggestion");
+    assert_eq!(values, [7.5, 10_010., -10.], "the EQ's knobs where they matched best (on its steps); Glue as it is");
+    assert_eq!(from.keys().collect::<Vec<_>>(), ["VST3: Pro-Q 3 (FabFilter)"]);
+    // Where the slot already is, or a device nothing is remembered for: nothing to try.
+    assert_eq!(memory.suggestion(&search, &knobs, &values).await, None);
+    let glue = SlotSearch::new("Other", &knobs[2..], BTreeMap::new());
+    assert_eq!(memory.suggestion(&glue, &knobs[2..], &[-10.]).await, None);
+}
+
+#[test]
+fn a_remembered_trial_says_which_setting_it_was() {
+    let knobs = vec![knob("0:Saturn", "Drive", 0., 1., 0.2)];
+    let mut search = SlotSearch::new("Candidate", &knobs, BTreeMap::from([("0:Saturn".to_string(), "Saturn 2".to_string())]));
+    search.suggested = BTreeMap::from([("Saturn 2".to_string(), "row-7".to_string())]);
+    let searches = HashMap::from([("Candidate".to_string(), search)]);
+    let trials = vec![GenerationTrial { slot: "Candidate".into(), knobs, values: vec![0.6], fresh: None }];
+    let generation = Generation { scores: HashMap::from([("Candidate".to_string(), 75.)]), ..Default::default() };
+    let heard = |remembered: &[String]| trials_heard(SearchKind::Goal, &searches, &trials, &generation, &json!({}), Some(2), remembered);
+    let setting = |heard: Vec<SettingsHeard>| match heard.into_iter().next() {
+        Some(SettingsHeard::Heard { settings, .. }) => settings.into_iter().next().unwrap(),
+        other => panic!("{other:?}"),
+    };
+    let tried = setting(heard(&["Candidate".to_string()]));
+    assert_eq!((tried.generation, tried.remembered.as_deref()), (Some(2), Some("row-7")));
+    assert_eq!(setting(heard(&[])).remembered, None, "a trial of its own");
 }

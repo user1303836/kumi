@@ -26,3 +26,4 @@ pub mod slots;
 pub mod sound;
 pub mod tools;
 pub mod transcribe;
+pub mod warm;

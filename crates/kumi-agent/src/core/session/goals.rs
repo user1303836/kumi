@@ -1,5 +1,5 @@
 //! Persistent goal search, model leaps, cancellation cleanup and final result retention.
-use super::matching::{add_usage, generation_trials, knob_key};
+use super::matching::{add_usage, generation_trials, knob_key, remembered_slots};
 use super::*;
 use crate::core::{
     evolve::{Evolution, NewSlot, Slot},
@@ -297,9 +297,17 @@ impl Session {
         // Each slot's search, remembered as it's heard (its settings on each of its devices).
         let target = json!({"kind": "reference", "reference": request.reference, "goal": kept_request(&state.goal)});
         let mut searches = HashMap::new();
+        let mut fresh = vec![];
         for slot in rig.slots() {
             searches.insert(slot.name.clone(), SlotSearch::new(&slot.name, &slot.knobs, slot.devices.clone()));
+            if !state.slots.iter().any(|kept| kept.name == slot.name) {
+                fresh.push(slot.name.clone());
+            }
             join(&mut evolution, slot, &state);
+        }
+        // A slot new to the goal starts from what worked on its devices before.
+        for name in fresh {
+            self.suggest_remembered(&mut evolution, &mut searches, &name).await;
         }
         evolution.generation = state.generation;
         evolution.rendered = state.rendered;
@@ -339,7 +347,7 @@ impl Session {
                         .collect::<Vec<_>>();
 
                     let checked = rig.generation(&elites, op.signal.clone(), Some(GenerationOptions { screen: Some(false) })).await?;
-                    self.remember_trials(SearchKind::Goal, &searches, &elites, &checked, &target);
+                    self.remember_trials(SearchKind::Goal, &searches, &elites, &checked, &target, None, &[]);
 
                     // Stable slot order preserves source Map ties in the displayed leader.
                     for slot in &evolution.slots {
@@ -359,10 +367,11 @@ impl Session {
                 }
                 let trials = evolution.propose();
                 let requests = generation_trials(&evolution, &trials);
+                let remembered = remembered_slots(&trials);
                 let result = rig.generation(&requests, op.signal.clone(), Some(GenerationOptions { screen: Some(screening) })).await?;
 
                 evolution.scored(&trials, &result.scores);
-                self.remember_trials(SearchKind::Goal, &searches, &requests, &result, &target);
+                self.remember_trials(SearchKind::Goal, &searches, &requests, &result, &target, Some(evolution.generation), &remembered);
                 silent_runs = if result.scores.is_empty() { silent_runs + 1 } else { 0 };
 
                 if silent_runs >= 2 {
@@ -452,7 +461,9 @@ impl Session {
                             search.before.entry((knob.device.clone(), knob.name.clone())).or_insert(knob.value);
                         }
                         if !evolution.slots.iter().any(|s| s.name == slot.name) {
+                            let name = slot.name.clone();
                             join(&mut evolution, slot, &state);
+                            self.suggest_remembered(&mut evolution, &mut searches, &name).await;
                         }
                     }
                     sync(&mut state, &evolution, started);
