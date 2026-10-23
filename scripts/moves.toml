@@ -4846,3 +4846,21 @@ to = "kumi_daw_ableton::app::willington"
 [[rust]]
 from = "kumi::daw::ableton"
 to = "kumi_daw_ableton::app"
+
+# Kumi's own bridges' provider, from the app into kumi-daw-own (P3.8 follow-up D, 2026-10-23); REAPER's and Renoise's
+# values, from the app's DAW table into their crates (`PROVIDER`).
+[[move]]
+from = "crates/kumi/src/daw/own.rs"
+to = "daws/own/kumi-daw-own/src/provider.rs"
+
+[[rust]]
+from = "kumi::daw::registry::REAPER"
+to = "kumi_daw_reaper::PROVIDER"
+
+[[rust]]
+from = "kumi::daw::registry::RENOISE"
+to = "kumi_daw_renoise::PROVIDER"
+
+[[rust]]
+from = "kumi::daw::own"
+to = "kumi_daw_own::provider"

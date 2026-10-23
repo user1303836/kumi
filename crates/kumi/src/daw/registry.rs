@@ -4,15 +4,9 @@
 //! bridge in it. The DAWs' own crates (Live's kumi-daw-ableton, and the integrations of the DAWs whose bridges are
 //! Kumi's own) don't name each other; this table names them all.
 
-use super::own::{self, Own};
-use daw_bridge::{
-    daw::Daw,
-    detect::{self, Os},
-    install::{reaper_extension_name, reaper_install, reaper_target, renoise_target, renoise_targets, unloadable, RENOISE_TOOL_FOLDER},
-};
 use kumi_agent::core::presentation::ToolPresentation;
 use kumi_agent::core::view::ViewPresentation;
-use kumi_daw::provider::{DawProvider, WatchWords};
+use kumi_daw::provider::DawProvider;
 use kumi_daw_ableton::app::provider::Ableton;
 use kumi_daw_reaper as reaper;
 use kumi_daw_renoise as renoise;
@@ -20,109 +14,10 @@ use kumi_library::daws::{Daws, LibrarySources};
 use kumi_library::sources::{Source, SourceOptions};
 use kumi_types::daw::{DawId, DawProfile};
 use kumi_types::place::Places;
-use kumi_types::system::Env;
-use std::path::PathBuf;
 use std::sync::LazyLock;
 
 /// The DAWs this build integrates, Live's first, then the DAWs whose bridges are Kumi's own.
-pub static DAWS: &[&(dyn DawProvider + Sync)] = &[&Ableton, &REAPER, &RENOISE];
-
-/// REAPER, through Kumi's own bridge: its extension, a file in the UserPlugins folder of the REAPER it goes in.
-pub static REAPER: Own = Own {
-    id: DawId::Reaper,
-    daw: Daw::Reaper,
-    profile: &DawProfile::REAPER,
-    presentation: &reaper::PRESENTATION,
-    view: &reaper::VIEW,
-    library: &reaper::library::LIBRARY,
-    site: "reaper.fm",
-    bridge: "Kumi's extension",
-    bridge_is_folder: false,
-    bridge_folder: "bridges/reaper",
-    create: reaper::create_reaper_integration,
-    instructions: "REAPER isn't connected, so Kumi can't see your project: answer from what you know, and say so.",
-    not_found: "REAPER isn't installed (or not where Kumi looks: set KUMI_REAPER_RESOURCE_DIR to its resource folder)",
-    watch_words: WatchWords {
-        starting: "REAPER is open; Kumi connects once its extension answers.",
-        unreachable: "Kumi couldn't reach REAPER, so this is chat without it. Open REAPER with Kumi's extension installed (kumi --daw reaper bridge); Kumi connects by itself once it answers.",
-        answered: "REAPER answered, so Kumi is connected to it now.",
-    },
-    removal_question: "take Kumi's extension out of REAPER too",
-    checkout_build: Some(("reaper-kumi", "Building REAPER's extension…")),
-    carried: || reaper_extension_name(Os::current()),
-    built: |beside| {
-        let name = reaper_extension_name(Os::current());
-        Some(beside.join(if cfg!(windows) { name.to_string() } else { format!("lib{name}") }))
-    },
-    version_file: |source| source.with_extension("version"),
-    placed: |own, env| reaper_target(reaper_install(&reapers(own, env))?, Os::current()).map_err(Some),
-    elsewhere: |_| vec![],
-    unloadable: |own, env, source| reaper_install(&reapers(own, env)).ok().and_then(|install| unloadable(source, install)),
-    used: |own, env| reapers(own, env).iter().any(|install| install.opened),
-    here: |own, env| !reapers(own, env).is_empty(),
-    // The REAPER Kumi's extension goes in.
-    app: |own, env| {
-        let installs = reapers(own, env);
-        let chosen = reaper_install(&installs).ok().and_then(|install| install.app.clone());
-        chosen.or_else(|| installs.into_iter().find_map(|install| install.app))
-    },
-    app_version: |own, env, is| {
-        reapers(own, env).into_iter().filter(|install| install.app.as_deref().is_some_and(is)).find_map(|install| install.version)
-    },
-};
-
-/// The REAPERs here, and the one Kumi's extension was put in (a portable one Kumi doesn't find by itself).
-fn reapers(own: &Own, env: &Env) -> Vec<detect::ReaperInstall> {
-    let placed = own.receipt(env).map(|receipt| PathBuf::from(receipt.target));
-    own::detected(env, |found| detect::with_placed(found, detect::detect_reaper(found), placed.as_deref()))
-}
-
-/// Renoise, through Kumi's own bridge: its tool, a folder in the preferences of the Renoise it goes in.
-pub static RENOISE: Own = Own {
-    id: DawId::Renoise,
-    daw: Daw::Renoise,
-    profile: &DawProfile::RENOISE,
-    presentation: &renoise::PRESENTATION,
-    view: &renoise::VIEW,
-    library: &renoise::library::LIBRARY,
-    site: "renoise.com",
-    bridge: "Kumi's tool",
-    bridge_is_folder: true,
-    bridge_folder: "bridges/renoise",
-    create: renoise::create_renoise_integration,
-    instructions: "Renoise isn't connected, so Kumi can't see your song: answer from what you know, and say so.",
-    not_found: "Renoise isn't installed (or not where Kumi looks: set KUMI_RENOISE_PREFS_DIR to its preferences folder)",
-    watch_words: WatchWords {
-        starting: "Renoise is open; Kumi connects once its tool answers.",
-        unreachable: "Kumi couldn't reach Renoise, so this is chat without it. Open Renoise with Kumi's tool installed (kumi --daw renoise bridge); Kumi connects by itself once it answers.",
-        answered: "Renoise answered, so Kumi is connected to it now.",
-    },
-    removal_question: "take Kumi's tool out of Renoise too",
-    checkout_build: None,
-    carried: || RENOISE_TOOL_FOLDER,
-    built: |_| Some(kumi_common::dev::checkout()?.join("daws").join("renoise").join(RENOISE_TOOL_FOLDER)),
-    version_file: |source| source.join("payload").join("version.lua"),
-    placed: |_, env| renoise_target(&own::detected(env, detect::detect_renoise)).map_err(Some),
-    // Renoise's version folders from 3.5, where a newer Renoise may have copied Kumi's tool.
-    elsewhere: |env| renoise_targets(&own::detected(env, detect::detect_renoise)),
-    unloadable: |_, _, _| None,
-    used: |_, env| !own::detected(env, detect::detect_renoise).prefs.is_empty(),
-    here: |_, env| {
-        let found = own::detected(env, detect::detect_renoise);
-        !found.apps.is_empty() || !found.prefs.is_empty()
-    },
-    // The newest Renoise.
-    app: |_, env| {
-        own::detected(env, detect::detect_renoise)
-            .apps
-            .into_iter()
-            .max_by_key(|app| app.version.as_deref().and_then(detect::Version::of_app))
-            .map(|app| app.path)
-    },
-    app_version: |_, env, is| {
-        own::detected(env, detect::detect_renoise).apps.into_iter().filter(|found| is(&found.path)).find_map(|found| found.version)
-    },
-};
+pub static DAWS: &[&(dyn DawProvider + Sync)] = &[&Ableton, &reaper::PROVIDER, &renoise::PROVIDER];
 
 /// The DAWs this build integrates, by profile.
 pub fn registered() -> impl Iterator<Item = &'static DawProfile> {

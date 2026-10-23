@@ -1,7 +1,8 @@
-//! REAPER and Renoise as the app works with them: Kumi's own bridge in each (REAPER's extension, Renoise's tool),
+//! REAPER and Renoise as Kumi's app works with them: Kumi's own bridge in each (REAPER's extension, Renoise's tool),
 //! found, installed, checked and taken out through the shared lifecycle (daw-bridge), and the session's integration
-//! through Kumi's host. One provider serves both; each DAW's entry in the DAW table (registry.rs) gives its words, its
-//! integration, and what's its alone about finding the DAW and its bridge.
+//! through Kumi's host. One provider serves both; each DAW's crate gives its value (`kumi_daw_reaper::PROVIDER`,
+//! `kumi_daw_renoise::PROVIDER`): its words, its integration, and what's its alone about finding the DAW and its bridge.
+use crate::bridge::OwnOptions;
 use async_trait::async_trait;
 use daw_bridge::{
     daw::Daw,
@@ -29,7 +30,6 @@ use kumi_daw::{
     },
     setup::DawSetup,
 };
-use kumi_daw_own::bridge::OwnOptions;
 use kumi_library::daws::LibrarySources;
 use kumi_types::{
     daw::{DawId, DawProfile},
@@ -43,7 +43,7 @@ use std::{
     time::Duration,
 };
 
-/// One DAW whose bridge is Kumi's own, as its entry in the DAW table gives it: what the app and the library take from
+/// One DAW whose bridge is Kumi's own, as its crate gives it: what the app and the library take from
 /// it, its words, and what's its alone about finding it and its bridge (REAPER's installs and its extension, a file;
 /// Renoise's version folders and its tool, a folder).
 #[derive(Clone, Copy)]
@@ -100,7 +100,7 @@ pub struct Own {
 /// How a DAW whose bridge is Kumi's own reaches Kumi's host, by DAW: a test's host in place of `daw-mcp-server`, as an
 /// answer the session's integration and the doctor's look read.
 #[derive(Clone)]
-pub struct OwnHosts(pub Rc<dyn Fn(DawId) -> kumi_daw_own::bridge::Connect>);
+pub struct OwnHosts(pub Rc<dyn Fn(DawId) -> crate::bridge::Connect>);
 
 fn kumi_home(env: &Env) -> PathBuf {
     PathBuf::from(kumi_daw::io::kumi_home(env))
@@ -123,7 +123,7 @@ fn home(env: &Env) -> PathBuf {
 }
 
 /// What daw-bridge's detection reads, from the app's environment.
-pub(super) fn detected<T>(env: &Env, read: impl FnOnce(&detect::Env) -> T) -> T {
+pub fn detected<T>(env: &Env, read: impl FnOnce(&detect::Env) -> T) -> T {
     let var = |name: &str| env.get(name).cloned();
     read(&detect::Env { os: Os::current(), home: home(env), var: &var, root: None })
 }
@@ -138,7 +138,8 @@ impl Own {
         (self.placed)(self, env).map_err(|why| why.map(|why| why.to_string()).unwrap_or_else(|| self.not_found.to_string()))
     }
 
-    pub(super) fn receipt(&self, env: &Env) -> Option<Receipt> {
+    /// Where Kumi's bridge was put in the DAW, as Kumi's receipt for it says, when it's installed.
+    pub fn receipt(&self, env: &Env) -> Option<Receipt> {
         let paths = BridgePaths::new(&kumi_home(env), self.daw);
         let text = std::fs::read_to_string(paths.receipt()).ok()?;
         serde_json::from_str::<Receipt>(&text).ok().filter(|receipt| receipt.status == "installed")

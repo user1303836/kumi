@@ -14,12 +14,14 @@ kumi-library.workspace = true
 kumi-listening.workspace = true
 kumi-media.workspace = true
 kumi-agent.workspace = true
+kumi-daw.workspace = true
 kumi-types.workspace = true
 # The system's name for where the DAWs' libraries are found, as daw-bridge's detection takes it.
 daw-bridge.workspace = true
 async-trait.workspace = true
 chrono.workspace = true
 futures.workspace = true
+home.workspace = true
 indexmap.workspace = true
 regex.workspace = true
 serde_json.workspace = true
@@ -29,4 +31,9 @@ uuid.workspace = true
 [dev-dependencies]
 # The semantic diff Kumi's host reads, which catching up drafts from.
 daw-mcp-server = { path = "../daw-mcp-server" }
+tempfile.workspace = true
 tokio = { workspace = true, features = ["test-util"] }
+
+[target.'cfg(unix)'.dev-dependencies]
+# A started DAW's process group, which the provider's tests compare with the tests' own.
+libc.workspace = true

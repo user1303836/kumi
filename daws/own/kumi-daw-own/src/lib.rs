@@ -13,6 +13,7 @@ pub mod library;
 pub mod listening;
 pub mod phrases;
 pub mod pictures;
+pub mod provider;
 mod scripts;
 pub mod spec;
 pub mod views;

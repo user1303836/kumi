@@ -9,6 +9,7 @@ mod layers;
 pub mod library;
 mod lines;
 mod mapping;
+mod provider;
 mod variations;
 
 use kumi_agent::core::{
@@ -44,6 +45,8 @@ const INSTRUCTIONS: &str = concat!(
     " Say Renoise's limits and offer the way around: a send can't feed back into itself (Renoise takes such a #Send Receiver without complaint, so check where one points): use a Delay's feedback or a second send; a Doofer has 8 macros; a phrase's LPB is fixed (switch to a copy at another LPB with 0Zxx); it has no audio tracks, no CLAP plug-ins and no ReWire.",
     " Prefer native devices for sample work; render plug-in instruments before a song is shared; a bypassed plug-in keeps its latency. Never depend on tools such as xStream or Duplex; when Paketti is installed the producer may name its commands."
 );
+
+pub use provider::PROVIDER;
 
 pub const DAW: OwnDaw = OwnDaw {
     profile: &DawProfile::RENOISE,

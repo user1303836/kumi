@@ -280,7 +280,7 @@ class DawSorting(unittest.TestCase):
         self.assertEqual(release.classify(1, line, reaper + ["daws/reaper/reaper-kumi/src/changes/tests.rs", "docs/en/X.md"]).lines,
                          [("reaper", "A new thing.")])
         self.assertEqual(release.classify(2, line, renoise + ["daws/renoise/tests/test_changes.lua"]).lines, [("renoise", "A new thing.")])
-        for paths in (reaper + renoise, reaper + ["crates/kumi/src/daw/own.rs"], renoise + ["daws/own/daw-mcp-server/src/tools.rs"],
+        for paths in (reaper + renoise, reaper + ["daws/own/kumi-daw-own/src/provider.rs"], renoise + ["daws/own/daw-mcp-server/src/tools.rs"],
                       ["daws/own/daw-bridge/src/wire.rs"]):  # daw-bridge is Kumi's too
             with self.subTest(paths=paths):
                 self.assertEqual(release.classify(3, line, paths).lines, [("kumi", "A new thing.")])

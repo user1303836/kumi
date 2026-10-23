@@ -26,12 +26,12 @@
 | `daws/ableton/protocol` | `ableton-live-v1.operations.json`，桥接与 Remote Script 共用的操作注册表 |
 | `scripts` | 发布构建器、迁移打包、Mac 辅助程序的构建、隔离测试运行器，以及 `npm run kumi` 和 `npm run setup` 背后的 `native-kumi.mjs` |
 | `daws/own/daw-mcp-server` | Kumi 为 REAPER 和 Renoise 准备的宿主程序（`daw-mcp-server --daw reaper\|renoise`）：基于 stdio 的 MCP、修改的日志与撤销、聆听任务、离开期间的变化；其他 MCP 客户端也能使用 |
-| `daws/own/kumi-daw-own` | REAPER 和 Renoise 的集成在主机端共享的部分：通过 Kumi 自有桥接的集成、修改引擎及其撤销、离开期间的变化、聆听、音频转 MIDI 与分离音轨、即时短语、图示与 FOCUS 视图、保留的脚本，以及按规格交付 |
-| `daws/reaper/kumi-daw-reaper` | REAPER 的主机端：通过 Kumi 自有桥接的集成、只有 REAPER 才有的工具（条目的变奏、交付、路由）以及它的素材库位置 |
+| `daws/own/kumi-daw-own` | REAPER 和 Renoise 的集成在主机端共享的部分：通过 Kumi 自有桥接的集成、修改引擎及其撤销、离开期间的变化、聆听、音频转 MIDI 与分离音轨、即时短语、图示与 FOCUS 视图、保留的脚本、按规格交付，以及两个 DAW 的桥接借以查找、安装、检查和移除的 provider（`provider`） |
+| `daws/reaper/kumi-daw-reaper` | REAPER 的主机端：通过 Kumi 自有桥接的集成、只有 REAPER 才有的工具（条目的变奏、交付、路由）、它的素材库位置，以及它给 provider 的值（`PROVIDER`） |
 | `daws/reaper/reaper-kumi` | Kumi 的 REAPER 扩展（`reaper_kumi`），用 `sdk/` 中附带的 REAPER SDK 头文件构建 |
 | `daws/own/daw-bridge` | REAPER 与 Renoise 桥接共用的部分：回环通信（`kumi-daw/1`）、它的握手与认证、发现、查找 DAW、doctor 的检查，以及桥接文件的生命周期 |
 | `daws/renoise` | Kumi 的 Renoise 工具（`com.kumi.Bridge.xrnx`，Lua）及其针对 Renoise API 模拟的测试 |
-| `daws/renoise/kumi-daw-renoise` | Renoise 的主机端：通过 Kumi 自有桥接的集成、只有 Renoise 才有的工具（行与乐句的变奏、采样映射、切片、整理即兴录音、叠层碎拍）以及它的素材库位置 |
+| `daws/renoise/kumi-daw-renoise` | Renoise 的主机端：通过 Kumi 自有桥接的集成、只有 Renoise 才有的工具（行与乐句的变奏、采样映射、切片、整理即兴录音、叠层碎拍）、它的素材库位置，以及它给 provider 的值（`PROVIDER`） |
 | `install.sh`、`install.ps1` | 安装程序 |
 
 这些 crate 共用根目录的 Cargo 工作区；没有 npm 工作区。桥接没有 Kumi 也能工作。这些 crate 移植自的 TypeScript 实现保留在 git 标签 `v1.7.6` 上。

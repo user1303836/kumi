@@ -24,9 +24,9 @@ SCHEMA = "ableton-mcp-native-release/v1"
 BRIDGE_BINARIES = ("ableton-mcp-server", "ableton-mcp-analysis-worker")
 # daw-mcp-server is Kumi's host for REAPER and Renoise: Kumi starts it from beside its own binary.
 BINARIES = ("kumi", *BRIDGE_BINARIES, "daw-mcp-server", "kumi-harness", "kumi-library-measure", "kumi-library-learner")
-# REAPER's extension and Renoise's tool, where Kumi installs them from (crates/kumi/src/daw/own.rs): daws/reaper and
-# daws/renoise in the bundle. REAPER loads `reaper_*` libraries from UserPlugins; a Renoise tool is a folder named for its
-# id. The extension's version is its crate's, in a file beside it.
+# REAPER's extension and Renoise's tool, where Kumi installs them from (daws/own/kumi-daw-own/src/provider.rs):
+# daws/reaper and daws/renoise in the bundle. REAPER loads `reaper_*` libraries from UserPlugins; a Renoise tool is a
+# folder named for its id. The extension's version is its crate's, in a file beside it.
 DAWS = "daws"
 REAPER_EXTENSION = "reaper_kumi"
 REAPER_CRATE = "daws/reaper/reaper-kumi"

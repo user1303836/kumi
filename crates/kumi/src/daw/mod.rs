@@ -1,7 +1,6 @@
 //! The DAWs this Kumi works with (the DAW table, in `registry`), and the one this run works with: what the app says of
 //! the DAW and shows of its tools, its focus and its devices comes from here, and each DAW's provider finds its bridge
 //! and makes the session's integration.
-pub mod own;
 pub mod registry;
 
 use kumi_agent::core::{presentation::ToolPresentation, view::ViewPresentation};
