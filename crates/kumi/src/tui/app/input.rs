@@ -4,7 +4,7 @@ use super::super::{
     tree::TreeRole,
 };
 use super::*;
-use crate::text::library_line;
+use crate::text::{library_line, remembered_line};
 use base64::Engine;
 use std::task::{Context, Poll};
 
@@ -758,6 +758,9 @@ impl TuiApp {
                     },
                     NoticeTone::Info,
                 );
+            }
+            if let Some(line) = remembered_line(controller.remembered().await) {
+                self.notice(&line, NoticeTone::Info);
             }
             if let Some(now) = controller.conversation_now().await {
                 self.notice(&conversation_line(&now, |text| self.clean(text, 60)), NoticeTone::Info);

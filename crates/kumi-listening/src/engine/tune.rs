@@ -4,10 +4,11 @@
 
 use super::{judge::JudgeHeard, masking_items, Listening};
 use crate::{
-    checklist::{masking_unfair_in, plan_cut, Quantity, Target, REGIONS},
+    checklist::{masking_unfair_in, plan_cut, Checklist, Item, Quantity, Target, REGIONS},
     cmaes::Cmaes,
     detect::ProblemKind,
     fit::{fit, Band, Limits, Shape},
+    heard_settings::{SearchKind, Setting, SettingsHeard},
     home::{Homed, Homing},
     judging::{candidate_cost, predict},
     knobs::{Scale, Unit},
@@ -581,6 +582,17 @@ impl Listening {
         // Where the knobs are now costs no listen: its gap as the run reads it. A search has to beat it.
         let standing = candidate_cost(&checklist, index, &before, &whole, &before, &start, &start);
         let mut search = Cmaes::new(&start, 0.2, None, crate::cmaes::seeded(rand::random::<u32>()));
+        // What the search hears is handed out, a generation at a time, for Kumi to remember what worked on this device:
+        // who the device is (never its place), what the search aims at and how the track sounded before it.
+        let remembered = match self.remembers() {
+            true => self.host.device_identity(&request.device, signal.clone()).await,
+            false => None,
+        };
+        let run = uuid::Uuid::new_v4().to_string();
+        let target = aimed_at(&checklist.items[index]);
+        let knobs_were: serde_json::Map<String, Value> =
+            fractions(&chosen, &start).into_iter().map(|(name, at)| (name, json!(at))).collect();
+        let was = json!({"values": readings(&checklist, &before), "knobs": knobs_were});
         // What the copies can't hear (the focus track isn't with them) reads as it did before.
         let heard_alone = |values: Vec<Option<f64>>| -> Vec<Option<f64>> {
             values
@@ -622,23 +634,48 @@ impl Listening {
                     Err(why) => return Ok(Err(why)),
                 };
                 self.judge.borrow_mut().as_mut().unwrap().listens += 1;
-                let costs: Vec<f64> = copies
-                    .names
+                let read: Vec<Option<Vec<Option<f64>>>> =
+                    copies.names.iter().map(|name| heard.get(name).map(|heard| heard_alone(checklist.read(heard, None)))).collect();
+                let costs: Vec<f64> = read
                     .iter()
                     .zip(&points)
-                    .map(|(name, point)| match heard.get(name) {
-                        Some(heard) => {
-                            candidate_cost(&checklist, index, &before, &whole, &heard_alone(checklist.read(heard, None)), point, &start)
-                        }
+                    .map(|(values, point)| match values {
+                        Some(values) => candidate_cost(&checklist, index, &before, &whole, values, point, &start),
                         None => f64::INFINITY,
                     })
                     .collect();
                 search.tell(&points, &costs);
+                if let Some(device) = &remembered {
+                    // Each setting heard (one that came through, and was read on its target).
+                    let settings = points
+                        .iter()
+                        .zip(&read)
+                        .zip(&costs)
+                        .filter(|(_, cost)| cost.is_finite())
+                        .filter_map(|((point, values), cost)| {
+                            let measured = Value::Object(readings(&checklist, values.as_ref()?));
+                            Some(Setting { knobs: fractions(&chosen, point), measured, cost: *cost })
+                        })
+                        .collect();
+                    self.heard(SettingsHeard::Heard {
+                        run: run.clone(),
+                        kind: SearchKind::Tune,
+                        daw: self.host.profile().id,
+                        device: device.clone(),
+                        track: Some(scoped.clone()),
+                        target: target.clone(),
+                        before: Some(was.clone()),
+                        settings,
+                    });
+                }
             }
             Ok(Ok(()))
         }
         .await;
         self.host.close_copies(copies).await;
+        if remembered.is_some() {
+            self.heard(SettingsHeard::Ended { run });
+        }
         match searched? {
             Ok(()) => {}
             Err(why) => return Ok(Err(why)),
@@ -671,6 +708,37 @@ impl Listening {
         );
         self.judge_round(Some(change), None, signal).await
     }
+}
+
+/// The knobs at a point of a search, by name: each the fraction of its perceptual range it's set to.
+fn fractions(chosen: &[(&DeviceKnob, Scale)], point: &[f64]) -> IndexMap<String, f64> {
+    chosen.iter().zip(point).map(|((knob, _), at)| (knob.name.clone(), at.clamp(0., 1.))).collect()
+}
+
+/// A listen's readings, by checklist item: the ones it read.
+fn readings(checklist: &Checklist, values: &[Option<f64>]) -> serde_json::Map<String, Value> {
+    checklist
+        .items
+        .iter()
+        .zip(values)
+        .filter_map(|(item, value)| Some((item.id.clone(), json!(value.filter(|value| value.is_finite())?))))
+        .collect()
+}
+
+/// What a search aims at, as Kumi remembers it: the item's kind (what it reads, a reference's own vector left out), and
+/// what it wants (its target, and where a knob turned for it should take it).
+fn aimed_at(item: &Item) -> Value {
+    let mut target = serde_json::to_value(&item.quantity).unwrap_or_else(|_| json!({}));
+    if let Some(object) = target.as_object_mut() {
+        object.remove("to");
+        object.insert("item".into(), json!(item.id));
+        object.insert("unit".into(), json!(item.unit));
+        object.insert("wanted".into(), serde_json::to_value(item.target).unwrap_or(Value::Null));
+        if let Some((aim, _)) = item.aim() {
+            object.insert("aim".into(), json!(aim));
+        }
+    }
+    target
 }
 
 /// The model's own words for the change, as the log's lead-in.

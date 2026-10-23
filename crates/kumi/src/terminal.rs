@@ -4,7 +4,7 @@ use crate::{
     history::InputHistory,
     input::{KeyInput, TerminalInput, Utf8Decoder},
     models::ModelController,
-    text::{library_line, sanitize_text, web_words, StreamingText},
+    text::{library_line, remembered_line, sanitize_text, web_words, StreamingText},
     tui::{
         editor::Editor,
         keys::{InputEvent, InputParser},
@@ -719,6 +719,9 @@ impl PlainTerminal {
             }
             self.0.saying.send_modify(|count| *count += 1);
             let _saying = Saying(self.clone());
+            if let Some(line) = remembered_line(controller.remembered().await) {
+                self.notice(&format!("[status] {line}"));
+            }
             if let Some(now) = controller.conversation_now().await {
                 let secrets = self.0.options.secrets.clone();
                 self.notice(&format!(

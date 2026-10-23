@@ -272,8 +272,16 @@ impl<S: RefScheme + 'static> OwnGoalRig<S> {
             r.tell_app(&note);
         }
         let chain = devices.iter().map(|device| device.name.clone()).collect::<Vec<_>>().join(" → ");
-        let info =
-            GoalSlotInfo { name: name.clone(), label: label.into(), chain: if chain.is_empty() { "empty".into() } else { chain }, knobs };
+        // Who each knob's device is, by the knobs' word for it (as `knobs_of` names them), for what Kumi remembers.
+        let identities =
+            devices.iter().enumerate().map(|(at, device)| (format!("{at}:{}", device.name), device.identity.clone())).collect();
+        let info = GoalSlotInfo {
+            name: name.clone(),
+            label: label.into(),
+            chain: if chain.is_empty() { "empty".into() } else { chain },
+            knobs,
+            devices: identities,
+        };
         self.current.borrow_mut().insert(name.clone(), info.knobs.iter().map(|knob| (key(knob), knob.value)).collect());
         let short = r.link.book.borrow_mut().short_ref(&track);
         self.slots.borrow_mut().push(Slot { info: info.clone(), track, short, scratch, copy_name, window, places, steps: 0 });

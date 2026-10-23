@@ -159,6 +159,9 @@ impl Renderer for LiveHost {
     async fn device_kind(&self, device: &str, signal: Signal) -> Option<String> {
         LiveRenderer::device_kind(self, device, signal).await
     }
+    async fn device_identity(&self, device: &str, signal: Signal) -> Option<kumi_listening::heard_settings::DeviceIdentity> {
+        LiveRenderer::device_identity(self, device, signal).await.map(kumi_listening::heard_settings::DeviceIdentity::named)
+    }
     async fn fit_eq(
         &self,
         device: &str,

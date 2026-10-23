@@ -48,6 +48,16 @@ fn object(value: Value) -> JsonObject {
 
 /// An integration over Kumi's host in front of `config`'s simulated bridge, with what it tells the app.
 fn integration(daw: Daw, home: &Path, create: fn(OwnOptions) -> Rc<dyn Integration>) -> (Rc<dyn Integration>, Rc<RefCell<Vec<String>>>) {
+    integration_with(daw, home, create, |_| {})
+}
+
+/// `integration`, with more of what the app gives it.
+fn integration_with(
+    daw: Daw,
+    home: &Path,
+    create: fn(OwnOptions) -> Rc<dyn Integration>,
+    more: impl FnOnce(&mut IntegrationContext),
+) -> (Rc<dyn Integration>, Rc<RefCell<Vec<String>>>) {
     let endpoint = Rc::new(InProcess { host: Arc::new(Host::new(daw, home)), id: Cell::new(0) });
     let connect: Connect = Rc::new(move |_| {
         let endpoint = endpoint.clone();
@@ -58,6 +68,7 @@ fn integration(daw: Daw, home: &Path, create: fn(OwnOptions) -> Rc<dyn Integrati
     let mut context = IntegrationContext::new(Rc::new(|_, _| {}));
     context.on_action = Some(Rc::new(move |event: ActionEvent| into.borrow_mut().push(event.title)));
     context.focus_interval_ms = Some(50);
+    more(&mut context);
     (create(OwnOptions { context, kumi_home: home.into(), connect: Some(connect) }), told)
 }
 
@@ -1359,6 +1370,63 @@ async fn reaper_measures_sounds_lays_out_the_form_and_tunes_a_reaeq_on_scratch_c
             said.push(tuned.text);
             said.extend(told.borrow().iter().cloned());
             assert_ours(&said);
+            reaper.close().await.unwrap();
+            simulator.stop();
+        })
+        .await;
+}
+
+/// What tune's search hears is handed out a generation at a time, for Kumi to remember what worked: the FX by who it is
+/// (the plug-in REAPER calls it, whatever the producer named it), each setting's knobs as fractions of their ranges and
+/// what it measured, and then the search's end.
+#[tokio::test(flavor = "current_thread")]
+async fn a_tune_search_hands_out_what_it_heard_on_the_fx_by_who_it_is() {
+    use kumi_listening::heard_settings::{SearchKind, SettingsHeard};
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let home = tempfile::tempdir().unwrap();
+            let script = ReaperScript::new(3, 0);
+            let eq = script.add_fx("r:track:{T0002}", "ReaEQ");
+            script.rename_fx(&eq, "Bass EQ");
+            script.listening().set_steps(0);
+            let simulator = reaper_lab(&script, home.path(), |_| {}).await;
+            let heard: Rc<RefCell<Vec<SettingsHeard>>> = Rc::default();
+            let into = heard.clone();
+            let (reaper, _) = integration_with(Daw::Reaper, home.path(), create_reaper_integration, |context| {
+                context.on_heard = Some(Rc::new(move |event| into.borrow_mut().push(event)));
+            });
+            reaper.start(Signal::new()).await.unwrap();
+            let observed = reaper.observe(Signal::new(), None).await.unwrap();
+            let goal = json!({"goal": {"loudness": -14, "problems": false}, "track": "Track 2", "from_beat": 0, "beats": 2});
+            assert!(!tool(&observed, "judge").execute(object(goal), Signal::new()).await.unwrap().is_error);
+            let tuned = tool(&observed, "tune")
+                .execute(object(json!({"device": eq, "how": "search", "knobs": ["Gain-Band 2", "Gain-Band 3"]})), Signal::new())
+                .await
+                .unwrap();
+            assert!(!tuned.is_error, "{}", tuned.text);
+            let heard = heard.borrow();
+            let (generations, ended): (Vec<_>, Vec<_>) = heard.iter().partition(|event| matches!(event, SettingsHeard::Heard { .. }));
+            assert!(!generations.is_empty() && generations.len() <= 4, "a generation at a time: {}", generations.len());
+            let mut runs = std::collections::BTreeSet::new();
+            for event in &generations {
+                let SettingsHeard::Heard { run, kind, daw, device, track, target, before, settings } = event else { unreachable!() };
+                runs.insert(run.clone());
+                assert_eq!(
+                    (*kind, *daw, device.name.as_str()),
+                    (SearchKind::Tune, Some(kumi_types::daw::DawId::Reaper), "VST: ReaEQ (Cockos)")
+                );
+                assert_eq!(track.as_deref(), Some("Track 2"));
+                assert_eq!(target["kind"], "integrated", "{target}");
+                assert!(before.as_ref().unwrap()["values"]["loudness"].is_number(), "{before:?}");
+                assert!(!settings.is_empty());
+                for setting in settings {
+                    assert_eq!(setting.knobs.keys().collect::<Vec<_>>(), ["Gain-Band 2", "Gain-Band 3"]);
+                    assert!(setting.knobs.values().all(|at| (0. ..=1.).contains(at)), "{:?}", setting.knobs);
+                    assert!(setting.cost.is_finite() && setting.measured["loudness"].is_number(), "{setting:?}");
+                }
+            }
+            assert_eq!(runs.len(), 1, "one search");
+            assert_eq!(ended, [&SettingsHeard::Ended { run: runs.into_iter().next().unwrap() }], "then its end");
             reaper.close().await.unwrap();
             simulator.stop();
         })

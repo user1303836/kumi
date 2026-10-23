@@ -161,7 +161,7 @@ async fn session(plays: bool) -> (Vec<String>, Rc<Fake>) {
         asked: RefCell::default(),
         told: RefCell::default(),
     });
-    let listening = Listening::new(fake.clone(), None, None, None, None);
+    let listening = Listening::new(fake.clone(), None, None, None, None, None);
     let object = |value: Value| value.as_object().cloned().unwrap();
     let mut said = vec![];
     let calls: Vec<(&str, JsonObject)> = vec![

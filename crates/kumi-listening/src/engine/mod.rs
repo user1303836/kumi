@@ -18,7 +18,7 @@ use super::{
     renderer::{bars_of, Renderer, Window},
     round::Round,
 };
-use crate::{listener::ListenerSource, references::store::ReferenceStore};
+use crate::{heard_settings::SettingsHeard, listener::ListenerSource, references::store::ReferenceStore};
 use indexmap::IndexMap;
 use kumi_common::{abort::Signal, js::number::round};
 use kumi_media::audio::{self, analyze::Analysis};
@@ -33,6 +33,8 @@ use std::{
 pub struct Listening {
     pub(crate) host: Rc<dyn Renderer>,
     on_judge: Option<Rc<dyn Fn(Round)>>,
+    /// Each setting a search hears, handed out as it's heard (for Kumi to remember what worked on a device).
+    on_heard: Option<Rc<dyn Fn(SettingsHeard)>>,
     /// The judged run under way (or the last one).
     pub(crate) judge: RefCell<Option<JudgeRun>>,
     /// The groove run under way (or the last one).
@@ -64,10 +66,12 @@ impl Listening {
         on_audition: Option<Rc<dyn Fn(AuditionEvent)>>,
         listener_source: Option<ListenerSource>,
         references: Option<Rc<ReferenceStore>>,
+        on_heard: Option<Rc<dyn Fn(SettingsHeard)>>,
     ) -> Rc<Self> {
         Rc::new(Self {
             host,
             on_judge,
+            on_heard,
             judge: RefCell::new(None),
             groove: RefCell::new(None),
             on_audition,
@@ -137,6 +141,18 @@ impl Listening {
     /// Says what Kumi is doing.
     pub(crate) fn tell(&self, title: impl AsRef<str>, playing: Option<bool>) {
         self.host.tell(title.as_ref(), playing);
+    }
+
+    /// Whether anyone keeps the settings searches hear.
+    pub(crate) fn remembers(&self) -> bool {
+        self.on_heard.is_some()
+    }
+
+    /// Settings a search heard, handed out.
+    pub(crate) fn heard(&self, event: SettingsHeard) {
+        if let Some(tell) = &self.on_heard {
+            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| tell(event)));
+        }
     }
 
     /// The bars `window` covers, as said while the DAW plays them: "bars 17–24", or "bar 17".
@@ -268,7 +284,7 @@ mod tests {
     }
 
     fn listening(tempo: Option<f64>, refuses: Option<&'static str>) -> Rc<Listening> {
-        Listening::new(Rc::new(Bare { tempo, refuses, flag: ListenFlag::default() }), None, None, None, None)
+        Listening::new(Rc::new(Bare { tempo, refuses, flag: ListenFlag::default() }), None, None, None, None, None)
     }
 
     /// Each tool, with an input that reaches the engine.
@@ -412,7 +428,7 @@ mod tests {
     async fn a_recorded_takes_lead_is_whole_inside_the_song_cut_short_at_its_start_and_none_for_a_tap() {
         let leads = |lead: f64, from: f64| async move {
             let host = Rc::new(Recording { lead, dir: tempfile::tempdir().unwrap(), flag: ListenFlag::default() });
-            let listening = Listening::new(host, None, None, None, None);
+            let listening = Listening::new(host, None, None, None, None, None);
             // (a beat of noise after its lead: the lead is what's checked, and a short take hears quickly)
             let heard = listening.hear_takes(&["Bass".to_string()], Window { from, beats: 2. }, "measuring Bass", Signal::new()).await;
             heard.unwrap().unwrap()["Bass"].1
