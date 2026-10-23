@@ -14,6 +14,9 @@ New-Item -ItemType Directory -Path $home_ | Out-Null
 try {
   $env:HOME = $home_; $env:USERPROFILE = $home_
   $env:APPDATA = Join-Path $home_ 'AppData\Roaming'; $env:LOCALAPPDATA = Join-Path $home_ 'AppData\Local'
+  # As a profile has them: Windows' known-folder lookups refuse a profile's folders that don't exist, and the tools the
+  # build runs (sccache's cache and settings) look theirs up there.
+  New-Item -ItemType Directory -Force -Path $env:APPDATA, $env:LOCALAPPDATA | Out-Null
   $env:XDG_CONFIG_HOME = Join-Path $home_ '.config'; $env:KUMI_HOME = Join-Path $home_ '.kumi'
   Remove-Item Env:KUMI_REMOTE_SCRIPTS_DIR -ErrorAction SilentlyContinue
   Remove-Item Env:KUMI_LIVE_EXTENSIONS_DIR -ErrorAction SilentlyContinue

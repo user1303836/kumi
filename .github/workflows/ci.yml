@@ -60,6 +60,12 @@ jobs:
     if: needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
+    env:
+      # The workspace's crates, which rust-cache never keeps, come from sccache's store in the Actions cache: main's pushes
+      # write it and pull requests read it (as rust-cache's), so a pull request compiles only the crates it changed. The
+      # steps that compile set RUSTC_WRAPPER: rust-cache keys its cache on RUST* variables, so a job-wide one misses main's.
+      SCCACHE_GHA_ENABLED: "true"
+      SCCACHE_GHA_RW_MODE: ${{ github.ref == 'refs/heads/main' && 'READ_WRITE' || 'READ_ONLY' }}
     strategy:
       fail-fast: false
       matrix:
@@ -80,6 +86,10 @@ jobs:
           echo "picked=$picked" | tee -a "$GITHUB_OUTPUT"
       - if: steps.part.outputs.picked != ''
         uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
+      - if: steps.part.outputs.picked != ''
+        uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+        with:
+          version: v0.18.0
       # Saved from main only. A pull request restores main's; caches saved from pull requests (about 300 MB a job)
       # pushed main's out of the repository's 10 GB. One cache per part: each builds other crates.
       - if: steps.part.outputs.picked != ''
@@ -99,6 +109,7 @@ jobs:
       - name: The tests, in a home of their own (no test reaches this machine's Live folders or ~/.kumi)
         if: steps.part.outputs.picked != ''
         env:
+          RUSTC_WRAPPER: sccache
           KUMI_NEXTEST: "1"
           KUMI_NEXTEST_LIST: ${{ runner.temp }}/nextest-list.json
           # Temporary files in memory: the tests' homes, Sets and stores write and sync many small files, which a
@@ -123,11 +134,20 @@ jobs:
     if: needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
+    env:
+      # The workspace's crates, which rust-cache never keeps, come from sccache's store in the Actions cache: main's pushes
+      # write it and pull requests read it (as rust-cache's), so a pull request compiles only the crates it changed. The
+      # steps that compile set RUSTC_WRAPPER: rust-cache keys its cache on RUST* variables, so a job-wide one misses main's.
+      SCCACHE_GHA_ENABLED: "true"
+      SCCACHE_GHA_RW_MODE: ${{ github.ref == 'refs/heads/main' && 'READ_WRITE' || 'READ_ONLY' }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
         with:
           components: rustfmt, clippy
+      - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+        with:
+          version: v0.18.0
       - uses: Swatinem/rust-cache@63fed3e2fecf6f7b51dc6f043341b79ef82a9ae7 # v2.9.2
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
@@ -136,9 +156,13 @@ jobs:
       # task borrows the same cell meanwhile. The rest of clippy stays advisory for now. (This builds the examples too;
       # the documentation tests are Extended's.)
       - name: No RefCell borrow held across an await
+        env:
+          RUSTC_WRAPPER: sccache
         run: cargo clippy --workspace --lib --bins --examples --locked -- -A clippy::all -D clippy::await_holding_refcell_ref
       - name: Clippy (advisory while the port is under way)
         continue-on-error: true
+        env:
+          RUSTC_WRAPPER: sccache
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
   rust-platforms:
@@ -158,6 +182,9 @@ jobs:
     env:
       # Rust's own linker: Microsoft's is a large part of linking two hundred test binaries.
       CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER: rust-lld
+      # The workspace's crates from sccache (see Rust / Linux; the steps that compile set RUSTC_WRAPPER).
+      SCCACHE_GHA_ENABLED: "true"
+      SCCACHE_GHA_RW_MODE: ${{ github.ref == 'refs/heads/main' && 'READ_WRITE' || 'READ_ONLY' }}
     steps:
       - name: Stop Windows Defender scanning the workspace (it slows every file the build touches)
         if: runner.os == 'Windows'
@@ -166,6 +193,9 @@ jobs:
         run: Set-MpPreference -DisableRealtimeMonitoring $true
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
+      - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+        with:
+          version: v0.18.0
       # Saved from main only (see Rust / Linux).
       - uses: Swatinem/rust-cache@63fed3e2fecf6f7b51dc6f043341b79ef82a9ae7 # v2.9.2
         with:
@@ -179,6 +209,7 @@ jobs:
       - name: The tests, in a home of their own
         if: runner.os != 'Windows'
         env:
+          RUSTC_WRAPPER: sccache
           KUMI_NEXTEST: "1"
           KUMI_NEXTEST_LIST: ${{ runner.temp }}/nextest-list.json
           # Only the test binaries the profile names are built.
@@ -188,6 +219,7 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         env:
+          RUSTC_WRAPPER: sccache
           KUMI_NEXTEST: "1"
           KUMI_NEXTEST_LIST: ${{ runner.temp }}/nextest-list.json
           KUMI_NEXTEST_BUILD_PROFILE: ci-os
