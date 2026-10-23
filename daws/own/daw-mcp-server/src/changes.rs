@@ -647,16 +647,16 @@ impl crate::host::Host {
         let read;
         let (daw, asked, given) = (self.daw(), kind.clone(), input.clone());
         let with_file = tokio::task::spawn_blocking(move || {
-            crate::library_files::with_file(daw, &asked, &given, &crate::library_files::library_roots())
+            crate::renoise::library_files::with_file(daw, &asked, &given, &crate::renoise::library_files::library_roots())
         })
         .await
-        .unwrap_or_else(|_| Some(Err(crate::presets::Refusal::Bad("Kumi couldn't read the library file".into()))));
+        .unwrap_or_else(|_| Some(Err(crate::renoise::presets::Refusal::Bad("Kumi couldn't read the library file".into()))));
         let input = match with_file {
             Some(Ok(with_data)) => {
                 read = with_data;
                 &read
             }
-            Some(Err(refusal)) => return (crate::presets::refusal_answer(&refusal), true),
+            Some(Err(refusal)) => return (crate::renoise::presets::refusal_answer(&refusal), true),
             None => input,
         };
         // (M4 n-devices: the Doofer, Splitter and Notepad edits are made here from the device's preset data, and an
@@ -666,7 +666,7 @@ impl crate::host::Host {
             Ok(pinned) => pinned,
             Err(error) => return (self.call_error(&error), true),
         };
-        if crate::presets::host_makes(self.daw(), &kind, input) {
+        if crate::renoise::presets::host_makes(self.daw(), &kind, input) {
             return self.preset_preview(&pick, &kind, input, arguments.get("epoch").and_then(Value::as_str), layout).await;
         }
         let mut params = json!({"kind": kind, "input": input});
@@ -701,7 +701,7 @@ impl crate::host::Host {
         if let Some(answer) = self.elsewhere(&record.instance) {
             return self.journal().end_apply(&id, &key, Err((&answer, false)));
         }
-        let params = if crate::presets::host_makes(self.daw(), &record.kind, &record.input) {
+        let params = if crate::renoise::presets::host_makes(self.daw(), &record.kind, &record.input) {
             match self.preset_apply_params(&record).await {
                 Ok(params) => params,
                 // (refused before anything was written: the change can be previewed again)
@@ -747,7 +747,7 @@ impl crate::host::Host {
             return self.journal().end_undo(&id, &key, Err(&answer));
         }
         let discard = arguments.get("discard") == Some(&Value::Bool(true));
-        let params = if crate::presets::composes_undo(self.daw(), &record.kind, &record.input) {
+        let params = if crate::renoise::presets::composes_undo(self.daw(), &record.kind, &record.input) {
             match self.preset_restore_params(&record, &desc, discard).await {
                 Ok(Ok(params)) => params,
                 // (it is back already: nothing to write)

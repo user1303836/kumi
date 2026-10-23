@@ -24,10 +24,6 @@ pub struct Line {
 }
 
 pub mod listening;
-pub mod reaper;
-pub mod renoise;
-mod renoise_dsp;
-mod renoise_takes;
 
 /// What a simulated bridge answers beyond `ping` and `status`: `Some(Ok(result))`, `Some(Err((code, message)))`, or None
 /// for a method it doesn't have.

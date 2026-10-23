@@ -6,7 +6,7 @@ mod common;
 
 use daw_bridge::auth::Secret;
 use daw_mcp_server::client::BridgeClient;
-use daw_mcp_server::simulator::renoise::RenoiseScript;
+use daw_mcp_server::renoise::simulator::RenoiseScript;
 use daw_mcp_server::simulator::Simulator;
 use serde_json::{json, Value};
 use std::time::Duration;

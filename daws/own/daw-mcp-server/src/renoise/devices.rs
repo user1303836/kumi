@@ -3,7 +3,7 @@
 //! range, default and step (0: continuous). Generated from the lab's inventory; the names are the defaults (some follow
 //! the device: EQ 5's gains name their frequency, a Splitter's lane gains its type, a Doofer's macros their names).
 
-pub use crate::renoise_texts::Text;
+pub use crate::renoise::texts::Text;
 
 /// One parameter: its name, the XML element it is saved in ("" when Renoise doesn't save it), range, default and step.
 pub struct Param {

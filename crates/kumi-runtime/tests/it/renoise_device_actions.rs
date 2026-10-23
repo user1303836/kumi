@@ -3,7 +3,8 @@
 use daw_bridge::{files::ensure_secret, paths::BridgePaths, Daw};
 use daw_mcp_server::{
     host::Host,
-    simulator::{renoise::RenoiseScript, Respond, Simulator},
+    renoise::simulator::RenoiseScript,
+    simulator::{Respond, Simulator},
 };
 use futures::FutureExt;
 use kumi_common::abort::Signal;

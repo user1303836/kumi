@@ -14,7 +14,7 @@ It's one Cargo workspace. Each DAW is reached through a bridge that runs inside 
   (Python); `live-extension/` is Live's extension (TypeScript); `protocol/` is the only list of Live operations;
   `max-standard/` is the standard Kumi holds Max patches to (data Kumi builds in).
 - `daws/own/`: Kumi's own bridges, for REAPER and Renoise: `daw-bridge/` (the `kumi-daw/1` wire) and
-  `daw-mcp-server/` (the host).
+  `daw-mcp-server/` (the host; what's one DAW's alone is in its `src/reaper/` and `src/renoise/`).
 - `crates/reaper-kumi`: REAPER's extension. `daws/renoise/com.kumi.Bridge.xrnx`: Renoise's tool (Lua).
 - `crates/kumi-store` (SQLite), `kumi-common` (shared utilities), `kumi-genexpr` (gen~ test interpreter).
 - `plugin-formats/`: the plug-in preset formats Kumi reads (data Kumi builds in).

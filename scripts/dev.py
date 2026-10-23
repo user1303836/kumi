@@ -394,6 +394,11 @@ class Rewrite:
     old: str
     new: str
     rust: bool = False
+    # A Rust path from its crate's root (`crate::x`) moves only in that crate's files, under this folder.
+    within: str | None = None
+
+    def applies_to(self, path: str) -> bool:
+        return self.within is None or path.startswith(self.within.rstrip("/") + "/")
 
     def apply(self, line: str) -> str:
         """`line` with each place it names the old path naming the new one."""
@@ -432,9 +437,11 @@ def load_moves(text: str) -> list[Rewrite]:
     rewrites = []
     for kind in ("move", "rust"):
         for entry in table.get(kind, []):
-            if set(entry) != {"from", "to"} or not all(isinstance(value, str) and value for value in entry.values()):
-                raise Refused(f"{MOVES}: each [[{kind}]] has a from and a to, and nothing else: {entry}")
-            rewrites.append(Rewrite(entry["from"], entry["to"], rust=kind == "rust"))
+            keys = {"from", "to"} | ({"in"} if kind == "rust" and "in" in entry else set())
+            if set(entry) != keys or not all(isinstance(value, str) and value for value in entry.values()):
+                raise Refused(f"{MOVES}: each [[{kind}]] has a from and a to{' (a [[rust]] may add in)' if kind == 'rust' else ''}, "
+                              f"and nothing else: {entry}")
+            rewrites.append(Rewrite(entry["from"], entry["to"], rust=kind == "rust", within=entry.get("in")))
     return rewrites
 
 
@@ -488,7 +495,8 @@ def rewrite_added(repo: Path, base: str, rewrites: list[Rewrite]) -> dict[str, l
             if number <= len(lines):
                 line = lines[number - 1]
                 for rewrite in rewrites:
-                    line = rewrite.apply(line)
+                    if rewrite.applies_to(path):
+                        line = rewrite.apply(line)
                 if line != lines[number - 1]:
                     lines[number - 1] = line
                     hit.append(number)

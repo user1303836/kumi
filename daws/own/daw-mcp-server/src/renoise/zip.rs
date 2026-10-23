@@ -391,7 +391,7 @@ pub(crate) mod tests {
             let entry = archive.entry("Instrument.xml").unwrap_or_else(|| panic!("{}: no Instrument.xml", path.display()));
             let xml = archive.contents(entry).unwrap();
             let text = String::from_utf8(xml.clone()).unwrap();
-            assert_eq!(crate::xml::parse(&text).unwrap().to_xml(), text, "{}", path.display());
+            assert_eq!(crate::renoise::xml::parse(&text).unwrap().to_xml(), text, "{}", path.display());
             let written = archive.with_replaced("Instrument.xml", &xml).unwrap();
             let again = Archive::read(&written).unwrap();
             for (old, new) in archive.entries.iter().zip(&again.entries) {

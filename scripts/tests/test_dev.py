@@ -263,6 +263,14 @@ class Moves(unittest.TestCase):
         for line in ("use kumi_runtime::core::daws;", "my_kumi_runtime::core::daw::Daw"):
             self.assertEqual(rust.apply(line), line)
 
+    def test_a_path_from_a_crates_root_moves_only_in_that_crate(self):
+        rust = dev.load_moves('[[rust]]\nfrom = "crate::old"\nto = "crate::new"\nin = "daws/x/a"\n')[0]
+        self.assertTrue(rust.applies_to("daws/x/a/src/lib.rs"))
+        self.assertFalse(rust.applies_to("daws/x/ab/src/lib.rs"))
+        self.assertFalse(rust.applies_to("crates/kumi/src/lib.rs"))
+        with self.assertRaises(dev.Refused):
+            dev.load_moves('[[move]]\nfrom = "a"\nto = "b"\nin = "c"\n')
+
     def test_moves_follow_one_another_in_order(self):
         rewrites = dev.load_moves('[[move]]\nfrom = "a"\nto = "b/a"\n\n[[move]]\nfrom = "b/a/x.rs"\nto = "b/a/y/x.rs"\n')
         self.assertEqual(dev.moved_to("a/x.rs", rewrites), "b/a/y/x.rs")
@@ -284,7 +292,8 @@ class Moves(unittest.TestCase):
 class RebaseMoves(unittest.TestCase):
     """A branch from before a move, brought across it in a repository of its own."""
 
-    MAP = '[[move]]\nfrom = "crates/a"\nto = "daws/x/a"\n\n[[rust]]\nfrom = "kumi_runtime::core::daw"\nto = "kumi_types::daw"\n'
+    MAP = ('[[move]]\nfrom = "crates/a"\nto = "daws/x/a"\n\n[[rust]]\nfrom = "kumi_runtime::core::daw"\nto = "kumi_types::daw"\n\n'
+           '[[rust]]\nfrom = "crate::old"\nto = "crate::new"\nin = "daws/x/a"\n')
 
     def setUp(self):
         folder = tempfile.TemporaryDirectory()
@@ -304,9 +313,9 @@ class RebaseMoves(unittest.TestCase):
         self.write("scripts/moves.toml", "")
         self.commit("Start")
         self.git("checkout", "-q", "-b", "feature")
-        self.write("crates/a/src/new.rs", "use kumi_runtime::core::daw::Daw;\n")
+        self.write("crates/a/src/new.rs", "use kumi_runtime::core::daw::Daw;\nuse crate::old::f;\n")
         self.write("crates/a/src/lib.rs", "pub fn a() {}\npub fn b() {}\n")
-        self.write("README.md", self.read("README.md") + "\nAlso crates/a/src/new.rs, in protocol and kumi_runtime::core::daws.\n")
+        self.write("README.md", self.read("README.md") + "\nAlso crates/a/src/new.rs, in protocol and kumi_runtime::core::daws (crate::old).\n")
         self.commit("Feature")
         self.git("checkout", "-q", "main")
         (self.repo / "daws/x").mkdir(parents=True)
@@ -342,10 +351,10 @@ class RebaseMoves(unittest.TestCase):
         self.assertEqual(self.git("log", "--format=%s").split(), ["Feature", "Move", "Start"])
         self.assertFalse((self.repo / "crates").exists(), out)
         self.assertEqual(self.read("daws/x/a/src/lib.rs"), "pub fn a() {}\npub fn b() {}\n")
-        self.assertEqual(self.read("daws/x/a/src/new.rs"), "use kumi_types::daw::Daw;\n")
+        self.assertEqual(self.read("daws/x/a/src/new.rs"), "use kumi_types::daw::Daw;\nuse crate::new::f;\n")
         # Main's own lines stay as main has them, history included.
         self.assertEqual(self.read("README.md"), "See daws/x/a/src/lib.rs.\n\nOne.\n\nBefore the move, crates/a held it.\n"
-                                                 "\nAlso daws/x/a/src/new.rs, in protocol and kumi_runtime::core::daws.\n")
+                                                 "\nAlso daws/x/a/src/new.rs, in protocol and kumi_runtime::core::daws (crate::old).\n")
         self.assertIn("README.md: 7", out)
         code, out = self.bring()
         self.assertEqual(code, 0, out)
@@ -355,7 +364,7 @@ class RebaseMoves(unittest.TestCase):
     def test_merging_keeps_the_branch_and_names_a_file_added_at_the_old_path_since(self):
         code, out = self.bring(merge=True)
         self.assertEqual(code, 0, out)
-        self.assertEqual(self.read("daws/x/a/src/new.rs"), "use kumi_types::daw::Daw;\n")
+        self.assertEqual(self.read("daws/x/a/src/new.rs"), "use kumi_types::daw::Daw;\nuse crate::new::f;\n")
         self.commit("Rewritten")
         self.write("crates/a/src/late.rs", "")
         self.commit("Late")

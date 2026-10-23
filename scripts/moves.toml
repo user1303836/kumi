@@ -6,6 +6,7 @@
 # - [[rust]]: a Rust path that moved with its code. dev.py rewrites it in the lines the branch adds, e.g.
 #   from = "kumi_runtime::core::daw"
 #   to = "kumi_types::daw"
+#   A path from a crate's root (`crate::…`) names the crate's folder with `in`, and moves only in the files under it.
 
 # Live's code, into daws/ableton (2026-10).
 [[move]]
@@ -36,3 +37,138 @@ to = "daws/own/daw-bridge"
 [[move]]
 from = "crates/daw-mcp-server"
 to = "daws/own/daw-mcp-server"
+
+# The host's REAPER and Renoise files, into src/reaper and src/renoise (2026-10).
+
+[[move]]
+from = "daws/own/daw-mcp-server/src/renoise_devices.rs"
+to = "daws/own/daw-mcp-server/src/renoise/devices.rs"
+
+[[move]]
+from = "daws/own/daw-mcp-server/src/renoise_texts.rs"
+to = "daws/own/daw-mcp-server/src/renoise/texts.rs"
+
+[[move]]
+from = "daws/own/daw-mcp-server/src/presets.rs"
+to = "daws/own/daw-mcp-server/src/renoise/presets.rs"
+
+[[move]]
+from = "daws/own/daw-mcp-server/src/presets"
+to = "daws/own/daw-mcp-server/src/renoise/presets"
+
+[[move]]
+from = "daws/own/daw-mcp-server/src/instruments.rs"
+to = "daws/own/daw-mcp-server/src/renoise/instruments.rs"
+
+[[move]]
+from = "daws/own/daw-mcp-server/src/instruments"
+to = "daws/own/daw-mcp-server/src/renoise/instruments"
+
+[[move]]
+from = "daws/own/daw-mcp-server/src/library_files.rs"
+to = "daws/own/daw-mcp-server/src/renoise/library_files.rs"
+
+[[move]]
+from = "daws/own/daw-mcp-server/src/xml.rs"
+to = "daws/own/daw-mcp-server/src/renoise/xml.rs"
+
+[[move]]
+from = "daws/own/daw-mcp-server/src/zip.rs"
+to = "daws/own/daw-mcp-server/src/renoise/zip.rs"
+
+[[move]]
+from = "daws/own/daw-mcp-server/src/simulator/renoise.rs"
+to = "daws/own/daw-mcp-server/src/renoise/simulator.rs"
+
+[[move]]
+from = "daws/own/daw-mcp-server/src/simulator/renoise_dsp.rs"
+to = "daws/own/daw-mcp-server/src/renoise/simulator/dsp.rs"
+
+[[move]]
+from = "daws/own/daw-mcp-server/src/simulator/renoise_takes.rs"
+to = "daws/own/daw-mcp-server/src/renoise/simulator/takes.rs"
+
+[[move]]
+from = "daws/own/daw-mcp-server/src/simulator/reaper.rs"
+to = "daws/own/daw-mcp-server/src/reaper/simulator.rs"
+
+[[rust]]
+from = "daw_mcp_server::renoise_devices"
+to = "daw_mcp_server::renoise::devices"
+
+[[rust]]
+from = "daw_mcp_server::renoise_texts"
+to = "daw_mcp_server::renoise::texts"
+
+[[rust]]
+from = "daw_mcp_server::presets"
+to = "daw_mcp_server::renoise::presets"
+
+[[rust]]
+from = "daw_mcp_server::instruments"
+to = "daw_mcp_server::renoise::instruments"
+
+[[rust]]
+from = "daw_mcp_server::library_files"
+to = "daw_mcp_server::renoise::library_files"
+
+[[rust]]
+from = "daw_mcp_server::xml"
+to = "daw_mcp_server::renoise::xml"
+
+[[rust]]
+from = "daw_mcp_server::zip"
+to = "daw_mcp_server::renoise::zip"
+
+[[rust]]
+from = "daw_mcp_server::simulator::renoise"
+to = "daw_mcp_server::renoise::simulator"
+
+[[rust]]
+from = "daw_mcp_server::simulator::reaper"
+to = "daw_mcp_server::reaper::simulator"
+
+[[rust]]
+from = "crate::renoise_devices"
+to = "crate::renoise::devices"
+in = "daws/own/daw-mcp-server"
+
+[[rust]]
+from = "crate::renoise_texts"
+to = "crate::renoise::texts"
+in = "daws/own/daw-mcp-server"
+
+[[rust]]
+from = "crate::presets"
+to = "crate::renoise::presets"
+in = "daws/own/daw-mcp-server"
+
+[[rust]]
+from = "crate::instruments"
+to = "crate::renoise::instruments"
+in = "daws/own/daw-mcp-server"
+
+[[rust]]
+from = "crate::library_files"
+to = "crate::renoise::library_files"
+in = "daws/own/daw-mcp-server"
+
+[[rust]]
+from = "crate::xml"
+to = "crate::renoise::xml"
+in = "daws/own/daw-mcp-server"
+
+[[rust]]
+from = "crate::zip"
+to = "crate::renoise::zip"
+in = "daws/own/daw-mcp-server"
+
+[[rust]]
+from = "crate::simulator::renoise"
+to = "crate::renoise::simulator"
+in = "daws/own/daw-mcp-server"
+
+[[rust]]
+from = "crate::simulator::reaper"
+to = "crate::reaper::simulator"
+in = "daws/own/daw-mcp-server"

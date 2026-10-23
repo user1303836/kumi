@@ -7,7 +7,7 @@ use common::{golden, Session};
 use daw_bridge::files::ensure_secret;
 use daw_bridge::paths::BridgePaths;
 use daw_bridge::Daw;
-use daw_mcp_server::simulator::renoise::RenoiseScript;
+use daw_mcp_server::renoise::simulator::RenoiseScript;
 use daw_mcp_server::simulator::Simulator;
 use serde_json::{json, Value};
 

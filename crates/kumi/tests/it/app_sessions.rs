@@ -10,7 +10,9 @@ use async_trait::async_trait;
 use daw_bridge::{files::ensure_secret, paths::BridgePaths, Daw};
 use daw_mcp_server::{
     host::Host,
-    simulator::{reaper::ReaperScript, renoise::RenoiseScript, Simulator, SimulatorConfig},
+    reaper::simulator::ReaperScript,
+    renoise::simulator::RenoiseScript,
+    simulator::{Simulator, SimulatorConfig},
 };
 use futures::FutureExt;
 use kumi::{

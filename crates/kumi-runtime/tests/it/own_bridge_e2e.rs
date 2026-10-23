@@ -2,10 +2,7 @@
 //! bridge that answers like REAPER's extension, or replays what Renoise's tool answered. What the host answers is what
 //! the integration reads: the observation, the model's read, the focus and FOCUS's bodies.
 use daw_bridge::{files::ensure_secret, paths::BridgePaths, Daw};
-use daw_mcp_server::{
-    host::Host,
-    simulator::{reaper::ReaperScript, renoise::RenoiseScript, Simulator},
-};
+use daw_mcp_server::{host::Host, reaper::simulator::ReaperScript, renoise::simulator::RenoiseScript, simulator::Simulator};
 use futures::FutureExt;
 use kumi_common::abort::Signal;
 use kumi_runtime::core::{
