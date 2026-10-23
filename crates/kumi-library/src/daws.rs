@@ -8,7 +8,7 @@ use kumi_net::web::WebClient;
 use kumi_types::contracts::KernelTool;
 use kumi_types::daw::DawProfile;
 
-use crate::sources::{Source, SourceOptions};
+use crate::sources::{Source, SourceKind, SourceOptions};
 use crate::tools::OnEvent;
 
 /// A DAW's places by its layout: those read before the folders the producer names (Live's User Library and Places) and
@@ -27,6 +27,21 @@ pub struct ManualOptions {
     pub on_event: Option<OnEvent>,
     pub base: Option<String>,
     pub now: Option<Rc<dyn Fn() -> i64>>,
+}
+
+/// How a DAW's own library is laid out, which a walk of it reads by: its top folders Kumi reads and the file types each
+/// holds ("" is a file with no extension, as a JSFX is), its folders whose audio files are sounds, and its folders whose
+/// presets keep a format of their own (REAPER's "effects": "jsfx").
+#[derive(Debug)]
+pub struct Layout {
+    pub folders: &'static [(&'static str, &'static [&'static str])],
+    pub sounds: &'static [&'static str],
+    pub formats: &'static [(&'static str, &'static str)],
+}
+
+impl Layout {
+    /// No library of its own.
+    pub const NONE: Layout = Layout { folders: &[], sounds: &[], formats: &[] };
 }
 
 /// What a DAW tells the library about itself.
@@ -50,6 +65,10 @@ pub trait LibrarySources: Sync {
     fn manual_tool(&self, _options: ManualOptions) -> Option<Rc<dyn KernelTool>> {
         None
     }
+    /// How its own library is laid out (`own_library`'s sources are read by it).
+    fn layout(&self) -> &'static Layout {
+        &Layout::NONE
+    }
 }
 
 /// The DAWs the library hears from, in the app's registry's order. None: only the folders the producer names.
@@ -59,6 +78,12 @@ pub struct Daws(pub &'static [&'static dyn LibrarySources]);
 impl Daws {
     pub fn iter(self) -> impl Iterator<Item = &'static dyn LibrarySources> {
         self.0.iter().copied()
+    }
+
+    /// How a source is laid out: its DAW's layout for a DAW's own library, else none.
+    pub fn layout(self, source: &Source) -> &'static Layout {
+        let SourceKind::Daw(id) = source.kind else { return &Layout::NONE };
+        self.iter().find(|daw| daw.profile().id == Some(id)).map_or(&Layout::NONE, |daw| daw.layout())
     }
 }
 

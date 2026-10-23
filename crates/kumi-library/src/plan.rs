@@ -78,7 +78,7 @@ pub async fn plan_learning(options: PlanOptions) -> LearnPlan {
     let sources = library_sources(options.daws, &source_options);
     let others: Vec<_> = sources
         .iter()
-        .filter(|s| matches!(s.kind, SourceKind::Pack | SourceKind::Core | SourceKind::Splice | SourceKind::Reaper | SourceKind::Renoise))
+        .filter(|s| matches!(s.kind, SourceKind::Pack | SourceKind::Core | SourceKind::Splice | SourceKind::Daw(_)))
         .map(|s| s.path.clone())
         .collect();
     let find_sets = options.find_sets != Some(false);

@@ -448,6 +448,7 @@ impl Library {
         let gate_signal = signal.clone();
         let mut options = LearnOptions::new(plan_learning(self.planning()).await, signal);
         options.rebuild = run.rebuild;
+        options.daws = self.options.daws;
         options.gate = Some(Rc::new(move || {
             let weak = weak.clone();
             let signal = gate_signal.clone();
@@ -519,7 +520,7 @@ impl Library {
             let entries = reader
                 .entries
                 .values()
-                .filter(|entry| !hidden.iter().any(|library| daw_sources::owns(library, &entry.path)))
+                .filter(|entry| !hidden.iter().any(|library| daw_sources::owns(library, self.options.daws.layout(library), &entry.path)))
                 .cloned()
                 .collect::<Vec<_>>();
             drop(reader);
