@@ -2,6 +2,7 @@
 
 use super::{
     contracts::*,
+    daw::cant_yet,
     errors::{FailureKind, KumiError, RuntimeError},
     file_sync::FileSync,
     gaps::{gap_guidance, gap_tools_for},
@@ -18,7 +19,7 @@ use super::{
     timing,
 };
 use crate::{
-    audio::tools::{listening_tools_for, ListeningOptions},
+    audio::tools::{listening_tools_for, ListeningOptions, MiddleC},
     core::conversations::{new_conversation_id, IMPORTED},
     kernel::budget::{transcript_of, OBSERVATION_MARKER},
     library::{Library, LibraryToolsOptions},
@@ -574,6 +575,7 @@ pub fn create_session(options: SessionOptions) -> Result<Session, RuntimeError> 
             listening_tools_for(
                 options.profile,
                 ListeningOptions {
+                    middle_c: Some(Session::middle_c_of(weak.clone())),
                     on_event: Rc::new(move |e| emit(SessionEvent::Heard(e))),
                     resolve: Some(Rc::new(move |named, signal| {
                         let integration = resolve.upgrade().and_then(|i| i.state.borrow().integration.clone());
@@ -587,10 +589,20 @@ pub fn create_session(options: SessionOptions) -> Result<Session, RuntimeError> 
                     })),
                     hear: Some(Rc::new(move |request, signal| {
                         let profile = options.profile;
-                        let integration = hear.upgrade().and_then(|i| i.state.borrow().integration.clone());
+                        let (integration, connected) = hear
+                            .upgrade()
+                            .map(|i| {
+                                let state = i.state.borrow();
+                                (state.integration.clone(), state.connection == ConnectionState::Connected)
+                            })
+                            .unwrap_or((None, false));
                         async move {
                             match integration {
                                 Some(i) if i.has_hear() => i.hear(&request, signal).await,
+                                // (M5) Connected to a DAW Kumi doesn't hear yet: what can't be done, not that it isn't connected.
+                                Some(i) if connected && i.profile().id.is_some() => {
+                                    Ok(Err(cant_yet(i.profile(), &format!("hear the {}", i.profile().words.place))))
+                                }
                                 _ => Ok(Err(format!(
                                     "Kumi isn't connected to {}, so it can't hear the {}.",
                                     profile.words.app, profile.words.place
@@ -681,6 +693,7 @@ pub fn create_session(options: SessionOptions) -> Result<Session, RuntimeError> 
                 library.tools_for(
                     &options.profile,
                     LibraryToolsOptions {
+                        middle_c: Some(Session::middle_c_of(weak.clone())),
                         on_event: Some(emit.clone()),
                         resolve: Some(Rc::new(move |named, signal| {
                             let integration = resolve.upgrade().and_then(|i| i.state.borrow().integration.clone());
@@ -814,6 +827,18 @@ pub fn create_session(options: SessionOptions) -> Result<Session, RuntimeError> 
 }
 
 impl Session {
+    /// (M6) The octave the open project names middle C in, as its integration last read it (Logic's "Display Middle C
+    /// as"): what the listening and library tools name notes by, made before any integration is, so asked each time.
+    fn middle_c_of(weak: std::rc::Weak<Inner>) -> MiddleC {
+        Rc::new(move || {
+            let inner = weak.upgrade()?;
+            let integration = inner.state.borrow().integration.clone();
+            integration.and_then(|integration| integration.middle_c_octave())
+        })
+    }
+    pub(crate) fn middle_c(&self) -> MiddleC {
+        Self::middle_c_of(Rc::downgrade(&self.0))
+    }
     /// Where the session's DAW keeps conversations about a project not saved yet: "unsaved" for Live's.
     fn unsaved(&self) -> &'static str {
         crate::core::place::unsaved(self.0.options.profile.id.unwrap_or(DawId::Ableton))
@@ -2974,6 +2999,10 @@ impl SessionController for Session {
     }
     fn open_set(&self) -> Option<String> {
         self.0.state.borrow().integration.as_ref().and_then(|integration| integration.open_set())
+    }
+    /// (M6) The session's profile: the app's, naming middle C as the open project does (Logic's own setting).
+    fn profile(&self) -> Option<DawProfile> {
+        Some(self.0.options.profile.with_middle_c(self.middle_c()()))
     }
     fn has_taste(&self) -> bool {
         self.0.options.library.is_some()

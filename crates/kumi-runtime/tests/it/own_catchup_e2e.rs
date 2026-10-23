@@ -50,10 +50,11 @@ fn kumi(daw: Daw, home: &Path, seen: Rc<Seen>) -> Rc<dyn Integration> {
     let into = seen.clone();
     context.on_watch = Some(Rc::new(move |on| into.watching.borrow_mut().push(on)));
     context.focus_interval_ms = Some(50);
-    let options = OwnOptions { context, kumi_home: home.into(), connect: Some(connect) };
+    let options = OwnOptions { context, kumi_home: home.into(), connect: Some(connect), open_file: None };
     match daw {
         Daw::Reaper => create_reaper_integration(options),
         Daw::Renoise => create_renoise_integration(options),
+        Daw::Logic => unreachable!("Logic's catch-up is Kumi's own, not the host's snapshots"),
     }
 }
 

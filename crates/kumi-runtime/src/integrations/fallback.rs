@@ -1,6 +1,7 @@
 //! Continue without the DAW when the primary integration reports a DAW setup failure.
 use crate::core::{
     contracts::*,
+    daw::cant_yet,
     errors::{FailureKind, KumiError, RuntimeError},
 };
 use async_trait::async_trait;
@@ -37,6 +38,15 @@ impl FallbackIntegration {
     /// "Kumi isn't connected to Live, so it can't …", in the primary's words (Live's when it doesn't say).
     fn not_connected(&self, what: &str) -> String {
         format!("Kumi isn't connected to {}, so it can't {what}.", self.primary.profile().or_live().words.app)
+    }
+    /// (M5) Why it can't do what the integration answering now doesn't do: the DAW's own integration answers (it
+    /// started), and it can't do that yet ("Kumi can't pursue a goal in Logic Pro yet."); else Kumi isn't connected.
+    fn cant(&self, what: &str) -> String {
+        let profile = self.primary.profile();
+        if Rc::ptr_eq(&self.current(), &self.primary) && profile.id.is_some() {
+            return cant_yet(profile, what);
+        }
+        self.not_connected(what)
     }
 }
 #[async_trait(?Send)]
@@ -87,7 +97,7 @@ impl Integration for FallbackIntegration {
     async fn undo(&self, id: Option<&str>, signal: Signal) -> Result<ChangeRecord, RuntimeError> {
         let current = self.current();
         if !current.has_undo() {
-            return Err(KumiError::new(FailureKind::Request, self.not_connected("undo")).into());
+            return Err(KumiError::new(FailureKind::Request, self.cant("undo")).into());
         }
         current.undo(id, signal).await
     }
@@ -146,6 +156,9 @@ impl Integration for FallbackIntegration {
     }
     async fn recording(&self, signal: Signal) -> Result<Option<bool>, RuntimeError> {
         self.current().recording(signal).await
+    }
+    fn middle_c_octave(&self) -> Option<i8> {
+        self.current().middle_c_octave()
     }
     fn has_instant(&self) -> bool {
         true
@@ -224,7 +237,7 @@ impl Integration for FallbackIntegration {
         if c.has_audition() {
             c.audition(request, signal).await
         } else {
-            Ok(Err(self.not_connected("render anything to hear")))
+            Ok(Err(self.cant("render anything to hear")))
         }
     }
     fn has_goal(&self) -> bool {
@@ -235,7 +248,7 @@ impl Integration for FallbackIntegration {
         if c.has_goal() {
             c.goal(request, signal).await
         } else {
-            Ok(Err(self.not_connected("pursue a goal")))
+            Ok(Err(self.cant("pursue a goal")))
         }
     }
     fn has_hear(&self) -> bool {
@@ -246,7 +259,7 @@ impl Integration for FallbackIntegration {
         if c.has_hear() {
             c.hear(request, signal).await
         } else {
-            Ok(Err(self.not_connected(&format!("hear the {}", self.primary.profile().or_live().words.place))))
+            Ok(Err(self.cant(&format!("hear the {}", self.primary.profile().or_live().words.place))))
         }
     }
 }

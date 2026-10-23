@@ -80,11 +80,40 @@ pub fn default_sample_folders(platform: Option<&str>, home: Option<&str>, progra
         .filter(|path| Path::new(path).exists())
         .collect()
 }
+/// The audio file a change brings in, found as the sample bank finds Live's: a whole path, or one under `~`, to a file
+/// that is there on this computer (never on a network share or a device), of one of the `extensions` the DAW takes
+/// (".wav"). Its whole path, or why not, in Kumi's words.
+pub fn sample_file(path: &str, extensions: &[&str]) -> Result<String, String> {
+    let path = trim(path);
+    let full = match path.strip_prefix("~/").or_else(|| path.strip_prefix("~\\")) {
+        Some(rest) => join(&homedir(), rest),
+        None => path.to_string(),
+    };
+    let asked = "Give the whole path of an audio file on this computer (one find_sounds returned, a recording, the producer's own)";
+    if kumi_common::path::network_or_device(&full) || !Path::new(&full).is_absolute() {
+        return Err(format!("{asked}."));
+    }
+    let extension = Path::new(&full).extension().map(|e| format!(".{}", e.to_string_lossy().to_lowercase())).unwrap_or_default();
+    if !extensions.contains(&extension.as_str()) {
+        let kinds: Vec<&str> = extensions.iter().map(|e| e.trim_start_matches('.')).collect();
+        return Err(format!("{asked}: one of {}.", kinds.join(", ")));
+    }
+    match std::fs::metadata(&full) {
+        Ok(stat) if stat.is_file() => Ok(full),
+        _ => Err(format!("There's no audio file at {full}. {asked}.")),
+    }
+}
+
 pub fn folder_path(value: &str, home: Option<&str>) -> Option<String> {
     expand_folder(value, &home.map(str::to_owned).unwrap_or_else(homedir))
 }
 
 pub async fn find_samples(options: FindSamplesOptions) -> Result<SampleSearch, RuntimeError> {
+    find_samples_with(SAMPLE_EXTENSIONS, options).await
+}
+
+/// `find_samples` over the audio files of `extensions` (another DAW's own: Logic Pro's `.caf` among them).
+pub async fn find_samples_with(extensions: &[&str], options: FindSamplesOptions) -> Result<SampleSearch, RuntimeError> {
     let words: Vec<String> = options.words.iter().map(|word| trim(word).to_lowercase()).filter(|word| !word.is_empty()).collect();
     let mut found: Vec<(Sample, usize)> = Vec::new();
     let mut missing = Vec::new();
@@ -119,7 +148,7 @@ pub async fn find_samples(options: FindSamplesOptions) -> Result<SampleSearch, R
                     continue;
                 }
                 let extension = name.rfind('.').map(|at| &name[at..]).unwrap_or("");
-                if !kind.is_file() || !SAMPLE_EXTENSIONS.contains(&extension.to_lowercase().as_str()) {
+                if !kind.is_file() || !extensions.contains(&extension.to_lowercase().as_str()) {
                     continue;
                 }
                 scanned += 1;
@@ -241,5 +270,35 @@ fn extended(bytes: &[u8]) -> f64 {
         0.0
     } else {
         mantissa * 2.0f64.powi(exponent - 16383 - 63) * if bytes[0] & 0x80 != 0 { -1.0 } else { 1.0 }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// (M6) A change's audio file is found on this computer before the DAW is asked: a whole path to a file of a kind
+    /// the DAW takes, else why not in Kumi's words (a path under ~ is made whole first).
+    #[test]
+    fn a_changes_audio_file_is_a_whole_path_to_a_file_the_daw_takes() {
+        let folder = tempfile::tempdir().unwrap();
+        let wav = folder.path().join("Kick 01.WAV");
+        std::fs::write(&wav, b"RIFF").unwrap();
+        let takes = [".wav", ".caf"];
+        let wav = wav.to_string_lossy().into_owned();
+        assert_eq!(sample_file(&format!("  {wav} "), &takes), Ok(wav.clone()), "the extension in any case, the path trimmed");
+        let flac = folder.path().join("Pad.flac");
+        std::fs::write(&flac, b"fLaC").unwrap();
+        let refused = sample_file(&flac.to_string_lossy(), &takes).unwrap_err();
+        assert!(refused.ends_with("one of wav, caf."), "{refused}");
+        let refused = sample_file(&folder.path().join("gone.wav").to_string_lossy(), &takes).unwrap_err();
+        assert!(refused.starts_with("There's no audio file at"), "{refused}");
+        assert!(sample_file(&folder.path().to_string_lossy(), &[""]).is_err(), "a folder isn't a file");
+        for asked in ["Kick 01.wav", "//host/share/Kick.wav", "\\\\host\\share\\Kick.wav"] {
+            let refused = sample_file(asked, &takes).unwrap_err();
+            assert!(refused.starts_with("Give the whole path of an audio file on this computer"), "{asked}: {refused}");
+        }
+        let home = sample_file("~/kumi-no-such-sample.wav", &takes).unwrap_err();
+        assert!(home.contains(&join(&homedir(), "kumi-no-such-sample.wav")), "a path under ~ is made whole: {home}");
     }
 }

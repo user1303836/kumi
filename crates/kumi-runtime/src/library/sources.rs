@@ -75,6 +75,36 @@ pub struct SourceOptions {
     /// The DAW whose places these are (Live's when None).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub daw: Option<crate::core::daw::DawId>,
+    /// (M6) The projects the DAW said it opened lately, where a DAW's own files don't say (Logic Pro's, as its bridge
+    /// read them from File > Open Recent).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recent: Option<Vec<String>>,
+    /// The system's Library folder (`/Library` on a Mac), for tests.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub system_library: Option<String>,
+}
+
+/// (M6) What a DAW other than Live gives the library, through the registry (`integrations::library`): where its places
+/// are, what its files are, where its projects usually are and the ones it opened lately, and what its presets are.
+/// Live's are the library's own (this module's functions and lists).
+pub struct DawLibrary {
+    pub daw: crate::core::daw::DawId,
+    /// The audio files it takes as sounds, by extension (".wav").
+    pub sample_extensions: &'static [&'static str],
+    /// Its presets, by extension, and those kept as packages (a folder the producer sees as one file): counted whole.
+    pub preset_extensions: &'static [&'static str],
+    pub preset_packages: &'static [&'static str],
+    /// Its projects' extension, each a package counted whole (Logic's ".logicx").
+    pub project_package: &'static str,
+    pub sources: fn(&SourceOptions) -> Vec<Source>,
+    pub recent: fn(&SourceOptions) -> Vec<String>,
+    /// Where its projects usually are, beside the folders holding the recent ones (and the home folder).
+    pub project_folders: fn(&[String], &str) -> Vec<String>,
+    /// What a preset of its own is, by its format and its place under its source.
+    pub preset_facts: fn(&str, &str) -> super::presets::PresetFacts,
+    /// The library tools as it says them, over what the profile's words made of Live's definitions: a tool's
+    /// description and parameters, by its name.
+    pub tool_words: fn(&str, &mut String, &mut crate::core::contracts::JsonObject),
 }
 
 // ---------------------------------------------------------------------------------------------------
@@ -719,7 +749,19 @@ pub fn library_sources(options: &SourceOptions) -> Vec<Source> {
         let core = core_libraries(options).into_iter().find(|folder| is_folder(folder));
         add(&mut found, core.as_deref(), "Core Library", SourceKind::Core);
     }
-    // Each folder once, and not again inside another: the outer one is searched whole.
+    let mut unique = unique(found);
+    // A DAW's own library is read by its layout, even inside a folder the producer named (that folder's walk leaves it
+    // out); each once.
+    for source in super::daw_sources::daw_library_sources(options) {
+        if is_folder(&source.path) && !unique.iter().any(|kept| kept.path == source.path) {
+            unique.push(source);
+        }
+    }
+    unique
+}
+
+/// Each folder once, and not again inside another: the outer one is searched whole. Only folders that are there.
+pub fn unique(found: Vec<Source>) -> Vec<Source> {
     let mut unique: Vec<Source> = Vec::new();
     for source in found {
         if !is_folder(&source.path) {
@@ -730,13 +772,6 @@ pub fn library_sources(options: &SourceOptions) -> Vec<Source> {
         }
         unique.retain(|kept| below(&kept.path, &source.path).is_none());
         unique.push(source);
-    }
-    // A DAW's own library is read by its layout, even inside a folder the producer named (that folder's walk leaves it
-    // out); each once.
-    for source in super::daw_sources::daw_library_sources(options) {
-        if is_folder(&source.path) && !unique.iter().any(|kept| kept.path == source.path) {
-            unique.push(source);
-        }
     }
     unique
 }

@@ -8,21 +8,24 @@
 
 | フォルダー | 内容 |
 | --- | --- |
-| `crates/kumi` | ネイティブの `kumi` コマンドとターミナルアプリ（`src/tui/`）、そしてモデルや実際の Live に対して任意で実行するチェック（`examples/`） |
-| `crates/kumi-runtime` | エージェントループ、プロバイダー、サインイン、セッション、ライブラリー、Live との連携、メディアのツール、MCP クライアント |
+| `crates/kumi` | ネイティブの `kumi` コマンドとターミナルアプリ（`src/tui/`）、DAW ごとのセットアップ、doctor、更新の手順（`src/daw/`）、そしてモデル、実際の Live、実際の Logic Pro に対して任意で実行するチェック（`examples/`） |
+| `crates/kumi-runtime` | エージェントループ、プロバイダー、サインイン、セッション、ライブラリー、DAW との連携（Live のもの、そして Kumi のホストを通じた REAPER、Renoise、Logic Pro のもの）、メディアのツール、MCP クライアント |
 | `crates/kumi-common` | ランタイムの共通処理と、ソース互換の値の扱い |
-| `crates/ableton-mcp-server` | ネイティブの MCP ブリッジ、解析ワーカー、ライフサイクル、セットアップ、移行、診断 |
+| `crates/kumi-store` | Kumi のデータベース：セッションをまたいで保持するものを、SQLite で |
+| `crates/kumi-genexpr` | Kumi の Max for Live のビルディングブロックのテストのための、GenExpr インタープリター |
+| `crates/ableton-mcp-server` | Live のネイティブの MCP ブリッジ、解析ワーカー、ライフサイクル、セットアップ、移行、診断 |
 | `remote-script` | Live の中で動く、ブリッジの Remote Script（`ableton_mcp_remote_script.py`、`AbletonMcpBridge/` エントリーポイント、Python のテスト） |
 | `apps/live-extension` | Live 12.4 以降向けの Kumi の Live 拡張機能。Live の Extensions SDK の上に作られています（TypeScript で、独自の `package.json` を持ちます） |
 | `protocol` | `ableton-live-v1.operations.json`。ブリッジと Remote Script が共有する操作のレジストリ |
 | `scripts` | リリースのビルダー、移行用のパッケージング、Mac のヘルパーのビルド、分離テストランナー、そして `npm run kumi` と `npm run setup` が使う `native-kumi.mjs` |
-| `crates/daw-mcp-server` | REAPER と Renoise のための Kumi のホスト（`daw-mcp-server --daw reaper\|renoise`）：stdio 上の MCP、変更のジャーナルと取り消し、聴くジョブ、離れていた間の変化。ほかの MCP クライアントからも使えます |
+| `crates/daw-mcp-server` | REAPER、Renoise、Logic Pro のための Kumi のホスト（`daw-mcp-server --daw reaper\|renoise\|logic`）：stdio 上の MCP、変更のジャーナルと取り消し、聴くジョブ、離れていた間の変化、そしてテストが相手にする、シミュレートされた REAPER、Renoise、Logic Pro。ほかの MCP クライアントからも使えます |
 | `crates/reaper-kumi` | Kumi の REAPER 拡張機能（`reaper_kumi`）。`sdk/` に同梱した REAPER の SDK ヘッダーでビルドします |
-| `crates/daw-bridge` | REAPER と Renoise のブリッジが共有するもの：ループバックの通信（`kumi-daw/1`）、そのハンドシェイクと認証、ディスカバリー、DAW の検出、doctor のチェック、ブリッジのファイルのライフサイクル |
+| `crates/daw-bridge` | REAPER、Renoise、Logic Pro のブリッジが共有するもの：ループバックの通信（`kumi-daw/1`）、そのハンドシェイクと認証、ディスカバリー、DAW の検出、doctor のチェック、ブリッジのファイルのライフサイクル |
 | `daws/renoise` | Kumi の Renoise ツール（`com.kumi.Bridge.xrnx`、Lua）と、Renoise の API のモックに対するそのテスト |
+| `crates/logic-kumi` | Kumi の Logic Pro ブリッジ（Logic Pro の横で動くプログラム）と、そのアクセシビリティ用ヘルパー（`helper/KumiLogicHands.swift`。`scripts/build-logic-hands.py` がビルドします）。[Logic の契約](LOGIC_CONTRACT.md)を参照 |
 | `install.sh`、`install.ps1` | インストーラー |
 
-クレートはルートの Cargo ワークスペースを共有します。npm のワークスペースはありません。ブリッジは Kumi なしでも動きます。クレートの移植元である TypeScript 実装は、git タグ `v1.7.6` に残っています。
+クレートはルートの Cargo ワークスペースを共有します。npm のワークスペースはありません。Live のブリッジは Kumi なしでも動きます。クレートの移植元である TypeScript 実装は、git タグ `v1.7.6` に残っています。
 
 ## 各部分のやりとり
 
@@ -48,6 +51,27 @@ host (crates/daw-mcp-server --daw reaper|renoise)
 - Kumi は、`full` デプロイメントポリシーと、使うツールだけをちょうど並べた許可リスト（`ABLETON_MCP_TOOL_ALLOW`）を指定してブリッジを起動します。モデルはいくつかのブリッジの読み取りを直接呼び出し（`crates/kumi-runtime/src/mcp/allowed_tools.rs` の `MODEL_TOOLS`）、残りは Kumi 自身のツールが呼び出します。
 - ブリッジのルーター（`crates/ableton-mcp-server/src/bridge/router.rs`）は、各操作を Remote Script に送るか、その操作を拡張機能しか持っていない場合は拡張機能に送ります。Live の Developer Mode のせいで拡張機能が起動されない場合、ブリッジは Live の Extension Host を自分で起動できます。
 - `kumi bridge` はブリッジのライフサイクルコマンドを通じてブリッジを Live にインストールし、その後は `Remote Scripts/AbletonMcpBridge/bridge-reference.json` を通じてブリッジを見つけます。
+
+Logic Pro にはスクリプト機能がなく、何も読み込まないので、そのブリッジは Logic Pro の横で動く Kumi のプログラムです：
+
+```text
+kumi (crates/kumi, crates/kumi-runtime)
+  │  MCP over stdio: Kumi starts its host as a child process
+  ▼
+host (crates/daw-mcp-server, `daw-mcp-server --daw logic`)
+  │  kumi-daw/1: authenticated TCP on 127.0.0.1 (9790 to 9799); the host starts the bridge
+  ▼
+bridge (crates/logic-kumi, `logic-kumi`, from Kumi's own folder)
+  │  JSON lines on stdin and stdout: the bridge runs its helper as a child
+  ▼
+helper (crates/logic-kumi/helper, `kumi-logic-hands-<hash>`)
+  │  Accessibility, key events and clicks, virtual CoreMIDI ports (Mackie Control), a Core Audio process tap
+  ▼
+Logic Pro
+```
+
+- ホストは、ブリッジが Kumi 独自のものである各 DAW で同じバイナリです（`--daw logic|reaper|renoise`）。Logic Pro では、インストールされたブリッジを `--kumi-home` を付けて起動し、`~/.kumi/bridges/logic/discovery/` にあるそのディスカバリーファイルを通じて見つけ、共有のシークレットを証明し、Kumi のセッションが終わるとブリッジを止めます。Logic Pro 用の Kumi の変更セット（`crates/kumi-runtime/src/integrations/logic_changes.rs`）がツールを定め、ホストのジャーナル（`crates/daw-mcp-server/src/changes.rs`）が各変更のプレビュー、適用、取り消しをブリッジを通じて行います。
+- `kumi --daw logic bridge` は、daw-bridge のライフサイクルを通じてブリッジを Kumi 自身のフォルダーに用意します。元にするのは、リリースでは Kumi の隣のコピー（`daws/logic/logic-kumi/`）、`KUMI_LOGIC_BRIDGE_SOURCE`、または Mac 上のチェックアウトでは `target/logic-bridge/logic-kumi/` にまとめたチェックアウトのビルドです（ヘルパーがなければ、そのスクリプトがビルドします）。
 
 ## セットアップ
 
@@ -126,6 +150,15 @@ cargo run --locked --release -p ableton-mcp-server --bin ableton-mcp-benchmark
 
 **MCP のバージョン。** ブリッジは `2025-11-25`（initialize の後にリクエスト）と `2026-07-28`（リクエストごとの `params._meta` にプロトコルバージョンとクライアントの機能、さらに `server/discover`）の両方に対応します。一つのプロセスはどちらか一方を使います。未知のバージョンには `-32022`、不正なメタデータには `-32602` を返します。新しいバージョンの結果は `resultType: "complete"` を持ち、JSON を `structuredContent` でも返します。新しいバージョンにはプッシュがありません。`live_subscribe` は古いバージョンでのみ動き、新しいクライアントはポーリングします。クライアントのメタデータが Live へのアクセスを与えることは決してありません。[仕様](https://modelcontextprotocol.io/specification/2026-07-28/basic/versioning)を参照してください。
 
+## Logic Pro ブリッジの開発
+
+[Logic の契約](LOGIC_CONTRACT.md)がリファレンスです：ブリッジが `kumi-daw/1` で何を答えるか、それぞれの答えとそれぞれの変更がどの macOS のチャンネルを通るか、そしてヘルパーのプロトコル（そのすべての操作は `crates/logic-kumi/helper/README.md` にあります）。本物の Logic Pro で何を計測したかは、`docs/evidence/logic-*.md` にあるラボの記録とゲートの記録にあります。
+
+- **Logic Pro を必要とするテストはありません。** ブリッジのテストは、本物の Logic Pro から記録したシーン（`crates/logic-kumi/tests/fixtures/`。`record_fixtures` と `record_changes` の example で記録し、ホームフォルダーは `/Users/me` として保存されます）を再生します。ホストのテストは、ブリッジが記録した読み取り（`crates/daw-mcp-server/tests/vectors/logic-reads.json`）の上で、シミュレートされた Logic Pro（`crates/daw-mcp-server/src/simulator/logic.rs`）を動かします。ランタイムとアプリのテストは、プロセス内のホストの上で Kumi を動かします。
+- **本物の Logic Pro** には、オプトインの `accept_logic` の example を使います。各ゲートがこれを実行しました（[テスト](TESTING.md#live-やモデルを使うチェック)）。
+- **Logic Pro の名前**は、`crates/logic-kumi`、`daw-bridge` と `daw-mcp-server` の Logic Pro の部分、ランタイムの `integrations/logic*.rs`、`crates/kumi/src/daw/own.rs`、そしてテストの中にとどめます：ランタイムの共有コードが見るのは DAW のプロファイルだけで、`daw_neutral_guard.rs` と偽の DAW のテストが、Logic Pro のセッションが言うことに Live の言葉が入らないようにします。
+- **ヘルパー**の名前はそのソースのハッシュから付けられ（`kumi-logic-hands-<hash>`）、リリースが収めるのは現在のソースのビルドそのものです：`KumiLogicHands.swift` を変えたら、`python3 scripts/build-logic-hands.py` で再ビルドしてください。
+
 ## Live 拡張機能の開発
 
 `apps/live-extension` は TypeScript で書かれ、esbuild でバンドルされ、独自の `package.json` を持ちます。Live の Extensions SDK に対してビルドしますが、この SDK のライセンスは再配布を禁じているため、リポジトリには含まれていません。リポジトリのルートの `vendor/ableton-extensions-sdk-1.0.0-beta.1/` にコピーを置いてください（ビルドはその中の `package 3/dist/index.cjs` を読みます）。`apps/live-extension` で `npm ci` を実行してから `npm run build` を実行すると、`dist/extension.js` とその `.sha256` が書き出されるので、両方をコミットします。`npm run typecheck` にも SDK が必要です。SDK がない場合、ビルドは止まり、コミット済みのバンドルがそのまま残ります。`npm test` はバンドルをそのチェックサムと照合します。Live が拡張機能をどう実行するかの測定結果は[エビデンス](../evidence/live-extension.md)にあります。
@@ -165,22 +198,25 @@ python3 scripts/release.py --go     # リリース
 ```
 
 - **出荷するもの**は、前回のタグ以降の `main` から読み取ります。マージされた各プルリクエストの `Changelog:` の行を、書かれたとおりに使います（"none" は何も加えません）。プルリクエストがブリッジを変え、Kumi のクレートやインストーラーを変えていない場合、その行はブリッジの見出しの下に入ります。両方を変えるプルリクエストでは、ブリッジについての行を `Changelog (bridge):` と書きます。ドライランは各行の入る場所を表示します。
+- **Logic Pro ブリッジ**も、プルリクエストがそれの実行するもの（ヘルパーを含む `crates/logic-kumi`、またはそれがリンクする `daw-bridge`。テスト、example、Markdown、`crates/logic-kumi/keys/` のキーコマンドのツールは除く）を変えたときに、同じように新しいバージョンになります。それを変え、出荷するほかのものを何も変えないプルリクエストでは、その行はその見出し `### Logic Pro bridge x.y.z` の下に入ります。それ以外では、それについての行を `Changelog (logic):` と書きます。`--logic` は何が変わったかにかかわらず新しいバージョンにし、`--no-logic` はバージョンを保ちます。バージョンは `crates/logic-kumi/Cargo.toml` にあり、リリースがパッチを一つ上げます。
 - **What's new**：Kumi は `CHANGELOG.md` を組み込み、アップデート後に初めて起動したとき、リリースのリスト項目を **What's new** として表示します（最大 5 件、新しいリリースから。残りは `/changelog`）。段落（同梱ブリッジやテスト環境の行など）は表示されないので、`Changelog:` の各行がそこで読まれる一つの項目になります。プロデューサーが気づくことを、重要なものから書きます。
 - **ブリッジ**は、プルリクエストが Live の読み込むもの（`crates/ableton-mcp-server`、ホストがリンクする `crates/kumi-common`、`remote-script`、`protocol`、`apps/live-extension`、`vendor/willington`。テストと Markdown は除く）を変えたときに新しいバージョンになります。`Cargo.lock` にあるホストの依存関係が変わるとドライランがそう伝えるので、そのときは `--bridge` でブリッジを新しいバージョンにします。
 - **REAPER の拡張機能と Renoise のツール**も同じように、プルリクエストがその DAW の読み込むもの（`crates/reaper-kumi` と `crates/daw-bridge`、または `daws/renoise/com.kumi.Bridge.xrnx`）を変えたときに新しいバージョンになります。`--reaper` と `--renoise` はどの場合でも新しいバージョンにし、`--no-reaper` と `--no-renoise` はそのままにします。`--no-bridge` は Live のものだけです。`Changelog (reaper):` か `Changelog (renoise):` と書いた行は、その見出しの下に入ります。`--go` では、`crates/reaper-kumi/Cargo.toml` と `Cargo.lock`、ツールの `payload/version.lua` と `manifest.xml` のバージョンが進み、三つの `KUMI_GUIDE.md` にあるそれぞれの ships-with の行も進みます。前のリリースになかったものはそのバージョンのまま出荷され、その行にはすでにこのリリースが書かれています。
 - **バージョン**は次のパッチです。`--minor` か `--version X.Y.Z` で別のものを選べます。
 - **`--go` を付けると**、`release/vX.Y.Z` に "Kumi X.Y.Z: the changelog, READMEs and versions" をコミットします。ルートの `package.json`、`crates/kumi-runtime/src/version.rs`、`kumi`、`kumi-common`、`kumi-runtime` の Cargo マニフェスト、`Cargo.lock` のバージョン（パッケージングのテストがこれらが等しいことを確認します）と、変わった場合はブリッジのバージョン、3 つの README の Status の行、3 つの `KUMI_CHANGES.md` の「Bridge versions」の下にある同梱するブリッジの行、`CHANGELOG.md` の `## X.Y.Z — date` の項目です。続いてプルリクエスト "Kumi X.Y.Z" を開き、その CI を待たずに管理者のバイパスで "Kumi X.Y.Z (#PR)" としてマージし、マージコミットに `vX.Y.Z` のタグを付けてプッシュし、リリースノート付きの下書きのリリースを作ります（`--summary` でノートの冒頭に一文を加えられます）。
+- **リリースの中の Logic Pro ブリッジ：** CHANGELOG とリリースノートは、その新しいバージョンを専用の言葉で伝えます（"Ships with Logic Pro bridge a.b.c, which Kumi starts beside Logic Pro; `kumi update` puts it in Kumi's own folder"）。それを初めて収めるリリースでは "Brings Logic Pro bridge a.b.c for Logic Pro 12 on Apple Silicon Macs: `kumi --daw logic bridge` sets it up" です。その同梱するブリッジの行は、3 つの `KUMI_CHANGES.md` の「Bridge versions」の下で Live のものの隣にあります（`Kumi X.Y.Z with Logic Pro bridge a.b.c.`。各言語に一つずつか、どの言語にもないか）。ブリッジを初めて収めるリリースは、すでにそれを挙げている行を見つけてそのまま残し、以降のリリースは Live のものと同じようにその行を進めます。
 - **タグの Installer の実行**が、macOS、Linux、Windows の Intel と ARM 向けのネイティブバンドルをビルドし、インストールと移行をテストし、ターゲットごとのバンドルとマニフェスト、互換用の `kumi.tar.gz`、`kumi-release.json`、`SHA256SUMS`、インストーラーを添付し、`release.py` がノートを書いていて（ノートの最後に `<!-- kumi:release-notes -->` があります）、インストーラーが両方添付されている場合はリリースを公開します。そうして初めて、インストーラー、`kumi update`、更新確認がそのリリースを認識します。手でプッシュした「ノートは後で」のタグなど、ほかの下書きは、だれかが公開するまで下書きのままです。
 
 **ネイティブリリースのローカルでの準備**（コミット済みの変更がない状態で）：
 
 ```sh
 python3 scripts/build-hands.py              # macOS のみ。ユニバーサルでアドホック署名のヘルパーを target/hands/ に作成
+python3 scripts/build-logic-hands.py        # Apple シリコン搭載 Mac のバンドルのみ。Logic Pro のヘルパーを target/logic-hands/ に作成
 MACOSX_DEPLOYMENT_TARGET=13.0 python3 scripts/build-native-release.py --target aarch64-apple-darwin --out release/native/aarch64-apple-darwin
 python3 -m unittest discover -s scripts/tests -p test_native_release.py
 ```
 
-ホストの Rust のターゲットトリプルを使ってください。Apple Silicon の Mac では、`--target x86_64-apple-darwin` で Intel 向けのバンドルをクロスビルドできます。ビルダーはロックしたリリースビルドを実行し、ブリッジのアーティファクトを、コミット、Cargo のロックファイル、ビルドレシピ、正確なファイルハッシュに結び付けます。CI がプルリクエストと `main` で使う `--profile ci-release` は、ビルドを速くするために、リリースプロファイルのプログラム全体の最適化を省きます。公開するバンドルは常に既定の `release` を使います。Mac のバンドルには `target/hands/` にある最新のヘルパーが必要で、ほかのバンドルはそれを含みません。サーバーと解析ワーカーは必ず一緒に配布します。`--binaries-dir` は既存のバイナリをパッケージするだけで、それがリリース用の最適化でビルドされたことは保証しません。
+ホストの Rust のターゲットトリプルを使ってください。Apple Silicon の Mac では、`--target x86_64-apple-darwin` で Intel 向けのバンドルをクロスビルドできます。ビルダーはロックしたリリースビルドを実行し、ブリッジのアーティファクトを、コミット、Cargo のロックファイル、ビルドレシピ、正確なファイルハッシュに結び付けます。CI がプルリクエストと `main` で使う `--profile ci-release` は、ビルドを速くするために、リリースプロファイルのプログラム全体の最適化を省きます。公開するバンドルは常に既定の `release` を使います。Mac のバンドルには `target/hands/` にある最新のヘルパーが必要で、ほかのバンドルはそれを含みません。Apple シリコン搭載 Mac のバンドルは、`daws/logic/logic-kumi/` に Logic Pro ブリッジ（`logic-kumi`、そのヘルパー、クレートのバージョンを記した `version` ファイル）も収めます。これには現在のソースのヘルパーそのものが、`target/logic-hands/` にそれだけで置かれている必要があります。ほかのバンドルはこれを収めません。サーバーと解析ワーカーは必ず一緒に配布します。`--binaries-dir` は既存のバイナリをパッケージするだけで、それがリリース用の最適化でビルドされたことは保証しません。
 
 集約の手順では、既存の Node 24 インストールが読むマニフェストを保ちます：
 

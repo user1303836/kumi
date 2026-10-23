@@ -30,9 +30,13 @@ pub struct Session {
 
 impl Session {
     pub fn start(daw: Daw, home: &Path) -> Self {
+        Self::start_with(Arc::new(Host::new(daw, home)), home)
+    }
+
+    /// A session over a host the test made (one with a spawner of its own, say).
+    pub fn start_with(host: Arc<Host>, home: &Path) -> Self {
         let (input, host_input) = tokio::io::duplex(1 << 22);
         let (host_output, output) = tokio::io::duplex(1 << 22);
-        let host = Arc::new(Host::new(daw, home));
         let served = tokio::spawn(daw_mcp_server::stdio::serve(host, host_input, host_output));
         let pid = std::process::id();
         let replace = vec![
@@ -108,8 +112,8 @@ impl Session {
     }
 }
 
-/// A simulator's transcript with what changes from run to run (nonces, proofs, sessions, the pid, deadlines) replaced
-/// by names, one line each: the connection, `>` from the host or `<` from the bridge, the frame.
+/// A simulator's transcript with what changes from run to run (nonces, proofs, sessions, the pid wherever it sits,
+/// deadlines) replaced by names, one line each: the connection, `>` from the host or `<` from the bridge, the frame.
 pub fn normalized(lines: &[daw_mcp_server::simulator::Line]) -> String {
     let mut out = String::new();
     for line in lines {
@@ -125,14 +129,30 @@ pub fn normalized(lines: &[daw_mcp_server::simulator::Line]) -> String {
                     object.insert(key.into(), format!("<{key}>").into());
                 }
             }
-            if object.contains_key("pid") {
-                object.insert("pid".into(), "<pid>".into());
-            }
             if object.contains_key("deadlineMs") {
                 object.insert("deadlineMs".into(), "<deadline>".into());
             }
+            // The host's own name in its hello, whose version moves with each release.
+            if object.get("client").and_then(Value::as_str) == Some(concat!("daw-mcp-server/", env!("CARGO_PKG_VERSION"))) {
+                object.insert("client".into(), "daw-mcp-server/<version>".into());
+            }
         }
+        hide_pids(&mut value);
         out.push_str(&format!("{} {} {}\n", line.connection, if line.from_host { ">" } else { "<" }, value));
     }
     out
+}
+
+/// Every `pid` in a value, at any depth (a welcome's, a status result's, Logic's nested identity's), made `<pid>`.
+fn hide_pids(value: &mut Value) {
+    match value {
+        Value::Object(object) => {
+            if object.contains_key("pid") {
+                object.insert("pid".into(), "<pid>".into());
+            }
+            object.values_mut().for_each(hide_pids);
+        }
+        Value::Array(items) => items.iter_mut().for_each(hide_pids),
+        _ => {}
+    }
 }

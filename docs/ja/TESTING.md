@@ -2,7 +2,7 @@
 
 [English](../en/TESTING.md) · [简体中文](../zh-CN/TESTING.md) · 日本語
 
-リポジトリの各部分のテストの実行方法、それに必要なもの、CI が何を実行するかをまとめます。通常のテストには、Live もサインインも必要ありません。
+リポジトリの各部分のテストの実行方法、それに必要なもの、CI が何を実行するかをまとめます。通常のテストには、Live も Logic Pro もサインインも必要ありません。
 
 ## クイックスタート
 
@@ -27,6 +27,7 @@ python3 -m unittest discover -s scripts/tests -p 'test_*release.py'
 | PATH 上の Node.js（CI は 24 を使用） | 一部の Rust テスト、Live 拡張機能のテスト、移行テスト |
 | PATH 上の Python 3.11 以降（`python3`、Windows では `python.exe`） | Remote Script のテスト、リリーススクリプトのテスト、Python を実行する Rust テスト |
 | `vendor/` にローカルで用意した Extensions SDK | Live 拡張機能のビルドや型チェック（そのテストには不要） |
+| Swift の入った macOS（Xcode のコマンドラインツール） | `scripts/build-logic-hands.py` による Logic Pro のヘルパーのビルド（Logic ブリッジのテストがヘルパーを使います） |
 
 Windows では、いくつかのテストがシンボリックリンクを作成するため、開発者モードか管理者アカウントが必要です。それがないと、一部のテストはスキップされ、いくつかは `EPERM` で失敗します。CI の Windows ランナーにはその権限があります。
 
@@ -38,6 +39,7 @@ Windows では、いくつかのテストがシンボリックリンクを作成
 | --- | --- |
 | `sh scripts/test-isolated.sh`（Windows では `./scripts/test-isolated.ps1`） | テスト専用のホームで、すべてのテストを cargo-nextest で一つずつ別のプロセスで実行します。引数は `cargo nextest run` に渡します（`KUMI_NEXTEST=0` では `cargo test`。クレートのテストが一つのプロセスで動きます） |
 | `sh scripts/test-isolated.sh -p kumi-runtime -E 'test(/^hands_transport::/)'` | 一つのクレートの、一つのテストファイルだけを実行します。クレートのテストは一つのバイナリ（`tests/it/`、ファイルごとに一つのモジュール）です |
+| `KUMI_PACKAGES="daw-bridge daw-mcp-server logic-kumi" sh scripts/test-isolated.sh` | それらのパッケージだけを、そのすべてのテストとともに実行します。ここでは Logic Pro ブリッジのクレートで、CI の `Logic bridge` ジョブが macOS で `python3 scripts/build-logic-hands.py` の後に実行するのと同じです |
 | `cargo fmt --all --check` | CI と同じようにフォーマットを確認します |
 | `cargo clippy --workspace --all-targets --locked -- -D warnings` | Lint。CI では今のところ参考扱いです |
 | `cargo clippy --workspace --lib --bins --examples --locked -- -A clippy::all -D clippy::await_holding_refcell_ref` | await をまたいで保持される `RefCell` の借用。Lint の CI ジョブを失敗させます |
@@ -84,22 +86,27 @@ python3 -m compileall -q remote-script/AbletonMcpBridge
 | コマンド（ルートから） | 必要なもの | 内容 |
 | --- | --- | --- |
 | `cargo run --release -p kumi --example accept_live -- --set "<Set>"` | Set の使い捨てコピーを開いた Live と、先にビルドしておいたブリッジ（`cargo build --release -p ableton-mcp-server --bins`。デバッグ実行では `--release` を付けずに同じコマンド） | Kumi ができるあらゆる種類の変更を行い、それぞれを Kumi の取り消しで元に戻し、再生、バウンス、聴き取り、監視を行い、大きな Set の読み取りにかかる時間を計測します。モデルは使いません。 |
+| `cargo run --release -p kumi --example accept_logic -- [--files <folder>] [--report <file>] [--no-operator]` | 使い捨てにしてもよいプロジェクトを開いた Logic Pro 12、アクセシビリティを許可して用意した Kumi の Logic Pro ブリッジ（`kumi --daw logic bridge`。`--kumi-home <folder>` で専用のホームを指定します）、先にビルドしておいた Kumi のホスト（`cargo build --release -p daw-mcp-server --bins`） | Logic Pro の各ゲートが行った実行を、Logic Pro が開いているプロジェクトの上で行います：ステータスとディスカバリー、FOCUS の速さ、すべての読み取りとボディ。変更のプラン（それぞれ Kumi を通じて取り消します）。`--files` の下のコピーへの名前を付けて保存（そこからはコピーの上で実行するので、開いたプロジェクトは元のままです）、キーコマンド、リージョン、インポート、サイクル、Tempo List。プラグイン、センド、パッチ（`--patch` で指定します）、バウンス。聴き取り（聴くこと、判定のラウンド、試聴、レンダリング）。決まったフレーズ、メトロノーム、Sampler トラックへのサンプル、最近のプロジェクト、中央 C、一括読み取り、`watch_me`、Channel EQ と Compressor のカーブ。そして最後に、以前と同じに読めるプロジェクト。`--files` がなければ、ファイルを書くものは省きます。あなたが Logic Pro の前にいれば、選択への追従、ダイアログが忙しい状態と見なされること、プロジェクトの切り替え、トラックの移動も確認します。`--no-operator` はこれらを省きます。`--report` は `docs/evidence/` 向けの Markdown の要約を書き出します。モデルは使いません。 |
 | `cargo run --release -p kumi --example time_rebuild` | Set を開いた Live と、`accept_live` と同じく先にビルドしたブリッジ | チュートリアルの再現が Live でどれだけかかるかを、モデルなしで計ります。Drift と四つのエフェクトを載せた MIDI トラックを一つのプランで作り、各デバイスのパラメータを読み、30 個を名前で設定し、Kumi が Set を見る時間も含めて、それぞれにかかったブリッジへのリクエスト数と一緒に表示します。トラックを一つ追加し、最後に削除します。 |
 | `cargo run --release -p kumi --example eval_changes [-- <part of a case name>]` | サインインとモデル | モデルが Kumi のツールをどう使うかを、本物のブリッジのツールスキーマ（ネイティブのカタログから読み込みます）を持つ合成ブリッジに対して評価します。Live には一切触れません。各ケースは、かかった時間、そのうちツールの時間、モデルの呼び出し回数を示します。`EVAL_EFFORT` でモデルの推論の度合いを設定し、`EVAL_TRACE=1` で呼び出しを一つずつ表示します。`EVAL_TUTORIAL=1` は YouTube の実際の 16 分のチュートリアルを加えます（ネットワークが必要です）。`EVAL_MEASURE=1` は、サインインもモデルも使わずに、すべてのリクエストが運ぶもの（指示と各ツールの定義）をバイト数で表示します（`EVAL_MEASURE=tools` では定義そのものも表示します）。 |
+| `cargo run --release -p kumi --example eval_logic [-- <part of a case name>]` | サインインとモデル | モデルが Logic Pro をどれだけ知り、その中でどう作業するかを、シミュレートされた Logic の上で評価します：Logic ブリッジのテストが記録した Scratch プロジェクトを前にした、プロセス内の Kumi のホストで、Logic の指示パック、変更、聴き取りを備えます。Logic Pro には一切触れません。23 のケースは、Logic の用語とやり方についての知識の問い（質問が Logic の機能についてのときは Apple のガイドに尋ねて引用します）、Scratch の上での変更のリクエスト、Kumi のブリッジが越えられない制限（理由を添えて拒否します）、そして 1 回の聴き取りです。各ケースのチェックはコードです。`--list` は各ケースとそのチェックが何を探すかを表示し、`--dry` はサインインもモデルも使わずに、ケースごとに用意した回答ですべてのチェックを実行します。`EVAL_EFFORT`、`EVAL_TRACE=1`（各回答も丸ごと表示します）、`EVAL_TIMINGS` は `eval_changes` と同じように使えます。 |
 | `cargo run --release -p kumi --example probe_inference` | サインイン | 無害なツールを使った認証済みのリクエストを一つ送ります。Live には一切触れません。 |
 | `cargo run --release -p kumi --example probe_cache` | サインインとモデル | 再開のときのようにカーネルを作り直しても、会話がプロバイダーのプロンプトキャッシュを保てるかを確かめます。短いターンごとに入力トークンとキャッシュされたトークンを表示し、同じ会話、別の会話、会話なしで作り直します。Live には一切触れません。 |
 
 合成ブリッジの Operator、Saturator、EQ Eight には、Live から `crates/kumi/examples/fixtures/eval_changes/live-devices.json` に読み込んだ、Live 12.4 のすべてのパラメータがあり、パラメータを設定する Kumi 自身のスクリプトを Live と同じように実行します。
 
+Logic の評価は、Apple の Logic Pro ユーザガイドを、評価のために Apple のガイドの形で書いた Logic のトピックのフィクスチャ（`crates/kumi/examples/fixtures/eval_logic/logic-guide.json`）から読みます。それを Apple のサイトがガイドを並べるのと同じように並べるので、Kumi 自身のパーサーがそれを読みます：ネットワークからは何も来ません。各ケースはそれぞれ独立したセッションで、Kumi のホーム、メモリー、レシピ、ライブラリーには使い捨てのフォルダーを使い、Logic Pro ではプロジェクトを一つも開きません。CI はこれをビルドし、そのドライラン（`crates/kumi/tests/eval_logic_dry.rs`）を実行します。ドライランは、チェックの種類ごとに、それぞれの形で間違った答えを不合格にし、ほかの正しい答えは受け入れることも確認します。費用がかかるのはモデルを使った実行です：用意した回答では 35 回のモデルのリクエストになり、モデルはそれより多く使い（変更の前に読み、ガイドのために `find_tools` に尋ねます）、23 のケースで約 50〜70 回になります。それぞれのリクエストは、会話のほかに約 47 KB の指示とツールの定義を運びます（キャッシュするプロバイダーなら、最初の後はキャッシュの読み取りです）。ケースの名前かその一部で、実行をそれらのケースに絞れます。結果は、Live のベンチマークのものと同じく、`docs/evidence/` の下に手で記録します：日付、モデルとその effort、各ケースの合格か FAIL と足りなかった点、そして評価が出力する合計です。
+
 ## ドキュメント
 
-ドキュメントを編集した後、パッケージングのテストを実行します：
+ドキュメントを編集した後、パッケージングのテストとリリーススクリプトのテストを実行します：
 
 ```sh
 python3 -m unittest discover -s scripts/tests -p test_native_release.py
+python3 -m unittest discover -s scripts/tests -p test_release.py
 ```
 
-このテストは、ブリッジと一緒に配布されるガイドのすべてのリンクを確認します。対象は、ブリッジの README と、`scripts/build-native-release.py` の `DOCUMENTS` に並んでいる `docs/en` の 14 ページです。3 言語の内容が一致しているかを確認するものはないので、手作業でそろえてください。リリーススクリプトのテスト（`test_release.py`）は、REAPER の拡張機能と Renoise のツールの ships-with の行が、各言語のドキュメント（`KUMI_GUIDE.md`）に一つずつあり、このチェックアウトのバージョンを指していることを確認します。
+一つ目は、ブリッジと一緒に配布されるガイドのすべてのリンクを確認します。対象は、ブリッジの README と、`scripts/build-native-release.py` の `DOCUMENTS` に並んでいる `docs/en` の 14 ページです。二つ目は、リリースが書き換える行がそれぞれ一度ずつあることを確認します：README の Status の行、「Bridge versions」の下にある同梱するブリッジの行（Logic Pro のものは、すべての言語にあるかどの言語にもないかで、そのブリッジのバージョンになっていること）、そして各言語のドキュメント（`KUMI_GUIDE.md`）に一つずつある、REAPER の拡張機能と Renoise のツールの ships-with の行（このチェックアウトのバージョンを指していること）です。ほかに 3 言語の内容が一致しているかを確認するものはないので、手作業でそろえてください。
 
 ## CI
 
@@ -115,19 +122,20 @@ python3 -m unittest discover -s scripts/tests -p test_native_release.py
 | | `Release scripts`（Ubuntu） | この変更の空白のチェック、続いてパッケージングのテスト、リリーススクリプトのテスト、`scripts/check-installers.sh`（install.sh が POSIX sh であること、install.ps1 が構文解析でき ASCII であること）。`main` へのプッシュでは、`main` の raw のインストーラーと最新リリースのものも確認します |
 | | `REAPER extension loads / macos-15`、`ubuntu-22.04`、`windows-2025` | 配布するとおりの REAPER の拡張機能：リリースビルドとプラットフォーム自身の strip、バンドルに入れてよいものかのリリーススクリプトによる確認（REAPER のエントリーポイント。macOS では署名と自身の名前、Windows では C ランタイムの組み込み、Linux では Kumi より新しい glibc を要しないこと）、システムのローダーでの読み込み、C++ シムを通じた REAPER からの呼び出し |
 | | `Renoise tool`（Ubuntu） | 固定した LuaJIT でのツールの Lua テスト（Renoise の API のモックに対して）と、Renoise の API 6.2 の定義に対する `lua-language-server --check` |
+| | `Logic bridge`（macOS 15） | Logic Pro のヘルパーをそのスクリプトでビルドし、続いて `daw-bridge`、`daw-mcp-server`、`logic-kumi` のテストを分離ランナーで実行します：ブリッジは本物の Logic Pro から記録したシーンに対して、ホストはシミュレートされた Logic Pro に対して。Logic Pro は使いません |
 | | `Required CI` | 上記がすべてパスした場合にだけパスします |
 | **Extended** | `Extended / Linux (1/3)` から `(3/3)`、`Extended / macOS (1/2)`、`(2/2)`、`Extended / Windows (1/3)` から `(3/3)`、`Extended / documentation tests` | 公式 SDK をインストールした状態での全テスト（`extended` セット）：`ci` が省くもの（記録されたソースのオラクル、長いリスニング・フォーム・レンダリングのシミュレーション、ffmpeg を使うビデオ、ベンチマーク、公式の MCP とモデルの SDK と並べて実行する相互運用テスト、Kumi 1.7.5 からの移行、タイミングのビルディングブロックの長いスイープ）と、各プラットフォームの全テスト。続いてドキュメントテスト。毎週、手動で、また `full-tests` ラベルの付いたプルリクエストで実行され、何もブロックしません |
 | | `Extended / REAPER SDK, newest header` | Cockos が公開している最新の SDK ヘッダーで REAPER の拡張機能をビルドし、生成した関数テーブルを確認し、それに移ると増える関数を一覧します |
 | **Network** | `Network / What changed`、続いて `Network / Linux`、`macOS`、`Windows` | 各システム自身の信頼ストアに入れた認証局と、システム自身の設定にあるプロキシを通した、Kumi の HTTP クライアント（`network.rs` の ignored のテスト）。各システムのジョブは、クライアントの作り方を変える変更（`scripts/areas.toml` の `network` エリア）のときだけ実行されます |
 | **Willington files** | `Willington files`（Ubuntu） | `vendor/willington/` を変えられるのは、このリポジトリの `willington/` ブランチから出たリポジトリ所有者のプルリクエストだけで、そのプルリクエストはほかに何も変えません。`main` にあるこのチェックが、プルリクエストのコードではなくファイルの一覧を読んで実行されます |
-| **Installer** | `Native bundle / <target>`、`Aggregate native and existing-installer releases`、続いて `Install / <system>` と `Existing installer transition / <system>`。`Installer edges / <system>`（3 つ）はバンドルを必要としません | `main` へのプッシュと、インストールを変えるプルリクエストでは、x64 の Linux と Windows、Apple Silicon の macOS のバンドルをビルドし、それぞれで以下のとおりインストール、確認、アンインストールします。タグ、手動の実行、`full-tests` ラベルの付いたプルリクエストではすべてを行います：macOS、Linux、Windows の Intel と ARM 向けのネイティブバンドル（Mac のバンドルには、Kumi が Live のメニューを使うためのヘルパー（ユニバーサル、アドホック署名）が入り、Intel 向けは Apple Silicon でクロスビルドします）、続いて既存のインストールが更新に使う互換リリースをビルドし、インストーラーと一緒に、GitHub がリリースのファイルを配信するのと同じ形でローカルで配信します。各システムで：そこからワンライナーでプロデューサーと同じ方法でインストールし（Windows では、非 ASCII 文字の名前のフォルダーにある `KUMI_HOME` で、Windows PowerShell 5.1 を使います）、バージョン、`doctor`、ブリッジとその解析ワーカーを確認し、修復として再インストールし、使い捨ての Remote Scripts フォルダーに `kumi bridge --yes` を実行し、プロデューサー自身のファイルをそれぞれ置いた使い捨ての DAW フォルダーに REAPER の拡張機能と Renoise のツールを入れ（`kumi --daw reaper|renoise bridge --yes`）、それぞれがバンドルのコピーで、リファレンス、レシート、残した世代があることを確かめ、拡張機能を REAPER のエントリーポイントで読み込み、それらのための Kumi のホストを起動します。続いて `kumi update`（両方のブリッジがそのまま）、`kumi update --rollback` を 2 回（両方を前の Kumi のコピーへ、そしてまた戻す）、`kumi uninstall`（両方を取り除き、プロデューサーが変えたツールのコピーを残し、プロデューサー自身のファイルはそのまま）を実行します。続いて各システムの 1 つのインストール（macOS arm64、Linux x64、Windows x64）が、空白と非 ASCII 文字を含むホームで次を行います：このビルドのインストーラーで GitHub の最新リリースを、続いて `KUMI_VERSION` でこのビルドの 1 つ前のリリースをインストールし、そのリリースのブリッジを入れ、このビルドへの更新と 2 回のロールバックのたびに Kumi とブリッジを確認し（REAPER と Renoise のブリッジも入れた状態で。そのリリースはどちらも知らず、そのままにします）、アンインストールします。PATH の行は macOS では zsh の `ZDOTDIR` に、Linux では fish の `conf.d` に入り、そのシェルが `kumi` を見つけ、アンインストールで取り除かれます。Windows ではこれを PowerShell 7 で実行します。このビルドのインストール、ブリッジ、ロールバック、アンインストールは非 ASCII 文字の名前のフォルダーにある `KUMI_HOME` で、1 つ前のリリースからの更新は空白だけを含むホームで行います（そのリリース自身の更新機能が展開するため）。移行のジョブは、Kumi 1.7.5 と新しいバンドルで移行テストを実行します。edges のジョブは、install.sh と install.ps1 を代わりのリリースに対して実行します：リリースがない、応答がない、サインインページが返る、チェックサムが合わない、Kumi が起動しない、Ctrl-C。`v*` タグのプッシュでは、これらがすべてパスした後に `publish` がバンドルとインストーラーをリリースに添付し、`scripts/release.py` がノートを書いていればリリースを公開します。 |
+| **Installer** | `Native bundle / <target>`、`Aggregate native and existing-installer releases`、続いて `Install / <system>` と `Existing installer transition / <system>`。`Installer edges / <system>`（3 つ）はバンドルを必要としません | `main` へのプッシュと、インストールを変えるプルリクエストでは、x64 の Linux と Windows、Apple Silicon の macOS のバンドルをビルドし、それぞれで以下のとおりインストール、確認、アンインストールします。タグ、手動の実行、`full-tests` ラベルの付いたプルリクエストではすべてを行います：macOS、Linux、Windows の Intel と ARM 向けのネイティブバンドル（Mac のバンドルには、Kumi が Live のメニューを使うためのヘルパー（ユニバーサル、アドホック署名）が入り、Intel 向けは Apple Silicon でクロスビルドします）、続いて既存のインストールが更新に使う互換リリースをビルドし、インストーラーと一緒に、GitHub がリリースのファイルを配信するのと同じ形でローカルで配信します。Apple シリコン搭載 Mac のバンドルは Logic Pro ブリッジとそのヘルパー（`scripts/build-logic-hands.py` がビルド）を収め、それぞれ Apple 自身のツールから見たとおりに確認します。ほかのバンドルはこれを収めません。各システムで：そこからワンライナーでプロデューサーと同じ方法でインストールし（Windows では、非 ASCII 文字の名前のフォルダーにある `KUMI_HOME` で、Windows PowerShell 5.1 を使います）、バージョン、`doctor`、ブリッジとその解析ワーカーを確認し、修復として再インストールし、使い捨ての Remote Scripts フォルダーに `kumi bridge --yes` を実行し、プロデューサー自身のファイルをそれぞれ置いた使い捨ての DAW フォルダーに REAPER の拡張機能と Renoise のツールを入れ（`kumi --daw reaper|renoise bridge --yes`）、Apple シリコン搭載 Mac では Logic Pro ブリッジを Kumi 自身のフォルダーに入れ（それ以外では、`kumi --daw logic bridge` が何も用意せず、Logic Pro は Apple シリコン搭載 Mac にしか対応していないと伝えることを確認し）、それぞれがバンドルのコピーで、リファレンス、レシート、残した世代があることを確かめ、拡張機能を REAPER のエントリーポイントで読み込み、それらのための Kumi のホストを起動します。続いて `kumi update`（どのブリッジもそのまま）、`kumi update --rollback` を 2 回（それぞれを前の Kumi のコピーへ、そしてまた戻す）、`kumi uninstall`（それぞれを取り除き、プロデューサーが変えたツールのコピーを残し、プロデューサー自身のファイルはそのまま）を実行します。続いて各システムの 1 つのインストール（macOS arm64、Linux x64、Windows x64）が、空白と非 ASCII 文字を含むホームで次を行います：このビルドのインストーラーで GitHub の最新リリースを、続いて `KUMI_VERSION` でこのビルドの 1 つ前のリリースをインストールし、そのリリースのブリッジを入れ、このビルドへの更新と 2 回のロールバックのたびに Kumi とブリッジを確認し（REAPER と Renoise のブリッジ、Apple シリコン搭載 Mac では Logic Pro ブリッジも入れた状態で。そのリリースはどれも知らず、そのままにします）、アンインストールします。PATH の行は macOS では zsh の `ZDOTDIR` に、Linux では fish の `conf.d` に入り、そのシェルが `kumi` を見つけ、アンインストールで取り除かれます。Windows ではこれを PowerShell 7 で実行します。このビルドのインストール、ブリッジ、ロールバック、アンインストールは非 ASCII 文字の名前のフォルダーにある `KUMI_HOME` で、1 つ前のリリースからの更新は空白だけを含むホームで行います（そのリリース自身の更新機能が展開するため）。移行のジョブは、Kumi 1.7.5 と新しいバンドルで移行テストを実行します。edges のジョブは、install.sh と install.ps1 を代わりのリリースに対して実行します：リリースがない、応答がない、サインインページが返る、チェックサムが合わない、Kumi が起動しない、Ctrl-C。`v*` タグのプッシュでは、これらがすべてパスした後に `publish` がバンドルとインストーラーをリリースに添付し、`scripts/release.py` がノートを書いていればリリースを公開します。 |
 
 プルリクエストでは、実行される範囲が狭くなります：
 
 - `Python Remote Script` は macOS を省きます。
 - Rust のビルドキャッシュは `main` からだけ保存されます。プルリクエストは `main` のものを復元し、何も保存しません。
 - それぞれの世界のジョブは、`scripts/dev.py` がクレートと `scripts/areas.toml` から読み取るとおり、テストする対象が変わったときに実行されます（`python3 scripts/dev.py affected --base origin/main` で、ブランチが何を実行するかがわかります）。Rust のジョブは Renoise のツールの Lua だけの変更では省かれ、`REAPER extension loads` は拡張機能のクレート、それがビルドに使うもの（`daw-bridge`、ロックファイル）、リリーススクリプトの変更で、`Renoise tool` は `daws/renoise` の変更で実行されます。`Release scripts` は、追跡されているすべてのファイルがクレートかエリアに属することを確認します。
-- Installer が各システムの 1 台でビルドしてインストールするのは、インストールに関わる部分を変える変更の場合だけです：インストーラー、インストール、更新、リリース、Willington のファイル、Mac のヘルパー、Kumi が使う `tar` と PowerShell、ダウンロードの方法（HTTP クライアントとネットワークの設定）とパスの組み立て、Kumi の拡張機能を Live に入れる処理、REAPER と Renoise のブリッジのビルドと配置、そして Installer のワークフロー（それぞれのテストは含まない）。それ以外のプルリクエストでは何もビルドせず、マージ後の `main` の実行で確認します。6 つすべて、GitHub のリリースからの更新、edges、移行は `full-tests` ラベルで実行されます。
+- Installer が各システムの 1 台でビルドしてインストールするのは、インストールに関わる部分を変える変更の場合だけです：インストーラー、インストール、更新、リリース、Willington のファイル、Mac のヘルパー、Kumi が使う `tar` と PowerShell、ダウンロードの方法（HTTP クライアントとネットワークの設定）とパスの組み立て、Kumi の拡張機能を Live に入れる処理、REAPER、Renoise、Logic Pro のブリッジのビルドと配置、そして Installer のワークフロー（それぞれのテストは含まない）。それ以外のプルリクエストでは何もビルドせず、マージ後の `main` の実行で確認します。6 つすべて、GitHub のリリースからの更新、edges、移行は `full-tests` ラベルで実行されます。
 - プルリクエストと `main` へのプッシュでは、Installer のバンドルを `ci-release` プロファイルでビルドします。これはリリースプロファイルのプログラム全体の最適化を省き、最適化も控えめにします。タグは `release` でビルドします。
 
 `main` へのプッシュでは、インストールを変えるプルリクエストと同じものが実行され、タグでは Installer のすべてが実行されます。Extended ワークフローは毎週すべてのテストを実行します。Installer は毎晩 `release` プロファイルで 6 つのバンドルをすべてビルドし（失敗すると issue「The nightly Installer build failed」を開きます）、次のタグのためにそのプロファイルのビルドキャッシュを温めておきます。Caches ワークフローは毎日、Rust のビルドキャッシュを種類ごとに最新のものだけ残して削除します。古いロックファイルの世代が、プルリクエストの復元するキャッシュをリポジトリの 10 GB から押し出さないようにするためです。
@@ -136,7 +144,7 @@ python3 -m unittest discover -s scripts/tests -p test_native_release.py
 
 ## パスが意味すること
 
-パスは、コードがテストに書かれたとおりに動作すること、パッケージが macOS、Linux、Windows でインストールでき動作すること、インストーラーが GitHub のランナー上で動作することを示します。Remote Script があなたの Live で読み込まれること、Live の API が偽物と同じ形をしていること、何かがどう聞こえるか、ターミナルやスクリーンリーダーが Kumi と一緒に動作することは示しません。本物の Live については、上記のオプトインのチェックと、[実装状況](IMPLEMENTATION_STATUS.md#エビデンス)にある記録がカバーしています。
+パスは、コードがテストに書かれたとおりに動作すること、パッケージが macOS、Linux、Windows でインストールでき動作すること、インストーラーが GitHub のランナー上で動作することを示します。Remote Script があなたの Live で読み込まれること、Live の API が偽物と同じ形をしていること、あなたの Logic Pro が記録したシーンと同じものを示すこと、何かがどう聞こえるか、ターミナルやスクリーンリーダーが Kumi と一緒に動作することは示しません。本物の Live と本物の Logic Pro については、上記のオプトインのチェックと、[実装状況](IMPLEMENTATION_STATUS.md#エビデンス)にある記録がカバーしています。
 
 ## テストを書く
 

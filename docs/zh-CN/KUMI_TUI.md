@@ -56,6 +56,7 @@ Kumi 占据整个终端窗口，并在 Kumi 关闭、崩溃或被停止时把窗
 | `kumi` | 在 Live 当前打开的工程上打开 Kumi；第一次时登录，并把桥接装入 Live（Kumi 可以替你重启 Live） |
 | `kumi --daw reaper`、`kumi --daw renoise` | 在当前打开的 REAPER 工程或 Renoise 歌曲上打开 Kumi；第一次时登录，并装入 Kumi 的扩展或工具。`KUMI_DAW` 作用相同；`kumi --daw reaper doctor`（或 `report`）说的是那个 DAW |
 | `kumi --daw reaper bridge [--yes]`（或 `renoise`） | 把 Kumi 的扩展装入 REAPER，或把它的工具装入 Renoise，或把它们更新到最新；`--yes` 预先回答它的提问 |
+| `kumi --daw logic [<command>]` | 配合 Logic Pro 而不是 Live 工作（`--daw ableton` 即 Live），可用于一次会话或一条命令：`kumi --daw logic bridge [--yes]` 把 Kumi 的 Logic Pro 桥接安装到 Kumi 自己的文件夹中，Logic Pro 打开与否都可以；`kumi --daw logic doctor` 检查 Logic Pro 这一侧（[连接 Logic Pro](KUMI_GUIDE.md#连接-logic-pro)） |
 | `kumi -c`（或 `--continue`） | 接着你上次使用的对话继续，不论它属于哪个工程 |
 | `kumi -r [ID 或名称]`（或 `--resume`） | 按 ID（或其开头）或名称继续一段保存的对话；不加参数则从列表中选择。两者都可与 `--inference-only` 一起使用 |
 | `kumi export [ID 或名称 \| --last] [--md \| --html \| --json] [--full] [--raw] [-o 路径]` | 将保存的对话存为 Markdown（默认）、网页或供 Kumi 使用的文件；不写 ID 或加 `--last` 时为最近的对话。`--full` 加上每个步骤的输入和结果，`--raw` 保留密钥和路径 |
@@ -89,7 +90,7 @@ Kumi 占据整个终端窗口，并在 Kumi 关闭、崩溃或被停止时把窗
 | `/export [copy \| md \| html \| json]` | 将这段对话存为文件：复制为 Markdown，或保存为 Markdown、网页、供 Kumi 使用的文件（`kumi import`）；不加参数时可以选择。超过 64 KB 时改为保存文件 |
 | `/share` | 将这段对话保存为随处可打开的网页（没有变化时仍是同一个网页），然后打开它、在访达（资源管理器）中显示它，或复制它的路径，直到选择 Done；通过 SSH 连接时，会告诉你网页在哪里 |
 | `/reconnect` | 通过新的桥接重新连接 Live，保留对话（之前的修改将失去 Kumi 的撤销） |
-| `/daw [name]` | 显示 Kumi 正在使用哪个 DAW；`/daw live`、`/daw reaper` 或 `/daw renoise` 会关闭 Kumi，并用那个 DAW 重新打开。在你使用 REAPER 或 Renoise，或其中之一装有 Kumi 的桥接后显示 |
+| `/daw [name]` | 显示 Kumi 正在使用哪个 DAW；`/daw live`、`/daw reaper`、`/daw renoise` 或 `/daw logic` 会关闭 Kumi，并用那个 DAW 重新打开，不带上这段对话（每个 DAW 的工程各自保留自己的对话）。在你使用 REAPER、Renoise 或 Logic Pro，或装好了其中之一的 Kumi 桥接后显示 |
 | `/undo` | 撤销 Kumi 最近一次修改 |
 | `/stop` | 停止 Live：片段、走带和录音。同时停止 Kumi 的回答 |
 | `/refresh` | 重新读取工程，不询问模型 |

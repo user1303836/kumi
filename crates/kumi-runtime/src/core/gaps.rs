@@ -25,14 +25,14 @@ use tokio::io::AsyncWriteExt;
 pub const GAP_TOOL: &str = "note_gap";
 crate::daw_text!(
     pub GAP_GUIDANCE, gap_guidance:
-    "When a request needs something Kumi's tools or ", app, "'s scripting don't offer, take the way round first (another tool, a plan of several, a recording, a device you make) and do it, cleanup included; then note the gap with note_gap beside your answer (final: true once nothing is left to do), and say in a sentence what you did instead."
+    "When a request needs something ", gap_offer, " don't offer, take the way round first (another tool, a plan of several, a recording, ", gap_way, ") and do it, cleanup included; then note the gap with note_gap beside your answer (final: true once nothing is left to do), and say in a sentence what you did instead."
 );
 const MAX_BYTES: u64 = 256 * 1024;
 const KEEP_LINES: usize = 500;
 crate::daw_text!(
     #[allow(dead_code)]
     DESCRIPTION, description:
-    "When the producer asks for something you can't do because Kumi's tools or ", app, "'s API lack it (a device setting scripts can't reach, an operation no tool offers), note it here for Kumi's developers, then tell the producer and offer the way round. ",
+    "When the producer asks for something you can't do because ", gap_lack, ", note it here for Kumi's developers, then tell the producer and offer the way round. ",
     "Not for things you chose not to do, or that failed for another reason. The producer doesn't see this, and it isn't a memory."
 );
 fn clean(value: Option<&Value>) -> String {
@@ -154,4 +154,34 @@ pub fn logged_gaps(db: &Path, file: &Path) -> Result<Vec<String>, kumi_store::St
             json::stringify(&entry)
         })
         .collect())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_gap_texts_name_what_each_daw_is_reached_through() {
+        assert_eq!(gap_guidance(&DawProfile::ABLETON), GAP_GUIDANCE);
+        assert_eq!(description(&DawProfile::ABLETON), DESCRIPTION);
+        // REAPER's and Renoise's say their scripting and API, as they did.
+        for profile in [DawProfile::REAPER, DawProfile::RENOISE] {
+            let app = profile.words.app;
+            assert!(gap_guidance(&profile)
+                .starts_with(&format!("When a request needs something Kumi's tools or {app}'s scripting don't offer, take")));
+            assert!(description(&profile).contains(&format!(
+                "because Kumi's tools or {app}'s API lack it (a device setting scripts can't reach, an operation no tool offers), note it"
+            )));
+        }
+        // Logic Pro has no scripting Kumi reaches (Scripter is a MIDI plug-in): Kumi's tools are what it works through.
+        let (guidance, tool) = (gap_guidance(&DawProfile::LOGIC), description(&DawProfile::LOGIC));
+        assert!(guidance.starts_with("When a request needs something Kumi's tools don't offer, take the way round first"), "{guidance}");
+        assert!(
+            tool.contains("because Kumi's tools lack it (a plug-in setting Kumi's bridge can't reach, an operation no tool offers)"),
+            "{tool}"
+        );
+        for text in [guidance, tool] {
+            assert!(!text.contains("script") && !text.contains("API"), "{text}");
+        }
+    }
 }

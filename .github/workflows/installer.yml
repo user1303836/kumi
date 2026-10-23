@@ -50,8 +50,8 @@ jobs:
           # each system (Linux and Windows on x64, macOS on Apple silicon). The install surface is the `install` area in
           # scripts/areas.toml: the installers, installing, updating and releasing, Willington's files, the Mac helper the
           # bundle carries, the tar and PowerShell Kumi runs, how it downloads (its HTTP client and network settings) and
-          # builds paths, how Kumi's extension goes into Live, how REAPER's and Renoise's bridges are built and go in, and
-          # this workflow; not their tests. Any other pull request builds nothing: main's run covers it once merged. Tags,
+          # builds paths, how Kumi's extension goes into Live, how REAPER's, Renoise's and Logic Pro's bridges are built and go
+          # in, and this workflow; not their tests. Any other pull request builds nothing: main's run covers it once merged. Tags,
           # a run by hand and a pull request labelled full-tests build all six platforms, install each, update to it from
           # the release before it and check the update from the JavaScript release (see below); the nightly run only
           # builds them.
@@ -69,7 +69,8 @@ jobs:
             crates/kumi/src/daw/own.rs crates/daw-bridge/src/lifecycle.rs crates/daw-bridge/src/install.rs crates/daw-bridge/src/detect.rs \
             crates/reaper-kumi/build.rs crates/reaper-kumi/src/lib.rs crates/daw-mcp-server/src/bin/daw-mcp-server.rs \
             crates/daw-bridge/src/files.rs crates/daw-bridge/src/owner.rs crates/daw-bridge/src/paths.rs crates/reaper-kumi/shim/csurf.cpp \
-            daws/renoise/com.kumi.Bridge.xrnx/manifest.xml daws/renoise/com.kumi.Bridge.xrnx/main.lua daws/renoise/com.kumi.Bridge.xrnx/payload/version.lua; do
+            daws/renoise/com.kumi.Bridge.xrnx/manifest.xml daws/renoise/com.kumi.Bridge.xrnx/main.lua daws/renoise/com.kumi.Bridge.xrnx/payload/version.lua \
+            crates/logic-kumi/src/main.rs crates/logic-kumi/helper/KumiLogicHands.swift scripts/build-logic-hands.py; do
             test -e "$path" || { echo "::error::$path, which the installs depend on, isn't there: point this check at its new name"; exit 1; }
             python3 scripts/dev.py areas --in install "$path" > /dev/null || { echo "::error::$path must count as installing (scripts/areas.toml)"; exit 1; }
           done
@@ -147,11 +148,15 @@ jobs:
         with:
           key: ${{ env.PROFILE }}-${{ matrix.target }}
           save-if: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'schedule' }}
-      # Only the Mac bundles carry the helper Kumi uses Live's menus with; each Mac job builds it (universal, under
-      # a minute) instead of waiting for a job of its own.
-      - name: Build Kumi's Mac helper
+      # Only the Mac bundles carry the helper Kumi uses Live's menus with, and only the Apple Silicon Mac's the helper Logic
+      # Pro's bridge reads Logic with (Logic Pro 12 runs on Apple Silicon only); each Mac job builds what its bundle
+      # carries (universal, under a minute each) instead of waiting for a job of its own.
+      - name: Build Kumi's Mac helpers
         if: runner.os == 'macOS'
-        run: python3 scripts/build-hands.py
+        shell: bash
+        run: |
+          python3 scripts/build-hands.py
+          if [[ '${{ matrix.target }}' == aarch64-apple-darwin ]]; then python3 scripts/build-logic-hands.py; fi
       - name: Build and bind the release artifacts
         shell: bash
         run: python3 scripts/build-native-release.py --target '${{ matrix.target }}' --profile "$PROFILE" --out release
@@ -161,7 +166,11 @@ jobs:
         run: |
           want=arm64
           if [[ '${{ matrix.target }}' == x86_64-* ]]; then want=x86_64; fi
-          for name in kumi ableton-mcp-server ableton-mcp-analysis-worker daw-mcp-server kumi-harness kumi-library-measure kumi-library-learner; do
+          names="kumi ableton-mcp-server ableton-mcp-analysis-worker daw-mcp-server kumi-harness kumi-library-measure kumi-library-learner"
+          # Logic Pro's bridge, which only the Apple Silicon Mac's bundle carries.
+          logic=false
+          if [[ '${{ matrix.target }}' == aarch64-apple-darwin ]]; then logic=true; names="$names logic-kumi"; fi
+          for name in $names; do
             archs="$(lipo -archs "target/${{ matrix.target }}/$PROFILE/$name")"
             echo "$name: $archs"
             test "$archs" = "$want"
@@ -175,6 +184,21 @@ jobs:
           codesign --verify --strict --verbose "$extension"
           test "$(otool -D "$extension" | tail -n 1)" = "@rpath/reaper_kumi.dylib"
           if dyld_info -segments "$extension" | grep -i mis-aligned; then exit 1; fi
+          # Logic Pro's bridge and its helper, as Apple's own tools see them (the release script read both too): the bridge
+          # signed (Apple Silicon runs no unsigned code), laid out as dyld wants and starting; the helper universal and
+          # signed, as scripts/build-logic-hands.py makes it, and the only build there.
+          if $logic; then
+            bridge="target/${{ matrix.target }}/$PROFILE/logic-kumi"
+            codesign --verify --strict --verbose "$bridge"
+            if dyld_info -segments "$bridge" | grep -i mis-aligned; then exit 1; fi
+            test "$("$bridge" --version)" = "logic-kumi $(sed -n 's/^version = "\(.*\)"$/\1/p' crates/logic-kumi/Cargo.toml)"
+            helpers=(target/logic-hands/kumi-logic-hands-*)
+            test "${#helpers[@]}" = 1
+            archs="$(lipo -archs "${helpers[0]}" | tr ' ' '\n' | sort | xargs)"
+            echo "$(basename "${helpers[0]}"): $archs"
+            test "$archs" = "arm64 x86_64"
+            codesign --verify --strict --verbose "${helpers[0]}"
+          fi
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: native-${{ matrix.target }}
@@ -255,6 +279,8 @@ jobs:
           KUMI_HOME: ${{ runner.temp }}/kumi-home
           KUMI_RELEASES: http://127.0.0.1:8765
           SHELL: /bin/bash
+          # Logic Pro's bridge is in an Apple Silicon Mac's bundle only (Logic Pro 12 runs on Apple Silicon only).
+          LOGIC: ${{ runner.os == 'macOS' && runner.arch == 'ARM64' }}
         run: |
           set -eux
           # A variable name running straight into a non-ASCII character ("$version…") is read as part of
@@ -293,22 +319,39 @@ jobs:
           # Kumi's host for them starts.
           kumi --daw reaper bridge --yes
           kumi --daw renoise bridge --yes
+          # Logic Pro's bridge from the bundle, into Kumi's own folder (Logic loads nothing, so there's no DAW folder), on
+          # an Apple Silicon Mac; it starts, asked its version. Anywhere else Kumi carries none: it says Logic Pro is
+          # supported on Apple Silicon Macs only and sets nothing up, which daw_bridges.py checks too.
+          if [[ "$LOGIC" == true ]]; then
+            kumi --daw logic bridge --yes
+          else
+            if kumi --daw logic bridge --yes > logic.txt; then cat logic.txt; exit 1; fi
+            cat logic.txt
+            grep -q "Logic Pro is supported on Apple Silicon Macs only" logic.txt
+          fi
           daws() { python3 scripts/tests/daw_bridges.py placed "$KUMI_HOME/app" "$KUMI_HOME" "$reaper" "$renoise" "$@"; }
           daws --load
           daws > daws.txt
           "$KUMI_HOME/app/daw-mcp-server" --version
           kumi --daw reaper doctor || true
           kumi update | tee update.txt; grep -q "up to date" update.txt
-          test "$(daws)" = "$(cat daws.txt)"   # up to date: both bridges as they were, the one to roll back to kept
+          test "$(daws)" = "$(cat daws.txt)"   # up to date: each bridge as it was, the one to roll back to kept
           # Two rollbacks, each DAW's bridge going with Kumi: the Kumi the repair kept is made to carry other copies of
-          # both, as an earlier release would (none before this one carries them), and the second rollback puts back
+          # each, as an earlier release would (none before this one carries them), and the second rollback puts back
           # this build's from the generations kept at the first install.
           python3 scripts/tests/daw_bridges.py earlier "$KUMI_HOME/app.previous" 0.0.9
-          kumi update --rollback
+          kumi update --rollback > rollback.txt
+          cat rollback.txt
           kumi --version
           daws | tee earlier.txt
           grep -q -E '^reaper 0\.0\.9 [0-9a-f]+ [^ ]+ rollback$' earlier.txt
           grep -q -E '^renoise 0\.0\.9 [0-9a-f]+ [^ ]+ rollback$' earlier.txt
+          if [[ "$LOGIC" == true ]]; then
+            grep -q -E '^logic 0\.0\.9 [0-9a-f]+ [^ ]+ rollback$' earlier.txt
+            # Said in Logic's words: the bridge is in Kumi's own folder, and nothing of Logic's restarts.
+            grep -q "Kumi's Logic Pro bridge 0.0.9 is back in Kumi's own folder" rollback.txt
+            if grep -q "restart Logic Pro" rollback.txt; then exit 1; fi
+          fi
           kumi update --rollback
           kumi --version
           daws | tee forward.txt
@@ -334,6 +377,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           KUMI_RELEASES: http://127.0.0.1:8765
+          # Logic Pro's bridge is in an Apple Silicon Mac's bundle only (Logic Pro 12 runs on Apple Silicon only).
+          LOGIC: ${{ runner.os == 'macOS' && runner.arch == 'ARM64' }}
         run: |
           set -eux
           version="$(python3 -c 'import json; print(json.load(open("package.json"))["version"])')"
@@ -347,7 +392,11 @@ jobs:
           import re, sys
           key = lambda version: tuple(map(int, version.split(".")))
           published = [m[1] for line in sys.stdin if (m := re.fullmatch(r"v(\d+\.\d+\.\d+)", line.strip()))]
-          print(max((v for v in published if key(v) < key(sys.argv[1])), key=key))' "$version")"
+          print(max((v for v in published if key(v) < key(sys.argv[1])), key=key, default=""))' "$version")"
+          if [ -z "$previous" ]; then
+            echo "no release published below $version in $GITHUB_REPOSITORY (a fork, or the first release): nothing to update from"
+            exit 0
+          fi
           # A home with spaces and non-ASCII letters. zsh (the Mac's) reads its startup files from ZDOTDIR here, fish
           # from conf.d. (zsh 5.9 reads none from a ZDOTDIR named in some non-ASCII letters, such as ホーム: zsh's own.)
           home="$RUNNER_TEMP/John Smith ホーム é"
@@ -409,24 +458,32 @@ jobs:
           kumi update
           test "$(kumi --version)" = "Kumi $version"
           after="$(bridge)"; after_extension="$(extension)"
-          # REAPER's extension and Renoise's tool from this build, in scratch DAW folders. A release that knows neither DAW
-          # (1.19 and before) leaves both as they are on its rollback, said; one that carries them puts back its own copy of
-          # each, said where it isn't this build's. The rollback back to this build puts this build's back, from the
-          # generations kept.
+          # REAPER's extension and Renoise's tool from this build, in scratch DAW folders, and on an Apple Silicon Mac Logic
+          # Pro's bridge in Kumi's own folder. A release that knows none of them (1.19 and before; for Logic's, every
+          # release before the one that brings it) leaves each as it is on its rollback, said; one that carries them puts
+          # back its own copy of each, said where it isn't this build's. The rollback back to this build puts this build's
+          # back, from the generations kept.
           python3 scripts/tests/daw_bridges.py prepare "$reaper" "$renoise"
           kumi --daw reaper bridge --yes
           kumi --daw renoise bridge --yes
-          placed() { python3 scripts/tests/daw_bridges.py placed "$home/.kumi/$1" "$home/.kumi" "$reaper" "$renoise"; }
+          if [[ "$LOGIC" == true ]]; then kumi --daw logic bridge --yes; fi
+          placed() { local app="$1"; shift; python3 scripts/tests/daw_bridges.py placed "$home/.kumi/$app" "$home/.kumi" "$reaper" "$renoise" "$@"; }
           placed app > daws.txt
           kumi update --rollback | tee rollback.txt
           test "$(kumi --version)" = "Kumi $previous"
           test "$(bridge)" = "$before"
           test "$(extension)" = "$before_extension"
+          # (a release before Logic Pro's bridge leaves the one this build set up where it is)
+          kept=""; if [[ "$LOGIC" == true && ! -d "$home/.kumi/app/daws/logic" ]]; then kept="--kept-logic"; fi
           if [[ -d "$home/.kumi/app/daws" ]]; then
-            placed app | tee earlier.txt
+            placed app $kept | tee earlier.txt
             while read -r daw carried sha _; do
               if [[ "$sha" != "$(grep "^$daw " daws.txt | cut -d' ' -f3)" ]]; then
-                if [[ "$daw" == reaper ]]; then said="Kumi's extension $carried is back in REAPER"; else said="Kumi's tool $carried is back in Renoise"; fi
+                case "$daw" in
+                  reaper) said="Kumi's extension $carried is back in REAPER" ;;
+                  renoise) said="Kumi's tool $carried is back in Renoise" ;;
+                  *) said="Kumi's Logic Pro bridge $carried is back in Kumi's own folder" ;;
+                esac
                 grep -qF "$said, as Kumi $previous had it" rollback.txt
               fi
             done < earlier.txt
@@ -435,13 +492,14 @@ jobs:
             grep -q "Kumi's tool stays in Renoise" rollback.txt
             test "$(placed app.previous)" = "$(cat daws.txt)"
           fi
+          if [[ -n "$kept" ]]; then grep -q "Kumi's Logic Pro bridge stays in Kumi's own folder" rollback.txt; fi
           kumi update --rollback
           test "$(kumi --version)" = "Kumi $version"
           if [[ "$before" == "$after" ]]; then test "$(bridge)" = "$after"; else test "$(bridge | cut -d' ' -f1)" = "${after%% *}"; fi
           test "$(extension)" = "$after_extension"
           test "$(placed app | cut -d' ' -f1-4)" = "$(cut -d' ' -f1-4 daws.txt)"
 
-          # Uninstalling takes the PATH line out, and REAPER's and Renoise's bridges.
+          # Uninstalling takes the PATH line out, and REAPER's and Renoise's bridges, and Logic's from Kumi's own folder.
           kumi uninstall --yes
           test ! -e "$home/.kumi/app"
           test ! -e "$home/.kumi/bin"
@@ -530,6 +588,10 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'kumi --daw reaper bridge failed' }
           & $kumi --daw renoise bridge --yes
           if ($LASTEXITCODE -ne 0) { throw 'kumi --daw renoise bridge failed' }
+          # Logic Pro's bridge is in an Apple Silicon Mac's bundle only (Logic Pro 12 runs on Apple Silicon only): Windows'
+          # Kumi carries none, says so, and sets nothing up, which daw_bridges.py checks too.
+          $logic = & $kumi --daw logic bridge --yes | Out-String; Write-Host $logic
+          if ($LASTEXITCODE -eq 0 -or $logic -notmatch 'Logic Pro is supported on Apple Silicon Macs only') { throw "kumi --daw logic bridge didn't refuse: $logic" }
           function Daws {
             $said = python scripts/tests/daw_bridges.py placed (Join-Path $env:KUMI_HOME 'app') $env:KUMI_HOME $reaper $renoise @args | Out-String
             if ($LASTEXITCODE -ne 0) { throw "REAPER's and Renoise's bridges aren't as Kumi put them" }
@@ -592,7 +654,8 @@ jobs:
           $previous = $tags |
             ForEach-Object { if ($_ -match '^v(\d+\.\d+\.\d+)$') { [version]$Matches[1] } } |
             Where-Object { $_ -lt [version]$version } | Sort-Object -Descending | Select-Object -First 1
-          if (-not $previous) { throw 'no published release before this one' }
+          # A fork, or the first release, has nothing to update from: the shell step above says so and stops too.
+          if (-not $previous) { Write-Host "no release published below $version in $env:GITHUB_REPOSITORY (a fork, or the first release): nothing to update from"; exit 0 }
           $previous = "$previous"
           function Kumi { & $kumi @args; if ($LASTEXITCODE -ne 0) { throw "kumi $args exited $LASTEXITCODE" } }
           function OnPath { ([Environment]::GetEnvironmentVariable('Path', 'User') -split ';') -contains $bin }

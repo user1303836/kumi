@@ -290,3 +290,55 @@ async fn a_reaper_only_report_never_speaks_lives_words() {
     assert!(said.contains("REAPER"), "{said}");
     kumi::daw::work_with(kumi_runtime::core::daw::DawId::Ableton);
 }
+
+/// A producer with Kumi's Logic Pro bridge alone: the report speaks of Logic Pro, never of Live, and carries the
+/// bridge's log from Kumi's own folder (`bridges/logic/logs/logic-<pid>.log`).
+#[tokio::test(flavor = "current_thread")]
+async fn a_logic_only_report_carries_the_bridges_log_and_never_speaks_lives_words() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path().display().to_string();
+    let kumi = dir.path().join(".kumi");
+    let env = Env::from([
+        ("KUMI_HOME".into(), kumi.display().to_string()),
+        ("HOME".into(), home.clone()),
+        ("KUMI_REAPER_RESOURCE_DIR".into(), dir.path().join("REAPER").display().to_string()),
+        ("KUMI_RENOISE_PREFS_DIR".into(), dir.path().join("Renoise").display().to_string()),
+        ("KUMI_LOGIC_APP".into(), dir.path().join("nowhere/Logic Pro.app").display().to_string()),
+    ]);
+    let paths = daw_bridge::paths::BridgePaths::new(&kumi, daw_bridge::daw::Daw::Logic);
+    fs::create_dir_all(&paths.root).unwrap();
+    let placed = paths.root.join("bridge/logic-kumi");
+    let receipt = daw_bridge::lifecycle::Receipt {
+        schema: daw_bridge::lifecycle::RECEIPT_SCHEMA.into(),
+        daw: "logic".into(),
+        status: "installed".into(),
+        target: placed.display().to_string(),
+        reference: placed.join("bridge-reference.json").display().to_string(),
+        generation: Some("g1".into()),
+        version: Some("0.1.0".into()),
+        sha256: None,
+        previous: vec![],
+        updated_ms: 0,
+        history: vec![],
+        copies: vec![],
+    };
+    fs::write(paths.receipt(), serde_json::to_string(&receipt).unwrap()).unwrap();
+    fs::create_dir_all(paths.logs()).unwrap();
+    fs::write(paths.logs().join("logic-4242.log"), "2026-10-19T10:00:00Z attached to Logic Pro 12.3.1 (pid 48552) in 23 ms\n").unwrap();
+    kumi::daw::work_with(kumi::daw::chosen(None, &env).0.id());
+    let out = Rc::new(Out::default());
+    let mut io = ReportIo::new(doctor(out.clone(), env));
+    io.home = Some(home.clone());
+    io.folder = Some(home);
+    io.user = Some("fixtureuser".into());
+    io.now = Some(Rc::new(|| "2026-10-19T20:00:00Z".parse().unwrap()));
+    io.live_logs = Some(Rc::new(|| async { Ok(vec![]) }.boxed_local()));
+    assert_eq!(write_report(io).await.unwrap(), 0);
+    let text = fs::read_to_string(dir.path().join("kumi-report-2026-10-19T20-00-00.txt")).unwrap();
+    let said = format!("{}\n{text}", out.0.borrow());
+    let leaks = live_words::leaks(&said);
+    assert!(leaks.is_empty(), "the report says Live's words:\n{}\n\nin:\n{said}", leaks.join("\n"));
+    assert!(said.contains("Logic Pro's bridge log") && said.contains("attached to Logic Pro 12.3.1 (pid 48552)"), "{said}");
+    assert!(said.contains("the bridge's lines from Logic Pro's log"), "{said}");
+    kumi::daw::work_with(kumi_runtime::core::daw::DawId::Ableton);
+}

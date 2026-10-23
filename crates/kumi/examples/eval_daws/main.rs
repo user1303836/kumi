@@ -382,6 +382,7 @@ async fn run_scenario(model: &Model, scenario: &Scenario, home: &Path, dirs: &Di
     let (prelude, state, timeout) = match scenario.daw {
         Daw::Reaper => (scenarios::REAPER_PRELUDE, scenarios::REAPER_STATE, 5_000),
         Daw::Renoise => (scenarios::RENOISE_PRELUDE, scenarios::RENOISE_STATE, 800),
+        Daw::Logic => unreachable!("the DAW evals are REAPER's and Renoise's: Logic Pro's are eval_logic's"),
     };
     let places = format!("local MEDIA = {:?}\nlocal SONGS = {:?}\n", dirs.media.to_string_lossy(), dirs.songs.to_string_lossy());
     let reader = format!("{state}\n{}\nreturn out", scenario.read);
@@ -478,10 +479,11 @@ async fn run_scenario(model: &Model, scenario: &Scenario, home: &Path, dirs: &Di
                     session.watch(WatchEvent::Change(change));
                 }
             }));
-            let options = OwnOptions { context, kumi_home: home.clone(), connect: Some(connect) };
+            let options = OwnOptions { context, kumi_home: home.clone(), connect: Some(connect), open_file: None };
             match daw {
                 Daw::Reaper => create_reaper_integration(options),
                 Daw::Renoise => create_renoise_integration(options),
+                Daw::Logic => unreachable!("the DAW evals are REAPER's and Renoise's: Logic Pro's are eval_logic's"),
             }
         })
     };
@@ -497,6 +499,7 @@ async fn run_scenario(model: &Model, scenario: &Scenario, home: &Path, dirs: &Di
     options.profile = match scenario.daw {
         Daw::Reaper => DawProfile::REAPER,
         Daw::Renoise => DawProfile::RENOISE,
+        Daw::Logic => unreachable!("the DAW evals are REAPER's and Renoise's: Logic Pro's are eval_logic's"),
     };
     // (a tutorial is fetched and transcribed inside the turn)
     options.timeout_ms = Some(900_000);

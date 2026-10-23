@@ -1,4 +1,4 @@
-//! What a REAPER or Renoise producer sees from Kumi's app never speaks Live's words: every TUI state a session reaches
+//! What a REAPER, Renoise or Logic producer sees from Kumi's app never speaks Live's words: every TUI state a session reaches
 //! (connecting, idle, the DAW gone, no model, FOCUS of each view, the command menu, /help, /status, the panels, the
 //! goodbye), the plain terminal's lines, and the commands' messages (bridge, doctor, report, update, uninstall). Live's
 //! own screens keep their bytes: the pins say so.
@@ -67,8 +67,15 @@ async fn settle(h: &Harness) {
     }
 }
 
-/// A session's states as the TUI draws them for `daw`, with its focus events and bodies.
-async fn tui_states(daw: DawId, label: &str, focuses: Vec<(serde_json::Value, Option<FocusBody>)>) -> Found {
+/// A session's states as the TUI draws them for `daw`, with its focus events and bodies, and `history`: the DAW's own
+/// HISTORY rows beyond the ones every DAW gets (a change only the DAW's own undo takes back, one past Kumi's undo, an
+/// undo the DAW didn't finish), each as the session tells the app of it.
+async fn tui_states(
+    daw: DawId,
+    label: &str,
+    focuses: Vec<(serde_json::Value, Option<FocusBody>)>,
+    history: Vec<serde_json::Value>,
+) -> Found {
     work_with(daw);
     let found = Found::default();
     let c = Rc::new(Control::default());
@@ -100,6 +107,21 @@ async fn tui_states(daw: DawId, label: &str, focuses: Vec<(serde_json::Value, Op
     h.type_text("/status\r").await;
     settle(&h).await;
     found.screen("/status", &h);
+    // A change that stands, and the producer's /undo of it: the notice, and HISTORY's rows, in the DAW's words.
+    h.emit(json!({"type":"change","change":{"id":"c2","family":"tempo","title":"Tempo 120 → 124 BPM","state":"applied","at":2}}));
+    settle(&h).await;
+    found.screen("a change", &h);
+    // The DAW's own rows: kept, past Kumi's undo, unsure after an undo the DAW didn't finish.
+    for change in history {
+        h.emit(json!({"type":"change","change":change}));
+    }
+    settle(&h).await;
+    found.screen("HISTORY", &h);
+    *c.undo.borrow_mut() =
+        Some(serde_json::from_value(json!({"id":"c2","family":"tempo","title":"Tempo 120 → 124 BPM","state":"undone","at":2})).unwrap());
+    h.type_text("/undo\r").await;
+    settle(&h).await;
+    found.screen("/undo", &h);
     h.emit(json!({"type":"library","status":{"state":"ready","sounds":1020,"presets":40,"sets":3,"learnedAt":1}}));
     settle(&h).await;
     found.screen("library", &h);
@@ -190,11 +212,98 @@ case!(a_reaper_session_never_speaks_lives_words, async {
         "Read your REAPER project again",
         "REAPER connected",
         "REAPER isn't connected",
+        "Undid: Tempo 120 → 124 BPM",
+        "Ran action",
+        "kept",
+        "Kumi closed. Each project's conversation continues next time.",
+    ];
+    let history = vec![
+        json!({"id":"c3","family":"structure","title":"Ran action “Track: Insert new track”","state":"kept","note":"Only REAPER's own undo can take this back (Edit > Undo).","at":3}),
+    ];
+    tui_states(DawId::Reaper, "REAPER — Night Drive", focuses, history).await.saw(&seen.map(String::from)).assert_none("REAPER");
+});
+
+case!(a_logic_session_never_speaks_lives_words, async {
+    let track = json!({"name":"Keys","color":"#5b8def","kind":"midi"});
+    let focuses = vec![
+        (json!({"track":track,"trackRef":"1:track:2","mainView":{"kind":"timeline","label":"Tracks"}}), None),
+        (
+            json!({"track":track,"trackRef":"1:track:2","mainView":{"kind":"timeline","label":"Tracks"},"editorView":{"kind":"note-editor","label":"Piano Roll"},"item":{"kind":"item","itemRef":"1:region:1","name":"Keys"}}),
+            None,
+        ),
+        // A dialog up in Logic: said in Logic's words; then free again, with the routing shown.
+        (
+            json!({"track":track,"trackRef":"1:track:2","device":"Alchemy","mainView":{"kind":"timeline","label":"Tracks"},"editorView":{"kind":"device-chain","label":"Plug-in"},"busy":"Logic Pro is showing a dialog"}),
+            None,
+        ),
+        (
+            json!({"track":track,"trackRef":"1:track:2","mainView":{"kind":"timeline","label":"Tracks"},"editorView":{"kind":"routing","label":"Routing"}}),
+            Some(FocusBody::Routing(RoutingView {
+                track_ref: "1:track:2".into(),
+                name: None,
+                routes: vec![],
+                parent_send: None,
+                midi_out: None,
+            })),
+        ),
+    ];
+    // HISTORY over Logic's profile: a change to check, the catch-up, watching, and the producer's /undo, each in
+    // Logic's words.
+    let seen = [
+        "connecting to Logic Pro",
+        "Ask Kumi about your project",
+        "check Logic Pro",
+        "While Logic Pro was away",
+        "Watching your changes in Logic Pro",
+        "Kept once the project is saved",
+        "A project not saved yet",
+        "Read your Logic Pro project again",
+        "Logic Pro connected",
+        "Logic Pro isn't connected",
+        "Logic Pro is busy",
+        "Undid: Tempo 120 → 124 BPM",
+        "Ran key command",
+        "kept",
+        "Split region",
+        "no undo",
+        "Imported 64 notes",
+        "Cycle bar 5",
         "Kumi closed. Each project's conversation continues next time.",
         // (/status: REAPER has no status bar Kumi can write to)
         "no status bar",
     ];
-    tui_states(DawId::Reaper, "REAPER — Night Drive", focuses).await.saw(&seen.map(String::from)).assert_none("REAPER");
+    // (M4, M4b) HISTORY's rows for Logic's two M4 slices: a key command only Logic's own undo takes back (kept, in Logic's
+    // words), a split past Kumi's undo (no undo), an import whose undo Logic didn't finish (unsure, Logic's words
+    // leading), and the cycle, which Logic's own undo never takes back.
+    let history = vec![
+        json!({"id":"c3","family":"structure","title":"Ran key command “Create Marker”","state":"kept","note":"Kumi can't take back what a key command did: Logic Pro's own undo can take it back (Cmd-Z in Logic Pro)","at":3}),
+        json!({"id":"c4","family":"clip","title":"Split region “Keys” at bar 3","state":"expired","note":"Kumi no longer holds this change for its undo; Logic Pro's own undo (Cmd-Z in Logic Pro) may.","at":4}),
+        json!({"id":"c5","family":"clip","title":"Imported 64 notes on “Keys” at bar 9","state":"unsure","note":"Kumi's undo didn't finish: Logic Pro didn't answer after the change was sent: the helper didn't answer in time","at":5}),
+        json!({"id":"c6","family":"locators","title":"Cycle bar 5 to bar 9","state":"applied","note":"Logic Pro's own undo (Cmd-Z in Logic Pro) can't take this back; Kumi can.","at":6}),
+    ];
+    tui_states(DawId::Logic, "Logic Pro — Night Drive", focuses.clone(), history)
+        .await
+        .saw(&seen.map(String::from))
+        .assert_none("Logic Pro");
+    // (M4b) HISTORY's rows for the second slice, in the bridge's titles: a Gain on the Stereo Out and its gain set (no
+    // step of Logic's undo), a send to a new bus undone, a patch only Logic's own undo takes back, kept, and Volume
+    // automation written.
+    // (the panel cuts a title at its width)
+    let seen = [
+        "Added “Gain” to “Stereo Out”",
+        "“Gain”'s Gain → -3.0 dB",
+        "Added send from “Vocal” to",
+        "Loaded the patch “Steinway",
+        "Wrote 3 Volume automation",
+    ];
+    let history = vec![
+        json!({"id":"c7","family":"device","title":"Added “Gain” to “Stereo Out”","state":"applied","at":7}),
+        json!({"id":"c8","family":"parameter","title":"“Gain”'s Gain → -3.0 dB on “Stereo Out”","state":"applied","note":"Logic Pro's own undo (Cmd-Z in Logic Pro) can't take this back; Kumi can.","at":8}),
+        json!({"id":"c9","family":"mixer","title":"Added send from “Vocal” to Bus 1","state":"undone","at":9}),
+        json!({"id":"c10","family":"device","title":"Loaded the patch “Steinway Grand Piano” on “Keys”","state":"kept","note":"Logic Pro's undo has other steps on top of the patch load, so Kumi can't put the strip back (a patch replaces the whole strip): Cmd-Z in Logic Pro can, step by step","at":10}),
+        json!({"id":"c11","family":"parameter","title":"Wrote 3 Volume automation events on “Vocal”","state":"applied","at":11}),
+    ];
+    tui_states(DawId::Logic, "Logic Pro — Night Drive", focuses, history).await.saw(&seen.map(String::from)).assert_none("Logic Pro");
 });
 
 case!(a_renoise_session_never_speaks_lives_words, async {
@@ -229,7 +338,7 @@ case!(a_renoise_session_never_speaks_lives_words, async {
         "Kumi closed. Each song's conversation continues next time.",
         "status bar too",
     ];
-    tui_states(DawId::Renoise, "Renoise — Night Drive", focuses).await.saw(&seen.map(String::from)).assert_none("Renoise");
+    tui_states(DawId::Renoise, "Renoise — Night Drive", focuses, vec![]).await.saw(&seen.map(String::from)).assert_none("Renoise");
 });
 
 fn now_ms() -> f64 {
@@ -336,6 +445,150 @@ case!(reapers_and_renoises_setup_never_speak_lives_words, async {
     setup_states(DawId::Reaper).await.saw(&reaper.map(String::from)).assert_none("REAPER's setup");
     let renoise = ["Renoise is open · restart needed", "Renoise 3.5 not found", "renoise.com", "chat without Renoise for now"];
     setup_states(DawId::Renoise).await.saw(&renoise.map(String::from)).assert_none("Renoise's setup");
+});
+
+/// Logic's side of setup as Kumi's own bridge has it: the bridge goes into Kumi's own folder while Logic stays open
+/// (nothing quits or restarts), and Accessibility, granted in System Settings, is what the bridge's status reports.
+struct FakeLogic {
+    open: RefCell<Option<String>>,
+    installed: RefCell<Installed>,
+    fails: Cell<bool>,
+    granted: Cell<bool>,
+}
+#[async_trait(?Send)]
+impl DawSetup for FakeLogic {
+    async fn open_live(&self) -> Option<String> {
+        self.open.borrow().clone()
+    }
+    async fn ask_to_quit(&self) -> bool {
+        false
+    }
+    async fn closed(&self, _stop: &Signal) -> bool {
+        false
+    }
+    async fn install(&self) -> Result<String, String> {
+        // Long enough for the installing screen to show.
+        delay(400).await;
+        if self.fails.replace(false) {
+            Err("The folder for Kumi's bridge can't be written.".into())
+        } else {
+            Ok("0.1.0".into())
+        }
+    }
+    async fn start(&self, _: Option<String>, _: Option<String>) -> bool {
+        false
+    }
+    async fn connect(&self) {}
+    async fn version(&self, _: Option<String>) -> Option<String> {
+        Some("12.3.1".into())
+    }
+    async fn installed(&self) -> Installed {
+        self.installed.borrow().clone()
+    }
+    fn can_ask_to_quit(&self) -> bool {
+        false
+    }
+    fn needs_restart(&self) -> bool {
+        false
+    }
+    async fn enabled(&self) -> Option<bool> {
+        Some(self.granted.get())
+    }
+    fn settings_menu(&self) -> Option<String> {
+        Some("Accessibility is under System Settings > Privacy & Security: turn on the app Kumi runs in.".into())
+    }
+    fn surface_wait(&self) -> std::time::Duration {
+        std::time::Duration::from_millis(100)
+    }
+}
+
+/// Waits (a while) until the setup shows `text`, wrapped over lines or not.
+async fn wait(h: &Harness, text: &str) {
+    let shown = |h: &Harness| h.screen().join(" ").split_whitespace().collect::<Vec<_>>().join(" ");
+    for _ in 0..50 {
+        if shown(h).contains(text) {
+            return;
+        }
+        settle(h).await;
+    }
+    panic!("never saw {text:?}:\n{}", h.screen().join("\n"));
+}
+
+/// Setup's screens for Logic: open (the bridge goes in at once, failing once), then Accessibility waited for, said
+/// where it is, and granted; and Logic missing or older than 12.
+async fn logic_setup_states() -> Found {
+    work_with(DawId::Logic);
+    let found = Found::default();
+    let harness = |fake: &Rc<FakeLogic>| {
+        let fake = fake.clone();
+        let models = models::FakeModels::catalog();
+        Harness::with(120, 30, Rc::new(Control::default()), move |o| {
+            o.models = Some(models);
+            o.connect_live = Some(ConnectLive {
+                why: Some("Kumi's Logic Pro bridge isn't set up yet, so Kumi can't see your project.".into()),
+                bridge: "0.1.0".into(),
+                live: fake,
+            });
+        })
+    };
+    let fake = Rc::new(FakeLogic {
+        open: RefCell::new(Some("/Applications/Logic Pro.app".into())),
+        installed: RefCell::new(Installed::Ready),
+        fails: Cell::new(true),
+        granted: Cell::new(false),
+    });
+    let h = harness(&fake);
+    h.start().await;
+    wait(&h, "The bridge goes into Kumi's own folder; Logic Pro stays open.").await;
+    found.screen("setup: installing", &h);
+    wait(&h, "Try again").await;
+    found.screen("setup: install failed", &h);
+    h.type_text("\r").await;
+    wait(&h, "waiting for Accessibility").await;
+    found.screen("setup: Accessibility", &h);
+    h.connect();
+    wait(&h, "System Settings > Privacy & Security: turn on").await;
+    found.screen("setup: where Accessibility is", &h);
+    fake.granted.set(true);
+    wait(&h, "You're set.").await;
+    found.screen("setup: done", &h);
+    h.close().await;
+    for installed in [Installed::Missing, Installed::Older("11.2".into())] {
+        let fake = Rc::new(FakeLogic {
+            open: RefCell::new(None),
+            installed: RefCell::new(installed),
+            fails: Cell::new(false),
+            granted: Cell::new(false),
+        });
+        let h = harness(&fake);
+        h.start().await;
+        wait(&h, "Look again").await;
+        found.screen("setup: no Logic Pro 12", &h);
+        h.type_text("\x1b").await;
+        settle(&h).await;
+        found.screen("setup: later", &h);
+        h.close().await;
+    }
+    found
+}
+
+case!(logics_setup_never_speaks_lives_words_and_never_restarts_logic, async {
+    let logic = [
+        "The bridge goes into Kumi's own folder; Logic Pro stays open.",
+        "waiting for Accessibility",
+        "Allow Kumi's helper under System Settings > Privacy & Security > Accessibility",
+        "Accessibility is under System Settings > Privacy & Security: turn on the app Kumi runs in.",
+        "Logic Pro 12.3.1 · connected",
+        "Logic Pro 12 not found",
+        "apple.com/logic-pro",
+        "this computer has Logic Pro 11.2",
+    ];
+    let found = logic_setup_states().await;
+    found.saw(&logic.map(String::from)).assert_none("Logic Pro's setup");
+    let seen = found.1.borrow().to_lowercase();
+    for word in ["restart", "quit"] {
+        assert!(!seen.contains(word), "Logic's setup says {word:?}:\n{seen}");
+    }
 });
 
 /// REAPER's and Renoise's FOCUS bodies and change pictures (tui_own_bodies' goldens: each body, each family's picture in

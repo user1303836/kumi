@@ -11,6 +11,11 @@ songs too: most of this guide speaks of Live, and
 [Connect to REAPER or Renoise](#connect-to-reaper-or-renoise) says what differs
 there.
 
+It works with Logic Pro 12 projects too, on Apple Silicon Macs, through a
+bridge of its own beside Logic Pro: [Connect to Logic Pro](#connect-to-logic-pro)
+and [Working in Logic Pro](#working-in-logic-pro) say how, and where Logic Pro
+differs from the Live this guide otherwise speaks of.
+
 To install Kumi and connect it to Live, follow [Quickstart](../../README.md#quickstart).
 This guide covers everything after that. For the keys and the screen, see
 [commands, keys and screens](KUMI_TUI.md); for how changes and undo work, see
@@ -229,8 +234,8 @@ bridge in or brings it up to date, and says to restart the DAW if it's open.
 With several, it takes the one running now, else the one you used last, else
 Live, and says when another is open too ("Renoise is open too: Kumi works with
 REAPER. /daw renoise switches to Renoise."). `/daw` says which DAW Kumi works
-with, and `/daw <name>` (`live`, `reaper` or `renoise`) closes Kumi and opens it
-again with that one. `--daw` and `KUMI_DAW` always decide.
+with, and `/daw <name>` (`live`, `reaper`, `renoise` or `logic`) closes Kumi and
+opens it again with that one. `--daw` and `KUMI_DAW` always decide.
 
 **Where Kumi looks.**
 
@@ -268,6 +273,165 @@ Kumi about this**), Live's own commands and Live's manual.
 Kumi 1.21.0 to 1.21.1 with REAPER extension 0.1.1, 1.20.0 with 0.1.0.
 Kumi 1.21.0 to 1.21.1 with Renoise tool 1.0.1, 1.20.0 with 1.0.0.
 
+## Connect to Logic Pro
+
+Kumi works with Logic Pro 12 on Apple Silicon Macs: the App Store's Logic Pro
+or the Creator Studio one. Logic Pro has no scripting Kumi could use, so Kumi
+brings a bridge of its own, `logic-kumi`, a program that runs beside Logic Pro
+while Kumi works with it. Its helper reads and works Logic Pro's windows as you
+would: through macOS's Accessibility, Logic Pro's key commands and menus, and a
+control surface Logic Pro adds by itself, "Kumi Logic". The bridge lives in
+Kumi's own folder; nothing goes into Logic Pro or its folders.
+
+Run `kumi --daw logic`. The first time, Kumi's setup runs the steps still
+missing, in the app:
+
+1. **Sign in**, if Kumi isn't signed in yet.
+2. **Connect to Logic Pro**: Kumi sets its Logic Pro bridge up in Kumi's own
+   folder. Logic Pro can stay open, and nothing restarts. If this Mac has no
+   Logic Pro 12, or only an older one, Kumi says so; **Look again** checks once
+   it's there.
+3. **Accessibility**: macOS asks the first time Kumi starts the bridge's
+   helper. Allow it in System Settings › Privacy & Security › Accessibility,
+   where macOS lists the app Kumi runs in (your terminal). Kumi waits until the
+   bridge can read Logic Pro, then connects.
+
+Esc on a step leaves it for later, and Kumi chats without Logic Pro meanwhile;
+once Accessibility is allowed, Kumi reads Logic Pro by itself.
+
+`kumi --daw logic bridge` sets the bridge up from a shell. It asks first
+(`--yes` confirms beforehand), Logic Pro can stay open, and it says what it
+did: "Kumi's Logic Pro bridge 0.1.0 is in Kumi's own folder. Kumi starts it
+beside Logic Pro when a session begins". Kumi puts it in place through the
+bridge's own lifecycle, with a receipt and the earlier versions kept for
+rollback. Kumi finds Logic Pro in `/Applications` or `~/Applications`;
+`KUMI_LOGIC_APP` names the app when it's elsewhere.
+
+**Each time**, open Logic Pro with a project, then run `kumi --daw logic`. Kumi
+starts its bridge beside Logic Pro as the session begins, and the bridge stops
+when Kumi closes. FOCUS follows the track and region you select in Logic Pro.
+With Logic Pro closed, Kumi chats without it and connects by itself once Logic
+Pro answers; `/reconnect` tries at once.
+
+**Live and Logic Pro.** `kumi --daw logic` (or `KUMI_DAW=logic`) works with
+Logic Pro, and `kumi --daw ableton` with Live. With only one of their bridges
+set up, `kumi` alone works with that one; with both, with the one that's open,
+else the one you used last, and Kumi says when the other is open too. Inside
+Kumi, `/daw` says which DAW it works with, and `/daw logic` or `/daw live`
+closes Kumi and opens it again with the other. Each DAW's projects keep their
+own conversations.
+
+**Apple Silicon Macs only.** Logic Pro 12 runs only there, so only the Apple
+Silicon Mac's Kumi carries the bridge. On an Intel Mac, Linux or Windows,
+`kumi --daw logic bridge` sets nothing up and says why: "Logic Pro is supported
+on Apple Silicon Macs only, and this Kumi is for Intel Macs" (or Linux, or
+Windows). Logic Pro 11 and earlier aren't supported, and
+`kumi --daw logic doctor` says so.
+
+**Hearing Logic Pro** needs macOS 14.2 or later. Kumi hears what Logic Pro
+outputs through a Core Audio process tap, which asked for no permission on the
+Mac it was tested on. Where macOS refuses it, Kumi says so: allow System Audio
+Recording for the app Kumi runs in (System Settings › Privacy & Security ›
+Screen & System Audio Recording).
+
+**The control surface.** The first time the bridge runs, Logic Pro adds the
+"Kumi Logic" control surface by itself (a Mackie Control on virtual MIDI ports)
+and may show its Control Surface Setup window, which you can close. The surface
+stays in Logic Pro › Control Surfaces › Setup, offline while no bridge runs.
+
+## Working in Logic Pro
+
+In Logic Pro, Kumi speaks Logic Pro's words: a project, its tracks and regions,
+the Tracks area, the plug-ins on a channel strip, the Stereo Out. It reads the
+project as you see it (tracks, regions and their notes, plug-ins and their
+parameters, sends, Smart Controls, automation, markers, the Tempo and Signature
+Lists), and FOCUS shows the selected track's channel strip, a region's notes
+and the Tracks area. A read that needs a pane Logic Pro isn't showing (the
+Mixer, the List Editors, a plug-in's window) opens it for a moment and closes
+it again.
+
+**What Kumi changes.** Each change is read back from Logic Pro before HISTORY
+says it's done:
+
+- tracks: volume, pan, mute, solo, arm and name; tracks added below the
+  selected one, and deleted; Track Stacks made and flattened;
+- regions: moved along their track, resized and split on whole beats, looped,
+  renamed and deleted; their notes added, changed, deleted and quantized; many
+  notes at once as a MIDI file Kumi writes and Logic Pro imports, onto a new
+  track of its own;
+- plug-ins added and removed, bypassed, their parameters set in the plug-in
+  window's Controls View and their settings stepped; patches from Logic Pro's
+  Library; Smart Controls; a sample loaded into a new Sampler track;
+- sends made to a bus (Logic Pro makes an aux for a bus nothing takes yet),
+  their levels set, and removed; automation events, through the Track
+  Automation Event List;
+- markers added, moved and deleted; the tempo, tempo events and time
+  signatures; the cycle; the metronome;
+- playing, stopping and the playhead; saving, or saving as a new `.logicx`
+  (never over a file that's there); bouncing a range to a file, and exporting
+  every track as audio files;
+- any of Logic Pro's key commands, by its name as the Key Commands window lists
+  it ("Split Regions/Events at Playhead") or by its id, from your own key set.
+  Kumi never runs one that opens a dialog or leaves the project.
+
+Many of these bring Logic Pro to the front for a moment, since its menus and
+key commands act only then. While Logic Pro shows a dialog, loads a project or
+has its window on another Space, Kumi says it's busy and changes nothing. If
+Logic Pro's window is too narrow to show its control bar or List Editors, Kumi
+says so: make it wider.
+
+**Undo.** Kumi's undo works in Logic Pro too, in HISTORY as in Live. Logic Pro
+has no undo block, so a plan is a step of Logic Pro's own undo for each change,
+not one. Where a value can be set again (a fader, a name, a region's place, a
+parameter, a marker, the tempo), Kumi puts it back by value. A deleted track or
+region, a split, an import, a flattened Track Stack, a patch or a loaded sample
+comes back through Logic Pro's own undo, which Kumi presses only while its step
+is still the top one; when your own steps are on top, Kumi says so, and Cmd-Z in
+Logic Pro takes them back one by one. What a key command did, only Logic Pro's
+own undo takes back. Logic Pro's undo keeps no step for a fader, pan, mute, solo
+or arm, the tempo, a bypass, the cycle, the metronome, a send's level or a Smart
+Control, nor for a plug-in's parameter or setting (those are steps of the
+plug-in window's own undo), so Cmd-Z in Logic Pro doesn't take those back, and
+Kumi's undo does. When you take one of Kumi's steps back with Cmd-Z in Logic
+Pro, Kumi notices, and HISTORY says so.
+
+**Listening.** Kumi hears Logic Pro by playing the part and capturing what
+Logic Pro outputs after the Stereo Out, which you hear too. A track is heard
+alone by soloing it for a pass of its own, and an audition plays each candidate
+in a pass of its own, Logic Pro silent for all but the first. A render is Logic
+Pro's own offline bounce. Kumi listens only while Logic Pro is stopped, and
+puts it back as it was after: stopped, its playhead, solos, metronome and
+cycle. The audio stays in files on your computer. A judged round brings the
+level back with the track's or the Stereo Out's last Adaptive Limiter or
+Limiter that's on, else its last Gain, else a Gain Kumi adds at the end, each a
+change in HISTORY. A listen turns the metronome off and on again (its clicks
+time the capture), and Logic Pro saves that setting with the project, so it
+asks to save when you close the project though nothing in it changed; Kumi says
+so when it has listened.
+
+**Catching up and watching.** Kumi remembers each saved project as it last saw
+it, and says what changed while it was closed, as for a Set: tracks by name and
+order (one renamed in its place is told as renamed), regions by their track and
+start, plug-ins by their order on the strip (the Stereo Out's too), markers by
+position. It doesn't compare notes or plug-in settings yet. Taking that look
+opens Logic Pro's Mixer and List Editors for a moment. Logic Pro keeps no id
+Kumi could put inside a project, so Kumi knows one by its path: a project moved
+or saved under another name starts afresh, and one in Logic Pro's Project
+Templates folder is never caught up on. "Watch me" works too: do it by hand in
+Logic Pro, say when you're done, and Kumi turns what changed into a recipe.
+
+**Instant phrases** work as in Live ([instant phrases](KUMI_TUI.md#instant-phrases)):
+the tempo in whole BPM, a track's mute, solo or arm (one of your tracks, never
+an aux, an output or the Stereo Out), the cycle (`loop 9-16`) and the
+metronome. Notes are named in the octave Logic Pro's "Display Middle C As"
+setting gives middle C.
+
+**Live's alone.** Max for Live devices and Kumi Ears, Kumi's Live extension and
+**Ask Kumi about this**, Python in Live, Live's own commands (in Logic Pro, its
+key commands do that work), Willington, and stem separation and audio-to-MIDI
+conversion are Live's. What Kumi can't do in Logic Pro yet is under
+[Limits](#limits).
+
 ## Working with Kumi
 
 Kumi runs full screen: the conversation on the left, a Live pane on the right
@@ -303,8 +467,9 @@ Clipboard pictures are kept in `~/.kumi/attachments` for a week.
 ## Background jobs
 
 Kumi does slow work that doesn't change the Set in the background, so you can
-keep working with it: research on the web, a tutorial video, Live's manual, your
-library or earlier conversations, or a Max for Live device's file.
+keep working with it: research on the web, a tutorial video, Live's manual (or
+Logic Pro's guide), your library or earlier conversations, or a Max for Live
+device's file.
 
 - **Starting:** Kumi says what's running in a line and is free for your next
   message. Ask for one ("look into this in the background") or let Kumi decide.
@@ -842,8 +1007,8 @@ technique.
 - **Reading** covers pages, PDFs, text and code files, GitHub repositories, Max
   patches and Max for Live devices, and pictures, which the model sees.
 - **Searches and reads** that don't touch Live (the web, sounds, presets, your
-  Sets, the Live manual, earlier conversations) run at the same time, up to four
-  at once. Changes to Live still run one after another.
+  Sets, the Live manual or Logic Pro's guide, earlier conversations) run at the
+  same time, up to four at once. Changes to Live still run one after another.
 
 What Kumi looked up shows above its answer, a line each. It reads only public
 addresses, never your computer or your network, and treats what a page says as
@@ -858,6 +1023,17 @@ reference", "my usual vocal chain" or "the bass from my Night Drive Set".
   its Core Library, Splice's folder, and folders you list in `settings.json`
   (`"libraryFolders": ["~/Samples"]`). A folder you name in a request is learned
   next. Sets are found where Live last opened them, and beside them.
+- **In Logic Pro,** Kumi learns Logic Pro's places instead, never Live's: your
+  content in `~/Music/Audio Music Apps` (samples, Sampler instruments, patches,
+  channel strip and plug-in settings), Apple Loops, Splice's folder and the
+  folders you list, then Logic Pro's own content in
+  `/Library/Application Support/Logic`. Patches, channel strip settings,
+  plug-in settings, Sampler instruments and Audio Units' presets are its
+  presets. Projects are found in `~/Music/Logic` and beside the ones Logic Pro
+  opened lately (File › Open Recent), where the bridge can tell their place:
+  macOS keeps `~/Music` from it, so a project kept there is learned once it's
+  open. Kumi doesn't read inside a `.logicx`, so a project counts by its file,
+  with no tempo or key, and your habits are learned from Live's Sets alone.
 - **What it learns.** Each sound: length, one-shot or loop, a loop's tempo, key
   or note, loudness, brightness, envelope, what it is (kick, snare, pad, vocal,
   fx…) and a fingerprint for finding sounds that sound alike. Each preset: its
@@ -870,7 +1046,10 @@ reference", "my usual vocal chain" or "the bass from my Night Drive Set".
 - **Finding things.** By words, class, tempo, key, length, or how close a sound is
   to a file, a clip or a rendered track; presets by device and kind; your Sets by
   tempo and key. "How do I… in Live?" is answered from Ableton's Live 12 manual,
-  citing the section.
+  citing the section, and "How do I… in Logic Pro?" from Apple's Logic Pro User
+  Guide, citing the topic by its title. Logic Pro's guide is read from
+  support.apple.com a topic at a time, the first time an answer needs it, and
+  kept beside the library (`logic-pro-guide.json`, read again after 45 days).
 - **From your Sets.** Kumi learns how you work: tempos and keys, each kind of
   track's instruments and usual chain, the plug-ins you reach for, your returns
   and main chain, how you name and colour tracks. `/memory` lists it under "From
@@ -1092,6 +1271,15 @@ bridge stays, which works with the earlier Kumi: to put back its bridge as well,
   `~/.kumi/bridges/reaper/changed` (or `renoise`), and Kumi says where.
 - Neither needs Live closed, nor the DAW: a running DAW loads the new copy when it restarts.
 
+Kumi's Logic Pro bridge follows Kumi as it updates and rolls back, whether
+Logic Pro is open or not, since Kumi starts it afresh for each session. An
+update that brings a newer one says "Kumi's Logic Pro bridge … is in Kumi's own
+folder now: Kumi starts it beside Logic Pro when a session begins", and
+`--rollback` puts back the one the earlier Kumi had ("… is back in Kumi's own
+folder"). Going back to a Kumi that doesn't know Logic Pro leaves the bridge
+where it is and says so ("Kumi's Logic Pro bridge stays in Kumi's own folder");
+that Kumi won't start while `KUMI_DAW` is set to `logic`.
+
 For the current 1.7.5 installer (bundled Node 24):
 
 1. Close Live and run `kumi update` (or `/update` inside Kumi).
@@ -1142,6 +1330,13 @@ Where REAPER or Renoise has been used, `doctor` checks it too, in its words
   server (when on, it takes commands from the network without a password), and
   Kumi's tool turned off in Tools › Tool Browser.
 
+`kumi --daw logic doctor` checks Logic Pro's side instead: Logic Pro 12 and
+where it is, Kumi's Logic Pro bridge (its version, whether it changed since Kumi
+set it up, whether macOS marked it as downloaded, whether it's built for the
+processor Logic Pro runs on), whether Logic Pro is running and the bridge
+answering, and whether its helper has Accessibility. Logic Pro running without
+the bridge is only a note: Kumi starts the bridge when a session begins.
+
 `--json` prints the same checks for sharing, with keys, tokens, your home folder
 and account name taken out, as in a report. Its wording can change between
 versions, so it isn't meant for scripts to match:
@@ -1154,7 +1349,7 @@ versions, so it isn't meant for scripts to match:
 `report` writes `~/kumi-report-<date and time>.txt`: Kumi's and the bridge's
 versions, the doctor's checks, your settings, what Kumi did in your last
 conversation, the gap log, and the bridge's lines from Live's own log (for
-REAPER and Renoise, the last lines of Kumi's bridge logs in
+REAPER, Renoise and Logic Pro, the last lines of Kumi's bridge logs in
 `~/.kumi/bridges/<daw>/logs`). Keys and tokens are taken out, your home folder
 shows as `~` and your account name as `<user>`. Read it before sending.
 
@@ -1163,10 +1358,12 @@ behind, any retained legacy Node runtime, its launcher, the PATH entry it added
 and what Kumi fetched (programs, models and watched videos, fetched again when
 needed), and says how much space that frees. It offers to take the bridge and
 the extension out of Live (only while Live is closed), Kumi's extension out of
-REAPER and its tool out of Renoise. Your conversations,
-notes, recipes, sign-ins, library and references stay unless you add `--all`,
-and so does catch-up's state for REAPER and Renoise; copies of their bridges you
-had changed (in `~/.kumi/bridges/<daw>/changed`) always stay.
+REAPER and its tool out of Renoise, and takes Kumi's Logic Pro bridge out of
+Kumi's own folder. The "Kumi Logic" control surface stays in Logic Pro › Control
+Surfaces › Setup, where you can delete it. Your conversations, notes, recipes,
+sign-ins, library and references stay unless you add `--all`, and so does
+catch-up's state for REAPER and Renoise; copies of their bridges you had changed
+(in `~/.kumi/bridges/<daw>/changed`) always stay.
 `--dry-run` says what it would remove, and removes nothing.
 
 - It removes nothing when Kumi's folder (`KUMI_HOME`) is your home folder, a
@@ -1224,12 +1421,25 @@ names. A model that can't take images gets a video's words only.
 only the tools it supports. [Bridge versions](KUMI_CHANGES.md#bridge-versions)
 says which need which.
 
+**Logic Pro.** Kumi can't name or rename a marker (Logic Pro numbers them),
+move or colour a track, set a send's mode, move a plug-in, or load a sample into
+Quick Sampler (it goes into Logic Pro's Sampler instead); each is refused,
+saying why. It reads a region's notes only as far as the Event List shows them
+on screen, and knows an audio region's file by its name alone (Kumi hears the
+region through its track instead). The tempo takes whole BPM; a region's
+edges, a split and an import go on whole beats; quantize has no strength; and
+automation events take whole beats and values from 0 to 127. The goal search
+(the knob search `/loop` runs for a sound to match), tuning a plug-in's knobs
+by ear, and following a track renamed during a judged run aren't there for
+Logic Pro yet. Logic Pro 12 needs an Apple Silicon Mac, and Kumi has been run
+with an English Logic Pro only.
+
 ## Privacy: what leaves your computer
 
 - **Your model provider** gets your messages, the conversation, what Kumi reads
-  from the Set, the frames of videos it watches, the pictures it reads, the
-  pictures you add to a message, and what background jobs are given and read
-  (`workerModel`'s provider, when it's set). With a
+  from the Set (or the Logic Pro project), the frames of videos it watches, the
+  pictures it reads, the pictures you add to a message, and what background
+  jobs are given and read (`workerModel`'s provider, when it's set). With a
   model on your computer, they stay on it (a server named in `settings.json` gets
   them wherever it runs).
 - **Web search and reading** go to the search services above, and the pages Kumi
@@ -1251,8 +1461,12 @@ says which need which.
   a known test tone.
 - **Your voice** is written down on your computer, and the recording deleted as
   soon as it is; only the words leave, when you send them.
-- **Your library** is learned on your computer; only the manual's pages come from
-  ableton.com.
+- **Your library** is learned on your computer; only the manuals' pages come
+  from outside: Live's from ableton.com, and Logic Pro's guide (Apple's Logic
+  Pro User Guide) from support.apple.com, each topic the first time an answer
+  needs it.
+- **Logic Pro's bridge** listens only on your computer (127.0.0.1), and what
+  Kumi hears in Logic Pro is analysed there, as any other audio is.
 
 Track, clip and device names, tool results and web pages are data for Kumi,
 never instructions. Kumi keeps its files in `~/.kumi`, readable only by you;
@@ -1339,9 +1553,10 @@ Environment variables (paths must be absolute):
 | `GEMINI_API_KEY`, `GOOGLE_API_KEY` | A Gemini API key for the listening model (Gemini's newest Flash model, from its own list) |
 | `KUMI_FAST=0` | Set device parameters through the bridge's preview and apply, the slower way ([how a change works](KUMI_CHANGES.md#how-a-change-works)) |
 | `KUMI_YTDLP`, `KUMI_FFMPEG`, `KUMI_WHISPER`, `KUMI_WHISPER_MODEL` | Your own yt-dlp, ffmpeg, whisper.cpp (`whisper-cli`) or speech model (`ggml-*.bin`), by path |
-| `KUMI_DAW` | `reaper` or `renoise` to work in that DAW (`ableton` for Live), as `--daw` does |
+| `KUMI_DAW` | `reaper`, `renoise` or `logic` to work in that DAW (`ableton` for Live), as `--daw` does |
 | `KUMI_REAPER_RESOURCE_DIR` | REAPER's resource folder, the only one Kumi then uses, when it isn't where REAPER keeps it by default |
 | `KUMI_RENOISE_PREFS_DIR` | Renoise's preferences: a `V<x.y.z>` folder, or the folder that holds them |
+| `KUMI_LOGIC_APP` | The Logic Pro app, when Kumi doesn't find it in `/Applications` or `~/Applications` |
 | `KUMI_REMOTE_SCRIPTS_DIR` | Live's Remote Scripts folder, when Kumi doesn't find it |
 | `KUMI_LIVE_EXTENSIONS_DIR` | Where `kumi bridge` puts Kumi's extension and `kumi doctor` looks for it, when Kumi doesn't find Live's Extensions folder |
 | `KUMI_BRIDGE_WAIT_SECONDS` | How long `kumi bridge` waits for Live to connect; `0` doesn't wait |

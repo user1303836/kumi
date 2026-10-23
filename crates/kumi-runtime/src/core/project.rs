@@ -1,12 +1,16 @@
 //! Where Kumi keeps what it knows of each saved project: its baselines (the project as last seen, for catching up),
-//! its track ids' keepers and its history, under the project's id. A project id is 32 hex digits: kept inside the
-//! project by its DAW, or the one its path gives. How a DAW tells a template from a song, and a song's folder, is its
-//! own (`ProjectRules`).
+//! its track ids' keepers and its history, under the project's key. A project id is 32 hex digits: kept inside the
+//! project by its DAW, or the one its path gives (Logic's bridge hashes the package's path). The key is the saved
+//! project's place: Live's bare id, as it always was, or another DAW's `<daw>-<id>` (`logic-<id>`), so another DAW's
+//! project never reads as Live's. How a DAW tells a template from a song, and a song's folder, is its own
+//! (`ProjectRules`).
 
 use crate::core::{
     contracts::JsonObject,
     conversations::{modified_ms, remove, write_privately},
+    daw::DawId,
     errors::RuntimeError,
+    place::Place,
 };
 use async_trait::async_trait;
 use kumi_common::js::json::stringify;
@@ -76,6 +80,15 @@ pub fn project_id_of(path: &str) -> String {
 pub fn project_id(id: &str) -> bool {
     id.len() == 32 && id.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
+/// Whether `key` is a saved project's key in the store: its place, Live's bare id or another DAW's `<daw>-<id>`. An
+/// unsaved project's place, imported conversations and anything else are none.
+pub fn project_key(key: &str) -> bool {
+    matches!(Place::parse(key), Some(Place::Saved { .. }))
+}
+/// The store's key for a DAW's saved project `id`: the project's place (Live's bare id; `logic-<id>` for Logic's).
+pub fn project_key_of(daw: DawId, id: &str) -> String {
+    Place::Saved { daw, id: id.into() }.text()
+}
 /// Whether two paths name the same file or folder: a case-only rename, or a symlink, is the same one.
 pub fn same_file(a: impl AsRef<Path>, b: impl AsRef<Path>) -> bool {
     #[cfg(unix)]
@@ -136,6 +149,8 @@ pub fn decide_project_with(rules: &dyn ProjectRules, kept: Option<&str>, path: &
 fn error(e: impl std::fmt::Display) -> RuntimeError {
     RuntimeError::plain(e.to_string())
 }
+/// The project store in a folder: each saved project's folder is named by its key (its place), beside its
+/// conversations and notes.
 pub struct FileProjectStore {
     directory: PathBuf,
 }
@@ -165,13 +180,13 @@ async fn baseline_path(file: &Path) -> Option<String> {
 #[async_trait(?Send)]
 impl ProjectStore for FileProjectStore {
     async fn load(&self, project: &str) -> Result<Option<Baseline>, RuntimeError> {
-        if !project_id(project) {
+        if !project_key(project) {
             return Ok(None);
         }
         Ok(read_baseline(&self.directory.join(project).join("last-seen.json")).await)
     }
     async fn load_set(&self, project: &str, path: &str) -> Result<Option<Baseline>, RuntimeError> {
-        if !project_id(project) {
+        if !project_key(project) {
             return Ok(None);
         }
         let folder = self.directory.join(project);
@@ -190,7 +205,7 @@ impl ProjectStore for FileProjectStore {
         })
     }
     async fn save(&self, project: &str, baseline: &Baseline) -> Result<(), RuntimeError> {
-        if !project_id(project) {
+        if !project_key(project) {
             return Err(error("invalid project id"));
         }
         let text = stringify(&serde_json::to_value(baseline).map_err(error)?);
@@ -226,13 +241,13 @@ impl ProjectStore for FileProjectStore {
         remove(sets.join(format!("{}.json", project_id_of(&baseline.path)))).await
     }
     async fn set_path(&self, project: &str) -> Option<String> {
-        if !project_id(project) {
+        if !project_key(project) {
             return None;
         }
         baseline_path(&self.directory.join(project).join("last-seen.json")).await
     }
     async fn load_track_keepers(&self, project: &str) -> Result<HashMap<String, String>, RuntimeError> {
-        if !project_id(project) {
+        if !project_key(project) {
             return Ok(HashMap::new());
         }
         let Ok(bytes) = tokio::fs::read(self.directory.join(project).join("track-ids.json")).await else { return Ok(HashMap::new()) };
@@ -246,14 +261,61 @@ impl ProjectStore for FileProjectStore {
             .collect())
     }
     fn history_path(&self, project: &str) -> Option<PathBuf> {
-        project_id(project).then(|| self.directory.join(project).join("history.db"))
+        project_key(project).then(|| self.directory.join(project).join("history.db"))
     }
     async fn save_track_keepers(&self, project: &str, keepers: &HashMap<String, String>) -> Result<(), RuntimeError> {
-        if !project_id(project) {
+        if !project_key(project) {
             return Err(error("invalid project id"));
         }
         let kept: serde_json::Map<String, Value> =
             keepers.iter().take(MAX_KEEPERS).map(|(id, identity)| (id.clone(), json!(identity))).collect();
         write_privately(&self.directory.join(project), "track-ids.json", &stringify(&json!({"version":1,"keepers":kept}))).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const ID: &str = "e805ab87b3ca9d66f0f62d47b97caa29";
+
+    fn baseline(path: &str) -> Baseline {
+        Baseline {
+            version: 1,
+            path: path.into(),
+            name: "Scratch".into(),
+            saved_at: 1,
+            artifact_id: "a".into(),
+            pages: vec![json!({"tracks": []}).as_object().unwrap().clone()],
+        }
+    }
+
+    #[test]
+    fn a_saved_projects_key_is_its_place_lives_as_it_was_and_another_daws_with_its_name() {
+        assert!(project_key(ID) && project_key(&format!("logic-{ID}")) && project_key(&format!("reaper-{ID}")));
+        for key in ["unsaved", "logic-unsaved", "imported", "", "../x", "logic-", "logic", &ID[..31]] {
+            assert!(!project_key(key), "{key}");
+        }
+        assert_eq!(project_key_of(DawId::Ableton, ID), ID);
+        assert_eq!(project_key_of(DawId::Logic, ID), format!("logic-{ID}"));
+        // A Logic project's key is Logic's place, never Live's.
+        assert_eq!(Place::parse(&project_key_of(DawId::Logic, ID)), Some(Place::Saved { daw: DawId::Logic, id: ID.into() }));
+    }
+
+    #[tokio::test]
+    async fn the_store_keeps_each_daws_baselines_in_its_places_folder() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = create_project_store(dir.path());
+        let logic = project_key_of(DawId::Logic, ID);
+        store.save(ID, &baseline("/songs/Beat.als")).await.unwrap();
+        store.save(&logic, &baseline("/Users/me/Music/Logic/Scratch.logicx")).await.unwrap();
+        assert!(dir.path().join(ID).join("last-seen.json").is_file(), "Live's, where it always was");
+        assert!(dir.path().join(&logic).join("last-seen.json").is_file(), "Logic's, in its place's folder");
+        assert_eq!(store.load(&logic).await.unwrap().map(|kept| kept.path).as_deref(), Some("/Users/me/Music/Logic/Scratch.logicx"));
+        assert_eq!(store.load(ID).await.unwrap().map(|kept| kept.path).as_deref(), Some("/songs/Beat.als"));
+        assert_eq!(store.set_path(&logic).await.as_deref(), Some("/Users/me/Music/Logic/Scratch.logicx"));
+        assert!(store.save("logic-unsaved", &baseline("/x")).await.is_err(), "an unsaved project keeps none");
+        assert_eq!(store.load("logic-unsaved").await.unwrap(), None);
+        assert_eq!(store.load(&format!("logic-{}", &ID[..31])).await.unwrap(), None);
     }
 }

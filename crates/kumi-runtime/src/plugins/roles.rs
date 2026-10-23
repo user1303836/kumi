@@ -8,9 +8,12 @@
 
 use std::sync::LazyLock;
 
-use crate::plugins::{
-    adapter::{matches, pattern, Pattern, PluginAdapter, PluginParameterHint},
-    registry::adapter_for,
+use crate::{
+    core::daw::DawId,
+    plugins::{
+        adapter::{matches, pattern, Pattern, PluginAdapter, PluginParameterHint},
+        registry::adapter_for,
+    },
 };
 
 /// One of Live's devices that does a job: its class, its name in words, the knob's pattern, the knob in words, and a
@@ -174,6 +177,52 @@ pub fn job_named(word: &str) -> Option<&'static Job> {
     JOBS.iter().find(|job| job.name == word || job.words.contains(&word.as_str()))
 }
 
+/// How a DAW lets Kumi turn a plug-in's parameters, and so what Kumi says of a parameter it can't turn: Live turns only
+/// the ones configured in the device (Configure, in the plug-in's title bar); Logic Pro sets any its plug-in window's
+/// Controls View shows, and Kumi opens that window itself.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Reach {
+    /// Live's: the parameters configured in the device.
+    #[default]
+    Configured,
+    /// Logic Pro's: what the plug-in window's Controls View shows.
+    ControlsView,
+}
+
+impl Reach {
+    /// The way the DAW a profile names reaches a plug-in's parameters.
+    pub fn of(daw: Option<DawId>) -> Reach {
+        match daw {
+            Some(DawId::Logic) => Reach::ControlsView,
+            _ => Reach::Configured,
+        }
+    }
+
+    /// None of the names the DAW lists for a mapped plug-in is the role the map has: name the knob as the DAW shows it.
+    pub fn unnamed(self, listed: usize, plugin: &str, role: &str) -> String {
+        match self {
+            Reach::Configured => format!(
+                "None of the {listed} parameters Live lists for {plugin} is {role} as Kumi's map has it (the map's names are guesses for some versions): name the knob as {plugin} shows it (plugin with action guide lists them)."
+            ),
+            Reach::ControlsView => format!(
+                "None of the {listed} parameters the Controls View of {plugin}'s window shows in Logic Pro is {role} as Kumi's map has it (the map's names are guesses for some versions): name the parameter as the Controls View shows it (a param read of the plug-in lists them)."
+            ),
+        }
+    }
+
+    /// A role's knob is there, and the DAW won't let Kumi turn it: what to do. `names` are the knobs the role is, said.
+    pub fn unreachable(self, role: &str, names: &str, first: &str) -> String {
+        match self {
+            Reach::Configured => format!(
+                "{role} is {names} in Live, and it isn't configured in the device, so Live won't let Kumi turn it. To configure it: click Configure in the plug-in's title bar in Live and move {first} once in its window (Kumi can open the window: set_device_details with isEditorOpen); Live keeps it with the Set."
+            ),
+            Reach::ControlsView => format!(
+                "{role} is {names} in Logic Pro, and the Controls View of the plug-in's window doesn't show it, so Kumi can't set it there. Kumi opens the plug-in's window and its Controls View itself, so nothing needs configuring: name one of the parameters it shows (a param read of the plug-in lists them)."
+            ),
+        }
+    }
+}
+
 /// A device as tune sees it.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Seen {
@@ -194,6 +243,8 @@ pub struct Seen {
     /// An EQ's bands, when Kumi read them: each band's number, frequency (Hz), whether it's on, and whether its gain
     /// shapes the sound (a bell or a shelf, not a cut).
     pub bands: Vec<(u8, f64, bool, bool)>,
+    /// How its DAW lets Kumi turn its parameters (Live's, unless the DAW's renderer says otherwise).
+    pub reach: Reach,
 }
 
 impl Seen {
@@ -263,21 +314,12 @@ fn on_plugin(device: &Seen, adapter: &'static PluginAdapter, hint: &PluginParame
     let (listed, names) = named(device, hint, narrow);
     let role = format!("{}'s {}", adapter.name, hint.role);
     if names.is_empty() {
-        return Found::Missing(format!(
-            "None of the {} parameters Live lists for {} is {role} as Kumi's map has it (the map's names are guesses for some versions): name the knob as {} shows it (plugin with action guide lists them).",
-            listed.len(),
-            adapter.name,
-            adapter.name
-        ));
+        return Found::Missing(device.reach.unnamed(listed.len(), adapter.name, &role));
     }
     let turnable: Vec<&String> = names.iter().copied().filter(|name| device.can_turn(name)).collect();
     match turnable.as_slice() {
         [one] => Found::Knob { name: (*one).clone(), read: format!("{role} is {one}") },
-        [] => Found::Missing(format!(
-            "{role} is {} in Live, and it isn't configured in the device, so Live won't let Kumi turn it. To configure it: click Configure in the plug-in's title bar in Live and move {} once in its window (Kumi can open the window: set_device_details with isEditorOpen); Live keeps it with the Set.",
-            list(&names),
-            names[0]
-        )),
+        [] => Found::Missing(device.reach.unreachable(&role, &list(&names), names[0])),
         several => Found::Several(format!("{role} is {} knobs Kumi can turn: {}. Name one in knobs.", several.len(), list(several))),
     }
 }

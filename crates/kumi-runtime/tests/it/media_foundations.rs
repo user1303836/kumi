@@ -1446,6 +1446,39 @@ fn transcribed_notes_reach_the_model_as_rows_in_beats_at_the_sets_tempo_as_playe
     assert_eq!(kumi_common::js::json::stringify(&rows["mostPlayed"]), "[{\"midi\":60,\"count\":2}]");
     assert!(rows["unit"].as_str().unwrap().contains("beats at 120 BPM"));
 }
+/// (M6) The listen tool names a sound's pitch in the octave the open project names middle C in (Logic Pro's "Display
+/// Middle C As", which the session takes from the project row): C3 by Logic's default, C4 when the producer chose it.
+#[tokio::test]
+async fn the_listen_tool_names_a_pitch_in_the_open_projects_octave() {
+    use kumi_runtime::audio::tools::*;
+    use kumi_runtime::core::daw::DawProfile;
+    use std::{cell::Cell, rc::Rc};
+    let root = tempfile::tempdir().unwrap();
+    let file = root.path().join("middle-c.wav");
+    let note = tone(48000, 261.63, 0.3);
+    wav(&file, &[note.clone(), note], 16);
+    let octave = Rc::new(Cell::new(None));
+    let asked = octave.clone();
+    let tool =
+        listening_tools_for(DawProfile::LOGIC, ListeningOptions { middle_c: Some(Rc::new(move || asked.get())), ..Default::default() })
+            .remove(0);
+    let heard = |tool: Rc<dyn kumi_runtime::core::contracts::KernelTool>| {
+        let file = file.clone();
+        async move {
+            let result = tool
+                .execute(serde_json::json!({"file": file}).as_object().unwrap().clone(), kumi_common::abort::Signal::new())
+                .await
+                .unwrap();
+            assert!(!result.is_error, "{}", result.text);
+            serde_json::from_str::<serde_json::Value>(&result.text).unwrap()["sound"]["pitch"]["note"].clone()
+        }
+    };
+    assert_eq!(heard(tool.clone()).await, "C3", "Logic's default");
+    octave.set(Some(4));
+    assert_eq!(heard(tool.clone()).await, "C4", "the producer's choice, as the project row says it");
+    octave.set(Some(3));
+    assert_eq!(heard(tool).await, "C3");
+}
 #[tokio::test]
 async fn the_listen_tool_hears_a_file_or_sets_it_against_a_reference_with_loudness_matched_and_tells_the_app() {
     use kumi_runtime::audio::tools::*;

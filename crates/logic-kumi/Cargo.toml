@@ -1,0 +1,31 @@
+[package]
+name = "logic-kumi"
+version = "0.1.0"
+description = "Kumi's Logic Pro bridge: a process beside Kumi that reaches Logic through its helper and serves Kumi's bridge on loopback."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lib]
+name = "logic_kumi"
+path = "src/lib.rs"
+
+[[bin]]
+name = "logic-kumi"
+path = "src/main.rs"
+
+[dependencies]
+daw-bridge.workspace = true
+flate2.workspace = true
+percent-encoding.workspace = true
+serde_json.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true
+
+[dev-dependencies]
+hex.workspace = true
+kumi-testkit.workspace = true
+tempfile.workspace = true

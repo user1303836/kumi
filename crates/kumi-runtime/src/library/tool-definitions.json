@@ -217,5 +217,27 @@
         }
       }
     }
+  },
+  {
+    "name": "logic_manual",
+    "description": "Answer how to do something in Logic Pro, or what a feature, plug-in or instrument does, from Apple's Logic Pro User Guide for Mac: give question in the producer's words (\"how do I quantize a region\", \"what does Compressor's Knee do\"). Returns the guide's best-matching topics, each with its title, where it sits in the guide and its address, and the passages that answer; topic reads one whole by its title or address. Answer from them and cite the topic by its title (\"Logic Pro User Guide, Quantize regions\"). The first time, Kumi reads the guide's contents from Apple's site, and a topic the first time an answer needs it (a few seconds); after that they're kept on this computer.",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "question": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 300,
+          "description": "What the producer wants to do or know, in their words"
+        },
+        "topic": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 300,
+          "description": "A topic's title or address, as a result gives it, to read it whole"
+        }
+      }
+    }
   }
 ]

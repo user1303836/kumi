@@ -152,6 +152,12 @@ pub struct PhraseTrack<'a> {
 
 /// How a DAW makes each fixed phrase's one change: the make_changes step for it.
 pub trait InstantVocab {
+    /// Whether the DAW takes this tempo as the phrase gives it (Logic Pro's goes to 990 BPM): one it doesn't goes to the
+    /// model, which says why.
+    fn takes_tempo(&self, bpm: f64) -> bool {
+        let _ = bpm;
+        true
+    }
     fn tempo(&self, bpm: f64) -> serde_json::Value;
     fn track(&self, reference: &str, switch: Switch, on: bool) -> serde_json::Value;
     /// A loop from `start` for `length` beats.
@@ -165,6 +171,7 @@ pub trait InstantVocab {
 /// request goes to the model.
 pub fn instant_steps(vocab: &dyn InstantVocab, intent: &Intent, tracks: &[PhraseTrack], beats_per_bar: f64) -> Option<serde_json::Value> {
     let step = match intent {
+        Intent::Tempo { bpm } if !vocab.takes_tempo(*bpm) => return None,
         Intent::Tempo { bpm } => vocab.tempo(*bpm),
         Intent::Track { track, switch, on } => vocab.track(&phrase_track(track, tracks)?, *switch, *on),
         Intent::Loop { from_bar, to_bar } => {

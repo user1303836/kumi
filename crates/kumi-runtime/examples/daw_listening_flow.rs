@@ -111,7 +111,7 @@ fn main() {
         }));
         context.on_action = Some(Rc::new(move |event: ActionEvent| into_told.borrow_mut().push(event.title)));
         context.focus_interval_ms = Some(200);
-        let options = OwnOptions { context, kumi_home: home.clone(), connect: Some(connect) };
+        let options = OwnOptions { context, kumi_home: home.clone(), connect: Some(connect), open_file: None };
         let daw_ = if reaper { create_reaper_integration(options) } else { create_renoise_integration(options) };
         let t = Instant::now();
         daw_.start(Signal::new()).await.unwrap();

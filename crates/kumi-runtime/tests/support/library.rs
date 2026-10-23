@@ -149,6 +149,7 @@ impl Studio {
         use kumi_runtime::library::sources::{library_sources, SourceOptions};
         kumi_runtime::library::learn::LearnPlan {
             dir: self.dir.to_string_lossy().into(),
+            daw: None,
             sources: library_sources(&SourceOptions {
                 home: Some(self.home.path().to_string_lossy().into()),
                 platform: Some("darwin".into()),

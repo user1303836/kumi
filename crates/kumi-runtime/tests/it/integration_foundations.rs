@@ -3,6 +3,7 @@ use kumi_common::{abort::Signal, js::json::stringify};
 use kumi_runtime::{
     core::{
         contracts::*,
+        daw::DawProfile,
         errors::{FailureKind, KumiError, RuntimeError},
     },
     integrations::{
@@ -163,4 +164,61 @@ async fn connected_primary_forwards_focus_hints_and_optional_views() {
     assert_eq!(wrapped.first_heard(5), Some(6));
     wrapped.close().await.unwrap();
     assert!(primary.closed.get());
+}
+
+/// A DAW's own integration as a profile: it starts, or fails to as `error` says, and does only what its profile says.
+struct Known {
+    profile: &'static DawProfile,
+    error: Option<RuntimeError>,
+}
+#[async_trait(?Send)]
+impl Integration for Known {
+    fn profile(&self) -> &DawProfile {
+        self.profile
+    }
+    async fn start(&self, _: Signal) -> Result<(), RuntimeError> {
+        self.error.clone().map_or(Ok(()), Err)
+    }
+    async fn observe(&self, _: Signal, _: Option<ObserveHints>) -> Result<Observation, RuntimeError> {
+        Err(RuntimeError::plain("not read"))
+    }
+    async fn close(&self) -> Result<(), RuntimeError> {
+        Ok(())
+    }
+}
+
+/// (M5) A DAW whose own integration started, and which Kumi can't do a thing in yet, says what can't be done ("Kumi
+/// can't pursue a goal in Logic Pro yet."), never that Kumi isn't connected; one that fell back says Kumi isn't
+/// connected, in the DAW's words.
+#[tokio::test(flavor = "current_thread")]
+async fn a_daw_that_cant_do_a_thing_yet_says_so_and_one_away_says_it_isnt_connected() {
+    let request: AuditionRequest = serde_json::from_value(json!({"candidates":[]})).unwrap();
+    let started = |profile: &'static DawProfile| {
+        with_fallback(Rc::new(Known { profile, error: None }), Rc::new(|| panic!("no fallback")), Rc::new(|_| panic!("no notice")))
+    };
+    let logic = started(&DawProfile::LOGIC);
+    logic.start(Signal::new()).await.unwrap();
+    assert_eq!(logic.goal(&request, Signal::new()).await.unwrap().err().unwrap(), "Kumi can't pursue a goal in Logic Pro yet.");
+    // (REAPER hears and renders since its M5: a REAPER that couldn't stands for a DAW Kumi can't hear yet)
+    static DEAF: DawProfile = DawProfile {
+        caps: kumi_runtime::core::daw::Capabilities { hear: false, audition: false, ..DawProfile::REAPER.caps },
+        ..DawProfile::REAPER
+    };
+    let reaper = started(&DEAF);
+    reaper.start(Signal::new()).await.unwrap();
+    assert_eq!(
+        reaper.hear(&HearRequest::default(), Signal::new()).await.unwrap().unwrap_err(),
+        "Kumi can't hear the project in REAPER yet."
+    );
+    assert_eq!(reaper.audition(&request, Signal::new()).await.unwrap().unwrap_err(), "Kumi can't render anything to hear in REAPER yet.");
+    let away = with_fallback(
+        Rc::new(Known { profile: &DEAF, error: Some(KumiError::new(FailureKind::Daw, "REAPER isn't open").into()) }),
+        Rc::new(|| Rc::new(Known { profile: &DEAF, error: None }) as Rc<dyn Integration>),
+        Rc::new(|_| {}),
+    );
+    away.start(Signal::new()).await.unwrap();
+    assert_eq!(
+        away.hear(&HearRequest::default(), Signal::new()).await.unwrap().unwrap_err(),
+        "Kumi isn't connected to REAPER, so it can't hear the project."
+    );
 }

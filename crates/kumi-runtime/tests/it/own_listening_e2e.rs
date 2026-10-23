@@ -56,7 +56,7 @@ fn integration(daw: Daw, home: &Path, create: fn(OwnOptions) -> Rc<dyn Integrati
     let mut context = IntegrationContext::new(Rc::new(|_, _| {}));
     context.on_action = Some(Rc::new(move |event: ActionEvent| into.borrow_mut().push(event.title)));
     context.focus_interval_ms = Some(50);
-    (create(OwnOptions { context, kumi_home: home.into(), connect: Some(connect) }), told)
+    (create(OwnOptions { context, kumi_home: home.into(), connect: Some(connect), open_file: None }), told)
 }
 
 async fn reaper_lab(script: &ReaperScript, home: &Path, keep: impl FnOnce(&mut SimulatorConfig)) -> Simulator {

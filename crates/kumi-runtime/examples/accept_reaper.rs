@@ -221,7 +221,7 @@ impl Session {
         context.on_action = Some(Rc::new(move |event: ActionEvent| into_told.borrow_mut().push(event.title)));
         // As the full screen's FOCUS asks.
         context.focus_drawn = true;
-        let daw = create_reaper_integration(OwnOptions { context, kumi_home: home.to_path_buf(), connect: Some(connect) });
+        let daw = create_reaper_integration(OwnOptions { context, kumi_home: home.to_path_buf(), connect: Some(connect), open_file: None });
         daw.start(Signal::new()).await.expect("Kumi's REAPER integration starts");
         let events: Rc<RefCell<Vec<Value>>> = Rc::default();
         let (into_events, mut from_host) = (events.clone(), tap.inner.host.events());

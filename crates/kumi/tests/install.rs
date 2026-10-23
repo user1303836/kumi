@@ -2563,3 +2563,40 @@ async fn an_update_brings_renoises_tool_from_the_new_kumi_and_going_back_says_it
     assert!(said.contains("Delete that folder to take it out."), "{said}");
     assert!(tools.join(folder).exists(), "going back leaves the tool where it is");
 }
+
+/// Logic's bridge lives in Kumi's own folder: uninstalling takes it out through its receipt, as any own bridge, and
+/// nobody is asked to quit or open Logic Pro for it (the bridge runs only while a session of Kumi's does).
+#[cfg(not(windows))]
+#[tokio::test]
+async fn uninstall_takes_logics_bridge_out_of_kumis_own_folder_without_a_word_about_logic() {
+    let dir = tempfile::tempdir().unwrap();
+    let env = env(dir.path());
+    let home = Path::new(&env["KUMI_HOME"]).to_path_buf();
+    for part in ["app", "bin"] {
+        fs::create_dir_all(home.join(part)).unwrap();
+    }
+    installed_kumi(&home);
+    // Kumi's Logic Pro bridge, set up through the lifecycle from a folder laid out as a release lays it out.
+    let source = dir.path().join("release").join("logic-kumi");
+    put(source.join("logic-kumi"), "#!/bin/sh\n");
+    put(source.join("kumi-logic-hands-test"), "#!/bin/sh\n");
+    put(source.join("version"), "0.1.0\n");
+    let target = daw_bridge::install::logic_target(&daw_bridge::paths::BridgePaths::new(&home, daw_bridge::daw::Daw::Logic));
+    daw_bridge::lifecycle::Lifecycle::new(&home, target.clone()).install(&source, "0.1.0").unwrap();
+    assert!(target.path().join("logic-kumi").is_file() && target.reference.is_file());
+    let (io, out) = io(&env);
+    assert_eq!(
+        uninstall_installed(io, UninstallOptions { all: false, yes: true, ..Default::default() }).await.unwrap(),
+        0,
+        "{}",
+        out.0.borrow()
+    );
+    assert!(!target.path().exists(), "the bridge's folder went: {}", out.0.borrow());
+    for part in ["app", "bin"] {
+        assert!(!home.join(part).exists(), "{part}: {}", out.0.borrow());
+    }
+    let said = out.0.borrow().to_lowercase();
+    for word in ["quit logic", "open logic", "restart"] {
+        assert!(!said.contains(word), "{word:?} in:\n{said}");
+    }
+}

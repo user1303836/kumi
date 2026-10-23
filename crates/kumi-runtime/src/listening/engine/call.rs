@@ -152,13 +152,14 @@ impl Listening {
         match self.host.render(track, from, beats, signal).await? {
             Err(why) => Ok(ToolResult::error(why)),
             Ok(mut reply) => {
+                // (M5) A DAW that renders otherwise says what its file holds in a note of its own (Logic bounces a track
+                // soloed, through its plug-ins); the others' is this, in their words.
                 let clips = self.host.profile().vocab.clips;
-                reply.insert(
-                    "note".into(),
+                reply.entry("note").or_insert_with(|| {
                     json!(format!(
                         "The track's own {clips}, before its devices. Hear it with listen (file), against a reference with compare_to."
-                    )),
-                );
+                    ))
+                });
                 Ok(ToolResult::text(stringify(&json!(reply))))
             }
         }

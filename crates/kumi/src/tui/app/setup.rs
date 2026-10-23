@@ -67,6 +67,16 @@ pub trait DawSetup {
     fn can_ask_to_quit(&self) -> bool {
         true
     }
+    /// Whether the DAW loads the bridge as it starts, so an open one quits before the bridge goes in and opens again
+    /// after (Live, REAPER, Renoise); a DAW whose bridge Kumi starts beside it (Logic) stays open throughout.
+    fn needs_restart(&self) -> bool {
+        true
+    }
+    /// Whether what the enable step asks for is granted, where the DAW's side can read it (Logic's Accessibility, from
+    /// its bridge's status): None for a DAW whose step ends when the session connects (Live's Control Surface).
+    async fn enabled(&self) -> Option<bool> {
+        None
+    }
     /// How long Live gets to quit once asked, before Kumi says it's still open (its save dialog
     /// cancelled, say) and offers to ask again.
     fn quit_wait(&self) -> Duration {
@@ -79,7 +89,7 @@ pub trait DawSetup {
 }
 
 /// Live's side of setup, as the app and its tests have always named it.
-pub use DawSetup as LiveSetup;
+pub use self::DawSetup as LiveSetup;
 
 /// How long Kumi keeps watching, after the producer put the Live step off, for Live to quit on the
 /// request Kumi already sent (its save dialog still up), so it can open Live again.
@@ -614,6 +624,8 @@ impl TuiApp {
             if self.closing() {
                 return LiveStep::Later(None);
             }
+            // A DAW whose bridge Kumi starts beside it (Logic) stays open: the bridge goes into Kumi's own folder.
+            let stays_open = open.is_some() && !live.needs_restart();
             if open.is_some() {
                 // Open (again): nothing is held until the producer says how it closes.
                 self.setup_show(|s| s.holding = false);
@@ -629,37 +641,40 @@ impl TuiApp {
                     }
                     continue;
                 }
-                let mut say = vec![format!("{app} loads the bridge when it starts."), format!("{app} will ask to save first.")];
-                // Asking Live to quit is an Apple Event: the first time, macOS asks whether this terminal may send it.
-                let permission = live.asks_permission();
-                if let Some(terminal) = &permission {
-                    say.push(format!("If macOS asks whether {terminal} can control {app}, choose OK."));
-                }
-                let wait = choice("I'll quit it", &format!("Kumi waits, then opens {app} again"), "wait");
-                // A DAW Kumi can't ask to quit is quit by the producer.
-                let restart =
-                    if live.can_ask_to_quit() { vec![choice(&format!("Restart {app} now"), "", "restart"), wait] } else { vec![wait] };
-                let Some(answer) = self.setup_choose(&format!("{app} is open · restart needed"), say, restart).await else {
-                    return self.leave_live(&live, None, None, false).await;
-                };
-                held = open.clone();
-                set = live.open_set();
-                let mut asked = answer == "restart";
-                self.setup_show(|s| s.holding = true);
-                let mut refused = None;
-                if asked {
-                    self.setup_show(|s| s.status = format!("asking {app} to quit…"));
-                    if !live.ask_to_quit().await {
-                        // Turned down: asking again can't help, so the producer quits Live.
-                        asked = false;
-                        refused = Some(refused_words(permission.as_deref()));
+                // One that loads the bridge as it starts quits first; one that stays open goes straight to the install.
+                if !stays_open {
+                    let mut say = vec![format!("{app} loads the bridge when it starts."), format!("{app} will ask to save first.")];
+                    // Asking Live to quit is an Apple Event: the first time, macOS asks whether this terminal may send it.
+                    let permission = live.asks_permission();
+                    if let Some(terminal) = &permission {
+                        say.push(format!("If macOS asks whether {terminal} can control {app}, choose OK."));
                     }
+                    let wait = choice("I'll quit it", &format!("Kumi waits, then opens {app} again"), "wait");
+                    // A DAW Kumi can't ask to quit is quit by the producer.
+                    let restart =
+                        if live.can_ask_to_quit() { vec![choice(&format!("Restart {app} now"), "", "restart"), wait] } else { vec![wait] };
+                    let Some(answer) = self.setup_choose(&format!("{app} is open · restart needed"), say, restart).await else {
+                        return self.leave_live(&live, None, None, false).await;
+                    };
+                    held = open.clone();
+                    set = live.open_set();
+                    let mut asked = answer == "restart";
+                    self.setup_show(|s| s.holding = true);
+                    let mut refused = None;
+                    if asked {
+                        self.setup_show(|s| s.status = format!("asking {app} to quit…"));
+                        if !live.ask_to_quit().await {
+                            // Turned down: asking again can't help, so the producer quits Live.
+                            asked = false;
+                            refused = Some(refused_words(permission.as_deref()));
+                        }
+                    }
+                    if !self.wait_closed(&live, asked, refused).await {
+                        return self.leave_live(&live, held, set, asked).await;
+                    }
+                    // The Live Kumi was connected to has gone: Control Surface waits for the one that opens next.
+                    self.0.state.borrow_mut().connection = ConnectionState::Disconnected;
                 }
-                if !self.wait_closed(&live, asked, refused).await {
-                    return self.leave_live(&live, held, set, asked).await;
-                }
-                // The Live Kumi was connected to has gone: Control Surface waits for the one that opens next.
-                self.0.state.borrow_mut().connection = ConnectionState::Disconnected;
             } else if held.is_none() {
                 // Not open, and not because Kumi closed it: is there a Live here that can take the bridge?
                 match live.installed().await {
@@ -687,10 +702,14 @@ impl TuiApp {
                     }
                 }
             }
-            let said = why.clone();
+            let said = if stays_open {
+                vec![why.clone(), format!("The bridge goes into Kumi's own folder; {app} stays open.")]
+            } else {
+                vec![why.clone()]
+            };
             self.setup_show(move |s| {
                 s.status = "installing…".into();
-                s.say = vec![said];
+                s.say = said;
                 s.hint.clear();
                 s.waiting = true;
                 s.installing = true;
@@ -702,16 +721,17 @@ impl TuiApp {
             }
             match installed {
                 Ok(version) => {
+                    let status = if stays_open { format!("connecting to {app}…") } else { format!("opening {app}…") };
                     self.setup_show(|s| {
                         s.bridge = Some(format!("bridge {version}"));
-                        s.status = format!("opening {app}…");
+                        s.status = status;
                         s.say.clear();
                     });
                     // The Live Kumi closed opens again, with its Set when Kumi knows it (else the producer finds it in
-                    // Open Recent); one that wasn't open opens as the newest installed.
+                    // Open Recent); one that wasn't open opens as the newest installed; one that stayed open is left as it is.
                     let closed_by_kumi = held.is_some();
                     let app = open.or(held);
-                    let (opened, with_set) = reopen(&live, app.clone(), set).await;
+                    let (opened, with_set) = if stays_open { (true, true) } else { reopen(&live, app.clone(), set).await };
                     if closed_by_kumi && !with_set {
                         self.setup_show(|s| s.set_note = Some(open_recent()));
                     }
@@ -881,7 +901,16 @@ impl TuiApp {
         });
         let mut more = live.settings_menu().map(|menu| format!("{menu} If {} shows a dialog, answer it first.", crate::daw::words().app));
         let more_at = std::time::Instant::now() + live.surface_wait();
-        while !self.connected() {
+        // Until the session is connected, and what the step asks for is granted where the DAW's side can read it
+        // (Logic's Accessibility, looked at once a second); a DAW whose step ends when it connects says nothing of it.
+        let mut looked_at: Option<std::time::Instant> = None;
+        loop {
+            if self.connected() && looked_at.is_none_or(|at| at.elapsed() >= Duration::from_secs(1)) {
+                if live.enabled().await.unwrap_or(true) {
+                    break;
+                }
+                looked_at = Some(std::time::Instant::now());
+            }
             if self.closing() {
                 return false;
             }

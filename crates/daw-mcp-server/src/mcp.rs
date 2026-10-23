@@ -26,6 +26,10 @@ pub fn tools(host: &Host) -> Value {
 
 fn tool_list(daw: Daw) -> Value {
     let kinds = kinds(daw);
+    let resource = match daw {
+        Daw::Logic => "The Logic Pro to use, by its bundle id (com.apple.logic10) from discover, when several run.".to_string(),
+        daw => format!("The {daw} resource or preferences folder to use, from discover, when several run."),
+    };
     // Each DAW's own words: what it opens, what a read's parent holds, what a view is about.
     let (place, inside, parent, about) = match daw {
         Daw::Renoise => (
@@ -34,6 +38,12 @@ fn tool_list(daw: Daw) -> Value {
             "The ref of what the rows are in: a track for its devices, a device for its parameters, an instrument for its samples or phrases, a pattern (with track) for its lines.",
             "the track, pattern or instrument it is about",
         ),
+        Daw::Logic => (
+            "project",
+            "a track's regions, plug-ins, sends, Smart Controls or automation, or a plug-in's parameters",
+            "The ref of what the rows are in: a track for its regions, plug-ins, sends, Smart Controls or automation; an output strip (the Stereo Out is <epoch>:output:1) for its plug-ins; a plug-in for its parameters; a region for its notes. Notes, parameters, Smart Controls and automation need theirs.",
+            "the track or region it is about",
+        ),
         _ => (
             "project",
             "a track's items or an FX's parameters",
@@ -41,17 +51,20 @@ fn tool_list(daw: Daw) -> Value {
             "the take or track it is about",
         ),
     };
-    // Renoise plays from a slot and line; REAPER from where it is (cursor_set moves it).
+    // Renoise plays from a slot and line; REAPER and Logic Pro from where they are (cursor_set moves them).
     let play = match daw {
         Daw::Renoise => (
             "Starts Renoise's playback from where it is, or from sequence (a slot, from 1) and line (from 0, as Renoise numbers lines).",
             json!({"sequence": {"type": "integer", "minimum": 1}, "line": {"type": "integer", "minimum": 0}, "epoch": {"type": "string"}}),
         ),
+        Daw::Logic => {
+            ("Starts Logic Pro's playback from where the playhead is (cursor_set moves it first).", json!({"epoch": {"type": "string"}}))
+        }
         _ => ("Starts REAPER's playback from where it is (cursor_set moves it first).", json!({"epoch": {"type": "string"}})),
     };
     let pick = json!({
         "pid": {"type": "integer", "minimum": 1, "description": format!("The {daw} process to use, from discover, when several run.")},
-        "resource": {"type": "string", "description": format!("The {daw} resource or preferences folder to use, from discover, when several run.")},
+        "resource": {"type": "string", "description": resource},
     });
     let mut list = json!([
         {
@@ -195,9 +208,10 @@ fn tool_list(daw: Daw) -> Value {
         },
     ]);
     // (r-tracks) Saving the project, in either DAW: a file written, nothing in the project changed, so no change and no
-    // undo. The bridge's `project_save`; Renoise refuses `version`.
+    // undo. The bridge's `project_save`; Renoise and Logic refuse `version`.
     let (save_title, save) = match daw {
         Daw::Reaper => ("Save the REAPER project", "Saves the open REAPER project where it is, or as its next version (version: true). A project never saved is saved only under path, a .rpp inside the folder REAPER saves projects in, and never over a file."),
+        Daw::Logic => ("Save the Logic Pro project", "Saves the open Logic Pro project where it is (File > Save), or as path (a whole path to a .logicx package that isn't there yet; the project is that file from then on). A project never saved is saved only under path, and never over a file. (version is REAPER's: Logic Pro refuses it.)"),
         _ => ("Save the Renoise song", "Saves the open Renoise song where it is, or as path (a whole path to a .xrns file that isn't there yet; the song is that file from then on). A song never saved is saved only under path, and never over a file. (version is REAPER's: Renoise refuses it.)"),
     };
     if let Some(tools) = list.as_array_mut() {
@@ -212,7 +226,11 @@ fn tool_list(daw: Daw) -> Value {
             })), "required": ["epoch"], "additionalProperties": false},
             "annotations": {"readOnlyHint": false, "destructiveHint": false, "idempotentHint": true, "openWorldHint": false},
         }));
-        tools.extend(listening_tools(daw, &pick));
+        // (Logic's listening is its own: hear, audition and render below, a pass played in real time and answered
+        // when it is done, not jobs.)
+        if daw != Daw::Logic {
+            tools.extend(listening_tools(daw, &pick));
+        }
     }
     if daw == Daw::Reaper {
         // REAPER's refs are GUIDs, which a copy of the project in another tab shares: the epoch says which project they came from.
@@ -384,64 +402,217 @@ fn tool_list(daw: Daw) -> Value {
             "annotations": {"readOnlyHint": false, "destructiveHint": true, "idempotentHint": false, "openWorldHint": false},
         }));
     }
-    // (#401) A chore kept as the DAW's own action (REAPER's Action List, Renoise's Tools menu): files and menus, not the project.
-    list.as_array_mut().expect("a list").extend([
-        json!({
-            "name": "script_install",
-            "title": format!("Keep a script in {daw}"),
-            "description": format!("Keeps a Lua chunk as {daw}'s own action ({}), under slug: a file and its action, not the project, so no step of {daw}'s undo; script_remove takes it away. A script kept already is written over only with replace. Answers {{file, where}}.", if daw == Daw::Reaper { "REAPER's Action List, Scripts/Kumi, one undo block a run" } else { "Tools > Kumi in Renoise's menu, with a shortcut to set" }),
+    if daw == Daw::Logic {
+        // (a parameter's text across its range is REAPER's and Renoise's read: Logic's param rows say their min and max)
+        unset(&mut list, "read", "grid");
+        // Logic's refs are positions with an epoch (`1:track:2`), as Renoise's: a track or region change moves the epoch,
+        // and refs from before are refused as stale. What each kind sits in, and what each view is about.
+        property(
+            &mut list,
+            "read",
+            "parent",
+            json!({
+                "type": "string",
+                "description": "The ref of what the rows are in: a track for its regions, plug-ins, sends, Smart Controls or automation; an output strip (the Stereo Out is <epoch>:output:1) for its plug-ins; a plug-in for its parameters; a region for its notes. Notes, parameters, Smart Controls and automation need theirs.",
+            }),
+        );
+        property(
+            &mut list,
+            "focus_body",
+            "ref",
+            json!({
+                "type": "string",
+                "description": "The ref of what the view is about: a track for tree and routing, a region for notes (the selected one when left out).",
+            }),
+        );
+        property(
+            &mut list,
+            "focus_body",
+            "around",
+            json!({
+                "type": "string",
+                "description": "The ref of a track to centre the first page of the timeline's lanes on: the page starts half a page above it, and says where in `from`.",
+            }),
+        );
+        // (M6) The bulk read: every row of the kinds asked, from one look at the project in one epoch, as `read` pages
+        // them (catch-up reads a project whole this way, showing Logic's panes once rather than once a kind).
+        property(
+            &mut list,
+            "snapshot",
+            "rows",
+            json!({
+                "type": "array",
+                "minItems": 1,
+                "items": {"type": "string", "enum": ["project", "track", "region", "plugin", "send", "marker", "tempo"]},
+                "description": "The kinds to read whole instead of the one screen: the answer is {epoch, rows: {kind: [rows]}, totals: {kind: n}, truncated?: [kinds]}, each kind's rows exactly what read pages for it, in one epoch.",
+            }),
+        );
+        property(
+            &mut list,
+            "snapshot",
+            "limit",
+            json!({"type": "integer", "minimum": 1, "maximum": crate::tools::MOST_BULK_ROWS, "description": "With rows: the most rows of a kind (10000 by default); a kind with more is named under truncated, to page with read."}),
+        );
+        // (M4b) A bounce and the tracks exported: files written, nothing in the project changed, so no change and no undo.
+        let epoch = json!({"type": "string", "description": "The epoch of the answer the project was read in: if the project open now is another, it is refused as stale."});
+        list.as_array_mut().expect("a list").push(json!({
+            "name": "bounce",
+            "title": "Bounce the Logic Pro project",
+            "description": "Bounces the open Logic Pro project from startBeats to endBeats (beats from the project's start) to an audio file at path, a whole path to a file that isn't there yet (.wav, or .aif for aiff24), in a folder that is (File > Bounce > Project or Section: Uncompressed in format, wav24 by default, Normalize off): what Logic Pro plays, through the Stereo Out. The file is found on disk and its header read: the answer gives bounced (its path), format, bytes, seconds, rate, channels and bits. A file written, not the project: no change and no undo.",
             "inputSchema": {"type": "object", "properties": merged(&pick, json!({
-                "slug": {"type": "string", "pattern": "^[a-z0-9-]{1,64}$", "description": "Its file's name"},
-                "name": {"type": "string", "minLength": 1, "maxLength": 80},
-                "description": {"type": "string", "maxLength": 500},
-                "code": {"type": "string", "minLength": 1, "maxLength": 200000},
-                "replace": {"type": "boolean"},
-            })), "required": ["slug", "name", "code"], "additionalProperties": false},
-            "annotations": {"readOnlyHint": false, "destructiveHint": true, "idempotentHint": false, "openWorldHint": false},
-        }),
-        json!({
-            "name": "script_remove",
-            "title": format!("Remove a kept script from {daw}"),
-            "description": format!("Takes a kept script away from {daw}: its action and its file."),
+                "startBeats": {"type": "number", "minimum": 0},
+                "endBeats": {"type": "number", "minimum": 0},
+                "path": {"type": "string"},
+                "format": {"type": "string", "enum": ["wav24", "wav16", "wav32f", "aiff24"]},
+                "epoch": epoch,
+            })), "required": ["startBeats", "endBeats", "path", "epoch"], "additionalProperties": false},
+            "annotations": {"readOnlyHint": false, "destructiveHint": false, "idempotentHint": false, "openWorldHint": false},
+        }));
+        list.as_array_mut().expect("a list").push(json!({
+            "name": "export_tracks",
+            "title": "Export Logic Pro's tracks as audio files",
+            "description": "Exports every track of the open Logic Pro project as an audio file of its own into the folder path, whole and there already (File > Export > All Tracks as Audio Files, with the options the producer set in Logic Pro): the answer lists the files Logic Pro wrote there (name, bytes, seconds). Files written, not the project: no change and no undo.",
             "inputSchema": {"type": "object", "properties": merged(&pick, json!({
-                "slug": {"type": "string", "pattern": "^[a-z0-9-]{1,64}$"},
-            })), "required": ["slug"], "additionalProperties": false},
-            "annotations": {"readOnlyHint": false, "destructiveHint": true, "idempotentHint": true, "openWorldHint": false},
-        }),
-    ]);
-    // M6: what changed in the project while Kumi wasn't looking, and what the producer did while it watched.
-    let catchup = json!([
-        {
-            "name": "catch_up",
-            "title": format!("What changed in {daw}"),
-            "description": format!("What changed in the open {daw} project since this host last kept its snapshot (edits made while Kumi was closed, or while {daw} was restarted): {{place, name, lastSeenAt, project: [details], changes: [added | removed | changed], more?, same?}}, or first: true when there is no snapshot yet. The snapshot is kept again afterwards."),
-            "inputSchema": {"type": "object", "properties": pick, "additionalProperties": false},
-            "annotations": {"readOnlyHint": false, "idempotentHint": false, "openWorldHint": false},
-        },
-        {
-            "name": "baseline_save",
-            "title": format!("Keep the {daw} project's snapshot"),
-            "description": format!("Keeps the open {daw} project's snapshot again, so the next catch_up tells only what changes after now. Refused (saved: false) until catch_up has compared this project, so what changed while Kumi was away is never lost."),
-            "inputSchema": {"type": "object", "properties": pick, "additionalProperties": false},
-            "annotations": {"readOnlyHint": false, "idempotentHint": true, "openWorldHint": false},
-        },
-        {
-            "name": "watch_start",
-            "title": format!("Watch {daw}"),
-            "description": format!("Starts watching the producer work in {daw}: the project as it is now is kept, and what they add is looked at as it comes. Nothing in {daw} changes."),
-            "inputSchema": {"type": "object", "properties": pick, "additionalProperties": false},
-            "annotations": {"readOnlyHint": true, "idempotentHint": false, "openWorldHint": false},
-        },
-        {
-            "name": "watch_stop",
-            "title": format!("Stop watching {daw}"),
-            "description": format!("Stops watching and says what the producer did since watch_start: {{watched, changes (with each value before and after, what an added thing is made of, the parameters they moved by name), project, selected (the tracks they selected)}}."),
-            "inputSchema": {"type": "object", "properties": pick, "additionalProperties": false},
-            "annotations": {"readOnlyHint": true, "idempotentHint": false, "openWorldHint": false},
-        }
-    ]);
-    list.as_array_mut().expect("a list").extend(catchup.as_array().cloned().unwrap_or_default());
+                "path": {"type": "string"},
+                "epoch": epoch,
+            })), "required": ["path", "epoch"], "additionalProperties": false},
+            "annotations": {"readOnlyHint": false, "destructiveHint": false, "idempotentHint": false, "openWorldHint": false},
+        }));
+        // (M5) Listening: a part played and what Logic outputs captured (hear), such a pass for each candidate
+        // (audition), a part bounced offline (render), as the bridge's Listening section has them. Audio travels as a
+        // file the bridge writes into folder; an answer carries its path, never its samples. Files written, not the
+        // project: no change and no undo, and Logic is put back as it was (its playhead, solos, metronome and cycle).
+        let part = json!({
+            "fromBeats": {"type": "number", "minimum": 0, "description": "Where the part starts, in beats from the project's start."},
+            "beats": {"type": "number", "minimum": 0.25, "maximum": 14400, "description": "How long the part is, in beats (a pass plays at most 600 s)."},
+            "folder": {"type": "string", "description": "A whole path to a folder that is there: the files go into it, named by the bridge (kumi-hear-<n>.wav, kumi-audition-<n>-<k>.wav, kumi-render-<n>.wav), never over a file."},
+            "epoch": {"type": "string", "description": "The epoch the refs were read in, when the request gives one: if the project's is another, it is refused as stale."},
+        });
+        let mute = json!({"type": "boolean", "description": "Logic Pro is kept from the speakers while it is captured (false by default: the producer hears it)."});
+        list.as_array_mut().expect("a list").push(json!({
+            "name": "hear",
+            "title": "Hear a part of the Logic Pro project",
+            "description": "Plays a part of the open Logic Pro project and captures what Logic Pro outputs, after the Stereo Out, into a WAV file in folder (32-bit float at the output device's rate): the cycle and the metronome off, the playhead placed exactly on the part's first beat, Logic played and followed past the part's end, the capture cut to the part; then Logic Pro put back as it was (its playhead, solos, metronome and cycle). solo hears those tracks alone (none: the whole mix, no track soloed); a track the producer muted stays silent, and the note says so. The answer: file, seconds, sampleRate, channels, lead (0: the file starts on the part's first beat), peak and rms (of full scale, 1.0), aligned (by, latencyMs, errorMs: how the capture was cut to the beats), fromBeats, beats, mute, solo, metronome, epoch, note, and notPutBack (what of Logic Pro couldn't be put back). busy while Logic Pro plays or a dialog is up. The call lasts as long as the part plays, plus a margin. A file written, not the project: no change and no undo.",
+            "inputSchema": {"type": "object", "properties": merged(&pick, merged(&part, json!({
+                "mute": mute,
+                "solo": {"type": "array", "items": {"type": "string"}, "maxItems": 64, "description": "Tracks (their refs) heard alone, soloed for the pass; none for the whole mix."},
+            }))), "required": ["fromBeats", "beats", "folder"], "additionalProperties": false},
+            "annotations": {"readOnlyHint": false, "destructiveHint": false, "idempotentHint": false, "openWorldHint": false},
+        }));
+        list.as_array_mut().expect("a list").push(json!({
+            "name": "audition",
+            "title": "Audition candidates in Logic Pro",
+            "description": "Hears each candidate over the same part of the open Logic Pro project, one pass after the other in their order and in one capture, each as hear hears it: a track ({\"ref\": …}) soloed alone, or the whole mix ({\"mix\": true}); Logic Pro is put back as it was after the last. The answer: candidates, in their order, each its candidate (ref, or mix), its name, and what hear's file holds (file, seconds, sampleRate, channels, lead, peak, rms, note); then aligned, fromBeats, beats, mute, metronome, epoch and notPutBack. The call lasts each pass's part plus a margin. Files written, not the project: no change and no undo.",
+            "inputSchema": {"type": "object", "properties": merged(&pick, merged(&part, json!({
+                "mute": mute,
+                "candidates": {"type": "array", "minItems": 1, "maxItems": 16, "items": {"type": "object", "properties": {
+                    "ref": {"type": "string", "description": "A track, heard soloed alone."},
+                    "mix": {"type": "boolean", "description": "true: the whole mix."},
+                }, "additionalProperties": false}},
+            }))), "required": ["candidates", "fromBeats", "beats", "folder"], "additionalProperties": false},
+            "annotations": {"readOnlyHint": false, "destructiveHint": false, "idempotentHint": false, "openWorldHint": false},
+        }));
+        list.as_array_mut().expect("a list").push(json!({
+            "name": "render",
+            "title": "Render a part of the Logic Pro project",
+            "description": "Bounces a part of the open Logic Pro project offline into a WAV file in folder (File > Bounce over the part: 32-bit float at the project's rate, Normalize off, the metronome off; nothing plays): ref, a track, is soloed alone for it, so its audio passes its plug-ins and the Stereo Out's (the note says so); without ref, the whole mix. The solos and the metronome are put back. The answer: file, seconds, sampleRate, channels, bits, lead (0), fromBeats, beats, metronome, epoch, ref, note and notPutBack. A file written, not the project: no change and no undo.",
+            "inputSchema": {"type": "object", "properties": merged(&pick, merged(&part, json!({
+                "ref": {"type": "string", "description": "A track to bounce alone, soloed for it; left out, the whole mix."},
+            }))), "required": ["fromBeats", "beats", "folder"], "additionalProperties": false},
+            "annotations": {"readOnlyHint": false, "destructiveHint": false, "idempotentHint": false, "openWorldHint": false},
+        }));
+        property(
+            &mut list,
+            "focus_body",
+            "window",
+            json!({
+                "type": "object",
+                "properties": {"from": {"type": "number"}, "to": {"type": "number"}},
+                "required": ["from", "to"],
+                "additionalProperties": false,
+                "description": "The range of the timeline to show, in beats from the project's start.",
+            }),
+        );
+    }
+    // (#401) A chore kept as the DAW's own action (REAPER's Action List, Renoise's Tools menu): files and menus, not the
+    // project. Logic Pro has no scripting Kumi reaches, so it keeps none.
+    if daw != Daw::Logic {
+        list.as_array_mut().expect("a list").extend([
+            json!({
+                "name": "script_install",
+                "title": format!("Keep a script in {daw}"),
+                "description": format!("Keeps a Lua chunk as {daw}'s own action ({}), under slug: a file and its action, not the project, so no step of {daw}'s undo; script_remove takes it away. A script kept already is written over only with replace. Answers {{file, where}}.", if daw == Daw::Reaper { "REAPER's Action List, Scripts/Kumi, one undo block a run" } else { "Tools > Kumi in Renoise's menu, with a shortcut to set" }),
+                "inputSchema": {"type": "object", "properties": merged(&pick, json!({
+                    "slug": {"type": "string", "pattern": "^[a-z0-9-]{1,64}$", "description": "Its file's name"},
+                    "name": {"type": "string", "minLength": 1, "maxLength": 80},
+                    "description": {"type": "string", "maxLength": 500},
+                    "code": {"type": "string", "minLength": 1, "maxLength": 200000},
+                    "replace": {"type": "boolean"},
+                })), "required": ["slug", "name", "code"], "additionalProperties": false},
+                "annotations": {"readOnlyHint": false, "destructiveHint": true, "idempotentHint": false, "openWorldHint": false},
+            }),
+            json!({
+                "name": "script_remove",
+                "title": format!("Remove a kept script from {daw}"),
+                "description": format!("Takes a kept script away from {daw}: its action and its file."),
+                "inputSchema": {"type": "object", "properties": merged(&pick, json!({
+                    "slug": {"type": "string", "pattern": "^[a-z0-9-]{1,64}$"},
+                })), "required": ["slug"], "additionalProperties": false},
+                "annotations": {"readOnlyHint": false, "destructiveHint": true, "idempotentHint": true, "openWorldHint": false},
+            }),
+        ]);
+    }
+    // M6: what changed in the project while Kumi wasn't looking, and what the producer did while it watched (REAPER's
+    // and Renoise's through the bridge's digest; Logic's catch-up and watch_me are Kumi's own, over the bridge's reads).
+    if daw != Daw::Logic {
+        let catchup = json!([
+            {
+                "name": "catch_up",
+                "title": format!("What changed in {daw}"),
+                "description": format!("What changed in the open {daw} project since this host last kept its snapshot (edits made while Kumi was closed, or while {daw} was restarted): {{place, name, lastSeenAt, project: [details], changes: [added | removed | changed], more?, same?}}, or first: true when there is no snapshot yet. The snapshot is kept again afterwards."),
+                "inputSchema": {"type": "object", "properties": pick, "additionalProperties": false},
+                "annotations": {"readOnlyHint": false, "idempotentHint": false, "openWorldHint": false},
+            },
+            {
+                "name": "baseline_save",
+                "title": format!("Keep the {daw} project's snapshot"),
+                "description": format!("Keeps the open {daw} project's snapshot again, so the next catch_up tells only what changes after now. Refused (saved: false) until catch_up has compared this project, so what changed while Kumi was away is never lost."),
+                "inputSchema": {"type": "object", "properties": pick, "additionalProperties": false},
+                "annotations": {"readOnlyHint": false, "idempotentHint": true, "openWorldHint": false},
+            },
+            {
+                "name": "watch_start",
+                "title": format!("Watch {daw}"),
+                "description": format!("Starts watching the producer work in {daw}: the project as it is now is kept, and what they add is looked at as it comes. Nothing in {daw} changes."),
+                "inputSchema": {"type": "object", "properties": pick, "additionalProperties": false},
+                "annotations": {"readOnlyHint": true, "idempotentHint": false, "openWorldHint": false},
+            },
+            {
+                "name": "watch_stop",
+                "title": format!("Stop watching {daw}"),
+                "description": format!("Stops watching and says what the producer did since watch_start: {{watched, changes (with each value before and after, what an added thing is made of, the parameters they moved by name), project, selected (the tracks they selected)}}."),
+                "inputSchema": {"type": "object", "properties": pick, "additionalProperties": false},
+                "annotations": {"readOnlyHint": true, "idempotentHint": false, "openWorldHint": false},
+            }
+        ]);
+        list.as_array_mut().expect("a list").extend(catchup.as_array().cloned().unwrap_or_default());
+    }
     list
+}
+
+/// Takes one property out of a tool's input schema, the tool found by its name: one another DAW's bridge takes and
+/// this one's doesn't.
+fn unset(list: &mut Value, tool: &str, name: &str) {
+    let tools = list.as_array_mut().expect("a list of tools");
+    let tool = tools.iter_mut().find(|candidate| candidate["name"] == tool).unwrap_or_else(|| panic!("no tool {tool}"));
+    tool["inputSchema"]["properties"].as_object_mut().expect("its properties").remove(name);
+}
+
+/// Sets one property of a tool's input schema, the tool found by its name.
+fn property(list: &mut Value, tool: &str, name: &str, schema: Value) {
+    let tools = list.as_array_mut().expect("a list of tools");
+    let tool = tools.iter_mut().find(|candidate| candidate["name"] == tool).unwrap_or_else(|| panic!("no tool {tool}"));
+    tool["inputSchema"]["properties"][name] = schema;
 }
 
 /// The listening tools (M5): renders and captures as jobs, playing a file out loud, the audio behind a ref, scratch
@@ -617,6 +788,30 @@ fn valid_id(id: &Value) -> bool {
     }
 }
 
+/// (M4b) What Logic's bounce or export wrote, as Kumi's HISTORY and the model are told it: the bridge answers the files
+/// and what their headers say, and no title of its own.
+fn written_title(name: &str, answer: &mut Value) {
+    if answer.pointer("/display/title").is_some() {
+        return;
+    }
+    let file_name = |path: &str| path.trim_end_matches('/').rsplit('/').next().unwrap_or(path).to_string();
+    let title = match name {
+        "bounce" => {
+            let Some(path) = answer.get("bounced").and_then(Value::as_str) else { return };
+            match answer.get("seconds").and_then(Value::as_f64) {
+                Some(seconds) => format!("Bounced \u{201c}{}\u{201d} ({seconds:.1} s)", file_name(path)),
+                None => format!("Bounced \u{201c}{}\u{201d}", file_name(path)),
+            }
+        }
+        _ => {
+            let Some(folder) = answer.get("folder").and_then(Value::as_str) else { return };
+            let count = answer.get("files").and_then(Value::as_array).map_or(0, Vec::len);
+            format!("Exported {count} audio file{} into \u{201c}{}\u{201d}", if count == 1 { "" } else { "s" }, file_name(folder))
+        }
+    };
+    answer["display"] = json!({"title": title});
+}
+
 fn tool_result(value: Value, is_error: bool) -> Value {
     json!({
         "content": [{"type": "text", "text": serde_json::to_string(&value).expect("JSON serializes")}],
@@ -685,7 +880,7 @@ pub async fn handle(host: &Host, message: &Value) -> Option<Value> {
                     };
                     result(id, tool_result(answer, is_error))
                 }
-                "catch_up" | "baseline_save" | "watch_start" | "watch_stop" => {
+                "catch_up" | "baseline_save" | "watch_start" | "watch_stop" if host.daw() != Daw::Logic => {
                     let (answer, is_error) = match name {
                         "catch_up" => host.catch_up(&arguments).await,
                         "baseline_save" => host.baseline_save(&arguments).await,
@@ -695,7 +890,9 @@ pub async fn handle(host: &Host, message: &Value) -> Option<Value> {
                     result(id, tool_result(answer, is_error))
                 }
                 "render" | "hear" | "listen_job" | "listen_cancel" | "audition" | "audition_stop" | "audio_file" | "scratch"
-                | "deliver_targets" | "deliver" => {
+                | "deliver_targets" | "deliver"
+                    if host.daw() != Daw::Logic =>
+                {
                     let (answer, is_error) = match name {
                         "render" => host.render(&arguments).await,
                         "deliver_targets" => host.deliver_targets(&arguments).await,
@@ -734,14 +931,26 @@ pub async fn handle(host: &Host, message: &Value) -> Option<Value> {
                     let (answer, is_error) = host.fx_chain_save(&arguments).await;
                     result(id, tool_result(answer, is_error))
                 }
-                // (#401) a chore kept as the DAW's own action: files and menus, passed on as they come
-                "script_install" | "script_remove" => {
+                // (#401) a chore kept as the DAW's own action: files and menus, passed on as they come (none in Logic Pro)
+                "script_install" | "script_remove" if host.daw() != Daw::Logic => {
                     let (answer, is_error) = host.passthrough(name, &arguments).await;
                     result(id, tool_result(answer, is_error))
                 }
-                // (r-tracks) Saving: the project in either DAW, tracks as a template in REAPER.
+                // (r-tracks) Saving: the project in either DAW, tracks as a template in REAPER; (M4b) Logic's bounce and export.
                 "project_save" | "track_template_save" if name == "project_save" || host.daw() == Daw::Reaper => {
                     let (answer, is_error) = host.passthrough(name, &arguments).await;
+                    result(id, tool_result(answer, is_error))
+                }
+                "bounce" | "export_tracks" if host.daw() == Daw::Logic => {
+                    let (mut answer, is_error) = host.passthrough(name, &arguments).await;
+                    if !is_error {
+                        written_title(name, &mut answer);
+                    }
+                    result(id, tool_result(answer, is_error))
+                }
+                // (M5) Logic heard: a part played and captured, a pass per candidate, a part bounced offline.
+                "hear" | "audition" | "render" if host.daw() == Daw::Logic => {
+                    let (answer, is_error) = host.listen(name, &arguments).await;
                     result(id, tool_result(answer, is_error))
                 }
                 _ => error(id, -32602, &format!("Unknown tool: {name}")),

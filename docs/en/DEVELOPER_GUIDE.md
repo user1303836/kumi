@@ -9,21 +9,24 @@ How the repository fits together, how to work on each part, and how to release.
 
 | Folder | What's in it |
 | --- | --- |
-| `crates/kumi` | The native `kumi` command and terminal app (`src/tui/`), and opt-in checks against models or real Live (`examples/`) |
-| `crates/kumi-runtime` | Agent loop, providers, sign-in, sessions, library, Live integration, media tools and MCP client |
+| `crates/kumi` | The native `kumi` command and terminal app (`src/tui/`), each DAW's setup, doctor and update steps (`src/daw/`), and opt-in checks against models, real Live or the real Logic Pro (`examples/`) |
+| `crates/kumi-runtime` | Agent loop, providers, sign-in, sessions, library, the DAW integrations (Live's, and REAPER's, Renoise's and Logic Pro's over Kumi's host), media tools and MCP client |
 | `crates/kumi-common` | Shared runtime utilities and source-compatible value handling |
-| `crates/ableton-mcp-server` | Native MCP bridge, analysis worker, lifecycle, setup, migration and diagnostics |
+| `crates/kumi-store` | Kumi's database: what it keeps between sessions, in SQLite |
+| `crates/kumi-genexpr` | A GenExpr interpreter for the tests of Kumi's Max for Live building blocks |
+| `crates/ableton-mcp-server` | Live's native MCP bridge, analysis worker, lifecycle, setup, migration and diagnostics |
 | `remote-script` | The bridge's Remote Script, which runs inside Live (`ableton_mcp_remote_script.py`, the `AbletonMcpBridge/` entry point, Python tests) |
 | `apps/live-extension` | Kumi's Live extension for Live 12.4 and later, on Live's Extensions SDK (TypeScript, with its own `package.json`) |
 | `protocol` | `ableton-live-v1.operations.json`, the operation registry the bridge and the Remote Script share |
 | `scripts` | Release builders, migration packaging, the Mac helper's build, the isolated test runners, and `native-kumi.mjs` behind `npm run kumi` and `npm run setup` |
-| `crates/daw-mcp-server` | Kumi's host for REAPER and Renoise (`daw-mcp-server --daw reaper\|renoise`): MCP over stdio, the changes' journal and undo, listening jobs, catch-up; also usable by other MCP clients |
+| `crates/daw-mcp-server` | Kumi's host for REAPER, Renoise and Logic Pro (`daw-mcp-server --daw reaper\|renoise\|logic`): MCP over stdio, the changes' journal and undo, listening jobs, catch-up, and the simulated REAPER, Renoise and Logic Pro the tests run against; also usable by other MCP clients |
 | `crates/reaper-kumi` | Kumi's REAPER extension (`reaper_kumi`), built against REAPER's SDK headers vendored in `sdk/` |
-| `crates/daw-bridge` | What the REAPER and Renoise bridges share: the loopback wire (`kumi-daw/1`), its handshake and auth, discovery, finding the DAWs, the doctor's checks and the bridge files' lifecycle |
+| `crates/daw-bridge` | What the REAPER, Renoise and Logic Pro bridges share: the loopback wire (`kumi-daw/1`), its handshake and auth, discovery, finding the DAWs, the doctor's checks and the bridge files' lifecycle |
 | `daws/renoise` | Kumi's Renoise tool (`com.kumi.Bridge.xrnx`, Lua) and its tests against a mock of Renoise's API |
+| `crates/logic-kumi` | Kumi's Logic Pro bridge, a program beside Logic Pro, and its Accessibility helper (`helper/KumiLogicHands.swift`, built by `scripts/build-logic-hands.py`); see [the Logic contract](LOGIC_CONTRACT.md) |
 | `install.sh`, `install.ps1` | The installers |
 
-The crates share the root Cargo workspace; there's no npm workspace. The
+The crates share the root Cargo workspace; there's no npm workspace. Live's
 bridge also works without Kumi. The TypeScript implementation the crates were
 ported from stays at the git tag `v1.7.6`.
 
@@ -59,6 +62,40 @@ host (crates/daw-mcp-server --daw reaper|renoise)
 - `kumi bridge` installs the bridge into Live through the bridge's lifecycle
   command, and finds it later through
   `Remote Scripts/AbletonMcpBridge/bridge-reference.json`.
+
+Logic Pro has no scripting and loads nothing, so its bridge is a program of
+Kumi's beside it:
+
+```text
+kumi (crates/kumi, crates/kumi-runtime)
+  │  MCP over stdio: Kumi starts its host as a child process
+  ▼
+host (crates/daw-mcp-server, `daw-mcp-server --daw logic`)
+  │  kumi-daw/1: authenticated TCP on 127.0.0.1 (9790 to 9799); the host starts the bridge
+  ▼
+bridge (crates/logic-kumi, `logic-kumi`, from Kumi's own folder)
+  │  JSON lines on stdin and stdout: the bridge runs its helper as a child
+  ▼
+helper (crates/logic-kumi/helper, `kumi-logic-hands-<hash>`)
+  │  Accessibility, key events and clicks, virtual CoreMIDI ports (Mackie Control), a Core Audio process tap
+  ▼
+Logic Pro
+```
+
+- The host is the same binary for each DAW whose bridge is Kumi's own
+  (`--daw logic|reaper|renoise`). For Logic Pro it starts the installed bridge
+  with `--kumi-home`, finds it through its discovery file in
+  `~/.kumi/bridges/logic/discovery/`, proves the shared secret, and stops it
+  when Kumi's session ends. Kumi's change set for Logic Pro
+  (`crates/kumi-runtime/src/integrations/logic_changes.rs`) names the tools;
+  the host's journal (`crates/daw-mcp-server/src/changes.rs`) previews, applies
+  and undoes each change through the bridge.
+- `kumi --daw logic bridge` sets the bridge up in Kumi's own folder through
+  daw-bridge's lifecycle, from the copy beside Kumi in a release
+  (`daws/logic/logic-kumi/`), from `KUMI_LOGIC_BRIDGE_SOURCE`, or, in a
+  checkout on a Mac, from the checkout's build staged in
+  `target/logic-bridge/logic-kumi/` (the helper built by its script when it
+  isn't there).
 
 ## Setup
 
@@ -188,6 +225,33 @@ version has no push: `live_subscribe` works only in the older one, and modern
 clients poll. Client metadata never grants access to Live. See the
 [specification](https://modelcontextprotocol.io/specification/2026-07-28/basic/versioning).
 
+## Working on Logic Pro's bridge
+
+[The Logic contract](LOGIC_CONTRACT.md) is the reference: what the bridge
+answers on `kumi-daw/1`, which macOS channel each answer and each change goes
+through, and the helper's protocol (`crates/logic-kumi/helper/README.md` has its
+every op). The lab record and the gate records in `docs/evidence/logic-*.md`
+say what was measured on the real Logic Pro.
+
+- **No test needs Logic Pro.** The bridge's tests replay scenes recorded from
+  the real Logic Pro (`crates/logic-kumi/tests/fixtures/`, recorded with the
+  `record_fixtures` and `record_changes` examples, which save a home folder as
+  `/Users/me`); the host's tests run the simulated Logic Pro
+  (`crates/daw-mcp-server/src/simulator/logic.rs`) over the reads the bridge
+  recorded (`crates/daw-mcp-server/tests/vectors/logic-reads.json`); the
+  runtime's and the app's run Kumi over the host in process.
+- **The real Logic Pro** is the opt-in `accept_logic` example, which each gate
+  ran ([Testing](TESTING.md#checks-with-live-or-a-model)).
+- **Logic Pro's names** stay in `crates/logic-kumi`, the Logic Pro parts of
+  `daw-bridge` and `daw-mcp-server`, `integrations/logic*.rs` in the runtime,
+  `crates/kumi/src/daw/own.rs` and the tests: the runtime's shared code sees
+  only the DAW's profile, and `daw_neutral_guard.rs` and the fake-DAW tests keep
+  Live's words out of what Logic Pro's session says.
+- **The helper** is named for its source's hash (`kumi-logic-hands-<hash>`),
+  and a release carries exactly the build of the current source: after a change
+  to `KumiLogicHands.swift`, rebuild it with
+  `python3 scripts/build-logic-hands.py`.
+
 ## Working on the Live extension
 
 `apps/live-extension` is TypeScript, bundled with esbuild, with its own
@@ -288,6 +352,14 @@ python3 scripts/release.py --go     # the release
   of Kumi's crates or installers. In a pull request that changes both, write
   `Changelog (bridge):` for a line about the bridge. The dry run shows where
   each line goes.
+- **Logic Pro's bridge** gets a new version the same way when a pull request
+  changes what it runs: `crates/logic-kumi` with its helper, or `daw-bridge`,
+  which it links (tests, examples, Markdown and the key-command tools in
+  `crates/logic-kumi/keys/` aside). A pull request that changes it and nothing
+  else that ships has its lines under its heading, `### Logic Pro bridge x.y.z`;
+  elsewhere, write `Changelog (logic):` for a line about it. `--logic` gives it
+  a new version whatever changed, and `--no-logic` keeps it. Its version is in
+  `crates/logic-kumi/Cargo.toml`, which the release bumps by a patch.
 - **What's new:** Kumi builds `CHANGELOG.md` in and shows a release's list
   items as **What's new** the first time it starts after an update (five at
   most, newest release first; `/changelog` has the rest). Paragraphs, such as
@@ -322,6 +394,16 @@ python3 scripts/release.py --go     # the release
   "Kumi X.Y.Z (#PR)" without waiting for its CI, tags the merge commit
   `vX.Y.Z`, pushes the tag and creates the draft release with its notes
   (`--summary` opens them with a sentence).
+- **Logic Pro's bridge in a release:** the CHANGELOG and the notes say a new
+  version of it in its own words, "Ships with Logic Pro bridge a.b.c, which Kumi
+  starts beside Logic Pro; `kumi update` puts it in Kumi's own folder", and the
+  release that first carries it "Brings Logic Pro bridge a.b.c for Logic Pro 12
+  on Apple Silicon Macs: `kumi --daw logic bridge` sets it up". Its ships-with
+  line sits beside Live's under "Bridge versions" in the three
+  `KUMI_CHANGES.md` (`Kumi X.Y.Z with Logic Pro bridge a.b.c.`, one in each
+  language, or none in any). The release that first carries the bridge finds
+  the line already naming it and keeps it; later releases move it on as they do
+  Live's.
 - **The tag's Installer run** builds native bundles for Intel and ARM on macOS,
   Linux and Windows, tests installs and migration, attaches the per-target
   bundles/manifests plus the compatibility `kumi.tar.gz`, `kumi-release.json`,
@@ -335,6 +417,7 @@ python3 scripts/release.py --go     # the release
 
 ```sh
 python3 scripts/build-hands.py              # macOS only; universal, ad hoc signed helper in target/hands/
+python3 scripts/build-logic-hands.py        # the Apple Silicon bundle only: Logic Pro's helper in target/logic-hands/
 MACOSX_DEPLOYMENT_TARGET=13.0 python3 scripts/build-native-release.py --target aarch64-apple-darwin --out release/native/aarch64-apple-darwin
 python3 -m unittest discover -s scripts/tests -p test_native_release.py
 ```
@@ -346,9 +429,13 @@ lockfile, build recipe and exact file hashes. `--profile ci-release`, which CI
 uses on pull requests and `main`, skips the release profile's whole-program
 optimization to build faster; a published bundle always uses the default
 `release`. Mac bundles need the current helper in `target/hands/`; other
-bundles don't carry it. The server and analysis worker must be shipped
-together. The `--binaries-dir` override packages existing binaries and
-does not establish that they were built with release optimizations.
+bundles don't carry it. The Apple Silicon Mac's bundle also carries Logic Pro's
+bridge in `daws/logic/logic-kumi/` (`logic-kumi`, its helper and a `version`
+file, the crate's version), which needs exactly the helper of the current
+source, alone in `target/logic-hands/`; no other bundle carries it. The server
+and analysis worker must be shipped together. The `--binaries-dir` override
+packages existing binaries and does not establish that they were built with
+release optimizations.
 
 The aggregation step retains the manifest consumed by existing Node 24
 installations:

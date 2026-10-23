@@ -8,6 +8,7 @@
   <img alt="Ableton Live 12" src="https://img.shields.io/badge/Ableton%20Live-12-111111">
   <img alt="REAPER 7" src="https://img.shields.io/badge/REAPER-7-111111">
   <img alt="Renoise 3.5" src="https://img.shields.io/badge/Renoise-3.5-111111">
+  <img alt="Logic Pro 12" src="https://img.shields.io/badge/Logic%20Pro-12-111111">
   <img alt="Native Rust runtime" src="https://img.shields.io/badge/runtime-native%20Rust-555555">
   <a href="LICENSE.md"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-blue"></a>
 </p>
@@ -16,13 +17,13 @@
   English · <a href="README.zh-CN.md">简体中文</a> · <a href="README.ja.md">日本語</a>
 </p>
 
-**A studio producer agent for Ableton Live, REAPER and Renoise that learns how you work.** Kumi will literally do anything in your set that Ableton exposes via Extensions/LOM... and even some things it doesn't intentionally expose via the API. From the tedious jobs to the ones you never have time for: rebuilding a sound from a YouTube tutorial, matching your mix to a reference, writing a Max for Live device you describe, or reworking the rack you point at. Every change shows up in HISTORY, most with their own undo, and a whole plan is one undo in Live (Cmd-Z, or Ctrl-Z on Windows). Kumi remembers the techniques you keep, so it fits you better with every session. In REAPER and Renoise it works through an extension and a tool of its own, in each DAW's words.
+**A studio producer agent for Ableton Live, REAPER, Renoise and Logic Pro that learns how you work.** Kumi will literally do anything in your set that Ableton exposes via Extensions/LOM... and even some things it doesn't intentionally expose via the API. From the tedious jobs to the ones you never have time for: rebuilding a sound from a YouTube tutorial, matching your mix to a reference, writing a Max for Live device you describe, or reworking the rack you point at. Every change shows up in HISTORY, most with their own undo, and a whole plan is one undo in Live (Cmd-Z, or Ctrl-Z on Windows). Kumi remembers the techniques you keep, so it fits you better with every session. In REAPER and Renoise it works through an extension and a tool of its own, in each DAW's words, and in Logic Pro 12 on Apple Silicon Macs through a bridge of its own beside Logic Pro.
 
 https://github.com/user-attachments/assets/f53fe0be-c9a9-476e-a1d5-efe3dc429526
 
 ## Quickstart
 
-Needs Ableton Live 12 on macOS 13+ or Windows 10/11, or REAPER 7+ or Renoise 3.5+ on macOS, Windows or Linux.
+Needs Ableton Live 12 on macOS 13+ or Windows 10/11, REAPER 7+ or Renoise 3.5+ on macOS, Windows or Linux, or Logic Pro 12 on an Apple Silicon Mac.
 
 **macOS or Linux** (Terminal):
 
@@ -37,6 +38,8 @@ irm https://github.com/user1303836/kumi/releases/latest/download/install.ps1 | i
 ```
 
 Kumi opens once it's installed and walks you through signing in and connecting to Live. After that, just run `kumi`. For REAPER or Renoise, run `kumi --daw reaper` or `kumi --daw renoise`: Kumi puts its extension or tool in and opens the DAW ([details](docs/en/KUMI_GUIDE.md#connect-to-reaper-or-renoise)). Something off? `kumi doctor` says what to fix.
+
+For Logic Pro, run `kumi --daw logic`: Kumi sets its Logic Pro bridge up in its own folder, with Logic Pro left open, and macOS asks once to allow its helper under Accessibility ([Connect to Logic Pro](docs/en/KUMI_GUIDE.md#connect-to-logic-pro)).
 
 [Guide](docs/en/KUMI_GUIDE.md) · [Commands, keys and screens](docs/en/KUMI_TUI.md) · [How Kumi changes your Set](docs/en/KUMI_CHANGES.md) · [Changelog](CHANGELOG.md)
 
@@ -56,6 +59,7 @@ Kumi opens once it's installed and walks you through signing in and connecting t
 - **Remembers:** notes about you and each Set, techniques it learns from what you keep, and recipes you can replay. Every save is shown, and one click forgets it.
 - **Keeps your conversations** for each Set, each with an id that takes it up again from anywhere (`kumi -r`), and says what changed while it was closed. `/share` turns one into a web page to send, with keys and paths taken out.
 - **Works in REAPER and Renoise too:** tracks, items and takes, FX and their parameters, envelopes and routing in REAPER; patterns and their lines, the sequence, instruments, samples, phrases and DSP chains in Renoise. Each change has its undo, Kumi listens and judges there too, and FOCUS follows the DAW's own views ([what it does in each DAW](docs/en/DAWS.md), [what it changes](docs/en/KUMI_CHANGES.md#reaper-and-renoise)).
+- **Works in Logic Pro 12** on Apple Silicon Macs: reads the project, changes its tracks, regions, notes, plug-ins, sends, automation, markers and tempo with Kumi's undo, listens to it, says what changed while Kumi was closed, and answers from Apple's Logic Pro User Guide. [What it can and can't do there](docs/en/KUMI_GUIDE.md#working-in-logic-pro).
 - **Works with your model:** sign in with ChatGPT, or use an OpenAI, Anthropic or OpenCode API key.
 
 ## Status
@@ -63,6 +67,7 @@ Kumi opens once it's installed and walks you through signing in and connecting t
 - Kumi 1.21.1 is currently supported for Ableton Live 12.4.15b4 (beta) and above on macOS and Windows. You may run into issues on lower versions. If you do, **please file an issue!**
 - 1.21.1 is tested with Live on macOS. On Windows, installing and updating are tested; using it with Live there is still new. Please send a `kumi report` when something breaks.
 - REAPER 7.82 and Renoise 3.5.4 are tested on macOS. On Windows and Linux, CI tests putting Kumi's extension and tool in place and loading the extension; using them with REAPER and Renoise there is new.
+- Logic Pro 12 is supported on Apple Silicon Macs through Kumi's own Logic Pro bridge, tested with Logic Pro 12.3.1 on macOS 26.6.1. Intel Macs, Linux and Windows have no Logic Pro bridge. Please send a `kumi --daw logic report` when something breaks there.
 
 ## Development
 
@@ -83,17 +88,21 @@ After that handoff, `kumi` runs the native application directly.
 | Folder | What's in it |
 | --- | --- |
 | `crates/kumi` | The native terminal app and `kumi` command |
-| `crates/kumi-runtime` | Model providers, memory, audio analysis, video, the web, and the integrations with Live, REAPER and Renoise |
-| `crates/ableton-mcp-server` | The native bridge, also usable by other MCP clients ([bridge guide](crates/ableton-mcp-server/README.md)) |
+| `crates/kumi-runtime` | Model providers, memory, audio analysis, video, the web, and the integrations with Live, REAPER, Renoise and Logic Pro |
+| `crates/kumi-common`, `crates/kumi-store` | What Kumi's crates share, and what Kumi keeps between sessions (SQLite) |
+| `crates/kumi-genexpr` | A GenExpr interpreter for the tests of the Max for Live devices Kumi makes |
+| `crates/ableton-mcp-server` | Live's native bridge, also usable by other MCP clients ([bridge guide](crates/ableton-mcp-server/README.md)) |
 | `remote-script` | The bridge's Remote Script, which runs inside Live |
 | `apps/live-extension` | Kumi's Live extension (Live 12.4 and later) |
 | `protocol` | The list of operations the bridge and the Remote Script share |
-| `crates/daw-mcp-server` | Kumi's host for REAPER and Renoise, which Kumi starts; also usable by other MCP clients |
+| `crates/daw-mcp-server` | Kumi's host for REAPER, Renoise and Logic Pro, which Kumi starts; also usable by other MCP clients |
+| `crates/daw-bridge` | What Kumi's REAPER, Renoise and Logic Pro bridges share |
 | `crates/reaper-kumi` | Kumi's REAPER extension |
 | `daws/renoise` | Kumi's Renoise tool |
+| `crates/logic-kumi` | Kumi's Logic Pro bridge, a program beside Logic Pro, and its Accessibility helper |
 
 The [developer guide](docs/en/DEVELOPER_GUIDE.md) covers building, testing and releasing.
 
 ## License
 
-[MIT](LICENSE.md); the parts from other people's work, and the models Kumi fetches, are in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Ableton Live is a trademark of Ableton AG; Kumi is not affiliated with or endorsed by Ableton, Cockos (REAPER) or Renoise.
+[MIT](LICENSE.md); the parts from other people's work, and the models Kumi fetches, are in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Ableton Live is a trademark of Ableton AG; Kumi is not affiliated with or endorsed by Ableton, Cockos (REAPER) or Renoise. Logic Pro is a trademark of Apple Inc.; Kumi is not affiliated with or endorsed by Apple.

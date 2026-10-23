@@ -1,5 +1,7 @@
 //! A producer away from Kumi's window: the terminal's status as Kumi works, and a desktop notification and a
-//! line in the DAW's window only while Kumi's window is behind another.
+//! line in the DAW's window only while Kumi's window is behind another; in Logic Pro as in Live.
+#[path = "support/live_words.rs"]
+mod live_words;
 #[path = "support/models.rs"]
 mod models;
 #[path = "support/tui_app.rs"]
@@ -207,6 +209,30 @@ case!(no_notification_over_a_take_being_recorded_until_it_stops, async {
     let (program, args) = h.notified.borrow()[0].clone();
     assert_eq!(program, "osascript");
     assert_eq!(args, ["-e", "display notification \"Done: Bounced the stems.\" with title \"Kumi\""]);
+    h.close().await;
+});
+
+// In Logic Pro too: nothing over a take being recorded (the session reads it from Logic's transport, as the bridge's
+// focus carries it), the notification once recording stops, and the screen in Logic's words throughout.
+case!(no_notification_over_a_take_being_recorded_in_logic_pro_either, async {
+    kumi::daw::work_with(kumi_runtime::core::daw::DawId::Logic);
+    let control = Rc::new(Control::default());
+    *control.extra.borrow_mut() = json!({"recording": true});
+    let h = away_with(control.clone(), NotifyChannel::AppleScript, AwaySettings::default());
+    h.start().await;
+    h.connect();
+    h.type_text(FOCUS_OUT).await;
+    answer(&h, "Bounced the keys.", 30_000).await;
+    delay(150).await;
+    assert!(h.notified.borrow().is_empty(), "nothing over the take");
+    control.extra.borrow_mut()["recording"] = json!(false);
+    until("the notification once recording stopped", || !h.notified.borrow().is_empty()).await;
+    let (program, args) = h.notified.borrow()[0].clone();
+    assert_eq!((program.as_str(), args[1].as_str()), ("osascript", "display notification \"Done: Bounced the keys.\" with title \"Kumi\""));
+    let screen = h.screen().join("\n");
+    assert!(screen.contains("Logic Pro"), "{screen}");
+    let leaks = live_words::leaks(&screen);
+    assert!(leaks.is_empty(), "Live's words:\n{}", leaks.join("\n"));
     h.close().await;
 });
 

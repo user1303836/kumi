@@ -27,7 +27,8 @@ def metadata(packages: dict[str, tuple[str, list[tuple[str, str | None]]]]) -> d
     }
 
 
-# store ← runtime ← app; the host is only a dev-dependency of the runtime and the app; the extension links the wire.
+# store ← runtime ← app; the host is only a dev-dependency of the runtime and the app; the extension and Logic's bridge
+# link the wire.
 WORKSPACE = dev.Workspace.from_metadata(metadata({
     "store": ("crates/store", []),
     "wire": ("crates/wire", []),
@@ -35,6 +36,7 @@ WORKSPACE = dev.Workspace.from_metadata(metadata({
     "runtime": ("crates/runtime", [("store", None), ("wire", None), ("host", "dev")]),
     "app": ("crates/app", [("runtime", None), ("host", "dev")]),
     "reaper-kumi": ("crates/extension", [("wire", None)]),
+    "logic-kumi": ("crates/logic", [("wire", None)]),
     "nested": ("crates/runtime/tests/nested", []),
 }))
 AREAS = [
@@ -45,6 +47,7 @@ AREAS = [
     dev.Area("renoise-tool-read", [dev.glob("daws/renoise/tool/version.lua")], feeds=["app"],
              layout=[dev.glob("daws/renoise/tool/**")]),
     dev.Area("reaper-extension", [dev.glob("crates/extension/**")]),
+    dev.Area("logic-helper", [dev.glob("scripts/build-logic-hands.py")], feeds=["logic-kumi"]),
     dev.Area("install", [dev.glob("install.sh"), dev.glob("crates/app/src/install/**")],
              unless=[dev.glob("**/tests.rs")]),
     dev.Area("network", [dev.glob("crates/runtime/src/net/**")]),
@@ -89,7 +92,7 @@ class Packages(unittest.TestCase):
 
     def test_dependents_carry_a_change_on_and_a_dev_dependent_only_sees_it(self):
         self.assertEqual(WORKSPACE.dependents({"store"}), {"store", "runtime", "app"})
-        self.assertEqual(WORKSPACE.dependents({"wire"}), {"wire", "host", "runtime", "app", "reaper-kumi"})
+        self.assertEqual(WORKSPACE.dependents({"wire"}), {"wire", "host", "runtime", "app", "reaper-kumi", "logic-kumi"})
         # The host's change reaches the runtime's and the app's tests, not what depends on the runtime's library.
         self.assertEqual(WORKSPACE.dependents({"host"}), {"host", "runtime", "app"})
         self.assertEqual(WORKSPACE.dependents({"app"}), {"app"})
@@ -127,8 +130,14 @@ class Affected(unittest.TestCase):
         self.assertIn("reaper_extension", jobs(run("M\tcrates/wire/src/frame.rs")))
         self.assertNotIn("reaper_extension", jobs(run("M\tcrates/store/src/lib.rs")))
 
+    def test_logic_s_bridge_runs_for_its_crate_what_it_builds_with_its_helper_s_script_and_ci(self):
+        self.assertIn("logic_bridge", jobs(run("M\tcrates/logic/src/server.rs")))
+        self.assertIn("logic_bridge", jobs(run("M\tcrates/wire/src/frame.rs")))
+        self.assertIn("logic_bridge", jobs(run("M\tscripts/build-logic-hands.py")))
+        self.assertNotIn("logic_bridge", jobs(run("M\tcrates/store/src/lib.rs")))
+
     def test_ci_s_workflow_runs_every_ci_job_and_another_workflow_the_broad_ones(self):
-        self.assertEqual(jobs(run("M\t.github/workflows/ci.yml")), RUST | CODE | {"reaper_extension", "renoise_tool"})
+        self.assertEqual(jobs(run("M\t.github/workflows/ci.yml")), RUST | CODE | {"reaper_extension", "renoise_tool", "logic_bridge"})
         self.assertEqual(jobs(run("M\t.github/workflows/extended.yml")), RUST | CODE)
 
     def test_a_change_no_package_holds_and_no_area_feeds_affects_every_package(self):

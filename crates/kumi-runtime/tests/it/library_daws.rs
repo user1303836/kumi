@@ -166,6 +166,7 @@ impl Home {
     fn plan(&self) -> LearnPlan {
         LearnPlan {
             dir: self.dir.path().to_string_lossy().into(),
+            daw: None,
             sources: library_sources(&self.options()),
             set_folders: vec![],
             set_files: vec![],

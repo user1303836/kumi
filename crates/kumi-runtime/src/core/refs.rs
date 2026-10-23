@@ -181,6 +181,12 @@ pub trait RefScheme: Default {
     fn row_refs(&self, kind: &str, row: &JsonObject) -> Vec<(String, String, bool)>;
     /// The long ref of the track a long ref is on, if it's on one.
     fn track_of(&self, reference: &str) -> Option<String>;
+    /// Refs every project has whatever its epoch, which no read lists (Logic's Stereo Out, `<epoch>:output:1`): each
+    /// long ref in `epoch`, its kind and what it is called. The book names them as it names any ref and the name stays
+    /// with the object from one epoch to the next; the observation lists them.
+    fn standing(&self, _epoch: &str) -> Vec<(String, &'static str, &'static str)> {
+        Vec::new()
+    }
 }
 
 /// The turn's refs, by the DAW's scheme.
@@ -198,20 +204,59 @@ pub struct Book<S: RefScheme> {
     /// these strings still holds, under each, what was at that place when it was last read there; code run in the DAW
     /// has the places it names read again first (`moved_places`), or it would act on what used to be there.
     moved: IndexSet<String>,
+    /// The scheme's standing refs as the book stands them now (`stand`), by what each is called: its long ref, its kind
+    /// and its short name.
+    standing: IndexMap<&'static str, (String, String, String)>,
     pub scheme: S,
 }
 
 impl<S: RefScheme> Book<S> {
-    /// Retired names never acquire a different object; counters continue across retirement.
+    /// Retired names never acquire a different object; counters continue across retirement. A standing ref's name
+    /// stays: its object is there whatever moved.
     pub fn clear_names(&mut self) {
         self.short.clear();
         self.long.clear();
+        self.name_standing();
     }
     /// Keeps the names of the refs `keep` holds to; the others retire (counters go on, so none is given again).
     pub fn keep_names(&mut self, keep: impl Fn(&S, &str) -> bool) {
         let scheme = &self.scheme;
         self.short.retain(|reference, _| keep(scheme, reference));
         self.long.retain(|_, reference| keep(scheme, reference));
+        self.name_standing();
+    }
+    /// The scheme's standing refs in `epoch`, registered and named, each name kept from the epoch before: each short
+    /// name with what it is called.
+    pub fn stand(&mut self, epoch: &str) -> Vec<(String, &'static str)> {
+        let mut out = Vec::new();
+        for (reference, kind, called) in self.scheme.standing(epoch) {
+            let short = match self.standing.get(called) {
+                Some((before, _, short)) => {
+                    let short = short.clone();
+                    if *before != reference {
+                        self.short.shift_remove(before);
+                    }
+                    short
+                }
+                None => self.short_ref(&reference),
+            };
+            self.refs.insert(reference.clone(), kind.into());
+            self.standing.insert(called, (reference, kind.into(), short.clone()));
+            out.push((short, called));
+        }
+        self.name_standing();
+        out
+    }
+    /// The standing refs' names, put (back) in the maps.
+    fn name_standing(&mut self) {
+        for (reference, _, short) in self.standing.values() {
+            self.short.insert(reference.clone(), short.clone());
+            self.long.insert(short.clone(), reference.clone());
+        }
+    }
+    /// The kind of a ref the book knows: one this turn's reads named, or a standing one.
+    fn kind_known(&self, reference: &str) -> Option<&String> {
+        self.refs.get(reference).or_else(|| self.standing.values().find(|(standing, _, _)| standing == reference).map(|(_, kind, _)| kind))
     }
     pub fn unname(&mut self, reference: &str) {
         if let Some(short) = self.short.shift_remove(reference) {
@@ -399,7 +444,7 @@ impl<S: RefScheme> Book<S> {
         let kind = js_string(args.get("kind"));
         let parent_kinds = self.scheme.parents(&kind);
         if parent_kinds.is_some() || args.contains_key("parent") {
-            let parent = args.get("parent").and_then(Value::as_str).and_then(|s| self.refs.get(s));
+            let parent = args.get("parent").and_then(Value::as_str).and_then(|s| self.kind_known(s));
             let takes = parent_kinds.unwrap_or_else(|| vec!["set".into()]);
             let parent = parent.ok_or_else(|| {
                 if !args.contains_key("parent") {

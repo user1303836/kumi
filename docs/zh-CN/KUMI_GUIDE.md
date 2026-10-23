@@ -4,6 +4,8 @@
 
 Kumi 是一个在终端里运行的制作人代理，为你在 Ableton Live 中打开的工程工作。它读取工程，按你的要求进行修改，并把每项修改显示在 HISTORY 中。它能播放、录音和渲染，聆听音频并与参考曲对比，观看视频教程，制作 Max for Live 设备，在网上查找资料，还会记住你的工作方式。它也能在 REAPER 工程和 Renoise 歌曲中工作：本指南主要讲 Live，在那里有什么不同，请见[连接 REAPER 或 Renoise](#连接-reaper-或-renoise)。
 
+在搭载 Apple 芯片的 Mac 上，它也能配合 Logic Pro 12 的工程工作，靠的是一个在 Logic Pro 旁运行的自有桥接：[连接 Logic Pro](#连接-logic-pro)和[在 Logic Pro 中工作](#在-logic-pro-中工作)说明了怎么做，以及 Logic Pro 在哪些地方不同于本指南其余部分所讲的 Live。
+
 要安装 Kumi 并把它连接到 Live，请按照[快速开始](../../README.zh-CN.md#快速开始)操作。本指南介绍之后的一切。按键与界面请见[命令、按键与界面](KUMI_TUI.md)；修改与撤销如何工作，请见 [Kumi 如何修改你的工程](KUMI_CHANGES.md)。
 
 ## 登录并选择模型
@@ -93,7 +95,7 @@ Kumi 可以在 REAPER 7 及更高版本和 Renoise 3.5 及更高版本中工作�
 
 `kumi --daw reaper bridge`（或 `renoise`）在 shell 中做同样的事：写入 DAW 的文件夹之前会先询问（`--yes` 可预先确认），放入桥接或把它更新到最新，DAW 开着时会提示你重启它。
 
-**用哪个 DAW。** 之后只运行 `kumi`，就会使用装有桥接的那个 DAW。装了多个时，它选正在运行的那个，否则选你上次用的，再否则选 Live；如果还有别的 DAW 开着，它会说明（"Renoise is open too: Kumi works with REAPER. /daw renoise switches to Renoise."）。`/daw` 告诉你 Kumi 正在用哪个 DAW，`/daw <name>`（`live`、`reaper` 或 `renoise`）会关闭 Kumi，并用那个 DAW 重新打开。`--daw` 和 `KUMI_DAW` 总是优先。
+**用哪个 DAW。** 之后只运行 `kumi`，就会使用装有桥接的那个 DAW。装了多个时，它选正在运行的那个，否则选你上次用的，再否则选 Live；如果还有别的 DAW 开着，它会说明（"Renoise is open too: Kumi works with REAPER. /daw renoise switches to Renoise."）。`/daw` 告诉你 Kumi 正在用哪个 DAW，`/daw <name>`（`live`、`reaper`、`renoise` 或 `logic`）会关闭 Kumi，并用那个 DAW 重新打开。`--daw` 和 `KUMI_DAW` 总是优先。
 
 **Kumi 查找的位置。**
 
@@ -107,6 +109,56 @@ Kumi 可以在 REAPER 7 及更高版本和 Renoise 3.5 及更高版本中工作�
 **版本。** 每个 Kumi 版本都附带一个扩展和一个工具，`kumi update` 会把它们更新到最新（见下文“更新、报告与卸载”）。
 Kumi 1.21.0 至 1.21.1 附带 REAPER 扩展 0.1.1，1.20.0 附带 0.1.0。
 Kumi 1.21.0 至 1.21.1 附带 Renoise 工具 1.0.1，1.20.0 附带 1.0.0。
+
+## 连接 Logic Pro
+
+Kumi 在搭载 Apple 芯片的 Mac 上配合 Logic Pro 12 工作：App Store 的 Logic Pro，或 Creator Studio 的 Logic Pro。Logic Pro 没有 Kumi 能用的脚本接口，所以 Kumi 带来了自己的桥接 `logic-kumi`：一个在 Kumi 配合 Logic Pro 工作期间运行在 Logic Pro 旁边的程序。它的辅助程序像你一样读取和操作 Logic Pro 的窗口：通过 macOS 的辅助功能、Logic Pro 的快捷键命令和菜单，以及 Logic Pro 自行添加的一个控制界面“Kumi Logic”。桥接放在 Kumi 自己的文件夹中；不会有任何东西放进 Logic Pro 或它的文件夹。
+
+运行 `kumi --daw logic`。第一次时，Kumi 的设置会在应用内只完成尚未完成的步骤：
+
+1. **Sign in**：如果 Kumi 还没有登录，先登录。
+2. **Connect to Logic Pro**：Kumi 把它的 Logic Pro 桥接安装到 Kumi 自己的文件夹中。Logic Pro 可以保持打开，也不会有任何东西重启。如果这台 Mac 上没有 Logic Pro 12，或只有旧版，Kumi 会说明；装好后选 **Look again** 重新检查。
+3. **Accessibility**：Kumi 第一次启动桥接的辅助程序时，macOS 会询问。请在 系统设置 › 隐私与安全性 › 辅助功能 中允许它，macOS 会在那里列出运行 Kumi 的应用（你的终端）。Kumi 会等到桥接能读取 Logic Pro，然后连接。
+
+在某一步按 Esc，会把这一步留到以后，这期间 Kumi 在不连接 Logic Pro 的情况下聊天；允许辅助功能之后，Kumi 会自己读取 Logic Pro。
+
+`kumi --daw logic bridge` 在 shell 中安装桥接。它会先询问（`--yes` 可预先确认），Logic Pro 可以保持打开，完成后它会说明做了什么：“Kumi's Logic Pro bridge 0.1.0 is in Kumi's own folder. Kumi starts it beside Logic Pro when a session begins”。Kumi 通过桥接自身的生命周期流程把它放到位，带有回执，并保留较早的版本以便回滚。Kumi 会在 `/Applications` 或 `~/Applications` 中找到 Logic Pro；Logic Pro 在别处时，用 `KUMI_LOGIC_APP` 指定这个应用。
+
+**每次使用时**，先在 Logic Pro 中打开一个工程，然后运行 `kumi --daw logic`。会话开始时，Kumi 在 Logic Pro 旁边启动它的桥接，Kumi 关闭时桥接随之停止。FOCUS 跟随你在 Logic Pro 中选中的轨道和片段（region）。Logic Pro 关闭时，Kumi 在不连接它的情况下聊天，等 Logic Pro 应答后自己连接；`/reconnect` 会立即尝试。
+
+**Live 与 Logic Pro。** `kumi --daw logic`（或 `KUMI_DAW=logic`）配合 Logic Pro 工作，`kumi --daw ableton` 配合 Live 工作。只安装了其中一个的桥接时，单独的 `kumi` 就配合那一个；两个都安装了时，配合打开着的那一个，否则配合你上次用的那一个，另一个也开着时 Kumi 会告诉你。在 Kumi 中，`/daw` 说明它正配合哪个 DAW 工作，`/daw logic` 或 `/daw live` 会关闭 Kumi，再以另一个 DAW 重新打开它。每个 DAW 的工程各自保留自己的对话。
+
+**仅限搭载 Apple 芯片的 Mac。** Logic Pro 12 只能在那里运行，所以只有搭载 Apple 芯片的 Mac 上的 Kumi 带有这个桥接。在 Intel Mac、Linux 或 Windows 上，`kumi --daw logic bridge` 什么都不安装，并说明原因：“Logic Pro is supported on Apple Silicon Macs only, and this Kumi is for Intel Macs”（或 Linux，或 Windows）。Logic Pro 11 及更早版本不受支持，`kumi --daw logic doctor` 会说明这一点。
+
+**聆听 Logic Pro** 需要 macOS 14.2 或更高版本。Kumi 通过 Core Audio 的进程音频分接（process tap）听取 Logic Pro 的输出；在测试所用的 Mac 上，它没有请求任何权限。macOS 拒绝它时，Kumi 会说明：请为运行 Kumi 的应用允许 System Audio Recording（系统设置 › 隐私与安全性 › Screen & System Audio Recording）。
+
+**控制界面。** 桥接第一次运行时，Logic Pro 会自行添加“Kumi Logic”控制界面（虚拟 MIDI 端口上的一个 Mackie Control），并可能显示它的 Control Surface Setup 窗口，你可以把它关掉。这个控制界面会留在 Logic Pro › Control Surfaces › Setup 中，没有桥接运行时处于离线状态。
+
+## 在 Logic Pro 中工作
+
+在 Logic Pro 中，Kumi 使用 Logic Pro 的用语：工程、它的轨道和片段、Tracks area、通道条上的插件、Stereo Out。它按你看到的样子读取工程（轨道、片段及其音符、插件及其参数、发送、Smart Controls、自动化、标记、Tempo List 和 Signature List），FOCUS 显示所选轨道的通道条、片段的音符和 Tracks area。如果某次读取需要 Logic Pro 当前没有显示的面板（Mixer、List Editors、插件的窗口），它会把这个面板短暂打开，然后再关上。
+
+**Kumi 修改什么。** 每项修改都会先从 Logic Pro 回读，HISTORY 才会说它已完成：
+
+- 轨道：音量、声像、静音、独奏、录音准备和名称；在所选轨道下方添加轨道，以及删除轨道；建立和展平 Track Stack；
+- 片段：沿所在轨道移动、按整拍调整大小和分割、设为循环、重命名和删除；添加、修改、删除和量化其中的音符；一次写入许多音符，方式是 Kumi 写出一个 MIDI 文件，由 Logic Pro 导入到一条单独的新轨道上；
+- 添加和移除插件、旁通插件、在插件窗口的 Controls View 中设置它们的参数，以及逐个切换它们的设置；从 Logic Pro 的 Library 载入音色；Smart Controls；把采样载入一条新的 Sampler 轨道；
+- 建立到总线的发送（对还没有任何东西接收的总线，Logic Pro 会为它建一条辅助轨（aux）），设置发送的电平，以及移除发送；通过 Track Automation Event List 修改自动化事件；
+- 添加、移动和删除标记；速度、速度事件和拍号；循环区域（cycle）；节拍器；
+- 播放、停止和播放头；保存，或另存为一个新的 `.logicx`（绝不覆盖已有的文件）；把一段范围并轨为文件，以及把每条轨道导出为音频文件；
+- Logic Pro 的任意快捷键命令，按 Key Commands 窗口列出的名称（“Split Regions/Events at Playhead”）或按它的 ID 指定，取自你自己的快捷键命令集。Kumi 从不运行会打开对话框或离开工程的快捷键命令。
+
+其中很多会把 Logic Pro 短暂调到最前面，因为它的菜单和快捷键命令只在那时才起作用。Logic Pro 显示对话框、正在载入工程，或者它的窗口在另一个空间（Space）中时，Kumi 会说它正忙，什么都不改。如果 Logic Pro 的窗口太窄，显示不了它的 control bar 或 List Editors，Kumi 会说明：请把窗口拉宽。
+
+**撤销。** Kumi 的撤销在 Logic Pro 中同样有效，在 HISTORY 中，和在 Live 中一样。Logic Pro 没有撤销块，所以一个计划在 Logic Pro 自己的撤销中不是一步，而是每项修改各占一步。能重新设置数值的地方（推子、名称、片段的位置、参数、标记、速度），Kumi 按数值把它恢复。删除的轨道或片段、分割、导入、展平的 Track Stack、音色或载入的采样，则通过 Logic Pro 自己的撤销复原，而 Kumi 只在它那一步仍在最上面时才按下这个撤销；当你自己的步骤在最上面时，Kumi 会说明，在 Logic Pro 中按 Cmd-Z 会把它们逐一撤回。快捷键命令做的事，只有 Logic Pro 自己的撤销能撤回。Logic Pro 的撤销不为推子、声像、静音、独奏或录音准备、速度、旁通、循环区域、节拍器、发送电平或 Smart Control 保留步骤，也不为插件的参数或设置保留步骤（这些是插件窗口自己撤销中的步骤），所以在 Logic Pro 中按 Cmd-Z 撤不回它们，而 Kumi 的撤销可以。当你在 Logic Pro 中用 Cmd-Z 撤回 Kumi 的某一步时，Kumi 会察觉，HISTORY 也会说明。
+
+**聆听。** Kumi 聆听 Logic Pro 的方式是播放要听的那一段，并捕获 Logic Pro 在 Stereo Out 之后的输出，你也会听到它。单独聆听一条轨道时，会专门为它播放一遍，并把它独奏；试听会让每个候选各播放一遍，除第一个之外，其余各遍 Logic Pro 都保持无声。渲染就是 Logic Pro 自己的离线并轨。Kumi 只在 Logic Pro 停止时聆听，之后把它恢复原样：停止状态、播放头、独奏、节拍器和循环区域。音频以文件形式留在你的电脑上。判定的一轮会用轨道或 Stereo Out 上最后一个开启的 Adaptive Limiter 或 Limiter 把电平拉回，没有就用最后一个 Gain，再没有就用 Kumi 加在末尾的 Gain，每次都是 HISTORY 中的一项修改。一次聆听会把节拍器关掉再打开（它的节拍声用来为捕获定时），而 Logic Pro 会随工程保存这个设置，所以即使工程中什么都没变，你关闭工程时它也会询问是否保存；Kumi 聆听过之后会说明这一点。
+
+**追上离开期间的变化与观察。** Kumi 会记住它最后一次看到的每个已保存工程是什么样子，并像对 Set 一样，说明它关闭期间发生了哪些变化：轨道按名称和顺序比对（在原位被重命名的轨道会报告为已重命名），片段按所在轨道和起点，插件按在通道条上的顺序（Stereo Out 上的也一样），标记按位置。它还不比较音符或插件设置。这次查看会短暂打开 Logic Pro 的 Mixer 和 List Editors。Logic Pro 不保留任何 Kumi 能放进工程内部的 ID，所以 Kumi 按路径识别工程：移动过或以其他名称保存的工程会重新开始，而对 Logic Pro 的 Project Templates 文件夹中的工程，从不追上离开期间的变化。“看我做”同样可用：在 Logic Pro 中手动操作，做完时告诉它，Kumi 就会把发生的变化变成一个配方。
+
+**即时短语**和在 Live 中一样可用（[即时短语](KUMI_TUI.md#即时短语)）：整数 BPM 的速度，轨道的静音、独奏或录音准备（你自己的轨道之一，绝不会是辅助轨、输出或 Stereo Out），循环区域（`loop 9-16`）和节拍器。音符按 Logic Pro 的“Display Middle C As”设置为中央 C 指定的八度来命名。
+
+**Live 独有的。** Max for Live 设备和 Kumi Ears、Kumi 的 Live 扩展和 **Ask Kumi about this**、Live 中的 Python、Live 自己的命令（在 Logic Pro 中，由它的快捷键命令做这些事）、Willington，以及分离音轨和把音频转换成 MIDI，都是 Live 独有的。Kumi 在 Logic Pro 中还做不到的事，见[限制](#限制)。
 
 ## 使用 Kumi
 
@@ -122,7 +174,7 @@ Kumi 工作时，按 Enter 可以补充说明（它会在当前这一步之后�
 
 ## 后台任务
 
-不改动工程的耗时工作，Kumi 会放到后台去做，这期间你可以继续和 Kumi 一起工作：网上查资料、看教程视频、查 Live 手册、翻你的素材库或之前的对话，或者写出一个 Max for Live 设备的文件。
+不改动工程的耗时工作，Kumi 会放到后台去做，这期间你可以继续和 Kumi 一起工作：网上查资料、看教程视频、查 Live 手册（或 Logic Pro 的指南）、翻你的素材库或之前的对话，或者写出一个 Max for Live 设备的文件。
 
 - **开始：** Kumi 用一句话说明正在运行什么，随即就能接收你的下一条消息。你可以主动要求（“在后台查一下这个”），也可以交给 Kumi 决定。
 - **查看：** 顶栏显示正在运行的任务数（◐ 2 jobs），**JOBS** 标签页列出每个任务正在做什么、用时和 token。`/jobs` 也能列出它们。
@@ -305,7 +357,7 @@ MIDI 效果器用 JavaScript 编写。在做出设备之前，Kumi 会在你的�
 
 - **搜索**通过无需密钥的免费搜索服务进行（Exa、Parallel、Keenable 和 Firecrawl 轮流使用，都没有回应时使用 DuckDuckGo），代码则在 GitHub 上搜索。同样的搜索在 20 分钟内不会重复执行。
 - **阅读**涵盖网页、PDF、文本和代码文件、GitHub 仓库、Max 补丁和 Max for Live 设备，以及图片（由模型查看）。
-- 不涉及 Live 的**搜索和阅读**（网页、声音、预设、你的 Set、Live 手册、以前的对话）会同时运行，最多四个。对 Live 的更改仍然逐个运行。
+- 不涉及 Live 的**搜索和阅读**（网页、声音、预设、你的 Set、Live 手册或 Logic Pro 的指南、以前的对话）会同时运行，最多四个。对 Live 的更改仍然逐个运行。
 
 Kumi 查过的内容会显示在它的回答上方，每项一行。它只读取公开地址，绝不读取你的电脑或你的网络，并把网页上写的内容当作信息，绝不当作指令。
 
@@ -314,9 +366,10 @@ Kumi 查过的内容会显示在它的回答上方，每项一行。它只读取
 Kumi 了解你拥有的东西，所以你可以要“像这首参考曲里那样带点颗粒感的军鼓”“我常用的人声效果链”或者“我那个 Night Drive 工程里的贝斯”。
 
 - **查找的位置。**Live 的 User Library 和 Places、Live 安装的音色包、Core Library、Splice 的文件夹，以及你在 `settings.json` 中列出的文件夹（`"libraryFolders": ["~/Samples"]`）。你在请求中提到的文件夹会被优先学习。工程会在 Live 最后打开它们的位置及其附近找到。
+- **在 Logic Pro 中，**Kumi 改为学习 Logic Pro 的位置，从不学习 Live 的：`~/Music/Audio Music Apps` 中你自己的内容（采样、Sampler 乐器、音色、通道条设置和插件设置）、Apple Loops、Splice 的文件夹和你列出的文件夹，然后是 `/Library/Application Support/Logic` 中 Logic Pro 自带的内容。音色、通道条设置、插件设置、Sampler 乐器和 Audio Unit 的预设都算作它的预设。工程会在 `~/Music/Logic` 中，以及 Logic Pro 最近打开过的工程（File › Open Recent）旁边找到，前提是桥接能知道它们的位置：macOS 不让桥接访问 `~/Music`，所以放在那里的工程要等它打开之后才会学到。Kumi 不读取 `.logicx` 的内部，所以工程按它的文件计入，没有速度或调，你的习惯也只从 Live 的 Set 中学习。
 - **学习的内容。**每个声音：时长、是单次还是循环、循环的速度、调或音高、响度、明亮度、包络、是什么声音（底鼓、军鼓、pad、人声、效果等），以及用来找出相似声音的指纹。每个预设：它的设备和类型。每个工程：速度、调、轨道、设备链、插件、返回轨道、片段和其中用到的采样。
 - **不打扰你。**学习会在 Kumi 启动几秒后，在一个最低优先级的独立进程中自动开始，Live 播放时会暂停。第一次之后只学习新增和改动过的文件，中途停止也不会丢失任何东西。
-- **查找方式。**按文字、类别、速度、调、时长，或与某个文件、片段、渲染出的轨道听起来有多接近；预设按设备和类型；工程按速度和调。“在 Live 里怎么……？”会根据 Ableton 的 Live 12 手册回答，并注明章节。
+- **查找方式。**按文字、类别、速度、调、时长，或与某个文件、片段、渲染出的轨道听起来有多接近；预设按设备和类型；工程按速度和调。“在 Live 里怎么……？”会根据 Ableton 的 Live 12 手册回答，并注明章节；“在 Logic Pro 里怎么……？”则根据 Apple 的《Logic Pro 使用手册》回答，并用标题注明主题。Logic Pro 的指南从 support.apple.com 一次读取一个主题，在回答第一次需要它时读取，并保存在素材库旁边（`logic-pro-guide.json`，45 天后重新读取）。
 - **来自你的工程。**Kumi 会学习你的工作方式：速度和调、每类轨道的乐器和常用效果链、你常用的插件、你的返回轨道和总线效果链、你给轨道命名和上色的方式。`/memory` 会把它列在 “From your Sets” 下；你让它忘掉的行会一直被忘掉。
 - **进度。**`/status`、欢迎界面、`kumi doctor` 和 `kumi library` 会告诉你；`kumi library --rebuild` 会全部重新学习。它保存在 `~/.kumi/library`，只有你能读取。
 
@@ -404,6 +457,8 @@ kumi uninstall                 # 卸载 Kumi；加上 --all 会同时删除你�
 - Kumi 放入之后在 DAW 文件夹中被改动过的副本，会先保存到 `~/.kumi/bridges/reaper/changed`（或 `renoise`），Kumi 会告诉你位置。
 - 两者都不需要关闭 Live 或该 DAW：正在运行的 DAW 会在重启时加载新版本。
 
+Kumi 的 Logic Pro 桥接会随 Kumi 一起更新和回滚，无论 Logic Pro 是否打开，因为 Kumi 每次会话都会重新启动它。带来更新版本的更新会说“Kumi's Logic Pro bridge … is in Kumi's own folder now: Kumi starts it beside Logic Pro when a session begins”，`--rollback` 会恢复之前那个 Kumi 带的桥接（“… is back in Kumi's own folder”）。回到不认识 Logic Pro 的 Kumi 时，桥接会留在原处，并会说明这一点（“Kumi's Logic Pro bridge stays in Kumi's own folder”）；`KUMI_DAW` 设为 `logic` 时，那个 Kumi 不会启动。
+
 从当前的 1.7.5 安装版（自带 Node 24）升级时，关闭 Live，运行 `kumi update`，再照常打开 Kumi。原生应用首次启动时会迁移桥接，即使新旧桥接都为 1.0.74。设置、登录信息、对话和素材库仍在 `~/.kumi` 或已有的 `KUMI_HOME` 中，无需重新登录或移动数据。
 
 上一版应用及其 Node 会保留供回滚。在 Windows 上，原生版首次启动时会替换旧启动器，之后的启动不再经过 Node；普通更新不需要额外操作。`kumi update --rollback` 会一起恢复 JavaScript 应用及其桥接配置和密钥；必须先关闭 Live，并保留桥接的上一代文件。再回滚一次就会返回原生应用。Kumi 从不自行关闭 Live。
@@ -428,15 +483,17 @@ Kumi 会在启动时检查是否有新版本，每天最多一次；没有新版
 - DAW 是否在运行、桥接是否应答（以及打开的工程或歌曲），仍在运行旧桥接的 DAW（需要重启），以及占用其端口（REAPER 为 9770–9779，Renoise 为 9780–9789）的其他程序。
 - 对 Renoise：是否为试用版（无法渲染，所以 Kumi 不能离线聆听）、它的 OSC 服务器（开启时会接受来自网络、不需要密码的命令），以及 Kumi 的工具是否在 Tools › Tool Browser 中被关闭。
 
+`kumi --daw logic doctor` 改为检查 Logic Pro 这一侧：Logic Pro 12 及其位置，Kumi 的 Logic Pro 桥接（它的版本、Kumi 安装它之后它是否被改动过、macOS 是否把它标记为已下载、它是否为 Logic Pro 运行所用的处理器构建），Logic Pro 是否在运行、桥接是否在应答，以及它的辅助程序是否有辅助功能权限。Logic Pro 在运行而桥接没有运行，只算一条提示：Kumi 会在会话开始时启动桥接。
+
 `--json` 以 JSON 输出同样的检查，便于分享，和报告一样会删除密钥、令牌、主文件夹和账户名。其措辞可能随版本变化，因此不适合让脚本去匹配：
 
 - `kumi`：版本；`fixes`：需要修复的检查数量。
 - `sections`：每项有一个 `title` 和它的 `checks`，每个检查有 `status`（`ok`、`note` 或 `fix`）、`text`，以及有下一步时的 `next`。
 - 退出码与不加 `--json` 时相同。
 
-`report` 会写出 `~/kumi-report-<date and time>.txt`，其中包含 Kumi 和桥接的版本、doctor 的检查结果、你的设置、Kumi 在你上一次对话中做了什么、缺口日志，以及 Live 自身日志中来自桥接的行（对 REAPER 和 Renoise，则是 `~/.kumi/bridges/<daw>/logs` 中 Kumi 桥接日志的最后几行）。密钥和令牌会被删除，你的主文件夹显示为 `~`，你的账户名显示为 `<user>`。发送前请先读一遍。
+`report` 会写出 `~/kumi-report-<date and time>.txt`，其中包含 Kumi 和桥接的版本、doctor 的检查结果、你的设置、Kumi 在你上一次对话中做了什么、缺口日志，以及 Live 自身日志中来自桥接的行（对 REAPER、Renoise 和 Logic Pro，则是 `~/.kumi/bridges/<daw>/logs` 中 Kumi 桥接日志的最后几行）。密钥和令牌会被删除，你的主文件夹显示为 `~`，你的账户名显示为 `<user>`。发送前请先读一遍。
 
-`uninstall` 会移除 Kumi、为 `--rollback` 保留的版本、更新留下的文件、保留的旧版 Node、启动器、它添加的 PATH 条目，以及 Kumi 下载的内容（程序、模型和看过的视频，需要时会再次下载），并告诉你释放了多少空间。它会提出把桥接和扩展从 Live 中移除（仅在 Live 关闭时），并把 Kumi 的扩展从 REAPER、工具从 Renoise 中移除。REAPER 和 Renoise 用来比较离开期间变化的状态也会保留，除非加上 `--all`；你改动过的桥接副本（`~/.kumi/bridges/<daw>/changed`）总会保留。你的对话、笔记、配方、登录信息、素材库和参考曲目会保留，除非你加上 `--all`。`--dry-run` 只说明会删除什么，不删除任何东西。
+`uninstall` 会移除 Kumi、为 `--rollback` 保留的版本、更新留下的文件、保留的旧版 Node、启动器、它添加的 PATH 条目，以及 Kumi 下载的内容（程序、模型和看过的视频，需要时会再次下载），并告诉你释放了多少空间。它会提出把桥接和扩展从 Live 中移除（仅在 Live 关闭时），并把 Kumi 的扩展从 REAPER、工具从 Renoise 中移除，再把 Kumi 的 Logic Pro 桥接从 Kumi 自己的文件夹中移除。“Kumi Logic”控制界面会留在 Logic Pro › Control Surfaces › Setup 中，你可以在那里删除它。REAPER 和 Renoise 用来比较离开期间变化的状态也会保留，除非加上 `--all`；你改动过的桥接副本（`~/.kumi/bridges/<daw>/changed`）总会保留。你的对话、笔记、配方、登录信息、素材库和参考曲目会保留，除非你加上 `--all`。`--dry-run` 只说明会删除什么，不删除任何东西。
 
 - 当 Kumi 的文件夹（`KUMI_HOME`）是你的主文件夹、磁盘的根目录、相对路径，或者没有 Kumi 启动器和应用的文件夹时，它什么都不删除，并说明哪些 Kumi 的内容需要你手动移除。安装程序也不会安装到那里。用 `sudo` 运行时，它同样不会动你的主文件夹，也不会动任何不属于 root 的文件夹。
 - 在 `bin`、`downloads` 以及存放 Kumi 下载内容的文件夹中，只删除 Kumi 自己的文件；其他东西会保留并列出名称，文件夹也会保留。
@@ -470,15 +527,18 @@ Kumi 会在启动时检查是否有新版本，每天最多一次；没有新版
 
 **桥接版本。** Kumi 在连接时读取桥接的版本，只提供该版本支持的工具。[桥接版本](KUMI_CHANGES.md#桥接版本)说明了哪些工具需要哪个版本。
 
+**Logic Pro。** Kumi 不能为标记命名或重命名（Logic Pro 自己为标记编号），不能移动轨道或给轨道上色，不能设置发送的模式，不能移动插件，也不能把采样载入 Quick Sampler（采样改为载入 Logic Pro 的 Sampler）；每一项都会被拒绝，并说明原因。它读取片段的音符，只限于 Event List 在屏幕上显示的那些，并且只按名称知道音频片段的文件（Kumi 改为通过片段所在的轨道来听这个片段）。速度只接受整数 BPM；片段的边缘、分割和导入都落在整拍上；量化没有强度；自动化事件只接受整拍，数值为 0 到 127。目标搜索（`/loop` 为匹配声音而运行的旋钮搜索）、凭耳朵调节插件的旋钮，以及跟上判定运行期间被重命名的轨道，在 Logic Pro 上都还没有。Logic Pro 12 需要搭载 Apple 芯片的 Mac，而 Kumi 只在英文版 Logic Pro 上运行过。
+
 ## 隐私：哪些内容会离开你的电脑
 
-- **你的模型提供方**会收到你的消息、对话、Kumi 从工程中读取的内容、它观看的视频画面、它读取的图片、你随消息添加的图片，以及交给后台任务的内容和任务读到的内容（设置了 `workerModel` 时则是它的提供方）。使用你电脑上的模型时，这些内容不会离开你的电脑（写在 `settings.json` 中的服务器无论运行在哪里都会收到）。
+- **你的模型提供方**会收到你的消息、对话、Kumi 从工程（或 Logic Pro 工程）中读取的内容、它观看的视频画面、它读取的图片、你随消息添加的图片，以及交给后台任务的内容和任务读到的内容（设置了 `workerModel` 时则是它的提供方）。使用你电脑上的模型时，这些内容不会离开你的电脑（写在 `settings.json` 中的服务器无论运行在哪里都会收到）。
 - **网络搜索和阅读**会发送到上面提到的搜索服务，Kumi 读取的网页也会看到它的请求。Kumi 不会读取带有密钥或令牌的地址。
 - **下载**来自 GitHub（Kumi 的发布版本和更新检查、yt-dlp、ffmpeg 和 whisper.cpp、ONNX Runtime 和 Kumi 自己的模型）、Hugging Face（语音模型）、你为槽位的模型给出的任意 https 地址，以及你指定的视频网站。
 - 用文字指定的**参考**会按名字在 MusicBrainz 和 ListenBrainz 上查找，Spotify 链接从 Spotify 的公开页面读取（艺人链接从 MusicBrainz），音频通过 YouTube 搜索获取，测量完即删除。
 - **音频**在你的电脑上分析；只有数字会发送给模型。如果有聆听模型，它会收到所判定修改的简短片段（每段最长 10 秒，单声道）：有 Gemini API 密钥时发给 Gemini，有 OpenAI API 密钥时发给 OpenAI，或发给 `KUMI_LISTENER` 或聆听槽位（`/slots`）指定的模型（设置了 `KUMI_LISTENER_KEY` 时连同它一起）。`KUMI_LISTENER=off` 或 `/slots listening off` 可以关闭；试用新的聆听模型时只会发送一段已知的测试音。
 - **你的声音**在你的电脑上转写，录音随即删除；只有你发送时的文字会离开。
-- **你的素材库**在你的电脑上学习；只有手册的页面来自网络。
+- **你的素材库**在你的电脑上学习；只有手册的页面来自外部：Live 的来自 ableton.com，Logic Pro 的指南（Apple 的《Logic Pro 使用手册》）来自 support.apple.com，每个主题都在回答第一次需要它时读取。
+- **Logic Pro 桥接**只在你的电脑上监听（127.0.0.1），Kumi 在 Logic Pro 中听到的内容也在你的电脑上分析，和其他任何音频一样。
 
 轨道、片段和设备的名称、工具结果以及网页对 Kumi 来说都是数据，绝不是指令。Kumi 把它的文件保存在 `~/.kumi` 中，只有你可以读取；登录信息保存在 `~/.kumi/auth.json`。终端的滚动记录，以及提供方自己的数据保留，不在此范围内。
 
@@ -537,9 +597,10 @@ Kumi 把一切都保存在 `~/.kumi` 中。`~/.kumi/settings.json` 包含：
 | `GEMINI_API_KEY`、`GOOGLE_API_KEY` | 聆听模型用的 Gemini API 密钥（从 Gemini 自己的列表中选出的最新 Flash 模型） |
 | `KUMI_FAST=0` | 通过桥接的预览和应用这条较慢的路来设置设备参数（[一项修改如何进行](KUMI_CHANGES.md#一项修改如何进行)） |
 | `KUMI_YTDLP`、`KUMI_FFMPEG`、`KUMI_WHISPER`、`KUMI_WHISPER_MODEL` | 按路径指定你自己的 yt-dlp、ffmpeg、whisper.cpp（`whisper-cli`）或语音模型（`ggml-*.bin`） |
-| `KUMI_DAW` | 设为 `reaper` 或 `renoise` 即使用那个 DAW（Live 为 `ableton`），作用同 `--daw` |
+| `KUMI_DAW` | 设为 `reaper`、`renoise` 或 `logic` 即使用那个 DAW（Live 为 `ableton`），作用同 `--daw` |
 | `KUMI_REAPER_RESOURCE_DIR` | REAPER 的资源文件夹不在默认位置时用它指定；指定后 Kumi 只用这一个 |
 | `KUMI_RENOISE_PREFS_DIR` | Renoise 的偏好设置：一个 `V<x.y.z>` 文件夹，或包含它们的文件夹 |
+| `KUMI_LOGIC_APP` | Kumi 在 `/Applications` 或 `~/Applications` 中找不到 Logic Pro 应用时，用它指定 |
 | `KUMI_REMOTE_SCRIPTS_DIR` | Kumi 找不到 Live 的 Remote Scripts 文件夹时，用它指定 |
 | `KUMI_LIVE_EXTENSIONS_DIR` | Kumi 找不到 Live 的 Extensions 文件夹时，指定 `kumi bridge` 放置 Kumi 扩展、`kumi doctor` 查找扩展的位置 |
 | `KUMI_BRIDGE_WAIT_SECONDS` | `kumi bridge` 等待 Live 连接的时长；`0` 表示不等待 |

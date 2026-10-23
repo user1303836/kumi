@@ -1,11 +1,13 @@
-//! The host's bridge client against simulated REAPER and Renoise bridges: the handshake, requests, events, busy and
-//! quitting, with golden NDJSON transcripts of the wire (tests/golden/*-bridge.ndjson; KUMI_BLESS=1 rewrites them).
+//! The host's bridge client against simulated REAPER, Renoise and Logic bridges: the handshake, requests, events, busy
+//! and quitting, with golden NDJSON transcripts of the wire (tests/golden/*-bridge.ndjson; KUMI_BLESS=1 rewrites them).
+mod common;
+
+use common::{golden, normalized};
 use daw_bridge::auth::Secret;
 use daw_bridge::wire::Project;
 use daw_mcp_server::client::{BridgeClient, ConnectError, RequestError};
-use daw_mcp_server::simulator::{Line, Simulator, SimulatorConfig};
+use daw_mcp_server::simulator::{Simulator, SimulatorConfig};
 use serde_json::{json, Value};
-use std::path::PathBuf;
 use std::time::Duration;
 
 const CLIENT: &str = "daw-mcp-server/test";
@@ -13,50 +15,6 @@ const WAIT: Duration = Duration::from_secs(5);
 
 fn secret() -> Secret {
     Secret::new("simulated-secret-0123456789-abcdefghijklmnop").unwrap()
-}
-
-/// The transcript with what changes from run to run (nonces, proofs, sessions, the pid) replaced by names.
-pub fn normalized(lines: &[Line]) -> String {
-    let mut out = String::new();
-    for line in lines {
-        let mut value: Value = serde_json::from_str(&line.text).unwrap_or_else(|_| Value::String(line.text.clone()));
-        // Credit frames are left out, like heartbeats: how many bytes a host grants depends on the receive buffer
-        // its system gave it and on how the bytes arrived.
-        if value.get("type").and_then(Value::as_str) == Some("credit") {
-            continue;
-        }
-        if let Some(object) = value.as_object_mut() {
-            for key in ["nonce", "proof", "session"] {
-                if object.contains_key(key) {
-                    object.insert(key.into(), format!("<{key}>").into());
-                }
-            }
-            if object.contains_key("pid") {
-                object.insert("pid".into(), "<pid>".into());
-            }
-            if object.contains_key("deadlineMs") {
-                object.insert("deadlineMs".into(), "<deadline>".into());
-            }
-            if let Some(result) = object.get_mut("result").and_then(Value::as_object_mut) {
-                if result.contains_key("pid") {
-                    result.insert("pid".into(), "<pid>".into());
-                }
-            }
-        }
-        out.push_str(&format!("{} {} {}\n", line.connection, if line.from_host { ">" } else { "<" }, value));
-    }
-    out
-}
-
-pub fn golden(name: &str, made: &str) {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests").join("golden").join(name);
-    if std::env::var("KUMI_BLESS").is_ok_and(|value| value == "1") {
-        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        std::fs::write(&path, made).unwrap();
-        return;
-    }
-    let kept = std::fs::read_to_string(&path).unwrap_or_else(|_| panic!("{} is missing; run with KUMI_BLESS=1", path.display()));
-    assert_eq!(made, kept, "{name} changed; bless it if that's intended");
 }
 
 async fn session(simulator: &Simulator) {
@@ -103,6 +61,51 @@ async fn renoise_session_transcript() {
     let transcript = normalized(&simulator.transcript());
     assert!(transcript.contains("\"demo\":false"));
     golden("renoise-bridge.ndjson", &transcript);
+}
+
+/// Logic's identity is the welcome's (Logic's pid, its bundle id as the resource, its version); its status is the
+/// project, `busy` (false, or `away` when Logic's windows are on another Space) and `permission` for what the bridge
+/// lacks.
+#[tokio::test]
+async fn logic_session_transcript() {
+    let simulator = Simulator::start(SimulatorConfig::logic(secret(), "com.apple.logic10")).await.unwrap();
+    let client = BridgeClient::connect(simulator.address(), secret(), CLIENT).await.unwrap();
+    let identity = &client.welcome().identity;
+    assert_eq!(
+        (identity.daw.as_str(), identity.daw_version.as_str(), identity.resource.as_str()),
+        ("logic", "12.3.1", "com.apple.logic10")
+    );
+    // The status is the recorded one: the bridge's answer over the real Logic, replayed by the simulator.
+    let status = client.request("status", json!({}), WAIT).await.unwrap();
+    let vectors: serde_json::Value = serde_json::from_str(include_str!("vectors/logic-reads.json")).unwrap();
+    let recorded = vectors["cases"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|case| case["request"]["method"] == "status")
+        .map(|case| case["response"]["result"].clone())
+        .expect("the vectors record a status");
+    assert_eq!(status, recorded);
+    assert_eq!((status["busy"].clone(), status["permission"].clone()), (json!(false), json!(null)));
+    // Without Accessibility the status says so, and reads fail in words, never busy.
+    simulator.set_permission(Some("accessibility"));
+    assert_eq!(client.request("status", json!({}), WAIT).await.unwrap()["permission"], "accessibility");
+    let refused = client.request("read", json!({"kind": "track"}), WAIT).await.unwrap_err();
+    assert!(
+        matches!(&refused, RequestError::Bridge { code, message } if code == "failed" && message.contains("Accessibility")),
+        "{refused:?}"
+    );
+    simulator.set_permission(None);
+    // Logic's windows on another Space: away, which is busy.
+    simulator.set_busy(Some("away"));
+    assert_eq!(client.request("status", json!({}), WAIT).await.unwrap()["busy"], "away");
+    assert!(
+        matches!(client.request("read", json!({"kind": "track"}), WAIT).await, Err(RequestError::Bridge { code, .. }) if code == "busy")
+    );
+    simulator.set_busy(None);
+    client.close().await;
+    session(&simulator).await;
+    golden("logic-bridge.ndjson", &normalized(&simulator.transcript()));
 }
 
 #[tokio::test]

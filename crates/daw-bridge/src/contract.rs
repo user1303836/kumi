@@ -6,8 +6,8 @@
 
 use serde_json::Value;
 
-/// The kinds a ref names, for both DAWs (`r:track:{GUID}`, `E:pattern:3`).
-const REF_KINDS: [&str; 18] = [
+/// The kinds a ref names, for every DAW (`r:track:{GUID}`, `E:pattern:3`, Logic's `1:region:2`).
+const REF_KINDS: [&str; 20] = [
     "aitem",
     "track",
     "item",
@@ -17,6 +17,8 @@ const REF_KINDS: [&str; 18] = [
     "send",
     "marker",
     "region",
+    "note",
+    "plugin",
     "env",
     "pattern",
     "seq",
@@ -102,6 +104,11 @@ mod tests {
         for ref_ in ["r:track:{0A1B}", "r:track:master", "r:param:{AB}:3", "e7:pattern:3", "1a15-2:device:2.1.4", "r:env:{AB}:VOLENV2"] {
             assert!(looks_like_ref(ref_), "{ref_}");
         }
+        // Logic's: positional, with an epoch, for its tracks, regions, notes, plug-ins, sends and markers.
+        for ref_ in ["1:track:2", "1:region:1", "3:note:1.4", "1:plugin:1.1", "1:send:2.1", "2:marker:1"] {
+            assert!(looks_like_ref(ref_), "{ref_}");
+        }
+        assert!(!looks_like_ref("1:tempo:1") && !looks_like_ref("1:project:1"));
         for text in ["Drums", "bass: track: loud", "track:3", "r:nothing:{AB}", "r:track:", "c1.sim-1.2", "36591:2", ""] {
             assert!(!looks_like_ref(text), "{text}");
         }

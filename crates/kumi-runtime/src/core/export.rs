@@ -14,8 +14,8 @@ use unicode_normalization::UnicodeNormalization;
 
 use super::contracts::{ChangePicture, ChangeRecord, ChangeState, KernelCheckpoint, MixLevels, PictureValue, SavedConversation};
 use super::gaps::GAP_TOOL;
-use super::goal::goal_setup;
-use super::loop_run::loop_setup;
+use super::goal::goal_setup_for;
+use super::loop_run::loop_setup_for;
 use super::memory::{FORGET_TOOL, REMEMBER_TOOL};
 use super::playbook::PLAYBOOK_OPEN;
 use super::recall::SEARCH_CONVERSATIONS_TOOL;
@@ -529,13 +529,16 @@ fn producer_words(text: &str, pictures: usize, earlier: &mut Vec<String>, partia
 
 /// What the producer asked, in words Kumi sends the model: theirs, a loop's or a goal's request without Kumi's framing
 /// ("Loop: …", "Goal: …"), or None for Kumi's own words to the model ("[Kumi…": a round's next step, a check, a job's
-/// report, the carry-on note).
+/// report, the carry-on note). Kumi frames a request in the words of the DAW it ran in, so every registered DAW's framing
+/// is tried, Live's first: a request of several lines framed in REAPER's, Renoise's or Logic Pro's words is the
+/// producer's too, in an export, an import and the budget's list.
 pub(crate) fn asked(words: &str) -> Option<String> {
     let words = trim(words);
-    if let Some(request) = framed(words, &loop_setup("")) {
+    let profiles = crate::integrations::REGISTERED;
+    if let Some(request) = profiles.iter().find_map(|profile| framed(words, &loop_setup_for(profile, ""))) {
         return Some(format!("Loop: {request}"));
     }
-    if let Some(goal) = framed(words, &goal_setup("")) {
+    if let Some(goal) = profiles.iter().find_map(|profile| framed(words, &goal_setup_for(profile, ""))) {
         return Some(format!("Goal: {goal}"));
     }
     (!words.is_empty() && !kumis(words)).then(|| words.to_string())

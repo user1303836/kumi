@@ -22,7 +22,7 @@ from urllib.parse import quote
 ROOT = Path(__file__).resolve().parents[1]
 SCHEMA = "ableton-mcp-native-release/v1"
 BRIDGE_BINARIES = ("ableton-mcp-server", "ableton-mcp-analysis-worker")
-# daw-mcp-server is Kumi's host for REAPER and Renoise: Kumi starts it from beside its own binary.
+# daw-mcp-server is Kumi's host for REAPER, Renoise and Logic Pro: Kumi starts it from beside its own binary.
 BINARIES = ("kumi", *BRIDGE_BINARIES, "daw-mcp-server", "kumi-harness", "kumi-library-measure", "kumi-library-learner")
 # REAPER's extension and Renoise's tool, where Kumi installs them from (crates/kumi/src/daw/own.rs): daws/reaper and
 # daws/renoise in the bundle. REAPER loads `reaper_*` libraries from UserPlugins; a Renoise tool is a folder named for its
@@ -34,6 +34,20 @@ RENOISE_TOOL = "com.kumi.Bridge.xrnx"
 RENOISE_TOOL_SOURCE = "daws/renoise/com.kumi.Bridge.xrnx"
 RENOISE_TOOL_ID = "com.kumi.Bridge"
 RENOISE_API = "6.2"
+# Logic Pro's bridge, where Kumi sets it up from (crates/kumi/src/daw/own.rs): daws/logic/logic-kumi in the bundle, one
+# flat folder (the lifecycle refuses links) holding the bridge, its Accessibility helper and a version file. Logic loads
+# nothing: Kumi copies the folder into its own and its host starts the bridge from there, so no copy goes beside Kumi.
+# Kumi supports Logic Pro 12 on Apple Silicon only (daw-bridge's detection and doctor say so), so only the Apple Silicon
+# Mac's bundle carries the bridge. The Intel Mac's bundle carries none, as Linux's and Windows' don't, and its Kumi says
+# Logic Pro is supported on Apple Silicon Macs only.
+LOGIC_TARGETS = ("aarch64-apple-darwin",)
+LOGIC_CRATE = "crates/logic-kumi"
+LOGIC_BRIDGE = "logic-kumi"  # the folder, and the bridge's binary in it
+LOGIC_VERSION_FILE = "version"
+# The helper scripts/build-logic-hands.py builds, named for its source's SHA-256 as that script names it.
+LOGIC_HELPER_SOURCE = "crates/logic-kumi/helper/KumiLogicHands.swift"
+LOGIC_HELPER_PREFIX = "kumi-logic-hands-"
+LOGIC_HANDS = "target/logic-hands"
 # What Kumi's installer or the DAW writes into a bridge's folder: never shipped (daw-bridge's NOT_PAYLOAD).
 NOT_PAYLOAD = ("bridge-reference.json", "preferences.xml")
 RENOISE_SUFFIXES = (".lua", ".xml", ".json")
@@ -495,7 +509,7 @@ def binary_facts(path: Path) -> list[dict]:
         raise ValueError(f"{path.name} can't be read as a library: {error}") from None
     raise ValueError(f"{path.name} isn't a Mach-O, ELF or PE library")
 
-# ── REAPER's extension and Renoise's tool ────────────────────────────────────────────────────────────────────────
+# ── REAPER's extension, Renoise's tool and Logic Pro's bridge ────────────────────────────────────────────────────
 
 def system_of(target: str) -> str:
     if target.endswith("-apple-darwin"):
@@ -598,6 +612,46 @@ def stage_daws(root: Path, bundle: Path, target: str, extension: Path) -> dict[s
         copy(folder / name, bundle / DAWS / "renoise" / RENOISE_TOOL / name)
     return {"reaper": version, "renoise": tool_version}
 
+def logic_helper_name(root: Path) -> str:
+    """The helper of the checkout's current source, named as scripts/build-logic-hands.py names its build."""
+    return LOGIC_HELPER_PREFIX + digest(root / LOGIC_HELPER_SOURCE)[:12]
+
+def check_logic(path: Path) -> None:
+    """One of Logic's bridge's binaries as macOS on Apple Silicon runs it: a Mach-O holding arm64, each slice signed."""
+    slices = binary_facts(path)
+    if any("signed" not in piece for piece in slices):
+        raise ValueError(f"{path.name} isn't a Mach-O: Logic Pro's bridge runs on macOS")
+    archs = sorted(piece["arch"] for piece in slices)
+    if "arm64" not in archs:
+        raise ValueError(f"{path.name} holds {', '.join(archs)}, not arm64: Logic Pro's bridge runs on Apple Silicon")
+    unsigned = [piece["arch"] for piece in slices if not piece["signed"]]
+    if unsigned:
+        raise ValueError(f"{path.name} ({', '.join(unsigned)}) isn't signed: macOS on Apple Silicon refuses unsigned code")
+
+def stage_logic(root: Path, bundle: Path, target: str, binaries: Path) -> str | None:
+    """Logic Pro's bridge into the bundle's daws/logic/logic-kumi, as Kumi sets it up from: the bridge built for the
+    target, exactly the helper of the current source (scripts/build-logic-hands.py's build, alone in its folder, no
+    link) and a version file, the crate's version; that version. A bundle for any other target carries none: None."""
+    if target not in LOGIC_TARGETS:
+        return None
+    name = logic_helper_name(root)
+    hands = root / LOGIC_HANDS
+    files = inventory(hands) if hands.exists() else {}
+    others = sorted(candidate for candidate in files if candidate != name)
+    if others:
+        raise ValueError(f"Logic's helper must be the build of the current source alone, {name}, not {', '.join(others)}: "
+                         "run python3 scripts/build-logic-hands.py")
+    if name not in files:
+        raise ValueError(f"{target}'s release requires {hands / name}; run python3 scripts/build-logic-hands.py first")
+    folder = bundle / DAWS / "logic" / LOGIC_BRIDGE
+    for source in (binaries / LOGIC_BRIDGE, hands / name):
+        copy(source, folder / source.name)
+        (folder / source.name).chmod(0o755)
+        check_logic(folder / source.name)
+    version = crate_version(root, LOGIC_CRATE)
+    (folder / LOGIC_VERSION_FILE).write_text(version + "\n", encoding="ascii")
+    return version
+
 def cargo_library(rust_target: str) -> str:
     return {"macos": f"lib{REAPER_EXTENSION}.dylib", "windows": f"{REAPER_EXTENSION}.dll",
             "linux": f"lib{REAPER_EXTENSION}.so"}[system_of(rust_target)]
@@ -640,7 +694,8 @@ def build_extension(root: Path, target: str, profile: str, out: Path) -> tuple[P
 def build_release(root: Path, binaries: Path, out: Path, target: str, source: dict, builder: dict, recipe: str, bridge_only=False,
                   reaper_extension: Path | None = None) -> dict:
     """The target's bundle in `out` (or, `bridge_only`, the Ableton bridge's artifact alone). A bundle carries REAPER's
-    extension, built for it (`reaper_extension`), and Renoise's tool."""
+    extension, built for it (`reaper_extension`), and Renoise's tool; the Apple Silicon Mac's carries Logic Pro's bridge
+    too, from `binaries` and the helper scripts/build-logic-hands.py built."""
     out.mkdir(parents=True, exist_ok=True)
     if not bridge_only and reaper_extension is None:
         raise ValueError("a bundle carries REAPER's extension: build it (build_extension) or name it")
@@ -669,8 +724,12 @@ def build_release(root: Path, binaries: Path, out: Path, target: str, source: di
             shutil.copytree(package / folder, bundle / folder)
         stage_hands(root, bundle, target)
         daws = stage_daws(root, bundle, target, reaper_extension)
+        logic = stage_logic(root, bundle, target, binaries)
+        if logic is not None:
+            daws["logic"] = logic
         version = tomllib.loads((root / "crates/kumi/Cargo.toml").read_text())["package"]["version"]
-        # `bridge` is Live's bridge, as every earlier Kumi reads it; REAPER's extension and Renoise's tool are new keys.
+        # `bridge` is Live's bridge, as every earlier Kumi reads it; REAPER's extension and Renoise's tool are new keys, and
+        # so is Logic's bridge, in the Apple Silicon Mac's bundle only.
         metadata = {"name": "kumi", "version": version, "bridge": manifest["package"]["version"], **daws, "runtime": "rust-native", "target": target}
         json_write(bundle / "package.json", metadata)
         # Existing JavaScript applications use this entry to return from an explicit rollback.

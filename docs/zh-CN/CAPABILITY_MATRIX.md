@@ -2,7 +2,7 @@
 
 [English](../en/CAPABILITY_MATRIX.md) · 简体中文 · [日本語](../ja/CAPABILITY_MATRIX.md)
 
-桥接在 Live 的各个领域覆盖了什么、由哪个通道完成工作、修改如何撤销，以及是否已在真实的 Live 上测试过。工具本身列在[用户指南](USER_GUIDE.md)中；Kumi 在这些工具之上构建的修改工具，见 [Kumi 如何修改你的工程](KUMI_CHANGES.md)。
+桥接在 Live 的各个领域覆盖了什么、由哪个通道完成工作、修改如何撤销，以及是否已在真实的 Live 上测试过。工具本身列在[用户指南](USER_GUIDE.md)中；Kumi 在这些工具之上构建的修改工具，见 [Kumi 如何修改你的工程](KUMI_CHANGES.md)。Kumi 自己为 Logic Pro 提供的桥接覆盖了什么，见下文的 [Logic Pro](#logic-pro)。
 
 ## 如何阅读本矩阵
 
@@ -78,3 +78,49 @@
 | 重新打开工程后仍保持不变的对象标识 | 引用只在一次连接内有效；探查时会重新读取 |
 
 有意不纳入范围的：Push 及其他硬件控制界面（桥接是一个 Control Surface，但不读取原始 MIDI）、通用的 OSC、网络、串口或传感器连接（实时控制仅限回环）、外部 Link 对等端和 Link Audio，以及桥接内部的 Max for Live 设备。Kumi 自己就能制作 Max for Live 设备；见 [Kumi 指南](KUMI_GUIDE.md#制作-max-for-live-设备)。
+
+## Logic Pro
+
+Kumi 的 Logic Pro 桥接（`logic-kumi`）在 Logic Pro 12 中覆盖了什么、通过 macOS 的哪个通道，以及 Kumi 的撤销在那里如何撤回一项修改。确切的数据格式，以及测得的每个通道能做什么，见 [Logic 契约](LOGIC_CONTRACT.md)。
+
+| 通道 | 说明 |
+| --- | --- |
+| 辅助功能 | 按 macOS 的辅助功能所呈现的样子读取和设置 Logic Pro 的窗口：Tracks area、轨道头和 Inspector、Mixer、List Editors、control bar、插件窗口、Library、对话框和菜单 |
+| 按键与点击 | Logic Pro 的快捷键命令，取自你的快捷键命令集或 Logic Pro 自己的那一套；在不接受辅助功能按下操作的按钮上点一下（轨道头的静音、独奏和录音准备） |
+| 面板服务 | macOS 的打开和保存面板，它们属于一个单独的服务 |
+| Mackie Control | 虚拟 MIDI 端口上的“Kumi Logic”控制界面：选择轨道、走带、Kumi 聆听时的时间码、一遍聆听中的独奏 |
+| 进程音频分接（process tap） | Logic Pro 的输出，通过 Core Audio 的进程音频分接听到 |
+| Spotlight、偏好设置 | 最近的某个工程在哪里；Logic Pro 以哪个八度为中央 C 命名 |
+
+**撤销：** *按数值* 表示 Kumi 的撤销把这项修改替换掉的内容重新设置回去；*Logic 的撤销* 表示 Kumi 为它按下 Logic Pro 自己的撤销，且只在 Kumi 的那一步仍在最上面时才这样做；*无* 表示没有可撤销的东西。Logic Pro 没有撤销块：计划中的每项修改在 Logic Pro 的撤销中都是单独的一步，而有些修改（推子、速度、旁通、循环区域（cycle）、节拍器、插件的参数）根本不是其中的一步。
+
+**真实 Logic** 一栏写出该领域在真实的 Logic Pro 12.3.1 上运行过的关口（gate），每个都记录在 `docs/evidence/` 中（[M2](../evidence/logic-m2-gate-2026-10-19.md)、[M3](../evidence/logic-m3-gate-2026-10-19.md)、[M4](../evidence/logic-m4-gate-2026-10-21.md)、[M4 第二批](../evidence/logic-m4b-gate-2026-10-21.md)、[M5](../evidence/logic-m5-gate-2026-10-21.md)、[M6](../evidence/logic-m6-gate-2026-10-21.md)）。
+
+| 领域 | 覆盖内容 | 通道 | 撤销 | 真实 Logic |
+| --- | --- | --- | --- | --- |
+| 读取工程 | 工程（速度、拍号、调、中央 C）、轨道、片段（region）、片段的音符（以 Event List 在屏幕上显示的为限）、插件及其参数、发送、Smart Controls、自动化、标记、Tempo List 和 Signature List、Logic Pro 最近打开过的工程；FOCUS：通道条、片段的音符、Tracks area、路由；为追上离开期间的变化而对整个工程做的一次批量读取 | 辅助功能（Mixer、List Editors 和插件的窗口会被短暂打开）；Spotlight、偏好设置 | 无 | M2；后来加入的读取为 M4（第二批）和 M6 |
+| 轨道 | 音量、声像、静音、独奏、录音准备、名称；在所选轨道下方添加轨道；删除轨道；建立和展平 Track Stack | 辅助功能；按键与点击 | 按数值；删除的轨道和展平的 Track Stack：Logic 的撤销；Kumi 建立的 Track Stack，在它那一步不在最上面时按数值重新展平 | M3；M4 |
+| 片段 | 沿所在轨道移动、按整拍调整大小和分割、设为循环、重命名、删除 | 辅助功能（Region inspector，处于片段层级的 Event List）；按键与点击 | 按数值；分割和删除的片段：Logic 的撤销 | M4 |
+| 音符 | 以 Event List 中的行添加、修改和删除；量化（Logic Pro 的量化参数，强度 100%）；一次许多个，作为一个 MIDI 文件导入到一条新轨道上 | 辅助功能；面板服务 | 按数值；导入：Logic 的撤销 | M3；M4 |
+| 插件与音色 | 添加和移除、旁通；插件窗口 Controls View 中的参数；逐个切换设置；从 Library 载入音色；把采样放进一条新的 Sampler 轨道 | 辅助功能；按键与点击（Mixer 插槽的菜单、Library 的搜索）；Mackie Control（选择轨道）；面板服务 | 按数值（添加的插件、旁通、参数）；设置：插件窗口自己的撤销；删除的插件：Logic 的撤销，否则按名称放回，采用 Logic Pro 的默认值；音色和采样：Logic 的撤销 | M3（旁通）；M4（第二批）；M6（采样） |
+| 发送、Smart Controls、自动化 | 建立到某条总线的发送（总线是新的时，Logic Pro 会为它建一条辅助轨（aux））、发送的电平、移除发送；Smart Controls；Track Automation Event List 中的自动化事件（整拍，数值 0 到 127） | 辅助功能；按键与点击；Mackie Control（选择轨道） | 按数值；建立或移除的发送：Logic 的撤销，否则按数值 | M4（第二批） |
+| 标记、速度与拍号 | 在播放头处添加标记（由 Logic Pro 命名）、移动、删除；速度（整数 BPM）；速度事件；拍号 | 辅助功能（Marker List、Tempo List 和 Signature List，以及 control bar） | 按数值；删除的标记：Logic 的撤销，否则按数值重新建立；删除的速度事件：Logic 的撤销 | M3；M4 |
+| 走带与工程 | 播放、停止、播放头；循环区域；节拍器；保存和另存为；按名称或 ID 指定的任意快捷键命令 | 辅助功能（control bar 及其 LCD）；按键与点击；面板服务 | 循环区域和节拍器：按数值；快捷键命令的那一步：只能在 Logic Pro 中按 Cmd-Z；播放和保存：无 | M3；M4；M6 |
+| 并轨与导出 | 把一段范围并轨为 WAV 或 AIFF 文件；把每条轨道导出为音频文件 | 辅助功能（Logic Pro 的 Bounce 对话框和导出对话框）；面板服务 | 无：写出文件，工程保持原样 | M4（第二批） |
+| 聆听 | 聆听一段（混音，或一条轨道：专门为它播放一遍，并把它独奏）、试听候选（每个一遍）、离线渲染一段；之后把 Logic Pro 恢复原样 | 进程音频分接；Mackie Control；Bounce 对话框 | 无 | M5 |
+| 追上离开期间的变化、观察、即时短语 | Kumi 不在时已保存的工程中发生了哪些变化；由 `watch_me` 得出配方；不调用模型的固定短语（速度、静音、独奏、录音准备、循环、节拍器） | 辅助功能（批量读取）；上面那些用于修改的通道 | 追上离开期间的变化和观察：无；短语做出的修改：与那项修改本身相同 | M6（批量读取、`watch_me`、短语；工程打开时追上离开期间的变化，只在模拟的 Logic 上运行过） |
+
+### Logic Pro 不允许 Kumi 做的事
+
+| 不提供 | 原因 |
+| --- | --- |
+| 为标记命名或重命名 | Marker List 中标记的名称单元格不是文本框；Logic Pro 自己为标记编号 |
+| 移动轨道或给轨道上色 | 轨道头无法从外部拖动，没有快捷键命令能重排轨道，而 Color palette 的色块只是光秃秃的位置，轨道头又不显示颜色，所以颜色永远无法回读 |
+| 发送的模式 | 这是 Logic Pro 在发送的菜单中画出的一个记号，辅助功能读不到 |
+| 移动插件 | Logic Pro 只能靠拖动来移动插件 |
+| 把采样放进 Quick Sampler | Quick Sampler 要把采样拖到它的窗口上才能载入；Kumi 改为把它载入 Sampler |
+| 片段中超出 Event List 显示范围的音符 | Event List 只列出它屏幕上的那些行 |
+| 音频片段的文件 | Logic Pro 只显示文件的名称，从不显示它的路径；Kumi 改为通过片段所在的轨道来听它 |
+| 目标搜索；凭耳朵调节插件的旋钮 | 还没有为 Logic Pro 构建 |
+
+对前五项，桥接会拒绝并说明原因。Logic Pro 11 或更早的版本不在服务范围内。

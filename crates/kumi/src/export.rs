@@ -32,6 +32,7 @@ use crate::tui::tty::TtyOutput;
 pub const COPY_MOST: usize = 64 * 1024;
 /// The DAW's words in what Kumi's commands export for a conversation of Live's (or one imported from a file).
 pub const WORDS: (&str, &str) = ("Live", "Set");
+
 /// A picture's size on the page, in its own units: wide, as the terminal draws it.
 const WIDTH: f64 = 400.;
 const HEIGHT: f64 = 160.;
@@ -394,7 +395,8 @@ pub struct ExportRequest {
 }
 
 /// What a kept conversation's export calls the DAW and a place in it, and how it names each step, from the conversation's
-/// place: REAPER's and Renoise's places are theirs; Live's, and conversations imported from files, are Live's.
+/// place: Logic Pro's, REAPER's and Renoise's places are theirs; Live's, and conversations imported from files, are
+/// Live's.
 pub fn words_of(place: &str) -> ((&'static str, &'static str), impl Fn(&str) -> String) {
     use kumi_runtime::core::{daw::DawId, place::Place};
     let daw = Place::parse(place).and_then(|place| place.daw()).filter(|daw| *daw != DawId::Ableton);

@@ -900,13 +900,17 @@ async fn export_and_share_save_this_conversation_where_kumi_was_started_with_sec
         .await;
 }
 
-/// Plain mode in a REAPER or Renoise session speaks the DAW's words, never Live's: its header, the commands' lines,
-/// what the session tells it, and the goodbye.
+/// Plain mode in a REAPER, Renoise or Logic session speaks the DAW's words, never Live's: its header, the commands'
+/// lines, what the session tells it, and the goodbye.
 #[tokio::test]
-async fn plain_mode_in_reaper_and_renoise_never_speaks_lives_words() {
+async fn plain_mode_in_reaper_renoise_and_logic_never_speaks_lives_words() {
     tokio::task::LocalSet::new()
         .run_until(async {
-            for (daw, app, place) in [(kumi_runtime::core::daw::DawId::Reaper, "REAPER", "project"), (kumi_runtime::core::daw::DawId::Renoise, "Renoise", "song")] {
+            for (daw, app, place) in [
+                (kumi_runtime::core::daw::DawId::Reaper, "REAPER", "project"),
+                (kumi_runtime::core::daw::DawId::Renoise, "Renoise", "song"),
+                (kumi_runtime::core::daw::DawId::Logic, "Logic Pro", "project"),
+            ] {
                 kumi::daw::work_with(daw);
                 for mode in ["live", "inference-only"] {
                     let f = Fixture::with(false, false, None, None, None, |o| o.mode = mode.into());

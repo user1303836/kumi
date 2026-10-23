@@ -1,5 +1,5 @@
-//! In-process stand-ins for the bridges inside REAPER and Renoise: the same wire through daw-bridge's
-//! [`ServerConnection`], a scripted identity, and a transcript of every line, for the host's tests.
+//! In-process stand-ins for the bridges inside REAPER and Renoise, and for Kumi's own bridge beside Logic: the same wire
+//! through daw-bridge's [`ServerConnection`], a scripted identity, and a transcript of every line, for the host's tests.
 use daw_bridge::auth::Secret;
 use daw_bridge::files::{write_discovery, Discovery, DISCOVERY_SCHEMA};
 use daw_bridge::frame::Framer;
@@ -24,14 +24,26 @@ pub struct Line {
 }
 
 pub mod listening;
+pub mod logic;
 pub mod reaper;
 pub mod renoise;
 mod renoise_dsp;
 mod renoise_takes;
+pub mod replay;
 
 /// What a simulated bridge answers beyond `ping` and `status`: `Some(Ok(result))`, `Some(Err((code, message)))`, or None
 /// for a method it doesn't have.
 pub type Respond = Arc<dyn Fn(&str, &Value) -> Option<Result<Value, (String, String)>> + Send + Sync>;
+
+/// What a bridge's `status` carries besides `busy` (false, or why).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StatusShape {
+    /// REAPER's and Renoise's: the identity's fields, and the bridge's own (Renoise's `demo`).
+    Identity,
+    /// Logic's: `{project, busy, permission}`, the identity being the welcome's; `permission` is null or what the bridge
+    /// lacks (`accessibility`).
+    Logic,
+}
 
 /// `status` fields read as each status is answered (what listening the bridge can do now, M5).
 pub type StatusMore = Arc<dyn Fn() -> Map<String, Value> + Send + Sync>;
@@ -43,6 +55,7 @@ pub struct SimulatorConfig {
     pub offer: Offer,
     /// Extra `status` fields (Renoise's `demo`).
     pub status_extra: Map<String, Value>,
+    pub status_shape: StatusShape,
     /// Where to write the discovery file, if anywhere.
     pub discovery_dir: Option<PathBuf>,
     /// The methods beyond ping and status.
@@ -82,6 +95,39 @@ impl SimulatorConfig {
                 ..Offer::default()
             },
             status_extra: Map::new(),
+            status_shape: StatusShape::Identity,
+            discovery_dir: None,
+            respond: None,
+            status_more: None,
+        }
+    }
+
+    /// Logic Pro 12.3.1 (`resource` its bundle id, `com.apple.logic10`) with the saved project its vectors were recorded
+    /// over, served by Kumi's own bridge beside it: its status is the project, busy, and the permission the bridge lacks.
+    pub fn logic(secret: Secret, resource: &str) -> Self {
+        Self {
+            secret,
+            identity: Identity {
+                daw: Daw::Logic.id().into(),
+                bridge: "0.1.0".into(),
+                daw_version: "12.3.1".into(),
+                pid: std::process::id(),
+                resource: resource.into(),
+                project: Some(logic::project()),
+            },
+            // (the bridge's events: the four of M2, and its naming of the producer's own undo of Kumi's changes)
+            offer: Offer {
+                events: vec![
+                    event::PROJECT.into(),
+                    event::TRANSPORT.into(),
+                    event::TRACKS.into(),
+                    event::SELECTION.into(),
+                    event::UNDONE_IN_DAW.into(),
+                ],
+                ..Offer::default()
+            },
+            status_extra: Map::new(),
+            status_shape: StatusShape::Logic,
             discovery_dir: None,
             respond: None,
             status_more: None,
@@ -116,6 +162,7 @@ impl SimulatorConfig {
                 ..Offer::default()
             },
             status_extra,
+            status_shape: StatusShape::Identity,
             discovery_dir: None,
             respond: None,
             status_more: None,
@@ -126,6 +173,8 @@ impl SimulatorConfig {
 struct State {
     identity: Identity,
     busy: Option<String>,
+    /// A permission the bridge lacks (Logic's `accessibility`): the status names it, and reads fail.
+    permission: Option<String>,
     /// Methods whose requests get no answer at all (a bridge stuck in the middle of one).
     held: Vec<String>,
     transcript: Vec<Line>,
@@ -168,6 +217,7 @@ impl Simulator {
         let state = Arc::new(Mutex::new(State {
             identity: config.identity.clone(),
             busy: None,
+            permission: None,
             held: vec![],
             transcript: vec![],
             connections: 0,
@@ -246,9 +296,16 @@ impl Simulator {
         Ok(())
     }
 
-    /// Busy (`Some("rendering")`): requests are refused as busy and heartbeats stop, as in a modal dialog.
+    /// Busy (`Some("rendering")`, Logic's `Some("away")`): requests are refused as busy and heartbeats stop, as in a modal
+    /// dialog.
     pub fn set_busy(&self, busy: Option<&str>) {
         self.state.lock().unwrap().busy = busy.map(str::to_string);
+    }
+
+    /// A permission the bridge lacks (`Some("accessibility")`, as Logic's bridge without Accessibility): the status names
+    /// it, and every read fails in words, never busy.
+    pub fn set_permission(&self, missing: Option<&str>) {
+        self.state.lock().unwrap().permission = missing.map(str::to_string);
     }
 
     /// Requests for this method are taken and never answered (until `release`), the rest go on as they do.
@@ -323,11 +380,23 @@ fn record(state: &Mutex<State>, connection: usize, from_host: bool, bytes: &[u8]
     }
 }
 
+/// What a bridge says about a permission it lacks.
+fn permission_words(permission: &str) -> String {
+    match permission {
+        "accessibility" => "Accessibility isn't granted to Kumi's helper: System Settings > Privacy & Security > Accessibility".into(),
+        other => format!("the {other} permission isn't granted"),
+    }
+}
+
 fn answer(request: &Request, state: &Mutex<State>, config: &SimulatorConfig) -> Frame {
     let state = state.lock().unwrap();
     // Busy, as the bridges are: status and focus still answer (saying why), the rest is refused.
     if let Some(busy) = state.busy.clone().filter(|_| !matches!(request.method.as_str(), "status" | "focus")) {
         return Frame::error(request.id, code::BUSY, format!("{} is {busy}", state.identity.daw));
+    }
+    // A permission the bridge lacks: the status names it, and reads fail (never busy), as Logic's contract says.
+    if let Some(permission) = state.permission.clone().filter(|_| !matches!(request.method.as_str(), "ping" | "status")) {
+        return Frame::error(request.id, code::FAILED, permission_words(&permission));
     }
     let busy = state.busy.clone();
     match request.method.as_str() {
@@ -344,8 +413,15 @@ fn answer(request: &Request, state: &Mutex<State>, config: &SimulatorConfig) -> 
             }
         }
         "status" => {
-            let mut status = serde_json::to_value(&state.identity).unwrap();
-            status["busy"] = busy.map_or(Value::Bool(false), Value::from);
+            let busy = busy.map_or(Value::Bool(false), Value::from);
+            let mut status = match config.status_shape {
+                StatusShape::Identity => {
+                    let mut status = serde_json::to_value(&state.identity).unwrap();
+                    status["busy"] = busy;
+                    status
+                }
+                StatusShape::Logic => json!({"project": state.identity.project, "busy": busy, "permission": state.permission}),
+            };
             for (key, value) in &config.status_extra {
                 status[key] = value.clone();
             }

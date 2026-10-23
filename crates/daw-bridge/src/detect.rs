@@ -1,6 +1,6 @@
-//! Finding REAPER and Renoise on this computer: the apps, their versions and architectures, REAPER's resource
-//! folders (portable installs included) and Renoise's per-version preferences folders. Read-only: nothing is
-//! launched and no permission is asked for.
+//! Finding REAPER, Renoise and Logic Pro on this computer: the apps, their versions and architectures, REAPER's
+//! resource folders (portable installs included) and Renoise's per-version preferences folders. Read-only: nothing
+//! is launched and no permission is asked for.
 use crate::daw::Daw;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
@@ -130,14 +130,77 @@ pub fn archs_of(bytes: &[u8]) -> Vec<Arch> {
     }
 }
 
-/// A value from a macOS app's `Contents/Info.plist` (XML form).
+/// A string value from a macOS app's `Contents/Info.plist`, in its XML or its binary form (the App Store's apps,
+/// Logic Pro among them, keep a binary one).
 fn plist_value(app: &Path, key: &str) -> Option<String> {
-    let text = std::fs::read_to_string(app.join("Contents").join("Info.plist")).ok()?;
+    let bytes = std::fs::read(app.join("Contents").join("Info.plist")).ok()?;
+    if bytes.starts_with(b"bplist") {
+        return bplist_string(&bytes, key);
+    }
+    let text = String::from_utf8(bytes).ok()?;
     let at = text.find(&format!("<key>{key}</key>"))?;
     let rest = &text[at..];
     let start = rest.find("<string>")? + "<string>".len();
     let end = rest[start..].find("</string>")?;
     Some(rest[start..start + end].trim().to_string())
+}
+
+/// The string under `key` in a binary plist's top dictionary (`bplist00`). Only what detection needs: the trailer, the
+/// offset table, one dictionary, and ASCII or UTF-16 strings; anything else answers None.
+fn bplist_string(bytes: &[u8], key: &str) -> Option<String> {
+    if bytes.len() < 40 || !bytes.starts_with(b"bplist0") {
+        return None;
+    }
+    let trailer = &bytes[bytes.len() - 32..];
+    let offset_size = trailer[6] as usize;
+    let ref_size = trailer[7] as usize;
+    let be64 = |at: usize| u64::from_be_bytes(trailer[at..at + 8].try_into().expect("8 bytes"));
+    let count = usize::try_from(be64(8)).ok()?;
+    let top = usize::try_from(be64(16)).ok()?;
+    let table = usize::try_from(be64(24)).ok()?;
+    if !(1..=8).contains(&offset_size) || !(1..=8).contains(&ref_size) || count > 1 << 20 {
+        return None;
+    }
+    let uint = |at: usize, size: usize| -> Option<usize> {
+        let value = bytes.get(at..at + size)?.iter().fold(0u64, |n, byte| (n << 8) | *byte as u64);
+        usize::try_from(value).ok()
+    };
+    let offset = |index: usize| -> Option<usize> { (index < count).then(|| uint(table + index * offset_size, offset_size)).flatten() };
+    // An object's type (its marker's high nibble), count (the low one, or the int object after it when that is 0xF), and
+    // where its contents start.
+    let header = |at: usize| -> Option<(u8, usize, usize)> {
+        let marker = *bytes.get(at)?;
+        let (kind, small) = (marker >> 4, (marker & 0x0F) as usize);
+        if small == 0x0F && matches!(kind, 0x4 | 0x5 | 0x6 | 0xA | 0xC | 0xD) {
+            let int_marker = *bytes.get(at + 1)?;
+            if int_marker >> 4 != 0x1 {
+                return None;
+            }
+            let size = 1usize << (int_marker & 0x0F);
+            return Some((kind, uint(at + 2, size)?, at + 2 + size));
+        }
+        Some((kind, small, at + 1))
+    };
+    let string_at = |index: usize| -> Option<String> {
+        let (kind, n, start) = header(offset(index)?)?;
+        match kind {
+            0x5 => String::from_utf8(bytes.get(start..start + n)?.to_vec()).ok(),
+            0x6 => {
+                let units: Vec<u16> =
+                    bytes.get(start..start + n * 2)?.chunks(2).map(|pair| u16::from_be_bytes([pair[0], pair[1]])).collect();
+                String::from_utf16(&units).ok()
+            }
+            _ => None,
+        }
+    };
+    let (kind, n, start) = header(offset(top)?)?;
+    if kind != 0xD {
+        return None;
+    }
+    (0..n).find_map(|i| {
+        let key_ref = uint(start + i * ref_size, ref_size)?;
+        (string_at(key_ref).as_deref() == Some(key)).then(|| string_at(uint(start + (n + i) * ref_size, ref_size)?)).flatten()
+    })
 }
 
 fn entries(dir: &Path) -> Vec<PathBuf> {
@@ -457,6 +520,60 @@ pub fn detect_renoise(env: &Env) -> RenoiseInstall {
     RenoiseInstall { apps, prefs, target, overridden }
 }
 
+/// Logic Pro's bundle ids: the App Store build, and the Creator Studio build.
+pub const LOGIC_BUNDLES: [&str; 2] = ["com.apple.logic10", "com.apple.mobilelogic"];
+/// The oldest Logic Pro Kumi's bridge serves (Logic Pro 12, on Apple Silicon).
+pub const LOGIC_MIN: Version = Version(12, 0, 0);
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LogicInstall {
+    /// The app bundle (`/Applications/Logic Pro.app`).
+    pub app: PathBuf,
+    /// Its bundle id, one of [`LOGIC_BUNDLES`] (whatever its plist says for the app `KUMI_LOGIC_APP` names).
+    pub bundle: String,
+    /// `CFBundleShortVersionString`, when it reads as one.
+    pub version: Option<Version>,
+    /// The app's executable's architectures (universal on the App Store build).
+    pub archs: Vec<Arch>,
+}
+
+fn logic_install(app: &Path) -> LogicInstall {
+    let bundle = plist_value(app, "CFBundleIdentifier").unwrap_or_default();
+    let version = plist_value(app, "CFBundleShortVersionString").and_then(|version| Version::parse(&version));
+    let executable = plist_value(app, "CFBundleExecutable").unwrap_or_else(|| "Logic Pro".into());
+    let archs = binary_archs(&app.join("Contents").join("MacOS").join(executable));
+    LogicInstall { app: app.to_path_buf(), bundle, version, archs }
+}
+
+/// Every Logic Pro on this Mac: `/Applications/Logic Pro.app` first, then any other app in `/Applications` or
+/// `~/Applications` whose bundle id is Logic's. `KUMI_LOGIC_APP` names the app instead, which then is the only one (and
+/// none when it isn't there).
+pub fn detect_logic(env: &Env) -> Vec<LogicInstall> {
+    if let Some(app) = env.var_path("KUMI_LOGIC_APP") {
+        return if app.is_dir() { vec![logic_install(&app)] } else { vec![] };
+    }
+    if env.os != Os::Mac {
+        return vec![];
+    }
+    let usual = env.system("/Applications").join("Logic Pro.app");
+    let mut candidates = vec![usual.clone()];
+    for dir in [env.system("/Applications"), env.home.join("Applications")] {
+        candidates.extend(entries(&dir).into_iter().filter(|app| name_of(app).ends_with(".app")));
+    }
+    let mut found: Vec<LogicInstall> = vec![];
+    for app in candidates {
+        if !app.is_dir() || found.iter().any(|install| install.app == app) {
+            continue;
+        }
+        let install = logic_install(&app);
+        if app == usual || LOGIC_BUNDLES.contains(&install.bundle.as_str()) {
+            found.push(install);
+        }
+    }
+    found
+}
+
 /// What a Renoise version folder's `Config.xml` says that Kumi cares about.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -519,6 +636,7 @@ pub fn process_is(daw: Daw, name: &str) -> bool {
     match daw {
         Daw::Reaper => matches!(base, "REAPER" | "REAPER64" | "reaper"),
         Daw::Renoise => base == "Renoise" || base == "renoise" || base.starts_with("Renoise ") || base.starts_with("renoise-"),
+        Daw::Logic => base == "Logic Pro",
     }
 }
 
@@ -720,6 +838,104 @@ mod tests {
         let found = detect_renoise(&env(Os::Linux, root.path(), &vars));
         assert_eq!(found.target.unwrap().dir, root.path().join("xdg/Renoise/V3.5.4"));
         assert_eq!(found.apps[0].version.as_deref(), Some("3.5.4"));
+    }
+
+    /// A binary plist of one dictionary of ASCII strings, as `plutil -convert binary1` lays one out.
+    fn bplist(pairs: &[(&str, &str)]) -> Vec<u8> {
+        let ascii = |text: &str| -> Vec<u8> {
+            let mut object = if text.len() < 15 { vec![0x50 | text.len() as u8] } else { vec![0x5F, 0x10, text.len() as u8] };
+            object.extend(text.as_bytes());
+            object
+        };
+        let mut out = b"bplist00".to_vec();
+        let mut offsets = vec![out.len()];
+        out.push(0xD0 | pairs.len() as u8);
+        out.extend((1..=pairs.len()).map(|i| i as u8));
+        out.extend((1..=pairs.len()).map(|i| (pairs.len() + i) as u8));
+        for text in pairs.iter().map(|(key, _)| *key).chain(pairs.iter().map(|(_, value)| *value)) {
+            offsets.push(out.len());
+            out.extend(ascii(text));
+        }
+        let table = out.len();
+        out.extend(offsets.iter().map(|offset| *offset as u8));
+        out.extend([0, 0, 0, 0, 0, 0, 1, 1]);
+        out.extend((1 + 2 * pairs.len() as u64).to_be_bytes());
+        out.extend(0u64.to_be_bytes());
+        out.extend((table as u64).to_be_bytes());
+        out
+    }
+
+    #[test]
+    fn logic_by_name_or_bundle_id_in_applications_or_where_the_override_says() {
+        let root = tempfile::tempdir().unwrap();
+        let none = |_: &str| None;
+        let apps = root.path().join("sys/Applications");
+        // The App Store build keeps a binary Info.plist, and a universal executable.
+        let logic = apps.join("Logic Pro.app");
+        let plist = bplist(&[
+            ("CFBundleExecutable", "Logic Pro"),
+            ("CFBundleIdentifier", "com.apple.logic10"),
+            ("CFBundleShortVersionString", "12.3.1"),
+        ]);
+        touch(&logic.join("Contents/Info.plist"), &plist);
+        touch(&logic.join("Contents/MacOS/Logic Pro"), &mach_universal());
+        // The Creator Studio build under another name (an XML plist), and an app that isn't Logic.
+        let studio = apps.join("Logic.app");
+        touch(
+            &studio.join("Contents/Info.plist"),
+            b"<plist><dict><key>CFBundleExecutable</key><string>Logic</string><key>CFBundleIdentifier</key><string>com.apple.mobilelogic</string><key>CFBundleShortVersionString</key><string>12.4</string></dict></plist>",
+        );
+        touch(&studio.join("Contents/MacOS/Logic"), &[0xcf, 0xfa, 0xed, 0xfe, 0x0c, 0, 0, 0x01]);
+        touch(&apps.join("Other.app/Contents/Info.plist"), b"<key>CFBundleIdentifier</key><string>com.example.other</string>");
+        let found = detect_logic(&env(Os::Mac, root.path(), &none));
+        assert_eq!(found.len(), 2, "{found:?}");
+        assert_eq!((&found[0].app, found[0].bundle.as_str(), found[0].version), (&logic, "com.apple.logic10", Some(Version(12, 3, 1))));
+        assert_eq!(found[0].archs, [Arch::X86_64, Arch::Arm64]);
+        assert_eq!(
+            (&found[1].app, found[1].bundle.as_str(), found[1].version),
+            (&studio, "com.apple.mobilelogic", Some(Version(12, 4, 0)))
+        );
+        assert_eq!(found[1].archs, [Arch::Arm64]);
+        assert!(found[0].version < found[1].version && found[0].version >= Some(LOGIC_MIN));
+        // Only on a Mac.
+        assert!(detect_logic(&env(Os::Linux, root.path(), &none)).is_empty());
+
+        // The override is the only one, wherever it is; one that isn't there finds nothing.
+        let lab = root.path().join("home/lab/Logic Pro.app");
+        touch(
+            &lab.join("Contents/Info.plist"),
+            &bplist(&[("CFBundleIdentifier", "com.apple.logic10"), ("CFBundleShortVersionString", "11.2")]),
+        );
+        let lab_text = lab.to_string_lossy().into_owned();
+        let vars = move |name: &str| (name == "KUMI_LOGIC_APP").then(|| lab_text.clone());
+        let found = detect_logic(&env(Os::Mac, root.path(), &vars));
+        assert_eq!(found.len(), 1);
+        assert_eq!((&found[0].app, found[0].version, found[0].archs.len()), (&lab, Some(Version(11, 2, 0)), 0));
+        let nowhere = root.path().join("nowhere/Logic Pro.app").to_string_lossy().into_owned();
+        let vars = move |name: &str| (name == "KUMI_LOGIC_APP").then(|| nowhere.clone());
+        assert!(detect_logic(&env(Os::Mac, root.path(), &vars)).is_empty());
+        assert!(process_is(Daw::Logic, "/Applications/Logic Pro.app/Contents/MacOS/Logic Pro") && !process_is(Daw::Logic, "Logic"));
+    }
+
+    #[test]
+    fn a_binary_plist_reads_its_strings_and_refuses_what_it_isnt() {
+        let plist = bplist(&[("Short", "x"), ("CFBundleShortVersionString", "7.82"), ("Name", "a long value, past fifteen characters")]);
+        assert_eq!(bplist_string(&plist, "CFBundleShortVersionString").as_deref(), Some("7.82"));
+        assert_eq!(bplist_string(&plist, "Name").as_deref(), Some("a long value, past fifteen characters"));
+        assert_eq!(bplist_string(&plist, "Short").as_deref(), Some("x"));
+        assert_eq!(bplist_string(&plist, "Missing"), None);
+        // A UTF-16 value, as a plist with a non-ASCII string is written: "ab" becomes "ét" (two units, marker 0x62).
+        let mut utf16 = bplist(&[("Key", "ab")]);
+        let at = utf16.windows(3).position(|window| window == [0x52, b'a', b'b']).unwrap();
+        utf16.splice(at..at + 3, [0x62, 0, 0xe9, 0, 0x74]);
+        // (the value is the last object, so only the offset table moved: the trailer says where)
+        let end = utf16.len();
+        let table = u64::from_be_bytes(utf16[end - 8..].try_into().unwrap()) + 2;
+        utf16[end - 8..].copy_from_slice(&table.to_be_bytes());
+        assert_eq!(bplist_string(&utf16, "Key").as_deref(), Some("\u{e9}t"));
+        assert_eq!(bplist_string(b"bplist00", "Key"), None);
+        assert_eq!(bplist_string(&plist[..plist.len() - 1], "Short"), None);
+        assert_eq!(bplist_string(b"<?xml version=\"1.0\"?>", "Key"), None);
     }
 
     #[test]

@@ -23,7 +23,7 @@ FILES = ["package.json", "Cargo.lock", "CHANGELOG.md", "README.md", "README.ja.m
          "crates/kumi/Cargo.toml", "crates/kumi-common/Cargo.toml", "crates/kumi-runtime/Cargo.toml", "crates/daw-mcp-server/Cargo.toml",
          "crates/kumi-runtime/src/version.rs", "crates/ableton-mcp-server/Cargo.toml",
          "docs/en/KUMI_CHANGES.md", "docs/ja/KUMI_CHANGES.md", "docs/zh-CN/KUMI_CHANGES.md",
-         release.REAPER_CARGO, release.RENOISE_VERSION, release.RENOISE_MANIFEST]
+         release.REAPER_CARGO, release.RENOISE_VERSION, release.RENOISE_MANIFEST, release.LOGIC_CARGO]
 LONG = ("Kumi does a new thing, described at enough length that its changelog bullet wraps onto a second line, "
         "as most of them do.")
 
@@ -38,6 +38,23 @@ def daw_versions() -> tuple[str, str]:
     """REAPER's extension's and Renoise's tool's versions in this checkout."""
     reaper = re.search(r'^version = "([^"]+)"', (ROOT / release.REAPER_CARGO).read_text(encoding="utf-8"), re.M)[1]
     return reaper, re.search(r'return "([^"]+)"', (ROOT / release.RENOISE_VERSION).read_text(encoding="utf-8"))[1]
+
+
+def logic_version() -> str:
+    """Logic Pro's bridge's version in this checkout."""
+    return re.search(r'^version = "([^"]+)"', (ROOT / release.LOGIC_CARGO).read_text(encoding="utf-8"), re.M)[1]
+
+
+def logic_docs(kumi: str, logic: str, later: dict[str, str] | None = None) -> dict[str, str]:
+    """A doc in each language with Logic Pro's bridge's running ships-with line, as the docs write it: the first entry,
+    then each language's `later` entries (older releases), or a full stop when it's the first release of it."""
+    later = later or {}
+    lines = {"en": "Logic Pro's bridge ships with each Kumi for Apple Silicon Macs: Kumi {kumi} with Logic Pro bridge {logic}{end}\n",
+             "ja": "Logic Pro ブリッジは Apple シリコン搭載 Mac 向けの Kumi に付きます：Kumi {kumi} には Logic Pro ブリッジ {logic}{end}\n",
+             "zh-CN": "每个面向 Apple 芯片 Mac 的 Kumi 都附带 Logic Pro 桥接：Kumi {kumi} 附带 Logic Pro 桥接 {logic}{end}\n"}
+    ends = {"en": ".", "ja": "。", "zh-CN": "。"}
+    return {f"docs/{language}/LOGIC_PRO.md": text.format(kumi=kumi, logic=logic, end=later.get(language, ends[language]))
+            for language, text in lines.items()}
 
 
 def daw_docs(kumi: str, reaper: str, renoise: str, later: dict[str, str] | None = None) -> dict[str, str]:
@@ -271,18 +288,46 @@ class DawSorting(unittest.TestCase):
         tagged = release.classify(5, "Changelog (reaper): R.\nChangelog (Renoise): N.\nChangelog: K.", ["crates/kumi/src/lib.rs"])
         self.assertEqual(tagged.lines, [("reaper", "R."), ("renoise", "N."), ("kumi", "K.")])
 
+    def test_what_kumi_starts_beside_logic_pro_is_its_bridge(self):
+        # The bridge, its helper and the key command tables it's built with, and daw-bridge, which it links.
+        for path in ("crates/logic-kumi/src/changes/regions.rs", "crates/logic-kumi/src/main.rs", "crates/logic-kumi/Cargo.toml",
+                     "crates/logic-kumi/helper/KumiLogicHands.swift", "crates/logic-kumi/src/keys/names.json", "crates/daw-bridge/src/wire.rs"):
+            self.assertTrue(release.ships_logic(path), path)
+        # Its tests, examples, notes, the helper's tests and the script that writes the tables: none runs beside Logic Pro.
+        # daw-bridge's parts the bridge doesn't link are Kumi's alone, as for REAPER's extension.
+        for path in ("crates/daw-bridge/src/lifecycle.rs", "crates/daw-bridge/src/detect.rs", "crates/daw-bridge/src/doctor.rs"):
+            self.assertFalse(release.ships_logic(path), path)
+        for path in ("crates/logic-kumi/tests/changes.rs", "crates/logic-kumi/src/changes/tests.rs", "crates/logic-kumi/examples/record_fixtures.rs",
+                     "crates/logic-kumi/README.md", "crates/logic-kumi/helper/README.md", "crates/logic-kumi/helper/tests/test_protocol.py",
+                     "crates/logic-kumi/keys/extract_names.py", "crates/reaper-kumi/src/lib.rs", "crates/kumi/src/daw/own.rs"):
+            self.assertFalse(release.ships_logic(path), path)
+        self.assertFalse(release.ships_reaper("crates/logic-kumi/src/main.rs") or release.ships_renoise("crates/logic-kumi/src/main.rs")
+                         or release.ships_bridge("crates/logic-kumi/src/main.rs"))
+
+    def test_changelog_lines_go_to_logic_when_its_bridge_alone_changed(self):
+        logic = ["crates/logic-kumi/src/changes/regions.rs", "crates/logic-kumi/tests/changes.rs", "docs/en/LOGIC_CONTRACT.md"]
+        line = "Changelog: A new thing."
+        self.assertEqual(release.classify(1, line, logic).lines, [("logic", "A new thing.")])
+        for paths in (logic + ["crates/reaper-kumi/src/lib.rs"], logic + ["daws/renoise/com.kumi.Bridge.xrnx/main.lua"],
+                      logic + ["crates/kumi/src/daw/own.rs"], ["crates/daw-bridge/src/wire.rs"]):
+            with self.subTest(paths=paths):
+                self.assertEqual(release.classify(2, line, paths).lines, [("kumi", "A new thing.")])
+        tagged = release.classify(3, "Changelog (logic): L.\nchangelog (Logic): M.\nChangelog: K.", ["crates/kumi/src/lib.rs"])
+        self.assertEqual(tagged.lines, [("logic", "L."), ("logic", "M."), ("kumi", "K.")])
+
 
 class DawPlans(unittest.TestCase):
-    def plan(self, changes, tag_has=True, head_has=True, **flags):
-        """plan_release for these pull requests ((body, paths) each), main at 1.0.93 / 0.1.0 / 1.0.0."""
+    def plan(self, changes, tag_has=True, head_has=True, logic_at=(False, False), **flags):
+        """plan_release for these pull requests ((body, paths) each), main at 1.0.93 / 0.1.0 / 1.0.0, and Logic's bridge
+        at 0.1.0 where `logic_at` (the tag's, main's) says it's there."""
         args = argparse.Namespace(version=None, minor=False, bridge=False, no_bridge=False, reaper=False, no_reaper=False,
-                                  renoise=False, no_renoise=False, date="2026-10-20")
+                                  renoise=False, no_renoise=False, logic=False, no_logic=False, date="2026-10-20")
         for name, value in flags.items():
             setattr(args, name, value)
         changes = [release.classify(number, body, paths) for number, (body, paths) in enumerate(changes, 1)]
         def versions_at(ref):
             has = head_has if ref == "HEAD" else tag_has
-            return ("1.0.93", "0.1.0", "1.0.0") if has else ("1.0.93", None, None)
+            return (("1.0.93", "0.1.0", "1.0.0") if has else ("1.0.93", None, None)) + ("0.1.0" if logic_at[ref == "HEAD"] else None,)
         with patch.object(release, "versions_at", side_effect=versions_at):
             return release.plan_release(args, "HEAD", "v1.19.3", changes)
 
@@ -330,16 +375,54 @@ class DawPlans(unittest.TestCase):
         with patch.object(release, "release", side_effect=seen.append), patch.object(sys, "argv", ["release.py", "--no-bridge", "--reaper"]):
             release.main()
         self.assertEqual((seen[0].no_bridge, seen[0].reaper, seen[0].no_reaper, seen[0].renoise), (True, True, False, False))
-        for pair in (["--reaper", "--no-reaper"], ["--renoise", "--no-renoise"]):
+        for pair in (["--reaper", "--no-reaper"], ["--renoise", "--no-renoise"], ["--logic", "--no-logic"]):
             with self.subTest(pair=pair), patch.object(sys, "argv", ["release.py", *pair]), patch("sys.stderr"):
                 with self.assertRaises(SystemExit):
                     release.main()
 
+    LOGIC = ("Changelog: The Logic bridge does V.", ["crates/logic-kumi/src/changes/regions.rs"])
+
+    def test_logics_bridge_is_brought_once_then_moves_with_what_it_runs(self):
+        # The release that brings it ships it at its version, its lines Kumi's, and says it's for Apple Silicon Macs.
+        plan = self.plan([self.KUMI, self.LOGIC], logic_at=(False, True))
+        self.assertEqual((plan.logic, plan.new_logic, plan.brought, plan.moved()), ("0.1.0", "0.1.0", ["logic"], []))
+        self.assertEqual((plan.kumi, plan.logic_lines), (["Kumi does W.", "The Logic bridge does V."], []))
+        self.assertEqual(release.daws_said(plan),
+                         "Brings Logic Pro bridge 0.1.0 for Logic Pro 12 on Apple Silicon Macs: `kumi --daw logic bridge` sets it up.")
+        # Brought with REAPER's and Renoise's: theirs first, in their words, then Logic's in its own.
+        plan = self.plan([self.KUMI], tag_has=False, logic_at=(False, True))
+        self.assertEqual(plan.brought, ["reaper", "renoise", "logic"])
+        self.assertEqual(release.daws_said(plan, bold=True),
+                         "Brings REAPER extension **0.1.0** and Renoise tool **1.0.0**: `kumi --daw reaper bridge` and `kumi --daw renoise "
+                         "bridge` put them in. Brings Logic Pro bridge **0.1.0** for Logic Pro 12 on Apple Silicon Macs: `kumi --daw logic "
+                         "bridge` sets it up.")
+        # Once released, a change to what it runs gives it a new version and its own lines: Logic Pro loads nothing, so
+        # nothing of Logic's restarts.
+        plan = self.plan([self.KUMI, self.LOGIC, self.REAPER], logic_at=(True, True))
+        self.assertEqual((plan.new_logic, plan.new_reaper, plan.moved(), plan.logic_lines),
+                         ("0.1.1", "0.1.1", ["reaper", "logic"], ["The Logic bridge does V."]))
+        self.assertEqual(plan.olds(), ["1.19.3", "0.1.0", "0.1.0"])
+        self.assertEqual(release.daws_said(plan),
+                         "Ships with REAPER extension 0.1.1, which REAPER loads when it restarts; `kumi update` puts it in. Ships with "
+                         "Logic Pro bridge 0.1.1, which Kumi starts beside Logic Pro; `kumi update` puts it in Kumi's own folder.")
+        # Its flags are its own: --no-logic keeps it (its lines are Kumi's then), --logic gives it a version whatever
+        # changed, and the others' flags leave it be.
+        kept = self.plan([self.KUMI, self.LOGIC], logic_at=(True, True), no_logic=True)
+        self.assertEqual((kept.new_logic, kept.moved(), kept.kumi), ("0.1.0", [], ["Kumi does W.", "The Logic bridge does V."]))
+        forced = self.plan([self.KUMI], logic_at=(True, True), logic=True)
+        self.assertEqual((forced.new_logic, forced.moved()), ("0.1.1", ["logic"]))
+        others = self.plan([self.LOGIC, self.REAPER], logic_at=(True, True), no_reaper=True, no_bridge=True)
+        self.assertEqual((others.new_logic, others.new_reaper), ("0.1.1", "0.1.0"))
+        # A main without it says nothing of it, and refuses to give it a version.
+        self.assertEqual((self.plan([self.KUMI, self.LOGIC]).logic, self.plan([self.KUMI]).brought), (None, []))
+        with self.assertRaisesRegex(release.Refused, "--logic: main at HEAD has no Logic Pro bridge to give a new version"):
+            self.plan([self.KUMI], logic=True)
+
 
 class DawEdits(unittest.TestCase):
-    def released(self, reaper=False, renoise=False, docs=None, brought=(), new_bridge=False):
+    def released(self, reaper=False, renoise=False, docs=None, brought=(), new_bridge=False, logic=None):
         """apply() on copies of this checkout's files (and `docs`): the plan, every file's text after, the files apply
-        said it changed, and the ones whose bytes did change."""
+        said it changed, and the ones whose bytes did change. Logic's bridge is left out, or `logic` is "same" or "new"."""
         old, bridge = current()
         reaper_now, renoise_now = daw_versions()
         plan = release.Plan(old, release.bump(old), bridge, release.bump(bridge) if new_bridge else bridge, "2026-10-20", [LONG],
@@ -348,11 +431,21 @@ class DawEdits(unittest.TestCase):
                             renoise_now, release.bump(renoise_now) if renoise else renoise_now,
                             ["The extension does a new thing."] if reaper else [], ["The tool does a new thing."] if renoise else [],
                             list(brought))
+        if logic:
+            plan.logic = logic_version()
+            plan.new_logic = release.bump(plan.logic) if logic == "new" else plan.logic
+            plan.logic_lines = ["The Logic bridge does a new thing."] if logic == "new" else []
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
             for name in FILES:
                 (root / name).parent.mkdir(parents=True, exist_ok=True)
                 shutil.copyfile(ROOT / name, root / name)
+            # This checkout's KUMI_CHANGES carry Logic Pro's bridge's own ships-with line, naming the release that brings
+            # it; the tests here write the lines they mean in docs of their own, so the copies leave it out.
+            for language, (pattern, *_) in release.DAW_SHIPS["logic"].items():
+                changes = root / "docs" / language / "KUMI_CHANGES.md"
+                if changes.exists():
+                    changes.write_text(re.sub(pattern, "", changes.read_text(encoding="utf-8")), encoding="utf-8")
             for name, text in (docs or {}).items():
                 (root / name).parent.mkdir(parents=True, exist_ok=True)
                 (root / name).write_text(text, encoding="utf-8")
@@ -481,11 +574,61 @@ class DawEdits(unittest.TestCase):
             self.released(docs=daw_docs(old, reaper, renoise), brought=("reaper", "renoise"))
 
     def test_this_checkouts_docs_have_each_daw_line_in_every_language_or_none(self):
-        versions = dict(zip(release.DAWS, daw_versions()))
+        versions = {**dict(zip(release.DAWS, daw_versions())), "logic": logic_version()}
         for daw in release.DAWS:
             for language, path in release.daw_lines(ROOT, daw).items():
                 entry_found = re.search(release.DAW_SHIPS[daw][language][0], path.read_text(encoding="utf-8"))
                 self.assertEqual(entry_found["bridge"], versions[daw], f"{path}: the {daw} line's first entry")
+
+    def test_a_new_version_of_logics_bridge_in_its_own_words(self):
+        plan, texts, changed, really = self.released(reaper=True, logic="new")
+        self.assertEqual(sorted(changed), really)
+        self.assertIn(f'name = "logic-kumi"\nversion = "{plan.new_logic}"', texts["Cargo.lock"])
+        self.assertIn(f'version = "{plan.new_logic}"', texts[release.LOGIC_CARGO])
+        self.assertIn(release.LOGIC_CARGO, changed)
+        new = entry(texts["CHANGELOG.md"], plan.new)
+        flat = " ".join(new.split())
+        self.assertIn(f"Ships with REAPER extension {plan.new_reaper}, which REAPER loads when it restarts; `kumi update` puts it in. "
+                      f"Ships with Logic Pro bridge {plan.new_logic}, which Kumi starts beside Logic Pro; `kumi update` puts it in Kumi's "
+                      "own folder.", flat)
+        self.assertNotIn("restart Logic", flat)
+        self.assertTrue(all(len(line) <= release.WIDTH for line in new.splitlines()), new)
+        self.assertIn(f"\n\n### Logic Pro bridge {plan.new_logic}\n\n- The Logic bridge does a new thing.", new)
+        self.assertLess(new.index(f"### REAPER extension {plan.new_reaper}"), new.index(f"### Logic Pro bridge {plan.new_logic}"))
+        # The notes and the pull request say it too, and where its version was set.
+        notes = release.notes(plan, "Tested with Live.", None)
+        self.assertIn(f"Ships with Logic Pro bridge **{plan.new_logic}**, which Kumi starts beside Logic Pro;", notes)
+        self.assertIn(f"\n\n**Logic Pro bridge {plan.new_logic}**\n- The Logic bridge does a new thing.\n\n", notes)
+        change = release.classify(9, "Changelog: The Logic bridge does a new thing.", ["crates/logic-kumi/src/main.rs"])
+        body = release.pr_body(plan, [change], "a" * 40, [])
+        self.assertIn(f"- **Logic Pro bridge {plan.new_logic}**\n  - #9: The Logic bridge does a new thing.", body)
+        self.assertIn(f"- Logic Pro bridge {plan.logic} → {plan.new_logic} in `crates/logic-kumi/Cargo.toml` and Cargo.lock.", body)
+        # As it was: nothing of it said or edited.
+        plan, texts, changed, really = self.released(logic="same")
+        self.assertEqual(sorted(changed), really)
+        self.assertNotIn(release.LOGIC_CARGO, changed)
+        self.assertNotIn("Logic", entry(texts["CHANGELOG.md"], plan.new))
+
+    def test_the_docs_logic_line_moves_on_with_each_release(self):
+        old, _ = current()
+        logic = logic_version()
+        new = release.bump(old)
+        plan, texts, changed, really = self.released(logic="new", docs=logic_docs(old, logic))
+        self.assertEqual(sorted(changed), really)
+        self.assertIn(f"Kumi {new} with Logic Pro bridge {plan.new_logic}, {old} with {logic}.\n", texts["docs/en/LOGIC_PRO.md"])
+        self.assertIn(f"Kumi {new} には Logic Pro ブリッジ {plan.new_logic}、{old} には {logic}。\n", texts["docs/ja/LOGIC_PRO.md"])
+        self.assertIn(f"Kumi {new} 附带 Logic Pro 桥接 {plan.new_logic}，{old} 附带 {logic}。\n", texts["docs/zh-CN/LOGIC_PRO.md"])
+        _, texts, _, _ = self.released(logic="same", docs=logic_docs(old, logic))
+        self.assertIn(f"Kumi {old} to {new} with Logic Pro bridge {logic}.\n", texts["docs/en/LOGIC_PRO.md"])
+        self.assertIn(f"Kumi {old}〜{new} には Logic Pro ブリッジ {logic}。\n", texts["docs/ja/LOGIC_PRO.md"])
+        self.assertIn(f"Kumi {old} 至 {new} 附带 Logic Pro 桥接 {logic}。\n", texts["docs/zh-CN/LOGIC_PRO.md"])
+        # The release that brings it writes its line as it ships, and it's kept so; a line in one language alone is refused.
+        docs = logic_docs(new, logic)
+        _, texts, changed, _ = self.released(logic="same", docs=docs, brought=("logic",))
+        self.assertEqual(texts["docs/en/LOGIC_PRO.md"], docs["docs/en/LOGIC_PRO.md"])
+        self.assertFalse([name for name in changed if "LOGIC_PRO" in name])
+        with self.assertRaisesRegex(release.Refused, re.escape("the Logic Pro bridge ships-with line is in docs/en but not in docs/ja, docs/zh-CN")):
+            self.released(logic="new", docs={**docs, "docs/ja/LOGIC_PRO.md": "", "docs/zh-CN/LOGIC_PRO.md": ""})
 
 
 if __name__ == "__main__":

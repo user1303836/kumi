@@ -13,16 +13,18 @@ pub const PORTS_PER_DAW: u16 = 10;
 pub enum Daw {
     Reaper,
     Renoise,
+    Logic,
 }
 
 impl Daw {
-    pub const ALL: [Daw; 2] = [Daw::Reaper, Daw::Renoise];
+    pub const ALL: [Daw; 3] = [Daw::Reaper, Daw::Renoise, Daw::Logic];
 
     /// The id on the wire, in file names and on the command line.
     pub fn id(self) -> &'static str {
         match self {
             Daw::Reaper => "reaper",
             Daw::Renoise => "renoise",
+            Daw::Logic => "logic",
         }
     }
 
@@ -35,6 +37,7 @@ impl Daw {
         match self {
             Daw::Reaper => "REAPER",
             Daw::Renoise => "Renoise",
+            Daw::Logic => "Logic Pro",
         }
     }
 
@@ -43,6 +46,7 @@ impl Daw {
         match self {
             Daw::Reaper => 9770,
             Daw::Renoise => 9780,
+            Daw::Logic => 9790,
         }
     }
 

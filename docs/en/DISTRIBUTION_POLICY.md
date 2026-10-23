@@ -13,6 +13,7 @@ what the bridge's package may contain. The steps for cutting a release are in
 | Kumi | GitHub Releases of `user1303836/kumi`: native `kumi-<target>.tar.gz` bundles, the compatibility `kumi.tar.gz`, `kumi-release.json`, `SHA256SUMS` and the installers `install.sh` and `install.ps1`, attached to each `vX.Y.Z` tag by the Installer workflow | `install.sh` or `install.ps1`, then `kumi update` |
 | The bridge (`@ableton-mcp/mcp-server`) | Inside each Kumi bundle, as a native bridge tarball and its prepared package | `kumi bridge`, which installs it through the bridge's lifecycle ([delivery](DELIVERY.md)) |
 | REAPER's extension and Renoise's tool | Inside each Kumi bundle, in `daws/`, with `daw-mcp-server` | `kumi --daw reaper bridge`, `kumi --daw renoise bridge` and `kumi update` ([delivery](DELIVERY.md#reapers-extension-and-renoises-tool)) |
+| Logic Pro's bridge (`logic-kumi` and its helper) | Inside the Apple Silicon Mac's Kumi bundle only, in `daws/logic/logic-kumi/` | `kumi --daw logic bridge`, which sets it up in Kumi's own folder ([delivery](DELIVERY.md#logic-pros-bridge)) |
 | The bridge on its own | No release of its own. Build it with `python3 scripts/build-native-release.py --bridge-only` ([build options](DEVELOPER_GUIDE.md#releasing)) | The lifecycle CLI ([delivery](DELIVERY.md#the-standalone-bridge)) |
 
 The one-liners fetch the installer from the latest published release, and it
@@ -27,15 +28,17 @@ package is `private: true`, so `npm publish` refuses.
 ## Integrity, not identity
 
 The app and bridge have no publisher signature or notarization, and there are
-no `.pkg` or `.msi` installers. The macOS Hands helper is ad-hoc signed; that
-does not establish publisher identity. The installer and `kumi update` check
-the bundle against the sha256 in `kumi-release.json`. Fresh native installs
-do not download Node. `kumi bridge` checks the bridge tarball against the hash
-recorded when the bundle was built. A checksum from the same place as the
-download proves the bytes arrived intact, not who made them.
+no `.pkg` or `.msi` installers. The macOS Hands helper, and Logic Pro's bridge
+and its helper, are ad-hoc signed; that does not establish publisher identity.
+The installer and `kumi update` check the bundle against the sha256 in
+`kumi-release.json`. Fresh native installs do not download Node. `kumi bridge`
+checks the bridge tarball against the hash recorded when the bundle was built.
+A checksum from the same place as the download proves the bytes arrived intact,
+not who made them.
 
 The software is [MIT licensed](../../LICENSE.md). The licence grants no rights
-to Ableton's trademarks, and Kumi isn't affiliated with or endorsed by Ableton.
+to Ableton's or Apple's trademarks, and Kumi isn't affiliated with or endorsed
+by Ableton or Apple.
 
 ## What the bridge's package may contain
 

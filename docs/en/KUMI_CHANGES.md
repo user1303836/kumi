@@ -376,6 +376,12 @@ Each Kumi release ships with a bridge: Kumi 1.19.2 to 1.21.1 with bridge 1.0.93,
 1.0.70, 1.4 with 1.0.69, 1.3 with 1.0.68, 1.2 with 1.0.66, 1.1 with 1.0.53 and
 1.0 with 1.0.52.
 
+Logic Pro's bridge has versions of its own. Only the Kumi for Apple Silicon
+Macs carries it: `kumi --daw logic bridge` sets it up in Kumi's own folder, and
+`kumi update` brings it up to date there. Kumi starts it beside Logic Pro,
+which loads nothing, so Logic Pro never restarts for it.
+Each Kumi release for Apple Silicon Macs ships with one: Kumi 1.22.0 with Logic Pro bridge 0.1.0.
+
 ## REAPER and Renoise
 
 In REAPER and Renoise, Kumi changes the project or song through its own bridge

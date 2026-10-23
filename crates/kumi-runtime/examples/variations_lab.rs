@@ -212,7 +212,7 @@ fn main() {
                 None => rows.push(record),
             }
         }));
-        let daw = create_renoise_integration(OwnOptions { context, kumi_home: home.clone(), connect: Some(connect) });
+        let daw = create_renoise_integration(OwnOptions { context, kumi_home: home.clone(), connect: Some(connect), open_file: None });
         if let Err(error) = daw.start(Signal::new()).await {
             eprintln!("no Renoise: {error:?}");
             std::process::exit(1);
@@ -379,7 +379,7 @@ return {synth = synth, brk = brk, t = m, p = p, q = q}
             let endpoint = endpoint.clone();
             async move { Ok(endpoint as Rc<dyn McpEndpoint>) }.boxed_local()
         });
-        let again = create_renoise_integration(OwnOptions { context: IntegrationContext::new(Rc::new(|_, _| {})), kumi_home: home.clone(), connect: Some(connect) });
+        let again = create_renoise_integration(OwnOptions { context: IntegrationContext::new(Rc::new(|_, _| {})), kumi_home: home.clone(), connect: Some(connect), open_file: None });
         again.start(Signal::new()).await.ok();
         let observed = again.observe(Signal::new(), None).await.expect("a look at Renoise");
         let lab = Lab { host: lab.host.clone(), tools: observed.tools.clone(), results: lab.results };

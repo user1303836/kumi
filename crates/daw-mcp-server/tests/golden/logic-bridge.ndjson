@@ -1,0 +1,32 @@
+1 > {"type":"hello","protocol":"kumi-daw/1","nonce":"<nonce>","client":"daw-mcp-server/test"}
+1 < {"type":"challenge","nonce":"<nonce>","proof":"<proof>"}
+1 > {"type":"auth","proof":"<proof>"}
+1 < {"type":"welcome","session":"<session>","daw":"logic","bridge":"0.1.0","dawVersion":"12.3.1","pid":"<pid>","resource":"com.apple.logic10","project":{"id":"e805ab87b3ca9d66f0f62d47b97caa29","name":"Scratch","path":"/Users/me/Music/Logic/Scratch.logicx"},"maxFrameBytes":67108864,"heartbeatMs":1000,"methods":["ping","status"],"events":["project","transport","tracks","selection","undone_in_daw"]}
+1 > {"type":"request","id":1,"method":"status","params":{},"deadlineMs":"<deadline>"}
+1 < {"type":"response","id":1,"ok":true,"result":{"project":{"id":"e805ab87b3ca9d66f0f62d47b97caa29","name":"Scratch","path":"/Users/me/Music/Logic/Scratch.logicx"},"busy":false,"permission":null}}
+1 > {"type":"request","id":2,"method":"status","params":{},"deadlineMs":"<deadline>"}
+1 < {"type":"response","id":2,"ok":true,"result":{"project":{"id":"e805ab87b3ca9d66f0f62d47b97caa29","name":"Scratch","path":"/Users/me/Music/Logic/Scratch.logicx"},"busy":false,"permission":"accessibility"}}
+1 > {"type":"request","id":3,"method":"read","params":{"kind":"track"},"deadlineMs":"<deadline>"}
+1 < {"type":"response","id":3,"ok":false,"error":{"code":"failed","message":"Accessibility isn't granted to Kumi's helper: System Settings > Privacy & Security > Accessibility"}}
+1 > {"type":"request","id":4,"method":"status","params":{},"deadlineMs":"<deadline>"}
+1 < {"type":"response","id":4,"ok":true,"result":{"project":{"id":"e805ab87b3ca9d66f0f62d47b97caa29","name":"Scratch","path":"/Users/me/Music/Logic/Scratch.logicx"},"busy":"away","permission":null}}
+1 > {"type":"request","id":5,"method":"read","params":{"kind":"track"},"deadlineMs":"<deadline>"}
+1 < {"type":"response","id":5,"ok":false,"error":{"code":"busy","message":"logic is away"}}
+2 > {"type":"hello","protocol":"kumi-daw/1","nonce":"<nonce>","client":"daw-mcp-server/test"}
+2 < {"type":"challenge","nonce":"<nonce>","proof":"<proof>"}
+2 > {"type":"auth","proof":"<proof>"}
+2 < {"type":"welcome","session":"<session>","daw":"logic","bridge":"0.1.0","dawVersion":"12.3.1","pid":"<pid>","resource":"com.apple.logic10","project":{"id":"e805ab87b3ca9d66f0f62d47b97caa29","name":"Scratch","path":"/Users/me/Music/Logic/Scratch.logicx"},"maxFrameBytes":67108864,"heartbeatMs":1000,"methods":["ping","status"],"events":["project","transport","tracks","selection","undone_in_daw"]}
+2 > {"type":"request","id":1,"method":"ping","params":{},"deadlineMs":"<deadline>"}
+2 < {"type":"response","id":1,"ok":true,"result":{}}
+2 > {"type":"request","id":2,"method":"status","params":{},"deadlineMs":"<deadline>"}
+2 < {"type":"response","id":2,"ok":true,"result":{"project":{"id":"e805ab87b3ca9d66f0f62d47b97caa29","name":"Scratch","path":"/Users/me/Music/Logic/Scratch.logicx"},"busy":false,"permission":null}}
+2 > {"type":"request","id":3,"method":"render","params":{},"deadlineMs":"<deadline>"}
+2 < {"type":"response","id":3,"ok":false,"error":{"code":"unknown-method","message":"no method render"}}
+2 < {"type":"event","seq":1,"name":"project","data":{"name":"Next"}}
+2 > {"type":"request","id":4,"method":"status","params":{},"deadlineMs":"<deadline>"}
+2 < {"type":"response","id":4,"ok":true,"result":{"project":{"name":"Next"},"busy":false,"permission":null}}
+2 > {"type":"request","id":5,"method":"status","params":{},"deadlineMs":"<deadline>"}
+2 < {"type":"response","id":5,"ok":true,"result":{"project":{"name":"Next"},"busy":"rendering","permission":null}}
+2 > {"type":"request","id":6,"method":"render","params":{},"deadlineMs":"<deadline>"}
+2 < {"type":"response","id":6,"ok":false,"error":{"code":"busy","message":"logic is rendering"}}
+2 < {"type":"bye","reason":"quit"}

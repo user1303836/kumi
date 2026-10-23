@@ -1,0 +1,1009 @@
+{
+  "cases": [
+    {
+      "request": {
+        "method": "status",
+        "params": {}
+      },
+      "response": {
+        "ok": true,
+        "result": {
+          "busy": false,
+          "permission": null,
+          "project": {
+            "id": "e805ab87b3ca9d66f0f62d47b97caa29",
+            "name": "Scratch",
+            "path": "/Users/me/Music/Logic/Scratch.logicx"
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "read",
+        "params": {
+          "kind": "project"
+        }
+      },
+      "response": {
+        "ok": true,
+        "result": {
+          "epoch": "1",
+          "items": [
+            {
+              "id": "e805ab87b3ca9d66f0f62d47b97caa29",
+              "identity": "Scratch",
+              "keySignature": "C Major",
+              "middleC": 3,
+              "path": "/Users/me/Music/Logic/Scratch.logicx",
+              "sampleRate": null,
+              "tempo": 160.0,
+              "timeSignature": "4/4",
+              "trackCount": 2
+            }
+          ],
+          "total": 1
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "read",
+        "params": {
+          "kind": "track"
+        }
+      },
+      "response": {
+        "ok": true,
+        "result": {
+          "epoch": "1",
+          "items": [
+            {
+              "armed": false,
+              "color": null,
+              "index": 1,
+              "inputs": [
+                "Input 1"
+              ],
+              "kind": "audio",
+              "monitoring": false,
+              "mute": false,
+              "name": "Vocal",
+              "output": "Stereo Output",
+              "pan": 0,
+              "ref": "1:track:1",
+              "selected": true,
+              "solo": false,
+              "volumeDb": 0.0
+            },
+            {
+              "armed": false,
+              "color": null,
+              "index": 2,
+              "inputs": [],
+              "kind": "instrument",
+              "monitoring": false,
+              "mute": false,
+              "name": "Keys",
+              "output": "Stereo Output",
+              "pan": 0,
+              "ref": "1:track:2",
+              "selected": false,
+              "solo": false,
+              "volumeDb": 0.0
+            }
+          ],
+          "total": 2
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "read",
+        "params": {
+          "kind": "track",
+          "limit": 1
+        }
+      },
+      "response": {
+        "ok": true,
+        "result": {
+          "epoch": "1",
+          "items": [
+            {
+              "armed": false,
+              "color": null,
+              "index": 1,
+              "inputs": [
+                "Input 1"
+              ],
+              "kind": "audio",
+              "monitoring": false,
+              "mute": false,
+              "name": "Vocal",
+              "output": "Stereo Output",
+              "pan": 0,
+              "ref": "1:track:1",
+              "selected": true,
+              "solo": false,
+              "volumeDb": 0.0
+            }
+          ],
+          "nextCursor": "1.1",
+          "total": 2
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "read",
+        "params": {
+          "cursor": "1.1",
+          "kind": "track"
+        }
+      },
+      "response": {
+        "ok": true,
+        "result": {
+          "epoch": "1",
+          "items": [
+            {
+              "armed": false,
+              "color": null,
+              "index": 2,
+              "inputs": [],
+              "kind": "instrument",
+              "monitoring": false,
+              "mute": false,
+              "name": "Keys",
+              "output": "Stereo Output",
+              "pan": 0,
+              "ref": "1:track:2",
+              "selected": false,
+              "solo": false,
+              "volumeDb": 0.0
+            }
+          ],
+          "total": 2
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "read",
+        "params": {
+          "kind": "region"
+        }
+      },
+      "response": {
+        "ok": true,
+        "result": {
+          "epoch": "1",
+          "items": [
+            {
+              "endBeats": 16.0,
+              "kind": "midi",
+              "looped": false,
+              "name": "Keys",
+              "ref": "1:region:1",
+              "selected": true,
+              "startBeats": 0.0,
+              "trackRef": "1:track:2"
+            }
+          ],
+          "total": 1
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "read",
+        "params": {
+          "kind": "region",
+          "parent": "1:track:2"
+        }
+      },
+      "response": {
+        "ok": true,
+        "result": {
+          "epoch": "1",
+          "items": [
+            {
+              "endBeats": 16.0,
+              "kind": "midi",
+              "looped": false,
+              "name": "Keys",
+              "ref": "1:region:1",
+              "selected": true,
+              "startBeats": 0.0,
+              "trackRef": "1:track:2"
+            }
+          ],
+          "total": 1
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "read",
+        "params": {
+          "kind": "note"
+        }
+      },
+      "response": {
+        "error": {
+          "code": "bad-params",
+          "message": "note: pass the parent region"
+        },
+        "ok": false
+      }
+    },
+    {
+      "request": {
+        "method": "read",
+        "params": {
+          "kind": "note",
+          "parent": "1:region:1"
+        }
+      },
+      "response": {
+        "ok": true,
+        "result": {
+          "epoch": "1",
+          "items": [
+            {
+              "channel": 1,
+              "lengthTicks": 240,
+              "pitch": 60,
+              "position": {
+                "bar": 1,
+                "beat": 1,
+                "division": 1,
+                "tick": 1
+              },
+              "ref": "1:note:1.1",
+              "regionRef": "1:region:1",
+              "velocity": 100
+            },
+            {
+              "channel": 1,
+              "lengthTicks": 240,
+              "pitch": 64,
+              "position": {
+                "bar": 1,
+                "beat": 2,
+                "division": 1,
+                "tick": 1
+              },
+              "ref": "1:note:1.2",
+              "regionRef": "1:region:1",
+              "selected": true,
+              "velocity": 96
+            },
+            {
+              "channel": 1,
+              "lengthTicks": 240,
+              "pitch": 67,
+              "position": {
+                "bar": 1,
+                "beat": 3,
+                "division": 1,
+                "tick": 1
+              },
+              "ref": "1:note:1.3",
+              "regionRef": "1:region:1",
+              "velocity": 92
+            },
+            {
+              "channel": 1,
+              "lengthTicks": 480,
+              "pitch": 72,
+              "position": {
+                "bar": 1,
+                "beat": 4,
+                "division": 1,
+                "tick": 1
+              },
+              "ref": "1:note:1.4",
+              "regionRef": "1:region:1",
+              "velocity": 110
+            }
+          ],
+          "total": 4
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "read",
+        "params": {
+          "kind": "plugin",
+          "parent": "1:track:1"
+        }
+      },
+      "response": {
+        "ok": true,
+        "result": {
+          "epoch": "1",
+          "items": [
+            {
+              "bypassed": false,
+              "kind": "effect",
+              "name": "Channel EQ",
+              "ref": "1:plugin:1.1",
+              "slot": 1,
+              "trackRef": "1:track:1"
+            }
+          ],
+          "total": 1
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "read",
+        "params": {
+          "kind": "send",
+          "parent": "1:track:1"
+        }
+      },
+      "response": {
+        "ok": true,
+        "result": {
+          "epoch": "1",
+          "items": [],
+          "total": 0
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "read",
+        "params": {
+          "kind": "marker"
+        }
+      },
+      "response": {
+        "ok": true,
+        "result": {
+          "epoch": "1",
+          "items": [
+            {
+              "length": 32.0,
+              "name": "Marker 1",
+              "position": {
+                "bar": 9,
+                "beat": 1,
+                "division": 1,
+                "tick": 1
+              },
+              "ref": "1:marker:1",
+              "text": ""
+            }
+          ],
+          "total": 1
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "read",
+        "params": {
+          "kind": "tempo"
+        }
+      },
+      "response": {
+        "ok": true,
+        "result": {
+          "epoch": "1",
+          "items": [
+            {
+              "bpm": 160.0,
+              "signatures": [
+                {
+                  "key": "C Major",
+                  "position": {
+                    "bar": 1,
+                    "beat": 1,
+                    "division": 1,
+                    "tick": 1
+                  },
+                  "time": "4/4"
+                }
+              ],
+              "tempos": [
+                {
+                  "bpm": 160.0,
+                  "position": {
+                    "bar": 1,
+                    "beat": 1,
+                    "division": 1,
+                    "tick": 1
+                  }
+                }
+              ]
+            }
+          ],
+          "total": 1
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "read",
+        "params": {
+          "ref": "1:track:2"
+        }
+      },
+      "response": {
+        "ok": true,
+        "result": {
+          "epoch": "1",
+          "items": [
+            {
+              "armed": false,
+              "color": null,
+              "index": 2,
+              "inputs": [],
+              "kind": "instrument",
+              "monitoring": false,
+              "mute": false,
+              "name": "Keys",
+              "output": "Stereo Output",
+              "pan": 0,
+              "ref": "1:track:2",
+              "selected": false,
+              "solo": false,
+              "volumeDb": 0.0
+            }
+          ]
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "read",
+        "params": {
+          "ref": "1:track:9"
+        }
+      },
+      "response": {
+        "error": {
+          "code": "failed",
+          "message": "1:track:9 isn't in the project (deleted, or another project)"
+        },
+        "ok": false
+      }
+    },
+    {
+      "request": {
+        "method": "read",
+        "params": {
+          "kind": "bogus"
+        }
+      },
+      "response": {
+        "error": {
+          "code": "bad-params",
+          "message": "Logic Pro has no kind \"bogus\" to read"
+        },
+        "ok": false
+      }
+    },
+    {
+      "request": {
+        "method": "read",
+        "params": {
+          "kind": "region",
+          "parent": "0:track:2"
+        }
+      },
+      "response": {
+        "error": {
+          "code": "stale",
+          "message": "that ref is from an earlier epoch (0; now 1): read again"
+        },
+        "ok": false
+      }
+    },
+    {
+      "request": {
+        "method": "snapshot",
+        "params": {}
+      },
+      "response": {
+        "ok": true,
+        "result": {
+          "epoch": "1",
+          "markers": [
+            {
+              "length": 32.0,
+              "name": "Marker 1",
+              "position": {
+                "bar": 9,
+                "beat": 1,
+                "division": 1,
+                "tick": 1
+              },
+              "ref": "1:marker:1",
+              "text": ""
+            }
+          ],
+          "project": {
+            "id": "e805ab87b3ca9d66f0f62d47b97caa29",
+            "identity": "Scratch",
+            "keySignature": "C Major",
+            "middleC": 3,
+            "path": "/Users/me/Music/Logic/Scratch.logicx",
+            "sampleRate": null,
+            "tempo": 160.0,
+            "timeSignature": "4/4",
+            "trackCount": 2
+          },
+          "selection": {
+            "regionName": "Keys",
+            "regionRef": "1:region:1",
+            "track": {
+              "kind": "audio",
+              "name": "Vocal"
+            },
+            "trackRef": "1:track:1"
+          },
+          "tracks": [
+            {
+              "armed": false,
+              "color": null,
+              "index": 1,
+              "inputs": [
+                "Input 1"
+              ],
+              "kind": "audio",
+              "monitoring": false,
+              "mute": false,
+              "name": "Vocal",
+              "output": "Stereo Output",
+              "pan": 0,
+              "ref": "1:track:1",
+              "selected": true,
+              "solo": false,
+              "volumeDb": 0.0
+            },
+            {
+              "armed": false,
+              "color": null,
+              "index": 2,
+              "inputs": [],
+              "kind": "instrument",
+              "monitoring": false,
+              "mute": false,
+              "name": "Keys",
+              "output": "Stereo Output",
+              "pan": 0,
+              "ref": "1:track:2",
+              "selected": false,
+              "solo": false,
+              "volumeDb": 0.0
+            }
+          ],
+          "transport": {
+            "cycle": false,
+            "playhead": {
+              "bar": 1,
+              "beat": 1
+            },
+            "playing": false,
+            "recording": false,
+            "tempo": 160.0,
+            "timeSignature": "4/4"
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "focus",
+        "params": {}
+      },
+      "response": {
+        "ok": true,
+        "result": {
+          "ageMs": 0,
+          "changed": 1,
+          "editor": null,
+          "epoch": "1",
+          "playhead": {
+            "bar": 1,
+            "beat": 1
+          },
+          "selection": {
+            "regionName": "Keys",
+            "regionRef": "1:region:1",
+            "track": {
+              "kind": "audio",
+              "name": "Vocal"
+            },
+            "trackRef": "1:track:1"
+          },
+          "transport": {
+            "beat": 0.0,
+            "beatsPerBar": 4,
+            "cycle": false,
+            "playing": false,
+            "recording": false,
+            "tempo": 160.0
+          },
+          "view": "tracks"
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "focus_body",
+        "params": {
+          "kind": "tree",
+          "ref": "1:track:1"
+        }
+      },
+      "response": {
+        "ok": true,
+        "result": {
+          "epoch": "1",
+          "kind": "tree",
+          "strip": {
+            "armed": false,
+            "inputs": [
+              "Input 1"
+            ],
+            "inserts": [
+              {
+                "bypassed": false,
+                "kind": "effect",
+                "name": "Channel EQ",
+                "pluginRef": "1:plugin:1.1",
+                "slot": 1
+              }
+            ],
+            "kind": "audio",
+            "mute": false,
+            "name": "Vocal",
+            "output": "Stereo Output",
+            "pan": 0,
+            "sends": [],
+            "solo": false,
+            "volumeDb": 0.0
+          },
+          "trackRef": "1:track:1"
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "focus_body",
+        "params": {
+          "kind": "tree"
+        }
+      },
+      "response": {
+        "ok": true,
+        "result": {
+          "epoch": "1",
+          "kind": "tree",
+          "strip": {
+            "armed": false,
+            "inputs": [
+              "Input 1"
+            ],
+            "inserts": [
+              {
+                "bypassed": false,
+                "kind": "effect",
+                "name": "Channel EQ",
+                "pluginRef": "1:plugin:1.1",
+                "slot": 1
+              }
+            ],
+            "kind": "audio",
+            "mute": false,
+            "name": "Vocal",
+            "output": "Stereo Output",
+            "pan": 0,
+            "sends": [],
+            "solo": false,
+            "volumeDb": 0.0
+          },
+          "trackRef": "1:track:1"
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "focus_body",
+        "params": {
+          "kind": "notes",
+          "ref": "1:region:1"
+        }
+      },
+      "response": {
+        "ok": true,
+        "result": {
+          "endBeats": 16.0,
+          "epoch": "1",
+          "kind": "notes",
+          "name": "Keys",
+          "notes": [
+            {
+              "channel": 1,
+              "lengthTicks": 240,
+              "pitch": 60,
+              "position": {
+                "bar": 1,
+                "beat": 1,
+                "division": 1,
+                "tick": 1
+              },
+              "ref": "1:note:1.1",
+              "regionRef": "1:region:1",
+              "velocity": 100
+            },
+            {
+              "channel": 1,
+              "lengthTicks": 240,
+              "pitch": 64,
+              "position": {
+                "bar": 1,
+                "beat": 2,
+                "division": 1,
+                "tick": 1
+              },
+              "ref": "1:note:1.2",
+              "regionRef": "1:region:1",
+              "selected": true,
+              "velocity": 96
+            },
+            {
+              "channel": 1,
+              "lengthTicks": 240,
+              "pitch": 67,
+              "position": {
+                "bar": 1,
+                "beat": 3,
+                "division": 1,
+                "tick": 1
+              },
+              "ref": "1:note:1.3",
+              "regionRef": "1:region:1",
+              "velocity": 92
+            },
+            {
+              "channel": 1,
+              "lengthTicks": 480,
+              "pitch": 72,
+              "position": {
+                "bar": 1,
+                "beat": 4,
+                "division": 1,
+                "tick": 1
+              },
+              "ref": "1:note:1.4",
+              "regionRef": "1:region:1",
+              "velocity": 110
+            }
+          ],
+          "regionRef": "1:region:1",
+          "startBeats": 0.0,
+          "timeSignature": "4/4",
+          "total": 4
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "focus_body",
+        "params": {
+          "kind": "notes"
+        }
+      },
+      "response": {
+        "ok": true,
+        "result": {
+          "endBeats": 16.0,
+          "epoch": "1",
+          "kind": "notes",
+          "name": "Keys",
+          "notes": [
+            {
+              "channel": 1,
+              "lengthTicks": 240,
+              "pitch": 60,
+              "position": {
+                "bar": 1,
+                "beat": 1,
+                "division": 1,
+                "tick": 1
+              },
+              "ref": "1:note:1.1",
+              "regionRef": "1:region:1",
+              "velocity": 100
+            },
+            {
+              "channel": 1,
+              "lengthTicks": 240,
+              "pitch": 64,
+              "position": {
+                "bar": 1,
+                "beat": 2,
+                "division": 1,
+                "tick": 1
+              },
+              "ref": "1:note:1.2",
+              "regionRef": "1:region:1",
+              "selected": true,
+              "velocity": 96
+            },
+            {
+              "channel": 1,
+              "lengthTicks": 240,
+              "pitch": 67,
+              "position": {
+                "bar": 1,
+                "beat": 3,
+                "division": 1,
+                "tick": 1
+              },
+              "ref": "1:note:1.3",
+              "regionRef": "1:region:1",
+              "velocity": 92
+            },
+            {
+              "channel": 1,
+              "lengthTicks": 480,
+              "pitch": 72,
+              "position": {
+                "bar": 1,
+                "beat": 4,
+                "division": 1,
+                "tick": 1
+              },
+              "ref": "1:note:1.4",
+              "regionRef": "1:region:1",
+              "velocity": 110
+            }
+          ],
+          "regionRef": "1:region:1",
+          "startBeats": 0.0,
+          "timeSignature": "4/4",
+          "total": 4
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "focus_body",
+        "params": {
+          "kind": "timeline"
+        }
+      },
+      "response": {
+        "ok": true,
+        "result": {
+          "beatsPerBar": 4,
+          "epoch": "1",
+          "from": 0,
+          "kind": "timeline",
+          "lanes": [
+            {
+              "kind": "audio",
+              "name": "Vocal",
+              "regions": [],
+              "trackRef": "1:track:1"
+            },
+            {
+              "kind": "instrument",
+              "name": "Keys",
+              "regions": [
+                {
+                  "endBeats": 16.0,
+                  "kind": "midi",
+                  "name": "Keys",
+                  "ref": "1:region:1",
+                  "selected": true,
+                  "startBeats": 0.0
+                }
+              ],
+              "trackRef": "1:track:2"
+            }
+          ],
+          "markers": [
+            {
+              "name": "Marker 1",
+              "positionBeats": 32.0
+            }
+          ],
+          "playheadBeats": 0.0,
+          "playing": false,
+          "trackCount": 2,
+          "window": {
+            "from": 0.0,
+            "to": 16.0
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "focus_body",
+        "params": {
+          "around": "1:track:2",
+          "kind": "timeline",
+          "limit": 1,
+          "window": {
+            "from": 0,
+            "to": 16
+          }
+        }
+      },
+      "response": {
+        "ok": true,
+        "result": {
+          "beatsPerBar": 4,
+          "epoch": "1",
+          "from": 1,
+          "kind": "timeline",
+          "lanes": [
+            {
+              "kind": "instrument",
+              "name": "Keys",
+              "regions": [
+                {
+                  "endBeats": 16.0,
+                  "kind": "midi",
+                  "name": "Keys",
+                  "ref": "1:region:1",
+                  "selected": true,
+                  "startBeats": 0.0
+                }
+              ],
+              "trackRef": "1:track:2"
+            }
+          ],
+          "markers": [
+            {
+              "name": "Marker 1",
+              "positionBeats": 32.0
+            }
+          ],
+          "playheadBeats": 0.0,
+          "playing": false,
+          "trackCount": 2,
+          "window": {
+            "from": 0.0,
+            "to": 16.0
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "focus_body",
+        "params": {
+          "kind": "routing",
+          "ref": "1:track:1"
+        }
+      },
+      "response": {
+        "ok": true,
+        "result": {
+          "epoch": "1",
+          "inputs": [
+            "Input 1"
+          ],
+          "kind": "routing",
+          "output": "Stereo Output",
+          "sends": [],
+          "trackRef": "1:track:1"
+        }
+      }
+    }
+  ],
+  "epoch": "1"
+}

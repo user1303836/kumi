@@ -89,6 +89,8 @@ pub async fn run_library(io: LibraryIo) -> Result<i32, RuntimeError> {
             dir: dir.clone(),
             folders: Some(read_settings(&load_settings_file(&io.env)?).library_folders),
             projects_dir: Some(load_projects_dir(&io.env)?),
+            // (M6) The DAW's own places: Logic Pro's content folders for Logic, Live's layout for Live.
+            sources: Some(kumi_runtime::library::sources::SourceOptions { daw: Some(crate::daw::current().id()), ..Default::default() }),
             ..Default::default()
         })
     };

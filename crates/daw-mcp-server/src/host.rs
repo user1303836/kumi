@@ -1,11 +1,17 @@
-//! What the tools do: find the running bridges of one DAW through their discovery files, connect, and report.
+//! What the tools do: find the running bridges of one DAW through their discovery files, connect, and report. A DAW
+//! nothing can be loaded into (Logic) has a bridge of Kumi's own, which the host starts when no discovery file answers.
 use crate::client::{BridgeClient, ConnectError, RequestError};
 use daw_bridge::files::{read_secret, scan_discovery, Discovery, FileError};
+use daw_bridge::install::{logic_target, LOGIC_BINARY};
+use daw_bridge::lifecycle::Lifecycle;
 use daw_bridge::paths::BridgePaths;
 use daw_bridge::Daw;
 use serde_json::{json, Value};
+use std::future::Future;
 use std::net::SocketAddr;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::pin::Pin;
+use std::process::Stdio;
 use std::time::Duration;
 
 pub const CLIENT_NAME: &str = concat!("daw-mcp-server/", env!("CARGO_PKG_VERSION"));
@@ -15,6 +21,14 @@ const STATUS_TIMEOUT: Duration = Duration::from_secs(2);
 pub const MAX_ANSWER_BYTES: usize = 256 * 1024;
 /// How long a silent connection gets to answer a ping before it is called dead.
 const PING_PROBE: Duration = Duration::from_millis(1500);
+/// How long a bridge the host starts gets to listen and write its discovery file, looked for this often.
+pub const SPAWN_WAIT: Duration = Duration::from_secs(10);
+const SPAWN_POLL: Duration = Duration::from_millis(100);
+/// How long a bridge the host stops gets to end by itself (removing its discovery file) before it is killed.
+const STOP_WAIT: Duration = Duration::from_secs(1);
+/// Names the bridge binary to start instead of the installed one; the command line reads it into
+/// [`Host::with_bridge_binary`].
+pub const LOGIC_BRIDGE_VAR: &str = "KUMI_LOGIC_BRIDGE";
 
 struct Current {
     pid: u32,
@@ -58,6 +72,51 @@ pub enum CallError {
     TooBig,
 }
 
+/// Whether the DAW's bridge is a process of Kumi's own that the host starts (Logic's: nothing can be loaded into
+/// Logic), rather than one the DAW loads and runs.
+pub fn spawned_by_host(daw: Daw) -> bool {
+    daw == Daw::Logic
+}
+
+/// A bridge the host started, or what a test runs in its place (a simulator).
+pub trait SpawnedBridge: Send {
+    /// How it ended (its exit status), once it has; None while it runs.
+    fn exited(&mut self) -> Option<String>;
+    /// Asks it to end, so it can remove its discovery file first.
+    fn stop(&mut self);
+    /// Ends it now.
+    fn end(&mut self);
+}
+
+impl SpawnedBridge for tokio::process::Child {
+    fn exited(&mut self) -> Option<String> {
+        match self.try_wait() {
+            Ok(Some(status)) => Some(status.to_string()),
+            Ok(None) => None,
+            Err(error) => Some(error.to_string()),
+        }
+    }
+
+    fn stop(&mut self) {
+        #[cfg(unix)]
+        if let Some(pid) = self.id().and_then(|pid| i32::try_from(pid).ok()) {
+            // SIGTERM: the bridge ends as it does when its DAW quits, removing its discovery file.
+            let _ = unsafe { libc::kill(pid, libc::SIGTERM) };
+            return;
+        }
+        self.end();
+    }
+
+    fn end(&mut self) {
+        let _ = self.start_kill();
+    }
+}
+
+/// What a spawner answers: the bridge it started, or why it couldn't.
+pub type SpawnFuture = Pin<Box<dyn Future<Output = Result<Box<dyn SpawnedBridge>, String>> + Send>>;
+/// Starts a bridge for the host, given Kumi's folder (what the bridge gets as `--kumi-home`): a future, so a test can
+/// start a simulator in its place.
+pub type Spawner = Box<dyn Fn(PathBuf) -> SpawnFuture + Send + Sync>;
 /// What the host asks again on a fresh connection when the old one was lost: the reads (and a preview, which writes
 /// nothing). A write is never sent twice.
 const RESENT: [&str; 7] = ["read", "snapshot", "focus", "focus_body", "status", "change_preview", "digest"];
@@ -65,10 +124,18 @@ const RESENT: [&str; 7] = ["read", "snapshot", "focus", "focus_body", "status", 
 /// The host for one DAW.
 pub struct Host {
     daw: Daw,
+    kumi_home: PathBuf,
     paths: BridgePaths,
     current: std::sync::Arc<tokio::sync::Mutex<Option<Current>>>,
     /// The bridge's events (`{name, data}`), for the MCP client: whichever instance the host is connected to.
     events: tokio::sync::broadcast::Sender<Value>,
+    /// What starts the bridge of a DAW whose bridge the host starts, in place of the installed binary (a test's).
+    spawner: Option<Spawner>,
+    /// The bridge binary to start instead of the installed one ([`LOGIC_BRIDGE_VAR`]).
+    bridge_binary: Option<PathBuf>,
+    spawn_wait: Duration,
+    /// The bridge the host started, while it runs it.
+    spawned: tokio::sync::Mutex<Option<Box<dyn SpawnedBridge>>>,
     /// The changes previewed, applied and undone through this host (M3).
     journal: std::sync::Arc<crate::changes::Journal>,
     /// The projects' snapshots, compared on connect and while watching (M6).
@@ -108,16 +175,27 @@ fn connect_error(daw: Daw, error: &ConnectError) -> String {
         ConnectError::Handshake(daw_bridge::handshake::HandshakeError::Refused { reason, protocol: Some(protocol) })
             if reason == "protocol" =>
         {
-            format!(
-                "the bridge in {daw} speaks {}, another version than this Kumi's: restart {daw} to load the installed one",
-                daw_bridge::handshake::known_protocol(protocol)
-            )
+            let protocol = daw_bridge::handshake::known_protocol(protocol);
+            match daw {
+                Daw::Logic => format!(
+                    "Kumi's bridge for Logic Pro speaks {protocol}, another version than this Kumi's: set up Kumi's Logic Pro bridge again (kumi --daw logic bridge)"
+                ),
+                _ => format!("the bridge in {daw} speaks {protocol}, another version than this Kumi's: restart {daw} to load the installed one"),
+            }
         }
-        ConnectError::Handshake(daw_bridge::handshake::HandshakeError::Refused { reason, .. }) if reason == "auth" => {
-            format!("the bridge in {daw} was set up with another secret: restart {daw}, or set up Kumi's bridge again")
-        }
+        ConnectError::Handshake(daw_bridge::handshake::HandshakeError::Refused { reason, .. }) if reason == "auth" => match daw {
+            Daw::Logic => {
+                "Kumi's bridge for Logic Pro was set up with another secret: set up Kumi's Logic Pro bridge again (kumi --daw logic bridge)"
+                    .to_string()
+            }
+            _ => format!("the bridge in {daw} was set up with another secret: restart {daw}, or set up Kumi's bridge again"),
+        },
         ConnectError::Handshake(daw_bridge::handshake::HandshakeError::Refused { reason, .. }) if reason == "connections" => {
-            format!("the bridge in {daw} already has as many connections as it takes: close another Kumi or MCP app connected to it")
+            let bridge = match daw {
+                Daw::Logic => "Kumi's bridge for Logic Pro".to_string(),
+                _ => format!("the bridge in {daw}"),
+            };
+            format!("{bridge} already has as many connections as it takes: close another Kumi or MCP app connected to it")
         }
         ConnectError::Handshake(daw_bridge::handshake::HandshakeError::BadProof) => {
             format!("whatever listens there isn't Kumi's bridge, or {daw} was set up with another secret")
@@ -137,13 +215,36 @@ impl Host {
     pub fn new(daw: Daw, kumi_home: &Path) -> Self {
         Self {
             daw,
+            kumi_home: kumi_home.to_path_buf(),
             paths: BridgePaths::new(kumi_home, daw),
             current: std::sync::Arc::new(tokio::sync::Mutex::new(None)),
             events: tokio::sync::broadcast::channel(1024).0,
+            spawner: None,
+            bridge_binary: None,
+            spawn_wait: SPAWN_WAIT,
+            spawned: tokio::sync::Mutex::new(None),
             journal: std::sync::Arc::new(crate::changes::Journal::for_daw(daw)),
             catchup: crate::catchup::Catchup::new(BridgePaths::new(kumi_home, daw).snapshots()),
             jobs: crate::listening::Jobs::default(),
         }
+    }
+
+    /// Starts the bridge through `spawner` instead of the installed binary (a test's simulator).
+    pub fn with_spawner(mut self, spawner: Spawner) -> Self {
+        self.spawner = Some(spawner);
+        self
+    }
+
+    /// Starts this binary instead of the installed one ([`LOGIC_BRIDGE_VAR`]).
+    pub fn with_bridge_binary(mut self, binary: PathBuf) -> Self {
+        self.bridge_binary = Some(binary);
+        self
+    }
+
+    /// How long a started bridge gets to write its discovery file ([`SPAWN_WAIT`] unless a test shortens it).
+    pub fn with_spawn_wait(mut self, wait: Duration) -> Self {
+        self.spawn_wait = wait;
+        self
     }
 
     pub(crate) fn catchup(&self) -> &crate::catchup::Catchup {
@@ -205,13 +306,23 @@ impl Host {
         })
     }
 
-    /// Connects to the instance a discovery file names. A file without a pid (Renoise on Windows) whose port nobody
-    /// answers is stale: it's removed, and the result is None.
+    /// Why nothing can be asked: no instance runs. Logic's bridge is the host's to start, so what is missing is Logic.
+    fn none_running(&self) -> String {
+        match self.daw {
+            Daw::Logic => "no Logic Pro with Kumi's bridge is running: open Logic Pro".into(),
+            daw => format!("no {daw} with Kumi's bridge is running"),
+        }
+    }
+
+    /// Connects to the instance a discovery file names (Logic's names Logic's pid and its bundle id as the resource). A
+    /// file whose port nobody answers is stale when it names no pid (Renoise on Windows), or when its bridge is one the
+    /// host starts (Logic's: it ended with the session that started it, or crashed, while Logic runs on): it's removed,
+    /// and the result is None.
     async fn connect(&self, discovery: &Discovery, secret: &daw_bridge::auth::Secret) -> Option<Result<BridgeClient, String>> {
         let address = SocketAddr::from(([127, 0, 0, 1], discovery.port));
         let client = match BridgeClient::connect_within(address, secret.clone(), CLIENT_NAME, CONNECT_TIMEOUT).await {
             Ok(client) => client,
-            Err(ConnectError::Io(error)) if discovery.pid == 0 && no_listener(&error) => {
+            Err(ConnectError::Io(error)) if (discovery.pid == 0 || spawned_by_host(self.daw)) && no_listener(&error) => {
                 let _ = std::fs::remove_file(self.paths.discovery().join(discovery.file_name()));
                 return None;
             }
@@ -266,6 +377,10 @@ impl Host {
                                         row[key] = value.clone();
                                     }
                                 }
+                                // What Logic's bridge lacks (`accessibility`), or null.
+                                if let Some(permission) = status.get("permission") {
+                                    row["permission"] = permission.clone();
+                                }
                             }
                             Err(error) => row["busy"] = busy_word(&error).into(),
                         }
@@ -285,10 +400,15 @@ impl Host {
         if instances.is_empty() {
             result["hint"] = match &secret {
                 Err(why) => why.clone(),
-                Ok(_) => format!(
-                    "no {} with Kumi's bridge is running: open {}, or restart it if it was open before Kumi set up its bridge",
-                    self.daw, self.daw
-                ),
+                Ok(_) => match self.daw {
+                    Daw::Logic => {
+                        "no Logic Pro with Kumi's bridge is running: open Logic Pro (Kumi starts its bridge when a session begins)"
+                            .to_string()
+                    }
+                    daw => format!(
+                        "no {daw} with Kumi's bridge is running: open {daw}, or restart it if it was open before Kumi set up its bridge"
+                    ),
+                },
             }
             .into();
         }
@@ -296,37 +416,88 @@ impl Host {
     }
 
     /// Makes `current` the chosen instance's connection: the one already connected if it fits the pick, else the only
-    /// running one, the one the pick names, or the newest. Returns how many instances run, or why none can be used.
+    /// running one, the one the pick names, or the newest. A DAW whose bridge the host starts (Logic) has it started
+    /// when none runs. Returns how many instances run, or why none can be used.
     async fn ensure_connected(&self, current: &mut Option<Current>, pick: &Pick) -> Result<usize, String> {
         let reusable = current.as_ref().is_some_and(|open| {
             !open.client.is_closed()
                 && pick.pid.is_none_or(|pid| pid == open.pid)
                 && pick.resource.as_ref().is_none_or(|r| *r == open.resource)
         });
-        let (alive, _, _) = self.instances();
+        let (mut alive, _, _) = self.instances();
         if !reusable {
             let secret = self.secret()?;
+            if alive.is_empty() && spawned_by_host(self.daw) {
+                alive = self.start_bridge().await?;
+            }
             // (a pick that matches nothing leaves the connection there is: the calls without a pick go on using it)
-            let Some(discovery) = alive.iter().find(|discovery| pick.matches(discovery)) else {
-                return Err(if alive.is_empty() {
-                    format!("no {} with Kumi's bridge is running", self.daw)
-                } else {
-                    format!("no running {} matches that pid or folder", self.daw)
-                });
-            };
+            let mut discovery = self.pick_from(&alive, pick)?;
             if let Some(open) = current.take() {
                 open.client.close().await;
             }
-            match self.connect(discovery, &secret).await {
+            let mut connected = self.connect(&discovery, &secret).await;
+            if connected.is_none() && spawned_by_host(self.daw) {
+                // The file was a gone bridge's (ended with the session that started it, or crashed), removed just now:
+                // the bridge is started again, once.
+                alive = self.start_bridge().await?;
+                discovery = self.pick_from(&alive, pick)?;
+                connected = self.connect(&discovery, &secret).await;
+            }
+            match connected {
                 Some(Ok(client)) => {
                     self.forward_events(&client);
                     *current = Some(Current { pid: discovery.pid, resource: discovery.resource.clone(), port: discovery.port, client });
                 }
                 Some(Err(why)) => return Err(why),
-                None => return Err(format!("no {} with Kumi's bridge is running", self.daw)),
+                None => return Err(self.none_running()),
             }
         }
         Ok(alive.len())
+    }
+
+    /// The instance the pick means among those running, or why none does.
+    fn pick_from(&self, alive: &[Discovery], pick: &Pick) -> Result<Discovery, String> {
+        alive.iter().find(|discovery| pick.matches(discovery)).cloned().ok_or_else(|| {
+            if alive.is_empty() {
+                self.none_running()
+            } else {
+                format!("no running {} matches that pid or folder", self.daw)
+            }
+        })
+    }
+
+    /// Starts the DAW's bridge (one the host starts: Logic's), any it started before stopped first, and waits for its
+    /// discovery file: the running instances once there is one. A bridge that ends first, or hasn't listened within
+    /// the wait, is said, with what to do.
+    async fn start_bridge(&self) -> Result<Vec<Discovery>, String> {
+        let mut spawned = self.spawned.lock().await;
+        if let Some(earlier) = spawned.take() {
+            stop_bridge(earlier).await;
+        }
+        let mut bridge = match &self.spawner {
+            Some(spawner) => spawner(self.kumi_home.clone()).await?,
+            None => start_bridge_process(self.daw, &self.kumi_home, self.bridge_binary.as_deref()).await?,
+        };
+        let deadline = tokio::time::Instant::now() + self.spawn_wait;
+        loop {
+            let (alive, _, _) = self.instances();
+            if !alive.is_empty() {
+                *spawned = Some(bridge);
+                return Ok(alive);
+            }
+            if let Some(how) = bridge.exited() {
+                return Err(format!("Kumi's {0} bridge ended before it served ({how}): open {0}, then ask again", self.daw));
+            }
+            if tokio::time::Instant::now() >= deadline {
+                stop_bridge(bridge).await;
+                return Err(format!(
+                    "Kumi's {0} bridge didn't start serving within {1} s: open {0}, then ask again",
+                    self.daw,
+                    self.spawn_wait.as_secs_f64()
+                ));
+            }
+            tokio::time::sleep(SPAWN_POLL).await;
+        }
     }
 
     /// The bridge's events go on to the MCP client while this connection lasts.
@@ -393,6 +564,10 @@ impl Host {
                         result[key] = value.clone();
                     }
                 }
+                // What Logic's bridge lacks (`accessibility`), or null.
+                if let Some(permission) = status.get("permission") {
+                    result["permission"] = permission.clone();
+                }
             }
             Err(RequestError::Closed) => {
                 current.take();
@@ -444,27 +619,40 @@ impl Host {
                 // new one); if not, the DAW is busy and the old connection is kept, as it was.
                 if client.busy() && client.request("ping", json!({}), PING_PROBE).await == Err(RequestError::Timeout) {
                     let Some(fresh) = self.fresh_connection(&client, pid, &resource).await else { return Err(CallError::Timeout) };
-                    // Only a read is asked again: a write the old connection carried may have been made, and making it twice
-                    // (or refusing it as changed) would be wrong; its caller is told it timed out (uncertain).
-                    if !RESENT.contains(&method) {
-                        return Err(CallError::Timeout);
-                    }
-                    return match fresh.request(method, params, timeout).await {
-                        Ok(answer) => Ok(answer),
-                        Err(RequestError::Bridge { code, message }) => Err(CallError::Bridge { code, message }),
-                        Err(RequestError::Timeout) => Err(CallError::Timeout),
-                        Err(RequestError::Closed) => Err(CallError::Closed(format!("{} closed the connection", self.daw))),
-                    };
+                    return self.again(&fresh, method, params, timeout).await;
                 }
                 Err(CallError::Timeout)
             }
             Err(RequestError::Closed) => {
                 let mut current = self.current.lock().await;
+                // The host let this connection go for a fresh one to the same instance while the call waited on it (another
+                // call's timeout, above): the DAW is still there, and the call is never told it closed.
+                let replaced =
+                    current.as_ref().filter(|open| open.pid == pid && !open.client.same_connection(&client) && !open.client.is_closed());
+                if let Some(fresh) = replaced.map(|open| open.client.clone()) {
+                    drop(current);
+                    return self.again(&fresh, method, params, timeout).await;
+                }
                 if current.as_ref().is_some_and(|open| open.pid == pid && open.client.is_closed()) {
                     current.take();
                 }
                 Err(CallError::Closed(format!("{} closed the connection", self.daw)))
             }
+        }
+    }
+
+    /// A call whose connection was let go of for a fresh one. Only a read is asked again: a write the old connection carried
+    /// may have been made, and making it twice (or refusing it as changed) would be wrong; its caller is told it timed out
+    /// (uncertain).
+    async fn again(&self, fresh: &BridgeClient, method: &str, params: Value, timeout: Duration) -> Result<Value, CallError> {
+        if !RESENT.contains(&method) {
+            return Err(CallError::Timeout);
+        }
+        match fresh.request(method, params, timeout).await {
+            Ok(answer) => Ok(answer),
+            Err(RequestError::Bridge { code, message }) => Err(CallError::Bridge { code, message }),
+            Err(RequestError::Timeout) => Err(CallError::Timeout),
+            Err(RequestError::Closed) => Err(CallError::Closed(format!("{} closed the connection", self.daw))),
         }
     }
 
@@ -499,12 +687,67 @@ impl Host {
         json!({"connected": false, "daw": self.daw.id(), "reason": reason})
     }
 
+    /// Closes the connection, and stops the bridge the host started, if it started one.
     pub async fn close(&self) {
         // A render or a capture still running is stopped, and what it changed put back, before the connection goes.
         self.cancel_running_jobs().await;
         if let Some(open) = self.current.lock().await.take() {
             open.client.close().await;
         }
+        if let Some(bridge) = self.spawned.lock().await.take() {
+            stop_bridge(bridge).await;
+        }
+    }
+}
+
+/// Starts the installed bridge binary (or `binary`, given instead of it) with `--kumi-home`: its stdin and stdout
+/// closed (the host's own stdout is the MCP channel), its stderr the host's, and killed when the host lets go of it.
+async fn start_bridge_process(daw: Daw, kumi_home: &Path, binary: Option<&Path>) -> Result<Box<dyn SpawnedBridge>, String> {
+    let binary = match binary {
+        Some(binary) if binary.is_file() => binary.to_path_buf(),
+        Some(binary) => return Err(format!("{LOGIC_BRIDGE_VAR} names {}, which isn't there", binary.display())),
+        None => installed_bridge_binary(daw, kumi_home)?,
+    };
+    let child = tokio::process::Command::new(&binary)
+        .arg("--kumi-home")
+        .arg(kumi_home)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::inherit())
+        .kill_on_drop(true)
+        .spawn()
+        .map_err(|error| format!("Kumi's {daw} bridge at {} couldn't start: {error}", binary.display()))?;
+    Ok(Box::new(child))
+}
+
+/// The bridge binary the lifecycle installed, from its receipt: Logic's `logic-kumi` inside its folder.
+fn installed_bridge_binary(daw: Daw, kumi_home: &Path) -> Result<PathBuf, String> {
+    let target = match daw {
+        Daw::Logic => logic_target(&BridgePaths::new(kumi_home, daw)),
+        other => return Err(format!("{other}'s bridge isn't one Kumi starts")),
+    };
+    let setup = format!("kumi --daw {} bridge", daw.id());
+    let receipt = Lifecycle::new(kumi_home, target)
+        .receipt()
+        .map_err(|error| format!("Kumi's {daw} bridge receipt can't be read ({error}): run `{setup}` to set it up again"))?
+        .filter(|receipt| receipt.status == "installed")
+        .ok_or_else(|| format!("Kumi's {daw} bridge isn't installed: run `{setup}`"))?;
+    let binary = Path::new(&receipt.target).join(LOGIC_BINARY);
+    if !binary.is_file() {
+        return Err(format!("Kumi's {daw} bridge is missing from {}: run `{setup}` to set it up again", receipt.target));
+    }
+    Ok(binary)
+}
+
+/// Stops a bridge the host started: asked to end, so it removes its discovery file; killed if it hasn't within a second.
+async fn stop_bridge(mut bridge: Box<dyn SpawnedBridge>) {
+    bridge.stop();
+    let deadline = tokio::time::Instant::now() + STOP_WAIT;
+    while bridge.exited().is_none() && tokio::time::Instant::now() < deadline {
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    if bridge.exited().is_none() {
+        bridge.end();
     }
 }
 
@@ -565,5 +808,30 @@ mod tests {
         assert!(no_listener(&Error::from(ErrorKind::TimedOut)));
         assert!(!no_listener(&Error::from(ErrorKind::ConnectionReset)));
         assert!(!no_listener(&Error::from(ErrorKind::PermissionDenied)));
+    }
+
+    #[test]
+    fn only_logics_bridge_is_the_hosts_to_start() {
+        assert!(spawned_by_host(Daw::Logic) && !spawned_by_host(Daw::Reaper) && !spawned_by_host(Daw::Renoise));
+    }
+
+    #[test]
+    fn the_installed_bridge_binary_comes_from_the_receipt() {
+        let home = tempfile::tempdir().unwrap();
+        let missing = installed_bridge_binary(Daw::Logic, home.path()).unwrap_err();
+        assert_eq!(missing, "Kumi's Logic Pro bridge isn't installed: run `kumi --daw logic bridge`");
+        assert!(installed_bridge_binary(Daw::Reaper, home.path()).is_err());
+        // Installed through the lifecycle: the binary inside the folder.
+        let target = logic_target(&BridgePaths::new(home.path(), Daw::Logic));
+        let source = home.path().join("built").join("logic-kumi");
+        std::fs::create_dir_all(&source).unwrap();
+        std::fs::write(source.join("logic-kumi"), b"#!/bin/sh\n").unwrap();
+        std::fs::write(source.join("version"), "0.1.0\n").unwrap();
+        Lifecycle::new(home.path(), target.clone()).install(&source, "0.1.0").unwrap();
+        assert_eq!(installed_bridge_binary(Daw::Logic, home.path()).unwrap(), target.path().join("logic-kumi"));
+        // Removed behind Kumi's back: said, with the command that puts it back.
+        std::fs::remove_file(target.path().join("logic-kumi")).unwrap();
+        let gone = installed_bridge_binary(Daw::Logic, home.path()).unwrap_err();
+        assert!(gone.contains("missing from") && gone.contains("kumi --daw logic bridge"), "{gone}");
     }
 }

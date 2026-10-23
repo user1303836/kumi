@@ -2,13 +2,13 @@
 
 [English](../en/SUPPORT_MATRIX.md) · [简体中文](../zh-CN/SUPPORT_MATRIX.md) · 日本語
 
-Kumi とそのブリッジが動作する環境、対応する Live、REAPER、Renoise のバージョン、どこで何をテストしたかをまとめます。それぞれの「テスト済み」の根拠は[実装状況](IMPLEMENTATION_STATUS.md)に記載しています。
+Kumi と各ブリッジが動作する環境、対応する Live、REAPER、Renoise、Logic Pro のバージョン、どこで何をテストしたかをまとめます。それぞれの「テスト済み」の根拠は[実装状況](IMPLEMENTATION_STATUS.md)に記載しています。
 
 ## Kumi
 
 | システム | バージョン | プロセッサ | 状況 |
 | --- | --- | --- | --- |
-| macOS | 13（Ventura）以降 | Apple silicon、Intel | ネイティブのビルドとインストールは CI 対象。過去の TypeScript 版を Apple silicon 上の Live でテスト済み |
+| macOS | 13（Ventura）以降 | Apple silicon、Intel。Logic Pro：Apple silicon のみ | ネイティブのビルドとインストールは CI 対象。過去の TypeScript 版を Apple silicon 上の Live でテスト済み。Logic Pro は Apple silicon でテスト済み |
 | Windows | 10 または 11 | x64、ARM64 | ネイティブのビルドとインストールは CI 対象。過去の TypeScript 版を Windows 10 上の Live でテスト済み。[Windows](#windows) を参照 |
 | Linux | glibc 2.35 以降（Ubuntu 22.04、Debian 12 以降。Alpine などの musl 系は不可） | x64、ARM64 | ネイティブのビルドとインストールは CI 対象。Linux 版の Live は存在しませんが、REAPER と Renoise は動きます |
 
@@ -41,6 +41,16 @@ Kumi とそのブリッジが動作する環境、対応する Live、REAPER、R
 - CI はどのシステムでも、Kumi 自身のコマンドで、両方のブリッジをスクラッチの DAW フォルダーに入れ、更新し、2 回ロールバックし、アンインストールします。
 - Renoise のデモ版はレンダリングできないので、Kumi はそこでソングを聴けません。
 
+## Logic Pro
+
+| Logic Pro | 状況 |
+| --- | --- |
+| 12（Apple シリコン搭載 Mac） | Kumi の Logic Pro ブリッジを通じて対応（[Logic Pro につなぐ](KUMI_GUIDE.md#logic-pro-につなぐ)）：App Store の Logic Pro（`com.apple.logic10`）と Creator Studio のもの（`com.apple.mobilelogic`）。macOS 26.6.1 上の、App Store の英語版 Logic Pro 12.3.1 でテスト済み。 |
+| 11 以前 | 非対応。`kumi --daw logic doctor` がそう伝えます。 |
+| Intel Mac、Linux、Windows | Logic Pro ブリッジはありません。Logic Pro 12 は Apple シリコン搭載 Mac でしか動かないので、ブリッジを収めているのは Apple シリコン搭載 Mac の Kumi だけです。ほかの Kumi は「Logic Pro is supported on Apple Silicon Macs only」と伝え、何も用意しません。 |
+
+ブリッジは Logic Pro の横で動く Kumi のプログラムで、Kumi 自身のフォルダーにあります。macOS のアクセシビリティ（Kumi を動かしているアプリに一度だけ許可します）、Logic Pro のキーコマンドとメニュー、仮想 MIDI ポート上の Mackie Control サーフェスを通じて Logic Pro を読み、操作し、Core Audio のプロセスタップを通じて Logic Pro を聴きます。プロセスタップには macOS 14.2 以降が必要です（macOS が求める場合は System Audio Recording も）。ほかの言語の Logic Pro はテストしていません：ブリッジは Logic Pro のラベルを Logic Pro 自身の翻訳で読みますが、その翻訳を手で確かめたのはドイツ語だけです。そこで Kumi がカバーする範囲は[機能マトリクス](CAPABILITY_MATRIX.md#logic-pro)に、本物の Logic Pro での実行は[実装状況](IMPLEMENTATION_STATUS.md#どこで何をテストしたか)にあります。
+
 ## Windows
 
 テスト済みの項目：CI 上の Windows PowerShell 5.1 と PowerShell 7 での、インストーラー、`kumi update`、`kumi bridge`、`kumi uninstall`。非 ASCII 文字の名前のフォルダーにある `KUMI_HOME` での、インストーラー、`kumi bridge`、ロールバック、`kumi uninstall`。そして Live 12.4.15 beta を入れた Windows 10 マシンでの、ユーザーフォルダーの外に移動した User Library への `kumi bridge`、Live での Remote Script の読み込み、Kumi の接続。CI の Windows ランナーは標準のフォルダー構成の管理者アカウントなので、一般のアカウントや移動したライブラリでしか起きない問題は確認できません。
@@ -71,4 +81,4 @@ Windows でまだ確認できていないこと：
 
 ## CI がカバーする範囲
 
-CI は GitHub がホストする macOS、Ubuntu、Windows のランナー上で、Rust のビルドとテスト、Remote Script と Live 拡張機能のテスト、6 ターゲットのバンドル、インストールと移行のテスト、各システムでの REAPER の拡張機能の読み込み、Renoise のツールのテストを実行します。どのランナーにも Live、REAPER、Renoise はありません。すべてのジョブは[テスト](TESTING.md#ci)に記載しています。
+CI は GitHub がホストする macOS、Ubuntu、Windows のランナー上で、Rust のビルドとテスト、Remote Script と Live 拡張機能のテスト、6 ターゲットのバンドル、インストールと移行のテスト、各システムでの REAPER の拡張機能の読み込み、Renoise のツールのテスト、macOS での Logic Pro ブリッジのテスト（記録したシーンと、シミュレートされた Logic Pro に対して）を実行します。どのランナーにも Live、REAPER、Renoise、Logic Pro はありません。すべてのジョブは[テスト](TESTING.md#ci)に記載しています。

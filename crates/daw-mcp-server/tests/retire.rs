@@ -105,6 +105,31 @@ async fn a_write_on_a_lost_connection_is_never_sent_again_on_the_fresh_one() {
     simulator.stop();
 }
 
+/// Calls still waiting on a connection the host lets go of for a fresh one were made of a DAW that is still there: a read
+/// among them is asked again on the fresh connection, and a write is told it timed out (uncertain), never that the DAW
+/// closed. Told it closed, Kumi said Logic Pro had quit while it was importing.
+#[tokio::test]
+async fn calls_waiting_on_a_connection_the_host_let_go_of_are_never_told_the_daw_closed() {
+    let (_home, host, simulator) = lab(100).await;
+    host.call("snapshot", json!({}), &anyone(), WAIT).await.unwrap();
+    simulator.go_silent();
+    let pick = anyone();
+    let params = json!({"kind": "track-volume", "input": {}, "fence": {}, "desc": "Kumi: Kick volume −6 dB (k0000)", "epoch": "1"});
+    let (read, write, replacing) =
+        tokio::join!(host.call("snapshot", json!({}), &pick, WAIT), host.call("change_apply", params, &pick, WAIT), async {
+            // Both are waiting on the old connection when this one's timeout lets it go.
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            host.call("snapshot", json!({}), &pick, Duration::from_millis(600)).await
+        },);
+    assert!(replacing.is_ok(), "asked again on the new connection: {replacing:?}");
+    assert_eq!(connections(&simulator), 2, "a fresh handshake, and the old connection let go");
+    assert!(read.is_ok(), "the read waiting on the old connection is asked again on the new one: {read:?}");
+    assert_eq!(write, Err(CallError::Timeout), "the write may have been made: uncertain, not closed");
+    let sent = simulator.transcript().iter().filter(|line| line.from_host && line.text.contains("\"change_apply\"")).count();
+    assert_eq!(sent, 1, "sent once, on the old connection only");
+    simulator.stop();
+}
+
 /// A frozen DAW (a plug-in loading, a long script) answers neither the old connection nor a new handshake: that is busy, not
 /// a lost connection. Nothing is dropped, and when it thaws the same connection answers.
 #[tokio::test]

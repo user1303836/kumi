@@ -240,10 +240,12 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
         _ => (None, None, None),
     };
     let tools_dir = load_tools_dir(&io.env)?;
+    // (M6) The DAW's own places: Logic Pro's content folders for Logic, Live's layout for Live.
     let library = create_library(LibraryOptions {
         dir: load_library_dir(&io.env)?,
         folders: Some(settings.library_folders),
         projects_dir: Some(projects_dir.clone()),
+        sources: Some(kumi_runtime::library::sources::SourceOptions { daw: Some(provider.id()), ..Default::default() }),
         ..Default::default()
     });
     let controller: Rc<RefCell<Option<Weak<dyn SessionController>>>> = Rc::new(RefCell::new(None));
@@ -469,6 +471,14 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
             options.on_catch_up = Some({
                 let emit = emit.clone();
                 Rc::new(move |catch_up| emit(SessionEvent::CatchUp { catch_up }))
+            });
+            // (M6) The projects the DAW opened lately, as its bridge read them: the library learns them next time.
+            options.on_recent_projects = Some({
+                let (library, daw) = (library.clone(), provider.id());
+                Rc::new(move |paths| {
+                    let library = library.clone();
+                    tokio::task::spawn_local(async move { library.remember_recent(daw, paths).await });
+                })
             });
             if trace {
                 options.on_dispatch = Some({

@@ -33,21 +33,31 @@ crate::daw_text!(
 pub type OnHeard = Rc<dyn Fn(HeardEvent)>;
 pub type ResolveAudio = Rc<dyn Fn(String, Signal) -> LocalBoxFuture<'static, Result<Option<String>, RuntimeError>>>;
 pub type HearSet = Rc<dyn Fn(HearRequest, Signal) -> LocalBoxFuture<'static, Result<Result<Vec<HeardTake>, String>, RuntimeError>>>;
+/// The octave the open project names middle C in, when it says (Logic Pro's "Display Middle C as").
+pub type MiddleC = Rc<dyn Fn() -> Option<i8>>;
 #[derive(Clone)]
 pub struct ListeningOptions {
     pub on_event: OnHeard,
     pub resolve: Option<ResolveAudio>,
     pub hear: Option<HearSet>,
+    /// (M6) Where the session's middle C is: the notes heard are named in its octave.
+    pub middle_c: Option<MiddleC>,
 }
 impl Default for ListeningOptions {
     fn default() -> Self {
-        Self { on_event: Rc::new(|_| {}), resolve: None, hear: None }
+        Self { on_event: Rc::new(|_| {}), resolve: None, hear: None, middle_c: None }
     }
 }
 struct ListenTool {
     options: ListeningOptions,
     profile: DawProfile,
     description: String,
+}
+impl ListenTool {
+    /// The DAW's profile naming notes as the open project does (its middle C's octave, when it says).
+    fn named(&self) -> DawProfile {
+        self.profile.with_middle_c(self.options.middle_c.as_ref().and_then(|middle_c| middle_c()))
+    }
 }
 pub fn listening_tools(options: ListeningOptions) -> Vec<Rc<dyn KernelTool>> {
     listening_tools_for(DawProfile::ABLETON, options)
@@ -293,7 +303,7 @@ impl KernelTool for ListenTool {
             seconds: if from_set { seconds } else { number("seconds") },
             signal: Some(signal.clone()),
         };
-        let result:Result<ToolResult,ListenError>=async{let path=self.locate(&file,signal.clone()).await?;let mine=hear(&path,common.clone()).await?;let Some(compare_to)=text("compare_to")else{self.event(&mine,None);let mut heard=trim_sound(&self.profile,&mine,tempo);if let Some(note)=&note{heard["heardShort"]=json!(note);}return Ok(ToolResult::text(stringify(&heard)));};let path=self.locate(compare_to,signal.clone()).await?;let reference=hear(&path,AnalyzeOptions{start:number("compare_from_seconds"),transcribe:false,focus:Some(mine.analyzed.focus.clone()),..common}).await?;let comparison=compare(&mine,&reference);self.event(&mine,Some(HeardComparison{reference:reference.file.clone(),summary:summary(&reference),differences:comparison.balance.iter().map(|b|b.difference).collect(),headlines:comparison.headlines.clone()}));let mut mine_value=json!({"loudness":mine.loudness,"tempo":mine.tempo,"key":mine.key});if let Some(notes)=&mine.notes{mine_value["notes"]=Value::Object(transcription_for(&self.profile,notes,tempo));}if let Some(note)=&note{mine_value["heardShort"]=json!(note);}Ok(ToolResult::text(stringify(&json!({"comparison":comparison,"mine":mine_value,"reference":{"loudness":reference.loudness,"tempo":reference.tempo,"key":reference.key}}))))}.await;
+        let result:Result<ToolResult,ListenError>=async{let path=self.locate(&file,signal.clone()).await?;let mine=hear(&path,common.clone()).await?;let Some(compare_to)=text("compare_to")else{self.event(&mine,None);let mut heard=trim_sound(&self.named(),&mine,tempo);if let Some(note)=&note{heard["heardShort"]=json!(note);}return Ok(ToolResult::text(stringify(&heard)));};let path=self.locate(compare_to,signal.clone()).await?;let reference=hear(&path,AnalyzeOptions{start:number("compare_from_seconds"),transcribe:false,focus:Some(mine.analyzed.focus.clone()),..common}).await?;let comparison=compare(&mine,&reference);self.event(&mine,Some(HeardComparison{reference:reference.file.clone(),summary:summary(&reference),differences:comparison.balance.iter().map(|b|b.difference).collect(),headlines:comparison.headlines.clone()}));let mut mine_value=json!({"loudness":mine.loudness,"tempo":mine.tempo,"key":mine.key});if let Some(notes)=&mine.notes{mine_value["notes"]=Value::Object(transcription_for(&self.named(),notes,tempo));}if let Some(note)=&note{mine_value["heardShort"]=json!(note);}Ok(ToolResult::text(stringify(&json!({"comparison":comparison,"mine":mine_value,"reference":{"loudness":reference.loudness,"tempo":reference.tempo,"key":reference.key}}))))}.await;
         match result {
             Ok(result) => Ok(result),
             Err(error) => {

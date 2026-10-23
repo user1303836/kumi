@@ -8,21 +8,24 @@
 
 | 文件夹 | 内容 |
 | --- | --- |
-| `crates/kumi` | 原生的 `kumi` 命令和终端应用（`src/tui/`），以及针对模型或真实 Live、需要主动运行的检查（`examples/`） |
-| `crates/kumi-runtime` | 代理循环、模型提供方、登录、会话、素材库、Live 集成、媒体工具和 MCP 客户端 |
+| `crates/kumi` | 原生的 `kumi` 命令和终端应用（`src/tui/`），每个 DAW 的设置、doctor 和更新步骤（`src/daw/`），以及针对模型、真实 Live 或真实 Logic Pro、需要主动运行的检查（`examples/`） |
+| `crates/kumi-runtime` | 代理循环、模型提供方、登录、会话、素材库、各 DAW 的集成（Live 的，以及经由 Kumi 主机的 REAPER、Renoise 和 Logic Pro 的）、媒体工具和 MCP 客户端 |
 | `crates/kumi-common` | 共享的运行时工具，以及与原实现兼容的值处理 |
-| `crates/ableton-mcp-server` | 原生 MCP 桥接、分析工作进程、生命周期、设置、迁移和诊断 |
+| `crates/kumi-store` | Kumi 的数据库：它在会话之间保存的内容，存于 SQLite 中 |
+| `crates/kumi-genexpr` | 用于测试 Kumi 的 Max for Live 构件的 GenExpr 解释器 |
+| `crates/ableton-mcp-server` | Live 的原生 MCP 桥接、分析工作进程、生命周期、设置、迁移和诊断 |
 | `remote-script` | 桥接的 Remote Script，运行在 Live 内部（`ableton_mcp_remote_script.py`、`AbletonMcpBridge/` 入口、Python 测试） |
 | `apps/live-extension` | Kumi 的 Live 扩展，适用于 Live 12.4 及更高版本，基于 Live 的 Extensions SDK（TypeScript，有自己的 `package.json`） |
 | `protocol` | `ableton-live-v1.operations.json`，桥接与 Remote Script 共用的操作注册表 |
 | `scripts` | 发布构建器、迁移打包、Mac 辅助程序的构建、隔离测试运行器，以及 `npm run kumi` 和 `npm run setup` 背后的 `native-kumi.mjs` |
-| `crates/daw-mcp-server` | Kumi 为 REAPER 和 Renoise 准备的宿主程序（`daw-mcp-server --daw reaper\|renoise`）：基于 stdio 的 MCP、修改的日志与撤销、聆听任务、离开期间的变化；其他 MCP 客户端也能使用 |
+| `crates/daw-mcp-server` | Kumi 为 REAPER、Renoise 和 Logic Pro 准备的宿主程序（`daw-mcp-server --daw reaper\|renoise\|logic`）：基于 stdio 的 MCP、修改的日志与撤销、聆听任务、离开期间的变化，以及测试所针对的模拟 REAPER、Renoise 和 Logic Pro；其他 MCP 客户端也能使用 |
 | `crates/reaper-kumi` | Kumi 的 REAPER 扩展（`reaper_kumi`），用 `sdk/` 中附带的 REAPER SDK 头文件构建 |
-| `crates/daw-bridge` | REAPER 与 Renoise 桥接共用的部分：回环通信（`kumi-daw/1`）、它的握手与认证、发现、查找 DAW、doctor 的检查，以及桥接文件的生命周期 |
+| `crates/daw-bridge` | REAPER、Renoise 与 Logic Pro 桥接共用的部分：回环通信（`kumi-daw/1`）、它的握手与认证、发现、查找 DAW、doctor 的检查，以及桥接文件的生命周期 |
 | `daws/renoise` | Kumi 的 Renoise 工具（`com.kumi.Bridge.xrnx`，Lua）及其针对 Renoise API 模拟的测试 |
+| `crates/logic-kumi` | Kumi 的 Logic Pro 桥接（在 Logic Pro 旁运行的程序）及其辅助功能辅助程序（`helper/KumiLogicHands.swift`，由 `scripts/build-logic-hands.py` 构建）；见 [Logic 契约](LOGIC_CONTRACT.md) |
 | `install.sh`、`install.ps1` | 安装程序 |
 
-这些 crate 共用根目录的 Cargo 工作区；没有 npm 工作区。桥接没有 Kumi 也能工作。这些 crate 移植自的 TypeScript 实现保留在 git 标签 `v1.7.6` 上。
+这些 crate 共用根目录的 Cargo 工作区；没有 npm 工作区。Live 的桥接没有 Kumi 也能工作。这些 crate 移植自的 TypeScript 实现保留在 git 标签 `v1.7.6` 上。
 
 ## 各部分如何通信
 
@@ -48,6 +51,27 @@ host (crates/daw-mcp-server --daw reaper|renoise)
 - Kumi 以 `full` 部署策略启动桥接，并附带一个只包含它所用工具的允许列表（`ABLETON_MCP_TOOL_ALLOW`）。模型直接调用少数几个桥接读取工具（`crates/kumi-runtime/src/mcp/allowed_tools.rs` 中的 `MODEL_TOOLS`）；其余的由 Kumi 自己的工具调用。
 - 桥接的路由器（`crates/ableton-mcp-server/src/bridge/router.rs`）把每个操作发送给 Remote Script，或者在只有扩展具备该操作时发送给扩展。当 Live 的 Developer Mode 让 Live 不启动扩展时，桥接可以自己启动 Live 的 Extension Host。
 - `kumi bridge` 通过桥接的生命周期命令把桥接安装到 Live 中，之后通过 `Remote Scripts/AbletonMcpBridge/bridge-reference.json` 找到它。
+
+Logic Pro 没有脚本接口，也不加载任何东西，所以它的桥接是 Kumi 在它旁边运行的一个程序：
+
+```text
+kumi (crates/kumi, crates/kumi-runtime)
+  │  MCP over stdio: Kumi starts its host as a child process
+  ▼
+host (crates/daw-mcp-server, `daw-mcp-server --daw logic`)
+  │  kumi-daw/1: authenticated TCP on 127.0.0.1 (9790 to 9799); the host starts the bridge
+  ▼
+bridge (crates/logic-kumi, `logic-kumi`, from Kumi's own folder)
+  │  JSON lines on stdin and stdout: the bridge runs its helper as a child
+  ▼
+helper (crates/logic-kumi/helper, `kumi-logic-hands-<hash>`)
+  │  Accessibility, key events and clicks, virtual CoreMIDI ports (Mackie Control), a Core Audio process tap
+  ▼
+Logic Pro
+```
+
+- 对于桥接由 Kumi 自己提供的每个 DAW，主机都是同一个二进制文件（`--daw logic|reaper|renoise`）。对 Logic Pro，它用 `--kumi-home` 启动已安装的桥接，通过 `~/.kumi/bridges/logic/discovery/` 中桥接的发现文件找到它，证明双方都知道共享的密钥，并在 Kumi 的会话结束时停止它。Kumi 为 Logic Pro 准备的修改集（`crates/kumi-runtime/src/integrations/logic_changes.rs`）定下各个工具的名称；主机的修改日志（`crates/daw-mcp-server/src/changes.rs`）通过桥接预览、应用和撤销每项修改。
+- `kumi --daw logic bridge` 通过 daw-bridge 的生命周期把桥接安装到 Kumi 自己的文件夹中，来源是发布版本中 Kumi 旁边的副本（`daws/logic/logic-kumi/`）、`KUMI_LOGIC_BRIDGE_SOURCE`，或者，在 Mac 上的源码副本中，是暂存在 `target/logic-bridge/logic-kumi/` 中的该源码副本的构建（辅助程序不存在时由它的脚本构建）。
 
 ## 环境搭建
 
@@ -126,6 +150,15 @@ cargo run --locked --release -p ableton-mcp-server --bin ableton-mcp-benchmark
 
 **MCP 版本。** 桥接同时支持 `2025-11-25`（先 initialize，再发请求）和 `2026-07-28`（每个请求的 `params._meta` 带有协议版本和客户端能力，另有 `server/discover`）；一个进程只使用其中一种。未知版本返回 `-32022`；错误的元数据返回 `-32602`。新版本的结果带有 `resultType: "complete"`，并且也会在 `structuredContent` 中返回 JSON。新版本没有推送：`live_subscribe` 只在旧版本中可用，新版本的客户端需要轮询。客户端元数据绝不会授予对 Live 的访问权限。请见[规范](https://modelcontextprotocol.io/specification/2026-07-28/basic/versioning)。
 
+## 开发 Logic Pro 桥接
+
+[Logic 契约](LOGIC_CONTRACT.md)是参考：桥接在 `kumi-daw/1` 上应答什么，每个应答和每项修改经过 macOS 的哪个通道，以及辅助程序的协议（`crates/logic-kumi/helper/README.md` 列出了它的每个操作）。`docs/evidence/logic-*.md` 中的实验记录和关口（gate）记录说明了在真实 Logic Pro 上测得了什么。
+
+- **没有测试需要 Logic Pro。** 桥接的测试重放从真实 Logic Pro 录下的场景（`crates/logic-kumi/tests/fixtures/`，用 `record_fixtures` 和 `record_changes` 示例录制，它们把主文件夹保存为 `/Users/me`）；主机的测试在桥接录下的读取（`crates/daw-mcp-server/tests/vectors/logic-reads.json`）之上运行模拟的 Logic Pro（`crates/daw-mcp-server/src/simulator/logic.rs`）；运行时和应用的测试则在进程内经由主机运行 Kumi。
+- **真实的 Logic Pro** 交给需要主动运行的 `accept_logic` 示例，每个关口都运行过它（[测试](TESTING.md#需要-live-或模型的检查)）。
+- **Logic Pro 的名称**只留在 `crates/logic-kumi`、`daw-bridge` 和 `daw-mcp-server` 中与 Logic Pro 有关的部分、运行时中的 `integrations/logic*.rs`、`crates/kumi/src/daw/own.rs` 以及测试中：运行时的共用代码只看到 DAW 的配置档（profile），`daw_neutral_guard.rs` 和假 DAW 测试则让 Logic Pro 会话所说的话中不出现 Live 的用语。
+- **辅助程序**以其源代码的哈希命名（`kumi-logic-hands-<hash>`），发布版本带的正是当前源代码的构建：修改 `KumiLogicHands.swift` 之后，用 `python3 scripts/build-logic-hands.py` 重新构建它。
+
 ## 开发 Live 扩展
 
 `apps/live-extension` 使用 TypeScript 编写，用 esbuild 打包，有自己的 `package.json`。它基于 Live 的 Extensions SDK 构建，而这个 SDK 的许可证禁止再分发，所以它不在仓库中：请把一份副本放到仓库根目录的 `vendor/ableton-extensions-sdk-1.0.0-beta.1/`（构建会读取其中的 `package 3/dist/index.cjs`）。在 `apps/live-extension` 中运行 `npm ci`，然后运行 `npm run build`，它会写出 `dist/extension.js` 及其 `.sha256`；两者都要提交。`npm run typecheck` 同样需要 SDK。没有 SDK 时，构建会停止，已提交的包保持不变；`npm test` 会根据校验和检查这个包。关于 Live 如何运行该扩展的测量数据，见[证据](../evidence/live-extension.md)。
@@ -165,22 +198,25 @@ python3 scripts/release.py --go     # 正式发布
 ```
 
 - **发布内容**读取自上一个标签以来的 `main`：每个已合并拉取请求的 `Changelog:` 行，按原文使用（“none” 不添加任何内容）。如果拉取请求修改了桥接，而没有修改 Kumi 的 crate 或安装程序，它的行会放在桥接的标题下；同时修改两者的拉取请求，请把关于桥接的行写成 `Changelog (bridge):`。试运行会显示每一行放在哪里。
+- **Logic Pro 桥接**在拉取请求修改了它运行的内容时，以同样的方式获得新版本：`crates/logic-kumi` 及其辅助程序，或它链接的 `daw-bridge`（测试、示例、Markdown 以及 `crates/logic-kumi/keys/` 中的快捷键命令工具除外）。只修改它、不修改其他任何随发布交付的内容的拉取请求，它的行放在它的标题 `### Logic Pro bridge x.y.z` 下；其他情况下，关于它的行要写成 `Changelog (logic):`。`--logic` 无论改了什么都给它一个新版本，`--no-logic` 则保持它的版本不变。它的版本在 `crates/logic-kumi/Cargo.toml` 中，发布时会提升一个补丁版本。
 - **What's new**：Kumi 内置 `CHANGELOG.md`，更新后第一次启动时，把一个版本的列表项显示为 **What's new**（最多五条，从最新版本开始；其余见 `/changelog`）。段落（例如附带桥接和测试环境的说明）不会显示，所以每一行 `Changelog:` 就是用户在那里读到的一条：写他们会注意到的变化，重要的放在前面。
 - **桥接**在拉取请求修改了 Live 加载的内容时获得新版本：`crates/ableton-mcp-server`、主机链接的 `crates/kumi-common`、`remote-script`、`protocol`、`apps/live-extension` 或 `vendor/willington`（测试和 Markdown 除外）。`Cargo.lock` 中主机的依赖变化时，试运行会提示，这时用 `--bridge` 给桥接一个新版本。
 - **REAPER 的扩展和 Renoise 的工具**也按同样的方式获得新版本：拉取请求修改了该 DAW 加载的内容时（`crates/reaper-kumi` 和 `crates/daw-bridge`，或 `daws/renoise/com.kumi.Bridge.xrnx`）。`--reaper` 和 `--renoise` 无论如何都给它新版本，`--no-reaper` 和 `--no-renoise` 保持原版本；`--no-bridge` 只针对 Live。写成 `Changelog (reaper):` 或 `Changelog (renoise):` 的行会放到它的标题下。使用 `--go` 时，`crates/reaper-kumi/Cargo.toml` 和 `Cargo.lock`、工具的 `payload/version.lua` 和 `manifest.xml` 中的版本会前进，三个 `KUMI_GUIDE.md` 中各自的 ships-with 行也会前进。上一个版本没有的桥接按它自己的版本发布，它那一行已经写着本次版本。
 - **版本**是下一个补丁版本；`--minor` 或 `--version X.Y.Z` 可以选择其他版本。
 - **加上 `--go`**，它会在 `release/vX.Y.Z` 上提交 “Kumi X.Y.Z: the changelog, READMEs and versions”：根目录的 `package.json`、`crates/kumi-runtime/src/version.rs`、`kumi`、`kumi-common` 和 `kumi-runtime` 的 Cargo 清单以及 `Cargo.lock` 中的版本（打包测试会确保这些相等），桥接变化时还有桥接的版本；三个 README 中当前状态（Status）的那一行；三个 `KUMI_CHANGES.md` 中“桥接版本”（Bridge versions）下说明随附哪个桥接的那一行；以及 `CHANGELOG.md` 中的 `## X.Y.Z — date` 条目。然后它打开拉取请求 “Kumi X.Y.Z”，不等其 CI，用管理员绕过将其合并为 “Kumi X.Y.Z (#PR)”，给合并提交打上标签 `vX.Y.Z` 并推送，再创建带发布说明的草稿发布（`--summary` 可以在说明开头加一句话）。
+- **发布中的 Logic Pro 桥接：** CHANGELOG 和发布说明用它自己的话说明它的新版本：“Ships with Logic Pro bridge a.b.c, which Kumi starts beside Logic Pro; `kumi update` puts it in Kumi's own folder”；第一次带有它的版本则说“Brings Logic Pro bridge a.b.c for Logic Pro 12 on Apple Silicon Macs: `kumi --daw logic bridge` sets it up”。它说明随附版本的那一行与 Live 的并列，位于三个 `KUMI_CHANGES.md` 的“桥接版本”下（`Kumi X.Y.Z with Logic Pro bridge a.b.c.`，每种语言各一行，或者每种语言都没有）。第一次带有这个桥接的版本会发现那一行已经写明了它，于是保留它；之后的版本会像更新 Live 的那一行一样更新它。
 - **标签触发的 Installer 运行**会为 macOS、Linux 和 Windows 的 Intel 与 ARM 构建原生发行包，测试安装和迁移，附加各平台的发行包和清单以及兼容用的 `kumi.tar.gz`、`kumi-release.json`、`SHA256SUMS` 和安装程序，并在说明由 `release.py` 撰写（说明以 `<!-- kumi:release-notes -->` 结尾）且两个安装程序都已附加时发布该版本。只有在此之后，安装程序、`kumi update` 和更新检查才能看到它。其他草稿，例如手动推送、说明“待补充”的标签，在有人发布之前一直是草稿。
 
 **在本地准备原生发布**，需从一个干净的提交开始：
 
 ```sh
 python3 scripts/build-hands.py              # 仅限 macOS；通用、临时签名的辅助程序，输出到 target/hands/
+python3 scripts/build-logic-hands.py        # 仅用于搭载 Apple 芯片的 Mac 的发行包：Logic Pro 的辅助程序，输出到 target/logic-hands/
 MACOSX_DEPLOYMENT_TARGET=13.0 python3 scripts/build-native-release.py --target aarch64-apple-darwin --out release/native/aarch64-apple-darwin
 python3 -m unittest discover -s scripts/tests -p test_native_release.py
 ```
 
-使用本机的 Rust 目标三元组；在 Apple Silicon 的 Mac 上，`--target x86_64-apple-darwin` 可以交叉构建 Intel 的发行包。构建器会运行锁定的 release 构建，并把桥接产物绑定到提交、Cargo 锁文件、构建方法和精确的文件哈希。CI 在拉取请求和 `main` 上使用的 `--profile ci-release` 省去 release 配置的全程序优化，以便更快地构建；发布的发行包始终使用默认的 `release`。Mac 发行包需要 `target/hands/` 中当前的辅助程序；其他发行包不包含它。服务器和分析工作进程必须一起发布。`--binaries-dir` 选项会打包已有的二进制文件，但不能证明它们是用 release 优化构建的。
+使用本机的 Rust 目标三元组；在 Apple Silicon 的 Mac 上，`--target x86_64-apple-darwin` 可以交叉构建 Intel 的发行包。构建器会运行锁定的 release 构建，并把桥接产物绑定到提交、Cargo 锁文件、构建方法和精确的文件哈希。CI 在拉取请求和 `main` 上使用的 `--profile ci-release` 省去 release 配置的全程序优化，以便更快地构建；发布的发行包始终使用默认的 `release`。Mac 发行包需要 `target/hands/` 中当前的辅助程序；其他发行包不包含它。搭载 Apple 芯片的 Mac 的发行包还在 `daws/logic/logic-kumi/` 中带有 Logic Pro 桥接（`logic-kumi`、它的辅助程序和一个 `version` 文件，即该 crate 的版本），这需要 `target/logic-hands/` 中只有当前源代码对应的那个辅助程序；其他发行包都不带它。服务器和分析工作进程必须一起发布。`--binaries-dir` 选项会打包已有的二进制文件，但不能证明它们是用 release 优化构建的。
 
 聚合步骤会保留现有 Node 24 安装所使用的清单：
 

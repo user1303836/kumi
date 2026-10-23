@@ -293,7 +293,10 @@ impl Session {
             ));
         }
         if let Some(library) = &options.library {
-            tools.extend(library.tools_for(&options.profile, LibraryToolsOptions { on_event: Some(on_event.clone()), resolve: None }));
+            tools.extend(library.tools_for(
+                &options.profile,
+                LibraryToolsOptions { on_event: Some(on_event.clone()), middle_c: Some(self.middle_c()), ..Default::default() },
+            ));
         }
         tools.extend(self.0.recall.clone());
         if let Some(dirs) = &options.watch {

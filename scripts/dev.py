@@ -21,6 +21,8 @@ ids in .github/workflows:
 - remote_script, live_extension: any change but to docs;
 - reaper_extension: REAPER's extension, a package it builds with, or CI's workflow;
 - renoise_tool: the Renoise tool, or CI's workflow;
+- logic_bridge: Logic Pro's bridge or a package its job tests with it (daw-bridge, daw-mcp-server), what they build
+  with, its helper's build script, or CI's workflow;
 - installer: the install surface (a pull request's Installer runs only for it);
 - network: how Kumi's HTTP clients are made.
 
@@ -51,8 +53,10 @@ ROOT = Path(__file__).resolve().parents[1]
 AREAS = ROOT / "scripts/areas.toml"
 # REAPER's extension, which CI builds as it ships and loads on each system.
 REAPER_EXTENSION = "reaper-kumi"
+# What CI's Logic job tests on macOS: Logic Pro's bridge and the crates its Logic parts are in.
+LOGIC_BRIDGE = ("daw-bridge", "daw-mcp-server", "logic-kumi")
 JOBS = ("rust_linux", "rust_lint", "rust_platforms", "remote_script", "live_extension", "reaper_extension",
-        "renoise_tool", "installer", "network")
+        "renoise_tool", "logic_bridge", "installer", "network")
 
 
 class Refused(Exception):
@@ -195,7 +199,7 @@ def affected(changes: list[tuple[str, list[str]]] | None, workspace: Workspace, 
     if changes is None:
         return Affected(0, sorted(workspace.folders), sorted(area.name for area in areas), {job: True for job in JOBS})
     owners, fed, hit = set(), set(), set()
-    code = rust = renoise = reaper = installer = network = unfed = False
+    code = rust = renoise = reaper = logic = installer = network = unfed = False
     files = 0
     for status, paths in changes:
         for path in paths:
@@ -218,6 +222,7 @@ def affected(changes: list[tuple[str, list[str]]] | None, workspace: Workspace, 
             unfed |= tests_rust and not owner and not feeds
             renoise |= bool(names & {"renoise-tool", "ci"})
             reaper |= bool(names & {"reaper-extension", "ci"})
+            logic |= "ci" in names
             installer |= "install" in names
             network |= "network" in names
     unknown = fed - set(workspace.folders)
@@ -227,8 +232,11 @@ def affected(changes: list[tuple[str, list[str]]] | None, workspace: Workspace, 
     packages = set(workspace.folders) if unfed else named
     # The extension's own jobs follow what it builds with, never the everything above.
     reaper |= REAPER_EXTENSION in named
+    # So do Logic's bridge's (its helper's script feeds the bridge's crate).
+    logic |= bool(named & set(LOGIC_BRIDGE))
     jobs = {"rust_linux": rust, "rust_lint": rust, "rust_platforms": rust, "remote_script": code, "live_extension": code,
-            "reaper_extension": reaper, "renoise_tool": renoise, "installer": installer, "network": network}
+            "reaper_extension": reaper, "renoise_tool": renoise, "logic_bridge": logic, "installer": installer,
+            "network": network}
     return Affected(files, sorted(packages), sorted(hit), jobs)
 
 

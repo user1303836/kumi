@@ -11,15 +11,16 @@ Kumi とそのブリッジがどのように人の手に届くか、それによ
 | Kumi | `user1303836/kumi` の GitHub Releases：ネイティブの `kumi-<target>.tar.gz`、互換用の `kumi.tar.gz`、`kumi-release.json`、`SHA256SUMS`、インストーラーの `install.sh` と `install.ps1`。Installer ワークフローが各 `vX.Y.Z` タグに添付します | `install.sh` または `install.ps1`、その後は `kumi update` |
 | ブリッジ（`@ableton-mcp/mcp-server`） | 各 Kumi バンドルの中に、ネイティブのブリッジ tarball と展開済みのパッケージが入っています | `kumi bridge`。ブリッジのライフサイクルを通じてインストールします（[ブリッジのインストール](DELIVERY.md)） |
 | REAPER の拡張機能と Renoise のツール | 各 Kumi バンドルの `daws/` の中に、`daw-mcp-server` と一緒に入っています | `kumi --daw reaper bridge`、`kumi --daw renoise bridge`、`kumi update`（[ブリッジのインストール](DELIVERY.md#reaper-の拡張機能と-renoise-のツール)） |
+| Logic Pro ブリッジ（`logic-kumi` とそのヘルパー） | Apple シリコン搭載 Mac 向けの Kumi バンドルの中だけ。`daws/logic/logic-kumi/` にあります | `kumi --daw logic bridge`。Kumi 自身のフォルダーにセットアップします（[ブリッジのインストール](DELIVERY.md#logic-pro-ブリッジ)） |
 | ブリッジ単体 | 独自のリリースはありません。`python3 scripts/build-native-release.py --bridge-only` でビルドします（[ビルドオプション](DEVELOPER_GUIDE.md#リリース)） | ライフサイクル CLI（[ブリッジのインストール](DELIVERY.md#スタンドアロンのブリッジ)） |
 
 ワンライナーはインストーラーを最新の公開リリースから取得し、そのインストーラーはそのリリースのバンドル（または `KUMI_VERSION` で指定したリリースのもの）をインストールします。インストーラーへの変更がプロデューサーに届くのは、タグのインストールがパスしたリリースと一緒のときだけです。`main` も両方のインストーラーを元の raw URL に残しており、古いリンクはそちらを使います。リリースは、そのタグの Installer の実行がパスして公開するまでは下書きです（手でプッシュしたタグは、メンテナーがノートを書いて公開するまで待ちます）。公開されたリリースだけが「latest」になります。npm には何も公開しません。すべてのパッケージが `private: true` なので、`npm publish` は拒否されます。
 
 ## 完全性は確かめるが、作成者は証明しない
 
-アプリとブリッジには発行者の署名や公証がなく、`.pkg` や `.msi` のインストーラーもありません。macOS の Hands ヘルパーにはアドホック署名がありますが、発行者の身元は証明しません。インストーラーと `kumi update` はバンドルを `kumi-release.json` 内の sha256 と照合します。新規のネイティブインストールは Node を取得しません。`kumi bridge` はブリッジの tarball を、バンドルのビルド時に記録されたハッシュと照合します。ダウンロードと同じ場所から来たチェックサムは、バイト列が無傷で届いたことは証明しますが、誰が作ったかは証明しません。
+アプリとブリッジには発行者の署名や公証がなく、`.pkg` や `.msi` のインストーラーもありません。macOS の Hands ヘルパーと、Logic Pro ブリッジおよびそのヘルパーにはアドホック署名がありますが、発行者の身元は証明しません。インストーラーと `kumi update` はバンドルを `kumi-release.json` 内の sha256 と照合します。新規のネイティブインストールは Node を取得しません。`kumi bridge` はブリッジの tarball を、バンドルのビルド時に記録されたハッシュと照合します。ダウンロードと同じ場所から来たチェックサムは、バイト列が無傷で届いたことは証明しますが、誰が作ったかは証明しません。
 
-ソフトウェアは [MIT ライセンス](../../LICENSE.md)です。このライセンスは Ableton の商標に関する権利を一切与えるものではなく、Kumi は Ableton と提携しておらず、Ableton の承認を受けたものでもありません。
+ソフトウェアは [MIT ライセンス](../../LICENSE.md)です。このライセンスは Ableton や Apple の商標に関する権利を一切与えるものではなく、Kumi は Ableton とも Apple とも提携しておらず、どちらの承認を受けたものでもありません。
 
 ## ブリッジのパッケージに含めてよいもの
 

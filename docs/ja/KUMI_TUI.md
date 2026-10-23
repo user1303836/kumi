@@ -56,6 +56,7 @@ REAPER と Renoise でも画面は同じで（[つなぎ方](KUMI_GUIDE.md#reape
 | `kumi` | Live で開いている Set で Kumi を開く。初回はサインインし、ブリッジを Live に入れる（Live の再起動も任せられる） |
 | `kumi --daw reaper`、`kumi --daw renoise` | 開いている REAPER のプロジェクトや Renoise のソングで Kumi を開く。初回はサインインし、Kumi の拡張機能かツールを入れる。`KUMI_DAW` でも同じ。`kumi --daw reaper doctor`（または `report`）はその DAW について伝える |
 | `kumi --daw reaper bridge [--yes]`（または `renoise`） | Kumi の拡張機能を REAPER に、ツールを Renoise に入れる、または最新にする。`--yes` で確認に前もって答える |
+| `kumi --daw logic [<command>]` | Live の代わりに Logic Pro で作業する（`--daw ableton` は Live）。セッションにもコマンドにも付けられる：`kumi --daw logic bridge [--yes]` は Logic Pro が開いていてもいなくても Kumi の Logic Pro ブリッジを Kumi 自身のフォルダーに用意し、`kumi --daw logic doctor` は Logic Pro 側を確認する（[Logic Pro につなぐ](KUMI_GUIDE.md#logic-pro-につなぐ)） |
 | `kumi -c`（`--continue` でも可） | どの Set のものでも、最後に使った会話の続きから始める |
 | `kumi -r [ID または名前]`（`--resume` でも可） | 保存された会話を ID（または先頭部分）か名前で選んで続ける。引数なしなら一覧から選ぶ。どちらも `--inference-only` と使える |
 | `kumi export [ID または名前 \| --last] [--md \| --html \| --json] [--full] [--raw] [-o パス]` | 保存された会話を Markdown（既定）、Web ページ、Kumi 用ファイルとして保存。ID を省くか `--last` で最新の会話。`--full` で各ステップの入力と結果も加え、`--raw` でキーやパスを残す |
@@ -89,7 +90,7 @@ REAPER と Renoise でも画面は同じで（[つなぎ方](KUMI_GUIDE.md#reape
 | `/export [copy \| md \| html \| json]` | この会話をファイルに：Markdown としてコピー、または Markdown、Web ページ、Kumi 用ファイル（`kumi import`）として保存。省くと選べます。64 KB を超えるとコピーの代わりにファイルに保存 |
 | `/share` | この会話をどこでも開ける Web ページとして保存し（何も変わっていなければ同じページ）、Done を選ぶまで、開く、Finder（エクスプローラー）で表示する、パスをコピーする。SSH 経由ではページの場所を伝えます |
 | `/reconnect` | 新しいブリッジで Live に接続し直す。会話はそのまま（それ以前の変更は Kumi の undo を失う） |
-| `/daw [name]` | Kumi がどの DAW を使っているかを表示する。`/daw live`、`/daw reaper`、`/daw renoise` で Kumi を閉じ、その DAW でまた開く。REAPER か Renoise で作業しているとき、またはどちらかに Kumi のブリッジが入っているときに表示される |
+| `/daw [name]` | Kumi がどの DAW を使っているかを表示する。`/daw live`、`/daw reaper`、`/daw renoise`、`/daw logic` で Kumi を閉じ、その DAW でまた開く。会話は引き継がない（各 DAW のプロジェクトはそれぞれの会話を持つ）。REAPER、Renoise、Logic Pro で作業しているとき、またはそのどれかのための Kumi のブリッジを用意してあるときに表示される |
 | `/undo` | Kumi の最新の変更を取り消す |
 | `/stop` | Live を止める：クリップ、トランスポート、録音。Kumi の答えも止める |
 | `/refresh` | モデルに尋ねずに Set を読み直す |

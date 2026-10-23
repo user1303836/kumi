@@ -1,7 +1,8 @@
-//! Where each DAW's bridge goes, from what detection found.
+//! Where each DAW's bridge goes, from what detection found (Logic's goes in Kumi's own folder: Logic loads nothing).
 use crate::daw::Daw;
 use crate::detect::{Arch, Os, ReaperInstall, RenoiseInstall, RenoisePrefs, Version, REAPER_MIN, RENOISE_MIN};
 use crate::lifecycle::Target;
+use crate::paths::BridgePaths;
 use std::path::Path;
 
 /// The Renoise tool's id: song `tool_data` is keyed by it, so it never changes.
@@ -12,6 +13,17 @@ pub const RENOISE_REFERENCE: &str = "bridge-reference.json";
 /// Beside REAPER's extension in UserPlugins (REAPER loads only `reaper_*` libraries, so it ignores this). In `paths`,
 /// which the extension links (it finds its reference by this name).
 pub use crate::paths::REAPER_REFERENCE;
+/// Logic's bridge folder, in `<Kumi's folder>/bridges/logic/bridge/`: the binary, its helper(s), a version file, and
+/// the reference inside it.
+pub const LOGIC_BRIDGE_FOLDER: &str = "logic-kumi";
+/// Inside Logic's bridge folder (left out of the folder's hash, as Renoise's is).
+pub const LOGIC_REFERENCE: &str = "bridge-reference.json";
+/// The bridge's binary, inside the folder: what the host starts, with `--kumi-home`.
+pub const LOGIC_BINARY: &str = "logic-kumi";
+/// The Accessibility helper(s) beside it, `kumi-logic-hands-<what follows>` (one per build the bridge may run).
+pub const LOGIC_HELPER_PREFIX: &str = "kumi-logic-hands-";
+/// The bridge's version, one line, inside the folder: part of what the lifecycle hashes.
+pub const LOGIC_VERSION_FILE: &str = "version";
 
 /// REAPER loads `reaper_*.dylib|dll|so` from UserPlugins: one file per platform (macOS's is universal).
 pub fn reaper_extension_name(os: Os) -> &'static str {
@@ -35,6 +47,8 @@ pub fn min_version(daw: Daw) -> &'static str {
     match daw {
         Daw::Reaper => "7",
         Daw::Renoise => "3.5",
+        // `detect::LOGIC_MIN`.
+        Daw::Logic => "12",
     }
 }
 
@@ -104,6 +118,19 @@ fn tool_in(prefs: &RenoisePrefs) -> Target {
         daw: Daw::Renoise,
         reference: dir.join(RENOISE_TOOL_FOLDER).join(RENOISE_REFERENCE),
         name: RENOISE_TOOL_FOLDER.into(),
+        folder: true,
+        dir,
+    }
+}
+
+/// Logic's bridge goes in Kumi's own folder for Logic (`paths` are Logic's): a `logic-kumi` folder in `bridge/`, with
+/// the reference inside it. Nothing waits on Logic having run, so this never fails.
+pub fn logic_target(paths: &BridgePaths) -> Target {
+    let dir = paths.root.join("bridge");
+    Target {
+        daw: Daw::Logic,
+        reference: dir.join(LOGIC_BRIDGE_FOLDER).join(LOGIC_REFERENCE),
+        name: LOGIC_BRIDGE_FOLDER.into(),
         folder: true,
         dir,
     }
@@ -200,6 +227,53 @@ mod tests {
         let target = renoise_target(&renoise).unwrap();
         assert_eq!(target.path(), root.path().join("V3.5.4/Scripts/Tools/com.kumi.Bridge.xrnx"));
         assert!(target.folder);
+    }
+
+    /// Logic's bridge is a folder of Kumi's own, installed through the lifecycle like Renoise's tool: the reference
+    /// inside it is left out of its hash, the version file is part of it, and the binary stays executable.
+    #[test]
+    fn logic_goes_in_kumis_own_folder_and_its_binary_stays_executable() {
+        use crate::lifecycle::Lifecycle;
+        let root = tempfile::tempdir().unwrap();
+        let kumi = root.path().join("kumi");
+        let paths = BridgePaths::new(&kumi, Daw::Logic);
+        let target = logic_target(&paths);
+        assert_eq!(target.dir, kumi.join("bridges/logic/bridge"));
+        assert_eq!(target.path(), kumi.join("bridges/logic/bridge/logic-kumi"));
+        assert_eq!(target.reference, kumi.join("bridges/logic/bridge/logic-kumi/bridge-reference.json"));
+        assert!(target.folder && target.daw == Daw::Logic);
+
+        let source = root.path().join("built").join(LOGIC_BRIDGE_FOLDER);
+        std::fs::create_dir_all(&source).unwrap();
+        std::fs::write(source.join(LOGIC_BINARY), b"#!/bin/sh\necho bridge\n").unwrap();
+        std::fs::write(source.join(format!("{LOGIC_HELPER_PREFIX}arm64")), b"#!/bin/sh\necho hands\n").unwrap();
+        std::fs::write(source.join(LOGIC_VERSION_FILE), "0.1.0\n").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            for name in [LOGIC_BINARY.to_string(), format!("{LOGIC_HELPER_PREFIX}arm64")] {
+                std::fs::set_permissions(source.join(name), std::fs::Permissions::from_mode(0o755)).unwrap();
+            }
+        }
+        let life = Lifecycle::new(&kumi, target.clone());
+        let receipt = life.install(&source, "0.1.0").unwrap();
+        assert_eq!(receipt.target, target.path().to_string_lossy());
+        let status = life.status().unwrap();
+        assert!(status.present && status.matches && status.reference && status.secret, "{status:?}");
+        assert_eq!(std::fs::read_to_string(target.path().join(LOGIC_VERSION_FILE)).unwrap(), "0.1.0\n");
+        let reference = crate::files::Reference::read(&target.reference).unwrap();
+        assert_eq!((reference.daw.as_str(), reference.port), ("logic", Some(9790)));
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(target.path().join(LOGIC_BINARY)).unwrap().permissions().mode();
+            assert_eq!(mode & 0o111, 0o111, "the host runs it: {mode:o}");
+        }
+        // The version file is the bridge's: a changed one is a changed bridge. The reference isn't.
+        std::fs::write(target.reference.clone(), reference.to_json()).unwrap();
+        assert!(life.status().unwrap().matches);
+        std::fs::write(target.path().join(LOGIC_VERSION_FILE), "0.2.0\n").unwrap();
+        assert!(!life.status().unwrap().matches);
     }
 
     /// A REAPER 6 or a Renoise 3.4 is named by its version, never taken for one that hasn't been opened yet; one whose

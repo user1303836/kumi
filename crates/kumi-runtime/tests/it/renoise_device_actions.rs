@@ -64,7 +64,7 @@ async fn a_device_action_names_its_device_by_a_short_ref_and_says_what_renoise_d
                 async move { Ok(endpoint as Rc<dyn McpEndpoint>) }.boxed_local()
             });
             let context = IntegrationContext::new(Rc::new(|_, _| {}));
-            let renoise = create_renoise_integration(OwnOptions { context, kumi_home: home.path().into(), connect: Some(connect) });
+            let renoise = create_renoise_integration(OwnOptions { context, kumi_home: home.path().into(), connect: Some(connect), open_file: None });
             renoise.start(Signal::new()).await.unwrap();
             let observed = renoise.observe(Signal::new(), None).await.unwrap();
             let read = tool(&observed, "renoise_read");

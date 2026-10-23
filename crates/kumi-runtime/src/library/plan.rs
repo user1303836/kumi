@@ -27,6 +27,20 @@ pub struct PlanOptions {
 pub fn remembered_file(dir: &str) -> String {
     join(dir, "folders.json")
 }
+/// (M6) Where the library keeps the projects a DAW's bridge said it opened lately (Logic's File > Open Recent), for
+/// a learning run outside the session that read them.
+pub fn recent_file(dir: &str, daw: crate::core::daw::DawId) -> String {
+    join(dir, &format!("recent-{}.json", daw.as_str()))
+}
+pub async fn remembered_recent(dir: &str, daw: crate::core::daw::DawId) -> Vec<String> {
+    read_json::<Value>(Path::new(&recent_file(dir, daw)))
+        .await
+        .and_then(|v| v.as_array().cloned())
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|v| v.as_str().map(str::to_owned))
+        .collect()
+}
 pub async fn remembered_folders(dir: &str) -> Vec<String> {
     read_json::<Value>(Path::new(&remembered_file(dir)))
         .await
@@ -66,7 +80,12 @@ pub async fn kumi_sets(projects_dir: Option<&str>) -> Vec<String> {
 }
 pub async fn plan_learning(options: PlanOptions) -> LearnPlan {
     let remembered = remembered_folders(&options.dir).await;
-    let original_sources = options.sources.unwrap_or_default();
+    let mut original_sources = options.sources.unwrap_or_default();
+    // (M6) Another DAW's own places, files and projects; the projects its bridge said it opened lately.
+    let library = crate::integrations::library(original_sources.daw);
+    if let (Some(library), None) = (library, &original_sources.recent) {
+        original_sources.recent = Some(remembered_recent(&options.dir, library.daw).await);
+    }
     let home = original_sources.home.clone().unwrap_or_else(homedir);
     let platform = original_sources.platform.clone().unwrap_or_else(|| current_platform().into());
     let mut source_options = original_sources.clone();
@@ -79,9 +98,11 @@ pub async fn plan_learning(options: PlanOptions) -> LearnPlan {
         .collect();
     let find_sets = options.find_sets != Some(false);
     let recent: Vec<_> = if find_sets {
+        // (Live's Sets Kumi kept are Live's: another DAW's projects are its own)
+        let kept = if library.is_none() { kumi_sets(options.projects_dir.as_deref()).await } else { vec![] };
         crate::integrations::recent_projects(&original_sources)
             .into_iter()
-            .chain(kumi_sets(options.projects_dir.as_deref()).await)
+            .chain(kept)
             .collect::<IndexSet<_>>()
             .into_iter()
             .filter(|path| !others.iter().any(|folder| below(path, folder).is_some()))
@@ -89,10 +110,15 @@ pub async fn plan_learning(options: PlanOptions) -> LearnPlan {
     } else {
         vec![]
     };
+    let folders = match library {
+        Some(library) => (library.project_folders)(&recent, &home),
+        None => set_folders(&recent, Some(&home), Some(&platform)),
+    };
     LearnPlan {
         dir: options.dir,
+        daw: library.map(|library| library.daw),
         sources,
-        set_folders: if find_sets { set_folders(&recent, Some(&home), Some(&platform)) } else { vec![] },
+        set_folders: if find_sets { folders } else { vec![] },
         set_files: recent,
         plugin_presets: if find_sets {
             plugin_preset_folders(Some(&home), Some(&platform)).into_iter().filter(|folder| Path::new(folder).exists()).collect()

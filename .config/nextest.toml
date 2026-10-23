@@ -52,6 +52,8 @@ fail-fast = false
 # into the DAWs' own folders (own_providers), Kumi's host on its loopback sockets to them (bridge, retire, credit), and
 # what each system decides for them (daw-bridge's system: a bridge's process, macOS's downloaded mark).
 # The extension REAPER loads is built, loaded and called through its C++ shim on every platform by CI's REAPER job.
+# For Logic: the host starting its bridge as a process of Kumi's own (logic_spawn); the bridge crate's every test runs
+# in CI's Logic job on macOS.
 [profile.ci-os]
 default-filter = '''
 (
@@ -65,7 +67,7 @@ default-filter = '''
   | (binary_id(ableton-mcp-server::it) & test(/^host_probes::/)) | (binary_id(ableton-mcp-server::it) & test(/^analysis_runner::/)) | (binary_id(ableton-mcp-server::it) & test(/^sqlite_reader::/)) | (binary_id(ableton-mcp-server::it) & test(/^native_connected::/))
   | (binary_id(ableton-mcp-server::it) & test(/^remote_adapter::/)) | (binary_id(ableton-mcp-server::it) & test(/^loopback::/)) | (binary_id(kumi-runtime::it) & test(/^ai_transport::/)) | (binary_id(kumi-runtime::it) & test(/^network::/)) | binary(store)
   | binary(willington) | binary(windows_console_control) | binary(windows_stdin) | binary(windows_tty)
-  | binary(own_providers) | binary(bridge) | binary(retire) | binary(credit)
+  | binary(own_providers) | binary(bridge) | binary(retire) | binary(credit) | binary(logic_spawn)
 ) & not (
     (binary_id(kumi-runtime::it) & test(/^live_rendering::/)) | (binary_id(kumi-runtime::it) & test(/^form::/)) | (binary_id(kumi-runtime::it) & test(/^video::/))
   | (binary_id(kumi-runtime::it) & test(/^listening::/)) | (binary_id(kumi-runtime::it) & test(/^effects::/)) | (binary_id(kumi-runtime::it) & test(/^sound::/))

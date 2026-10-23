@@ -9,6 +9,9 @@ bridge's lifecycle CLI, `ableton-mcp-server lifecycle`. It plans before it chang
 anything, records what it installed in a receipt, and can repair, roll back and
 remove exactly that. With Kumi, `kumi bridge` runs it for you.
 
+Kumi's bridge for Logic Pro is another program, which Kumi sets up in its own
+folder rather than in Logic Pro: see [Logic Pro's bridge](#logic-pros-bridge).
+
 ## With Kumi
 
 Run `kumi`: it puts the bridge in Live and can restart Live for you. By hand, quit Live, then run
@@ -90,6 +93,43 @@ producer's side.
 - **Rollback and removal:** `kumi update --rollback` takes each bridge to the
   copy the earlier Kumi carries (a Kumi that knows neither DAW leaves both where
   they are); `kumi uninstall` takes them out where the receipt says they went.
+
+## Logic Pro's bridge
+
+Logic Pro loads nothing from outside, so its bridge doesn't go into Logic Pro.
+It's a program of Kumi's, `logic-kumi`, with its Accessibility helper,
+`kumi-logic-hands-<hash>` (a universal, ad hoc signed Swift program), and Kumi's
+host for Logic Pro, `daw-mcp-server --daw logic`, which Kumi starts from beside
+its own binary, starts it beside Logic Pro when a session begins. Only the
+Apple Silicon Mac's Kumi carries it, in `daws/logic/logic-kumi/` beside `kumi`:
+the bridge, the helper and a `version` file.
+
+`kumi --daw logic bridge` (or setup's **Connect to Logic Pro**) copies that
+folder into Kumi's own folder through the lifecycle Kumi's own bridges share
+(daw-bridge's): it checks the folder's hash, records a receipt, keeps the
+earlier versions for rollback, and refuses links in it. Logic Pro can stay
+open: nothing of Logic Pro's changes, and the bridge only runs while Kumi does.
+
+| What | Where |
+| --- | --- |
+| The bridge, its helper and `version` | `~/.kumi/bridges/logic/bridge/logic-kumi/`, with `bridge-reference.json` |
+| Its secret, discovery files and log | `bridge.secret`, `discovery/` and `logs/` in `~/.kumi/bridges/logic/` |
+| The receipt, the lock, the journal of a change under way, and the versions kept for rollback | `install-receipt.json`, `lifecycle.lock`, `lifecycle-journal.json` and `generations/` in `~/.kumi/bridges/logic/` |
+
+The bridge listens on 127.0.0.1, on the first free port from 9790 to 9799, and
+says where in its discovery file; Kumi's host and the bridge prove they know
+its secret before anything else passes. `kumi update` brings the bridge up to
+date when the new Kumi carries a newer one, `kumi update --rollback` puts back
+the earlier Kumi's, and `kumi uninstall` takes it out, none of them waiting on
+Logic Pro. `kumi --daw logic doctor` checks it. On an Intel Mac, Linux or
+Windows, Kumi carries no Logic Pro bridge, and `kumi --daw logic bridge` sets
+nothing up, saying Logic Pro is supported on Apple Silicon Macs only.
+
+`KUMI_LOGIC_BRIDGE_SOURCE` names a folder laid out as a release lays the bridge
+out, to set it up from instead. A checkout's build on a Mac stages its own
+(`cargo build -p logic-kumi`, and the helper `scripts/build-logic-hands.py`
+builds when it isn't there yet) in `target/logic-bridge/logic-kumi/` and sets
+that up.
 
 ## The standalone bridge
 

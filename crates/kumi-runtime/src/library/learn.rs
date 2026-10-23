@@ -114,6 +114,10 @@ pub struct LearnProgress {
 #[serde(rename_all = "camelCase")]
 pub struct LearnPlan {
     pub dir: String,
+    /// (M6) The DAW whose library this is when it isn't Live's (Logic Pro's): its samples, presets and projects are
+    /// its own kinds of file.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub daw: Option<crate::core::daw::DawId>,
     pub sources: Vec<Source>,
     #[serde(default)]
     pub set_folders: Vec<String>,
@@ -163,6 +167,7 @@ use super::{
     measure_worker::{MeasureJob, MeasurePool},
     presets::{plugin_preset_facts, read_daw_preset, read_live_preset, read_max_device, PresetFacts, PRESET_EXTENSIONS},
     sets::read_set,
+    sources::DawLibrary,
     sources::{basename, below, browser_path, dirname, join, SourceKind},
     store::{pack_vector, write_json},
     taste::build_taste,
@@ -277,6 +282,7 @@ fn mtime(time: SystemTime) -> i64 {
 fn io_error(error: io::Error) -> RuntimeError {
     RuntimeError::plain(error.to_string())
 }
+#[allow(clippy::too_many_arguments)]
 async fn walk(
     source: &Source,
     kinds: Kinds,
@@ -284,7 +290,11 @@ async fn walk(
     signal: &Signal,
     depth_limit: usize,
     skip: &HashSet<String>,
+    library: Option<&'static DawLibrary>,
 ) -> Result<bool, RuntimeError> {
+    // (Live's kinds of file, or another DAW's own)
+    let samples = library.map_or(crate::integrations::shared::samples::SAMPLE_EXTENSIONS, |library| library.sample_extensions);
+    let presets = library.map_or(PRESET_EXTENSIONS, |library| library.preset_extensions);
     let mut queue = vec![(source.path.clone(), 0)];
     let mut complete = true;
     let daw_library = source.is_daw_library();
@@ -321,6 +331,29 @@ async fn walk(
                 continue;
             };
             if kind.is_dir() {
+                // (M6) A package the DAW keeps as one file (a Logic patch or project): counted whole, never walked into.
+                if let Some(library) = library {
+                    let preset = library.preset_packages.iter().any(|package| lower.ends_with(package));
+                    let project = lower.ends_with(library.project_package);
+                    if preset || project {
+                        let wanted = (preset && kinds.presets) || (project && kinds.sets);
+                        if wanted && found.seen.insert(full.clone()) {
+                            let Ok(info) = entry.metadata().await else { continue };
+                            let Ok(modified) = info.modified() else { continue };
+                            let relative = Path::new(&full)
+                                .strip_prefix(&source.path)
+                                .map(|p| p.to_string_lossy().into_owned())
+                                .unwrap_or_else(|_| full.clone());
+                            let list = if preset { &mut found.presets } else { &mut found.sets };
+                            list.push(Found {
+                                file: Entry { path: full, size: info.len(), mtime: mtime(modified), gone: None },
+                                source: source.clone(),
+                                relative,
+                            });
+                        }
+                        continue;
+                    }
+                }
                 if SKIP.contains(&lower.as_str())
                     || lower == "backup"
                     || lower.ends_with(".app")
@@ -358,12 +391,12 @@ async fn walk(
                     Some(daw_sources::Role::Preset) if kinds.presets => &mut found.presets,
                     _ => continue,
                 }
-            // Formats Live accepts as samples, intentionally narrower than the general audio decoder.
-            } else if kinds.sounds && crate::integrations::shared::samples::SAMPLE_EXTENSIONS.contains(&ext.as_str()) {
+            // Formats Live accepts as samples, intentionally narrower than the general audio decoder (another DAW's own).
+            } else if kinds.sounds && samples.contains(&ext.as_str()) {
                 &mut found.sounds
-            } else if kinds.presets && PRESET_EXTENSIONS.contains(&ext.as_str()) {
+            } else if kinds.presets && presets.contains(&ext.as_str()) {
                 &mut found.presets
-            } else if kinds.sets && ext == ".als" {
+            } else if kinds.sets && library.is_none() && ext == ".als" {
                 &mut found.sets
             } else {
                 continue;
@@ -445,11 +478,12 @@ impl<T: LogEntry + Clone + Send + Sync + 'static> Writer<T> {
         }
     }
 }
-/// Each project's newest saved version contributes once to the producer's habits.
+/// Each project's newest saved version contributes once to the producer's habits. Live's Sets alone: another DAW's
+/// project is counted by its name, and what's inside isn't read.
 pub fn songs_of<'a>(entries: impl IntoIterator<Item = &'a SetEntry>) -> Vec<SetSummary> {
     let mut newest: IndexMap<String, &SetEntry> = IndexMap::new();
     for entry in entries {
-        if entry.set.is_none() {
+        if entry.set.as_ref().is_none_or(|set| set.daw.is_some()) {
             continue;
         }
         let folder = dirname(&entry.path);
@@ -536,6 +570,7 @@ pub async fn learn(options: LearnOptions) -> Result<LearnProgress, RuntimeError>
     progress.tell(true);
     let mut found = Finds::default();
     let (mut walked_sounds, mut walked_presets, mut walked_sets) = (vec![], vec![], vec![]);
+    let library = crate::integrations::library(plan.daw);
     let mut sources = plan.sources.clone();
     sources.sort_by_key(|s| order(s.kind));
     // A DAW's library inside another folder: what its layout reads is its own source's; the rest stays the outer folder's.
@@ -545,7 +580,7 @@ pub async fn learn(options: LearnOptions) -> Result<LearnProgress, RuntimeError>
         progress.tell(false);
         let own = matches!(source.kind, SourceKind::UserLibrary | SourceKind::Place | SourceKind::Folder);
         let skip = if source.is_daw_library() { HashSet::new() } else { daw_libraries.clone() };
-        if walk(source, Kinds { sounds: true, presets: true, sets: own }, &mut found, &options.signal, 16, &skip).await? {
+        if walk(source, Kinds { sounds: true, presets: true, sets: own }, &mut found, &options.signal, 16, &skip, library).await? {
             walked_sounds.push(source.path.clone());
             walked_presets.push(source.path.clone());
             if own {
@@ -559,7 +594,9 @@ pub async fn learn(options: LearnOptions) -> Result<LearnProgress, RuntimeError>
             continue;
         }
         let source = Source { path: path.clone(), label: basename(path), kind: SourceKind::Folder };
-        if walk(&source, Kinds { sounds: false, presets: false, sets: true }, &mut found, &options.signal, 6, &source_paths).await? {
+        if walk(&source, Kinds { sounds: false, presets: false, sets: true }, &mut found, &options.signal, 6, &source_paths, library)
+            .await?
+        {
             walked_sets.push(path.clone());
         }
     }
@@ -578,7 +615,9 @@ pub async fn learn(options: LearnOptions) -> Result<LearnProgress, RuntimeError>
     }
     for path in &plan.plugin_presets {
         let source = Source { path: path.clone(), label: "Plug-in presets".into(), kind: SourceKind::Folder };
-        if walk(&source, Kinds { sounds: false, presets: true, sets: false }, &mut found, &options.signal, 6, &HashSet::new()).await? {
+        if walk(&source, Kinds { sounds: false, presets: true, sets: false }, &mut found, &options.signal, 6, &HashSet::new(), library)
+            .await?
+        {
             walked_presets.push(path.clone());
         }
     }
@@ -614,10 +653,12 @@ pub async fn learn(options: LearnOptions) -> Result<LearnProgress, RuntimeError>
             ext.to_lowercase().trim_start_matches('.').to_owned()
         };
         let plugin = file.source.label == "Plug-in presets";
-        let facts = match format.as_str() {
+        let facts = match (library, format.as_str()) {
+            // (M6) Another DAW's own presets, read its way (a Logic plug-in setting by its plug-in's folder).
+            (Some(library), _) if !plugin => Ok((library.preset_facts)(&format, &file.relative)),
             _ if daw_library => read_daw_preset(&format, &file.file.path, &file.relative).await,
-            "adv" | "adg" => read_live_preset(&file.file.path).await,
-            "amxd" => read_max_device(&file.file.path).await,
+            (_, "adv" | "adg") => read_live_preset(&file.file.path).await,
+            (_, "amxd") => read_max_device(&file.file.path).await,
             _ => Ok(plugin_preset_facts(&file.relative)),
         };
         let (facts, error) = match facts {
@@ -641,7 +682,8 @@ pub async fn learn(options: LearnOptions) -> Result<LearnProgress, RuntimeError>
             about: facts.about,
             source: file.source.label.clone(),
             folder: if folder == "." { String::new() } else { folder },
-            browser: if plugin { None } else { browser_path(&file.source, &file.relative).filter(|s| !s.is_empty()) },
+            // (Live's Browser alone lists presets by such a path)
+            browser: if plugin || library.is_some() { None } else { browser_path(&file.source, &file.relative).filter(|s| !s.is_empty()) },
             error,
         };
         presets.insert(file.file.path.clone(), entry.clone());
@@ -658,6 +700,25 @@ pub async fn learn(options: LearnOptions) -> Result<LearnProgress, RuntimeError>
     let mut set_writer = Writer::new(logs.sets.clone());
     for file in &todo_sets {
         gated(&options).await?;
+        // (M6) Another DAW's project (a Logic package): counted by its name, its insides not read.
+        if let Some(library) = library.filter(|library| file.file.path.to_lowercase().ends_with(library.project_package)) {
+            let name = basename(&file.file.path);
+            let name = name.get(..name.len() - library.project_package.len()).unwrap_or(&name).to_string();
+            let entry = SetEntry {
+                file: file.file.clone(),
+                set: Some(SetSummary { name, daw: Some(library.daw), ..Default::default() }),
+                error: None,
+            };
+            sets.insert(file.file.path.clone(), entry.clone());
+            set_writer.add(entry);
+            {
+                let mut p = progress.value.borrow_mut();
+                p.sets.done += 1;
+                p.sets.known = sets.len();
+            }
+            progress.tell(false);
+            continue;
+        }
         let entry = match read_set(&file.file.path, Some(options.signal.clone())).await {
             Ok(set) => SetEntry { file: file.file.clone(), set: Some(set), error: None },
             Err(error) => {

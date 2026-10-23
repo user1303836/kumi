@@ -562,16 +562,26 @@ impl Library {
         write_json(&file, &ordered.into_iter().collect::<Vec<_>>()).await.map_err(io_error)?;
         Ok(true)
     }
+    /// (M6) The projects the DAW's bridge says it opened lately (Logic Pro's File > Open Recent: the ones whose place it
+    /// knew), kept for the next learning run, which counts them and looks through the folders they're in. Written only
+    /// when they change.
+    pub async fn remember_recent(&self, daw: crate::core::daw::DawId, paths: Vec<String>) {
+        if plan::remembered_recent(&self.dir, daw).await == paths {
+            return;
+        }
+        let _ = write_json(Path::new(&plan::recent_file(&self.dir, daw)), &paths).await;
+    }
     pub fn tools(self: &Rc<Self>, options: LibraryToolsOptions) -> Vec<Rc<dyn KernelTool>> {
         self.tools_for(&DawProfile::ABLETON, options)
     }
-    /// The library's tools in the DAW's words; the DAW's manual only for a DAW whose manual Kumi reads (Live's).
+    /// The library's tools in the DAW's words; the DAW's manual only for a DAW whose manual Kumi reads (Live's, and
+    /// Apple's guide to Logic Pro).
     pub fn tools_for(self: &Rc<Self>, profile: &DawProfile, options: LibraryToolsOptions) -> Vec<Rc<dyn KernelTool>> {
         let mut tools = tools::library_tools_for(profile, self.clone(), options.clone());
         if let Some(daw) = profile.id.filter(|_| profile.caps.manual) {
             let manual = crate::integrations::manual_tool(
                 daw,
-                manual::ManualOptions {
+                crate::integrations::shared::manual::ManualOptions {
                     dir: self.dir.clone(),
                     client: self.options.web.as_ref().map(|w| w.client.clone()),
                     base: self.options.web.as_ref().and_then(|w| w.base.clone()),

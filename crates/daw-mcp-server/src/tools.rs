@@ -75,6 +75,32 @@ pub fn kinds(daw: Daw) -> Kinds {
                 "plugin-suspend",
             ],
         },
+        Daw::Logic => Kinds {
+            // (M4b) a plug-in's parameters as its window's Controls View lists them, a track's Smart Controls and its
+            // automation, as the bridge's `read.rs` takes them (the Stereo Out's plug-ins are `plugin` rows under
+            // `<epoch>:output:1`); (M6) the projects Logic opened lately, from File > Open Recent
+            read: &["project", "track", "region", "note", "plugin", "send", "marker", "tempo", "param", "smart", "automation", "recent"],
+            bodies: &["tree", "notes", "timeline", "routing"],
+            // Logic keeps no step of its history for a mixer move, the tempo or a bypass (the M3 lab), nor for the cycle
+            // range (M4), nor (M4b) for a plug-in's parameter or setting (steps of the plug-in window's own undo), a Smart
+            // Control or a send's level, nor (M6) for the metronome: those are put back by Kumi, never by Logic's own undo.
+            outside_undo: &[
+                "track-volume",
+                "track-pan",
+                "track-mute",
+                "track-solo",
+                "track-arm",
+                "tempo-set",
+                "fx-bypass",
+                "loop-range",
+                "fx-param",
+                "fx-params",
+                "fx-preset",
+                "smart-control-set",
+                "send-volume",
+                "metronome-set",
+            ],
+        },
     }
 }
 
@@ -140,6 +166,37 @@ fn read_params(arguments: &Value) -> Result<Value, String> {
     switches_arg(arguments, &mut params)?;
     if let Some(limit) = limit_arg(arguments)? {
         params.insert("limit".into(), limit.into());
+    }
+    Ok(Value::Object(params))
+}
+
+/// The most rows of a kind Logic's bulk read answers (its bridge's `BULK_MOST`).
+pub const MOST_BULK_ROWS: u64 = 10_000;
+
+/// The arguments a `snapshot` forwards: none, but (M6) Logic's bulk read, `rows` (the kinds to read whole, which the
+/// bridge checks) and `limit` (the most rows of a kind). Another DAW's snapshot takes nothing, as before.
+fn snapshot_params(arguments: &Value, daw: Daw) -> Result<Value, String> {
+    let mut params = Map::new();
+    if daw != Daw::Logic {
+        return Ok(Value::Object(params));
+    }
+    match arguments.get("rows") {
+        None | Some(Value::Null) => {}
+        Some(Value::Array(kinds)) if !kinds.is_empty() && kinds.iter().all(|kind| kind.as_str().is_some_and(|kind| !kind.is_empty())) => {
+            params.insert("rows".into(), Value::Array(kinds.clone()));
+        }
+        Some(_) => {
+            return Err("rows must be a list of the kinds to read whole (project, track, region, plugin, send, marker, tempo)".into())
+        }
+    }
+    match arguments.get("limit") {
+        None | Some(Value::Null) => {}
+        Some(value) => match value.as_u64() {
+            Some(n) if params.contains_key("rows") && (1..=MOST_BULK_ROWS).contains(&n) => {
+                params.insert("limit".into(), n.into());
+            }
+            _ => return Err(format!("limit must be a whole number from 1 to {MOST_BULK_ROWS}, with rows")),
+        },
     }
     Ok(Value::Object(params))
 }
@@ -305,11 +362,15 @@ impl Host {
         }
     }
 
-    /// `snapshot`: the project on one screen.
+    /// `snapshot`: the project on one screen; (M6) for Logic, with `rows`, every row of the kinds named in one answer.
     pub async fn snapshot(&self, arguments: &Value) -> (Value, bool) {
-        match Self::pick_of(arguments) {
-            Ok(pick) => self.answer_of_bounded("snapshot", json!({}), &pick, READ_TIMEOUT).await,
-            Err(answer) => answer,
+        let pick = match Self::pick_of(arguments) {
+            Ok(pick) => pick,
+            Err(answer) => return answer,
+        };
+        match snapshot_params(arguments, self.daw()) {
+            Ok(params) => self.answer_of_bounded("snapshot", params, &pick, READ_TIMEOUT).await,
+            Err(why) => (json!({"error": why}), true),
         }
     }
 
@@ -471,8 +532,34 @@ mod tests {
     }
 
     #[test]
+    fn a_snapshot_forwards_logics_bulk_read_and_nothing_for_another_daw() {
+        let bulk = json!({"rows": ["project", "track"], "limit": 500, "pid": 4});
+        assert_eq!(snapshot_params(&bulk, Daw::Logic).unwrap(), json!({"rows": ["project", "track"], "limit": 500}));
+        assert_eq!(snapshot_params(&json!({}), Daw::Logic).unwrap(), json!({}));
+        // (the kinds are the bridge's to check: an unknown one goes on, and comes back refused in its words)
+        assert_eq!(snapshot_params(&json!({"rows": ["note"]}), Daw::Logic).unwrap(), json!({"rows": ["note"]}));
+        for bad in [
+            json!({"rows": []}),
+            json!({"rows": "track"}),
+            json!({"rows": [3]}),
+            json!({"rows": [""]}),
+            json!({"rows": ["track"], "limit": 0}),
+            json!({"rows": ["track"], "limit": 10001}),
+            json!({"limit": 50}),
+        ] {
+            assert!(snapshot_params(&bad, Daw::Logic).is_err(), "{bad}");
+        }
+        // REAPER's and Renoise's snapshot takes nothing, whatever it is given.
+        assert_eq!(snapshot_params(&bulk, Daw::Reaper).unwrap(), json!({}));
+        assert_eq!(snapshot_params(&json!({"rows": 3}), Daw::Renoise).unwrap(), json!({}));
+    }
+
+    #[test]
     fn each_daw_has_its_own_kinds() {
         assert!(kinds(Daw::Reaper).read.contains(&"envelope") && !kinds(Daw::Reaper).read.contains(&"pattern"));
         assert!(kinds(Daw::Renoise).bodies.contains(&"matrix") && !kinds(Daw::Renoise).bodies.contains(&"arrange"));
+        assert!(["param", "smart", "automation"].iter().all(|kind| kinds(Daw::Logic).read.contains(kind)));
+        assert!(!kinds(Daw::Logic).read.contains(&"strip"), "the bridge reads no strip kind: the Stereo Out is output:1");
+        assert!(kinds(Daw::Logic).read.contains(&"recent") && kinds(Daw::Logic).outside_undo.contains(&"metronome-set"));
     }
 }

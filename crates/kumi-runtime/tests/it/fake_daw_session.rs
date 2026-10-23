@@ -80,6 +80,8 @@ const FAKE: DawProfile = DawProfile {
     },
 };
 const INSTRUCTIONS: &str = "You work in Fakeloop: read the song with fake_read before changing it.";
+/// Logic Pro, by its real profile and (M7) its instruction pack (the same fake tools stand in for its read).
+const LOGIC_INSTRUCTIONS: &str = kumi_runtime::integrations::logic::DAW.instructions;
 
 fn finish(unified: FinishReasonUnified) -> StreamPart {
     let raw = serde_json::to_value(unified).unwrap().as_str().unwrap().to_string();
@@ -209,23 +211,25 @@ impl KernelTool for FakeTool {
     }
 }
 
-/// The fake DAW as the session sees it.
+/// The fake DAW as the session sees it: by `profile` (the fake's, or a real DAW's).
 struct FakeIntegration {
     listener: ConnectionListener,
     listeners: Rc<RefCell<Vec<ConnectionListener>>>,
     started: Rc<Cell<bool>>,
     /// The DAW won't start: the session carries on without it.
     away: bool,
+    profile: DawProfile,
+    instructions: &'static str,
 }
 #[async_trait(?Send)]
 impl Integration for FakeIntegration {
     fn profile(&self) -> &DawProfile {
-        &FAKE
+        &self.profile
     }
     async fn start(&self, signal: Signal) -> Result<(), RuntimeError> {
         signal.check()?;
         if self.away {
-            return Err(KumiError::new(FailureKind::Daw, FAKE.vocab.cant_reach).into());
+            return Err(KumiError::new(FailureKind::Daw, self.profile.vocab.cant_reach).into());
         }
         self.listeners.borrow_mut().push(self.listener.clone());
         (self.listener)(ConnectionState::Connecting, None);
@@ -238,13 +242,14 @@ impl Integration for FakeIntegration {
             Rc::new(FakeTool { name: "fake_read", started: self.started.clone() }),
             Rc::new(FakeTool { name: "fake_wait", started: self.started.clone() }),
         ];
+        let mut context = json!({"tempo":120,"tracks":[{"ref":"track:1","name":"Kick"},{"ref":"track:2","name":"Bass"}]});
+        context[self.profile.words.place] = json!("Beat");
         Ok(Observation {
             key: "song:beat".into(),
             revision: None,
-            label: "Fakeloop — Beat".into(),
-            context: json!({"song":"Beat","tempo":120,"tracks":[{"ref":"track:1","name":"Kick"},{"ref":"track:2","name":"Bass"}]})
-                .to_string(),
-            instructions: INSTRUCTIONS.into(),
+            label: format!("{} — Beat", self.profile.words.app),
+            context: context.to_string(),
+            instructions: self.instructions.into(),
             tools,
             project: Some(ProjectRef { id: "0123456789abcdef0123456789abcdef".into(), name: "Beat".into() }),
             set: Some("identity:beat".into()),
@@ -270,12 +275,14 @@ impl Integration for FakeIntegration {
     }
 }
 
-/// A session with every option on, over the fake DAW (or, `away`, without it).
+/// A session with every option on, over the fake DAW by `profile` (or, `away`, without it).
 fn open(
     main: &Rc<Recorded>,
     worker: &Rc<Recorded>,
     dir: &std::path::Path,
     away: bool,
+    profile: DawProfile,
+    instructions: &'static str,
 ) -> (Session, Rc<RefCell<Vec<SessionEvent>>>, Rc<RefCell<Vec<ConnectionListener>>>, Rc<Cell<bool>>) {
     let events = Rc::new(RefCell::new(vec![]));
     let out = events.clone();
@@ -284,18 +291,18 @@ fn open(
     let (held, waiting) = (listeners.clone(), started.clone());
     let integration: IntegrationFactory = Box::new(move |listener: ConnectionListener| {
         let fallback = listener.clone();
-        let primary = Rc::new(FakeIntegration { listener, listeners: held.clone(), started: waiting.clone(), away });
+        let primary = Rc::new(FakeIntegration { listener, listeners: held.clone(), started: waiting.clone(), away, profile, instructions });
         with_fallback(
             primary,
             Rc::new(move || {
                 let on_connection = fallback.clone();
-                create_no_daw_integration(FAKE, INSTRUCTIONS, Rc::new(move |state| on_connection(state, None)))
+                create_no_daw_integration(profile, instructions, Rc::new(move |state| on_connection(state, None)))
             }),
             Rc::new(|_| {}),
         )
     });
     let mut options = SessionOptions::new(recording(main.clone(), None), integration, Rc::new(move |event| out.borrow_mut().push(event)));
-    options.profile = FAKE;
+    options.profile = profile;
     options.timeout_ms = Some(20_000);
     options.close_timeout_ms = Some(5_000);
     options.cancel_grace_ms = Some(10);
@@ -343,11 +350,11 @@ fn step(make: impl Fn(&Recorded) -> Vec<StreamPart> + 'static) -> Step {
     Box::new(make)
 }
 
-/// Everything core said over the fake DAW, in one session and in one without it.
-async fn everything_said() -> Vec<String> {
+/// Everything core said over the DAW of `profile`, in one session and in one without it.
+async fn everything_said(profile: DawProfile, instructions: &'static str) -> Vec<String> {
     let dir = tempfile::tempdir().unwrap();
     let (main, worker) = (Rc::new(Recorded::default()), Rc::new(Recorded::default()));
-    let (session, events, listeners, started) = open(&main, &worker, dir.path(), false);
+    let (session, events, listeners, started) = open(&main, &worker, dir.path(), false, profile, instructions);
     session.start().await.unwrap();
 
     // A turn that remembers, saves a recipe, starts a job, finds every deferred tool, and reads the song.
@@ -383,7 +390,7 @@ async fn everything_said() -> Vec<String> {
         let listener = listeners.borrow().last().unwrap().clone();
         listener(ConnectionState::Disconnected, cause);
         for _ in 0..1000 {
-            if notices(&events).iter().any(|notice| notice == FAKE.vocab.cant_reach) {
+            if notices(&events).iter().any(|notice| notice == profile.vocab.cant_reach) {
                 break;
             }
             delay(2).await;
@@ -440,7 +447,7 @@ async fn everything_said() -> Vec<String> {
     // Without the DAW: the fallback's own words.
     let dir = tempfile::tempdir().unwrap();
     let (main, worker) = (Rc::new(Recorded::default()), Rc::new(Recorded::default()));
-    let (session, events, _, _) = open(&main, &worker, dir.path(), true);
+    let (session, events, _, _) = open(&main, &worker, dir.path(), true, profile, instructions);
     session.start().await.unwrap();
     session.submit("Make the kick punchier.", None).await.unwrap();
     let _ = session.undo(None).await;
@@ -454,10 +461,24 @@ async fn everything_said() -> Vec<String> {
 async fn a_whole_session_over_another_daw_says_nothing_in_lives_words() {
     tokio::task::LocalSet::new()
         .run_until(async {
-            let said = everything_said().await;
+            let said = everything_said(FAKE, INSTRUCTIONS).await;
             for (at, phrase, why) in ALLOWED {
                 assert!(said.iter().any(|text| text.contains(phrase)), "{at} no longer says {phrase} ({why}): take it off the list");
             }
+            assert_no_live_words(&said);
+        })
+        .await;
+}
+
+/// Logic Pro's own profile (its words, its capabilities) through the same whole session: nothing the model or the
+/// producer gets is in Live's words.
+#[tokio::test(flavor = "current_thread")]
+async fn a_whole_session_over_logic_pro_says_nothing_in_lives_words() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let said = everything_said(DawProfile::LOGIC, LOGIC_INSTRUCTIONS).await;
+            assert!(said.iter().any(|text| text.contains("Logic Pro")), "Logic's words reach the model");
+            assert!(said.iter().any(|text| text.contains(DawProfile::LOGIC.vocab.cant_reach)), "and the producer, when it's away");
             assert_no_live_words(&said);
         })
         .await;
@@ -515,7 +536,7 @@ async fn own_session(
         let mut context = IntegrationContext::new(listener);
         let into = into.clone();
         context.on_change = Some(Rc::new(move |record| into.borrow_mut().push(record)));
-        create(OwnOptions { context, kumi_home: home.clone(), connect: Some(connect) })
+        create(OwnOptions { context, kumi_home: home.clone(), connect: Some(connect), open_file: None })
     });
     let main = Rc::new(Recorded::default());
     let events = Rc::new(RefCell::new(vec![]));
@@ -682,6 +703,273 @@ async fn a_renoise_session_changes_and_undoes_in_renoises_words() {
         .await;
 }
 
+/// A session in Logic Pro through Kumi's host (in process, in front of the simulated Logic): the model changes the
+/// project with a plan (a fader, which is no step of Logic's undo, a track added below the last one, which moves
+/// Logic's epoch, and a rename of it), undoes a change, and the producer undoes another with /undo. What the model is
+/// sent (its tools, the plan's and undo's answers, the observations with kumiChanges) and what the producer is told
+/// (the changes in HISTORY, notices) is in Logic's words, never Live's.
+#[tokio::test(flavor = "current_thread")]
+async fn a_logic_session_changes_and_undoes_in_logics_words() {
+    use daw_bridge::{files::ensure_secret, paths::BridgePaths, Daw};
+    use daw_mcp_server::{host::Host, simulator::logic::LogicScript, simulator::Simulator};
+    use kumi_runtime::core::context::IntegrationContext;
+    use kumi_runtime::integrations::{
+        logic::create_logic_integration,
+        own_bridge::{Connect, OwnOptions},
+    };
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let dir = tempfile::tempdir().unwrap();
+            let paths = BridgePaths::new(dir.path(), Daw::Logic);
+            let secret = ensure_secret(&paths.secret()).unwrap();
+            let bounced = dir.path().join("Scratch bar 1.wav").to_string_lossy().into_owned();
+            let bounce = bounced.clone();
+            let script = LogicScript::new();
+            let mut config = script.config(secret, "com.apple.logic10");
+            config.discovery_dir = Some(paths.discovery());
+            let simulator = Simulator::start(config).await.unwrap();
+            let host = Rc::new(in_process::InProcess { host: std::sync::Arc::new(Host::new(Daw::Logic, dir.path())), id: Cell::new(0) });
+            let home = dir.path().to_path_buf();
+            let changes: Rc<RefCell<Vec<ChangeRecord>>> = Rc::default();
+            let into = changes.clone();
+            let integration: IntegrationFactory = Box::new(move |listener: ConnectionListener| {
+                let host = host.clone();
+                let connect: Connect = Rc::new(move |_| {
+                    let host = host.clone();
+                    async move { Ok(host as Rc<dyn kumi_runtime::mcp::client::McpEndpoint>) }.boxed_local()
+                });
+                let mut context = IntegrationContext::new(listener);
+                let into = into.clone();
+                context.on_change = Some(Rc::new(move |record| into.borrow_mut().push(record)));
+                create_logic_integration(OwnOptions { context, kumi_home: home.clone(), connect: Some(connect), open_file: None })
+            });
+            let main = Rc::new(Recorded::default());
+            let events = Rc::new(RefCell::new(vec![]));
+            let out = events.clone();
+            let mut options =
+                SessionOptions::new(recording(main.clone(), None), integration, Rc::new(move |event| out.borrow_mut().push(event)));
+            options.profile = DawProfile::LOGIC;
+            options.timeout_ms = Some(20_000);
+            options.close_timeout_ms = Some(5_000);
+            options.conversations = Some(create_conversation_store(dir.path()));
+            let session = create_session(options).unwrap();
+            session.start().await.unwrap();
+
+            main.script.borrow_mut().extend([
+                step(|_| {
+                    call(
+                        "make_changes",
+                        json!({"steps": [
+                            {"tool": "track_volume", "input": {"ref": "track:1", "volumeDb": -6}},
+                            {"tool": "track_add", "as": "pad", "input": {"name": "Pad"}},
+                            {"tool": "track_rename", "input": {"ref": "@pad", "name": "Pads"}},
+                        ]}),
+                    )
+                }),
+                step(|_| call("undo_change", json!({"change": "last"}))),
+                step(|_| call("logic_read", json!({"kind": "track"}))),
+                // (M4) The project saved (no row), a region read and split, and the split taken back (Logic's own
+                // undo, while on top).
+                step(|_| call("make_changes", json!({"steps": [{"tool": "save_project", "input": {}}]}))),
+                step(|_| call("logic_read", json!({"kind": "region"}))),
+                // (the region's short ref as the read just named it: a session never names a ref twice)
+                step(|recorded| {
+                    let text = recorded.requests.borrow().last().cloned().unwrap_or_default();
+                    let region = Regex::new(r"region:\d+").unwrap().find_iter(&text).last().map(|m| m.as_str().to_string());
+                    call("region_split", json!({"ref": region.unwrap_or_else(|| "region:1".into()), "positionBeats": 8}))
+                }),
+                step(|_| call("undo_change", json!({"change": "last"}))),
+                // (M4b) A Gain on the Stereo Out (the observation's outputs name it: no read lists it) and its gain set;
+                // then a patch loaded on Keys, a send from Vocal to a bus nothing takes and a bounce (no row) in one plan.
+                step(|recorded| {
+                    let text = recorded.requests.borrow().last().cloned().unwrap_or_default();
+                    let output = Regex::new(r"output:\d+").unwrap().find_iter(&text).last().map(|m| m.as_str().to_string());
+                    call("fx_add", json!({"ref": output.expect("the observation names the Stereo Out"), "name": "Gain"}))
+                }),
+                step(|recorded| {
+                    let text = recorded.requests.borrow().last().cloned().unwrap_or_default();
+                    let plugin = Regex::new(r"plugin:\d+").unwrap().find_iter(&text).last().map(|m| m.as_str().to_string());
+                    call("fx_param", json!({"ref": plugin.unwrap_or_else(|| "plugin:1".into()), "param": "Gain", "value": -3}))
+                }),
+                step(|_| call("logic_read", json!({"kind": "track", "limit": 2}))),
+                step(move |recorded| {
+                    let text = recorded.requests.borrow().last().cloned().unwrap_or_default();
+                    let tracks: Vec<String> = Regex::new(r"track:\d+").unwrap().find_iter(&text).map(|m| m.as_str().to_string()).collect();
+                    let (vocal, keys) = (tracks[tracks.len() - 2].clone(), tracks[tracks.len() - 1].clone());
+                    call(
+                        "make_changes",
+                        json!({"steps": [
+                            {"tool": "patch_load", "input": {"ref": keys, "patch": "Piano/Steinway Grand Piano"}},
+                            {"tool": "send_add", "input": {"ref": vocal, "bus": 1}},
+                            {"tool": "bounce", "input": {"startBeats": 0, "endBeats": 4, "path": bounce.clone()}},
+                        ]}),
+                    )
+                }),
+                step(|_| answer("Done.")),
+            ]);
+            session.submit("Pull the vocal down and add a pad track.", None).await.unwrap();
+            assert_eq!(script.volume(1), -6.0, "the plan ran");
+            assert_eq!(script.track(3)["name"], json!("Pad"), "the track below Keys, its rename undone");
+            let asked = script.asked();
+            assert!(asked.iter().any(|(method, _)| method == "project_save"), "the save reached the bridge: {asked:?}");
+            assert!(asked.iter().any(|(method, params)| method == "change_apply" && params["kind"] == "region-split"), "{asked:?}");
+            assert_eq!(script.regions().len(), 1, "the split was taken back");
+            assert_eq!(
+                (script.param("output:1", 1, "Gain"), script.patch(2).as_deref()),
+                (Some((Some(930.0), "-3.0 dB".to_string())), Some("Steinway Grand Piano"))
+            );
+            assert!(std::path::Path::new(&bounced).is_file(), "the bounce's file");
+            assert_eq!(
+                script.undo_titles(),
+                [
+                    "Undo Create Track",
+                    "Undo Renaming",
+                    "Undo Renaming",
+                    "Undo Renaming",
+                    "Undo Insert Plug-in in Channel Strip",
+                    "Undo Load Patch",
+                    "Undo Change Send in Channel Strip"
+                ],
+                "the add (made, then named), the rename and its put-back, the Gain, the patch and the send are Logic's steps; the fader and the Gain's gain none: {:?}",
+                script.undo_history()
+            );
+            // The producer's /undo takes back the latest change still standing: the send, through Logic's own undo, with
+            // the aux Logic made for it.
+            let undone = session.undo(None).await.unwrap();
+            assert_eq!(undone.map(|record| record.title).as_deref(), Some("Added send from “Vocal” to Bus 1"));
+            assert!(script.auxes().is_empty(), "the aux went with it");
+            session.submit("What changed?", None).await.unwrap();
+            session.close().await.unwrap();
+            simulator.stop();
+
+            let titles: Vec<String> = changes.borrow().iter().map(|record| record.title.clone()).collect();
+            for title in [
+                "Vocal volume −6 dB",
+                "Added “Gain” to “Stereo Out”",
+                "“Gain”'s Gain → -3.0 dB on “Stereo Out”",
+                "Loaded the patch “Steinway Grand Piano” on “Keys”",
+                "Added send from “Vocal” to Bus 1",
+            ] {
+                assert!(titles.iter().any(|seen| seen == title), "{title}: {titles:?}");
+            }
+            assert!(!titles.iter().any(|title| title.starts_with("Bounced")), "a bounce makes no row: {titles:?}");
+            let mut said: Vec<String> = main.requests.borrow().clone();
+            assert!(said.iter().any(|request| request.contains("kumiChanges")), "the model sees its changes");
+            assert!(said.iter().any(|request| request.contains("Logic Pro's own undo")), "in Logic's words");
+            said.extend(
+                main.tools
+                    .borrow()
+                    .iter()
+                    .map(|tool| json!({"name":tool.name(),"description":tool.description(),"inputSchema":tool.input_schema()}).to_string()),
+            );
+            said.extend(events.borrow().iter().map(|event| serde_json::to_string(event).unwrap()));
+            said.extend(changes.borrow().iter().map(|record| serde_json::to_string(record).unwrap()));
+            assert_no_live_words(&said);
+        })
+        .await;
+}
+
+/// (M6) Logic Pro's fixed phrases run with no model call: each is one of Logic's own changes, made through Kumi's host
+/// on the project as a fresh look reads it, and lands in HISTORY in Logic's words; Kumi's undo takes each back. A phrase
+/// Logic can't run as given (a tempo past its 990 BPM, a track it hasn't) goes to the model.
+#[tokio::test(flavor = "current_thread")]
+async fn logics_fixed_phrases_run_without_the_model_and_come_back_with_kumis_undo() {
+    use daw_bridge::{files::ensure_secret, paths::BridgePaths, Daw};
+    use daw_mcp_server::{host::Host, simulator::logic::LogicScript, simulator::Simulator};
+    use kumi_runtime::core::context::IntegrationContext;
+    use kumi_runtime::integrations::{
+        logic::create_logic_integration,
+        own_bridge::{Connect, OwnOptions},
+    };
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let dir = tempfile::tempdir().unwrap();
+            let paths = BridgePaths::new(dir.path(), Daw::Logic);
+            let secret = ensure_secret(&paths.secret()).unwrap();
+            let script = LogicScript::new();
+            let mut config = script.config(secret, "com.apple.logic10");
+            config.discovery_dir = Some(paths.discovery());
+            let simulator = Simulator::start(config).await.unwrap();
+            let host = Rc::new(in_process::InProcess { host: std::sync::Arc::new(Host::new(Daw::Logic, dir.path())), id: Cell::new(0) });
+            let home = dir.path().to_path_buf();
+            let changes: Rc<RefCell<Vec<ChangeRecord>>> = Rc::default();
+            let into = changes.clone();
+            let integration: IntegrationFactory = Box::new(move |listener: ConnectionListener| {
+                let host = host.clone();
+                let connect: Connect = Rc::new(move |_| {
+                    let host = host.clone();
+                    async move { Ok(host as Rc<dyn kumi_runtime::mcp::client::McpEndpoint>) }.boxed_local()
+                });
+                let mut context = IntegrationContext::new(listener);
+                let into = into.clone();
+                context.on_change = Some(Rc::new(move |record| into.borrow_mut().push(record)));
+                create_logic_integration(OwnOptions { context, kumi_home: home.clone(), connect: Some(connect), open_file: None })
+            });
+            let main = Rc::new(Recorded::default());
+            let mut options = SessionOptions::new(recording(main.clone(), None), integration, Rc::new(|_| {}));
+            options.profile = DawProfile::LOGIC;
+            options.timeout_ms = Some(20_000);
+            options.close_timeout_ms = Some(5_000);
+            let session = create_session(options).unwrap();
+            session.start().await.unwrap();
+            assert!(session.has_instant());
+            let state = |title: &str| changes.borrow().iter().rev().find(|record| record.title == title).map(|record| record.state);
+            // Each phrase, the row it makes, and the project after it.
+            for (phrase, title) in [
+                ("tempo 124", "Tempo 124 BPM"),
+                ("mute keys", "Keys muted"),
+                ("solo vocal", "Vocal soloed"),
+                ("arm track 1", "Vocal armed"),
+                ("loop 2-3", "Cycle bar 2 to bar 4"),
+                ("loop off", "Cycle off"),
+                ("metronome off", "Metronome off"),
+            ] {
+                let outcome = session.instant(phrase).await.unwrap().unwrap_or_else(|| panic!("{phrase} ran"));
+                assert!(!outcome.is_error && outcome.text.contains(title), "{phrase}: {}", outcome.text);
+                assert_eq!(
+                    state(title),
+                    Some(ChangeState::Applied),
+                    "{phrase}: {:?}",
+                    changes.borrow().iter().map(|r| &r.title).collect::<Vec<_>>()
+                );
+            }
+            assert_eq!(
+                (script.tempo(), script.track(2)["mute"].clone(), script.track(1)["solo"].clone()),
+                (124.0, json!(true), json!(true))
+            );
+            assert_eq!((script.track(1)["armed"].clone(), script.cycle(), script.metronome()), (json!(true), (false, 4.0, 12.0), false));
+            for phrase in ["tempo 87.5"] {
+                assert!(session.instant(phrase).await.unwrap().is_some_and(|outcome| !outcome.is_error), "{phrase}");
+            }
+            assert_eq!(script.tempo(), 88.0, "whole BPM, as Logic's tempo display takes it");
+            // What Logic can't take as given goes to the model.
+            for phrase in ["tempo 995", "mute guitar", "make the bass darker"] {
+                assert!(session.instant(phrase).await.unwrap().is_none(), "{phrase}");
+            }
+            assert!(main.requests.borrow().is_empty(), "no model call");
+            // Kumi's undo takes each back, newest first; none was a step of Logic's own undo.
+            for _ in 0..8 {
+                let undone = session.undo(None).await.unwrap().expect("a change to undo");
+                assert_eq!(undone.state, ChangeState::Undone, "{}", undone.title);
+            }
+            assert_eq!(
+                (script.tempo(), script.track(2)["mute"].clone(), script.track(1)["solo"].clone()),
+                (160.0, json!(false), json!(false))
+            );
+            assert_eq!((script.track(1)["armed"].clone(), script.cycle(), script.metronome()), (json!(false), (false, 0.0, 16.0), true));
+            assert!(script.undo_titles().is_empty(), "no step of Logic's own undo: {:?}", script.undo_titles());
+            // (M6) The session's profile names notes as the open project does: Logic's middle C, as its row says it.
+            assert_eq!(session.profile().map(|profile| profile.note_name(60)).as_deref(), Some("C3"));
+            script.set_middle_c(4);
+            session.refresh().await.unwrap();
+            assert_eq!(session.profile().map(|profile| profile.note_name(60)).as_deref(), Some("C4"), "the producer chose C4");
+            assert_eq!(session.profile().map(|profile| profile.words.app), Some("Logic Pro"));
+            session.close().await.unwrap();
+            simulator.stop();
+        })
+        .await;
+}
+
 fn floor(text: &str, mut at: usize) -> usize {
     while !text.is_char_boundary(at) {
         at -= 1;
@@ -704,13 +992,38 @@ async fn the_session_offers_another_daws_own_focus_bodies() {
             use kumi_runtime::core::view::{BodyKind, BodyRequest, FocusBody};
             let dir = tempfile::tempdir().unwrap();
             let (main, worker) = (Rc::new(Recorded::default()), Rc::new(Recorded::default()));
-            let (session, _, _, _) = open(&main, &worker, dir.path(), false);
+            let (session, _, _, _) = open(&main, &worker, dir.path(), false, FAKE, INSTRUCTIONS);
             session.start().await.unwrap();
             assert!(session.can_show(BodyKind::Matrix), "the DAW's own body");
             assert!(!session.can_show(BodyKind::Tracker), "one the DAW doesn't draw");
             assert!(session.can_show(BodyKind::Tree) && session.can_show(BodyKind::Timeline), "Live's four, as always");
             assert!(matches!(session.focus_body(&BodyRequest::Matrix).await.unwrap(), Some(FocusBody::Matrix(_))));
             session.close().await.unwrap();
+        })
+        .await;
+}
+
+/// (M5) Listening to a DAW that is connected but that Kumi doesn't hear yet says what can't be done, not that Kumi
+/// isn't connected: the listen tool over REAPER, as the app has it (in a fallback).
+#[tokio::test(flavor = "current_thread")]
+async fn listening_to_a_daw_kumi_doesnt_hear_yet_says_what_cant_be_done() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let dir = tempfile::tempdir().unwrap();
+            let (main, worker) = (Rc::new(Recorded::default()), Rc::new(Recorded::default()));
+            // (REAPER hears since its M5: a REAPER that couldn't stands for a DAW Kumi doesn't hear yet)
+            let deaf = DawProfile {
+                caps: kumi_runtime::core::daw::Capabilities { hear: false, audition: false, ..DawProfile::REAPER.caps },
+                ..DawProfile::REAPER
+            };
+            let (session, _, _, _) = open(&main, &worker, dir.path(), false, deaf, INSTRUCTIONS);
+            session.start().await.unwrap();
+            main.script.borrow_mut().extend([step(|_| call("listen", json!({"mix": true}))), step(|_| answer("Done."))]);
+            session.submit("Listen to the mix.", None).await.unwrap();
+            session.close().await.unwrap();
+            let said = main.requests.borrow().join("\n");
+            assert!(said.contains("Kumi can't hear the project in REAPER yet."), "{said}");
+            assert!(!said.contains("isn't connected to REAPER"), "{said}");
         })
         .await;
 }

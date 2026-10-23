@@ -6,6 +6,7 @@ What the bridge covers in each area of Live, which channel does the work, how a
 change is undone, and whether it has been tested on real Live. The tools
 themselves are listed in the [user guide](USER_GUIDE.md); Kumi's own change
 tools, built on these, are in [how Kumi changes your Set](KUMI_CHANGES.md).
+What Kumi's own bridge for Logic Pro covers is in [Logic Pro](#logic-pro), below.
 
 ## How to read the matrix
 
@@ -109,3 +110,64 @@ Control Surface but reads no raw MIDI), general OSC, web, serial or sensor
 links (realtime control is loopback only), an external Link peer and Link
 Audio, and Max for Live devices inside the bridge. Kumi makes Max for Live
 devices itself; see [the Kumi guide](KUMI_GUIDE.md#making-max-for-live-devices).
+
+## Logic Pro
+
+What Kumi's Logic Pro bridge (`logic-kumi`) covers in Logic Pro 12, through
+which macOS channel, and how Kumi's undo takes a change back there. The exact
+shapes, and what each channel was measured to do, are in
+[the Logic contract](LOGIC_CONTRACT.md).
+
+| Channel | What it is |
+| --- | --- |
+| Accessibility | Logic Pro's windows read and set as macOS's Accessibility shows them: the Tracks area, the track headers and the Inspector, the Mixer, the List Editors, the control bar, plug-in windows, the Library, dialogs and menus |
+| Keys and clicks | Logic Pro's key commands, from your key set or Logic Pro's own; a click where a button takes no Accessibility press (a header's mute, solo and arm) |
+| Panel service | macOS's open and save panels, which belong to a service of their own |
+| Mackie Control | The "Kumi Logic" control surface on virtual MIDI ports: selecting a track, the transport, the timecode while Kumi listens, the solos of a listening pass |
+| Process tap | Logic Pro's output, heard through a Core Audio process tap |
+| Spotlight, preferences | Where a recent project is; which octave Logic Pro names middle C in |
+
+**Undo:** *by value* means Kumi's undo sets what the change replaced again;
+*Logic's undo* means Kumi presses Logic Pro's own undo for it, only while Kumi's
+step is still the top one; *none* means there's nothing to undo. Logic Pro has
+no undo block: each change in a plan is a step of its own in Logic Pro's undo,
+and some (a fader, the tempo, a bypass, the cycle, the metronome, a plug-in's
+parameter) are no step of it at all.
+
+**Real Logic** names the gate where the area ran on the real Logic Pro 12.3.1,
+each recorded in `docs/evidence/` ([M2](../evidence/logic-m2-gate-2026-10-19.md),
+[M3](../evidence/logic-m3-gate-2026-10-19.md),
+[M4](../evidence/logic-m4-gate-2026-10-21.md),
+[M4, second slice](../evidence/logic-m4b-gate-2026-10-21.md),
+[M5](../evidence/logic-m5-gate-2026-10-21.md),
+[M6](../evidence/logic-m6-gate-2026-10-21.md)).
+
+| Area | What's covered | Channel | Undo | Real Logic |
+| --- | --- | --- | --- | --- |
+| Reading the project | The project (tempo, signatures, key, middle C), tracks, regions, a region's notes (as far as the Event List shows them on screen), plug-ins and their parameters, sends, Smart Controls, automation, markers, the Tempo and Signature Lists, the projects Logic Pro opened lately; FOCUS: a channel strip, a region's notes, the Tracks area, routing; one bulk read of the whole project for catching up | Accessibility (the Mixer, the List Editors and a plug-in's window opened for a moment); Spotlight, preferences | None | M2; M4 (second slice) and M6 for the later reads |
+| Tracks | Volume, pan, mute, solo, arm, name; a track added below the selected one; a track deleted; Track Stacks made and flattened | Accessibility; keys and clicks | By value; a deleted track and a flattened stack: Logic's undo; a stack Kumi made, flattened again by value when its step isn't on top | M3; M4 |
+| Regions | Moved along their track, resized and split on whole beats, looped, renamed, deleted | Accessibility (the Region inspector, the Event List at its region level); keys and clicks | By value; a split and a deleted region: Logic's undo | M4 |
+| Notes | Added, changed and deleted as Event List rows; quantized (Logic Pro's quantize parameter, 100% strength); many at once as a MIDI file imported onto a new track | Accessibility; panel service | By value; an import: Logic's undo | M3; M4 |
+| Plug-ins and patches | Added and removed, bypassed; parameters in the plug-in window's Controls View; settings stepped; a patch from the Library; a sample into a new Sampler track | Accessibility; keys and clicks (the Mixer's slot menus, the Library's search); Mackie Control (selecting the track); panel service | By value (an added plug-in, a bypass, parameters); a setting: the plug-in window's own undo; a deleted plug-in: Logic's undo, else by name with Logic Pro's defaults; a patch and a sample: Logic's undo | M3 (bypass); M4 (second slice); M6 (the sample) |
+| Sends, Smart Controls, automation | Sends made to a bus (Logic Pro makes an aux for a new one), their levels, removed; Smart Controls; automation events in the Track Automation Event List (whole beats, values 0 to 127) | Accessibility; keys and clicks; Mackie Control (selecting the track) | By value; a send made or removed: Logic's undo, else by value | M4 (second slice) |
+| Markers, tempo and signatures | Markers added at the playhead (Logic Pro names them), moved, deleted; the tempo (whole BPM); tempo events; time signatures | Accessibility (the Marker, Tempo and Signature Lists, the control bar) | By value; a deleted marker: Logic's undo, else made again by value; a deleted tempo event: Logic's undo | M3; M4 |
+| Transport and the project | Play, stop, the playhead; the cycle; the metronome; save and save as; any key command by its name or id | Accessibility (the control bar and its LCD); keys and clicks; panel service | By value for the cycle and the metronome; a key command's step: only Cmd-Z in Logic Pro; playing and saving: none | M3; M4; M6 |
+| Bounce and export | A range bounced to a WAV or AIFF file; every track exported as audio files | Accessibility (Logic Pro's Bounce and export dialogs); panel service | None: files written, the project left as it was | M4 (second slice) |
+| Listening | A part heard (the mix, or a track soloed for a pass of its own), candidates auditioned a pass each, a part rendered offline; Logic Pro put back after | Process tap; Mackie Control; the Bounce dialog | None | M5 |
+| Catching up, watching, instant phrases | What changed in a saved project while Kumi was away; `watch_me` turned into a recipe; fixed phrases (tempo, mute, solo, arm, loop, metronome) with no model call | Accessibility (the bulk read); the change channels above | None for catching up and watching; a phrase's change as that change | M6 (the bulk read, `watch_me`, the phrases; catching up as a project opens has run over the simulated Logic only) |
+
+### What Logic Pro doesn't let Kumi do
+
+| Not offered | Why |
+| --- | --- |
+| Naming or renaming a marker | A marker's name cell in the Marker List isn't a text field; Logic Pro numbers markers itself |
+| Moving or colouring a track | The headers can't be dragged from outside, no key command reorders tracks, and the Color palette's swatches are bare positions while a header shows no colour, so a colour could never be read back |
+| A send's mode | A mark Logic Pro draws in the send's menu, which Accessibility can't read |
+| Moving a plug-in | Logic Pro moves one only by dragging it |
+| A sample into Quick Sampler | Quick Sampler takes a sample by a drag onto its window; Kumi loads it into Sampler instead |
+| A region's notes past what the Event List shows | The Event List lists the rows on its screen only |
+| An audio region's file | Logic Pro shows the file by name only, never its path; Kumi hears the region through its track instead |
+| The goal search; tuning a plug-in's knobs by ear | Not built for Logic Pro yet |
+
+The bridge refuses the first five saying why. Logic Pro 11 or earlier isn't
+served.

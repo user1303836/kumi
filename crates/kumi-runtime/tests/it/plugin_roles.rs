@@ -2,9 +2,12 @@
 //! how to configure it, another device on the track doing the job in the agreed order (Ozone 12, the other mapped
 //! plug-ins, Live's own devices; none that's off), Live's own device to add placed where its job goes, a job on Live's
 //! own devices by their Live 12 names, and fixes that name a role.
+use kumi_runtime::core::daw::DawId;
+use kumi_runtime::plugins::registry::guide_words;
 use kumi_runtime::plugins::roles::{
-    agreed_order, find, job_for_item, job_named, nearest_band, plugin_fix, resolve, resolve_near, Found, Resolved, Seen,
+    agreed_order, find, job_for_item, job_named, nearest_band, plugin_fix, resolve, resolve_near, Found, Reach, Resolved, Seen,
 };
+use regex::Regex;
 use serde_json::Value;
 
 /// Ozone 12.1's own parameter names, as Live listed them on the machine its format was read on.
@@ -28,6 +31,7 @@ fn ozone(turnable: &[&str]) -> Seen {
         off: false,
         switched_on: vec![],
         bands: vec![],
+        reach: Reach::Configured,
     }
 }
 
@@ -41,6 +45,7 @@ fn stock(reference: &str, name: &str, class: &str, turnable: &[&str]) -> Seen {
         off: false,
         switched_on: vec![],
         bands: vec![],
+        reach: Reach::Configured,
     }
 }
 
@@ -157,6 +162,7 @@ fn another_device_on_the_track_does_the_job_in_the_agreed_order() {
         off: false,
         switched_on: vec![],
         bands: vec![],
+        reach: Reach::Configured,
     };
     let eq = stock("d4", "EQ Eight", "Eq8", &["Device On", "1 Gain A", "1 Frequency A"]);
     let track = |ozone_knobs: &[&str], pro_l_knobs: &[&str]| vec![limiter("d0"), pro_l(pro_l_knobs), ozone(ozone_knobs), eq.clone()];
@@ -297,6 +303,7 @@ fn a_fix_names_a_mapped_plug_ins_role_when_one_on_the_track_does_the_job() {
         off: false,
         switched_on: vec![],
         bands: vec![],
+        reach: Reach::Configured,
     };
     let fix = plugin_fix(&[ozone(&[]), pro_q], balance, Some("an EQ Eight")).unwrap();
     assert!(fix.starts_with("Pro-Q 4's gain (Band 1 Gain)") && fix.contains("knobs [\"Band 1 Gain\"]"), "{fix}");
@@ -322,6 +329,7 @@ fn low_width_is_the_lowest_bands_width_only() {
         off: false,
         switched_on: vec![],
         bands: vec![],
+        reach: Reach::Configured,
     };
     assert_eq!(plugin_fix(&[supermassive], low, Some("the Imager")), None);
 }
@@ -357,5 +365,50 @@ fn an_eq_band_named_by_role_is_the_one_nearest_the_target() {
     match resolve_near(&[eq], 0, &strings(&["eq gain"]), Some(500.)) {
         Resolved::Refused(why) => assert!(why.starts_with("None of EQ Eight's bands that are on and shape"), "{why}"),
         other => panic!("{other:?}"),
+    }
+}
+
+/// (M4b) What Kumi says of a plug-in parameter it can't turn is each DAW's: Live's words, byte for byte, say to configure it
+/// in the device; Logic Pro's say the Controls View of the plug-in's window, which Kumi opens itself, and none of Live's.
+#[test]
+fn what_kumi_says_of_a_parameter_it_cant_turn_is_each_daws_own() {
+    assert_eq!(
+        (Reach::of(Some(DawId::Logic)), Reach::of(Some(DawId::Ableton)), Reach::of(None)),
+        (Reach::ControlsView, Reach::Configured, Reach::Configured)
+    );
+    // Live: Ozone's ceiling listed, not configured.
+    let Some(Found::Missing(live)) = find(&ozone(&[]), "ceiling") else { panic!("Ozone's ceiling is missing in Live") };
+    let names = live.strip_prefix("Ozone 12's ceiling is ").and_then(|rest| rest.split(" in Live, ").next()).unwrap().to_string();
+    let first = names.split(", ").next().unwrap().split(" and ").next().unwrap().to_string();
+    assert_eq!(
+        live,
+        format!("Ozone 12's ceiling is {names} in Live, and it isn't configured in the device, so Live won't let Kumi turn it. To configure it: click Configure in the plug-in's title bar in Live and move {first} once in its window (Kumi can open the window: set_device_details with isEditorOpen); Live keeps it with the Set.")
+    );
+    let (by_role, to_turn_more) = guide_words(Reach::Configured);
+    assert!(by_role.ends_with("Kumi finds its knob among the plug-in's names in Live and turns it only when it's configured, saying which to configure when it isn't."));
+    assert!(to_turn_more.starts_with("Live lets Kumi turn only the parameters configured in the device. To add some: the producer clicks Configure in the plug-in's title bar"));
+    // Logic Pro: the same knob, through the Controls View, in Logic's words only.
+    let in_logic = Seen { reach: Reach::ControlsView, ..ozone(&[]) };
+    let Some(Found::Missing(logic)) = find(&in_logic, "ceiling") else { panic!("Ozone's ceiling is missing in Logic Pro") };
+    assert!(
+        logic.starts_with("Ozone 12's ceiling is ")
+            && logic.contains("in Logic Pro, and the Controls View of the plug-in's window doesn't show it")
+            && logic.contains("Kumi opens the plug-in's window and its Controls View itself"),
+        "{logic}"
+    );
+    let unlisted = Seen { reach: Reach::ControlsView, listed: Some(vec!["Input Gain".into()]), ..ozone(&[]) };
+    let Some(Found::Missing(unnamed)) = find(&unlisted, "ceiling") else { panic!("no ceiling among the names") };
+    assert!(
+        unnamed.starts_with("None of the 1 parameters the Controls View of Ozone 12's window shows in Logic Pro is Ozone 12's ceiling"),
+        "{unnamed}"
+    );
+    let (by_role, to_turn_more) = guide_words(Reach::ControlsView);
+    assert!(
+        by_role.contains("the Controls View of the plug-in's window shows in Logic Pro")
+            && to_turn_more.contains("Kumi opens the window and its Controls View itself")
+    );
+    let live_words = Regex::new(r"\b(Live|Set|Sets|Ableton|Session|Arrangement|Remote Script|Control Surface|Main|Drum Rack|Operator|[Rr]acks?|[Cc]lips?|[Cc]lip slots?|[Ss]cenes?|Configure|set_device_details)\b").unwrap();
+    for text in [logic.as_str(), unnamed.as_str(), by_role, to_turn_more] {
+        assert!(!live_words.is_match(text), "{text}");
     }
 }

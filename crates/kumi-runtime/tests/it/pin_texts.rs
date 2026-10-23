@@ -65,7 +65,7 @@ use kumi_runtime::{
     plugins::{
         adapters::ADAPTERS,
         registry::{plugin_guide, ExposedParameter},
-        roles::{find, job_for_item, plugin_fix, resolve, Found, Resolved, Seen},
+        roles::{find, job_for_item, plugin_fix, resolve, Found, Reach, Resolved, Seen},
     },
     providers::local::{local_servers, resolve_local_model, LocalModelOptions},
     video::{
@@ -1179,6 +1179,7 @@ fn device(reference: &str, name: &str, class: &str, turnable: &[&str], listed: O
         off: false,
         switched_on: vec![],
         bands: vec![],
+        reach: Reach::Configured,
     }
 }
 fn ozone(turnable: &[&str]) -> Seen {

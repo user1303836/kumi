@@ -115,7 +115,7 @@ impl ToolRole {
 
 /// Kumi's own tools that only read away from the DAW: several calls to them run at once.
 pub const CONCURRENT: &[&str] =
-    &["search_web", "read_web", "find_sounds", "find_presets", "my_sets", "live_manual", "search_conversations"];
+    &["search_web", "read_web", "find_sounds", "find_presets", "my_sets", "live_manual", "logic_manual", "search_conversations"];
 
 #[async_trait(?Send)]
 pub trait KernelTool {
@@ -795,6 +795,11 @@ pub trait Integration {
     async fn recording(&self, signal: Signal) -> Result<Option<bool>, RuntimeError> {
         let _ = signal;
         Ok(None)
+    }
+    /// The octave the DAW names middle C (MIDI 60) in for the project open now, when its project says (Logic Pro's
+    /// "Display Middle C as", which the producer may set apart from Logic's default); None keeps the profile's.
+    fn middle_c_octave(&self) -> Option<i8> {
+        None
     }
     fn has_instant(&self) -> bool {
         self.profile().caps.instant
@@ -2083,6 +2088,11 @@ pub trait SessionController {
     }
     /// The saved Set open in the DAW, by its file, once the session has read it.
     fn open_set(&self) -> Option<String> {
+        None
+    }
+    /// The DAW's profile as this session speaks it: the app's, with what the open project sets apart from it (the
+    /// octave Logic Pro names middle C in); None for a controller that doesn't say (the app's own profile then).
+    fn profile(&self) -> Option<DawProfile> {
         None
     }
     fn has_taste(&self) -> bool {

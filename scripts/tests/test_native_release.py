@@ -159,6 +159,13 @@ class NativeRelease(unittest.TestCase):
         self.assertRegex(reaper, r"^\d+\.\d+\.\d+$")
         self.assertEqual(next(p["version"] for p in cargo_lock if p["name"] == "reaper-kumi"), reaper)
         self.assertEqual(release.renoise_tool(root)[1], re.search(r'return "([^"]+)"', (root / release.RENOISE_TOOL_SOURCE / "payload/version.lua").read_text())[1])
+        # Logic's bridge: the version file the Apple Silicon Mac's bundle carries is its crate's, as Cargo.lock has it (and as
+        # the binary says it: logic-kumi's BRIDGE_VERSION is its package version).
+        logic = cargo_version(release.LOGIC_CRATE + "/Cargo.toml")
+        self.assertRegex(logic, r"^\d+\.\d+\.\d+$")
+        self.assertEqual(next(p["version"] for p in cargo_lock if p["name"] == "logic-kumi"), logic)
+        self.assertEqual(release.crate_version(root, release.LOGIC_CRATE), logic)
+        self.assertIn('BRIDGE_VERSION: &str = env!("CARGO_PKG_VERSION")', (root / release.LOGIC_CRATE / "src/lib.rs").read_text())
 
     def helper_source(self):
         source = self.root / "crates/kumi-runtime/src/integrations/ableton/hands/KumiHands.swift"
@@ -685,14 +692,18 @@ class NativeRelease(unittest.TestCase):
                              {"daws/reaper/reaper_kumi.so", "daws/reaper/reaper_kumi.version", *(prefix + name for name in files)})
             for name in files:
                 self.assertEqual(tar.extractfile(prefix + name).read(), (tool / name).read_bytes(), name)
-            # `bridge` stays Live's, as every earlier Kumi and installer reads it: REAPER's and Renoise's are new keys.
+            # `bridge` stays Live's, as every earlier Kumi and installer reads it: REAPER's and Renoise's are new keys. Linux
+            # has no Logic Pro, so its bundle carries no bridge for it and says none.
             for name in ("package.json", "kumi-install.json"):
                 metadata = json.load(tar.extractfile(name))
                 self.assertEqual((metadata["bridge"], metadata["reaper"], metadata["renoise"]), (result["bridge"], reaper, renoise), name)
+                self.assertNotIn("logic", metadata, name)
+            self.assertFalse([name for name in names if "logic" in name])
             # install.sh reads the first "version" in package.json as Kumi's.
             versions = [line for line in tar.extractfile("package.json").read().decode().splitlines() if '"version"' in line]
             self.assertEqual(versions, [f'  "version": "{result["kumi"]}",'])
         self.assertEqual(json.loads((out / "kumi-release.json").read_text())["reaper"], reaper)
+        self.assertNotIn("logic", json.loads((out / "kumi-release.json").read_text()))
 
     def test_a_bundle_carries_a_checked_extension_or_none_is_built(self):
         with self.assertRaisesRegex(ValueError, "a bundle carries REAPER's extension"):
@@ -711,6 +722,144 @@ class NativeRelease(unittest.TestCase):
         with tarfile.open(out / result["bundle"]) as tar:
             self.assertEqual(tar.extractfile("daws/reaper/reaper_kumi.dll").read(), dll.read_bytes())
             self.assertIn("daw-mcp-server.exe", tar.getnames())
+            # REAPER's and Renoise's, and nothing of Logic Pro's, which Windows doesn't run.
+            prefix = "daws/renoise/com.kumi.Bridge.xrnx/"
+            self.assertEqual({name for name in tar.getnames() if name.startswith("daws/")},
+                             {"daws/reaper/reaper_kumi.dll", "daws/reaper/reaper_kumi.version",
+                              *(prefix + name for name in release.inventory(release.ROOT / release.RENOISE_TOOL_SOURCE))})
+            self.assertFalse([name for name in tar.getnames() if "logic" in name])
+            for name in ("package.json", "kumi-install.json"):
+                self.assertNotIn("logic", json.load(tar.extractfile(name)), name)
+        self.assertNotIn("logic", result)
+
+    def logic_checkout(self):
+        """A checkout with this one's Logic crate manifest and helper source, and that helper built as
+        scripts/build-logic-hands.py leaves it (universal, signed): the checkout, the helper's name and the helper."""
+        checkout = self.root / "checkout"
+        for name in (release.LOGIC_CRATE + "/Cargo.toml", release.LOGIC_HELPER_SOURCE):
+            (checkout / name).parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(release.ROOT / name, checkout / name)
+        name = release.logic_helper_name(checkout)
+        helper = checkout / release.LOGIC_HANDS / name
+        helper.parent.mkdir(parents=True)
+        helper.write_bytes(universal(macho_library(0x01000007), macho_library()))
+        # The bridge as cargo builds it for Apple Silicon: arm64, signed by the linker.
+        (self.binaries / release.LOGIC_BRIDGE).write_bytes(macho_library())
+        return checkout, name, helper
+
+    def test_logics_bridge_is_staged_flat_with_the_current_helper_and_the_crates_version(self):
+        checkout, name, helper = self.logic_checkout()
+        bundle = self.root / "bundle"
+        version = release.stage_logic(checkout, bundle, "aarch64-apple-darwin", self.binaries)
+        crate = release.crate_version(release.ROOT, release.LOGIC_CRATE)
+        self.assertEqual(version, crate)
+        # Where Kumi sets it up from (own.rs: daws/logic/logic-kumi, its `version` read as the bridge's): the bridge, the
+        # helper and the version, and nothing else.
+        folder = bundle / "daws/logic/logic-kumi"
+        self.assertEqual(release.inventory(folder), {"logic-kumi": release.digest(self.binaries / "logic-kumi"),
+                                                     name: release.digest(helper), "version": release.digest(folder / "version")})
+        self.assertEqual((folder / "version").read_bytes(), f"{crate}\n".encode())
+        if EXEC_BITS:
+            modes = {path.name: path.stat().st_mode & 0o777 for path in folder.iterdir()}
+            self.assertEqual(modes, {"logic-kumi": 0o755, name: 0o755, "version": 0o644})
+        # The helper's name is the one scripts/build-logic-hands.py gives its build of this source, in the folder it builds in.
+        spec = importlib.util.spec_from_file_location("build_logic_hands", release.ROOT / "scripts/build-logic-hands.py")
+        hands = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(hands)
+        self.assertEqual(hands.helper_name(checkout / release.LOGIC_HELPER_SOURCE), name)
+        self.assertEqual(hands.OUT.relative_to(hands.ROOT).as_posix(), release.LOGIC_HANDS)
+        self.assertEqual(hands.SOURCE.relative_to(hands.ROOT).as_posix(), release.LOGIC_HELPER_SOURCE)
+        # Only the Apple Silicon Mac's bundle carries it: the others don't look for the helper, nor the bridge.
+        for target in ("x86_64-apple-darwin", "x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu", "x86_64-pc-windows-msvc",
+                       "aarch64-pc-windows-msvc"):
+            with self.subTest(target=target):
+                self.assertIsNone(release.stage_logic(self.root / "nowhere", self.root / target, target, self.root / "nothing"))
+                self.assertFalse((self.root / target).exists())
+
+    def test_logics_bridge_ships_only_the_current_helper_and_a_bridge_apple_silicon_runs(self):
+        checkout, name, helper = self.logic_checkout()
+        hands = helper.parent
+        stage = lambda: release.stage_logic(checkout, self.root / "bundle", "aarch64-apple-darwin", self.binaries)
+        built = helper.read_bytes()
+        helper.unlink()
+        with self.assertRaisesRegex(ValueError, "run python3 scripts/build-logic-hands.py first"):
+            stage()
+        # An older source's build, alone or beside the current one, and a build left half done.
+        for others in (["kumi-logic-hands-000000000000"], ["kumi-logic-hands-000000000000", name], [name + ".partial", name]):
+            with self.subTest(others=others):
+                for other in others:
+                    (hands / other).write_bytes(built)
+                with self.assertRaisesRegex(ValueError, f"build of the current source alone, {name}, not "):
+                    stage()
+                for other in others:
+                    (hands / other).unlink()
+        helper.write_bytes(built)
+        stage()
+        # What Apple Silicon wouldn't run: a bridge built for another system or architecture, a helper not signed.
+        for bridge, data, said in [(True, elf_library(183), "logic-kumi isn't a Mach-O"),
+                                   (True, macho_library(0x01000007), "logic-kumi holds x86_64, not arm64"),
+                                   (True, macho_library(signed=False), "logic-kumi (arm64) isn't signed"),
+                                   (False, universal(macho_library(0x01000007), macho_library(signed=False)), f"{name} (arm64) isn't signed")]:
+            with self.subTest(said=said):
+                (self.binaries / "logic-kumi").write_bytes(macho_library())
+                helper.write_bytes(built)
+                (self.binaries / "logic-kumi" if bridge else helper).write_bytes(data)
+                with self.assertRaisesRegex(ValueError, re.escape(said)):
+                    stage()
+        (self.binaries / "logic-kumi").write_bytes(macho_library())
+        helper.write_bytes(built)
+        # A link, for the helper or the bridge: the lifecycle refuses links, so the bundle never holds one.
+        target = self.root / "linked"
+        target.write_bytes(built)
+        helper.unlink()
+        try:
+            helper.symlink_to(target)
+        except OSError:
+            return  # Windows runners may not grant symlink creation.
+        with self.assertRaisesRegex(ValueError, "link or special file"):
+            stage()
+        helper.unlink()
+        helper.write_bytes(built)
+        (self.binaries / "logic-kumi").unlink()
+        (self.binaries / "logic-kumi").symlink_to(target)
+        with self.assertRaisesRegex(ValueError, "payload must be a regular file"):
+            stage()
+
+    def test_the_apple_silicon_macs_bundle_carries_logics_bridge_and_the_intel_macs_none(self):
+        checkout, name, helper = self.logic_checkout()
+        extension = self.library(universal(macho_library(0x01000007), macho_library()), "reaper_kumi.dylib")
+        crate = release.crate_version(release.ROOT, release.LOGIC_CRATE)
+        tool = release.inventory(release.ROOT / release.RENOISE_TOOL_SOURCE)
+        staged = release.stage_logic
+        # Live's helper is stage_hands' (tested above); Logic's comes from the checkout made here.
+        with patch.object(release, "stage_hands"), \
+                patch.object(release, "stage_logic", side_effect=lambda root, *rest: staged(checkout, *rest)):
+            for target in ("aarch64-apple-darwin", "x86_64-apple-darwin"):
+                out = self.root / target
+                result = release.build_release(release.ROOT, self.binaries, out, target, self.source, self.builder, "fixture",
+                                               reaper_extension=extension)
+                with tarfile.open(out / result["bundle"]) as tar:
+                    names = set(tar.getnames())
+                    daws = {"daws/reaper/reaper_kumi.dylib", "daws/reaper/reaper_kumi.version",
+                            *("daws/renoise/com.kumi.Bridge.xrnx/" + file for file in tool)}
+                    logic = {f"daws/logic/logic-kumi/{file}" for file in ("logic-kumi", name, "version")}
+                    metadata = [json.load(tar.extractfile(file)) for file in ("package.json", "kumi-install.json")]
+                    if target == "aarch64-apple-darwin":
+                        self.assertEqual({file for file in names if file.startswith("daws/")}, daws | logic)
+                        self.assertEqual(tar.extractfile("daws/logic/logic-kumi/logic-kumi").read(), (self.binaries / "logic-kumi").read_bytes())
+                        self.assertEqual(tar.extractfile(f"daws/logic/logic-kumi/{name}").read(), helper.read_bytes())
+                        self.assertEqual(tar.extractfile("daws/logic/logic-kumi/version").read(), f"{crate}\n".encode())
+                        if EXEC_BITS:
+                            self.assertEqual([tar.getmember(file).mode for file in sorted(logic)], [0o755, 0o755, 0o644])
+                        # Kumi sets it up from daws/logic alone: the host runs the copy in Kumi's folder, never one beside Kumi.
+                        self.assertNotIn("logic-kumi", names)
+                        self.assertEqual([value.get("logic") for value in metadata] + [result.get("logic")], [crate] * 3)
+                        self.assertEqual(json.loads((out / "kumi-release.json").read_text())["logic"], crate)
+                    else:
+                        # Logic Pro 12 runs on Apple Silicon only: the Intel Mac's bundle carries no bridge for it, and says none.
+                        self.assertEqual({file for file in names if file.startswith("daws/")}, daws)
+                        self.assertFalse([file for file in names if "logic" in file])
+                        self.assertEqual([value.get("logic", "none") for value in metadata] + [result.get("logic", "none")], ["none"] * 3)
 
     def test_the_aggregate_refuses_targets_whose_daw_bridges_differ(self):
         spec = importlib.util.spec_from_file_location("migration_release", release.ROOT / "scripts/build-migration-release.py")
@@ -730,6 +879,38 @@ class NativeRelease(unittest.TestCase):
         same = json.loads(manifests[1].read_text())
         manifests[1].write_text(json.dumps({**same, "reaper": "0.1.0"}))
         self.assertEqual(migration.build(manifests, self.root / "aggregate", "24.0.0")["bridge"], "1.0.93")
+
+    def test_the_aggregate_compares_logics_bridge_among_the_macs_that_carry_it(self):
+        spec = importlib.util.spec_from_file_location("migration_release", release.ROOT / "scripts/build-migration-release.py")
+        migration = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(migration)
+        def manifests(logic: dict[str, str | None]) -> list[Path]:
+            """One commit's target manifests, each target's Logic bridge as given (None: it carries none)."""
+            folder = Path(tempfile.mkdtemp(dir=self.root))
+            paths = []
+            for target, version in logic.items():
+                out = folder / target
+                out.mkdir()
+                (out / "kumi.tar.gz").write_bytes(target.encode())
+                manifest = {"kumi": "1.20.0", "bundle": "kumi.tar.gz", "sha256": release.digest(out / "kumi.tar.gz"), "runtime": "rust-native",
+                            "target": target, "bridge": "1.0.93", "reaper": "0.1.0", "renoise": "1.0.0",
+                            **({"logic": version} if version else {})}
+                (out / "kumi-release.json").write_text(json.dumps(manifest))
+                paths.append(out / "kumi-release.json")
+            return paths
+        everyone = {"aarch64-apple-darwin": "0.1.0", "x86_64-apple-darwin": None, "x86_64-unknown-linux-gnu": None,
+                    "aarch64-pc-windows-msvc": None}
+        built = migration.build(manifests(everyone), self.root / "aggregate", "24.0.0")
+        self.assertEqual({target: value.get("logic") for target, value in built["targets"].items()}, everyone)
+        # Only the Apple Silicon Mac's bundle carries it: one elsewhere is a bundle built some other way.
+        for target in ("x86_64-apple-darwin", "x86_64-unknown-linux-gnu"):
+            with self.subTest(target=target), self.assertRaisesRegex(ValueError, f"only aarch64-apple-darwin carries Logic Pro's bridge, not {target}"):
+                migration.build(manifests({**everyone, target: "0.1.0"}), self.root / "refused", "24.0.0")
+        # Among the Macs that carry it, one version, as for every other bridge.
+        with patch.object(migration.native, "LOGIC_TARGETS", ("aarch64-apple-darwin", "x86_64-apple-darwin")):
+            with self.assertRaisesRegex(ValueError, "the Mac targets that carry Logic Pro's bridge must have the same version of it"):
+                migration.build(manifests({**everyone, "x86_64-apple-darwin": "0.1.1"}), self.root / "refused", "24.0.0")
+            migration.build(manifests({**everyone, "x86_64-apple-darwin": "0.1.0"}), self.root / "aggregate", "24.0.0")
 
     def test_renoise_tool_ships_only_its_own_files_with_one_version(self):
         root = self.root / "checkout"

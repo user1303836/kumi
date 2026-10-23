@@ -4,6 +4,8 @@
 
 桥接由两部分组成：由 Live 加载的 `AbletonMcpBridge` Remote Script，以及由 Kumi（或其他 MCP 客户端）启动的本地 MCP 服务器。两者都在同一个包 `@ableton-mcp/mcp-server` 中，并由同一个工具安装：桥接的生命周期 CLI `ableton-mcp-server lifecycle`。它在做任何修改之前先制定计划，把安装的内容记录在回执中，并且能够精确地修复、回滚和移除这些内容。使用 Kumi 时，`kumi bridge` 会替你运行它。
 
+Kumi 为 Logic Pro 提供的桥接是另一个程序，Kumi 把它安装在自己的文件夹中，而不是装进 Logic Pro：见 [Logic Pro 桥接](#logic-pro-桥接)。
+
 ## 使用 Kumi 安装
 
 运行 `kumi`：它会把桥接装入 Live，也可以替你重启 Live。手动操作时，退出 Live，然后运行 `kumi bridge`。它会：
@@ -36,6 +38,22 @@ Kumi 在 REAPER 和 Renoise 中的桥接，不经由桥接的 CLI，而是通过
 - **回执与各代副本：** `~/.kumi/bridges/<daw>/install-receipt.json` 记录每一步，最多最新 20 条：`install`、`upgrade`、`reinstall`（把同一版本装回被改动过的副本上）、`rollback` 和 `uninstall`。当前的副本和它之前的三个保存在 `generations` 中以供回滚；带来已就位副本的更新什么也不改变。
 - **不丢失任何东西：** DAW 文件夹中不是 Kumi 放入的副本（之后被改动过，或在 Kumi 之前就存在），在被替换或移除之前，会先保存到 `~/.kumi/bridges/<daw>/changed`。Renoise 写入的工具 `preferences.xml` 会随工具保留，`.DS_Store`、`Thumbs.db` 和 `desktop.ini` 从不算作改动。`kumi uninstall` 会把这些副本留在原处，比较离开期间变化所用的状态（`snapshots`）也会保留，除非加上 `--all`；`~/.kumi/bridges` 中的其他内容会被移除。
 - **回滚与移除：** `kumi update --rollback` 把每个桥接恢复到之前那个 Kumi 附带的版本（两个 DAW 都不认识的 Kumi 会把它们原样留下）；`kumi uninstall` 按回执记录的位置把它们移除。
+
+## Logic Pro 桥接
+
+Logic Pro 不从外部加载任何东西，所以它的桥接不放进 Logic Pro。它是 Kumi 的一个程序 `logic-kumi`，带有它的辅助功能辅助程序 `kumi-logic-hands-<hash>`（一个通用、临时签名的 Swift 程序）。会话开始时，由 Kumi 为 Logic Pro 提供的主机 `daw-mcp-server --daw logic` 在 Logic Pro 旁边启动它，而这个主机由 Kumi 从它自己的二进制文件旁边启动。只有搭载 Apple 芯片的 Mac 上的 Kumi 带有它，放在 `kumi` 旁边的 `daws/logic/logic-kumi/` 中：桥接、辅助程序和一个 `version` 文件。
+
+`kumi --daw logic bridge`（或设置中的 **Connect to Logic Pro**）通过 Kumi 自己的各个桥接共用的生命周期（daw-bridge 的生命周期）把那个文件夹复制到 Kumi 自己的文件夹中：它检查文件夹的哈希，记录回执，保留较早的版本以便回滚，并拒绝其中的链接。Logic Pro 可以保持打开：Logic Pro 的任何东西都不会改变，而且桥接只在 Kumi 运行时才运行。
+
+| 内容 | 位置 |
+| --- | --- |
+| 桥接、它的辅助程序和 `version` | `~/.kumi/bridges/logic/bridge/logic-kumi/`，连同 `bridge-reference.json` |
+| 它的密钥、发现文件和日志 | `~/.kumi/bridges/logic/` 中的 `bridge.secret`、`discovery/` 和 `logs/` |
+| 回执、锁、进行中修改的操作日志，以及为回滚保留的版本 | `~/.kumi/bridges/logic/` 中的 `install-receipt.json`、`lifecycle.lock`、`lifecycle-journal.json` 和 `generations/` |
+
+桥接在 127.0.0.1 上监听 9790 到 9799 中第一个空闲的端口，并在它的发现文件中写明是哪一个；Kumi 的主机和桥接在传递任何其他内容之前，先证明双方都知道它的密钥。新的 Kumi 带有更新的桥接时，`kumi update` 会把桥接更新到最新，`kumi update --rollback` 会恢复之前那个 Kumi 的桥接，`kumi uninstall` 会把它移除，这些都不需要等待 Logic Pro。`kumi --daw logic doctor` 会检查它。在 Intel Mac、Linux 或 Windows 上，Kumi 不带 Logic Pro 桥接，`kumi --daw logic bridge` 什么都不安装，并说明 Logic Pro 只在搭载 Apple 芯片的 Mac 上受支持。
+
+`KUMI_LOGIC_BRIDGE_SOURCE` 指定一个按发布版本的方式布置桥接的文件夹，改为从那里安装桥接。在 Mac 上，源码副本的构建会把它自己的桥接暂存到 `target/logic-bridge/logic-kumi/` 中（`cargo build -p logic-kumi`；辅助程序还不存在时，由 `scripts/build-logic-hands.py` 构建），然后安装那一份。
 
 ## 独立桥接
 

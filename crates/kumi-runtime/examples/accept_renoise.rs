@@ -947,7 +947,7 @@ fn main() {
         context.on_action = Some(Rc::new(move |event: ActionEvent| into_told.borrow_mut().push(event.title)));
         context.on_focus = Some(Rc::new(move |seen| into_focus.borrow_mut().push((Instant::now(), seen))));
         context.focus_drawn = true;
-        let options = OwnOptions { context, kumi_home: home.clone(), connect: Some(connect) };
+        let options = OwnOptions { context, kumi_home: home.clone(), connect: Some(connect), open_file: None };
         let daw = create_renoise_integration(options);
         let t = Instant::now();
         if let Err(error) = daw.start(Signal::new()).await {

@@ -39,10 +39,16 @@ def build(inputs: list[Path], out: Path, node: str, timestamp: int = 0, release_
         releases[target] = (value, path.parent / bundle)
     if not releases:
         raise ValueError("at least one target release is required")
-    # One commit's bundles: the same Kumi, Live's bridge, REAPER's extension and Renoise's tool on every target.
+    # One commit's bundles: the same Kumi, Live's bridge, REAPER's extension and Renoise's tool on every target, and the
+    # same Logic Pro bridge on each Mac target that carries one (the Apple Silicon Mac's), none elsewhere.
     versions = {tuple(value[0].get(key) for key in ("kumi", "bridge", "reaper", "renoise")) for value in releases.values()}
     if len(versions) != 1:
         raise ValueError("all targets must have the same Kumi, bridge, REAPER extension and Renoise tool versions")
+    if len({value[0].get("logic") for target, value in releases.items() if target in native.LOGIC_TARGETS}) > 1:
+        raise ValueError("the Mac targets that carry Logic Pro's bridge must have the same version of it")
+    stray = sorted(target for target, value in releases.items() if target not in native.LOGIC_TARGETS and "logic" in value[0])
+    if stray:
+        raise ValueError(f"only {', '.join(native.LOGIC_TARGETS)} carries Logic Pro's bridge, not {', '.join(stray)}")
     version, bridge, _, _ = versions.pop()
     targets = {target: item[0] for target, item in sorted(releases.items())}
     base = (release_base or f"https://github.com/user1303836/kumi/releases/download/v{version}").rstrip("/")

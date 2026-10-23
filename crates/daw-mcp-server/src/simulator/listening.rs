@@ -565,6 +565,7 @@ impl SimListening {
                 match state.daw {
                     Daw::Reaper => "The audition playing was stopped: REAPER closes its audio device to render".into(),
                     Daw::Renoise => "Renoise stopped playback to render.".into(),
+                    Daw::Logic => unreachable!("Logic's simulator hears through its own listen module"),
                 },
             );
         }
@@ -716,6 +717,7 @@ impl SimListening {
                 answer["via"] = "song".into();
                 answer["note"] = "Renoise plays the song over that part".into();
             }
+            Daw::Logic => unreachable!("Logic's simulator hears through its own listen module"),
         }
         Ok(answer)
     }
@@ -729,6 +731,7 @@ impl SimListening {
                     "That's a MIDI item, which has no sound of its own: listen to its track instead (Kumi renders it)".into(),
                 ),
                 Daw::Renoise => ("failed".into(), "That sample has no audio".into()),
+                Daw::Logic => unreachable!("Logic's simulator hears through its own listen module"),
             });
         }
         let kind = reference.split(':').nth(1).unwrap_or_default();
@@ -798,6 +801,7 @@ impl SimListening {
                     let reference = match state.daw {
                         Daw::Reaper => format!("r:track:{{C{:04}}}", state.next_copy),
                         Daw::Renoise => format!("{epoch}:track:{}", 900 + state.next_copy),
+                        Daw::Logic => unreachable!("Logic's simulator hears through its own listen module"),
                     };
                     copies.push((reference, format!("Kumi · try {tag} {n}"), source.clone(), vec![]));
                 }

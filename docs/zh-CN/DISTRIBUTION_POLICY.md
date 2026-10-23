@@ -11,15 +11,16 @@ Kumi 及其桥接如何送到用户手中，这能证明什么、不能证明什
 | Kumi | `user1303836/kumi` 的 GitHub Releases：原生 `kumi-<target>.tar.gz`、兼容包 `kumi.tar.gz`、`kumi-release.json`、`SHA256SUMS`，以及安装程序 `install.sh` 和 `install.ps1`，由 Installer 工作流附加到每个 `vX.Y.Z` 标签上 | `install.sh` 或 `install.ps1`，之后用 `kumi update` |
 | 桥接（`@ableton-mcp/mcp-server`） | 包含在每个 Kumi 发行包中：既有原生桥接 tarball，也有已解包的桥接包 | `kumi bridge`，它通过桥接的生命周期进行安装（[安装桥接](DELIVERY.md)） |
 | REAPER 的扩展和 Renoise 的工具 | 包含在每个 Kumi 发行包的 `daws/` 中，与 `daw-mcp-server` 一起 | `kumi --daw reaper bridge`、`kumi --daw renoise bridge` 和 `kumi update`（[安装桥接](DELIVERY.md#reaper-的扩展和-renoise-的工具)） |
+| Logic Pro 桥接（`logic-kumi` 及其辅助程序） | 仅包含在面向搭载 Apple 芯片的 Mac 的 Kumi 发行包中，位于 `daws/logic/logic-kumi/` | `kumi --daw logic bridge`，它把桥接安装到 Kumi 自己的文件夹（[安装桥接](DELIVERY.md#logic-pro-桥接)） |
 | 单独的桥接 | 没有自己的发布版本。用 `python3 scripts/build-native-release.py --bridge-only` 构建（[构建选项](DEVELOPER_GUIDE.md#发布)） | 生命周期 CLI（[安装桥接](DELIVERY.md#独立桥接)） |
 
 一行安装命令从最新的已发布版本获取安装程序，它安装该版本的发行包（或 `KUMI_VERSION` 指定的版本）。对安装程序的改动只会随发布版本、在其标签的安装测试通过后才到达用户。`main` 分支仍在原来的 raw 地址保留两个安装程序，供旧链接使用。在其标签的 Installer 运行通过并发布它之前，发布版本只是草稿（手动推送的标签要等维护者撰写说明并发布），只有已发布的版本才是“latest”。不会向 npm 发布任何内容：每个包都是 `private: true`，所以 `npm publish` 会拒绝。
 
 ## 只证明完整性，不证明身份
 
-应用和桥接没有发布者签名或公证，也没有 `.pkg`、`.msi` 安装程序。macOS 的 Hands 辅助程序使用临时签名（ad-hoc），这不证明发布者身份。安装程序和 `kumi update` 对照 `kumi-release.json` 中的 sha256 检查发行包。全新原生安装不会下载 Node。`kumi bridge` 对照构建发行包时记录的哈希检查桥接 tarball。与下载内容来自同一处的校验和只能证明字节完整送达，不能证明是谁制作的。
+应用和桥接没有发布者签名或公证，也没有 `.pkg`、`.msi` 安装程序。macOS 的 Hands 辅助程序，以及 Logic Pro 桥接和它的辅助程序，都使用临时签名（ad-hoc），这不证明发布者身份。安装程序和 `kumi update` 对照 `kumi-release.json` 中的 sha256 检查发行包。全新原生安装不会下载 Node。`kumi bridge` 对照构建发行包时记录的哈希检查桥接 tarball。与下载内容来自同一处的校验和只能证明字节完整送达，不能证明是谁制作的。
 
-本软件采用 [MIT 许可证](../../LICENSE.md)。该许可证不授予任何 Ableton 商标权利，Kumi 与 Ableton 没有关联，也未获其认可。
+本软件采用 [MIT 许可证](../../LICENSE.md)。该许可证不授予任何 Ableton 或 Apple 的商标权利，Kumi 与 Ableton、Apple 均没有关联，也未获其认可。
 
 ## 桥接的包可以包含什么
 

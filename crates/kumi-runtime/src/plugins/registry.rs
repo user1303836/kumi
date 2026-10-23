@@ -13,6 +13,7 @@ use serde_json::{json, Map, Value};
 use crate::plugins::adapter::OsPaths;
 pub use crate::plugins::adapter::PluginAdapter;
 use crate::plugins::adapters::ADAPTERS;
+use crate::plugins::roles::Reach;
 
 /// The adapter for a plug-in device, by the name Live shows for it; `adapters` defaults to Kumi's own.
 pub fn adapter_for<'a>(device_name: &str, adapters: Option<&[&'a PluginAdapter]>) -> Option<&'a PluginAdapter> {
@@ -68,6 +69,33 @@ pub fn group_names(names: &[String], max_groups: usize) -> Vec<NameGroup> {
 /// matched to the plug-in's real parameter names (marked when Live exposes them), what Kumi can turn now,
 /// and the rest of the names, grouped.
 pub fn plugin_guide(device: &str, adapter: Option<&PluginAdapter>, all: &[String], exposed: &[ExposedParameter]) -> Map<String, Value> {
+    plugin_guide_in(Reach::Configured, device, adapter, all, exposed)
+}
+
+/// What the guide says of finding a role's knob, and of turning more of a plug-in's parameters, in its DAW's words:
+/// Live's configured parameters, or Logic Pro's plug-in window's Controls View.
+pub fn guide_words(reach: Reach) -> (&'static str, &'static str) {
+    match reach {
+        Reach::Configured => (
+            "tune takes a role from these sections in knobs (such as \"ceiling\"), or a job (\"limiter gain\", \"ceiling\", \"eq gain\"): Kumi finds its knob among the plug-in's names in Live and turns it only when it's configured, saying which to configure when it isn't.",
+            "Live lets Kumi turn only the parameters configured in the device. To add some: the producer clicks Configure in the plug-in's title bar and moves those knobs in its window once (Live keeps them with the Set; Save as Default Configuration in the title bar's menu keeps them for every new one). Kumi can open the plug-in's window with set_device_details (isEditorOpen).",
+        ),
+        Reach::ControlsView => (
+            "tune takes a role from these sections in knobs (such as \"ceiling\"), or a job (\"limiter gain\", \"ceiling\", \"eq gain\"): Kumi finds its knob among the parameters the Controls View of the plug-in's window shows in Logic Pro, and sets it there.",
+            "Logic Pro lets Kumi set any parameter the Controls View of a plug-in's window shows (View > Controls in the window): Kumi opens the window and its Controls View itself for each change and closes it after, so nothing needs configuring. A parameter it doesn't show isn't one Kumi can set.",
+        ),
+    }
+}
+
+/// The guide, in the words of the DAW whose way of reaching parameters `reach` is.
+pub fn plugin_guide_in(
+    reach: Reach,
+    device: &str,
+    adapter: Option<&PluginAdapter>,
+    all: &[String],
+    exposed: &[ExposedParameter],
+) -> Map<String, Value> {
+    let (by_role, to_turn_more) = guide_words(reach);
     let exposed_names: HashSet<String> = exposed.iter().map(|parameter| parameter.name.to_lowercase()).collect();
     let mark =
         |name: &str| if exposed_names.contains(&name.to_lowercase()) { format!("{name} (Kumi can turn it)") } else { name.to_string() };
@@ -137,13 +165,10 @@ pub fn plugin_guide(device: &str, adapter: Option<&PluginAdapter>, all: &[String
     if let Some(adapter) = adapter {
         guide.insert("recipes".into(), json!(adapter.recipes));
         guide.insert("beyond".into(), json!(adapter.beyond));
-        guide.insert(
-            "byRole".into(),
-            json!("tune takes a role from these sections in knobs (such as \"ceiling\"), or a job (\"limiter gain\", \"ceiling\", \"eq gain\"): Kumi finds its knob among the plug-in's names in Live and turns it only when it's configured, saying which to configure when it isn't."),
-        );
+        guide.insert("byRole".into(), json!(by_role));
     }
     if !hidden.is_empty() {
-        guide.insert("toTurnMore".into(), json!("Live lets Kumi turn only the parameters configured in the device. To add some: the producer clicks Configure in the plug-in's title bar and moves those knobs in its window once (Live keeps them with the Set; Save as Default Configuration in the title bar's menu keeps them for every new one). Kumi can open the plug-in's window with set_device_details (isEditorOpen)."));
+        guide.insert("toTurnMore".into(), json!(to_turn_more));
     }
     if let Some(wavetable) = adapter.and_then(|adapter| adapter.wavetable) {
         let name = adapter.map(|adapter| adapter.name).unwrap_or_default();

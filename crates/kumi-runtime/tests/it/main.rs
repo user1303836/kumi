@@ -43,6 +43,7 @@ mod library_files;
 mod library_handle;
 mod library_learn;
 mod library_learner;
+mod library_logic;
 mod library_manual;
 #[cfg(unix)]
 mod library_room;
@@ -69,6 +70,9 @@ mod live_snapshots;
 mod live_views;
 mod local;
 mod local_servers;
+mod logic_catch_up;
+mod logic_first_request;
+mod logic_manual;
 mod loop_run;
 mod match_run;
 mod mcp;

@@ -2,15 +2,15 @@
 
 English · [简体中文](../zh-CN/SUPPORT_MATRIX.md) · [日本語](../ja/SUPPORT_MATRIX.md)
 
-What Kumi and its bridges run on, which versions of Live, REAPER and Renoise
-they work with, and what has been tested where. [Implementation status](IMPLEMENTATION_STATUS.md)
+What Kumi and its bridges run on, which versions of Live, REAPER, Renoise and
+Logic Pro they work with, and what has been tested where. [Implementation status](IMPLEMENTATION_STATUS.md)
 lists the evidence behind each "tested".
 
 ## Kumi
 
 | System | Versions | Processors | Status |
 | --- | --- | --- | --- |
-| macOS | 13 (Ventura) or later | Apple silicon, Intel | Native build/install CI; earlier TypeScript releases tested with Live on Apple silicon |
+| macOS | 13 (Ventura) or later | Apple silicon, Intel; Logic Pro: Apple silicon only | Native build/install CI; earlier TypeScript releases tested with Live on Apple silicon; Logic Pro tested on Apple silicon |
 | Windows | 10 or 11 | x64, ARM64 | Native build/install CI; earlier TypeScript releases tested with Live on Windows 10; see [Windows](#windows) |
 | Linux | glibc 2.35 or later (Ubuntu 22.04, Debian 12 or newer; not Alpine or other musl) | x64, ARM64 | Native build/install CI; no Live for Linux, but REAPER and Renoise run there |
 
@@ -51,6 +51,25 @@ Native editing (groups, Arrangement automation, scene/global Follow Actions and 
 - On every system, CI puts both bridges into scratch DAW folders, updates them,
   rolls back twice and uninstalls them, through Kumi's own commands.
 - Renoise's demo can't render, so Kumi can't listen to a song there.
+
+## Logic Pro
+
+| Logic Pro | Status |
+| --- | --- |
+| 12, on an Apple silicon Mac | Supported through Kumi's Logic Pro bridge ([Connect to Logic Pro](KUMI_GUIDE.md#connect-to-logic-pro)): the App Store's Logic Pro (`com.apple.logic10`) and the Creator Studio one (`com.apple.mobilelogic`). Tested on Logic Pro 12.3.1, the App Store's, in English, on macOS 26.6.1. |
+| 11 or earlier | Not supported; `kumi --daw logic doctor` says so. |
+| Intel Macs, Linux, Windows | No Logic Pro bridge. Logic Pro 12 runs on Apple silicon Macs only, so only the Apple silicon Mac's Kumi carries the bridge; the others say "Logic Pro is supported on Apple Silicon Macs only" and set nothing up. |
+
+The bridge is a program of Kumi's beside Logic Pro, in Kumi's own folder: it
+reads and works Logic Pro through macOS's Accessibility (granted once to the
+app Kumi runs in), Logic Pro's key commands and menus and a Mackie Control
+surface on virtual MIDI ports, and hears Logic Pro through a Core Audio process
+tap, which needs macOS 14.2 or later (and, where macOS asks for it, System
+Audio Recording). A Logic Pro in another language is untested: the bridge reads
+Logic Pro's labels in its own translations, which were checked by hand on
+German only. What Kumi covers there is in the
+[capability matrix](CAPABILITY_MATRIX.md#logic-pro), and the runs on the real
+Logic Pro are in [implementation status](IMPLEMENTATION_STATUS.md#what-has-been-tested-where).
 
 ## Windows
 
@@ -112,6 +131,7 @@ makers decide.
 
 CI runs on GitHub's hosted macOS, Ubuntu and Windows runners: Rust builds and
 tests, the Remote Script's and the Live extension's tests, REAPER's extension
-loaded on each system, Renoise's tool's tests, six target bundles, and
-installation and migration tests. None has Live, REAPER or Renoise. [Testing](TESTING.md#ci)
+loaded on each system, Renoise's tool's tests, the Logic Pro bridge's tests on
+macOS (over recorded scenes and a simulated Logic Pro), six target bundles, and
+installation and migration tests. None has Live, REAPER, Renoise or Logic Pro. [Testing](TESTING.md#ci)
 lists every job.

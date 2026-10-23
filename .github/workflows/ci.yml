@@ -31,6 +31,7 @@ jobs:
       rust: ${{ steps.paths.outputs.rust_linux }}
       reaper: ${{ steps.paths.outputs.reaper_extension }}
       renoise: ${{ steps.paths.outputs.renoise_tool }}
+      logic: ${{ steps.paths.outputs.logic_bridge }}
       packages: ${{ steps.paths.outputs.packages }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (Node 24)
@@ -347,6 +348,34 @@ jobs:
           KUMI_REQUIRE_LUALS: "1"
         run: sh daws/renoise/tests/run.sh
 
+  logic-bridge:
+    # Logic's bridge is Kumi's own process beside Logic (nothing loads into Logic), so it is tested where it runs: the
+    # shared crate's and the host's tests with their Logic parts, and the bridge crate's own, on macOS, with its
+    # Accessibility helper built by its script first.
+    name: Logic bridge
+    needs: changes
+    if: needs.changes.outputs.logic == 'true'
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
+      - uses: Swatinem/rust-cache@63fed3e2fecf6f7b51dc6f043341b79ef82a9ae7 # v2.9.2
+        with:
+          key: logic-bridge
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - uses: taiki-e/install-action@e407f7bafb71fd004bc5c2da3032e5470cbb6ef0 # v2
+        with:
+          tool: nextest
+      - name: The Accessibility helper
+        shell: bash
+        run: python3 scripts/build-logic-hands.py
+      - name: The bridge crates' tests, in a home of their own (no test reaches this machine's ~/.kumi or Logic)
+        shell: bash
+        env:
+          KUMI_PACKAGES: daw-bridge daw-mcp-server logic-kumi
+        run: sh scripts/test-isolated.sh --no-fail-fast
+
   scripts:
     name: Release scripts
     runs-on: ubuntu-24.04
@@ -404,7 +433,7 @@ jobs:
   required:
     name: Required CI
     if: always()
-    needs: [changes, rust-linux, rust-lint, rust-platforms, remote-script, live-extension, reaper-extension, renoise-tool, scripts]
+    needs: [changes, rust-linux, rust-lint, rust-platforms, remote-script, live-extension, reaper-extension, renoise-tool, logic-bridge, scripts]
     runs-on: ubuntu-24.04
     steps:
       - name: Require every job above (the builds may skip a documentation-only change)
@@ -422,3 +451,4 @@ jobs:
           ok "${{ needs.live-extension.result }}" "${{ needs.changes.outputs.code }}"
           ok "${{ needs.reaper-extension.result }}" "${{ needs.changes.outputs.reaper }}"
           ok "${{ needs.renoise-tool.result }}" "${{ needs.changes.outputs.renoise }}"
+          ok "${{ needs.logic-bridge.result }}" "${{ needs.changes.outputs.logic }}"

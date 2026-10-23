@@ -1,0 +1,546 @@
+{
+ "about": "A synthetic Logic Pro User Guide for Kumi's Logic eval (examples/eval_logic.rs): a few topics in the shape of Apple's guide (its contents' parts and chapters, each topic's introduction and sections, their ids), written for the eval and not Apple's text. What it says of Logic Pro follows Kumi's own findings on the real Logic (docs/evidence/logic-*). The harness lays it out as Apple's site lays the guide out, and Kumi's own parser reads it.",
+ "base": "https://guide.test/guide/logicpro/welcome/mac",
+ "topics": [
+  {
+   "id": "lgcp4c1e9a02",
+   "title": "Undo and redo edits",
+   "in": [
+    "Logic Pro basics"
+   ],
+   "intro": [
+    "Logic Pro keeps a history of the edits you make in a project, so you can take them back one at a time and make them again."
+   ],
+   "sections": [
+    {
+     "id": "lgcp4c1e9a03",
+     "title": "Undo or redo the last edit",
+     "text": [
+      "Choose Edit > Undo (or press Command-Z) to take back the last edit; the menu item names the edit it takes back. Choose Edit > Redo (or press Shift-Command-Z) to make it again."
+     ]
+    },
+    {
+     "id": "lgcp4c1e9a04",
+     "title": "See the undo history",
+     "text": [
+      "Choose Edit > Undo History to see the steps the project keeps, the newest last. Click a step to take back every step after it."
+     ]
+    },
+    {
+     "id": "lgcp4c1e9a05",
+     "title": "What the undo history doesn't keep",
+     "text": [
+      "The undo history keeps edits to the project: regions and the events in them, tracks made, deleted or renamed, markers, the Tempo and Signature Lists, Track Stacks, plug-ins inserted or removed, patches loaded, and sends made or removed.",
+      "A channel strip's volume fader and pan knob, its Mute, Solo and Record Enable buttons, a plug-in's bypass, a plug-in's parameters and settings, Smart Controls, a send's level, the cycle area and the tempo you set in the control bar aren't steps of the project's undo history: Edit > Undo doesn't take them back. A plug-in window keeps its own undo for its parameters."
+     ]
+    }
+   ]
+  },
+  {
+   "id": "lgcp7d20b5e1",
+   "title": "Key commands overview",
+   "in": [
+    "Settings, project settings, and key commands",
+    "Key commands"
+   ],
+   "intro": [
+    "A key command runs a Logic Pro function from the keyboard. Most functions act on what is selected: the selected regions or events in the Tracks area or an editor, or the selected track. A command that edits regions does nothing when no region is selected."
+   ],
+   "sections": [
+    {
+     "id": "lgcp7d20b5e2",
+     "title": "Open the Key Commands window",
+     "text": [
+      "Choose Logic Pro > Key Commands > Edit (or press Option-K) to see every function with the key command assigned to it, search the list by name, and assign your own."
+     ]
+    },
+    {
+     "id": "lgcp7d20b5e3",
+     "title": "Key commands and the playhead",
+     "text": [
+      "Functions that work at a position, such as splitting regions or creating a marker, use the playhead: move the playhead first, then press the key command."
+     ]
+    }
+   ]
+  },
+  {
+   "id": "lgcp7d20b5f0",
+   "title": "Tracks area key commands",
+   "in": [
+    "Settings, project settings, and key commands",
+    "Key commands",
+    "Key command tables"
+   ],
+   "intro": [
+    "These are the key commands of the U.S. preset for the Tracks area. Each acts on the selected regions or tracks."
+   ],
+   "sections": [
+    {
+     "id": "lgcp7d20b5f1",
+     "title": "Edit regions",
+     "text": [],
+     "table": [
+      [
+       "Function",
+       "Key command"
+      ],
+      [
+       "Split Regions/Events at Playhead",
+       "Command-T"
+      ],
+      [
+       "Join Regions",
+       "Command-J"
+      ],
+      [
+       "Repeat Regions/Events",
+       "Command-R"
+      ],
+      [
+       "Select All",
+       "Command-A"
+      ],
+      [
+       "Create Track Stack",
+       "Shift-Command-D"
+      ],
+      [
+       "Quantize Selected Events",
+       "Q"
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "id": "lgcp2a6c0d14",
+   "title": "Regions overview",
+   "in": [
+    "Arrange a project",
+    "Work with regions"
+   ],
+   "intro": [
+    "A region is the block on a track's lane in the Tracks area that holds what the track plays. Audio regions sit on audio tracks and play part of an audio file; MIDI regions sit on software instrument and external MIDI tracks and hold MIDI events, such as notes and controller data; Drummer regions hold a Drummer's performance.",
+    "You move, copy, resize, split, join, loop and rename regions in the Tracks area. Editing a region doesn't change the audio file it plays."
+   ],
+   "sections": [
+    {
+     "id": "lgcp2a6c0d15",
+     "title": "Open a region in an editor",
+     "text": [
+      "Double-click a MIDI region to open it in the Piano Roll, or an audio region to open it in the Audio Track Editor. The Event List lists a MIDI region's events one a row."
+     ]
+    }
+   ]
+  },
+  {
+   "id": "lgcp2a6c0d20",
+   "title": "Loop regions",
+   "in": [
+    "Arrange a project",
+    "Work with regions"
+   ],
+   "intro": [
+    "A looped region repeats on its track until the next region on that track, or the end of the project."
+   ],
+   "sections": [
+    {
+     "id": "lgcp2a6c0d21",
+     "title": "Loop a region",
+     "text": [
+      "Select the region, then select the Loop checkbox in the Region inspector. Each repetition shows on the track's lane as a lighter copy of the region."
+     ]
+    },
+    {
+     "id": "lgcp2a6c0d22",
+     "title": "Repeat a region a set number of times",
+     "text": [
+      "Instead of looping, choose Edit > Repeat > Regions/Events (or press Command-R) to place copies of the region one after another."
+     ]
+    }
+   ]
+  },
+  {
+   "id": "lgcp2a6c0d30",
+   "title": "Region inspector",
+   "in": [
+    "Arrange a project",
+    "Work with regions"
+   ],
+   "intro": [
+    "The Region inspector shows the parameters of the selected regions; a change there applies to every selected region and leaves the events inside them as they were. Choose View > Show Inspector (or press I) to see it."
+   ],
+   "sections": [
+    {
+     "id": "lgcp2a6c0d31",
+     "title": "MIDI region parameters",
+     "text": [
+      "Mute, Loop, Quantize, Q-Swing, Transpose, Velocity and Dynamics change how a MIDI region plays without rewriting its events."
+     ]
+    }
+   ]
+  },
+  {
+   "id": "lgcp9e3f1a40",
+   "title": "Quantize MIDI regions",
+   "in": [
+    "Edit MIDI",
+    "Quantize MIDI"
+   ],
+   "intro": [
+    "Quantizing places notes on a grid. In the Region inspector, Quantize is a parameter of the whole region: its notes play on the grid you choose, while each note keeps the position it was recorded at."
+   ],
+   "sections": [
+    {
+     "id": "lgcp9e3f1a41",
+     "title": "Quantize a region",
+     "text": [
+      "Select the region, then choose a grid, such as 1/16 Note, from the Quantize pop-up menu in the Region inspector. Choose Off to hear the notes at their own positions again."
+     ]
+    },
+    {
+     "id": "lgcp9e3f1a42",
+     "title": "Make quantization permanent",
+     "text": [
+      "To write the quantized positions into the notes themselves, apply the quantization permanently. After that, choosing Off no longer brings back the positions the notes were recorded at."
+     ]
+    }
+   ]
+  },
+  {
+   "id": "lgcp5b8d2c60",
+   "title": "Import MIDI files",
+   "in": [
+    "Add content",
+    "Import files"
+   ],
+   "intro": [
+    "You can bring a Standard MIDI File into a project with the File menu, or by dragging it into the Tracks area."
+   ],
+   "sections": [
+    {
+     "id": "lgcp5b8d2c61",
+     "title": "Import a MIDI file with the File menu",
+     "text": [
+      "Choose File > Import > MIDI File, select the file, then click Import. Logic Pro puts the file's events in a new MIDI region on a new software instrument track it makes for them, at the playhead."
+     ]
+    },
+    {
+     "id": "lgcp5b8d2c62",
+     "title": "Drag a MIDI file into the Tracks area",
+     "text": [
+      "Drag the file from the Finder onto a track's lane to place its region on that track, where you drop it."
+     ]
+    }
+   ]
+  },
+  {
+   "id": "lgcp3f9a7e10",
+   "title": "Channel strip types",
+   "in": [
+    "Mix a project",
+    "Channel strips"
+   ],
+   "intro": [
+    "The Mixer shows a channel strip for each track, and one for each aux and output."
+   ],
+   "sections": [
+    {
+     "id": "lgcp3f9a7e11",
+     "title": "Audio and software instrument channel strips",
+     "text": [
+      "An audio channel strip plays an audio track's regions; a software instrument channel strip plays its MIDI regions through the instrument in its Instrument slot."
+     ]
+    },
+    {
+     "id": "lgcp3f9a7e12",
+     "title": "Aux channel strips",
+     "text": [
+      "An aux channel strip takes a bus as its input: sends from other channel strips feed it, and a summing Track Stack mixes its tracks on one."
+     ]
+    },
+    {
+     "id": "lgcp3f9a7e13",
+     "title": "The Stereo Out channel strip",
+     "text": [
+      "The Stereo Out is the output channel strip of a stereo project. Every channel strip whose output is Stereo Output passes through it, so a plug-in in its insert slots, such as a Gain or a limiter, processes the whole mix. The Master channel strip beside it sets the level of every output at once."
+     ]
+    }
+   ]
+  },
+  {
+   "id": "lgcp3f9a7e20",
+   "title": "Use sends and auxes",
+   "in": [
+    "Mix a project",
+    "Route audio"
+   ],
+   "intro": [
+    "A send passes part of a channel strip's signal to a bus, to be processed on an aux channel strip: a reverb that several tracks share, for example."
+   ],
+   "sections": [
+    {
+     "id": "lgcp3f9a7e21",
+     "title": "Add a send",
+     "text": [
+      "Click an empty Send slot on the channel strip and choose a bus. If nothing takes that bus yet, Logic Pro makes an aux channel strip with the bus as its input. Turn the send's knob to set how much is sent."
+     ]
+    },
+    {
+     "id": "lgcp3f9a7e22",
+     "title": "Choose where a send takes the signal",
+     "text": [
+      "A send is post-fader at first: what it sends follows the channel strip's volume fader. Click the send and choose Pre Fader to send the signal before the fader, or Post Pan to send it after the pan."
+     ]
+    }
+   ]
+  },
+  {
+   "id": "lgce8c1d4b70",
+   "title": "Plug-in window overview",
+   "in": [
+    "Mix a project",
+    "Work with plug-ins"
+   ],
+   "intro": [
+    "Double-click a plug-in in a channel strip's slot to open its window. The header holds the plug-in's settings and its compare and link buttons; the body shows its controls."
+   ],
+   "sections": [
+    {
+     "id": "lgce8c1d4b71",
+     "title": "Switch between the Editor and Controls views",
+     "text": [
+      "Choose Controls from the View pop-up menu in the plug-in window's header to show every parameter as a slider, checkbox or pop-up menu with its name and value. Choose Editor to go back to the plug-in's own interface."
+     ]
+    },
+    {
+     "id": "lgce8c1d4b72",
+     "title": "Step through a plug-in's settings",
+     "text": [
+      "Click the Next or Previous button beside the Setting pop-up menu to load the next or the previous setting."
+     ]
+    }
+   ]
+  },
+  {
+   "id": "lgce8c1d4b80",
+   "title": "Move and copy plug-ins",
+   "in": [
+    "Mix a project",
+    "Work with plug-ins"
+   ],
+   "intro": [
+    "You change the order of a channel strip's plug-ins by dragging them."
+   ],
+   "sections": [
+    {
+     "id": "lgce8c1d4b81",
+     "title": "Move a plug-in",
+     "text": [
+      "Drag the plug-in by its handle to another slot on the same channel strip, or to a slot on another channel strip. It keeps its settings."
+     ]
+    },
+    {
+     "id": "lgce8c1d4b82",
+     "title": "Copy a plug-in",
+     "text": [
+      "Option-drag the plug-in to the slot where you want a copy."
+     ]
+    }
+   ]
+  },
+  {
+   "id": "lgcp6e0a9d50",
+   "title": "Smart Controls overview",
+   "in": [
+    "Mix a project",
+    "Smart Controls"
+   ],
+   "intro": [
+    "Smart Controls are a small set of screen controls for the parameters that shape a track's sound, on its instrument and its effects. Each patch from the Library comes with its own Smart Controls, mapped to the parameters that matter most for it."
+   ],
+   "sections": [
+    {
+     "id": "lgcp6e0a9d51",
+     "title": "Show Smart Controls",
+     "text": [
+      "Choose View > Show Smart Controls (or press B) to open the Smart Controls pane for the selected track."
+     ]
+    },
+    {
+     "id": "lgcp6e0a9d52",
+     "title": "Map a screen control",
+     "text": [
+      "Click the Inspector button in the Smart Controls pane, select a screen control, then choose the parameter it controls in the Parameter Mapping area."
+     ]
+    }
+   ]
+  },
+  {
+   "id": "lgcp1b7c3e90",
+   "title": "Track Stacks overview",
+   "in": [
+    "Work with tracks",
+    "Track Stacks"
+   ],
+   "intro": [
+    "A Track Stack gathers several tracks under a main track, which you can open to see them or close to hide them."
+   ],
+   "sections": [
+    {
+     "id": "lgcp1b7c3e91",
+     "title": "Folder stacks",
+     "text": [
+      "A folder stack groups tracks, so you can hide, mute or solo them together. Its main track sets their levels together, and each track keeps its own output."
+     ]
+    },
+    {
+     "id": "lgcp1b7c3e92",
+     "title": "Summing stacks",
+     "text": [
+      "A summing stack sends its tracks to an aux, so they are mixed and processed together as one submix: a plug-in on the main track processes every track in the stack."
+     ]
+    },
+    {
+     "id": "lgcp1b7c3e93",
+     "title": "Create a Track Stack",
+     "text": [
+      "Select the tracks, choose Track > Create Track Stack (or press Shift-Command-D), choose Folder Stack or Summing Stack, then click Create."
+     ]
+    }
+   ]
+  },
+  {
+   "id": "lgcp1b7c3ea0",
+   "title": "Reorder tracks",
+   "in": [
+    "Work with tracks"
+   ],
+   "intro": [
+    "Tracks play the same wherever they sit, but their order sets how the Tracks area and the Mixer read."
+   ],
+   "sections": [
+    {
+     "id": "lgcp1b7c3ea1",
+     "title": "Move a track",
+     "text": [
+      "Drag a track's header up or down; a line shows where the track will land."
+     ]
+    }
+   ]
+  },
+  {
+   "id": "lgcp1b7c3eb0",
+   "title": "Change track colors",
+   "in": [
+    "Work with tracks"
+   ],
+   "intro": [
+    "A track's color shows on its header and on the regions you record on it."
+   ],
+   "sections": [
+    {
+     "id": "lgcp1b7c3eb1",
+     "title": "Choose a track's color",
+     "text": [
+      "Select the track, choose View > Show Colors (or press Option-C), then click a color in the palette."
+     ]
+    }
+   ]
+  },
+  {
+   "id": "lgcp8a2e5f10",
+   "title": "Marker List",
+   "in": [
+    "Arrange a project",
+    "Markers, tempo, and signatures"
+   ],
+   "intro": [
+    "The Marker List shows the project's markers in time order, each with its position, name and length. Press D to open the List Editors, then click Marker."
+   ],
+   "sections": [
+    {
+     "id": "lgcp8a2e5f11",
+     "title": "Create a marker",
+     "text": [
+      "Move the playhead, then click Create in the Marker List, or press Option-Apostrophe. Logic Pro names a new marker by its place in the list."
+     ]
+    },
+    {
+     "id": "lgcp8a2e5f12",
+     "title": "Rename a marker",
+     "text": [
+      "Double-click the marker's name in the Marker List and type a new one."
+     ]
+    }
+   ]
+  },
+  {
+   "id": "lgcp8a2e5f20",
+   "title": "Tempo List",
+   "in": [
+    "Arrange a project",
+    "Markers, tempo, and signatures"
+   ],
+   "intro": [
+    "The Tempo List shows each tempo event of the project: its position and its tempo in beats per minute. The first event sets the project's tempo from its start; each later one changes the tempo from where it sits. Press D to open the List Editors, then click Tempo."
+   ],
+   "sections": [
+    {
+     "id": "lgcp8a2e5f21",
+     "title": "Add a tempo change",
+     "text": [
+      "Click Create in the Tempo List to add a tempo event at the playhead, then edit its position and tempo. You can also draw tempo changes on the Tempo track."
+     ]
+    },
+    {
+     "id": "lgcp8a2e5f22",
+     "title": "The tempo in the control bar",
+     "text": [
+      "The control bar shows the tempo at the playhead. With no tempo changes in the project, changing it there changes the tempo of the whole project."
+     ]
+    }
+   ]
+  },
+  {
+   "id": "lgcp8a2e5f30",
+   "title": "Signature List",
+   "in": [
+    "Arrange a project",
+    "Markers, tempo, and signatures"
+   ],
+   "intro": [
+    "The Signature List shows the project's time signature and key signature changes, each at its bar. Press D to open the List Editors, then click Signature."
+   ],
+   "sections": [
+    {
+     "id": "lgcp8a2e5f31",
+     "title": "Add a time signature change",
+     "text": [
+      "Click Create in the Signature List to add a time signature at the playhead's bar, then edit its numerator and denominator."
+     ]
+    }
+   ]
+  },
+  {
+   "id": "lgsi4d6b8a10",
+   "title": "Quick Sampler overview",
+   "in": [
+    "Logic Pro Instruments",
+    "Quick Sampler"
+   ],
+   "intro": [
+    "Quick Sampler plays one audio sample across the keyboard. You load a sample into it by dragging: an audio file from the Finder, a region from the Tracks area or a file from the Browser onto its waveform display."
+   ],
+   "sections": [
+    {
+     "id": "lgsi4d6b8a11",
+     "title": "Make a Quick Sampler track from a file",
+     "text": [
+      "Drag an audio file onto the empty area below the track headers, then choose Quick Sampler (Original) or Quick Sampler (Optimized): Logic Pro makes a software instrument track with the sample loaded."
+     ]
+    }
+   ]
+  }
+ ]
+}

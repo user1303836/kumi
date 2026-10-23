@@ -378,6 +378,45 @@ fn export_then_import_shows_the_same_words_and_carries_on_with_any_model() {
     }
 }
 
+/// A loop's and a goal's request of several lines, framed as each registered DAW's Kumi frames it (in that DAW's
+/// words), is the producer's: in the export's Markdown, and through an import, never dropped as Kumi's.
+#[test]
+fn a_loops_and_a_goals_request_of_several_lines_is_the_producers_in_every_daws_framing() {
+    use kumi_runtime::core::{goal::goal_setup_for, loop_run::loop_setup_for};
+    let (request, goal) = ("make the drop hit harder\nand keep the hats soft", "a pad like the reference\nwith a slow attack");
+    for profile in kumi_runtime::integrations::REGISTERED {
+        let messages = vec![
+            json!({"role": "user", "content": [{"type": "text", "text": format!("{}{OBSERVATION_MARKER}\nOBSERVED-TRACK-LIST", loop_setup_for(profile, request))}]}),
+            json!({"role": "assistant", "content": [{"type": "text", "text": "Starting."}]}),
+            json!({"role": "user", "content": [{"type": "text", "text": goal_setup_for(profile, goal)}]}),
+            json!({"role": "assistant", "content": [{"type": "text", "text": "Building."}]}),
+        ];
+        let conversation = SavedConversation {
+            saved_at: NOW - 100,
+            checkpoint: KernelCheckpoint { version: 1, messages: messages.clone(), origin: None, tools: None },
+            changes: None,
+            first: None,
+            turns: Some(2),
+        };
+        let source = Source {
+            id: "k3x9a1b2",
+            conversation: &conversation,
+            title: "Louder",
+            place: Some("Song"),
+            words: profile.word_pair(),
+            created: NOW - 10_000,
+        };
+        let page = markdown(&source, &options(false));
+        for line in ["Loop: make the drop hit harder", "and keep the hats soft", "Goal: a pad like the reference", "with a slow attack"] {
+            assert!(page.contains(line), "{}: {line}\n{page}", profile.words.app);
+        }
+        assert!(!page.contains("Work in rounds") && !page.contains("This is a goal"), "{}: Kumi's framing stays out", profile.words.app);
+        let imported = import(&json(&source, &options(false)), NOW, "kumi").unwrap();
+        let kept = lines(&Value::Array(imported.conversation.checkpoint.messages.clone()));
+        assert_eq!(kept[0].text, format!("Loop: {request}"), "{}: an import keeps the request", profile.words.app);
+    }
+}
+
 /// Each call answered right after its message, once, and every result answering a call.
 fn assert_paired(messages: &[Value]) {
     let mut open: Vec<String> = Vec::new();

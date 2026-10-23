@@ -371,6 +371,21 @@ pub fn recipe_tools(options: RecipeToolsOptions) -> Vec<Rc<dyn KernelTool>> {
     recipe_tools_for(DawProfile::ABLETON, options)
 }
 
+/// What the save description says of watch_me, and what it says where the DAW has none.
+const WATCHED: &str = ", has just had you do a routine they'll clearly want again, or showed you one while you watched (watch_me);";
+const UNWATCHED: &str = ", or has just had you do a routine they'll clearly want again;";
+
+/// The save description in the DAW's words, naming watch_me only where the DAW has it: where Kumi catches up on its
+/// projects and watches the producer work (Live, Logic Pro), not REAPER's or Renoise's yet.
+fn save_text(profile: &DawProfile) -> String {
+    let text = save_description(profile);
+    if profile.caps.catch_up {
+        text
+    } else {
+        text.replace(WATCHED, UNWATCHED)
+    }
+}
+
 /// `recipe_tools`, saying the DAW's words.
 pub fn recipe_tools_for(profile: DawProfile, options: RecipeToolsOptions) -> Vec<Rc<dyn KernelTool>> {
     let options = Rc::new(options);
@@ -378,7 +393,7 @@ pub fn recipe_tools_for(profile: DawProfile, options: RecipeToolsOptions) -> Vec
         .into_iter()
         .map(|action| {
             let description = match action {
-                RecipeAction::Saved => save_description(&profile),
+                RecipeAction::Saved => save_text(&profile),
                 RecipeAction::Running => run_description(&profile),
                 _ => "Remove a saved recipe, when the producer asks.".into(),
             };
@@ -574,5 +589,44 @@ impl RecipeTool {
             }
         }
         Ok(ToolResult::error(format!("There's no recipe called {}.", json::quote(&string::head(name, 80)))))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use regex::Regex;
+
+    /// Live's words, whole: none may reach the model from another DAW's recipe tools.
+    const LIVE_WORDS: &str = r"\b(Live|Set|Sets|Ableton|Session|Arrangement|Remote Script|Control Surface|Main|Drum Rack|Operator|[Rr]acks?|[Cc]lips?|[Cc]lip slots?|[Ss]cenes?)\b";
+
+    /// (M6) The recipe tools in each DAW's words: watch_me named only where the DAW has it (Live's text byte for byte),
+    /// no Live word in another DAW's, and Logic Pro's step example naming tools its change set offers.
+    #[test]
+    fn the_recipe_texts_name_watch_me_only_where_the_daw_has_it_and_say_no_live_word_elsewhere() {
+        assert_eq!(save_text(&DawProfile::ABLETON), SAVE_DESCRIPTION, "Live's, as it was");
+        // (REAPER, Renoise and Logic Pro catch up and watch the producer: a DAW that doesn't says no watch_me)
+        for profile in [DawProfile::REAPER, DawProfile::RENOISE, DawProfile::LOGIC] {
+            assert!(save_text(&profile).contains("or showed you one while you watched (watch_me);"), "{}", profile.words.app);
+        }
+        let unwatched =
+            DawProfile { caps: crate::core::daw::Capabilities { catch_up: false, ..DawProfile::REAPER.caps }, ..DawProfile::REAPER };
+        let text = save_text(&unwatched);
+        assert!(!text.contains("watch_me"), "{text}");
+        assert!(
+            text.contains("describes a routine they repeat, or has just had you do a routine they'll clearly want again; then say"),
+            "{text}"
+        );
+        let live = Regex::new(LIVE_WORDS).unwrap();
+        for profile in [DawProfile::REAPER, DawProfile::RENOISE, DawProfile::LOGIC] {
+            for text in [save_text(&profile), run_description(&profile)] {
+                assert!(!live.is_match(&text), "{}: {text}", profile.words.app);
+            }
+        }
+        let example = DawProfile::LOGIC.vocab.recipe_step_example;
+        for tool in ["fx_param", "fx_add"] {
+            let offered = crate::integrations::logic_changes::CHANGES.kinds.iter().any(|kind| kind.tool == tool);
+            assert!(offered && example.contains(tool), "{tool}: {example}");
+        }
     }
 }

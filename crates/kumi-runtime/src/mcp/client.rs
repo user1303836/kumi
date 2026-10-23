@@ -137,6 +137,15 @@ impl BridgeDescriptor {
         daw: "Renoise",
     };
 
+    /// Logic Pro's bridge: Kumi's host, `daw-mcp-server --daw logic`, which starts Kumi's own `logic-kumi` beside Logic.
+    pub const LOGIC: BridgeDescriptor = BridgeDescriptor {
+        program: "daw-mcp-server",
+        policy_variable: "KUMI_DAW_TOOL_POLICY",
+        allow_variable: "KUMI_DAW_TOOL_ALLOW",
+        events: "notifications/daw_event",
+        daw: "Logic Pro",
+    };
+
     /// Its program beside Kumi's own.
     pub fn entry(&self) -> PathBuf {
         let name = if cfg!(windows) { format!("{}.exe", self.program) } else { self.program.to_string() };

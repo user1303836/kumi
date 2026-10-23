@@ -443,6 +443,44 @@ async fn an_import_keeps_the_set_its_file_names_for_resume_and_another_export() 
     assert!(page.contains("- **Set:** Their Song\n"), "{page}");
 }
 
+/// `kumi export` speaks the DAW of the conversation's place: a Logic Pro project's says Logic Pro's words, as the session's
+/// own export does; Live's and an imported one say Live's, as before.
+#[tokio::test(flavor = "current_thread")]
+async fn kumi_export_says_the_daw_of_the_conversations_place() {
+    use kumi::export::words_of;
+    let id = "0123456789abcdef0123456789abcdef";
+    assert_eq!(words_of(id).0, ("Live", "Set"));
+    assert_eq!(words_of("imported").0, ("Live", "Set"));
+    assert_eq!(words_of(&format!("logic-{id}")).0, ("Logic Pro", "project"));
+    assert_eq!(words_of("logic-unsaved").0, ("Logic Pro", "project"));
+    assert_eq!(words_of(&format!("reaper-{id}")).0, ("REAPER", "project"));
+    assert_eq!(words_of(&format!("renoise-{id}")).0, ("Renoise", "song"));
+    assert_eq!(words_of("somewhere").0, ("Live", "Set"));
+    let home = tempfile::tempdir().unwrap();
+    let env = Env::from([("KUMI_HOME".to_string(), home.path().join("kumi").display().to_string())]);
+    let store = kumi_runtime::core::conversations::create_conversation_store_in(
+        home.path().join("kumi/projects"),
+        None,
+        kumi_runtime::integrations::PLACES,
+    );
+    store.save(&format!("logic-{id}"), "l0g1c2b3a4", &conversation()).await.unwrap();
+    let folder = home.path().join("files");
+    fs::create_dir(&folder).unwrap();
+    let (out, err) = (Out::default(), Out::default());
+    let ask = ExportRequest {
+        conversation: Some("l0g1c2b3a4".into()),
+        format: Format::Markdown,
+        out: Some(folder.display().to_string()),
+        full: false,
+        raw: false,
+    };
+    assert_eq!(export_command(ask, &env, &out, &err, "kumi").await.unwrap(), 0, "{}", err.0.borrow());
+    let files: Vec<_> = fs::read_dir(&folder).unwrap().map(|entry| entry.unwrap().path()).collect();
+    let page = fs::read_to_string(&files[0]).unwrap();
+    assert!(page.contains("What Kumi changed in Logic Pro"), "{page}");
+    assert!(!page.contains("What Kumi changed in Live"), "{page}");
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn exports_take_out_every_key_kumi_knows_as_it_knows_them_then() {
     let home = tempfile::tempdir().unwrap();

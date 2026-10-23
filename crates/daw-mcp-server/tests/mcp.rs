@@ -81,6 +81,17 @@ impl Session {
 }
 
 async fn transcript_for(daw: Daw, config: fn(daw_bridge::auth::Secret, &str) -> SimulatorConfig, resources: [&str; 2]) -> String {
+    transcript_with(daw, config, resources, "bounce").await
+}
+
+/// The same, with `unknown` the tool asked for that the DAW doesn't have (REAPER and Renoise have no bounce; Logic has
+/// its own since M4).
+async fn transcript_with(
+    daw: Daw,
+    config: fn(daw_bridge::auth::Secret, &str) -> SimulatorConfig,
+    resources: [&str; 2],
+    unknown: &str,
+) -> String {
     let home = tempfile::tempdir().unwrap();
     let paths = BridgePaths::new(home.path(), daw);
     let mut session = Session::start(daw, home.path());
@@ -132,7 +143,7 @@ async fn transcript_for(daw: Daw, config: fn(daw_bridge::auth::Secret, &str) -> 
     assert_eq!(session.tool(11, "discover", json!({})).await["staleRemoved"], 1);
 
     // Errors: an unknown tool, bad arguments, an unknown method.
-    session.call(json!({"jsonrpc":"2.0","id":12,"method":"tools/call","params":{"name":"bounce","arguments":{}}})).await;
+    session.call(json!({"jsonrpc":"2.0","id":12,"method":"tools/call","params":{"name":unknown,"arguments":{}}})).await;
     session.call(json!({"jsonrpc":"2.0","id":13,"method":"tools/call","params":{"name":"status","arguments":{"pid":"x"}}})).await;
     session.call(json!({"jsonrpc":"2.0","id":14,"method":"resources/list"})).await;
     session.call(json!({"jsonrpc":"2.0","id":15,"method":"ping"})).await;
@@ -150,6 +161,15 @@ async fn reaper_mcp_transcript() {
 async fn renoise_mcp_transcript() {
     let transcript = transcript_for(Daw::Renoise, SimulatorConfig::renoise, ["/lab/Renoise/V3.5.4", "/lab/Renoise/V3.5.3"]).await;
     golden("renoise-mcp.ndjson", &transcript);
+}
+
+/// Logic's resource is its bundle id; its status names the permission its bridge lacks, which the status tool passes
+/// on. (The host never starts a bridge here: a discovery file always answers.)
+#[tokio::test]
+async fn logic_mcp_transcript() {
+    let transcript = transcript_with(Daw::Logic, SimulatorConfig::logic, ["com.apple.logic10", "com.apple.mobilelogic"], "freeze").await;
+    assert!(transcript.contains("\\\"permission\\\":null"), "{transcript}");
+    golden("logic-mcp.ndjson", &transcript);
 }
 
 #[tokio::test]

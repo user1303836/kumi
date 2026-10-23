@@ -1,7 +1,9 @@
-//! FOCUS draws REAPER's and Renoise's views as the producer moves between them: REAPER's MIDI editor shows the take's
-//! notes and controller lanes, its arrange view each track's items, a track's routing its sends, an FX chain (a take's
-//! too) its tree; Renoise's pattern and phrase editors show the lines around the cursor, its matrix the sequence, an
-//! instrument its keyzones, the DSP chain its Doofers and Splitters. NOW and HISTORY draw each family of their changes.
+//! FOCUS draws REAPER's, Renoise's and Logic's views as the producer moves between them: REAPER's MIDI editor shows the
+//! take's notes and controller lanes, its arrange view each track's items, a track's routing its sends, an FX chain (a
+//! take's too) its tree; Renoise's pattern and phrase editors show the lines around the cursor, its matrix the
+//! sequence, an instrument its keyzones, the DSP chain its Doofers and Splitters; Logic's Piano Roll shows the region's
+//! notes, its Tracks area each track's regions, a channel strip its plug-ins and its routing. NOW and HISTORY draw each
+//! family of their changes.
 #[path = "support/models.rs"]
 mod models;
 #[path = "support/tui_app.rs"]
@@ -239,6 +241,30 @@ case!(renoises_pattern_editor_matrix_and_keyzones_draw_in_focus, async {
     h.close().await;
 });
 
+// (M6) FOCUS's keyzones name notes as the session's profile does (the octave the open project names middle C in, as
+// Logic's project row says it), not as the DAW's static profile.
+case!(keyzones_name_notes_in_the_sessions_octave, async {
+    work_with(DawId::Renoise);
+    let c = Rc::new(Control::default());
+    *c.profile.borrow_mut() = Some(kumi_runtime::core::daw::DawProfile::RENOISE.with_middle_c(Some(4)));
+    *c.own.borrow_mut() = Some(FocusBody::Keyzones(KeyzoneMap {
+        item_ref: "3:instrument:1".into(),
+        name: "Drumkit".into(),
+        zones: vec![Keyzone { sample: "Kick".into(), notes: (60, 60), velocities: (0, 127), base: 60, ..Default::default() }],
+        ..Default::default()
+    }));
+    let h = Harness::with(120, 40, c.clone(), |_| {});
+    h.start().await;
+    h.connect();
+    let track = json!({"name":"Bass","kind":"sequencer"});
+    let instrument = json!({"track":track,"trackRef":"3:track:2","mainView":{"kind":"instrument","label":"Instrument"},"item":{"kind":"sample","itemRef":"3:instrument:1","name":"Drumkit"}});
+    h.emit(json!({"type":"focus","focus":instrument}));
+    shows(&h, "FOCUS · Keyzones").await;
+    // (Renoise names a note as its tracker writes it, C-4: the octave is the session's)
+    h.has("A C-4       Kick");
+    h.close().await;
+});
+
 /// Renoise can't say which pane has the keyboard, so FOCUS follows what changes: the pattern under the DSP frame, the
 /// DSP chain for another device on the same track, the matrix when the producer moves through the sequence (never
 /// when playback does), and the pattern again on another track.
@@ -334,6 +360,78 @@ case!(renoises_cursor_line_stays_in_view_deep_in_a_pattern, async {
     // (the cursor's line as Renoise numbers it: 39, the 40th)
     let cursor = lines.iter().find(|line| line.contains(" 39 ")).unwrap_or_else(|| panic!("line 39 on screen:\n{}", lines.join("\n")));
     assert!(cursor.contains("OFF 01"), "{cursor}");
+    h.close().await;
+});
+
+case!(logics_piano_roll_tracks_area_channel_strip_and_routing_draw_in_focus, async {
+    work_with(DawId::Logic);
+    let c = Rc::new(Control::default());
+    *c.clip.borrow_mut() = Some(
+        serde_json::from_value(json!({"slotRef":"1:region:1","name":"Keys","length":16.0,"notes":[
+            {"pitch":60,"start":0.0,"duration":0.25,"velocity":100},{"pitch":64,"start":1.0,"duration":0.25,"velocity":96,"selected":true}
+        ]}))
+        .unwrap(),
+    );
+    let h = Harness::with(120, 40, c.clone(), |_| {});
+    h.start().await;
+    h.connect();
+    let track = json!({"name":"Keys","color":"#5b8def","kind":"midi"});
+    // The Piano Roll over the Tracks area: the region's notes.
+    let piano_roll = json!({"track":track,"trackRef":"1:track:2","mainView":{"kind":"timeline","label":"Tracks"},"editorView":{"kind":"note-editor","label":"Piano Roll"},"item":{"kind":"item","itemRef":"1:region:1","name":"Keys"}});
+    h.emit(json!({"type":"focus","focus":piano_roll}));
+    shows(&h, "FOCUS · Piano Roll").await;
+    h.has("Keys");
+    h.has("4 bars · 2 notes · 1 selected");
+    assert!(h.calls().contains(&"clip:1:region:1".to_string()), "{:?}", h.calls());
+
+    // A plug-in window open: the channel strip's inserts, as the tree.
+    *c.tree.borrow_mut() = Some(
+        serde_json::from_value(
+            json!({"trackRef":"1:track:2","devices":[{"ref":"1:plugin:2.1","name":"Alchemy"},{"ref":"1:plugin:2.2","name":"Channel EQ"}]}),
+        )
+        .unwrap(),
+    );
+    let strip = json!({"track":track,"trackRef":"1:track:2","device":"Alchemy","deviceRef":"1:plugin:2.1","mainView":{"kind":"timeline","label":"Tracks"},"editorView":{"kind":"device-chain","label":"Plug-in"}});
+    h.emit(json!({"type":"focus","focus":strip}));
+    shows(&h, "FOCUS · Channel Strip").await;
+    h.has("Alchemy");
+    h.has("Channel EQ");
+
+    // The strip's routing: its input, its send and its output.
+    *c.own.borrow_mut() = Some(FocusBody::Routing(RoutingView {
+        track_ref: "1:track:2".into(),
+        routes: vec![
+            Route { kind: RouteKind::Receive, other: "Input 1".into(), volume_db: None, muted: false, tap: None },
+            Route { kind: RouteKind::Send, other: "Bus 1".into(), volume_db: Some(-6.0), muted: false, tap: None },
+            Route { kind: RouteKind::Hardware, other: "Stereo Out".into(), volume_db: None, muted: false, tap: None },
+        ],
+        parent_send: None,
+        name: None,
+        midi_out: None,
+    }));
+    let routing = json!({"track":track,"trackRef":"1:track:2","mainView":{"kind":"timeline","label":"Tracks"},"editorView":{"kind":"routing","label":"Routing"}});
+    h.emit(json!({"type":"focus","focus":routing}));
+    shows(&h, "FOCUS · Routing").await;
+    h.has("← Input 1");
+    h.has("→ Bus 1 · −6 dB");
+    h.has("⇥ Stereo Out");
+
+    // The Tracks area: each track's regions as bars.
+    *c.arrangement.borrow_mut() = Some(
+        serde_json::from_value(
+            json!({"length":32.0,"position":0.0,"playing":false,"locators":[{"name":"Chorus","position":32.0}],"beatsPerBar":4.0,"track_count":2,"lanes":[
+                {"name":"Vocal","depth":0,"items":[]},
+                {"name":"Keys","depth":0,"items":[{"start":0.0,"length":16.0,"name":"Keys","selected":true}]}
+            ]}),
+        )
+        .unwrap(),
+    );
+    let tracks = json!({"track":track,"trackRef":"1:track:2","mainView":{"kind":"timeline","label":"Tracks"}});
+    h.emit(json!({"type":"focus","focus":tracks}));
+    shows(&h, "FOCUS · Tracks").await;
+    h.has("Vocal");
+    h.has("Keys");
+    h.has("▬▬");
     h.close().await;
 });
 

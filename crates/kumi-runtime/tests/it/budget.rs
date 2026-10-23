@@ -252,6 +252,29 @@ fn a_loops_request_is_listed_without_kumis_framing_and_its_rounds_notes_arent_li
     assert_eq!(list, "- Loop: make the drop hit harder", "{first}");
 }
 
+/// A loop's request of several lines in any registered DAW's framing (each in its own words) is listed as the producer's
+/// when the conversation is shortened, never left out as Kumi's.
+#[test]
+fn a_loops_request_of_several_lines_is_listed_in_every_daws_framing() {
+    use kumi_runtime::core::loop_run::loop_setup_for;
+    for profile in kumi_runtime::integrations::REGISTERED {
+        let budget = budget(4096.0, 16.0 * 1024.0);
+        let request = "make the drop hit harder\nand keep the hats soft";
+        let mut history = vec![user(&observed(&loop_setup_for(profile, request))), said(&"w".repeat(900))];
+        for round in 0..40 {
+            let asked =
+                format!("[Kumi loop] Round {round}. Kept: louder. Budget left: 3 rounds, about 4 minutes. Make one change toward it.");
+            let turn = vec![user(&observed(&asked)), said(&format!("built {round} {}", "w".repeat(900)))];
+            let fitted = fit(&history, &turn, &budget);
+            history = [fitted.history.into_owned(), fitted.turn.into_owned()].concat();
+        }
+        let first = text_of(history.first()).unwrap();
+        let listed = first.strip_prefix(SHORTENED).and_then(|rest| rest.strip_prefix(ASKED)).unwrap_or_else(|| panic!("{first}"));
+        let (list, _) = listed.split_once("\n\n").unwrap();
+        assert_eq!(list, "- Loop: make the drop hit harder and keep the hats soft", "{}: {first}", profile.words.app);
+    }
+}
+
 #[test]
 fn a_match_runs_lessons_arent_the_producers_words_and_the_latest_long_message_stays() {
     let budget = budget(4096.0, 16.0 * 1024.0);

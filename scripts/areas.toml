@@ -57,6 +57,11 @@ feeds = ["kumi-runtime", "kumi"]
 [reaper-extension]
 paths = ["crates/reaper-kumi/**", "scripts/build-native-release.py"]
 
+# The script that builds Logic Pro's Accessibility helper, which CI's Logic job builds before the bridge's tests.
+[logic-helper]
+paths = ["scripts/build-logic-hands.py"]
+feeds = ["logic-kumi"]
+
 # What Kumi builds in as data: the standard Max patchers are held to, and the plug-in formats it reads.
 [data]
 paths = ["max-standard/**", "plugin-formats/**"]
@@ -130,12 +135,16 @@ paths = [
   "crates/reaper-kumi/shim/**",
   "crates/reaper-kumi/sdk/**",
   "crates/reaper-kumi/src/lib.rs",
+  "crates/logic-kumi/Cargo.toml",
+  "crates/logic-kumi/src/main.rs",
+  "crates/logic-kumi/helper/**",
   "daws/renoise/com.kumi.Bridge.xrnx/manifest.xml",
   "daws/renoise/com.kumi.Bridge.xrnx/main.lua",
   "daws/renoise/com.kumi.Bridge.xrnx/payload/version.lua",
   "scripts/build-native-release.py",
   "scripts/build-migration-release.py",
   "scripts/build-hands.py",
+  "scripts/build-logic-hands.py",
   "scripts/release.py",
   "scripts/check-installers.sh",
   "scripts/vendor-willington.py",

@@ -145,6 +145,7 @@ Run these as `kumi <command>`; from a copy of the repository, as
 | `kumi` | Open Kumi on the Set Live has open; the first time, sign in and put the bridge in Live (Kumi can restart Live for you) |
 | `kumi --daw reaper`, `kumi --daw renoise` | Open Kumi on the REAPER project or Renoise song that's open; the first time, sign in and put Kumi's extension or tool in. `KUMI_DAW` does the same; `kumi --daw reaper doctor` (or `report`) speaks of that DAW |
 | `kumi --daw reaper bridge [--yes]` (or `renoise`) | Put Kumi's extension into REAPER, or its tool into Renoise, or bring it up to date; `--yes` answers its question beforehand |
+| `kumi --daw logic [<command>]` | Work with Logic Pro instead of Live (`--daw ableton` is Live), for a session or a command: `kumi --daw logic bridge [--yes]` sets Kumi's Logic Pro bridge up in Kumi's own folder, with Logic Pro open or not, and `kumi --daw logic doctor` checks Logic Pro's side ([Connect to Logic Pro](KUMI_GUIDE.md#connect-to-logic-pro)) |
 | `kumi -c` (or `--continue`) | Carry on the conversation you had last, in any Set |
 | `kumi -r [id or name]` (or `--resume`) | Carry on a kept conversation by its id (or its start) or name; alone, choose one. Both work with `--inference-only` |
 | `kumi export [id or name \| --last] [--md \| --html \| --json] [--full] [--raw] [-o path]` | Save a kept conversation as Markdown (the default), a web page or a file for Kumi; without an id (or with `--last`), your latest. `--full` adds each step's input and result; `--raw` leaves keys and paths in |
@@ -180,7 +181,7 @@ message, not a command.
 | `/export [copy \| md \| html \| json]` | This conversation as a file: copy it as Markdown, or save Markdown, a web page or a file for Kumi (`kumi import`); alone, choose. Over 64 KB, the copy is saved as a file instead |
 | `/share` | Save this conversation as a web page that opens anywhere (the same page again while nothing changed), then open it, show it in Finder (Explorer) or copy its path, until Done; over SSH, it says where the page is |
 | `/reconnect` | Connect to Live again over a fresh bridge, keeping the conversation (earlier changes lose Kumi's undo) |
-| `/daw [name]` | Which DAW Kumi works with; `/daw live`, `/daw reaper` or `/daw renoise` closes Kumi and opens it again with that one. Shown once you work in REAPER or Renoise, or have Kumi's bridge in one |
+| `/daw [name]` | Which DAW Kumi works with; `/daw live`, `/daw reaper`, `/daw renoise` or `/daw logic` closes Kumi and opens it again with that one, without the conversation (each DAW's projects keep their own). Shown once you work in REAPER, Renoise or Logic Pro, or have Kumi's bridge for one |
 | `/undo` | Undo Kumi's latest change |
 | `/stop` | Stop Live: clips, the transport and recording. Also stops Kumi's answer |
 | `/refresh` | Read the Set again without asking the model |

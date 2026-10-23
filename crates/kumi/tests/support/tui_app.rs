@@ -108,6 +108,8 @@ pub struct Control {
     pub own_refused: Cell<bool>,
     /// What /export and /share get as the conversation going on now.
     pub export: RefCell<Option<ConversationToExport>>,
+    /// The session's profile, as the open project sets it apart from the DAW's (its middle C); None for the app's.
+    pub profile: RefCell<Option<kumi_runtime::core::daw::DawProfile>>,
 }
 impl Default for Control {
     fn default() -> Self {
@@ -133,6 +135,7 @@ impl Default for Control {
             own: RefCell::default(),
             own_refused: Cell::default(),
             export: RefCell::default(),
+            profile: RefCell::default(),
         }
     }
 }
@@ -493,6 +496,9 @@ impl SessionController for Control {
     }
     fn has_library(&self) -> bool {
         self.library.borrow().is_some()
+    }
+    fn profile(&self) -> Option<kumi_runtime::core::daw::DawProfile> {
+        *self.profile.borrow()
     }
     fn library(&self) -> Option<LibraryStatus> {
         self.library.borrow().clone()

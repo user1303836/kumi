@@ -796,6 +796,76 @@ async fn a_kumi_daw_kumi_doesnt_know_is_a_fix_the_doctor_names() {
     let sections = doctor_sections(&io).await.unwrap();
     let fix = sections.iter().flat_map(|s| &s.checks).find(|c| c.text.contains("KUMI_DAW")).expect("the doctor names KUMI_DAW");
     assert_eq!(fix.status, CheckStatus::Fix);
-    assert_eq!(fix.text, "Kumi won't start: KUMI_DAW must be one of: ableton, reaper, renoise.");
+    assert_eq!(fix.text, "Kumi won't start: KUMI_DAW must be one of: ableton, reaper, renoise, logic.");
     assert_eq!(fix.next.as_deref(), Some("Set KUMI_DAW to one of those, or unset it"));
+}
+
+/// A producer with Kumi's Logic Pro bridge alone (and no Live): the doctor speaks of Logic Pro, never of Live, and
+/// finds nothing to fix for a DAW they don't use. Logic's bridge sits in Kumi's own folder, set up through the
+/// lifecycle from a folder laid out as a release lays it out.
+#[tokio::test(flavor = "current_thread")]
+async fn a_logic_only_doctor_never_speaks_lives_words() {
+    let root = tempfile::tempdir().unwrap();
+    let path = |p: &str| root.path().join(p).display().to_string();
+    // Logic Pro 12.3.1, as detection reads it (its plist and arm64 executable).
+    let app = root.path().join("Applications/Logic Pro.app");
+    fs::create_dir_all(app.join("Contents/MacOS")).unwrap();
+    fs::write(
+        app.join("Contents/Info.plist"),
+        "<plist><dict><key>CFBundleIdentifier</key><string>com.apple.logic10</string><key>CFBundleShortVersionString</key><string>12.3.1</string></dict></plist>",
+    )
+    .unwrap();
+    let arm64 = [0xcf, 0xfa, 0xed, 0xfe, 0x0c, 0, 0, 0x01];
+    fs::write(app.join("Contents/MacOS/Logic Pro"), arm64).unwrap();
+    let env = Env::from([
+        ("KUMI_MODEL".into(), "openai/gpt-fixture".into()),
+        ("OPENAI_API_KEY".into(), "sk-fixture-never-printed".into()),
+        ("KUMI_AUTH_FILE".into(), path("auth.json")),
+        ("KUMI_SETTINGS_FILE".into(), path("settings.json")),
+        ("KUMI_PROJECTS_DIR".into(), path("projects")),
+        ("KUMI_LIBRARY_DIR".into(), path("library")),
+        ("KUMI_LIVE_EXTENSIONS_DIR".into(), path("Ableton/Extensions")),
+        ("KUMI_REAPER_RESOURCE_DIR".into(), path("REAPER")),
+        ("KUMI_RENOISE_PREFS_DIR".into(), path("Renoise")),
+        ("KUMI_LOGIC_APP".into(), app.display().to_string()),
+        ("KUMI_HOME".into(), path(".kumi")),
+        ("HOME".into(), root.path().display().to_string()),
+    ]);
+    // Kumi's Logic Pro bridge in Kumi's own folder, as the lifecycle places it.
+    let source = root.path().join("release/logic-kumi");
+    fs::create_dir_all(&source).unwrap();
+    fs::write(source.join("logic-kumi"), arm64).unwrap();
+    fs::write(source.join("kumi-logic-hands-test"), arm64).unwrap();
+    fs::write(source.join("version"), "0.1.0\n").unwrap();
+    let kumi = root.path().join(".kumi");
+    let target = daw_bridge::install::logic_target(&daw_bridge::paths::BridgePaths::new(&kumi, daw_bridge::daw::Daw::Logic));
+    daw_bridge::lifecycle::Lifecycle::new(&kumi, target).install(&source, "0.1.0").unwrap();
+    kumi::daw::work_with(kumi::daw::chosen(None, &env).0.id());
+    assert_eq!(kumi::daw::current().id(), kumi_runtime::core::daw::DawId::Logic, "the only bridge installed");
+    let mut io = DoctorIo::new(Rc::new(Out::default()), env.clone());
+    io.terminal = Some(TerminalInfo { is_tty: true, columns: Some(120), rows: Some(36) });
+    io.video_programs = Some(Rc::new(|| {
+        async { Ok(VideoPrograms { ffmpeg: Some("/usr/bin/ffmpeg".into()), whisper: Some("/usr/bin/whisper-cli".into()) }) }.boxed_local()
+    }));
+    io.hands = Some(Rc::new(|| async { Ok(None) }.boxed_local()));
+    io.voice = Some(Rc::new(|| async { Ok(ready()) }.boxed_local()));
+    io.model_servers = Some(Rc::new(|| async { Ok(vec![]) }.boxed_local()));
+    let mut installation = quiet_installation();
+    installation.lives = Some(Rc::new(Vec::new));
+    io.installation = installation;
+    let sections = doctor_sections(&io).await.unwrap();
+    let text = sections
+        .iter()
+        .flat_map(|section| {
+            std::iter::once(section.title.clone())
+                .chain(section.checks.iter().map(|c| format!("{} {}", c.text, c.next.clone().unwrap_or_default())))
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    let leaks = live_words::leaks(&text);
+    assert!(leaks.is_empty(), "the doctor says Live's words:\n{}\n\nin:\n{text}", leaks.join("\n"));
+    assert!(text.contains("Logic Pro 12.3.1 at") && text.contains("Sign-in, Logic Pro and the rest"), "{text}");
+    let fixes: Vec<&Check> = sections.iter().flat_map(|s| &s.checks).filter(|c| c.status == CheckStatus::Fix).collect();
+    assert!(fixes.iter().all(|c| c.text.contains("Logic")), "nothing to fix for a DAW this producer doesn't use: {fixes:?}");
+    kumi::daw::work_with(kumi_runtime::core::daw::DawId::Ableton);
 }

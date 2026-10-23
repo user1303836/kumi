@@ -113,6 +113,7 @@ impl AbletonOptions {
         options.on_watch = context.on_watch;
         options.change_timeout_ms = context.change_timeout_ms;
         options.on_catch_up = context.on_catch_up;
+        options.project_store = context.project_store;
         options.reconnect_interval_ms = context.reconnect_interval_ms;
         options.restore_file = context.restore_file;
         options.on_audition = context.on_audition;
@@ -140,6 +141,9 @@ impl AbletonOptions {
             on_look_again: None,
             change_timeout_ms: self.change_timeout_ms,
             on_catch_up: self.on_catch_up.clone(),
+            // (Live's library reads its recent Sets from its own log)
+            on_recent_projects: None,
+            project_store: self.project_store.clone(),
             reconnect_interval_ms: self.reconnect_interval_ms,
             restore_file: self.restore_file.clone(),
             on_audition: self.on_audition.clone(),

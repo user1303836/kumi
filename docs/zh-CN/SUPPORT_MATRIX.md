@@ -2,13 +2,13 @@
 
 [English](../en/SUPPORT_MATRIX.md) · 简体中文 · [日本語](../ja/SUPPORT_MATRIX.md)
 
-Kumi 及其桥接能在哪些系统上运行、适用于哪些版本的 Live、REAPER 和 Renoise，以及在哪里测试过什么。每一项“已测试”背后的证据列在[实现状态](IMPLEMENTATION_STATUS.md)中。
+Kumi 及其各个桥接能在哪些系统上运行、适用于哪些版本的 Live、REAPER、Renoise 和 Logic Pro，以及在哪里测试过什么。每一项“已测试”背后的证据列在[实现状态](IMPLEMENTATION_STATUS.md)中。
 
 ## Kumi
 
 | 系统 | 版本 | 处理器 | 状态 |
 | --- | --- | --- | --- |
-| macOS | 13（Ventura）或更高 | Apple 芯片、Intel | 原生构建和安装纳入 CI；较早的 TypeScript 版已在 Apple 芯片上配合 Live 测试 |
+| macOS | 13（Ventura）或更高 | Apple 芯片、Intel；Logic Pro：仅限 Apple 芯片 | 原生构建和安装纳入 CI；较早的 TypeScript 版已在 Apple 芯片上配合 Live 测试；Logic Pro 已在 Apple 芯片上测试 |
 | Windows | 10 或 11 | x64、ARM64 | 原生构建和安装纳入 CI；较早的 TypeScript 版已在 Windows 10 上配合 Live 测试；见 [Windows](#windows) |
 | Linux | glibc 2.35 或更高（Ubuntu 22.04、Debian 12 或更新；不包括 Alpine 或其他 musl 发行版） | x64、ARM64 | 原生构建和安装纳入 CI；Live 没有 Linux 版，但 REAPER 和 Renoise 可以在上面运行 |
 
@@ -41,6 +41,16 @@ Kumi 及其桥接能在哪些系统上运行、适用于哪些版本的 Live、R
 - 在每个系统上，CI 都会通过 Kumi 自己的命令，把两个桥接装进临时的 DAW 文件夹，更新它们，回滚两次，再卸载。
 - Renoise 的试用版无法渲染，所以 Kumi 在那里无法聆听歌曲。
 
+## Logic Pro
+
+| Logic Pro | 状态 |
+| --- | --- |
+| 12，在搭载 Apple 芯片的 Mac 上 | 通过 Kumi 的 Logic Pro 桥接支持（[连接 Logic Pro](KUMI_GUIDE.md#连接-logic-pro)）：App Store 的 Logic Pro（`com.apple.logic10`）和 Creator Studio 的 Logic Pro（`com.apple.mobilelogic`）。已在 macOS 26.6.1 上用 App Store 的英文版 Logic Pro 12.3.1 测试。 |
+| 11 或更早 | 不支持；`kumi --daw logic doctor` 会说明这一点。 |
+| Intel Mac、Linux、Windows | 没有 Logic Pro 桥接。Logic Pro 12 只能在搭载 Apple 芯片的 Mac 上运行，所以只有搭载 Apple 芯片的 Mac 上的 Kumi 带有这个桥接；其他的 Kumi 会说“Logic Pro is supported on Apple Silicon Macs only”，并且什么都不安装。 |
+
+这个桥接是 Kumi 的一个程序，在 Logic Pro 旁边运行，位于 Kumi 自己的文件夹中：它通过 macOS 的辅助功能（对运行 Kumi 的应用授权一次即可）、Logic Pro 的快捷键命令和菜单，以及虚拟 MIDI 端口上的一个 Mackie Control 控制界面来读取和操作 Logic Pro，并通过 Core Audio 的进程音频分接（process tap）聆听 Logic Pro，这需要 macOS 14.2 或更高版本（以及在 macOS 要求时的 System Audio Recording 权限）。其他语言的 Logic Pro 未经测试：桥接按 Logic Pro 自己的译文读取它的标签，而这些译文只在德语上手动核对过。Kumi 在 Logic Pro 中覆盖了什么，见[能力矩阵](CAPABILITY_MATRIX.md#logic-pro)；在真实 Logic Pro 上的运行，见[实现状态](IMPLEMENTATION_STATUS.md#在哪里测试过什么)。
+
 ## Windows
 
 已测试：在 CI 上，于 Windows PowerShell 5.1 和 PowerShell 7 中测试了安装程序、`kumi update`、`kumi bridge` 和 `kumi uninstall`，并在名称含非 ASCII 字符的文件夹中的 `KUMI_HOME` 下测试了安装程序、`kumi bridge`、回滚和 `kumi uninstall`；在一台装有 Live 12.4.15 beta 的 Windows 10 电脑上，测试了用 `kumi bridge` 安装到已移出用户文件夹的 User Library、Remote Script 在 Live 中加载，以及 Kumi 连接。CI 的 Windows 运行器使用默认文件夹的管理员账户，因此无法暴露只在普通账户或移动过的库中才会出现的问题。
@@ -71,4 +81,4 @@ Kumi 及其桥接能在哪些系统上运行、适用于哪些版本的 Live、R
 
 ## CI 覆盖的范围
 
-CI 在 GitHub 托管的 macOS、Ubuntu 和 Windows 运行器上运行 Rust 构建和测试、Remote Script 和 Live 扩展的测试、六个目标平台的发行包，以及安装和迁移测试，还会在每个系统上加载 REAPER 的扩展，并运行 Renoise 工具的测试。这些运行器都没有 Live、REAPER 或 Renoise。[测试](TESTING.md#ci)列出了每个作业。
+CI 在 GitHub 托管的 macOS、Ubuntu 和 Windows 运行器上运行 Rust 构建和测试、Remote Script 和 Live 扩展的测试、六个目标平台的发行包，以及安装和迁移测试，还会在每个系统上加载 REAPER 的扩展，运行 Renoise 工具的测试，并在 macOS 上运行 Logic Pro 桥接的测试（基于录下的场景和一个模拟的 Logic Pro）。这些运行器都没有 Live、REAPER、Renoise 或 Logic Pro。[测试](TESTING.md#ci)列出了每个作业。

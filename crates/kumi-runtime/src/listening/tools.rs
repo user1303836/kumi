@@ -120,7 +120,7 @@ static GROOVE: LazyLock<Value> = LazyLock::new(|| serde_json::from_str(include_s
 
 /// What each asset says in Live's words, and how many times; a DAW says them its own way.
 pub(crate) const JUDGE_PHRASES: &[AssetPhrase] = &[
-    AssetPhrase { live: "Live's devices", count: 1, said: |p| format!("{}'s devices", p.words.app) },
+    AssetPhrase { live: "Live's devices", count: 1, said: |p| format!("{}'s {}", p.words.app, p.vocab.devices) },
     AssetPhrase { live: "the last Live Limiter on the track, else a Utility it adds", count: 1, said: |p| p.vocab.gain_stage.into() },
     AssetPhrase { live: "a static EQ (EQ Eight)", count: 1, said: |p| format!("a static EQ{}", parenthetical(p.vocab.eq_name)) },
     AssetPhrase {

@@ -570,7 +570,8 @@ impl TuiApp {
     /// An instrument's samples on the keyboard: a map of its keyzones (keys across, velocities up), each zone's notes and
     /// velocities, then its macros and phrases with their keys.
     fn draw_keyzones(&self, screen: &mut Screen, x: i32, y: i32, width: i32, map: &KeyzoneMap, most: i32) -> i32 {
-        let profile = crate::daw::profile();
+        // (M6) The session's profile: notes named as the open project names them (Logic's middle C), else the app's.
+        let profile = self.0.options.controller.profile().unwrap_or(*crate::daw::profile());
         let mut title = if map.name.is_empty() { "Instrument".to_owned() } else { map.name.clone() };
         match map.plays_through.as_deref() {
             Some("plugin") => title.push_str(" · plug-in"),
