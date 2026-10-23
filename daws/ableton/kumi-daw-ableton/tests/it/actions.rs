@@ -2,7 +2,7 @@ use kumi_daw_ableton::{
     actions::ACTIONS,
     more_changes::{bars, set_meter, span},
 };
-use kumi_runtime::core::contracts::TrackChip;
+use kumi_types::contracts::TrackChip;
 use serde_json::Value;
 #[test]
 fn transport_action_preparation_summaries_and_metadata_match_source() {

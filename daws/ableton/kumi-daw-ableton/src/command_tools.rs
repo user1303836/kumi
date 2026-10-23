@@ -13,6 +13,7 @@ use futures::{
     future::{LocalBoxFuture, Shared},
     FutureExt,
 };
+use kumi_agent::{core::contracts::ActionEvent, mcp::allowed_tools::CallOptions};
 use kumi_common::{
     abort::{self, Signal, SignalExt},
     js::{
@@ -25,10 +26,7 @@ use kumi_media::audio::{
     audio_path,
     wavetable::{self, FromAudio, Keyframe, Shape, WavetableSpec},
 };
-use kumi_runtime::{
-    core::contracts::{ActionEvent, ChangeRecord, JsonObject, ToolResult},
-    mcp::allowed_tools::CallOptions,
-};
+use kumi_types::contracts::{ChangeRecord, JsonObject, ToolResult};
 use kumi_types::errors::RuntimeError;
 use regex::Regex;
 use serde_json::{json, Value};

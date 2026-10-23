@@ -1,9 +1,7 @@
 //! Live's part of `kumi report`: the bridge's lines and errors from Live's own log.
 use crate::report::{clip, modified, names, read};
-use kumi_runtime::{
-    library::sources::join,
-    system::{self, Env},
-};
+use kumi_library::sources::join;
+use kumi_types::system::{self, Env};
 
 /// Live's log for the report: its heading, and the bridge's lines and errors from the newest log (`logs`, when given,
 /// lists the log files in place of Live's).

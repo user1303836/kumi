@@ -11,8 +11,8 @@ use super::super::{
 };
 use super::*;
 use crate::text::library_line;
+use kumi_ai::failure::reset_words;
 use kumi_common::time::since;
-use kumi_runtime::kernel::failure::reset_words;
 pub(super) mod st {
     use super::{palette, Style};
     pub const GROUND: Style = Style::bg(palette::GROUND);
@@ -523,7 +523,7 @@ impl TuiApp {
                 ..simple(&format!("Watching your changes in {}; tell Kumi when you're done", crate::daw::words().app), st::TEXT)
             };
         }
-        let jobs = state.jobs.values().filter(|status| status.state == kumi_runtime::core::jobs::JobState::Running).count();
+        let jobs = state.jobs.values().filter(|status| status.state == kumi_agent::core::jobs::JobState::Running).count();
         if jobs > 0 {
             return simple(&format!("Ready · {jobs} {} running in the background", if jobs == 1 { "job" } else { "jobs" }), st::FAINT);
         }

@@ -2,7 +2,7 @@
 use futures::FutureExt;
 use kumi_common::abort::Signal;
 use kumi_daw_ableton::connection::{ConnectionOptions, LiveConnection};
-use kumi_runtime::core::errors::RuntimeError;
+use kumi_types::errors::RuntimeError;
 use std::rc::Rc;
 
 async fn start_with(said: String) -> String {

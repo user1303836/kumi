@@ -13,7 +13,7 @@ kumi-common.workspace = true
 kumi-library.workspace = true
 kumi-listening.workspace = true
 kumi-media.workspace = true
-kumi-runtime.workspace = true
+kumi-agent.workspace = true
 kumi-types.workspace = true
 # The system's name for where the DAWs' libraries are found, as daw-bridge's detection takes it.
 daw-bridge.workspace = true

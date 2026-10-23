@@ -14,21 +14,24 @@ use daw_mcp_server::{
 use futures::stream::{self, StreamExt};
 use futures::FutureExt;
 use kumi::daw::registry::PLACES;
+use kumi_agent::core::context::IntegrationContext;
+use kumi_agent::core::contracts::*;
+use kumi_agent::core::conversations::create_conversation_store_in;
+use kumi_agent::core::jobs::{create_job_store, JobState};
+use kumi_agent::core::memory::{create_memory_store_in, MemoryStoreOptions};
+use kumi_agent::core::session::JobsOptions;
+use kumi_agent::kernel::agent::{create_agent_kernel, AgentKernel, AgentKernelOptions};
+use kumi_agent::{create_session, Session, SessionOptions};
+use kumi_ai::binding::{LanguageModel, ModelBinding, ModelRequest};
+use kumi_ai::error::LanguageModelError;
+use kumi_ai::types::{
+    CallOptions, FinishReason, FinishReasonUnified, InputTokens, OutputTokens, StreamPart, StreamParts, ToolCall, Usage as ModelUsage,
+};
 use kumi_daw_own::bridge::{Connect, OwnOptions};
 use kumi_daw_reaper::create_reaper_integration;
 use kumi_daw_renoise::create_renoise_integration;
-use kumi_runtime::ai::error::LanguageModelError;
-use kumi_runtime::ai::types::{
-    CallOptions, FinishReason, FinishReasonUnified, InputTokens, OutputTokens, StreamPart, StreamParts, ToolCall, Usage as ModelUsage,
-};
-use kumi_runtime::core::context::IntegrationContext;
-use kumi_runtime::core::contracts::*;
-use kumi_runtime::core::conversations::create_conversation_store_in;
-use kumi_runtime::core::jobs::{create_job_store, JobState};
-use kumi_runtime::core::memory::{create_memory_store_in, MemoryStoreOptions};
-use kumi_runtime::core::session::JobsOptions;
-use kumi_runtime::kernel::agent::{create_agent_kernel, AgentKernel, AgentKernelOptions, LanguageModel, ModelBinding, ModelRequest};
-use kumi_runtime::{create_session, Session, SessionOptions};
+use kumi_types::contracts::*;
+use kumi_types::daw::DawProfile;
 use regex::Regex;
 use serde_json::{json, Value};
 use std::{
@@ -190,7 +193,7 @@ impl Own {
             let host = host.clone();
             let connect: Connect = Rc::new(move |_| {
                 let host = host.clone();
-                async move { Ok(host as Rc<dyn kumi_runtime::mcp::client::McpEndpoint>) }.boxed_local()
+                async move { Ok(host as Rc<dyn kumi_agent::mcp::client::McpEndpoint>) }.boxed_local()
             });
             let mut context = IntegrationContext::new(listener);
             let (into, told) = (into.clone(), told.clone());
@@ -523,7 +526,7 @@ async fn reaper_notes_are_kept_per_producer_and_per_project_and_come_back_with_t
 /// in the song.
 #[tokio::test(flavor = "current_thread")]
 async fn a_renoise_conversation_exports_in_renoises_words() {
-    use kumi_runtime::core::export::{html, markdown, Options, Source};
+    use kumi_agent::core::export::{html, markdown, Options, Source};
     tokio::task::LocalSet::new()
         .run_until(async {
             let dir = tempfile::tempdir().unwrap();
@@ -590,7 +593,7 @@ fn kept_conversation(saved_at: i64, words: &str) -> SavedConversation {
 /// found again, by its id and by its name, pinned as it was, and none is said to be let go.
 #[tokio::test(flavor = "current_thread")]
 async fn after_a_rollback_and_back_the_index_finds_reaper_and_renoise_conversations_again() {
-    use kumi_runtime::core::place::Places;
+    use kumi_types::place::Places;
     let dir = tempfile::tempdir().unwrap();
     let projects = dir.path().join("projects");
     let ids = ["mf1a2b3c4d5e6", "mf1a2b3c4d5e7", "mf1a2b3c4d5e8", "mf1a2b3c4d5e9"];
@@ -702,8 +705,8 @@ async fn a_reaper_projects_background_job_report_comes_back_with_the_project() {
 /// with the project's place and REAPER's tag.
 #[tokio::test(flavor = "current_thread")]
 async fn reaper_techniques_are_offered_and_kept_and_reactions_are_kept_with_the_projects_place() {
-    use kumi_runtime::core::{store_client::StoreClient, store_import::JsonFiles};
-    use kumi_runtime::{create_technique_store, TechniqueStore};
+    use kumi_agent::core::{store_client::StoreClient, store_import::JsonFiles};
+    use kumi_agent::{create_technique_store, TechniqueStore};
     use kumi_store::observations::{self, Kind};
     tokio::task::LocalSet::new()
         .run_until(async {
@@ -766,7 +769,7 @@ async fn reaper_techniques_are_offered_and_kept_and_reactions_are_kept_with_the_
 /// job's unheard report and a technique built there, which all come back with it next time.
 #[tokio::test(flavor = "current_thread")]
 async fn renoises_unsaved_song_is_renoise_unsaved_and_a_saved_songs_notes_jobs_and_techniques_come_back_with_it() {
-    use kumi_runtime::{create_technique_store, TechniqueStore};
+    use kumi_agent::{create_technique_store, TechniqueStore};
     const DEMO: &str = "b9e741f2bc26a406294ae3e2318dbafc";
     tokio::task::LocalSet::new()
         .run_until(async {

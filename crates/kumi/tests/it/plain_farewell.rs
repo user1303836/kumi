@@ -8,7 +8,9 @@ use kumi::{
     terminal::{create_terminal, Terminal, TerminalOptions},
     tui::tty::TtyOutput,
 };
-use kumi_runtime::core::{contracts::*, errors::RuntimeError};
+use kumi_agent::core::contracts::*;
+use kumi_types::contracts::*;
+use kumi_types::errors::RuntimeError;
 use models::FakeModels;
 use std::{
     cell::{Cell, RefCell},

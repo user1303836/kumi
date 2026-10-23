@@ -1,7 +1,7 @@
 //! The fixed phrases ("tempo 124", "mute drums", core/phrases.rs) in a DAW of Kumi's own: each DAW says which of its
 //! change kinds make a phrase in the project as the look just found it, or why the phrase doesn't apply there, in its
 //! words. The integration runs the steps as one plan (`bridge`), so they land in HISTORY with Kumi's undo.
-use kumi_runtime::core::phrases::{phrase_track, Intent, PhraseTrack, TrackPick};
+use kumi_agent::core::phrases::{phrase_track, Intent, PhraseTrack, TrackPick};
 use serde_json::Value;
 
 /// What a phrase is made from: the project as the look (and, for a big project, reads after it) found it.

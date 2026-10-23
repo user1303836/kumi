@@ -5,8 +5,8 @@ use super::super::{
 };
 use super::*;
 use crate::text::web_words;
+use kumi_ai::failure::reset_words;
 use kumi_common::time::since;
-use kumi_runtime::kernel::failure::reset_words;
 use serde_json::json;
 
 impl TuiApp {

@@ -7,13 +7,13 @@
 //! Maximizer, Compressor, Bus Compressor or Gate 2, or a plug-in named as a limiter, maximizer, compressor or clipper. Core's
 //! tool does the rest.
 use async_trait::async_trait;
+use kumi_agent::core::layers::backend::{Compressor, Dynamics, LayersBackend, Words};
+use kumi_agent::core::refs::RefScheme;
 use kumi_common::abort::Signal;
 use kumi_daw_own::changes::OwnPlan;
 use kumi_daw_own::listening::OwnRenderer;
 use kumi_listening::renderer::Window;
-use kumi_runtime::core::contracts::Render;
-use kumi_runtime::core::layers::backend::{Compressor, Dynamics, LayersBackend, Words};
-use kumi_runtime::core::refs::RefScheme;
+use kumi_types::contracts::Render;
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::rc::Rc;
@@ -358,7 +358,7 @@ mod tests {
     #[test]
     fn every_change_fits_its_renoise_kind() {
         use crate::changes::CHANGES;
-        use kumi_runtime::kernel::schema::problem;
+        use kumi_agent::kernel::schema::problem;
         let schema_of = |tool: &str| {
             Value::Object(CHANGES.kinds.iter().find(|kind| kind.tool == tool).unwrap_or_else(|| panic!("{tool}")).input_schema())
         };

@@ -12,7 +12,7 @@ use super::panels::{inert, item, noted};
 use super::*;
 use crate::tui::picker::{NoteTone, PickerOptions};
 use base64::Engine;
-use kumi_runtime::core::jobs::{JobDetail, JobState, JobStatus, JobStepState};
+use kumi_agent::core::jobs::{JobDetail, JobState, JobStatus, JobStepState};
 
 /// The JOBS tab: on the strip from the first job.
 pub(super) struct JobsTab {
@@ -85,7 +85,7 @@ impl TuiApp {
         self.job_status(status);
         if ended {
             self.job_ended(status);
-            if status.when_done == kumi_runtime::core::jobs::WhenDone::Continue && status.state != JobState::Interrupted {
+            if status.when_done == kumi_agent::core::jobs::WhenDone::Continue && status.state != JobState::Interrupted {
                 self.0.state.borrow_mut().carry.push(status.id);
             }
         }
@@ -176,7 +176,7 @@ impl TuiApp {
     pub(super) fn job_ended(&self, status: &JobStatus) {
         let title = self.clean_text(&status.title);
         match status.state {
-            JobState::Done if status.when_done == kumi_runtime::core::jobs::WhenDone::Tell => {
+            JobState::Done if status.when_done == kumi_agent::core::jobs::WhenDone::Tell => {
                 self.alert(&format!("Job {} done: {title}", status.id), &format!("Kumi · job done · {title}"))
             }
             JobState::Failed => self.alert(&format!("Job {} failed: {title}", status.id), &format!("Kumi · job failed · {title}")),

@@ -7,29 +7,31 @@ use async_trait::async_trait;
 use futures::channel::oneshot;
 use futures::future::LocalBoxFuture;
 use futures::stream::{self, StreamExt};
-use kumi_common::abort::{Controller, Signal};
-use kumi_common::js::json::stringify;
-use kumi_daw_ableton::{integration::Ableton, observation::ObservationHost, options::AbletonOptions};
-use kumi_runtime::ai::error::{ApiCallError, LanguageModelError};
-use kumi_runtime::ai::types::{
+use kumi_agent::core::contracts::{
+    Integration, KernelCheckpoint, KernelEmit, KernelEvent, Picture, StopReason, TranscriptLine, TranscriptRole,
+};
+use kumi_agent::kernel::agent::{
+    create_agent_kernel, plain_words, AgentKernel, AgentKernelOptions, CARRY_ON_NOTE, STOPPED_BEFORE_RUNNING, STOPPED_NOTE,
+    STOPPED_READING, STOPPED_WHILE_RUNNING,
+};
+use kumi_agent::kernel::budget::{transcript_of, SHORTENED};
+use kumi_agent::mcp::{
+    client::{McpEndpoint, StderrStatus},
+    types::{CallToolResult, Implementation, ListToolsResult},
+};
+use kumi_ai::binding::ContextBudget;
+use kumi_ai::binding::{LanguageModel, ModelBinding};
+use kumi_ai::error::{ApiCallError, LanguageModelError};
+use kumi_ai::types::{
     AssistantPart, CallOptions, DataContent, FileData, FinishReason, FinishReasonUnified, InputTokens, Message, OutputTokens,
     ProviderMetadata, StreamPart, StreamParts, TextPart, ToolCall, ToolPart, ToolResultContentItem, ToolResultOutput, Usage as ModelUsage,
     UserPart,
 };
-use kumi_runtime::core::contracts::{
-    ChangeState, Integration, JsonObject, KernelCheckpoint, KernelEmit, KernelEvent, KernelTool, Picture, StopReason, StreamingCall,
-    ToolImage, ToolResult, TranscriptLine, TranscriptRole, Usage,
-};
-use kumi_runtime::core::errors::{FailureKind, RuntimeError};
-use kumi_runtime::kernel::agent::{
-    create_agent_kernel, plain_words, AgentKernel, AgentKernelOptions, LanguageModel, ModelBinding, CARRY_ON_NOTE, STOPPED_BEFORE_RUNNING,
-    STOPPED_NOTE, STOPPED_READING, STOPPED_WHILE_RUNNING,
-};
-use kumi_runtime::kernel::budget::{transcript_of, ContextBudget, SHORTENED};
-use kumi_runtime::mcp::{
-    client::{McpEndpoint, StderrStatus},
-    types::{CallToolResult, Implementation, ListToolsResult},
-};
+use kumi_common::abort::{Controller, Signal};
+use kumi_common::js::json::stringify;
+use kumi_daw_ableton::{integration::Ableton, observation::ObservationHost, options::AbletonOptions};
+use kumi_types::contracts::{ChangeState, JsonObject, KernelTool, StreamingCall, ToolImage, ToolResult, Usage};
+use kumi_types::errors::{FailureKind, RuntimeError};
 use serde::Serialize;
 use serde_json::{json, Value};
 use tokio::task::{spawn_local, LocalSet};
@@ -297,7 +299,7 @@ fn output_type(part: &ToolPart) -> &'static str {
         ToolPart::ToolApprovalResponse(_) => "approval",
     }
 }
-fn kumi_error(error: RuntimeError) -> kumi_runtime::core::errors::KumiError {
+fn kumi_error(error: RuntimeError) -> kumi_types::errors::KumiError {
     match error {
         RuntimeError::Kumi(error) => error,
         other => panic!("not a KumiError: {other:?}"),
@@ -561,7 +563,7 @@ async fn cancellation_during_an_uncooperative_tool_settles_without_waiting_for_i
 
 #[tokio::test]
 async fn a_turns_timing_has_the_effort_its_model_asked_for_and_each_tools_time_a_stopped_ones_too() {
-    use kumi_runtime::core::timing;
+    use kumi_ai::timing;
     local(async {
         let model = ScriptedModel {
             script: Rc::new(|_, n| match n {
@@ -733,7 +735,7 @@ fn unavailable() -> LanguageModelError {
 
 #[test]
 fn a_retrys_reason_says_what_happened() {
-    use kumi_runtime::kernel::failure::retry_reason;
+    use kumi_ai::failure::retry_reason;
     let status = |code: Option<u16>| LanguageModelError::ApiCall(ApiCallError::new("x", "u", Some(json!({})), code));
     let said: Vec<String> = [Some(200), Some(429), Some(503), Some(502), Some(408), None]
         .into_iter()
@@ -2009,7 +2011,7 @@ async fn a_note_kept_beside_words_about_what_comes_next_lets_the_model_carry_on_
 
 #[tokio::test]
 async fn words_beside_a_reaction_alone_get_another_model_call() {
-    use kumi_runtime::core::{
+    use kumi_agent::core::{
         store_client::StoreClient,
         taste_log::{TasteLog, Whereabouts},
     };
@@ -2437,7 +2439,7 @@ fn busy(retry_after: &str) -> LanguageModelError {
     error.response_headers = Some([("retry-after".to_string(), retry_after.to_string())].into_iter().collect());
     LanguageModelError::ApiCall(error)
 }
-fn waits(events: &[KernelEvent]) -> Vec<(String, u64, Option<kumi_runtime::core::contracts::WaitFor>)> {
+fn waits(events: &[KernelEvent]) -> Vec<(String, u64, Option<kumi_agent::core::contracts::WaitFor>)> {
     events
         .iter()
         .filter_map(|event| match event {
@@ -2501,7 +2503,7 @@ async fn a_plans_limit_is_waited_out_and_the_same_answer_carries_on_when_it_rese
         assert_eq!(waited.len(), 1);
         let (reason, wait_ms, wait) = waited[0].clone();
         assert_eq!(reason, "test's plan limit");
-        assert_eq!(wait, Some(kumi_runtime::core::contracts::WaitFor::Limit));
+        assert_eq!(wait, Some(kumi_agent::core::contracts::WaitFor::Limit));
         // The hour to the reset, and the margin after it.
         assert!((3_620_000..=3_631_000).contains(&wait_ms), "{wait_ms}");
         assert!(began.elapsed() >= Duration::from_secs(3600));
@@ -2541,7 +2543,7 @@ async fn a_limit_too_far_off_or_one_waiting_cant_mend_stops_and_names_the_fix() 
 
 #[test]
 fn a_certificate_or_a_proxy_in_the_way_is_named_with_its_fix_not_said_as_offline() {
-    use kumi_runtime::kernel::failure::{describe_failure, retry_reason};
+    use kumi_ai::failure::{describe_failure, retry_reason};
     let model = "openai-codex/gpt-6-astra";
     let untrusted = refused_on_the_way(UNTRUSTED);
     assert_eq!(retry_reason(&untrusted, model), "ChatGPT couldn't be reached: the secure connection didn't check out (TLS)");
@@ -2567,8 +2569,8 @@ fn a_certificate_or_a_proxy_in_the_way_is_named_with_its_fix_not_said_as_offline
 
 #[tokio::test]
 async fn a_certificate_or_a_proxy_in_the_way_is_waited_out_as_offline_is_but_named() {
-    use kumi_runtime::core::contracts::WaitFor;
-    use kumi_runtime::web::cause::NetCause;
+    use kumi_agent::core::contracts::WaitFor;
+    use kumi_net::cause::NetCause;
     local(async {
         tokio::time::pause();
         // A Wi-Fi sign-in page reads as TLS until the producer signs in: the same tries as offline, as long as it takes.
@@ -2624,7 +2626,7 @@ async fn offline_it_keeps_trying_with_longer_waits_until_the_connection_is_back(
         assert_eq!(h.kernel.run("q", signal(), emit).await.unwrap().stop_reason, StopReason::Completed);
         assert_eq!(h.count(), 7, "past the three tries a busy provider gets");
         let waited = waits(&events.borrow());
-        assert!(waited.iter().all(|(_, _, wait)| *wait == Some(kumi_runtime::core::contracts::WaitFor::Offline)), "{waited:?}");
+        assert!(waited.iter().all(|(_, _, wait)| *wait == Some(kumi_agent::core::contracts::WaitFor::Offline)), "{waited:?}");
         assert_eq!(waited.iter().map(|(_, ms, _)| *ms).collect::<Vec<_>>(), [750, 2250, 6750, 20250, 30000, 30000]);
         assert_eq!(texts(&events.borrow()), ["back"]);
         h.kernel.close().await;
@@ -2677,10 +2679,10 @@ async fn the_fallback_carries_on_the_same_answer_through_tool_calls_and_the_chos
         assert_eq!(kernel.run("look", signal(), ignore()).await.unwrap().stop_reason, StopReason::Completed);
         // The plan's limit: the fallback carries on this same answer, through a tool call of its own.
         let (events, emit) = collect();
-        let recorder = kumi_runtime::core::timing::begin();
+        let recorder = kumi_ai::timing::begin();
         assert_eq!(kernel.run("look again", signal(), emit).await.unwrap().stop_reason, StopReason::Completed);
         // The turn's timing says which model made each call.
-        let line = kumi_runtime::core::timing::line(&recorder.finish(), 0, json!("completed"), None);
+        let line = kumi_ai::timing::line(&recorder.finish(), 0, json!("completed"), None);
         assert_eq!(line["models"], json!([{"model":"openai-codex/gpt-6-sol","calls":1},{"model":"anthropic/claude-sonnet-5-5","calls":2}]));
         assert_eq!(line["model"], "anthropic/claude-sonnet-5-5");
         let switched = switches(&events.borrow());
@@ -2697,7 +2699,7 @@ async fn the_fallback_carries_on_the_same_answer_through_tool_calls_and_the_chos
         assert!(first.contains("call_1") && first.contains("two tracks"), "the earlier call and its result stay: {first}");
         assert!(first.contains("look again"));
         assert_eq!(kernel.answering(), "anthropic/claude-sonnet-5-5");
-        assert_eq!(kumi_runtime::core::contracts::Kernel::answering_fallback(&kernel).as_deref(), Some("anthropic/claude-sonnet-5-5"));
+        assert_eq!(kumi_agent::core::contracts::Kernel::answering_fallback(&kernel).as_deref(), Some("anthropic/claude-sonnet-5-5"));
         assert_eq!(kernel.checkpoint().unwrap().origin.as_deref(), Some("anthropic/claude-sonnet-5-5"));
         // Once the limit has reset, the chosen model answers again from the next turn.
         sleep(Duration::from_millis(1100)).await;
@@ -2707,7 +2709,7 @@ async fn the_fallback_carries_on_the_same_answer_through_tool_calls_and_the_chos
         assert_eq!(texts(&events.borrow()), ["Back on ChatGPT."]);
         assert_eq!(primary_asked.borrow().len(), 4);
         assert_eq!(kernel.answering(), "openai-codex/gpt-6-sol");
-        assert_eq!(kumi_runtime::core::contracts::Kernel::answering_fallback(&kernel), None);
+        assert_eq!(kumi_agent::core::contracts::Kernel::answering_fallback(&kernel), None);
         kernel.close().await;
     })
     .await

@@ -4,7 +4,7 @@
 use serde_json::{json, Value};
 
 use super::set_model::SetModel;
-use kumi_runtime::core::phrases::{instant_steps, InstantVocab, Intent, PhraseTrack, Switch};
+use kumi_agent::core::phrases::{instant_steps, InstantVocab, Intent, PhraseTrack, Switch};
 
 /// Live's changes for the fixed phrases.
 pub struct LiveInstant;
@@ -50,7 +50,8 @@ pub fn steps(intent: &Intent, model: &SetModel, beats_per_bar: f64) -> Option<Va
 #[cfg(test)]
 mod tests {
     use super::*;
-    use kumi_runtime::core::{contracts::JsonObject, phrases::TrackPick};
+    use kumi_agent::core::phrases::TrackPick;
+    use kumi_types::contracts::JsonObject;
 
     fn model() -> SetModel {
         let rows: Vec<JsonObject> = [

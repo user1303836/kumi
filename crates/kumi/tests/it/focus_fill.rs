@@ -4,13 +4,13 @@
 //! app makes of a filled focus is what it made of Live's.
 
 use kumi::tui::app::{focus_path, touched_next};
-use kumi_runtime::core::contracts::{
+use kumi_agent::core::contracts::{
     filled, BodyKind, DawFocus, FocusItem, FocusSection, FocusView, ItemKind, LiveDetail, LiveView, SectionKind, ViewKind,
 };
 use serde_json::{json, Value};
 
-fn live() -> &'static kumi_runtime::core::view::ViewPresentation {
-    kumi::daw::registry::view(kumi_runtime::core::daw::DawId::Ableton).unwrap()
+fn live() -> &'static kumi_agent::core::view::ViewPresentation {
+    kumi::daw::registry::view(kumi_types::daw::DawId::Ableton).unwrap()
 }
 
 /// The neutral fields cleared: Live's wire form alone.

@@ -17,11 +17,13 @@ use crate::{
     update::{self, CheckIo, UpdateIo},
 };
 use futures::{future::LocalBoxFuture, FutureExt};
+use kumi_agent::core::export::Format;
+use kumi_ai::providers::ProviderId;
 use kumi_common::{
     abort::{self, Signal},
     js::{number, string},
 };
-use kumi_runtime::{core::export::Format, providers::ProviderId, system::Env, RuntimeError, KUMI_VERSION};
+use kumi_types::{errors::RuntimeError, system::Env, version::KUMI_VERSION};
 use std::{
     cell::{Cell, RefCell},
     rc::Rc,
@@ -173,7 +175,7 @@ fn installed_io(io: &CliIo) -> InstalledIo {
 fn doctor_io(io: &CliIo, factory: DawFactory) -> DoctorIo {
     let mut doctor = DoctorIo::new(io.out.clone(), io.env.clone());
     // Live's checks probe Live and judge its bridge by Live's version, whichever DAW the doctor speaks for.
-    let live = crate::daw::provider(kumi_runtime::core::daw::DawId::Ableton).expect("Live is registered");
+    let live = crate::daw::provider(kumi_types::daw::DawId::Ableton).expect("Live is registered");
     doctor.bundled_bridge_version = live.bundled_bridge_version();
     let env = io.env.clone();
     let (own_factory, own_env) = (factory.clone(), env.clone());
@@ -508,7 +510,7 @@ pub fn main_with(factory: impl Into<DawFactory>) -> i32 {
 mod doctor_io_tests {
     use super::*;
     use crate::input::ByteListener;
-    use kumi_runtime::core::daw::DawId;
+    use kumi_types::daw::DawId;
 
     struct Silent;
     impl TerminalInput for Silent {

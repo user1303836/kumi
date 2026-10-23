@@ -56,7 +56,7 @@ impl Activity {
 
 /// The kind of task a tool is, as Kumi and the DAW show it; the rest change the project.
 pub fn activity_of(tool: Option<&str>) -> Activity {
-    use kumi_runtime::core::presentation::{activity, ToolActivity};
+    use kumi_agent::core::presentation::{activity, ToolActivity};
     let Some(tool) = tool.filter(|tool| !tool.is_empty()) else { return Activity::Think };
     match activity(crate::daw::presentation(), crate::daw::profile(), tool) {
         ToolActivity::Search => Activity::Search,

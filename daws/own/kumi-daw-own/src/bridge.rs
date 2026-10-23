@@ -10,13 +10,7 @@ use crate::{
 use async_trait::async_trait;
 use chrono::{SecondsFormat, Utc};
 use futures::future::LocalBoxFuture;
-use kumi_common::{
-    abort::{self, Signal, SignalExt},
-    js::json::stringify,
-    time::perf_now,
-};
-use kumi_library::taste;
-use kumi_runtime::{
+use kumi_agent::{
     core::{
         context::IntegrationContext,
         contracts::*,
@@ -33,6 +27,13 @@ use kumi_runtime::{
         types::{CallToolResult, ContentBlock},
     },
 };
+use kumi_common::{
+    abort::{self, Signal, SignalExt},
+    js::json::stringify,
+    time::perf_now,
+};
+use kumi_library::taste;
+use kumi_types::contracts::*;
 use kumi_types::{
     daw::DawProfile,
     errors::{FailureKind, KumiError, RuntimeError},
@@ -86,7 +87,7 @@ pub struct OwnDaw {
     /// How it makes the fixed phrases ("tempo 124", "mute drums") with no model call.
     pub phrases: &'static crate::phrases::OwnPhrases,
     /// (#401) What its kept scripts are in, become, and take by their place (lint rules).
-    pub scripts: &'static kumi_runtime::core::scripts::backend::Words,
+    pub scripts: &'static kumi_agent::core::scripts::backend::Words,
     /// (#401) Its facts for delivery to a spec: its master's row and fader, and what limits or raises the master.
     pub spec: &'static crate::spec::OwnSpecFacts,
 }
@@ -366,12 +367,12 @@ pub fn create_own_integration<S: RefScheme + 'static>(
     // (#401) kept scripts, where the DAW offers them: Kumi's copies in its folder, one a DAW
     let scripts: Option<Rc<dyn KernelTool>> = daw.profile.caps.scripts.then(|| {
         let backend = crate::scripts::OwnScripts::new(changes.clone(), daw.scripts);
-        kumi_runtime::core::scripts::tool::Scripts::new(backend, options.kumi_home.join("scripts").join(daw.host_flag)).tool()
+        kumi_agent::core::scripts::tool::Scripts::new(backend, options.kumi_home.join("scripts").join(daw.host_flag)).tool()
     });
     // (#401) delivery to a spec, where the DAW offers it
     let spec: Option<Rc<dyn KernelTool>> = daw.profile.caps.delivery_spec.then(|| {
         let backend = crate::spec::OwnSpec::new(changes.clone(), listening.renderer.clone(), daw.spec);
-        kumi_runtime::core::spec::tool::DeliverySpec::new(backend).tool()
+        kumi_agent::core::spec::tool::DeliverySpec::new(backend).tool()
     });
     // (#401) audio to MIDI, where the DAW offers it through Kumi's own ears
     let to_midi: Option<Rc<dyn KernelTool>> = match (daw.profile.caps.audio_to_midi, daw.profile.id) {
@@ -381,7 +382,7 @@ pub fn create_own_integration<S: RefScheme + 'static>(
     }
     .map(|which| {
         let backend = crate::ears::OwnEars::new(changes.clone(), listening.renderer.clone(), which);
-        kumi_runtime::core::to_midi::tool::ToMidi::new(backend).tool()
+        kumi_agent::core::to_midi::tool::ToMidi::new(backend).tool()
     });
     // (#401) stems, where the DAW splits by Kumi's own splitter
     let stems: Option<Rc<dyn KernelTool>> = match (daw.profile.caps.stems, daw.profile.id) {
@@ -391,7 +392,7 @@ pub fn create_own_integration<S: RefScheme + 'static>(
     }
     .map(|which| {
         let backend = crate::ears::OwnEars::new(changes.clone(), listening.renderer.clone(), which);
-        kumi_runtime::core::stems::tool::Stems::new(backend).tool()
+        kumi_agent::core::stems::tool::Stems::new(backend).tool()
     });
     let kumi_home = options.kumi_home.clone();
     Rc::new(OwnIntegration::<S> {

@@ -22,7 +22,7 @@ __pycache__/
 # npm installs
 /node_modules/
 /daws/ableton/live-extension/node_modules/
-/crates/kumi-runtime/tests/support/node_modules/
+/crates/kumi-agent/tests/support/node_modules/
 # Release bundles built locally
 /release/
 

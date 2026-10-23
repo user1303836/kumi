@@ -3,7 +3,7 @@ use super::*;
 /// The kumi command the installers write, and Kumi repairs from its active app. It runs the native app; one rolled
 /// back to its JavaScript release, on its own Node; with no app, the Kumi before it, saying so; with neither, it says
 /// how to repair Kumi. install.sh and install.ps1 write the same, and tests keep the three, and the one-liner in them
-/// ([`kumi_runtime::INSTALL_SH`], [`kumi_runtime::INSTALL_PS1`]), the same.
+/// ([`kumi_types::command::INSTALL_SH`], [`kumi_types::command::INSTALL_PS1`]), the same.
 pub fn launcher(windows: bool) -> &'static str {
     if windows {
         WINDOWS_LAUNCHER
@@ -107,7 +107,7 @@ mod tests {
 
     #[test]
     fn every_copy_of_the_one_liners_is_kumis_own() {
-        use kumi_runtime::{INSTALL_PS1, INSTALL_SH};
+        use kumi_types::command::{INSTALL_PS1, INSTALL_SH};
         let sh = include_str!(concat!(env!("KUMI_WORKSPACE"), "/install.sh"));
         let ps1 = include_str!(concat!(env!("KUMI_WORKSPACE"), "/install.ps1")).replace("\r\n", "\n");
         // Each script's own header, install.sh's word to Git Bash, and the launchers' word when Kumi's app is missing.

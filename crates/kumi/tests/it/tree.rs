@@ -1,5 +1,5 @@
 use kumi::tui::{icons::IconKind, tree::*};
-use kumi_runtime::core::contracts::DeviceTree;
+use kumi_agent::core::contracts::DeviceTree;
 use serde_json::{json, Value};
 fn fx(reference: &str, name: &str) -> Value {
     json!({"ref":reference,"name":name,"className":regex::Regex::new(r"\W").unwrap().replace_all(name,""),"deviceType":"audio_effect"})

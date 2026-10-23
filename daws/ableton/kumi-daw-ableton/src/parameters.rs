@@ -21,7 +21,7 @@ use kumi_common::{
     },
     time::perf_now,
 };
-use kumi_runtime::core::contracts::*;
+use kumi_types::contracts::*;
 use kumi_types::{command::KUMI, errors::RuntimeError};
 use serde::Serialize;
 use serde_json::{json, Value};
@@ -31,7 +31,7 @@ use std::{
     rc::Rc,
 };
 
-pub use kumi_runtime::core::plan::ChangeOutcome;
+pub use kumi_agent::core::plan::ChangeOutcome;
 #[derive(Clone, Serialize)]
 pub struct Found {
     pub index: f64,

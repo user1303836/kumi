@@ -38,7 +38,7 @@ pub fn step(name: &str) -> bool {
     CHANGES.iter().any(|kind| kind.tool == name) || ACTIONS.iter().any(|kind| kind.tool == name)
 }
 
-pub use kumi_runtime::integrations::shared::steps::step_line;
+pub use kumi_agent::integrations::shared::steps::step_line;
 
 #[cfg(test)]
 mod tests {

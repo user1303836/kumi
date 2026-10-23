@@ -4,7 +4,7 @@ members = [
     "crates/kumi-common",
     "crates/kumi-store",
     "crates/kumi-genexpr",
-    "crates/kumi-runtime",
+    "crates/kumi-agent",
     "daws/ableton/ableton-mcp-server",
     "crates/kumi",
     "daws/own/daw-bridge",
@@ -34,7 +34,7 @@ rust-version = "1.89"
 kumi-common = { path = "crates/kumi-common" }
 kumi-store = { path = "crates/kumi-store" }
 kumi-genexpr = { path = "crates/kumi-genexpr" }
-kumi-runtime = { path = "crates/kumi-runtime" }
+kumi-agent = { path = "crates/kumi-agent" }
 ableton-mcp-server = { path = "daws/ableton/ableton-mcp-server" }
 daw-bridge = { path = "daws/own/daw-bridge" }
 kumi-testkit = { path = "crates/kumi-testkit" }
@@ -77,7 +77,7 @@ percent-encoding = "2"
 fancy-regex = "0.14"
 rand = "0.9"
 regex = "1"
-# Each client begins at kumi-runtime's net::client, with Kumi's own TLS and proxies; socks: an ALL_PROXY of socks5://.
+# Each client begins at kumi-net's client, with Kumi's own TLS and proxies; socks: an ALL_PROXY of socks5://.
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream", "json", "gzip", "brotli", "deflate", "http2", "socks"] }
 # Kumi's TLS (net::trust): rustls with the features reqwest's has, the certificates it carries (webpki-roots), and this
 # computer's own trust store when those don't vouch for a server: its check, or for the web tool its list of roots.

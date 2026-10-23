@@ -1,3 +1,4 @@
+use kumi_agent::ConnectionState;
 use kumi_common::{abort::Signal, js::json::stringify};
 use kumi_daw_ableton::references::LiveBook;
 use kumi_daw_ableton::{
@@ -5,7 +6,7 @@ use kumi_daw_ableton::{
     references::{slim_mixers, References},
     BRIDGE_TOOLS,
 };
-use kumi_runtime::{ConnectionState, RuntimeError};
+use kumi_types::errors::RuntimeError;
 use serde_json::{json, Value};
 use std::{cell::RefCell, rc::Rc};
 #[test]

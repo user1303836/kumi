@@ -9,7 +9,7 @@
 リポジトリのルートから実行します：
 
 ```sh
-npm ci --prefix crates/kumi-runtime/tests/support   # 初回のみ：一部の Rust テストが使う公式 SDK
+npm ci --prefix crates/kumi-agent/tests/support   # 初回のみ：一部の Rust テストが使う公式 SDK
 cargo build --workspace --all-targets --locked
 sh scripts/test-isolated.sh                        # Windows: ./scripts/test-isolated.ps1
 python3 -m unittest discover -s daws/ableton/remote-script -p 'test_*.py'
@@ -47,7 +47,7 @@ Windows では、いくつかのテストがシンボリックリンクを作成
 
 分離ランナーはテスト専用のホームを用意します。`HOME`、`USERPROFILE`、`APPDATA`、`LOCALAPPDATA`、`XDG_CONFIG_HOME`、`KUMI_HOME` は新しい一時フォルダーの中を指し、`KUMI_REMOTE_SCRIPTS_DIR` と `KUMI_LIVE_EXTENSIONS_DIR` は取り除かれるので、どのテストもあなたの Live のフォルダーや `~/.kumi` には届きません。
 
-公式の MCP とモデルの SDK を Kumi 自身のクライアントやプロバイダーと並べて実行するテストは、`npm ci --prefix crates/kumi-runtime/tests/support` を実行するまで失敗します。ラウドネスとトゥルーピークのテストは、生成した音声に対する FFmpeg の `ebur128` の結果と解析を照らし合わせます。
+公式の MCP とモデルの SDK を Kumi 自身のクライアントやプロバイダーと並べて実行するテストは、`npm ci --prefix crates/kumi-agent/tests/support` を実行するまで失敗します。ラウドネスとトゥルーピークのテストは、生成した音声に対する FFmpeg の `ebur128` の結果と解析を照らし合わせます。
 
 `testdata/oracles/<クレート>/` にある JSON のオラクルファイル（そのクレートのテストが `kumi_testkit::oracle` で読みます）は、TypeScript 実装から記録したゴールデンファイルです。その実装と、ファイルを生成したスクリプトは git タグ `v1.7.6` に残っていますが、このツリーにはファイルを再生成するものがありません。軽量なワークツリー（`python3 scripts/dev.py worktree new <名前> --lean`）には、Extended のテストだけが読むもの（`testdata/oracles/extended-only.txt` の一覧）が含まれません。意図して動作を変えたときは、影響を受けるオラクルの項目をネイティブの出力から書き直します。失敗したアサーションが実際の出力を表示します。SHA-256 の項目には、その出力のハッシュを書きます。差分を確認し、ゴールデンファイルを変えたことと、その理由をコミットメッセージに書いてください。ホストのテストは、ゴールデンファイルを記録したときのブリッジのバージョン（`ORACLE_VERSION`）に固定して動くので、ブリッジのバージョンを上げてもゴールデンファイルは変わりません。
 

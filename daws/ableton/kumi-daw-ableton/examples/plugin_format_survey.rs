@@ -3,20 +3,20 @@
 //! read where they lie) and every state of that plug-in in Live Sets (.als), device presets (.adv) and VST3
 //! presets (.vstpreset), and checks each round trip. Only counts, types, ranges and option-like values leave the machine.
 //!
-//! cargo run -p kumi-runtime --example plugin_format_survey -- <serum-2|vital|ozone-12> <report.json>
+//! cargo run -p kumi-daw-ableton --example plugin_format_survey -- <serum-2|vital|ozone-12> <report.json>
 //!     [--structure plugin-formats/<plug-in>/format-1/structure.json] <file or folder>...
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use kumi_daw_ableton::live_set::{self, PluginFormat as Host, PluginState};
-use kumi_runtime::plugins::formats::ozone12::{OzonePreset, OzoneState};
-use kumi_runtime::plugins::formats::serum2::{SerumPreset, XferFile};
-use kumi_runtime::plugins::formats::structure::{builtin, merge_survey, to_text};
-use kumi_runtime::plugins::formats::survey::Survey;
-use kumi_runtime::plugins::formats::vital::VitalPreset;
-use kumi_runtime::plugins::formats::vstpreset::{vst2_chunk, VstPreset};
-use kumi_runtime::plugins::formats::{cbor, FormatError};
+use kumi_library::plugins::formats::ozone12::{OzonePreset, OzoneState};
+use kumi_library::plugins::formats::serum2::{SerumPreset, XferFile};
+use kumi_library::plugins::formats::structure::{builtin, merge_survey, to_text};
+use kumi_library::plugins::formats::survey::Survey;
+use kumi_library::plugins::formats::vital::VitalPreset;
+use kumi_library::plugins::formats::vstpreset::{vst2_chunk, VstPreset};
+use kumi_library::plugins::formats::{cbor, FormatError};
 use serde_json::{json, Value};
 
 #[derive(Default)]

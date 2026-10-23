@@ -12,7 +12,7 @@ use kumi_library::sources::{
 };
 use regex::Regex;
 
-use kumi_runtime::core::contracts::KernelTool;
+use kumi_types::contracts::KernelTool;
 use kumi_types::daw::DawProfile;
 
 /// Live's library.

@@ -12,12 +12,13 @@
 use daw_bridge::Daw;
 use daw_mcp_server::host::Host;
 use futures::FutureExt;
+use kumi_agent::core::context::IntegrationContext;
+use kumi_agent::mcp::client::McpEndpoint;
+use kumi_agent::mcp::types::{CallToolResult, ContentBlock};
 use kumi_common::abort::Signal;
 use kumi_daw_own::bridge::{Connect, OwnOptions};
 use kumi_daw_renoise::create_renoise_integration;
-use kumi_runtime::core::{context::IntegrationContext, contracts::*};
-use kumi_runtime::mcp::client::McpEndpoint;
-use kumi_runtime::mcp::types::{CallToolResult, ContentBlock};
+use kumi_types::contracts::*;
 use serde_json::{json, Value};
 use std::path::PathBuf;
 use std::{cell::Cell, cell::RefCell, rc::Rc, sync::Arc, time::Duration, time::Instant};

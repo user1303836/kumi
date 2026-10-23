@@ -1,5 +1,5 @@
 /// `in_process!()` declares `mod in_process` where it's called: `InProcess`, Kumi's host as an MCP endpoint called in
-/// process. The calling crate supplies kumi-runtime and daw-mcp-server.
+/// process. The calling crate supplies kumi-agent, kumi-types and daw-mcp-server.
 #[macro_export]
 macro_rules! in_process {
     () => {
@@ -9,9 +9,9 @@ macro_rules! in_process {
             use async_trait::async_trait;
             use daw_mcp_server::host::Host;
             use kumi_common::abort::Signal;
-            use kumi_runtime::core::{contracts::JsonObject, errors::RuntimeError};
-            use kumi_runtime::mcp::client::{McpEndpoint, StderrStatus};
-            use kumi_runtime::mcp::types::{CallToolResult, Implementation, ListToolsResult};
+            use kumi_types::{contracts::JsonObject, errors::RuntimeError};
+            use kumi_agent::mcp::client::{McpEndpoint, StderrStatus};
+            use kumi_agent::mcp::types::{CallToolResult, Implementation, ListToolsResult};
             use serde_json::json;
             use std::{cell::Cell, rc::Rc, sync::Arc};
 

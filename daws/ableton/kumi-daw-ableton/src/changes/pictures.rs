@@ -5,6 +5,12 @@
 
 use super::summaries::{coalesce, label};
 use super::*;
+use kumi_types::picture::Dynamics;
+use kumi_types::picture::EqBand;
+use kumi_types::picture::EqShape;
+use kumi_types::picture::MixLevels;
+use kumi_types::picture::MixSend;
+use kumi_types::picture::PictureValue;
 
 /// The picture of a change, from its preview, its input and Live's answer (none before it's applied).
 pub(crate) fn picture(kind: &ChangeKind, preview: &JsonObject, input: &JsonObject, applied: Option<&JsonObject>) -> Option<ChangePicture> {

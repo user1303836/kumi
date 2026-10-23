@@ -4,11 +4,11 @@
 use crate::changes::OwnPlan;
 use crate::listening::OwnRenderer;
 use async_trait::async_trait;
+use kumi_agent::core::refs::RefScheme;
+use kumi_agent::core::spec::backend::{SpecBackend, Words};
 use kumi_common::abort::Signal;
 use kumi_listening::renderer::Renderer;
-use kumi_runtime::core::contracts::Render;
-use kumi_runtime::core::refs::RefScheme;
-use kumi_runtime::core::spec::backend::{SpecBackend, Words};
+use kumi_types::contracts::Render;
 use serde_json::{json, Value};
 use std::rc::Rc;
 

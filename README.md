@@ -71,7 +71,7 @@ Build this checkout with Rust and Cargo:
 ```sh
 cargo build --release --locked --workspace --bins
 cargo run --release -p kumi --                     # add bridge, doctor, or other arguments after --
-npm ci --prefix crates/kumi-runtime/tests/support  # once: the official SDKs some tests run
+npm ci --prefix crates/kumi-agent/tests/support  # once: the official SDKs some tests run
 sh scripts/test-isolated.sh                        # no Live or sign-in needed
 ```
 
@@ -83,7 +83,9 @@ After that handoff, `kumi` runs the native application directly.
 | Folder | What's in it |
 | --- | --- |
 | `crates/kumi` | The native terminal app and `kumi` command |
-| `crates/kumi-runtime` | Model providers, memory, audio analysis, video, the web, and the integrations with Live, REAPER and Renoise |
+| `crates/kumi-agent` | The agent: its loop, sessions, memory, HISTORY and the MCP client |
+| `crates/kumi-ai`, `kumi-media`, `kumi-web`, `kumi-library`, `kumi-listening` | Model providers, audio analysis and voice, the web and video, the producer's library, and listening |
+| `daws/<daw>/kumi-daw-<daw>` | The integrations with Live, REAPER and Renoise |
 | `daws/ableton/ableton-mcp-server` | The native bridge, also usable by other MCP clients ([bridge guide](daws/ableton/ableton-mcp-server/README.md)) |
 | `daws/ableton/remote-script` | The bridge's Remote Script, which runs inside Live |
 | `daws/ableton/live-extension` | Kumi's Live extension (Live 12.4 and later) |

@@ -18,7 +18,7 @@ use kumi_library::{
     tools::{definition, tell},
 };
 use kumi_net::web::{create_web_client, decode_text, status_words, WebClient, WebClientOptions, WebError, WebFailure, WebRequest};
-use kumi_runtime::core::contracts::{JsonObject, KernelTool, Reach, ToolResult};
+use kumi_types::contracts::{JsonObject, KernelTool, Reach, ToolResult};
 use kumi_types::errors::RuntimeError;
 use kumi_web::html::html_to_text;
 use regex::Regex;

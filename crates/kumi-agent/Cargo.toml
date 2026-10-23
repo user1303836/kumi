@@ -1,0 +1,65 @@
+[package]
+name = "kumi-agent"
+version = "0.1.0"
+description = "Kumi's agent: the kernel (the agent loop), the DAW-neutral core (sessions, HISTORY, plans, places, FOCUS views, workflows), the MCP client, and what every DAW's integration shares."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lib]
+name = "kumi_agent"
+path = "src/lib.rs"
+
+# What other crates' tests use of the agent's own test helpers (a DAW's variations' directions). Only as a
+# dev-dependency.
+[features]
+test-support = []
+
+[dependencies]
+kumi-common.workspace = true
+kumi-store.workspace = true
+kumi-types.workspace = true
+kumi-net.workspace = true
+kumi-media.workspace = true
+kumi-ai.workspace = true
+kumi-web.workspace = true
+kumi-library.workspace = true
+kumi-listening.workspace = true
+async-trait.workspace = true
+base64.workspace = true
+chrono.workspace = true
+futures.workspace = true
+hex.workspace = true
+indexmap.workspace = true
+memchr.workspace = true
+rand.workspace = true
+regex.workspace = true
+fancy-regex.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+unicode-normalization.workspace = true
+uuid.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true
+
+[dev-dependencies]
+url.workspace = true
+kumi-media = { workspace = true, features = ["test-support"] }
+kumi-net = { workspace = true, features = ["test-support"] }
+kumi-testkit.workspace = true
+tokio = { workspace = true, features = ["test-util"] }
+# The GenExpr interpreter the building blocks' tests run their gen~ code in (optimized even in tests).
+kumi-genexpr.workspace = true
+tempfile.workspace = true
+# REAPER's and Renoise's integrations, end to end against Kumi's host and its simulated bridges.
+daw-mcp-server = { path = "../../daws/own/daw-mcp-server" }
+# Certificates for the stand-in servers and proxies of the network tests, with the ring Kumi's TLS already has.
+rcgen = { version = "0.14", default-features = false, features = ["crypto", "pem", "ring"] }
+# live_views reads deep Set snapshots, as the bridge does.
+serde_json = { workspace = true, features = ["unbounded_depth"] }

@@ -5,7 +5,7 @@
 mod live_words;
 use futures::FutureExt;
 use kumi::daw::{chosen, own, DawProvider, RemovedBridge};
-use kumi_runtime::{core::daw::DawId, system::Env};
+use kumi_types::{daw::DawId, system::Env};
 use std::rc::Rc;
 
 #[derive(Default)]
@@ -702,13 +702,13 @@ async fn the_doctor_names_each_fix_and_says_when_kumis_host_wont_start() {
         async { LiveProbe { started: false, said: Some("daw-mcp-server wasn't found".into()), ..Default::default() } }.boxed_local()
     }));
     let checks = own::RENOISE.doctor_checks(&io, &Check::ok("Kumi")).await;
-    let again = format!("{} --daw renoise bridge", *kumi_runtime::KUMI);
+    let again = format!("{} --daw renoise bridge", *kumi_types::command::KUMI);
     let removed = checks.iter().find(|check| check.text.contains("was removed from")).unwrap_or_else(|| panic!("{checks:?}"));
     assert_eq!((removed.status.clone(), removed.next.as_deref()), (CheckStatus::Fix, Some(again.as_str())), "{checks:?}");
     let host = checks.iter().find(|check| check.text == "Kumi's host for Renoise didn't start: daw-mcp-server wasn't found");
     let host = host.unwrap_or_else(|| panic!("{checks:?}"));
     assert_eq!(host.status, CheckStatus::Fix);
-    assert!(host.next.as_deref().is_some_and(|next| next.contains(kumi_runtime::KUMI_REPAIR.as_str())), "{host:?}");
+    assert!(host.next.as_deref().is_some_and(|next| next.contains(kumi_types::command::KUMI_REPAIR.as_str())), "{host:?}");
 }
 
 /// Review K43: the report reads the bridge's logs oldest first, whatever order their folder lists them in.

@@ -9,17 +9,16 @@ use std::rc::Rc;
 
 use chrono::{FixedOffset, Local, Offset};
 use futures::future::{FutureExt, LocalBoxFuture};
+use kumi_agent::core::contracts::{ConversationMatch, ConversationStore, ConversationSummary, SessionController};
+use kumi_agent::core::conversations::FileConversationStore;
+use kumi_agent::core::export::{file_name, html, html_text, import, importable, json, markdown, Format, Options, Source, IMPORT_MAX_BYTES};
+use kumi_agent::gone_words;
 use kumi_common::js::string::head;
 use kumi_common::time::now_ms;
-use kumi_runtime::core::contracts::{
-    ChangePicture, ChangeRecord, ColorChange, ConversationMatch, ConversationStore, ConversationSummary, DevicePlacement, SessionController,
-};
-use kumi_runtime::core::conversations::FileConversationStore;
-use kumi_runtime::core::export::{
-    file_name, html, html_text, import, importable, json, markdown, Format, Options, Source, IMPORT_MAX_BYTES,
-};
-use kumi_runtime::system::{self, Env};
-use kumi_runtime::{gone_words, RuntimeError, IMPORTED, KUMI_VERSION};
+use kumi_types::contracts::{ChangePicture, ChangeRecord, ColorChange, DevicePlacement};
+use kumi_types::place::IMPORTED;
+use kumi_types::system::{self, Env};
+use kumi_types::{errors::RuntimeError, version::KUMI_VERSION};
 
 use crate::config::{load_projects_dir, load_settings_file, read_settings};
 use crate::report::{known_secrets, redactor, username};
@@ -396,12 +395,12 @@ pub struct ExportRequest {
 /// What a kept conversation's export calls the DAW and a place in it, and how it names each step, from the conversation's
 /// place: REAPER's and Renoise's places are theirs; Live's, and conversations imported from files, are Live's.
 pub fn words_of(place: &str) -> ((&'static str, &'static str), impl Fn(&str) -> String) {
-    use kumi_runtime::core::{daw::DawId, place::Place};
+    use kumi_types::{daw::DawId, place::Place};
     let daw = Place::parse(place).and_then(|place| place.daw()).filter(|daw| *daw != DawId::Ableton);
     let own = daw.and_then(|daw| crate::daw::registry::profile(daw).zip(crate::daw::registry::presentation(daw)));
     let words = own.map_or(WORDS, |(profile, _)| profile.word_pair());
     let label = move |tool: &str| match own {
-        Some((profile, shown)) => kumi_runtime::core::presentation::step_label(shown, profile, tool),
+        Some((profile, shown)) => kumi_agent::core::presentation::step_label(shown, profile, tool),
         None => step_label(tool),
     };
     (words, label)
@@ -410,7 +409,7 @@ pub fn words_of(place: &str) -> ((&'static str, &'static str), impl Fn(&str) -> 
 /// The kept conversations, kept as the settings say.
 fn kept(env: &Env) -> Result<Rc<FileConversationStore>, RuntimeError> {
     let settings = read_settings(&load_settings_file(env)?);
-    Ok(kumi_runtime::core::conversations::create_conversation_store_in(
+    Ok(kumi_agent::core::conversations::create_conversation_store_in(
         load_projects_dir(env)?,
         settings.conversations.as_ref().and_then(|c| c.keep_days),
         crate::daw::registry::PLACES,

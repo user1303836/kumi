@@ -6,27 +6,32 @@
 //! With --listener, the judge asks the listening model as the app would: the listening slot (/slots), or KUMI_LISTENER.
 use futures::FutureExt;
 use kumi::config::{find_bridge_config, kumi_dir, load_inference_config, safe_error};
+use kumi_agent::{
+    core::{
+        contracts::{ActionEvent, KernelEvent, WatchEvent},
+        memory::MemoryStoreOptions,
+    },
+    create_agent_kernel, create_memory_store, create_recipe_store, create_session,
+    kernel::agent::AgentKernelOptions,
+    mcp::client,
+    IntegrationFactory, Kernel, KernelFactory, KernelOptions, Session, SessionController, SessionEvent, SessionOptions,
+};
+use kumi_ai::{
+    auth::store::{open_credential_store, CredentialStore},
+    binding::ModelBinding,
+    providers::{resolve_model, ResolveModelOptions},
+};
 use kumi_common::{
     abort::Signal,
     js::string::{head, trim},
     time::perf_now,
 };
 use kumi_daw_ableton::{connection::Connect, create_ableton_integration, options::ListenerSource, AbletonOptions, BRIDGE_TOOLS};
-use kumi_runtime::{
-    auth::store::CredentialStore,
-    core::{
-        contracts::{ActionEvent, KernelEvent, KernelTool, ToolResult, WatchEvent},
-        memory::MemoryStoreOptions,
-    },
-    create_agent_kernel, create_memory_store, create_recipe_store, create_session,
-    kernel::agent::{AgentKernelOptions, ModelBinding},
-    mcp::client,
-    open_credential_store,
-    providers::{resolve_model, ResolveModelOptions},
-    slots,
+use kumi_listening::slots;
+use kumi_types::{
+    contracts::{ChangeRecord, KernelTool, ToolResult},
+    errors::RuntimeError,
     system::process_env,
-    ChangeRecord, IntegrationFactory, Kernel, KernelFactory, KernelOptions, RuntimeError, Session, SessionController, SessionEvent,
-    SessionOptions,
 };
 use std::{
     cell::RefCell,
@@ -81,10 +86,10 @@ impl KernelTool for Logged {
     fn description(&self) -> &str {
         self.0.description()
     }
-    fn input_schema(&self) -> kumi_runtime::core::contracts::JsonObject {
+    fn input_schema(&self) -> kumi_types::contracts::JsonObject {
         self.0.input_schema()
     }
-    async fn execute(&self, input: kumi_runtime::core::contracts::JsonObject, signal: Signal) -> Result<ToolResult, RuntimeError> {
+    async fn execute(&self, input: kumi_types::contracts::JsonObject, signal: Signal) -> Result<ToolResult, RuntimeError> {
         let result = self.0.execute(input, signal).await;
         match &result {
             Ok(done) if done.is_error => println!("  ✗ {}: {}", self.0.name(), head(&done.text, 400)),
@@ -217,7 +222,7 @@ async fn run() -> Result<i32, RuntimeError> {
             });
             options.on_judge = Some({
                 let controller = controller.clone();
-                Rc::new(move |round: kumi_runtime::listening::round::Round| {
+                Rc::new(move |round: kumi_listening::round::Round| {
                     println!();
                     for line in round.lines() {
                         println!("  | {line}");

@@ -6,6 +6,19 @@ use crate::{
     tui::tty::TtyOutput,
 };
 use futures::FutureExt;
+use kumi_ai::{
+    auth::{
+        openai_codex::{login_codex_browser, login_codex_device, read_pi_codex_login, LoginOptions, OPENAI_CODEX},
+        store::{open_credential_store, valid_api_key, Credential, CredentialStore},
+    },
+    http::{default_fetch, Fetch, FetchInit},
+    providers::{
+        api_key_for,
+        local::{local_servers, probe_local},
+        models::{ApiKeyCheck, Transport},
+        provider_info, KeySource, SignIn,
+    },
+};
 use kumi_common::{
     abort::{self, Signal},
     js::{
@@ -14,22 +27,11 @@ use kumi_common::{
     },
     time::now_ms,
 };
-use kumi_runtime::{
-    ai::http::{default_fetch, Fetch, FetchInit},
-    auth::{
-        openai_codex::{login_codex_browser, login_codex_device, read_pi_codex_login, LoginOptions, OPENAI_CODEX},
-        store::{open_credential_store, valid_api_key, Credential, CredentialStore},
-    },
-    core::errors::RuntimeError,
-    providers::{
-        api_key_for,
-        local::{local_servers, probe_local},
-        models::{ApiKeyCheck, Transport},
-        provider_info, KeySource, SignIn,
-    },
+use kumi_net::cause::{unreachable, unreachable_call, NetCause};
+use kumi_types::{
+    command::{KUMI, KUMI_START},
+    errors::RuntimeError,
     system::{self, Env},
-    web::cause::{unreachable, unreachable_call, NetCause},
-    KUMI, KUMI_START,
 };
 use std::{cell::RefCell, process::Stdio, rc::Rc};
 #[derive(Clone)]
@@ -236,8 +238,7 @@ pub async fn reach_sign_in(env: &Env, fetch: Option<Rc<dyn Fetch>>) -> Option<St
         // As a model call says it: a proxy that isn't answering told apart from one that turned Kumi away.
         Err(error) => {
             return Some(
-                unreachable_call(&host, &url, &error, env, &kumi_runtime::net::proxy::current())
-                    .unwrap_or_else(|| unreachable(&host, None, env)),
+                unreachable_call(&host, &url, &error, env, &kumi_net::proxy::current()).unwrap_or_else(|| unreachable(&host, None, env)),
             )
         }
     };

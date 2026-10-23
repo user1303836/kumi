@@ -7,8 +7,9 @@ use super::{
 use crate::config::find_bridge_config;
 use crate::tui::app::{DawSetup, Installed};
 use async_trait::async_trait;
+use kumi_agent::core::contracts::SessionController;
 use kumi_common::abort::Signal;
-use kumi_runtime::{core::contracts::SessionController, system::Env};
+use kumi_types::system::Env;
 use std::{
     cell::RefCell,
     rc::{Rc, Weak},
@@ -28,13 +29,13 @@ pub(crate) struct LiveSide {
 #[async_trait(?Send)]
 impl DawSetup for LiveSide {
     async fn open_live(&self) -> Option<String> {
-        live_app::open_live(&self.run, kumi_runtime::system::platform(), &self.env).await.map(|live| live.app)
+        live_app::open_live(&self.run, kumi_types::system::platform(), &self.env).await.map(|live| live.app)
     }
     async fn ask_to_quit(&self) -> bool {
-        live_app::ask_to_quit(&self.run, kumi_runtime::system::platform(), &self.env).await
+        live_app::ask_to_quit(&self.run, kumi_types::system::platform(), &self.env).await
     }
     async fn closed(&self, stop: &Signal) -> bool {
-        live_app::closed(&self.run, kumi_runtime::system::platform(), &self.env, stop).await
+        live_app::closed(&self.run, kumi_types::system::platform(), &self.env, stop).await
     }
     async fn install(&self) -> Result<String, String> {
         let mut options = BridgeSetupIo::quiet(self.env.clone());
@@ -42,7 +43,7 @@ impl DawSetup for LiveSide {
         bridge_setup::install_quietly(options).await
     }
     async fn start(&self, app: Option<String>, set: Option<String>) -> bool {
-        live_app::start(&self.run, kumi_runtime::system::platform(), &self.env, app.as_deref(), set.as_deref()).await
+        live_app::start(&self.run, kumi_types::system::platform(), &self.env, app.as_deref(), set.as_deref()).await
     }
     async fn connect(&self) {
         if !self.given {
@@ -62,10 +63,10 @@ impl DawSetup for LiveSide {
         }
     }
     async fn version(&self, app: Option<String>) -> Option<String> {
-        live_app::version(&self.run, kumi_runtime::system::platform(), &self.env, app.as_deref()).await
+        live_app::version(&self.run, kumi_types::system::platform(), &self.env, app.as_deref()).await
     }
     async fn installed(&self) -> Installed {
-        live_app::installed(&self.env, kumi_runtime::system::platform())
+        live_app::installed(&self.env, kumi_types::system::platform())
     }
     fn open_set(&self) -> Option<String> {
         self.controller.borrow().as_ref().and_then(Weak::upgrade).and_then(|session| session.open_set())
@@ -74,13 +75,13 @@ impl DawSetup for LiveSide {
         live_here()
     }
     fn asks_permission(&self) -> Option<String> {
-        (kumi_runtime::system::platform() == "darwin").then(|| kumi_runtime::voice::microphone::terminal_app(&self.env).to_string())
+        (kumi_types::system::platform() == "darwin").then(|| kumi_media::voice::microphone::terminal_app(&self.env).to_string())
     }
     fn settings_menu(&self) -> Option<String> {
-        live_app::settings_menu(kumi_runtime::system::platform())
+        live_app::settings_menu(kumi_types::system::platform())
     }
 }
 /// Live runs on macOS and Windows only: elsewhere Kumi chats without it, and setup only signs in.
 pub(crate) fn live_here() -> bool {
-    live_app::runs_on(kumi_runtime::system::platform())
+    live_app::runs_on(kumi_types::system::platform())
 }

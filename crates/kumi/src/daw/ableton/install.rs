@@ -17,11 +17,11 @@ use crate::{
     update::{newer, UpdateIo},
 };
 use kumi_daw_ableton::ears::device::EARS_NAME;
-use kumi_runtime::{
-    core::errors::RuntimeError,
-    library::sources::{basename, dirname, join, resolve},
+use kumi_library::sources::{basename, dirname, join, resolve};
+use kumi_types::{
+    command::{CONNECT_LIVE, KUMI},
+    errors::RuntimeError,
     system::{self, Env},
-    CONNECT_LIVE, KUMI,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -443,7 +443,7 @@ pub(crate) async fn after_checkout_update(io: &UpdateIo, run: Run, repo: &str) -
     let bundled = bundled.as_deref();
     let bridge = older_bridge(&io.env, bundled);
     if find_bridge_config(&io.env).is_none() {
-        if let Some(words) = crate::install::no_bridge_yet(kumi_runtime::system::platform()) {
+        if let Some(words) = crate::install::no_bridge_yet(kumi_types::system::platform()) {
             say(words);
         }
         return 0;

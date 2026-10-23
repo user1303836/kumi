@@ -232,7 +232,7 @@ case!(a_first_run_signs_in_puts_the_bridge_in_and_waits_for_the_control_surface,
     let first = rows(&h);
     println!("--- sign in, 80 columns ---\n{first}");
     let kumi = first.lines().nth(1).unwrap();
-    assert!(kumi.starts_with("  kumi") && kumi.ends_with(kumi_runtime::KUMI_VERSION), "{kumi}");
+    assert!(kumi.starts_with("  kumi") && kumi.ends_with(kumi_types::version::KUMI_VERSION), "{kumi}");
     assert_eq!(first.lines().nth(2).unwrap().trim(), kumi::tui::app::waveform(kumi::tui::app::WAVE_WIDTH, None), "still");
     for line in [
         "  Sign in             now",
@@ -947,7 +947,7 @@ case!(the_control_surface_step_says_where_settings_are_after_a_while, async {
 case!(a_first_run_with_several_daws_here_asks_which_one_and_opens_again_with_it, async {
     // Live and REAPER here, no bridge yet, none chosen before (review L2): setup asks before Live's step, and the DAW
     // chosen is remembered and Kumi opens again with it; Live's step never starts.
-    use kumi_runtime::core::daw::DawId;
+    use kumi_types::daw::DawId;
     let live = FakeLive::new(false);
     let picked: Rc<RefCell<Vec<DawId>>> = Rc::default();
     let into = picked.clone();
@@ -974,7 +974,7 @@ case!(a_first_run_with_several_daws_here_asks_which_one_and_opens_again_with_it,
 
 case!(a_first_run_whose_daw_is_chosen_here_goes_on_with_its_setup, async {
     // Live chosen among them: remembered, and Live's step goes on in this run.
-    use kumi_runtime::core::daw::DawId;
+    use kumi_types::daw::DawId;
     let live = FakeLive::new(false);
     let picked: Rc<RefCell<Vec<DawId>>> = Rc::default();
     let into = picked.clone();
@@ -995,10 +995,10 @@ case!(an_own_daws_setup_hands_the_session_its_bridge_and_reconnects_it, async {
     // Review K1: once setup has put REAPER's extension in (its receipt is written), connecting hands the session the
     // bridge's reference and reconnects it, as Live's setup does, so the session connects without a restart.
     use kumi::daw::DawProvider;
-    use kumi_runtime::core::contracts::SessionController;
+    use kumi_agent::core::contracts::SessionController;
     let home = tempfile::tempdir().unwrap();
     let kumi_home = home.path().join(".kumi");
-    let env = kumi_runtime::system::Env::from([
+    let env = kumi_types::system::Env::from([
         ("HOME".into(), home.path().display().to_string()),
         ("KUMI_HOME".into(), kumi_home.display().to_string()),
         ("KUMI_REAPER_RESOURCE_DIR".into(), home.path().join("REAPER").display().to_string()),

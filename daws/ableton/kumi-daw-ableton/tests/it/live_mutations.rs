@@ -3,6 +3,13 @@ mod change_pictures;
 kumi_testkit::fixture_paths!();
 use async_trait::async_trait;
 use futures::FutureExt;
+use kumi_agent::{
+    core::contracts::Integration,
+    mcp::{
+        client::{McpEndpoint, StderrStatus},
+        types::{CallToolResult, Implementation, ListToolsResult},
+    },
+};
 use kumi_common::{
     abort::{Signal, SignalExt},
     js::json::stringify,
@@ -12,15 +19,9 @@ use kumi_daw_ableton::{
     actions::ACTIONS, arrange::ArrangeHost, changes::CHANGES, connection::LiveConnection, integration::Ableton, mutations::Mutations,
     observation::ObservationHost, options::AbletonOptions, remember::CurrentProject, watch::Watch,
 };
-use kumi_runtime::{
-    core::{
-        contracts::{Integration, JsonObject, ToolResult},
-        errors::RuntimeError,
-    },
-    mcp::{
-        client::{McpEndpoint, StderrStatus},
-        types::{CallToolResult, Implementation, ListToolsResult},
-    },
+use kumi_types::{
+    contracts::{JsonObject, ToolResult},
+    errors::RuntimeError,
 };
 thread_local! { static FIXTURE_ROOT: RefCell<String> = const { RefCell::new(String::new()) }; }
 use serde_json::{json, Value};
@@ -99,7 +100,7 @@ fn canonical(value: &Value) -> Value {
     }
 }
 fn normalized(value: &Value) -> String {
-    let home = kumi_runtime::library::sources::homedir();
+    let home = kumi_library::sources::homedir();
     let value = fixture_paths::map_strings(value, &|text| fixture_paths::normalize_root(text, &home, "<home>"));
     let value = FIXTURE_ROOT
         .with(|root| fixture_paths::map_strings(&value, &|text| fixture_paths::normalize_root(text, root.borrow().as_str(), "<fixture>")));
@@ -108,7 +109,7 @@ fn normalized(value: &Value) -> String {
     regex::Regex::new(r"\bc\d+\b").unwrap().replace_all(&text, "<change>").into_owned()
 }
 fn eq(actual: &Value, expected: &Value, label: &str) {
-    assert_eq!(normalized(actual), normalized(expected).replace("npm run kumi --", &kumi_runtime::command::KUMI), "{label}");
+    assert_eq!(normalized(actual), normalized(expected).replace("npm run kumi --", &kumi_types::command::KUMI), "{label}");
 }
 fn tool_result(result: ToolResult) -> Value {
     let mut value = json!(result);

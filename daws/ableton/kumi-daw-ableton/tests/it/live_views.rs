@@ -1,13 +1,11 @@
 use async_trait::async_trait;
+use kumi_agent::mcp::types::CallToolResult;
 use kumi_common::{
     abort::{Signal, SignalExt},
     js::json::stringify,
 };
 use kumi_daw_ableton::views::{self, ViewHost};
-use kumi_runtime::{
-    core::{contracts::JsonObject, errors::RuntimeError},
-    mcp::types::CallToolResult,
-};
+use kumi_types::{contracts::JsonObject, errors::RuntimeError};
 use serde_json::{json, Value};
 use std::cell::RefCell;
 struct Replay {
@@ -78,7 +76,7 @@ async fn paged_collections_and_all_focus_views_match_source_results_and_dispatch
             }
             "_pointed" => Ok(serde_json::to_value(kumi_daw_ableton::pins::pointed_pin(args[0].as_object().unwrap())).unwrap()),
             "_pin" => {
-                let pin: kumi_runtime::core::contracts::PinnedNode = serde_json::from_value(args[0].clone()).unwrap();
+                let pin: kumi_agent::core::contracts::PinnedNode = serde_json::from_value(args[0].clone()).unwrap();
                 let tree = if pin.live == Some(true) {
                     None
                 } else {

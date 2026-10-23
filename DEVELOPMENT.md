@@ -5,7 +5,7 @@ From a copy of this repository, with Rust, Cargo, cargo-nextest and Python 3.11 
 ```sh
 cargo build --release --locked --workspace --bins
 cargo run --release -p kumi --
-npm ci --prefix crates/kumi-runtime/tests/support  # once: the official SDKs some tests run
+npm ci --prefix crates/kumi-agent/tests/support  # once: the official SDKs some tests run
 sh scripts/test-isolated.sh                        # PowerShell: ./scripts/test-isolated.ps1
 ```
 

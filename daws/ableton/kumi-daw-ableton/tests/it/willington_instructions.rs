@@ -8,15 +8,16 @@ use std::rc::Rc;
 
 use async_trait::async_trait;
 use futures::FutureExt;
+use kumi_agent::core::contracts::*;
+use kumi_agent::mcp::client::{McpEndpoint, StderrStatus};
+use kumi_agent::mcp::types::{CallToolResult, Implementation, ListToolsResult};
+use kumi_agent::{create_session, SessionOptions};
 use kumi_common::abort::{Signal, SignalExt};
 use kumi_daw_ableton::integration::Ableton;
 use kumi_daw_ableton::options::{AbletonOptions, HandsSetup};
 use kumi_daw_ableton::willington::WillingtonSwitch;
-use kumi_runtime::core::contracts::*;
-use kumi_runtime::core::errors::RuntimeError;
-use kumi_runtime::mcp::client::{McpEndpoint, StderrStatus};
-use kumi_runtime::mcp::types::{CallToolResult, Implementation, ListToolsResult};
-use kumi_runtime::{create_session, SessionOptions};
+use kumi_types::contracts::*;
+use kumi_types::errors::RuntimeError;
 use serde_json::{json, Value};
 
 /// Live's bridge on the fixtures: the fullest public-tools catalog, less the tools a test takes away, answering the

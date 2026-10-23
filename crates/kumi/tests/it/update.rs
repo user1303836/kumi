@@ -5,7 +5,7 @@ use kumi::{
     tui::tty::TtyOutput,
     update::*,
 };
-use kumi_runtime::system::Env;
+use kumi_types::system::Env;
 use serde_json::json;
 use std::{
     cell::{Cell, RefCell},
@@ -243,7 +243,7 @@ async fn update_moves_forward_rebuilds_native_and_updates_bridge_only_when_live_
     assert_eq!(run_update(io).await, 0);
     assert!(out.0.borrow().contains("Kumi is up to date (1.0.1)."));
     // Live open: the one way to connect it, which can restart Live for the producer.
-    assert!(out.0.borrow().contains(&format!("{}.", *kumi_runtime::CONNECT_LIVE)), "{}", out.0.borrow());
+    assert!(out.0.borrow().contains(&format!("{}.", *kumi_types::command::CONNECT_LIVE)), "{}", out.0.borrow());
     assert!(!touched.get());
 }
 #[tokio::test(flavor = "current_thread")]
@@ -263,7 +263,7 @@ async fn dirty_checkout_is_preserved_and_current_or_missing_bridge_is_explained(
     assert_eq!(run_update(io).await, 0);
     // How to connect it where Live runs; on Linux, nothing about Live.
     let said = out.0.borrow().clone();
-    match kumi::install::no_bridge_yet(kumi_runtime::system::platform()) {
+    match kumi::install::no_bridge_yet(kumi_types::system::platform()) {
         Some(words) => assert!(said.contains(&words), "{said}"),
         None => assert!(!said.contains("Live"), "{said}"),
     }

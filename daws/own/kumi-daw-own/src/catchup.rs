@@ -4,16 +4,16 @@
 //! them; the integration (`bridge`) decides when.
 use crate::bridge::{answer_of, stopped_or, CALL_MS};
 use async_trait::async_trait;
+use kumi_agent::core::contracts::CatchUp;
+use kumi_agent::core::describe::{
+    describe_changes, describe_watch_changes, DescribedDiff, Detail, ProjectChange, ProjectItem, ProjectWords,
+};
+use kumi_agent::mcp::client::McpEndpoint;
 use kumi_common::{
     abort::{self, Signal, SignalExt},
     js::json::stringify,
 };
-use kumi_runtime::core::contracts::CatchUp;
-use kumi_runtime::core::{
-    contracts::{JsonObject, KernelTool, Reach, ToolResult},
-    describe::{describe_changes, describe_watch_changes, DescribedDiff, Detail, ProjectChange, ProjectItem, ProjectWords},
-};
-use kumi_runtime::mcp::client::McpEndpoint;
+use kumi_types::contracts::{JsonObject, KernelTool, Reach, ToolResult};
 use kumi_types::errors::RuntimeError;
 use serde_json::{json, Value};
 use std::{
@@ -789,13 +789,13 @@ mod tests {
         fn pid(&self) -> Option<u32> {
             None
         }
-        fn server_info(&self) -> Option<kumi_runtime::mcp::types::Implementation> {
+        fn server_info(&self) -> Option<kumi_agent::mcp::types::Implementation> {
             None
         }
-        async fn list(&self, _: Option<&str>, _: Signal) -> Result<kumi_runtime::mcp::types::ListToolsResult, RuntimeError> {
+        async fn list(&self, _: Option<&str>, _: Signal) -> Result<kumi_agent::mcp::types::ListToolsResult, RuntimeError> {
             Ok(serde_json::from_value(json!({"tools": []})).unwrap())
         }
-        async fn call(&self, _: &str, _: JsonObject, _: Signal) -> Result<kumi_runtime::mcp::types::CallToolResult, RuntimeError> {
+        async fn call(&self, _: &str, _: JsonObject, _: Signal) -> Result<kumi_agent::mcp::types::CallToolResult, RuntimeError> {
             let answer = self.0.borrow_mut().remove(0);
             Ok(serde_json::from_value(json!({"content": [{"type": "text", "text": answer.to_string()}], "isError": false})).unwrap())
         }
@@ -805,8 +805,8 @@ mod tests {
         fn on_disconnect(&self, _: Rc<dyn Fn()>) -> Box<dyn Fn()> {
             Box::new(|| {})
         }
-        fn stderr_status(&self) -> kumi_runtime::mcp::client::StderrStatus {
-            kumi_runtime::mcp::client::StderrStatus { bytes: 0, truncated: false }
+        fn stderr_status(&self) -> kumi_agent::mcp::client::StderrStatus {
+            kumi_agent::mcp::client::StderrStatus { bytes: 0, truncated: false }
         }
         async fn close(&self) -> Result<(), RuntimeError> {
             Ok(())
@@ -908,13 +908,13 @@ mod tests {
         fn pid(&self) -> Option<u32> {
             None
         }
-        fn server_info(&self) -> Option<kumi_runtime::mcp::types::Implementation> {
+        fn server_info(&self) -> Option<kumi_agent::mcp::types::Implementation> {
             None
         }
-        async fn list(&self, _: Option<&str>, _: Signal) -> Result<kumi_runtime::mcp::types::ListToolsResult, RuntimeError> {
+        async fn list(&self, _: Option<&str>, _: Signal) -> Result<kumi_agent::mcp::types::ListToolsResult, RuntimeError> {
             Ok(serde_json::from_value(json!({"tools": []})).unwrap())
         }
-        async fn call(&self, name: &str, _: JsonObject, _: Signal) -> Result<kumi_runtime::mcp::types::CallToolResult, RuntimeError> {
+        async fn call(&self, name: &str, _: JsonObject, _: Signal) -> Result<kumi_agent::mcp::types::CallToolResult, RuntimeError> {
             self.asked.borrow_mut().push(name.into());
             let answer = if name == "catch_up" { self.catch_up.borrow().clone() } else { self.save.borrow().clone() };
             let error = name == "baseline_save" && self.save_fails.get();
@@ -926,8 +926,8 @@ mod tests {
         fn on_disconnect(&self, _: Rc<dyn Fn()>) -> Box<dyn Fn()> {
             Box::new(|| {})
         }
-        fn stderr_status(&self) -> kumi_runtime::mcp::client::StderrStatus {
-            kumi_runtime::mcp::client::StderrStatus { bytes: 0, truncated: false }
+        fn stderr_status(&self) -> kumi_agent::mcp::client::StderrStatus {
+            kumi_agent::mcp::client::StderrStatus { bytes: 0, truncated: false }
         }
         async fn close(&self) -> Result<(), RuntimeError> {
             Ok(())

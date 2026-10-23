@@ -1,10 +1,8 @@
 //! FOCUS's bodies from Kumi's host's `focus_body` answers (the M2 contract, §5), the same for every DAW whose bridge is
 //! Kumi's own: a device tree from nodes, a take's notes, the timeline with its lanes, a tracker grid, the sequence, an
 //! instrument's keyzones, a track's routing.
-use kumi_runtime::core::{
-    contracts::{ClipNote, JsonObject},
-    view::*,
-};
+use kumi_agent::core::view::*;
+use kumi_types::contracts::{ClipNote, JsonObject};
 use serde_json::Value;
 
 fn text(value: &Value, key: &str) -> String {

@@ -1,5 +1,5 @@
 //! Live's transport as a Max for Live device sees it, one sample at a time, the way Live 12 was recorded doing it, and Kumi's
-//! transport and clock run in it: the test bench of Kumi's timing building blocks (kumi-runtime's kit::clock tests say
+//! transport and clock run in it: the test bench of Kumi's timing building blocks (kumi-daw-ableton's kit::clock tests say
 //! what each rule is). Here so that it runs optimized in those tests, as the interpreter does.
 
 use crate::Gen;

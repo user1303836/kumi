@@ -3,6 +3,13 @@ mod change_pictures;
 kumi_testkit::fixture_paths!();
 use async_trait::async_trait;
 use futures::FutureExt;
+use kumi_agent::{
+    core::contracts::*,
+    mcp::{
+        client::{McpEndpoint, StderrStatus},
+        types::{CallToolResult, Implementation, ListToolsResult},
+    },
+};
 use kumi_common::{
     abort::{Signal, SignalExt},
     js::json::stringify,
@@ -19,13 +26,8 @@ use kumi_daw_ableton::{
     remember::{CurrentProject, Remember},
     rendering::Rendering,
 };
-use kumi_runtime::{
-    core::{contracts::*, errors::RuntimeError},
-    mcp::{
-        client::{McpEndpoint, StderrStatus},
-        types::{CallToolResult, Implementation, ListToolsResult},
-    },
-};
+use kumi_types::contracts::*;
+use kumi_types::errors::RuntimeError;
 use serde_json::{json, Value};
 use std::{
     cell::{Cell, RefCell},
@@ -459,14 +461,13 @@ impl EarsLink for EarsReplay {
 #[tokio::test(flavor = "current_thread")]
 async fn cancelled_kernel_audition_removes_scratch_tracks_and_clears_its_journal_after_close() {
     use futures::StreamExt;
-    use kumi_daw_ableton::{integration::Ableton, observation::ObservationHost};
-    use kumi_runtime::{
-        ai::{
-            error::LanguageModelError,
-            types::{CallOptions, FinishReason, FinishReasonUnified, StreamPart, StreamParts, ToolCall},
-        },
-        kernel::agent::{create_agent_kernel, AgentKernelOptions, LanguageModel, ModelBinding},
+    use kumi_agent::kernel::agent::{create_agent_kernel, AgentKernelOptions};
+    use kumi_ai::{
+        binding::{LanguageModel, ModelBinding},
+        error::LanguageModelError,
+        types::{CallOptions, FinishReason, FinishReasonUnified, StreamPart, StreamParts, ToolCall},
     };
+    use kumi_daw_ableton::{integration::Ableton, observation::ObservationHost};
     use std::time::Duration;
     struct Model {
         input: String,

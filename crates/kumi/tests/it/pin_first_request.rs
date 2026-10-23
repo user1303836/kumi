@@ -10,29 +10,32 @@ use std::rc::Rc;
 use async_trait::async_trait;
 use futures::stream::{self, StreamExt};
 use futures::FutureExt;
+use kumi_agent::core::contracts::*;
+use kumi_agent::core::memory::{create_memory_store, MemoryStoreOptions};
+use kumi_agent::core::session::JobsOptions;
+use kumi_agent::core::session::VideoDirectories;
+use kumi_agent::core::techniques::create_technique_store;
+use kumi_agent::kernel::agent::{create_agent_kernel, AgentKernel, AgentKernelOptions};
+use kumi_agent::mcp::client::{McpEndpoint, StderrStatus};
+use kumi_agent::mcp::types::{CallToolResult, Implementation, ListToolsResult};
+use kumi_agent::{
+    create_conversation_store, create_goal_store, create_objective_store, create_playbook_store, create_recipe_store, create_session,
+    with_fallback, SessionOptions,
+};
+use kumi_ai::binding::DEFAULT_BUDGET;
+use kumi_ai::binding::{LanguageModel, ModelBinding, ModelRequest};
+use kumi_ai::error::LanguageModelError;
+use kumi_ai::types::{
+    CallOptions, FinishReason, FinishReasonUnified, InputTokens, OutputTokens, StreamPart, StreamParts, ToolCall, Usage as ModelUsage,
+};
 use kumi_common::abort::{Signal, SignalExt};
 use kumi_common::js::json::stringify;
 use kumi_daw_ableton::options::{AbletonOptions, HandsSetup};
 use kumi_daw_ableton::willington::WillingtonSwitch;
 use kumi_daw_ableton::{create_ableton_integration, create_inference_only_integration};
-use kumi_runtime::ai::error::LanguageModelError;
-use kumi_runtime::ai::types::{
-    CallOptions, FinishReason, FinishReasonUnified, InputTokens, OutputTokens, StreamPart, StreamParts, ToolCall, Usage as ModelUsage,
-};
-use kumi_runtime::core::contracts::*;
-use kumi_runtime::core::errors::{FailureKind, KumiError, RuntimeError};
-use kumi_runtime::core::memory::{create_memory_store, MemoryStoreOptions};
-use kumi_runtime::core::session::JobsOptions;
-use kumi_runtime::core::session::VideoDirectories;
-use kumi_runtime::core::techniques::create_technique_store;
-use kumi_runtime::kernel::agent::{create_agent_kernel, AgentKernel, AgentKernelOptions, LanguageModel, ModelBinding, ModelRequest};
-use kumi_runtime::library::{create_library, sources::SourceOptions, LibraryOptions};
-use kumi_runtime::mcp::client::{McpEndpoint, StderrStatus};
-use kumi_runtime::mcp::types::{CallToolResult, Implementation, ListToolsResult};
-use kumi_runtime::{
-    create_conversation_store, create_goal_store, create_objective_store, create_playbook_store, create_recipe_store, create_session,
-    with_fallback, SessionOptions, DEFAULT_BUDGET,
-};
+use kumi_library::{create_library, sources::SourceOptions, LibraryOptions};
+use kumi_types::contracts::*;
+use kumi_types::errors::{FailureKind, KumiError, RuntimeError};
 use serde_json::{json, Value};
 
 const ASKED: &str = "Make the kick punchier.";
@@ -169,8 +172,8 @@ impl LanguageModel for Scripted {
 /// One request as the binding was given it.
 struct Sent {
     instructions: String,
-    messages: Vec<kumi_runtime::ai::types::Message>,
-    tools: Vec<kumi_runtime::ai::types::FunctionTool>,
+    messages: Vec<kumi_ai::types::Message>,
+    tools: Vec<kumi_ai::types::FunctionTool>,
 }
 
 /// What one kernel was made with and sent: its tools as offered, each request, the bytes its instructions and tools
@@ -302,7 +305,7 @@ async fn run(setup: Setup, script: Script) -> Run {
         options.web = true;
         options.recipes = Some(create_recipe_store(dir.path().join("recipes")));
         options.watch = Some(VideoDirectories { videos_dir: text("videos"), tools_dir: text("tools") });
-        options.references = Some(Rc::new(kumi_runtime::references::store::ReferenceStore::new(text("references"))));
+        options.references = Some(Rc::new(kumi_listening::references::store::ReferenceStore::new(text("references"))));
         options.techniques = Some(create_technique_store(dir.path().join("techniques.json")));
         options.gaps = Some(text("gaps.jsonl"));
         options.conversations = Some(create_conversation_store(dir.path()));

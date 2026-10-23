@@ -6,11 +6,12 @@ use super::{
 };
 use async_trait::async_trait;
 use futures::FutureExt;
+use kumi_agent::{core::contracts::*, mcp::types::CallToolResult};
 use kumi_common::{
     abort::{Signal, SignalExt},
     js::{json::stringify, string::head},
 };
-use kumi_runtime::{core::contracts::*, mcp::types::CallToolResult};
+use kumi_types::contracts::*;
 use kumi_types::errors::RuntimeError;
 use regex::Regex;
 use serde_json::{json, Value};

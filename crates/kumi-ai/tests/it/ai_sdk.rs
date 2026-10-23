@@ -29,14 +29,14 @@ impl Fetch for Fixture {
     }
 }
 fn oracle(test: &Value) -> Value {
-    // The official SDKs are installed in one npm project, beside kumi-runtime's MCP tests.
+    // The official SDKs are installed in one npm project, beside kumi-agent's MCP tests.
     let mut command = Command::new("node");
     command
-        .arg(kumi_testkit::workspace_path("crates/kumi-runtime/tests/support/ai_sdk_oracle.mjs"))
+        .arg(kumi_testkit::workspace_path("crates/kumi-agent/tests/support/ai_sdk_oracle.mjs"))
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    let mut child = command.spawn().expect("SDK parity tests need Node and: npm ci --prefix crates/kumi-runtime/tests/support");
+    let mut child = command.spawn().expect("SDK parity tests need Node and: npm ci --prefix crates/kumi-agent/tests/support");
     child.stdin.take().unwrap().write_all(serde_json::to_string(test).unwrap().as_bytes()).unwrap();
     let output = child.wait_with_output().unwrap();
     assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));

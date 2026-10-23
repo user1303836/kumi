@@ -20,7 +20,7 @@ kumi-library.workspace = true
 kumi-listening.workspace = true
 kumi-media.workspace = true
 kumi-net.workspace = true
-kumi-runtime.workspace = true
+kumi-agent.workspace = true
 kumi-store.workspace = true
 kumi-types.workspace = true
 kumi-web.workspace = true
@@ -48,7 +48,7 @@ uuid.workspace = true
 libc.workspace = true
 
 [dev-dependencies]
-kumi-runtime = { workspace = true, features = ["test-support"] }
+kumi-agent = { workspace = true, features = ["test-support"] }
 # The GenExpr interpreter the building blocks' tests run their gen~ code in (optimized even in tests).
 kumi-genexpr.workspace = true
 kumi-media = { workspace = true, features = ["test-support"] }

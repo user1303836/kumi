@@ -10,16 +10,20 @@ use std::{cell::RefCell, rc::Rc};
 use async_trait::async_trait;
 use futures::StreamExt;
 use kumi::config::load_inference_config;
-use kumi_common::abort::Signal;
-use kumi_runtime::ai::{
+use kumi_agent::{
+    core::contracts::{KernelCheckpoint, KernelEmit},
+    create_agent_kernel, AgentKernel, AgentKernelOptions, KernelEvent,
+};
+use kumi_ai::{
+    auth::store::open_credential_store,
+    providers::{resolve_model, ResolveModelOptions},
+};
+use kumi_ai::{
     error::LanguageModelError,
     http::{Fetch, FetchInit, HttpFetch, Response},
 };
-use kumi_runtime::{
-    core::contracts::{KernelCheckpoint, KernelEmit},
-    create_agent_kernel, open_credential_store, resolve_model, system, AgentKernel, AgentKernelOptions, KernelEvent, ResolveModelOptions,
-    RuntimeError,
-};
+use kumi_common::abort::Signal;
+use kumi_types::{errors::RuntimeError, system};
 use serde_json::{json, Value};
 
 /// The provider's own usage report and the cache key sent, on stderr: no credentials.

@@ -4,7 +4,7 @@
 
 use super::super::alerts::{self, Blocked, NotifyChannel, ProgramState, StatusReport, TerminalProfile};
 use super::*;
-use kumi_runtime::kernel::failure::reset_words;
+use kumi_ai::failure::reset_words;
 
 /// What the producer chose about being told while away (settings.json).
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -373,7 +373,7 @@ pub(super) fn summary_of(answer: &str) -> String {
 
 /// The profile Kumi uses where none was given: this process's terminal.
 pub(super) fn detect_profile_here() -> TerminalProfile {
-    alerts::detect_terminal_profile(&kumi_common::env::vars(), kumi_runtime::system::platform())
+    alerts::detect_terminal_profile(&kumi_common::env::vars(), kumi_types::system::platform())
 }
 
 #[cfg(test)]

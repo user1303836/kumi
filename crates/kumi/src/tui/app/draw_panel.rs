@@ -10,7 +10,7 @@ use super::super::{
 };
 use super::drawing::{sp, st};
 use super::*;
-use kumi_runtime::providers::provider_info;
+use kumi_ai::providers::provider_info;
 struct Line {
     text: String,
     style: Style,
@@ -211,7 +211,7 @@ impl TuiApp {
                         line.right = more.map(|s| sp(s, st::FAINT)).or_else(|| right.clone());
                         lines.push(line);
                     }
-                    if detail.status.state == kumi_runtime::core::jobs::JobState::Running {
+                    if detail.status.state == kumi_agent::core::jobs::JobState::Running {
                         self.0.scheduler.request();
                     }
                 }

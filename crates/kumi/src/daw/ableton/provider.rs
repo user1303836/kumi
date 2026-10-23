@@ -15,18 +15,15 @@ use crate::report::LogFiles;
 use crate::tui::app::DawSetup;
 use crate::{install::InstalledIo, process::Run, tui::tty::TtyOutput, update::UpdateIo};
 use futures::{future::LocalBoxFuture, FutureExt};
+use kumi_agent::core::contracts::SessionController;
+use kumi_agent::core::{
+    context::IntegrationContext,
+    contracts::{ConnectionState, Integration},
+};
 use kumi_common::abort;
 use kumi_daw_ableton::AbletonOptions;
-use kumi_runtime::core::contracts::SessionController;
-use kumi_runtime::RuntimeError;
-use kumi_runtime::{
-    core::{
-        context::IntegrationContext,
-        contracts::{ConnectionState, Integration},
-        daw::DawId,
-    },
-    system::Env,
-};
+use kumi_types::errors::RuntimeError;
+use kumi_types::{daw::DawId, system::Env};
 use std::rc::Rc;
 use std::{cell::RefCell, rc::Weak};
 
@@ -59,11 +56,10 @@ impl DawProvider for Ableton {
     }
     fn app_open(&self, env: &Env) -> LocalBoxFuture<'static, bool> {
         let env = env.clone();
-        async move { live_app::open_live(&bridge_setup::default_run(), kumi_runtime::system::platform(), &env).await.is_some() }
-            .boxed_local()
+        async move { live_app::open_live(&bridge_setup::default_run(), kumi_types::system::platform(), &env).await.is_some() }.boxed_local()
     }
     fn here(&self, env: &Env) -> bool {
-        live_here() && live_app::installed(env, kumi_runtime::system::platform()) != crate::daw::provider::Installed::Missing
+        live_here() && live_app::installed(env, kumi_types::system::platform()) != crate::daw::provider::Installed::Missing
     }
     fn running_now(&self) -> bool {
         crate::daw::processes().iter().any(|(_, name)| {
@@ -97,7 +93,7 @@ impl DawProvider for Ableton {
             let env = env.clone();
             Rc::new(move |set| {
                 let env = env.clone();
-                async move { live_app::open_set_file(&bridge_setup::default_run(), kumi_runtime::system::platform(), &env, &set).await }
+                async move { live_app::open_set_file(&bridge_setup::default_run(), kumi_types::system::platform(), &env, &set).await }
                     .boxed_local()
             })
         });
@@ -118,7 +114,7 @@ impl DawProvider for Ableton {
             .flatten()
             .filter(|stale| !(stale.runtime_migration && crate::install::only_the_host_differs(env)));
         // Plain mode has no setup to put the bridge in: the way by hand comes first.
-        let connect = kumi_runtime::command::connect_live_by_hand(command);
+        let connect = kumi_types::command::connect_live_by_hand(command);
         let notice = if missing {
             live_here()
                 .then(|| format!("The Ableton bridge isn't in Live yet, so Kumi can't see your Set; chatting without it. {connect}."))

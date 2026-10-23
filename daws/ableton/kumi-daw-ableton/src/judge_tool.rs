@@ -5,7 +5,7 @@ pub use kumi_listening::tools::{
     TUNE_TOOL,
 };
 use kumi_listening::tools::{form_tool, groove_tool, judge_tool, sound_tool, tune_tool, ToolDef};
-use kumi_runtime::core::contracts::JsonObject;
+use kumi_types::contracts::JsonObject;
 use kumi_types::daw::DawProfile;
 use std::sync::LazyLock;
 

@@ -1,0 +1,26 @@
+//! kumi-agent's integration tests, one module per file: one test binary for the crate, built and linked once.
+mod budget;
+mod conversations;
+mod daw_neutral_guard;
+mod deferred_tools;
+mod disk;
+mod evolve;
+mod export;
+mod fake_daw;
+mod fake_daw_listening;
+mod file_sync;
+mod gaps;
+mod goal_store;
+mod latency_budgets;
+mod local_servers;
+mod match_run;
+mod mcp;
+mod memory;
+mod pin_wire;
+mod providers;
+mod recall;
+mod recipes;
+mod store_backed;
+mod store_import;
+mod store_rollback;
+mod techniques;

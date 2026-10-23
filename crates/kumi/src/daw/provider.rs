@@ -1,15 +1,17 @@
 //! What the app needs of a DAW it works with: finding Kumi's bridge for it, making the session's integration with the
 //! app's neutral context, watching for the DAW to answer, and chatting without it in its words.
 use futures::future::LocalBoxFuture;
-use kumi_runtime::{
+use kumi_agent::{
     core::{
         context::IntegrationContext,
         contracts::{ConnectionState, Integration, SessionController},
-        daw::{DawId, DawProfile},
         presentation::ToolPresentation,
         view::ViewPresentation,
     },
     integrations::ProjectStore,
+};
+use kumi_types::{
+    daw::{DawId, DawProfile},
     system::Env,
 };
 use std::{
@@ -25,7 +27,7 @@ use crate::report::LogFiles;
 use crate::tui::app::DawSetup;
 use crate::tui::tty::TtyOutput;
 use crate::update::UpdateIo;
-use kumi_runtime::RuntimeError;
+use kumi_types::errors::RuntimeError;
 
 /// How a DAW whose bridge is Kumi's own reaches Kumi's host, by DAW: a test's host in place of `daw-mcp-server`.
 pub type OwnHostFactory = Rc<dyn Fn(DawId) -> kumi_daw_own::bridge::Connect>;

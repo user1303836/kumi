@@ -12,6 +12,27 @@ use ableton_mcp_server::{lifecycle::delivery::PACKAGE_VERSION, protocol::tool_ca
 use async_trait::async_trait;
 use futures::{FutureExt, StreamExt};
 use kumi::config::{load_inference_config, safe_error};
+use kumi_agent::{
+    core::{
+        contracts::{ActionEvent, MemoryEvent, MemoryScope, TechniqueAction, WatchEvent},
+        memory::MemoryStoreOptions,
+        session::VideoDirectories,
+    },
+    create_agent_kernel, create_memory_store, create_recipe_store, create_session, create_technique_store,
+    mcp::{
+        client::{McpEndpoint, StderrStatus},
+        types::{CallToolResult, Implementation, ListToolsResult},
+    },
+    AgentKernel, AgentKernelOptions, IntegrationFactory, Kernel, KernelEvent, KernelFactory, KernelOptions, Recipe, RecipeStore, Session,
+    SessionController, SessionEvent, SessionOptions,
+};
+use kumi_ai::{
+    auth::store::open_credential_store,
+    binding::{ContextBudget, LanguageModel, ModelBinding, ModelRequest},
+    error::LanguageModelError,
+    providers::{resolve_model, Effort, ResolveModelOptions, EFFORTS},
+    types::{CallOptions, FunctionTool, StreamPart, StreamParts},
+};
 use kumi_common::{
     abort::Signal,
     js::{
@@ -22,29 +43,13 @@ use kumi_common::{
     time::{now_ms, perf_now},
 };
 use kumi_daw_ableton::{create_ableton_integration, AbletonOptions, BRIDGE_TOOLS};
-use kumi_runtime::{
-    ai::{
-        error::LanguageModelError,
-        types::{CallOptions, FunctionTool, StreamPart, StreamParts},
-    },
-    core::{
-        contracts::{ActionEvent, ChangeFamily, ChangeState, MemoryEvent, MemoryScope, TechniqueAction, WatchEvent},
-        memory::MemoryStoreOptions,
-        session::VideoDirectories,
-    },
-    create_agent_kernel, create_memory_store, create_recipe_store, create_session, create_technique_store, find_ffmpeg,
-    kernel::agent::{LanguageModel, ModelRequest},
-    mcp::{
-        client::{McpEndpoint, StderrStatus},
-        types::{CallToolResult, Implementation, ListToolsResult},
-    },
-    open_credential_store, resolve_model,
+use kumi_media::programs::FfmpegOptions;
+use kumi_types::{
+    contracts::{ChangeFamily, ChangeRecord, ChangeState, HeardEvent, JsonObject},
+    errors::RuntimeError,
     system::process_env,
-    video::programs::FfmpegOptions,
-    AgentKernel, AgentKernelOptions, ChangeRecord, ContextBudget, Effort, HeardEvent, IntegrationFactory, JsonObject, Kernel, KernelEvent,
-    KernelFactory, KernelOptions, ModelBinding, Recipe, RecipeStore, ResolveModelOptions, RuntimeError, Session, SessionController,
-    SessionEvent, SessionOptions, EFFORTS,
 };
+use kumi_web::video::find_ffmpeg;
 use regex::Regex;
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -1691,7 +1696,7 @@ async fn run_case(model: &Counted, case: &Case, catalog: &Rc<ListToolsResult>, w
     options.watch = Some(VideoDirectories { videos_dir: text_of(&place.join("videos")), tools_dir: text_of(&place.join("tools")) });
     // EVAL_TIMINGS=<file>: each turn's timings.jsonl line, after a {"case": …} line naming its case.
     if let Some(file) = std::env::var_os("EVAL_TIMINGS").filter(|file| !file.is_empty()) {
-        kumi_runtime::core::timing::append(Path::new(&file), &json!({"case": case.name}));
+        kumi_ai::timing::append(Path::new(&file), &json!({"case": case.name}));
         options.timings = Some(file.to_string_lossy().into_owned());
     }
     let session = Rc::new(create_session(options)?);
@@ -1886,7 +1891,7 @@ fn report(outcome: &Outcome) {
 
 thread_local! {
     /// Every tool the last kernel was made with, the deferred ones too: what EVAL_MEASURE=tools lists.
-    static OFFERED: RefCell<Vec<Rc<dyn kumi_runtime::KernelTool>>> = const { RefCell::new(Vec::new()) };
+    static OFFERED: RefCell<Vec<Rc<dyn kumi_types::contracts::KernelTool>>> = const { RefCell::new(Vec::new()) };
 }
 
 /// A model that answers nothing, for measuring what a request carries.

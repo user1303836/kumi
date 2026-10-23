@@ -7,17 +7,19 @@ use crate::{
 };
 use chrono::{DateTime, Utc};
 use futures::future::LocalBoxFuture;
+use kumi_agent::core::gaps::logged_gaps;
+use kumi_ai::auth::store::{open_credential_store, CredentialStore};
 use kumi_common::js::{
     json::stringify,
     number,
     string::{trim, trim_end, utf16_len},
 };
-use kumi_runtime::{
-    auth::store::{open_credential_store, CredentialStore},
-    core::{errors::RuntimeError, gaps::logged_gaps},
-    library::sources::join,
+use kumi_library::sources::join;
+use kumi_types::place::IMPORTED;
+use kumi_types::{
+    errors::RuntimeError,
     system::{self, Env},
-    IMPORTED, KUMI_VERSION,
+    version::KUMI_VERSION,
 };
 use serde_json::Value;
 use std::{path::Path, rc::Rc, time::UNIX_EPOCH};
@@ -538,10 +540,10 @@ async fn compose(io: &ReportIo, redact: &dyn Fn(&str) -> String, home: &str, now
     // Each DAW's log the producer has: Live's as always, another DAW's once its bridge is in (none for a Live-only
     // producer). Live's logs (a test's stand-in for them) are Live's alone.
     let has_log = |provider: &&dyn crate::daw::DawProvider| {
-        crate::daw::in_use(*provider, env) && (provider.id() == kumi_runtime::core::daw::DawId::Ableton || provider.bridge_installed(env))
+        crate::daw::in_use(*provider, env) && (provider.id() == kumi_types::daw::DawId::Ableton || provider.bridge_installed(env))
     };
     for provider in crate::daw::providers().into_iter().filter(has_log) {
-        let logs = if provider.id() == kumi_runtime::core::daw::DawId::Ableton { io.live_logs.as_ref() } else { None };
+        let logs = if provider.id() == kumi_types::daw::DawId::Ableton { io.live_logs.as_ref() } else { None };
         let (heading, body) = provider.report_log(env, home, logs).await;
         section(&heading, body);
     }

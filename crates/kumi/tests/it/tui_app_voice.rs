@@ -3,7 +3,7 @@ mod support;
 #[path = "../support/voice.rs"]
 mod voice;
 use kumi::{tui::voice::VoiceController, voice::VoiceChange};
-use kumi_runtime::voice::{VoiceError, VoiceTrouble};
+use kumi_media::voice::{VoiceError, VoiceTrouble};
 use serde_json::json;
 use std::rc::Rc;
 use support::*;

@@ -8,15 +8,15 @@ use kumi::{
     login::*,
     tui::tty::TtyOutput,
 };
-use kumi_common::{abort::Signal, time::now_ms};
-use kumi_runtime::{
-    ai::{
-        error::LanguageModelError,
-        http::{Fetch, FetchInit, Response},
-    },
+use kumi_ai::{
     auth::store::{open_credential_store, Credential, CredentialStore},
+    error::LanguageModelError,
+    http::{Fetch, FetchInit, Response},
+};
+use kumi_common::{abort::Signal, time::now_ms};
+use kumi_types::{
+    command::{KUMI, KUMI_START},
     system::Env,
-    KUMI, KUMI_START,
 };
 use serde_json::json;
 use std::{
@@ -331,7 +331,7 @@ impl Fetch for Reach {
 }
 #[tokio::test(flavor = "current_thread")]
 async fn before_sign_in_kumi_says_why_it_cant_reach_it_with_the_proxy_settings() {
-    use kumi_runtime::ai::error::ApiCallError;
+    use kumi_ai::error::ApiCallError;
     let reach = |answer| async move { reach_sign_in(&Env::new(), Some(Rc::new(Reach(answer)))).await };
     // Any answer from the host is a way there, even one that refuses this request.
     for status in [200, 403, 404, 500] {

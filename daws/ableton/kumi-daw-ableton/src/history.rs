@@ -13,18 +13,16 @@ use super::{
 };
 use async_trait::async_trait;
 use indexmap::IndexSet;
+pub use kumi_agent::core::history::{CurveRun, OnShift, Restore, UndoResult, MAX_ENTRIES, PICTURES_KEPT};
+use kumi_agent::{
+    core::history::{cant_reach_to_undo, ChangeHost},
+    mcp::types::{CallToolResult, ContentBlock},
+};
 use kumi_common::{
     abort::{self, Signal, SignalExt},
     js::{json::stringify, number::to_string, string::head},
 };
-pub use kumi_runtime::core::history::{CurveRun, OnShift, Restore, UndoResult, MAX_ENTRIES, PICTURES_KEPT};
-use kumi_runtime::{
-    core::{
-        contracts::*,
-        history::{cant_reach_to_undo, ChangeHost},
-    },
-    mcp::types::{CallToolResult, ContentBlock},
-};
+use kumi_types::contracts::*;
 use kumi_types::{daw::DawProfile, errors::RuntimeError};
 use serde_json::{json, Value};
 use std::{cell::RefCell, future::Future, rc::Rc};
@@ -35,9 +33,9 @@ const RESTORE_MS: u64 = 30_000;
 const MISSING_FILE: &str = "audio file isn't there any more (";
 
 /// HISTORY over Live.
-pub type History = kumi_runtime::core::history::History<LiveChanges>;
+pub type History = kumi_agent::core::history::History<LiveChanges>;
 /// A change as Live's HISTORY keeps it, with the clips it cut.
-pub type Applied = kumi_runtime::core::history::Applied<Material>;
+pub type Applied = kumi_agent::core::history::Applied<Material>;
 
 /// Whether a change Live's HISTORY keeps can change what's heard.
 pub trait Audible {

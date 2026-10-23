@@ -6,13 +6,18 @@
 //!   cargo run --release -p kumi --example time_rebuild
 use futures::FutureExt;
 use kumi::config::find_bridge_config;
+use kumi_agent::{mcp::client, Integration, Observation};
+use kumi_ai::timing;
 use kumi_common::{
     abort::{self, Signal},
     js::string::head,
     time::{now_ms, perf_now},
 };
 use kumi_daw_ableton::{connection::Connect, create_ableton_integration, AbletonOptions, BRIDGE_TOOLS};
-use kumi_runtime::{core::timing, mcp::client, system::Env, ChangeRecord, Integration, JsonObject, KernelTool, Observation};
+use kumi_types::{
+    contracts::{ChangeRecord, JsonObject, KernelTool},
+    system::Env,
+};
 use serde_json::{json, Value};
 use std::{
     cell::RefCell,

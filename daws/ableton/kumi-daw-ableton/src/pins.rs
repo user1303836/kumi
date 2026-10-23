@@ -1,7 +1,8 @@
 //! Things pointed at in Live or Kumi, validated against the current connection and device tree.
 use super::{more_changes::bars, references::References};
+use kumi_agent::core::contracts::*;
 use kumi_common::js::{json::stringify, number::to_string};
-use kumi_runtime::core::contracts::*;
+use kumi_types::contracts::*;
 use regex::Regex;
 use serde_json::{json, Value};
 use std::sync::LazyLock;

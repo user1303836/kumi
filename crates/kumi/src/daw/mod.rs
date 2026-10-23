@@ -11,12 +11,9 @@ pub use provider::{
     RemovedBridge, Toggle, ToggleWords, WatchWords,
 };
 
-use kumi_runtime::{
-    core::{
-        daw::{DawId, DawProfile},
-        presentation::ToolPresentation,
-        view::ViewPresentation,
-    },
+use kumi_agent::core::{presentation::ToolPresentation, view::ViewPresentation};
+use kumi_types::{
+    daw::{DawId, DawProfile},
     system::Env,
 };
 use std::cell::{Cell, RefCell};
@@ -195,7 +192,7 @@ pub fn daw_command(typed: &str) -> DawCommand {
     match HERE.with(|here| here.borrow().clone()) {
         Some(here) => daw_command_among(typed, &|provider| here(provider.id())),
         None => {
-            let env = kumi_runtime::system::process_env();
+            let env = kumi_types::system::process_env();
             daw_command_among(typed, &|provider| provider.here(&env) || provider.bridge_installed(&env))
         }
     }
@@ -283,7 +280,7 @@ pub fn profile() -> &'static DawProfile {
 }
 
 /// The DAW's words for what the app says ("Live", "Set", "Sets"): Live's for Live, so its screens keep their bytes.
-pub fn words() -> &'static kumi_runtime::core::daw::DawWords {
+pub fn words() -> &'static kumi_types::daw::DawWords {
     &profile().words
 }
 

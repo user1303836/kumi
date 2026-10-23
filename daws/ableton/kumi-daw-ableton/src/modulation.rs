@@ -15,7 +15,7 @@ use kumi_common::{
     abort::{Signal, SignalExt},
     js::json::stringify,
 };
-use kumi_runtime::core::contracts::*;
+use kumi_types::contracts::*;
 use serde_json::{json, Value};
 use std::time::{Duration, Instant};
 

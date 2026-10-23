@@ -5,12 +5,10 @@ use kumi::{
     input::{ByteListener, TerminalInput},
     tui::tty::TtyOutput,
 };
+use kumi_agent::core::contracts::*;
 use kumi_common::abort::Signal;
-use kumi_runtime::{
-    core::{
-        contracts::*,
-        errors::{FailureKind, KumiError, RuntimeError},
-    },
+use kumi_types::{
+    errors::{FailureKind, KumiError, RuntimeError},
     system::Env,
 };
 use serde_json::{json, Value};
@@ -209,7 +207,7 @@ impl Integration for Failing {
         // As Live's integration says it: another bridge in Live is a failure restarting Live fixes.
         let failure = KumiError::new(FailureKind::Live, self.0.clone());
         if self.0.contains(kumi_common::bridge::ANOTHER_BRIDGE) {
-            return Err(failure.with_setup(kumi_runtime::SetupFailure::RestartDaw).into());
+            return Err(failure.with_setup(kumi_types::errors::SetupFailure::RestartDaw).into());
         }
         Err(failure.into())
     }

@@ -1,6 +1,6 @@
 //! Telling what changed in a Set reads the two snapshots it's given without copying them.
 use kumi_daw_ableton::project::{describe_diff, describe_watch};
-use kumi_runtime::core::contracts::JsonObject;
+use kumi_types::contracts::JsonObject;
 use serde_json::{json, Value};
 use std::{
     alloc::{GlobalAlloc, Layout, System},

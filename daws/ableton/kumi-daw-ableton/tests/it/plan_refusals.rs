@@ -2,17 +2,15 @@
 //! the tracks a delete or an add moved, so deleting many tracks in one plan works (#261).
 use async_trait::async_trait;
 use futures::FutureExt;
+use kumi_agent::mcp::{
+    client::{McpEndpoint, StderrStatus},
+    types::{CallToolResult, Implementation, ListToolsResult},
+};
 use kumi_common::{abort::Signal, js::json::stringify};
 use kumi_daw_ableton::{integration::Ableton, observation::ObservationHost, options::AbletonOptions};
-use kumi_runtime::{
-    core::{
-        contracts::{JsonObject, ToolResult},
-        errors::RuntimeError,
-    },
-    mcp::{
-        client::{McpEndpoint, StderrStatus},
-        types::{CallToolResult, Implementation, ListToolsResult},
-    },
+use kumi_types::{
+    contracts::{JsonObject, ToolResult},
+    errors::RuntimeError,
 };
 use serde_json::{json, Value};
 use std::{

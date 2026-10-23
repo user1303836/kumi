@@ -1,21 +1,20 @@
 //! The own bridges' change engine against REAPER's and Renoise's own sets of changes (from own_changes' tests: the app is where both DAWs' integrations meet).
 use async_trait::async_trait;
-use kumi_common::abort::Signal;
-use kumi_daw_own::bridge::OwnDaw;
-use kumi_daw_own::changes::*;
-use kumi_daw_reaper::changes as reaper_changes;
-use kumi_daw_renoise::changes as renoise_changes;
-use kumi_runtime::{
+use kumi_agent::{
     core::{
-        contracts::*,
-        daw::DawProfile,
-        errors::RuntimeError,
         plan::PlanHost,
         refs::{Book, RefScheme},
     },
     integrations::shared::{changes::ChangeSummary, steps::own_step_line},
     mcp::client::McpEndpoint,
 };
+use kumi_common::abort::Signal;
+use kumi_daw_own::bridge::OwnDaw;
+use kumi_daw_own::changes::*;
+use kumi_daw_reaper::changes as reaper_changes;
+use kumi_daw_renoise::changes as renoise_changes;
+use kumi_types::contracts::*;
+use kumi_types::{daw::DawProfile, errors::RuntimeError};
 use regex::Regex;
 use serde_json::{json, Value};
 use std::collections::BTreeSet;
@@ -322,9 +321,9 @@ fn an_epoch_renoise_moved_only_for_devices_keeps_the_names_of_what_stayed() {
 
 #[test]
 fn a_layout_goes_with_any_request_naming_a_track_anywhere_and_renoises_refs_follow_their_track() {
+    use kumi_agent::core::refs::{Moved, Shift};
     use kumi_daw_own::bridge::names_tracks;
     use kumi_daw_renoise::RenoiseRefs;
-    use kumi_runtime::core::refs::{Moved, Shift};
     let asks = |value: Value| names_tracks(&RenoiseRefs, value.as_object().unwrap());
     assert!(asks(json!({"type": "sequencer", "group": "1:track:2"})), "track_add's group");
     assert!(asks(json!({"lines": [{"line": 1}], "track": "1:track:3", "pattern": "1:pattern:1"})));
@@ -343,13 +342,13 @@ impl McpEndpoint for Silent {
     fn pid(&self) -> Option<u32> {
         None
     }
-    fn server_info(&self) -> Option<kumi_runtime::mcp::types::Implementation> {
+    fn server_info(&self) -> Option<kumi_agent::mcp::types::Implementation> {
         None
     }
-    async fn list(&self, _: Option<&str>, _: Signal) -> Result<kumi_runtime::mcp::types::ListToolsResult, RuntimeError> {
+    async fn list(&self, _: Option<&str>, _: Signal) -> Result<kumi_agent::mcp::types::ListToolsResult, RuntimeError> {
         Err(RuntimeError::plain("silent"))
     }
-    async fn call(&self, _: &str, _: JsonObject, signal: Signal) -> Result<kumi_runtime::mcp::types::CallToolResult, RuntimeError> {
+    async fn call(&self, _: &str, _: JsonObject, signal: Signal) -> Result<kumi_agent::mcp::types::CallToolResult, RuntimeError> {
         signal.cancelled().await;
         Err(RuntimeError::plain("MCP request cancelled"))
     }
@@ -359,8 +358,8 @@ impl McpEndpoint for Silent {
     fn on_disconnect(&self, _: Rc<dyn Fn()>) -> Box<dyn Fn()> {
         Box::new(|| {})
     }
-    fn stderr_status(&self) -> kumi_runtime::mcp::client::StderrStatus {
-        kumi_runtime::mcp::client::StderrStatus { bytes: 0, truncated: false }
+    fn stderr_status(&self) -> kumi_agent::mcp::client::StderrStatus {
+        kumi_agent::mcp::client::StderrStatus { bytes: 0, truncated: false }
     }
     async fn close(&self) -> Result<(), RuntimeError> {
         Ok(())
@@ -374,13 +373,13 @@ impl McpEndpoint for Saves {
     fn pid(&self) -> Option<u32> {
         None
     }
-    fn server_info(&self) -> Option<kumi_runtime::mcp::types::Implementation> {
+    fn server_info(&self) -> Option<kumi_agent::mcp::types::Implementation> {
         None
     }
-    async fn list(&self, _: Option<&str>, _: Signal) -> Result<kumi_runtime::mcp::types::ListToolsResult, RuntimeError> {
+    async fn list(&self, _: Option<&str>, _: Signal) -> Result<kumi_agent::mcp::types::ListToolsResult, RuntimeError> {
         Err(RuntimeError::plain("no list"))
     }
-    async fn call(&self, tool: &str, args: JsonObject, _: Signal) -> Result<kumi_runtime::mcp::types::CallToolResult, RuntimeError> {
+    async fn call(&self, tool: &str, args: JsonObject, _: Signal) -> Result<kumi_agent::mcp::types::CallToolResult, RuntimeError> {
         assert_eq!(tool, "project_save");
         let text = json!({"saved": args["path"], "dirty": false}).to_string();
         Ok(serde_json::from_value(json!({"content": [{"type": "text", "text": text}]})).unwrap())
@@ -391,8 +390,8 @@ impl McpEndpoint for Saves {
     fn on_disconnect(&self, _: Rc<dyn Fn()>) -> Box<dyn Fn()> {
         Box::new(|| {})
     }
-    fn stderr_status(&self) -> kumi_runtime::mcp::client::StderrStatus {
-        kumi_runtime::mcp::client::StderrStatus { bytes: 0, truncated: false }
+    fn stderr_status(&self) -> kumi_agent::mcp::client::StderrStatus {
+        kumi_agent::mcp::client::StderrStatus { bytes: 0, truncated: false }
     }
     async fn close(&self) -> Result<(), RuntimeError> {
         Ok(())
@@ -697,13 +696,13 @@ impl McpEndpoint for Saver {
     fn pid(&self) -> Option<u32> {
         None
     }
-    fn server_info(&self) -> Option<kumi_runtime::mcp::types::Implementation> {
+    fn server_info(&self) -> Option<kumi_agent::mcp::types::Implementation> {
         None
     }
-    async fn list(&self, _: Option<&str>, _: Signal) -> Result<kumi_runtime::mcp::types::ListToolsResult, RuntimeError> {
+    async fn list(&self, _: Option<&str>, _: Signal) -> Result<kumi_agent::mcp::types::ListToolsResult, RuntimeError> {
         Err(RuntimeError::plain("not listed"))
     }
-    async fn call(&self, tool: &str, args: JsonObject, _: Signal) -> Result<kumi_runtime::mcp::types::CallToolResult, RuntimeError> {
+    async fn call(&self, tool: &str, args: JsonObject, _: Signal) -> Result<kumi_agent::mcp::types::CallToolResult, RuntimeError> {
         self.0.borrow_mut().push((tool.to_string(), args));
         let answer = json!({"epoch": "e1", "file": "/r/FXChains/Lead.RfxChain", "name": "Lead", "count": 2, "replaced": false});
         Ok(serde_json::from_value(json!({"content": [{"type": "text", "text": answer.to_string()}]})).unwrap())
@@ -714,8 +713,8 @@ impl McpEndpoint for Saver {
     fn on_disconnect(&self, _: Rc<dyn Fn()>) -> Box<dyn Fn()> {
         Box::new(|| {})
     }
-    fn stderr_status(&self) -> kumi_runtime::mcp::client::StderrStatus {
-        kumi_runtime::mcp::client::StderrStatus { bytes: 0, truncated: false }
+    fn stderr_status(&self) -> kumi_agent::mcp::client::StderrStatus {
+        kumi_agent::mcp::client::StderrStatus { bytes: 0, truncated: false }
     }
     async fn close(&self) -> Result<(), RuntimeError> {
         Ok(())
@@ -755,13 +754,13 @@ impl McpEndpoint for Refuses {
     fn pid(&self) -> Option<u32> {
         None
     }
-    fn server_info(&self) -> Option<kumi_runtime::mcp::types::Implementation> {
+    fn server_info(&self) -> Option<kumi_agent::mcp::types::Implementation> {
         None
     }
-    async fn list(&self, _: Option<&str>, _: Signal) -> Result<kumi_runtime::mcp::types::ListToolsResult, RuntimeError> {
+    async fn list(&self, _: Option<&str>, _: Signal) -> Result<kumi_agent::mcp::types::ListToolsResult, RuntimeError> {
         Err(RuntimeError::plain("not listed"))
     }
-    async fn call(&self, _: &str, _: JsonObject, _: Signal) -> Result<kumi_runtime::mcp::types::CallToolResult, RuntimeError> {
+    async fn call(&self, _: &str, _: JsonObject, _: Signal) -> Result<kumi_agent::mcp::types::CallToolResult, RuntimeError> {
         let answer = json!({"error": "it isn't in the song any more", "code": self.0});
         Ok(serde_json::from_value(json!({"content": [{"type": "text", "text": answer.to_string()}], "isError": true})).unwrap())
     }
@@ -771,8 +770,8 @@ impl McpEndpoint for Refuses {
     fn on_disconnect(&self, _: Rc<dyn Fn()>) -> Box<dyn Fn()> {
         Box::new(|| {})
     }
-    fn stderr_status(&self) -> kumi_runtime::mcp::client::StderrStatus {
-        kumi_runtime::mcp::client::StderrStatus { bytes: 0, truncated: false }
+    fn stderr_status(&self) -> kumi_agent::mcp::client::StderrStatus {
+        kumi_agent::mcp::client::StderrStatus { bytes: 0, truncated: false }
     }
     async fn close(&self) -> Result<(), RuntimeError> {
         Ok(())
@@ -795,7 +794,7 @@ async fn an_undo_refused_after_the_daws_own_redo_says_the_daw_put_it_back_not_th
             plan.undone_in_daw(&json!({"undone": [], "redone": ["t-redone"]}));
             for id in [&redone, &plain] {
                 let input = json!({"change": id});
-                kumi_runtime::integrations::shared::undo::undo_change_with(&plan.history, input.as_object().unwrap(), Signal::new(), false)
+                kumi_agent::integrations::shared::undo::undo_change_with(&plan.history, input.as_object().unwrap(), Signal::new(), false)
                     .await
                     .unwrap();
             }
@@ -827,7 +826,7 @@ async fn an_undo_refused_in_another_song_says_another_song_is_open() {
             let history = &plan.history;
             let undo = |id: String| async move {
                 let input = json!({"change": id});
-                kumi_runtime::integrations::shared::undo::undo_change_with(history, input.as_object().unwrap(), Signal::new(), false)
+                kumi_agent::integrations::shared::undo::undo_change_with(history, input.as_object().unwrap(), Signal::new(), false)
                     .await
                     .unwrap();
             };

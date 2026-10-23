@@ -1,7 +1,7 @@
 //! HISTORY's records: Kumi's changes and what it kept, with a revision every change to them bumps. HISTORY lays its
 //! rows out again only when the revision moves, so nothing changes them except through these methods.
 use super::Kept;
-use kumi_runtime::core::contracts::ChangeRecord;
+use kumi_types::contracts::ChangeRecord;
 use std::{cell::RefCell, rc::Rc};
 
 #[derive(Default)]

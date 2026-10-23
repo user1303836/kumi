@@ -1,4 +1,4 @@
-use kumi_runtime::library::{
+use kumi_library::{
     learn::{plugin_preset_folders, set_folders, Counts, LearnPhase, LearnProgress},
     plan::{kumi_sets, plan_learning, remembered_folders, PlanOptions},
     sources::SourceOptions,
@@ -153,7 +153,7 @@ async fn plan_reads_bounded_project_records_remembers_folders_and_excludes_pack_
 }
 #[test]
 fn project_and_plugin_folders_follow_platform_and_preserve_first_seen_order() {
-    use kumi_runtime::library::sources::join;
+    use kumi_library::sources::join;
     let home = join(std::env::temp_dir().to_str().unwrap(), "producer");
     let recent = vec![join(&home, "Songs/One/A.als"), join(&home, "Songs/Two/B.als"), join(&home, "Direct.als")];
     assert_eq!(

@@ -1,7 +1,7 @@
 //! `--daw <id>` and KUMI_DAW choose the DAW a session works with, among the DAWs this Kumi integrates (Live, REAPER and
 //! Renoise). Choosing Live is what Kumi does anyway: the configuration reads, and is written, exactly as without it.
 use kumi::config::*;
-use kumi_runtime::system::Env;
+use kumi_types::system::Env;
 
 fn env() -> Env {
     Env::from([
@@ -75,7 +75,7 @@ fn reaper_or_renoise_chosen_is_written_and_read_back() {
 #[test]
 fn without_any_bridge_kumi_chats_in_lives_words() {
     use kumi::daw::{chosen, providers};
-    use kumi_runtime::core::daw::{DawId, DawProfile};
+    use kumi_types::daw::{DawId, DawProfile};
     let env = env();
     assert_eq!(providers().map(|provider| provider.id()), [DawId::Ableton, DawId::Reaper, DawId::Renoise], "Live first");
     let (provider, found) = chosen(None, &env);
@@ -185,7 +185,7 @@ fn every_daw_is_asked_whether_it_runs_from_one_process_listing() {
 /// chose before, else Live, else the first; setup asks among several none of which was chosen (review L2).
 #[test]
 fn without_a_bridge_the_daw_here_is_the_one_a_first_run_sets_up() {
-    use kumi_runtime::core::daw::DawId;
+    use kumi_types::daw::DawId;
     let home = tempfile::tempdir().unwrap();
     let mut env = env();
     env.insert("KUMI_HOME".into(), home.path().to_string_lossy().into_owned());

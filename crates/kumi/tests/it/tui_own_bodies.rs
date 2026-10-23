@@ -8,10 +8,12 @@ mod models;
 mod support;
 use kumi::daw::work_with;
 use kumi::tui::{pictures::Graphics, style::ColorDepth};
+use kumi_agent::core::contracts::*;
 use kumi_daw_own::pictures as own_pictures;
 use kumi_daw_reaper as reaper;
 use kumi_daw_renoise as renoise;
-use kumi_runtime::core::{contracts::*, daw::DawId};
+use kumi_types::contracts::*;
+use kumi_types::daw::DawId;
 use serde_json::{json, Value};
 use std::rc::Rc;
 use support::*;
@@ -247,7 +249,7 @@ case!(renoises_pattern_editor_matrix_and_keyzones_draw_in_focus, async {
 #[test]
 fn renoises_open_panes_show_when_the_producer_works_in_them() {
     use kumi::tui::app::{touched_next, Touched};
-    use kumi_runtime::core::view::DawFocus;
+    use kumi_agent::core::view::DawFocus;
     work_with(DawId::Renoise);
     let focus = |track: u32, device: &str, slot: f64, follows: bool| -> DawFocus {
         serde_json::from_value(json!({

@@ -1,19 +1,17 @@
 //! Kumi's own ids for a Set's tracks (`kumi.track`): who gets a new one, and one write for all of them.
 use async_trait::async_trait;
 use futures::FutureExt;
+use kumi_agent::mcp::{
+    client::{McpEndpoint, StderrStatus},
+    types::{CallToolResult, Implementation, ListToolsResult},
+};
 use kumi_common::{abort::Signal, js::json::stringify};
 use kumi_daw_ableton::{
     connection::{ConnectionOptions, LiveConnection},
     project::{create_project_store, ProjectStore},
     track_ids::{gaps, ids_to_write, track_id, Keepers, Seen, TrackIds, Write, TRACK_KEY},
 };
-use kumi_runtime::{
-    core::{contracts::JsonObject, errors::RuntimeError},
-    mcp::{
-        client::{McpEndpoint, StderrStatus},
-        types::{CallToolResult, Implementation, ListToolsResult},
-    },
-};
+use kumi_types::{contracts::JsonObject, errors::RuntimeError};
 use serde_json::{json, Value};
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
 

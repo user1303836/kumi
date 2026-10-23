@@ -1,0 +1,47 @@
+// What kumi-types holds now, where the runtime's code has always named it.
+
+pub mod chop;
+pub mod context;
+pub mod contracts;
+pub mod conversations;
+pub mod delivery;
+pub mod describe;
+pub mod evolve;
+pub mod export;
+pub mod file_sync;
+pub mod fold;
+pub mod gaps;
+pub mod goal;
+pub mod goal_mode;
+pub mod history;
+pub mod jam;
+pub mod jobs;
+pub mod layers;
+pub mod loop_run;
+pub mod mapping;
+pub mod match_run;
+pub mod memory;
+pub mod phrases;
+pub mod plan;
+pub mod plan_stream;
+pub mod playbook;
+pub mod presentation;
+pub mod project;
+pub mod recall;
+pub mod recipes;
+pub mod refs;
+pub mod routing;
+pub mod scripts;
+pub mod session;
+pub mod spec;
+pub mod stems;
+pub mod store_backed;
+pub mod store_client;
+pub mod store_import;
+pub mod store_rows;
+pub mod taste_log;
+pub mod techniques;
+// Where a turn's time went (kumi-ai, whose model calls it times first).
+pub mod to_midi;
+pub mod variations;
+pub mod view;

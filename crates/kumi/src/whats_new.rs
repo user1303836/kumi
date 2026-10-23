@@ -276,7 +276,7 @@ mod tests {
         // The real changelog parses: every release has notes, the newest first.
         let real = releases();
         assert!(real.len() > 20 && real.iter().all(|release| !release.items.is_empty()), "{real:?}");
-        assert_eq!(real[0].version, kumi_runtime::KUMI_VERSION, "the changelog's newest release is this Kumi");
+        assert_eq!(real[0].version, kumi_types::version::KUMI_VERSION, "the changelog's newest release is this Kumi");
     }
 
     #[test]

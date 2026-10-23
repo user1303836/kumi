@@ -1,7 +1,7 @@
 //! Code picking numbers: homing that never runs out of room, a searched candidate that goes silent or hurts something
 //! never winning, an EQ fit that holds the regions already in tolerance, a search as short as Kumi runs it, and knob
 //! text read the way Live writes it, and a knob probed before starting where its saved response says.
-use kumi_runtime::listening::{
+use kumi_listening::{
     checklist::{Checklist, Item, Quantity, Role, Target, REGIONS},
     cmaes::Cmaes,
     fit::{fit, total, Limits},

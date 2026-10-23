@@ -14,11 +14,7 @@ use futures::{
     future::{LocalBoxFuture, Shared},
     FutureExt,
 };
-use kumi_common::{
-    abort::{self, Signal, SignalExt},
-    js::{json::stringify, number::to_string},
-};
-use kumi_runtime::{
+use kumi_agent::{
     core::contracts::*,
     mcp::{
         allowed_tools::{AllowedTools, CallOptions},
@@ -26,6 +22,11 @@ use kumi_runtime::{
         types::CallToolResult,
     },
 };
+use kumi_common::{
+    abort::{self, Signal, SignalExt},
+    js::{json::stringify, number::to_string},
+};
+use kumi_types::contracts::*;
 use kumi_types::{
     command::KUMI,
     errors::{FailureKind, KumiError, RuntimeError, SetupFailure},
@@ -330,7 +331,7 @@ impl LiveConnection {
         *self.endpoint.borrow_mut() = Some(endpoint.clone());
         *self.tools.borrow_mut() = Some(AllowedTools::with_model_tools(
             endpoint.clone(),
-            &kumi_runtime::mcp::allowed_tools::MODEL_TOOLS,
+            &kumi_agent::mcp::allowed_tools::MODEL_TOOLS,
             BRIDGE_TOOLS.iter().cloned().collect::<HashSet<_>>(),
         ));
         let weak = self.weak.clone();
@@ -964,7 +965,7 @@ impl LiveConnection {
         let args = context::discovery_args(&input)?;
         let read = views::pages(self, args.clone(), abort::any([signal, self.lifetime.clone()])).await?;
         if read.is_error == Some(true) {
-            use kumi_runtime::mcp::types::ContentBlock;
+            use kumi_agent::mcp::types::ContentBlock;
             let text = read
                 .content
                 .iter()

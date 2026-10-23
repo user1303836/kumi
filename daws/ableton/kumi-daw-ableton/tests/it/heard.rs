@@ -1,7 +1,7 @@
 //! Whether the producer heard one of Kumi's changes: Live played after it, Kumi's own listens included (auditions,
 //! listening, goal and match runs play through Main, as the producer has it). A render ends however it ends.
+use kumi_agent::core::contracts::Integration;
 use kumi_daw_ableton::{integration::Ableton, options::AbletonOptions};
-use kumi_runtime::core::contracts::Integration;
 use std::rc::Rc;
 
 #[tokio::test(flavor = "current_thread")]

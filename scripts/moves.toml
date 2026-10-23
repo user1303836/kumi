@@ -3790,3 +3790,1009 @@ to = "kumi_daw_own::spec"
 [[rust]]
 from = "kumi_runtime::integrations::own_views"
 to = "kumi_daw_own::views"
+
+# kumi-agent: what was left of kumi-runtime, which is gone; its re-exports resolved to the crates that define them (2026-10).
+
+[[move]]
+from = "crates/kumi-runtime/examples/reference_probe.rs"
+to = "crates/kumi-listening/examples/reference_probe.rs"
+
+[[move]]
+from = "crates/kumi-runtime/examples/resonance_probe.rs"
+to = "crates/kumi-listening/examples/resonance_probe.rs"
+
+[[move]]
+from = "testdata/oracles/kumi-runtime"
+to = "testdata/oracles/kumi-agent"
+
+[[move]]
+from = "crates/kumi-runtime"
+to = "crates/kumi-agent"
+
+[[rust]]
+from = "kumi_runtime::core::contracts::AuditionCandidate"
+to = "kumi_types::contracts::AuditionCandidate"
+
+[[rust]]
+from = "kumi_runtime::core::contracts::AuditionRequest"
+to = "kumi_types::contracts::AuditionRequest"
+
+[[rust]]
+from = "kumi_runtime::core::contracts::DevicePlacement"
+to = "kumi_types::contracts::DevicePlacement"
+
+[[rust]]
+from = "kumi_runtime::core::contracts::HeardComparison"
+to = "kumi_types::contracts::HeardComparison"
+
+[[rust]]
+from = "kumi_runtime::kernel::budget::BYTES_PER_TOKEN"
+to = "kumi_ai::binding::BYTES_PER_TOKEN"
+
+[[rust]]
+from = "kumi_runtime::core::contracts::StructuralMove"
+to = "kumi_types::contracts::StructuralMove"
+
+[[rust]]
+from = "kumi_runtime::core::contracts::ReferenceHeard"
+to = "kumi_types::contracts::ReferenceHeard"
+
+[[rust]]
+from = "kumi_runtime::core::contracts::AuditionResult"
+to = "kumi_types::contracts::AuditionResult"
+
+[[rust]]
+from = "kumi_runtime::core::contracts::ChainPlacement"
+to = "kumi_types::contracts::ChainPlacement"
+
+[[rust]]
+from = "kumi_runtime::kernel::budget::DEFAULT_BUDGET"
+to = "kumi_ai::binding::DEFAULT_BUDGET"
+
+[[rust]]
+from = "kumi_runtime::core::contracts::StreamingCall"
+to = "kumi_types::contracts::StreamingCall"
+
+[[rust]]
+from = "kumi_runtime::core::contracts::MIX_CANDIDATE"
+to = "kumi_types::contracts::MIX_CANDIDATE"
+
+[[rust]]
+from = "kumi_runtime::core::contracts::AuditionEvent"
+to = "kumi_types::contracts::AuditionEvent"
+
+[[rust]]
+from = "kumi_runtime::core::contracts::LibraryStatus"
+to = "kumi_types::contracts::LibraryStatus"
+
+[[rust]]
+from = "kumi_runtime::core::contracts::ChangePicture"
+to = "kumi_types::contracts::ChangePicture"
+
+[[rust]]
+from = "kumi_runtime::integrations::shared::display"
+to = "kumi_types::display"
+
+[[rust]]
+from = "kumi_runtime::integrations::shared::samples"
+to = "kumi_library::samples"
+
+[[rust]]
+from = "kumi_runtime::kernel::budget::ContextBudget"
+to = "kumi_ai::binding::ContextBudget"
+
+[[rust]]
+from = "kumi_runtime::core::contracts::AuditionTake"
+to = "kumi_types::contracts::AuditionTake"
+
+[[rust]]
+from = "kumi_runtime::core::contracts::ChangeFamily"
+to = "kumi_types::contracts::ChangeFamily"
+
+[[rust]]
+from = "kumi_runtime::core::contracts::ChangeRecord"
+to = "kumi_types::contracts::ChangeRecord"
+
+[[rust]]
+from = "kumi_runtime::core::contracts::WatchedFrame"
+to = "kumi_types::contracts::WatchedFrame"
+
+[[rust]]
+from = "kumi_runtime::core::contracts::WatchedEvent"
+to = "kumi_types::contracts::WatchedEvent"
+
+[[rust]]
+from = "kumi_runtime::core::contracts::LibraryState"
+to = "kumi_types::contracts::LibraryState"
+
+[[rust]]
+from = "kumi_runtime::core::contracts::Capabilities"
+to = "kumi_types::daw::Capabilities"
+
+[[rust]]
+from = "kumi_runtime::core::contracts::PictureRoute"
+to = "kumi_types::picture::PictureRoute"
+
+[[rust]]
+from = "kumi_runtime::core::contracts::PictureValue"
+to = "kumi_types::picture::PictureValue"
+
+[[rust]]
+from = "kumi_runtime::core::context::ListenerSource"
+to = "kumi_listening::listener::ListenerSource"
+
+[[rust]]
+from = "kumi_runtime::core::conversations::IMPORTED"
+to = "kumi_types::place::IMPORTED"
+
+[[rust]]
+from = "kumi_runtime::kernel::agent::LanguageModel"
+to = "kumi_ai::binding::LanguageModel"
+
+[[rust]]
+from = "kumi_runtime::core::contracts::HearRequest"
+to = "kumi_types::contracts::HearRequest"
+
+[[rust]]
+from = "kumi_runtime::core::contracts::ColorChange"
+to = "kumi_types::contracts::ColorChange"
+
+[[rust]]
+from = "kumi_runtime::core::contracts::ClipPicture"
+to = "kumi_types::contracts::ClipPicture"
+
+[[rust]]
+from = "kumi_runtime::core::contracts::ChangeState"
+to = "kumi_types::contracts::ChangeState"
+
+[[rust]]
+from = "kumi_runtime::core::contracts::WordsSource"
+to = "kumi_types::contracts::WordsSource"
+
+[[rust]]
+from = "kumi_runtime::core::contracts::PictureItem"
+to = "kumi_types::picture::PictureItem"
+
+[[rust]]
+from = "kumi_runtime::core::contracts::PictureLine"
+to = "kumi_types::picture::PictureLine"
+
+[[rust]]
+from = "kumi_runtime::core::contracts::PictureZone"
+to = "kumi_types::picture::PictureZone"
+
+[[rust]]
+from = "kumi_runtime::core::contracts::RouteChange"
+to = "kumi_types::picture::RouteChange"
+
+[[rust]]
+from = "kumi_runtime::kernel::agent::ModelBinding"
+to = "kumi_ai::binding::ModelBinding"
+
+[[rust]]
+from = "kumi_runtime::kernel::agent::ModelRequest"
+to = "kumi_ai::binding::ModelRequest"
+
+[[rust]]
+from = "kumi_runtime::core::contracts::JsonObject"
+to = "kumi_types::contracts::JsonObject"
+
+[[rust]]
+from = "kumi_runtime::core::contracts::MAX_IMAGES"
+to = "kumi_types::contracts::MAX_IMAGES"
+
+[[rust]]
+from = "kumi_runtime::core::contracts::ToolResult"
+to = "kumi_types::contracts::ToolResult"
+
+[[rust]]
+from = "kumi_runtime::core::contracts::with_final"
+to = "kumi_types::contracts::with_final"
+
+[[rust]]
+from = "kumi_runtime::core::contracts::CONCURRENT"
+to = "kumi_types::contracts::CONCURRENT"
+
+[[rust]]
+from = "kumi_runtime::core::contracts::KernelTool"
+to = "kumi_types::contracts::KernelTool"
+
+[[rust]]
+from = "kumi_runtime::core::contracts::HeardEvent"
+to = "kumi_types::contracts::HeardEvent"
+
+[[rust]]
+from = "kumi_runtime::core::contracts::DawProfile"
+to = "kumi_types::daw::DawProfile"
+
+[[rust]]
+from = "kumi_runtime::core::contracts::ScriptKind"
+to = "kumi_types::daw::ScriptKind"
+
+[[rust]]
+from = "kumi_runtime::core::memory::suspect_note"
+to = "kumi_types::notes::suspect_note"
+
+[[rust]]
+from = "kumi_runtime::kernel::budget::MAX_IMAGES"
+to = "kumi_types::contracts::MAX_IMAGES"
+
+[[rust]]
+from = "kumi_runtime::kernel::budget::budget_for"
+to = "kumi_ai::binding::budget_for"
+
+[[rust]]
+from = "kumi_runtime::core::contracts::ToolImage"
+to = "kumi_types::contracts::ToolImage"
+
+[[rust]]
+from = "kumi_runtime::core::contracts::HeardTake"
+to = "kumi_types::contracts::HeardTake"
+
+[[rust]]
+from = "kumi_runtime::core::contracts::TakeScore"
+to = "kumi_types::contracts::TakeScore"
+
+[[rust]]
+from = "kumi_runtime::core::contracts::TrackChip"
+to = "kumi_types::contracts::TrackChip"
+
+[[rust]]
+from = "kumi_runtime::core::contracts::SoundSpan"
+to = "kumi_types::contracts::SoundSpan"
+
+[[rust]]
+from = "kumi_runtime::core::contracts::WebAction"
+to = "kumi_types::contracts::WebAction"
+
+[[rust]]
+from = "kumi_runtime::core::contracts::ToolEvent"
+to = "kumi_types::contracts::ToolEvent"
+
+[[rust]]
+from = "kumi_runtime::core::contracts::Closeness"
+to = "kumi_types::contracts::Closeness"
+
+[[rust]]
+from = "kumi_runtime::core::contracts::MixLevels"
+to = "kumi_types::picture::MixLevels"
+
+[[rust]]
+from = "kumi_runtime::core::contracts::ToolRole"
+to = "kumi_types::contracts::ToolRole"
+
+[[rust]]
+from = "kumi_runtime::core::contracts::BestTake"
+to = "kumi_types::contracts::BestTake"
+
+[[rust]]
+from = "kumi_runtime::core::contracts::ClipNote"
+to = "kumi_types::contracts::ClipNote"
+
+[[rust]]
+from = "kumi_runtime::core::contracts::WebWhere"
+to = "kumi_types::contracts::WebWhere"
+
+[[rust]]
+from = "kumi_runtime::core::contracts::WebEvent"
+to = "kumi_types::contracts::WebEvent"
+
+[[rust]]
+from = "kumi_runtime::core::contracts::DawWords"
+to = "kumi_types::daw::DawWords"
+
+[[rust]]
+from = "kumi_runtime::core::contracts::Dynamics"
+to = "kumi_types::picture::Dynamics"
+
+[[rust]]
+from = "kumi_runtime::core::contracts::EqShape"
+to = "kumi_types::picture::EqShape"
+
+[[rust]]
+from = "kumi_runtime::core::contracts::MixSend"
+to = "kumi_types::picture::MixSend"
+
+[[rust]]
+from = "kumi_runtime::core::contracts::Render"
+to = "kumi_types::contracts::Render"
+
+[[rust]]
+from = "kumi_runtime::DEVICE_VERIFICATION_URL"
+to = "kumi_ai::auth::openai_codex::DEVICE_VERIFICATION_URL"
+
+[[rust]]
+from = "kumi_runtime::core::contracts::EqBand"
+to = "kumi_types::picture::EqBand"
+
+[[rust]]
+from = "kumi_runtime::core::contracts::Usage"
+to = "kumi_types::contracts::Usage"
+
+[[rust]]
+from = "kumi_runtime::core::contracts::Reach"
+to = "kumi_types::contracts::Reach"
+
+[[rust]]
+from = "kumi_runtime::core::contracts::Where"
+to = "kumi_types::contracts::Where"
+
+[[rust]]
+from = "kumi_runtime::core::contracts::Heard"
+to = "kumi_types::contracts::Heard"
+
+[[rust]]
+from = "kumi_runtime::core::contracts::Thumb"
+to = "kumi_types::contracts::Thumb"
+
+[[rust]]
+from = "kumi_runtime::core::contracts::Focus"
+to = "kumi_types::contracts::Focus"
+
+[[rust]]
+from = "kumi_runtime::core::contracts::DawId"
+to = "kumi_types::daw::DawId"
+
+[[rust]]
+from = "kumi_runtime::open_credential_store"
+to = "kumi_ai::auth::store::open_credential_store"
+
+[[rust]]
+from = "kumi_runtime::list_local_models_in"
+to = "kumi_ai::providers::local::list_local_models_in"
+
+[[rust]]
+from = "kumi_runtime::parse_local_model_id"
+to = "kumi_ai::providers::local::parse_local_model_id"
+
+[[rust]]
+from = "kumi_runtime::core::evolve::seeded"
+to = "kumi_listening::cmaes::seeded"
+
+[[rust]]
+from = "kumi_runtime::login_codex_browser"
+to = "kumi_ai::auth::openai_codex::login_codex_browser"
+
+[[rust]]
+from = "kumi_runtime::read_pi_codex_login"
+to = "kumi_ai::auth::openai_codex::read_pi_codex_login"
+
+[[rust]]
+from = "kumi_runtime::resolve_local_model"
+to = "kumi_ai::providers::local::resolve_local_model"
+
+[[rust]]
+from = "kumi_runtime::ResolveModelOptions"
+to = "kumi_ai::providers::ResolveModelOptions"
+
+[[rust]]
+from = "kumi_runtime::login_codex_device"
+to = "kumi_ai::auth::openai_codex::login_codex_device"
+
+[[rust]]
+from = "kumi_runtime::read_library_state"
+to = "kumi_library::read_state"
+
+[[rust]]
+from = "kumi_runtime::configure_programs"
+to = "kumi_media::programs::configure_programs"
+
+[[rust]]
+from = "kumi_runtime::microphone_allowed"
+to = "kumi_media::voice::microphone_allowed"
+
+[[rust]]
+from = "kumi_runtime::FIND_PRESETS_TOOL"
+to = "kumi_library::FIND_PRESETS_TOOL"
+
+[[rust]]
+from = "kumi_runtime::list_local_models"
+to = "kumi_ai::providers::local::list_local_models"
+
+[[rust]]
+from = "kumi_runtime::create_web_client"
+to = "kumi_net::web::create_web_client"
+
+[[rust]]
+from = "kumi_runtime::ApiKeyCredential"
+to = "kumi_ai::auth::store::ApiKeyCredential"
+
+[[rust]]
+from = "kumi_runtime::FIND_SOUNDS_TOOL"
+to = "kumi_library::FIND_SOUNDS_TOOL"
+
+[[rust]]
+from = "kumi_runtime::WATCH_VIDEO_TOOL"
+to = "kumi_web::video::tool::WATCH_VIDEO_TOOL"
+
+[[rust]]
+from = "kumi_runtime::list_microphones"
+to = "kumi_media::voice::list_microphones"
+
+[[rust]]
+from = "kumi_runtime::video::programs"
+to = "kumi_media::programs"
+
+[[rust]]
+from = "kumi_runtime::video::captions"
+to = "kumi_media::captions"
+
+[[rust]]
+from = "kumi_runtime::kernel::failure"
+to = "kumi_ai::failure"
+
+[[rust]]
+from = "kumi_runtime::listening_tools"
+to = "kumi_media::audio::tools::listening_tools"
+
+[[rust]]
+from = "kumi_runtime::CredentialStore"
+to = "kumi_ai::auth::store::CredentialStore"
+
+[[rust]]
+from = "kumi_runtime::OAuthCredential"
+to = "kumi_ai::auth::store::OAuthCredential"
+
+[[rust]]
+from = "kumi_runtime::AuditionRequest"
+to = "kumi_types::contracts::AuditionRequest"
+
+[[rust]]
+from = "kumi_runtime::DevicePlacement"
+to = "kumi_types::contracts::DevicePlacement"
+
+[[rust]]
+from = "kumi_runtime::local_installed"
+to = "kumi_ai::providers::local::local_installed"
+
+[[rust]]
+from = "kumi_runtime::LOCAL_PROVIDERS"
+to = "kumi_ai::providers::local::LOCAL_PROVIDERS"
+
+[[rust]]
+from = "kumi_runtime::voice_readiness"
+to = "kumi_media::voice::voice_readiness"
+
+[[rust]]
+from = "kumi_runtime::SEARCH_WEB_TOOL"
+to = "kumi_web::tool::SEARCH_WEB_TOOL"
+
+[[rust]]
+from = "kumi_runtime::AuditionResult"
+to = "kumi_types::contracts::AuditionResult"
+
+[[rust]]
+from = "kumi_runtime::DEFAULT_BUDGET"
+to = "kumi_ai::binding::DEFAULT_BUDGET"
+
+[[rust]]
+from = "kumi_runtime::create_library"
+to = "kumi_library::create_library"
+
+[[rust]]
+from = "kumi_runtime::LibraryOptions"
+to = "kumi_library::LibraryOptions"
+
+[[rust]]
+from = "kumi_runtime::parse_model_id"
+to = "kumi_ai::providers::parse_model_id"
+
+[[rust]]
+from = "kumi_runtime::system_program"
+to = "kumi_types::system::system_program"
+
+[[rust]]
+from = "kumi_runtime::VoiceReadiness"
+to = "kumi_media::voice::VoiceReadiness"
+
+[[rust]]
+from = "kumi_runtime::video::frames"
+to = "kumi_media::frames"
+
+[[rust]]
+from = "kumi_runtime::video::speech"
+to = "kumi_media::speech"
+
+[[rust]]
+from = "kumi_runtime::core::picture"
+to = "kumi_types::picture"
+
+[[rust]]
+from = "kumi_runtime::core::private"
+to = "kumi_types::private"
+
+[[rust]]
+from = "kumi_runtime::valid_api_key"
+to = "kumi_ai::auth::store::valid_api_key"
+
+[[rust]]
+from = "kumi_runtime::AuditionEvent"
+to = "kumi_types::contracts::AuditionEvent"
+
+[[rust]]
+from = "kumi_runtime::LibraryStatus"
+to = "kumi_types::contracts::LibraryStatus"
+
+[[rust]]
+from = "kumi_runtime::StreamingCall"
+to = "kumi_types::contracts::StreamingCall"
+
+[[rust]]
+from = "kumi_runtime::ContextBudget"
+to = "kumi_ai::binding::ContextBudget"
+
+[[rust]]
+from = "kumi_runtime::LearnProgress"
+to = "kumi_library::LearnProgress"
+
+[[rust]]
+from = "kumi_runtime::LibrarySource"
+to = "kumi_library::Source"
+
+[[rust]]
+from = "kumi_runtime::local_servers"
+to = "kumi_ai::providers::local::local_servers"
+
+[[rust]]
+from = "kumi_runtime::ServerSetting"
+to = "kumi_ai::providers::local::ServerSetting"
+
+[[rust]]
+from = "kumi_runtime::check_api_key"
+to = "kumi_ai::providers::models::check_api_key"
+
+[[rust]]
+from = "kumi_runtime::resolve_model"
+to = "kumi_ai::providers::resolve_model"
+
+[[rust]]
+from = "kumi_runtime::PROVIDER_INFO"
+to = "kumi_ai::providers::PROVIDER_INFO"
+
+[[rust]]
+from = "kumi_runtime::prepare_voice"
+to = "kumi_media::voice::prepare_voice"
+
+[[rust]]
+from = "kumi_runtime::READ_WEB_TOOL"
+to = "kumi_web::tool::READ_WEB_TOOL"
+
+[[rust]]
+from = "kumi_runtime::core::errors"
+to = "kumi_types::errors"
+
+[[rust]]
+from = "kumi_runtime::core::timing"
+to = "kumi_ai::timing"
+
+[[rust]]
+from = "kumi_runtime::analyze_file"
+to = "kumi_media::audio::analyze_file"
+
+[[rust]]
+from = "kumi_runtime::OPENAI_CODEX"
+to = "kumi_ai::auth::openai_codex::OPENAI_CODEX"
+
+[[rust]]
+from = "kumi_runtime::CONNECT_LIVE"
+to = "kumi_types::command::CONNECT_LIVE"
+
+[[rust]]
+from = "kumi_runtime::ChangeFamily"
+to = "kumi_types::contracts::ChangeFamily"
+
+[[rust]]
+from = "kumi_runtime::ChangeRecord"
+to = "kumi_types::contracts::ChangeRecord"
+
+[[rust]]
+from = "kumi_runtime::WatchedEvent"
+to = "kumi_types::contracts::WatchedEvent"
+
+[[rust]]
+from = "kumi_runtime::RuntimeError"
+to = "kumi_types::errors::RuntimeError"
+
+[[rust]]
+from = "kumi_runtime::SetupFailure"
+to = "kumi_types::errors::SetupFailure"
+
+[[rust]]
+from = "kumi_runtime::ModelBinding"
+to = "kumi_ai::binding::ModelBinding"
+
+[[rust]]
+from = "kumi_runtime::ModelRequest"
+to = "kumi_ai::binding::ModelRequest"
+
+[[rust]]
+from = "kumi_runtime::library_logs"
+to = "kumi_library::library_logs"
+
+[[rust]]
+from = "kumi_runtime::LibraryState"
+to = "kumi_library::LibraryState"
+
+[[rust]]
+from = "kumi_runtime::MY_SETS_TOOL"
+to = "kumi_library::MY_SETS_TOOL"
+
+[[rust]]
+from = "kumi_runtime::LocalBinding"
+to = "kumi_ai::providers::local::LocalBinding"
+
+[[rust]]
+from = "kumi_runtime::ProviderInfo"
+to = "kumi_ai::providers::ProviderInfo"
+
+[[rust]]
+from = "kumi_runtime::KUMI_VERSION"
+to = "kumi_types::version::KUMI_VERSION"
+
+[[rust]]
+from = "kumi_runtime::whisper_hint"
+to = "kumi_media::programs::whisper_hint"
+
+[[rust]]
+from = "kumi_runtime::find_whisper"
+to = "kumi_web::video::find_whisper"
+
+[[rust]]
+from = "kumi_runtime::WatchRequest"
+to = "kumi_web::video::WatchRequest"
+
+[[rust]]
+from = "kumi_runtime::terminal_app"
+to = "kumi_media::voice::terminal_app"
+
+[[rust]]
+from = "kumi_runtime::voice_prompt"
+to = "kumi_media::voice::voice_prompt"
+
+[[rust]]
+from = "kumi_runtime::VoiceTrouble"
+to = "kumi_media::voice::VoiceTrouble"
+
+[[rust]]
+from = "kumi_runtime::core::place"
+to = "kumi_types::place"
+
+[[rust]]
+from = "kumi_runtime::LISTEN_TOOL"
+to = "kumi_media::audio::tools::LISTEN_TOOL"
+
+[[rust]]
+from = "kumi_runtime::INSTALL_PS1"
+to = "kumi_types::command::INSTALL_PS1"
+
+[[rust]]
+from = "kumi_runtime::KUMI_REPAIR"
+to = "kumi_types::command::KUMI_REPAIR"
+
+[[rust]]
+from = "kumi_runtime::FailureKind"
+to = "kumi_types::errors::FailureKind"
+
+[[rust]]
+from = "kumi_runtime::context_for"
+to = "kumi_ai::providers::local::context_for"
+
+[[rust]]
+from = "kumi_runtime::probe_local"
+to = "kumi_ai::providers::local::probe_local"
+
+[[rust]]
+from = "kumi_runtime::LocalServer"
+to = "kumi_ai::providers::local::LocalServer"
+
+[[rust]]
+from = "kumi_runtime::list_models"
+to = "kumi_ai::providers::models::list_models"
+
+[[rust]]
+from = "kumi_runtime::api_key_for"
+to = "kumi_ai::providers::api_key_for"
+
+[[rust]]
+from = "kumi_runtime::API_KEY_ENV"
+to = "kumi_ai::providers::API_KEY_ENV"
+
+[[rust]]
+from = "kumi_runtime::ffmpeg_hint"
+to = "kumi_media::programs::ffmpeg_hint"
+
+[[rust]]
+from = "kumi_runtime::video_tools"
+to = "kumi_web::video::tool::video_tools"
+
+[[rust]]
+from = "kumi_runtime::find_ffmpeg"
+to = "kumi_web::video::find_ffmpeg"
+
+[[rust]]
+from = "kumi_runtime::find_yt_dlp"
+to = "kumi_web::video::find_yt_dlp"
+
+[[rust]]
+from = "kumi_runtime::watch_video"
+to = "kumi_web::video::watch_video"
+
+[[rust]]
+from = "kumi_runtime::references"
+to = "kumi_listening::references"
+
+[[rust]]
+from = "kumi_runtime::web::cause"
+to = "kumi_net::cause"
+
+[[rust]]
+from = "kumi_runtime::core::disk"
+to = "kumi_types::disk"
+
+[[rust]]
+from = "kumi_runtime::Comparison"
+to = "kumi_media::audio::Comparison"
+
+[[rust]]
+from = "kumi_runtime::login_hint"
+to = "kumi_ai::auth::openai_codex::login_hint"
+
+[[rust]]
+from = "kumi_runtime::LOGIN_HINT"
+to = "kumi_ai::auth::openai_codex::LOGIN_HINT"
+
+[[rust]]
+from = "kumi_runtime::Credential"
+to = "kumi_ai::auth::store::Credential"
+
+[[rust]]
+from = "kumi_runtime::INSTALL_SH"
+to = "kumi_types::command::INSTALL_SH"
+
+[[rust]]
+from = "kumi_runtime::KUMI_START"
+to = "kumi_types::command::KUMI_START"
+
+[[rust]]
+from = "kumi_runtime::HeardEvent"
+to = "kumi_types::contracts::HeardEvent"
+
+[[rust]]
+from = "kumi_runtime::JsonObject"
+to = "kumi_types::contracts::JsonObject"
+
+[[rust]]
+from = "kumi_runtime::KernelTool"
+to = "kumi_types::contracts::KernelTool"
+
+[[rust]]
+from = "kumi_runtime::ToolResult"
+to = "kumi_types::contracts::ToolResult"
+
+[[rust]]
+from = "kumi_runtime::budget_for"
+to = "kumi_ai::binding::budget_for"
+
+[[rust]]
+from = "kumi_runtime::start_hint"
+to = "kumi_ai::providers::local::start_hint"
+
+[[rust]]
+from = "kumi_runtime::ProviderId"
+to = "kumi_ai::providers::ProviderId"
+
+[[rust]]
+from = "kumi_runtime::USER_AGENT"
+to = "kumi_ai::providers::USER_AGENT"
+
+[[rust]]
+from = "kumi_runtime::youtube_id"
+to = "kumi_web::video::youtube_id"
+
+[[rust]]
+from = "kumi_runtime::write_down"
+to = "kumi_media::voice::write_down"
+
+[[rust]]
+from = "kumi_runtime::VoiceError"
+to = "kumi_media::voice::VoiceError"
+
+[[rust]]
+from = "kumi_runtime::providers"
+to = "kumi_ai::providers"
+
+[[rust]]
+from = "kumi_runtime::listening"
+to = "kumi_listening"
+
+[[rust]]
+from = "kumi_runtime::live_word"
+to = "kumi_types::live_word"
+
+[[rust]]
+from = "kumi_runtime::core::daw"
+to = "kumi_types::daw"
+
+[[rust]]
+from = "kumi_runtime::closeness"
+to = "kumi_media::audio::closeness"
+
+[[rust]]
+from = "kumi_runtime::Closeness"
+to = "kumi_media::audio::Closeness"
+
+[[rust]]
+from = "kumi_runtime::INSTALLED"
+to = "kumi_types::command::INSTALLED"
+
+[[rust]]
+from = "kumi_runtime::REINSTALL"
+to = "kumi_types::command::REINSTALL"
+
+[[rust]]
+from = "kumi_runtime::ToolImage"
+to = "kumi_types::contracts::ToolImage"
+
+[[rust]]
+from = "kumi_runtime::KumiError"
+to = "kumi_types::errors::KumiError"
+
+[[rust]]
+from = "kumi_runtime::TasteLine"
+to = "kumi_library::TasteLine"
+
+[[rust]]
+from = "kumi_runtime::LocalKind"
+to = "kumi_ai::providers::local::LocalKind"
+
+[[rust]]
+from = "kumi_runtime::ModelInfo"
+to = "kumi_ai::providers::models::ModelInfo"
+
+[[rust]]
+from = "kumi_runtime::PROVIDERS"
+to = "kumi_ai::providers::PROVIDERS"
+
+[[rust]]
+from = "kumi_runtime::Listening"
+to = "kumi_media::voice::Listening"
+
+[[rust]]
+from = "kumi_runtime::WebClient"
+to = "kumi_net::web::WebClient"
+
+[[rust]]
+from = "kumi_runtime::web_tools"
+to = "kumi_web::tool::web_tools"
+
+[[rust]]
+from = "kumi_runtime::notation"
+to = "kumi_listening::notation"
+
+[[rust]]
+from = "kumi_runtime::web::net"
+to = "kumi_net::web"
+
+[[rust]]
+from = "kumi_runtime::daw_text"
+to = "kumi_types::daw_text"
+
+[[rust]]
+from = "kumi_runtime::daw_word"
+to = "kumi_types::daw_word"
+
+[[rust]]
+from = "kumi_runtime::Analysis"
+to = "kumi_media::audio::Analysis"
+
+[[rust]]
+from = "kumi_runtime::ClipNote"
+to = "kumi_types::contracts::ClipNote"
+
+[[rust]]
+from = "kumi_runtime::WebEvent"
+to = "kumi_types::contracts::WebEvent"
+
+[[rust]]
+from = "kumi_runtime::IMPORTED"
+to = "kumi_types::place::IMPORTED"
+
+[[rust]]
+from = "kumi_runtime::library"
+to = "kumi_library"
+
+[[rust]]
+from = "kumi_runtime::plugins"
+to = "kumi_library::plugins"
+
+[[rust]]
+from = "kumi_runtime::command"
+to = "kumi_types::command"
+
+[[rust]]
+from = "kumi_runtime::version"
+to = "kumi_types::version"
+
+[[rust]]
+from = "kumi_runtime::compare"
+to = "kumi_media::audio::compare"
+
+[[rust]]
+from = "kumi_runtime::Library"
+to = "kumi_library::Library"
+
+[[rust]]
+from = "kumi_runtime::EFFORTS"
+to = "kumi_ai::providers::EFFORTS"
+
+[[rust]]
+from = "kumi_runtime::Watched"
+to = "kumi_web::video::Watched"
+
+[[rust]]
+from = "kumi_runtime::models"
+to = "kumi_ai::models"
+
+[[rust]]
+from = "kumi_runtime::system"
+to = "kumi_types::system"
+
+[[rust]]
+from = "kumi_runtime::Effort"
+to = "kumi_ai::providers::Effort"
+
+[[rust]]
+from = "kumi_runtime::listen"
+to = "kumi_media::voice::listen"
+
+[[rust]]
+from = "kumi_runtime::audio"
+to = "kumi_media::audio"
+
+[[rust]]
+from = "kumi_runtime::voice"
+to = "kumi_media::voice"
+
+[[rust]]
+from = "kumi_runtime::slots"
+to = "kumi_listening::slots"
+
+[[rust]]
+from = "kumi_runtime::video"
+to = "kumi_web::video"
+
+[[rust]]
+from = "kumi_runtime::Usage"
+to = "kumi_types::contracts::Usage"
+
+[[rust]]
+from = "kumi_runtime::Heard"
+to = "kumi_media::voice::Heard"
+
+[[rust]]
+from = "kumi_runtime::auth"
+to = "kumi_ai::auth"
+
+[[rust]]
+from = "kumi_runtime::hear"
+to = "kumi_media::audio::hear"
+
+[[rust]]
+from = "kumi_runtime::KUMI"
+to = "kumi_types::command::KUMI"
+
+[[rust]]
+from = "kumi_runtime::net"
+to = "kumi_net"
+
+[[rust]]
+from = "kumi_runtime::web"
+to = "kumi_web"
+
+[[rust]]
+from = "kumi_runtime::ai"
+to = "kumi_ai"
+
+[[rust]]
+from = "kumi_runtime"
+to = "kumi_agent"

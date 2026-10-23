@@ -6,12 +6,10 @@ use super::{
     context::{payload, PARENTS},
     mutations::track_index_of,
 };
+pub use kumi_agent::core::refs::{Book, KeptRefs, KnownParameter, Moved, RefScheme, ReferenceError, Shift};
+use kumi_agent::mcp::types::CallToolResult;
 use kumi_common::js::{json::stringify, string::utf16_len};
-pub use kumi_runtime::core::refs::{Book, KeptRefs, KnownParameter, Moved, RefScheme, ReferenceError, Shift};
-use kumi_runtime::{
-    core::contracts::{JsonObject, ToolResult},
-    mcp::types::CallToolResult,
-};
+use kumi_types::contracts::{JsonObject, ToolResult};
 use regex::Regex;
 use serde_json::{json, Value};
 use std::sync::LazyLock;

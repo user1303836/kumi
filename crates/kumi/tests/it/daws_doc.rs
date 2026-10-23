@@ -4,10 +4,10 @@
 //! named in that DAW's section, and every kind their own undo skips in its limits; each cell speaks the legend's forms.
 //! A new flag, FOCUS view, kind category or undo-skipped kind can't ship unlisted (the bridges' other tools aren't
 //! checked here).
+use kumi_agent::core::view::BodyKind;
 use kumi_daw_reaper::{self as reaper, changes as reaper_changes};
 use kumi_daw_renoise::{self as renoise, changes as renoise_changes};
-use kumi_runtime::core::daw::{Capabilities, DawProfile};
-use kumi_runtime::core::view::BodyKind;
+use kumi_types::daw::{Capabilities, DawProfile};
 use std::collections::BTreeSet;
 
 const LANGUAGES: [&str; 3] = ["en", "ja", "zh-CN"];

@@ -5,6 +5,7 @@
 use crate::listening::{DeviceRow, OwnRenderer};
 use async_trait::async_trait;
 use indexmap::IndexMap;
+use kumi_agent::core::{contracts::*, evolve::Knob, refs::RefScheme};
 use kumi_common::{
     abort::{self, Signal, SignalExt},
     js::number::to_fixed,
@@ -18,7 +19,7 @@ use kumi_media::audio::{
     analyze::Analysis,
     matching::{closeness, Focus},
 };
-use kumi_runtime::core::{contracts::*, evolve::Knob, refs::RefScheme};
+use kumi_types::contracts::*;
 use kumi_types::errors::RuntimeError;
 use serde_json::{json, Value};
 use std::{

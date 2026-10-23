@@ -106,7 +106,7 @@ fn use_own_kumi_folder() {
 }
 
 /// The tool, making devices in `library` for a conversation of its own.
-fn tool_in(library: &std::path::Path, made: Rc<RefCell<Made>>) -> Rc<dyn kumi_runtime::core::contracts::KernelTool> {
+fn tool_in(library: &std::path::Path, made: Rc<RefCell<Made>>) -> Rc<dyn kumi_types::contracts::KernelTool> {
     use futures::FutureExt;
     use_own_kumi_folder();
     device_tool(DeviceToolOptions {

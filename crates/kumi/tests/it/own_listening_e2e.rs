@@ -11,12 +11,14 @@ use daw_mcp_server::{
     simulator::{Simulator, SimulatorConfig},
 };
 use futures::FutureExt;
+use kumi_agent::core::{context::IntegrationContext, contracts::*};
+use kumi_agent::mcp::client::McpEndpoint;
 use kumi_common::abort::Signal;
 use kumi_daw_own::bridge::{Connect, OwnOptions};
 use kumi_daw_reaper::create_reaper_integration;
 use kumi_daw_renoise::create_renoise_integration;
-use kumi_runtime::core::{context::IntegrationContext, contracts::*, errors::RuntimeError};
-use kumi_runtime::mcp::client::McpEndpoint;
+use kumi_types::contracts::*;
+use kumi_types::errors::RuntimeError;
 use regex::Regex;
 use serde_json::{json, Value};
 use std::{cell::Cell, cell::RefCell, path::Path, rc::Rc, sync::Arc, sync::LazyLock};
@@ -1059,7 +1061,7 @@ async fn a_limiter_that_cant_turn_down_far_enough_leaves_the_rest_to_a_gain_fx_a
 /// runs (an offline render needs none); the listen tool says a render stops the DAW's playback.
 #[tokio::test(flavor = "current_thread")]
 async fn an_offline_renders_silence_and_the_listen_tool_are_said_as_rendering_is() {
-    use kumi_runtime::core::daw::DawProfile;
+    use kumi_types::daw::DawProfile;
     for profile in [DawProfile::REAPER, DawProfile::RENOISE] {
         assert!(profile.vocab.listen_method.contains("a render stops"), "{}", profile.vocab.listen_method);
     }

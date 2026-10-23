@@ -1,10 +1,8 @@
 //! /slots in the app: the slots shown, a swap made and taken back, and a model Kumi can't run yet refused with why.
 #[path = "../support/tui_app.rs"]
 mod support;
-use kumi_runtime::{
-    auth::store::{open_credential_store, CredentialStore},
-    slots::{self, Choice, Job, Slots, SlotsContext},
-};
+use kumi_ai::auth::store::{open_credential_store, CredentialStore};
+use kumi_listening::slots::{self, Choice, Job, Slots, SlotsContext};
 use std::rc::Rc;
 use support::*;
 

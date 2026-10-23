@@ -5,15 +5,16 @@ use std::rc::Rc;
 
 use async_trait::async_trait;
 use futures::FutureExt;
-use kumi_common::abort::{self, Signal};
-use kumi_common::js::json::stringify;
-use kumi_daw_ableton::{integration::Ableton, options::AbletonOptions};
-use kumi_runtime::core::contracts::{Integration, JsonObject};
-use kumi_runtime::core::errors::RuntimeError;
-use kumi_runtime::mcp::{
+use kumi_agent::core::contracts::Integration;
+use kumi_agent::mcp::{
     client::{McpEndpoint, StderrStatus},
     types::{CallToolResult, Implementation, ListToolsResult},
 };
+use kumi_common::abort::{self, Signal};
+use kumi_common::js::json::stringify;
+use kumi_daw_ableton::{integration::Ableton, options::AbletonOptions};
+use kumi_types::contracts::JsonObject;
+use kumi_types::errors::RuntimeError;
 use serde_json::{json, Value};
 
 /// A bridge of a given version, answering the status-bar line and Live's playback with what it's given.

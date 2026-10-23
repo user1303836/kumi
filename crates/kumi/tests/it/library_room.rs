@@ -3,7 +3,7 @@
 mod fixture;
 use fixture::Studio;
 use kumi_common::abort::Signal;
-use kumi_runtime::library::learn::{learn, library_logs, LearnOptions};
+use kumi_library::learn::{learn, library_logs, LearnOptions};
 
 #[tokio::test]
 async fn no_room_to_convert_ends_the_run_and_keeps_nothing_of_the_sounds() {

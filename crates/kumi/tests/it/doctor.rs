@@ -3,12 +3,12 @@
 mod live_words;
 use futures::FutureExt;
 use kumi::{doctor::*, live_app::InstalledLive, live_extension::install_extension, tui::tty::TtyOutput};
+use kumi_ai::providers::{local::local_servers, models::ModelInfo};
 use kumi_common::time::now_ms;
-use kumi_runtime::{
-    providers::{local::local_servers, models::ModelInfo},
+use kumi_media::voice::VoiceReadiness;
+use kumi_types::{
+    command::{KUMI, KUMI_REPAIR},
     system::Env,
-    voice::VoiceReadiness,
-    KUMI, KUMI_REPAIR,
 };
 use serde_json::json;
 use std::{cell::RefCell, fs, path::PathBuf, rc::Rc};
@@ -145,10 +145,10 @@ async fn doctor_says_whats_fine_and_exact_fixes_without_secrets() {
     let printed = out.0.borrow().clone();
     // An older bridge in Live: the one way Kumi says to connect it, which can restart Live for the producer. Where Live
     // doesn't run (Linux), a note (older_bridge's test has its words).
-    let live = kumi::live_app::runs_on(kumi_runtime::system::platform());
+    let live = kumi::live_app::runs_on(kumi_types::system::platform());
     let older = find(&doctor_checks(&io).await.unwrap(), "The installed bridge (1.0.9) is older than this Kumi's (1.0.10)").clone();
     if live {
-        assert_eq!(older.next.as_deref(), Some(kumi_runtime::CONNECT_LIVE.as_str()));
+        assert_eq!(older.next.as_deref(), Some(kumi_types::command::CONNECT_LIVE.as_str()));
     } else {
         assert_eq!(older.status, CheckStatus::Note);
     }
@@ -192,9 +192,9 @@ async fn doctor_explains_live_bridge_and_terminal_in_plain_words() {
     assert!(find(&doctor_checks(&io).await.unwrap(), "Terminal").text.contains("small"));
     io.env.insert("KUMI_REMOTE_SCRIPTS_DIR".into(), s.root.path().join("nowhere").display().to_string());
     let checks = doctor_checks(&io).await.unwrap();
-    if matches!(kumi_runtime::system::platform(), "darwin" | "win32") {
+    if matches!(kumi_types::system::platform(), "darwin" | "win32") {
         let missing = find(&checks, "The Ableton bridge isn't installed");
-        assert_eq!(missing.next.as_deref(), Some(kumi_runtime::CONNECT_LIVE.as_str()));
+        assert_eq!(missing.next.as_deref(), Some(kumi_types::command::CONNECT_LIVE.as_str()));
         assert!(missing.next.as_ref().unwrap().contains(&format!("{} bridge", *KUMI)));
     } else {
         // No Live for Linux: nothing to fix.
@@ -412,8 +412,11 @@ async fn native_bridge_configuration_resolves_binary_and_sibling_metadata() {
     let binary = s.root.path().join("native/ableton-mcp-server");
     fs::create_dir_all(binary.parent().unwrap()).unwrap();
     fs::write(&binary, "native fixture").unwrap();
-    fs::write(binary.parent().unwrap().join("package.json"), json!({"version":kumi_runtime::KUMI_VERSION,"bridge":"1.0.11"}).to_string())
-        .unwrap();
+    fs::write(
+        binary.parent().unwrap().join("package.json"),
+        json!({"version":kumi_types::version::KUMI_VERSION,"bridge":"1.0.11"}).to_string(),
+    )
+    .unwrap();
     fs::write(&s.config, json!({"version":2,"server":{"command":binary,"args":["--config",s.config]}}).to_string()).unwrap();
     let server = read_bridge_server(s.config.to_str().unwrap()).unwrap();
     assert!(server.native());
@@ -425,7 +428,7 @@ async fn native_bridge_configuration_resolves_binary_and_sibling_metadata() {
     // A native Kumi's version heads the Installation section; there's no Node to check.
     assert!(!doctor_checks(&io).await.unwrap().iter().any(|c| c.text.contains("native executable") || c.text.contains("Node")));
     let installation = installation_checks(&io.env, &io.installation).await;
-    assert!(installation[0].text.starts_with(&format!("Kumi {}", kumi_runtime::KUMI_VERSION)), "{installation:?}");
+    assert!(installation[0].text.starts_with(&format!("Kumi {}", kumi_types::version::KUMI_VERSION)), "{installation:?}");
 }
 fn put(path: &std::path::Path, text: &str) {
     fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -451,13 +454,13 @@ async fn installation_names_this_kumi_what_it_goes_back_to_and_how_the_shell_fin
     let mut io = s.io();
     let home = s.root.path().join(".kumi");
     io.env.insert("KUMI_INSTALLED".into(), "1".into());
-    put(&home.join("app/package.json"), &json!({"version":kumi_runtime::KUMI_VERSION}).to_string());
+    put(&home.join("app/package.json"), &json!({"version":kumi_types::version::KUMI_VERSION}).to_string());
     let checks = installation_checks(&io.env, &io.installation).await;
-    assert!(checks[0].text.starts_with(&format!("Kumi {} in ", kumi_runtime::KUMI_VERSION)), "{checks:?}");
+    assert!(checks[0].text.starts_with(&format!("Kumi {} in ", kumi_types::version::KUMI_VERSION)), "{checks:?}");
     assert_eq!(find(&checks, "Nothing kept to go back to yet").status, CheckStatus::Ok);
     put(&home.join("app.previous/package.json"), &json!({"version":"1.15.0"}).to_string());
     assert!(find(&installation_checks(&io.env, &io.installation).await, "update --rollback goes back to 1.15.0").next.is_none());
-    put(&home.join("app.previous/package.json"), &json!({"version":kumi_runtime::KUMI_VERSION}).to_string());
+    put(&home.join("app.previous/package.json"), &json!({"version":kumi_types::version::KUMI_VERSION}).to_string());
     find(&installation_checks(&io.env, &io.installation).await, "has only this same");
     // The shell finds Kumi's launcher, or another kumi before it, or none in this window.
     let ours = home.join("bin");
@@ -492,13 +495,13 @@ async fn installation_says_whether_a_newer_kumi_is_out_from_the_daily_check_with
     let cache = s.root.path().join("update-check.json");
     let at = now_ms() as f64 - 3. * 3_600_000.;
     // Versions compare as numbers, from this one: x.y.(z + 10) is newer, and 1.9.0 is older than any 1.10 or later.
-    let this: Vec<u32> = kumi_runtime::KUMI_VERSION.split(['.', '-']).take(3).map(|part| part.parse().unwrap()).collect();
+    let this: Vec<u32> = kumi_types::version::KUMI_VERSION.split(['.', '-']).take(3).map(|part| part.parse().unwrap()).collect();
     let later = format!("{}.{}.{}", this[0], this[1], this[2] + 10);
-    for (latest, newer) in [("99.0.0", true), (later.as_str(), true), ("1.9.0", false), (kumi_runtime::KUMI_VERSION, false)] {
+    for (latest, newer) in [("99.0.0", true), (later.as_str(), true), ("1.9.0", false), (kumi_types::version::KUMI_VERSION, false)] {
         fs::write(&cache, json!({"checkedAt":at,"latest":latest}).to_string()).unwrap();
         let said = check(io.clone()).await;
         if newer {
-            assert_eq!(said.text, format!("Kumi {latest} is out (this is {})", kumi_runtime::KUMI_VERSION));
+            assert_eq!(said.text, format!("Kumi {latest} is out (this is {})", kumi_types::version::KUMI_VERSION));
             assert_eq!((said.status, said.next.unwrap()), (CheckStatus::Note, format!("{} update", *KUMI)));
         } else {
             assert_eq!(said, Check::ok("Up to date when Kumi last looked (3 hours ago)"), "{latest}");
@@ -616,7 +619,7 @@ async fn doctor_json_takes_out_keys_and_counts_only_fixes() {
     let printed = out.0.borrow().clone();
     assert!(!printed.contains("sk-fixture-never-printed") && printed.contains("Read [secret] in a log"), "{printed}");
     let value: serde_json::Value = serde_json::from_str(&printed).unwrap();
-    assert_eq!(value["kumi"], kumi_runtime::KUMI_VERSION);
+    assert_eq!(value["kumi"], kumi_types::version::KUMI_VERSION);
     assert_eq!(value["fixes"], 0);
     let titles: Vec<_> = value["sections"].as_array().unwrap().iter().map(|s| s["title"].as_str().unwrap().to_string()).collect();
     assert_eq!(titles, ["Installation", "Sign-in, Live and the rest"]);
@@ -635,7 +638,7 @@ fn an_older_bridge_is_to_fix_where_live_runs_and_elsewhere_says_only_what_that_s
             (check.status, check.text.as_str()),
             (CheckStatus::Fix, "The installed bridge (1.0.80) is older than this Kumi's (1.0.92)")
         );
-        assert_eq!(check.next.as_deref(), Some(kumi_runtime::CONNECT_LIVE.as_str()), "{platform}");
+        assert_eq!(check.next.as_deref(), Some(kumi_types::command::CONNECT_LIVE.as_str()), "{platform}");
     }
     // Linux: no Live to load it, so nothing to fix and nothing about Live; its files can be brought up to date.
     let linux = older_bridge("linux", "1.0.80", "1.0.92");
@@ -665,7 +668,7 @@ fn a_missing_bridge_is_to_fix_only_where_a_live_12_can_take_it() {
     for found in [LiveInstalled::Ready, LiveInstalled::NeverOpened("/Applications/Ableton Live 12 Suite.app".into())] {
         let check = missing_bridge("win32", || found);
         assert_eq!(check.status, CheckStatus::Fix);
-        assert_eq!(check.next.as_deref(), Some(kumi_runtime::CONNECT_LIVE.as_str()));
+        assert_eq!(check.next.as_deref(), Some(kumi_types::command::CONNECT_LIVE.as_str()));
     }
 }
 
@@ -736,14 +739,14 @@ async fn a_reaper_only_doctor_never_speaks_lives_words() {
     assert!(text.contains("REAPER"), "{text}");
     let fixes: Vec<&Check> = sections.iter().flat_map(|s| &s.checks).filter(|c| c.status == CheckStatus::Fix).collect();
     assert!(fixes.iter().all(|c| c.text.contains("REAPER")), "nothing to fix for a DAW this producer doesn't use: {fixes:?}");
-    kumi::daw::work_with(kumi_runtime::core::daw::DawId::Ableton);
+    kumi::daw::work_with(kumi_types::daw::DawId::Ableton);
 }
 
 /// A Live producer who has opened Renoise once (its preferences folder is there) but never put Kumi's tool in sees the
 /// doctor as before REAPER and Renoise (review L7); `kumi --daw renoise doctor` gets a note about it, never a fix.
 #[tokio::test(flavor = "current_thread")]
 async fn a_live_producer_who_opened_renoise_once_gets_a_note_not_a_fix() {
-    kumi::daw::work_with(kumi_runtime::core::daw::DawId::Ableton);
+    kumi::daw::work_with(kumi_types::daw::DawId::Ableton);
     let s = Setup::new();
     let mut io = s.io();
     io.env.insert("KUMI_REAPER_RESOURCE_DIR".into(), s.root.path().join("no-reaper").display().to_string());
@@ -758,9 +761,9 @@ async fn a_live_producer_who_opened_renoise_once_gets_a_note_not_a_fix() {
     assert_eq!(texts(&before), texts(&after), "Live's doctor as before: no rows for a DAW never set up");
     assert!(!texts(&after).iter().any(|text| text.contains("Renoise")), "{:?}", texts(&after));
     // Asked about Renoise (`--daw renoise doctor`): a note, never a fix.
-    kumi::daw::work_with(kumi_runtime::core::daw::DawId::Renoise);
+    kumi::daw::work_with(kumi_types::daw::DawId::Renoise);
     let asked = doctor_checks(&io).await.unwrap();
-    kumi::daw::work_with(kumi_runtime::core::daw::DawId::Ableton);
+    kumi::daw::work_with(kumi_types::daw::DawId::Ableton);
     assert_eq!(fixes(&before), fixes(&asked), "no fix for a DAW never set up");
     let note = find(&asked, "Kumi's tool isn't in Renoise");
     assert_eq!(note.status, CheckStatus::Note);

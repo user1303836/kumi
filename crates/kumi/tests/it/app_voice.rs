@@ -3,7 +3,7 @@ use kumi::{
     config::{read_settings, write_settings},
     voice::*,
 };
-use kumi_runtime::system::Env;
+use kumi_types::system::Env;
 use serde_json::json;
 use std::{cell::RefCell, rc::Rc};
 #[test]

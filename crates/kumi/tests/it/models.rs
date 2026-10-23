@@ -1,16 +1,13 @@
 use async_trait::async_trait;
 use futures::FutureExt;
 use kumi::models::*;
-use kumi_runtime::{
-    ai::{
-        error::LanguageModelError,
-        http::{default_fetch, Fetch, FetchInit, Response},
-    },
+use kumi_ai::{
     auth::store::{open_credential_store, Credential, CredentialStore},
-    core::errors::FailureKind,
+    error::LanguageModelError,
+    http::{default_fetch, Fetch, FetchInit, Response},
     providers::{models::ApiKeyCheck, Effort, ProviderId},
-    system::Env,
 };
+use kumi_types::{errors::FailureKind, system::Env};
 use serde_json::{json, Value};
 use std::{
     cell::{Cell, RefCell},
@@ -146,7 +143,7 @@ async fn sign_in_chatgpt(store: &Rc<dyn CredentialStore>) {
     use base64::Engine;
     let claims = json!({"https://api.openai.com/auth":{"chatgpt_account_id":"acct-1"},"exp":kumi_common::time::now_ms()/1000+3600});
     let access = format!("e30.{}.sig", base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(serde_json::to_vec(&claims).unwrap()));
-    let credential = kumi_runtime::auth::store::OAuthCredential {
+    let credential = kumi_ai::auth::store::OAuthCredential {
         access,
         refresh: "refresh-1".into(),
         expires: kumi_common::time::now_ms() as f64 + 86400000.,
@@ -162,12 +159,8 @@ async fn fast_uses_the_tier_the_models_list_offers_persists_and_reaches_the_requ
         let control = control.clone();
         async move {
             let binding = control.binding().await.unwrap();
-            let request = kumi_runtime::kernel::agent::ModelRequest {
-                instructions: "i".into(),
-                messages: vec![],
-                tools: vec![],
-                session_id: "s".into(),
-            };
+            let request =
+                kumi_ai::binding::ModelRequest { instructions: "i".into(), messages: vec![], tools: vec![], session_id: "s".into() };
             (binding.prepare)(request).provider_options.unwrap()["openai"].get("serviceTier").cloned()
         }
     };

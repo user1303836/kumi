@@ -3,10 +3,8 @@
 
 use crate::bridge_setup::{is_live_running_on, Run};
 use kumi_common::abort::Signal;
-use kumi_runtime::{
-    library::sources::join,
-    system::{self, Env, SystemProgram},
-};
+use kumi_library::sources::join;
+use kumi_types::system::{self, Env, SystemProgram};
 use regex::Regex;
 use std::{path::Path, sync::LazyLock, time::Duration};
 

@@ -1,7 +1,7 @@
 //! Native audio formats and transport fixtures for audio, listening and video.
 use futures::FutureExt;
 use kumi_daw_ableton::ears::{capture::*, osc::*};
-use kumi_runtime::{audio::decode::open_audio, video::programs::*};
+use kumi_media::{audio::decode::open_audio, programs::*};
 use sha2::{Digest, Sha256};
 use std::{
     collections::HashMap,
@@ -436,7 +436,7 @@ fn model_download(oid: String) -> Download {
 async fn a_download_that_doesnt_match_its_published_checksum_isnt_kept() {
     let root = tempfile::tempdir().unwrap();
     let dir = root.path().join("tools-mismatch");
-    let asset = yt_dlp_asset(kumi_runtime::system::platform(), node_arch()).unwrap();
+    let asset = yt_dlp_asset(kumi_types::system::platform(), node_arch()).unwrap();
     let options = ProgramOptions {
         tools_dir: dir.to_string_lossy().into_owned(),
         env: Some(HashMap::from([("PATH".into(), "".into())])),
@@ -477,7 +477,7 @@ async fn a_download_that_doesnt_match_its_published_checksum_isnt_kept() {
 }
 #[test]
 fn kumi_goes_only_to_public_addresses() {
-    use kumi_runtime::web::net::{checked_url, private_address};
+    use kumi_net::web::{checked_url, private_address};
     for inside in [
         "127.0.0.1",
         "10.1.2.3",
@@ -531,7 +531,7 @@ fn kumi_goes_only_to_public_addresses() {
 }
 #[tokio::test]
 async fn wavetables_shapes_as_harmonics_keyframes_morphing_cycles_cut_from_a_sound_and_serums_frame_marker() {
-    use kumi_runtime::audio::wavetable::*;
+    use kumi_media::audio::wavetable::*;
     assert_eq!(
         shape_harmonics(Shape::Square, Some(0.5), Some(5)).iter().map(|v| (v * 1000.0).round() / 1000.0).collect::<Vec<_>>(),
         vec![1.0, 0.0, 0.333, 0.0, 0.2]
@@ -578,7 +578,7 @@ fn ffmpeg_archive(root: &Path, folder: &str) -> Vec<u8> {
     std::fs::write(build.join("bin/ffprobe"), "x").unwrap();
     std::fs::write(build.join("LICENSE.txt"), "LGPL").unwrap();
     let archive = root.join("build.tar.gz");
-    assert!(std::process::Command::new(kumi_runtime::system::system_program_default(kumi_runtime::system::SystemProgram::Tar))
+    assert!(std::process::Command::new(kumi_types::system::system_program_default(kumi_types::system::SystemProgram::Tar))
         .args(["-czf", archive.to_str().unwrap(), "-C", root.join("build").to_str().unwrap(), folder])
         .status()
         .unwrap()
@@ -834,7 +834,7 @@ fn harmonic_tone(seconds: f64, hz: f64, amplitude: f64, harmonics: impl Fn(usize
 }
 #[tokio::test]
 async fn a_stereo_1khz_sine_at_minus20_dbfs_reads_minus20_lufs_one_band_fully_correlated() {
-    use kumi_runtime::audio::analyze::*;
+    use kumi_media::audio::analyze::*;
     let dir = tempfile::tempdir().unwrap();
     let file = dir.path().join("sine-1k.wav");
     let sine = tone(48000 * 8, 1000.0, 0.1);
@@ -854,7 +854,7 @@ async fn a_stereo_1khz_sine_at_minus20_dbfs_reads_minus20_lufs_one_band_fully_co
 }
 #[tokio::test]
 async fn out_of_phase_channels_read_as_negative_correlation_and_wide() {
-    use kumi_runtime::audio::analyze::*;
+    use kumi_media::audio::analyze::*;
     let dir = tempfile::tempdir().unwrap();
     let file = dir.path().join("phase.wav");
     let left = tone(48000 * 3, 300.0, 0.3);
@@ -866,7 +866,7 @@ async fn out_of_phase_channels_read_as_negative_correlation_and_wide() {
 }
 #[tokio::test]
 async fn a_saw_a_square_and_a_sine_are_told_apart_with_their_pitch() {
-    use kumi_runtime::audio::analyze::*;
+    use kumi_media::audio::analyze::*;
     let dir = tempfile::tempdir().unwrap();
     for (name, hz, shape, expected) in [
         ("saw-a2.wav", 110.0, 0, "A2"),
@@ -924,7 +924,7 @@ fn deterministic_noise(length: usize) -> Vec<f32> {
 }
 #[tokio::test]
 async fn noise_has_no_pitch_a_shaped_note_has_its_envelope_measured() {
-    use kumi_runtime::audio::analyze::*;
+    use kumi_media::audio::analyze::*;
     let dir = tempfile::tempdir().unwrap();
     let noise = dir.path().join("noise.wav");
     wav(&noise, &[deterministic_noise(48000)], 16);
@@ -955,7 +955,7 @@ async fn noise_has_no_pitch_a_shaped_note_has_its_envelope_measured() {
 }
 #[tokio::test]
 async fn a_wobbles_rate_is_heard_as_a_filter_lfo_and_named_at_the_tempo() {
-    use kumi_runtime::audio::analyze::*;
+    use kumi_media::audio::analyze::*;
     let samples: Vec<f32> = (0..48000 * 3)
         .map(|i| {
             let t = i as f64 / 48000.0;
@@ -980,7 +980,7 @@ async fn a_wobbles_rate_is_heard_as_a_filter_lfo_and_named_at_the_tempo() {
 }
 #[tokio::test]
 async fn clicks_at_128_bpm_give_the_tempo_c_major_material_gives_the_key() {
-    use kumi_runtime::audio::analyze::*;
+    use kumi_media::audio::analyze::*;
     let dir = tempfile::tempdir().unwrap();
     let length = 48000 * 16;
     let mut beats = vec![0f32; length];
@@ -1026,7 +1026,7 @@ fn plucked_notes(list: &[(f64, f64, f64)], seconds: f64) -> Vec<f32> {
 }
 #[tokio::test]
 async fn the_notes_in_a_part_are_transcribed_when_each_starts_its_pitch_and_how_hard() {
-    use kumi_runtime::audio::analyze::*;
+    use kumi_media::audio::analyze::*;
     let played = [(0.1, 60.0, 0.5), (0.4, 64.0, 0.5), (0.7, 67.0, 0.25), (1.0, 72.0, 0.5), (1.3, 48.0, 0.5), (1.6, 60.0, 0.12)];
     let samples = plucked_notes(&played, 2.2);
     let dir = tempfile::tempdir().unwrap();
@@ -1054,7 +1054,7 @@ async fn the_notes_in_a_part_are_transcribed_when_each_starts_its_pitch_and_how_
 }
 #[tokio::test]
 async fn a_dense_line_of_16ths_at_varied_velocities_is_transcribed_note_for_note_a_note_at_the_start_too() {
-    use kumi_runtime::audio::analyze::*;
+    use kumi_media::audio::analyze::*;
     let played: Vec<_> = [0, 1, 2, 4, 5, 7, 8, 9, 11, 12, 13, 15]
         .iter()
         .enumerate()
@@ -1097,19 +1097,19 @@ fn pattern(seconds: f64, every: f64) -> Vec<f32> {
     }
     out
 }
-async fn analyze_samples(root: &Path, name: &str, samples: Vec<f32>, focus: &str) -> kumi_runtime::audio::analyze::Analysis {
+async fn analyze_samples(root: &Path, name: &str, samples: Vec<f32>, focus: &str) -> kumi_media::audio::analyze::Analysis {
     let file = root.join(name);
     wav(&file, &[samples.clone(), samples], 16);
-    kumi_runtime::audio::analyze::analyze_file(
+    kumi_media::audio::analyze::analyze_file(
         file.to_str().unwrap(),
-        kumi_runtime::audio::analyze::AnalyzeOptions { focus: Some(focus.into()), ..Default::default() },
+        kumi_media::audio::analyze::AnalyzeOptions { focus: Some(focus.into()), ..Default::default() },
     )
     .await
     .unwrap()
 }
 #[tokio::test]
 async fn the_same_sound_against_itself_is_100_a_tone_against_noise_is_low_the_same_tone_darkened_is_in_between() {
-    use kumi_runtime::audio::matching::*;
+    use kumi_media::audio::matching::*;
     let dir = tempfile::tempdir().unwrap();
     let bright = analyze_samples(dir.path(), "bright.wav", saw(3.0, 110.0, 20000.0), "sound").await;
     let again = analyze_samples(dir.path(), "again.wav", saw(3.0, 110.0, 20000.0), "sound").await;
@@ -1133,7 +1133,7 @@ async fn the_same_sound_against_itself_is_100_a_tone_against_noise_is_low_the_sa
 }
 #[tokio::test]
 async fn a_section_is_judged_on_density_and_rhythm_too() {
-    use kumi_runtime::audio::matching::*;
+    use kumi_media::audio::matching::*;
     let dir = tempfile::tempdir().unwrap();
     let part = analyze_samples(dir.path(), "part.wav", pattern(8.0, 0.5), "mix").await;
     let same = analyze_samples(dir.path(), "same.wav", pattern(8.0, 0.5), "mix").await;
@@ -1148,7 +1148,7 @@ async fn a_section_is_judged_on_density_and_rhythm_too() {
 }
 #[tokio::test]
 async fn a_gap_no_knob_closes_is_named_with_the_structure_that_closes_it() {
-    use kumi_runtime::audio::matching::*;
+    use kumi_media::audio::matching::*;
     let dir = tempfile::tempdir().unwrap();
     let sub = saw(3.0, 110.0, 20000.0)
         .iter()
@@ -1165,7 +1165,7 @@ async fn a_gap_no_knob_closes_is_named_with_the_structure_that_closes_it() {
 }
 #[tokio::test]
 async fn a_sections_timing_counts_and_a_part_that_builds_against_one_that_doesnt_is_named() {
-    use kumi_runtime::audio::matching::*;
+    use kumi_media::audio::matching::*;
     let dir = tempfile::tempdir().unwrap();
     let hit: Vec<_> =
         saw(0.08, 110.0, 20000.0).iter().enumerate().map(|(i, v)| (*v as f64 * (-(i as f64) / (0.02 * 48000.0)).exp()) as f32).collect();
@@ -1204,7 +1204,7 @@ async fn a_sections_timing_counts_and_a_part_that_builds_against_one_that_doesnt
 }
 #[tokio::test]
 async fn a_song_length_file_is_analyzed_quickly_part_by_part() {
-    use kumi_runtime::audio::analyze::*;
+    use kumi_media::audio::analyze::*;
     let dir = tempfile::tempdir().unwrap();
     let samples = deterministic_noise(75 * 48000);
     let file = dir.path().join("long.wav");
@@ -1229,7 +1229,7 @@ async fn a_song_length_file_is_analyzed_quickly_part_by_part() {
 }
 #[tokio::test]
 async fn native_analysis_and_matching_match_the_typescript_reference_for_seeded_signals() {
-    use kumi_runtime::audio::matching::closeness;
+    use kumi_media::audio::matching::closeness;
     let reference: serde_json::Value = serde_json::from_str(include_str!("../support/media/analysis-reference.json")).unwrap();
     let dir = tempfile::tempdir().unwrap();
     let bright = analyze_samples(dir.path(), "bright.wav", saw(3.0, 110.0, 20000.0), "sound").await;
@@ -1247,7 +1247,7 @@ async fn native_analysis_and_matching_match_the_typescript_reference_for_seeded_
 }
 #[tokio::test]
 async fn a_listening_worker_keeps_the_runtime_responsive_and_honors_cancellation() {
-    use kumi_runtime::audio::{hear, AnalyzeOptions};
+    use kumi_media::audio::{hear, AnalyzeOptions};
     let root = tempfile::tempdir().unwrap();
     let file = root.path().join("worker.wav");
     wav(&file, &[deterministic_noise(48000 * 30)], 16);
@@ -1266,7 +1266,7 @@ async fn a_listening_worker_keeps_the_runtime_responsive_and_honors_cancellation
 }
 #[tokio::test]
 async fn a_songs_form_sections_where_whats_played_and_how_it_sounds_change_in_bars() {
-    use kumi_runtime::audio::{
+    use kumi_media::audio::{
         structure::*,
         tools::{listening_tools, ListeningOptions},
     };
@@ -1330,7 +1330,7 @@ async fn a_songs_form_sections_where_whats_played_and_how_it_sounds_change_in_ba
 }
 #[tokio::test(flavor = "current_thread")]
 async fn a_big_wavetable_is_made_while_kumi_keeps_running() {
-    use kumi_runtime::audio::wavetable::{build_wavetable, Keyframe, WavetableSpec};
+    use kumi_media::audio::wavetable::{build_wavetable, Keyframe, WavetableSpec};
     let keyframe = Keyframe { harmonics: Some(vec![1.0; 1023]), ..Default::default() };
     let spec = WavetableSpec { keyframes: Some(vec![keyframe; 2]), count: Some(16.0), from_audio: None };
     // Kumi's thread draws the screen and answers the model meanwhile: here, a tick each millisecond.
@@ -1352,7 +1352,7 @@ async fn a_big_wavetable_is_made_while_kumi_keeps_running() {
 }
 #[tokio::test]
 async fn a_long_compressed_file_is_converted_only_as_far_as_its_read() {
-    use kumi_runtime::audio::decode::{open_audio, open_audio_to, prepare_audio_to};
+    use kumi_media::audio::decode::{open_audio, open_audio_to, prepare_audio_to};
     let Some(ffmpeg) = find_ffmpeg(FfmpegOptions { installed_only: true, ..Default::default() }).await.unwrap() else {
         eprintln!("ffmpeg makes the test file; unavailable");
         return;
@@ -1396,7 +1396,7 @@ async fn a_long_compressed_file_is_converted_only_as_far_as_its_read() {
 }
 #[test]
 fn a_near_silent_float_sound_has_an_envelope() {
-    use kumi_runtime::audio::analyze::analyze_sound;
+    use kumi_media::audio::analyze::analyze_sound;
     // Every level under the 1e-9 floor, quiet and then silent: no peak to start from.
     let mono: Vec<f32> = (0..9600).map(|i| if i < 4800 { 5e-10 } else { 0.0 }).collect();
     let heard = analyze_sound(&mono, 48000.0, None);
@@ -1405,7 +1405,7 @@ fn a_near_silent_float_sound_has_an_envelope() {
 }
 #[tokio::test]
 async fn a_form_asked_for_in_bars_of_no_beats_or_at_a_tempo_past_the_schema_is_still_heard() {
-    use kumi_runtime::audio::structure::{hear_form, FormOptions};
+    use kumi_media::audio::structure::{hear_form, FormOptions};
     let root = tempfile::tempdir().unwrap();
     let file = root.path().join("tone.wav");
     let tone: Vec<f32> = (0..12 * 48000).map(|i| (0.3 * (2.0 * std::f64::consts::PI * 220.0 * i as f64 / 48000.0).sin()) as f32).collect();
@@ -1423,7 +1423,7 @@ async fn a_form_asked_for_in_bars_of_no_beats_or_at_a_tempo_past_the_schema_is_s
 }
 #[test]
 fn section_edges_come_from_diagonal_novelty_snapped_to_four_bar_phrases_never_closer_than_four_bars() {
-    use kumi_runtime::audio::structure::boundaries;
+    use kumi_media::audio::structure::boundaries;
     let owner: Vec<_> = [7, 9, 8].iter().enumerate().flat_map(|(i, n)| std::iter::repeat_n(i, *n)).collect();
     let matrix = owner.iter().map(|a| owner.iter().map(|b| if a == b { 1.0 } else { 0.2 }).collect()).collect::<Vec<_>>();
     assert_eq!(boundaries(&matrix, owner.len()), vec![8, 16]);
@@ -1431,7 +1431,7 @@ fn section_edges_come_from_diagonal_novelty_snapped_to_four_bar_phrases_never_cl
 }
 #[test]
 fn transcribed_notes_reach_the_model_as_rows_in_beats_at_the_sets_tempo_as_played() {
-    use kumi_runtime::audio::{analyze::HeardNote, tools::transcription};
+    use kumi_media::audio::{analyze::HeardNote, tools::transcription};
     let rows = transcription(
         &[
             HeardNote { time: 0.52, duration: 0.24, midi: Some(60.0), velocity: 100.0, confidence: 0.9 },
@@ -1448,7 +1448,7 @@ fn transcribed_notes_reach_the_model_as_rows_in_beats_at_the_sets_tempo_as_playe
 }
 #[tokio::test]
 async fn the_listen_tool_hears_a_file_or_sets_it_against_a_reference_with_loudness_matched_and_tells_the_app() {
-    use kumi_runtime::audio::tools::*;
+    use kumi_media::audio::tools::*;
     use std::{cell::RefCell, rc::Rc};
     let root = tempfile::tempdir().unwrap();
     let events = Rc::new(RefCell::new(Vec::new()));

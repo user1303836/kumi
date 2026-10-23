@@ -20,7 +20,7 @@ sys.modules[SPEC.name] = release  # dataclasses look their module up there
 SPEC.loader.exec_module(release)
 
 FILES = ["package.json", "Cargo.lock", "CHANGELOG.md", "README.md", "README.ja.md", "README.zh-CN.md",
-         "crates/kumi/Cargo.toml", "crates/kumi-common/Cargo.toml", "crates/kumi-runtime/Cargo.toml", "daws/own/daw-mcp-server/Cargo.toml",
+         "crates/kumi/Cargo.toml", "crates/kumi-common/Cargo.toml", "daws/own/daw-mcp-server/Cargo.toml",
          "crates/kumi-types/src/version.rs", "crates/kumi-types/Cargo.toml", "daws/ableton/ableton-mcp-server/Cargo.toml",
          "docs/en/KUMI_CHANGES.md", "docs/ja/KUMI_CHANGES.md", "docs/zh-CN/KUMI_CHANGES.md",
          release.REAPER_CARGO, release.RENOISE_VERSION, release.RENOISE_MANIFEST]
@@ -95,12 +95,12 @@ class Sorting(unittest.TestCase):
                      "vendor/willington/release.json"):
             self.assertTrue(release.ships_bridge(path), path)
         for path in ("daws/ableton/ableton-mcp-server/tests/it/host_clip.rs", "daws/ableton/remote-script/test_remote_script.py",
-                     "daws/ableton/ableton-mcp-server/README.md", "crates/kumi-runtime/src/agent.rs", ".github/workflows/ci.yml"):
+                     "daws/ableton/ableton-mcp-server/README.md", "crates/kumi-agent/src/lib.rs", ".github/workflows/ci.yml"):
             self.assertFalse(release.ships_bridge(path), path)
 
     def test_changelog_lines_and_where_they_go(self):
         host = ["daws/ableton/ableton-mcp-server/src/host/clip.rs", "daws/ableton/ableton-mcp-server/tests/it/host_clip.rs"]
-        both = host + ["crates/kumi-runtime/src/agent.rs"]
+        both = host + ["crates/kumi-agent/src/lib.rs"]
         self.assertEqual(release.classify(1, "Why.\n\nChangelog: A copy is refused.\n", host).lines,
                          [("bridge", "A copy is refused.")])
         self.assertEqual(release.classify(2, "Changelog: Kumi does X.", both).lines, [("kumi", "Kumi does X.")])
@@ -108,7 +108,7 @@ class Sorting(unittest.TestCase):
                          [("bridge", "The bridge does Y."), ("kumi", "Kumi does Z.")])
         quiet = release.classify(4, "Changelog: none (CI and developer docs).", [".github/workflows/ci.yml"])
         self.assertEqual((quiet.lines, quiet.written), ([], True))
-        self.assertFalse(release.classify(5, "Bumps a test dependency.", ["crates/kumi-runtime/tests/support/package.json"]).written)
+        self.assertFalse(release.classify(5, "Bumps a test dependency.", ["crates/kumi-agent/tests/support/package.json"]).written)
         # kumi-common is the bridge's too, but its lines stay Kumi's.
         self.assertEqual(release.classify(6, "Changelog: Shared thing.", ["crates/kumi-common/src/lib.rs"]).lines,
                          [("kumi", "Shared thing.")])
@@ -161,13 +161,13 @@ version = "1.47.0"
     def test_this_checkouts_lock(self):
         graph = release.bridge_graph((ROOT / "Cargo.lock").read_text(encoding="utf-8"))
         self.assertTrue(graph)
-        self.assertFalse({name for name, _ in graph} & {"ableton-mcp-server", "kumi-common", "kumi", "kumi-runtime"})
+        self.assertFalse({name for name, _ in graph} & {"ableton-mcp-server", "kumi-common", "kumi", "kumi-agent"})
 
     def test_reapers_extensions_graph(self):
         lock = (ROOT / "Cargo.lock").read_text(encoding="utf-8")
         graph = release.bridge_graph(lock, "reaper-kumi", ("reaper-kumi", "daw-bridge"))
         self.assertIn("serde_json", {name for name, _ in graph})
-        self.assertFalse({name for name, _ in graph} & {"reaper-kumi", "daw-bridge", "kumi", "kumi-runtime", "ableton-mcp-server"})
+        self.assertFalse({name for name, _ in graph} & {"reaper-kumi", "daw-bridge", "kumi", "kumi-agent", "ableton-mcp-server"})
         # A lock from before the extension: nothing to compare with.
         self.assertEqual(release.bridge_graph(self.LOCK, "reaper-kumi", ("reaper-kumi", "daw-bridge")), set())
 
@@ -414,7 +414,9 @@ class DawEdits(unittest.TestCase):
     def test_daw_bridges_as_they_were_say_nothing(self):
         plan, texts, changed, really = self.released()
         self.assertEqual(sorted(changed), really)
-        self.assertEqual(len(changed), 15)  # what a release changed before REAPER and Renoise, the host for them and kumi-types
+        # what a release changed before REAPER and Renoise, the host for them and kumi-types, less kumi-runtime's manifest
+        # (kumi-agent, which took its place, isn't at Kumi's version)
+        self.assertEqual(len(changed), 14)
         new = entry(texts["CHANGELOG.md"], plan.new)
         self.assertNotIn("REAPER", new)
         self.assertNotIn("Renoise", new)

@@ -2,15 +2,13 @@
 mod fixture;
 use fixture::{put, Studio};
 use kumi_common::abort::Signal;
-use kumi_runtime::{
-    core::{
-        contracts::{KernelTool, LibraryState},
-        daw::DawId,
-    },
-    library::{
-        create_library, library_dir, sources::SourceOptions, tools::LibraryAccess, LearnNowOptions, Library, LibraryOptions,
-        LibraryToolsOptions,
-    },
+use kumi_library::{
+    create_library, library_dir, sources::SourceOptions, tools::LibraryAccess, LearnNowOptions, Library, LibraryOptions,
+    LibraryToolsOptions,
+};
+use kumi_types::{
+    contracts::{KernelTool, LibraryState},
+    daw::DawId,
 };
 use serde_json::{json, Value};
 use std::{cell::RefCell, rc::Rc, time::Duration};
@@ -167,7 +165,7 @@ async fn unknown_folders_are_saved_and_learned_and_reference_cancellation_stops_
             let measured = LibraryAccess::measure(
                 library.as_ref(),
                 downloads.join("New Kick.wav").to_string_lossy().into(),
-                kumi_runtime::library::features::MeasureOptions { signal: Some(signal), ..Default::default() },
+                kumi_library::features::MeasureOptions { signal: Some(signal), ..Default::default() },
             )
             .await;
             assert!(measured.unwrap_err().is_aborted());
@@ -180,5 +178,5 @@ fn library_location_honors_only_nonempty_override() {
     let env = std::collections::HashMap::from([("KUMI_LIBRARY_DIR".into(), "/kept".into())]);
     assert_eq!(library_dir("/kumi", Some(&env)), "/kept");
     let empty = std::collections::HashMap::from([("KUMI_LIBRARY_DIR".into(), String::new())]);
-    assert_eq!(library_dir("/kumi", Some(&empty)), kumi_runtime::library::sources::join("/kumi", "library"));
+    assert_eq!(library_dir("/kumi", Some(&empty)), kumi_library::sources::join("/kumi", "library"));
 }

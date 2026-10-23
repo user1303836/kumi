@@ -8,7 +8,8 @@ pub mod kitty;
 pub mod raster;
 pub mod scene;
 
-use kumi_runtime::core::contracts::{ChangePicture, MixLevels, PictureLine, PictureRoute, PictureValue, RouteChange};
+use kumi_types::contracts::ChangePicture;
+use kumi_types::picture::{MixLevels, PictureLine, PictureRoute, PictureValue, RouteChange};
 
 use super::alerts::TerminalProfile;
 use super::style::{palette, ColorDepth, Rgb, Style};
@@ -169,7 +170,7 @@ pub fn lines_of(picture: &ChangePicture, cols: usize) -> Vec<Vec<Span>> {
             })
             .collect(),
         ChangePicture::Notes { before, after, .. } => {
-            let same = |a: &kumi_runtime::core::contracts::ClipNote, b: &kumi_runtime::core::contracts::ClipNote| {
+            let same = |a: &kumi_types::contracts::ClipNote, b: &kumi_types::contracts::ClipNote| {
                 a.pitch == b.pitch && (a.start - b.start).abs() < 1e-6 && (a.duration - b.duration).abs() < 1e-6
             };
             let new = after.iter().filter(|note| !before.iter().any(|old| same(old, note))).count();
@@ -332,7 +333,7 @@ fn fit(spans: Vec<Span>, cols: usize) -> Vec<Span> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use kumi_runtime::core::contracts::{EqBand, EqShape};
+    use kumi_types::picture::{EqBand, EqShape};
 
     fn text(rows: &[Vec<Span>]) -> Vec<String> {
         rows.iter().map(|row| row.iter().map(|span| span.text.as_str()).collect()).collect()

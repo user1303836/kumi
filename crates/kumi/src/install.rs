@@ -13,26 +13,27 @@ use crate::{
     tui::tty::TtyOutput,
 };
 use futures::{future::LocalBoxFuture, StreamExt};
+use kumi_agent::core::store_import::write_back;
+use kumi_ai::{
+    error::LanguageModelError,
+    http::{default_fetch, Fetch, FetchInit, Headers},
+};
 use kumi_common::{
     abort,
     js::{json::stringify, string::trim},
     time::now_ms,
 };
-use kumi_runtime::{
-    ai::{
-        error::LanguageModelError,
-        http::{default_fetch, Fetch, FetchInit, Headers},
-    },
-    core::{
-        disk::{free_bytes, size, MB},
-        errors::RuntimeError,
-        store_import::write_back,
-    },
-    library::sources::{basename, dirname, join},
-    net::proxy,
+use kumi_library::sources::{basename, dirname, join};
+use kumi_net::{
+    cause::{unreachable, unreachable_call, NetCause},
+    proxy,
+};
+use kumi_types::{
+    command::{KUMI, REINSTALL},
+    disk::{free_bytes, size, MB},
+    errors::RuntimeError,
     system::{self, Env, SystemProgram},
-    web::cause::{unreachable, unreachable_call, NetCause},
-    KUMI, KUMI_VERSION, REINSTALL,
+    version::KUMI_VERSION,
 };
 pub use migration::{ensure_native_launcher, has_app, launcher, write_launcher};
 use serde::{Deserialize, Serialize};
@@ -1435,7 +1436,7 @@ fn litter(name: &str) -> bool {
 /// it fetched, one of the bridge's generations. Nothing in `node` tells Kumi's old Node from the producer's own, so
 /// its entries count as Kumi's only in a folder of Kumi's alone.
 fn kumis_entry(part: &str, name: &str, path: &Path, alone: bool) -> bool {
-    use kumi_runtime::models::pinned::{AFX_REP, BASIC_PITCH, CLAP};
+    use kumi_ai::models::pinned::{AFX_REP, BASIC_PITCH, CLAP};
     let inside = |folder: &Path| -> Vec<String> {
         fs::read_dir(folder)
             .into_iter()

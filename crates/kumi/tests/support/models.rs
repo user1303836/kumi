@@ -2,15 +2,15 @@
 //! Fake models shared by the plain terminal and full-screen app tests.
 use async_trait::async_trait;
 use kumi::models::{ChatGptSignIn, CurrentModel, DefaultModel, LocalStatus, ModelController, ProviderStatus};
-use kumi_common::abort::Signal;
-use kumi_runtime::{
+use kumi_ai::{
     auth::openai_codex::DevicePrompt,
-    core::errors::{FailureKind, KumiError, RuntimeError},
     providers::{
         models::{ApiKeyCheck, ModelInfo},
         provider_info, Effort, ProviderId, SignIn, PROVIDERS,
     },
 };
+use kumi_common::abort::Signal;
+use kumi_types::errors::{FailureKind, KumiError, RuntimeError};
 use std::{
     cell::RefCell,
     collections::{HashMap, HashSet},
@@ -193,7 +193,7 @@ impl ModelController for FakeModels {
     fn fast_enabled(&self) -> bool {
         *self.fast.borrow()
     }
-    async fn set_fast(&self, on: bool) -> Result<Option<kumi_runtime::providers::models::ServiceTier>, RuntimeError> {
+    async fn set_fast(&self, on: bool) -> Result<Option<kumi_ai::providers::models::ServiceTier>, RuntimeError> {
         let tier = self.model.borrow().as_ref().and_then(|m| self.info(m)).and_then(|m| m.service_tiers.first().cloned());
         if on && tier.is_none() {
             return Ok(None);

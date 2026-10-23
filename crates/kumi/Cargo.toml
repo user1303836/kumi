@@ -19,7 +19,13 @@ path = "src/main.rs"
 
 [dependencies]
 kumi-common.workspace = true
-kumi-runtime.workspace = true
+kumi-types.workspace = true
+kumi-net.workspace = true
+kumi-media.workspace = true
+kumi-ai.workspace = true
+kumi-library.workspace = true
+kumi-listening.workspace = true
+kumi-agent.workspace = true
 kumi-daw-ableton.workspace = true
 kumi-daw-reaper.workspace = true
 kumi-daw-renoise.workspace = true
@@ -57,9 +63,11 @@ libc.workspace = true
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_Storage_FileSystem", "Win32_System_Console", "Win32_System_IO", "Win32_System_Pipes", "Win32_System_Power", "Win32_System_Threading"] }
 
 [dev-dependencies]
-# The runtime's test helpers (a FOCUS view's row in DAWS.md, which daws_doc checks).
-kumi-runtime = { workspace = true, features = ["test-support"] }
+# The agent's test helpers (a FOCUS view's row in DAWS.md, which daws_doc checks).
+kumi-agent = { workspace = true, features = ["test-support"] }
 kumi-store.workspace = true
+# Where the changes eval example finds FFmpeg (the video tool's search for it).
+kumi-web.workspace = true
 uuid.workspace = true
 kumi-testkit.workspace = true
 tokio = { workspace = true, features = ["test-util"] }

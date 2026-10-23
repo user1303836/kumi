@@ -8,10 +8,8 @@ use super::{
 use crate::voice::{VoiceChange, VoiceChoices, VoiceControl, VoiceIo};
 use async_trait::async_trait;
 use kumi_common::{abort::Signal, js::number, time::perf_now};
-use kumi_runtime::{
-    core::errors::RuntimeError,
-    voice::{Heard, Listening, VoiceError, VoiceFailure, VoiceTrouble},
-};
+use kumi_media::voice::{Heard, Listening, VoiceError, VoiceFailure, VoiceTrouble};
+use kumi_types::errors::RuntimeError;
 use std::{cell::RefCell, rc::Rc, sync::Arc, time::Duration};
 #[async_trait(?Send)]
 pub trait VoiceListening {

@@ -4,11 +4,7 @@
 //! `item_variation_set`, `items_delete`), one change each. Takes are found by their items' ids, else by the names Kumi gave
 //! them, and heard as their track plays them. Core's tool does the rest.
 use async_trait::async_trait;
-use kumi_common::abort::Signal;
-use kumi_daw_own::changes::OwnPlan;
-use kumi_daw_own::listening::OwnRenderer;
-use kumi_runtime::core::{
-    contracts::JsonObject,
+use kumi_agent::core::{
     refs::RefScheme,
     variations::{
         backend::{Rendered, Rewritten, Source, Undroppable, VariationsBackend, Words},
@@ -21,6 +17,10 @@ use kumi_runtime::core::{
         Material, Rng, TakeSet,
     },
 };
+use kumi_common::abort::Signal;
+use kumi_daw_own::changes::OwnPlan;
+use kumi_daw_own::listening::OwnRenderer;
+use kumi_types::contracts::JsonObject;
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
@@ -166,7 +166,7 @@ impl<S: RefScheme + 'static> ReaperVariations<S> {
     }
 
     /// A take heard as its track plays it: one render over its item.
-    async fn hear(&self, row: &Value, track: &str, signal: &Signal) -> Result<kumi_runtime::core::variations::heard::Heard, String> {
+    async fn hear(&self, row: &Value, track: &str, signal: &Signal) -> Result<kumi_agent::core::variations::heard::Heard, String> {
         let from = row.get("positionBeats").and_then(Value::as_f64).ok_or("the take's place in beats isn't known")?;
         let beats = row.get("lengthBeats").and_then(Value::as_f64).filter(|beats| *beats > 0.).ok_or("the take has no length")?;
         let sources = vec![json!({"id": "t", "what": "track", "ref": track, "stage": "pre-fader"})];
@@ -626,7 +626,7 @@ impl<S: RefScheme + 'static> VariationsBackend for ReaperVariations<S> {
 mod tests {
 
     use super::*;
-    use kumi_runtime::core::variations::Bounds;
+    use kumi_agent::core::variations::Bounds;
 
     fn audio() -> ItemTake {
         ItemTake { midi: false, length: 1.0, playrate: 1.0, fade_out: 0.1, ..ItemTake::default() }
@@ -646,7 +646,7 @@ mod tests {
     #[test]
     fn every_change_a_take_makes_fits_its_reaper_kind() {
         use crate::changes::CHANGES;
-        use kumi_runtime::kernel::schema::problem;
+        use kumi_agent::kernel::schema::problem;
         let note = Note { pitch: 38, start: 0.5, length: 0.25, velocity: 90, channel: 10 };
         let midi = ItemTake { midi: true, notes: vec![note], ..audio() };
         let mut made = settings(&midi, Some("V1 \u{b7} snare"));
@@ -705,7 +705,7 @@ mod tests {
     /// moved a take at most 0.06 from its source, a near-copy: "make 4" of a MIDI item gave V1 and V2).
     #[test]
     fn every_direction_kumi_picks_for_a_midi_item_makes_a_take_of_it() {
-        kumi_runtime::core::variations::notes::every_note_direction_makes_a_take(
+        kumi_agent::core::variations::notes::every_note_direction_makes_a_take(
             |notes, anchors| ItemTake { midi: true, notes, anchors, ..audio() },
             |ops, factor, take, source, rng| ops.iter().map(|op| apply_one(op, factor, take, source, rng)).collect(),
             |take| take.notes.as_slice(),

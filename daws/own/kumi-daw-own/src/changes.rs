@@ -7,11 +7,7 @@ use crate::bridge::{
 use async_trait::async_trait;
 use chrono::Utc;
 use indexmap::IndexMap;
-use kumi_common::{
-    abort::{self, Signal, SignalExt},
-    js::json::stringify,
-};
-use kumi_runtime::{
+use kumi_agent::{
     core::{
         contracts::*,
         history::{cant_reach_to_undo, cant_take_back, Applied, ChangeHost, Entry, History, UndoResult},
@@ -26,6 +22,11 @@ use kumi_runtime::{
     kernel::schema,
     mcp::client::McpEndpoint,
 };
+use kumi_common::{
+    abort::{self, Signal, SignalExt},
+    js::json::stringify,
+};
+use kumi_types::contracts::*;
 use kumi_types::{daw::DawProfile, errors::RuntimeError};
 use serde_json::{json, Value};
 use std::{
@@ -945,8 +946,8 @@ impl<S: RefScheme + 'static> OwnPlan<S> {
     /// One change: previewed, applied in one named step of the DAW's undo, and kept in HISTORY.
     pub async fn one_change(&self, kind: &'static OwnKind, asked: JsonObject, signal: Signal) -> ChangeOutcome {
         let words = self.link().words().words;
-        if self.history.changes_this_turn.get() >= kumi_runtime::core::plan::MAX_CHANGES {
-            return ChangeOutcome::stop(kumi_runtime::core::plan::too_many_changes());
+        if self.history.changes_this_turn.get() >= kumi_agent::core::plan::MAX_CHANGES {
+            return ChangeOutcome::stop(kumi_agent::core::plan::too_many_changes());
         }
         // Each track a DAW like Renoise adds costs it more in a big song (and it stalls near 600): an answer adds a few.
         let most = self.link().daw.changes.most_track_adds.filter(|_| kind.kind == "track-add");

@@ -6,18 +6,16 @@ use async_trait::async_trait;
 use fixture::{put, wav};
 use kumi::daw::registry::library_sources;
 use kumi_common::abort::Signal;
-use kumi_runtime::{
-    core::{daw::DawProfile, errors::RuntimeError},
-    library::{
-        create_library,
-        features::MeasureOptions,
-        learn::{learn, library_logs, LearnOptions, LearnPlan, PresetEntry, SetEntry, SoundEntry},
-        search::SoundIndex,
-        sources::{Source, SourceKind, SourceOptions},
-        tools::{library_tools_for, LearningState, LibraryAccess, LibraryToolsOptions},
-        LibraryOptions,
-    },
+use kumi_library::{
+    create_library,
+    features::MeasureOptions,
+    learn::{learn, library_logs, LearnOptions, LearnPlan, PresetEntry, SetEntry, SoundEntry},
+    search::SoundIndex,
+    sources::{Source, SourceKind, SourceOptions},
+    tools::{library_tools_for, LearningState, LibraryAccess, LibraryToolsOptions},
+    LibraryOptions,
 };
+use kumi_types::{daw::DawProfile, errors::RuntimeError};
 use serde_json::{json, Map, Value};
 use std::{collections::HashMap, path::Path, rc::Rc};
 
@@ -192,7 +190,7 @@ fn a_daws_library_is_a_source_only_where_kumis_bridge_is() {
     let reaper = sources.iter().find(|s| s.kind == SourceKind::Reaper).unwrap();
     assert!(reaper.path.ends_with("REAPER Lab"), "{}", reaper.path);
     // Who sees what: a DAW's own library only there; the producer's folders everywhere; Live's when no DAW is known.
-    use kumi_runtime::core::daw::DawId::*;
+    use kumi_types::daw::DawId::*;
     let user = sources.iter().find(|s| s.kind == SourceKind::UserLibrary).unwrap();
     let renoise = sources.iter().find(|s| s.label == "Renoise Library").unwrap();
     assert!([None, Some(Ableton), Some(Reaper), Some(Renoise)].into_iter().all(|daw| user.offered_in(daw)));
@@ -351,7 +349,7 @@ async fn find_sounds_in_each_daw_holds_only_the_sounds_offered_there() {
                 delay_ms: Some(3_600_000),
                 ..Default::default()
             });
-            use kumi_runtime::core::daw::DawId::*;
+            use kumi_types::daw::DawId::*;
             let names = |index: &SoundIndex| {
                 let mut names: Vec<String> =
                     index.entries.iter().map(|e| Path::new(&e.path).file_stem().unwrap().to_string_lossy().into_owned()).collect();
@@ -411,7 +409,7 @@ async fn a_daws_library_inside_a_producers_folder_leaves_its_other_sounds_to_tha
                 delay_ms: Some(3_600_000),
                 ..Default::default()
             });
-            use kumi_runtime::core::daw::DawId::*;
+            use kumi_types::daw::DawId::*;
             let names = |index: &SoundIndex| {
                 let mut names: Vec<String> =
                     index.entries.iter().map(|e| Path::new(&e.path).file_stem().unwrap().to_string_lossy().into_owned()).collect();
@@ -475,7 +473,7 @@ fn find_presets_names_only_steps_the_daw_has_and_lives_text_stays() {
 /// find_presets in its words, its kinds offered, and find_sounds naming its sample steps.
 #[test]
 fn a_dawss_library_words_come_from_its_profile_alone() {
-    use kumi_runtime::core::daw::{Capabilities, PromptVocab};
+    use kumi_types::daw::{Capabilities, PromptVocab};
     const ANOTHER: DawProfile = DawProfile {
         id: None,
         caps: Capabilities { presets: true, ..Capabilities::NONE },

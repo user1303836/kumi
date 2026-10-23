@@ -4,11 +4,11 @@
 //! pattern with slot_pattern, and a slot goes with slot_delete. Core's tool does the rest.
 use crate::lines::{note_text, Lines};
 use async_trait::async_trait;
+use kumi_agent::core::jam::backend::{Edit, JamBackend, Words};
+use kumi_agent::core::jam::{Hit, Part, TrackPart};
+use kumi_agent::core::refs::RefScheme;
 use kumi_common::abort::Signal;
 use kumi_daw_own::changes::OwnPlan;
-use kumi_runtime::core::jam::backend::{Edit, JamBackend, Words};
-use kumi_runtime::core::jam::{Hit, Part, TrackPart};
-use kumi_runtime::core::refs::RefScheme;
 use serde_json::{json, Value};
 use std::rc::Rc;
 
@@ -260,7 +260,7 @@ impl<S: RefScheme + 'static> RenoiseJam<S> {
 mod tests {
     use super::*;
     use crate::changes::CHANGES;
-    use kumi_runtime::kernel::schema::problem;
+    use kumi_agent::kernel::schema::problem;
 
     fn lines() -> Lines {
         let rows = vec![

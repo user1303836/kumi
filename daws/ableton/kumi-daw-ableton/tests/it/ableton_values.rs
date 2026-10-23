@@ -1,6 +1,6 @@
+use kumi_agent::mcp::types::CallToolResult;
 use kumi_common::js::json::stringify;
 use kumi_daw_ableton::{context, display::*, fast::*};
-use kumi_runtime::mcp::types::CallToolResult;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::{

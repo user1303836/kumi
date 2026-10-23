@@ -8,6 +8,7 @@ use crate::changes::{Link, OwnPlan};
 use crate::groove::Part;
 use async_trait::async_trait;
 use indexmap::IndexMap;
+use kumi_agent::core::{context::IntegrationContext, contracts::*, refs::RefScheme};
 use kumi_common::{
     abort::{self, Signal, SignalExt},
     js::string::head,
@@ -26,10 +27,8 @@ use kumi_listening::{
     },
     tools::{audition_tool, form_tool, groove_tool, judge_tool, render_tool, sound_tool, tune_tool},
 };
-use kumi_runtime::{
-    core::{context::IntegrationContext, contracts::*, refs::RefScheme},
-    integrations::shared::display::parse_display,
-};
+use kumi_types::contracts::*;
+use kumi_types::display::parse_display;
 use kumi_types::{
     daw::{DawId, DawProfile},
     errors::RuntimeError,

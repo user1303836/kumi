@@ -2,6 +2,14 @@
 //! (and those Kumi changed) again each turn, and checks the rest with a whole read beside the turns.
 use async_trait::async_trait;
 use futures::FutureExt;
+use kumi_agent::{
+    core::contracts::Integration,
+    mcp::{
+        client::{McpEndpoint, StderrStatus},
+        types::{CallToolResult, Implementation, ListToolsResult},
+    },
+};
+use kumi_ai::timing;
 use kumi_common::{abort::Signal, js::json::stringify};
 use kumi_daw_ableton::{
     connection::{ConnectionOptions, LiveConnection},
@@ -11,16 +19,9 @@ use kumi_daw_ableton::{
     references::Shift,
     remember::Remember,
 };
-use kumi_runtime::{
-    core::{
-        contracts::{Integration, JsonObject, KernelTool, ToolResult},
-        errors::RuntimeError,
-        timing,
-    },
-    mcp::{
-        client::{McpEndpoint, StderrStatus},
-        types::{CallToolResult, Implementation, ListToolsResult},
-    },
+use kumi_types::{
+    contracts::{JsonObject, KernelTool, ToolResult},
+    errors::RuntimeError,
 };
 use serde_json::{json, Value};
 use std::{

@@ -2,6 +2,10 @@
 mod change_pictures;
 use async_trait::async_trait;
 use futures::FutureExt;
+use kumi_agent::mcp::{
+    client::{McpEndpoint, StderrStatus},
+    types::{CallToolResult, Implementation, ListToolsResult},
+};
 use kumi_common::{
     abort::{Signal, SignalExt},
     js::json::stringify,
@@ -14,13 +18,7 @@ use kumi_daw_ableton::{
     parameters::Parameters,
     remember::Remember,
 };
-use kumi_runtime::{
-    core::{contracts::JsonObject, errors::RuntimeError},
-    mcp::{
-        client::{McpEndpoint, StderrStatus},
-        types::{CallToolResult, Implementation, ListToolsResult},
-    },
-};
+use kumi_types::{contracts::JsonObject, errors::RuntimeError};
 use serde_json::{json, Value};
 use std::{
     cell::{Cell, RefCell},
@@ -93,7 +91,7 @@ fn normalized(value: &Value) -> String {
 }
 fn eq(actual: &Value, expected: &Value, label: &str) {
     // The checkout command changes with the runtime; installed users still invoke `kumi`.
-    assert_eq!(normalized(actual), normalized(expected).replace("npm run kumi --", &kumi_runtime::command::KUMI), "{label}")
+    assert_eq!(normalized(actual), normalized(expected).replace("npm run kumi --", &kumi_types::command::KUMI), "{label}")
 }
 #[tokio::test(flavor = "current_thread")]
 async fn a_python_failure_after_the_code_ran_counts_as_sent() {
