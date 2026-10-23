@@ -68,6 +68,22 @@ class Versions(unittest.TestCase):
         self.assertFalse(release.newer("1.9.2", "1.9.2"))
 
 
+class Moves(unittest.TestCase):
+    def test_a_path_from_before_a_move_counts_where_it_is_now_and_is_read_where_it_was(self):
+        with patch.object(release, "MOVES", [("crates/a", "daws/x/a"), ("daws/x/a/src/b.rs", "daws/x/a/src/b/mod.rs")]):
+            self.assertEqual(release.now("crates/a/src/b.rs"), "daws/x/a/src/b/mod.rs")
+            self.assertEqual(release.now("crates/a/Cargo.toml"), "daws/x/a/Cargo.toml")
+            self.assertEqual(release.now("crates/ab/Cargo.toml"), "crates/ab/Cargo.toml")
+            self.assertEqual(release.then("daws/x/a/src/b/mod.rs"), ["daws/x/a/src/b/mod.rs", "daws/x/a/src/b.rs", "crates/a/src/b.rs"])
+            self.assertEqual(release.then("daws/x/a/Cargo.toml"), ["daws/x/a/Cargo.toml", "crates/a/Cargo.toml"])
+            self.assertEqual(release.then("crates/kumi/Cargo.toml"), ["crates/kumi/Cargo.toml"])
+
+    def test_this_checkouts_moves_lead_to_paths_it_has(self):
+        for old, new in release.MOVES:
+            here = release.now(new)
+            self.assertTrue((ROOT / here).exists(), f"{old} moved to {new}, now {here}, which isn't here")
+
+
 class Sorting(unittest.TestCase):
     def test_what_live_loads_is_the_bridge(self):
         for path in ("crates/ableton-mcp-server/src/host/clip.rs", "crates/kumi-common/src/lib.rs",
