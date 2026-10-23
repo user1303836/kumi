@@ -10,7 +10,7 @@ use std::{
     process::{Command, Stdio},
 };
 fn oracle() -> Value {
-    serde_json::from_str(include_str!("../support/ableton-values-oracle.json")).unwrap()
+    serde_json::from_str(&kumi_testkit::oracle("kumi-runtime/ableton-values-oracle.json")).unwrap()
 }
 fn hash(text: &str) -> String {
     hex::encode(Sha256::digest(text.as_bytes()))

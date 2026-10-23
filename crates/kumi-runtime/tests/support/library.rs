@@ -130,7 +130,7 @@ impl Studio {
         }
         put(&user.join("Samples/Notes.txt"), "not audio");
         put(&user.join("Ableton Folder Info/Previews/Kick Preview.wav"), wav(&[kick(50., 0.5)], 44100));
-        let files: serde_json::Value = serde_json::from_str(include_str!("library-files-oracle.json")).unwrap();
+        let files: serde_json::Value = serde_json::from_str(&kumi_testkit::oracle("kumi-runtime/library-files-oracle.json")).unwrap();
         for (name, relative) in [
             ("Rolling Bass.adv", "Presets/Instruments/Wavetable/Rolling Bass.adv"),
             ("Vox Chain.adg", "Presets/Audio Effects/Vox Chain.adg"),

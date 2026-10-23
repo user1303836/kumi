@@ -203,7 +203,7 @@ async fn replay(chunk: usize, chunks: usize) {
     for kind in ["square", "noise", "silence", "vanishing"] {
         wav(folder.path(), kind);
     }
-    let source: Value = serde_json::from_str(include_str!("../support/rendering-oracle.json")).unwrap();
+    let source: Value = serde_json::from_str(&kumi_testkit::oracle("kumi-runtime/rendering-oracle.json")).unwrap();
     let fixture = fixture_paths::map_strings(&source, &|text| text.replace("$AUDIO", folder.path().to_str().unwrap()));
     for (case_index, case) in fixture["cases"].as_array().unwrap().iter().enumerate().skip(chunk).step_by(chunks) {
         if std::env::var("KUMI_RENDERING_CASE").is_ok_and(|label| case["label"].as_str() != Some(&label)) {
@@ -495,7 +495,7 @@ async fn cancelled_kernel_audition_removes_scratch_tracks_and_clears_its_journal
         .run_until(async {
             let folder = tempfile::tempdir().unwrap();
             wav(folder.path(), "square");
-            let source: Value = serde_json::from_str(include_str!("../support/rendering-oracle.json")).unwrap();
+            let source: Value = serde_json::from_str(&kumi_testkit::oracle("kumi-runtime/rendering-oracle.json")).unwrap();
             let source_case =
                 source["cases"].as_array().unwrap().iter().find(|case| case["label"] == "cancel-live_recording_apply").unwrap();
             let case = fixture_paths::map_strings(source_case, &|text| text.replace("$AUDIO", folder.path().to_str().unwrap()));

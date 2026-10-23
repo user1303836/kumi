@@ -41,7 +41,7 @@ fn normalize_paths(value: &mut Value) {
 }
 #[test]
 fn native_simulator_matches_typescript_state_results_events_and_authority_errors() {
-    let scenarios: Vec<Value> = serde_json::from_str(include_str!("../fixtures/simulator-oracle.json")).unwrap();
+    let scenarios: Vec<Value> = serde_json::from_str(&kumi_testkit::oracle("ableton-mcp-server/simulator-oracle.json")).unwrap();
     for scenario in scenarios {
         let live = DeterministicLiveSimulator::new();
         let events = Rc::new(RefCell::new(vec![]));
@@ -232,7 +232,7 @@ fn simulator_subscriptions_preserve_set_identity_and_reentrant_removal() {
 #[test]
 fn simulator_invalid_authority_fields_match_typescript_errors() {
     let cases: Vec<Value> = serde_json::from_str(include_str!("../fixtures/simulator-errors.json")).unwrap();
-    let scenarios: Vec<Value> = serde_json::from_str(include_str!("../fixtures/simulator-oracle.json")).unwrap();
+    let scenarios: Vec<Value> = serde_json::from_str(&kumi_testkit::oracle("ableton-mcp-server/simulator-oracle.json")).unwrap();
     let mut mismatches = Vec::new();
     for case in cases {
         let live = DeterministicLiveSimulator::new();

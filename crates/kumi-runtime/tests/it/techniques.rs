@@ -14,7 +14,7 @@ fn neuro() -> Value {
 
 #[test]
 fn cleaning_and_feedback_signals_match_the_typescript_reference() {
-    let oracle: Value = serde_json::from_str(include_str!("../support/techniques-oracle.json")).unwrap();
+    let oracle: Value = serde_json::from_str(&kumi_testkit::oracle("kumi-runtime/techniques-oracle.json")).unwrap();
     for case in oracle["checks"].as_array().unwrap() {
         let actual = match check_technique(&case["input"]) {
             Ok(technique) => json!({"technique":technique}),

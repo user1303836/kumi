@@ -535,7 +535,7 @@ mod tests {
 
     #[test]
     fn number_parsing_matches_javascript_whitespace_and_radix_rounding() {
-        let cases: serde_json::Value = serde_json::from_str(include_str!("../tests/number-oracle.json")).unwrap();
+        let cases: serde_json::Value = serde_json::from_str(&kumi_testkit::oracle("kumi-common/number-oracle.json")).unwrap();
         for case in cases.as_array().unwrap() {
             let actual = number::parse(case["text"].as_str().unwrap()).unwrap_or(f64::NAN);
             if let Some(expected) = case["value"].as_f64() {

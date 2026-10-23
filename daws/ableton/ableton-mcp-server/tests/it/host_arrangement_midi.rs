@@ -13,7 +13,7 @@ fn array(v: &Value) -> Vec<Value> {
     v.as_array().cloned().unwrap_or_default()
 }
 fn fixture() -> Value {
-    serde_json::from_str(include_str!("../fixtures/host-arrangement-midi-oracle.json")).unwrap()
+    serde_json::from_str(&kumi_testkit::oracle("ableton-mcp-server/host-arrangement-midi-oracle.json")).unwrap()
 }
 /// Live never holds two Arrangement clips with one ref or identity, so the simulator mustn't either.
 fn clips_are_unique(state: &Value, label: &str) {

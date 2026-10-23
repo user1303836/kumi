@@ -290,7 +290,7 @@ fn pagination_retains_node_base64_and_parse_int_cursor_behavior() {
 }
 #[test]
 fn validation_and_session_pages_match_typescript_oracle() {
-    let fixture: Value = serde_json::from_str(include_str!("../fixtures/session-midi-oracle.json")).unwrap();
+    let fixture: Value = serde_json::from_str(&kumi_testkit::oracle("ableton-mcp-server/session-midi-oracle.json")).unwrap();
     for row in fixture["rows"].as_array().unwrap() {
         let manager = SessionMidiTransactionManager::new(simulator(), None);
         let mut request = row["input"].clone();

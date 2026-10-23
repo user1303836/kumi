@@ -13,7 +13,7 @@ fn normalized<T: Serialize>(value: T) -> Value {
     serde_json::from_str(&stringify(&serde_json::to_value(value).unwrap())).unwrap()
 }
 fn reference() -> Value {
-    serde_json::from_str(include_str!("../support/library-files-oracle.json")).unwrap()
+    serde_json::from_str(&kumi_testkit::oracle("kumi-runtime/library-files-oracle.json")).unwrap()
 }
 #[tokio::test]
 async fn sets_presets_and_max_headers_match_typescript() {

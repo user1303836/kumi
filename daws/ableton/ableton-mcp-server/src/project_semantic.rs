@@ -1310,7 +1310,8 @@ pub(crate) mod tests {
     /// The case 0 Set from the semantic oracle, with `tracks` copies of its track: names of 1 to 512 units, and with
     /// `heavy` no clips or devices but 128 sends, so most records are tracks of about 3.5 KB.
     pub(crate) fn artifact(tracks: usize, heavy: bool) -> Value {
-        let mut d = serde_json::Deserializer::from_str(include_str!("../tests/support/project_semantic_oracle.json"));
+        let recorded = kumi_testkit::oracle("ableton-mcp-server/project_semantic_oracle.json");
+        let mut d = serde_json::Deserializer::from_str(&recorded);
         d.disable_recursion_limit();
         let fixture = <Value as serde::Deserialize>::deserialize(&mut d).unwrap();
         let options: CreateSemanticProjectOptions = serde_json::from_value(fixture["cases"][0]["options"].clone()).unwrap();

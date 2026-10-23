@@ -186,7 +186,7 @@ fn staged_files(root: &Path) -> Value {
 async fn source_audio_import_workflows_preserve_file_and_transaction_authority() {
     tokio::task::LocalSet::new()
         .run_until(async {
-            let fixture: Value = serde_json::from_str(include_str!("../fixtures/host-audio-import-oracle.json")).unwrap();
+            let fixture: Value = serde_json::from_str(&kumi_testkit::oracle("ableton-mcp-server/host-audio-import-oracle.json")).unwrap();
             for case in fixture["cases"].as_array().unwrap() {
                 let label = case["label"].as_str().unwrap();
                 if std::env::var("KUMI_IMPORT_CASE").ok().is_some_and(|v| v != label) {

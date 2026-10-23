@@ -51,7 +51,7 @@ async fn tool_results_and_events_match_typescript() {
     let root = tempfile::tempdir().unwrap();
     std::fs::create_dir(root.path().join("Nested")).unwrap();
     let root_text = root.path().to_str().unwrap();
-    let fixture = library_fixture_paths::load(include_str!("../support/library-search-oracle.json"), root.path());
+    let fixture = library_fixture_paths::load(&kumi_testkit::oracle("kumi-runtime/library-search-oracle.json"), root.path());
     let entries: Vec<SoundEntry> = serde_json::from_value(fixture["entries"].clone()).unwrap();
     let sources: Vec<Source> = serde_json::from_value(fixture["sources"].clone()).unwrap();
     let access = Rc::new(Access {
@@ -71,7 +71,7 @@ async fn tool_results_and_events_match_typescript() {
             ..Default::default()
         },
     );
-    let cases = library_fixture_paths::load(include_str!("../support/library-tools-oracle.json"), root.path());
+    let cases = library_fixture_paths::load(&kumi_testkit::oracle("kumi-runtime/library-tools-oracle.json"), root.path());
     for case in cases.as_array().unwrap() {
         let state = &case["state"];
         *access.state.borrow_mut() = LearningState {

@@ -72,7 +72,7 @@ impl AsyncLiveAdapter for Adapter {
     }
 }
 fn fixture() -> Value {
-    serde_json::from_str(include_str!("../support/host_probes_oracle.json")).unwrap()
+    serde_json::from_str(&kumi_testkit::oracle("ableton-mcp-server/host_probes_oracle.json")).unwrap()
 }
 fn parsed(mut v: Value) -> Value {
     if let Some(t) = v["result"]["content"][0]["text"].as_str() {

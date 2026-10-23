@@ -60,7 +60,7 @@ fn modern(method: &str, params: Value) -> Value {
 }
 #[tokio::test]
 async fn host_lifecycle_resources_status_and_gates_match_source() {
-    let data: Value = serde_json::from_str(include_str!("../fixtures/host-protocol-oracle.json")).unwrap();
+    let data: Value = serde_json::from_str(&kumi_testkit::oracle("ableton-mcp-server/host-protocol-oracle.json")).unwrap();
     for case in data["cases"].as_array().unwrap() {
         let status = if case["statusError"] == true {
             Err(LiveError::error("broken adapter"))

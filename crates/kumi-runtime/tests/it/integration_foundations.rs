@@ -20,7 +20,7 @@ use std::{
     rc::Rc,
 };
 fn fixture() -> Value {
-    serde_json::from_str(include_str!("../support/integration-foundations-oracle.json")).unwrap()
+    serde_json::from_str(&kumi_testkit::oracle("kumi-runtime/integration-foundations-oracle.json")).unwrap()
 }
 #[test]
 fn folded_tracks_and_version_gates_match_complete_source_outputs() {

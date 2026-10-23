@@ -177,3 +177,477 @@ in = "daws/own/daw-mcp-server"
 [[move]]
 from = "crates/reaper-kumi"
 to = "daws/reaper/reaper-kumi"
+
+# The recorded oracles, into testdata/oracles (2026-10).
+
+[[move]]
+from = "crates/kumi-common/tests/locale-oracle.json"
+to = "testdata/oracles/kumi-common/locale-oracle.json"
+
+[[move]]
+from = "crates/kumi-common/tests/number-oracle.json"
+to = "testdata/oracles/kumi-common/number-oracle.json"
+
+[[move]]
+from = "crates/kumi-runtime/tests/support/ableton-values-oracle.json"
+to = "testdata/oracles/kumi-runtime/ableton-values-oracle.json"
+
+[[move]]
+from = "crates/kumi-runtime/tests/support/actions-oracle.json"
+to = "testdata/oracles/kumi-runtime/actions-oracle.json"
+
+[[move]]
+from = "crates/kumi-runtime/tests/support/arrange-oracle.json"
+to = "testdata/oracles/kumi-runtime/arrange-oracle.json"
+
+[[move]]
+from = "crates/kumi-runtime/tests/support/audition-menu-oracle.json"
+to = "testdata/oracles/kumi-runtime/audition-menu-oracle.json"
+
+[[move]]
+from = "crates/kumi-runtime/tests/support/change-summaries-oracle.json"
+to = "testdata/oracles/kumi-runtime/change-summaries-oracle.json"
+
+[[move]]
+from = "crates/kumi-runtime/tests/support/changes-oracle.json"
+to = "testdata/oracles/kumi-runtime/changes-oracle.json"
+
+[[move]]
+from = "crates/kumi-runtime/tests/support/command-tools-oracle.json"
+to = "testdata/oracles/kumi-runtime/command-tools-oracle.json"
+
+[[move]]
+from = "crates/kumi-runtime/tests/support/connection-oracle.json"
+to = "testdata/oracles/kumi-runtime/connection-oracle.json"
+
+[[move]]
+from = "crates/kumi-runtime/tests/support/focus-stream-oracle.json"
+to = "testdata/oracles/kumi-runtime/focus-stream-oracle.json"
+
+[[move]]
+from = "crates/kumi-runtime/tests/support/goal-oracle.json"
+to = "testdata/oracles/kumi-runtime/goal-oracle.json"
+
+[[move]]
+from = "crates/kumi-runtime/tests/support/history-oracle.json"
+to = "testdata/oracles/kumi-runtime/history-oracle.json"
+
+[[move]]
+from = "crates/kumi-runtime/tests/support/integration-foundations-oracle.json"
+to = "testdata/oracles/kumi-runtime/integration-foundations-oracle.json"
+
+[[move]]
+from = "crates/kumi-runtime/tests/support/library-features-oracle.json"
+to = "testdata/oracles/kumi-runtime/library-features-oracle.json"
+
+[[move]]
+from = "crates/kumi-runtime/tests/support/library-files-oracle.json"
+to = "testdata/oracles/kumi-runtime/library-files-oracle.json"
+
+[[move]]
+from = "crates/kumi-runtime/tests/support/library-learn-oracle.json"
+to = "testdata/oracles/kumi-runtime/library-learn-oracle.json"
+
+[[move]]
+from = "crates/kumi-runtime/tests/support/library-manual-oracle.json"
+to = "testdata/oracles/kumi-runtime/library-manual-oracle.json"
+
+[[move]]
+from = "crates/kumi-runtime/tests/support/library-search-oracle.json"
+to = "testdata/oracles/kumi-runtime/library-search-oracle.json"
+
+[[move]]
+from = "crates/kumi-runtime/tests/support/library-taste-oracle.json"
+to = "testdata/oracles/kumi-runtime/library-taste-oracle.json"
+
+[[move]]
+from = "crates/kumi-runtime/tests/support/library-tools-oracle.json"
+to = "testdata/oracles/kumi-runtime/library-tools-oracle.json"
+
+[[move]]
+from = "crates/kumi-runtime/tests/support/mutations-oracle.json"
+to = "testdata/oracles/kumi-runtime/mutations-oracle.json"
+
+[[move]]
+from = "crates/kumi-runtime/tests/support/observation-oracle.json"
+to = "testdata/oracles/kumi-runtime/observation-oracle.json"
+
+[[move]]
+from = "crates/kumi-runtime/tests/support/parameters-oracle.json"
+to = "testdata/oracles/kumi-runtime/parameters-oracle.json"
+
+[[move]]
+from = "crates/kumi-runtime/tests/support/project-oracle.json"
+to = "testdata/oracles/kumi-runtime/project-oracle.json"
+
+[[move]]
+from = "crates/kumi-runtime/tests/support/public-tools-oracle.json"
+to = "testdata/oracles/kumi-runtime/public-tools-oracle.json"
+
+[[move]]
+from = "crates/kumi-runtime/tests/support/references-oracle.json"
+to = "testdata/oracles/kumi-runtime/references-oracle.json"
+
+[[move]]
+from = "crates/kumi-runtime/tests/support/remember-oracle.json"
+to = "testdata/oracles/kumi-runtime/remember-oracle.json"
+
+[[move]]
+from = "crates/kumi-runtime/tests/support/rendering-oracle.json"
+to = "testdata/oracles/kumi-runtime/rendering-oracle.json"
+
+[[move]]
+from = "crates/kumi-runtime/tests/support/samples-oracle.json"
+to = "testdata/oracles/kumi-runtime/samples-oracle.json"
+
+[[move]]
+from = "crates/kumi-runtime/tests/support/techniques-oracle.json"
+to = "testdata/oracles/kumi-runtime/techniques-oracle.json"
+
+[[move]]
+from = "crates/kumi-runtime/tests/support/views-oracle.json"
+to = "testdata/oracles/kumi-runtime/views-oracle.json"
+
+[[move]]
+from = "crates/kumi/tests/support/app/screens.json"
+to = "testdata/oracles/kumi/screens.json"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/tests/fixtures/analysis-worker-oracle.json"
+to = "testdata/oracles/ableton-mcp-server/analysis-worker-oracle.json"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/tests/fixtures/batch-oracle.json"
+to = "testdata/oracles/ableton-mcp-server/batch-oracle.json"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/tests/fixtures/benchmark-oracle.json"
+to = "testdata/oracles/ableton-mcp-server/benchmark-oracle.json"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/tests/fixtures/delivery-oracle.json"
+to = "testdata/oracles/ableton-mcp-server/delivery-oracle.json"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/tests/fixtures/device-state-oracle.json"
+to = "testdata/oracles/ableton-mcp-server/device-state-oracle.json"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-advanced-devices-oracle.json"
+to = "testdata/oracles/ableton-mcp-server/host-advanced-devices-oracle.json"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-arrangement-clip-oracle.json"
+to = "testdata/oracles/ableton-mcp-server/host-arrangement-clip-oracle.json"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-arrangement-midi-oracle.json"
+to = "testdata/oracles/ableton-mcp-server/host-arrangement-midi-oracle.json"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-arrangement-oracle.json"
+to = "testdata/oracles/ableton-mcp-server/host-arrangement-oracle.json"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-audio-clip-oracle.json"
+to = "testdata/oracles/ableton-mcp-server/host-audio-clip-oracle.json"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-audio-import-oracle.json"
+to = "testdata/oracles/ableton-mcp-server/host-audio-import-oracle.json"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-audio-oracle.json"
+to = "testdata/oracles/ableton-mcp-server/host-audio-oracle.json"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-audition-oracle.json"
+to = "testdata/oracles/ableton-mcp-server/host-audition-oracle.json"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-automation-oracle.json.gz"
+to = "testdata/oracles/ableton-mcp-server/host-automation-oracle.json.gz"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-browser-load-oracle.json"
+to = "testdata/oracles/ableton-mcp-server/host-browser-load-oracle.json"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-browser-render-oracle.json"
+to = "testdata/oracles/ableton-mcp-server/host-browser-render-oracle.json"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-capture-oracle.json"
+to = "testdata/oracles/ableton-mcp-server/host-capture-oracle.json"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-catalog-routes-oracle.json"
+to = "testdata/oracles/ableton-mcp-server/host-catalog-routes-oracle.json"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-clip-action-oracle.json.gz"
+to = "testdata/oracles/ableton-mcp-server/host-clip-action-oracle.json.gz"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-clip-duplicate-oracle.json"
+to = "testdata/oracles/ableton-mcp-server/host-clip-duplicate-oracle.json"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-clip-launch-oracle.json"
+to = "testdata/oracles/ableton-mcp-server/host-clip-launch-oracle.json"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-clip-move-oracle.json"
+to = "testdata/oracles/ableton-mcp-server/host-clip-move-oracle.json"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-clip-properties-oracle.json"
+to = "testdata/oracles/ableton-mcp-server/host-clip-properties-oracle.json"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-data-oracle.json"
+to = "testdata/oracles/ableton-mcp-server/host-data-oracle.json"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-deletion-oracle.json"
+to = "testdata/oracles/ableton-mcp-server/host-deletion-oracle.json"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-device-basic-oracle.json"
+to = "testdata/oracles/ableton-mcp-server/host-device-basic-oracle.json"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-device-copy-oracle.json"
+to = "testdata/oracles/ableton-mcp-server/host-device-copy-oracle.json"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-device-edit-oracle.json"
+to = "testdata/oracles/ableton-mcp-server/host-device-edit-oracle.json"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-device-state-oracle.json"
+to = "testdata/oracles/ableton-mcp-server/host-device-state-oracle.json"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-dialog-oracle.json"
+to = "testdata/oracles/ableton-mcp-server/host-dialog-oracle.json"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-dispatch-oracle.json"
+to = "testdata/oracles/ableton-mcp-server/host-dispatch-oracle.json"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-drum-pad-oracle.json.gz"
+to = "testdata/oracles/ableton-mcp-server/host-drum-pad-oracle.json.gz"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-extended-mixer-oracle.json"
+to = "testdata/oracles/ableton-mcp-server/host-extended-mixer-oracle.json"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-fire-button-oracle.json"
+to = "testdata/oracles/ableton-mcp-server/host-fire-button-oracle.json"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-follow-oracle.json"
+to = "testdata/oracles/ableton-mcp-server/host-follow-oracle.json"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-groove-oracle.json.gz"
+to = "testdata/oracles/ableton-mcp-server/host-groove-oracle.json.gz"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-helpers-oracle.json"
+to = "testdata/oracles/ableton-mcp-server/host-helpers-oracle.json"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-looper-oracle.json"
+to = "testdata/oracles/ableton-mcp-server/host-looper-oracle.json"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-managed-oracle.json"
+to = "testdata/oracles/ableton-mcp-server/host-managed-oracle.json"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-midi-transform-oracle.json.gz"
+to = "testdata/oracles/ableton-mcp-server/host-midi-transform-oracle.json.gz"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-mixer-oracle.json"
+to = "testdata/oracles/ableton-mcp-server/host-mixer-oracle.json"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-mutations-oracle.json"
+to = "testdata/oracles/ableton-mcp-server/host-mutations-oracle.json"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-note-edit-oracle.json"
+to = "testdata/oracles/ableton-mcp-server/host-note-edit-oracle.json"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-note-target-oracle.json"
+to = "testdata/oracles/ableton-mcp-server/host-note-target-oracle.json"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-object-view-oracle.json"
+to = "testdata/oracles/ableton-mcp-server/host-object-view-oracle.json"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-parameter-oracle.json"
+to = "testdata/oracles/ableton-mcp-server/host-parameter-oracle.json"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-protocol-oracle.json"
+to = "testdata/oracles/ableton-mcp-server/host-protocol-oracle.json"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-racks-oracle.json"
+to = "testdata/oracles/ableton-mcp-server/host-racks-oracle.json"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-reads-oracle.json"
+to = "testdata/oracles/ableton-mcp-server/host-reads-oracle.json"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-recording-realtime-oracle.json"
+to = "testdata/oracles/ableton-mcp-server/host-recording-realtime-oracle.json"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-recovery-oracle.json"
+to = "testdata/oracles/ableton-mcp-server/host-recovery-oracle.json"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-rename-oracle.json"
+to = "testdata/oracles/ableton-mcp-server/host-rename-oracle.json"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-routing-oracle.json"
+to = "testdata/oracles/ableton-mcp-server/host-routing-oracle.json"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-scene-oracle.json.gz"
+to = "testdata/oracles/ableton-mcp-server/host-scene-oracle.json.gz"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-selection-oracle.json"
+to = "testdata/oracles/ableton-mcp-server/host-selection-oracle.json"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-session-capture-oracle.json"
+to = "testdata/oracles/ableton-mcp-server/host-session-capture-oracle.json"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-simpler-oracle.json"
+to = "testdata/oracles/ableton-mcp-server/host-simpler-oracle.json"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-song-settings-oracle.json"
+to = "testdata/oracles/ableton-mcp-server/host-song-settings-oracle.json"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-specialized-devices-oracle.json"
+to = "testdata/oracles/ableton-mcp-server/host-specialized-devices-oracle.json"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-structure-oracle.json"
+to = "testdata/oracles/ableton-mcp-server/host-structure-oracle.json"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-tempo-oracle.json"
+to = "testdata/oracles/ableton-mcp-server/host-tempo-oracle.json"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-track-properties-oracle.json"
+to = "testdata/oracles/ableton-mcp-server/host-track-properties-oracle.json"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-track-structure-oracle.json"
+to = "testdata/oracles/ableton-mcp-server/host-track-structure-oracle.json"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-track-view-oracle.json"
+to = "testdata/oracles/ableton-mcp-server/host-track-view-oracle.json"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-transport-action-oracle.json"
+to = "testdata/oracles/ableton-mcp-server/host-transport-action-oracle.json"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-transport-oracle.json"
+to = "testdata/oracles/ableton-mcp-server/host-transport-oracle.json"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-tuning-oracle.json.gz"
+to = "testdata/oracles/ableton-mcp-server/host-tuning-oracle.json.gz"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-ui-oracle.json"
+to = "testdata/oracles/ableton-mcp-server/host-ui-oracle.json"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-warp-oracle.json.gz"
+to = "testdata/oracles/ableton-mcp-server/host-warp-oracle.json.gz"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-willington-oracle.json"
+to = "testdata/oracles/ableton-mcp-server/host-willington-oracle.json"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/tests/fixtures/journeys-oracle.json"
+to = "testdata/oracles/ableton-mcp-server/journeys-oracle.json"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/tests/fixtures/json-diagnostics-oracle.json"
+to = "testdata/oracles/ableton-mcp-server/json-diagnostics-oracle.json"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/tests/fixtures/midi-transform-oracle.json"
+to = "testdata/oracles/ableton-mcp-server/midi-transform-oracle.json"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/tests/fixtures/session-midi-oracle.json"
+to = "testdata/oracles/ableton-mcp-server/session-midi-oracle.json"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/tests/fixtures/simulator-oracle.json"
+to = "testdata/oracles/ableton-mcp-server/simulator-oracle.json"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/tests/fixtures/tool-catalog-oracle.json"
+to = "testdata/oracles/ableton-mcp-server/tool-catalog-oracle.json"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/tests/support/als_oracle.json"
+to = "testdata/oracles/ableton-mcp-server/als_oracle.json"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/tests/support/delivery_cli_oracle.json"
+to = "testdata/oracles/ableton-mcp-server/delivery_cli_oracle.json"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/tests/support/host_probes_oracle.json"
+to = "testdata/oracles/ableton-mcp-server/host_probes_oracle.json"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/tests/support/host_project_oracle.json"
+to = "testdata/oracles/ableton-mcp-server/host_project_oracle.json"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/tests/support/lifecycle_oracle.json"
+to = "testdata/oracles/ableton-mcp-server/lifecycle_oracle.json"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/tests/support/project_semantic_bounds_oracle.json"
+to = "testdata/oracles/ableton-mcp-server/project_semantic_bounds_oracle.json"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/tests/support/project_semantic_diff_oracle.json"
+to = "testdata/oracles/ableton-mcp-server/project_semantic_diff_oracle.json"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/tests/support/project_semantic_oracle.json"
+to = "testdata/oracles/ableton-mcp-server/project_semantic_oracle.json"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/tests/support/project_semantic_paths_oracle.json"
+to = "testdata/oracles/ableton-mcp-server/project_semantic_paths_oracle.json"

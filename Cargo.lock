@@ -1279,6 +1279,7 @@ version = "1.21.1"
 dependencies = [
  "icu_collator",
  "icu_locale_core",
+ "kumi-testkit",
  "libc",
  "ryu",
  "serde",

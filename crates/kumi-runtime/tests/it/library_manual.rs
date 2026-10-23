@@ -43,7 +43,7 @@ impl WebClient for Client {
     }
 }
 fn fixture() -> Value {
-    serde_json::from_str(include_str!("../support/library-manual-oracle.json")).unwrap()
+    serde_json::from_str(&kumi_testkit::oracle("kumi-runtime/library-manual-oracle.json")).unwrap()
 }
 fn client(fixture: &Value) -> Rc<Client> {
     Rc::new(Client {

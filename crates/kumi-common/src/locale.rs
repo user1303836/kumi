@@ -86,7 +86,7 @@ mod tests {
     use super::*;
     #[test]
     fn default_and_explicit_collation_match_node_reference() {
-        let fixture: serde_json::Value = serde_json::from_str(include_str!("../tests/locale-oracle.json")).unwrap();
+        let fixture: serde_json::Value = serde_json::from_str(&kumi_testkit::oracle("kumi-common/locale-oracle.json")).unwrap();
         let values: Vec<&str> = fixture["values"].as_array().unwrap().iter().map(|v| v.as_str().unwrap()).collect();
         for case in fixture["locales"].as_array().unwrap() {
             let locale = case["locale"].as_str().unwrap();

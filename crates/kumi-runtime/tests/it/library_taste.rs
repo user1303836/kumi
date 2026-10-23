@@ -6,7 +6,7 @@ use kumi_runtime::library::{
 use serde_json::{json, Value};
 #[test]
 fn habits_chains_counts_names_and_untrusted_instructions_match_typescript() {
-    let fixture: Value = serde_json::from_str(include_str!("../support/library-taste-oracle.json")).unwrap();
+    let fixture: Value = serde_json::from_str(&kumi_testkit::oracle("kumi-runtime/library-taste-oracle.json")).unwrap();
     for (index, case) in fixture["cases"].as_array().unwrap().iter().enumerate() {
         let sets: Vec<SetSummary> = serde_json::from_value(case["sets"].clone()).unwrap();
         let taste = build_taste(&sets, Some(123456789));
@@ -21,7 +21,7 @@ fn habits_chains_counts_names_and_untrusted_instructions_match_typescript() {
 }
 #[test]
 fn every_palette_colour_and_track_role_matches_typescript() {
-    let fixture: Value = serde_json::from_str(include_str!("../support/library-taste-oracle.json")).unwrap();
+    let fixture: Value = serde_json::from_str(&kumi_testkit::oracle("kumi-runtime/library-taste-oracle.json")).unwrap();
     for case in fixture["colours"].as_array().unwrap() {
         assert_eq!(json!(colour_name(case["index"].as_f64().unwrap())), case["expected"], "colour {}", case["index"]);
     }

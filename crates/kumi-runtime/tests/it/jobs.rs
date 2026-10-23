@@ -624,7 +624,7 @@ local_test!(a_session_with_everything_on_offers_the_model_at_most_128_tools, {
     let dir = tempfile::tempdir().unwrap();
     let at = |name: &str| dir.path().join(name);
     // The bridge's whole catalog as Kumi offers it: the oracle's largest case.
-    let source: Value = serde_json::from_str(include_str!("../support/public-tools-oracle.json")).unwrap();
+    let source: Value = serde_json::from_str(&kumi_testkit::oracle("kumi-runtime/public-tools-oracle.json")).unwrap();
     let names: Vec<String> = source["cases"]
         .as_array()
         .unwrap()

@@ -62,7 +62,7 @@ impl McpEndpoint for Fixture {
 async fn of_the_fullest_catalog_only_the_core_tools_go_with_every_request() {
     tokio::task::LocalSet::new()
         .run_until(async {
-            let source: Value = serde_json::from_str(include_str!("../support/public-tools-oracle.json")).unwrap();
+            let source: Value = serde_json::from_str(&kumi_testkit::oracle("kumi-runtime/public-tools-oracle.json")).unwrap();
             let cases = source["cases"].as_array().unwrap();
             let fullest = cases.iter().max_by_key(|case| case["definitions"].as_array().unwrap().len()).unwrap();
             let catalog = Value::Array(
@@ -112,7 +112,7 @@ async fn of_the_fullest_catalog_only_the_core_tools_go_with_every_request() {
 #[tokio::test(flavor = "current_thread")]
 async fn complete_public_tool_catalog_matches_source_versions_capabilities_and_schemas() {
     tokio::task::LocalSet::new().run_until(async{
-        let source:Value=serde_json::from_str(include_str!("../support/public-tools-oracle.json")).unwrap();
+        let source:Value=serde_json::from_str(&kumi_testkit::oracle("kumi-runtime/public-tools-oracle.json")).unwrap();
         for (index,case) in source["cases"].as_array().unwrap().iter().enumerate(){
             let expand=|v:&Value|Value::Array(v.as_array().unwrap().iter().map(|id|source["pool"][id.as_u64().unwrap() as usize].clone()).collect());
             let endpoint=Rc::new(Fixture{case:case.clone(),catalog:expand(&case["catalog"]),closed:Cell::new(0)});

@@ -703,8 +703,7 @@ mod tests {
     use super::*;
     #[test]
     fn note_fences_match_source() {
-        let data: Value =
-            serde_json::from_str(include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/host-note-edit-oracle.json"))).unwrap();
+        let data: Value = serde_json::from_str(&kumi_testkit::oracle("ableton-mcp-server/host-note-edit-oracle.json")).unwrap();
         for row in data["fences"].as_array().unwrap() {
             let notes = row["notes"].as_array().unwrap();
             assert_eq!(note_fence(notes), row["fence"].as_str().unwrap());
