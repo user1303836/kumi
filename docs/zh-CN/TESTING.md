@@ -42,7 +42,7 @@ python3 -m unittest discover -s scripts/tests -p 'test_*release.py'
 | `cargo clippy --workspace --all-targets --locked -- -D warnings` | Lint 检查；目前在 CI 中仅供参考 |
 | `cargo clippy --workspace --lib --bins --examples --locked -- -A clippy::all -D clippy::await_holding_refcell_ref` | 跨 await 持有的 `RefCell` 借用；会使 Lint CI 任务失败 |
 | `sh scripts/test-isolated.sh --profile ci` | 用 cargo-nextest 运行 `Rust / Linux` 各部分运行的测试（单个部分的用 `-p <crate>` 或 `--exclude <crate>`；`--profile ci-os`：macOS 和 Windows 运行的测试；`--profile extended`：全部测试） |
-| `python3 scripts/dev.py check` | 针对本分支相对 `origin/main` 的改动（用 `--base` 指定其他起点）运行 Required CI 的检查：改动的空白、每个文件都属于某个 crate 或区域，然后对受影响的 crate 运行 `cargo fmt --check`、`RefCell` 的 lint 和它们的 `ci` 测试（用 cargo-nextest），再在有改动时运行 Remote Script、Live 扩展和 Renoise 工具的测试，以及发布脚本的测试。`--dry-run` 只说明会运行什么 |
+| `python3 scripts/dev.py check` | 针对本分支相对 `origin/main` 的改动（用 `--base` 指定其他起点）运行 Required CI 的检查：改动的空白、每个文件都属于某个 crate 或区域、crate 的分层（`dev.py deps --check`：依赖只指向下层，一个 DAW 的 crate 不使用另一个 DAW 的 crate），然后对受影响的 crate 运行 `cargo fmt --check`、`RefCell` 的 lint 和它们的 `ci` 测试（用 cargo-nextest），再在有改动时运行 Remote Script、Live 扩展和 Renoise 工具的测试，以及发布脚本的测试。`--dry-run` 只说明会运行什么 |
 | `cargo run --locked --release -p ableton-mcp-server --bin ableton-mcp-benchmark` | 桥接的性能预算；见[开发者指南](DEVELOPER_GUIDE.md#构建测试与测量) |
 
 隔离运行器为测试提供独立的主目录：`HOME`、`USERPROFILE`、`APPDATA`、`LOCALAPPDATA`、`XDG_CONFIG_HOME` 和 `KUMI_HOME` 都指向一个全新的临时文件夹，`KUMI_REMOTE_SCRIPTS_DIR` 和 `KUMI_LIVE_EXTENSIONS_DIR` 则被移除，因此任何测试都无法触及你的 Live 文件夹或 `~/.kumi`。

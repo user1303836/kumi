@@ -370,9 +370,11 @@ jobs:
       - name: The release script's edits
         run: python3 -m unittest discover -s scripts/tests -p test_release.py
       # CI picks its jobs by what a change affects (scripts/dev.py): every file has to belong to a package or an area.
-      - name: Every tracked file belongs to a package or an area, and dev.py's tests
+      # And the crates keep their layers: dependencies point down, and the DAWs' crates don't use each other's.
+      - name: Every tracked file belongs to a package or an area, the crates keep their layers, and dev.py's tests
         run: |
           python3 scripts/dev.py affected --check
+          python3 scripts/dev.py deps --check
           python3 -m unittest discover -s scripts/tests -p test_dev.py
       # The install jobs run the paths that work; this reads every line, the error paths too.
       - name: The installers are POSIX sh, and PowerShell that parses and is ASCII

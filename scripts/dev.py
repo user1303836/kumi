@@ -8,6 +8,7 @@
     python3 scripts/dev.py affected --check               # every tracked file belongs to a package or an area
     python3 scripts/dev.py areas [--in AREA] PATH...      # the areas each path belongs to
     python3 scripts/dev.py check [--base origin/main]     # Required CI's checks for what this branch changes
+    python3 scripts/dev.py deps [--check]                 # each crate's layer and what it uses; --check: the layer rules
     python3 scripts/dev.py select "PACKAGES" [-p NAME | --exclude NAME]...   # a CI part's affected packages, as -p options
     python3 scripts/dev.py rebase-moves [--onto origin/main] [--merge] [--no-build]   # a branch from before a move, onto main
     python3 scripts/dev.py worktree new NAME [--lean] [--branch B] [--base origin/main]   # ../kumi-NAME, a worktree
@@ -32,6 +33,13 @@ the areas' check; then, when it affects Rust packages, `cargo fmt --all --check`
 tests (cargo-nextest, through scripts/test-isolated) of those packages, the ones CI's Rust jobs test; then the Remote
 Script's, the Live extension's and the Renoise tool's tests when their areas changed (each skipped, and said, without its
 npm or LuaJIT); and the release scripts' and the installers' checks (the latter skipped without shellcheck and pwsh).
+
+`deps` lists each package's layer and what it uses of the workspace; `--check` fails, naming them, on the dependencies
+the layer rules refuse. Crates in crates/ have layers (LAYERS: the app 5, the agent 3, then 2 down to 0), and each DAW's
+integration (daws/<daw>/kumi-daw-<daw>) is 4: a normal dependency points down or stays in its layer. Nothing in crates/
+uses daws/ but the app (its DAWs' integrations, ableton-mcp-server and daw-bridge) and tests, which may reach
+daws/own/. A DAW's crates use no other DAW's, only daws/own/. A bridge (the rest of daws/) uses nothing of Kumi's
+crates but kumi-common. kumi-testkit is a dev-dependency only. A new crate in crates/ needs its layer in LAYERS.
 
 `select` takes the affected packages (space-separated, as `affected --github-output` writes them) and a part of the
 workspace as cargo selects it (`-p` each package, or `--exclude` the rest's), and prints `-p` for each of that part's
@@ -84,6 +92,22 @@ EXTENDED_ONLY_HEADER = """\
 # artifacts (the `ci` and `ci-os` sets). A test that starts reading one of these in those sets fails in lean worktrees
 # only, naming the file.
 """
+# The layers of the crates in crates/ (`deps --check`): a normal dependency points down, or stays in its layer, and Cargo
+# keeps them acyclic. Each DAW's integration (daws/<daw>/kumi-daw-<daw>) is a layer of its own, between the app (the
+# composition root, which names every DAW) and the agent; the rest of daws/ is what runs inside or beside a DAW.
+LAYERS = {
+    "kumi": 5,
+    "kumi-agent": 3,
+    "kumi-listening": 2, "kumi-library": 2, "kumi-web": 2, "kumi-ai": 2,
+    "kumi-media": 1, "kumi-net": 1, "kumi-store": 1, "kumi-genexpr": 1,
+    "kumi-types": 0, "kumi-common": 0,
+}
+INTEGRATION_LAYER = 4
+# What every crate's tests share: a dev-dependency only.
+TEST_SUPPORT = "kumi-testkit"
+# The app's: it installs and checks the bridges (Live's, and Kumi's own through daw-bridge's lifecycle).
+APP = "kumi"
+APP_BRIDGES = frozenset({"ableton-mcp-server", "daw-bridge"})
 WORD = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_")
 PATH = WORD | frozenset("-./")
 
@@ -265,6 +289,50 @@ def affected(changes: list[tuple[str, list[str]]] | None, workspace: Workspace, 
     return Affected(files, sorted(packages), sorted(hit), jobs)
 
 
+def role(name: str, folder: str) -> str:
+    """What a package is, for the layer rules: a crate (in crates/, layered), test support, a DAW's integration
+    (daws/<daw>/kumi-daw-…) or a bridge (the rest of daws/: what runs inside or beside a DAW, and Kumi's host for them)."""
+    if name == TEST_SUPPORT:
+        return "test support"
+    if folder.startswith("daws/"):
+        return "integration" if name.startswith("kumi-daw-") else "bridge"
+    return "crate"
+
+
+def layer_breaks(workspace: Workspace) -> list[str]:
+    """Each dependency the layer rules refuse, in a line: crates point down (or stay in their layer); nothing in crates/
+    uses daws/ but the app, and tests reaching daws/own/; a DAW's crates use no other DAW's but daws/own/'s; a bridge uses
+    nothing of Kumi's crates but kumi-common; kumi-testkit is a dev-dependency only."""
+    breaks = []
+    roles = {name: role(name, folder) for name, folder in workspace.folders.items()}
+    daw = {name: folder.split("/")[1] for name, folder in workspace.folders.items() if folder.startswith("daws/")}
+
+    def layer(name: str) -> int | None:
+        return INTEGRATION_LAYER if roles[name] == "integration" else LAYERS.get(name)
+
+    for name in sorted(workspace.folders):
+        if roles[name] == "crate" and name not in LAYERS:
+            breaks.append(f"{name} ({workspace.folders[name]}) has no layer: give it one in dev.py's LAYERS")
+    for name, uses in sorted(workspace.depends.items()):
+        for used, kind in sorted(set(uses)):
+            dev = kind == "dev"
+            edge = f"{name} -> {used}" + (" (dev)" if dev else "")
+            if used == TEST_SUPPORT and not dev:
+                breaks.append(f"{edge}: {TEST_SUPPORT} is the tests' support, a dev-dependency only")
+            if not dev and layer(name) is not None and layer(used) is not None and layer(used) > layer(name):
+                breaks.append(f"{edge}: L{layer(name)} uses L{layer(used)}; a dependency points down, or stays in its layer")
+            if roles[name] in ("crate", "test support") and used in daw:
+                allowed = (dev and daw[used] == "own") or (name == APP and (roles[used] == "integration" or used in APP_BRIDGES))
+                if not allowed:
+                    breaks.append(f"{edge}: nothing in crates/ uses daws/ but the app (its DAWs and bridges) and tests (daws/own/)")
+            if name in daw and used in daw and daw[used] not in (daw[name], "own"):
+                breaks.append(f"{edge}: a DAW's crates use no other DAW's, only daws/own/")
+            if roles[name] == "bridge":
+                if roles[used] == "integration" or (roles[used] == "crate" and used != "kumi-common"):
+                    breaks.append(f"{edge}: a bridge uses nothing of Kumi's crates but kumi-common")
+    return breaks
+
+
 def tracked(root: Path = ROOT) -> list[str]:
     return subprocess.run(["git", "ls-files", "-z"], cwd=root, capture_output=True, text=True, check=True).stdout.split("\0")[:-1]
 
@@ -335,7 +403,8 @@ def check_steps(result: Affected, base: str, windows: bool = sys.platform == "wi
     """Required CI's checks for what `result` affects, in CI's order."""
     python = sys.executable or "python3"
     steps = [Step("the change's whitespace", ["git", "diff", "--check", f"{base}...HEAD"]),
-             Step("every tracked file belongs to a package or an area", [python, "scripts/dev.py", "affected", "--check"])]
+             Step("every tracked file belongs to a package or an area", [python, "scripts/dev.py", "affected", "--check"]),
+             Step("the crates keep their layers", [python, "scripts/dev.py", "deps", "--check"])]
     if result.packages:
         picked = [arg for package in result.packages for arg in ("-p", package)]
         runner = ["pwsh", "-NoProfile", "-File", "scripts/test-isolated.ps1"] if windows else ["sh", "scripts/test-isolated.sh"]
@@ -382,6 +451,32 @@ def command_check(args: argparse.Namespace) -> int:
             return 1
     print("dev.py check: every check passed." if not args.dry_run else "dev.py check: nothing run (--dry-run).")
     return 0
+
+
+def command_deps(args: argparse.Namespace) -> int:
+    workspace = Workspace.read()
+    breaks = layer_breaks(workspace)
+    if args.check:
+        if breaks:
+            print(f"{len(breaks)} dependencies break the crates' layers (scripts/dev.py, LAYERS):", file=sys.stderr)
+            for line in breaks:
+                print(f"  {line}", file=sys.stderr)
+            return 1
+        print(f"The crates keep their layers ({len(workspace.folders)} packages).")
+        return 0
+    for name, folder in sorted(workspace.folders.items(), key=lambda item: item[1]):
+        kind = role(name, folder)
+        if kind == "integration":
+            place = f"L{INTEGRATION_LAYER}"
+        elif kind == "crate":
+            place = f"L{LAYERS[name]}" if name in LAYERS else "no layer"
+        else:
+            place = kind
+        uses = sorted({used + (" (dev)" if how == "dev" else "") for used, how in workspace.depends[name]})
+        print(f"{folder} [{place}]: {', '.join(uses) or 'nothing of the workspace'}")
+    for line in breaks:
+        print(f"breaks: {line}")
+    return 1 if breaks else 0
 
 
 def command_select(args: argparse.Namespace) -> int:
@@ -680,6 +775,9 @@ def main(argv: list[str] | None = None) -> int:
     check.add_argument("--base", default="origin/main", help="the ref the branch is measured from (default origin/main)")
     check.add_argument("--dry-run", action="store_true", help="say what would run, and run nothing")
     check.set_defaults(run=command_check)
+    layers = commands.add_parser("deps", help="each crate's layer and what it uses of the workspace; --check: the layer rules")
+    layers.add_argument("--check", action="store_true", help="fail, naming them, on dependencies the layer rules refuse")
+    layers.set_defaults(run=command_deps)
     part = commands.add_parser("select", help="a CI part's affected packages, as -p options")
     part.add_argument("affected", help="the affected packages, space-separated")
     part.add_argument("selection", nargs=argparse.REMAINDER, help="the part: -p NAME... or --exclude NAME...")

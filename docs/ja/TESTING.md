@@ -42,7 +42,7 @@ Windows では、いくつかのテストがシンボリックリンクを作成
 | `cargo clippy --workspace --all-targets --locked -- -D warnings` | Lint。CI では今のところ参考扱いです |
 | `cargo clippy --workspace --lib --bins --examples --locked -- -A clippy::all -D clippy::await_holding_refcell_ref` | await をまたいで保持される `RefCell` の借用。Lint の CI ジョブを失敗させます |
 | `sh scripts/test-isolated.sh --profile ci` | `Rust / Linux` の各パートが実行するテストを cargo-nextest で実行します（一つのパートのものは `-p <crate>` か `--exclude <crate>`、`--profile ci-os`：macOS と Windows が実行するもの、`--profile extended`：すべてのテスト） |
-| `python3 scripts/dev.py check` | このブランチが `origin/main` から変えたものについて、Required CI のチェックを実行します（別の起点は `--base`）：変更の空白、すべてのファイルがクレートかエリアに属すること、続いて影響を受けるクレートの `cargo fmt --check`、`RefCell` の lint、`ci` テスト（cargo-nextest）、さらに変更があれば Remote Script、Live の拡張機能、Renoise のツールのテスト、そしてリリーススクリプトのテスト。`--dry-run` は何を実行するかだけを示します |
+| `python3 scripts/dev.py check` | このブランチが `origin/main` から変えたものについて、Required CI のチェックを実行します（別の起点は `--base`）：変更の空白、すべてのファイルがクレートかエリアに属すること、クレートの層（`dev.py deps --check`：依存は下の層へ向かい、ある DAW のクレートは別の DAW のクレートを使わない）、続いて影響を受けるクレートの `cargo fmt --check`、`RefCell` の lint、`ci` テスト（cargo-nextest）、さらに変更があれば Remote Script、Live の拡張機能、Renoise のツールのテスト、そしてリリーススクリプトのテスト。`--dry-run` は何を実行するかだけを示します |
 | `cargo run --locked --release -p ableton-mcp-server --bin ableton-mcp-benchmark` | ブリッジの性能の基準。[開発者ガイド](DEVELOPER_GUIDE.md#ビルドテスト計測)を参照してください |
 
 分離ランナーはテスト専用のホームを用意します。`HOME`、`USERPROFILE`、`APPDATA`、`LOCALAPPDATA`、`XDG_CONFIG_HOME`、`KUMI_HOME` は新しい一時フォルダーの中を指し、`KUMI_REMOTE_SCRIPTS_DIR` と `KUMI_LIVE_EXTENSIONS_DIR` は取り除かれるので、どのテストもあなたの Live のフォルダーや `~/.kumi` には届きません。
