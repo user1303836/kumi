@@ -254,9 +254,10 @@ pub fn route(answers: &Answers) -> Option<ChangePicture> {
 // ----- a keyzone -----
 
 /// A keyzone before and after (Renoise's): its notes, velocities and base note, as the preview and the apply showed the
-/// settings the change named. What it didn't name it didn't change, and isn't claimed: velocities it didn't name are
-/// left unknown (the zone is drawn by its keys alone), and a change that named no keys draws its values alone.
-pub fn zone(answers: &Answers) -> Option<ChangePicture> {
+/// settings the change named, its keys in its DAW's names (`profile`). What it didn't name it didn't change, and isn't
+/// claimed: velocities it didn't name are left unknown (the zone is drawn by its keys alone), and a change that named no
+/// keys draws its values alone.
+pub fn zone(answers: &Answers, profile: &DawProfile) -> Option<ChangePicture> {
     let range = |state: &Value, key: &str| -> Option<[u8; 2]> {
         let ends: Vec<u8> = list(state, key).iter().filter_map(Value::as_f64).map(|n| n.clamp(0., 127.) as u8).collect();
         match ends.as_slice() {
@@ -283,8 +284,8 @@ pub fn zone(answers: &Answers) -> Option<ChangePicture> {
         return None;
     }
     let (was, now) = (zone(before), zone(after));
-    // Keys in Renoise's names, as FOCUS's keyzone map says them.
-    let name = |n: u8| DawProfile::RENOISE.note_name(n);
+    // Keys in the DAW's names, as FOCUS's keyzone map says them.
+    let name = |n: u8| profile.note_name(n);
     let span = |[low, high]: [u8; 2], words: &dyn Fn(u8) -> String| {
         if low == high {
             words(low)
@@ -528,7 +529,7 @@ mod tests {
     }
 
     fn zone_picture(preview: &Value, applied: &Value) -> Option<ChangePicture> {
-        zone(&Answers { preview, applied })
+        zone(&Answers { preview, applied }, &DawProfile::RENOISE)
     }
 
     #[test]
@@ -661,7 +662,9 @@ mod tests {
             json!({"display": {"before": {"noteRange": [36, 47], "baseNote": 36}}}),
             json!({"display": {"after": {"noteRange": [48, 59], "baseNote": 48}}}),
         );
-        let Some(ChangePicture::Zones { before, after, values }) = zone(&Answers { preview: &preview, applied: &applied }) else {
+        let Some(ChangePicture::Zones { before, after, values }) =
+            zone(&Answers { preview: &preview, applied: &applied }, &DawProfile::RENOISE)
+        else {
             panic!()
         };
         assert_eq!((before[0].notes, after[0].notes, after[0].velocities, after[0].base), ([36, 47], [48, 59], None, Some(48)));

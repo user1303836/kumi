@@ -22,7 +22,8 @@ It's one Cargo workspace. Each DAW is reached through a bridge that runs inside 
 - `daws/own/`: Kumi's own bridges, for REAPER and Renoise: `daw-bridge/` (the `kumi-daw/1` wire) and
   `daw-mcp-server/` (the host; what's one DAW's alone is in its `src/reaper/` and `src/renoise/`); `kumi-daw-own/`
   is what REAPER's and Renoise's integrations share, host side, and their provider (`provider`: one for both, configured
-  by the value each DAW's crate exports).
+  by the value each DAW's crate exports). It names neither DAW: each gives its facts (`OwnDaw`: its listening table, its
+  words) and its own code (`OwnTools`: its tools, its ears).
 - `daws/reaper/reaper-kumi`: REAPER's extension (Rust, built against REAPER's SDK headers in its `sdk/`);
   `daws/reaper/kumi-daw-reaper`: REAPER, host side (its integration, the tools only REAPER has, its library, and its
   provider's value, `PROVIDER`).
