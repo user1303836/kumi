@@ -88,17 +88,27 @@ impl Style for Fake {
 fn library(root: &Path) -> String {
     let music = root.join("Music");
     for n in 0..2 {
-        song(&music.join(format!("Low/Album/0{} Low {n}.wav", n + 1)), 31. + n as f64, 110., 0.5);
-        song(&music.join(format!("High/Album/0{} High {n}.wav", n + 1)), 31. + n as f64, 2_000., 0.5);
+        song(&std::path::Path::new(&at(&music.to_string_lossy(), &format!("Low/Album/0{} Low {n}.wav", n + 1))), 31. + n as f64, 110., 0.5);
+        song(
+            &std::path::Path::new(&at(&music.to_string_lossy(), &format!("High/Album/0{} High {n}.wav", n + 1))),
+            31. + n as f64,
+            2_000.,
+            0.5,
+        );
     }
-    song(&music.join("Short/Album/01 Short.wav"), 5., 440., 0.5);
-    song(&music.join("Quiet/Album/01 Quiet.wav"), 31., 440., 0.000_02);
+    song(Path::new(&at(&music.to_string_lossy(), "Short/Album/01 Short.wav")), 5., 440., 0.5);
+    song(Path::new(&at(&music.to_string_lossy(), "Quiet/Album/01 Quiet.wav")), 31., 440., 0.000_02);
     music.to_string_lossy().into_owned()
 }
 
 async fn scan(dir: &Path, music: &str, style: Rc<dyn Style>, control: &Control) -> ScanProgress {
     let options = ScanOptions { dir: dir.to_string_lossy().into_owned(), folders: vec![music.into()], ..Default::default() };
     run(&options, Default::default(), control, Some(style), &|_| {}).await.unwrap()
+}
+
+/// A song's path under the music folder, a component at a time: the system's own separators, as the walk keeps them.
+fn at(music: &str, relative: &str) -> String {
+    relative.split('/').fold(std::path::PathBuf::from(music), |path, part| path.join(part)).to_string_lossy().into_owned()
 }
 
 fn store(dir: &Path) -> MusicStore {
@@ -180,17 +190,17 @@ async fn the_scan_hears_measures_and_embeds_songs_and_says_why_it_skips_one() {
     assert_eq!((progress.songs, progress.full, progress.skipped, progress.heard), (6, 4, 2, 6), "{progress:?}");
     let dir = dir.path().join("kumi/music");
     let store = store(&dir);
-    let why = |name: &str| store.song_at(&format!("{music}/{name}")).unwrap().unwrap().skipped;
+    let why = |name: &str| store.song_at(&at(&music, name)).unwrap().unwrap().skipped;
     assert_eq!(why("Short/Album/01 Short.wav").as_deref(), Some(TOO_SHORT));
     assert_eq!(why("Quiet/Album/01 Quiet.wav").as_deref(), Some(TOO_QUIET));
-    let low = store.song_at(&format!("{music}/Low/Album/01 Low 0.wav")).unwrap().unwrap();
+    let low = store.song_at(&at(&music, "Low/Album/01 Low 0.wav")).unwrap().unwrap();
     assert_eq!((low.stage, low.cluster), (Stage::Full as i64, Some(0)));
     let profile: Profile = serde_json::from_str(low.profile.as_deref().unwrap()).unwrap();
     assert!(profile.integrated.is_some() && profile.vibe.is_none(), "measured, its vector kept apart: {profile:?}");
     // Four vectors, fewer than a file's scale needs: the scale was set when the scan had nothing left to hear.
     assert!(file_for(&dir, "test-model").is_file());
     let reader = VectorReader::open(&dir, &store, "test-model").unwrap();
-    let high = store.song_at(&format!("{music}/High/Album/01 High 0.wav")).unwrap().unwrap();
+    let high = store.song_at(&at(&music, "High/Album/01 High 0.wav")).unwrap().unwrap();
     assert!(reader.distance(low.id, &reader.get(low.id).unwrap()).unwrap() < 1e-3);
     assert!(reader.distance(low.id, &reader.get(high.id).unwrap()).unwrap() > 0.5, "the two folders sound apart");
     assert_eq!(style.heard.borrow().len(), 4, "each song heard once: {:?}", style.heard.borrow());
@@ -302,7 +312,7 @@ async fn the_real_style_model_hears_the_scans_songs() {
     let store = store(&dir);
     let model = kumi_listening::embed::own_style_id();
     let reader = VectorReader::open(&dir, &store, &model).unwrap();
-    let id = |name: &str| store.song_at(&format!("{music}/{name}")).unwrap().unwrap().id;
+    let id = |name: &str| store.song_at(&at(&music, name)).unwrap().unwrap().id;
     let (low, low_again, high) = (id("Low/Album/01 Low 0.wav"), id("Low/Album/02 Low 1.wav"), id("High/Album/01 High 0.wav"));
     let apart = |a: i64, b: i64| reader.distance(a, &reader.get(b).unwrap()).unwrap();
     eprintln!("low to low {:.3}, low to high {:.3}", apart(low, low_again), apart(low, high));

@@ -366,6 +366,7 @@ async fn uninstall_preserves_producer_files_until_all_requested() {
     }
     installed_kumi(home);
     put(home.join("auth.json"), "{}");
+    put(home.join("music").join("music.db"), "songs");
     let (mut refused, _) = io(&env);
     refused.confirm = Some(Rc::new(|_| async { false }.boxed_local()));
     assert_eq!(uninstall_installed(refused, UninstallOptions::default()).await.unwrap(), 1);
@@ -376,6 +377,7 @@ async fn uninstall_preserves_producer_files_until_all_requested() {
     }
     assert!(home.join("auth.json").exists());
     assert!(home.join("projects").exists());
+    assert!(home.join("music").join("music.db").exists(), "what Kumi learned of their music is theirs until --all");
     // Without Kumi in it, the folder is the producer's to delete; installed again, --all takes everything.
     assert_eq!(uninstall_installed(io(&env).0, UninstallOptions { all: true, yes: true, ..Default::default() }).await.unwrap(), 1);
     assert!(home.join("auth.json").exists());

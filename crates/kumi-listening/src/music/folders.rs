@@ -271,7 +271,11 @@ mod tests {
 
     #[test]
     fn nested_folders_are_walked_once() {
-        let folders = folders_to_walk(&["/m/a/b".into(), "/m/a".into(), "/n".into(), "/m/a/".into()]);
-        assert_eq!(folders, ["/m/a", "/n"]);
+        // Absolute on every system, and never made.
+        let root = std::env::temp_dir().join("kumi-nowhere-at-all");
+        let path = |rest: &str| rest.split('/').fold(root.clone(), |path, part| path.join(part)).to_string_lossy().into_owned();
+        let trailing = format!("{}{}", path("m/a"), std::path::MAIN_SEPARATOR);
+        let folders = folders_to_walk(&[path("m/a/b"), path("m/a"), path("n"), trailing]);
+        assert_eq!(folders, [normalize(&path("m/a")), normalize(&path("n"))]);
     }
 }

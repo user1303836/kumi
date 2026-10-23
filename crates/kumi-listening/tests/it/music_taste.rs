@@ -126,7 +126,7 @@ fn direction(at: usize, artist: usize, song: usize) -> Vec<f32> {
 fn library(root: &Path) -> (PathBuf, String) {
     let dir = root.join("kumi/music");
     let mut store = MusicStore::open(&database(&dir)).unwrap();
-    let archangel = root.join("Music/Burial/Untrue/01 Archangel.wav");
+    let archangel = ["Music", "Burial", "Untrue", "01 Archangel.wav"].iter().fold(root.to_path_buf(), |path, part| path.join(part));
     std::fs::create_dir_all(archangel.parent().unwrap()).unwrap();
     std::fs::write(&archangel, kumi_media::audio::decode::float_wav(&[vec![0.1; 800]], 8_000)).unwrap();
     let archangel = archangel.to_string_lossy().into_owned();
@@ -201,10 +201,13 @@ async fn ask(music: &Rc<Music>, input: Value) -> String {
     result.text
 }
 
-/// Pretty, as a golden keeps it, with the test's folders put by name.
+/// Pretty, as a golden keeps it, with the test's folders put by name and the system's separators as `/`, so it reads
+/// the same on every system.
 fn pinned(answer: &str, root: &Path) -> String {
     let value: Value = serde_json::from_str(answer).unwrap();
-    serde_json::to_string_pretty(&value).unwrap().replace(&root.to_string_lossy().into_owned(), "<root>") + "\n"
+    let root = serde_json::to_string(&root.to_string_lossy()).unwrap();
+    let text = serde_json::to_string_pretty(&value).unwrap().replace(&root[1..root.len() - 1], "<root>");
+    text.replace("\\\\", "/") + "\n"
 }
 
 fn local(test: impl std::future::Future<Output = ()>) {
