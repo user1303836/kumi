@@ -375,6 +375,14 @@ impl SoundIndex {
     pub fn measured(&self) -> usize {
         self.has_vector.iter().filter(|flag| **flag).count()
     }
+    /// A sound's name, by its row: its file's, without the extension.
+    pub fn name(&self, row: usize) -> &str {
+        &self.prepared[row].name
+    }
+    /// Where a sound is, by its row: its source's label and the folders down to it ("Splice / Drums / Kicks").
+    pub fn place(&self, row: usize) -> &str {
+        &self.prepared[row].where_
+    }
     pub fn holds(&self, folder: &str) -> bool {
         self.entries.iter().any(|e| below(&e.path, folder).is_some())
     }

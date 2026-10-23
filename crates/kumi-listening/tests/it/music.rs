@@ -186,3 +186,46 @@ fn the_first_usual_place_with_songs_is_offered() {
     assert_eq!(found_in(vec![apple.clone(), music.clone()], &[]), Some(Found { folder: text(&apple), songs: 1, capped: false }));
     assert_eq!(found_in(vec![dir.path().join("nowhere")], &[]), None);
 }
+
+#[test]
+fn the_map_has_the_songs_laid_out_and_the_styles_with_their_words() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("music.db");
+    let store = MusicStore::open(&file).unwrap();
+    // A song laid out in each style, one heard but not laid out yet, and one laid out but gone since.
+    for (path, artist, title, cluster, at, gone) in [
+        ("/m/Burial/Archangel.flac", "'Burial'", "'Archangel'", "1", "0.25, 0.75", 0),
+        ("/m/Loose/Untitled 3.wav", "NULL", "NULL", "0", "1.0, 0.0", 0),
+        ("/m/New/Fresh.wav", "'New'", "'Fresh'", "NULL", "NULL, NULL", 0),
+        ("/m/Old/Gone.wav", "'Old'", "'Gone'", "0", "0.5, 0.5", 1),
+    ] {
+        let sql = format!(
+            "INSERT INTO songs (path, folder, size, mtime, names_from, artist, title, genre, seconds, cluster, x, y, gone) \
+             VALUES ('{path}', '/m', 1, 1, 'tags', {artist}, {title}, 'Dubstep; Garage', 240.0, {cluster}, {at}, {gone})"
+        );
+        store.connection().execute(&sql, []).unwrap();
+    }
+    let clusters = r#"{"model": "clap", "heard": 3, "centres": [], "clusters": [
+        {"songs": 2, "examples": [2], "genres": ["Garage"]},
+        {"songs": 1, "examples": [1], "genres": ["Dubstep"], "names": ["dark", "rainy"]}]}"#;
+    store.set_meta("clusters", clusters).unwrap();
+    drop(store);
+    let (songs, styles) = MusicStore::open_read(&file).unwrap().unwrap().map().unwrap();
+    let shown: Vec<(&str, Option<usize>, f64, f64)> = songs.iter().map(|song| (song.name.as_str(), song.cluster, song.x, song.y)).collect();
+    assert_eq!(shown, [("Burial – Archangel", Some(1), 0.25, 0.75), ("Untitled 3.wav", Some(0), 1., 0.)], "laid out, and not gone");
+    assert_eq!((songs[0].genre.as_deref(), songs[0].seconds), (Some("Dubstep; Garage"), Some(240.)));
+    assert_eq!(styles.len(), 2);
+    assert_eq!((styles[0].songs, styles[0].examples.as_slice()), (2, &[2][..]));
+    assert!(styles[0].names.is_empty(), "named once the text half names it");
+    assert_eq!(
+        (styles[1].genres.as_slice(), styles[1].names.as_slice()),
+        (&["Dubstep".to_string()][..], &["dark".to_string(), "rainy".to_string()][..])
+    );
+}
+
+#[test]
+fn a_song_plays_from_the_window_its_style_was_heard_in() {
+    use kumi_listening::music::hear::heard_first;
+    assert_eq!(heard_first(240.), (115., 10.), "ten seconds halfway through");
+    assert_eq!(heard_first(6.), (0., 6.), "all of a short one");
+}

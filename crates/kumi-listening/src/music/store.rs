@@ -470,6 +470,38 @@ impl MusicStore {
         Ok(tags.into_values().map(|(count, spelling, _)| (spelling, count)).collect())
     }
 
+    /// The songs on the map (heard and laid out, none gone), by id, and the producer's styles, numbered as the songs'
+    /// clusters are.
+    pub fn map(&self) -> Result<(Vec<MapSong>, Vec<MapStyle>), MusicError> {
+        let mut statement = self.connection.prepare(&format!(
+            "SELECT id, x, y, cluster, path, artist, title, genre, seconds FROM songs \
+             WHERE {LIVE} AND x IS NOT NULL AND y IS NOT NULL ORDER BY id"
+        ))?;
+        let songs = statement
+            .query_map([], |row| {
+                let path: String = row.get(4)?;
+                let (artist, title): (Option<String>, Option<String>) = (row.get(5)?, row.get(6)?);
+                Ok(MapSong {
+                    id: row.get(0)?,
+                    x: row.get(1)?,
+                    y: row.get(2)?,
+                    cluster: row.get::<_, Option<i64>>(3)?.and_then(|cluster| usize::try_from(cluster).ok()),
+                    name: song_name(artist.as_deref(), title.as_deref(), &path),
+                    path,
+                    genre: row.get(7)?,
+                    seconds: row.get(8)?,
+                })
+            })?
+            .collect::<Result<_, _>>()?;
+        #[derive(serde::Deserialize)]
+        struct Kept {
+            #[serde(default)]
+            clusters: Vec<MapStyle>,
+        }
+        let styles = self.meta("clusters")?.and_then(|text| serde_json::from_str::<Kept>(&text).ok()).map(|kept| kept.clusters);
+        Ok((songs, styles.unwrap_or_default()))
+    }
+
     pub fn meta(&self, key: &str) -> Result<Option<String>, MusicError> {
         Ok(self.connection.query_row("SELECT value FROM meta WHERE key = ?1", [key], |row| row.get(0)).optional()?)
     }
@@ -478,6 +510,46 @@ impl MusicStore {
         self.connection
             .execute("INSERT INTO meta (key, value) VALUES (?1, ?2) ON CONFLICT(key) DO UPDATE SET value = excluded.value", [key, value])?;
         Ok(())
+    }
+}
+
+/// A song on the map: where it sits (x and y in [0, 1]), its style, and what the map shows of it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MapSong {
+    pub id: i64,
+    pub x: f64,
+    pub y: f64,
+    /// Its style, numbered from 0 (the style c1 is 0).
+    pub cluster: Option<usize>,
+    pub path: String,
+    /// "Artist – Title", or its file's name.
+    pub name: String,
+    pub genre: Option<String>,
+    pub seconds: Option<f64>,
+}
+
+/// One of the producer's styles (a cluster of their songs), as the scan last kept it.
+#[derive(Debug, Clone, Default, PartialEq, serde::Deserialize)]
+pub struct MapStyle {
+    #[serde(default)]
+    pub songs: usize,
+    /// The songs nearest its centre, by id.
+    #[serde(default)]
+    pub examples: Vec<i64>,
+    /// Its commonest genre tags.
+    #[serde(default)]
+    pub genres: Vec<String>,
+    /// Its two words, once CLAP's text half named it.
+    #[serde(default)]
+    pub names: Vec<String>,
+}
+
+/// A song's name: "Artist – Title", its title alone, or its file's name.
+pub fn song_name(artist: Option<&str>, title: Option<&str>, path: &str) -> String {
+    match (artist, title) {
+        (Some(artist), Some(title)) => format!("{artist} – {title}"),
+        (None, Some(title)) => title.to_string(),
+        _ => path.rsplit(['/', '\\']).next().unwrap_or("").to_string(),
     }
 }
 
