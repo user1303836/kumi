@@ -12,7 +12,7 @@ use kumi_agent::core::contracts::Picked;
 use kumi_ai::failure::reset_words;
 use kumi_ai::providers::{
     models::{ApiKeyCheck, ModelInfo, ServiceTier},
-    provider_info, Effort, SignIn,
+    Effort, SignIn,
 };
 use kumi_common::time::since;
 use kumi_types::errors::FailureKind;
@@ -735,7 +735,7 @@ impl TuiApp {
         if self.0.options.models.is_none() {
             return;
         }
-        if provider_info(provider).sign_in == SignIn::ApiKey {
+        if provider.row().sign_in == SignIn::ApiKey {
             self.0.state.borrow_mut().panel =
                 Some(Rc::new(RefCell::new(Panel::Key { provider, secret: String::new(), checking: false, status: None, then })));
             self.0.scheduler.request();
@@ -827,11 +827,11 @@ impl TuiApp {
                 return;
             };
             *checking = true;
-            *status = Some((format!("Checking the key with {}…", provider_info(*provider).name), NoticeTone::Info));
+            *status = Some((format!("Checking the key with {}…", provider.row().name), NoticeTone::Info));
             (*provider, secret.clone(), then.clone())
         };
         self.0.scheduler.request();
-        let name = provider_info(provider).name;
+        let name = provider.row().name;
         let verdict = match self.0.options.models.as_ref().unwrap().save_key(provider, &key, None).await {
             Ok(v) => v,
             Err(error) => {
@@ -963,7 +963,7 @@ impl TuiApp {
         let Some(provider) = provider.and_then(ProviderId::parse).filter(|_| kind == "auth") else {
             return;
         };
-        let info = provider_info(provider);
+        let info = provider.row();
         self.pick(
             Picker::new(
                 format!("Sign in to {}?", info.name),
@@ -1532,7 +1532,7 @@ impl TuiApp {
             return String::new();
         };
         let state = self.0.state.borrow();
-        if provider_info(provider).sign_in != SignIn::ApiKey || state.used.answers == 0 {
+        if provider.row().sign_in != SignIn::ApiKey || state.used.answers == 0 {
             return String::new();
         }
         let count = |n: f64| {
@@ -1834,8 +1834,8 @@ impl TuiApp {
             let Some(provider) = item.value.as_deref().and_then(ProviderId::parse) else {
                 return Ok(());
             };
-            let info = provider_info(provider);
-            let shared = if info.credential == "opencode" { " (OpenCode Zen and Go share it)" } else { "" };
+            let info = provider.row();
+            let shared = info.shared_by.map(|names| format!(" ({names} share it)")).unwrap_or_default();
             app.pick(
                 Picker::new(
                     format!("Sign out of {}?", info.name),
@@ -1854,7 +1854,7 @@ impl TuiApp {
                     let still = if models.providers().await?.iter().find(|p| p.id == provider).and_then(|p| p.via.as_deref())
                         == Some("environment")
                     {
-                        format!(" {} is still set, so Kumi uses that key now.", info.key_env.unwrap_or("undefined"))
+                        format!(" {} is still set, so Kumi uses that key now.", info.first_key_env().unwrap_or("undefined"))
                     } else {
                         String::new()
                     };

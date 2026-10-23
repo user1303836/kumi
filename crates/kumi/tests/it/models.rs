@@ -96,16 +96,19 @@ impl Fixture {
 #[tokio::test(flavor = "current_thread")]
 async fn keys_are_kept_only_when_the_provider_accepts_them_then_models_are_available() {
     let f = Fixture::new(Env::new());
-    assert!(!f.control.providers().await.unwrap().iter().find(|p| p.id == ProviderId::Anthropic).unwrap().signed_in);
+    assert!(!f.control.providers().await.unwrap().iter().find(|p| p.id == ProviderId::parse("anthropic").unwrap()).unwrap().signed_in);
     let error = f.control.choose("anthropic/claude-sonnet-5-5").await.unwrap_err();
     assert_eq!(error.kumi().unwrap().kind, FailureKind::Auth);
     assert_eq!(error.kumi().unwrap().provider.as_deref(), Some("anthropic"));
-    assert_eq!(f.control.save_key(ProviderId::Anthropic, "sk-ant-fixture-bad-0002", None).await.unwrap(), ApiKeyCheck::Refused);
+    assert_eq!(
+        f.control.save_key(ProviderId::parse("anthropic").unwrap(), "sk-ant-fixture-bad-0002", None).await.unwrap(),
+        ApiKeyCheck::Refused
+    );
     assert!(f.store.get("anthropic").await.unwrap().is_none());
-    assert_eq!(f.control.save_key(ProviderId::Anthropic, &format!(" {GOOD}\n"), None).await.unwrap(), ApiKeyCheck::Ok);
+    assert_eq!(f.control.save_key(ProviderId::parse("anthropic").unwrap(), &format!(" {GOOD}\n"), None).await.unwrap(), ApiKeyCheck::Ok);
     assert_eq!(f.store.get("anthropic").await.unwrap(), Some(Credential::ApiKey { key: GOOD.into() }));
     assert_eq!(
-        f.control.providers().await.unwrap().iter().find(|p| p.id == ProviderId::Anthropic).unwrap().via.as_deref(),
+        f.control.providers().await.unwrap().iter().find(|p| p.id == ProviderId::parse("anthropic").unwrap()).unwrap().via.as_deref(),
         Some("saved key")
     );
     assert_eq!(
@@ -116,7 +119,7 @@ async fn keys_are_kept_only_when_the_provider_accepts_them_then_models_are_avail
 #[tokio::test(flavor = "current_thread")]
 async fn model_and_effort_persist_an_unsupported_effort_reverts_and_signout_is_applied() {
     let f = Fixture::new(Env::new());
-    f.control.save_key(ProviderId::Anthropic, GOOD, None).await.unwrap();
+    f.control.save_key(ProviderId::parse("anthropic").unwrap(), GOOD, None).await.unwrap();
     assert_eq!(f.control.choose_default().await.unwrap().unwrap().model.id, "anthropic/claude-sonnet-5-5");
     f.control.set_effort(Some(Effort::Max)).await.unwrap();
     assert_eq!(f.settings(), json!({"model":"anthropic/claude-sonnet-5-5","effort":"max"}));
@@ -132,11 +135,11 @@ async fn model_and_effort_persist_an_unsupported_effort_reverts_and_signout_is_a
     f.control.choose("anthropic/claude-haiku-4-5").await.unwrap();
     assert_eq!(f.settings(), json!({"model":"anthropic/claude-haiku-4-5"}));
     assert!(f.changes.get() >= 3);
-    assert!(f.control.sign_out(ProviderId::Anthropic).await.unwrap());
+    assert!(f.control.sign_out(ProviderId::parse("anthropic").unwrap()).await.unwrap());
     let error = f.control.binding().await.err().unwrap();
     assert_eq!(error.kumi().unwrap().kind, FailureKind::Auth);
     assert_eq!(error.kumi().unwrap().provider.as_deref(), Some("anthropic"));
-    assert!(!f.control.sign_out(ProviderId::Anthropic).await.unwrap());
+    assert!(!f.control.sign_out(ProviderId::parse("anthropic").unwrap()).await.unwrap());
 }
 /// Signed in to ChatGPT, with a token good for a day.
 async fn sign_in_chatgpt(store: &Rc<dyn CredentialStore>) {
@@ -203,7 +206,10 @@ async fn opencode_zen_and_go_share_new_keys_and_invalidate_the_current_binding()
         say: None,
         installed: None,
     });
-    assert_eq!(control.save_key(ProviderId::Opencode, "oc-fixture-key-0001", None).await.unwrap(), ApiKeyCheck::Unreachable);
+    assert_eq!(
+        control.save_key(ProviderId::parse("opencode").unwrap(), "oc-fixture-key-0001", None).await.unwrap(),
+        ApiKeyCheck::Unreachable
+    );
     assert_eq!(changes.get(), 1);
 }
 #[tokio::test(flavor = "current_thread")]
@@ -220,7 +226,7 @@ async fn a_saved_model_its_providers_list_no_longer_shows_is_said() {
     offline.control.choose("openai-codex/gpt-5.5").await.unwrap();
     assert_eq!(missing_model(&offline.control).await, None);
     f.control.choose("openai-codex/gpt-5.5").await.unwrap();
-    assert!(f.control.sign_out(ProviderId::OpenaiCodex).await.unwrap());
+    assert!(f.control.sign_out(ProviderId::parse("openai-codex").unwrap()).await.unwrap());
     assert_eq!(missing_model(&f.control).await, None);
     let pinned = Fixture::with_fetch(Env::from([("KUMI_MODEL".into(), "openai-codex/gpt-5.5".into())]), Rc::new(Chatgpt));
     sign_in_chatgpt(&pinned.store).await;
@@ -232,13 +238,13 @@ async fn environment_model_choices_are_temporary_and_environment_keys_cannot_be_
         Fixture::new(Env::from([("KUMI_MODEL".into(), "anthropic/claude-sonnet-5-5".into()), ("ANTHROPIC_API_KEY".into(), GOOD.into())]));
     assert!(f.control.current().pinned);
     assert_eq!(
-        f.control.providers().await.unwrap().iter().find(|p| p.id == ProviderId::Anthropic).unwrap().via.as_deref(),
+        f.control.providers().await.unwrap().iter().find(|p| p.id == ProviderId::parse("anthropic").unwrap()).unwrap().via.as_deref(),
         Some("environment")
     );
     f.control.choose("anthropic/claude-haiku-4-5").await.unwrap();
     assert_eq!(f.control.current().model.as_deref(), Some("anthropic/claude-haiku-4-5"));
     assert_eq!(f.settings(), json!({}));
-    assert!(!f.control.sign_out(ProviderId::Anthropic).await.unwrap());
+    assert!(!f.control.sign_out(ProviderId::parse("anthropic").unwrap()).await.unwrap());
     let none = Fixture::new(Env::new());
     assert!(none.control.binding().await.err().unwrap().to_string().contains("Choose a model to talk to: type /model"));
 }

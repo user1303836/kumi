@@ -3,7 +3,7 @@ use super::{
     compat::mending_fetch,
     models::{EffortInfo, ModelInfo},
     ollama::{ollama_chat, FailurePhase, OllamaChatSettings, OllamaShape},
-    words_only, Effort, PROVIDERS, USER_AGENT,
+    table, words_only, Effort, USER_AGENT,
 };
 use crate::{
     binding::{budget_for, LanguageModel, ModelBinding, ModelRequest, BYTES_PER_TOKEN},
@@ -152,8 +152,7 @@ pub fn local_servers(settings: &[ServerSetting], env: &HashMap<String, String>) 
         server("ollama", LocalKind::Ollama, "Ollama", ollama_address(env.get("OLLAMA_HOST")), None)?,
         server("lmstudio", LocalKind::Lmstudio, "LM Studio", "http://127.0.0.1:1234/v1".into(), env.get("LM_API_TOKEN").cloned())?,
     ];
-    let mut taken: HashSet<String> =
-        PROVIDERS.iter().map(|p| p.as_str().into()).chain(LOCAL_PROVIDERS.iter().map(|p| (*p).into())).collect();
+    let mut taken: HashSet<String> = table::rows().map(|row| row.id.into()).chain(LOCAL_PROVIDERS.iter().map(|p| (*p).into())).collect();
     static WORD: LazyLock<regex::Regex> = LazyLock::new(|| regex::Regex::new("[^a-z0-9]+").unwrap());
     for setting in settings {
         let word = head(WORD.replace_all(&setting.name.to_lowercase(), "-").trim_matches('-'), 32);

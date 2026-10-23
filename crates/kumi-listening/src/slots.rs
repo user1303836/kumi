@@ -500,7 +500,8 @@ async fn gemini(store: &dyn CredentialStore, env: &HashMap<String, String>, sign
 
 /// An OpenAI listener for this computer's OpenAI API key; None when there's no key.
 async fn openai(store: &dyn CredentialStore, env: &HashMap<String, String>, signal: Signal) -> Result<Option<Rc<dyn Listener>>, String> {
-    let Some(key) = api_key_for(ProviderId::Openai, store, Some(env)).await.ok().flatten() else { return Ok(None) };
+    let Some(openai) = ProviderId::parse("openai") else { return Ok(None) };
+    let Some(key) = api_key_for(openai, store, Some(env)).await.ok().flatten() else { return Ok(None) };
     Ok(openai_listener(&key.key, signal).await?.map(|listener| Rc::new(listener) as Rc<dyn Listener>))
 }
 

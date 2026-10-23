@@ -6,7 +6,7 @@ use kumi_ai::{
     auth::openai_codex::DevicePrompt,
     providers::{
         models::{ApiKeyCheck, ModelInfo},
-        provider_info, Effort, ProviderId, SignIn, PROVIDERS,
+        table, Effort, ProviderId, SignIn,
     },
 };
 use kumi_common::abort::Signal;
@@ -54,7 +54,7 @@ impl FakeModels {
     pub fn chosen() -> Rc<Self> {
         let models = Rc::new(Self::default());
         *models.model.borrow_mut() = Some("openai-codex/fixture".into());
-        models.signed_in.borrow_mut().insert(ProviderId::OpenaiCodex);
+        models.signed_in.borrow_mut().insert(ProviderId::parse("openai-codex").unwrap());
         models
     }
     pub fn catalog() -> Rc<Self> {
@@ -78,7 +78,7 @@ impl FakeModels {
         if !self.signed_in.borrow().contains(&provider) {
             return Err(KumiError::with_provider(
                 FailureKind::Auth,
-                format!("Not signed in to {}.", provider_info(provider).name),
+                format!("Not signed in to {}.", provider.row().name),
                 provider.as_str(),
             )
             .into());
@@ -86,7 +86,7 @@ impl FakeModels {
         Ok(())
     }
     fn shared(&self, provider: ProviderId) -> Vec<ProviderId> {
-        PROVIDERS.into_iter().filter(|p| provider_info(*p).credential == provider_info(provider).credential).collect()
+        table::rows().filter(|row| row.credential == provider.row().credential).map(|row| ProviderId::parse(row.id).unwrap()).collect()
     }
 }
 #[async_trait(?Send)]
@@ -109,9 +109,10 @@ impl ModelController for FakeModels {
         }
     }
     async fn providers(&self) -> Result<Vec<ProviderStatus>, RuntimeError> {
-        Ok([ProviderId::OpenaiCodex, ProviderId::Anthropic, ProviderId::Openai, ProviderId::Opencode, ProviderId::OpencodeGo]
+        Ok(table::offered()
+            .into_iter()
             .map(|id| {
-                let info = provider_info(id);
+                let info = id.row();
                 let signed_in = self.signed_in.borrow().contains(&id);
                 ProviderStatus {
                     id,
@@ -120,17 +121,17 @@ impl ModelController for FakeModels {
                     signed_in,
                     via: signed_in.then(|| if info.sign_in == SignIn::Chatgpt { "chatgpt" } else { "saved key" }.into()),
                     key_page: info.key_page.map(str::to_string),
-                    key_env: info.key_env.map(str::to_string),
+                    key_env: info.first_key_env().map(str::to_string),
                 }
             })
-            .into())
+            .collect())
     }
     async fn local(&self) -> Vec<LocalStatus> {
         self.local.borrow().clone()
     }
     fn provider_name(&self, id: &str) -> String {
         ProviderId::parse(id)
-            .map(|p| provider_info(p).name.into())
+            .map(|p| p.row().name.into())
             .or_else(|| self.local.borrow().iter().find(|s| s.id == id).map(|s| s.name.clone()))
             .unwrap_or(id.into())
     }
@@ -139,17 +140,23 @@ impl ModelController for FakeModels {
         if self.model.borrow().is_some() {
             return Ok(None);
         }
-        let provider = [ProviderId::OpenaiCodex, ProviderId::Anthropic, ProviderId::Openai, ProviderId::Opencode, ProviderId::OpencodeGo]
-            .into_iter()
-            .find(|p| self.signed_in.borrow().contains(p) && self.lists.borrow().get(p.as_str()).is_some_and(|s| !s.is_empty()))
-            .map(|p| p.as_str().to_string())
-            .or_else(|| {
-                self.local
-                    .borrow()
-                    .iter()
-                    .find(|s| s.running && self.lists.borrow().get(&s.id).is_some_and(|list| !list.is_empty()))
-                    .map(|s| s.id.clone())
-            });
+        let provider = [
+            ProviderId::parse("openai-codex").unwrap(),
+            ProviderId::parse("anthropic").unwrap(),
+            ProviderId::parse("openai").unwrap(),
+            ProviderId::parse("opencode").unwrap(),
+            ProviderId::parse("opencode-go").unwrap(),
+        ]
+        .into_iter()
+        .find(|p| self.signed_in.borrow().contains(p) && self.lists.borrow().get(p.as_str()).is_some_and(|s| !s.is_empty()))
+        .map(|p| p.as_str().to_string())
+        .or_else(|| {
+            self.local
+                .borrow()
+                .iter()
+                .find(|s| s.running && self.lists.borrow().get(&s.id).is_some_and(|list| !list.is_empty()))
+                .map(|s| s.id.clone())
+        });
         let first = provider.and_then(|p| self.lists.borrow().get(&p).and_then(|s| s.first()).cloned());
         if let Some(model) = first {
             *self.model.borrow_mut() = Some(model.id.clone());
@@ -226,7 +233,7 @@ impl ModelController for FakeModels {
         let (tx, rx) = tokio::sync::oneshot::channel();
         *self.finish_chatgpt.borrow_mut() = Some(tx);
         tokio::select! {_=rx=>{},_=signal.cancelled()=>return Err(RuntimeError::plain("cancelled"))};
-        self.signed_in.borrow_mut().insert(ProviderId::OpenaiCodex);
+        self.signed_in.borrow_mut().insert(ProviderId::parse("openai-codex").unwrap());
         if self.model.borrow().is_none() {
             *self.model.borrow_mut() = self.lists.borrow().get("openai-codex").and_then(|s| s.first()).map(|m| m.id.clone());
         }

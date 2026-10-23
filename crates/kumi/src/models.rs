@@ -14,7 +14,7 @@ use kumi_ai::{
         api_key_for,
         local::{self, LocalBinding, LocalKind, LocalModelOptions, LocalServer},
         models::{check_api_key, list_models, ApiKeyCheck, EffortInfo, ListOptions, ModelInfo, ServiceTier, Transport},
-        parse_model_id, provider_info, resolve_model, Effort, KeySource, ProviderId, ResolveModelOptions, SignIn, PROVIDERS,
+        parse_model_id, resolve_model, table, Effort, KeySource, ProviderId, ResolveModelOptions, SignIn,
     },
 };
 use kumi_common::{
@@ -32,8 +32,6 @@ use std::{
     collections::{HashMap, HashSet},
     rc::Rc,
 };
-pub const OFFER_ORDER: [ProviderId; 5] =
-    [ProviderId::OpenaiCodex, ProviderId::Anthropic, ProviderId::Openai, ProviderId::Opencode, ProviderId::OpencodeGo];
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProviderStatus {
@@ -322,8 +320,8 @@ impl ModelControl {
     }
     pub async fn providers(&self) -> Result<Vec<ProviderStatus>, RuntimeError> {
         let mut statuses = Vec::new();
-        for id in OFFER_ORDER.into_iter().chain(PROVIDERS.into_iter().filter(|id| !OFFER_ORDER.contains(id))) {
-            let info = provider_info(id);
+        for id in table::offered() {
+            let info = id.row();
             let via = if info.sign_in == SignIn::Chatgpt {
                 matches!(self.inner.options.store.get(OPENAI_CODEX).await?, Some(Credential::Oauth(_))).then(|| "chatgpt".into())
             } else {
@@ -342,7 +340,7 @@ impl ModelControl {
                 signed_in: via.is_some(),
                 via,
                 key_page: info.key_page.map(str::to_string),
-                key_env: info.key_env.map(str::to_string),
+                key_env: info.first_key_env().map(str::to_string),
             });
         }
         Ok(statuses)
@@ -371,7 +369,7 @@ impl ModelControl {
     }
     pub fn provider_name(&self, id: &str) -> String {
         if let Some(provider) = ProviderId::parse(id) {
-            provider_info(provider).name.into()
+            provider.row().name.into()
         } else {
             self.servers().into_iter().find(|s| s.id == id).map(|s| s.name).unwrap_or_else(|| id.into())
         }
@@ -516,7 +514,7 @@ impl ModelControl {
         self.set_effort(effort).await
     }
     pub async fn save_key(&self, provider: ProviderId, key: &str, signal: Option<Signal>) -> Result<ApiKeyCheck, RuntimeError> {
-        let info = provider_info(provider);
+        let info = provider.row();
         if info.sign_in != SignIn::ApiKey {
             return Err(KumiError::new(FailureKind::Config, format!("{} signs in with ChatGPT, not a key.", info.name)).into());
         }
@@ -532,16 +530,13 @@ impl ModelControl {
             .await?;
         let current = {
             let mut state = self.inner.state.borrow_mut();
-            state.catalog.remove(provider.as_str());
-            if provider == ProviderId::Opencode {
-                state.catalog.remove("opencode-go");
-            }
-            if provider == ProviderId::OpencodeGo {
-                state.catalog.remove("opencode");
+            // Every provider the key opens lists afresh.
+            for row in table::rows().filter(|row| row.credential == info.credential) {
+                state.catalog.remove(row.id);
             }
             state.model.clone().and_then(|m| parse_model_id(&m)).map(|m| m.provider)
         };
-        if current.is_some_and(|p| provider_info(p).credential == info.credential) {
+        if current.is_some_and(|p| p.row().credential == info.credential) {
             self.inner.state.borrow_mut().bound = None;
             (self.inner.options.changed)().await?;
         }
@@ -557,21 +552,23 @@ impl ModelControl {
         self.inner.options.store.update(OPENAI_CODEX, Box::new(move |_| async move { Ok(Some(credential.into())) }.boxed_local())).await?;
         let model = {
             let mut state = self.inner.state.borrow_mut();
-            state.catalog.remove("openai-codex");
+            for row in table::rows().filter(|row| row.sign_in == SignIn::Chatgpt) {
+                state.catalog.remove(row.id);
+            }
             state.model.clone()
         };
         if model.as_ref().is_none_or(|s| s.is_empty()) {
             self.choose_default().await?;
             return Ok(());
         }
-        if model.as_deref().and_then(parse_model_id).is_some_and(|m| m.provider == ProviderId::OpenaiCodex) {
+        if model.as_deref().and_then(parse_model_id).is_some_and(|m| m.provider.row().sign_in == SignIn::Chatgpt) {
             self.inner.state.borrow_mut().bound = None;
             (self.inner.options.changed)().await?;
         }
         Ok(())
     }
     pub async fn sign_out(&self, provider: ProviderId) -> Result<bool, RuntimeError> {
-        let info = provider_info(provider);
+        let info = provider.row();
         if self.inner.options.store.get(info.credential).await?.is_none() {
             return Ok(false);
         }
@@ -581,7 +578,7 @@ impl ModelControl {
             state.catalog.remove(provider.as_str());
             state.model.clone().and_then(|m| parse_model_id(&m)).map(|m| m.provider)
         };
-        if current.is_some_and(|p| provider_info(p).credential == info.credential) {
+        if current.is_some_and(|p| p.row().credential == info.credential) {
             self.inner.state.borrow_mut().bound = None;
             (self.inner.options.changed)().await?;
         }

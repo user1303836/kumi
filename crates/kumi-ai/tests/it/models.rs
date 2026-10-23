@@ -64,7 +64,7 @@ async fn chatgpt_catalog_keeps_priority_zero_and_its_supported_effort_levels() {
             ]}),
         ))
     });
-    let models = list_models(ProviderId::OpenaiCodex, opts(store, fetch)).await.unwrap();
+    let models = list_models(ProviderId::parse("openai-codex").unwrap(), opts(store, fetch)).await.unwrap();
     assert_eq!(
         models.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(),
         ["openai-codex/gpt-6-nova", "openai-codex/gpt-6-astra", "openai-codex/gpt-6-luna", "openai-codex/gpt-6-draft"]
@@ -90,7 +90,7 @@ async fn saved_or_environment_keys_list_models_with_provider_capabilities_and_fi
     let (_dir, store) = store();
     let (fetch, _) = server(|_, _| panic!("missing credentials must fail before network"));
     assert!(
-        matches!(list_models(ProviderId::Anthropic,opts(store.clone(),fetch)).await,Err(RuntimeError::Kumi(e))if e.kind==FailureKind::Auth&&e.provider.as_deref()==Some("anthropic"))
+        matches!(list_models(ProviderId::parse("anthropic").unwrap(),opts(store.clone(),fetch)).await,Err(RuntimeError::Kumi(e))if e.kind==FailureKind::Auth&&e.provider.as_deref()==Some("anthropic"))
     );
     store.update_with("anthropic", |_| async { Ok(Some(Credential::ApiKey { key: "sk-ant-saved-0000".into() })) }).await.unwrap();
     let (fetch, seen) = server(|url, headers| {
@@ -116,7 +116,7 @@ async fn saved_or_environment_keys_list_models_with_provider_capabilities_and_fi
             _ => Response::text_response(404, "not found"),
         })
     });
-    let models = list_models(ProviderId::Anthropic, opts(store.clone(), fetch.clone())).await.unwrap();
+    let models = list_models(ProviderId::parse("anthropic").unwrap(), opts(store.clone(), fetch.clone())).await.unwrap();
     assert_eq!(
         models
             .iter()
@@ -131,22 +131,22 @@ async fn saved_or_environment_keys_list_models_with_provider_capabilities_and_fi
     );
     let mut options = opts(store.clone(), fetch.clone());
     options.env = Some([("OPENAI_API_KEY".into(), "sk-env-openai".into())].into());
-    let models = list_models(ProviderId::Openai, options).await.unwrap();
+    let models = list_models(ProviderId::parse("openai").unwrap(), options).await.unwrap();
     assert_eq!(models.iter().map(|m| m.model.as_str()).collect::<Vec<_>>(), ["gpt-6-astra", "gpt-6-luna", "o5-mini"]);
     assert_eq!(models[0].efforts.len(), 5);
     assert_eq!(models[2].efforts.len(), 3);
     let mut options = opts(store.clone(), fetch.clone());
     options.env = Some([("OPENCODE_API_KEY".into(), "oc-env-key".into())].into());
-    let models = list_models(ProviderId::Opencode, options).await.unwrap();
+    let models = list_models(ProviderId::parse("opencode").unwrap(), options).await.unwrap();
     assert_eq!(models.iter().map(|m| m.model.as_str()).collect::<Vec<_>>(), ["claude-sonnet-5-5", "kimi-k2.6"]);
     let mut options = opts(store.clone(), fetch.clone());
     options.env = Some([("ANTHROPIC_API_KEY".into(), "sk-ant-env-1111".into())].into());
-    list_models(ProviderId::Anthropic, options).await.unwrap();
+    list_models(ProviderId::parse("anthropic").unwrap(), options).await.unwrap();
     assert_eq!(seen.borrow().last().unwrap().1["x-api-key"], "sk-ant-saved-0000");
     store.update_with("anthropic", |_| async { Ok(None) }).await.unwrap();
     let mut options = opts(store, fetch);
     options.env = Some([("ANTHROPIC_API_KEY".into(), "sk-ant-env-1111".into())].into());
-    assert!(list_models(ProviderId::Anthropic, options).await.is_err());
+    assert!(list_models(ProviderId::parse("anthropic").unwrap(), options).await.is_err());
     assert_eq!(seen.borrow().last().unwrap().1["x-api-key"], "sk-ant-env-1111");
 }
 #[tokio::test]
@@ -159,21 +159,22 @@ async fn keys_are_checked_before_saving_and_transport_failure_is_not_rejection()
         })
     });
     assert_eq!(
-        check_api_key(ProviderId::Anthropic, "good-key-123", Transport { fetch: Some(fetch.clone()), signal: None }).await,
+        check_api_key(ProviderId::parse("anthropic").unwrap(), "good-key-123", Transport { fetch: Some(fetch.clone()), signal: None })
+            .await,
         ApiKeyCheck::Ok
     );
     assert_eq!(
-        check_api_key(ProviderId::Anthropic, "bad-key-456", Transport { fetch: Some(fetch), signal: None }).await,
+        check_api_key(ProviderId::parse("anthropic").unwrap(), "bad-key-456", Transport { fetch: Some(fetch), signal: None }).await,
         ApiKeyCheck::Refused
     );
     let (fetch, _) = server(|_, _| Err(LanguageModelError::other("fetch failed")));
     assert_eq!(
-        check_api_key(ProviderId::Anthropic, "good-key-123", Transport { fetch: Some(fetch), signal: None }).await,
+        check_api_key(ProviderId::parse("anthropic").unwrap(), "good-key-123", Transport { fetch: Some(fetch), signal: None }).await,
         ApiKeyCheck::Unreachable
     );
     let (fetch, _) = server(|_, _| Ok(Response::json_response(500, json!({}))));
     assert_eq!(
-        check_api_key(ProviderId::Anthropic, "good-key-123", Transport { fetch: Some(fetch), signal: None }).await,
+        check_api_key(ProviderId::parse("anthropic").unwrap(), "good-key-123", Transport { fetch: Some(fetch), signal: None }).await,
         ApiKeyCheck::Unreachable
     );
 }
@@ -197,10 +198,13 @@ async fn catalogs_handle_malformed_rows_and_bound_names_using_js_string_lengths(
             json!({"models":[null,[],5,{"slug":1},{"slug":"last"},{"slug":"first","priority":" -1 ","display_name":format!("  {}  ","😀".repeat(31)),"description":"  description  "},{"slug":"middle","priority":"0x10"}]}),
         ))
     });
-    let models = list_models(ProviderId::OpenaiCodex, opts(store, fetch)).await.unwrap();
+    let models = list_models(ProviderId::parse("openai-codex").unwrap(), opts(store, fetch)).await.unwrap();
     assert_eq!(models.iter().map(|m| m.model.as_str()).collect::<Vec<_>>(), ["first", "middle", "last"]);
     assert_eq!(models[0].name, "😀".repeat(30));
     assert_eq!(models[0].description.as_deref(), Some("description"));
     let (fetch, _) = server(|_, _| Ok(Response::json_response(200, Value::Null)));
-    assert_eq!(check_api_key(ProviderId::Openai, "key", Transport { fetch: Some(fetch), signal: None }).await, ApiKeyCheck::Ok);
+    assert_eq!(
+        check_api_key(ProviderId::parse("openai").unwrap(), "key", Transport { fetch: Some(fetch), signal: None }).await,
+        ApiKeyCheck::Ok
+    );
 }

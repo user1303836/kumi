@@ -2,7 +2,6 @@
 mod installation;
 use crate::{
     config::*,
-    models::OFFER_ORDER,
     spinner::step,
     tui::{
         style::{detect_color_depth, os_release, ColorDepth},
@@ -21,7 +20,7 @@ use kumi_ai::{
         api_key_for,
         local::{list_local_models, local_installed, local_servers, parse_local_model_id, probe_local, start_hint, LocalKind, LocalServer},
         models::{ModelInfo, Transport},
-        parse_model_id, provider_info, KeySource, ProviderId, SignIn,
+        parse_model_id, table, KeySource, ProviderId, SignIn,
     },
 };
 use kumi_common::{
@@ -127,7 +126,7 @@ fn node_check(version: &str) -> Check {
     }
 }
 async fn signed_in(provider: ProviderId, store: &dyn CredentialStore, env: &Env) -> bool {
-    if provider_info(provider).sign_in == SignIn::Chatgpt {
+    if provider.row().sign_in == SignIn::Chatgpt {
         matches!(store.get(OPENAI_CODEX).await.ok().flatten(), Some(Credential::Oauth(_)))
     } else {
         api_key_for(provider, store, Some(env)).await.ok().flatten().is_some()
@@ -138,11 +137,11 @@ async fn sign_in_check(env: &Env, servers: &[ServerFinding]) -> Result<Check, Ru
     let settings = read_settings(&load_settings_file(env)?);
     let model = env.get("KUMI_MODEL").cloned().or(settings.model.clone());
     let Some(model) = model.filter(|m| !m.is_empty()) else {
-        for provider in OFFER_ORDER {
+        for provider in table::offered() {
             if signed_in(provider, &store, env).await {
                 return Ok(Check::ok(format!(
                     "Signed in to {} · Kumi starts with its first model (/model changes it)",
-                    provider_info(provider).name
+                    provider.row().name
                 )));
             }
         }
@@ -183,7 +182,7 @@ async fn sign_in_check(env: &Env, servers: &[ServerFinding]) -> Result<Check, Ru
             Some("Choose one with /model in Kumi".into()),
         ));
     };
-    let info = provider_info(parsed.provider);
+    let info = parsed.provider.row();
     if !signed_in(parsed.provider, &store, env).await {
         return Ok(Check::fix(
             format!("Not signed in to {} (model {model})", info.name),
@@ -198,7 +197,7 @@ async fn sign_in_check(env: &Env, servers: &[ServerFinding]) -> Result<Check, Ru
         "{} API key {} · model {model}",
         parsed.provider,
         if key.is_some_and(|key| key.source == KeySource::Env) {
-            format!("from {}", info.key_env.unwrap_or(""))
+            format!("from {}", info.first_key_env().unwrap_or(""))
         } else {
             "saved in Kumi".into()
         }

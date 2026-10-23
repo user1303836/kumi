@@ -2,6 +2,7 @@ pub mod compat;
 pub mod local;
 pub mod models;
 pub mod ollama;
+pub mod table;
 pub mod usage;
 
 use crate::{
@@ -21,44 +22,9 @@ use async_trait::async_trait;
 use kumi_types::errors::{FailureKind, KumiError, RuntimeError};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
-use std::{collections::HashMap, fmt, rc::Rc, sync::LazyLock};
+use std::{collections::HashMap, rc::Rc, sync::LazyLock};
+pub use table::{Format, KeyHeader, ProviderId, ProviderRow, SignIn};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum ProviderId {
-    OpenaiCodex,
-    Openai,
-    Anthropic,
-    Opencode,
-    OpencodeGo,
-}
-impl ProviderId {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::OpenaiCodex => "openai-codex",
-            Self::Openai => "openai",
-            Self::Anthropic => "anthropic",
-            Self::Opencode => "opencode",
-            Self::OpencodeGo => "opencode-go",
-        }
-    }
-    pub fn parse(value: &str) -> Option<Self> {
-        PROVIDERS.iter().copied().find(|provider| provider.as_str() == value)
-    }
-}
-impl fmt::Display for ProviderId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
-pub const PROVIDERS: [ProviderId; 5] =
-    [ProviderId::OpenaiCodex, ProviderId::Openai, ProviderId::Anthropic, ProviderId::Opencode, ProviderId::OpencodeGo];
-pub const API_KEY_ENV: [(ProviderId, &str); 4] = [
-    (ProviderId::Openai, "OPENAI_API_KEY"),
-    (ProviderId::Anthropic, "ANTHROPIC_API_KEY"),
-    (ProviderId::Opencode, "OPENCODE_API_KEY"),
-    (ProviderId::OpencodeGo, "OPENCODE_API_KEY"),
-];
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Effort {
@@ -83,69 +49,6 @@ impl Effort {
     }
 }
 pub const EFFORTS: [Effort; 5] = [Effort::Low, Effort::Medium, Effort::High, Effort::Xhigh, Effort::Max];
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum SignIn {
-    Chatgpt,
-    ApiKey,
-}
-#[derive(Debug, Clone, Copy, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ProviderInfo {
-    pub id: ProviderId,
-    pub name: &'static str,
-    pub sign_in: SignIn,
-    pub credential: &'static str,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub key_env: Option<&'static str>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub key_page: Option<&'static str>,
-}
-pub const PROVIDER_INFO: [ProviderInfo; 5] = [
-    ProviderInfo {
-        id: ProviderId::OpenaiCodex,
-        name: "ChatGPT",
-        sign_in: SignIn::Chatgpt,
-        credential: "openai-codex",
-        key_env: None,
-        key_page: None,
-    },
-    ProviderInfo {
-        id: ProviderId::Anthropic,
-        name: "Anthropic",
-        sign_in: SignIn::ApiKey,
-        credential: "anthropic",
-        key_env: Some("ANTHROPIC_API_KEY"),
-        key_page: Some("platform.claude.com (API keys)"),
-    },
-    ProviderInfo {
-        id: ProviderId::Openai,
-        name: "OpenAI API",
-        sign_in: SignIn::ApiKey,
-        credential: "openai",
-        key_env: Some("OPENAI_API_KEY"),
-        key_page: Some("platform.openai.com/api-keys"),
-    },
-    ProviderInfo {
-        id: ProviderId::Opencode,
-        name: "OpenCode Zen",
-        sign_in: SignIn::ApiKey,
-        credential: "opencode",
-        key_env: Some("OPENCODE_API_KEY"),
-        key_page: Some("opencode.ai/auth"),
-    },
-    ProviderInfo {
-        id: ProviderId::OpencodeGo,
-        name: "OpenCode Go",
-        sign_in: SignIn::ApiKey,
-        credential: "opencode",
-        key_env: Some("OPENCODE_API_KEY"),
-        key_page: Some("opencode.ai/auth"),
-    },
-];
-pub fn provider_info(provider: ProviderId) -> &'static ProviderInfo {
-    PROVIDER_INFO.iter().find(|info| info.id == provider).unwrap()
-}
 pub static USER_AGENT: LazyLock<String> = LazyLock::new(|| {
     let platform = match std::env::consts::OS {
         "macos" => "darwin",
@@ -214,17 +117,17 @@ pub async fn api_key_for(
     store: &dyn CredentialStore,
     env: Option<&HashMap<String, String>>,
 ) -> Result<Option<ApiKey>, RuntimeError> {
-    let info = provider_info(provider);
-    if info.sign_in != SignIn::ApiKey {
+    let row = provider.row();
+    if row.sign_in != SignIn::ApiKey {
         return Ok(None);
     }
-    if let Some(Credential::ApiKey { key }) = store.get(info.credential).await? {
+    if let Some(Credential::ApiKey { key }) = store.get(row.credential).await? {
         return Ok(Some(ApiKey { key, source: KeySource::Saved }));
     }
-    Ok(info
+    Ok(row
         .key_env
-        .and_then(|name| env.and_then(|env| env.get(name)))
-        .filter(|key| !key.is_empty())
+        .iter()
+        .find_map(|name| env.and_then(|env| env.get(*name)).filter(|key| !key.is_empty()))
         .map(|key| ApiKey { key: key.clone(), source: KeySource::Env }))
 }
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -233,9 +136,8 @@ pub struct ParsedModelId {
     pub model: String,
 }
 pub fn parse_model_id(value: &str) -> Option<ParsedModelId> {
-    static MODEL_ID: LazyLock<regex::Regex> = LazyLock::new(|| {
-        regex::Regex::new(r"^(openai-codex|openai|anthropic|opencode|opencode-go)/([a-zA-Z0-9][a-zA-Z0-9._:-]{0,127})$").unwrap()
-    });
+    static MODEL_ID: LazyLock<regex::Regex> =
+        LazyLock::new(|| regex::Regex::new(r"^([a-z0-9-]+)/([a-zA-Z0-9][a-zA-Z0-9._:-]{0,127})$").unwrap());
     let matched = MODEL_ID.captures(value)?;
     Some(ParsedModelId { provider: ProviderId::parse(&matched[1])?, model: matched[2].into() })
 }
@@ -281,38 +183,61 @@ impl Fetch for CodexFetch {
         self.fetch.fetch(url, init).await
     }
 }
+/// The headers a provider's requests carry beside the format's own: the conversation's ID, where it takes one.
+fn session_headers(header: Option<&'static str>, session: String) -> Option<crate::http::Headers> {
+    header.map(|header| [(String::from(header), session)].into())
+}
 pub async fn resolve_model(options: ResolveModelOptions) -> Result<ModelBinding, RuntimeError> {
     let parsed = parse_model_id(&options.model).ok_or_else(|| {
         KumiError::new(
             FailureKind::Config,
             format!(
                 "KUMI_MODEL must be <provider>/<model> with provider one of {}.",
-                PROVIDERS.iter().map(|p| p.as_str()).collect::<Vec<_>>().join(", ")
+                table::rows().map(|row| row.id).collect::<Vec<_>>().join(", ")
             ),
         )
     })?;
     let provider = parsed.provider;
     let model = parsed.model;
+    let row = provider.row();
     let base = options.fetch.unwrap_or_else(default_fetch);
     let identified: Rc<dyn Fetch> = Rc::new(IdentifiedFetch { fetch: base.clone(), provider });
+    let (key, fetch): (String, Rc<dyn Fetch>) = match row.sign_in {
+        SignIn::Chatgpt => {
+            let token = codex_token_source(options.store, TokenOptions { fetch: Some(base), now: None });
+            token().await?;
+            ("kumi-oauth".into(), Rc::new(CodexFetch { fetch: identified, token }))
+        }
+        SignIn::ApiKey => {
+            let key = api_key_for(provider, options.store.as_ref(), options.env.as_ref())
+                .await?
+                .map(|k| k.key)
+                .filter(|k| !k.is_empty())
+                .ok_or_else(|| {
+                KumiError::with_provider(
+                    FailureKind::Auth,
+                    format!("Not signed in to {}: add its API key with /login (or set {}).", row.name, row.first_key_env().unwrap_or("")),
+                    provider.as_str(),
+                )
+            })?;
+            (key, identified)
+        }
+    };
+    let format = row.format_for(&model).map_err(|why| KumiError::new(FailureKind::Config, why))?;
     let effort = options.effort;
-    let service_tier = options.service_tier.clone();
+    let extras = row.extras;
+    let service_tier = options.service_tier.clone().filter(|_| extras.service_tier);
     let bind = |model, prepare| ModelBinding { id: options.model.clone(), model, prepare, budget: None };
-    if provider == ProviderId::OpenaiCodex {
-        let token = codex_token_source(options.store, TokenOptions { fetch: Some(base), now: None });
-        token().await?;
-        let model = openai_responses(ResponsesSettings {
-            model,
-            base_url: "https://chatgpt.com/backend-api/codex".into(),
-            api_key: "kumi-oauth".into(),
-            headers: Default::default(),
-            fetch: Rc::new(CodexFetch { fetch: identified, token }),
-        });
-        return Ok(bind(
-            model,
+    let base_url = row.base_url.to_string();
+    Ok(match format {
+        Format::Responses => bind(
+            openai_responses(ResponsesSettings { model, base_url, api_key: key, headers: Default::default(), fetch }),
             Box::new(move |request: ModelRequest| {
                 let session = request.session_id.clone();
-                let mut extra = Map::from_iter([("textVerbosity".into(), json!("low"))]);
+                let mut extra = Map::new();
+                if let Some(verbosity) = extras.verbosity {
+                    extra.insert("textVerbosity".into(), json!(verbosity));
+                }
                 if let Some(effort) = effort {
                     extra.insert("reasoningEffort".into(), json!(effort));
                 }
@@ -320,98 +245,49 @@ pub async fn resolve_model(options: ResolveModelOptions) -> Result<ModelBinding,
                     extra.insert("serviceTier".into(), json!(tier));
                 }
                 let mut options = responses_request(request, extra);
-                options.headers = Some([(String::from("session-id"), session)].into());
+                options.headers = session_headers(extras.session_header, session);
                 options
             }),
-        ));
-    }
-    let info = provider_info(provider);
-    let key =
-        api_key_for(provider, options.store.as_ref(), options.env.as_ref()).await?.map(|k| k.key).filter(|k| !k.is_empty()).ok_or_else(
-            || {
-                KumiError::with_provider(
-                    FailureKind::Auth,
-                    format!("Not signed in to {}: add its API key with /login (or set {}).", info.name, info.key_env.unwrap_or("")),
-                    provider.as_str(),
-                )
-            },
-        )?;
-    let openai = provider == ProviderId::Openai
-        || matches!(provider, ProviderId::Opencode | ProviderId::OpencodeGo)
-            && ["gpt-", "grok-", "muse-"].iter().any(|prefix| model.starts_with(prefix));
-    let claude = provider == ProviderId::Anthropic
-        || matches!(provider, ProviderId::Opencode | ProviderId::OpencodeGo) && model.starts_with("claude-");
-    let gateway = matches!(provider, ProviderId::Opencode | ProviderId::OpencodeGo);
-    let base_url = match provider {
-        ProviderId::Openai => "https://api.openai.com/v1",
-        ProviderId::Anthropic => "https://api.anthropic.com/v1",
-        ProviderId::Opencode => "https://opencode.ai/zen/v1",
-        ProviderId::OpencodeGo => "https://opencode.ai/zen/go/v1",
-        ProviderId::OpenaiCodex => unreachable!(),
-    }
-    .to_string();
-    if openai {
-        let model = openai_responses(ResponsesSettings { model, base_url, api_key: key, headers: Default::default(), fetch: identified });
-        return Ok(bind(
-            model,
+        ),
+        Format::Messages => {
+            let bearer = row.key_header == KeyHeader::Bearer;
+            bind(
+                anthropic(AnthropicSettings {
+                    model,
+                    base_url,
+                    api_key: (!bearer).then(|| key.clone()),
+                    auth_token: bearer.then_some(key),
+                    headers: Default::default(),
+                    fetch,
+                }),
+                Box::new(move |request: ModelRequest| {
+                    let session = request.session_id.clone();
+                    let mut options = anthropic_request(request, effort);
+                    options.headers = session_headers(extras.session_header, session);
+                    options
+                }),
+            )
+        }
+        Format::ChatCompletions => bind(
+            openai_compatible(CompatibleSettings {
+                name: provider.as_str().into(),
+                model,
+                base_url,
+                api_key: Some(key),
+                headers: Default::default(),
+                fetch,
+                include_usage: true,
+            }),
             Box::new(move |request: ModelRequest| {
-                let session = request.session_id.clone();
-                let extra = effort.map(|e| Map::from_iter([("reasoningEffort".into(), json!(e))])).unwrap_or_default();
-                let mut options = responses_request(request, extra);
-                if gateway {
-                    options.headers = Some([(String::from("x-opencode-session"), session)].into());
-                }
+                let mut prompt = vec![Message::System { content: request.instructions, provider_options: None }];
+                prompt.extend(words_only(request.messages));
+                let mut options =
+                    CallOptions { prompt, headers: session_headers(extras.session_header, request.session_id), ..Default::default() };
+                tool_options(&mut options, request.tools);
                 options
             }),
-        ));
-    }
-    if claude {
-        let model = anthropic(AnthropicSettings {
-            model,
-            base_url,
-            api_key: (!gateway).then(|| key.clone()),
-            auth_token: gateway.then_some(key),
-            headers: Default::default(),
-            fetch: identified,
-        });
-        return Ok(bind(
-            model,
-            Box::new(move |request: ModelRequest| {
-                let session = request.session_id.clone();
-                let mut options = anthropic_request(request, effort);
-                if gateway {
-                    options.headers = Some([(String::from("x-opencode-session"), session)].into());
-                }
-                options
-            }),
-        ));
-    }
-    if model.starts_with("gemini-") {
-        return Err(KumiError::new(FailureKind::Config, "Gemini models through OpenCode are not supported yet.").into());
-    }
-    let model = openai_compatible(CompatibleSettings {
-        name: provider.as_str().into(),
-        model,
-        base_url,
-        api_key: Some(key),
-        headers: Default::default(),
-        fetch: identified,
-        include_usage: true,
-    });
-    Ok(bind(
-        model,
-        Box::new(|request: ModelRequest| {
-            let mut prompt = vec![Message::System { content: request.instructions, provider_options: None }];
-            prompt.extend(words_only(request.messages));
-            let mut options = CallOptions {
-                prompt,
-                headers: Some([(String::from("x-opencode-session"), request.session_id)].into()),
-                ..Default::default()
-            };
-            tool_options(&mut options, request.tools);
-            options
-        }),
-    ))
+        ),
+    })
 }
 fn tool_options(options: &mut CallOptions, tools: Vec<FunctionTool>) {
     if !tools.is_empty() {
