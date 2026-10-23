@@ -285,15 +285,16 @@ pub fn library_line(status: Option<&LibraryStatus>) -> Option<String> {
     })
 }
 
-/// What Kumi's searches remember, in a line: how many settings they heard, and on how many devices.
+/// What Kumi's searches remember, in a line: how many settings they heard, and on how many devices. Nothing until a
+/// search has heard something, as for a library not learned yet.
 pub fn remembered_line(remembered: Option<(usize, usize)>) -> Option<String> {
-    let (settings, devices) = remembered?;
+    let (settings, devices) = remembered.filter(|(settings, _)| *settings > 0)?;
     let count = |value: usize, one: &str, many: &str| format!("{} {}", locale_count(value as i64), if value == 1 { one } else { many });
-    Some(if settings == 0 {
-        "Kumi remembers no settings its searches heard yet".to_string()
-    } else {
-        format!("Kumi remembers {} its searches heard, on {}", count(settings, "setting", "settings"), count(devices, "device", "devices"))
-    })
+    Some(format!(
+        "Kumi remembers {} its searches heard, on {}",
+        count(settings, "setting", "settings"),
+        count(devices, "device", "devices")
+    ))
 }
 
 #[cfg(test)]
@@ -303,7 +304,7 @@ mod tests {
     #[test]
     fn what_searches_remember_is_said_in_a_line() {
         assert_eq!(remembered_line(None), None, "without Kumi's database there's nothing to say");
-        assert_eq!(remembered_line(Some((0, 0))).as_deref(), Some("Kumi remembers no settings its searches heard yet"));
+        assert_eq!(remembered_line(Some((0, 0))), None, "nor before a search has heard anything");
         assert_eq!(remembered_line(Some((1, 1))).as_deref(), Some("Kumi remembers 1 setting its searches heard, on 1 device"));
         assert_eq!(remembered_line(Some((12_345, 7))).as_deref(), Some("Kumi remembers 12,345 settings its searches heard, on 7 devices"));
     }
