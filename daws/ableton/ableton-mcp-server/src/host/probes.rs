@@ -1,7 +1,7 @@
 //! Read-only, revision-bound probes and their shared mutation authority evidence.
 use super::reads::AUDITION_DEADLINE_MS;
 use super::*;
-use crate::registry::{canonical_json, CanonicalError, CanonicalLimits};
+use crate::protocol::registry::{canonical_json, CanonicalError, CanonicalLimits};
 use base64::Engine;
 use kumi_common::{
     abort::Signal,

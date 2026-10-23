@@ -31,7 +31,7 @@ pub fn kumi_extension_folders(
             &home_fallback
         }
     };
-    let platform = platform.unwrap_or_else(|| crate::platform::current_platform());
+    let platform = platform.unwrap_or_else(|| crate::lifecycle::platform::current_platform());
     let extensions =
         env.get("ABLETON_MCP_LIVE_EXTENSIONS_DIR").filter(|v| !v.is_empty()).map(PathBuf::from).or_else(|| match platform {
             "darwin" => Some(home.join("Library/Application Support/Ableton/Extensions")),

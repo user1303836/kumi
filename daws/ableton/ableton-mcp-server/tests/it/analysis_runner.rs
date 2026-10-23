@@ -2,11 +2,11 @@ use std::f64::consts::PI;
 use std::future::Future;
 use std::time::Duration;
 
-use ableton_mcp_server::analysis::MAX_ANALYSIS_SAMPLES;
-use ableton_mcp_server::analysis_runner::{
+use ableton_mcp_server::analysis::runner::{
     AnalysisJob, AnalysisRunner, AnalysisRunnerStatus, EncodedAnalysisSource, MAX_ANALYSIS_JOB_REQUEST_BYTES, MAX_CONCURRENT_ANALYSIS_JOBS,
     MAX_QUEUED_ANALYSIS_JOBS,
 };
+use ableton_mcp_server::analysis::MAX_ANALYSIS_SAMPLES;
 use base64::Engine;
 use kumi_common::abort::Controller;
 use tokio::task::{spawn_local, LocalSet};

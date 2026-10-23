@@ -1,7 +1,7 @@
 //! The host's validation, mutation authority and client-facing result helpers.
 use crate::{
     live::LiveError,
-    registry::{canonical_json, CanonicalError, CanonicalLimits},
+    protocol::registry::{canonical_json, CanonicalError, CanonicalLimits},
 };
 use kumi_common::js::{json as js_json, number as js_number, string as js_string};
 use regex::Regex;

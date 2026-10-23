@@ -1,5 +1,5 @@
 #![allow(dead_code)]
-use ableton_mcp_server::{delivery::*, lifecycle::*};
+use ableton_mcp_server::{lifecycle::delivery::*, lifecycle::*};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::{

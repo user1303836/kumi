@@ -1,4 +1,4 @@
-use ableton_mcp_server::delivery::*;
+use ableton_mcp_server::lifecycle::delivery::*;
 use serde_json::json;
 use std::path::Path;
 #[test]
@@ -232,7 +232,7 @@ fn script_install_is_atomic_and_keeps_backup_configuration_and_cache_blocker() {
     assert!(blocker.is_file());
     assert_eq!(std::fs::metadata(&blocker).unwrap().len(), 0);
     let manifest: serde_json::Value = serde_json::from_slice(&std::fs::read(destination.join("manifest.json")).unwrap()).unwrap();
-    assert_eq!(manifest["registryHash"], ableton_mcp_server::registry::live_registry_hash());
+    assert_eq!(manifest["registryHash"], ableton_mcp_server::protocol::registry::live_registry_hash());
     for name in ["__init__.py", REMOTE_SCRIPT_ASSET, OPERATION_REGISTRY_ASSET] {
         assert_eq!(manifest["files"][name], hex::encode(Sha256::digest(std::fs::read(destination.join(name)).unwrap())));
     }

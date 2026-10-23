@@ -71,7 +71,7 @@ impl McpEndpoint for HostEndpoint {
 async fn native_editing_through_make_changes_host_and_history() {
     tokio::task::LocalSet::new().run_until(async {
         let path=std::env::var("KUMI_EDITING_LIVE_CONFIG").expect("explicit fixture endpoint required");
-        assert_eq!(ableton_mcp_server::delivery::secret_permissions(Path::new(&path)),ableton_mcp_server::delivery::SecretPermissions::OwnerOnly);
+        assert_eq!(ableton_mcp_server::lifecycle::delivery::secret_permissions(Path::new(&path)),ableton_mcp_server::lifecycle::delivery::SecretPermissions::OwnerOnly);
         let config:Value=serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
         let mut endpoint=RemoteScriptEndpoint::new("127.0.0.1",config["port"].as_u64().unwrap() as u16,config["secret"].as_str().unwrap());
         endpoint.timeout_ms=Some(15000.);

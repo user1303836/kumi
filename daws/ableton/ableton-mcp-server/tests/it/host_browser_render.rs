@@ -1,7 +1,7 @@
 use ableton_mcp_server::{
     host::{helpers::canonical_mutation_identity, McpHost, McpHostOptions, ToolCall},
     live::*,
-    registry::live_registry_operations,
+    protocol::registry::live_registry_operations,
 };
 use kumi_common::{abort::Signal, time::now_ms_f64};
 use serde_json::{json, Value};

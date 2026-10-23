@@ -83,9 +83,9 @@ mod willington;
 
 use crate::{
     live::*,
-    mcp_protocol::{is_modern_unavailable_tool, ProtocolEra},
-    registry::live_registry_operations,
-    tool_catalog::{self, ToolPolicySpec, ToolVisibilityRow},
+    protocol::mcp::{is_modern_unavailable_tool, ProtocolEra},
+    protocol::registry::live_registry_operations,
+    protocol::tool_catalog::{self, ToolPolicySpec, ToolVisibilityRow},
     transactions::{
         batch::{BatchTransactionManager, BATCH_OPERATION_POLICY_TOOLS},
         device_state::DeviceStateTransactionManager,
@@ -138,7 +138,7 @@ pub struct McpHost {
     in_flight_mutations: RefCell<std::collections::HashMap<String, Rc<mutations::MutationFlight>>>,
     open_undo_step: RefCell<Option<Value>>,
     song_history_calls: RefCell<VecDeque<(String, Value)>>,
-    analysis_runner: crate::analysis_runner::AnalysisRunner,
+    analysis_runner: crate::analysis::runner::AnalysisRunner,
     adapter: Rc<dyn AsyncLiveAdapter>,
     /// The last adapter call that failed (see `apply_failure`).
     last_live_failure: Rc<RefCell<Option<apply_failure::NotedFailure>>>,
@@ -234,7 +234,7 @@ impl McpHost {
             in_flight_mutations: RefCell::new(Default::default()),
             open_undo_step: RefCell::new(None),
             song_history_calls: RefCell::new(VecDeque::new()),
-            analysis_runner: crate::analysis_runner::AnalysisRunner::new(),
+            analysis_runner: crate::analysis::runner::AnalysisRunner::new(),
             initialized: Cell::new(false),
             initialized_notification: Cell::new(false),
             protocol_era: Cell::new(None),
@@ -361,7 +361,8 @@ fn safe_adapter_status(adapter: &dyn AsyncLiveAdapter) -> LiveStatus {
         let capabilities: HashSet<_> = status.capabilities.iter().collect();
         let operations_valid = status.operations.as_ref().is_none_or(|operations| {
             let unique: HashSet<_> = operations.iter().collect();
-            unique.len() == operations.len() && operations.iter().all(|operation| crate::registry::is_live_registry_operation(operation))
+            unique.len() == operations.len()
+                && operations.iter().all(|operation| crate::protocol::registry::is_live_registry_operation(operation))
         });
         let hash_valid = status
             .registry_hash

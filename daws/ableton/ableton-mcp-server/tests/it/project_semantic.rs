@@ -1,4 +1,4 @@
-use ableton_mcp_server::{als::*, project::SetSourceRead, project_semantic::*};
+use ableton_mcp_server::{project::als::*, project::semantic::*, project::SetSourceRead};
 use serde::Deserialize;
 use serde_json::{json, Value};
 fn fixture() -> Value {

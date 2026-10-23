@@ -1,9 +1,9 @@
 //! Exercise the shipped stdio executable through an authenticated loopback peer.
 //! The peer is explicitly fake-live and delegates state/authority checks to the simulator.
 use ableton_mcp_server::{
-    delivery::{config_for_bridge, read_any_config, write_config, write_secret_file},
+    lifecycle::delivery::{config_for_bridge, read_any_config, write_config, write_secret_file},
     live::*,
-    registry::{canonical_json, WIRE_CANONICAL_LIMITS},
+    protocol::registry::{canonical_json, WIRE_CANONICAL_LIMITS},
 };
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use hmac::{Hmac, Mac};

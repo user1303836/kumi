@@ -252,7 +252,7 @@ async fn undo_watches_include_other_live_invocations_but_exclude_reads_and_prove
     let fixture: Value = serde_json::from_str(&kumi_testkit::oracle("ableton-mcp-server/host-recovery-oracle.json")).unwrap();
     for row in fixture["watches"].as_array().unwrap() {
         let mut adapter = Adapter::new(&json!({"watchFault":row["fault"]}));
-        adapter.status.operations = Some(crate::registry::live_registry_operations().to_vec());
+        adapter.status.operations = Some(crate::protocol::registry::live_registry_operations().to_vec());
         let adapter = Rc::new(adapter);
         let host = McpHost::new(adapter.clone(), McpHostOptions::default()).unwrap();
         let record =

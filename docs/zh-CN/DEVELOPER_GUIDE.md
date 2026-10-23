@@ -100,20 +100,19 @@ cargo run --locked --release -p ableton-mcp-server --bin ableton-mcp-benchmark
 
 ## 开发桥接
 
-下面的路径都相对于 `daws/ableton/ableton-mcp-server`。
+桥接的模块位于 `daws/ableton/ableton-mcp-server/src`（模块 `x` 是 `x.rs`，它的组成部分在 `x/` 中）。
 
-| 路径 | 说明 |
+| 模块 | 说明 |
 | --- | --- |
-| `src/host.rs`、`src/host/` | MCP 分发、严格的工具模式、事务、撤销与恢复 |
-| `src/tool_catalog.rs` | 唯一的工具目录：模式、注解、每个工具所需的能力，以及它的部署策略类别 |
-| `src/live.rs`、`src/registry.rs` | Live 类型与适配器；注册表及其哈希的加载与验证 |
-| `src/bridge/` | 经过认证的回环客户端（`remote_adapter.rs`）、路由器，以及扩展的通道、启动器和文件夹 |
-| `src/transactions/` | 批处理、设备状态、Session MIDI 和发现辅助工具 |
-| `src/mcp_protocol.rs`、`src/stdio.rs` | 两个协议版本的 MCP 传输处理 |
-| `src/analysis*.rs`、`src/audio_*.rs`、`src/reference_analysis.rs` | 在隔离的工作进程中进行音频分析 |
-| `src/delivery*.rs`、`src/lifecycle*.rs`、`src/setup.rs`、`src/migrate.rs`、`src/diagnostics.rs` | 配置、密钥、安装、升级、回滚与诊断 |
-| `src/als.rs`、`src/project*.rs`、`src/library_search.rs` | 已保存的工程、工程快照与差异、Live 的库数据库 |
-| `src/follow_actions.rs` | 可选的 [Willington](WILLINGTON_INTEGRATION.md) Follow Actions |
+| `host` | MCP 分发、严格的工具模式、事务、撤销与恢复 |
+| `protocol` | 两个协议版本的 MCP 传输处理（`mcp`、`stdio`）；唯一的工具目录（`tool_catalog`：模式、注解、每个工具所需的能力，以及它的部署策略类别）；Live 的操作注册表（`registry`：注册表及其哈希的加载与验证） |
+| `live` | Live 类型与适配器，以及模拟器（其组成部分在 `simulator/` 中） |
+| `bridge` | 经过认证的回环客户端（`remote_adapter.rs`）、路由器，以及扩展的通道、启动器和文件夹 |
+| `transactions` | 批处理、设备状态、Session MIDI 和发现辅助工具 |
+| `analysis` | 在隔离的工作进程中进行音频分析（`runner`、`job_worker`）、响度标准、诊断、调性估计与参考对比 |
+| `lifecycle` | 配置与密钥（`delivery`）、安装、升级、回滚、设置、迁移与诊断 |
+| `project` | 已保存的工程（`als`）、工程快照与差异（`semantic`、`semantic_diff`）、Live 的库数据库（`library_search`、`sqlite_reader`） |
+| `follow_actions` | 可选的 [Willington](WILLINGTON_INTEGRATION.md) Follow Actions |
 
 **契约规则。**
 

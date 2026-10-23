@@ -76,11 +76,11 @@ async fn delivery_subcommands_preserve_their_existing_cli_parsers() {
         .run_until(async {
             let args = vec!["--unknown".into()];
             let cases = [
-                ("setup", ableton_mcp_server::setup::run(&args)),
-                ("migrate", ableton_mcp_server::migrate::run(&args)),
-                ("install-remote-script", ableton_mcp_server::install_remote_script::run(&args)),
-                ("diagnostics", ableton_mcp_server::diagnostics::run(&args).await),
-                ("lifecycle", ableton_mcp_server::lifecycle_cli::run(&args).await),
+                ("setup", ableton_mcp_server::lifecycle::setup::run(&args)),
+                ("migrate", ableton_mcp_server::lifecycle::migrate::run(&args)),
+                ("install-remote-script", ableton_mcp_server::lifecycle::install_remote_script::run(&args)),
+                ("diagnostics", ableton_mcp_server::lifecycle::diagnostics::run(&args).await),
+                ("lifecycle", ableton_mcp_server::lifecycle::cli::run(&args).await),
             ];
             for (name, expected) in cases {
                 let actual = ableton_mcp_server::cli::auxiliary_command(&[name.into(), "--unknown".into()]).await.unwrap();

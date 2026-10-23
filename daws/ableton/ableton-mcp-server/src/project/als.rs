@@ -1,7 +1,7 @@
 //! Bounded offline Live Set XML parsing, structural extraction, MIDI, and findings-only lint.
 use crate::{
+    project::semantic::{semantic_project_name, JS_SPACE},
     project::{decode_xml_attribute, read_set_source, ProjectError, SetSourceRead},
-    project_semantic::{semantic_project_name, JS_SPACE},
 };
 use kumi_common::js::{json as js_json, number, string};
 use regex::Regex;
@@ -657,11 +657,11 @@ pub fn create_offline_als_artifact(
     options: &OfflineAlsArtifactOptions,
 ) -> Result<Value, ProjectError> {
     use crate::{
+        project::semantic::{create_semantic_project_snapshot, CreateSemanticProjectOptions, SemanticUnavailable},
         project::{
             AbletonRootAttributes, ObservedKind, ProjectManifest, ProjectReference, ProjectSourceEvidence, ReferenceBounds,
             ReferenceResolution,
         },
-        project_semantic::{create_semantic_project_snapshot, CreateSemanticProjectOptions, SemanticUnavailable},
     };
     if model.tracks.iter().any(|track| track.clips.iter().any(|clip| clip.length.is_none())) {
         return Err(fail("offline clip length is unavailable; semantic export refused"));

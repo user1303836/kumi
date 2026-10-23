@@ -2,7 +2,7 @@
 use super::*;
 use crate::{
     midi_transforms::{note_content_digest, note_identity_digest},
-    registry::{canonical_json, CanonicalError},
+    protocol::registry::{canonical_json, CanonicalError},
 };
 use kumi_common::js::json as js_json;
 use note_edit::{live_precision, normalized_note};

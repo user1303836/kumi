@@ -71,7 +71,7 @@ pub fn verify_retained_package(package_root: &Path, allow_dirty: bool) -> Result
     }
     for name in names {
         let text = String::from_utf8(read(&package_root.join(name))?).map_err(|_| fail("the retained release's registry isn't text"))?;
-        let hash = crate::registry::registry_text_hash(&text).map_err(|error| fail(error.0))?;
+        let hash = crate::protocol::registry::registry_text_hash(&text).map_err(|error| fail(error.0))?;
         if json!(hash) != evidence.manifest["protocol"]["registryHash"] {
             return Err(fail("the retained release's registry and its manifest disagree"));
         }

@@ -2,7 +2,7 @@
 use ableton_mcp_server::{
     host::{helpers::canonical_mutation_identity, McpHost, McpHostOptions},
     live::*,
-    tool_catalog::TOOL_CATALOG,
+    protocol::tool_catalog::TOOL_CATALOG,
 };
 use serde_json::{json, Value};
 use std::rc::Rc;

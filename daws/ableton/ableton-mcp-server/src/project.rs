@@ -4,6 +4,12 @@
 //! verification. Referenced media is checked for existence only (metadata),
 //! never read.
 
+pub mod als;
+pub mod library_search;
+pub mod semantic;
+pub mod semantic_diff;
+pub mod sqlite_reader;
+
 use std::cmp::Ordering;
 use std::collections::HashSet;
 use std::fs;

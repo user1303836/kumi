@@ -3,14 +3,24 @@
 //! This module deliberately accepts samples rather than paths or URLs. It never
 //! retains or returns audio data; callers receive aggregate measurements only.
 
+pub mod diagnosis;
+pub mod job_worker;
+pub mod key_estimation;
+pub mod reference;
+pub mod runner;
+pub mod standards;
+pub mod worker;
+
 use std::f64::consts::PI;
 
 use base64::Engine;
 use kumi_common::js::{number, string};
 use serde::{Deserialize, Serialize};
 
-pub use crate::audio_standards::RangeError;
-use crate::audio_standards::{analyze_standards_audio, is_integer, ConventionalChannelLabel, StandardsAudioAnalysis, StandardsAudioInput};
+pub use crate::analysis::standards::RangeError;
+use crate::analysis::standards::{
+    analyze_standards_audio, is_integer, ConventionalChannelLabel, StandardsAudioAnalysis, StandardsAudioInput,
+};
 
 pub const ANALYSIS_VERSION: &str = "pcm-analysis/v3";
 pub const MAX_ANALYSIS_SAMPLES: usize = 10_000_000;

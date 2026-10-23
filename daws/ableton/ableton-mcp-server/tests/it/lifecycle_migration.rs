@@ -1,7 +1,7 @@
 //! A real JavaScript bridge installation (Kumi 1.7.5's lifecycle) → native migration, with the existing receipt and files untouched by fixture rebinding.
 #[path = "../support/lifecycle_fixture.rs"]
 mod fixture;
-use ableton_mcp_server::{delivery::*, lifecycle::*};
+use ableton_mcp_server::{lifecycle::delivery::*, lifecycle::*};
 use fixture::*;
 use serde_json::{json, Value};
 use std::{
@@ -219,7 +219,7 @@ async fn source_install_migration_failures_restore_every_owned_file_and_refuse_d
 
 #[tokio::test(flavor = "current_thread")]
 async fn migrated_activation_uses_preserved_port_secret_and_authenticated_discovery() {
-    use ableton_mcp_server::registry::{canonical_json, live_registry_hash, WIRE_CANONICAL_LIMITS};
+    use ableton_mcp_server::protocol::registry::{canonical_json, live_registry_hash, WIRE_CANONICAL_LIMITS};
     use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
     use hmac::{Hmac, Mac};
     use sha2::Sha256;

@@ -6,12 +6,12 @@ use std::io::{Read, Write};
 use kumi_common::js::{json, string};
 use serde_json::{json as json_value, Map, Value};
 
-use crate::analysis::{analyze_pcm, decode_float32_le, PcmAnalysisInput};
-use crate::analysis_runner::MAX_ANALYSIS_JOB_REQUEST_BYTES;
-use crate::audio_standards::{is_integer, ConventionalChannelLabel};
-use crate::reference_analysis::{
+use crate::analysis::reference::{
     compare_reference_audio_mode, AlignmentMode, AlignmentOptions, ReferenceComparisonInput, ReferencePcmSource,
 };
+use crate::analysis::runner::MAX_ANALYSIS_JOB_REQUEST_BYTES;
+use crate::analysis::standards::{is_integer, ConventionalChannelLabel};
+use crate::analysis::{analyze_pcm, decode_float32_le, PcmAnalysisInput};
 
 struct EncodedSource {
     pcm_base64: String,

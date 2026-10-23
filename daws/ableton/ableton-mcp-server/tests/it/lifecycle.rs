@@ -1,6 +1,6 @@
 #[path = "../support/lifecycle_fixture.rs"]
 mod fixture;
-use ableton_mcp_server::{delivery::*, lifecycle::*, lifecycle_cli};
+use ableton_mcp_server::{lifecycle::cli as lifecycle_cli, lifecycle::delivery::*, lifecycle::*};
 use fixture::*;
 use serde_json::{json, Value};
 use std::{fs, path::Path};

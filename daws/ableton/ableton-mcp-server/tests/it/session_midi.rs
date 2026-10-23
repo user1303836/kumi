@@ -319,7 +319,11 @@ fn validation_and_session_pages_match_typescript_oracle() {
         } else {
             let actual = result.unwrap();
             let canonical = |v: &Value| {
-                ableton_mcp_server::registry::canonical_json(v, &ableton_mcp_server::registry::UNBOUNDED_CANONICAL_LIMITS).unwrap()
+                ableton_mcp_server::protocol::registry::canonical_json(
+                    v,
+                    &ableton_mcp_server::protocol::registry::UNBOUNDED_CANONICAL_LIMITS,
+                )
+                .unwrap()
             };
             assert_eq!(canonical(&actual), canonical(&row["result"]), "{row}");
         }

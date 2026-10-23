@@ -10,11 +10,11 @@ use std::cell::RefCell;
 use std::future::Future;
 use std::rc::Rc;
 
-use ableton_mcp_server::mcp_protocol::{
+use ableton_mcp_server::protocol::mcp::{
     format_mcp_response, prepare_mcp_request, ProtocolEra, LEGACY_PROTOCOL_VERSION, MODERN_PROTOCOL_VERSION, MODERN_UNAVAILABLE_TOOLS,
     SUPPORTED_PROTOCOL_VERSIONS,
 };
-use ableton_mcp_server::stdio::{serve_stdio, HandlerOutcome, RecordContext, RecordHandler, StdioOptions};
+use ableton_mcp_server::protocol::stdio::{serve_stdio, HandlerOutcome, RecordContext, RecordHandler, StdioOptions};
 use futures::FutureExt;
 use kumi_common::abort::Signal;
 use serde_json::{json, Map, Value};
@@ -41,7 +41,7 @@ fn initialize() -> Value {
     json!({ "jsonrpc": "2.0", "id": "legacy-init", "method": "initialize", "params": { "protocolVersion": LEGACY_PROTOCOL_VERSION, "capabilities": {}, "clientInfo": { "name": "legacy-test", "version": "1" } } })
 }
 
-fn error_code(prepared: &ableton_mcp_server::mcp_protocol::PreparedMcpRequest) -> Option<i64> {
+fn error_code(prepared: &ableton_mcp_server::protocol::mcp::PreparedMcpRequest) -> Option<i64> {
     prepared.error.as_ref().and_then(|error| error["error"]["code"].as_i64())
 }
 

@@ -718,7 +718,7 @@ impl McpHost {
             .collect())
     }
     pub async fn live_key_estimate_async(&self, id: &Value, params: &Value) -> Value {
-        use crate::key_estimation::{estimate_key, KeyEstimateNote};
+        use crate::analysis::key_estimation::{estimate_key, KeyEstimateNote};
         let typed = |note: &Value| KeyEstimateNote {
             pitch: note["pitch"].as_f64().unwrap_or(f64::NAN),
             start: note["start"].as_f64().unwrap_or(f64::NAN),

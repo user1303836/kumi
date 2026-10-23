@@ -3,7 +3,7 @@
 //! Remote Script, which the bridge reads again within a second of it changing, Live running.
 
 use crate::config::remote_scripts_dir;
-use ableton_mcp_server::delivery::{
+use ableton_mcp_server::lifecycle::delivery::{
     secret_permissions, write_owner_file, SecretPermissions, REMOTE_SCRIPT_PACKAGE, WILLINGTON_CONFIG, WILLINGTON_FOLDER,
 };
 use futures::future::FutureExt;

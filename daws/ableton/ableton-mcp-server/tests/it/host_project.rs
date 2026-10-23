@@ -2,7 +2,7 @@ kumi_testkit::fixture_paths!();
 use ableton_mcp_server::{
     host::{McpHost, McpHostOptions, ToolCall},
     live::*,
-    registry::live_registry_operations,
+    protocol::registry::live_registry_operations,
 };
 use base64::Engine;
 use serde_json::{json, Value};

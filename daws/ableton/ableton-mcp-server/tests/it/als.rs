@@ -1,6 +1,6 @@
 use ableton_mcp_server::{
-    als::*,
-    project_semantic::{canonical_semantic_json, semantic_project_name},
+    project::als::*,
+    project::semantic::{canonical_semantic_json, semantic_project_name},
 };
 use serde::Deserialize;
 use serde_json::{json, Value};

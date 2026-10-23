@@ -9,7 +9,7 @@ use sha2::Sha256;
 use subtle::ConstantTimeEq;
 
 use crate::live::{LiveAdapter, LiveError, LiveEvent, LiveInvocation, LiveListener, LiveRef, LiveSnapshot, LiveStatus, Unsubscribe};
-use crate::registry::{
+use crate::protocol::registry::{
     canonical_json, validate_live_operation_request, validate_live_operation_result, CanonicalError, WIRE_CANONICAL_LIMITS,
 };
 

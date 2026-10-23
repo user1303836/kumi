@@ -426,10 +426,10 @@ class RemoteScriptTests(unittest.TestCase):
 
     @unittest.skipUnless(sys.platform == "win32", "runs Windows PowerShell's ACL check itself")
     def test_one_powershell_run_judges_each_file_by_its_own_acl(self):
-        # Unmocked: a file secured by the bridge's own script (delivery_acl.rs, as its setup runs it), one left with the
+        # Unmocked: a file secured by the bridge's own script (lifecycle/delivery/acl.rs, as its setup runs it), one left with the
         # rules it inherits and one that isn't there, in one run, each verdict at its own place.
         package = __import__("AbletonMcpBridge")
-        source = (Path(__file__).resolve().parent.parent / "ableton-mcp-server" / "src" / "delivery_acl.rs").read_text(encoding="utf-8")
+        source = (Path(__file__).resolve().parent.parent / "ableton-mcp-server" / "src" / "lifecycle" / "delivery" / "acl.rs").read_text(encoding="utf-8")
         target, secure, checks = (re.search(rf'const {name}\s*:\s*&str\s*=\s*"([^"\\]*)";', source).group(1) for name in ("WINDOWS_ACL_TARGET", "SECURE_FILE", "WINDOWS_ACL_CHECKS"))
         with tempfile.TemporaryDirectory() as directory:
             owner_only, inherited, missing = Path(directory, "secret"), Path(directory, "inherited"), Path(directory, "missing")

@@ -6,7 +6,7 @@ use crate::{
         live_extension_folders::kumi_extension_folders,
         remote_adapter::{RemoteScriptEndpoint, RemoteScriptLiveAdapter},
     },
-    delivery::{read_any_config, read_secret_file},
+    lifecycle::delivery::{read_any_config, read_secret_file},
     live::{AsyncLiveAdapter, LiveError},
 };
 use std::{
@@ -22,11 +22,11 @@ pub async fn auxiliary_command(args: &[String]) -> Option<CommandOutput> {
     let command = args.first()?.as_str();
     let arguments = &args[1..];
     Some(match command {
-        "lifecycle" => crate::lifecycle_cli::run(arguments).await,
-        "setup" => crate::setup::run(arguments),
-        "migrate" => crate::migrate::run(arguments),
-        "diagnostics" => crate::diagnostics::run(arguments).await,
-        "install-remote-script" => crate::install_remote_script::run(arguments),
+        "lifecycle" => crate::lifecycle::cli::run(arguments).await,
+        "setup" => crate::lifecycle::setup::run(arguments),
+        "migrate" => crate::lifecycle::migrate::run(arguments),
+        "diagnostics" => crate::lifecycle::diagnostics::run(arguments).await,
+        "install-remote-script" => crate::lifecycle::install_remote_script::run(arguments),
         _ => return None,
     })
 }

@@ -1,6 +1,6 @@
 //! Owner-allowlisted offline library discovery, including the source WAL refusal.
 use super::*;
-use crate::{library_search::*, sqlite_reader::SqliteReader};
+use crate::{project::library_search::*, project::sqlite_reader::SqliteReader};
 use kumi_common::js::json as js_json;
 use std::{
     fs,
@@ -76,8 +76,9 @@ fn forget_idle(read: &mut Vec<Read>) {
     read.retain(|kept| kept.used.elapsed() < KEPT_FOR);
 }
 async fn read_database(reads: &LibraryReads, path: &Path) -> Result<Arc<SqliteReader>, LibrarySearchError> {
-    let unreadable =
-        |e: std::io::Error| unavailable(format!("the library database is unreadable ({})", crate::delivery::io_error(&e, "open", &[path])));
+    let unreadable = |e: std::io::Error| {
+        unavailable(format!("the library database is unreadable ({})", crate::lifecycle::delivery::io_error(&e, "open", &[path])))
+    };
     let file = FileStamp::of(&fs::metadata(path).map_err(unreadable)?);
     let cached = {
         let mut read = reads.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -94,7 +95,10 @@ async fn read_database(reads: &LibraryReads, path: &Path) -> Result<Arc<SqliteRe
             let owned = path.to_path_buf();
             let parsed = tokio::task::spawn_blocking(move || -> Result<SqliteReader, LibrarySearchError> {
                 let bytes = fs::read(&owned).map_err(|e| {
-                    unavailable(format!("the library database is unreadable ({})", crate::delivery::io_error(&e, "open", &[&owned])))
+                    unavailable(format!(
+                        "the library database is unreadable ({})",
+                        crate::lifecycle::delivery::io_error(&e, "open", &[&owned])
+                    ))
                 })?;
                 SqliteReader::new(bytes).map_err(|e| unavailable(format!("the library database is unreadable ({e})")))
             })

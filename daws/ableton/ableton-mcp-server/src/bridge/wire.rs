@@ -1,6 +1,6 @@
 //! Shared signed-wire primitives. Each caller applies its source channel's limits.
 use crate::live::LiveError;
-use crate::registry::{canonical_json, CanonicalError, CanonicalLimits, WIRE_CANONICAL_LIMITS};
+use crate::protocol::registry::{canonical_json, CanonicalError, CanonicalLimits, WIRE_CANONICAL_LIMITS};
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use rand::RngCore;
 use serde::Deserialize;

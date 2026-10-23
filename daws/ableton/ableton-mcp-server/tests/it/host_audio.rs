@@ -1,5 +1,5 @@
 use ableton_mcp_server::{
-    audio_diagnosis::{diagnose_audio_with_live_context_value, AudioSourceProvenance},
+    analysis::diagnosis::{diagnose_audio_with_live_context_value, AudioSourceProvenance},
     host::{audio::*, helpers::canonical_mutation_identity, McpHost, McpHostOptions},
     live::*,
 };
@@ -158,7 +158,7 @@ async fn worker_coercion_and_semantic_validation_match_source_process() {
     tokio::task::LocalSet::new()
         .run_until(async {
             let fixture: Value = serde_json::from_str(&kumi_testkit::oracle("ableton-mcp-server/analysis-worker-oracle.json")).unwrap();
-            let runner = ableton_mcp_server::analysis_runner::AnalysisRunner::new();
+            let runner = ableton_mcp_server::analysis::runner::AnalysisRunner::new();
             for (i, row) in fixture["rows"].as_array().unwrap().iter().enumerate() {
                 let text =
                     serde_json::to_string(&row["job"]).unwrap().replace("\"$pcm\"", &serde_json::to_string(&fixture["pcm"]).unwrap());

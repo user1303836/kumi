@@ -1,4 +1,6 @@
-use ableton_mcp_server::{delivery::*, diagnostics, install_remote_script, migrate, setup};
+use ableton_mcp_server::{
+    lifecycle::delivery::*, lifecycle::diagnostics, lifecycle::install_remote_script, lifecycle::migrate, lifecycle::setup,
+};
 use serde_json::{json, Value};
 use std::path::Path;
 fn args(values: &[&str]) -> Vec<String> {

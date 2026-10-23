@@ -1,7 +1,7 @@
 //! Native lifecycle command and retained standalone command name.
 use crate::{
     command::CommandOutput,
-    delivery::default_package_root,
+    lifecycle::delivery::default_package_root,
     lifecycle::{run_lifecycle, LifecycleOptions, LIFECYCLE_ACTIONS},
     live::LiveError,
 };

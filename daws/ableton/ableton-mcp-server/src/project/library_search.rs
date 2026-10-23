@@ -28,7 +28,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 
-use crate::sqlite_reader::{SqliteError, SqliteReader, SqliteRow, SqliteValue};
+use crate::project::sqlite_reader::{SqliteError, SqliteReader, SqliteRow, SqliteValue};
 
 pub const LIBRARY_SEARCH_SCHEMA: &str = "ableton-mcp-library-search/v1";
 pub const SUPPORTED_FILES_SCHEMA_VERSIONS: &[i64] = &[12300];

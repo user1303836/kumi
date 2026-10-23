@@ -100,20 +100,19 @@ cargo run --locked --release -p ableton-mcp-server --bin ableton-mcp-benchmark
 
 ## ブリッジの開発
 
-以下のパスは `daws/ableton/ableton-mcp-server` からの相対パスです。
+ブリッジのモジュールは `daws/ableton/ableton-mcp-server/src` にあります（モジュール `x` は `x.rs` で、その部品は `x/` にあります）。
 
-| パス | 内容 |
+| モジュール | 内容 |
 | --- | --- |
-| `src/host.rs`、`src/host/` | MCP のディスパッチ、厳密なツールスキーマ、トランザクション、取り消しと回復 |
-| `src/tool_catalog.rs` | 唯一のツールカタログ：スキーマ、アノテーション、各ツールに必要な機能、デプロイメントポリシークラス |
-| `src/live.rs`、`src/registry.rs` | Live の型とアダプター。レジストリとそのハッシュの読み込みと検証 |
-| `src/bridge/` | 認証付きループバッククライアント（`remote_adapter.rs`）、ルーター、拡張機能のチャネル、ランチャー、フォルダー |
-| `src/transactions/` | バッチ、デバイスの状態、Session MIDI、ディスカバリのヘルパー |
-| `src/mcp_protocol.rs`、`src/stdio.rs` | 両方のプロトコルバージョンの MCP ワイヤー処理 |
-| `src/analysis*.rs`、`src/audio_*.rs`、`src/reference_analysis.rs` | 隔離されたワーカーでのオーディオ解析 |
-| `src/delivery*.rs`、`src/lifecycle*.rs`、`src/setup.rs`、`src/migrate.rs`、`src/diagnostics.rs` | 設定、シークレット、インストール、アップグレード、ロールバック、診断 |
-| `src/als.rs`、`src/project*.rs`、`src/library_search.rs` | 保存された Set、Set のスナップショットと差分、Live のライブラリデータベース |
-| `src/follow_actions.rs` | オプションの [Willington](WILLINGTON_INTEGRATION.md) の Follow Actions |
+| `host` | MCP のディスパッチ、厳密なツールスキーマ、トランザクション、取り消しと回復 |
+| `protocol` | 両方のプロトコルバージョンの MCP ワイヤー処理（`mcp`、`stdio`）。唯一のツールカタログ（`tool_catalog`：スキーマ、アノテーション、各ツールに必要な機能、デプロイメントポリシークラス）。Live の操作レジストリ（`registry`：レジストリとそのハッシュの読み込みと検証） |
+| `live` | Live の型とアダプター、そしてシミュレーター（その部品は `simulator/` にあります） |
+| `bridge` | 認証付きループバッククライアント（`remote_adapter.rs`）、ルーター、拡張機能のチャネル、ランチャー、フォルダー |
+| `transactions` | バッチ、デバイスの状態、Session MIDI、ディスカバリのヘルパー |
+| `analysis` | 隔離されたワーカーでのオーディオ解析（`runner`、`job_worker`）、ラウドネスの規格、診断、キー推定、リファレンスとの比較 |
+| `lifecycle` | 設定とシークレット（`delivery`）、インストール、アップグレード、ロールバック、セットアップ、移行、診断 |
+| `project` | 保存された Set（`als`）、Set のスナップショットと差分（`semantic`、`semantic_diff`）、Live のライブラリデータベース（`library_search`、`sqlite_reader`） |
+| `follow_actions` | オプションの [Willington](WILLINGTON_INTEGRATION.md) の Follow Actions |
 
 **契約ルール。**
 

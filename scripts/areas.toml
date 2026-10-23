@@ -110,18 +110,8 @@ paths = [
   "crates/kumi-runtime/src/net/**",
   "crates/kumi-runtime/src/integrations/ableton/hands/KumiHands.swift",
   "crates/kumi-runtime/src/integrations/ableton/hands/mac.rs",
-  "daws/ableton/ableton-mcp-server/src/install_remote_script*",
-  "daws/ableton/ableton-mcp-server/src/install_remote_script*/**",
-  "daws/ableton/ableton-mcp-server/src/lifecycle*",
-  "daws/ableton/ableton-mcp-server/src/lifecycle*/**",
-  "daws/ableton/ableton-mcp-server/src/delivery*",
-  "daws/ableton/ableton-mcp-server/src/delivery*/**",
-  "daws/ableton/ableton-mcp-server/src/setup*",
-  "daws/ableton/ableton-mcp-server/src/setup*/**",
-  "daws/ableton/ableton-mcp-server/src/migrate*",
-  "daws/ableton/ableton-mcp-server/src/migrate*/**",
-  "daws/ableton/ableton-mcp-server/src/platform*",
-  "daws/ableton/ableton-mcp-server/src/platform*/**",
+  "daws/ableton/ableton-mcp-server/src/lifecycle.rs",
+  "daws/ableton/ableton-mcp-server/src/lifecycle/**",
   "daws/own/daw-bridge/Cargo.toml",
   "daws/own/daw-bridge/src/lifecycle.rs",
   "daws/own/daw-bridge/src/install.rs",
@@ -149,7 +139,8 @@ paths = [
   "vendor/willington/**",
   ".github/workflows/installer.yml",
 ]
-except = ["**/tests/**", "**/examples/**", "**/tests.rs"]
+# The bridge's lifecycle module is install surface, but for its read-only diagnostics.
+except = ["**/tests/**", "**/examples/**", "**/tests.rs", "daws/ableton/ableton-mcp-server/src/lifecycle/diagnostics.rs"]
 
 # How Kumi's HTTP clients are made, which the Network workflow checks on each system's own trust store and proxies.
 [network]

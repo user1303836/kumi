@@ -17,11 +17,11 @@ pub fn device_state_directory(directory: &Value) -> Result<PathBuf, LiveError> {
         .filter(|s| is_non_empty_string(directory, 4096) && Path::new(s).is_absolute() && !s.contains('\0'))
         .ok_or_else(|| LiveError::error("an explicit absolute directory is required"))?;
     let path = crate::command::resolve(path)?;
-    let stats = fs::symlink_metadata(&path).map_err(|e| crate::delivery::io_error(&e, "lstat", &[&path]))?;
+    let stats = fs::symlink_metadata(&path).map_err(|e| crate::lifecycle::delivery::io_error(&e, "lstat", &[&path]))?;
     if !stats.is_dir() || stats.file_type().is_symlink() {
         return Err(LiveError::error("the device-state directory must be a real directory"));
     }
-    let real = fs::canonicalize(&path).map_err(|e| crate::delivery::io_error(&e, "realpath", &[&path]))?;
+    let real = fs::canonicalize(&path).map_err(|e| crate::lifecycle::delivery::io_error(&e, "realpath", &[&path]))?;
     let text = real.to_string_lossy();
     Ok(PathBuf::from(
         text.strip_prefix(r"\\?\UNC\")
@@ -36,7 +36,7 @@ pub fn read_device_state_file(file: &Value) -> Result<Value, LiveError> {
         .filter(|s| is_non_empty_string(file, 4096) && Path::new(s).is_absolute() && !s.contains('\0'))
         .ok_or_else(|| LiveError::error("an explicit absolute snapshot file path is required"))?;
     let path = crate::command::resolve(path)?;
-    let stats = fs::symlink_metadata(&path).map_err(|e| crate::delivery::io_error(&e, "lstat", &[&path]))?;
+    let stats = fs::symlink_metadata(&path).map_err(|e| crate::lifecycle::delivery::io_error(&e, "lstat", &[&path]))?;
     if !stats.is_file() || stats.file_type().is_symlink() {
         return Err(LiveError::error("the device-state snapshot must be a real regular file"));
     }
@@ -44,7 +44,7 @@ pub fn read_device_state_file(file: &Value) -> Result<Value, LiveError> {
         return Err(LiveError::error("the device-state snapshot exceeds its 256 KiB bound"));
     }
     let parsed = (|| {
-        let bytes = fs::read(&path).map_err(|e| crate::delivery::io_error(&e, "open", &[&path]))?;
+        let bytes = fs::read(&path).map_err(|e| crate::lifecycle::delivery::io_error(&e, "open", &[&path]))?;
         super::json_diagnostics::parse_json(&String::from_utf8_lossy(&bytes))
     })()
     .map_err(|e: LiveError| LiveError::error(format!("the device-state snapshot is not readable JSON ({})", e.message())))?;
@@ -68,7 +68,7 @@ pub fn write_device_state_file_atomically(target: &Path, file: &Value, overwrite
             true
         }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
-        Err(error) => return Err(crate::delivery::io_error(&error, "lstat", &[target])),
+        Err(error) => return Err(crate::lifecycle::delivery::io_error(&error, "lstat", &[target])),
     };
     let mut random = [0u8; 12];
     rand::rng().fill_bytes(&mut random);
@@ -80,17 +80,17 @@ pub fn write_device_state_file_atomically(target: &Path, file: &Value, overwrite
         use std::os::unix::fs::OpenOptionsExt;
         options.mode(0o600).custom_flags(libc::O_NOFOLLOW);
     }
-    let mut descriptor = options.open(&temporary).map_err(|e| crate::delivery::io_error(&e, "open", &[&temporary]))?;
+    let mut descriptor = options.open(&temporary).map_err(|e| crate::lifecycle::delivery::io_error(&e, "open", &[&temporary]))?;
     let _cleanup = Temporary(temporary.clone());
-    descriptor.write_all(js_json::file_text(file).as_bytes()).map_err(|e| crate::delivery::io_error(&e, "write", &[]))?;
-    descriptor.sync_all().map_err(|e| crate::delivery::io_error(&e, "fsync", &[]))?;
+    descriptor.write_all(js_json::file_text(file).as_bytes()).map_err(|e| crate::lifecycle::delivery::io_error(&e, "write", &[]))?;
+    descriptor.sync_all().map_err(|e| crate::lifecycle::delivery::io_error(&e, "fsync", &[]))?;
     drop(descriptor);
     let staged = read_device_state_file(&json!(temporary))?;
     if staged["digest"] != file["digest"] {
         return Err(LiveError::error("device-state staged snapshot failed read-back verification"));
     }
     if target_exists {
-        fs::rename(&temporary, target).map_err(|e| crate::delivery::io_error(&e, "rename", &[&temporary, target]))?;
+        fs::rename(&temporary, target).map_err(|e| crate::lifecycle::delivery::io_error(&e, "rename", &[&temporary, target]))?;
     } else {
         publish_new(&temporary, target, |from, to| fs::hard_link(from, to))?;
     }
@@ -102,17 +102,17 @@ pub fn write_device_state_file_atomically(target: &Path, file: &Value, overwrite
 fn publish_new(temporary: &Path, target: &Path, link: impl FnOnce(&Path, &Path) -> std::io::Result<()>) -> Result<(), LiveError> {
     let changed = || LiveError::error("device-state snapshot target changed during save; retry");
     match link(temporary, target) {
-        Ok(()) => fs::remove_file(temporary).map_err(|e| crate::delivery::io_error(&e, "unlink", &[temporary])),
+        Ok(()) => fs::remove_file(temporary).map_err(|e| crate::lifecycle::delivery::io_error(&e, "unlink", &[temporary])),
         Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Err(changed()),
         Err(e) => match rename_no_replace(temporary, target) {
             Ok(()) => Ok(()),
             Err(exists) if exists.kind() == std::io::ErrorKind::AlreadyExists => Err(changed()),
             Err(_) => match fs::symlink_metadata(target) {
                 Err(absent) if absent.kind() == std::io::ErrorKind::NotFound => {
-                    fs::rename(temporary, target).map_err(|e| crate::delivery::io_error(&e, "rename", &[temporary, target]))
+                    fs::rename(temporary, target).map_err(|e| crate::lifecycle::delivery::io_error(&e, "rename", &[temporary, target]))
                 }
                 Ok(_) => Err(changed()),
-                Err(_) => Err(crate::delivery::io_error(&e, "link", &[temporary, target])),
+                Err(_) => Err(crate::lifecycle::delivery::io_error(&e, "link", &[temporary, target])),
             },
         },
     }

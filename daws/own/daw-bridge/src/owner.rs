@@ -1,6 +1,6 @@
 //! Files and folders only their owner can read: mode 0600/0700 on unix; on Windows a protected DACL whose one rule
 //! gives the current user full control, then checked. The PowerShell scripts are the twins of kumi-runtime's
-//! auth/store.rs and ableton-mcp-server's delivery_acl.rs: keep them in step.
+//! auth/store.rs and ableton-mcp-server's lifecycle/delivery/acl.rs: keep them in step.
 use std::io::Write;
 use std::path::{Path, PathBuf};
 #[cfg(windows)]

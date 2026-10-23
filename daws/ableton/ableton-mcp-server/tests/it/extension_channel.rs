@@ -124,7 +124,7 @@ async fn an_extension_that_closes_before_its_hello_is_refused_at_once() {
                 }
             });
             let folder = tempfile::tempdir().unwrap();
-            let endpoint = json!({"host":"127.0.0.1","port":port,"pid":std::process::id(),"registryHash":ableton_mcp_server::registry::live_registry_hash()});
+            let endpoint = json!({"host":"127.0.0.1","port":port,"pid":std::process::id(),"registryHash":ableton_mcp_server::protocol::registry::live_registry_hash()});
             std::fs::write(folder.path().join("endpoint.json"), endpoint.to_string()).unwrap();
             std::fs::write(folder.path().join("secret"), "w".repeat(40)).unwrap();
             let channel = ExtensionChannel::new(ExtensionChannelOptions::new(folder.path()));

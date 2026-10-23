@@ -77,7 +77,7 @@ impl Adapter {
     /// Renumbers the locators by place, as Live does, and gives `made` (a created locator's result) its ref and
     /// fingerprint there.
     fn renumber(&self, made: Option<&mut Value>) {
-        use ableton_mcp_server::registry::{canonical_json, sha256_hex, UNBOUNDED_CANONICAL_LIMITS};
+        use ableton_mcp_server::protocol::registry::{canonical_json, sha256_hex, UNBOUNDED_CANONICAL_LIMITS};
         let hash = |value: &Value| sha256_hex(&canonical_json(value, &UNBOUNDED_CANONICAL_LIMITS).unwrap());
         let mut state = self.sim.state.borrow_mut();
         let locators = state["arrangement"]["locators"].as_array_mut().unwrap();

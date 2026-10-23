@@ -20,7 +20,7 @@ pub struct InstallResult {
     pub dry_run: bool,
 }
 pub fn registry_digest() -> &'static str {
-    crate::registry::live_registry_hash()
+    crate::protocol::registry::live_registry_hash()
 }
 pub fn reject_symlink_tree(path: &Path) -> Result<(), LiveError> {
     let entry = lstat(path)?;
@@ -179,7 +179,7 @@ pub fn install_remote_script(
         }
         // The native bridge carries the registry it was built against. This same text
         // feeds the authenticated wire validator; a caller's working directory cannot replace it.
-        write_new(&staged_package.join(OPERATION_REGISTRY_ASSET), crate::registry::LIVE_REGISTRY_TEXT.as_bytes(), 0o644)?;
+        write_new(&staged_package.join(OPERATION_REGISTRY_ASSET), crate::protocol::registry::LIVE_REGISTRY_TEXT.as_bytes(), 0o644)?;
         let mut hashes = serde_json::Map::new();
         for name in ["__init__.py", REMOTE_SCRIPT_ASSET, OPERATION_REGISTRY_ASSET] {
             hashes.insert(name.into(), file_digest(&staged_package.join(name))?.into());

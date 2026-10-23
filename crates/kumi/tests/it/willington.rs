@@ -1,5 +1,5 @@
 //! /willington's switch: finding Willington in the bridge in Live, and turning its bindings on and off.
-use ableton_mcp_server::delivery::{secret_permissions, SecretPermissions};
+use ableton_mcp_server::lifecycle::delivery::{secret_permissions, SecretPermissions};
 use kumi::willington::{Willington, WillingtonControl, TURNED_OFF, TURNED_OFF_FOLLOW_STAYS, TURNED_ON, TURNED_ON_WITH_FOLLOW};
 use kumi_runtime::integrations::ableton::willington::WillingtonSwitch;
 use serde_json::{json, Value};
@@ -160,7 +160,7 @@ async fn without_willington_in_the_bridge_there_is_nothing_to_switch() {
 
 #[test]
 fn native_editing_requires_an_owner_only_receipt_for_the_loaded_package() {
-    use ableton_mcp_server::delivery::write_owner_file;
+    use ableton_mcp_server::lifecycle::delivery::write_owner_file;
     use kumi::willington::TURNED_ON_WITH_EDITING;
     let folder = tempfile::tempdir().unwrap();
     let scripts = folder.path();

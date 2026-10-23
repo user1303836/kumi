@@ -207,7 +207,7 @@ fn registry_request(operation: &str, fields: &Value) -> Result<Value, LiveError>
 }
 use super::listeners::Listeners;
 use crate::loopback::LOOPBACK_PROTOCOL_VERSION;
-use crate::registry::{validate_live_operation_request, validate_live_operation_result};
+use crate::protocol::registry::{validate_live_operation_request, validate_live_operation_result};
 use async_trait::async_trait;
 use futures::future::{LocalBoxFuture, Shared};
 use futures::FutureExt;

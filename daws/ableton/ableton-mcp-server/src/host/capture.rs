@@ -2,7 +2,7 @@
 use super::reads::AUDITION_DEADLINE_MS;
 use super::retention::TransactionRecord;
 use super::*;
-use crate::audio_diagnosis::{diagnose_audio_with_live_context_value, AudioSourceKind, AudioSourceProvenance};
+use crate::analysis::diagnosis::{diagnose_audio_with_live_context_value, AudioSourceKind, AudioSourceProvenance};
 use crate::audio_file::{self, DecodedCaptureFile};
 use base64::Engine;
 use kumi_common::{

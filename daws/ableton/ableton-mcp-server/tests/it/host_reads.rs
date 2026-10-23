@@ -1,7 +1,7 @@
 use ableton_mcp_server::{
     host::{helpers::canonical_mutation_identity, McpHost, McpHostOptions, ToolCall},
     live::*,
-    registry::live_registry_operations,
+    protocol::registry::live_registry_operations,
 };
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};

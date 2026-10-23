@@ -141,20 +141,20 @@ The terminal app's design and foundations are in
 
 ## Working on the bridge
 
-Paths below are relative to `daws/ableton/ableton-mcp-server`.
+The bridge's modules, in `daws/ableton/ableton-mcp-server/src` (a module `x` is
+`x.rs` and, for its parts, `x/`):
 
-| Path | What it is |
+| Module | What it is |
 | --- | --- |
-| `src/host.rs`, `src/host/` | MCP dispatch, strict tool schemas, transactions, undo and recovery |
-| `src/tool_catalog.rs` | The single tool catalog: schemas, annotations, the capabilities each tool needs, and its deployment policy class |
-| `src/live.rs`, `src/registry.rs` | Live types and adapters; loading and validating the registry and its hash |
-| `src/bridge/` | The authenticated loopback client (`remote_adapter.rs`), the router, and the extension channel, launcher and folders |
-| `src/transactions/` | Batches, device state, Session MIDI and discovery helpers |
-| `src/mcp_protocol.rs`, `src/stdio.rs` | MCP wire handling for both protocol versions |
-| `src/analysis*.rs`, `src/audio_*.rs`, `src/reference_analysis.rs` | Audio analysis in isolated workers |
-| `src/delivery*.rs`, `src/lifecycle*.rs`, `src/setup.rs`, `src/migrate.rs`, `src/diagnostics.rs` | Configuration, secrets, install, upgrade, rollback and diagnostics |
-| `src/als.rs`, `src/project*.rs`, `src/library_search.rs` | Saved Sets, Set snapshots and diffs, Live's library database |
-| `src/follow_actions.rs` | The optional [Willington](WILLINGTON_INTEGRATION.md) Follow Actions |
+| `host` | MCP dispatch, strict tool schemas, transactions, undo and recovery |
+| `protocol` | MCP's wire for both protocol versions (`mcp`, `stdio`); the single tool catalog (`tool_catalog`: schemas, annotations, the capabilities each tool needs, and its deployment policy class); Live's operation registry (`registry`: loading and validating it and its hash) |
+| `live` | Live types and adapters, and the simulator, whose parts are in `simulator/` |
+| `bridge` | The authenticated loopback client (`remote_adapter.rs`), the router, and the extension channel, launcher and folders |
+| `transactions` | Batches, device state, Session MIDI and discovery helpers |
+| `analysis` | Audio analysis in isolated workers (`runner`, `job_worker`), loudness standards, diagnosis, key estimation and reference comparison |
+| `lifecycle` | Configuration and secrets (`delivery`), install, upgrade and rollback, setup, migration and diagnostics |
+| `project` | Saved Sets (`als`), Set snapshots and diffs (`semantic`, `semantic_diff`), Live's library database (`library_search`, `sqlite_reader`) |
+| `follow_actions` | The optional [Willington](WILLINGTON_INTEGRATION.md) Follow Actions |
 
 **Contract rules.**
 
