@@ -53,9 +53,10 @@ paths = [
 layout = ["daws/renoise/com.kumi.Bridge.xrnx/**"]
 feeds = ["kumi-agent", "kumi"]
 
-# REAPER's extension as it ships: its crate and the release script's check of what a bundle may carry.
+# REAPER's extension as it ships: its crate and the release script's check of what a bundle may carry (with what the
+# DAW list says of the extension).
 [reaper-extension]
-paths = ["daws/reaper/reaper-kumi/**", "scripts/build-native-release.py"]
+paths = ["daws/reaper/reaper-kumi/**", "scripts/build-native-release.py", "scripts/daws.toml"]
 
 # What Kumi builds in as data: the standard Max patchers are held to, and the plug-in formats it reads.
 [data]
@@ -136,6 +137,7 @@ paths = [
   "daws/renoise/com.kumi.Bridge.xrnx/payload/version.lua",
   "scripts/build-native-release.py",
   "scripts/build-migration-release.py",
+  "scripts/daws.toml",
   "scripts/build-hands.py",
   "scripts/release.py",
   "scripts/check-installers.sh",

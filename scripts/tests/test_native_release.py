@@ -26,6 +26,8 @@ VENDOR_SPEC.loader.exec_module(vendor)
 release = vendor.release
 # Windows files carry no exec bits, so a bundle built there marks only .exe files executable.
 EXEC_BITS = os.name != "nt"
+# The two kinds of bridge a bundle carries (scripts/daws.toml): REAPER's extension, a library, and Renoise's tool.
+REAPER, RENOISE = release.DAW_BRIDGES["reaper"], release.DAW_BRIDGES["renoise"]
 
 # Libraries as each system's linker lays them out, cut down to what the release script reads: their exported names
 # and, by format, what REAPER's loader on that system cares about.
@@ -133,7 +135,7 @@ class NativeRelease(unittest.TestCase):
 
     def build(self, out):
         return release.build_release(release.ROOT, self.binaries, out, "x86_64-unknown-linux-gnu", self.source,
-                                     self.builder, "test fixture payload (not a compiled runtime)", reaper_extension=self.extension)
+                                     self.builder, "test fixture payload (not a compiled runtime)", extensions={"reaper": self.extension})
 
     def test_application_and_bridge_versions_match_all_release_inputs(self):
         root = release.ROOT
@@ -158,7 +160,7 @@ class NativeRelease(unittest.TestCase):
         reaper = cargo_version("daws/reaper/reaper-kumi/Cargo.toml")
         self.assertRegex(reaper, r"^\d+\.\d+\.\d+$")
         self.assertEqual(next(p["version"] for p in cargo_lock if p["name"] == "reaper-kumi"), reaper)
-        self.assertEqual(release.renoise_tool(root)[1], re.search(r'return "([^"]+)"', (root / release.RENOISE_TOOL_SOURCE / "payload/version.lua").read_text())[1])
+        self.assertEqual(release.renoise_tool(RENOISE, root)[1], re.search(r'return "([^"]+)"', (root / RENOISE["tool"]["folder"] / "payload/version.lua").read_text())[1])
 
     def helper_source(self):
         source = self.root / "daws/ableton/kumi-daw-ableton/src/hands/KumiHands.swift"
@@ -591,8 +593,8 @@ class NativeRelease(unittest.TestCase):
         self.assertEqual(elf, [{"arch": "arm64", "exports": {"ReaperPluginEntry"}, "glibc": (2, 34)}])
         mac = release.binary_facts(self.library(universal(macho_library(0x01000007), macho_library(exports=("ReaperPluginEntry", "Other")))))
         self.assertEqual([(piece["arch"], piece["exports"], piece["install_name"], piece["signed"]) for piece in mac],
-                         [("x86_64", {"ReaperPluginEntry"}, release.REAPER_INSTALL_NAME, True),
-                          ("arm64", {"ReaperPluginEntry", "Other"}, release.REAPER_INSTALL_NAME, True)])
+                         [("x86_64", {"ReaperPluginEntry"}, release.install_name(REAPER), True),
+                          ("arm64", {"ReaperPluginEntry", "Other"}, release.install_name(REAPER), True)])
         pe = release.binary_facts(self.library(pe_library(imports=("KERNEL32.dll", "VCRUNTIME140.dll"), delayed=("bcrypt.dll",))))
         self.assertEqual(pe, [{"arch": "x86_64", "exports": {"ReaperPluginEntry"}, "imports": {"kernel32.dll", "vcruntime140.dll", "bcrypt.dll"}}])
         for junk in (b"#!/bin/sh\n", b"\x7fELF\x02\x01" + b"\0" * 10, b"MZ" + b"\0" * 62, b"\xca\xfe\xba\xbe\0\0\0\x01"):
@@ -605,7 +607,7 @@ class NativeRelease(unittest.TestCase):
                              ("aarch64-apple-darwin", mac), ("x86_64-apple-darwin", mac),
                              ("x86_64-pc-windows-msvc", pe_library()), ("aarch64-pc-windows-msvc", pe_library())]:
             with self.subTest(target=target):
-                checked = release.check_extension(self.library(data, release.extension_name(target)), target)
+                checked = release.check_extension(REAPER, self.library(data, release.extension_name(REAPER, target)), target)
                 self.assertEqual(checked["archs"], release.extension_archs(target))
         built = "/Users/runner/work/kumi/kumi/target/x86_64-apple-darwin/release/deps/libreaper_kumi.dylib"
         for target, data, said in [
@@ -622,11 +624,11 @@ class NativeRelease(unittest.TestCase):
                 # Windows on Arm gets the x64 build: REAPER's Arm build is ARM64EC, which loads x64 libraries.
                 ("aarch64-pc-windows-msvc", pe_library(machine=0xAA64), "holds arm64, not x86_64")]:
             with self.subTest(said=said), self.assertRaisesRegex(ValueError, re.escape(said)):
-                release.check_extension(self.library(data, release.extension_name(target)), target)
+                release.check_extension(REAPER, self.library(data, release.extension_name(REAPER, target)), target)
         # CI's REAPER job checks its one build of the runner's own architecture.
-        release.check_extension(self.library(macho_library(), "thin.dylib"), "aarch64-apple-darwin", ["arm64"])
-        with self.assertRaisesRegex(ValueError, "no REAPER extension is built for x86_64-unknown-linux-musl"):
-            release.extension_name("x86_64-unknown-linux-musl")
+        release.check_extension(REAPER, self.library(macho_library(), "thin.dylib"), "aarch64-apple-darwin", ["arm64"])
+        with self.assertRaisesRegex(ValueError, "no extension is built for x86_64-unknown-linux-musl"):
+            release.extension_name(REAPER, "x86_64-unknown-linux-musl")
 
     def test_the_extension_is_built_as_it_ships_on_each_system(self):
         calls = []
@@ -634,7 +636,7 @@ class NativeRelease(unittest.TestCase):
             calls.append((command[0], command[1:], (env or {}).get("RUSTFLAGS")))
             if command[0] == "cargo":
                 folder, target = Path(command[command.index("--target-dir") + 1]), command[command.index("--target") + 1]
-                built = folder / target / "ci-release" / release.cargo_library(target)
+                built = folder / target / "ci-release" / release.cargo_library(REAPER, target)
                 built.parent.mkdir(parents=True, exist_ok=True)
                 built.write_bytes(target.encode())
             elif command[0] == "lipo":
@@ -643,8 +645,8 @@ class NativeRelease(unittest.TestCase):
         with patch.object(release.subprocess, "run", side_effect=run), patch.dict(os.environ, {"CARGO_TARGET_DIR": str(target_dir)}):
             os.environ.pop("RUSTFLAGS", None)
             for target in ("x86_64-apple-darwin", "aarch64-pc-windows-msvc", "aarch64-unknown-linux-gnu"):
-                final, commands = release.build_extension(self.root, target, "ci-release", self.root / target)
-                self.assertEqual(final, self.root / target / release.extension_name(target))
+                final, commands = release.build_extension(REAPER, self.root, target, "ci-release", self.root / target)
+                self.assertEqual(final, self.root / target / release.extension_name(REAPER, target))
                 self.assertEqual(len(commands), len(release.extension_builds(target)))
         cargo = lambda target, folder: ("cargo", ["build", "--locked", "--profile", "ci-release", "--target", target, "-p", "reaper-kumi",
                                                   "--target-dir", str(folder)])
@@ -668,8 +670,8 @@ class NativeRelease(unittest.TestCase):
     def test_the_bundle_carries_reapers_extension_and_renoises_tool_where_kumi_installs_them_from(self):
         out = self.root / "release"
         result = self.build(out)
-        tool = release.ROOT / release.RENOISE_TOOL_SOURCE
-        reaper = release.crate_version(release.ROOT, release.REAPER_CRATE)
+        tool = release.ROOT / RENOISE["tool"]["folder"]
+        reaper = release.crate_version(release.ROOT, REAPER["library"]["crate"])
         renoise = re.search(r'return "([^"]+)"', (tool / "payload/version.lua").read_text())[1]
         self.assertEqual((result["reaper"], result["renoise"]), (reaper, renoise))
         with tarfile.open(out / result["bundle"]) as tar:
@@ -703,11 +705,11 @@ class NativeRelease(unittest.TestCase):
         out = self.root / "windows"
         with self.assertRaisesRegex(ValueError, "build it with \\+crt-static"):
             release.build_release(release.ROOT, self.binaries, out, "x86_64-pc-windows-msvc", self.source, self.builder, "fixture",
-                                  reaper_extension=dll)
+                                  extensions={"reaper": dll})
         self.assertEqual(list(out.iterdir()), [])
         dll.write_bytes(pe_library())
         result = release.build_release(release.ROOT, self.binaries, out, "x86_64-pc-windows-msvc", self.source, self.builder, "fixture",
-                                       reaper_extension=dll)
+                                       extensions={"reaper": dll})
         with tarfile.open(out / result["bundle"]) as tar:
             self.assertEqual(tar.extractfile("daws/reaper/reaper_kumi.dll").read(), dll.read_bytes())
             self.assertIn("daw-mcp-server.exe", tar.getnames())
@@ -733,9 +735,9 @@ class NativeRelease(unittest.TestCase):
 
     def test_renoise_tool_ships_only_its_own_files_with_one_version(self):
         root = self.root / "checkout"
-        tool = root / release.RENOISE_TOOL_SOURCE
-        shutil.copytree(release.ROOT / release.RENOISE_TOOL_SOURCE, tool)
-        release.renoise_tool(root)
+        tool = root / RENOISE["tool"]["folder"]
+        shutil.copytree(release.ROOT / RENOISE["tool"]["folder"], tool)
+        release.renoise_tool(RENOISE, root)
         manifest = (tool / "manifest.xml").read_text()
         for extra, said in [("preferences.xml", "preferences.xml isn't one of the tool's own files"),
                             ("bridge-reference.json", "bridge-reference.json isn't one of"),
@@ -743,7 +745,7 @@ class NativeRelease(unittest.TestCase):
             with self.subTest(extra=extra), self.assertRaisesRegex(ValueError, re.escape(said)):
                 (tool / extra).write_text("x")
                 try:
-                    release.renoise_tool(root)
+                    release.renoise_tool(RENOISE, root)
                 finally:
                     (tool / extra).unlink()
         version = re.search(r"<Version>([^<]+)</Version>", manifest)[1]
@@ -753,7 +755,7 @@ class NativeRelease(unittest.TestCase):
             with self.subTest(said=said), self.assertRaisesRegex(ValueError, re.escape(said)):
                 (tool / "manifest.xml").write_text(changed)
                 try:
-                    release.renoise_tool(root)
+                    release.renoise_tool(RENOISE, root)
                 finally:
                     (tool / "manifest.xml").write_text(manifest)
         # Renoise compares the manifest's Version as a number: each later version is a larger one.
@@ -770,7 +772,7 @@ class NativeRelease(unittest.TestCase):
         # Every bundle carries REAPER's extension and THIRD_PARTY_NOTICES.md (see the bundle's test): the notice names the
         # vendored SDK commit and its copyright, and gives its license word for word; the shim that repeats the SDK's
         # declaration names that license too.
-        sdk = release.ROOT / release.REAPER_CRATE / "sdk"
+        sdk = release.ROOT / REAPER["library"]["crate"] / "sdk"
         notices = (release.ROOT / "THIRD_PARTY_NOTICES.md").read_text(encoding="utf-8")
         section = notices.split("\n## REAPER extension SDK (Cockos)", 1)[1].split("\n## ", 1)[0]
         self.assertIn((sdk / "LICENSE").read_text(encoding="utf-8").strip(), section)
@@ -781,9 +783,9 @@ class NativeRelease(unittest.TestCase):
         # Each shim repeats an SDK declaration: each names its copyright and license, and the notice names each. A new
         # shim is added to this list, and so to the notice.
         shims = ("csurf.cpp", "preview.cpp")
-        self.assertEqual(sorted(path.name for path in (release.ROOT / release.REAPER_CRATE / "shim").iterdir()), list(shims))
+        self.assertEqual(sorted(path.name for path in (release.ROOT / REAPER["library"]["crate"] / "shim").iterdir()), list(shims))
         for shim in shims:
-            text = (release.ROOT / release.REAPER_CRATE / "shim" / shim).read_text(encoding="utf-8")
+            text = (release.ROOT / REAPER["library"]["crate"] / "shim" / shim).read_text(encoding="utf-8")
             self.assertIn("../sdk/LICENSE", text, shim)
             self.assertIn("Cockos", text, shim)
             self.assertIn(f"daws/reaper/reaper-kumi/shim/{shim}", section, shim)

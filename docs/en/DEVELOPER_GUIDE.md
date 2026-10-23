@@ -326,7 +326,9 @@ python3 scripts/release.py --go     # the release
   `daws/reaper/reaper-kumi/Cargo.toml` and `Cargo.lock`, and in the tool's
   `payload/version.lua` and `manifest.xml`, and each one's ships-with line moves
   on in the three `KUMI_GUIDE.md`. One the last release didn't have ships at its
-  version, and its line names this release already.
+  version, and its line names this release already. `scripts/daws.toml` lists
+  these bridges for the release and packaging scripts: a DAW added there gets
+  its own flags, heading and ships-with line.
 - **The version** is the next patch; `--minor` or `--version X.Y.Z` choose
   another.
 - **With `--go`** it commits "Kumi X.Y.Z: the changelog, READMEs and versions"

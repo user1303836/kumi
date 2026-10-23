@@ -51,7 +51,8 @@ It's one Cargo workspace. Each DAW is reached through a bridge that runs inside 
 - `crates/kumi-testkit`: what tests share (a dev-dependency only): `workspace_path`, `chunked!`, `fixture_paths!`,
   `in_process!`. It depends on nothing: support that needs Kumi's crates is a macro the test's crate expands.
 - `scripts/`: release and packaging (Python), the isolated test runners, and `dev.py` with `areas.toml` (what a change
-  affects, which CI picks its jobs by). `install.sh` and `install.ps1`: the installers.
+  affects, which CI picks its jobs by). `daws.toml`: the DAWs on Kumi's own bridges, for release and packaging.
+  `install.sh` and `install.ps1`: the installers.
 - `.config/nextest.toml`: CI's test sets (`ci`, `ci-os`, `extended`). `.github/workflows/`: CI.
 - `docs/en`, `docs/ja`, `docs/zh-CN`: user docs. DEVELOPER_GUIDE.md and TESTING.md have the details.
 
