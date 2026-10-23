@@ -8,6 +8,7 @@ pub mod daws;
 pub mod features;
 pub mod learn;
 pub mod learner;
+pub mod map;
 pub mod measure_worker;
 pub mod plan;
 pub mod plugins;
