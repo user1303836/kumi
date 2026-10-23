@@ -1,8 +1,9 @@
 //! Live, the app: which one is open, asking it to quit the way its own menu does (unsaved work makes
 //! it ask to save first), opening it again, and which Live is on this computer at all.
 
-use crate::bridge_setup::{is_live_running_on, Run};
+use crate::bridge_setup::is_live_running_on;
 use kumi_common::abort::Signal;
+use kumi_daw::process::Run;
 use kumi_library::sources::join;
 use kumi_types::system::{self, Env, SystemProgram};
 use regex::Regex;
@@ -128,7 +129,7 @@ pub async fn open_set_file(run: &Run, platform: &str, env: &Env, set: &str) -> b
 pub const MIN_LIVE_MAJOR: u32 = 12;
 
 /// What of Live is on this computer, read from its files without opening it: whether it can take the bridge yet.
-pub use crate::daw::provider::Installed as LiveInstalled;
+use kumi_daw::provider::Installed as LiveInstalled;
 
 /// Which Live is here, from files alone: the Lives installed where their installer puts them, the settings folder
 /// each version makes as it first starts ("Live 12.4.15"), and the User Library the bridge goes in.
@@ -324,8 +325,8 @@ fn bundle_version(plist: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::bridge_setup::Ran;
     use futures::FutureExt;
+    use kumi_daw::process::Ran;
     use std::{cell::RefCell, rc::Rc};
 
     #[test]

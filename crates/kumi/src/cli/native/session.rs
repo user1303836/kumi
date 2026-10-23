@@ -137,21 +137,19 @@ async fn connect_when_live_answers<F, A, O, B>(
     O: FnOnce() -> B,
     B: std::future::Future<Output = bool>,
 {
-    use crate::daw::DawProvider;
+    use kumi_daw::provider::DawProvider;
     let words = crate::daw::ableton::provider::Ableton.watch_words();
     connect_when_daw_answers(answers, live_open, words, controller, emit, watching, told, pace).await
 }
 // What the unit tests below drive: Live's watch words and Live's side of setup.
 #[cfg(test)]
-use crate::{
-    daw::ableton::{
-        bridge_setup,
-        provider::{LIVE_STARTING, NO_LIVE},
-        setup::LiveSide,
-    },
-    tui::app::LiveSetup,
+use crate::daw::ableton::{
+    provider::{LIVE_STARTING, NO_LIVE},
+    setup::LiveSide,
 };
-pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<String>, factory: DawFactory) -> Result<i32, RuntimeError> {
+#[cfg(test)]
+use kumi_daw::setup::DawSetup as LiveSetup;
+pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<String>, answers: Answers) -> Result<i32, RuntimeError> {
     let (inference, bridge_config, bridge_missing, resume, daw) = match config {
         AppConfig::InferenceOnly { inference, bridge_missing, resume, daw } => {
             (inference, None, bridge_missing.unwrap_or(false), resume, daw)
@@ -482,7 +480,7 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
                 env: env.clone(),
                 bridge_config: bridge_config.clone(),
                 project_store: project_store.clone(),
-                factory: factory.clone(),
+                answers: answers.clone(),
             };
             let emit = emit.clone();
             let bundled = bundled.clone();
@@ -623,7 +621,7 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
     // Several DAWs open and none asked for: which one Kumi works with, and how to switch.
     let asked = crate::config::take_daw(&io.args, &io.env).ok().and_then(|(_, asked)| asked);
     let also = if asked.is_none() {
-        let others = crate::daw::also_running(provider.id(), &io.env, &|other| other.running_now());
+        let others = crate::daw::also_running(provider.id(), &io.env, &|other| other.running_now(&crate::daw::processes()));
         crate::daw::also_running_words(provider.id(), &others, &io.env)
     } else {
         None
@@ -1017,7 +1015,7 @@ mod watch_tests {
         let env = Env::from([("KUMI_REMOTE_SCRIPTS_DIR".to_string(), dir.path().join("Remote Scripts").display().to_string())]);
         let side = |given| LiveSide {
             env: env.clone(),
-            run: bridge_setup::default_run(),
+            run: kumi_daw::process::default_run(),
             bridge: Rc::new(RefCell::new(Some("/given/bridge-config.json".into()))),
             given,
             controller: Rc::new(RefCell::new(None)),

@@ -106,3 +106,25 @@ pub async fn step<T, F: Future<Output = T>>(out: Rc<dyn TtyOutput>, env: &HashMa
     spinning.stop();
     result
 }
+
+/// The terminal as a DAW's steps say things on it ([`kumi_daw::io::Out`]): a step working shows with the spinner.
+pub struct Terminal {
+    out: Rc<dyn TtyOutput>,
+    env: HashMap<String, String>,
+}
+
+impl Terminal {
+    pub fn new(out: Rc<dyn TtyOutput>, env: &HashMap<String, String>) -> Self {
+        Self { out, env: env.clone() }
+    }
+}
+
+impl kumi_daw::io::Out for Terminal {
+    fn write(&self, text: &str) {
+        self.out.write(text);
+    }
+    fn working(&self, line: &str, keep: bool) -> kumi_daw::io::Working {
+        let spinning = spin(self.out.clone(), &self.env, line, keep);
+        kumi_daw::io::Working::new(move || spinning.stop())
+    }
+}

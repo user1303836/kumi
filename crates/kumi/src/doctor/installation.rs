@@ -2,16 +2,19 @@
 //! the shell finds `kumi`, whether a newer Kumi is out, free space, and what Live needs from this computer.
 //! Files and the system are read; nothing goes over the network: whether a newer Kumi is out comes from
 //! the daily check's note, and the bridge's ports are tried on this computer (127.0.0.1) only.
-use super::{tilde, Check};
+use super::tilde;
 use crate::{
     config::{kumi_dir, load_settings_file, read_settings},
     install::{app_version, chown_line, has_app, not_yours, startup_files, PATH_MARKER, UPDATE_SPACE},
-    live_app::InstalledLive,
-    process::{repository_dir, AsyncBool},
     update::newer,
 };
 use futures::future::LocalBoxFuture;
 use kumi_common::time::{now_ms, since};
+use kumi_daw::{
+    check::Check,
+    io::{Answers, DawIo},
+    process::repository_dir,
+};
 use kumi_library::sources::{dirname, join};
 use kumi_types::{
     command::KUMI,
@@ -22,20 +25,14 @@ use kumi_types::{
 use serde_json::Value;
 use std::{path::Path, rc::Rc};
 
-/// Who listens on one of this computer's ports: nobody (None), or a program, named when the system says.
-pub type PortOwner = Option<Option<String>>;
-
 /// What the Installation section reads from the system; tests answer it.
 #[derive(Clone, Default)]
 pub struct InstallationIo {
     pub platform: Option<String>,
-    pub lives: Option<Rc<dyn Fn() -> Vec<InstalledLive>>>,
     pub free: Option<Rc<dyn Fn(String) -> LocalBoxFuture<'static, Option<f64>>>>,
-    pub port: Option<Rc<dyn Fn(u16) -> LocalBoxFuture<'static, PortOwner>>>,
-    pub live_running: Option<AsyncBool>,
-    /// Whether Live runs its own Extension Host, which it does with Developer Mode off.
-    pub live_extension_host: Option<AsyncBool>,
     pub now: Option<f64>,
+    /// What each DAW's checks of this computer read beyond the environment (`kumi_daw::io::Answers`): a test's answers.
+    pub answers: Answers,
 }
 
 /// The `kumi` programs on `path`, in the order a shell finds them.
@@ -186,8 +183,9 @@ pub async fn installation_checks(env: &Env, io: &InstallationIo) -> Vec<Check> {
     };
     checks.extend(space_check(free, &home));
     // What each DAW the producer uses needs from this computer.
+    let daw = DawIo { answers: io.answers.clone(), ..DawIo::new(env.clone()) };
     for provider in crate::daw::providers().into_iter().filter(|provider| crate::daw::in_use(*provider, env)) {
-        checks.extend(provider.installation_checks(env, io, &platform).await);
+        checks.extend(provider.installation_checks(&daw, &platform).await);
     }
     checks
 }
@@ -199,16 +197,16 @@ mod tests {
     #[test]
     fn ports_held_by_live_are_fine_and_by_another_program_need_fixing() {
         assert_eq!(ports_check(&[(9765, None), (9766, None)], false).text, "Ports 9765 and 9766 free for Live's bridge");
-        assert_eq!(ports_check(&[(9765, None), (9766, None)], true).status, crate::doctor::CheckStatus::Ok);
+        assert_eq!(ports_check(&[(9765, None), (9766, None)], true).status, kumi_daw::check::CheckStatus::Ok);
         let live = ports_check(&[(9765, Some(Some("Live".into()))), (9766, None)], true);
         assert_eq!(live, Check::ok("Live's bridge has port 9765 (Live is open)"));
         let windows =
             ports_check(&[(9765, Some(Some("Ableton Live 12 Suite".into()))), (9766, Some(Some("Ableton Live 12 Suite".into())))], true);
         assert_eq!(windows.text, "Live's bridge has ports 9765 and 9766 (Live is open)");
         // Unnamed while Live runs: Live's. Unnamed with Live closed: another program's.
-        assert_eq!(ports_check(&[(9765, Some(None))], true).status, crate::doctor::CheckStatus::Ok);
+        assert_eq!(ports_check(&[(9765, Some(None))], true).status, kumi_daw::check::CheckStatus::Ok);
         let unnamed = ports_check(&[(9765, Some(None))], false);
-        assert_eq!(unnamed.status, crate::doctor::CheckStatus::Fix);
+        assert_eq!(unnamed.status, kumi_daw::check::CheckStatus::Fix);
         assert!(unnamed.next.unwrap().starts_with("Quit it, then restart Live"));
         let other = ports_check(&[(9765, Some(Some("Live".into()))), (9766, Some(Some("node".into())))], true);
         assert_eq!(other, Check::fix("node holds port 9766, which Live's bridge needs", Some("Quit node, then restart Live".into())));

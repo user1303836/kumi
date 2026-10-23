@@ -17,7 +17,7 @@ use daw_mcp_server::{
 use futures::FutureExt;
 use kumi::{
     cli::{run, CliIo},
-    daw::{DawFactory, OwnHostFactory},
+    daw::{ableton::AbletonFactory, own::OwnHosts},
     input::{ByteListener, TerminalInput},
     tui::tty::TtyOutput,
 };
@@ -154,7 +154,7 @@ struct AppLab {
     _home: tempfile::TempDir,
     simulator: Rc<Simulator>,
     env: Env,
-    factory: DawFactory,
+    factory: kumi_daw::io::Answers,
     daw: DawId,
 }
 impl AppLab {
@@ -197,17 +197,16 @@ impl AppLab {
             ("TERM".into(), "xterm-256color".into()),
         ]);
         let host_home = kumi_home.clone();
-        let own_host: OwnHostFactory = Rc::new(move |_| {
+        let own_host = OwnHosts(Rc::new(move |_| {
             let endpoint = Rc::new(InProcess { host: Arc::new(Host::new(bridge, &host_home)), id: Cell::new(0) });
             Rc::new(move |_| {
                 let endpoint = endpoint.clone();
                 async move { Ok(endpoint as Rc<dyn McpEndpoint>) }.boxed_local()
             })
-        });
-        let factory = DawFactory {
-            ableton: Rc::new(|_| panic!("a REAPER or Renoise session makes no Ableton integration")),
-            own_host: Some(own_host),
-        };
+        }));
+        let factory = kumi_daw::io::Answers::default()
+            .with(AbletonFactory(Rc::new(|_| panic!("a REAPER or Renoise session makes no Ableton integration"))))
+            .with(own_host);
         AppLab { _home: home, simulator, env, factory, daw }
     }
     /// Kumi started as main() starts it: the full screen in a terminal (`tty`), else plain lines.

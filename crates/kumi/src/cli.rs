@@ -4,5 +4,5 @@ pub use native::{help, main_with, run, AbletonFactory, CliIo};
 
 /// Run the terminal application with each DAW's production integration.
 pub fn main() -> i32 {
-    main_with(crate::daw::DawFactory::native())
+    main_with(kumi_daw::io::Answers::default())
 }

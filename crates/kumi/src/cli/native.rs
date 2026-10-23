@@ -4,7 +4,6 @@ mod shutdown;
 pub use crate::daw::ableton::AbletonFactory;
 use crate::{
     config::*,
-    daw::{BridgeCommand, DawFactory, DawSession, WatchWords},
     doctor::{self, DoctorIo},
     export::{self, ExportRequest},
     input::TerminalInput,
@@ -22,6 +21,11 @@ use kumi_ai::providers::ProviderId;
 use kumi_common::{
     abort::{self, Signal},
     js::{number, string},
+};
+use kumi_daw::{
+    check::{Bundled, Probe, Probes},
+    io::{Answers, DawIo},
+    provider::{BridgeCommand, DawSession, WatchWords},
 };
 use kumi_types::{errors::RuntimeError, system::Env, version::KUMI_VERSION};
 use std::{
@@ -172,21 +176,21 @@ fn installed_io(io: &CliIo) -> InstalledIo {
     out.input = Some(io.input.clone());
     out
 }
-fn doctor_io(io: &CliIo, factory: DawFactory) -> DoctorIo {
+/// The doctor, looking through each DAW's bridge with its own probe (and this run's stand-ins), and comparing each
+/// DAW's installed bridge with the one this Kumi brings: each DAW's checks ask for their own DAW's, whichever DAW the
+/// doctor speaks for.
+fn doctor_io(io: &CliIo, answers: &Answers) -> DoctorIo {
     let mut doctor = DoctorIo::new(io.out.clone(), io.env.clone());
-    // Live's checks probe Live and judge its bridge by Live's version, whichever DAW the doctor speaks for.
-    let live = crate::daw::provider(kumi_types::daw::DawId::Ableton).expect("Live is registered");
-    doctor.bundled_bridge_version = live.bundled_bridge_version();
-    let env = io.env.clone();
-    let (own_factory, own_env) = (factory.clone(), env.clone());
-    doctor.probe_live = Some(Rc::new(move |config| {
-        let probe = live.probe(config, &factory, &env);
-        async move { Ok(probe.await) }.boxed_local()
+    let (env, stand_ins) = (io.env.clone(), answers.clone());
+    let probes = Probes(Rc::new(move |daw, config| match crate::daw::provider(daw) {
+        Some(provider) => {
+            let probe = provider.probe(config, &stand_ins, &env);
+            async move { Ok(probe.await) }.boxed_local()
+        }
+        None => async { Ok(Probe::default()) }.boxed_local(),
     }));
-    doctor.probe_own = Some(Rc::new(move |daw| match crate::daw::provider(daw) {
-        Some(own) => own.probe(String::new(), &own_factory, &own_env),
-        None => async { crate::doctor::LiveProbe::default() }.boxed_local(),
-    }));
+    let bundled = Bundled(Rc::new(|daw| crate::daw::provider(daw).and_then(|provider| provider.bundled_bridge_version())));
+    doctor.answers = answers.clone().with(probes).with(bundled);
     doctor
 }
 async fn login_with(config: &AppConfig, io: &CliIo) -> Result<(), RuntimeError> {
@@ -204,8 +208,8 @@ async fn login_with(config: &AppConfig, io: &CliIo) -> Result<(), RuntimeError> 
     )
     .await
 }
-pub async fn run(io: CliIo, factory: impl Into<DawFactory>) -> i32 {
-    let factory = factory.into();
+pub async fn run(io: CliIo, answers: impl Into<Answers>) -> i32 {
+    let answers = answers.into();
     io.exit_after_reopen.set(false);
     let mut secrets: Vec<String> =
         crate::report::KEY_VARIABLES.into_iter().filter_map(|s| io.env.get(s).filter(|s| !s.is_empty()).cloned()).collect();
@@ -216,7 +220,7 @@ pub async fn run(io: CliIo, factory: impl Into<DawFactory>) -> i32 {
             }
         }
     }
-    match dispatch(&io, factory, &mut secrets).await {
+    match dispatch(&io, answers, &mut secrets).await {
         Ok(code) => code,
         Err(error) => {
             io.err.write(&format!("Kumi: {}\n", safe_error_message(Some(&error.message()), &secrets)));
@@ -224,7 +228,7 @@ pub async fn run(io: CliIo, factory: impl Into<DawFactory>) -> i32 {
         }
     }
 }
-async fn dispatch(io: &CliIo, factory: DawFactory, secrets: &mut Vec<String>) -> Result<i32, RuntimeError> {
+async fn dispatch(io: &CliIo, answers: Answers, secrets: &mut Vec<String>) -> Result<i32, RuntimeError> {
     let config = load_config(&io.args, &io.env)?;
     match &config {
         AppConfig::Help => {
@@ -238,13 +242,13 @@ async fn dispatch(io: &CliIo, factory: DawFactory, secrets: &mut Vec<String>) ->
         AppConfig::Doctor { json, daw } => {
             // The doctor speaks in the words of the DAW asked for, else the one this producer works with (Live's, for Live).
             crate::daw::work_with(crate::daw::chosen(*daw, &io.env).0.id());
-            let mut doctor = doctor_io(io, factory);
+            let mut doctor = doctor_io(io, &answers);
             doctor.json = *json;
             doctor::run_doctor(doctor).await
         }
         AppConfig::Report { daw } => {
             crate::daw::work_with(crate::daw::chosen(*daw, &io.env).0.id());
-            write_report(ReportIo::new(doctor_io(io, factory))).await
+            write_report(ReportIo::new(doctor_io(io, &answers))).await
         }
         AppConfig::Export { conversation, format, out, full, raw } => {
             let format = match format.as_str() {
@@ -332,9 +336,16 @@ async fn dispatch(io: &CliIo, factory: DawFactory, secrets: &mut Vec<String>) ->
                 .filter(|s| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit()))
                 .and_then(|s| s.parse::<u64>().ok())
                 .map(|n| n.saturating_mul(1000));
-            let command = BridgeCommand { input: Some(io.input.clone()), yes: *yes, allow_dirty: *allow_dirty, wait_ms };
+            let command = BridgeCommand { yes: *yes, allow_dirty: *allow_dirty, wait_ms };
             let provider = daw.and_then(crate::daw::provider).unwrap_or_else(crate::daw::current);
-            provider.setup_bridge(io.out.clone(), &io.env, command).await
+            let daw = DawIo {
+                out: Rc::new(crate::spinner::Terminal::new(io.out.clone(), &io.env)),
+                ask: Rc::new(crate::process::TerminalAsk { input: Some(io.input.clone()), out: io.out.clone(), confirm: None }),
+                env: io.env.clone(),
+                run: kumi_daw::process::default_run(),
+                answers: answers.clone(),
+            };
+            provider.setup_bridge(daw, command).await
         }
         AppConfig::Auth { .. } => {
             login::auth_status(&config, AuthIo { out: io.out.clone(), env: io.env.clone(), fetch: None }).await?;
@@ -404,12 +415,12 @@ async fn dispatch(io: &CliIo, factory: DawFactory, secrets: &mut Vec<String>) ->
         }
         AppConfig::InferenceOnly { .. } | AppConfig::Live { .. } => {
             if io.installed() && matches!(config, AppConfig::Live { .. }) {
-                let installed = installed_io(io);
+                let installed = installed_io(io).daw();
                 for provider in crate::daw::providers() {
                     provider.finish_transition(&installed).await;
                 }
             }
-            session::run_session(io.clone(), config, secrets, factory).await
+            session::run_session(io.clone(), config, secrets, answers).await
         }
     }
 }
@@ -456,7 +467,7 @@ async fn reopen(io: &CliIo) -> Result<i32, RuntimeError> {
         return Ok(reopen(io.args.clone()).await);
     }
     let exe = if io.installed() {
-        std::path::Path::new(&install::kumi_home(&io.env)).join("app").join(crate::process::executable_name("kumi"))
+        std::path::Path::new(&install::kumi_home(&io.env)).join("app").join(kumi_daw::process::executable_name("kumi"))
     } else {
         std::env::current_exe().map_err(|e| RuntimeError::plain(e.to_string()))?
     };
@@ -474,9 +485,10 @@ async fn reopen(io: &CliIo) -> Result<i32, RuntimeError> {
     drop(guard);
     Ok(code)
 }
-/// Bind the command loop to the process after supplying each DAW's native factory.
-pub fn main_with(factory: impl Into<DawFactory>) -> i32 {
-    let factory = factory.into();
+/// Bind the command loop to the process, with answers for what each DAW would otherwise find out for itself (none, for
+/// Kumi itself: each DAW's own integration).
+pub fn main_with(answers: impl Into<Answers>) -> i32 {
+    let answers = answers.into();
     // Before anything is written: Windows consoles need VT processing for Kumi's escape sequences.
     let _vt = crate::tui::tty::VtOutput::enable();
     let runtime = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
@@ -502,7 +514,7 @@ pub fn main_with(factory: impl Into<DawFactory>) -> i32 {
     let err = io.err.clone();
     let explicit_exit = io.exit_after_reopen.clone();
     let local = tokio::task::LocalSet::new();
-    let code = local.block_on(&runtime, run(io, factory));
+    let code = local.block_on(&runtime, run(io, answers));
     shutdown::finish(runtime, local, code, explicit_exit.get(), err.as_ref())
 }
 
@@ -551,19 +563,17 @@ mod doctor_io_tests {
         crate::daw::work_with(DawId::Reaper);
         let probed = Rc::new(Cell::new(0));
         let count = probed.clone();
-        let factory = DawFactory {
-            ableton: Rc::new(move |options| {
-                count.set(count.get() + 1);
-                kumi_daw_ableton::create_ableton_integration(options)
-            }),
-            own_host: None,
-        };
+        let factory = AbletonFactory(Rc::new(move |options| {
+            count.set(count.get() + 1);
+            kumi_daw_ableton::create_ableton_integration(options)
+        }));
         let io = CliIo::new(Rc::new(Silent), Rc::new(Nowhere), Rc::new(Nowhere), Env::new());
-        let doctor = doctor_io(&io, factory);
+        let doctor = doctor_io(&io, &Answers::default().with(factory));
         let live = crate::daw::provider(DawId::Ableton).unwrap();
-        assert_eq!(doctor.bundled_bridge_version, live.bundled_bridge_version());
-        let probe = doctor.probe_live.clone().unwrap();
-        let _ = probe("/nowhere/bridge-config.json".into()).await;
+        let bundled = doctor.answers.get::<Bundled>().unwrap();
+        assert_eq!((bundled.0)(DawId::Ableton), live.bundled_bridge_version());
+        let probe = doctor.answers.get::<Probes>().unwrap();
+        let _ = (probe.0)(DawId::Ableton, "/nowhere/bridge-config.json".into()).await;
         assert_eq!(probed.get(), 1, "Live's probe made Live's integration");
         crate::daw::work_with(DawId::Ableton);
     }
@@ -577,17 +587,15 @@ mod doctor_io_tests {
     async fn probe_own_hosts() {
         let asked = Rc::new(std::cell::RefCell::new(vec![]));
         let seen = asked.clone();
-        let factory = DawFactory {
-            ableton: Rc::new(kumi_daw_ableton::create_ableton_integration),
-            own_host: Some(Rc::new(move |daw| {
-                seen.borrow_mut().push(daw);
-                Rc::new(|_| async { Err(RuntimeError::plain("daw-mcp-server wasn't found")) }.boxed_local())
-            })),
-        };
+        let hosts = crate::daw::own::OwnHosts(Rc::new(move |daw| {
+            seen.borrow_mut().push(daw);
+            Rc::new(|_| async { Err(RuntimeError::plain("daw-mcp-server wasn't found")) }.boxed_local())
+        }));
         let io = CliIo::new(Rc::new(Silent), Rc::new(Nowhere), Rc::new(Nowhere), Env::new());
-        let probe = doctor_io(&io, factory).probe_own.expect("the doctor probes Kumi's own hosts");
+        let doctor = doctor_io(&io, &Answers::default().with(hosts));
+        let probe = doctor.answers.get::<Probes>().expect("the doctor probes Kumi's own hosts").clone();
         for daw in [DawId::Reaper, DawId::Renoise] {
-            let host = probe(daw).await;
+            let host = (probe.0)(daw, String::new()).await.unwrap();
             assert!(!host.started && host.said.as_deref().is_some_and(|said| said.contains("daw-mcp-server wasn't found")), "{host:?}");
         }
         assert_eq!(*asked.borrow(), [DawId::Reaper, DawId::Renoise]);

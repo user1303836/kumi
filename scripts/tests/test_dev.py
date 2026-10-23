@@ -202,10 +202,11 @@ class Check(unittest.TestCase):
         self.assertTrue(any("pwsh" in step and "--profile ci -p" in step for step in self.steps("M\tcrates/store/src/lib.rs", windows=True)))
 
 
-# The layers as Kumi's crates keep them: the app on the DAWs' integrations, the integrations on the agent and daws/own/,
-# the bridges on kumi-common and each other.
+# The layers as Kumi's crates keep them: the app on the DAWs' integrations, the integrations on kumi-daw, the agent and
+# daws/own/, kumi-daw on the agent, the bridges on kumi-common and each other.
 LAYERED = {
-    "kumi": ("crates/kumi", [("kumi-agent", None), ("kumi-daw-reaper", None), ("daw-bridge", None), ("kumi-testkit", "dev")]),
+    "kumi": ("crates/kumi", [("kumi-agent", None), ("kumi-daw", None), ("kumi-daw-reaper", None), ("daw-bridge", None), ("kumi-testkit", "dev")]),
+    "kumi-daw": ("crates/kumi-daw", [("kumi-agent", None), ("kumi-types", None)]),
     "kumi-agent": ("crates/kumi-agent", [("kumi-ai", None), ("kumi-types", None), ("daw-mcp-server", "dev")]),
     "kumi-ai": ("crates/kumi-ai", [("kumi-net", None)]),
     "kumi-web": ("crates/kumi-web", []),
@@ -213,7 +214,7 @@ LAYERED = {
     "kumi-types": ("crates/kumi-types", [("kumi-common", None)]),
     "kumi-common": ("crates/kumi-common", [("kumi-testkit", "dev")]),
     "kumi-testkit": ("crates/kumi-testkit", []),
-    "kumi-daw-own": ("daws/own/kumi-daw-own", [("kumi-agent", None), ("daw-bridge", None)]),
+    "kumi-daw-own": ("daws/own/kumi-daw-own", [("kumi-agent", None), ("kumi-daw", None), ("daw-bridge", None)]),
     "kumi-daw-reaper": ("daws/reaper/kumi-daw-reaper", [("kumi-daw-own", None), ("daw-mcp-server", "dev")]),
     "kumi-daw-renoise": ("daws/renoise/kumi-daw-renoise", [("kumi-daw-own", None)]),
     "reaper-kumi": ("daws/reaper/reaper-kumi", [("daw-bridge", None), ("kumi-testkit", "dev")]),
@@ -234,8 +235,10 @@ class Layers(unittest.TestCase):
         self.assertEqual(self.breaks(kumi_web=[("kumi-ai", None)]), [])
         [refused] = self.breaks(kumi_types=[("kumi-net", None)])
         self.assertIn("kumi-types -> kumi-net: L0 uses L1", refused)
-        # an integration (L4) is above the agent, and below the app
-        self.assertIn("kumi-agent -> kumi-daw-reaper: L3 uses L4", " ".join(self.breaks(kumi_agent=[("kumi-daw-reaper", None)])))
+        # an integration (L5) is above kumi-daw (L4), which is above the agent (L3), and below the app (L6)
+        self.assertIn("kumi-agent -> kumi-daw-reaper: L3 uses L5", " ".join(self.breaks(kumi_agent=[("kumi-daw-reaper", None)])))
+        self.assertIn("kumi-daw -> kumi-daw-reaper: L4 uses L5", " ".join(self.breaks(kumi_daw=[("kumi-daw-reaper", None)])))
+        self.assertIn("kumi-agent -> kumi-daw: L3 uses L4", " ".join(self.breaks(kumi_agent=[("kumi-daw", None)])))
         # a test may use what it likes of the crates
         self.assertEqual(self.breaks(kumi_types=[("kumi-net", "dev")]), [])
 

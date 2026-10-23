@@ -2,14 +2,6 @@
 //! found, installed, checked and taken out through the shared lifecycle (daw-bridge), and the session's integration
 //! through Kumi's host. One provider serves both; each DAW's entry in the DAW table (registry.rs) gives its words, its
 //! integration, and what's its alone about finding the DAW and its bridge.
-use crate::daw::provider::{
-    BridgeCommand, BridgeRollbackStep, BridgeState, DawFactory, DawProvider, DawSession, EnableStep, Installed, RemovedBridge, Toggle,
-    ToggleWords, WatchWords,
-};
-use crate::doctor::{Check, DoctorIo, InstallationIo, LiveProbe};
-use crate::report::LogFiles;
-use crate::tui::app::DawSetup;
-use crate::{install::InstalledIo, process::Run, tui::tty::TtyOutput, update::UpdateIo};
 use async_trait::async_trait;
 use daw_bridge::{
     daw::Daw,
@@ -28,6 +20,15 @@ use kumi_agent::core::{
     view::ViewPresentation,
 };
 use kumi_common::abort::{self, Signal};
+use kumi_daw::{
+    check::{Check, Probe, Probes},
+    io::{step, Answers, DawIo},
+    provider::{
+        BridgeCommand, BridgeRollbackStep, BridgeState, DawProvider, DawSession, EnableStep, Installed, RemovedBridge, Toggle, ToggleWords,
+        WatchWords,
+    },
+    setup::DawSetup,
+};
 use kumi_daw_own::bridge::OwnOptions;
 use kumi_library::daws::LibrarySources;
 use kumi_types::{
@@ -96,8 +97,13 @@ pub struct Own {
     pub app_version: fn(&Own, &Env, &dyn Fn(&Path) -> bool) -> Option<String>,
 }
 
+/// How a DAW whose bridge is Kumi's own reaches Kumi's host, by DAW: a test's host in place of `daw-mcp-server`, as an
+/// answer the session's integration and the doctor's look read.
+#[derive(Clone)]
+pub struct OwnHosts(pub Rc<dyn Fn(DawId) -> kumi_daw_own::bridge::Connect>);
+
 fn kumi_home(env: &Env) -> PathBuf {
-    PathBuf::from(crate::config::kumi_dir(env))
+    PathBuf::from(kumi_daw::io::kumi_home(env))
 }
 
 /// What putting the bridge in did: its version, whether the DAW's copy changed (a DAW that's open loads the new one when
@@ -309,8 +315,8 @@ impl DawProvider for Own {
     fn here(&self, env: &Env) -> bool {
         (self.here)(self, env)
     }
-    fn running_now(&self) -> bool {
-        super::processes().iter().any(|(_, name)| detect::process_is(self.daw, name))
+    fn running_now(&self, processes: &[(u32, String)]) -> bool {
+        processes.iter().any(|(_, name)| detect::process_is(self.daw, name))
     }
     fn app_open(&self, _env: &Env) -> LocalBoxFuture<'static, bool> {
         let daw = self.daw;
@@ -326,27 +332,27 @@ impl DawProvider for Own {
         min_version(self.daw)
     }
     fn integration(&self, context: IntegrationContext, session: &DawSession) -> Rc<dyn Integration> {
-        let connect = session.factory.own_host.as_ref().map(|host| host(self.id));
+        let connect = session.answers.get::<OwnHosts>().map(|hosts| (hosts.0)(self.id));
         (self.create)(OwnOptions { context, kumi_home: kumi_home(&session.env), connect })
     }
-    fn probe(&self, _bridge_config: String, factory: &DawFactory, env: &Env) -> LocalBoxFuture<'static, LiveProbe> {
+    fn probe(&self, _bridge_config: String, answers: &Answers, env: &Env) -> LocalBoxFuture<'static, Probe> {
         let create = self.create;
         let home = kumi_home(env);
-        let connect = factory.own_host.as_ref().map(|host| host(self.id));
+        let connect = answers.get::<OwnHosts>().map(|hosts| (hosts.0)(self.id));
         async move {
             let integration = create(OwnOptions { context: IntegrationContext::new(Rc::new(|_, _| {})), kumi_home: home, connect });
             if let Err(error) = integration.start(abort::timeout(20_000)).await {
                 let _ = integration.close().await;
-                return LiveProbe { started: false, said: Some(error.to_string()), ..Default::default() };
+                return Probe { started: false, said: Some(error.to_string()), ..Default::default() };
             }
             let probe = match integration.observe(abort::timeout(20_000), None).await {
-                Ok(observation) if !observation.tools.is_empty() => LiveProbe {
+                Ok(observation) if !observation.tools.is_empty() => Probe {
                     started: true,
                     connected: Some(true),
                     set: observation.label.split(" — ").nth(1).map(str::to_owned),
                     ..Default::default()
                 },
-                _ => LiveProbe { started: true, connected: Some(false), ..Default::default() },
+                _ => Probe { started: true, connected: Some(false), ..Default::default() },
             };
             let _ = integration.close().await;
             probe
@@ -372,7 +378,7 @@ impl DawProvider for Own {
     ) -> Rc<dyn DawSetup> {
         Rc::new(OwnSetup { own: *self, env: env.clone(), bridge, given, controller })
     }
-    fn doctor_checks<'a>(&'a self, io: &'a DoctorIo, _node: &'a Check) -> LocalBoxFuture<'a, Vec<Check>> {
+    fn doctor_checks<'a>(&'a self, io: &'a DawIo, _node: &'a Check) -> LocalBoxFuture<'a, Vec<Check>> {
         if !self.present(&io.env) {
             return async { vec![] }.boxed_local();
         }
@@ -391,7 +397,7 @@ impl DawProvider for Own {
         }
         let (daw, id, name) = (self.daw, self.id, self.name());
         let env = io.env.clone();
-        let probe = io.probe_own.clone();
+        let probe = io.answers.get::<Probes>().cloned();
         let bundled = self.bundled_source().and_then(|source| {
             let sha256 = daw_bridge::lifecycle::tree_sha256(&source).ok()?;
             Some(Bundled { version: self.bundled_version().unwrap_or_else(|| "dev".into()), sha256 })
@@ -428,7 +434,7 @@ impl DawProvider for Own {
             .unwrap_or_default();
             // Kumi's host, started once: a Kumi missing it (or one that won't run) can't reach the DAW at all.
             if let Some(probe) = probe {
-                let host = probe(id).await;
+                let host = (probe.0)(id, String::new()).await.unwrap_or_default();
                 if !host.started {
                     let said = host.said.map(|said| format!(": {said}")).unwrap_or_default();
                     let repair = if *kumi_types::command::INSTALLED {
@@ -443,48 +449,42 @@ impl DawProvider for Own {
         }
         .boxed_local()
     }
-    fn installation_checks<'a>(&'a self, env: &'a Env, _io: &'a InstallationIo, _platform: &'a str) -> LocalBoxFuture<'a, Vec<Check>> {
-        if !self.present(env) {
+    fn installation_checks<'a>(&'a self, io: &'a DawIo, _platform: &'a str) -> LocalBoxFuture<'a, Vec<Check>> {
+        if !self.present(&io.env) {
             return async { vec![] }.boxed_local();
         }
-        let check = match self.target(env) {
+        let check = match self.target(&io.env) {
             Ok(_) => Check::ok(format!("{} is installed here.", self.name())),
             Err(why) => Check::note(format!("{}: {why}.", self.name()), None),
         };
         async move { vec![check] }.boxed_local()
     }
-    fn extra_checks<'a>(&'a self, _io: &'a DoctorIo) -> LocalBoxFuture<'a, Result<Vec<Check>, RuntimeError>> {
+    fn extra_checks<'a>(&'a self, _io: &'a DawIo) -> LocalBoxFuture<'a, Result<Vec<Check>, RuntimeError>> {
         async { Ok(vec![]) }.boxed_local()
     }
-    fn report_log<'a>(&'a self, env: &'a Env, _home: &'a str, logs: Option<&'a LogFiles>) -> LocalBoxFuture<'a, (String, String)> {
+    fn report_log<'a>(&'a self, io: &'a DawIo, _home: &'a str) -> LocalBoxFuture<'a, (String, String)> {
         let heading = format!("{}'s bridge log", self.name());
-        let folder = BridgePaths::new(&kumi_home(env), self.daw).logs();
+        let folder = BridgePaths::new(&kumi_home(&io.env), self.daw).logs();
         async move {
-            let lines = match logs {
-                Some(logs) => logs().await.unwrap_or_default(),
-                None => {
-                    // Oldest first, so the report reads in the order things happened.
-                    let mut files: Vec<(std::time::SystemTime, PathBuf)> = std::fs::read_dir(&folder)
-                        .into_iter()
-                        .flatten()
-                        .flatten()
-                        .map(|entry| (entry.metadata().and_then(|meta| meta.modified()).unwrap_or(std::time::UNIX_EPOCH), entry.path()))
-                        .collect();
-                    files.sort();
-                    let mut lines = vec![];
-                    for (_, file) in files {
-                        if let Ok(text) = std::fs::read_to_string(&file) {
-                            lines.extend(text.lines().rev().take(200).map(str::to_owned).collect::<Vec<_>>().into_iter().rev());
-                        }
-                    }
-                    lines
+            // Oldest first, so the report reads in the order things happened.
+            let mut files: Vec<(std::time::SystemTime, PathBuf)> = std::fs::read_dir(&folder)
+                .into_iter()
+                .flatten()
+                .flatten()
+                .map(|entry| (entry.metadata().and_then(|meta| meta.modified()).unwrap_or(std::time::UNIX_EPOCH), entry.path()))
+                .collect();
+            files.sort();
+            let mut lines = vec![];
+            for (_, file) in files {
+                if let Ok(text) = std::fs::read_to_string(&file) {
+                    lines.extend(text.lines().rev().take(200).map(str::to_owned).collect::<Vec<_>>().into_iter().rev());
                 }
-            };
+            }
             (heading, lines.join("\n"))
         }
         .boxed_local()
     }
-    fn after_update<'a>(&'a self, io: &'a InstalledIo, _home: &'a str, app: &'a str, back_to: Option<&'a str>) -> LocalBoxFuture<'a, i32> {
+    fn after_update<'a>(&'a self, io: &'a DawIo, _home: &'a str, app: &'a str, back_to: Option<&'a str>) -> LocalBoxFuture<'a, i32> {
         async move {
             if self.receipt(&io.env).is_none() {
                 return 0;
@@ -526,7 +526,7 @@ impl DawProvider for Own {
         }
         .boxed_local()
     }
-    fn after_checkout_update<'a>(&'a self, io: &'a UpdateIo, run: Run, repo: &'a str) -> LocalBoxFuture<'a, i32> {
+    fn after_checkout_update<'a>(&'a self, io: &'a DawIo, repo: &'a str) -> LocalBoxFuture<'a, i32> {
         async move {
             if self.receipt(&io.env).is_none() {
                 return 0;
@@ -548,8 +548,7 @@ impl DawProvider for Own {
                 if release {
                     args.insert(1, "--release".into());
                 }
-                let built =
-                    crate::spinner::step(io.out.clone(), &io.env, building, run("cargo".into(), args, Some(repo.to_string())), true).await;
+                let built = step(io.out.as_ref(), building, (io.run)("cargo".into(), args, Some(repo.to_string())), true).await;
                 if built.code != 0 {
                     let said = if built.stderr.trim().is_empty() { &built.stdout } else { &built.stderr };
                     let why = said.trim().lines().next_back().unwrap_or("").chars().take(300).collect::<String>();
@@ -586,7 +585,7 @@ impl DawProvider for Own {
     }
     fn prepare_rollback<'a>(
         &'a self,
-        _io: &'a InstalledIo,
+        _io: &'a DawIo,
         _home: &'a str,
         _previous: &'a str,
         _version: &'a str,
@@ -595,7 +594,7 @@ impl DawProvider for Own {
         // Nothing moves before the swap: the bridge follows Kumi once it's back (see OwnRollback).
         async move { Ok(Box::new(OwnRollback(*self)) as Box<dyn BridgeRollbackStep>) }.boxed_local()
     }
-    fn finish_transition<'a>(&'a self, io: &'a InstalledIo) -> LocalBoxFuture<'a, ()> {
+    fn finish_transition<'a>(&'a self, io: &'a DawIo) -> LocalBoxFuture<'a, ()> {
         async move {
             // An earlier Kumi's updater (1.19's knows no DAW bridge) put this Kumi in place: the bridge it carries goes
             // in now, as its own kumi update would have put it. Nothing when it's in already, or the producer took it out.
@@ -618,19 +617,14 @@ impl DawProvider for Own {
         }
         .boxed_local()
     }
-    fn setup_bridge(
-        &self,
-        out: Rc<dyn TtyOutput>,
-        env: &Env,
-        command: BridgeCommand,
-    ) -> LocalBoxFuture<'static, Result<i32, RuntimeError>> {
-        let (own, env) = (*self, env.clone());
+    fn setup_bridge(&self, io: DawIo, command: BridgeCommand) -> LocalBoxFuture<'static, Result<i32, RuntimeError>> {
+        let (own, env, out) = (*self, io.env.clone(), io.out.clone());
         async move {
             // Asked before anything is written into the DAW's folder (--yes answers beforehand). Without a place yet,
             // the install below says why.
             if let (false, Ok(target)) = (command.yes, own.target(&env)) {
                 let question = format!("Put {} in {} ({})?", own.bridge, own.name(), target.path().display());
-                if !crate::process::ask_yes_no(command.input.clone(), out.clone(), &question, Some("add --yes")).await {
+                if !io.ask.yes_no(&question, Some("add --yes")).await {
                     out.write(&format!(
                         "Nothing was changed. To put it in later: {} --daw {} bridge\n",
                         *kumi_types::command::KUMI,
@@ -670,7 +664,7 @@ impl DawProvider for Own {
         // The DAW loads its copy from its own folder, not Kumi's.
         false
     }
-    fn remove_bridge<'a>(&'a self, io: &'a InstalledIo, _run: Run) -> LocalBoxFuture<'a, Result<RemovedBridge, RuntimeError>> {
+    fn remove_bridge<'a>(&'a self, io: &'a DawIo) -> LocalBoxFuture<'a, Result<RemovedBridge, RuntimeError>> {
         async move {
             let Some(receipt) = self.receipt(&io.env) else {
                 return Ok(RemovedBridge::None);
@@ -736,7 +730,7 @@ impl BridgeRollbackStep for OwnRollback {
     async fn swap_failed(&self) -> Option<String> {
         None
     }
-    async fn after_swap(&self, io: &InstalledIo, _home: &str, app: &str, version: &str, _native: bool) -> i32 {
+    async fn after_swap(&self, io: &DawIo, _home: &str, app: &str, version: &str, _native: bool) -> i32 {
         let own = &self.0;
         // An earlier Kumi that doesn't know this DAW refuses to start while KUMI_DAW names it (1.19 and before).
         let asked = io.env.get("KUMI_DAW").is_some_and(|daw| daw.eq_ignore_ascii_case(own.id.as_str()));

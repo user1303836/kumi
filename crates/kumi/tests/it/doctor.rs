@@ -2,9 +2,14 @@
 #[path = "../support/live_words.rs"]
 mod live_words;
 use futures::FutureExt;
+use kumi::daw::ableton::answers::{ExtensionHost, Hands, LiveRunning, Lives, NodeVersions, PortOwners};
 use kumi::{doctor::*, live_app::InstalledLive, live_extension::install_extension, tui::tty::TtyOutput};
 use kumi_ai::providers::{local::local_servers, models::ModelInfo};
 use kumi_common::time::now_ms;
+use kumi_daw::{
+    check::{Bundled, Check, CheckStatus, Probe, Probes},
+    io::Answers,
+};
 use kumi_media::voice::VoiceReadiness;
 use kumi_types::{
     command::{KUMI, KUMI_REPAIR},
@@ -81,9 +86,9 @@ impl Setup {
         let mut io = DoctorIo::new(Rc::new(Out::default()), self.env.clone());
         io.node_version = Some("v24.21.0".into());
         io.terminal = Some(TerminalInfo { is_tty: true, columns: Some(120), rows: Some(36) });
-        io.probe_live = Some(Rc::new(|_| {
+        io.answers = io.answers.clone().with(Probes(Rc::new(|_, _| {
             async {
-                Ok(LiveProbe {
+                Ok(Probe {
                     started: true,
                     connected: Some(true),
                     set: Some("Night Drive".into()),
@@ -92,13 +97,13 @@ impl Setup {
                 })
             }
             .boxed_local()
-        }));
-        io.node_version_of = Some(Rc::new(|_| async { Some("v24.1.0".into()) }.boxed_local()));
+        })));
+        io.answers = io.answers.clone().with(NodeVersions(Rc::new(|_| async { Some("v24.1.0".into()) }.boxed_local())));
         io.video_programs = Some(Rc::new(|| {
             async { Ok(VideoPrograms { ffmpeg: Some("/usr/bin/ffmpeg".into()), whisper: Some("/usr/bin/whisper-cli".into()) }) }
                 .boxed_local()
         }));
-        io.hands = Some(Rc::new(|| async { Ok(None) }.boxed_local()));
+        io.answers = io.answers.clone().with(Hands(Rc::new(|| async { Ok(None) }.boxed_local())));
         io.voice = Some(Rc::new(|| async { Ok(ready()) }.boxed_local()));
         io.model_servers = Some(Rc::new(|| async { Ok(vec![]) }.boxed_local()));
         io.installation = quiet_installation();
@@ -109,29 +114,30 @@ impl Setup {
 fn quiet_installation() -> InstallationIo {
     InstallationIo {
         platform: Some("darwin".into()),
-        lives: Some(Rc::new(|| {
-            vec![InstalledLive {
-                app: "/Applications/Ableton Live 12 Suite.app".into(),
-                name: "Ableton Live 12 Suite".into(),
-                version: Some("12.4.15".into()),
-                opened: true,
-            }]
-        })),
         free: Some(Rc::new(|_| async { Some(50e9) }.boxed_local())),
-        port: Some(Rc::new(|_| async { None }.boxed_local())),
-        live_running: Some(Rc::new(|| async { false }.boxed_local())),
-        live_extension_host: Some(Rc::new(|| async { false }.boxed_local())),
         now: Some(now_ms() as f64),
+        answers: Answers::default()
+            .with(Lives(Rc::new(|| {
+                vec![InstalledLive {
+                    app: "/Applications/Ableton Live 12 Suite.app".into(),
+                    name: "Ableton Live 12 Suite".into(),
+                    version: Some("12.4.15".into()),
+                    opened: true,
+                }]
+            })))
+            .with(PortOwners(Rc::new(|_| async { None }.boxed_local())))
+            .with(LiveRunning(Rc::new(|| async { false }.boxed_local())))
+            .with(ExtensionHost(Rc::new(|| async { false }.boxed_local()))),
     }
 }
 fn find<'a>(checks: &'a [Check], text: &str) -> &'a Check {
     checks.iter().find(|c| c.text.contains(text)).unwrap_or_else(|| panic!("No {text:?} in {checks:?}"))
 }
-fn probe(io: &mut DoctorIo, live: LiveProbe) {
-    io.probe_live = Some(Rc::new(move |_| {
+fn probe(io: &mut DoctorIo, live: Probe) {
+    io.answers = io.answers.clone().with(Probes(Rc::new(move |_, _| {
         let live = live.clone();
         async move { Ok(live) }.boxed_local()
-    }));
+    })));
 }
 #[tokio::test(flavor = "current_thread")]
 async fn doctor_says_whats_fine_and_exact_fixes_without_secrets() {
@@ -140,7 +146,7 @@ async fn doctor_says_whats_fine_and_exact_fixes_without_secrets() {
     let mut io = s.io();
     io.out = out.clone();
     io.node_version = Some("v20.11.0".into());
-    io.bundled_bridge_version = Some("1.0.10".into());
+    io.answers = io.answers.clone().with(Bundled(Rc::new(|_| Some("1.0.10".into()))));
     assert_eq!(run_doctor(io.clone()).await.unwrap(), 1);
     let printed = out.0.borrow().clone();
     // An older bridge in Live: the one way Kumi says to connect it, which can restart Live for the producer. Where Live
@@ -171,18 +177,18 @@ async fn doctor_says_whats_fine_and_exact_fixes_without_secrets() {
 async fn doctor_explains_live_bridge_and_terminal_in_plain_words() {
     let s = Setup::new();
     let mut io = s.io();
-    probe(&mut io, LiveProbe { started: true, connected: Some(false), ..Default::default() });
+    probe(&mut io, Probe { started: true, connected: Some(false), ..Default::default() });
     assert_eq!(find(&doctor_checks(&io).await.unwrap(), "Live isn't connected").status, CheckStatus::Fix);
-    probe(&mut io, LiveProbe::default());
+    probe(&mut io, Probe::default());
     assert!(find(&doctor_checks(&io).await.unwrap(), "didn't start").next.as_ref().unwrap().contains(KUMI_REPAIR.as_str()));
-    io.bundled_bridge_version = Some("1.0.9".into());
+    io.answers = io.answers.clone().with(Bundled(Rc::new(|_| Some("1.0.9".into()))));
     let checks = doctor_checks(&io).await.unwrap();
     assert!(find(&checks, "couldn't reach Live").next.as_ref().unwrap().contains("answer it first"));
     assert!(!checks.iter().any(|c| c.text.contains("didn't start")));
     // Live still runs the bridge it loaded before an update (the installed one is current): restart Live, never the
     // Control Surface advice.
     let said = format!("Kumi's bridge didn't start: {}", kumi_common::bridge::ANOTHER_BRIDGE);
-    probe(&mut io, LiveProbe { said: Some(said), ..Default::default() });
+    probe(&mut io, Probe { said: Some(said), ..Default::default() });
     let checks = doctor_checks(&io).await.unwrap();
     let restart = find(&checks, "Live is running another version of Kumi's bridge");
     assert_eq!(restart.status, CheckStatus::Fix);
@@ -246,7 +252,7 @@ async fn doctor_extension_is_installed_matches_the_bridge_and_answers() {
     fs::create_dir_all(s.root.path().join("Ableton")).unwrap();
     install_extension(source.to_str().unwrap(), &s.env["KUMI_LIVE_EXTENSIONS_DIR"]).unwrap();
     assert_eq!(find(&doctor_checks(&io).await.unwrap(), "extension").text, "Live hasn't started Kumi's extension");
-    probe(&mut io, LiveProbe { started: true, connected: Some(false), ..Default::default() });
+    probe(&mut io, Probe { started: true, connected: Some(false), ..Default::default() });
     assert_eq!(find(&doctor_checks(&io).await.unwrap(), "extension").text, "Kumi's extension 1.0.0 is in Live; it starts with Live");
     let data = s.root.path().join("Ableton/Extensions Data/kumi.kumi");
     fs::create_dir_all(&data).unwrap();
@@ -263,7 +269,7 @@ async fn doctor_extension_is_installed_matches_the_bridge_and_answers() {
     );
     extension(&source, "module.exports = { newer: true };\n");
     assert_eq!(find(&doctor_checks(&io).await.unwrap(), "extension").text, "Kumi's extension in Live is from another bridge");
-    probe(&mut io, LiveProbe { started: true, live_version: Some("12.3.2".into()), ..Default::default() });
+    probe(&mut io, Probe { started: true, live_version: Some("12.3.2".into()), ..Default::default() });
     assert!(find(&doctor_checks(&io).await.unwrap(), "extension").text.contains("Live 12.3.2 runs no extensions (12.4 and later do)"));
     server.abort();
 }
@@ -275,13 +281,13 @@ async fn doctor_hands_names_the_permission_and_library_progress() {
         "Kumi can't use Live's own menus until Accessibility is on for this terminal",
         Some("System Settings › Privacy & Security › Accessibility: turn on the app Kumi runs in".into()),
     );
-    io.hands = Some(Rc::new({
+    io.answers = io.answers.clone().with(Hands(Rc::new({
         let off = off.clone();
         move || {
             let off = off.clone();
             async move { Ok(Some(off)) }.boxed_local()
         }
-    }));
+    })));
     assert_eq!(*find(&doctor_checks(&io).await.unwrap(), "own menus"), off);
     assert!(!doctor_checks(&s.io()).await.unwrap().iter().any(|c| c.text.contains("own menus")));
     assert_eq!(find(&doctor_checks(&io).await.unwrap(), "library").text, "Kumi hasn't learned your library yet");
@@ -537,11 +543,11 @@ async fn installation_checks_room_live_its_user_library_and_the_bridges_ports() 
     // Only an older Live, or none (a build machine, say): listed as it is, never a fix (the bridge's check says what to
     // do), and no User Library to look for. The exit code stays.
     let scripts = io.env.remove("KUMI_REMOTE_SCRIPTS_DIR").unwrap();
-    io.installation.lives = Some(Rc::new(move || vec![eleven.clone()]));
+    io.installation.answers = io.installation.answers.clone().with(Lives(Rc::new(move || vec![eleven.clone()])));
     let older = installation(&io).await;
     assert_eq!(find(&older, "Live installed").text, "Live installed: 11.3.21 (Ableton Live 11 Suite)");
     assert!(!older.iter().any(|c| c.text.contains("User Library")), "{older:?}");
-    io.installation.lives = Some(Rc::new(Vec::new));
+    io.installation.answers = io.installation.answers.clone().with(Lives(Rc::new(Vec::new)));
     let none = installation(&io).await;
     assert_eq!(find(&none, "Live isn't installed here").status, CheckStatus::Note);
     assert_eq!(doctor_code(&[Section { title: "Installation".into(), checks: none }]), 0);
@@ -565,7 +571,11 @@ async fn installation_checks_room_live_its_user_library_and_the_bridges_ports() 
     assert!(find(&installation(&io).await, "Remote Scripts folder:").text.ends_with("(KUMI_REMOTE_SCRIPTS_DIR)"));
     // The bridge's ports: free, or another program's.
     assert_eq!(find(&installation(&io).await, "9765").text, "Ports 9765 and 9766 free for Live's bridge");
-    io.installation.port = Some(Rc::new(|port| async move { (port == 9766).then(|| Some("node".into())) }.boxed_local()));
+    io.installation.answers = io
+        .installation
+        .answers
+        .clone()
+        .with(PortOwners(Rc::new(|port| async move { (port == 9766).then(|| Some("node".into())) }.boxed_local())));
     let held = find(&installation(&io).await, "9766").clone();
     assert_eq!(held, Check::fix("node holds port 9766, which Live's bridge needs", Some("Quit node, then restart Live".into())));
 }
@@ -588,9 +598,9 @@ async fn installation_tells_developer_mode_by_who_started_kumis_extension() {
     fs::remove_dir_all(s.config.parent().unwrap().join("live-extension")).unwrap();
     // Live open with Kumi's extension installed but not running: Live runs its own Extension Host only with it off.
     extension(&s.root.path().join("Ableton/Extensions/kumi.kumi"), "module.exports = {};\n");
-    io.installation.live_running = Some(Rc::new(|| async { true }.boxed_local()));
+    io.installation.answers = io.installation.answers.clone().with(LiveRunning(Rc::new(|| async { true }.boxed_local())));
     assert!(mode(&io).await.unwrap().text.starts_with("Live's Developer Mode is on"));
-    io.installation.live_extension_host = Some(Rc::new(|| async { true }.boxed_local()));
+    io.installation.answers = io.installation.answers.clone().with(ExtensionHost(Rc::new(|| async { true }.boxed_local())));
     assert!(mode(&io).await.unwrap().text.starts_with("Live's Developer Mode is off"));
 }
 #[cfg(unix)]
@@ -614,7 +624,10 @@ async fn doctor_json_takes_out_keys_and_counts_only_fixes() {
     let mut io = s.io();
     io.out = out.clone();
     io.json = true;
-    io.hands = Some(Rc::new(|| async { Ok(Some(Check::note("Read sk-fixture-never-printed in a log", None))) }.boxed_local()));
+    io.answers = io
+        .answers
+        .clone()
+        .with(Hands(Rc::new(|| async { Ok(Some(Check::note("Read sk-fixture-never-printed in a log", None))) }.boxed_local())));
     assert_eq!(run_doctor(io.clone()).await.unwrap(), 0);
     let printed = out.0.borrow().clone();
     assert!(!printed.contains("sk-fixture-never-printed") && printed.contains("Read [secret] in a log"), "{printed}");
@@ -625,8 +638,9 @@ async fn doctor_json_takes_out_keys_and_counts_only_fixes() {
     assert_eq!(titles, ["Installation", "Sign-in, Live and the rest"]);
     assert!(value["sections"][0]["checks"][0]["text"].as_str().unwrap().starts_with("Kumi "));
     out.0.borrow_mut().clear();
-    io.hands =
-        Some(Rc::new(|| async { Ok(Some(Check::fix("Kumi can't use Live's menus", Some("Run kumi report".into())))) }.boxed_local()));
+    io.answers = io.answers.clone().with(Hands(Rc::new(|| {
+        async { Ok(Some(Check::fix("Kumi can't use Live's menus", Some("Run kumi report".into())))) }.boxed_local()
+    })));
     assert_eq!(run_doctor(io).await.unwrap(), 1);
     assert_eq!(serde_json::from_str::<serde_json::Value>(&out.0.borrow()).unwrap()["fixes"], 1);
 }
@@ -648,7 +662,7 @@ fn an_older_bridge_is_to_fix_where_live_runs_and_elsewhere_says_only_what_that_s
 }
 #[test]
 fn a_missing_bridge_is_to_fix_only_where_a_live_12_can_take_it() {
-    use kumi::live_app::LiveInstalled;
+    use kumi_daw::provider::Installed as LiveInstalled;
     // Linux: no Live, so nothing to fix, and Live's folders aren't read at all.
     let none = missing_bridge("linux", || unreachable!("no Live folders on Linux"));
     assert_eq!(
@@ -719,11 +733,11 @@ async fn a_reaper_only_doctor_never_speaks_lives_words() {
     io.video_programs = Some(Rc::new(|| {
         async { Ok(VideoPrograms { ffmpeg: Some("/usr/bin/ffmpeg".into()), whisper: Some("/usr/bin/whisper-cli".into()) }) }.boxed_local()
     }));
-    io.hands = Some(Rc::new(|| async { Ok(None) }.boxed_local()));
+    io.answers = io.answers.clone().with(Hands(Rc::new(|| async { Ok(None) }.boxed_local())));
     io.voice = Some(Rc::new(|| async { Ok(ready()) }.boxed_local()));
     io.model_servers = Some(Rc::new(|| async { Ok(vec![]) }.boxed_local()));
     let mut installation = quiet_installation();
-    installation.lives = Some(Rc::new(Vec::new));
+    installation.answers = installation.answers.clone().with(Lives(Rc::new(Vec::new)));
     io.installation = installation;
     let sections = doctor_sections(&io).await.unwrap();
     let text = sections
@@ -792,7 +806,7 @@ async fn a_kumi_daw_kumi_doesnt_know_is_a_fix_the_doctor_names() {
     io.video_programs = Some(Rc::new(|| {
         async { Ok(VideoPrograms { ffmpeg: Some("/usr/bin/ffmpeg".into()), whisper: Some("/usr/bin/whisper-cli".into()) }) }.boxed_local()
     }));
-    io.hands = Some(Rc::new(|| async { Ok(None) }.boxed_local()));
+    io.answers = io.answers.clone().with(Hands(Rc::new(|| async { Ok(None) }.boxed_local())));
     io.voice = Some(Rc::new(|| async { Ok(ready()) }.boxed_local()));
     io.model_servers = Some(Rc::new(|| async { Ok(vec![]) }.boxed_local()));
     io.installation = quiet_installation();

@@ -35,8 +35,8 @@ Script's, the Live extension's and the Renoise tool's tests when their areas cha
 npm or LuaJIT); and the release scripts' and the installers' checks (the latter skipped without shellcheck and pwsh).
 
 `deps` lists each package's layer and what it uses of the workspace; `--check` fails, naming them, on the dependencies
-the layer rules refuse. Crates in crates/ have layers (LAYERS: the app 5, the agent 3, then 2 down to 0), and each DAW's
-integration (daws/<daw>/kumi-daw-<daw>) is 4: a normal dependency points down or stays in its layer. Nothing in crates/
+the layer rules refuse. Crates in crates/ have layers (LAYERS: the app 6, kumi-daw 4, the agent 3, then 2 down to 0), and
+each DAW's integration (daws/<daw>/kumi-daw-<daw>) is 5: a normal dependency points down or stays in its layer. Nothing in crates/
 uses daws/ but the app (its DAWs' integrations, ableton-mcp-server and daw-bridge) and tests, which may reach
 daws/own/. A DAW's crates use no other DAW's, only daws/own/. A bridge (the rest of daws/) uses nothing of Kumi's
 crates but kumi-common. kumi-testkit is a dev-dependency only. A new crate in crates/ needs its layer in LAYERS.
@@ -96,13 +96,15 @@ EXTENDED_ONLY_HEADER = """\
 # keeps them acyclic. Each DAW's integration (daws/<daw>/kumi-daw-<daw>) is a layer of its own, between the app (the
 # composition root, which names every DAW) and the agent; the rest of daws/ is what runs inside or beside a DAW.
 LAYERS = {
-    "kumi": 5,
+    "kumi": 6,
+    # What a DAW's crate gives the app and gets from it: below the DAWs' integrations, above the agent.
+    "kumi-daw": 4,
     "kumi-agent": 3,
     "kumi-listening": 2, "kumi-library": 2, "kumi-web": 2, "kumi-ai": 2,
     "kumi-media": 1, "kumi-net": 1, "kumi-store": 1, "kumi-genexpr": 1,
     "kumi-types": 0, "kumi-common": 0,
 }
-INTEGRATION_LAYER = 4
+INTEGRATION_LAYER = 5
 # What every crate's tests share: a dev-dependency only.
 TEST_SUPPORT = "kumi-testkit"
 # The app's: it installs and checks the bridges (Live's, and Kumi's own through daw-bridge's lifecycle).

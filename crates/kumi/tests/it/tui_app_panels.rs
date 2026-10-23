@@ -1008,10 +1008,10 @@ case!(history_scroll_mouse_keyboard_and_badges, async {
     h.has("└ FX Saturator");
     h.close().await;
 });
-fn willington(on: bool) -> (kumi::willington::WillingtonControl, Rc<RefCell<Vec<bool>>>) {
+fn willington(on: bool) -> (kumi_daw::provider::Toggle, Rc<RefCell<Vec<bool>>>) {
     let on = Rc::new(Cell::new(on));
     let switched = Rc::new(RefCell::new(Vec::new()));
-    let control = kumi::willington::WillingtonControl {
+    let control = kumi_daw::provider::Toggle {
         on: {
             let on = on.clone();
             Rc::new(move || Some(on.get()))

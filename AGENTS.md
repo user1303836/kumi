@@ -6,6 +6,9 @@ It's one Cargo workspace. Each DAW is reached through a bridge that runs inside 
 ## Where things live
 - `crates/kumi`: the app. TUI (`src/tui/`), CLI, install/update/doctor; `src/daw/` wires each DAW in, and its
   `registry` names the DAWs this build integrates (the only place that names them all).
+- `crates/kumi-daw`: what a DAW's crate gives the app and gets from it: `DawProvider` (what the DAW is, its bridge
+  found, installed, checked and taken out), the doctor's `Check`, setup's DAW side, and the small ports a DAW's steps
+  use (`io`: what they say, ask and run, and `Answers`, a test's stand-ins by type). No terminal or UI types.
 - `crates/kumi-agent`: the agent and the DAW-neutral core, and the MCP client (`src/mcp/`).
   - `src/kernel/`: the agent loop. `src/core/`: the DAW-neutral model (HISTORY, plans, sessions, places, FOCUS
     views, and workflows such as jam, layers and stems).
@@ -61,7 +64,8 @@ It's one Cargo workspace. Each DAW is reached through a bridge that runs inside 
 - Release scripts' tests: `python3 -m unittest discover -s scripts/tests -p 'test_*release.py'`
 - What a branch affects, and the CI jobs that test it: `python3 scripts/dev.py affected --base origin/main`
 - The crates' layers (Required CI checks them): `python3 scripts/dev.py deps --check`. A dependency points down: the app,
-  the DAWs' integrations (`daws/<daw>/kumi-daw-<daw>`), the agent, then L2 down to L0 (`LAYERS` in scripts/dev.py).
+  the DAWs' integrations (`daws/<daw>/kumi-daw-<daw>`), kumi-daw, the agent, then L2 down to L0 (`LAYERS` in
+  scripts/dev.py).
 - A branch begun before a move: `python3 scripts/dev.py rebase-moves` (`scripts/moves.toml` lists the moves).
 - Wait for CI: watch the CI run of the commit you pushed. Only "Required CI" (its last job) and "Willington files" are
   required. `gh pr checks --required --watch` can return early: "Required CI" is listed only once the jobs it needs end.

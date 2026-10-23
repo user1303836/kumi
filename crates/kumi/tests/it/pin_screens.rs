@@ -865,9 +865,9 @@ scene!(notice_status, |width, height| {
     finish(h).await
 });
 
-fn willington_off() -> kumi::willington::WillingtonControl {
+fn willington_off() -> kumi_daw::provider::Toggle {
     let on = Rc::new(Cell::new(false));
-    kumi::willington::WillingtonControl {
+    kumi_daw::provider::Toggle {
         on: {
             let on = on.clone();
             Rc::new(move || Some(on.get()))

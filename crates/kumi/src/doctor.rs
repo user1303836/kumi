@@ -13,7 +13,7 @@ use crate::{
     voice::system_language,
 };
 use futures::future::{join_all, LocalBoxFuture};
-pub use installation::{installation_checks, kumi_on_path, InstallationIo, PortOwner};
+pub use installation::{installation_checks, kumi_on_path, InstallationIo};
 use kumi_ai::{
     auth::{
         openai_codex::OPENAI_CODEX,
@@ -33,6 +33,10 @@ use kumi_common::{
     },
     time::{now_ms, since},
 };
+use kumi_daw::{
+    check::{Check, CheckStatus},
+    io::{Answers, DawIo, NoAnswer},
+};
 use kumi_library::{
     learn::LearnPhase,
     sources::{dirname, join},
@@ -44,7 +48,6 @@ use kumi_media::{
 };
 use kumi_types::{
     command::{INSTALLED, KUMI, KUMI_REPAIR},
-    daw::DawId,
     errors::RuntimeError,
     system::{self, Env},
     version::KUMI_VERSION,
@@ -52,56 +55,6 @@ use kumi_types::{
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{fs, path::Path, rc::Rc, time::Duration};
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum CheckStatus {
-    Ok,
-    Note,
-    Fix,
-}
-impl CheckStatus {
-    fn as_str(&self) -> &str {
-        match self {
-            Self::Ok => "ok",
-            Self::Note => "note",
-            Self::Fix => "fix",
-        }
-    }
-}
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Check {
-    pub status: CheckStatus,
-    pub text: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub next: Option<String>,
-}
-impl Check {
-    pub fn ok(text: impl Into<String>) -> Self {
-        Self { status: CheckStatus::Ok, text: text.into(), next: None }
-    }
-    pub fn note(text: impl Into<String>, next: Option<String>) -> Self {
-        Self { status: CheckStatus::Note, text: text.into(), next }
-    }
-    pub fn fix(text: impl Into<String>, next: Option<String>) -> Self {
-        Self { status: CheckStatus::Fix, text: text.into(), next }
-    }
-}
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct LiveProbe {
-    pub started: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub connected: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub live_version: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub set: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub real_live: Option<bool>,
-    /// Why the bridge didn't start, in Kumi's words.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub said: Option<String>,
-}
 #[derive(Debug, Clone, Default)]
 pub struct TerminalInfo {
     pub is_tty: bool,
@@ -121,13 +74,10 @@ pub struct DoctorIo {
     /// Optional legacy Node diagnostic; native installations need no JavaScript runtime.
     pub node_version: Option<String>,
     pub terminal: Option<TerminalInfo>,
-    pub probe_live: Option<Rc<dyn Fn(String) -> LocalBoxFuture<'static, Result<LiveProbe, RuntimeError>>>>,
-    /// Starts Kumi's host for REAPER or Renoise once, as Live's probe starts Live's bridge.
-    pub probe_own: Option<Rc<dyn Fn(DawId) -> LocalBoxFuture<'static, LiveProbe>>>,
-    pub node_version_of: Option<Rc<dyn Fn(String) -> LocalBoxFuture<'static, Option<String>>>>,
-    pub bundled_bridge_version: Option<String>,
+    /// What each DAW's checks read beyond the environment (`kumi_daw::io::Answers`): the app's look through each DAW's
+    /// bridge and the bridge versions this Kumi brings (`kumi_daw::check::{Probes, Bundled}`), or a test's answers.
+    pub answers: Answers,
     pub video_programs: Option<AsyncCheck<VideoPrograms>>,
-    pub hands: Option<AsyncCheck<Option<Check>>>,
     pub model_servers: Option<AsyncCheck<Vec<ServerFinding>>>,
     pub voice: Option<AsyncCheck<VoiceReadiness>>,
     pub installation: InstallationIo,
@@ -141,16 +91,23 @@ impl DoctorIo {
             env,
             node_version: None,
             terminal: None,
-            probe_live: None,
-            probe_own: None,
-            node_version_of: None,
-            bundled_bridge_version: None,
+            answers: Answers::default(),
             video_programs: None,
-            hands: None,
             model_servers: None,
             voice: None,
             installation: InstallationIo::default(),
             json: false,
+        }
+    }
+    /// What the DAWs' checks get: the doctor's output (they say nothing as they go), nobody to ask, the answers.
+    pub fn daw(&self) -> DawIo {
+        let out: Rc<dyn kumi_daw::io::Out> = Rc::new(crate::spinner::Terminal::new(self.out.clone(), &self.env));
+        DawIo {
+            ask: Rc::new(NoAnswer(out.clone())),
+            out,
+            env: self.env.clone(),
+            run: kumi_daw::process::default_run(),
+            answers: self.answers.clone(),
         }
     }
 }
@@ -482,8 +439,9 @@ pub async fn doctor_checks(io: &DoctorIo) -> Result<Vec<Check>, RuntimeError> {
     }
     checks.extend(server_checks(&servers, env, said));
     // Each DAW's bridge and whether Kumi reaches the DAW through it.
+    let daw = io.daw();
     for provider in crate::daw::providers().into_iter().filter(|provider| crate::daw::in_use(*provider, env)) {
-        checks.extend(provider.doctor_checks(io, &node).await);
+        checks.extend(provider.doctor_checks(&daw, &node).await);
     }
     if let Ok(projects) = load_projects_dir(env) {
         checks.push(if access(&projects, false) || access(&dirname(&projects), false) {
@@ -534,7 +492,7 @@ pub async fn doctor_checks(io: &DoctorIo) -> Result<Vec<Check>, RuntimeError> {
     });
     // What each DAW needs of this computer beyond its bridge (Live: Kumi's hands in its menus).
     for provider in crate::daw::providers().into_iter().filter(|provider| crate::daw::in_use(*provider, env)) {
-        checks.extend(provider.extra_checks(io).await?);
+        checks.extend(provider.extra_checks(&daw).await?);
     }
     let voice = if let Some(voice) = &io.voice {
         voice().await.ok()

@@ -5,10 +5,10 @@ use super::{
     live_app,
 };
 use crate::config::find_bridge_config;
-use crate::tui::app::{DawSetup, Installed};
 use async_trait::async_trait;
 use kumi_agent::core::contracts::SessionController;
 use kumi_common::abort::Signal;
+use kumi_daw::{process::Run, provider::Installed, setup::DawSetup};
 use kumi_types::system::Env;
 use std::{
     cell::RefCell,
@@ -19,7 +19,7 @@ use std::{
 /// connecting through the bridge once it's in place.
 pub(crate) struct LiveSide {
     pub(crate) env: Env,
-    pub(crate) run: bridge_setup::Run,
+    pub(crate) run: Run,
     /// The bridge configuration the session's integration starts from, and whether it was given
     /// (`--bridge-config`), so the one put in place doesn't replace it.
     pub(crate) bridge: Rc<RefCell<Option<String>>>,

@@ -26,6 +26,7 @@ kumi-ai.workspace = true
 kumi-library.workspace = true
 kumi-listening.workspace = true
 kumi-agent.workspace = true
+kumi-daw.workspace = true
 kumi-daw-ableton.workspace = true
 kumi-daw-reaper.workspace = true
 kumi-daw-renoise.workspace = true

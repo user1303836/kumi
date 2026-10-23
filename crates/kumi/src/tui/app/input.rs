@@ -983,7 +983,7 @@ impl TuiApp {
         self.0.state.borrow_mut().editor.clear();
     }
     /// /willington, with whether the bindings are on, while the bridge in Live carries Willington.
-    fn willington(&self) -> Option<(crate::daw::Toggle, bool)> {
+    fn willington(&self) -> Option<(kumi_daw::provider::Toggle, bool)> {
         let willington = self.0.options.willington.clone()?;
         let on = (willington.on)()?;
         Some((willington, on))

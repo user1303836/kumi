@@ -1,10 +1,10 @@
 //! `kumi bridge`: installs and updates the native bridge.
-pub use crate::process::{
-    ask_yes_no, copy_tree, default_run, executable_dir, executable_name, repository_dir, run_program, AsyncBool, Confirm, Ran, Run,
-};
-use crate::{input::TerminalInput, tui::tty::TtyOutput};
 use futures::{future::LocalBoxFuture, FutureExt};
-use kumi_common::{abort::Signal, js::string::trim};
+use kumi_common::js::string::trim;
+use kumi_daw::{
+    io::{step, Ask, Kept as Said, NoAnswer, Out},
+    process::{copy_tree, default_run, executable_dir, executable_name, repository_dir, AsyncBool, Ran, Run},
+};
 use kumi_types::system::{self, Env, SystemProgram};
 use serde_json::Value;
 use std::{rc::Rc, time::Duration};
@@ -57,7 +57,6 @@ use crate::{
     config::{find_bridge_config, kumi_dir, remote_scripts_dir},
     doctor::read_bridge_server,
     live_extension::{extension_source, install_extension, live_extensions_dir, remove_former_extension},
-    spinner::{spin, step},
 };
 use kumi_common::{js::string::head, time::now_ms};
 use kumi_daw_ableton::ears::device::{install_ears, EARS_NAME};
@@ -70,34 +69,33 @@ use sha2::{Digest, Sha256};
 use std::{fs, path::Path};
 #[derive(Clone)]
 pub struct BridgeSetupIo {
-    pub out: Rc<dyn TtyOutput>,
+    pub out: Rc<dyn Out>,
     pub env: Env,
-    pub input: Option<Rc<dyn TerminalInput>>,
+    /// How its questions are asked: with nobody to answer, each is said, with how to answer it beforehand (--yes).
+    pub ask: Rc<dyn Ask>,
     pub yes: bool,
     pub allow_dirty: bool,
     pub wait_ms: Option<u64>,
     pub run: Option<Run>,
     pub live_running: Option<AsyncBool>,
     pub remote_script_answers: Option<Rc<dyn Fn(String) -> LocalBoxFuture<'static, bool>>>,
-    pub confirm: Option<Confirm>,
     pub sleep: Option<Rc<dyn Fn(u64) -> LocalBoxFuture<'static, ()>>>,
     pub bridge_dir: Option<String>,
     pub home: Option<String>,
     pub prepared: Option<String>,
 }
 impl BridgeSetupIo {
-    pub fn new(out: Rc<dyn TtyOutput>, env: Env) -> Self {
+    pub fn new(out: Rc<dyn Out>, env: Env) -> Self {
         Self {
+            ask: Rc::new(NoAnswer(out.clone())),
             out,
             env,
-            input: None,
             yes: false,
             allow_dirty: false,
             wait_ms: None,
             run: None,
             live_running: None,
             remote_script_answers: None,
-            confirm: None,
             sleep: None,
             bridge_dir: None,
             home: None,
@@ -106,7 +104,7 @@ impl BridgeSetupIo {
     }
     /// For `install_quietly`, which keeps what's said to itself.
     pub fn quiet(env: Env) -> Self {
-        Self::new(Rc::new(Captured::default()), env)
+        Self::new(Rc::new(Said::default()), env)
     }
 }
 fn error(e: impl std::fmt::Display) -> RuntimeError {
@@ -199,7 +197,7 @@ fn place_extension(io: &BridgeSetupIo, roots: &[String], live_open: bool) {
         _ => {}
     }
 }
-async fn place_ears(out: &dyn TtyOutput, scripts: &str) {
+async fn place_ears(out: &dyn Out, scripts: &str) {
     let library = dirname(scripts);
     if Path::new(scripts).file_name().is_none_or(|n| n != "Remote Scripts") || !Path::new(&library).exists() {
         return;
@@ -210,40 +208,9 @@ async fn place_ears(out: &dyn TtyOutput, scripts: &str) {
         }
     }
 }
-struct StopOnKey {
-    signal: Signal,
-    input: Option<Rc<dyn TerminalInput>>,
-}
-impl StopOnKey {
-    fn new(input: Option<Rc<dyn TerminalInput>>) -> Self {
-        let signal = Signal::new();
-        let input = input.filter(|i| i.is_tty());
-        if let Some(input) = &input {
-            let _ = input.set_raw_mode(true);
-            input.resume(Rc::new({
-                let signal = signal.clone();
-                move |chunk| {
-                    if chunk.iter().any(|b| matches!(b, 3 | 27 | b'\r' | b'\n')) {
-                        signal.cancel();
-                    }
-                }
-            }));
-        }
-        Self { signal, input }
-    }
-}
-impl Drop for StopOnKey {
-    fn drop(&mut self) {
-        if let Some(input) = &self.input {
-            let _ = input.set_raw_mode(false);
-            input.pause();
-        }
-    }
-}
 async fn live_open(io: &BridgeSetupIo, run: Run) -> bool {
     step(
-        io.out.clone(),
-        &io.env,
+        io.out.as_ref(),
         "Checking whether Live is open…",
         async {
             if let Some(live) = &io.live_running {
@@ -420,31 +387,13 @@ impl Drop for Unfinished {
         }
     }
 }
-/// What `setup_bridge` says, kept for the in-app setup to show what went wrong.
-#[derive(Default)]
-struct Captured(std::cell::RefCell<String>);
-impl TtyOutput for Captured {
-    fn is_tty(&self) -> bool {
-        false
-    }
-    fn columns(&self) -> Option<i32> {
-        None
-    }
-    fn rows(&self) -> Option<i32> {
-        None
-    }
-    fn write(&self, data: &str) {
-        self.0.borrow_mut().push_str(data);
-    }
-}
-
 /// The bridge put in place from Kumi's own setup, with Live closed: nothing printed, no question asked
 /// and no wait for Live, which the setup opens itself. The bridge's version, or what went wrong in a
 /// sentence; Live found open (it opened again) is the setup's to fix, so it says so.
 pub async fn install_quietly(mut io: BridgeSetupIo) -> Result<String, String> {
-    let said = Rc::new(Captured::default());
+    let said = Rc::new(Said::default());
     io.out = said.clone();
-    io.input = None;
+    io.ask = Rc::new(NoAnswer(said.clone()));
     io.yes = true;
     io.wait_ms = Some(0);
     // Each look for Live is noted: a refusal right after one that found it open is Live's.
@@ -474,7 +423,7 @@ pub async fn install_quietly(mut io: BridgeSetupIo) -> Result<String, String> {
         Ok(0) => Ok(version.unwrap_or_default()),
         Ok(_) if open.get() => Err("Live is open again: quit it, then Try again.".into()),
         Ok(_) => {
-            let said = said.0.borrow();
+            let said = said.text();
             Err(said.lines().map(trim).rfind(|line| !line.is_empty()).unwrap_or("The bridge didn't go in place.").to_string())
         }
         Err(error) => Err(error.message()),
@@ -552,19 +501,7 @@ pub async fn setup_bridge(io: BridgeSetupIo) -> Result<i32, RuntimeError> {
             say(&format!("Live is open. To put back {bundled}, save your work, quit Live, then run this again: {} bridge", *KUMI));
             return Ok(1);
         }
-        if !io.yes
-            && !(if let Some(confirm) = &io.confirm {
-                confirm("Is Live closed, with your work saved?".into()).await
-            } else {
-                ask_yes_no(
-                    io.input.clone(),
-                    io.out.clone(),
-                    "Is Live closed, with your work saved?",
-                    (!after_update).then_some("add --yes"),
-                )
-                .await
-            })
-        {
+        if !io.yes && !io.ask.yes_no("Is Live closed, with your work saved?", (!after_update).then_some("add --yes")).await {
             if after_update {
                 return later("to put back its own, quit Live");
             }
@@ -587,9 +524,7 @@ pub async fn setup_bridge(io: BridgeSetupIo) -> Result<i32, RuntimeError> {
             kept.clone(),
             run.clone(),
         );
-        if let Err(reason) =
-            step(io.out.clone(), &io.env, "Putting back Live's Remote Script and the bridge…", rollback.apply(), true).await
-        {
+        if let Err(reason) = step(io.out.as_ref(), "Putting back Live's Remote Script and the bridge…", rollback.apply(), true).await {
             say(&format!("The bridge's rollback stopped, and put back what was there: {}", reason.message()));
             return Ok(1);
         }
@@ -640,19 +575,12 @@ pub async fn setup_bridge(io: BridgeSetupIo) -> Result<i32, RuntimeError> {
         say(&format!("Live is open. Save your work, quit Live, then run this again: {} bridge", *KUMI));
         return Ok(1);
     }
-    if !io.yes
-        && !(if let Some(confirm) = &io.confirm {
-            confirm("Is Live closed, with your work saved?".into()).await
-        } else {
-            ask_yes_no(io.input.clone(), io.out.clone(), "Is Live closed, with your work saved?", (!after_update).then_some("add --yes"))
-                .await
-        })
-    {
+    if !io.yes && !io.ask.yes_no("Is Live closed, with your work saved?", (!after_update).then_some("add --yes")).await {
         if after_update {
             return later("");
         }
         // Asked with nobody to answer (no terminal), the question has said how: --yes.
-        let nobody = io.confirm.is_none() && !io.input.as_ref().is_some_and(|input| input.is_tty());
+        let nobody = !io.ask.answers();
         say(&if nobody { "Nothing was changed.".into() } else { format!("Nothing was changed. Quit Live, then run: {} bridge", *KUMI) });
         return Ok(1);
     }
@@ -682,8 +610,7 @@ pub async fn setup_bridge(io: BridgeSetupIo) -> Result<i32, RuntimeError> {
     if let Some(ready) = ready {
         artifact = join(&folder, &ready.artifact);
         let copied = step(
-            io.out.clone(),
-            &io.env,
+            io.out.as_ref(),
             "Copying the bridge…",
             async {
                 tokio::fs::copy(join(&prepared, &ready.artifact), &artifact).await.map_err(error)?;
@@ -704,8 +631,7 @@ pub async fn setup_bridge(io: BridgeSetupIo) -> Result<i32, RuntimeError> {
     } else {
         let producer = join(&repository_dir(), "scripts/build-native-release.py");
         let built = step(
-            io.out.clone(),
-            &io.env,
+            io.out.as_ref(),
             "Preparing the bridge…",
             run(
                 if cfg!(windows) { "python".into() } else { "python3".into() },
@@ -762,8 +688,7 @@ pub async fn setup_bridge(io: BridgeSetupIo) -> Result<i32, RuntimeError> {
     };
     let action = if config.is_some() { "upgrade" } else { "install" };
     let artifact_args = vec!["--artifact".into(), artifact, "--artifact-sha256".into(), sha];
-    let plan =
-        lifecycle_answer(step(io.out.clone(), &io.env, "Checking what changes…", lifecycle(action, artifact_args.clone()), false).await);
+    let plan = lifecycle_answer(step(io.out.as_ref(), "Checking what changes…", lifecycle(action, artifact_args.clone()), false).await);
     if let Err(reason) = plan {
         say(&format!("The bridge's installer refused: {reason}"));
         if reason.to_ascii_lowercase().contains("dirty") {
@@ -780,8 +705,7 @@ pub async fn setup_bridge(io: BridgeSetupIo) -> Result<i32, RuntimeError> {
     apply_args.extend(["--apply".into(), "--confirm-live-stopped".into()]);
     let applied = lifecycle_answer(
         step(
-            io.out.clone(),
-            &io.env,
+            io.out.as_ref(),
             if action == "upgrade" {
                 "Updating Live's Remote Script and the bridge…"
             } else {
@@ -823,8 +747,8 @@ async fn wait_for_live(
     if wait_ms == 0 {
         return 0;
     }
-    let stop = StopOnKey::new(io.input.clone());
-    let waiting = spin(io.out.clone(), &io.env, "Waiting for Live… (Enter or Ctrl-C stops waiting; nothing else depends on it)", true);
+    let stop = io.ask.stop_key();
+    let waiting = io.out.working("Waiting for Live… (Enter or Ctrl-C stops waiting; nothing else depends on it)", true);
     let mut connected = false;
     let attempts = wait_ms.div_ceil(2000).max(1);
     for attempt in 0..attempts {

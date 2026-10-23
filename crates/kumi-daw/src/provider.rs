@@ -1,6 +1,10 @@
 //! What the app needs of a DAW it works with: what it is (its profile, how its tools and focus show, what it tells the
 //! library), finding Kumi's bridge for it, making the session's integration with the app's neutral context, watching
-//! for the DAW to answer, and chatting without it in its words.
+//! for the DAW to answer, and chatting without it in its words. What a DAW says back is data (words, setup's step, the
+//! doctor's checks); its install, update, rollback and removal steps run through the app's ports ([`DawIo`]).
+use crate::check::{Check, Probe};
+use crate::io::{Answers, DawIo};
+use crate::setup::DawSetup;
 use futures::future::LocalBoxFuture;
 use kumi_agent::{
     core::{
@@ -14,46 +18,13 @@ use kumi_agent::{
 use kumi_library::daws::LibrarySources;
 use kumi_types::{
     daw::{DawId, DawProfile},
+    errors::RuntimeError,
     system::Env,
 };
 use std::{
     cell::RefCell,
     rc::{Rc, Weak},
 };
-
-use super::ableton::AbletonFactory;
-use crate::doctor::{Check, DoctorIo, InstallationIo};
-use crate::install::InstalledIo;
-use crate::process::Run;
-use crate::report::LogFiles;
-use crate::tui::app::DawSetup;
-use crate::tui::tty::TtyOutput;
-use crate::update::UpdateIo;
-use kumi_types::errors::RuntimeError;
-
-/// How a DAW whose bridge is Kumi's own reaches Kumi's host, by DAW: a test's host in place of `daw-mcp-server`.
-pub type OwnHostFactory = Rc<dyn Fn(DawId) -> kumi_daw_own::bridge::Connect>;
-
-/// Makes each registered DAW's integration from its options: the app's own, or a test's stand-in.
-#[derive(Clone)]
-pub struct DawFactory {
-    pub ableton: AbletonFactory,
-    /// REAPER's and Renoise's host: none in production (Kumi starts `daw-mcp-server`).
-    pub own_host: Option<OwnHostFactory>,
-}
-
-impl DawFactory {
-    /// Each DAW's production integration.
-    pub fn native() -> Self {
-        DawFactory { ableton: Rc::new(kumi_daw_ableton::create_ableton_integration), own_host: None }
-    }
-}
-
-impl From<AbletonFactory> for DawFactory {
-    fn from(ableton: AbletonFactory) -> Self {
-        DawFactory { ableton, own_host: None }
-    }
-}
 
 /// What the app hands a DAW's provider for the session's integration, beside the neutral context.
 #[derive(Clone)]
@@ -63,7 +34,8 @@ pub struct DawSession {
     pub bridge_config: String,
     /// Where saved projects' ids and baselines are kept.
     pub project_store: Rc<dyn ProjectStore>,
-    pub factory: DawFactory,
+    /// A test's stand-ins for what the integration starts (Live's integration, Kumi's host for REAPER and Renoise).
+    pub answers: Answers,
 }
 
 /// Whether `version` ("11.3.21", "3.4.4", "6.83") is older than `min` ("12", "3.5"), number by number; a version that
@@ -122,7 +94,6 @@ pub enum RemovedBridge {
 /// DAW to answer once the bridge is in place.
 #[derive(Clone, Default)]
 pub struct BridgeCommand {
-    pub input: Option<Rc<dyn crate::input::TerminalInput>>,
     pub yes: bool,
     pub allow_dirty: bool,
     pub wait_ms: Option<u64>,
@@ -137,7 +108,7 @@ pub trait BridgeRollbackStep {
     /// The swap failed: what to say when the bridge couldn't be restored either.
     async fn swap_failed(&self) -> Option<String>;
     /// Kumi is back at `version` (`native`: a native Kumi); the exit code.
-    async fn after_swap(&self, io: &InstalledIo, home: &str, app: &str, version: &str, native: bool) -> i32;
+    async fn after_swap(&self, io: &DawIo, home: &str, app: &str, version: &str, native: bool) -> i32;
 }
 
 /// A switch of the DAW's that the producer flips with a command (Live: /willington, for Willington's bindings): whether
@@ -187,8 +158,10 @@ pub trait DawProvider {
     fn bridge_answers(&self, bridge_config: &str, env: &Env) -> LocalBoxFuture<'static, bool>;
     /// Whether the DAW is open.
     fn app_open(&self, env: &Env) -> LocalBoxFuture<'static, bool>;
-    /// Whether the DAW runs now, from one process listing: for choosing among several DAWs whose bridges are installed.
-    fn running_now(&self) -> bool {
+    /// Whether the DAW runs now, from one listing of the processes running (pid and name): for choosing among several
+    /// DAWs whose bridges are installed.
+    fn running_now(&self, processes: &[(u32, String)]) -> bool {
+        let _ = processes;
         false
     }
     /// Whether the DAW is on this computer, from files alone (installed, or opened once): with no bridge installed yet,
@@ -204,8 +177,9 @@ pub trait DawProvider {
     fn min_version(&self) -> &'static str;
     /// The session's integration with the DAW: the app's neutral context, and what the DAW finds for itself.
     fn integration(&self, context: IntegrationContext, session: &DawSession) -> Rc<dyn Integration>;
-    /// For the doctor: whether Kumi reaches the DAW through a bridge configuration, and what it says.
-    fn probe(&self, bridge_config: String, factory: &DawFactory, env: &Env) -> LocalBoxFuture<'static, crate::doctor::LiveProbe>;
+    /// For the doctor: whether Kumi reaches the DAW through a bridge configuration, and what it says (`answers`: a
+    /// test's stand-ins for what the integration starts).
+    fn probe(&self, bridge_config: String, answers: &Answers, env: &Env) -> LocalBoxFuture<'static, Probe>;
     /// What the session says of the DAW's bridge: `missing` when it isn't installed; `found` when a configuration was,
     /// which may be older than this Kumi's (`bundled`); `command` starts Kumi in the way by hand.
     fn bridge_state(&self, env: &Env, found: bool, missing: bool, bundled: Option<&str>, command: &str) -> BridgeState;
@@ -220,33 +194,31 @@ pub trait DawProvider {
     ) -> Rc<dyn DawSetup>;
     /// The DAW's part of `kumi doctor`: its bridge, and whether Kumi reaches the DAW through it (`node` is the doctor's
     /// check of Kumi itself).
-    fn doctor_checks<'a>(&'a self, io: &'a DoctorIo, node: &'a Check) -> LocalBoxFuture<'a, Vec<Check>>;
+    fn doctor_checks<'a>(&'a self, io: &'a DawIo, node: &'a Check) -> LocalBoxFuture<'a, Vec<Check>>;
     /// What the DAW needs from this computer, for the doctor's Installation section.
-    fn installation_checks<'a>(&'a self, env: &'a Env, io: &'a InstallationIo, platform: &'a str) -> LocalBoxFuture<'a, Vec<Check>>;
+    fn installation_checks<'a>(&'a self, io: &'a DawIo, platform: &'a str) -> LocalBoxFuture<'a, Vec<Check>>;
     /// What the DAW needs beyond its bridge, later in the doctor (Live: Kumi's hands in its menus).
-    fn extra_checks<'a>(&'a self, io: &'a DoctorIo) -> LocalBoxFuture<'a, Result<Vec<Check>, RuntimeError>>;
-    /// The DAW's log for `kumi report`: its heading, and its bridge's lines and errors (`logs`: a test's log files in
-    /// place of the DAW's own).
-    fn report_log<'a>(&'a self, env: &'a Env, home: &'a str, logs: Option<&'a LogFiles>) -> LocalBoxFuture<'a, (String, String)>;
+    fn extra_checks<'a>(&'a self, io: &'a DawIo) -> LocalBoxFuture<'a, Result<Vec<Check>, RuntimeError>>;
+    /// The DAW's log for `kumi report`: its heading, and its bridge's lines and errors.
+    fn report_log<'a>(&'a self, io: &'a DawIo, home: &'a str) -> LocalBoxFuture<'a, (String, String)>;
     /// After an installed Kumi's update (`back_to`: to the earlier Kumi it names), its bridge brought up to date where it
     /// can be, or how to: the exit code.
-    fn after_update<'a>(&'a self, io: &'a InstalledIo, home: &'a str, app: &'a str, back_to: Option<&'a str>) -> LocalBoxFuture<'a, i32>;
+    fn after_update<'a>(&'a self, io: &'a DawIo, home: &'a str, app: &'a str, back_to: Option<&'a str>) -> LocalBoxFuture<'a, i32>;
     /// After a checkout's update, the same, with the checkout's own build of the bridge.
-    fn after_checkout_update<'a>(&'a self, io: &'a UpdateIo, run: Run, repo: &'a str) -> LocalBoxFuture<'a, i32>;
+    fn after_checkout_update<'a>(&'a self, io: &'a DawIo, repo: &'a str) -> LocalBoxFuture<'a, i32>;
     /// Ready the bridge for a rollback to the Kumi at `previous` (`version`; `legacy`: a JavaScript Kumi).
     fn prepare_rollback<'a>(
         &'a self,
-        io: &'a InstalledIo,
+        io: &'a DawIo,
         home: &'a str,
         previous: &'a str,
         version: &'a str,
         legacy: bool,
     ) -> LocalBoxFuture<'a, Result<Box<dyn BridgeRollbackStep>, RuntimeError>>;
     /// Finishes a switch of the bridge an earlier updater began, before a session starts. Best effort.
-    fn finish_transition<'a>(&'a self, io: &'a InstalledIo) -> LocalBoxFuture<'a, ()>;
+    fn finish_transition<'a>(&'a self, io: &'a DawIo) -> LocalBoxFuture<'a, ()>;
     /// `kumi bridge`: puts Kumi's bridge in the DAW, or brings it up to date.
-    fn setup_bridge(&self, out: Rc<dyn TtyOutput>, env: &Env, command: BridgeCommand)
-        -> LocalBoxFuture<'static, Result<i32, RuntimeError>>;
+    fn setup_bridge(&self, io: DawIo, command: BridgeCommand) -> LocalBoxFuture<'static, Result<i32, RuntimeError>>;
     /// Whether Kumi's bridge is in the DAW, for removing Kumi.
     fn bridge_installed(&self, env: &Env) -> bool;
     /// Kumi's folder of the DAW's bridge files, under Kumi's home ("bridge").
@@ -254,7 +226,7 @@ pub trait DawProvider {
     /// Whether the DAW uses the bridge files in `folder`, so they stay when Kumi goes.
     fn bridge_files_in_use(&self, folder: &str, env: &Env) -> bool;
     /// Takes Kumi's bridge out of the DAW, asking first.
-    fn remove_bridge<'a>(&'a self, io: &'a InstalledIo, run: Run) -> LocalBoxFuture<'a, Result<RemovedBridge, RuntimeError>>;
+    fn remove_bridge<'a>(&'a self, io: &'a DawIo) -> LocalBoxFuture<'a, Result<RemovedBridge, RuntimeError>>;
     /// What `kumi uninstall --dry-run` says it would also do with the bridge.
     fn removal_question(&self) -> &'static str;
     /// What removing Kumi says when the bridge's files stay in `folder`.

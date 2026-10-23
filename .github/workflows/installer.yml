@@ -61,7 +61,8 @@ jobs:
           # when the Mac helper's didn't. Each has to be there, so a renamed one can't drop out unnoticed.
           for path in install.sh install.ps1 crates/kumi/src/install.rs crates/kumi/src/update.rs crates/kumi/src/install/migration.rs \
             crates/kumi/src/daw/ableton/bridge_setup.rs crates/kumi/src/daw/ableton/live_extension.rs \
-            crates/kumi/src/daw/ableton/live_app.rs crates/kumi/src/process.rs crates/kumi/src/doctor.rs \
+            crates/kumi/src/daw/ableton/live_app.rs crates/kumi/src/process.rs crates/kumi-daw/src/process.rs \
+            crates/kumi/src/doctor.rs \
             crates/kumi/src/doctor/installation.rs daws/ableton/kumi-daw-ableton/src/hands/KumiHands.swift \
             daws/ableton/kumi-daw-ableton/src/hands/mac.rs crates/kumi-types/src/system.rs crates/kumi-ai/src/http.rs \
             crates/kumi-library/src/sources.rs daws/ableton/ableton-mcp-server/src/lifecycle/install_remote_script.rs \

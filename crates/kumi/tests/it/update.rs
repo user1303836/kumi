@@ -1,10 +1,8 @@
 //! `kumi update` for a checkout, rebuilding with Cargo.
 use futures::FutureExt;
-use kumi::{
-    bridge_setup::{executable_name, Ran, Run},
-    tui::tty::TtyOutput,
-    update::*,
-};
+use kumi::daw::ableton::answers::{BridgeAfterUpdate, LiveRunning};
+use kumi::{tui::tty::TtyOutput, update::*};
+use kumi_daw::process::{executable_name, Ran, Run};
 use kumi_types::system::Env;
 use serde_json::json;
 use std::{
@@ -211,15 +209,15 @@ async fn update_moves_forward_rebuilds_native_and_updates_bridge_only_when_live_
     let out = Rc::new(Out::default());
     let bridged = Rc::new(RefCell::new(String::new()));
     let mut io = c.update(out.clone(), run);
-    io.live_running = Some(Rc::new(|| async { false }.boxed_local()));
+    io.answers = io.answers.clone().with(LiveRunning(Rc::new(|| async { false }.boxed_local())));
     io.others = Some(Rc::new(|| async { 1 }.boxed_local()));
-    io.update_bridge = Some(Rc::new({
+    io.answers = io.answers.clone().with(BridgeAfterUpdate(Rc::new({
         let bridged = bridged.clone();
         move |repo| {
             *bridged.borrow_mut() = repo;
             async { 0 }.boxed_local()
         }
-    }));
+    })));
     assert_eq!(run_update(io).await, 0);
     assert_eq!(
         calls.borrow().iter().filter(|line| line.contains("merge") || line.starts_with("cargo")).cloned().collect::<Vec<_>>(),
@@ -232,14 +230,14 @@ async fn update_moves_forward_rebuilds_native_and_updates_bridge_only_when_live_
     let out = Rc::new(Out::default());
     let touched = Rc::new(Cell::new(false));
     let mut io = c.update(out.clone(), programs(Options::default()).0);
-    io.live_running = Some(Rc::new(|| async { true }.boxed_local()));
-    io.update_bridge = Some(Rc::new({
+    io.answers = io.answers.clone().with(LiveRunning(Rc::new(|| async { true }.boxed_local())));
+    io.answers = io.answers.clone().with(BridgeAfterUpdate(Rc::new({
         let touched = touched.clone();
         move |_| {
             touched.set(true);
             async { 0 }.boxed_local()
         }
-    }));
+    })));
     assert_eq!(run_update(io).await, 0);
     assert!(out.0.borrow().contains("Kumi is up to date (1.0.1)."));
     // Live open: the one way to connect it, which can restart Live for the producer.
@@ -292,14 +290,14 @@ async fn same_version_legacy_bridge_migrates_but_newer_bridge_is_preserved() {
         let out = Rc::new(Out::default());
         let touched = Rc::new(Cell::new(false));
         let mut io = c.update(out.clone(), programs(Options::default()).0);
-        io.live_running = Some(Rc::new(move || async move { live }.boxed_local()));
-        io.update_bridge = Some(Rc::new({
+        io.answers = io.answers.clone().with(LiveRunning(Rc::new(move || async move { live }.boxed_local())));
+        io.answers = io.answers.clone().with(BridgeAfterUpdate(Rc::new({
             let touched = touched.clone();
             move |_| {
                 touched.set(true);
                 async { 0 }.boxed_local()
             }
-        }));
+        })));
         assert_eq!(run_update(io).await, 0);
         assert_eq!(touched.get(), !live);
         assert!(out.0.borrow().contains("includes the native bridge (1.0.73)"));

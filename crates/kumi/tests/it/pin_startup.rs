@@ -189,7 +189,7 @@ async fn wait_for(what: &str, done: impl Fn() -> bool) {
     panic!("timed out waiting for {what}");
 }
 fn unused_factory() -> AbletonFactory {
-    Rc::new(|_| panic!("without a bridge, Kumi makes no Ableton integration"))
+    AbletonFactory(Rc::new(|_| panic!("without a bridge, Kumi makes no Ableton integration")))
 }
 macro_rules! case {
     ($name:ident,$body:expr) => {
@@ -309,7 +309,7 @@ async fn falls_back(message: &str) -> Value {
     let starts = Rc::new(Cell::new(0));
     let count = starts.clone();
     let message = message.to_string();
-    let factory: AbletonFactory = Rc::new(move |_| Rc::new(Failing(message.clone(), count.clone())) as Rc<dyn Integration>);
+    let factory = AbletonFactory(Rc::new(move |_| Rc::new(Failing(message.clone(), count.clone())) as Rc<dyn Integration>));
     let task = tokio::task::spawn_local(run(f.io(&["--bridge-config", config.to_str().unwrap()]), factory));
     f.input.wait_ready().await;
     let observations = || f.output().lines().filter(|l| l.starts_with("[observation] ")).count();

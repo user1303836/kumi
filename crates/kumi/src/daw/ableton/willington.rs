@@ -8,6 +8,7 @@ use ableton_mcp_server::lifecycle::delivery::{
 };
 use futures::future::FutureExt;
 use kumi_common::time::now_ms_f64;
+use kumi_daw::provider::Toggle;
 use kumi_daw_ableton::willington::WillingtonSwitch;
 use kumi_types::system::Env;
 use serde_json::Value;
@@ -173,20 +174,12 @@ fn libraries(folder: &Path, depth: usize) -> Vec<PathBuf> {
         .collect()
 }
 
-/// /willington for the app: whether the bindings are on (None while the bridge in Live doesn't carry
-/// Willington), and switching them, which ends with what to tell the producer. Live's switch, a DAW's Toggle.
-pub type WillingtonControl = crate::daw::Toggle;
 /// How often Kumi looks again for a bridge that doesn't carry Willington yet: first-run setup can put one in place.
 const LOOK_AGAIN_MS: f64 = 2000.;
-impl crate::daw::Toggle {
-    /// Live's /willington switch, as `WillingtonControl::new` has always made it (its tests do).
-    pub fn new(env: Env) -> Self {
-        control(env)
-    }
-}
 
-/// Live's /willington switch, from Willington's file beside the bridge in Live.
-pub fn control(env: Env) -> WillingtonControl {
+/// Live's /willington switch, from Willington's file beside the bridge in Live: whether the bindings are on (None while
+/// the bridge in Live doesn't carry Willington), and switching them, which ends with what to tell the producer.
+pub fn control(env: Env) -> Toggle {
     {
         // The command menu asks on every frame it's drawn: the bridge, once found, stays where it is, and the
         // switch is read again only when its file changes.
@@ -200,7 +193,7 @@ pub fn control(env: Env) -> WillingtonControl {
             found.0.clone()
         });
         let read = Rc::new(RefCell::new(None::<(Option<(SystemTime, u64)>, bool)>));
-        WillingtonControl {
+        Toggle {
             on: {
                 let (find, read) = (find.clone(), read.clone());
                 Rc::new(move || {

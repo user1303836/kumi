@@ -7,11 +7,12 @@ use async_trait::async_trait;
 use futures::FutureExt;
 use kumi::terminal::Terminal;
 use kumi::tui::{
-    app::{ConnectLive, LiveInstalled, LiveSetup, TuiOptions},
+    app::{ConnectLive, TuiOptions},
     icons::IconStyle,
     style::ColorDepth,
 };
 use kumi_common::abort::Signal;
+use kumi_daw::{provider::Installed as LiveInstalled, setup::DawSetup as LiveSetup};
 use models::FakeModels;
 use serde_json::json;
 use std::{
@@ -994,8 +995,8 @@ case!(a_first_run_whose_daw_is_chosen_here_goes_on_with_its_setup, async {
 case!(an_own_daws_setup_hands_the_session_its_bridge_and_reconnects_it, async {
     // Review K1: once setup has put REAPER's extension in (its receipt is written), connecting hands the session the
     // bridge's reference and reconnects it, as Live's setup does, so the session connects without a restart.
-    use kumi::daw::DawProvider;
     use kumi_agent::core::contracts::SessionController;
+    use kumi_daw::provider::DawProvider;
     let home = tempfile::tempdir().unwrap();
     let kumi_home = home.path().join(".kumi");
     let env = kumi_types::system::Env::from([

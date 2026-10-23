@@ -2,19 +2,22 @@
 //! receipt-bound switch from a JavaScript bridge), the bridge going back with a rollback, and the bridge taken out of
 //! Live when Kumi is removed.
 use super::{
+    answers::{BridgeAfterUpdate, LiveRunning},
     bridge_setup::{bridge_version, is_live_running, kept_generation, BridgeRollback},
     live_extension::{
         extension_data_dir, former_extensions_dir, live_extensions_dir, remove_extension, remove_former_extension, KUMI_EXTENSION_ID,
     },
 };
-use crate::daw::{BridgeRollbackStep, RemovedBridge};
 use crate::{
     config::{find_bridge_config, remote_scripts_dir},
     doctor::read_bridge_server,
-    install::{ask, error, kumi_home, newer_version, remove, InstalledIo},
-    process::{default_run, executable_dir, executable_name, Run},
-    spinner::step,
-    update::{newer, UpdateIo},
+    install::{error, newer_version, remove},
+    update::newer,
+};
+use kumi_daw::{
+    io::{kumi_home, step, DawIo, Kept},
+    process::{executable_dir, executable_name},
+    provider::{BridgeRollbackStep, RemovedBridge},
 };
 use kumi_daw_ableton::ears::device::EARS_NAME;
 use kumi_library::sources::{basename, dirname, join, resolve};
@@ -27,16 +30,15 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{fs, path::Path, process::Stdio, rc::Rc};
 
-pub(crate) async fn live_open(io: &InstalledIo, run: Run) -> bool {
+pub(crate) async fn live_open(io: &DawIo) -> bool {
     step(
-        io.out.clone(),
-        &io.env,
+        io.out.as_ref(),
         "Checking whether Live is open…",
         async {
-            if let Some(live) = &io.live_running {
-                live().await
+            if let Some(live) = io.answers.get::<LiveRunning>() {
+                (live.0)().await
             } else {
-                is_live_running(run).await
+                is_live_running(io.run.clone()).await
             }
         },
         false,
@@ -45,7 +47,7 @@ pub(crate) async fn live_open(io: &InstalledIo, run: Run) -> bool {
 }
 /// After an update: going back (`back_to`, the earlier Kumi), a bridge in Live as new as the earlier Kumi's stays, as a
 /// newer one serves it too and Live may have it loaded; otherwise the bridge as after any update.
-pub(crate) async fn after_update(io: &InstalledIo, home: &str, app: &str, back_to: Option<&str>) -> i32 {
+pub(crate) async fn after_update(io: &DawIo, home: &str, app: &str, back_to: Option<&str>) -> i32 {
     if let Some(kumi) = back_to {
         let installed = find_bridge_config(&io.env).and_then(|config| read_bridge_server(&config).ok()?.version);
         if let Some(installed) = installed.filter(|installed| bridge_version(app).is_none_or(|bundled| !newer_version(&bundled, installed)))
@@ -56,7 +58,7 @@ pub(crate) async fn after_update(io: &InstalledIo, home: &str, app: &str, back_t
     }
     bridge_after(io, home, app).await
 }
-pub(crate) async fn bridge_after(io: &InstalledIo, home: &str, app: &str) -> i32 {
+pub(crate) async fn bridge_after(io: &DawIo, home: &str, app: &str) -> i32 {
     let say = |text: String| io.out.write(&format!("{text}\n"));
     let Some(config) = find_bridge_config(&io.env) else {
         if let Some(words) = no_bridge_yet(system::platform()) {
@@ -80,12 +82,12 @@ pub(crate) async fn bridge_after(io: &InstalledIo, home: &str, app: &str) -> i32
     } else {
         format!("The bridge in Live is {installed}; this Kumi's is {bundled}.")
     });
-    if live_open(io, io.run.clone().unwrap_or_else(default_run)).await {
+    if live_open(io).await {
         say(format!("{}.", *CONNECT_LIVE));
         return 0;
     }
-    if let Some(update) = &io.update_bridge {
-        return update(app.into()).await;
+    if let Some(update) = io.answers.get::<BridgeAfterUpdate>() {
+        return (update.0)(app.into()).await;
     }
     bridge_command(app, home).status().await.ok().and_then(|s| s.code()).unwrap_or(1)
 }
@@ -113,7 +115,7 @@ pub fn bridge_command(app: &str, home: &str) -> tokio::process::Command {
         .stderr(Stdio::inherit());
     command
 }
-pub(crate) async fn remove_bridge(io: &InstalledIo, run: Run) -> Result<RemovedBridge, RuntimeError> {
+pub(crate) async fn remove_bridge(io: &DawIo) -> Result<RemovedBridge, RuntimeError> {
     let say = |s: String| io.out.write(&format!("{s}\n"));
     let Some(config) = find_bridge_config(&io.env) else { return Ok(RemovedBridge::None) };
     let extensions = live_extensions_dir(&io.env, system::platform());
@@ -124,11 +126,11 @@ pub(crate) async fn remove_bridge(io: &InstalledIo, run: Run) -> Result<RemovedB
             .map(|ext| format!(", and {KUMI_EXTENSION_ID} from {ext} and from {}", dirname(&extension_data_dir(ext))))
             .unwrap_or_default()
     );
-    if !ask(io, "Remove the Ableton bridge from Live too?", None).await {
+    if !io.ask.yes_no("Remove the Ableton bridge from Live too?", None).await {
         say(format!("The bridge stays in Live, and so do its files. To take it out later, remove {by_hand}."));
         return Ok(RemovedBridge::Kept);
     }
-    if live_open(io, run.clone()).await {
+    if live_open(io).await {
         say(format!("Live is open, so the bridge stays, and so do its files. Quit Live, then remove {by_hand}."));
         return Ok(RemovedBridge::Kept);
     }
@@ -145,10 +147,9 @@ pub(crate) async fn remove_bridge(io: &InstalledIo, run: Run) -> Result<RemovedB
         return Ok(RemovedBridge::Kept);
     };
     let ran = step(
-        io.out.clone(),
-        &io.env,
+        io.out.as_ref(),
         "Taking the bridge out of Live…",
-        run(
+        (io.run)(
             lifecycle,
             vec![
                 "lifecycle".into(),
@@ -222,7 +223,7 @@ pub(crate) fn bridge_uses(folder: &str, env: &Env) -> bool {
 
 /// Complete a receipt-bound bridge transition after the old updater's application swap. Best effort:
 /// Kumi opens whatever happens here, and keeps chatting through the existing bridge until it switches.
-pub async fn finish_legacy_transition(io: &InstalledIo) {
+pub async fn finish_legacy_transition(io: &DawIo) {
     let home = kumi_home(&io.env);
     let app = join(&home, "app");
     let native = fs::read(join(&app, "package.json"))
@@ -243,20 +244,20 @@ pub async fn finish_legacy_transition(io: &InstalledIo) {
     // under it. A connect is instant; asking the system about Live is not (Windows). With the same
     // Remote Script nothing is missing meanwhile (Kumi runs its own native host), so the session
     // doesn't mention it either.
-    if crate::bridge_setup::remote_script_answers(&config).await || live_open(io, io.run.clone().unwrap_or_else(default_run)).await {
+    if crate::bridge_setup::remote_script_answers(&config).await || live_open(io).await {
         return;
     }
     // Byte for byte the same Remote Script (1.7.5's 1.0.74 for this release's): only the host and its
     // receipt change, so the switch is quiet, failing included (a later start tries again).
-    let said = Rc::new(Said::default());
+    let said = Rc::new(Kept::default());
     let mut setup = crate::bridge_setup::BridgeSetupIo::new(if unchanged { said.clone() } else { io.out.clone() }, io.env.clone());
-    setup.input = io.input.clone();
+    setup.ask = io.ask.clone();
     setup.bridge_dir = Some(app.clone());
     setup.prepared = Some(join(&app, "bridge"));
     setup.yes = true;
     setup.wait_ms = Some(0);
-    setup.run = io.run.clone();
-    setup.live_running = io.live_running.clone();
+    setup.run = Some(io.run.clone());
+    setup.live_running = io.answers.get::<LiveRunning>().map(|running| running.0.clone());
     match crate::bridge_setup::setup_bridge(setup).await {
         Ok(0) => {}
         _ if unchanged => {}
@@ -286,25 +287,7 @@ pub fn only_the_host_differs(env: &Env) -> bool {
     remote_script_unchanged(env, &app, &config, &server)
 }
 
-/// What a quiet bridge switch said, kept for when it fails.
-#[derive(Default)]
-struct Said(std::cell::RefCell<String>);
-impl crate::tui::tty::TtyOutput for Said {
-    fn is_tty(&self) -> bool {
-        false
-    }
-    fn columns(&self) -> Option<i32> {
-        None
-    }
-    fn rows(&self) -> Option<i32> {
-        None
-    }
-    fn write(&self, data: &str) {
-        self.0.borrow_mut().push_str(data);
-    }
-}
-
-pub(crate) async fn prepare_legacy_rollback(io: &InstalledIo, home: &str) -> Result<Option<BridgeRollback>, RuntimeError> {
+pub(crate) async fn prepare_legacy_rollback(io: &DawIo, home: &str) -> Result<Option<BridgeRollback>, RuntimeError> {
     let Some(config) = find_bridge_config(&io.env) else { return Ok(None) };
     let server = read_bridge_server(&config)?;
     if !server.native() {
@@ -331,11 +314,17 @@ pub(crate) async fn prepare_legacy_rollback(io: &InstalledIo, home: &str) -> Res
             "The earlier Kumi needs its JavaScript bridge, but no retained JavaScript bridge generation is available. Nothing was changed.",
         ));
     }
-    let run = io.run.clone().unwrap_or_else(default_run);
-    if live_open(io, run.clone()).await {
+    if live_open(io).await {
         return Err(RuntimeError::plain("Quit Live (save your work first), then run: kumi update --rollback. Restoring this Kumi also restores its previous bridge; nothing was changed."));
     }
-    Ok(Some(BridgeRollback::new(server.command.unwrap(), package, (state, secret, scripts), config, previous.unwrap().into(), run)))
+    Ok(Some(BridgeRollback::new(
+        server.command.unwrap(),
+        package,
+        (state, secret, scripts),
+        config,
+        previous.unwrap().into(),
+        io.run.clone(),
+    )))
 }
 
 /// What a rollback to a native Kumi does with the bridge in Live.
@@ -350,7 +339,7 @@ pub(crate) struct EarlierBridge {
 /// A rollback to a native Kumi whose own bridge is older than the one in Live. The bridge goes back too when its
 /// receipt kept that Kumi's and Live is closed; in a terminal, the producer can close Live first. Otherwise the newer
 /// bridge stays: it serves the earlier Kumi too. Kumi never quits Live itself here.
-pub(crate) async fn earlier_bridge(io: &InstalledIo, home: &str, previous: &str, earlier: &str) -> EarlierBridge {
+pub(crate) async fn earlier_bridge(io: &DawIo, home: &str, previous: &str, earlier: &str) -> EarlierBridge {
     let unchanged = || EarlierBridge { rollback: None, said: None, later: None };
     let Some(config) = find_bridge_config(&io.env) else { return unchanged() };
     let Ok(server) = read_bridge_server(&config) else { return unchanged() };
@@ -375,23 +364,22 @@ pub(crate) async fn earlier_bridge(io: &InstalledIo, home: &str, previous: &str,
     let (false, Some(command), Some(package), Some(owner), Some(kept)) = (in_app, server.command.clone(), package, owner, kept) else {
         return EarlierBridge { rollback: None, said: Some(stays), later: None };
     };
-    let run = io.run.clone().unwrap_or_else(default_run);
     let back = EarlierBridge {
-        rollback: Some(BridgeRollback::new(command, package, owner, config, kept.root, run.clone())),
+        rollback: Some(BridgeRollback::new(command, package, owner, config, kept.root, io.run.clone())),
         said: Some(format!("The bridge went back to {bundled} with it; Live loads it when it starts.")),
         later: Some(twice.clone()),
     };
-    if !live_open(io, run.clone()).await {
+    if !live_open(io).await {
         return back;
     }
     let mut question = format!(
         "Live is open. Going back to {earlier} can also put back its bridge {bundled} once Live is closed (save your work, then quit Live). Put it back too?"
     );
     for _ in 0..3 {
-        if !ask(io, &question, None).await {
+        if !io.ask.yes_no(&question, None).await {
             break;
         }
-        if !live_open(io, run.clone()).await {
+        if !live_open(io).await {
             return back;
         }
         question = format!("Live is still open. Put back bridge {bundled} too, once it's closed?");
@@ -437,7 +425,7 @@ pub async fn checkout_bridge(repo: &str) -> i32 {
 }
 
 /// After a checkout's update: Live's bridge brought up to date with the checkout's own build, where Live is closed.
-pub(crate) async fn after_checkout_update(io: &UpdateIo, run: Run, repo: &str) -> i32 {
+pub(crate) async fn after_checkout_update(io: &DawIo, repo: &str) -> i32 {
     let say = |s: String| io.out.write(&format!("{s}\n"));
     let bundled = crate::update::read_cargo_version(&join(repo, "daws/ableton/ableton-mcp-server/Cargo.toml"));
     let bundled = bundled.as_deref();
@@ -457,26 +445,12 @@ pub(crate) async fn after_checkout_update(io: &UpdateIo, run: Run, repo: &str) -
     } else {
         format!("The bridge in Live is {}; this Kumi's is {}.", bridge.installed, bridge.bundled)
     });
-    if step(
-        io.out.clone(),
-        &io.env,
-        "Checking whether Live is open…",
-        async {
-            if let Some(live) = &io.live_running {
-                live().await
-            } else {
-                is_live_running(run).await
-            }
-        },
-        false,
-    )
-    .await
-    {
+    if live_open(io).await {
         say(format!("{}.", *CONNECT_LIVE));
         return 0;
     }
-    if let Some(bridge) = &io.update_bridge {
-        bridge(repo.into()).await
+    if let Some(bridge) = io.answers.get::<BridgeAfterUpdate>() {
+        (bridge.0)(repo.into()).await
     } else {
         checkout_bridge(repo).await
     }
@@ -491,7 +465,7 @@ struct LiveRollback {
 }
 
 pub(crate) async fn prepare_rollback(
-    io: &InstalledIo,
+    io: &DawIo,
     home: &str,
     previous: &str,
     version: &str,
@@ -522,7 +496,7 @@ impl BridgeRollbackStep for LiveRollback {
             )
         })
     }
-    async fn after_swap(&self, io: &InstalledIo, home: &str, app: &str, version: &str, native: bool) -> i32 {
+    async fn after_swap(&self, io: &DawIo, home: &str, app: &str, version: &str, native: bool) -> i32 {
         let say = |text: String| io.out.write(&format!("{text}\n"));
         let earlier = self.earlier.borrow_mut().take();
         if native {
@@ -538,11 +512,11 @@ impl BridgeRollbackStep for LiveRollback {
             // extension come from the bridge's folders, which the swap doesn't move.
             // Live may have opened while the folders moved (a rename can wait on a held folder): the switch runs with
             // it closed, or not at all.
-            if live_open(io, io.run.clone().unwrap_or_else(default_run)).await {
+            if live_open(io).await {
                 say(later.unwrap_or_default());
                 return 0;
             }
-            match step(io.out.clone(), &io.env, "Putting back the bridge…", rollback.apply(), true).await {
+            match step(io.out.as_ref(), "Putting back the bridge…", rollback.apply(), true).await {
                 Ok(()) => {
                     say(said);
                     if let Some(placed) = rollback.place_extension(&io.env) {
