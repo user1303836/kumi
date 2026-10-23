@@ -337,6 +337,32 @@ fn conversations_keep_days_is_read_kept_and_bounded() {
     assert_eq!(read_settings(&file).conversations.and_then(|c| c.keep_days), Some(0));
 }
 #[test]
+fn music_settings_round_trip_and_a_newer_kumis_settings_stay() {
+    let folder = tempfile::tempdir().unwrap();
+    let file = folder.path().join("settings.json").to_string_lossy().into_owned();
+    let saved = || serde_json::from_str::<Value>(&std::fs::read_to_string(&file).unwrap()).unwrap();
+    // None until the producer agrees, and nothing offered yet.
+    std::fs::write(&file, "{}").unwrap();
+    assert_eq!((read_settings(&file).music_folders, read_settings(&file).music_offered), (None, None));
+    write_settings(&file, &json!({"musicFolders": ["~/Music", "", 7], "musicOffered": true})).unwrap();
+    let settings = read_settings(&file);
+    assert_eq!((settings.music_folders, settings.music_offered), (Some(vec!["~/Music".to_string()]), Some(true)));
+    // Another setting written keeps them.
+    write_settings(&file, &json!({"model": "openai/gpt-6-luna"})).unwrap();
+    assert_eq!(saved(), json!({"model": "openai/gpt-6-luna", "musicFolders": ["~/Music"], "musicOffered": true}));
+    // Every folder taken away is an answer too: agreed, with none.
+    write_settings(&file, &json!({"musicFolders": []})).unwrap();
+    assert_eq!(read_settings(&file).music_folders, Some(vec![]));
+    write_settings(&file, &json!({"musicFolders": null, "musicOffered": false})).unwrap();
+    assert_eq!((read_settings(&file).music_folders, read_settings(&file).music_offered), (None, None));
+    // A newer Kumi's settings stay through this one's writes, so an update and a rollback keep them.
+    std::fs::write(&file, json!({"model": "openai/gpt-6-luna", "laterSetting": {"on": true}}).to_string()).unwrap();
+    write_settings(&file, &json!({"model": "anthropic/claude-sonnet-5"})).unwrap();
+    assert_eq!(saved(), json!({"model": "anthropic/claude-sonnet-5", "laterSetting": {"on": true}}));
+    write_settings(&file, &serde_json::to_value(read_settings(&file)).unwrap()).unwrap();
+    assert_eq!(saved()["laterSetting"], json!({"on": true}));
+}
+#[test]
 fn export_and_import_take_a_conversation_a_format_and_a_file() {
     let env = env();
     assert_eq!(value(&["export"], &env), json!({"mode": "export", "format": "md", "full": false, "raw": false}));

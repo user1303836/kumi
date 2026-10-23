@@ -5,6 +5,8 @@ mod embed;
 mod feel;
 mod form;
 mod listener;
+mod music;
+mod music_scale;
 mod notation;
 mod slots;
 mod sound;
