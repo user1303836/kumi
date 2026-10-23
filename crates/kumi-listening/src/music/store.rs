@@ -31,6 +31,7 @@ CREATE INDEX songs_album ON songs(album COLLATE NOCASE);
 CREATE INDEX songs_genre ON songs(genre COLLATE NOCASE);
 CREATE INDEX songs_stage ON songs(stage, mtime);
 CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL) STRICT;
+CREATE TABLE vectors_pending (model TEXT NOT NULL, id INTEGER NOT NULL, vector BLOB NOT NULL, PRIMARY KEY (model, id)) STRICT;
 ";
 
 /// Forward-only, as kumi.db's: migration N brings music.db from version N-1 to N (SQLite's `user_version`).
@@ -345,6 +346,61 @@ impl MusicStore {
         Ok(self.connection.query_row(&format!("SELECT {SONG_COLUMNS} FROM songs WHERE path = ?1"), [path], song_row).optional()?)
     }
 
+    /// Songs that meet `condition` (SQL over the songs table, on top of being heard or hearable), in `order`, at most
+    /// `limit`.
+    pub fn songs_where(&self, condition: &str, order: &str, limit: usize) -> Result<Vec<Song>, MusicError> {
+        let sql = format!("SELECT {SONG_COLUMNS} FROM songs WHERE {LIVE} AND ({condition}) ORDER BY {order} LIMIT {limit}");
+        let mut statement = self.connection.prepare(&sql)?;
+        let songs = statement.query_map([], song_row)?.collect::<Result<_, _>>()?;
+        Ok(songs)
+    }
+
+    /// Songs by their ids, in no order (those gone, duplicates or skipped left out).
+    pub fn songs_by_id(&self, ids: &[i64]) -> Result<Vec<Song>, MusicError> {
+        let mut songs = vec![];
+        for chunk in ids.chunks(500) {
+            let list = chunk.iter().map(i64::to_string).collect::<Vec<_>>().join(",");
+            songs.extend(self.songs_where(&format!("id IN ({list})"), "id", chunk.len())?);
+        }
+        Ok(songs)
+    }
+
+    /// A song heard at a stage: its profile (JSON), and when.
+    pub fn heard(&self, id: i64, stage: Stage, profile: &str, at: i64) -> Result<(), MusicError> {
+        self.connection.execute(
+            "UPDATE songs SET stage = ?2, profile = ?3, heard_at = ?4, skipped = NULL WHERE id = ?1",
+            params![id, stage as i64, profile, at],
+        )?;
+        Ok(())
+    }
+
+    /// A song that won't be heard, and why.
+    pub fn skip(&self, id: i64, why: &str, at: i64) -> Result<(), MusicError> {
+        self.connection.execute("UPDATE songs SET skipped = ?2, heard_at = ?3 WHERE id = ?1", params![id, why, at])?;
+        Ok(())
+    }
+
+    /// The songs heard at least lightly, by id.
+    pub fn heard_ids(&self) -> Result<Vec<i64>, MusicError> {
+        let mut statement = self.connection.prepare(&format!("SELECT id FROM songs WHERE {LIVE} AND stage >= 1 ORDER BY id"))?;
+        let ids = statement.query_map([], |row| row.get(0))?.collect::<Result<_, _>>()?;
+        Ok(ids)
+    }
+
+    /// Each heard song's cluster (the rest none), in one transaction.
+    pub fn set_clusters(&mut self, clusters: &[(i64, usize)]) -> Result<(), MusicError> {
+        let transaction = self.connection.transaction()?;
+        transaction.execute("UPDATE songs SET cluster = NULL WHERE cluster IS NOT NULL", [])?;
+        {
+            let mut statement = transaction.prepare_cached("UPDATE songs SET cluster = ?2 WHERE id = ?1")?;
+            for (id, cluster) in clusters {
+                statement.execute(params![id, *cluster as i64])?;
+            }
+        }
+        transaction.commit()?;
+        Ok(())
+    }
+
     pub fn meta(&self, key: &str) -> Result<Option<String>, MusicError> {
         Ok(self.connection.query_row("SELECT value FROM meta WHERE key = ?1", [key], |row| row.get(0)).optional()?)
     }
@@ -355,6 +411,9 @@ impl MusicStore {
         Ok(())
     }
 }
+
+/// A song that can be heard (or was): known, not gone, not a duplicate, not skipped.
+pub const LIVE: &str = "gone = 0 AND duplicate_of IS NULL AND skipped IS NULL";
 
 /// The columns `song_row` reads, in its order.
 pub const SONG_COLUMNS: &str =

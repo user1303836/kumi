@@ -2,10 +2,15 @@
 //! (`musicFolders`), each known first by its tags, then heard in the background, so Kumi can lean on their taste when
 //! a request leaves the style open. Kept in `music` in Kumi's folder; never sent anywhere.
 
+pub mod clusters;
 pub mod folders;
+pub mod hear;
+pub mod learning;
 pub mod scan;
 pub mod store;
 pub mod tags;
+pub mod vectors;
+pub mod worker;
 
 use std::path::{Path, PathBuf};
 

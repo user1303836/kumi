@@ -7,6 +7,7 @@ mod form;
 mod listener;
 mod music;
 mod music_scale;
+mod music_scan;
 mod notation;
 mod slots;
 mod sound;

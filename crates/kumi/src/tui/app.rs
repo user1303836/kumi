@@ -297,6 +297,9 @@ struct State {
     newer: Option<String>,
     library: Option<LibraryStatus>,
     told_library: bool,
+    told_music: bool,
+    /// How learning the producer's own music goes (/music shows it).
+    music: Option<kumi_listening::music::learning::MusicStatus>,
     /// Willington's bindings are off in the bridge that carries them, and the producer has yet to be told.
     willington_off: bool,
     /// What's new, shown as Kumi started: a conversation carried on at the start comes above it.
@@ -439,6 +442,8 @@ impl State {
             newer: None,
             library: None,
             told_library: false,
+            told_music: false,
+            music: None,
             willington_off: false,
             news: None,
             news_since: None,
