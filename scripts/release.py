@@ -18,11 +18,10 @@ What ships is read from main since the last release tag:
   with Kumi (kumi-common), the Remote Script, the protocol, the Live extension or Willington's files (their tests
   and Markdown aside). A dependency change can change the host too: the dry run says so, and --bridge gives the
   bridge a new version then. --no-bridge keeps it.
-- REAPER's extension and Renoise's tool get new versions the same way, each when a pull request changes what its DAW
-  loads: the extension (daws/reaper/reaper-kumi, and daw-bridge, which it links) or the tool (daws/renoise's
-  com.kumi.Bridge.xrnx). --reaper and --renoise give one a new version whatever changed; --no-reaper and --no-renoise
-  keep it. A pull request that changes one of them and nothing else that ships has its lines under that one's
-  heading, as do lines written "Changelog (reaper):" or "Changelog (renoise):". --no-bridge is only Live's.
+- Each other DAW's bridge (scripts/daws.toml lists them: REAPER's extension, Renoise's tool) gets new versions the
+  same way, when a pull request changes what that DAW loads (its `loads` there). --<id> gives one a new version
+  whatever changed (--reaper, say); --no-<id> keeps it. A pull request that changes one of them and nothing else that
+  ships has its lines under that one's heading, as do lines written "Changelog (<id>):". --no-bridge is only Live's.
 - A pull request's files count where they are now: one from before a move (scripts/moves.toml) by their new places,
   and an older release's versions are read where it had them.
 The version goes up by a patch, by a minor with --minor, or is given with --version.
@@ -44,8 +43,8 @@ import textwrap
 import tomllib
 
 ROOT = Path(__file__).resolve().parents[1]
-# The script that builds the bundles, one copy shared with its tests: where the DAWs' bridges are, and how Renoise's
-# manifest numbers a version.
+# The script that builds the bundles, one copy shared with its tests: the other DAWs' bridges (scripts/daws.toml), a
+# library bridge's crate, and how a Renoise tool's manifest numbers a version.
 native = sys.modules.get("native_release")
 if native is None:
     SPEC = importlib.util.spec_from_file_location("native_release", ROOT / "scripts/build-native-release.py")
@@ -55,23 +54,17 @@ if native is None:
 # A change under these, besides tests and Markdown, is a new bridge for Live to load. The host links kumi-common.
 BRIDGE = ("daws/ableton/ableton-mcp-server/", "crates/kumi-common/", "daws/ableton/remote-script/", "daws/ableton/protocol/",
           "daws/ableton/live-extension/", "vendor/willington/")
-# The same for REAPER's extension, and the parts of daw-bridge it links (its own wire, handshake, auth, discovery and
-# files: `rg daw_bridge:: daws/reaper/reaper-kumi/src`, and what those use), and for Renoise's tool (their tests and examples
-# aside too). The rest of daw-bridge (the lifecycle, detection, the doctor, installing) is Kumi's alone.
-REAPER = (native.REAPER_CRATE + "/", "daws/own/daw-bridge/Cargo.toml", *(f"daws/own/daw-bridge/src/{name}.rs" for name in (
-    "lib", "auth", "contract", "daw", "files", "frame", "handshake", "loopback", "owner", "paths", "wire")))
-RENOISE = (native.RENOISE_TOOL_SOURCE + "/",)
-REAPER_CARGO = native.REAPER_CRATE + "/Cargo.toml"
-RENOISE_VERSION = native.RENOISE_TOOL_SOURCE + "/payload/version.lua"
-RENOISE_MANIFEST = native.RENOISE_TOOL_SOURCE + "/manifest.xml"
-# Kumi's own, daw-bridge and its host for REAPER and Renoise (daw-mcp-server) among them.
+# Each other DAW's bridge, by the DAW's id (scripts/daws.toml): what it is and what it's built from. A change under its
+# `loads`, besides tests, examples and Markdown, is a new bridge for that DAW to load.
+DAWS = native.DAW_BRIDGES
+# Kumi's own, daw-bridge and its host for the other DAWs (daw-mcp-server) among them, and each other DAW's integration.
 KUMI = ("crates/kumi/", "crates/kumi-agent/", "crates/kumi-types/", "crates/kumi-net/", "crates/kumi-media/", "crates/kumi-ai/",
         "crates/kumi-web/", "crates/kumi-library/", "crates/kumi-daw/",
         "crates/kumi-listening/", "crates/kumi-common/", "crates/kumi-store/", "daws/ableton/kumi-daw-ableton/",
-        "daws/reaper/kumi-daw-reaper/", "daws/renoise/kumi-daw-renoise/", "daws/own/kumi-daw-own/",
+        *(daw["integration"] + "/" for daw in DAWS.values()), "daws/own/kumi-daw-own/",
         "daws/own/daw-bridge/", "daws/own/daw-mcp-server/", "install.sh", "install.ps1")
 # Kumi's own crates, at Kumi's version, and their folders: Kumi, its common parts and shared types (with the version), and
-# its host for REAPER and Renoise.
+# its host for the other DAWs.
 CRATES = {"kumi": "crates/kumi", "kumi-common": "crates/kumi-common", "kumi-types": "crates/kumi-types",
           "daw-mcp-server": "daws/own/daw-mcp-server"}
 # Where paths moved in the repository, oldest first (scripts/moves.toml, which `dev.py rebase-moves` reads too).
@@ -80,7 +73,8 @@ MOVES = [(move["from"], move["to"]) for move in
 # The CHANGELOG's dates are New York's, as its earlier entries are.
 TIMEZONE = "America/New_York"
 WIDTH = 102
-LINE = re.compile(r"^Changelog(?:\s*\((?P<where>kumi|bridge|reaper|renoise)\))?:\s*(?P<text>.+?)\s*$", re.M | re.I)
+LINE = re.compile(rf"^Changelog(?:\s*\((?P<where>kumi|bridge|{'|'.join(map(re.escape, DAWS))})\))?:\s*(?P<text>.+?)\s*$",
+                  re.M | re.I)
 # The notes end with this, unrendered: the tag build publishes only a draft whose notes carry it.
 MARKER = "<!-- kumi:release-notes -->"
 NUMBER = r"\d+\.\d+(?:\.\d+)?"  # the oldest ships-with entries say "1.5"
@@ -96,35 +90,30 @@ SHIPS = {
 }
 RESTART = ("Ships with bridge {bridge}, which Live loads when it restarts. After updating, Kumi offers to quit Live "
            "(it asks to save first) and opens it again with the new bridge; or run `kumi bridge` with Live closed.")
-# REAPER's extension and Renoise's tool: what the CHANGELOG, the notes and the docs call each, and its DAW.
-DAWS = {"reaper": ("REAPER extension", "REAPER"), "renoise": ("Renoise tool", "Renoise")}
-# Each one's running ships-with line in the docs, in any docs/<language>/*.md (one in every language, or none in any):
-# the pattern of its first entry, that entry with a longer range, the range's dash, and a new first entry in front
-# of the old one. A first entry that ends the sentence (the first release of it) still ends it, after the old one.
-DAW_SHIPS = {
-    "reaper": {
-        "en": (rf"Kumi (?P<first>{NUMBER})(?: to (?P<last>{NUMBER}))? with REAPER extension (?P<bridge>{NUMBER})(?P<end>, |\.)",
-               "Kumi {range} with REAPER extension {bridge}{end}", " to ",
-               "Kumi {new} with REAPER extension {new_bridge}, {range} with {bridge}{end}"),
-        "ja": (rf"Kumi (?P<first>{NUMBER})(?:〜(?P<last>{NUMBER}))? には REAPER 拡張機能 (?P<bridge>{NUMBER})(?P<end>、|。)",
-               "Kumi {range} には REAPER 拡張機能 {bridge}{end}", "〜",
-               "Kumi {new} には REAPER 拡張機能 {new_bridge}、{range} には {bridge}{end}"),
-        "zh-CN": (rf"Kumi (?P<first>{NUMBER})(?: 至 (?P<last>{NUMBER}))? 附带 REAPER 扩展 (?P<bridge>{NUMBER})(?P<end>，|。)",
-                  "Kumi {range} 附带 REAPER 扩展 {bridge}{end}", " 至 ",
-                  "Kumi {new} 附带 REAPER 扩展 {new_bridge}，{range} 附带 {bridge}{end}"),
-    },
-    "renoise": {
-        "en": (rf"Kumi (?P<first>{NUMBER})(?: to (?P<last>{NUMBER}))? with Renoise tool (?P<bridge>{NUMBER})(?P<end>, |\.)",
-               "Kumi {range} with Renoise tool {bridge}{end}", " to ",
-               "Kumi {new} with Renoise tool {new_bridge}, {range} with {bridge}{end}"),
-        "ja": (rf"Kumi (?P<first>{NUMBER})(?:〜(?P<last>{NUMBER}))? には Renoise ツール (?P<bridge>{NUMBER})(?P<end>、|。)",
-               "Kumi {range} には Renoise ツール {bridge}{end}", "〜",
-               "Kumi {new} には Renoise ツール {new_bridge}、{range} には {bridge}{end}"),
-        "zh-CN": (rf"Kumi (?P<first>{NUMBER})(?: 至 (?P<last>{NUMBER}))? 附带 Renoise 工具 (?P<bridge>{NUMBER})(?P<end>，|。)",
-                  "Kumi {range} 附带 Renoise 工具 {bridge}{end}", " 至 ",
-                  "Kumi {new} 附带 Renoise 工具 {new_bridge}，{range} 附带 {bridge}{end}"),
-    },
-}
+# What the CHANGELOG, the notes and the docs call each other DAW's bridge, in each language ("REAPER extension").
+NAMES = {name: {"en": f"{daw['name']} {daw['bridge']}", **daw["words"]} for name, daw in DAWS.items()}
+
+
+def ships_lines(words: dict[str, str]) -> dict[str, tuple[str, str, str, str]]:
+    """A DAW's bridge's running ships-with line in the docs, in any docs/<language>/*.md (one in every language, or none
+    in any), `words` being what each language calls the bridge: the pattern of its first entry, that entry with a longer
+    range, the range's dash, and a new first entry in front of the old one. A first entry that ends the sentence (the
+    first release of it) still ends it, after the old one."""
+    en, ja, zh = (words[language] for language in ("en", "ja", "zh-CN"))
+    return {
+        "en": (rf"Kumi (?P<first>{NUMBER})(?: to (?P<last>{NUMBER}))? with {re.escape(en)} (?P<bridge>{NUMBER})(?P<end>, |\.)",
+               f"Kumi {{range}} with {en} {{bridge}}{{end}}", " to ",
+               f"Kumi {{new}} with {en} {{new_bridge}}, {{range}} with {{bridge}}{{end}}"),
+        "ja": (rf"Kumi (?P<first>{NUMBER})(?:〜(?P<last>{NUMBER}))? には {re.escape(ja)} (?P<bridge>{NUMBER})(?P<end>、|。)",
+               f"Kumi {{range}} には {ja} {{bridge}}{{end}}", "〜",
+               f"Kumi {{new}} には {ja} {{new_bridge}}、{{range}} には {{bridge}}{{end}}"),
+        "zh-CN": (rf"Kumi (?P<first>{NUMBER})(?: 至 (?P<last>{NUMBER}))? 附带 {re.escape(zh)} (?P<bridge>{NUMBER})(?P<end>，|。)",
+                  f"Kumi {{range}} 附带 {zh} {{bridge}}{{end}}", " 至 ",
+                  f"Kumi {{new}} 附带 {zh} {{new_bridge}}，{{range}} 附带 {{bridge}}{{end}}"),
+    }
+
+
+DAW_SHIPS = {name: ships_lines(words) for name, words in NAMES.items()}
 
 
 class Refused(Exception):
@@ -135,7 +124,7 @@ class Refused(Exception):
 class Change:
     number: int
     paths: list[str]
-    lines: list[tuple[str, str]]  # (kumi | bridge | reaper | renoise, text)
+    lines: list[tuple[str, str]]  # (kumi | bridge | a DAW's id, text)
     written: bool  # the body has a Changelog line, "none" included
     wrapped: list[str]  # Changelog lines whose sentence seems to go on past the line break
 
@@ -149,14 +138,9 @@ class Plan:
     date: str
     kumi: list[str]
     bridges: list[str]
-    # REAPER's extension and Renoise's tool, their versions before and after and their own lines (None: this main has
-    # no such bridge).
-    reaper: str | None = None
-    new_reaper: str | None = None
-    renoise: str | None = None
-    new_renoise: str | None = None
-    reaper_lines: list[str] = field(default_factory=list)
-    renoise_lines: list[str] = field(default_factory=list)
+    # Each other DAW's bridge, by the DAW's id: its version before and after and its own lines (None for both: this main
+    # has no such bridge, as for a DAW not here).
+    daws: dict[str, tuple[str | None, str | None, list[str]]] = field(default_factory=dict)
     # The DAWs whose bridges this release brings (the last release had none): each ships at the version it has.
     brought: list[str] = field(default_factory=list)
 
@@ -164,22 +148,12 @@ class Plan:
     def same_bridge(self) -> bool:
         return self.new_bridge == self.bridge
 
-    @property
-    def same_reaper(self) -> bool:
-        return self.new_reaper == self.reaper
-
-    @property
-    def same_renoise(self) -> bool:
-        return self.new_renoise == self.renoise
-
     def daw(self, name: str) -> tuple[str | None, str | None, list[str]]:
         """A DAW's bridge's version before and after, and its lines."""
-        if name == "reaper":
-            return self.reaper, self.new_reaper, self.reaper_lines
-        return self.renoise, self.new_renoise, self.renoise_lines
+        return self.daws.get(name, (None, None, []))
 
     def moved(self) -> list[str]:
-        """The DAWs whose bridges get a new version, REAPER's first."""
+        """The DAWs whose bridges get a new version, in DAWS's order."""
         return [name for name in DAWS if self.daw(name)[0] != self.daw(name)[1] and name not in self.brought]
 
     def olds(self) -> list[str]:
@@ -234,29 +208,29 @@ def ships_bridge(path: str) -> bool:
     return path.startswith(BRIDGE) and not path.endswith(".md") and "/tests/" not in path and not name.startswith("test_")
 
 
-def ships_daw(path: str, under: tuple[str, ...]) -> bool:
-    """A change under these that the DAW loads: not a test, an example or Markdown."""
-    name = path.rsplit("/", 1)[-1]
-    return (path.startswith(under) and not path.endswith(".md") and "/tests/" not in path and "/examples/" not in path
-            and name != "tests.rs" and not name.startswith("test_"))
+def ships_daw(name: str, path: str) -> bool:
+    """A change the DAW `name` loads (under its bridge's `loads`): not a test, an example or Markdown."""
+    file = path.rsplit("/", 1)[-1]
+    return (path.startswith(tuple(DAWS[name]["loads"])) and not path.endswith(".md") and "/tests/" not in path
+            and "/examples/" not in path and file != "tests.rs" and not file.startswith("test_"))
 
 
-def ships_reaper(path: str) -> bool:
-    return ships_daw(path, REAPER)
-
-
-def ships_renoise(path: str) -> bool:
-    return ships_daw(path, RENOISE)
+def version_file(daw: dict) -> tuple[str, str]:
+    """Where a DAW's bridge says its version, and the pattern that reads it there: a library's crate's Cargo.toml, or a
+    Renoise tool's payload/version.lua (which its manifest's Version follows)."""
+    if "library" in daw:
+        return f"{daw['library']['crate']}/Cargo.toml", r'^version = "([^"]+)"'
+    return f"{daw['tool']['folder']}/payload/version.lua", r'return "([^"]+)"'
 
 
 def classify(number: int, body: str, paths: list[str]) -> Change:
     rows = (body or "").replace("\r\n", "\n").split("\n")
     found = [(i, m) for i, row in enumerate(rows) if (m := LINE.match(row))]
     kumis = any(path.startswith(KUMI) for path in paths)
-    bridge, reaper, renoise = (any(ships(path) for path in paths) for ships in (ships_bridge, ships_reaper, ships_renoise))
+    bridge = any(map(ships_bridge, paths))
+    daws = [name for name in DAWS if any(ships_daw(name, path) for path in paths)]
     # A pull request whose lines are a bridge's alone: it changes that bridge and nothing else that ships.
-    alone = ("bridge" if bridge and not kumis else "reaper" if reaper and not (kumis or bridge or renoise)
-             else "renoise" if renoise and not (kumis or bridge or reaper) else "kumi")
+    alone = "bridge" if bridge and not kumis else daws[0] if len(daws) == 1 and not (kumis or bridge) else "kumi"
     lines = [((m["where"] or alone).lower(), m["text"]) for _, m in found if not re.match(r"none\b", m["text"], re.I)]
     # Only a Changelog line's own row is read, so a sentence the body wraps onto the next row would be cut.
     wrapped = [m["text"] for i, m in found if i + 1 < len(rows) and rows[i + 1].strip()
@@ -290,7 +264,7 @@ def ships_with(text: str, language: str, plan: Plan) -> str:
 def daw_lines(root: Path, daw: str) -> dict[str, Path]:
     """The doc holding each language's running ships-with line for a DAW's bridge: one in every language, or none
     while the docs have none yet."""
-    name = DAWS[daw][0]
+    name = NAMES[daw]["en"]
     found: dict[str, Path] = {}
     for language, (pattern, *_) in DAW_SHIPS[daw].items():
         docs = sorted((root / "docs" / language).glob("*.md"))
@@ -310,7 +284,7 @@ def daw_ships_with(text: str, daw: str, language: str, plan: Plan, where: str) -
     """`text` (the doc at `where`) with a DAW's bridge's running ships-with line moved on to this release. One the
     release brings starts with this release already, and stays as it is."""
     pattern, same, dash, moved = DAW_SHIPS[daw][language]
-    name = DAWS[daw][0]
+    name = NAMES[daw]["en"]
     old, new, _ = plan.daw(daw)
     found = list(re.finditer(pattern, text))
     if len(found) != 1:
@@ -332,8 +306,8 @@ def daw_ships_with(text: str, daw: str, language: str, plan: Plan, where: str) -
 
 
 def daws_said(plan: Plan, bold: bool = False) -> str:
-    """What the CHANGELOG and the notes say of REAPER's extension and Renoise's tool: the ones this release changes,
-    which their DAWs load when they restart, and the ones it brings; nothing of the rest."""
+    """What the CHANGELOG and the notes say of the other DAWs' bridges: the ones this release changes, which their DAWs
+    load when they restart, and the ones it brings; nothing of the rest."""
     shown = (lambda version: f"**{version}**") if bold else (lambda version: version)
     said = []
     for names, sentence in [(plan.moved(), "Ships with {bridges}, which {daws} {load} when {they} {restart}; `kumi update` puts {it} in."),
@@ -341,8 +315,8 @@ def daws_said(plan: Plan, bold: bool = False) -> str:
         if names:
             many = len(names) > 1
             said.append(sentence.format(
-                bridges=" and ".join(f"{DAWS[name][0]} {shown(plan.daw(name)[1])}" for name in names),
-                daws=" and ".join(DAWS[name][1] for name in names), load="load" if many else "loads",
+                bridges=" and ".join(f"{NAMES[name]['en']} {shown(plan.daw(name)[1])}" for name in names),
+                daws=" and ".join(DAWS[name]["name"] for name in names), load="load" if many else "loads",
                 they="they" if many else "it", restart="restart" if many else "restarts", it="them" if many else "it",
                 commands=" and ".join(f"`kumi --daw {name} bridge`" for name in names), put="put" if many else "puts"))
     return " ".join(said)
@@ -383,7 +357,7 @@ def changelog(text: str, plan: Plan) -> str:
         parts += [f"### Bridge {plan.new_bridge}", bullets(plan.bridges)]
     for name in plan.moved():
         if plan.daw(name)[2]:
-            parts += [f"### {DAWS[name][0]} {plan.daw(name)[1]}", bullets(plan.daw(name)[2])]
+            parts += [f"### {NAMES[name]['en']} {plan.daw(name)[1]}", bullets(plan.daw(name)[2])]
     at = text.index(f"\n## {plan.old} — ") + 1
     return text[:at] + "\n\n".join(parts) + "\n\n" + text[at:]
 
@@ -404,7 +378,7 @@ def notes(plan: Plan, tested: str, summary: str | None) -> str:
         parts.append(f"**Bridge {plan.new_bridge}**\n" + "\n".join(f"- {line}" for line in plan.bridges))
     for name in plan.moved():
         if plan.daw(name)[2]:
-            parts.append(f"**{DAWS[name][0]} {plan.daw(name)[1]}**\n" + "\n".join(f"- {line}" for line in plan.daw(name)[2]))
+            parts.append(f"**{NAMES[name]['en']} {plan.daw(name)[1]}**\n" + "\n".join(f"- {line}" for line in plan.daw(name)[2]))
     parts.append(f"Update with `/update` inside Kumi or `kumi update` in your terminal.{restart}"
                  " `kumi update --rollback` goes back to your previous version.")
     parts.append(" ".join(tested.split()))
@@ -428,16 +402,20 @@ def apply(root: Path, plan: Plan) -> list[str]:
     if not plan.same_bridge:
         replace_once(edit("daws/ableton/ableton-mcp-server/Cargo.toml"), f'version = "{plan.bridge}"', f'version = "{plan.new_bridge}"')
         moves["ableton-mcp-server"] = (plan.bridge, plan.new_bridge)
-    if not plan.same_reaper:
-        replace_once(edit(REAPER_CARGO), f'version = "{plan.reaper}"', f'version = "{plan.new_reaper}"')
-        moves[Path(native.REAPER_CRATE).name] = (plan.reaper, plan.new_reaper)
-    if not plan.same_renoise:
+    for name, daw in DAWS.items():
+        old, new, _ = plan.daw(name)
+        if old == new:
+            continue
+        if "library" in daw:
+            replace_once(edit(version_file(daw)[0]), f'version = "{old}"', f'version = "{new}"')
+            moves[native.crate_names(daw)[0]] = (old, new)
+            continue
         try:  # the manifest's number, which Renoise compares: each later version a larger one
-            numbers = native.renoise_manifest_version(plan.renoise), native.renoise_manifest_version(plan.new_renoise)
+            numbers = native.renoise_manifest_version(old), native.renoise_manifest_version(new)
         except ValueError as error:
             raise Refused(str(error)) from None
-        replace_once(edit(RENOISE_VERSION), f'return "{plan.renoise}"', f'return "{plan.new_renoise}"')
-        replace_once(edit(RENOISE_MANIFEST), f"<Version>{numbers[0]}</Version>", f"<Version>{numbers[1]}</Version>")
+        replace_once(edit(version_file(daw)[0]), f'return "{old}"', f'return "{new}"')
+        replace_once(edit(daw["tool"]["folder"] + "/manifest.xml"), f"<Version>{numbers[0]}</Version>", f"<Version>{numbers[1]}</Version>")
     lock = edit("Cargo.lock")
     text = lock.read_text(encoding="utf-8")
     for name, (before, after) in moves.items():
@@ -467,7 +445,7 @@ def apply(root: Path, plan: Plan) -> list[str]:
 
 
 def history_docs(root: Path, plan: Plan) -> list[str]:
-    """The docs holding REAPER's or Renoise's running ships-with line, which name every version before."""
+    """The docs holding another DAW's bridge's running ships-with line, which name every version before."""
     return sorted({path.relative_to(root).as_posix() for daw in DAWS if plan.daw(daw)[0] is not None
                    for path in daw_lines(root, daw).values()})
 
@@ -491,9 +469,9 @@ def checks(work: Path, olds: list[str], history: list[str] | None = None) -> lis
 
 def bridge_graph(lock_text: str, crate: str = "ableton-mcp-server", own: tuple[str, ...] = ("ableton-mcp-server", "kumi-common")
                  ) -> set[tuple[str, str]]:
-    """Every (name, version) a bridge's build reaches in a Cargo.lock (Live's bridge host's, or with `crate` REAPER's
-    extension's), less its own crates (whose code BRIDGE or REAPER covers): a change here changes the bridge without a
-    file under BRIDGE changing. Test-only dependencies count too, so a difference is for a look rather than a new
+    """Every (name, version) a bridge's build reaches in a Cargo.lock (Live's bridge host's, or with `crate` a library
+    bridge's), less its own crates (whose code BRIDGE or the DAW's `loads` covers): a change here changes the bridge
+    without a file under them changing. Test-only dependencies count too, so a difference is for a look rather than a new
     version by itself. Nothing for a lock from before the crate."""
     by_name: dict[str, list[dict]] = {}
     for package in tomllib.loads(lock_text)["package"]:
@@ -547,13 +525,14 @@ def pr_body(plan: Plan, changes: list[Change], head: str, left: list[str]) -> st
                  "", "### What ships", *(["- **Kumi**", *kumi] if kumi else []),
                  f"- **Bridge {plan.new_bridge}**", *(listed("bridge") or ["  - no line of its own"])]
     for name in plan.moved():
-        lines += [f"- **{DAWS[name][0]} {plan.daw(name)[1]}**", *(listed(name) or ["  - no line of its own"])]
+        lines += [f"- **{NAMES[name]['en']} {plan.daw(name)[1]}**", *(listed(name) or ["  - no line of its own"])]
     quiet = [f"#{change.number}" for change in changes if not change.lines]
     if quiet:
         lines += ["", f"{', '.join(quiet)}: no changelog line (CI, docs, tests or dependencies)."]
     bridge = "" if plan.same_bridge else f" The bridge goes {plan.bridge} → {plan.new_bridge}."
-    moved = [f"- {DAWS[name][0]} {plan.daw(name)[0]} → {plan.daw(name)[1]} in "
-             + ("`daws/reaper/reaper-kumi/Cargo.toml` and Cargo.lock." if name == "reaper" else "the tool's `payload/version.lua` and its manifest's Version.")
+    moved = [f"- {NAMES[name]['en']} {plan.daw(name)[0]} → {plan.daw(name)[1]} in "
+             + (f"`{version_file(DAWS[name])[0]}` and Cargo.lock." if "library" in DAWS[name]
+                else "the tool's `payload/version.lua` and its manifest's Version.")
              for name in plan.moved()]
     lines += [
         "", "### Set here",
@@ -572,21 +551,24 @@ def pr_body(plan: Plan, changes: list[Change], head: str, left: list[str]) -> st
     return "\n".join(lines) + "\n"
 
 
-def versions_at(ref: str) -> tuple[str, str | None, str | None]:
-    """Live's bridge's version at a commit, REAPER's extension's and Renoise's tool's (None where it has no such one)."""
+def versions_at(ref: str) -> tuple[str, dict[str, str | None]]:
+    """Live's bridge's version at a commit, and each other DAW's bridge's by its id (None where it has no such one)."""
     def shown(path: str) -> str | None:
         held = next((name for name in then(path) if run(["git", "ls-tree", "--name-only", ref, "--", name])), None)
         return run(["git", "show", f"{ref}:{held}"]) if held else None
     bridge = re.search(r'^version = "([^"]+)"', shown("daws/ableton/ableton-mcp-server/Cargo.toml"), re.M)[1]
-    reaper, renoise = shown(REAPER_CARGO), shown(RENOISE_VERSION)
-    return (bridge, reaper and re.search(r'^version = "([^"]+)"', reaper, re.M)[1],
-            renoise and re.search(r'return "([^"]+)"', renoise)[1])
+    daws = {}
+    for name, daw in DAWS.items():
+        path, pattern = version_file(daw)
+        text = shown(path)
+        daws[name] = text and re.search(pattern, text, re.M)[1]
+    return bridge, daws
 
 
 def plan_release(args: argparse.Namespace, head: str, tag: str, changes: list[Change]) -> Plan:
     old = tag[1:]
-    bridge, reaper, renoise = versions_at(head)
-    _, reaper_before, renoise_before = versions_at(tag)
+    bridge, daws = versions_at(head)
+    _, befores = versions_at(tag)
     paths = [path for change in changes for path in change.paths]
     changed = args.bridge or (not args.no_bridge and any(map(ships_bridge, paths)))
     new = args.version or bump(old, args.minor)
@@ -597,21 +579,22 @@ def plan_release(args: argparse.Namespace, head: str, tag: str, changes: list[Ch
         lines["kumi"], lines["bridge"] = lines["kumi"] + lines["bridge"], []
     versions, brought = {}, []
     # A DAW's bridge the last release didn't have ships as it is; any other gets a new version when what it loads changed.
-    for name, version, before, force, keep, ships in [("reaper", reaper, reaper_before, args.reaper, args.no_reaper, ships_reaper),
-                                                      ("renoise", renoise, renoise_before, args.renoise, args.no_renoise, ships_renoise)]:
+    for name in DAWS:
+        flag = name.replace("-", "_")
+        version, before, force, keep = daws[name], befores[name], getattr(args, flag), getattr(args, f"no_{flag}")
         if version is None:
             if force:
-                raise Refused(f"--{name}: main at {head[:8]} has no {DAWS[name][0]} to give a new version")
+                raise Refused(f"--{name}: main at {head[:8]} has no {NAMES[name]['en']} to give a new version")
             versions[name] = (None, None)
             continue
         if before is None:
             brought.append(name)
-        moves = force or (before is not None and not keep and any(map(ships, paths)))
+        moves = force or (before is not None and not keep and any(ships_daw(name, path) for path in paths))
         versions[name] = (version, bump(version) if moves else version)
         if not moves:
             lines["kumi"], lines[name] = lines["kumi"] + lines[name], []
     return Plan(old, new, bridge, bump(bridge) if changed else bridge, args.date or today(), lines["kumi"], lines["bridge"],
-                *versions["reaper"], *versions["renoise"], lines["reaper"], lines["renoise"], brought)
+                {name: (*versions[name], lines[name]) for name in DAWS}, brought)
 
 
 def publish(args: argparse.Namespace, repo: str, plan: Plan, changes: list[Change], head: str, work: Path,
@@ -697,15 +680,19 @@ def release(args: argparse.Namespace) -> None:
             print(f"LOOK: #{change.number}'s Changelog line seems to go on past its line break, and only its first row "
                   f"is read: {text[:70]!r}. Put it on one row in the pull request's body.", file=sys.stderr)
         headings = {"bridge": None if plan.same_bridge else f"Bridge {plan.new_bridge}",
-                    **{name: f"{DAWS[name][0]} {plan.daw(name)[1]}" for name in plan.moved()}}
+                    **{name: f"{NAMES[name]['en']} {plan.daw(name)[1]}" for name in plan.moved()}}
         for kind, text in change.lines:
             print(f"#{change.number} → {headings.get(kind) or 'Kumi'}: {text[:100]}")
-    if not (plan.kumi or plan.bridges or plan.reaper_lines or plan.renoise_lines):
+    if not (plan.kumi or plan.bridges or any(plan.daw(name)[2] for name in DAWS)):
         raise Refused(f"no pull request since {tag} has a changelog line, so there's nothing to release")
     locks = {ref: run(["git", "show", f"{ref}:Cargo.lock"]) for ref in (tag, head)}
-    reaper = Path(native.REAPER_CRATE).name
-    for crate, own, whose, same, flag in [("ableton-mcp-server", ("ableton-mcp-server", "kumi-common"), "the bridge host's", plan.same_bridge, "--bridge"),
-                                          (reaper, (reaper, "daw-bridge"), "REAPER's extension's", plan.same_reaper, "--reaper")]:
+    graphs = [("ableton-mcp-server", ("ableton-mcp-server", "kumi-common"), "the bridge host's", plan.same_bridge, "--bridge")]
+    for name, daw in DAWS.items():
+        if "library" in daw:  # its own crates are those whose code its `loads` covers, each in a folder named for it
+            own = tuple(Path(path.removesuffix("Cargo.toml")).name for path in daw["loads"] if path.endswith(("/", "/Cargo.toml")))
+            graphs.append((native.crate_names(daw)[0], own, f"{daw['name']}'s {daw['bridge']}'s",
+                           plan.daw(name)[0] == plan.daw(name)[1], f"--{name}"))
+    for crate, own, whose, same, flag in graphs:
         before, after = (bridge_graph(locks[ref], crate, own) for ref in (tag, head))
         if before and before != after:  # (nothing to compare with in a lock from before the crate)
             moved = [f"+ {name} {version}" for name, version in sorted(after - before)]
@@ -724,14 +711,14 @@ def release(args: argparse.Namespace) -> None:
         for name in DAWS:
             if plan.daw(name)[0] is not None and not daw_lines(work, name):
                 example = DAW_SHIPS[name]["en"][1].format(range=plan.new, bridge=plan.daw(name)[1], end=".")
-                print(f"LOOK: no doc has the {DAWS[name][0]}'s ships-with line yet (such as {example!r}, in en, ja and "
+                print(f"LOOK: no doc has the {NAMES[name]['en']}'s ships-with line yet (such as {example!r}, in en, ja and "
                       f"zh-CN), so none is moved on", file=sys.stderr)
         changed = apply(work, plan)
         left = checks(work, plan.olds(), history_docs(work, plan))
         changelog_text = (work / "CHANGELOG.md").read_text(encoding="utf-8")
         release_notes = notes(plan, tested_paragraph(changelog_text, plan.new), args.summary)
         bridge = f"{plan.bridge} (unchanged)" if plan.same_bridge else f"{plan.bridge} → {plan.new_bridge}"
-        daws = "".join(f", {DAWS[name][0]} " + (f"{old} (first release)" if name in plan.brought
+        daws = "".join(f", {NAMES[name]['en']} " + (f"{old} (first release)" if name in plan.brought
                                                 else f"{old} (unchanged)" if old == new else f"{old} → {new}")
                        for name in DAWS for old, new, _ in [plan.daw(name)] if old is not None)
         print(f"Kumi {plan.old} → {plan.new}, bridge {bridge}{daws}, dated {plan.date}, from main {head[:8]} with "
@@ -767,12 +754,10 @@ def main() -> None:
     bridge = parser.add_mutually_exclusive_group()
     bridge.add_argument("--bridge", action="store_true", help="give the bridge a new version whatever changed")
     bridge.add_argument("--no-bridge", action="store_true", help="keep the bridge's version whatever changed")
-    reaper = parser.add_mutually_exclusive_group()
-    reaper.add_argument("--reaper", action="store_true", help="give REAPER's extension a new version whatever changed")
-    reaper.add_argument("--no-reaper", action="store_true", help="keep REAPER's extension's version whatever changed")
-    renoise = parser.add_mutually_exclusive_group()
-    renoise.add_argument("--renoise", action="store_true", help="give Renoise's tool a new version whatever changed")
-    renoise.add_argument("--no-renoise", action="store_true", help="keep Renoise's tool's version whatever changed")
+    for name, daw in DAWS.items():
+        flags = parser.add_mutually_exclusive_group()
+        flags.add_argument(f"--{name}", action="store_true", help=f"give {daw['name']}'s {daw['bridge']} a new version whatever changed")
+        flags.add_argument(f"--no-{name}", action="store_true", help=f"keep {daw['name']}'s {daw['bridge']}'s version whatever changed")
     parser.add_argument("--date", help="the CHANGELOG's date (today in New York by default)")
     parser.add_argument("--summary", help="a sentence to open the release notes with")
     parser.add_argument("--co-author", help='"Name <email>" for the release commit\'s Co-Authored-By trailer')

@@ -1,0 +1,53 @@
+# The DAWs on Kumi's own bridges, as the release and packaging scripts read them: release.py (each bridge's version,
+# its changelog lines and the docs' ships-with lines), build-native-release.py (what a bundle carries in daws/<id>) and
+# build-migration-release.py (one commit's versions on every target). Live's bridge is the release's own, so it isn't
+# here. In the order the CHANGELOG, the notes and a bundle's manifests name them.
+#
+# - id: the DAW's id: `kumi --daw <id>`, "Changelog (<id>):" lines, release.py's --<id> and --no-<id>, the bundle's
+#   daws/<id> folder and the manifests' key for its bridge's version.
+# - name and bridge: the DAW's name and what its bridge is ("REAPER extension", "REAPER's extension"); words: what the
+#   docs call the bridge in their other languages.
+# - integration: Kumi's code for the DAW, which ships in Kumi.
+# - loads: what the DAW loads. A change under these, besides tests, examples and Markdown, gives its bridge a new
+#   version.
+# - library: a library Cargo builds from `crate` for each bundle's system, which the DAW loads and calls `entry` in. Its
+#   version is its crate's.
+# - tool: a Renoise tool, its `folder` (named for the tool's id) shipped as it is. Its manifest names the id and the
+#   `api` the tool declares; its version is payload/version.lua's, and the manifest's Version is that as a number.
+
+[[daw]]
+id = "reaper"
+name = "REAPER"
+bridge = "extension"
+words = { ja = "REAPER 拡張機能", zh-CN = "REAPER 扩展" }
+integration = "daws/reaper/kumi-daw-reaper"
+# REAPER loads the `reaper_*` libraries in its UserPlugins folder: the crate's library is reaper_kumi.
+library = { crate = "daws/reaper/reaper-kumi", entry = "ReaperPluginEntry" }
+# The extension, and the parts of daw-bridge it links (its own wire, handshake, auth, discovery and files:
+# `rg daw_bridge:: daws/reaper/reaper-kumi/src`, and what those use). The rest of daw-bridge (the lifecycle, detection,
+# the doctor, installing) is Kumi's alone.
+loads = [
+  "daws/reaper/reaper-kumi/",
+  "daws/own/daw-bridge/Cargo.toml",
+  "daws/own/daw-bridge/src/lib.rs",
+  "daws/own/daw-bridge/src/auth.rs",
+  "daws/own/daw-bridge/src/contract.rs",
+  "daws/own/daw-bridge/src/daw.rs",
+  "daws/own/daw-bridge/src/files.rs",
+  "daws/own/daw-bridge/src/frame.rs",
+  "daws/own/daw-bridge/src/handshake.rs",
+  "daws/own/daw-bridge/src/loopback.rs",
+  "daws/own/daw-bridge/src/owner.rs",
+  "daws/own/daw-bridge/src/paths.rs",
+  "daws/own/daw-bridge/src/wire.rs",
+]
+
+[[daw]]
+id = "renoise"
+name = "Renoise"
+bridge = "tool"
+words = { ja = "Renoise ツール", zh-CN = "Renoise 工具" }
+integration = "daws/renoise/kumi-daw-renoise"
+# API 6.2 is Renoise 3.5's.
+tool = { folder = "daws/renoise/com.kumi.Bridge.xrnx", api = "6.2" }
+loads = ["daws/renoise/com.kumi.Bridge.xrnx/"]

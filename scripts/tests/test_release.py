@@ -18,12 +18,15 @@ SPEC = importlib.util.spec_from_file_location("release_script", ROOT / "scripts/
 release = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = release  # dataclasses look their module up there
 SPEC.loader.exec_module(release)
+# Where REAPER's extension and Renoise's tool say their versions (scripts/daws.toml).
+REAPER_CARGO, RENOISE_VERSION = (release.version_file(release.DAWS[name])[0] for name in ("reaper", "renoise"))
+RENOISE_MANIFEST = release.DAWS["renoise"]["tool"]["folder"] + "/manifest.xml"
 
 FILES = ["package.json", "Cargo.lock", "CHANGELOG.md", "README.md", "README.ja.md", "README.zh-CN.md",
          "crates/kumi/Cargo.toml", "crates/kumi-common/Cargo.toml", "daws/own/daw-mcp-server/Cargo.toml",
          "crates/kumi-types/src/version.rs", "crates/kumi-types/Cargo.toml", "daws/ableton/ableton-mcp-server/Cargo.toml",
          "docs/en/KUMI_CHANGES.md", "docs/ja/KUMI_CHANGES.md", "docs/zh-CN/KUMI_CHANGES.md",
-         release.REAPER_CARGO, release.RENOISE_VERSION, release.RENOISE_MANIFEST]
+         REAPER_CARGO, RENOISE_VERSION, RENOISE_MANIFEST]
 LONG = ("Kumi does a new thing, described at enough length that its changelog bullet wraps onto a second line, "
         "as most of them do.")
 
@@ -36,8 +39,8 @@ def current() -> tuple[str, str]:
 
 def daw_versions() -> tuple[str, str]:
     """REAPER's extension's and Renoise's tool's versions in this checkout."""
-    reaper = re.search(r'^version = "([^"]+)"', (ROOT / release.REAPER_CARGO).read_text(encoding="utf-8"), re.M)[1]
-    return reaper, re.search(r'return "([^"]+)"', (ROOT / release.RENOISE_VERSION).read_text(encoding="utf-8"))[1]
+    reaper = re.search(r'^version = "([^"]+)"', (ROOT / REAPER_CARGO).read_text(encoding="utf-8"), re.M)[1]
+    return reaper, re.search(r'return "([^"]+)"', (ROOT / RENOISE_VERSION).read_text(encoding="utf-8"))[1]
 
 
 def daw_docs(kumi: str, reaper: str, renoise: str, later: dict[str, str] | None = None) -> dict[str, str]:
@@ -255,22 +258,22 @@ class DawSorting(unittest.TestCase):
     def test_what_reaper_and_renoise_load_is_their_bridges(self):
         for path in ("daws/reaper/reaper-kumi/src/lib.rs", "daws/reaper/reaper-kumi/build.rs", "daws/reaper/reaper-kumi/sdk/reaper_plugin.h",
                      "daws/reaper/reaper-kumi/Cargo.toml", "daws/own/daw-bridge/src/wire.rs"):
-            self.assertTrue(release.ships_reaper(path), path)
+            self.assertTrue(release.ships_daw("reaper", path), path)
         for path in ("daws/reaper/reaper-kumi/tests/it/loads.rs", "daws/reaper/reaper-kumi/src/changes/tests.rs",
                      "daws/reaper/reaper-kumi/examples/accept_reaper.rs", "daws/reaper/reaper-kumi/sdk/SOURCE.md",
                      "daws/own/daw-bridge/tests/it/vectors.rs", "daws/own/daw-mcp-server/src/host.rs", "daws/renoise/tests/test_changes.lua"):
-            self.assertFalse(release.ships_reaper(path), path)
+            self.assertFalse(release.ships_daw("reaper", path), path)
         # daw-bridge's parts the extension doesn't link are Kumi's alone: a fix there is no new extension.
         for path in ("daws/own/daw-bridge/src/lifecycle.rs", "daws/own/daw-bridge/src/detect.rs", "daws/own/daw-bridge/src/doctor.rs",
                      "daws/own/daw-bridge/src/install.rs", "daws/own/daw-bridge/src/probe.rs"):
-            self.assertFalse(release.ships_reaper(path), path)
+            self.assertFalse(release.ships_daw("reaper", path), path)
         for path in ("daws/own/daw-bridge/src/handshake.rs", "daws/own/daw-bridge/src/owner.rs", "daws/own/daw-bridge/Cargo.toml"):
-            self.assertTrue(release.ships_reaper(path), path)
+            self.assertTrue(release.ships_daw("reaper", path), path)
         for path in ("daws/renoise/com.kumi.Bridge.xrnx/payload/changes.lua", "daws/renoise/com.kumi.Bridge.xrnx/manifest.xml",
                      "daws/renoise/com.kumi.Bridge.xrnx/main.lua"):
-            self.assertTrue(release.ships_renoise(path), path)
+            self.assertTrue(release.ships_daw("renoise", path), path)
         for path in ("daws/renoise/tests/test_changes.lua", "daws/renoise/tests/mock_song.lua", "daws/reaper/reaper-kumi/src/lib.rs"):
-            self.assertFalse(release.ships_renoise(path), path)
+            self.assertFalse(release.ships_daw("renoise", path), path)
         # Neither is Live's bridge.
         self.assertFalse(release.ships_bridge("daws/reaper/reaper-kumi/src/lib.rs") or release.ships_bridge("daws/renoise/com.kumi.Bridge.xrnx/main.lua"))
 
@@ -301,7 +304,7 @@ class DawPlans(unittest.TestCase):
         changes = [release.classify(number, body, paths) for number, (body, paths) in enumerate(changes, 1)]
         def versions_at(ref):
             has = head_has if ref == "HEAD" else tag_has
-            return ("1.0.93", "0.1.0", "1.0.0") if has else ("1.0.93", None, None)
+            return "1.0.93", {"reaper": "0.1.0", "renoise": "1.0.0"} if has else {"reaper": None, "renoise": None}
         with patch.object(release, "versions_at", side_effect=versions_at):
             return release.plan_release(args, "HEAD", "v1.19.3", changes)
 
@@ -312,35 +315,35 @@ class DawPlans(unittest.TestCase):
 
     def test_a_daw_bridge_gets_a_new_version_when_what_it_loads_changed(self):
         plan = self.plan([self.KUMI, self.REAPER])
-        self.assertEqual((plan.new_reaper, plan.new_renoise, plan.new_bridge), ("0.1.1", "1.0.0", "1.0.93"))
-        self.assertEqual((plan.kumi, plan.reaper_lines, plan.renoise_lines), (["Kumi does W."], ["The extension does Y."], []))
+        self.assertEqual((plan.daw('reaper')[1], plan.daw('renoise')[1], plan.new_bridge), ("0.1.1", "1.0.0", "1.0.93"))
+        self.assertEqual((plan.kumi, plan.daw('reaper')[2], plan.daw('renoise')[2]), (["Kumi does W."], ["The extension does Y."], []))
         self.assertEqual((plan.moved(), plan.brought, plan.olds()), (["reaper"], [], ["1.19.3", "0.1.0"]))
         plan = self.plan([self.RENOISE, self.REAPER, self.LIVE])
-        self.assertEqual((plan.new_reaper, plan.new_renoise, plan.new_bridge), ("0.1.1", "1.0.1", "1.0.94"))
+        self.assertEqual((plan.daw('reaper')[1], plan.daw('renoise')[1], plan.new_bridge), ("0.1.1", "1.0.1", "1.0.94"))
         self.assertEqual(plan.olds(), ["1.19.3", "1.0.93", "0.1.0", "1.0.0"])
 
     def test_each_daws_flags_and_live_bridges_are_its_own(self):
         kept = self.plan([self.KUMI, self.REAPER], no_reaper=True)
-        self.assertEqual((kept.new_reaper, kept.moved()), ("0.1.0", []))
+        self.assertEqual((kept.daw('reaper')[1], kept.moved()), ("0.1.0", []))
         self.assertEqual(kept.kumi, ["Kumi does W.", "The extension does Y."])  # its lines are Kumi's then
         forced = self.plan([self.KUMI], renoise=True)
-        self.assertEqual((forced.new_renoise, forced.new_reaper), ("1.0.1", "0.1.0"))
+        self.assertEqual((forced.daw('renoise')[1], forced.daw('reaper')[1]), ("1.0.1", "0.1.0"))
         # --no-bridge is Live's bridge's alone, and --bridge too.
-        self.assertEqual((lambda p: (p.new_bridge, p.new_reaper))(self.plan([self.LIVE, self.REAPER], no_bridge=True)), ("1.0.93", "0.1.1"))
-        self.assertEqual((lambda p: (p.new_bridge, p.new_reaper))(self.plan([self.KUMI], bridge=True)), ("1.0.94", "0.1.0"))
+        self.assertEqual((lambda p: (p.new_bridge, p.daw('reaper')[1]))(self.plan([self.LIVE, self.REAPER], no_bridge=True)), ("1.0.93", "0.1.1"))
+        self.assertEqual((lambda p: (p.new_bridge, p.daw('reaper')[1]))(self.plan([self.KUMI], bridge=True)), ("1.0.94", "0.1.0"))
 
     def test_a_daw_bridge_the_last_release_hadnt_ships_as_it_is(self):
         plan = self.plan([self.KUMI, self.REAPER, self.RENOISE], tag_has=False)
-        self.assertEqual((plan.new_reaper, plan.new_renoise, plan.brought, plan.moved()), ("0.1.0", "1.0.0", ["reaper", "renoise"], []))
+        self.assertEqual((plan.daw('reaper')[1], plan.daw('renoise')[1], plan.brought, plan.moved()), ("0.1.0", "1.0.0", ["reaper", "renoise"], []))
         self.assertEqual(plan.kumi, ["Kumi does W.", "The extension does Y.", "The tool does Z."])
         # Given a version all the same, it's still brought, not updated: no `kumi update` puts in what wasn't there.
         forced = self.plan([self.KUMI], tag_has=False, reaper=True)
-        self.assertEqual((forced.new_reaper, forced.brought, forced.moved()), ("0.1.1", ["reaper", "renoise"], []))
+        self.assertEqual((forced.daw('reaper')[1], forced.brought, forced.moved()), ("0.1.1", ["reaper", "renoise"], []))
         self.assertEqual(release.daws_said(forced), "Brings REAPER extension 0.1.1 and Renoise tool 1.0.0: `kumi --daw reaper bridge` "
                                                     "and `kumi --daw renoise bridge` put them in.")
         # A main without them says nothing of them, and refuses to give them a version.
         plan = self.plan([self.KUMI, self.REAPER], tag_has=False, head_has=False)
-        self.assertEqual((plan.reaper, plan.new_reaper, plan.brought), (None, None, []))
+        self.assertEqual((plan.daw('reaper')[0], plan.daw('reaper')[1], plan.brought), (None, None, []))
         with self.assertRaisesRegex(release.Refused, "--reaper: main at HEAD has no REAPER extension"):
             self.plan([self.KUMI], tag_has=False, head_has=False, reaper=True)
 
@@ -363,9 +366,10 @@ class DawEdits(unittest.TestCase):
         reaper_now, renoise_now = daw_versions()
         plan = release.Plan(old, release.bump(old), bridge, release.bump(bridge) if new_bridge else bridge, "2026-10-20", [LONG],
                             ["The bridge does a new thing."] if new_bridge else [],
-                            reaper_now, release.bump(reaper_now) if reaper else reaper_now,
-                            renoise_now, release.bump(renoise_now) if renoise else renoise_now,
-                            ["The extension does a new thing."] if reaper else [], ["The tool does a new thing."] if renoise else [],
+                            {"reaper": (reaper_now, release.bump(reaper_now) if reaper else reaper_now,
+                                        ["The extension does a new thing."] if reaper else []),
+                             "renoise": (renoise_now, release.bump(renoise_now) if renoise else renoise_now,
+                                         ["The tool does a new thing."] if renoise else [])},
                             list(brought))
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
@@ -385,31 +389,31 @@ class DawEdits(unittest.TestCase):
     def test_new_versions_of_both_daw_bridges(self):
         plan, texts, changed, really = self.released(reaper=True, renoise=True)
         self.assertEqual(sorted(changed), really)
-        self.assertIn(f'name = "reaper-kumi"\nversion = "{plan.new_reaper}"', texts["Cargo.lock"])
-        self.assertIn(f'version = "{plan.new_reaper}"', texts[release.REAPER_CARGO])
-        self.assertIn(f'return "{plan.new_renoise}"', texts[release.RENOISE_VERSION])
-        self.assertIn(f"<Version>{release.native.renoise_manifest_version(plan.new_renoise)}</Version>", texts[release.RENOISE_MANIFEST])
-        self.assertTrue({release.REAPER_CARGO, release.RENOISE_VERSION, release.RENOISE_MANIFEST} <= set(changed))
+        self.assertIn(f'name = "reaper-kumi"\nversion = "{plan.daw("reaper")[1]}"', texts["Cargo.lock"])
+        self.assertIn(f'version = "{plan.daw("reaper")[1]}"', texts[REAPER_CARGO])
+        self.assertIn(f'return "{plan.daw("renoise")[1]}"', texts[RENOISE_VERSION])
+        self.assertIn(f"<Version>{release.native.renoise_manifest_version(plan.daw('renoise')[1])}</Version>", texts[RENOISE_MANIFEST])
+        self.assertTrue({REAPER_CARGO, RENOISE_VERSION, RENOISE_MANIFEST} <= set(changed))
         new = entry(texts["CHANGELOG.md"], plan.new)
-        self.assertIn(f"Ships with REAPER extension {plan.new_reaper} and Renoise tool {plan.new_renoise}, which REAPER and Renoise "
+        self.assertIn(f"Ships with REAPER extension {plan.daw('reaper')[1]} and Renoise tool {plan.daw('renoise')[1]}, which REAPER and Renoise "
                       "load when they restart; `kumi update` puts them in.", " ".join(new.split()))
         self.assertTrue(all(len(line) <= release.WIDTH for line in new.splitlines()), new)
-        self.assertIn(f"\n\n### REAPER extension {plan.new_reaper}\n\n- The extension does a new thing.", new)
-        self.assertIn(f"\n\n### Renoise tool {plan.new_renoise}\n\n- The tool does a new thing.", new)
+        self.assertIn(f"\n\n### REAPER extension {plan.daw('reaper')[1]}\n\n- The extension does a new thing.", new)
+        self.assertIn(f"\n\n### Renoise tool {plan.daw('renoise')[1]}\n\n- The tool does a new thing.", new)
         self.assertLess(new.index("Tested with"), new.index("### REAPER extension"))
         self.assertLess(new.index("### REAPER extension"), new.index("### Renoise tool"))
 
     def test_a_new_version_of_one_daw_bridge(self):
         plan, texts, changed, really = self.released(reaper=True, new_bridge=True)
         self.assertEqual(sorted(changed), really)
-        self.assertNotIn(release.RENOISE_VERSION, changed)
-        self.assertNotIn(release.RENOISE_MANIFEST, changed)
+        self.assertNotIn(RENOISE_VERSION, changed)
+        self.assertNotIn(RENOISE_MANIFEST, changed)
         new = entry(texts["CHANGELOG.md"], plan.new)
         flat = " ".join(new.split())
-        self.assertIn(f"with Live closed. Ships with REAPER extension {plan.new_reaper}, which REAPER loads when it restarts; "
+        self.assertIn(f"with Live closed. Ships with REAPER extension {plan.daw('reaper')[1]}, which REAPER loads when it restarts; "
                       "`kumi update` puts it in.", flat)
         self.assertNotIn("Renoise", new)
-        self.assertLess(new.index(f"### Bridge {plan.new_bridge}"), new.index(f"### REAPER extension {plan.new_reaper}"))
+        self.assertLess(new.index(f"### Bridge {plan.new_bridge}"), new.index(f"### REAPER extension {plan.daw('reaper')[1]}"))
 
     def test_daw_bridges_as_they_were_say_nothing(self):
         plan, texts, changed, really = self.released()
@@ -423,18 +427,19 @@ class DawEdits(unittest.TestCase):
 
     def test_the_notes_say_the_new_daw_bridges_and_their_lines(self):
         reaper_now = daw_versions()[0]
-        both = release.Plan("1.20.0", "1.20.1", "1.0.93", "1.0.93", "2026-10-20", ["Kumi does X."], [], reaper_now, "9.9.9", "1.0.0", "1.0.1",
-                            ["The extension does Y."], [])
+        both = release.Plan("1.20.0", "1.20.1", "1.0.93", "1.0.93", "2026-10-20", ["Kumi does X."], [],
+                            {"reaper": (reaper_now, "9.9.9", ["The extension does Y."]), "renoise": ("1.0.0", "1.0.1", [])})
         text = release.notes(both, "Tested with Live.", None)
         self.assertTrue(text.startswith("Kumi 1.20.1. Ships with bridge **1.0.93**, as 1.20.0 did, so Live needs no restart. Ships with "
                                         "REAPER extension **9.9.9** and Renoise tool **1.0.1**, which REAPER and Renoise load when they "
                                         "restart; `kumi update` puts them in.\n"), text)
         self.assertIn("\n\n**REAPER extension 9.9.9**\n- The extension does Y.\n\n", text)
         self.assertNotIn("**Renoise tool", text)  # no line of its own: no heading
-        same = release.Plan("1.20.0", "1.20.1", "1.0.93", "1.0.93", "2026-10-20", ["Kumi does X."], [], "0.1.0", "0.1.0", "1.0.0", "1.0.0")
+        same = release.Plan("1.20.0", "1.20.1", "1.0.93", "1.0.93", "2026-10-20", ["Kumi does X."], [],
+                            {"reaper": ("0.1.0", "0.1.0", []), "renoise": ("1.0.0", "1.0.0", [])})
         self.assertNotIn("REAPER", release.notes(same, "Tested with Live.", None))
-        brought = release.Plan("1.19.3", "1.20.0", "1.0.93", "1.0.93", "2026-10-20", ["Kumi does X."], [], "0.1.0", "0.1.0", "1.0.0", "1.0.0",
-                               brought=["reaper", "renoise"])
+        brought = release.Plan("1.19.3", "1.20.0", "1.0.93", "1.0.93", "2026-10-20", ["Kumi does X."], [],
+                               {"reaper": ("0.1.0", "0.1.0", []), "renoise": ("1.0.0", "1.0.0", [])}, brought=["reaper", "renoise"])
         self.assertIn("no restart. Brings REAPER extension **0.1.0** and Renoise tool **1.0.0**: `kumi --daw reaper bridge` and "
                       "`kumi --daw renoise bridge` put them in.\n", release.notes(brought, "Tested with Live.", None))
         body = release.pr_body(both, [release.classify(7, "Changelog: The extension does Y.", ["daws/reaper/reaper-kumi/src/lib.rs"])], "a" * 40, [])
@@ -454,7 +459,7 @@ class DawEdits(unittest.TestCase):
         # The first release of each: a full stop after its only entry. REAPER's gets a new version, Renoise's doesn't.
         plan, texts, changed, really = self.released(reaper=True, docs=daw_docs(old, reaper, renoise))
         self.assertEqual(sorted(changed), really)
-        new_reaper = plan.new_reaper
+        new_reaper = plan.daw('reaper')[1]
         self.assertIn(f"Kumi {new} with REAPER extension {new_reaper}, {old} with {reaper}.\n", texts["docs/en/CONNECT_DAWS.md"])
         self.assertIn(f"Kumi {old} to {new} with Renoise tool {renoise}.\n", texts["docs/en/CONNECT_DAWS.md"])
         self.assertIn(f"Kumi {new} には REAPER 拡張機能 {new_reaper}、{old} には {reaper}。\n", texts["docs/ja/CONNECT_DAWS.md"])
@@ -469,9 +474,9 @@ class DawEdits(unittest.TestCase):
                 for name, text in docs.items()}
         plan, texts, _, _ = self.released(renoise=True, docs=docs)
         self.assertIn(f"Kumi 1.19.2 to {new} with REAPER extension {reaper}, 1.19.0 to 1.19.1 with 0.0.9.", texts["docs/en/CONNECT_DAWS.md"])
-        self.assertIn(f"Kumi {new} with Renoise tool {plan.new_renoise}, 1.19.2 to {old} with {renoise}, 1.19.0 to 1.19.1 with 0.0.9.",
+        self.assertIn(f"Kumi {new} with Renoise tool {plan.daw('renoise')[1]}, 1.19.2 to {old} with {renoise}, 1.19.0 to 1.19.1 with 0.0.9.",
                       texts["docs/en/CONNECT_DAWS.md"])
-        self.assertIn(f"Kumi {new} には Renoise ツール {plan.new_renoise}、1.19.2〜{old} には {renoise}、1.19.0〜1.19.1 には 0.0.9。",
+        self.assertIn(f"Kumi {new} には Renoise ツール {plan.daw('renoise')[1]}、1.19.2〜{old} には {renoise}、1.19.0〜1.19.1 には 0.0.9。",
                       texts["docs/ja/CONNECT_DAWS.md"])
         self.assertIn(f"Kumi 1.19.2 至 {new} 附带 REAPER 扩展 {reaper}，1.19.0 至 1.19.1 附带 0.0.9。", texts["docs/zh-CN/CONNECT_DAWS.md"])
 
