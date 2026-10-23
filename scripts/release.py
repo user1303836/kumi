@@ -23,6 +23,8 @@ What ships is read from main since the last release tag:
   com.kumi.Bridge.xrnx). --reaper and --renoise give one a new version whatever changed; --no-reaper and --no-renoise
   keep it. A pull request that changes one of them and nothing else that ships has its lines under that one's
   heading, as do lines written "Changelog (reaper):" or "Changelog (renoise):". --no-bridge is only Live's.
+- A pull request's files count where they are now: one from before a move (scripts/moves.toml) by their new places,
+  and an older release's versions are read where it had them.
 The version goes up by a patch, by a minor with --minor, or is given with --version.
 """
 from __future__ import annotations
@@ -67,6 +69,9 @@ KUMI = ("crates/kumi/", "crates/kumi-runtime/", "crates/kumi-common/", "crates/k
         "crates/daw-mcp-server/", "install.sh", "install.ps1")
 # Kumi's own crates, at Kumi's version: Kumi, its runtime and common parts, and its host for REAPER and Renoise.
 CRATES = ("kumi", "kumi-common", "kumi-runtime", "daw-mcp-server")
+# Where paths moved in the repository, oldest first (scripts/moves.toml, which `dev.py rebase-moves` reads too).
+MOVES = [(move["from"], move["to"]) for move in
+         tomllib.loads((ROOT / "scripts/moves.toml").read_text(encoding="utf-8")).get("move", [])]
 # The CHANGELOG's dates are New York's, as its earlier entries are.
 TIMEZONE = "America/New_York"
 WIDTH = 102
@@ -200,6 +205,23 @@ def today() -> str:
         return datetime.datetime.now(ZoneInfo(TIMEZONE)).date().isoformat()
     except Exception:  # no time zone database: the local date
         return datetime.date.today().isoformat()
+
+
+def now(path: str) -> str:
+    """Where a path that a commit from before a move names is now."""
+    for old, new in MOVES:
+        if path == old or path.startswith(old + "/"):
+            path = new + path[len(old):]
+    return path
+
+
+def then(path: str) -> list[str]:
+    """`path`, then what it was before each move, newest first: an older commit has it at one of them."""
+    names = [path]
+    for old, new in reversed(MOVES):
+        if names[-1] == new or names[-1].startswith(new + "/"):
+            names.append(old + names[-1][len(new):])
+    return names
 
 
 def ships_bridge(path: str) -> bool:
@@ -500,7 +522,8 @@ def pull_requests(tag: str, head: str, repo: str) -> list[Change]:
         if re.match(r"Kumi \d+\.\d+\.\d+ \(#\d+\)$", subject):
             raise Refused(f"{subject!r} is a release since {tag} without its tag")
         body = json.loads(run(["gh", "pr", "view", found[1], "--repo", repo, "--json", "body"]))["body"]
-        changes.append(classify(int(found[1]), body, run(["git", "diff", "--name-only", f"{sha}^1", sha]).splitlines()))
+        paths = run(["git", "diff", "--name-only", f"{sha}^1", sha]).splitlines()
+        changes.append(classify(int(found[1]), body, [now(path) for path in paths]))
     return changes
 
 
@@ -547,7 +570,8 @@ def pr_body(plan: Plan, changes: list[Change], head: str, left: list[str]) -> st
 def versions_at(ref: str) -> tuple[str, str | None, str | None]:
     """Live's bridge's version at a commit, REAPER's extension's and Renoise's tool's (None where it has no such one)."""
     def shown(path: str) -> str | None:
-        return run(["git", "show", f"{ref}:{path}"]) if run(["git", "ls-tree", "--name-only", ref, "--", path]) else None
+        held = next((name for name in then(path) if run(["git", "ls-tree", "--name-only", ref, "--", name])), None)
+        return run(["git", "show", f"{ref}:{held}"]) if held else None
     bridge = re.search(r'^version = "([^"]+)"', shown("crates/ableton-mcp-server/Cargo.toml"), re.M)[1]
     reaper, renoise = shown(REAPER_CARGO), shown(RENOISE_VERSION)
     return (bridge, reaper and re.search(r'^version = "([^"]+)"', reaper, re.M)[1],

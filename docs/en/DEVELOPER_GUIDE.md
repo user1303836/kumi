@@ -27,6 +27,12 @@ The crates share the root Cargo workspace; there's no npm workspace. The
 bridge also works without Kumi. The TypeScript implementation the crates were
 ported from stays at the git tag `v1.7.6`.
 
+When a folder moves, `scripts/moves.toml` records where it went. A branch begun
+before a move catches up with `python3 scripts/dev.py rebase-moves` (`--merge`
+merges main instead of rebasing): git follows the moved folders, the old paths
+in the branch's own lines are rewritten, and what's left (conflicts, files at an
+old path, build errors) is listed.
+
 ## How the parts talk
 
 ```text

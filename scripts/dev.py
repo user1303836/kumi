@@ -9,6 +9,7 @@
     python3 scripts/dev.py areas [--in AREA] PATH...      # the areas each path belongs to
     python3 scripts/dev.py check [--base origin/main]     # Required CI's checks for what this branch changes
     python3 scripts/dev.py select "PACKAGES" [-p NAME | --exclude NAME]...   # a CI part's affected packages, as -p options
+    python3 scripts/dev.py rebase-moves [--onto origin/main] [--merge] [--no-build]   # a branch from before a move, onto main
 
 `affected` reads the changed files from `git diff <base>...HEAD`. A file's package is the Cargo package whose folder
 holds it (the longest such folder); its areas are the ones in scripts/areas.toml whose globs match it. The affected
@@ -33,6 +34,15 @@ npm or LuaJIT); and the release scripts' and the installers' checks (the latter 
 `select` takes the affected packages (space-separated, as `affected --github-output` writes them) and a part of the
 workspace as cargo selects it (`-p` each package, or `--exclude` the rest's), and prints `-p` for each of that part's
 affected packages: the ones a CI job of that part tests. It prints nothing when none is.
+
+`rebase-moves` brings a branch that began before a move in scripts/moves.toml onto `--onto` (origin/main). It rebases
+the branch (or merges `--onto` into it, `--merge`) with git following moved folders, files the branch adds in them
+included (merge.directoryRenames); rewrites each moved repository path (`[[move]]`) and Rust path (`[[rust]]`) in the
+lines the branch adds, leaving them for you to review and commit; lists the files the branch adds where a path moved
+away (git follows a moved folder, not files moved out of one); and builds every target (`cargo check`, skipped with
+`--no-build`), listing the errors. It reads the map from `--onto` and works on the checkout it's run in, so a branch
+older than this command runs main's copy: `python3 <(git show origin/main:scripts/dev.py) rebase-moves`. When the rebase
+stops on a conflict, resolve it, `git rebase --continue`, and run it again.
 """
 from __future__ import annotations
 
@@ -53,6 +63,10 @@ AREAS = ROOT / "scripts/areas.toml"
 REAPER_EXTENSION = "reaper-kumi"
 JOBS = ("rust_linux", "rust_lint", "rust_platforms", "remote_script", "live_extension", "reaper_extension",
         "renoise_tool", "installer", "network")
+# Where the repository's paths moved, oldest first: `rebase-moves` reads it from the branch it rebases onto.
+MOVES = "scripts/moves.toml"
+WORD = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_")
+PATH = WORD | frozenset("-./")
 
 
 class Refused(Exception):
@@ -374,8 +388,187 @@ def command_areas(args: argparse.Namespace) -> int:
     return 0
 
 
+@dataclass
+class Rewrite:
+    """A path that moved: a repository path (`[[move]]` in scripts/moves.toml) or a Rust path (`[[rust]]`)."""
+    old: str
+    new: str
+    rust: bool = False
+
+    def apply(self, line: str) -> str:
+        """`line` with each place it names the old path naming the new one."""
+        out, at = [], 0
+        while (found := line.find(self.old, at)) >= 0:
+            end = found + len(self.old)
+            out += [line[at:found], self.new if self.names(line, found, end) else self.old]
+            at = end
+        return "".join(out) + line[at:]
+
+    def names(self, line: str, start: int, end: int) -> bool:
+        """Whether line[start:end] is the old path itself, not a piece of a longer name or path."""
+        before, after = line[start - 1:start], line[end:end + 1]
+        if self.rust:
+            return before not in WORD and after not in WORD
+        # `./crates/x` and `/crates/x` (`concat!(env!("KUMI_WORKSPACE"), "/crates/x")`) name it from the checkout's
+        # root; `../crates/x` and `a/crates/x` don't.
+        lead = line[:start]
+        rooted = lead.endswith("./") and lead[-3:-2] not in PATH or lead.endswith("/") and lead[-2:-1] not in PATH
+        if before in PATH and not rooted:
+            return False
+        # A one-word path (`protocol`) is often a word in prose too: it moves only as a folder of a longer path.
+        return after == "/" if "/" not in self.old else after not in WORD and after != "-"
+
+    def moved(self, path: str) -> str:
+        """Where a repository path is after this move."""
+        if path == self.old or path.startswith(self.old + "/"):
+            return self.new + path[len(self.old):]
+        return path
+
+
+def load_moves(text: str) -> list[Rewrite]:
+    table = tomllib.loads(text)
+    if set(table) - {"move", "rust"}:
+        raise Refused(f"{MOVES} holds [[move]] and [[rust]] entries only, not {', '.join(sorted(set(table) - {'move', 'rust'}))}")
+    rewrites = []
+    for kind in ("move", "rust"):
+        for entry in table.get(kind, []):
+            if set(entry) != {"from", "to"} or not all(isinstance(value, str) and value for value in entry.values()):
+                raise Refused(f"{MOVES}: each [[{kind}]] has a from and a to, and nothing else: {entry}")
+            rewrites.append(Rewrite(entry["from"], entry["to"], rust=kind == "rust"))
+    return rewrites
+
+
+def moved_to(path: str, rewrites: list[Rewrite]) -> str:
+    """Where a repository path is after every move in the map, in order."""
+    for rewrite in rewrites:
+        if not rewrite.rust:
+            path = rewrite.moved(path)
+    return path
+
+
+def git(repo: Path, *args: str) -> str:
+    try:
+        return subprocess.run(["git", "-c", "core.quotePath=false", *args], cwd=repo, capture_output=True, text=True,
+                              check=True).stdout
+    except subprocess.CalledProcessError as failed:
+        raise Refused(f"git {' '.join(args)} failed: {failed.stderr.strip()}") from None
+
+
+def added_lines(diff: str) -> dict[str, list[int]]:
+    """The lines (from 1) each file has that the other side hasn't, from `git diff -U0`; none for a file it deletes."""
+    lines: dict[str, list[int]] = {}
+    path, header = None, False
+    for line in diff.splitlines():
+        if line.startswith("diff --git "):
+            path, header = None, True
+        elif header and line.startswith("+++ "):
+            path = line[6:] if line.startswith("+++ b/") else None
+        elif line.startswith("@@ "):
+            header = False
+            hunk = re.match(r"@@ -\S+ \+(\d+)(?:,(\d+))? @@", line)
+            if path and hunk:
+                start = int(hunk[1])
+                lines.setdefault(path, []).extend(range(start, start + int(hunk[2] or 1)))
+    return lines
+
+
+def rewrite_added(repo: Path, base: str, rewrites: list[Rewrite]) -> dict[str, list[int]]:
+    """Rewrites the moved paths in the lines the branch adds since `base`, in the working tree: the lines it changed,
+    by file."""
+    changed = {}
+    diff = git(repo, "diff", "-U0", "--no-color", "--no-ext-diff", "--src-prefix=a/", "--dst-prefix=b/", f"{base}...HEAD")
+    for path, numbers in added_lines(diff).items():
+        try:
+            with open(repo / path, encoding="utf-8", newline="") as file:
+                lines = file.read().splitlines(keepends=True)
+        except (OSError, UnicodeDecodeError):
+            continue
+        hit = []
+        for number in numbers:
+            if number <= len(lines):
+                line = lines[number - 1]
+                for rewrite in rewrites:
+                    line = rewrite.apply(line)
+                if line != lines[number - 1]:
+                    lines[number - 1] = line
+                    hit.append(number)
+        if hit:
+            with open(repo / path, "w", encoding="utf-8", newline="") as file:
+                file.write("".join(lines))
+            changed[path] = hit
+    return changed
+
+
+def rebase_moves(repo: Path, onto: str, merge: bool = False, build: bool = True) -> int:
+    """Brings the branch checked out in `repo` onto `onto` across the moves in `onto`'s map (see the module's
+    docstring). 0 when it's there and builds; 1 with what's left to do."""
+    try:
+        rewrites = load_moves(git(repo, "show", f"{onto}:{MOVES}"))
+    except Refused as refused:
+        raise Refused(f"no {MOVES} at {onto}, so nothing has moved there ({refused})") from None
+    git_dir = Path(git(repo, "rev-parse", "--absolute-git-dir").strip())
+    if any((git_dir / name).exists() for name in ("rebase-merge", "rebase-apply", "MERGE_HEAD")):
+        raise Refused("a rebase or merge is under way here: finish it (git rebase --continue, or git commit) and run this again")
+    left = 0
+    if subprocess.run(["git", "merge-base", "--is-ancestor", onto, "HEAD"], cwd=repo).returncode:
+        if git(repo, "status", "--porcelain", "--untracked-files=no").strip():
+            raise Refused("the working tree has changes: commit them first")
+        command = ["git", "-c", "merge.directoryRenames=true", "-c", "merge.renameLimit=100000",
+                   *(["merge", "--no-edit", onto] if merge else ["rebase", onto])]
+        print(f"-- {' '.join(command)}", flush=True)
+        done = subprocess.run(command, cwd=repo, capture_output=True, text=True)
+        if (done.stdout + done.stderr).strip():
+            print((done.stdout + done.stderr).rstrip())
+        if done.returncode:
+            conflicts = git(repo, "diff", "--name-only", "--diff-filter=U").splitlines()
+            print(f"-- {len(conflicts)} file{'' if len(conflicts) == 1 else 's'} in conflict:" if conflicts else
+                  f"-- git {'merge' if merge else 'rebase'} stopped (above)")
+            for path in conflicts:
+                print(f"  {path}")
+            print(f"Resolve, then {'git commit' if merge else 'git rebase --continue (until it ends)'}, and run "
+                  "rebase-moves again: it rewrites the moved paths and builds.")
+            return 1
+    else:
+        print(f"-- HEAD already has {onto}")
+    changed = rewrite_added(repo, onto, rewrites)
+    lines = sum(len(numbers) for numbers in changed.values())
+    print(f"-- moved paths rewritten in the lines the branch adds: {lines} line{'' if lines == 1 else 's'}"
+          + (" (review them with git diff, then commit)" if changed else ""))
+    for path, numbers in sorted(changed.items()):
+        print(f"  {path}: {', '.join(map(str, numbers))}")
+    added = git(repo, "diff", "--name-only", "--diff-filter=A", f"{onto}...HEAD").splitlines()
+    behind = [(path, moved_to(path, rewrites)) for path in added if moved_to(path, rewrites) != path]
+    if behind:
+        left += 1
+        print("-- files the branch adds where a path moved away: move each with git mv")
+        for path, where in behind:
+            print(f"  {path} -> {where}")
+    if build:
+        if not shutil.which("cargo"):
+            print("-- the build: skipped, without cargo on PATH")
+        else:
+            print("-- cargo check --workspace --all-targets --locked", flush=True)
+            done = subprocess.run(["cargo", "check", "--workspace", "--all-targets", "--locked", "--message-format", "short"],
+                                  cwd=repo, capture_output=True, text=True)
+            errors = [line for line in done.stderr.splitlines() if re.search(r"(^|: )error(\[\w+\])?: ", line)
+                      and "could not compile" not in line]
+            if done.returncode:
+                left += 1
+                print(f"  {len(errors)} error{'' if len(errors) == 1 else 's'}" + (":" if errors else ""))
+                for line in errors[:40] if errors else done.stderr.strip().splitlines()[-20:]:
+                    print(f"  {line}")
+            else:
+                print("  it builds")
+    print("rebase-moves: done." if not left else "rebase-moves: the branch is on its new base, with the above left to fix.")
+    return 1 if left else 0
+
+
+def command_rebase_moves(args: argparse.Namespace) -> int:
+    return rebase_moves(Path(git(Path.cwd(), "rev-parse", "--show-toplevel").strip()), args.onto, args.merge, not args.no_build)
+
+
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = argparse.ArgumentParser(prog="dev.py", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     commands = parser.add_subparsers(dest="command", required=True)
     what = commands.add_parser("affected", help="the packages, areas and CI jobs a change affects")
     what.add_argument("--base", help="the ref the change is measured from (its merge base with HEAD); none: everything")
@@ -397,6 +590,11 @@ def main(argv: list[str] | None = None) -> int:
     part.add_argument("affected", help="the affected packages, space-separated")
     part.add_argument("selection", nargs=argparse.REMAINDER, help="the part: -p NAME... or --exclude NAME...")
     part.set_defaults(run=command_select)
+    rebase = commands.add_parser("rebase-moves", help="bring a branch from before a move onto main, moved paths rewritten")
+    rebase.add_argument("--onto", default="origin/main", help="the ref to rebase onto, whose moves map is read (default origin/main)")
+    rebase.add_argument("--merge", action="store_true", help="merge --onto into the branch instead of rebasing it")
+    rebase.add_argument("--no-build", action="store_true", help="don't run cargo check afterwards")
+    rebase.set_defaults(run=command_rebase_moves)
     args = parser.parse_args(argv)
     try:
         return args.run(args)
