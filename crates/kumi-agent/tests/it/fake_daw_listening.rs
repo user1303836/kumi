@@ -245,7 +245,7 @@ async fn a_judged_run_works_toward_the_producers_own_music_kept_by_name() {
                 asked: RefCell::default(),
                 told: RefCell::default(),
             });
-            let listening = Listening::new(fake.clone(), None, None, None, Some(references));
+            let listening = Listening::new(fake.clone(), None, None, None, Some(references), None);
             let input = json!({"goal": {"reference": name}, "from_beat": 0, "beats": 4});
             let result = listening.call("judge", input.as_object().cloned().unwrap(), Signal::new()).await.expect("judge").unwrap();
             assert!(!result.is_error, "{}", result.text);
