@@ -633,16 +633,23 @@ mod tests {
 
     #[test]
     fn a_play_reading_its_file_stops_reading_when_another_play_or_a_stop_comes() {
-        let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        // One thread for blocking work, kept busy while both plays are asked: their file reads wait behind it, so
+        // each is still reading, however fast the computer is.
+        let runtime = tokio::runtime::Builder::new_current_thread().max_blocking_threads(1).enable_all().build().unwrap();
         runtime.block_on(async {
             let player = Player::with_opener(Box::new(|| Ok(Box::new(Silent) as Box<dyn Output>)));
             let file = Path::new("there's no such file.wav");
+            let (release, held) = mpsc::channel::<()>();
+            tokio::task::spawn_blocking(move || {
+                let _ = held.recv();
+            });
             let mut first = std::pin::pin!(player.play(file, 0., 1.));
             assert!(futures::poll!(first.as_mut()).is_pending(), "reading its file");
             let reading = player.reading.borrow().clone();
             let mut second = std::pin::pin!(player.play(file, 0., 1.));
             assert!(futures::poll!(second.as_mut()).is_pending());
             assert!(reading.is_cancelled(), "the first stops reading");
+            drop(release);
             assert_eq!(first.await, Ok(Played::Overtaken), "its file was missing, but it was overtaken first");
             let reading = player.reading.borrow().clone();
             player.stop();
