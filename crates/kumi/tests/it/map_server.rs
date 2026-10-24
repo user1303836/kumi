@@ -220,3 +220,103 @@ fn the_page_gets_both_maps_and_names_points_and_actions_by_id() {
     assert_eq!(page.asked("grow", "sounds:0").unwrap(), "Make a sound like this one, with a match run aimed at it: /Samples/One 1.wav");
     assert!(page.asked("delete", "songs:40").is_none() && page.asked("more", "songs:41").is_none());
 }
+
+/// A server with nothing much to serve, for what's asked of it below.
+fn plain() -> Served {
+    Served {
+        points: Box::new(|| Box::pin(async { r#"{"layers":[],"actions":[]}"#.to_string() })),
+        audio: Box::new(|_| None),
+        action: Box::new(|_, _| false),
+    }
+}
+
+/// What came back's status, when anything did: none when the server closed without answering.
+async fn answered(port: u16, request: &[u8]) -> Option<u16> {
+    let mut stream = TcpStream::connect(("127.0.0.1", port)).await.ok()?;
+    let _ = stream.write_all(request).await;
+    let mut bytes = vec![];
+    let _ = stream.read_to_end(&mut bytes).await;
+    String::from_utf8_lossy(&bytes).split(' ').nth(1)?.parse().ok()
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_browsers_cookies_get_through_and_more_connections_than_a_page_opens_are_refused() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let server = open(plain()).await.unwrap();
+            let url: url::Url = server.url.parse().unwrap();
+            let (port, points) = (url.port().unwrap(), format!("{}points", url.path()));
+            let host = format!("127.0.0.1:{port}");
+            // Every cookie the browser holds for 127.0.0.1 comes along (40 KB of other apps' here), and a header may hold
+            // bytes that aren't UTF-8.
+            let cookies: String = (0..10).map(|n| format!("Cookie: app{n}={}\r\n", "c".repeat(4000))).collect();
+            let mut request = format!("GET {points} HTTP/1.1\r\nHost: {host}\r\n{cookies}").into_bytes();
+            request.extend(b"X-Note: caf\xe9\r\n\r\n");
+            assert_eq!(answered(port, &request).await, Some(200));
+            // Sixteen connections held open, sending nothing: one more is closed unanswered.
+            let mut held = vec![];
+            for _ in 0..16 {
+                held.push(TcpStream::connect(("127.0.0.1", port)).await.unwrap());
+            }
+            let asked = get(&points, &host, "");
+            assert_eq!(answered(port, asked.as_bytes()).await, None, "one too many");
+            // Once they've gone, it answers again.
+            drop(held);
+            let mut again = None;
+            for _ in 0..200 {
+                again = answered(port, asked.as_bytes()).await;
+                if again.is_some() {
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+            assert_eq!(again, Some(200));
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_request_still_arriving_after_ten_seconds_is_answered_and_closed_however_its_bytes_trickle() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let server = open(plain()).await.unwrap();
+            let port: u16 = server.url.parse::<url::Url>().unwrap().port().unwrap();
+            let mut stream = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+            tokio::time::pause();
+            // A byte every nine seconds: eighteen seconds in, each came in time, and the request as a whole didn't.
+            for byte in b"GE" {
+                stream.write_all(&[*byte]).await.unwrap();
+                tokio::time::sleep(std::time::Duration::from_secs(9)).await;
+            }
+            let mut bytes = vec![];
+            let read = tokio::time::timeout(std::time::Duration::from_millis(500), stream.read_to_end(&mut bytes)).await;
+            assert!(read.is_ok(), "closed");
+            assert!(String::from_utf8_lossy(&bytes).starts_with("HTTP/1.1 400"), "{}", String::from_utf8_lossy(&bytes));
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn the_browser_starts_with_a_link_that_goes_on_to_the_page_once() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let server = open(plain()).await.unwrap();
+            let (url, once): (url::Url, url::Url) = (server.url.parse().unwrap(), server.once.parse().unwrap());
+            let (port, page, link) = (url.port().unwrap(), url.path().to_string(), once.path().to_string());
+            let host = format!("127.0.0.1:{port}");
+            assert_eq!((once.port(), once.host_str()), (Some(port), Some("127.0.0.1")));
+            assert!(link.starts_with("/once/") && !server.once.contains(page.trim_matches('/')), "no token in it: {}", server.once);
+            // Another name for it, or a POST: refused, and it isn't spent.
+            assert_eq!(ask(port, &get(&link, "evil.example", "")).await.0, 403);
+            assert_eq!(ask(port, &post(&link, &host, &format!("http://{host}"), "{}")).await.0, 404);
+            // Once: on to the page, which answers.
+            let (status, head, _) = ask(port, &get(&link, &host, "")).await;
+            assert_eq!(status, 302);
+            assert!(head.contains(&format!("Location: {page}")), "{head}");
+            assert_eq!(ask(port, &get(&page, &host, "")).await.0, 200);
+            // Twice: nothing there.
+            assert_eq!(ask(port, &get(&link, &host, "")).await.0, 404);
+            assert_eq!(ask(port, &get("/once/00000000000000000000000000000000", &host, "")).await.0, 404);
+        })
+        .await;
+}

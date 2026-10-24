@@ -948,9 +948,10 @@ a reference, sounds or values, it goes by those instead.
   fingerprint. A spread of songs across your artists is heard first (about an
   hour), then every song for a minute, newest first, then each in full.
 - **Out of the way.** It runs in Kumi's library learner at the lowest priority,
-  waits while Kumi listens or plays and while your computer runs on its battery,
-  and carries on where it stopped. Songs under 30 seconds or near silence are
-  skipped; Apple's protected purchases are named but never heard.
+  waits while your DAW plays (Kumi's listening included) and while your computer
+  runs on its battery, and carries on where it stopped. Songs under 30 seconds
+  or near silence are skipped; Apple's protected purchases are named but never
+  heard.
 - **Like your own music.** Ask for something in your own style ("like my
   stuff") and Kumi keeps your nearest songs (5 to 10, heard in full) as a
   reference, then works toward it as it does toward any reference.

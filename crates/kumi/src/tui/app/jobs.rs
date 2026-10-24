@@ -210,7 +210,7 @@ impl TuiApp {
     }
 
     /// A job whose request carries on starts its answer only when the producer isn't in the middle of something: no
-    /// answer under way, no pick or panel open, nothing typed or waiting to send.
+    /// answer under way, no pick or panel open, nothing typed or waiting to send, and not in the map.
     pub(super) fn maybe_carry_on(&self) {
         let id = {
             let state = self.0.state.borrow();
@@ -220,7 +220,8 @@ impl TuiApp {
                 && state.panel.is_none()
                 && state.editor.is_empty()
                 && state.held.is_empty()
-                && state.setup.is_none();
+                && state.setup.is_none()
+                && state.map.is_none();
             match state.carry.first() {
                 Some(id) if quiet && !self.busy() => *id,
                 _ => return,

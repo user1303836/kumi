@@ -148,10 +148,13 @@ impl TuiApp {
                     return;
                 }
                 match music.set_folders(Some(kept)) {
-                    Ok(()) => self.notice(
-                        &format!("Kumi no longer learns from {}; what it heard there is set aside as gone.", self.clean(&folder, 200)),
-                        NoticeTone::Info,
-                    ),
+                    Ok(()) => {
+                        self.notice(
+                            &format!("Kumi no longer learns from {}; what it heard there is set aside as gone.", self.clean(&folder, 200)),
+                            NoticeTone::Info,
+                        );
+                        self.music_changed_under_map_page();
+                    }
                     Err(why) => self.notice(&format!("Kumi couldn't keep that in its settings: {why}"), NoticeTone::Warn),
                 }
             }
@@ -184,6 +187,7 @@ impl TuiApp {
                                 ),
                                 Err(why) => app.notice(&why, NoticeTone::Warn),
                             }
+                            app.music_changed_under_map_page();
                         }
                         Ok(())
                     }

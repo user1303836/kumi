@@ -54,28 +54,44 @@ pub struct MapSound {
 /// The sounds `index` offers, where the map puts them, in the map's order: a sound the index doesn't offer (gone, or
 /// in another DAW's library) is left out, and so is one the map doesn't have yet.
 pub fn sounds_on_map(map: &SoundsMap, index: &SoundIndex) -> Vec<MapSound> {
-    let rows: HashMap<&str, usize> = index
-        .entries
-        .iter()
-        .enumerate()
-        .filter(|(_, entry)| entry.gone != Some(true))
-        .map(|(row, entry)| (entry.path.as_str(), row))
-        .collect();
-    map.points
-        .iter()
-        .filter_map(|(path, x, y)| {
-            let row = *rows.get(path.as_str())?;
-            let entry = &index.entries[row];
-            Some(MapSound {
-                path: path.clone(),
-                x: *x,
-                y: *y,
-                name: index.name(row).to_string(),
-                place: index.place(row).to_string(),
-                class: entry.r#class,
-                kind: entry.kind,
-                seconds: entry.seconds,
-            })
-        })
-        .collect()
+    let rows = rows(index, 0..index.entries.len());
+    map.points.iter().filter_map(|point| on_map(index, &rows, point)).collect()
+}
+
+/// The same, a slice at a time, the thread's other work going on between the slices: Kumi's own thread reads a map of
+/// 300,000 sounds without its keys and screen waiting on it.
+pub async fn sounds_on_map_by_turns(map: &SoundsMap, index: &SoundIndex) -> Vec<MapSound> {
+    const TURN: usize = 4096;
+    let mut known = HashMap::with_capacity(index.entries.len());
+    for start in (0..index.entries.len()).step_by(TURN) {
+        known.extend(rows(index, start..(start + TURN).min(index.entries.len())));
+        tokio::task::yield_now().await;
+    }
+    let mut sounds = Vec::with_capacity(map.points.len());
+    for points in map.points.chunks(TURN) {
+        sounds.extend(points.iter().filter_map(|point| on_map(index, &known, point)));
+        tokio::task::yield_now().await;
+    }
+    sounds
+}
+
+/// The rows of the index's sounds the library still has, by path.
+fn rows(index: &SoundIndex, of: std::ops::Range<usize>) -> HashMap<&str, usize> {
+    of.filter(|row| index.entries[*row].gone != Some(true)).map(|row| (index.entries[row].path.as_str(), row)).collect()
+}
+
+/// A point of the map with what the index knows of its sound: none when it doesn't have the sound.
+fn on_map(index: &SoundIndex, rows: &HashMap<&str, usize>, (path, x, y): &(String, f64, f64)) -> Option<MapSound> {
+    let row = *rows.get(path.as_str())?;
+    let entry = &index.entries[row];
+    Some(MapSound {
+        path: path.clone(),
+        x: *x,
+        y: *y,
+        name: index.name(row).to_string(),
+        place: index.place(row).to_string(),
+        class: entry.r#class,
+        kind: entry.kind,
+        seconds: entry.seconds,
+    })
 }
