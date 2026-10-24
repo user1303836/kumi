@@ -473,3 +473,79 @@ fn how_long_a_key_takes_at_300_000_points() {
         eprintln!("{graphics:?} (frame, of it the upload): first {first:?}, an arrow {moved:?}, a zoom {zoomed:?}");
     }
 }
+
+/// An output that plays for as long as what it's given lasts, and `tail` more (the last block, a fade).
+struct Timed {
+    ends: Rc<std::cell::Cell<Option<std::time::Instant>>>,
+    tail: std::time::Duration,
+}
+impl Output for Timed {
+    fn format(&self) -> Format {
+        Format { rate: 48_000, channels: 2 }
+    }
+    fn start(&self, samples: Vec<f32>) -> Result<(), PlayerError> {
+        let lasts = std::time::Duration::from_secs_f64(samples.len() as f64 / 96_000.) + self.tail;
+        self.ends.set(Some(std::time::Instant::now() + lasts));
+        Ok(())
+    }
+    fn stop(&self) {
+        self.ends.set(None);
+    }
+    fn playing(&self) -> bool {
+        self.ends.get().is_some_and(|end| std::time::Instant::now() < end)
+    }
+}
+
+/// The map, its sounds real files of a quarter second, played through a Timed output.
+fn timed(dir: &std::path::Path, tail: std::time::Duration) -> Harness {
+    let mut data = fixture(2, 1);
+    for point in data.sounds.points.iter_mut() {
+        let file = dir.join(format!("{}.wav", point.name));
+        let samples: Vec<f32> = (0..12_000).map(|n| (n as f32 * 0.05).sin() * 0.2).collect();
+        std::fs::write(&file, kumi_media::audio::decode::float_wav(&[samples], 48_000)).unwrap();
+        point.path = file.to_str().unwrap().to_string();
+        point.seconds = 0.25;
+    }
+    for point in data.songs.points.iter_mut() {
+        point.path = dir.join("not there.wav").to_str().unwrap().to_string();
+    }
+    Harness::with(160, 40, Rc::new(Control::default()), move |o| {
+        o.map = Some(loader(data));
+        let ends = Rc::new(std::cell::Cell::new(None));
+        o.player =
+            Some(Rc::new(Player::with_opener(Box::new(move || Ok(Box::new(Timed { ends: ends.clone(), tail }) as Box<dyn Output>)))));
+    })
+}
+
+case!(the_playing_mark_goes_once_the_output_has_played_the_last_of_it, async {
+    let dir = tempfile::tempdir().unwrap();
+    // The output still plays a moment after the sound's length: the mark waits for it, and goes.
+    let h = timed(dir.path(), std::time::Duration::from_millis(300));
+    h.start().await;
+    h.connect();
+    h.type_text("/map\r").await;
+    h.wait_for("Sounds 12").await;
+    h.type_text(" ").await;
+    h.wait_for("▶ playing").await;
+    h.wait_until_hidden("▶ playing").await;
+    h.close().await;
+});
+
+case!(a_play_that_ended_says_nothing_over_what_a_later_one_said, async {
+    let dir = tempfile::tempdir().unwrap();
+    let h = timed(dir.path(), std::time::Duration::ZERO);
+    h.start().await;
+    h.connect();
+    h.type_text("/map\r").await;
+    h.wait_for("Sounds 12").await;
+    // A sound plays; meanwhile a song (a file that isn't there) can't be played, and says why.
+    h.type_text(" ").await;
+    h.wait_for("▶ playing").await;
+    h.type_text("\t").await;
+    h.type_text(" ").await;
+    h.wait_for("There's no file there.").await;
+    // The sound's play has ended since: what the song said stays.
+    delay(600).await;
+    h.has("There's no file there.");
+    h.close().await;
+});

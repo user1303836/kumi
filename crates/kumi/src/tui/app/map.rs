@@ -9,7 +9,7 @@ use super::super::{
 };
 use super::*;
 use crate::map_server::Served;
-use kumi_media::audio::player::PlayerError;
+use kumi_media::audio::player::Played;
 use std::{path::PathBuf, sync::Arc};
 
 impl TuiApp {
@@ -161,6 +161,7 @@ impl TuiApp {
             }
             Asked::Play { path, from, seconds, name } => self.map_play(path, from, seconds, name),
             Asked::Stop => {
+                self.0.state.borrow_mut().map_play += 1;
                 if let Some(player) = &self.0.options.player {
                     player.stop();
                 }
@@ -174,6 +175,7 @@ impl TuiApp {
         let mut state = self.0.state.borrow_mut();
         state.map = None;
         state.map_image = None;
+        state.map_play += 1;
         state.images.forget("map");
         drop(state);
         if let Some(player) = &self.0.options.player {
@@ -181,7 +183,8 @@ impl TuiApp {
         }
     }
 
-    /// A point played: shown as playing until it ends, or why it didn't play.
+    /// A point played: shown as playing until it ends, or why it didn't play. Only the latest play (no other, no stop
+    /// and no closing since) says so: one taken over says nothing.
     fn map_play(&self, path: String, from: f64, seconds: f64, name: String) {
         let Some(player) = self.0.options.player.clone() else {
             if let Some(view) = self.0.state.borrow_mut().map.as_mut() {
@@ -189,21 +192,33 @@ impl TuiApp {
             }
             return;
         };
+        let number = {
+            let mut state = self.0.state.borrow_mut();
+            state.map_play += 1;
+            state.map_play
+        };
+        let latest = move |app: &TuiApp| app.0.state.borrow().map_play == number;
         let app = self.clone();
         tokio::task::spawn_local(async move {
-            let said = match player.play(&path, from, seconds, Signal::new()).await {
-                Ok(()) => {
+            let said = match player.play(&path, from, seconds).await {
+                Ok(Played::Overtaken) => return,
+                Ok(Played::Began) => {
                     tokio::time::sleep(Duration::from_secs_f64(seconds)).await;
-                    // Another sound took over: it says when it ends.
-                    if player.playing() {
-                        return;
+                    // The output plays the last of it a moment later (a block at a time, a fade before it): until it has,
+                    // a second at most.
+                    for _ in 0..50 {
+                        if !latest(&app) || !player.playing() {
+                            break;
+                        }
+                        tokio::time::sleep(Duration::from_millis(20)).await;
                     }
                     None
                 }
-                // Another sound, or a stop, came while this one's file was read.
-                Err(PlayerError::Stopped) => return,
                 Err(error) => Some(error.to_string()),
             };
+            if !latest(&app) {
+                return;
+            }
             if let Some(view) = app.0.state.borrow_mut().map.as_mut() {
                 view.played(said);
             }

@@ -1,9 +1,8 @@
 //! The player through a fake output (never a real device): what it's handed, at the output's rate and in its channels,
 //! one sound at a time.
-use kumi_common::abort::Signal;
 use kumi_media::audio::{
     decode::float_wav,
-    player::{Format, Output, Player, PlayerError},
+    player::{Format, Output, Played, Player, PlayerError},
 };
 use std::{
     cell::{Cell, RefCell},
@@ -77,7 +76,7 @@ async fn a_stretch_of_a_file_plays_at_the_outputs_rate_in_each_of_its_channels()
     let folder = tempfile::tempdir().unwrap();
     let file = tones(folder.path());
     let (fake, player) = fake(48_000, 2);
-    player.play(&file, 0.5, 0.25, Signal::new()).await.unwrap();
+    assert_eq!(player.play(&file, 0.5, 0.25).await, Ok(Played::Began));
     let started = fake.started.borrow();
     assert_eq!(started.len(), 1);
     let samples = &started[0];
@@ -108,32 +107,31 @@ fn one_sound_at_a_time_a_new_one_takes_over_and_a_stop_ends_it() {
         let folder = tempfile::tempdir().unwrap();
         let file = tones(folder.path());
         let (fake, player) = fake(44_100, 1);
-        player.play(&file, 0., 0.1, Signal::new()).await.unwrap();
-        player.play(&file, 0.5, 0.1, Signal::new()).await.unwrap();
+        player.play(&file, 0., 0.1).await.unwrap();
+        player.play(&file, 0.5, 0.1).await.unwrap();
         assert_eq!(fake.started.borrow().len(), 2, "each handed over in its turn");
         player.stop();
         assert!(!player.playing());
         assert_eq!(fake.stops.get(), 1);
         // A play asked for while another's file is still being read: only the later one plays.
         let release = reads_held();
-        let (first, second, _) =
-            tokio::join!(player.play(&file, 0., 0.1, Signal::new()), player.play(&file, 0.5, 0.1, Signal::new()), async {
-                tokio::task::yield_now().await;
-                drop(release);
-            });
-        assert_eq!((first, second), (Ok(()), Ok(())), "the one overtaken isn't an error");
+        let (first, second, _) = tokio::join!(player.play(&file, 0., 0.1), player.play(&file, 0.5, 0.1), async {
+            tokio::task::yield_now().await;
+            drop(release);
+        });
+        assert_eq!((first, second), (Ok(Played::Overtaken), Ok(Played::Began)), "the one overtaken isn't an error");
         let started = fake.started.borrow().clone();
         assert_eq!(started.len(), 3);
         let pitch = crossings_a_second(&started[2], 44_100.) / 2.;
         assert!((pitch - 1_000.).abs() < 25., "the later one: {pitch} Hz");
         // A stop while a file is still being read: nothing plays.
         let release = reads_held();
-        let (stopped, _) = tokio::join!(player.play(&file, 0., 0.1, Signal::new()), async {
+        let (stopped, _) = tokio::join!(player.play(&file, 0., 0.1), async {
             tokio::task::yield_now().await;
             player.stop();
             drop(release);
         });
-        assert_eq!(stopped, Ok(()));
+        assert_eq!(stopped, Ok(Played::Overtaken));
         assert_eq!(fake.started.borrow().len(), 3, "nothing more handed over");
     });
 }
@@ -148,27 +146,50 @@ async fn with_no_output_nothing_plays_and_it_says_so() {
     }));
     let folder = tempfile::tempdir().unwrap();
     let file = tones(folder.path());
-    let refused = player.play(&file, 0., 0.1, Signal::new()).await;
+    let refused = player.play(&file, 0., 0.1).await;
     assert_eq!(refused, Err(PlayerError::NoOutput));
     assert_eq!(refused.unwrap_err().to_string(), "There's no sound output on this computer to play through.");
     assert!(!player.playing());
     player.stop();
-    assert_eq!(player.play(&file, 0., 0.1, Signal::new()).await, Err(PlayerError::NoOutput));
+    assert_eq!(player.play(&file, 0., 0.1).await, Err(PlayerError::NoOutput));
     assert_eq!(opened.get(), 2, "looked for again on the next play: one may have been plugged in");
 }
 
+/// An AIFF of a few samples whose header gives a sample rate past any number (an 80-bit exponent of 0x7ffe).
+fn broken_rate(folder: &Path) -> PathBuf {
+    let samples = 64u32;
+    let mut common = vec![0, 1];
+    common.extend(samples.to_be_bytes());
+    common.extend(16u16.to_be_bytes());
+    common.extend([0x7f, 0xfe, 0x80, 0, 0, 0, 0, 0, 0, 0]);
+    let mut sound = vec![0u8; 8];
+    sound.extend((0..samples).flat_map(|n| ((n as i16) * 100).to_be_bytes()));
+    let mut body = b"AIFF".to_vec();
+    for (id, chunk) in [(b"COMM", common), (b"SSND", sound)] {
+        body.extend(id);
+        body.extend((chunk.len() as u32).to_be_bytes());
+        body.extend(chunk);
+    }
+    let mut file = b"FORM".to_vec();
+    file.extend((body.len() as u32).to_be_bytes());
+    file.extend(body);
+    let path = folder.join("broken.aiff");
+    std::fs::write(&path, file).unwrap();
+    path
+}
+
 #[tokio::test(flavor = "current_thread")]
-async fn a_file_that_cant_be_played_says_why_and_a_stopped_play_says_so() {
+async fn a_file_that_cant_be_played_says_why() {
     let folder = tempfile::tempdir().unwrap();
     let file = tones(folder.path());
     let (fake, player) = fake(48_000, 2);
-    let missing = player.play(folder.path().join("missing.wav"), 0., 1., Signal::new()).await;
+    let missing = player.play(folder.path().join("missing.wav"), 0., 1.).await;
     assert!(matches!(missing, Err(PlayerError::File(_))), "{missing:?}");
-    let past = player.play(&file, 5., 1., Signal::new()).await;
+    let past = player.play(&file, 5., 1.).await;
     assert_eq!(past, Err(PlayerError::File("There's nothing to play there: it's at or past the end of the file.".into())));
-    let signal = Signal::new();
-    signal.cancel();
-    assert_eq!(player.play(&file, 0., 0.1, signal).await, Err(PlayerError::Stopped));
+    // A header's rate no file has: refused, before anything is sized from it.
+    let broken = player.play(broken_rate(folder.path()), 0., 0.1).await;
+    assert_eq!(broken, Err(PlayerError::File("Kumi can't play it: it says its sample rate is Infinity Hz.".into())));
     assert!(fake.started.borrow().is_empty());
 }
 
@@ -178,5 +199,5 @@ async fn a_file_that_cant_be_played_says_why_and_a_stopped_play_says_so() {
 async fn linuxs_kumi_without_its_player_says_it_cant_play() {
     let folder = tempfile::tempdir().unwrap();
     let file = tones(folder.path());
-    assert_eq!(Player::new().play(&file, 0., 0.1, Signal::new()).await, Err(PlayerError::Off));
+    assert_eq!(Player::new().play(&file, 0., 0.1).await, Err(PlayerError::Off));
 }
