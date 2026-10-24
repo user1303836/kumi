@@ -11,7 +11,7 @@ use kumi_ai::{
     binding::ModelBinding,
     http::Fetch,
     providers::{
-        api_key_for,
+        api_key_for, chat_only,
         local::{self, LocalBinding, LocalKind, LocalModelOptions, LocalServer},
         models::{check_api_key, list_models, ApiKeyCheck, EffortInfo, ListOptions, ModelInfo, ServiceTier, Transport},
         parse_model_id, resolve_model, table, Effort, KeySource, ProviderId, ResolveModelOptions, SignIn,
@@ -99,13 +99,14 @@ pub enum ChatGptSignIn {
 }
 #[derive(Clone)]
 enum Bound {
-    Cloud(Rc<ModelBinding>),
+    /// A cloud model, and what the producer hears of it once (a model that can't use tools).
+    Cloud(Rc<ModelBinding>, Option<String>),
     Local(Rc<LocalBinding>),
 }
 impl Bound {
     fn original(&self) -> &ModelBinding {
         match self {
-            Self::Cloud(b) => b,
+            Self::Cloud(b, _) => b,
             Self::Local(b) => &b.binding,
         }
     }
@@ -128,10 +129,9 @@ impl Bound {
         }
     }
     fn note(&self) -> Option<String> {
-        if let Self::Local(b) = self {
-            b.note()
-        } else {
-            None
+        match self {
+            Self::Local(b) => b.note(),
+            Self::Cloud(_, note) => note.clone(),
         }
     }
 }
@@ -169,6 +169,8 @@ struct Inner {
     options: ModelControlOptions,
     pinned: bool,
     state: RefCell<State>,
+    /// Cloud models found this session to turn tools down: they're sent none from then on.
+    learned: chat_only::Learned,
 }
 #[derive(Clone)]
 pub struct ModelControl {
@@ -198,6 +200,7 @@ pub fn create_model_control(options: ModelControlOptions) -> ModelControl {
                 heard: HashSet::new(),
                 defaulting: None,
             }),
+            learned: Default::default(),
         }),
     }
 }
@@ -292,17 +295,22 @@ impl ModelControl {
                 },
             ))));
         }
-        Ok(Bound::Cloud(Rc::new(
-            resolve_model(ResolveModelOptions {
-                model: id.into(),
-                store: self.inner.options.store.clone(),
-                env: Some(self.inner.options.env.clone()),
-                fetch: self.inner.options.fetch.clone(),
-                effort,
-                service_tier: tier,
-            })
-            .await?,
-        )))
+        let binding = resolve_model(ResolveModelOptions {
+            model: id.into(),
+            store: self.inner.options.store.clone(),
+            env: Some(self.inner.options.env.clone()),
+            fetch: self.inner.options.fetch.clone(),
+            effort,
+            service_tier: tier,
+        })
+        .await?;
+        // A model its list says can't use tools is still there to talk with, as one on this computer is.
+        let info = self.info_for(Some(id));
+        let toolless = info.as_ref().is_some_and(|info| info.tools == Some(false));
+        let name = info.map(|info| info.name).unwrap_or_else(|| id.split_once('/').map_or(id, |(_, model)| model).to_string());
+        let profile = *crate::daw::profile();
+        let note = toolless.then(|| chat_only::talk_only(&name, &profile, "/model chooses one that can."));
+        Ok(Bound::Cloud(Rc::new(chat_only::chat_only(binding, toolless, self.inner.learned.clone(), profile, name)), note))
     }
     pub fn current(&self) -> CurrentModel {
         let (model, effort) = {

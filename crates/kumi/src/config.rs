@@ -363,6 +363,9 @@ pub struct Settings {
     /// How long kept conversations stay.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub conversations: Option<ConversationSettings>,
+    /// false: Kumi doesn't fetch models.dev's catalog of models; the copy it has stays in use.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model_catalog: Option<bool>,
 }
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -446,6 +449,7 @@ pub fn read_settings(file: &str) -> Settings {
             .as_u64()
             .filter(|days| *days <= MAX_KEEP_DAYS)
             .map(|days| ConversationSettings { keep_days: Some(days as u32) }),
+        model_catalog: (value["modelCatalog"] == false).then_some(false),
         model_servers,
     }
 }
@@ -505,6 +509,9 @@ pub fn write_settings(file: &str, next: &Value) -> Result<(), RuntimeError> {
     }
     if let Some(days) = kept("conversations").and_then(|v| v["keepDays"].as_u64()).filter(|days| *days <= MAX_KEEP_DAYS) {
         settings.insert("conversations".into(), json!({ "keepDays": days }));
+    }
+    if kept("modelCatalog") == Some(&Value::Bool(false)) {
+        settings.insert("modelCatalog".into(), json!(false));
     }
     let parent = Path::new(file).parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new("."));
     let mut mkdir = std::fs::DirBuilder::new();

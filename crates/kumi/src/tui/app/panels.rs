@@ -11,7 +11,7 @@ use base64::Engine;
 use kumi_agent::core::contracts::Picked;
 use kumi_ai::failure::reset_words;
 use kumi_ai::providers::{
-    models::{ApiKeyCheck, ModelInfo, ServiceTier},
+    models::{ApiKeyCheck, FactsFrom, ModelInfo, ServiceTier},
     Effort, SignIn,
 };
 use kumi_common::time::since;
@@ -1746,7 +1746,9 @@ impl TuiApp {
         items.extend(current.efforts.iter().map(|level| {
             let description = level.description.clone().unwrap_or_else(|| {
                 match level.effort {
-                    Effort::Low => "Fastest; lighter thinking",
+                    Effort::None => "No thinking; answers at once",
+                    Effort::Minimal => "Barely thinks",
+                    Effort::Low => "Quick; lighter thinking",
                     Effort::Medium => "Balanced",
                     Effort::High => "Thorough",
                     Effort::Xhigh => "More thorough still",
@@ -2129,6 +2131,22 @@ fn read_models(
     }
     .boxed_local()
 }
+/// A model's line in /model: its description, then what to know before choosing it.
+fn model_detail(model: &ModelInfo) -> String {
+    let mut detail: Vec<String> = model.description.iter().cloned().collect();
+    // A model on this computer says it in its description, in the DAW's words.
+    if model.tools == Some(false) && model.r#where.is_none() {
+        detail.push("chat only".into());
+    }
+    detail.extend(model.labels.iter().cloned());
+    if model.status.as_deref() == Some("deprecated") {
+        detail.push("deprecated".into());
+    }
+    if model.facts_from == Some(FactsFrom::Guess) {
+        detail.push("unverified".into());
+    }
+    detail.join(" · ")
+}
 fn model_items(
     statuses: &[ProviderStatus],
     lists: &HashMap<String, Listed>,
@@ -2137,7 +2155,7 @@ fn model_items(
     fallback: Option<&str>,
 ) -> Vec<PickerItem> {
     let model_item = |m: &ModelInfo| {
-        let i = item(&m.name, &m.id, m.description.clone().unwrap_or_default());
+        let i = item(&m.name, &m.id, model_detail(m));
         if Some(m.id.as_str()) == current {
             noted(i, "current", NoteTone::Accent)
         } else if Some(m.id.as_str()) == fallback {

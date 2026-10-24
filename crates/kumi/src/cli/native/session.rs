@@ -278,6 +278,14 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
         fetch: None,
         installed: None,
     }));
+    // models.dev's catalog of models: the copy Kumi kept, then a newer one at most once a day, never in the way.
+    tokio::task::spawn_local(kumi_ai::providers::catalog::refresh(kumi_ai::providers::catalog::RefreshOptions {
+        cache: std::path::Path::new(&crate::config::kumi_dir(&io.env)).join("cache").join("models-catalog.json"),
+        fetch: kumi_ai::http::default_fetch(),
+        now: kumi_common::time::now_ms() as f64,
+        ask: settings.model_catalog != Some(false),
+        wait_ms: kumi_ai::providers::catalog::WAIT_MS,
+    }));
     let kernel_factory: KernelFactory = {
         let models = models.clone();
         Rc::new(move |options| {

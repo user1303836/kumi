@@ -482,6 +482,8 @@ jobs:
         run: python3 -m unittest discover -s scripts/tests -p test_native_release.py
       - name: The release script's edits
         run: python3 -m unittest discover -s scripts/tests -p test_release.py
+      - name: The models catalog's snapshot and the script that makes it
+        run: python3 -m unittest discover -s scripts/tests -p test_models_catalog.py
       # CI picks its jobs by what a change affects (scripts/dev.py): every file has to belong to a package or an area.
       # And the crates keep their layers: dependencies point down, and the DAWs' crates don't use each other's.
       - name: Every tracked file belongs to a package or an area, the crates keep their layers, and dev.py's tests

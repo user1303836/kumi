@@ -3,6 +3,7 @@
 mod ai_sdk;
 mod ai_transport;
 mod auth;
+mod catalog;
 mod local;
 mod model_fetch;
 mod models;

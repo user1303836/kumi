@@ -1,7 +1,8 @@
 pub use super::models::Transport;
 use super::{
+    chat_only::{refuses_tools, talk_only, without_tools},
     compat::mending_fetch,
-    models::{EffortInfo, ModelInfo},
+    models::{EffortInfo, FactsFrom, Input, ModelInfo},
     ollama::{ollama_chat, FailurePhase, OllamaChatSettings, OllamaShape},
     split_model_id, table, words_only, Effort, ProviderId, USER_AGENT,
 };
@@ -301,6 +302,8 @@ struct Facts {
     loaded: Vec<CopyInfo>,
     in_memory: bool,
     details: Vec<String>,
+    /// The server said what the model can do (tools, thinking, pictures), not only its name.
+    described: bool,
 }
 impl Facts {
     fn new(model: String) -> Self {
@@ -317,6 +320,7 @@ impl Facts {
             loaded: vec![],
             in_memory: false,
             details: vec![],
+            described: false,
         }
     }
 }
@@ -335,6 +339,7 @@ fn ollama_facts(name: &str, details: &Value, show: &Value, in_memory: bool) -> O
     let mut facts = Facts::new(name.into());
     facts.levels = levels(&thinking["values"]);
     if let Some(capabilities) = capabilities {
+        facts.described = true;
         facts.tools = Some(capabilities.contains(&json!("tools")));
         facts.thinks = Some(capabilities.contains(&json!("thinking")));
         facts.vision = Some(capabilities.contains(&json!("vision")));
@@ -419,6 +424,7 @@ async fn lm_studio_list(server: &LocalServer, options: &Transport) -> Result<(Ve
                 .filter(|r| r["type"] == "llm" && r["key"].is_string())
                 .map(|r| {
                     let mut f = Facts::new(r["key"].as_str().unwrap().into());
+                    f.described = r["capabilities"].is_object();
                     f.name = text(&r["display_name"], 60).unwrap_or_else(|| f.model.clone());
                     let capabilities = &r["capabilities"];
                     let reasoning = &capabilities["reasoning"];
@@ -450,6 +456,7 @@ async fn lm_studio_list(server: &LocalServer, options: &Transport) -> Result<(Ve
                 .map(|r| {
                     let mut f = Facts::new(r["id"].as_str().unwrap().into());
                     f.tools = r["capabilities"].as_array().map(|v| v.contains(&json!("tool_use")));
+                    f.described = f.tools.is_some();
                     f.vision = (r["type"] == "vlm").then_some(true);
                     f.most = count(&r["max_context_length"]);
                     f.served = count(&r["loaded_context_length"]);
@@ -491,7 +498,11 @@ fn info_of(server: &LocalServer, facts: Facts, place: &str) -> ModelInfo {
         context: facts.served.or(facts.most),
         loaded: facts.in_memory.then_some(true),
         r#where: Some(server.r#where.clone()),
-        service_tiers: Vec::new(),
+        reasoning: facts.thinks,
+        inputs: if facts.vision == Some(true) { vec![Input::Image] } else { vec![] },
+        // What the server said of the model, or only its name: unverified.
+        facts_from: Some(if facts.described { FactsFrom::Provider } else { FactsFrom::Guess }),
+        ..Default::default()
     }
 }
 pub async fn list_local_models(server: &LocalServer, options: Transport) -> Result<Vec<ModelInfo>, RuntimeError> {
@@ -545,11 +556,6 @@ pub struct LocalModelOptions {
     pub effort: Option<Effort>,
     pub on_note: Option<Rc<dyn Fn(String)>>,
 }
-kumi_types::daw_text!(
-    #[allow(dead_code)]
-    NO_TOOLS, no_tools:
-    "This model can't use tools here: you see the ", place, " only as it's described above, and can't read more of it or change anything. When asked for a change, say so plainly, and that /model chooses a model that can make it."
-);
 struct Identified(Rc<dyn Fetch>);
 #[async_trait(?Send)]
 impl Fetch for Identified {
@@ -646,14 +652,7 @@ impl LocalState {
             } else {
                 "/model chooses one that can.".into()
             };
-            self.tell(
-                format!(
-                    "{} can't use tools, so Kumi can talk with it about your {} but can't change anything. {instead}",
-                    found.name,
-                    self.profile.get().words.place
-                ),
-                quiet,
-            );
+            self.tell(talk_only(&found.name, &self.profile.get(), &instead), quiet);
         }
         Ok(found)
     }
@@ -666,12 +665,7 @@ impl LocalState {
         let known = self.facts.borrow().clone();
         let known = if let Some(known) = known { known } else { self.learn(call.abort_signal.clone(), false).await? };
         if known.tools == Some(false) {
-            if let Some(Message::System { content, .. }) = call.prompt.first_mut() {
-                content.push_str("\n\n");
-                content.push_str(&no_tools(&self.profile.get()));
-            }
-            call.tools = None;
-            call.tool_choice = None;
+            call = without_tools(call, &self.profile.get());
         }
         let system = match call.prompt.first() {
             Some(Message::System { content, .. }) => content.len(),
@@ -768,6 +762,12 @@ impl LocalState {
         format!("{} gives {name} room for {} tokens, too few for Kumi's instructions and tools ({need}): start it with a context of {target} tokens or more, or choose another model with /model.", self.server.name, tokens(room))
     }
     fn fail(&self, error: LanguageModelError, phase: FailurePhase) -> KumiError {
+        // A model that turns tools down is sent none from then on, this session.
+        if refuses_tools(&server_words(&error)) && !server_words(&error).contains("--jinja") {
+            if let Some(facts) = self.facts.borrow_mut().as_mut() {
+                facts.tools = Some(false);
+            }
+        }
         let model = self.facts.borrow().as_ref().map(|f| f.name.clone()).unwrap_or_else(|| self.model.clone());
         let place = self.profile.get().words.place;
         failure(
@@ -1072,16 +1072,18 @@ fn failure(
         let room = window.map(|n| format!(" with the room Kumi needs ({} tokens)", tokens(n))).unwrap_or_default();
         return fail(FailureKind::Model, format!("{name} couldn't fit {model} in this computer's memory{room}: choose a smaller model with /model, or close other apps and send your message again{detail}."));
     }
-    static TOOLS: LazyLock<regex::Regex> =
-        LazyLock::new(|| regex::Regex::new(r"(?i)does not support tools|tools? (?:is |are )?not supported|--jinja").unwrap());
-    if TOOLS.is_match(&said) {
+    if said.contains("--jinja") {
         return fail(
             FailureKind::Model,
-            if said.contains("--jinja") {
-                format!("{name} needs --jinja to use tools: start it with --jinja, or choose another model with /model.")
-            } else {
-                format!("{model} can't use tools, so Kumi can't change your {place} with it: choose another model with /model.")
-            },
+            format!("{name} needs --jinja to use tools: start it with --jinja, or choose another model with /model."),
+        );
+    }
+    if refuses_tools(&said) {
+        return fail(
+            FailureKind::Model,
+            format!(
+                "{model} can't use tools, so Kumi can talk with it about your {place} but can't change anything. Send your message again to talk with it, or choose one that can with /model."
+            ),
         );
     }
     static CONTEXT: LazyLock<regex::Regex> = LazyLock::new(|| {

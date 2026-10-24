@@ -296,7 +296,7 @@ async fn ollama_catalog_capabilities_and_probe() {
     );
     assert_eq!(
         serde_json::to_value(&models[0]).unwrap(),
-        json!({"id":"ollama/qwen3:8b","provider":"ollama","model":"qwen3:8b","name":"qwen3:8b","description":"8.2B · Q4_K_M · loaded","efforts":[],"tools":true,"context":40960.0,"loaded":true,"where":"on this computer"})
+        json!({"id":"ollama/qwen3:8b","provider":"ollama","model":"qwen3:8b","name":"qwen3:8b","description":"8.2B · Q4_K_M · loaded","efforts":[],"tools":true,"context":40960.0,"loaded":true,"where":"on this computer","reasoning":true,"factsFrom":"provider"})
     );
     assert_eq!(models[1].description.as_deref(), Some("8.2B · Q4_K_M · can't change the Set"));
     // In another DAW's session, in its words.

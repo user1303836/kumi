@@ -5,7 +5,7 @@ use kumi::models::{ChatGptSignIn, CurrentModel, DefaultModel, LocalStatus, Model
 use kumi_ai::{
     auth::openai_codex::DevicePrompt,
     providers::{
-        models::{ApiKeyCheck, ModelInfo},
+        models::{ApiKeyCheck, FactsFrom, ModelInfo},
         table, Effort, ProviderId, SignIn,
     },
 };
@@ -62,6 +62,33 @@ impl FakeModels {
         *models.model.borrow_mut() = Some("openai-codex/gpt-6-astra".into());
         let values = serde_json::json!({"openai-codex":[{"id":"openai-codex/gpt-6-astra","provider":"openai-codex","model":"gpt-6-astra","name":"GPT-6 Astra","description":"Frontier model for complex work","efforts":[{"effort":"low"},{"effort":"medium"},{"effort":"high"},{"effort":"xhigh"}],"defaultEffort":"medium","serviceTiers":[{"id":"priority","name":"Fast","description":"2x speed, increased usage"}]},{"id":"openai-codex/gpt-6-luna","provider":"openai-codex","model":"gpt-6-luna","name":"GPT-6 Luna","description":"Fast and light","efforts":[{"effort":"low"},{"effort":"medium"}],"defaultEffort":"low"}],"anthropic":[{"id":"anthropic/claude-sonnet-5-5","provider":"anthropic","model":"claude-sonnet-5-5","name":"Claude Sonnet 5.5","efforts":[{"effort":"low"},{"effort":"medium"},{"effort":"high"},{"effort":"xhigh"},{"effort":"max"}]},{"id":"anthropic/claude-haiku-4-5","provider":"anthropic","model":"claude-haiku-4-5","name":"Claude Haiku 4.5","efforts":[]}]});
         *models.lists.borrow_mut() = serde_json::from_value(values).unwrap();
+        models
+    }
+    /// A list as long as a gateway's: OpenCode Zen's forty models, some that can't use tools, unverified, private or
+    /// deprecated.
+    pub fn long_catalog() -> Rc<Self> {
+        let models = Self::chosen();
+        models.signed_in.borrow_mut().insert(ProviderId::parse("opencode").unwrap());
+        let list: Vec<ModelInfo> = (1..=40)
+            .map(|n| {
+                let mut info = ModelInfo {
+                    id: format!("opencode/model-{n:02}"),
+                    provider: "opencode".into(),
+                    model: format!("model-{n:02}"),
+                    name: format!("Model {n:02}"),
+                    ..Default::default()
+                };
+                match n % 5 {
+                    1 => info.tools = Some(false),
+                    2 => info.facts_from = Some(FactsFrom::Guess),
+                    3 => info.labels = vec!["private".into()],
+                    4 => info.status = Some("deprecated".into()),
+                    _ => info.description = Some("A model the list describes".into()),
+                }
+                info
+            })
+            .collect();
+        models.lists.borrow_mut().insert("opencode".into(), list);
         models
     }
     fn provider(&self, id: &str) -> Option<String> {
