@@ -34,7 +34,7 @@ impl TuiApp {
             self.0.scheduler.request();
             return;
         }
-        if self.map_open() {
+        if self.map_shown() {
             self.map_input(event);
             return;
         }

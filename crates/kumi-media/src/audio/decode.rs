@@ -186,11 +186,16 @@ async fn convert(
     let from_text = from.map(|from| to_fixed(from, 3));
     let folder = output.parent().map(|folder| folder.to_string_lossy().into_owned()).unwrap_or_default();
     let mut no_room = None;
-    for Attempt { command, args, writes } in
+    for Attempt { command, args, mut writes } in
         attempts(mac, &ffmpeg, &input_s, &output_s, reach.zip(until_text.as_deref()), length, from_text.as_deref())
     {
         if let Some(s) = &signal {
             s.check()?;
+        }
+        // A Mac's afconvert copies the whole file, a stretch's too, whose length wasn't read: read it now, to ask room
+        // for the copy.
+        if command == "afconvert" && writes.is_none() && from.is_some() {
+            writes = crate::frames::duration_of(&ffmpeg, &input_s, signal.clone()).await;
         }
         match writes {
             Some(seconds) => {

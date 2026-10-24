@@ -116,6 +116,9 @@ impl View {
     fn clamp(&mut self) {
         if self.zoom <= 1. {
             (self.zoom, self.centre) = (1., (0.5, 0.5));
+        } else if !(self.centre.0.is_finite() && self.centre.1.is_finite()) {
+            // Worked out against an area that has nothing in it: the middle.
+            self.centre = (0.5, 0.5);
         } else {
             self.centre = (self.centre.0.clamp(0., 1.), self.centre.1.clamp(0., 1.));
         }
@@ -534,10 +537,10 @@ impl MapView {
         }
     }
 
-    /// Shift and an arrow: a quarter of the view that way.
+    /// Shift and an arrow: a quarter of the view that way (nothing before the map has been drawn at a size that shows it).
     fn pan(&mut self, (ux, uy): (f64, f64)) {
         let area = self.area;
-        let Some(view) = self.views.get_mut(self.tab) else { return };
+        let Some(view) = self.views.get_mut(self.tab).filter(|_| area.width > 0 && area.height > 0) else { return };
         let frame = Frame::new(area, view);
         view.centre = (view.centre.0 + ux * frame.width / frame.scale / 4., view.centre.1 + uy * frame.height / frame.scale / 4.);
         view.clamp();
@@ -964,6 +967,28 @@ mod tests {
         assert_eq!(view.chosen, Some(1), "the kept one nearest");
         view.filter_by(&layer, "nothing");
         assert!(view.shown.is_empty() && view.chosen.is_none());
+    }
+
+    #[test]
+    fn panned_before_the_map_has_room_to_show_nothing_moves_and_it_shows_once_it_has() {
+        let data = MapData { sounds: layer(&[(0.5, 0.5, 0), (0.6, 0.55, 1)]), songs: layer(&[]) };
+        let mut map = MapView::new(Graphics::Cells);
+        map.loaded(data);
+        // A window too small for the map: it says so and draws none of it, so it has no area yet.
+        let mut screen = Screen::new(30, 10);
+        assert!(map.draw(&mut screen, &mut |_, _, _, _| 0).is_none());
+        assert_eq!(map.on_text("+"), Asked::Nothing);
+        map.on_key("right", true);
+        let centre = map.views[0].centre;
+        assert!(centre.0.is_finite() && centre.1.is_finite(), "{centre:?}");
+        // Big enough: the map shows, its points with it.
+        let mut screen = Screen::new(100, 30);
+        map.draw(&mut screen, &mut |_, _, _, _| 0);
+        assert!(screen.lines().iter().any(|line| line.chars().any(|c| ('\u{2801}'..='\u{28ff}').contains(&c))), "points drawn");
+        // A centre that's no number goes back to the middle.
+        map.views[0].centre = (f64::NAN, 0.5);
+        map.views[0].clamp();
+        assert_eq!(map.views[0].centre, (0.5, 0.5));
     }
 
     #[test]

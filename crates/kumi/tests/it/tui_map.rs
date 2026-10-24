@@ -268,6 +268,20 @@ fn served_at(url: &str) -> (u16, String) {
     (url.port().unwrap(), url.path().to_string())
 }
 
+/// The map's link, from what the browser was opened with: a link that works once (so the browser's command line,
+/// which on Linux any account reads, has no token), which goes on to the map's page, and after that finds nothing.
+async fn linked(opened: &str) -> String {
+    let (port, once) = served_at(opened);
+    assert!(opened.starts_with("http://127.0.0.1:") && once.starts_with("/once/"), "{opened}");
+    let host = format!("127.0.0.1:{port}");
+    let (status, head, _) = ask(port, &get(&once, &host, "")).await;
+    assert_eq!(status, 302, "{head}");
+    let page = head.lines().find_map(|line| line.strip_prefix("Location: ")).expect("where it goes on to");
+    assert!(!opened.contains(page.trim_matches('/')), "no token in what the browser was opened with");
+    assert_eq!(ask(port, &get(&once, &host, "")).await.0, 404, "once only");
+    format!("http://{host}{page}")
+}
+
 case!(map_open_serves_the_map_to_the_browser_whose_actions_fill_the_input_box, async {
     let h = Harness::with(160, 40, Rc::new(Control::default()), |o| o.map = Some(loader(fixture(12, 8))));
     h.start().await;
@@ -276,9 +290,9 @@ case!(map_open_serves_the_map_to_the_browser_whose_actions_fill_the_input_box, a
     h.wait_for("The map is open in your browser").await;
     let opened = h.browsed.borrow().clone();
     assert_eq!(opened.len(), 1, "{opened:?}");
-    assert!(opened[0].starts_with("http://127.0.0.1:"), "{}", opened[0]);
-    h.has(&opened[0]);
-    let (port, home) = served_at(&opened[0]);
+    let link = linked(&opened[0]).await;
+    h.has(&link);
+    let (port, home) = served_at(&link);
     let host = format!("127.0.0.1:{port}");
     let (status, _, body) = ask(port, &get(&format!("{home}points"), &host, "")).await;
     let map: serde_json::Value = serde_json::from_slice(&body).unwrap();
@@ -302,8 +316,9 @@ case!(map_open_serves_the_map_to_the_browser_whose_actions_fill_the_input_box, a
         }
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
     }
-    let again = h.browsed.borrow()[1].clone();
-    assert_ne!(again, opened[0]);
+    let opened = h.browsed.borrow()[1].clone();
+    let again = linked(&opened).await;
+    assert_ne!(again, link);
     assert!(tokio::net::TcpStream::connect(("127.0.0.1", port)).await.is_err(), "the first closed");
     // /map close: nothing answers there.
     let (port, _) = served_at(&again);
@@ -473,3 +488,213 @@ fn how_long_a_key_takes_at_300_000_points() {
         eprintln!("{graphics:?} (frame, of it the upload): first {first:?}, an arrow {moved:?}, a zoom {zoomed:?}");
     }
 }
+
+/// The answer to a request, ending on a question with options.
+fn asks_which(h: &Harness) {
+    h.emit(serde_json::json!({"type":"text","text":"Which track should get the reverb?\n\n1. Bubbles\n2. Drums"}));
+    h.emit(serde_json::json!({"type":"turn-complete","result":{"stopReason":"completed"},"elapsedMs":900}));
+    h.emit(serde_json::json!({"type":"state","state":"idle"}));
+}
+
+case!(a_question_kumi_asks_while_the_map_is_open_shows_in_its_place_and_the_map_comes_back_after, async {
+    let h = Harness::with(160, 40, Rc::new(Control::default()), |o| o.map = Some(loader(fixture(12, 8))));
+    h.start().await;
+    h.connect();
+    h.type_text("add a reverb\r").await;
+    h.emit(serde_json::json!({"type":"state","state":"running"}));
+    h.type_text("/map\r").await;
+    h.wait_for("Sounds 72").await;
+    // The answer ends asking which: its options show in the map's place, and take the keys.
+    asks_which(&h);
+    h.wait_for("Your answer").await;
+    assert!(!has(&h.screen(), "Sounds 72"), "the map gives way");
+    h.type_text("2").await;
+    h.type_text("\r").await;
+    h.wait_for_call("submit:Drums").await;
+    // Answered: the map's back.
+    h.wait_for("Sounds 72").await;
+    h.close().await;
+});
+
+case!(an_action_from_the_browser_while_kumi_offers_answers_takes_their_place_and_enter_sends_it, async {
+    let h = Harness::with(160, 40, Rc::new(Control::default()), |o| o.map = Some(loader(fixture(12, 8))));
+    h.start().await;
+    h.connect();
+    h.type_text("/map open\r").await;
+    h.wait_for("The map is open in your browser").await;
+    let opened = h.browsed.borrow()[0].clone();
+    let (port, home) = served_at(&linked(&opened).await);
+    let host = format!("127.0.0.1:{port}");
+    h.type_text("add a reverb\r").await;
+    h.emit(serde_json::json!({"type":"state","state":"running"}));
+    asks_which(&h);
+    h.wait_for("Your answer").await;
+    let more = r#"{"action":"more","id":"sounds:0"}"#;
+    assert_eq!(ask(port, &post(&format!("{home}action"), &host, &format!("http://{host}"), more)).await.0, 204);
+    h.wait_for("Find sounds like this one: /Samples/Kicks/Kick 01.wav").await;
+    h.wait_until_hidden("Your answer").await;
+    h.type_text("\r").await;
+    h.wait_for_call("submit:Find sounds like this one: /Samples/Kicks/Kick 01.wav").await;
+    h.close().await;
+});
+
+case!(a_jobs_answer_waits_while_the_producer_is_in_the_map, async {
+    let h = Harness::with(160, 40, Rc::new(Control::default()), |o| o.map = Some(loader(fixture(12, 8))));
+    h.start().await;
+    h.connect();
+    h.type_text("/map\r").await;
+    h.wait_for("Sounds 72").await;
+    let job = |state: &str| serde_json::json!({"type":"job","id":1,"kind":"worker","title":"Burial vocal chops","state":state,"whenDone":"continue","startedAt":1,"steps":0,"sources":0,"line":"Done.","endedAt":2});
+    h.emit(job("running"));
+    h.emit(job("done"));
+    delay(100).await;
+    assert!(!h.calls().iter().any(|call| call.starts_with("carry-on")), "not while they're in the map: {:?}", h.calls());
+    h.type_text("\x1b").await;
+    h.wait_for_call("carry-on:1").await;
+    h.close().await;
+});
+
+case!(map_close_while_the_browsers_map_is_still_read_opens_none, async {
+    let read = Rc::new(tokio::sync::Notify::new());
+    let load: LoadMap = {
+        let (read, data) = (read.clone(), fixture(2, 1));
+        Rc::new(move || {
+            let (read, data) = (read.clone(), data.clone());
+            async move {
+                read.notified().await;
+                data
+            }
+            .boxed_local()
+        })
+    };
+    let h = Harness::with(160, 40, Rc::new(Control::default()), |o| o.map = Some(load));
+    h.start().await;
+    h.connect();
+    h.type_text("/map open\r").await;
+    h.wait_for("Kumi is reading your map for the browser").await;
+    h.type_text("/map close\r").await;
+    h.wait_for("The map won't open in your browser after all.").await;
+    read.notify_one();
+    delay(200).await;
+    assert!(h.browsed.borrow().is_empty(), "no browser opened: {:?}", h.browsed.borrow());
+    h.type_text("/map close\r").await;
+    h.wait_for("The map isn't open in your browser: /map open opens it.").await;
+    h.close().await;
+});
+
+/// An output that plays for as long as what it's given lasts, and `tail` more (the last block, a fade).
+struct Timed {
+    ends: Rc<std::cell::Cell<Option<std::time::Instant>>>,
+    tail: std::time::Duration,
+}
+impl Output for Timed {
+    fn format(&self) -> Format {
+        Format { rate: 48_000, channels: 2 }
+    }
+    fn start(&self, samples: Vec<f32>) -> Result<(), PlayerError> {
+        let lasts = std::time::Duration::from_secs_f64(samples.len() as f64 / 96_000.) + self.tail;
+        self.ends.set(Some(std::time::Instant::now() + lasts));
+        Ok(())
+    }
+    fn stop(&self) {
+        self.ends.set(None);
+    }
+    fn playing(&self) -> bool {
+        self.ends.get().is_some_and(|end| std::time::Instant::now() < end)
+    }
+}
+
+/// The map, its sounds real files of a quarter second, played through a Timed output.
+fn timed(dir: &std::path::Path, tail: std::time::Duration) -> Harness {
+    let mut data = fixture(2, 1);
+    for point in data.sounds.points.iter_mut() {
+        let file = dir.join(format!("{}.wav", point.name));
+        let samples: Vec<f32> = (0..12_000).map(|n| (n as f32 * 0.05).sin() * 0.2).collect();
+        std::fs::write(&file, kumi_media::audio::decode::float_wav(&[samples], 48_000)).unwrap();
+        point.path = file.to_str().unwrap().to_string();
+        point.seconds = 0.25;
+    }
+    for point in data.songs.points.iter_mut() {
+        point.path = dir.join("not there.wav").to_str().unwrap().to_string();
+    }
+    Harness::with(160, 40, Rc::new(Control::default()), move |o| {
+        o.map = Some(loader(data));
+        let ends = Rc::new(std::cell::Cell::new(None));
+        o.player =
+            Some(Rc::new(Player::with_opener(Box::new(move || Ok(Box::new(Timed { ends: ends.clone(), tail }) as Box<dyn Output>)))));
+    })
+}
+
+case!(the_playing_mark_goes_once_the_output_has_played_the_last_of_it, async {
+    let dir = tempfile::tempdir().unwrap();
+    // The output still plays a moment after the sound's length: the mark waits for it, and goes.
+    let h = timed(dir.path(), std::time::Duration::from_millis(300));
+    h.start().await;
+    h.connect();
+    h.type_text("/map\r").await;
+    h.wait_for("Sounds 12").await;
+    h.type_text(" ").await;
+    h.wait_for("▶ playing").await;
+    h.wait_until_hidden("▶ playing").await;
+    h.close().await;
+});
+
+case!(a_play_that_ended_says_nothing_over_what_a_later_one_said, async {
+    let dir = tempfile::tempdir().unwrap();
+    let h = timed(dir.path(), std::time::Duration::ZERO);
+    h.start().await;
+    h.connect();
+    h.type_text("/map\r").await;
+    h.wait_for("Sounds 12").await;
+    // A sound plays; meanwhile a song (a file that isn't there) can't be played, and says why.
+    h.type_text(" ").await;
+    h.wait_for("▶ playing").await;
+    h.type_text("\t").await;
+    h.type_text(" ").await;
+    h.wait_for("There's no file there.").await;
+    // The sound's play has ended since: what the song said stays.
+    delay(600).await;
+    h.has("There's no file there.");
+    h.close().await;
+});
+
+case!(the_browsers_map_closes_when_the_music_it_shows_is_forgotten_or_its_folder_goes, async {
+    let folder = tempfile::tempdir().unwrap();
+    let songs = folder.path().join("Songs");
+    std::fs::create_dir_all(&songs).unwrap();
+    let songs = songs.to_string_lossy().into_owned();
+    let mut options =
+        kumi_listening::music::learning::MusicOptions::new(folder.path().join("kumi/music"), Some(vec![songs.clone()]), Default::default());
+    (options.fork, options.delay_ms) = (false, 3_600_000);
+    let music = kumi_listening::music::learning::create_music(options);
+    let h = Harness::with(160, 40, Rc::new(Control::default()), |o| {
+        o.map = Some(loader(fixture(2, 1)));
+        o.music = Some(music.clone());
+    });
+    h.start().await;
+    h.connect();
+    let served = |h: &Harness, at: usize| served_at(&h.browsed.borrow()[at]).0;
+    h.type_text("/map open\r").await;
+    h.wait_for("The map is open in your browser").await;
+    let port = served(&h, 0);
+    // The folder taken away: the page, which lists its songs, closes.
+    h.type_text(&format!("/music remove {songs}\r")).await;
+    h.wait_for("The map in your browser closed: it showed your music as it was").await;
+    assert!(tokio::net::TcpStream::connect(("127.0.0.1", port)).await.is_err(), "closed");
+    // Forgotten: the same.
+    h.type_text("/map open\r").await;
+    for _ in 0..500 {
+        if h.browsed.borrow().len() > 1 {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    let port = served(&h, 1);
+    h.type_text("/music forget\r").await;
+    h.wait_for("Forget my music").await;
+    h.type_text("\r").await;
+    h.wait_for("Forgot your music.").await;
+    h.wait_for("The map in your browser closed").await;
+    assert!(tokio::net::TcpStream::connect(("127.0.0.1", port)).await.is_err(), "closed");
+    h.close().await;
+});

@@ -4,7 +4,7 @@
 
 use futures::{future::LocalBoxFuture, FutureExt};
 use kumi_library::{
-    map::{read_sounds_map, sounds_on_map, MapSound},
+    map::{read_sounds_map, sounds_on_map_by_turns, MapSound},
     Library, SoundClass, CLASSES,
 };
 use kumi_listening::music::{
@@ -439,23 +439,30 @@ async fn sounds(library: &Library, dir: PathBuf) -> Layer {
     let Some(map) = tokio::task::spawn_blocking(move || read_sounds_map(&dir)).await.ok().flatten() else {
         return Layer::empty(Kind::Sounds, "Kumi hasn't put your sounds on a map yet: it does once it has learned your library.");
     };
+    // Joined with the library's index a slice at a time (the index lives on Kumi's thread), and laid out off it: a big
+    // library's map doesn't hold up the keys and the screen.
     match library.sound_index_in(Some(crate::daw::current().id())).await {
-        Ok(index) => sounds_layer(sounds_on_map(&map, &index)),
+        Ok(index) => {
+            let sounds = sounds_on_map_by_turns(&map, &index).await;
+            tokio::task::spawn_blocking(move || sounds_layer(sounds)).await.unwrap_or_else(|_| sounds_layer(vec![]))
+        }
         Err(error) => Layer::empty(Kind::Sounds, &format!("Kumi couldn't read your library: {error}")),
     }
 }
 
 async fn songs(music: &Music) -> Layer {
     let file = kumi_listening::music::database(&music.dir());
-    let read = tokio::task::spawn_blocking(move || -> Result<Option<(Vec<MapSong>, Vec<MapStyle>)>, MusicError> {
-        match MusicStore::open_read(&file)? {
-            Some(store) => store.map().map(Some),
-            None => Ok(None),
-        }
+    // Read and laid out off Kumi's thread.
+    let read = tokio::task::spawn_blocking(move || -> Result<Layer, MusicError> {
+        let (songs, styles): (Vec<MapSong>, Vec<MapStyle>) = match MusicStore::open_read(&file)? {
+            Some(store) => store.map()?,
+            None => (vec![], vec![]),
+        };
+        Ok(songs_layer(songs, styles))
     });
     match read.await {
-        Ok(Ok(Some((songs, styles)))) => songs_layer(songs, styles),
+        Ok(Ok(layer)) => layer,
         Ok(Err(error)) => Layer::empty(Kind::Songs, &format!("Kumi couldn't read your music: {error}")),
-        _ => songs_layer(vec![], vec![]),
+        Err(_) => songs_layer(vec![], vec![]),
     }
 }
