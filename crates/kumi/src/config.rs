@@ -438,6 +438,15 @@ fn read_json(file: &str) -> Option<Value> {
 }
 pub fn read_settings(file: &str) -> Settings {
     let Some(value) = read_json(file) else { return Settings::default() };
+    // The producer's answer about their music: settings.json's, or the copy beside it when an older Kumi rewrote
+    // settings.json without the keys it doesn't know.
+    let kept_beside;
+    let music = if value.get("musicFolders").is_none() && value.get("musicOffered").is_none() {
+        kept_beside = read_json(&music_answer_file(file)).unwrap_or_default();
+        &kept_beside
+    } else {
+        &value
+    };
     let model_servers = server_settings(&value["modelServers"]);
     let model = value["model"].as_str().filter(|m| valid_model(Some(m), &model_servers)).map(str::to_string);
     let effort = value["effort"].as_str().and_then(Effort::parse);
@@ -463,8 +472,8 @@ pub fn read_settings(file: &str) -> Settings {
             .as_u64()
             .filter(|days| *days <= MAX_KEEP_DAYS)
             .map(|days| ConversationSettings { keep_days: Some(days as u32) }),
-        music_folders: value["musicFolders"].is_array().then(|| folder_list(&value["musicFolders"])),
-        music_offered: (value["musicOffered"] == true).then_some(true),
+        music_folders: music["musicFolders"].is_array().then(|| folder_list(&music["musicFolders"])),
+        music_offered: (music["musicOffered"] == true).then_some(true),
         model_catalog: (value["modelCatalog"] == false).then_some(false),
         model_servers,
     }
@@ -504,9 +513,10 @@ pub fn write_music_settings(file: &str, folders: Option<&[String]>, before: Opti
         Some(Value::Object(raw)) => raw,
         _ => Map::new(),
     };
+    let now = read_settings(file);
     let folders = folders.map(|folders| {
         let before = before.unwrap_or_default();
-        let mut kept = next.get("musicFolders").map(folder_list).unwrap_or_default();
+        let mut kept = now.music_folders.unwrap_or_default();
         kept.retain(|folder| folders.contains(folder) || !before.contains(folder));
         for folder in folders.iter().filter(|folder| !before.contains(folder)) {
             if !kept.contains(folder) {
@@ -515,15 +525,23 @@ pub fn write_music_settings(file: &str, folders: Option<&[String]>, before: Opti
         }
         kept
     });
+    let offered = offered || now.music_offered == Some(true);
     next.insert("musicFolders".into(), json!(folders));
     if offered {
         next.insert("musicOffered".into(), json!(true));
     }
-    write_settings(file, &Value::Object(next))
+    write_settings(file, &Value::Object(next))?;
+    write_private(&music_answer_file(file), &file_text(&json!({"musicFolders": folders, "musicOffered": offered})))
 }
-/// Whether the file says Kumi offered to learn the producer's music (another Kumi may have since this one read it).
+/// Whether the settings say Kumi offered to learn the producer's music (another Kumi may have since this one read them).
 pub fn music_offered(file: &str) -> bool {
-    read_json(file).is_some_and(|value| value["musicOffered"] == true)
+    read_settings(file).music_offered == Some(true)
+}
+/// The producer's answer about their music is kept beside settings.json too (`write_music_settings`), as whats-new.json
+/// is: an older Kumi writing its settings drops the keys it doesn't know, and this copy is read when they're gone.
+pub const MUSIC_ANSWER_FILE: &str = "music-answer.json";
+fn music_answer_file(settings: &str) -> String {
+    Path::new(settings).with_file_name(MUSIC_ANSWER_FILE).to_string_lossy().into_owned()
 }
 /// A JSON object preserves the difference between omitting a setting and explicitly clearing it.
 pub fn write_settings(file: &str, next: &Value) -> Result<(), RuntimeError> {
@@ -597,6 +615,10 @@ pub fn write_settings(file: &str, next: &Value) -> Result<(), RuntimeError> {
             }
         }
     }
+    write_private(file, &file_text(&Value::Object(settings)))
+}
+/// A file only the producer can read (its folder too), written whole or not at all.
+fn write_private(file: &str, text: &str) -> Result<(), RuntimeError> {
     let parent = Path::new(file).parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new("."));
     let mut mkdir = std::fs::DirBuilder::new();
     mkdir.recursive(true);
@@ -616,7 +638,7 @@ pub fn write_settings(file: &str, next: &Value) -> Result<(), RuntimeError> {
     }
     options
         .open(&temporary)
-        .and_then(|mut f| f.write_all(file_text(&Value::Object(settings)).as_bytes()))
+        .and_then(|mut f| f.write_all(text.as_bytes()))
         .and_then(|_| std::fs::rename(temporary, file))
         .map_err(|e| RuntimeError::plain(e.to_string()))
 }
