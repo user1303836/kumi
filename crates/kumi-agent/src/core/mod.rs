@@ -32,6 +32,7 @@ pub mod recipes;
 pub mod refs;
 pub mod routing;
 pub mod scripts;
+pub mod search_memory;
 pub mod session;
 pub mod spec;
 pub mod stems;

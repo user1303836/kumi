@@ -84,7 +84,7 @@ struct InDaw {
 
 /// Whether the reference names something in the project by its ref (REAPER's `item:3`, Renoise's `sample:2`), not a
 /// file, a link, plain words or a question's answer.
-fn names_a_ref(what: &str) -> bool {
+pub(crate) fn names_a_ref(what: &str) -> bool {
     let Some((kind, rest)) = what.split_once(':') else { return false };
     !what.contains(char::is_whitespace)
         && !rest.starts_with("//")

@@ -1,0 +1,11 @@
+{
+  "learned": 0,
+  "found": {
+    "folders": [
+      "<root>/Music"
+    ],
+    "songs": 3
+  },
+  "offer": "I found 3 songs in <root>/Music. Learn your taste from them? It stays on this computer.",
+  "note": "Ask the producer this once, in your own words, then carry on with their request whatever they say. Only if they say yes, call taste with learn: the folders found."
+}

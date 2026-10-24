@@ -1399,9 +1399,9 @@ fn not_kumis_said(home: &str, why: NotKumis, display: &dyn Fn(&str) -> String) -
     said
 }
 /// What Kumi keeps in its folder besides itself, by name: the producer's conversations, notes, recipes, sign-ins,
-/// library and references, and what Kumi remembers between runs. Only --all takes these, and only from a folder of
+/// library, music and references, and what Kumi remembers between runs. Only --all takes these, and only from a folder of
 /// Kumi's alone: elsewhere, names like projects and settings.json could be the producer's.
-const KUMI_S_DATA: [&str; 27] = [
+const KUMI_S_DATA: [&str; 29] = [
     "auth.json",
     "settings.json",
     "kumi.db",
@@ -1417,10 +1417,14 @@ const KUMI_S_DATA: [&str; 27] = [
     "input-history",
     "update-check.json",
     "whats-new.json",
+    // The producer's answer about their music, beside settings.json.
+    "music-answer.json",
     "slots.json",
     "projects",
     "recipes",
     "library",
+    // What Kumi learned of the producer's own music (music.db, its style vectors, the map).
+    "music",
     "references",
     "goals",
     "attachments",
@@ -1442,7 +1446,7 @@ fn litter(name: &str) -> bool {
 /// it fetched, one of the bridge's generations. Nothing in `node` tells Kumi's old Node from the producer's own, so
 /// its entries count as Kumi's only in a folder of Kumi's alone.
 fn kumis_entry(part: &str, name: &str, path: &Path, alone: bool) -> bool {
-    use kumi_ai::models::pinned::{AFX_REP, BASIC_PITCH, CLAP};
+    use kumi_ai::models::pinned::{AFX_REP, BASIC_PITCH, CLAP, CLAP_MERGES, CLAP_TEXT, CLAP_VOCAB};
     let inside = |folder: &Path| -> Vec<String> {
         fs::read_dir(folder)
             .into_iter()
@@ -1473,7 +1477,7 @@ fn kumis_entry(part: &str, name: &str, path: &Path, alone: bool) -> bool {
                     || [".ffmpeg-", ".whisper-", ".yt-dlp"].iter().any(|start| name.starts_with(start))
             }
             "models" => {
-                [CLAP.name, AFX_REP.name, BASIC_PITCH.name, "slots"].contains(&name)
+                [CLAP.name, CLAP_TEXT.name, CLAP_VOCAB.name, CLAP_MERGES.name, AFX_REP.name, BASIC_PITCH.name, "slots"].contains(&name)
                     || name.starts_with("onnxruntime")
                     || name.contains(".partial-")
                     || name.contains(".unpacking-")

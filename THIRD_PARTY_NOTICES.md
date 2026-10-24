@@ -9,11 +9,22 @@ Kumi's own models aren't in the bundle: Kumi fetches them the first time they're
 SHA-256, from its `models-1` release (https://github.com/user1303836/kumi/releases/tag/models-1). That release's
 `LICENSE` and `NOTICE` files carry their licenses and notices:
 
-- LAION-CLAP's music model (laion/larger_clap_music), Apache License 2.0;
+- LAION-CLAP's music model (laion/larger_clap_music), Apache License 2.0: its audio side, and its text side with its
+  tokenizer's vocabulary and merges from the same repository;
 - AFx-Rep (csteinmetz1/afx-rep), Apache License 2.0, with PANNs' Cnn14 and torchlibrosa under the MIT License;
 - Basic Pitch's model (spotify/basic-pitch), Apache License 2.0.
 
 ONNX Runtime, which runs them, is fetched from Microsoft's own releases, under the MIT License.
+
+## Rust crates for the producer's music
+
+Kumi is built with crates from crates.io, each under its own license (Cargo.lock lists them all). Those it uses to learn
+the producer's own music and play it:
+
+- lofty (https://github.com/Serial-ATA/lofty-rs), MIT License or Apache License 2.0: reading songs' tags;
+- memmap2 (https://github.com/RazrFalcon/memmap2-rs), MIT License or Apache License 2.0: reading their style vectors;
+- cpal (https://github.com/RustAudio/cpal), Apache License 2.0: playing a song or a sound through the computer's output
+  (Core Audio on a Mac, WASAPI on Windows).
 
 ## Basic Pitch (Spotify), Apache License 2.0
 
@@ -60,6 +71,39 @@ The tests for `basic-pitch` include audio files from the
 Vocadito dataset liscened under Creative Commons
 Attribution 4.0 International. The dataset can be found at:
 https://zenodo.org/record/5578807#.YnRm5vPMKDU
+```
+
+## GPT-2's tokenizer (OpenAI), Modified MIT License
+
+`crates/kumi-listening/src/words.rs` follows the byte-level BPE in GPT-2's `src/encoder.py`, as RoBERTa's tokenizer
+uses it: its pattern for cutting a text into pieces, its table of a character for each byte and its merging of pairs,
+from https://github.com/openai/gpt-2 at revision e5c5054474f583d6d9499624649353995d63c70a.
+
+```text
+Modified MIT License
+
+Software Copyright (c) 2019 OpenAI
+
+We don’t claim ownership of the content you create with GPT-2, so it is yours to do with as you please.
+We only ask that you use GPT-2 responsibly and clearly indicate your content was created using GPT-2.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and
+associated documentation files (the "Software"), to deal in the Software without restriction,
+including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense,
+and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so,
+subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included
+in all copies or substantial portions of the Software.
+The above copyright notice and this permission notice need not be included
+with content created by the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED,
+INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
+BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE
+OR OTHER DEALINGS IN THE SOFTWARE.
 ```
 
 ## REAPER extension SDK (Cockos), zlib License

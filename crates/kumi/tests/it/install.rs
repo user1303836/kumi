@@ -366,6 +366,7 @@ async fn uninstall_preserves_producer_files_until_all_requested() {
     }
     installed_kumi(home);
     put(home.join("auth.json"), "{}");
+    put(home.join("music").join("music.db"), "songs");
     let (mut refused, _) = io(&env);
     refused.confirm = Some(Rc::new(|_| async { false }.boxed_local()));
     assert_eq!(uninstall_installed(refused, UninstallOptions::default()).await.unwrap(), 1);
@@ -376,6 +377,7 @@ async fn uninstall_preserves_producer_files_until_all_requested() {
     }
     assert!(home.join("auth.json").exists());
     assert!(home.join("projects").exists());
+    assert!(home.join("music").join("music.db").exists(), "what Kumi learned of their music is theirs until --all");
     // Without Kumi in it, the folder is the producer's to delete; installed again, --all takes everything.
     assert_eq!(uninstall_installed(io(&env).0, UninstallOptions { all: true, yes: true, ..Default::default() }).await.unwrap(), 1);
     assert!(home.join("auth.json").exists());
@@ -1276,7 +1278,7 @@ fn with_no_bridge_in_live_an_update_says_how_to_connect_it_only_where_live_runs(
 }
 
 /// Everything a producer keeps in Kumi's folder, which no uninstall without --all may touch.
-const THEIRS: [&str; 17] = [
+const THEIRS: [&str; 18] = [
     "auth.json",
     "settings.json",
     "kumi.db",
@@ -1288,6 +1290,7 @@ const THEIRS: [&str; 17] = [
     "timings.jsonl",
     "input-history",
     "whats-new.json",
+    "music-answer.json",
     "audition-restore.json",
     "projects/0123456789abcdef/conversations/night-drive.json",
     "recipes/warm-pad.json",
@@ -1827,6 +1830,7 @@ async fn uninstall_takes_kumis_names_by_their_case_and_leaves_folders_holding_mo
         ("tools/ffmpeg/ffmpeg", "Kumi's"),
         ("tools/mixdown.sh", "theirs"),
         ("models/basic-pitch.onnx", "Kumi's"),
+        ("models/clap-music-vocab.json", "Kumi's"),
         ("models/slots/0123456789ab/model.onnx", "Kumi's"),
     ] {
         put(home.join(file), text);

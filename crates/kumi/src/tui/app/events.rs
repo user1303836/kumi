@@ -153,6 +153,27 @@ impl TuiApp {
                     self.notice("Learning your library in the background…", NoticeTone::Info);
                 }
             }
+            "music" => {
+                let tell = {
+                    let mut state = self.0.state.borrow_mut();
+                    let Ok(music) = serde_json::from_value::<kumi_listening::music::learning::MusicStatus>(value["status"].clone()) else {
+                        return;
+                    };
+                    // The first time Kumi learns their music: nothing heard yet.
+                    let tell = !state.told_music
+                        && music.state == kumi_listening::music::learning::MusicState::Learning
+                        && music.heard() == 0
+                        && music.learned_at.is_none();
+                    if tell {
+                        state.told_music = true;
+                    }
+                    state.music = Some(music);
+                    tell && !state.transcript.is_empty()
+                };
+                if tell {
+                    self.notice("Learning your music in the background…", NoticeTone::Info);
+                }
+            }
             "focus" => {
                 {
                     let mut state = self.0.state.borrow_mut();

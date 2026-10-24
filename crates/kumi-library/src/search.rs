@@ -265,7 +265,13 @@ pub struct SoundIndex {
 }
 impl SoundIndex {
     pub fn new(entries: impl IntoIterator<Item = SoundEntry>, sources: &[Source]) -> Self {
-        let mut roots: Vec<_> = sources.iter().filter(|s| Path::new(&s.path).exists()).collect();
+        Self::rooted(entries, sources.iter().filter(|s| Path::new(&s.path).exists()).collect())
+    }
+    /// The sounds of every one of `sources`, its folder there now or not (the map lays them all out).
+    pub fn of_every_source(entries: impl IntoIterator<Item = SoundEntry>, sources: &[Source]) -> Self {
+        Self::rooted(entries, sources.iter().collect())
+    }
+    fn rooted(entries: impl IntoIterator<Item = SoundEntry>, mut roots: Vec<&Source>) -> Self {
         roots.sort_by_key(|s| std::cmp::Reverse(s.path.encode_utf16().count()));
         let rows: Vec<_> = entries
             .into_iter()
@@ -374,6 +380,14 @@ impl SoundIndex {
     }
     pub fn measured(&self) -> usize {
         self.has_vector.iter().filter(|flag| **flag).count()
+    }
+    /// A sound's name, by its row: its file's, without the extension.
+    pub fn name(&self, row: usize) -> &str {
+        &self.prepared[row].name
+    }
+    /// Where a sound is, by its row: its source's label and the folders down to it ("Splice / Drums / Kicks").
+    pub fn place(&self, row: usize) -> &str {
+        &self.prepared[row].where_
     }
     pub fn holds(&self, folder: &str) -> bool {
         self.entries.iter().any(|e| below(&e.path, folder).is_some())
@@ -654,6 +668,15 @@ pub struct PresetHit {
     pub score: f64,
     pub why: Vec<String>,
 }
+impl SoundIndex {
+    /// Each measured sound's row and its numbers as the search compares them: standardized, each group weighted.
+    pub fn compared(&self) -> impl Iterator<Item = (usize, &[f32])> + '_ {
+        (0..self.entries.len())
+            .filter(|row| self.has_vector[*row])
+            .map(|row| (row, &self.vectors[row * VECTOR_LENGTH..(row + 1) * VECTOR_LENGTH]))
+    }
+}
+
 pub fn search_presets<'a>(entries: impl IntoIterator<Item = &'a PresetEntry>, query: &PresetQuery) -> SearchResult<PresetHit> {
     let words = words(&query.words);
     let device = query.device.as_ref().map(|d| trim(d).to_lowercase()).filter(|d| !d.is_empty());
