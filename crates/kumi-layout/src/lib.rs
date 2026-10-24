@@ -347,11 +347,38 @@ fn distance(a: &[f32], b: &[f32]) -> f32 {
             lanes[lane] += d * d;
         }
     }
-    let mut sum = ((lanes[0] + lanes[1]) + (lanes[2] + lanes[3])) + ((lanes[4] + lanes[5]) + (lanes[6] + lanes[7]));
+    let mut sum = lanes_sum(&lanes);
     for (a, b) in a_rest.iter().zip(b_rest) {
         sum += (a - b) * (a - b);
     }
     sum
+}
+
+fn lanes_sum(lanes: &[f32; 8]) -> f32 {
+    ((lanes[0] + lanes[1]) + (lanes[2] + lanes[3])) + ((lanes[4] + lanes[5]) + (lanes[6] + lanes[7]))
+}
+
+/// `distance`, the same number to the bit, or None once it's sure to be more than `limit`: each lane only grows, and so
+/// does their sum, so what they add up to so far is never more than the whole. The points' numbers come widest first,
+/// so a point far off is known for one in a few eights.
+fn distance_within(a: &[f32], b: &[f32], limit: f32) -> Option<f32> {
+    let mut lanes = [0f32; 8];
+    let (a8, b8) = (a.chunks_exact(8), b.chunks_exact(8));
+    let (a_rest, b_rest) = (a8.remainder(), b8.remainder());
+    for (a, b) in a8.zip(b8) {
+        for lane in 0..8 {
+            let d = a[lane] - b[lane];
+            lanes[lane] += d * d;
+        }
+        if lanes_sum(&lanes) > limit {
+            return None;
+        }
+    }
+    let mut sum = lanes_sum(&lanes);
+    for (a, b) in a_rest.iter().zip(b_rest) {
+        sum += (a - b) * (a - b);
+    }
+    Some(sum)
 }
 
 /// The `most` points of `points` (rows of `k`) nearest `point`: squared distances and indexes, nearest first, ties by
@@ -362,7 +389,9 @@ fn nearest_to(point: &[f32], points: &[f32], k: usize, most: usize, skip: Option
         if skip == Some(at) {
             continue;
         }
-        let candidate = (distance(point, row), at as u32);
+        let farthest = if best.len() == most { best[most - 1].0 } else { f32::INFINITY };
+        let Some(apart) = distance_within(point, row, farthest) else { continue };
+        let candidate = (apart, at as u32);
         if best.len() == most && !closer(candidate, best[most - 1]) {
             continue;
         }
@@ -784,6 +813,29 @@ mod tests {
         let a: Vec<f32> = (0..13).map(|at| at as f32).collect();
         let b = vec![0f32; 13];
         assert_eq!(distance(&a, &b), (0..13).map(|at| (at * at) as f32).sum::<f32>());
+    }
+
+    #[test]
+    fn a_distance_cut_short_is_the_same_to_the_bit_or_more_than_its_limit() {
+        // Points of 50 numbers, a pseudo-random walk, each pair's distance against limits around it.
+        let mut seed = 7u32;
+        let mut next = || {
+            seed = seed.wrapping_mul(1_103_515_245).wrapping_add(12_345);
+            (seed >> 8) as f32 / (1 << 24) as f32 - 0.5
+        };
+        let points: Vec<Vec<f32>> = (0..60).map(|_| (0..50).map(|_| next()).collect()).collect();
+        for a in &points {
+            for b in &points {
+                let whole = distance(a, b);
+                for limit in [f32::INFINITY, whole, whole * 1.0001, whole * 0.5, 0.] {
+                    match distance_within(a, b, limit) {
+                        Some(within) => assert_eq!(within.to_bits(), whole.to_bits()),
+                        None => assert!(whole > limit, "{whole} cut short at {limit}"),
+                    }
+                }
+                assert_eq!(distance_within(a, b, whole), Some(whole), "a tie isn't cut short");
+            }
+        }
     }
 
     #[test]
