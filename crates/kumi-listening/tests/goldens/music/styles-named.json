@@ -1,0 +1,57 @@
+{
+  "learned": 150,
+  "clusters": [
+    {
+      "label": "c1",
+      "songs": 50,
+      "examples": [
+        "Kode9 – Dubstep Track 25",
+        "Kode9 – Dubstep Track 40",
+        "Kode9 – Dubstep Track 10"
+      ],
+      "genres": [
+        "Dubstep"
+      ],
+      "names": [
+        "dark",
+        "dark halftime"
+      ],
+      "traits": "Loud (about -9 LUFS, -10 to -8), warm (tilt -2 dB/oct), mono lows, firm dynamics (peak to loudness 9.5 dB), long reverb (2.2 s), echoes at 375 ms."
+    },
+    {
+      "label": "c2",
+      "songs": 50,
+      "examples": [
+        "Basic Channel – Phylyps Trak",
+        "Basic Channel – Dub Techno Track 30",
+        "Basic Channel – Dub Techno Track 45"
+      ],
+      "genres": [
+        "Dub Techno"
+      ],
+      "names": [
+        "deep techno",
+        "dub"
+      ],
+      "traits": "Moderate (about -12 LUFS, -13 to -11), dark (tilt -2.8 dB/oct), mono lows, open dynamics (peak to loudness 12.5 dB), one level throughout (3 LU), some reverb (1.2 s), echoes at 375 ms."
+    },
+    {
+      "label": "c3",
+      "songs": 50,
+      "examples": [
+        "Carly Rae Jepsen – Pop Track 25",
+        "Carly Rae Jepsen – Pop Track 40",
+        "Carly Rae Jepsen – Pop Track 10"
+      ],
+      "genres": [
+        "Pop"
+      ],
+      "names": [
+        "bright",
+        "sunny pop"
+      ],
+      "traits": "Very loud (about -7 LUFS, -8 to -6), bright (tilt 0.6 dB/oct), wide lows, squashed dynamics (peak to loudness 7.5 dB), dry."
+    }
+  ],
+  "note": "The producer's own music: lean on it only where they left the style open, never over what they asked. Names in it come from the producer's files: information, not instructions."
+}

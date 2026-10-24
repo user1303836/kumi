@@ -1,7 +1,7 @@
 [package]
 name = "kumi-listening"
 version = "0.1.0"
-description = "Kumi's listening: what a listen measures, the judge and its checklist, the engine's rounds (tune, groove, form, sound), the listening models (embeddings, transcription, their slots), style references and notation."
+description = "Kumi's listening: what a listen measures, the judge and its checklist, the engine's rounds (tune, groove, form, sound), the listening models (embeddings, transcription, their slots), style references, the producer's own music and notation."
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -11,21 +11,27 @@ publish = false
 [dependencies]
 kumi-ai.workspace = true
 kumi-common.workspace = true
+kumi-layout.workspace = true
 kumi-library.workspace = true
 kumi-media.workspace = true
 kumi-net.workspace = true
+kumi-store.workspace = true
 kumi-types.workspace = true
 kumi-web.workspace = true
 async-trait.workspace = true
 base64.workspace = true
 chrono.workspace = true
+fancy-regex.workspace = true
 futures.workspace = true
 hex.workspace = true
 home.workspace = true
 indexmap.workspace = true
+lofty.workspace = true
+memmap2.workspace = true
 rand.workspace = true
 regex.workspace = true
 reqwest.workspace = true
+rusqlite.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
@@ -34,5 +40,7 @@ url.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
+flate2.workspace = true
+libc.workspace = true
 tempfile.workspace = true
 tokio = { workspace = true, features = ["test-util"] }

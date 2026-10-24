@@ -4,10 +4,11 @@
 
 use super::{judge::JudgeHeard, masking_items, Listening};
 use crate::{
-    checklist::{masking_unfair_in, plan_cut, Quantity, Target, REGIONS},
+    checklist::{masking_unfair_in, plan_cut, Checklist, Item, Quantity, Target, REGIONS},
     cmaes::Cmaes,
     detect::ProblemKind,
     fit::{fit, Band, Limits, Shape},
+    heard_settings::{SearchKind, Setting, SettingsHeard},
     home::{Homed, Homing},
     judging::{candidate_cost, predict},
     knobs::{Scale, Unit},
@@ -16,6 +17,7 @@ use crate::{
     renderer::{DeviceKnob, Window},
     round::{Round, RoundKind},
     tools::{TuneHow, TuneRequest},
+    warm,
 };
 use indexmap::IndexMap;
 use kumi_common::{
@@ -24,6 +26,7 @@ use kumi_common::{
 };
 use kumi_types::{contracts::AuditionCandidate, errors::RuntimeError};
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 use std::rc::Rc;
 
 /// Generations a search hears at most, each in one pass.
@@ -581,6 +584,31 @@ impl Listening {
         // Where the knobs are now costs no listen: its gap as the run reads it. A search has to beat it.
         let standing = candidate_cost(&checklist, index, &before, &whole, &before, &start, &start);
         let mut search = Cmaes::new(&start, 0.2, None, crate::cmaes::seeded(rand::random::<u32>()));
+        // What the search hears is handed out, a generation at a time, for Kumi to remember what worked on this device:
+        // who the device is (never its place), what the search aims at and how the track sounded before it.
+        let device = match self.remembers() {
+            true => self.host.device_identity(&request.device, signal.clone()).await,
+            false => None,
+        };
+        let run = uuid::Uuid::new_v4().to_string();
+        let target = aimed_at(&checklist.items[index]);
+        let knobs_were: serde_json::Map<String, Value> =
+            fractions(&chosen, &start).into_iter().map(|(name, at)| (name, json!(at))).collect();
+        let was = json!({"values": readings(&checklist, &before), "knobs": knobs_were});
+        // What worked on this device before, from the past searches nearest this one: heard in its first generation.
+        let starts = match (&device, &self.memory) {
+            (Some(device), Some(memory)) => {
+                let past = memory.bests(self.host.profile().id, &device.name, &[SearchKind::Tune]).await;
+                let names: Vec<String> = chosen.iter().map(|(knob, _)| knob.name.clone()).collect();
+                let item = &checklist.items[index];
+                let sounds: Vec<(String, f64, f64)> =
+                    checklist.items.iter().zip(&before).filter_map(|(item, value)| Some((item.id.clone(), (*value)?, item.jnd))).collect();
+                let aim = item.aim().map(|(aim, _)| (aim, item.jnd));
+                warm::starts(&past, &warm::Now { knobs: &names, start: &start, target: &target, aim, sounds: &sounds })
+            }
+            _ => vec![],
+        };
+        search.inject(&starts.iter().map(|start| start.point.clone()).collect::<Vec<_>>());
         // What the copies can't hear (the focus track isn't with them) reads as it did before.
         let heard_alone = |values: Vec<Option<f64>>| -> Vec<Option<f64>> {
             values
@@ -622,29 +650,67 @@ impl Listening {
                     Err(why) => return Ok(Err(why)),
                 };
                 self.judge.borrow_mut().as_mut().unwrap().listens += 1;
-                let costs: Vec<f64> = copies
-                    .names
+                let read: Vec<Option<Vec<Option<f64>>>> =
+                    copies.names.iter().map(|name| heard.get(name).map(|heard| heard_alone(checklist.read(heard, None)))).collect();
+                let costs: Vec<f64> = read
                     .iter()
                     .zip(&points)
-                    .map(|(name, point)| match heard.get(name) {
-                        Some(heard) => {
-                            candidate_cost(&checklist, index, &before, &whole, &heard_alone(checklist.read(heard, None)), point, &start)
-                        }
+                    .map(|(values, point)| match values {
+                        Some(values) => candidate_cost(&checklist, index, &before, &whole, values, point, &start),
                         None => f64::INFINITY,
                     })
                     .collect();
+                let generation = search.generation + 1;
                 search.tell(&points, &costs);
+                if let Some(device) = &device {
+                    // Each setting heard (one that came through, and was read on its target), a remembered one said.
+                    let settings = points
+                        .iter()
+                        .zip(&read)
+                        .zip(&costs)
+                        .filter(|(_, cost)| cost.is_finite())
+                        .filter_map(|((point, values), cost)| {
+                            let measured = Value::Object(readings(&checklist, values.as_ref()?));
+                            let remembered = starts
+                                .iter()
+                                .filter(|_| generation == 1)
+                                .find(|start| start.point.iter().zip(point).all(|(a, b)| a.clamp(0., 1.) == *b))
+                                .map(|start| start.remembered.id.clone());
+                            Some(Setting {
+                                knobs: fractions(&chosen, point),
+                                measured,
+                                cost: *cost,
+                                generation: Some(generation),
+                                remembered,
+                            })
+                        })
+                        .collect();
+                    self.heard(SettingsHeard::Heard {
+                        run: run.clone(),
+                        kind: SearchKind::Tune,
+                        daw: self.host.profile().id,
+                        device: device.clone(),
+                        track: Some(scoped.clone()),
+                        target: target.clone(),
+                        before: Some(was.clone()),
+                        settings,
+                    });
+                }
             }
             Ok(Ok(()))
         }
         .await;
         self.host.close_copies(copies).await;
+        // Better than standing still by half a step (or half of what's left, near the target), as the judge counts better.
+        let better = search.best.as_ref().is_some_and(|(_, cost)| *cost < standing - (standing / 2.).min(0.5));
+        if device.is_some() {
+            self.heard(SettingsHeard::Ended { run, kept: better && matches!(searched, Ok(Ok(()))) });
+        }
         match searched? {
             Ok(()) => {}
             Err(why) => return Ok(Err(why)),
         }
-        // Better than standing still by half a step (or half of what's left, near the target), as the judge counts better.
-        if search.best.as_ref().is_none_or(|(_, cost)| !(*cost < standing - (standing / 2.).min(0.5))) {
+        if !better {
             return Ok(Err(format!(
                 "The search heard nothing better than where the knobs are (in {} generations of {}); they stay. Try other knobs or another device.",
                 search.generation, search.lambda
@@ -663,14 +729,60 @@ impl Listening {
             })
             .collect();
         let change = format!(
-            "{}{} on {scoped}, searched in {} generations of {} heard side by side",
+            "{}{} on {scoped}, searched in {} generations of {} heard side by side{}",
             said_first(request),
             said.join(", "),
             search.generation,
-            search.lambda
+            search.lambda,
+            started_from(&starts)
         );
         self.judge_round(Some(change), None, signal).await
     }
+}
+
+/// What a search started from, as its log says it: where the nearest remembered setting worked, and when.
+fn started_from(starts: &[warm::Start]) -> String {
+    let Some(first) = starts.first() else { return String::new() };
+    let day = chrono::DateTime::from_timestamp_millis(first.remembered.at)
+        .map(|at| format!(" on {}", at.with_timezone(&chrono::Local).format("%-d %b")))
+        .unwrap_or_default();
+    let track = first.remembered.track.as_deref().map(|track| format!(" on {track}")).unwrap_or_default();
+    let more = if starts.len() > 1 { format!(" (and {} more)", starts.len() - 1) } else { String::new() };
+    format!("; started from what worked{track}{day}{more}")
+}
+
+/// The knobs at a point of a search, by name: each the fraction of its perceptual range it's set to.
+fn fractions(chosen: &[(&DeviceKnob, Scale)], point: &[f64]) -> IndexMap<String, f64> {
+    chosen.iter().zip(point).map(|((knob, _), at)| (knob.name.clone(), at.clamp(0., 1.))).collect()
+}
+
+/// A listen's readings, by checklist item: the ones it read.
+fn readings(checklist: &Checklist, values: &[Option<f64>]) -> serde_json::Map<String, Value> {
+    checklist
+        .items
+        .iter()
+        .zip(values)
+        .filter_map(|(item, value)| Some((item.id.clone(), json!(value.filter(|value| value.is_finite())?))))
+        .collect()
+}
+
+/// What a search aims at, as Kumi remembers it: the item's kind (what it reads; a reference's own vector left out, a
+/// fingerprint of it kept as `towards`), and what it wants (its target, and where a knob turned for it should take it).
+fn aimed_at(item: &Item) -> Value {
+    let mut target = serde_json::to_value(&item.quantity).unwrap_or_else(|_| json!({}));
+    if let Some(object) = target.as_object_mut() {
+        if let Some(to) = object.remove("to") {
+            let towards = hex::encode(Sha256::digest(to.to_string().as_bytes()));
+            object.insert("towards".into(), json!(towards[..16]));
+        }
+        object.insert("item".into(), json!(item.id));
+        object.insert("unit".into(), json!(item.unit));
+        object.insert("wanted".into(), serde_json::to_value(item.target).unwrap_or(Value::Null));
+        if let Some((aim, _)) = item.aim() {
+            object.insert("aim".into(), json!(aim));
+        }
+    }
+    target
 }
 
 /// The model's own words for the change, as the log's lead-in.

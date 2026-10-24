@@ -731,6 +731,11 @@ pub struct GoalSlotInfo {
     pub label: String,
     pub chain: String,
     pub knobs: Vec<Knob>,
+    /// Who each knob's device is (`Knob::device` to the device's identity: a built-in device's own name, a plug-in's
+    /// format, maker and name as far as the DAW says them), for what Kumi remembers of the search. A device the rig
+    /// doesn't name is known by its name.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub devices: std::collections::BTreeMap<String, String>,
 }
 
 /// One trial of a generation: a slot's knobs set to these values.
@@ -970,6 +975,8 @@ pub enum SessionEvent {
     Watched(WatchedEvent),
     Web(WebEvent),
     Library(LibraryEvent),
+    /// How learning the producer's own music is going.
+    Music(MusicEvent),
     Recipe(RecipeEvent),
     Technique(TechniqueEvent),
     /// What a tool at work is doing now ("looking at 2:05"), for NOW; it ends with the tool.
@@ -1176,6 +1183,12 @@ pub trait MemoryStore {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LibraryEvent {
     pub status: LibraryStatus,
+}
+
+/// How learning the producer's own music is going, for the app to show (a `{ type: "music" }` session event).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MusicEvent {
+    pub status: kumi_listening::music::learning::MusicStatus,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -1487,6 +1500,16 @@ pub trait SessionController {
     }
     /// The producer's library: what Kumi knows of it, and how learning it is going.
     fn library(&self) -> Option<LibraryStatus> {
+        None
+    }
+    /// What Kumi's searches remember (settings heard, their devices, how often one won the round it was tried in): None
+    /// without its database.
+    async fn remembered(&self) -> Option<crate::core::search_memory::SearchMemoryStatus> {
+        None
+    }
+    /// What Kumi remembers of searches, for a DAW's listening to hand what it hears to and start from: None without its
+    /// database.
+    fn settings_memory(&self) -> Option<Rc<dyn kumi_listening::heard_settings::SettingsMemory>> {
         None
     }
     /// The saved Set open in the DAW, by its file, once the session has read it.

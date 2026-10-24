@@ -47,6 +47,20 @@ fn device_name(device: &JsonObject) -> String {
         .map(js_string)
         .unwrap_or_else(|| "Device".into())
 }
+/// Who each knob's device is, by the knobs' word for it (`<place>:<name>`), for what Kumi remembers of a search.
+fn identities(read: &Knobs) -> std::collections::BTreeMap<String, String> {
+    read.devices
+        .iter()
+        .enumerate()
+        .filter_map(|(index, device)| {
+            let text = |key: &str| device.get(key).and_then(Value::as_str).unwrap_or("");
+            Some((
+                format!("{index}:{}", device_name(device)),
+                super::probe::identity_of(text("className"), text("classDisplayName"), text("name"))?,
+            ))
+        })
+        .collect()
+}
 fn gain(read: &Knobs) -> Option<&Knob> {
     let limiter = read.devices.last()?;
     let name = limiter.get("name").filter(|v| !v.is_null()).map(js_string).unwrap_or_else(|| "Limiter".into());
@@ -258,7 +272,8 @@ impl Goal {
             }
         }
         self.current.borrow_mut().insert(name.into(), read.knobs.iter().map(|knob| (key(knob), knob.value)).collect());
-        let slot = GoalSlotInfo { name: name.into(), label: label.into(), chain: read.chain, knobs: read.knobs };
+        let devices = identities(&read);
+        let slot = GoalSlotInfo { name: name.into(), label: label.into(), chain: read.chain, knobs: read.knobs, devices };
         self.slots.borrow_mut().push(slot.clone());
         Ok(slot)
     }

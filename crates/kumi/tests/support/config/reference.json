@@ -1366,7 +1366,8 @@
             "baseURL": "ftp://example.test"
           },
           "not a server"
-        ]
+        ],
+        "editorNote": "theirs"
       }
     },
     {
@@ -1406,7 +1407,8 @@
       "expected": {
         "model": "anthropic/claude-sonnet-5",
         "effort": "high",
-        "modelServers": null
+        "modelServers": null,
+        "editorNote": "theirs"
       }
     },
     {
@@ -1466,7 +1468,8 @@
           "send": true,
           "language": "en",
           "microphone": "Built-in"
-        }
+        },
+        "editorNote": "theirs"
       }
     },
     {

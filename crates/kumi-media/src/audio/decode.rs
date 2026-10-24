@@ -63,6 +63,8 @@ pub struct PreparedAudio {
     pub format: Option<String>,
     /// The file's length in seconds when its converted copy stops short of it.
     pub seconds: Option<f64>,
+    /// Where the copy begins in the file, seconds: 0 unless only a stretch was converted (`prepare_audio_range`).
+    pub start: f64,
     folder: Option<PathBuf>,
 }
 impl PreparedAudio {
@@ -85,7 +87,9 @@ pub async fn prepare_audio(path: impl AsRef<Path>, signal: Option<Signal>) -> Re
 /// As prepare_audio, converting no further than `until` seconds in, the farthest anything will read: a 2-hour mix
 /// isn't written out whole (2.5 GB of it) for its first twelve minutes, and the length it's read as is kept.
 pub async fn prepare_audio_to(path: impl AsRef<Path>, signal: Option<Signal>, until: Option<f64>) -> Result<PreparedAudio, AudioError> {
-    let path = path.as_ref();
+    prepare(path.as_ref(), signal, until, None).await
+}
+async fn prepare(path: &Path, signal: Option<Signal>, until: Option<f64>, from: Option<f64>) -> Result<PreparedAudio, AudioError> {
     let extension = extension(path);
     if !AUDIO_EXTENSIONS.contains(&extension.as_str()) {
         return Err(AudioError(format!(
@@ -94,20 +98,36 @@ pub async fn prepare_audio_to(path: impl AsRef<Path>, signal: Option<Signal>, un
         )));
     }
     if [".wav", ".wave", ".aif", ".aiff", ".aifc"].contains(&extension.as_str()) {
-        return Ok(PreparedAudio { path: path.into(), format: None, seconds: None, folder: None });
+        return Ok(PreparedAudio { path: path.into(), format: None, seconds: None, start: 0., folder: None });
     }
     let folder = std::env::temp_dir().join(format!("kumi-audio-{}", uuid::Uuid::new_v4()));
     tokio::fs::create_dir(&folder).await?;
-    let mut prepared =
-        PreparedAudio { path: folder.join("converted.wav"), format: Some(extension[1..].into()), seconds: None, folder: Some(folder) };
-    match convert(path, &prepared.path, signal, until).await {
-        Ok(seconds) => prepared.seconds = seconds,
+    let mut prepared = PreparedAudio {
+        path: folder.join("converted.wav"),
+        format: Some(extension[1..].into()),
+        seconds: None,
+        start: 0.,
+        folder: Some(folder),
+    };
+    match convert(path, &prepared.path, signal, until, from).await {
+        Ok((seconds, start)) => (prepared.seconds, prepared.start) = (seconds, start),
         Err(error) => {
             prepared.cleanup().await;
             return Err(error);
         }
     }
     Ok(prepared)
+}
+/// A stretch of a file Kumi can read as PCM: `seconds` from `from` on. WAV and AIFF are read in place; other formats are
+/// converted from `from` (ffmpeg seeks there first, so a song's middle minute is decoded without what comes before),
+/// or whole where only a Mac's afconvert is there. `start` says where the copy begins in the file.
+pub async fn prepare_audio_range(
+    path: impl AsRef<Path>,
+    signal: Option<Signal>,
+    from: f64,
+    seconds: f64,
+) -> Result<PreparedAudio, AudioError> {
+    prepare(path.as_ref(), signal, Some(from.max(0.) + seconds.max(0.)), Some(from.max(0.)).filter(|from| *from > 0.)).await
 }
 fn extension(path: &Path) -> String {
     path.extension().map(|v| format!(".{}", v.to_string_lossy().to_lowercase())).unwrap_or_default()
@@ -132,8 +152,15 @@ pub async fn open_audio_to(path: impl AsRef<Path>, signal: Option<Signal>, until
     source.prepared = Some(prepared);
     Ok(source)
 }
-/// The copy converted, and the file's length when the copy stops short of it (`until`).
-async fn convert(input: &Path, output: &Path, signal: Option<Signal>, until: Option<f64>) -> Result<Option<f64>, AudioError> {
+/// The copy converted, the file's length when the copy stops short of it (`until`), and where the copy begins in the
+/// file (`from`, when a converter could seek to it).
+async fn convert(
+    input: &Path,
+    output: &Path,
+    signal: Option<Signal>,
+    until: Option<f64>,
+    from: Option<f64>,
+) -> Result<(Option<f64>, f64), AudioError> {
     let mac = cfg!(target_os = "macos");
     let ffmpeg = if mac {
         "ffmpeg".into()
@@ -148,16 +175,27 @@ async fn convert(input: &Path, output: &Path, signal: Option<Signal>, until: Opt
     let output_s = output.to_string_lossy();
     // How long it is (ffprobe, or what ffmpeg says of it, decoding nothing): to ask room for what will be written, and to
     // keep the file's length when the copy stops short of it. A reading can be wrong, so where ffmpeg stops isn't up to it.
+    // (A stretch's length is known: nothing to read first.)
     let length = match until {
-        Some(_) => crate::frames::duration_of(&ffmpeg, &input_s, signal.clone()).await,
-        None => None,
+        Some(_) if from.is_none() => crate::frames::duration_of(&ffmpeg, &input_s, signal.clone()).await,
+        _ => None,
     };
-    let until_text = until.map(|until| to_fixed(until, 3));
+    // From a seek, ffmpeg's -t is the stretch's length.
+    let reach = until.map(|until| until - from.unwrap_or(0.));
+    let until_text = reach.map(|reach| to_fixed(reach, 3));
+    let from_text = from.map(|from| to_fixed(from, 3));
     let folder = output.parent().map(|folder| folder.to_string_lossy().into_owned()).unwrap_or_default();
     let mut no_room = None;
-    for Attempt { command, args, writes } in attempts(mac, &ffmpeg, &input_s, &output_s, until.zip(until_text.as_deref()), length) {
+    for Attempt { command, args, mut writes } in
+        attempts(mac, &ffmpeg, &input_s, &output_s, reach.zip(until_text.as_deref()), length, from_text.as_deref())
+    {
         if let Some(s) = &signal {
             s.check()?;
+        }
+        // A Mac's afconvert copies the whole file, a stretch's too, whose length wasn't read: read it now, to ask room
+        // for the copy.
+        if command == "afconvert" && writes.is_none() && from.is_some() {
+            writes = crate::frames::duration_of(&ffmpeg, &input_s, signal.clone()).await;
         }
         match writes {
             Some(seconds) => {
@@ -171,7 +209,8 @@ async fn convert(input: &Path, output: &Path, signal: Option<Signal>, until: Opt
             None => {}
         }
         match run(command, &args, RunOptions { signal: signal.clone(), timeout_ms: Some(120_000), max_buffer: Some(1024 * 1024) }).await {
-            Ok(_) => return Ok(if command == "afconvert" { None } else { length_past(until, length) }),
+            Ok(_) if command == "afconvert" => return Ok((None, 0.)),
+            Ok(_) => return Ok((length_past(until, length), from.unwrap_or(0.))),
             Err(e) => {
                 if signal.as_ref().is_some_and(Signal::is_cancelled) {
                     return Err(e.into());
@@ -202,8 +241,13 @@ fn attempts<'a>(
     output: &'a str,
     until: Option<(f64, &'a str)>,
     length: Option<f64>,
+    from: Option<&'a str>,
 ) -> Vec<Attempt<'a>> {
-    let mut args = vec!["-v", "error", "-nostdin", "-y", "-i", input, "-vn"];
+    let mut args = vec!["-v", "error", "-nostdin", "-y"];
+    if let Some(from) = from {
+        args.extend(["-ss", from]);
+    }
+    args.extend(["-i", input, "-vn"]);
     if let Some((_, until)) = until {
         args.extend(["-t", until]);
     }
@@ -587,7 +631,7 @@ mod tests {
         // Each converter tried, in order: where it stops (`-t`), and the seconds it's asked room for.
         let plan = |mac, until: Option<f64>, length| {
             let text = until.map(|until| to_fixed(until, 3));
-            attempts(mac, "ffmpeg", "in.mp3", "out.wav", until.zip(text.as_deref()), length)
+            attempts(mac, "ffmpeg", "in.mp3", "out.wav", until.zip(text.as_deref()), length, None)
                 .into_iter()
                 .map(|tried| {
                     let stop = tried.args.iter().position(|arg| *arg == "-t").map(|at| tried.args[at + 1].to_string());

@@ -4,6 +4,7 @@
 use crate::{
     checklist::MainState,
     fit::Band,
+    heard_settings::DeviceIdentity,
     judging::Placed,
     knobs::Scale,
     notes::{Kit, Note},
@@ -304,6 +305,12 @@ pub trait Renderer {
     /// What kind of device it is, as its probes are saved: the DAW's class for its own devices, the name for a plug-in.
     async fn device_kind(&self, _device: &str, _signal: Signal) -> Option<String> {
         None
+    }
+    /// Who a device is, for what Kumi remembers of a search on it: the same in every session and wherever it sits (a
+    /// built-in device's own name, a plug-in's format, maker and name as far as the DAW says them). By default, what its
+    /// kind says.
+    async fn device_identity(&self, device: &str, signal: Signal) -> Option<DeviceIdentity> {
+        self.device_kind(device, signal).await.map(DeviceIdentity::named)
     }
     /// The knobs to set so an equaliser's bands are these (the ones it isn't using take them); why not, when it can't.
     async fn fit_eq(

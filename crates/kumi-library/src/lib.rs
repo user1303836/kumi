@@ -8,6 +8,7 @@ pub mod daws;
 pub mod features;
 pub mod learn;
 pub mod learner;
+pub mod map;
 pub mod measure_worker;
 pub mod plan;
 pub mod plugins;
@@ -15,6 +16,7 @@ pub mod presets;
 pub mod samples;
 pub mod search;
 pub mod sets;
+pub mod sounds_map;
 pub mod sources;
 pub mod state;
 pub mod store;
@@ -227,8 +229,10 @@ impl Library {
     pub fn status(&self) -> LibraryStatus {
         let saved = self.saved.borrow();
         let last = saved.as_ref().and_then(|s| s.last.as_ref());
-        let learned_at = last.map(|l| l.finished_at).filter(|t| *t != 0);
         let progress = self.progress.borrow();
+        // A learn that has just finished counts at once (its state is read again once the learner's done with its map).
+        let finished = progress.as_ref().filter(|p| p.phase == LearnPhase::Done).and_then(|p| p.finished_at);
+        let learned_at = finished.or(last.map(|l| l.finished_at)).filter(|t| *t != 0);
         let (known_sounds, known_presets, known_sets) = self.counts.get();
         let counts = progress.as_ref().map(|p| (p.sounds.known, p.presets.known, p.sets.known)).unwrap_or((
             known_sounds.max(last.map(|l| l.sounds).unwrap_or(0)),

@@ -235,6 +235,30 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
         _ => (None, None, None),
     };
     let tools_dir = load_tools_dir(&io.env)?;
+    // The producer's own music, learned from the folders they agreed to (none: not learned).
+    let music = {
+        let mut options = kumi_listening::music::learning::MusicOptions::new(
+            load_music_dir(&io.env)?.into(),
+            settings.music_folders.clone(),
+            crate::daw::registry::libraries(),
+        );
+        // The references taste makes from their songs, which forgetting their music deletes too.
+        options.references = Some(load_references_dir(&io.env)?.into());
+        options.library_folders = settings.library_folders.clone();
+        options.offered = settings.music_offered == Some(true);
+        // The producer's answer, kept in settings.json beside the rest of their settings: what this Kumi changed, applied
+        // to the file as it is now (another Kumi may have changed it since).
+        let file = settings_file.clone();
+        let before = RefCell::new(settings.music_folders.clone());
+        options.save = Some(Rc::new(move |folders: Option<&[String]>, offered: bool| {
+            crate::config::write_music_settings(&file, folders, before.borrow().as_deref(), offered).map_err(|error| error.to_string())?;
+            *before.borrow_mut() = folders.map(<[String]>::to_vec);
+            Ok(())
+        }));
+        let file = settings_file.clone();
+        options.offered_since = Some(Rc::new(move || crate::config::music_offered(&file)));
+        kumi_listening::music::learning::create_music(options)
+    };
     let library = create_library(LibraryOptions {
         daws: crate::daw::registry::libraries(),
         dir: load_library_dir(&io.env)?,
@@ -366,6 +390,7 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
         let watching_live = watching_live.clone();
         let restart_said = restart_said.clone();
         let library = library.clone();
+        let music = music.clone();
         let emit = emit.clone();
         let controller = controller.clone();
         let live_config = live_config.clone();
@@ -391,12 +416,15 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
             options.on_transport = Some({
                 let emit = emit.clone();
                 let library = library.clone();
+                let music = music.clone();
                 Rc::new(move |transport| {
-                    if transport.as_ref().is_some_and(|t| t.playing) {
+                    let playing = transport.as_ref().is_some_and(|t| t.playing);
+                    if playing {
                         library.pause();
                     } else {
                         library.resume();
                     }
+                    music.set_playing(playing);
                     emit(SessionEvent::Transport { transport });
                 })
             });
@@ -459,6 +487,8 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
                     emit(SessionEvent::Judged(round));
                 })
             });
+            // What a search hears is kept, and the next search on the same device starts from what worked.
+            options.search_memory = controller.borrow().as_ref().and_then(Weak::upgrade).and_then(|c| c.settings_memory());
             options.references = Some(references.clone());
             options.listener = Some({
                 let store: Rc<dyn CredentialStore> = listener_store.clone();
@@ -583,6 +613,7 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
     options.watch = Some(VideoDirectories { videos_dir: load_videos_dir(&io.env)?, tools_dir: tools_dir.clone() });
     options.web = true;
     options.library = Some(library.clone());
+    options.music = Some(music.clone());
     options.jobs = Some(JobsOptions {
         worker_factory,
         max: settings.max_jobs.map(|n| n as usize).unwrap_or(DEFAULT_MAX_JOBS),
@@ -740,6 +771,10 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
         options.pick_daw = pick_daw;
         options.willington = provider.toggle(&io.env);
         options.slots = Some(slots_context);
+        options.music = Some(music.clone());
+        // /map: the library's sounds and the songs, read each time it opens; Space plays through Kumi's player.
+        options.map = Some(crate::map::loader(library.clone(), load_library_dir(&io.env)?.into(), music.clone()));
+        options.player = Some(Rc::new(kumi_media::audio::player::Player::new()));
         options.voice = Some(Rc::new(create_voice_control(VoiceControlOptions {
             env: Some(io.env.clone()),
             tools_dir,
@@ -805,6 +840,7 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
     });
     let running = ui.run();
     library.start();
+    music.start();
     let settings = read_settings(&settings_file);
     let update_check = if settings.update_check != Some(false) && !io.env.get("KUMI_NO_UPDATE_CHECK").is_some_and(|s| !s.is_empty()) {
         let cache = std::path::Path::new(&settings_file)
@@ -845,6 +881,7 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
     #[cfg(unix)]
     drop(terminate);
     library.close().await;
+    music.close().await;
     fetch_notices.abort();
     configure_programs(ProgramDefaults::default());
     if let Some(task) = update_check {

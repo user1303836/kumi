@@ -803,6 +803,15 @@ impl<S: RefScheme + 'static> OwnIntegration<S> {
                     }
                 }
             };
+            // Nothing plays in a DAW that's gone (it quit or crashed mid-playback), so what waits while it plays (the
+            // library's learner, the music scan) goes on.
+            let lose_transport = |last_transport: &mut Option<Value>| {
+                if last_transport.take().is_some() {
+                    if let Some(on_transport) = &on_transport {
+                        on_transport(None);
+                    }
+                }
+            };
             while !closed.get() {
                 tokio::time::sleep(std::time::Duration::from_millis(period)).await;
                 let Some(host) = endpoint.borrow().clone() else { continue };
@@ -823,6 +832,7 @@ impl<S: RefScheme + 'static> OwnIntegration<S> {
                         identity.borrow_mut().take();
                         last_epoch = None;
                         lose_focus(&mut last);
+                        lose_transport(&mut last_transport);
                         continue;
                     }
                     _ => {
@@ -888,6 +898,7 @@ impl<S: RefScheme + 'static> OwnIntegration<S> {
                     last_transport = transport;
                 }
             }
+            lose_transport(&mut last_transport);
         });
     }
 

@@ -7,6 +7,7 @@ pub mod editor;
 pub mod icons;
 pub mod keys;
 pub mod logo;
+pub mod map;
 pub mod markdown;
 pub mod picker;
 pub mod pictures;

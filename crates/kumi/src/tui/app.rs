@@ -9,10 +9,13 @@ mod events;
 mod input;
 mod jobs;
 mod live;
+mod map;
+mod music;
 mod panels;
 mod records;
 mod setup;
 use kumi_daw::setup::DawSetup;
+pub use music::{music_lines, parse_music, MusicAsked, MUSIC_FOOTER};
 pub use setup::{waveform, WAVE_WIDTH};
 mod sharing;
 mod shown;
@@ -96,6 +99,12 @@ pub struct TuiOptions {
     pub willington: Option<kumi_daw::provider::Toggle>,
     /// /slots: which model does each listening job, swapped and taken back.
     pub slots: Option<Rc<kumi_listening::slots::SlotsContext>>,
+    /// /music: the producer's own music, which Kumi learns their taste from.
+    pub music: Option<Rc<kumi_listening::music::learning::Music>>,
+    /// /map: reads the producer's sounds and songs on their maps, each time it opens.
+    pub map: Option<crate::map::LoadMap>,
+    /// What plays a point of the map.
+    pub player: Option<Rc<kumi_media::audio::player::Player>>,
     /// What's new since the producer last opened Kumi, shown once as it starts.
     pub whats_new: Option<crate::whats_new::News>,
     /// How this terminal shows Kumi's status and notifications; read from the environment when None.
@@ -170,6 +179,9 @@ impl TuiOptions {
             connect_live: None,
             willington: None,
             slots: None,
+            music: None,
+            map: None,
+            player: None,
             whats_new: None,
             terminal: None,
             away: AwaySettings::default(),
@@ -297,6 +309,9 @@ struct State {
     newer: Option<String>,
     library: Option<LibraryStatus>,
     told_library: bool,
+    told_music: bool,
+    /// How learning the producer's own music goes (/music shows it).
+    music: Option<kumi_listening::music::learning::MusicStatus>,
     /// Willington's bindings are off in the bridge that carries them, and the producer has yet to be told.
     willington_off: bool,
     /// What's new, shown as Kumi started: a conversation carried on at the start comes above it.
@@ -313,6 +328,17 @@ struct State {
     history_image: Option<String>,
     /// Pictures drawn, and images uploaded to the terminal.
     images: shown::Images,
+    /// /map while it's open, in place of the conversation, and the key of the image it has up.
+    map: Option<super::map::MapView>,
+    map_image: Option<String>,
+    /// /map open: the map served to the browser, until /map close or Kumi quits.
+    map_page: Option<crate::map_server::MapServer>,
+    /// Counts /map open and what stops one (/map close, the music changing): a map read for an older one doesn't open;
+    /// and whether one is being read.
+    map_page_asked: u64,
+    map_page_opening: bool,
+    /// Counts the map's plays, stops and closings: only the latest play says when it ended.
+    map_play: u64,
     last_change: Option<(String, f64)>,
     last_action: Option<LastAction>,
     goal: Option<Value>,
@@ -439,6 +465,8 @@ impl State {
             newer: None,
             library: None,
             told_library: false,
+            told_music: false,
+            music: None,
             willington_off: false,
             news: None,
             news_since: None,
@@ -447,6 +475,12 @@ impl State {
             expanded: None,
             history_image: None,
             images: shown::Images::default(),
+            map: None,
+            map_image: None,
+            map_page: None,
+            map_page_asked: 0,
+            map_page_opening: false,
+            map_play: 0,
             last_change: None,
             last_action: None,
             goal: None,
@@ -797,6 +831,8 @@ impl TuiApp {
             if let Some(setup) = state.setup.as_mut() {
                 setup.stop();
             }
+            // The browser's map stops answering as Kumi closes.
+            state.map_page = None;
             for aside in &state.asides {
                 if aside.borrow().state == "asking" {
                     aside.borrow().abort.cancel();

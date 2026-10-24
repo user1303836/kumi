@@ -192,12 +192,15 @@ message, not a command.
 | `/loop <what to reach>` | Work in judged rounds: one change, heard before and after, kept only if its target improved and nothing else got worse, then the next target. It stops when every item is met, when changes stop helping, or at 16 rounds or 45 minutes; Esc or `/loop stop` stops it. A sound to match ("make my pad sound like ~/ref.wav") runs the knob search instead: `/loop` alone picks a paused one up, `/loop stop` ends it |
 | `/goal <what to reach>` | Keep at one goal across turns, checked after each (by the judge's numbers when measured), until it's met, blocked, stuck (three turns in a row that got no closer) or out of budget. `/goal` shows it; `/goal resume` (a fresh budget for whatever ran out), `/goal edit <words>`, `/goal new: <words>` (replaces an unfinished one), `/goal pause` (or Esc), `/goal clear` (with no unfinished goal, a paused sound-match search) |
 | `/slots` | Which model does each listening job (stems, transcription, listening, embeddings), and swaps one in plain words: `/slots listening gemini`, `/slots listening off`, `/slots listening <base URL>#<model>`, `/slots embeddings <.onnx file or https link>`. A new model is tried first; `/slots back <job>` takes a swap back |
+| `/music` | Your own music, which Kumi learns your taste from on this computer: its folders, the songs heard and how it's going. `/music add <folder>`, `/music remove <folder>`, `/music pause`, `/music resume`, and `/music forget` (deletes what Kumi learned, after you confirm). Song and artist names reach the model when Kumi uses your taste |
+| `/map` | Your sounds and songs as two maps, full screen (Tab switches): sounds coloured by class, songs by style. The arrows move to the nearest point that way, Shift and the arrows pan, + and − zoom, a click picks a point, `/` filters by class, folder, pack or genre tag, Space plays the point, and Enter asks Kumi for more like it, to use it as the reference, or to grow a sound like it (the words land in the input box for you to send). Zoomed out on a big library, the busiest places are brightest; names appear as you zoom in. An image where the terminal shows images (kitty, Ghostty), braille elsewhere, a list on a basic console. Esc closes it |
+| `/map open` | The map in your browser: a point's name when you point at it, the wheel zooms, Shift and drag (or Lasso) picks points, the filter keeps what has its words, groups show or hide, and a click plays a point. Its actions put their message in the input box, as the terminal's map does. Served from this computer only, at a link with a random key; over SSH, Kumi says which port to forward. `/map close` closes it, and so does quitting Kumi |
 | `/memory` | Everything Kumi keeps: notes about you and this Set, what it learned from your Sets, techniques, recipes and lessons; choose one to forget it (a note to change its words or pin it, a recipe to run or forget) |
 | `/note <id> <new words>` | Change a note's words without the model; a note's "Change the words" in `/memory` starts it for you |
 | `/recipes` | Your recipes: run one or forget it. One with blanks starts a `/recipe` line for you to finish, with what's pinned filled in |
 | `/recipe <name> blank=value …` | Run a recipe now, with no model call; a value with spaces goes in quotes, an unquoted number or true/false goes as itself (quote it to keep it words), and Kumi names any blank left empty |
 | `/jobs` | The background jobs: Enter opens one, where `x` stops it and `r` runs an interrupted one again. Works while Kumi answers |
-| `/status` | What Kumi is connected to, the model, how far it has got learning your library, on an API key the tokens this session used, and the conversation with its id |
+| `/status` | What Kumi is connected to, the model, how far it has got learning your library, how many settings its searches heard and remember (and on how many devices) and how often one remembered won the round it was tried in, of the searches that started from one, on an API key the tokens this session used, and the conversation with its id |
 | `/voice` | Talking instead of typing: start or stop, "Send when you stop", the language you speak and the microphone |
 | `/update` | Get the newest Kumi: it asks, closes, updates and opens again with the same conversation |
 | `/changelog` | What's new in Kumi: every note since the version you updated from, or the latest three releases, and where the whole history is |
@@ -305,7 +308,7 @@ instead, which suits screen readers and logs. It has `/help`, `/status`,
 `/model [provider/model]`, `/effort [level|default]`, `/fast`, `/logout <provider>`,
 `/memory`, `/forget <id>`, `/note <id> <new words>`, `/pin <id>`, `/unpin <id>`,
 `/recipes`, `/willington`, `/update`, `/changelog` and `/quit`, but no `/btw`,
-`/goal`, `/loop`, `/slots`, `/jobs` or `/copy`. `/resume` numbers this Set's
+`/goal`, `/loop`, `/slots`, `/music`, `/map`, `/jobs` or `/copy`. `/resume` numbers this Set's
 conversations, then other Sets'; Kumi's question about another Set's
 conversation takes 1, 2 or 3 (commands still run while it waits, and other
 words ask it again). It says when a background job

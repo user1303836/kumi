@@ -76,6 +76,25 @@ pub struct Profile {
     /// How its effects sound to the effects model (AFx-Rep: mid and side, each unit length).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effects: Option<Vec<f32>>,
+    /// The music in it, beyond the mix: its tempo (beats a minute), its key ("A minor"; several tracks', the commonest),
+    /// how busy it is (onsets a bar of four beats) and its groove. For the brief and the model, not the judge's targets.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tempo: Option<Spread>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub key: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub busyness: Option<Spread>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub groove: Option<Groove>,
+}
+
+/// How a track grooves: its swing as the ratio of a pair of steps (1 straight, 2 a triplet's lilt), and how far it sits
+/// ahead (−) of or behind (+) the beat, ms.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Groove {
+    pub swing_ratio: Spread,
+    pub push_ms: Spread,
 }
 
 /// A sound's measures beyond its envelope and tone, each with its range.
@@ -200,6 +219,7 @@ impl Profile {
             })
             .collect();
         let m = &heard.measures;
+        let musical = crate::musical::of(heard);
         Self {
             name: name.into(),
             tracks: 1,
@@ -225,6 +245,13 @@ impl Profile {
                 .filter(|embedding| embedding.vibe.is_some())
                 .and_then(|embedding| embedding.vibe_model.clone()),
             effects: heard.embedding.as_ref().and_then(|embedding| embedding.effects.clone()),
+            tempo: musical.tempo.map(|bpm| Spread::point(round1(bpm), 1.)),
+            key: musical.key,
+            busyness: musical.busyness.map(|onsets| Spread::point(round1(onsets), (onsets * 0.15).max(1.))),
+            groove: musical.groove.map(|feel| Groove {
+                swing_ratio: Spread::point(round2(feel.swing_ratio), 0.1),
+                push_ms: Spread::point(round1(feel.push_ms), 5.),
+            }),
         }
     }
 
@@ -298,8 +325,36 @@ impl Profile {
             }),
             vibe_model: vibe_model.filter(|_| vibe.is_some()),
             effects: average(&tracks.iter().filter_map(|track| track.effects.clone()).collect::<Vec<_>>()),
+            tempo: pick(&|track| track.tempo),
+            key: commonest(tracks.iter().filter_map(|track| track.key.as_deref())),
+            busyness: pick(&|track| track.busyness),
+            groove: match (
+                pick(&|track| track.groove.map(|groove| groove.swing_ratio)),
+                pick(&|track| track.groove.map(|groove| groove.push_ms)),
+            ) {
+                (Some(swing_ratio), Some(push_ms)) => Some(Groove { swing_ratio, push_ms }),
+                _ => None,
+            },
         })
     }
+}
+
+/// The key most tracks are in (of equals, the first named).
+fn commonest<'a>(keys: impl Iterator<Item = &'a str>) -> Option<String> {
+    let mut counts: Vec<(&str, usize)> = vec![];
+    for key in keys {
+        match counts.iter_mut().find(|(known, _)| *known == key) {
+            Some((_, count)) => *count += 1,
+            None => counts.push((key, 1)),
+        }
+    }
+    counts
+        .iter()
+        .fold(None, |best: Option<(&str, usize)>, (key, count)| match best {
+            Some((_, most)) if most >= *count => best,
+            _ => Some((key, *count)),
+        })
+        .map(|(key, _)| key.to_string())
 }
 
 /// What a goal asks: explicit targets, a reference, the problems to clear and the element that must cut through.

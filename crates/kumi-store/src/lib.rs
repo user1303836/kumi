@@ -1,5 +1,5 @@
 //! Kumi's database, `~/.kumi/kumi.db`: what Kumi keeps between sessions (notes, techniques, lessons,
-//! gaps, and what the producer did in answer to Kumi), in SQLite.
+//! gaps, what the producer did in answer to Kumi, and the settings its searches heard), in SQLite.
 //!
 //! One thread writes, committing what's queued together; reads run beside it on their own
 //! connections. Kumi's runtime is a single thread, so nothing here is called from it directly: writes
@@ -7,6 +7,7 @@
 //! throughout; the async side lives in the runtime.
 
 pub mod gaps;
+pub mod heard_settings;
 pub mod history;
 pub mod ids;
 pub mod imports;
@@ -99,16 +100,7 @@ impl Store {
     }
     fn open_with(path: &Path, migrate: impl FnOnce(&mut Connection) -> Result<(), StoreError>) -> Result<Store, StoreError> {
         let path = path.to_path_buf();
-        prepare_file(&path)?;
-        let mut connection = Connection::open(&path)?;
-        connection.busy_timeout(BUSY_TIMEOUT)?;
-        // Write-ahead logging: readers and the writer don't wait for each other, and a commit is an append.
-        let mode: String = connection.query_row("PRAGMA journal_mode = WAL", [], |row| row.get(0))?;
-        if !mode.eq_ignore_ascii_case("wal") {
-            return Err(StoreError::Io(format!("SQLite kept journal mode {mode} instead of WAL (is the folder on a network drive?)")));
-        }
-        // An app crash never loses a commit with NORMAL; only a power cut can lose the last few.
-        connection.execute_batch("PRAGMA synchronous = NORMAL; PRAGMA foreign_keys = ON; PRAGMA temp_store = MEMORY;")?;
+        let mut connection = connect(&path)?;
         migrate(&mut connection)?;
         let readers = Readers::open(&path, READERS)?;
         Ok(Store(Arc::new(Inner { writer: Writer::start(connection)?, readers, path })))
@@ -157,6 +149,34 @@ pub fn read_only<T>(path: impl AsRef<Path>, job: impl FnOnce(&Connection) -> Res
         return Err(StoreError::Newer { found, known: SCHEMA_VERSION });
     }
     job(&connection)
+}
+
+/// A connection to another database Kumi keeps (the producer's music.db), opened as kumi.db is: its folder and file
+/// only theirs, write-ahead logged, with the same pragmas, and its schema brought up to date by its own `migrations`
+/// (forward-only over SQLite's `user_version`; one from a newer Kumi isn't opened). An up-to-date database is opened
+/// without waiting for another process's write.
+pub fn open_connection(path: &Path, migrations: &[&str]) -> Result<Connection, StoreError> {
+    let mut connection = connect(path)?;
+    let found = connection.query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))?.max(0) as usize;
+    if found != migrations.len() {
+        schema::migrate_with(&mut connection, migrations)?;
+    }
+    Ok(connection)
+}
+
+/// The connection each of Kumi's databases opens with, made (and its folder) if needed.
+fn connect(path: &Path) -> Result<Connection, StoreError> {
+    prepare_file(path)?;
+    let connection = Connection::open(path)?;
+    connection.busy_timeout(BUSY_TIMEOUT)?;
+    // Write-ahead logging: readers and the writer don't wait for each other, and a commit is an append.
+    let mode: String = connection.query_row("PRAGMA journal_mode = WAL", [], |row| row.get(0))?;
+    if !mode.eq_ignore_ascii_case("wal") {
+        return Err(StoreError::Io(format!("SQLite kept journal mode {mode} instead of WAL (is the folder on a network drive?)")));
+    }
+    // An app crash never loses a commit with NORMAL; only a power cut can lose the last few.
+    connection.execute_batch("PRAGMA synchronous = NORMAL; PRAGMA foreign_keys = ON; PRAGMA temp_store = MEMORY;")?;
+    Ok(connection)
 }
 
 /// The database's folder (only the producer's) and file (only theirs): SQLite gives the WAL files the

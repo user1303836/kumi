@@ -9,6 +9,8 @@ pub mod input;
 pub mod install;
 pub mod library;
 pub mod login;
+pub mod map;
+pub mod map_server;
 pub mod models;
 pub mod process;
 pub mod report;

@@ -196,6 +196,19 @@ pub fn svg_of(picture: &ChangePicture) -> Option<String> {
                     alpha.clamp(0., 1.)
                 ));
             }
+            Shape::Dot { x, y, radius, color, alpha } => {
+                if ![x, y, radius].iter().all(|value| value.is_finite()) {
+                    continue;
+                }
+                shapes.push_str(&format!(
+                    "<circle{} cx=\"{:.1}\" cy=\"{:.1}\" r=\"{:.2}\" fill-opacity=\"{:.2}\"/>",
+                    paint(*color, "fill"),
+                    x * WIDTH,
+                    (1. - y) * HEIGHT,
+                    radius / 1000. * HEIGHT,
+                    alpha.clamp(0., 1.)
+                ));
+            }
             Shape::Rect { x0, y0, x1, y1, color, alpha } => {
                 if ![x0, y0, x1, y1].iter().all(|value| value.is_finite()) {
                     continue;

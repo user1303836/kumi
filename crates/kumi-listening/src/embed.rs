@@ -9,6 +9,8 @@ use kumi_media::audio::{decode::open_audio_to, dsp::fft};
 use std::path::{Path, PathBuf};
 
 pub use kumi_ai::models::Say;
+// Kumi's resampler lives in its audio layer, where the player resamples to the output's rate with it too.
+pub use kumi_media::audio::dsp::resample;
 
 /// CLAP hears 10 s at 48 kHz: 1001 frames of 64 mel bands.
 pub const CLAP_RATE: f64 = 48_000.;
@@ -85,68 +87,6 @@ pub fn clap_features(window: &[f32]) -> Vec<f32> {
     features
 }
 
-/// Audio from one rate to another: a windowed sinc (Blackman, 32 zero crossings a side), its cutoff under the lower
-/// rate's half. Between whole rates, each output sample's kernel is one of a few made once (polyphase: 44.1 to 48 kHz
-/// is 160 kernels of 69 taps, 44.1 to 22.05 kHz one).
-pub fn resample(input: &[f32], from: f64, to: f64) -> Vec<f32> {
-    if (from - to).abs() < 1e-6 || input.is_empty() {
-        return input.to_vec();
-    }
-    let ratio = to / from;
-    // Cutoff in cycles per input sample.
-    let cutoff = 0.5 * ratio.min(1.) * 0.95;
-    let width = (32. / (2. * cutoff)).ceil();
-    let length = (input.len() as f64 * ratio).round() as usize;
-    let weight = |x: f64| {
-        let y = 2. * cutoff * x;
-        let sinc = if y.abs() < 1e-12 { 1. } else { (std::f64::consts::PI * y).sin() / (std::f64::consts::PI * y) };
-        let phase = std::f64::consts::PI * x / width;
-        2. * cutoff * sinc * (0.42 + 0.5 * phase.cos() + 0.08 * (2. * phase).cos())
-    };
-    // An output sample sits `up` phases between input samples, stepping `down` phases a sample.
-    let phases = (from.fract() == 0. && to.fract() == 0. && from >= 1. && to >= 1.)
-        .then(|| {
-            let (from, to) = (from as u64, to as u64);
-            let (mut a, mut b) = (from, to);
-            while b != 0 {
-                (a, b) = (b, a % b);
-            }
-            (to / a, from / a)
-        })
-        .filter(|(up, _)| *up <= 4096);
-    let Some((up, down)) = phases else {
-        return (0..length)
-            .map(|n| {
-                let at = n as f64 / ratio;
-                let (first, last) = ((at - width).ceil().max(0.) as usize, ((at + width).floor() as usize).min(input.len() - 1));
-                (first..=last).map(|k| input[k] as f64 * weight(at - k as f64)).sum::<f64>() as f32
-            })
-            .collect();
-    };
-    // Each phase's kernel: where its taps start against the input sample before it, and their weights.
-    let kernels: Vec<(i64, Vec<f64>)> = (0..up)
-        .map(|phase| {
-            let offset = phase as f64 / up as f64;
-            let (first, last) = ((offset - width).ceil() as i64, (offset + width).floor() as i64);
-            (first, (first..=last).map(|tap| weight(offset - tap as f64)).collect())
-        })
-        .collect();
-    (0..length as u64)
-        .map(|n| {
-            let before = (n * down / up) as i64;
-            let (first, taps) = &kernels[(n * down % up) as usize];
-            let mut sum = 0.;
-            for (tap, weight) in taps.iter().enumerate() {
-                let at = before + first + tap as i64;
-                if at >= 0 && (at as usize) < input.len() {
-                    sum += input[at as usize] as f64 * weight;
-                }
-            }
-            sum as f32
-        })
-        .collect()
-}
-
 /// How far apart two embeddings point: 0 alike, 1 unrelated, 2 opposite.
 pub fn distance(a: &[f32], b: &[f32]) -> Option<f64> {
     if a.len() != b.len() || a.is_empty() {
@@ -193,24 +133,37 @@ fn windows(total: usize, length: usize, count: usize) -> Vec<usize> {
     (0..count).map(|k| if count == 1 { room / 2 } else { room * k / (count - 1) }).collect()
 }
 
-/// Up to `count` windows of `length` seconds spread over a stretch of a file, each as channels at `rate` (stereo when
-/// it has two or more). Only the windows are read, and they're resampled off the app's thread. Silence is refused.
-async fn read_windows(
-    file: &Path,
-    (start, seconds): (f64, f64),
-    (length, count): (f64, usize),
-    rate: f64,
-    signal: &Signal,
-) -> Result<Vec<Vec<Vec<f32>>>, String> {
-    let mut source = open_audio_to(file, Some(signal.clone()), Some(start + seconds + 1.)).await.map_err(|error| error.to_string())?;
+/// Where windows are read: up to `count` spread over a stretch (`start`, `seconds`), or starting at given seconds.
+enum Windows<'a> {
+    Spread { start: f64, seconds: f64, count: usize },
+    At(&'a [f64]),
+}
+
+/// Windows of `length` seconds of a file, each as channels at `rate` (stereo when it has two or more). Only the windows
+/// are read, and they're resampled off the app's thread. Silence is refused; a window past the file's end is left out.
+async fn read_windows(file: &Path, place: Windows<'_>, length: f64, rate: f64, signal: &Signal) -> Result<Vec<Vec<Vec<f32>>>, String> {
+    let until = match place {
+        Windows::Spread { start, seconds, .. } => start + seconds + 1.,
+        Windows::At(starts) => starts.iter().fold(0f64, |last, start| last.max(*start)) + length + 1.,
+    };
+    let mut source = open_audio_to(file, Some(signal.clone()), Some(until)).await.map_err(|error| error.to_string())?;
     let native = source.sample_rate;
     let channels = source.channels.clamp(1, 2);
-    let total = (seconds * native).round() as usize;
     let span = (length * native).round() as usize;
+    // Each window: where it starts (in frames) and how many frames it wants.
+    let plan: Vec<(f64, usize)> = match place {
+        Windows::Spread { start, seconds, count } => {
+            let total = (seconds * native).round() as usize;
+            windows(total, span, count)
+                .into_iter()
+                .map(|at| (start * native + at as f64, span.min(total.saturating_sub(at)).max(1)))
+                .collect()
+        }
+        Windows::At(starts) => starts.iter().map(|start| (start.max(0.) * native, span.max(1))).collect(),
+    };
     let mut raw: Vec<Vec<Vec<f32>>> = vec![];
-    for at in windows(total, span, count) {
-        source.seek(start * native + at as f64);
-        let wanted = span.min(total.saturating_sub(at)).max(1);
+    for (at, wanted) in plan {
+        source.seek(at);
         let mut audio: Vec<Vec<f32>> = vec![vec![]; channels];
         while audio[0].len() < wanted {
             let Some(chunk) = source.read((wanted - audio[0].len()).min(65_536)).await.map_err(|error| error.to_string())? else { break };
@@ -218,9 +171,14 @@ async fn read_windows(
                 samples.extend_from_slice(&chunk[channel.min(chunk.len() - 1)]);
             }
         }
-        raw.push(audio);
+        if !audio[0].is_empty() {
+            raw.push(audio);
+        }
     }
     let _ = source.close().await;
+    if raw.is_empty() {
+        return Err("there's no audio there".into());
+    }
     if raw.iter().flatten().flatten().all(|sample| sample.abs() < 1e-4) {
         return Err("there's only silence there".into());
     }
@@ -326,10 +284,35 @@ pub async fn vibe(
     say: Say<'_>,
     signal: &Signal,
 ) -> Result<(Vec<f32>, String), String> {
+    let place = Windows::Spread { start, seconds, count: MOST_WINDOWS };
+    vibe_of(file, place, loudness, slot, say, signal).await
+}
+
+/// What a file sounds like to CLAP from windows starting at `starts` (seconds): as `vibe`, but where the windows are is
+/// chosen (a song's quarter, half and three quarters).
+pub async fn vibe_at(
+    file: &Path,
+    starts: &[f64],
+    loudness: Option<f64>,
+    slot: Option<PathBuf>,
+    say: Say<'_>,
+    signal: &Signal,
+) -> Result<(Vec<f32>, String), String> {
+    vibe_of(file, Windows::At(starts), loudness, slot, say, signal).await
+}
+
+async fn vibe_of(
+    file: &Path,
+    place: Windows<'_>,
+    loudness: Option<f64>,
+    slot: Option<PathBuf>,
+    say: Say<'_>,
+    signal: &Signal,
+) -> Result<(Vec<f32>, String), String> {
     models::runtime(say, signal).await?;
     let model = clap_model(slot.clone(), say, signal).await?;
     let id = if slot.as_deref() == Some(model.as_path()) { file_id(&model, signal).await } else { own_style_id() };
-    let heard = read_windows(file, (start, seconds), (CLAP_SAMPLES as f64 / CLAP_RATE, MOST_WINDOWS), CLAP_RATE, signal).await?;
+    let heard = read_windows(file, place, CLAP_SAMPLES as f64 / CLAP_RATE, CLAP_RATE, signal).await?;
     let gain = loudness.filter(|loudness| loudness.is_finite()).map_or(1., |loudness| 10f64.powf((STYLE_LOUDNESS - loudness) / 20.)) as f32;
     // Each window as one channel, its log-mel made off the app's thread.
     let features: Vec<Vec<f32>> = tokio::task::spawn_blocking(move || {
@@ -360,7 +343,8 @@ pub async fn effects(file: &Path, start: f64, seconds: f64, say: Say<'_>, signal
     models::runtime(say, signal).await?;
     let model = models::dir().join(pinned::AFX_REP.name);
     models::fetch(&pinned::AFX_REP, &model, "its effects model, AFx-Rep", say, signal).await?;
-    let heard = read_windows(file, (start, seconds), (AFX_SAMPLES as f64 / AFX_RATE, MOST_WINDOWS), AFX_RATE, signal).await?;
+    let place = Windows::Spread { start, seconds, count: MOST_WINDOWS };
+    let heard = read_windows(file, place, AFX_SAMPLES as f64 / AFX_RATE, AFX_RATE, signal).await?;
     let (mut mids, mut sides) = (vec![], vec![]);
     for window in &heard {
         let (left, right) = (&window[0], window.get(1).unwrap_or(&window[0]));

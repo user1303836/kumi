@@ -83,14 +83,28 @@ struct InDaw {
 }
 
 /// Whether the reference names something in the project by its ref (REAPER's `item:3`, Renoise's `sample:2`), not a
-/// file, a link, plain words or a question's answer.
-fn names_a_ref(what: &str) -> bool {
+/// file (Windows' `C:\Music\…` too), a link, plain words or a question's answer.
+pub(crate) fn names_a_ref(what: &str) -> bool {
     let Some((kind, rest)) = what.split_once(':') else { return false };
     !what.contains(char::is_whitespace)
         && !rest.starts_with("//")
+        && !(kind.len() == 1 && rest.starts_with(['\\', '/']))
         && !matches!(kind, "artist" | "album")
         && !kind.is_empty()
         && kind.chars().all(|c| c.is_ascii_alphanumeric())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::names_a_ref;
+
+    #[test]
+    fn a_ref_in_the_project_is_told_from_a_windows_path() {
+        assert!(names_a_ref("item:3") && names_a_ref("sample:2"));
+        assert!(!names_a_ref("C:\\Music\\Burial\\Untrue\\01-Archangel.flac"));
+        assert!(!names_a_ref("D:/Music/Artist/track.wav"));
+        assert!(!names_a_ref("https://youtu.be/abc") && !names_a_ref("artist:Burial"));
+    }
 }
 
 #[async_trait(?Send)]

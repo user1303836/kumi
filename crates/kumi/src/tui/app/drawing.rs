@@ -82,6 +82,12 @@ impl TuiApp {
             self.present(screen, cursor);
             return;
         }
+        if self.map_shown() {
+            self.keep_tree_fresh(None);
+            let cursor = self.draw_map(&mut screen).filter(|_| !self.0.state.borrow().closing);
+            self.present(screen, cursor);
+            return;
+        }
         let (pane, left) = Self::layout_for(columns);
         self.draw_header(&mut screen, columns);
         let layout = self.0.state.borrow().editor.layout((left - 6).max(1));

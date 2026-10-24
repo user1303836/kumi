@@ -8,9 +8,11 @@ repository.workspace = true
 rust-version.workspace = true
 publish = false
 
-# What other crates' tests use of the audio: writing a test's sound files. Only as a dev-dependency.
 [features]
+# What other crates' tests use of the audio: writing a test's sound files. Only as a dev-dependency.
 test-support = []
+# The player on Linux, through ALSA: its library (libasound) is then needed to build Kumi and to run it.
+linux-player = ["dep:cpal"]
 
 [dependencies]
 kumi-common.workspace = true
@@ -33,6 +35,13 @@ uuid.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 libc.workspace = true
+
+# The player's output: Core Audio on a Mac, WASAPI on Windows; on Linux only with linux-player.
+[target.'cfg(not(target_os = "linux"))'.dependencies]
+cpal.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+cpal = { workspace = true, optional = true }
 
 [dev-dependencies]
 tempfile.workspace = true
