@@ -1,7 +1,7 @@
 //! The sounds map: sounds-map.json read as the layout writes it, and joined with what the library knows of each sound.
 use kumi_library::{
     learn::SoundEntry,
-    map::{read_sounds_map, sounds_on_map, SoundsMap, SOUNDS_MAP},
+    map::{read_sounds_map, sounds_on_map, sounds_on_map_by_turns, SoundsMap, SOUNDS_MAP},
     search::SoundIndex,
     sources::{Source, SourceKind},
     store::Entry,
@@ -60,4 +60,7 @@ fn a_sound_on_the_map_carries_its_name_place_and_class() {
         ("Kick 808", "Samples / Drums / Kicks", Some(SoundClass::Kick))
     );
     assert_eq!((sounds[1].x, sounds[1].y, sounds[1].kind, sounds[1].seconds), (0.9, 0.8, Some(SoundKind::OneShot), Some(0.5)));
+    // A slice at a time, as Kumi's own thread reads it: the same.
+    let by_turns = tokio::runtime::Builder::new_current_thread().build().unwrap().block_on(sounds_on_map_by_turns(&map, &index));
+    assert_eq!(by_turns, sounds);
 }
