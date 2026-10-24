@@ -80,6 +80,8 @@ pub struct TuiOptions {
     pub close_timeout_ms: Option<u64>,
     pub color_depth: Option<ColorDepth>,
     pub frame_ms: Option<f64>,
+    /// How often a frame is drawn while something animates (the scheduler's ANIMATION_MS unless set).
+    pub animation_ms: Option<f64>,
     pub history: Option<Rc<RefCell<InputHistory>>>,
     pub open_browser: Option<Rc<dyn Fn(&str)>>,
     pub icons: Option<IconStyle>,
@@ -166,6 +168,7 @@ impl TuiOptions {
             close_timeout_ms: None,
             color_depth: None,
             frame_ms: None,
+            animation_ms: None,
             history: None,
             open_browser: None,
             icons: None,
@@ -707,13 +710,14 @@ impl TuiApp {
                 }),
             });
             let w = weak.clone();
-            let scheduler = FrameScheduler::new(
+            let scheduler = FrameScheduler::with_intervals(
                 Rc::new(move || {
                     if let Some(a) = w.upgrade() {
                         TuiApp(a).draw();
                     }
                 }),
                 options.frame_ms.unwrap_or(16.),
+                options.animation_ms.unwrap_or(super::scheduler::ANIMATION_MS),
             );
             let mut tabs: Vec<Rc<dyn Tab>> =
                 vec![Rc::new(AppTab { app: weak.clone(), id: "history", title: "HISTORY", empty: "Nothing changed yet" })];
