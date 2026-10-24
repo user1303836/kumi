@@ -295,3 +295,28 @@ async fn a_request_still_arriving_after_ten_seconds_is_answered_and_closed_howev
         })
         .await;
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn the_browser_starts_with_a_link_that_goes_on_to_the_page_once() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let server = open(plain()).await.unwrap();
+            let (url, once): (url::Url, url::Url) = (server.url.parse().unwrap(), server.once.parse().unwrap());
+            let (port, page, link) = (url.port().unwrap(), url.path().to_string(), once.path().to_string());
+            let host = format!("127.0.0.1:{port}");
+            assert_eq!((once.port(), once.host_str()), (Some(port), Some("127.0.0.1")));
+            assert!(link.starts_with("/once/") && !server.once.contains(page.trim_matches('/')), "no token in it: {}", server.once);
+            // Another name for it, or a POST: refused, and it isn't spent.
+            assert_eq!(ask(port, &get(&link, "evil.example", "")).await.0, 403);
+            assert_eq!(ask(port, &post(&link, &host, &format!("http://{host}"), "{}")).await.0, 404);
+            // Once: on to the page, which answers.
+            let (status, head, _) = ask(port, &get(&link, &host, "")).await;
+            assert_eq!(status, 302);
+            assert!(head.contains(&format!("Location: {page}")), "{head}");
+            assert_eq!(ask(port, &get(&page, &host, "")).await.0, 200);
+            // Twice: nothing there.
+            assert_eq!(ask(port, &get(&link, &host, "")).await.0, 404);
+            assert_eq!(ask(port, &get("/once/00000000000000000000000000000000", &host, "")).await.0, 404);
+        })
+        .await;
+}

@@ -113,7 +113,7 @@ impl TuiApp {
                 return;
             }
         };
-        let (url, port, door) = (server.url.clone(), server.port, server.door());
+        let (url, port, once) = (server.url.clone(), server.port, server.once.clone());
         self.0.state.borrow_mut().map_page = Some(server);
         if self.0.options.remote {
             self.notice(
@@ -125,9 +125,9 @@ impl TuiApp {
             return;
         }
         if let Some(open) = &self.0.options.open_browser {
-            // Where the browser's command line can be read by every account (Linux), it's given a page only this one
-            // can read, which goes on to the map: the token stays off it.
-            open(&door.unwrap_or(url.clone()));
+            // A link that works once, which goes on to the map: the browser's command line (on Linux every account can
+            // read it) never has the token.
+            open(&once);
         }
         self.notice(&format!("The map is open in your browser: {url} (/map close closes it)."), NoticeTone::Info);
     }

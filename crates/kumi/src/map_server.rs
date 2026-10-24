@@ -6,10 +6,9 @@
 //! - the points, `/<token>/points`: the map as the page draws it;
 //! - what a point plays, `/<token>/audio/<id>`: by the point's id only, never a path, as a WAV of the stretch the
 //!   terminal's map plays (so every browser plays it, an AIFF sample too), with Range requests;
-//! - one POST, `/<token>/action`: what the producer chose, which becomes a message in the input box.
-//!
-//! On Linux every account can read a process's command line, so the browser isn't started with the link: it's given a
-//! page only this account can read (the door), which goes on to the map.
+//! - one POST, `/<token>/action`: what the producer chose, which becomes a message in the input box;
+//! - a link that works once, `/once/<nonce>`, which goes on to the page: what the browser is started with, so no
+//!   command line (which on Linux every account can read) carries the token. Spent, it finds nothing.
 
 use futures::future::LocalBoxFuture;
 use kumi_common::abort::Signal;
@@ -42,10 +41,12 @@ pub struct Served {
 
 /// The server, while it runs: closed by `close`, or when it's dropped (Kumi quitting).
 pub struct MapServer {
+    /// The page's address, with its token: what the producer can paste.
     pub url: String,
     pub port: u16,
+    /// The one-time link that goes on to the page: what the browser is started with.
+    pub once: String,
     stop: Signal,
-    door: Option<Door>,
 }
 
 impl MapServer {
@@ -55,45 +56,6 @@ impl MapServer {
 
     pub fn is_closed(&self) -> bool {
         self.stop.is_cancelled()
-    }
-
-    /// The door's page, where the browser is given one (Linux): what to open in place of the link.
-    pub fn door(&self) -> Option<String> {
-        self.door.as_ref().map(|door| door.page.to_string_lossy().into_owned())
-    }
-}
-
-/// A page that goes on to the map, in a folder only this account can read, as the link must stay. It goes with the
-/// server.
-struct Door {
-    folder: PathBuf,
-    page: PathBuf,
-}
-
-impl Door {
-    fn new(url: &str) -> io::Result<Door> {
-        let folder = std::env::temp_dir().join(format!("kumi-map-{:016x}", rand::random::<u64>()));
-        let mut made = std::fs::DirBuilder::new();
-        #[cfg(unix)]
-        std::os::unix::fs::DirBuilderExt::mode(&mut made, 0o700);
-        made.create(&folder)?;
-        let page = folder.join("map.html");
-        let mut options = std::fs::OpenOptions::new();
-        options.write(true).create_new(true);
-        #[cfg(unix)]
-        std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
-        let html = format!(
-            "<!doctype html>\n<meta charset=\"utf-8\">\n<meta http-equiv=\"refresh\" content=\"0; url={url}\">\n<title>Kumi's map</title>\n<p><a href=\"{url}\">Kumi's map</a></p>\n"
-        );
-        let door = Door { folder, page };
-        io::Write::write_all(&mut options.open(&door.page)?, html.as_bytes())?;
-        Ok(door)
-    }
-}
-
-impl Drop for Door {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.folder);
     }
 }
 
@@ -107,11 +69,11 @@ impl Drop for MapServer {
 pub async fn open(served: Served) -> io::Result<MapServer> {
     let listener = TcpListener::bind(("127.0.0.1", 0)).await?;
     let port = listener.local_addr()?.port();
-    let token = format!("{:032x}", rand::random::<u128>());
-    let url = format!("http://127.0.0.1:{port}/{token}/");
-    let door = if cfg!(target_os = "linux") { Some(Door::new(&url)?) } else { None };
+    let (token, nonce) = (format!("{:032x}", rand::random::<u128>()), format!("{:032x}", rand::random::<u128>()));
+    let (url, once) = (format!("http://127.0.0.1:{port}/{token}/"), format!("http://127.0.0.1:{port}/once/{nonce}"));
     let stop = Signal::new();
-    let (served, stopped) = (Rc::new(Serving { served, clips: RefCell::default() }), stop.clone());
+    let serving = Serving { served, clips: RefCell::default(), once: RefCell::new(Some(nonce)) };
+    let (served, stopped) = (Rc::new(serving), stop.clone());
     let open = Rc::new(Cell::new(0usize));
     tokio::task::spawn_local(async move {
         loop {
@@ -136,7 +98,7 @@ pub async fn open(served: Served) -> io::Result<MapServer> {
             }
         }
     });
-    Ok(MapServer { url, port, stop, door })
+    Ok(MapServer { url, port, once, stop })
 }
 
 /// Connections answered at once, at most: a browser opens six to a host.
@@ -158,10 +120,12 @@ impl Drop for Counted {
     }
 }
 
-/// What's served, and the clips made last: a browser asks for a clip more than once (its length, then its bytes).
+/// What's served, the clips made last (a browser asks for a clip more than once: its length, then its bytes), and the
+/// one-time link's nonce until it's spent.
 struct Serving {
     served: Served,
     clips: RefCell<Vec<(String, Rc<Vec<u8>>)>>,
+    once: RefCell<Option<String>>,
 }
 
 /// Clips kept.
@@ -242,6 +206,7 @@ async fn reply(stream: &mut TcpStream, status: u16, kind: &str, body: &[u8], ext
     let reason = match status {
         200 => "OK",
         204 => "No Content",
+        302 => "Found",
         206 => "Partial Content",
         400 => "Bad Request",
         403 => "Forbidden",
@@ -282,6 +247,15 @@ async fn answer(mut stream: TcpStream, serving: &Serving, token: &str, port: u16
         return say(&mut stream, 403, "This map answers only its own page.").await;
     }
     let path = request.path.split('?').next().unwrap_or_default();
+    // The one-time link: its first GET goes on to the page, and nothing is there after it.
+    if let Some(nonce) = path.strip_prefix("/once/") {
+        if request.method != "GET" || serving.once.borrow().as_deref() != Some(nonce) {
+            return say(&mut stream, 404, "There's nothing here.").await;
+        }
+        serving.once.borrow_mut().take();
+        let _ = reply(&mut stream, 302, "text/plain", b"", &[("Location", format!("/{token}/"))]).await;
+        return;
+    }
     let Some(asked) = path.strip_prefix(&format!("/{token}/")) else {
         return say(&mut stream, 404, "There's nothing here.").await;
     };
@@ -413,23 +387,6 @@ pub fn byte_range(header: &str, size: u64) -> Option<(u64, u64)> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn the_door_goes_on_to_the_map_only_this_account_reads_it_and_it_goes_with_the_server() {
-        let url = "http://127.0.0.1:4242/0123456789abcdef0123456789abcdef/";
-        let door = Door::new(url).unwrap();
-        let page = std::fs::read_to_string(&door.page).unwrap();
-        assert!(page.contains(&format!("<meta http-equiv=\"refresh\" content=\"0; url={url}\">")), "{page}");
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let mode = |path: &std::path::Path| std::fs::metadata(path).unwrap().permissions().mode() & 0o777;
-            assert_eq!((mode(&door.folder), mode(&door.page)), (0o700, 0o600));
-        }
-        let folder = door.folder.clone();
-        drop(door);
-        assert!(!folder.exists());
-    }
 
     #[tokio::test(flavor = "current_thread")]
     async fn work_for_a_page_that_went_away_stops_and_a_page_still_there_gets_it() {

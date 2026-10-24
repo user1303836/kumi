@@ -268,17 +268,18 @@ fn served_at(url: &str) -> (u16, String) {
     (url.port().unwrap(), url.path().to_string())
 }
 
-/// The map's link, from what the browser was opened with: the link itself, or on Linux a page only this account reads
-/// that goes on to it (so the browser's command line, which any account there reads, has no token).
-fn linked(opened: &str) -> String {
-    if !cfg!(target_os = "linux") {
-        assert!(opened.starts_with("http://127.0.0.1:"), "{opened}");
-        return opened.to_string();
-    }
-    assert!(!opened.contains("http"), "a page, not the link: {opened}");
-    let page = std::fs::read_to_string(opened).unwrap();
-    let from = page.find("url=").expect("it goes on to the map") + 4;
-    page[from..from + page[from..].find('"').unwrap()].to_string()
+/// The map's link, from what the browser was opened with: a link that works once (so the browser's command line,
+/// which on Linux any account reads, has no token), which goes on to the map's page, and after that finds nothing.
+async fn linked(opened: &str) -> String {
+    let (port, once) = served_at(opened);
+    assert!(opened.starts_with("http://127.0.0.1:") && once.starts_with("/once/"), "{opened}");
+    let host = format!("127.0.0.1:{port}");
+    let (status, head, _) = ask(port, &get(&once, &host, "")).await;
+    assert_eq!(status, 302, "{head}");
+    let page = head.lines().find_map(|line| line.strip_prefix("Location: ")).expect("where it goes on to");
+    assert!(!opened.contains(page.trim_matches('/')), "no token in what the browser was opened with");
+    assert_eq!(ask(port, &get(&once, &host, "")).await.0, 404, "once only");
+    format!("http://{host}{page}")
 }
 
 case!(map_open_serves_the_map_to_the_browser_whose_actions_fill_the_input_box, async {
@@ -289,7 +290,7 @@ case!(map_open_serves_the_map_to_the_browser_whose_actions_fill_the_input_box, a
     h.wait_for("The map is open in your browser").await;
     let opened = h.browsed.borrow().clone();
     assert_eq!(opened.len(), 1, "{opened:?}");
-    let link = linked(&opened[0]);
+    let link = linked(&opened[0]).await;
     h.has(&link);
     let (port, home) = served_at(&link);
     let host = format!("127.0.0.1:{port}");
@@ -315,12 +316,10 @@ case!(map_open_serves_the_map_to_the_browser_whose_actions_fill_the_input_box, a
         }
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
     }
-    let again = linked(&h.browsed.borrow()[1]);
+    let opened = h.browsed.borrow()[1].clone();
+    let again = linked(&opened).await;
     assert_ne!(again, link);
     assert!(tokio::net::TcpStream::connect(("127.0.0.1", port)).await.is_err(), "the first closed");
-    if cfg!(target_os = "linux") {
-        assert!(!std::path::Path::new(&opened[0]).exists(), "its page went with it");
-    }
     // /map close: nothing answers there.
     let (port, _) = served_at(&again);
     h.type_text("/map close\r").await;
@@ -523,7 +522,8 @@ case!(an_action_from_the_browser_while_kumi_offers_answers_takes_their_place_and
     h.connect();
     h.type_text("/map open\r").await;
     h.wait_for("The map is open in your browser").await;
-    let (port, home) = served_at(&linked(&h.browsed.borrow()[0]));
+    let opened = h.browsed.borrow()[0].clone();
+    let (port, home) = served_at(&linked(&opened).await);
     let host = format!("127.0.0.1:{port}");
     h.type_text("add a reverb\r").await;
     h.emit(serde_json::json!({"type":"state","state":"running"}));
@@ -673,7 +673,7 @@ case!(the_browsers_map_closes_when_the_music_it_shows_is_forgotten_or_its_folder
     });
     h.start().await;
     h.connect();
-    let served = |h: &Harness, at: usize| served_at(&linked(&h.browsed.borrow()[at])).0;
+    let served = |h: &Harness, at: usize| served_at(&h.browsed.borrow()[at]).0;
     h.type_text("/map open\r").await;
     h.wait_for("The map is open in your browser").await;
     let port = served(&h, 0);
