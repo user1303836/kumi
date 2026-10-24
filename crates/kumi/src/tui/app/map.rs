@@ -54,7 +54,32 @@ impl TuiApp {
     /// /map open: the map as it is now, served to the browser on this computer until /map close or Kumi quits (a map
     /// opened before closes). Over SSH the browser is on another computer: Kumi says how to reach the map from it.
     async fn open_map_page(&self, load: crate::map::LoadMap) {
-        let page = Arc::new(crate::map::Page::new(load().await));
+        let asked = {
+            let mut state = self.0.state.borrow_mut();
+            state.map_page_asked += 1;
+            state.map_page_opening = true;
+            state.map_page_asked
+        };
+        // Kumi quitting, /map close or another /map open while the map was read: this one opens nothing.
+        let wanted = |app: &TuiApp| {
+            let state = app.0.state.borrow();
+            !state.closing && state.map_page_asked == asked
+        };
+        let reading = load();
+        tokio::pin!(reading);
+        let data = tokio::select! {
+            data = &mut reading => data,
+            _ = tokio::time::sleep(Duration::from_millis(500)) => {
+                if wanted(self) {
+                    self.notice("Kumi is reading your map for the browser…", NoticeTone::Info);
+                }
+                reading.await
+            }
+        };
+        if !wanted(self) {
+            return;
+        }
+        let page = Arc::new(crate::map::Page::new(data));
         let app = Rc::downgrade(&self.0);
         let served = Served {
             points: Box::new({
@@ -76,14 +101,19 @@ impl TuiApp {
                 _ => false,
             }),
         };
-        let server = match crate::map_server::open(served).await {
+        let opened = crate::map_server::open(served).await;
+        if !wanted(self) {
+            return;
+        }
+        self.0.state.borrow_mut().map_page_opening = false;
+        let server = match opened {
             Ok(server) => server,
             Err(error) => {
                 self.notice(&format!("Kumi couldn't open the map in your browser: {error}"), NoticeTone::Warn);
                 return;
             }
         };
-        let (url, port) = (server.url.clone(), server.port);
+        let (url, port, door) = (server.url.clone(), server.port, server.door());
         self.0.state.borrow_mut().map_page = Some(server);
         if self.0.options.remote {
             self.notice(
@@ -95,18 +125,44 @@ impl TuiApp {
             return;
         }
         if let Some(open) = &self.0.options.open_browser {
-            open(&url);
+            // Where the browser's command line can be read by every account (Linux), it's given a page only this one
+            // can read, which goes on to the map: the token stays off it.
+            open(&door.unwrap_or(url.clone()));
         }
         self.notice(&format!("The map is open in your browser: {url} (/map close closes it)."), NoticeTone::Info);
     }
 
-    /// /map close: the browser's map stops answering.
+    /// /map close: the browser's map stops answering (or, while it's being read, doesn't open).
     fn close_map_page(&self) {
-        let server = self.0.state.borrow_mut().map_page.take();
-        let words =
-            if server.is_some() { "The map in your browser is closed." } else { "The map isn't open in your browser: /map open opens it." };
+        let (server, opening) = {
+            let mut state = self.0.state.borrow_mut();
+            state.map_page_asked += 1;
+            (state.map_page.take(), std::mem::take(&mut state.map_page_opening))
+        };
+        let words = match (&server, opening) {
+            (Some(_), _) => "The map in your browser is closed.",
+            (None, true) => "The map won't open in your browser after all.",
+            (None, false) => "The map isn't open in your browser: /map open opens it.",
+        };
         drop(server);
         self.notice(words, NoticeTone::Info);
+    }
+
+    /// The music the browser's map shows changed (forgotten, or a folder taken away): that map closes, and one still
+    /// being read doesn't open.
+    pub(super) fn music_changed_under_map_page(&self) {
+        let (server, opening) = {
+            let mut state = self.0.state.borrow_mut();
+            state.map_page_asked += 1;
+            (state.map_page.take(), std::mem::take(&mut state.map_page_opening))
+        };
+        if server.is_some() || opening {
+            drop(server);
+            self.notice(
+                "The map in your browser closed: it showed your music as it was (/map open shows it as it is now).",
+                NoticeTone::Info,
+            );
+        }
     }
 
     /// What the producer chose on the browser's map, in the input box to send; the terminal's map closes so it shows.

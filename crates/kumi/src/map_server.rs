@@ -7,11 +7,21 @@
 //! - what a point plays, `/<token>/audio/<id>`: by the point's id only, never a path, as a WAV of the stretch the
 //!   terminal's map plays (so every browser plays it, an AIFF sample too), with Range requests;
 //! - one POST, `/<token>/action`: what the producer chose, which becomes a message in the input box.
+//!
+//! On Linux every account can read a process's command line, so the browser isn't started with the link: it's given a
+//! page only this account can read (the door), which goes on to the map.
 
 use futures::future::LocalBoxFuture;
 use kumi_common::abort::Signal;
 use serde_json::Value;
-use std::{cell::RefCell, io, path::PathBuf, rc::Rc, time::Duration};
+use std::{
+    cell::{Cell, RefCell},
+    future::Future,
+    io,
+    path::PathBuf,
+    rc::Rc,
+    time::Duration,
+};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream},
@@ -35,6 +45,7 @@ pub struct MapServer {
     pub url: String,
     pub port: u16,
     stop: Signal,
+    door: Option<Door>,
 }
 
 impl MapServer {
@@ -44,6 +55,45 @@ impl MapServer {
 
     pub fn is_closed(&self) -> bool {
         self.stop.is_cancelled()
+    }
+
+    /// The door's page, where the browser is given one (Linux): what to open in place of the link.
+    pub fn door(&self) -> Option<String> {
+        self.door.as_ref().map(|door| door.page.to_string_lossy().into_owned())
+    }
+}
+
+/// A page that goes on to the map, in a folder only this account can read, as the link must stay. It goes with the
+/// server.
+struct Door {
+    folder: PathBuf,
+    page: PathBuf,
+}
+
+impl Door {
+    fn new(url: &str) -> io::Result<Door> {
+        let folder = std::env::temp_dir().join(format!("kumi-map-{:016x}", rand::random::<u64>()));
+        let mut made = std::fs::DirBuilder::new();
+        #[cfg(unix)]
+        std::os::unix::fs::DirBuilderExt::mode(&mut made, 0o700);
+        made.create(&folder)?;
+        let page = folder.join("map.html");
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+        let html = format!(
+            "<!doctype html>\n<meta charset=\"utf-8\">\n<meta http-equiv=\"refresh\" content=\"0; url={url}\">\n<title>Kumi's map</title>\n<p><a href=\"{url}\">Kumi's map</a></p>\n"
+        );
+        let door = Door { folder, page };
+        io::Write::write_all(&mut options.open(&door.page)?, html.as_bytes())?;
+        Ok(door)
+    }
+}
+
+impl Drop for Door {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.folder);
     }
 }
 
@@ -59,16 +109,22 @@ pub async fn open(served: Served) -> io::Result<MapServer> {
     let port = listener.local_addr()?.port();
     let token = format!("{:032x}", rand::random::<u128>());
     let url = format!("http://127.0.0.1:{port}/{token}/");
+    let door = if cfg!(target_os = "linux") { Some(Door::new(&url)?) } else { None };
     let stop = Signal::new();
     let (served, stopped) = (Rc::new(Serving { served, clips: RefCell::default() }), stop.clone());
+    let open = Rc::new(Cell::new(0usize));
     tokio::task::spawn_local(async move {
         loop {
             tokio::select! {
                 _ = stopped.cancelled() => break,
                 accepted = listener.accept() => match accepted {
+                    // More at once than a page opens: refused.
+                    Ok(_) if open.get() >= AT_ONCE => {}
                     Ok((stream, _)) => {
                         let (served, token, stopped) = (served.clone(), token.clone(), stopped.clone());
+                        let counted = Counted::new(&open);
                         tokio::task::spawn_local(async move {
+                            let _counted = counted;
                             tokio::select! {
                                 _ = stopped.cancelled() => {}
                                 _ = answer(stream, &served, &token, port) => {}
@@ -80,7 +136,26 @@ pub async fn open(served: Served) -> io::Result<MapServer> {
             }
         }
     });
-    Ok(MapServer { url, port, stop })
+    Ok(MapServer { url, port, stop, door })
+}
+
+/// Connections answered at once, at most: a browser opens six to a host.
+const AT_ONCE: usize = 16;
+
+/// A connection counted while it's answered.
+struct Counted(Rc<Cell<usize>>);
+
+impl Counted {
+    fn new(open: &Rc<Cell<usize>>) -> Counted {
+        open.set(open.get() + 1);
+        Counted(open.clone())
+    }
+}
+
+impl Drop for Counted {
+    fn drop(&mut self) {
+        self.0.set(self.0.get() - 1);
+    }
 }
 
 /// What's served, and the clips made last: a browser asks for a clip more than once (its length, then its bytes).
@@ -92,10 +167,11 @@ struct Serving {
 /// Clips kept.
 const CLIPS: usize = 4;
 
-/// A request's head at most, and a POST's body.
-const HEAD_MOST: usize = 16 * 1024;
+/// A request's head at most (a browser sends every cookie it holds for 127.0.0.1, whatever set them), and a POST's
+/// body.
+const HEAD_MOST: usize = 256 * 1024;
 const BODY_MOST: usize = 16 * 1024;
-/// How long a request may take to arrive.
+/// How long a request may take to arrive, all of it.
 const PATIENCE: Duration = Duration::from_secs(10);
 
 /// A request, as far as the server reads one.
@@ -118,13 +194,14 @@ async fn read_request(stream: &mut TcpStream) -> Option<Request> {
         if bytes.len() > HEAD_MOST {
             return None;
         }
-        let read = tokio::time::timeout(PATIENCE, stream.read(&mut chunk)).await.ok()?.ok()?;
+        let read = stream.read(&mut chunk).await.ok()?;
         if read == 0 {
             return None;
         }
         bytes.extend_from_slice(&chunk[..read]);
     };
-    let head = std::str::from_utf8(&bytes[..end]).ok()?;
+    // A header the server doesn't read may hold any bytes (a cookie's).
+    let head = String::from_utf8_lossy(&bytes[..end]);
     let mut lines = head.split("\r\n");
     let mut first = lines.next()?.split(' ');
     let (method, path) = (first.next()?.to_string(), first.next()?.to_string());
@@ -146,7 +223,7 @@ async fn read_request(stream: &mut TcpStream) -> Option<Request> {
     }
     request.body = bytes[end + 4..].to_vec();
     while request.body.len() < length {
-        let read = tokio::time::timeout(PATIENCE, stream.read(&mut chunk)).await.ok()?.ok()?;
+        let read = stream.read(&mut chunk).await.ok()?;
         if read == 0 {
             return None;
         }
@@ -194,7 +271,7 @@ pub fn is_id(text: &str) -> bool {
 
 async fn answer(mut stream: TcpStream, serving: &Serving, token: &str, port: u16) {
     let served = &serving.served;
-    let Some(request) = read_request(&mut stream).await else {
+    let Some(request) = tokio::time::timeout(PATIENCE, read_request(&mut stream)).await.ok().flatten() else {
         return say(&mut stream, 400, "That isn't a request this page makes.").await;
     };
     let ours = [format!("127.0.0.1:{port}"), format!("localhost:{port}")];
@@ -265,10 +342,13 @@ async fn audio(stream: &mut TcpStream, serving: &Serving, id: &str, range: Optio
         return say(stream, 404, "No point has that id.").await;
     };
     let kept = serving.clips.borrow().iter().find(|(kept, _)| kept == id).map(|(_, wav)| wav.clone());
+    let signal = Signal::new();
     let wav = match kept {
         Some(wav) => wav,
-        None => match kumi_media::audio::player::stretch(&path, from, seconds, &Signal::new()).await {
-            Ok((channels, rate)) => {
+        None => match while_asked(stream, &signal, kumi_media::audio::player::stretch(&path, from, seconds, &signal)).await {
+            // The page asked for another clip, or went: no one waits for this one.
+            None => return,
+            Some(Ok((channels, rate))) => {
                 let wav = Rc::new(kumi_media::audio::decode::float_wav(&channels, rate.round() as u32));
                 let mut clips = serving.clips.borrow_mut();
                 clips.retain(|(kept, _)| kept != id);
@@ -276,7 +356,7 @@ async fn audio(stream: &mut TcpStream, serving: &Serving, id: &str, range: Optio
                 clips.truncate(CLIPS);
                 wav
             }
-            Err(error) => return say(stream, 404, &format!("It can't be played: {error}")).await,
+            Some(Err(error)) => return say(stream, 404, &format!("It can't be played: {error}")).await,
         },
     };
     let size = wav.len() as u64;
@@ -298,6 +378,21 @@ async fn audio(stream: &mut TcpStream, serving: &Serving, id: &str, range: Optio
     }
 }
 
+/// `work`, unless the page that asked goes away first (its connection closes, as when it asks for another clip): then
+/// `signal` stops the work, which tidies up after itself, and nothing comes of it.
+async fn while_asked<T>(stream: &mut TcpStream, signal: &Signal, work: impl Future<Output = T>) -> Option<T> {
+    tokio::pin!(work);
+    let mut gone = [0u8; 1];
+    tokio::select! {
+        done = &mut work => Some(done),
+        _ = stream.read(&mut gone) => {
+            signal.cancel();
+            let _ = work.await;
+            None
+        }
+    }
+}
+
 /// A single byte range (`bytes=first-last`, `first-` or `-last count`) of `size` bytes, its ends within them.
 pub fn byte_range(header: &str, size: u64) -> Option<(u64, u64)> {
     let (first, last) = header.trim().strip_prefix("bytes=")?.split_once('-')?;
@@ -313,4 +408,47 @@ pub fn byte_range(header: &str, size: u64) -> Option<(u64, u64)> {
         (first, last) => (first.parse().ok()?, last.parse::<u64>().ok()?.min(size - 1)),
     };
     (first <= last && first < size).then_some((first, last))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_door_goes_on_to_the_map_only_this_account_reads_it_and_it_goes_with_the_server() {
+        let url = "http://127.0.0.1:4242/0123456789abcdef0123456789abcdef/";
+        let door = Door::new(url).unwrap();
+        let page = std::fs::read_to_string(&door.page).unwrap();
+        assert!(page.contains(&format!("<meta http-equiv=\"refresh\" content=\"0; url={url}\">")), "{page}");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = |path: &std::path::Path| std::fs::metadata(path).unwrap().permissions().mode() & 0o777;
+            assert_eq!((mode(&door.folder), mode(&door.page)), (0o700, 0o600));
+        }
+        let folder = door.folder.clone();
+        drop(door);
+        assert!(!folder.exists());
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn work_for_a_page_that_went_away_stops_and_a_page_still_there_gets_it() {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let client = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+        let (mut stream, _) = listener.accept().await.unwrap();
+        drop(client);
+        let signal = Signal::new();
+        let work = async {
+            signal.cancelled().await;
+            "stopped"
+        };
+        assert_eq!(while_asked(&mut stream, &signal, work).await, None);
+        assert!(signal.is_cancelled());
+        let _client = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+        let (mut stream, _) = listener.accept().await.unwrap();
+        let signal = Signal::new();
+        assert_eq!(while_asked(&mut stream, &signal, async { "made" }).await, Some("made"));
+        assert!(!signal.is_cancelled());
+    }
 }

@@ -268,6 +268,19 @@ fn served_at(url: &str) -> (u16, String) {
     (url.port().unwrap(), url.path().to_string())
 }
 
+/// The map's link, from what the browser was opened with: the link itself, or on Linux a page only this account reads
+/// that goes on to it (so the browser's command line, which any account there reads, has no token).
+fn linked(opened: &str) -> String {
+    if !cfg!(target_os = "linux") {
+        assert!(opened.starts_with("http://127.0.0.1:"), "{opened}");
+        return opened.to_string();
+    }
+    assert!(!opened.contains("http"), "a page, not the link: {opened}");
+    let page = std::fs::read_to_string(opened).unwrap();
+    let from = page.find("url=").expect("it goes on to the map") + 4;
+    page[from..from + page[from..].find('"').unwrap()].to_string()
+}
+
 case!(map_open_serves_the_map_to_the_browser_whose_actions_fill_the_input_box, async {
     let h = Harness::with(160, 40, Rc::new(Control::default()), |o| o.map = Some(loader(fixture(12, 8))));
     h.start().await;
@@ -276,9 +289,9 @@ case!(map_open_serves_the_map_to_the_browser_whose_actions_fill_the_input_box, a
     h.wait_for("The map is open in your browser").await;
     let opened = h.browsed.borrow().clone();
     assert_eq!(opened.len(), 1, "{opened:?}");
-    assert!(opened[0].starts_with("http://127.0.0.1:"), "{}", opened[0]);
-    h.has(&opened[0]);
-    let (port, home) = served_at(&opened[0]);
+    let link = linked(&opened[0]);
+    h.has(&link);
+    let (port, home) = served_at(&link);
     let host = format!("127.0.0.1:{port}");
     let (status, _, body) = ask(port, &get(&format!("{home}points"), &host, "")).await;
     let map: serde_json::Value = serde_json::from_slice(&body).unwrap();
@@ -302,9 +315,12 @@ case!(map_open_serves_the_map_to_the_browser_whose_actions_fill_the_input_box, a
         }
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
     }
-    let again = h.browsed.borrow()[1].clone();
-    assert_ne!(again, opened[0]);
+    let again = linked(&h.browsed.borrow()[1]);
+    assert_ne!(again, link);
     assert!(tokio::net::TcpStream::connect(("127.0.0.1", port)).await.is_err(), "the first closed");
+    if cfg!(target_os = "linux") {
+        assert!(!std::path::Path::new(&opened[0]).exists(), "its page went with it");
+    }
     // /map close: nothing answers there.
     let (port, _) = served_at(&again);
     h.type_text("/map close\r").await;
@@ -501,6 +517,27 @@ case!(a_question_kumi_asks_while_the_map_is_open_shows_in_its_place_and_the_map_
     h.close().await;
 });
 
+case!(an_action_from_the_browser_while_kumi_offers_answers_takes_their_place_and_enter_sends_it, async {
+    let h = Harness::with(160, 40, Rc::new(Control::default()), |o| o.map = Some(loader(fixture(12, 8))));
+    h.start().await;
+    h.connect();
+    h.type_text("/map open\r").await;
+    h.wait_for("The map is open in your browser").await;
+    let (port, home) = served_at(&linked(&h.browsed.borrow()[0]));
+    let host = format!("127.0.0.1:{port}");
+    h.type_text("add a reverb\r").await;
+    h.emit(serde_json::json!({"type":"state","state":"running"}));
+    asks_which(&h);
+    h.wait_for("Your answer").await;
+    let more = r#"{"action":"more","id":"sounds:0"}"#;
+    assert_eq!(ask(port, &post(&format!("{home}action"), &host, &format!("http://{host}"), more)).await.0, 204);
+    h.wait_for("Find sounds like this one: /Samples/Kicks/Kick 01.wav").await;
+    h.wait_until_hidden("Your answer").await;
+    h.type_text("\r").await;
+    h.wait_for_call("submit:Find sounds like this one: /Samples/Kicks/Kick 01.wav").await;
+    h.close().await;
+});
+
 case!(a_jobs_answer_waits_while_the_producer_is_in_the_map, async {
     let h = Harness::with(160, 40, Rc::new(Control::default()), |o| o.map = Some(loader(fixture(12, 8))));
     h.start().await;
@@ -514,6 +551,34 @@ case!(a_jobs_answer_waits_while_the_producer_is_in_the_map, async {
     assert!(!h.calls().iter().any(|call| call.starts_with("carry-on")), "not while they're in the map: {:?}", h.calls());
     h.type_text("\x1b").await;
     h.wait_for_call("carry-on:1").await;
+    h.close().await;
+});
+
+case!(map_close_while_the_browsers_map_is_still_read_opens_none, async {
+    let read = Rc::new(tokio::sync::Notify::new());
+    let load: LoadMap = {
+        let (read, data) = (read.clone(), fixture(2, 1));
+        Rc::new(move || {
+            let (read, data) = (read.clone(), data.clone());
+            async move {
+                read.notified().await;
+                data
+            }
+            .boxed_local()
+        })
+    };
+    let h = Harness::with(160, 40, Rc::new(Control::default()), |o| o.map = Some(load));
+    h.start().await;
+    h.connect();
+    h.type_text("/map open\r").await;
+    h.wait_for("Kumi is reading your map for the browser").await;
+    h.type_text("/map close\r").await;
+    h.wait_for("The map won't open in your browser after all.").await;
+    read.notify_one();
+    delay(200).await;
+    assert!(h.browsed.borrow().is_empty(), "no browser opened: {:?}", h.browsed.borrow());
+    h.type_text("/map close\r").await;
+    h.wait_for("The map isn't open in your browser: /map open opens it.").await;
     h.close().await;
 });
 
@@ -590,5 +655,46 @@ case!(a_play_that_ended_says_nothing_over_what_a_later_one_said, async {
     // The sound's play has ended since: what the song said stays.
     delay(600).await;
     h.has("There's no file there.");
+    h.close().await;
+});
+
+case!(the_browsers_map_closes_when_the_music_it_shows_is_forgotten_or_its_folder_goes, async {
+    let folder = tempfile::tempdir().unwrap();
+    let songs = folder.path().join("Songs");
+    std::fs::create_dir_all(&songs).unwrap();
+    let songs = songs.to_string_lossy().into_owned();
+    let mut options =
+        kumi_listening::music::learning::MusicOptions::new(folder.path().join("kumi/music"), Some(vec![songs.clone()]), Default::default());
+    (options.fork, options.delay_ms) = (false, 3_600_000);
+    let music = kumi_listening::music::learning::create_music(options);
+    let h = Harness::with(160, 40, Rc::new(Control::default()), |o| {
+        o.map = Some(loader(fixture(2, 1)));
+        o.music = Some(music.clone());
+    });
+    h.start().await;
+    h.connect();
+    let served = |h: &Harness, at: usize| served_at(&linked(&h.browsed.borrow()[at])).0;
+    h.type_text("/map open\r").await;
+    h.wait_for("The map is open in your browser").await;
+    let port = served(&h, 0);
+    // The folder taken away: the page, which lists its songs, closes.
+    h.type_text(&format!("/music remove {songs}\r")).await;
+    h.wait_for("The map in your browser closed: it showed your music as it was").await;
+    assert!(tokio::net::TcpStream::connect(("127.0.0.1", port)).await.is_err(), "closed");
+    // Forgotten: the same.
+    h.type_text("/map open\r").await;
+    for _ in 0..500 {
+        if h.browsed.borrow().len() > 1 {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    let port = served(&h, 1);
+    h.type_text("/music forget\r").await;
+    h.wait_for("Forget my music").await;
+    h.type_text("\r").await;
+    h.wait_for("Forgot your music.").await;
+    h.wait_for("The map in your browser closed").await;
+    assert!(tokio::net::TcpStream::connect(("127.0.0.1", port)).await.is_err(), "closed");
     h.close().await;
 });
