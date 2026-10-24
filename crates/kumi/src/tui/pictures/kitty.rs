@@ -330,9 +330,10 @@ pub fn placeholder(row: usize, column: usize) -> String {
     cell
 }
 
-/// Uploads the image under `id` and places it virtually over `cols` × `rows` cells: RGBA, deflated, in chunks.
+/// Uploads the image under `id` and places it virtually over `cols` × `rows` cells: RGBA, deflated, in chunks. Deflated
+/// fast: the frame waits for it, and a map's image is megabytes of mostly clear pixels.
 pub fn transmit(id: u32, raster: &Raster, cols: usize, rows: usize) -> String {
-    let mut deflate = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
+    let mut deflate = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::fast());
     let _ = deflate.write_all(&raster.rgba);
     let data = base64::engine::general_purpose::STANDARD.encode(deflate.finish().unwrap_or_default());
     let chunks: Vec<&[u8]> = data.as_bytes().chunks(CHUNK).collect();

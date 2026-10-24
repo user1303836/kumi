@@ -318,9 +318,10 @@ case!(space_plays_the_point_chosen_and_again_stops_it, async {
 
 #[test]
 fn the_map_drawn_for_a_look() {
-    let data = fixture(500, 120);
+    // Zoomed out, 12,000 sounds are density; zoomed in, points.
+    let data = fixture(2_000, 120);
     let mut shots: Vec<(String, Vec<u8>)> = vec![];
-    for (name, zoom) in [("map", 0), ("map-zoomed", 5)] {
+    for (name, zoom) in [("map", 0), ("map-zoomed", 4)] {
         let mut image = MapView::new(Graphics::Kitty);
         image.loaded(data.clone());
         let mut cells = MapView::new(Graphics::Cells);
@@ -354,5 +355,45 @@ fn the_map_drawn_for_a_look() {
         for (name, bytes) in shots {
             std::fs::write(std::path::Path::new(&folder).join(name), bytes).unwrap();
         }
+    }
+}
+
+/// How long the map takes to answer a key at 300,000 points, in the build at hand: run by hand
+/// (`--run-ignored only --no-capture`); it says, and checks nothing. An image goes up once per picture, as the app
+/// sends it.
+#[test]
+#[ignore]
+fn how_long_a_key_takes_at_300_000_points() {
+    use std::time::{Duration, Instant};
+    let started = Instant::now();
+    let data = fixture(50_000, 1);
+    eprintln!("300,000 sounds laid out for the map in {:?}", started.elapsed());
+    for graphics in [Graphics::Kitty, Graphics::Cells] {
+        let mut view = MapView::new(graphics);
+        view.loaded(data.clone());
+        let mut shown = String::new();
+        // The frame, and how much of it was the image going up.
+        let mut frame = |view: &mut MapView| {
+            let (started, mut sent) = (Instant::now(), Duration::ZERO);
+            view.draw(&mut Screen::new(200, 50), &mut |key, raster, cols, rows| {
+                if key != shown {
+                    let started = Instant::now();
+                    std::hint::black_box(kumi::tui::pictures::kitty::transmit(1, raster, cols, rows));
+                    (sent, shown) = (started.elapsed(), key.to_string());
+                }
+                1
+            });
+            (started.elapsed(), sent)
+        };
+        let first = frame(&mut view);
+        let started = Instant::now();
+        view.on_key("right", false);
+        let (_, sent) = frame(&mut view);
+        let moved = (started.elapsed(), sent);
+        let started = Instant::now();
+        view.on_text("+");
+        let (_, sent) = frame(&mut view);
+        let zoomed = (started.elapsed(), sent);
+        eprintln!("{graphics:?} (frame, of it the upload): first {first:?}, an arrow {moved:?}, a zoom {zoomed:?}");
     }
 }

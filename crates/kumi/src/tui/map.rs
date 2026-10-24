@@ -422,7 +422,8 @@ impl MapView {
 
     fn on_character(&mut self, character: char) -> Asked {
         if let Some(prompt) = self.prompt.as_mut() {
-            prompt.push(character);
+            // A pasted line break, or a tab, is a space in the filter's words.
+            prompt.push(if character.is_control() { ' ' } else { character });
             return Asked::Nothing;
         }
         if self.menu.is_some() {
@@ -671,8 +672,8 @@ impl MapView {
         let frame = Frame::new(area, view);
         if self.picture.as_ref().is_none_or(|picture| picture.key != key) {
             let image = self.graphics == Graphics::Kitty;
-            let (scene, named, dense) =
-                if image { scene(layer, view, &frame, 0.5, None) } else { scene(layer, view, &frame, 1., Some(6.)) };
+            // A patch of density a braille dot across (four pixels of an image); in braille its brightness in steps.
+            let (scene, named, dense) = scene(layer, view, &frame, 1., (!image).then_some(6.));
             let picture = if image {
                 let shrink = (MOST_PIXELS.0 / (cols as f64 * CELL_PIXELS.0)).min(MOST_PIXELS.1 / (rows as f64 * CELL_PIXELS.1)).min(1.);
                 let (width, height) = ((cols as f64 * CELL_PIXELS.0 * shrink) as u32, (rows as f64 * CELL_PIXELS.1 * shrink) as u32);
@@ -707,14 +708,17 @@ impl MapView {
             };
             (area.x + x as i32, area.y + y as i32)
         };
-        let mut taken = vec![false; cols * rows];
-        let mut take = |x: i32, y: i32| {
-            let inside = x >= area.x && y >= area.y && x < area.x + area.width && y < area.y + area.height;
-            inside && !std::mem::replace(&mut taken[((y - area.y) * area.width + x - area.x) as usize], true)
+        let index = |x: i32, y: i32| {
+            (x >= area.x && y >= area.y && x < area.x + area.width && y < area.y + area.height)
+                .then(|| ((y - area.y) * area.width + x - area.x) as usize)
         };
+        // The cells the named points and the names take.
+        let mut taken = vec![false; cols * rows];
         for at in &picture.named {
             let (x, y) = cell(*at);
-            take(x, y);
+            if let Some(at) = index(x, y) {
+                taken[at] = true;
+            }
         }
         let chosen = view.chosen.filter(|at| frame.shows(frame.dot(spot(&layer.points[*at as usize]))));
         let order = chosen.into_iter().chain(picture.named.iter().copied().filter(|at| Some(*at) != chosen));
@@ -723,8 +727,11 @@ impl MapView {
                 let (x, y) = cell(at);
                 let name = truncate(&layer.points[at as usize].name, NAME_CELLS.min(area.x + area.width - x - 2));
                 let width = text_width(&name);
-                if width < 3 || !(x + 1..x + 2 + width).all(|column| take(column, y)) {
-                    continue;
+                // The cell between the point and its name too: a name never runs into another point.
+                let free: Option<Vec<usize>> = (x + 1..x + 2 + width).map(|column| index(column, y).filter(|at| !taken[*at])).collect();
+                let Some(free) = free.filter(|_| width >= 3) else { continue };
+                for at in free {
+                    taken[at] = true;
                 }
                 let color = if Some(at) == chosen { palette::BRIGHT } else { palette::DIM };
                 screen.put(x + 2, y, &name, &Style { bg: Some(palette::GROUND), ..Style::fg(color) });

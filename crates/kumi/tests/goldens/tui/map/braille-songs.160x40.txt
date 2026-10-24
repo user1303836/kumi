@@ -10,8 +10,8 @@
 
 
                                                                                     ⠁ Artist 1 – Song 06
-                                                                                               ⠐ Artist 1 – Song 01
-                                                                                              ⠂⠁Artist 1 – Song 05
+                                                                                               ⠐ Artist 1 – Song 03
+                                                                                              ⠂⠁ Artist 1 – Song 01
                                                                     ⠂ Artist 0 – Song 07
                                                                  ⠂          ◉             ⠂    ⢀ Artist 1 – Song 08
                                                          ⠁            ⠠⠄ Artist 0 – Song 04

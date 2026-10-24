@@ -1,5 +1,5 @@
  Map   Sounds 72   Songs 24
- ● c1 · dark rainy 8  ● c2 · warm dusty 8  ● c3 · Techno 8
+
   c1 · dark rainy        8  Artist 0 – Song 01
   c2 · warm dusty        8  Artist 1 – Song 01
   c3 · Techno            8  Artist 2 – Song 01
@@ -35,6 +35,6 @@
 
 
 
- ● Artist 0 – Song 01  c1 · dark rainy  /Music/Artist 0
+ Artist 0 – Song 01  c1 · dark rainy  /Music/Artist 0
 
- ↑ ↓ choose · space plays · enter asks Kumi · / filters · tab sounds · esc closes
+ up and down choose · space plays · enter asks Kumi · / filters · tab sounds · esc closes

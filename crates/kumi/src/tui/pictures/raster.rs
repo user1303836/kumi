@@ -95,10 +95,16 @@ impl Raster {
         if !(x.is_finite() && y.is_finite()) || x < -radius - 1. || y < -radius - 1. {
             return;
         }
+        // Inside its edge a pixel is covered and outside it isn't: only the edge's pixels are measured.
+        let (inside, outside) = ((radius - 0.5).max(0.).powi(2), (radius + 0.5).powi(2));
         for py in span(y, self.height) {
             for px in span(x, self.width) {
-                let distance = ((px as f64 - x).powi(2) + (py as f64 - y).powi(2)).sqrt();
-                let covered = (radius + 0.5 - distance).clamp(0., 1.);
+                let squared = (px as f64 - x).powi(2) + (py as f64 - y).powi(2);
+                let covered = match squared {
+                    s if s <= inside => 1.,
+                    s if s >= outside => continue,
+                    s => (radius + 0.5 - s.sqrt()).clamp(0., 1.),
+                };
                 self.blend((py * self.width + px) as usize, color, covered * alpha);
             }
         }
