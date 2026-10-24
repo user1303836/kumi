@@ -5,7 +5,7 @@ use kumi_common::js::json as js_json;
 use std::{
     fs,
     path::{Path, PathBuf},
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, OnceLock},
     time::{Duration, Instant, SystemTime},
 };
 fn unavailable(message: impl Into<String>) -> LibrarySearchError {
@@ -42,12 +42,14 @@ fn allowlisted_file(file: &Value, root: &Value, label: &str) -> Result<PathBuf, 
 }
 /// A database read, by its path and what its file was then (size, mtime and on unix its inode, which a file put in its
 /// place by a rename changes): each page of a search, and the next search, read and parse the file (up to 128 MiB)
-/// again only once it changed. At most two are kept (the files and the plug-ins database), each
-/// for two minutes after its last use.
+/// again only once it changed, and decode its rows into the index (`LibraryIndex`) once as well. At most two are
+/// kept (the files and the plug-ins database), each for two minutes after its last use.
 pub(super) struct Read {
     path: PathBuf,
     file: FileStamp,
     reader: Arc<SqliteReader>,
+    /// The files database's rows, tags and places, decoded on the first file or tag query of this read.
+    index: OnceLock<Arc<LibraryIndex>>,
     used: Instant,
 }
 #[derive(PartialEq)]
@@ -107,7 +109,7 @@ async fn read_database(reads: &LibraryReads, path: &Path) -> Result<Arc<SqliteRe
             let reader = Arc::new(parsed);
             let mut read = reads.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
             read.retain(|kept| kept.path != path);
-            read.push(Read { path: path.to_path_buf(), file, reader: reader.clone(), used: Instant::now() });
+            read.push(Read { path: path.to_path_buf(), file, reader: reader.clone(), index: OnceLock::new(), used: Instant::now() });
             while read.len() > 2 {
                 read.remove(0);
             }
@@ -129,6 +131,25 @@ async fn read_database(reads: &LibraryReads, path: &Path) -> Result<Arc<SqliteRe
         }
     }
     Ok(reader)
+}
+/// The index of the files database `reader` was read from: decoded off the bridge's thread on the first query of a
+/// read, then kept with it (the next query, and the next page, find it decoded). A read let go meanwhile (idle, or
+/// its database changed) gives an index that lives only for this query.
+async fn library_index(reads: &LibraryReads, path: &Path, reader: Arc<SqliteReader>) -> Result<Arc<LibraryIndex>, LibrarySearchError> {
+    let kept = {
+        let read = reads.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        read.iter().find(|kept| kept.path == path && Arc::ptr_eq(&kept.reader, &reader)).and_then(|kept| kept.index.get().cloned())
+    };
+    if let Some(index) = kept {
+        return Ok(index);
+    }
+    let decoding = reader.clone();
+    let index = Arc::new(off_thread(move || index_library(&decoding)).await?);
+    let read = reads.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    if let Some(kept) = read.iter().find(|kept| kept.path == path && Arc::ptr_eq(&kept.reader, &reader)) {
+        let _ = kept.index.set(index.clone());
+    }
+    Ok(index)
 }
 /// `query` on a blocking thread: scanning, decoding, filtering and sorting a library's tables takes a while, and the
 /// bridge's only thread answers everything else meanwhile.
@@ -231,13 +252,14 @@ impl McpHost {
                 .await?
             } else {
                 let reader = read_database(&self.library_reads, &database).await?;
+                let index = library_index(&self.library_reads, &database, reader.clone()).await?;
                 let tags = mode == "tags";
                 off_thread(move || {
                     let version = assert_supported_files_schema(&reader)?;
                     let page = if tags {
-                        serde_json::to_value(query_library_tag_vocabulary(&reader, &query)?).unwrap()
+                        serde_json::to_value(query_library_tag_vocabulary(&index, &query)?).unwrap()
                     } else {
-                        serde_json::to_value(query_library_files(&reader, &query)?).unwrap()
+                        serde_json::to_value(query_library_files(&index, &query)?).unwrap()
                     };
                     Ok((version, SUPPORTED_FILES_SCHEMA_VERSIONS, page))
                 })
