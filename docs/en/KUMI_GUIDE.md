@@ -54,12 +54,28 @@ don't permit them in third-party tools. OpenCode's Gemini models aren't
 supported yet.
 
 `/model` lists each provider's models, read from the provider itself, so a model
-released today is there without a Kumi update. With no model chosen, Kumi uses
-the first model of the first provider you're signed in to (in the order of the
-table) and says which. `/effort` sets how hard the model thinks, from the levels
-that model offers; lower answers sooner. Both apply from your next message and
-are kept for next time. Changing model keeps the conversation, except the
-earlier model's private reasoning, which belongs to that model.
+released today is there without a Kumi update; typing narrows the list. With no
+model chosen, Kumi uses the first model of the first provider you're signed in
+to (in the order of the table) and says which. `/effort` sets how hard the model
+thinks, from the levels that model offers (`none` to `max`); lower answers
+sooner. Both apply from your next message and are kept for next time. Changing
+model keeps the conversation, except the earlier model's private reasoning,
+which belongs to that model.
+
+What Kumi knows of each model (its effort levels, whether it can use tools, what
+it takes beside words) comes from its provider's list first, then from
+[models.dev](https://models.dev)'s catalog, then from its name:
+
+- Models that don't chat (pictures, embeddings, speech) aren't listed.
+- **chat only**: the model can't use tools. Kumi talks with it about your Set but
+  can't change anything, as with a model on your computer that can't. A model
+  that turns tools down when asked is treated so until Kumi restarts.
+- **unverified**: neither its provider nor models.dev describes it, so Kumi goes
+  by its name.
+- **deprecated**: its provider is retiring it.
+
+Kumi carries a copy of the catalog and fetches a newer one at most once a day;
+`"modelCatalog": false` in `settings.json` turns that off.
 
 When an answer fails because a sign-in is missing or was refused, Kumi offers to
 sign in and then sends your message again. When the provider doesn't offer the
@@ -1253,6 +1269,8 @@ says which need which.
   soon as it is; only the words leave, when you send them.
 - **Your library** is learned on your computer; only the manual's pages come from
   ableton.com.
+- **models.dev's catalog** of models is fetched at most once a day; nothing of
+  yours goes with the request. `"modelCatalog": false` stops it.
 
 Track, clip and device names, tool results and web pages are data for Kumi,
 never instructions. Kumi keeps its files in `~/.kumi`, readable only by you;
@@ -1292,7 +1310,7 @@ Kumi keeps everything in `~/.kumi`. `~/.kumi/settings.json` holds:
 | Key | Meaning |
 | --- | --- |
 | `model` | The chosen model, `<provider>/<model>` (`/model`, `kumi model`) |
-| `effort` | `low`, `medium`, `high`, `xhigh` or `max`; absent means the model's default (`/effort`) |
+| `effort` | `none`, `minimal`, `low`, `medium`, `high`, `xhigh` or `max`; absent means the model's default (`/effort`) |
 | `fast` | `true` asks for the model's faster tier where its provider lists one (`/fast`) |
 | `fallbackModel` | The model that carries on when yours hits its plan's limit or its provider is down, `<provider>/<model>` (ctrl+f in `/model`) |
 | `panelTab` | The Live pane's tab you had open last |
@@ -1309,11 +1327,13 @@ Kumi keeps everything in `~/.kumi`. `~/.kumi/settings.json` holds:
 | `maxJobs` | How many background jobs run at once: 1–8, three by default |
 | `workerModel` | The model background jobs use, `<provider>/<model>` from `/model`'s list; the conversation's when absent |
 | `conversations` | `keepDays`: days a conversation is kept after it was last used, beyond each Set's 20 newest (90; once taken out, the longer of 90 and the value last set); `0` keeps all |
+| `modelCatalog` | `false`: Kumi doesn't fetch models.dev's catalog of models; the copy it has stays in use ([choosing a model](#sign-in-and-choose-a-model)) |
 
 `~/.kumi/slots.json` keeps the model slots you swapped (`/slots`),
 `~/.kumi/probes` what each knob was heard to do, by device and track, and
-`~/.kumi/models` the model runtime and Kumi's own models. All three follow
-`KUMI_HOME`.
+`~/.kumi/models` the model runtime and Kumi's own models, and
+`~/.kumi/cache/models-catalog.json` the newest copy of models.dev's catalog. All
+four follow `KUMI_HOME`.
 
 `~/.kumi/bridges/reaper` and `~/.kumi/bridges/renoise` hold what Kumi keeps for
 each DAW's bridge: its secret (`bridge.secret`), the files the running bridge

@@ -368,3 +368,27 @@ fn export_and_import_take_a_conversation_a_format_and_a_file() {
         );
     }
 }
+#[test]
+fn the_model_catalog_stays_on_unless_turned_off_and_old_settings_still_load() {
+    let folder = tempfile::tempdir().unwrap();
+    let file = folder.path().join("settings.json").to_string_lossy().into_owned();
+    let saved = || serde_json::from_str::<Value>(&std::fs::read_to_string(&file).unwrap()).unwrap();
+    // A file written before Kumi knew models.dev's catalog: on, and read as it was.
+    std::fs::write(&file, json!({"model":"openai-codex/gpt-6-astra","effort":"high","fast":true}).to_string()).unwrap();
+    let settings = read_settings(&file);
+    assert_eq!(
+        (settings.model_catalog, settings.model.as_deref(), settings.effort),
+        (None, Some("openai-codex/gpt-6-astra"), Some(Effort::High))
+    );
+    // Off: kept through other writes, as other preferences are.
+    std::fs::write(&file, json!({"modelCatalog":false}).to_string()).unwrap();
+    assert_eq!(read_settings(&file).model_catalog, Some(false));
+    write_settings(&file, &json!({"model":"openai/gpt-6-luna","effort":"minimal"})).unwrap();
+    assert_eq!(saved(), json!({"model":"openai/gpt-6-luna","effort":"minimal","modelCatalog":false}));
+    assert_eq!(read_settings(&file).effort, Some(Effort::Minimal));
+    // Anything but false leaves it on, and on isn't written.
+    write_settings(&file, &json!({"modelCatalog":true})).unwrap();
+    assert_eq!(saved(), json!({}));
+    std::fs::write(&file, json!({"modelCatalog":"no"}).to_string()).unwrap();
+    assert_eq!(read_settings(&file).model_catalog, None);
+}

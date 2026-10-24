@@ -1,4 +1,7 @@
+pub mod catalog;
+pub mod chat_only;
 pub mod compat;
+pub mod facts;
 pub mod local;
 pub mod models;
 pub mod ollama;
@@ -29,6 +32,8 @@ pub use table::{Format, KeyHeader, ProviderId, ProviderRow, SignIn};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Effort {
+    None,
+    Minimal,
     Low,
     Medium,
     High,
@@ -38,6 +43,8 @@ pub enum Effort {
 impl Effort {
     pub fn as_str(self) -> &'static str {
         match self {
+            Self::None => "none",
+            Self::Minimal => "minimal",
             Self::Low => "low",
             Self::Medium => "medium",
             Self::High => "high",
@@ -49,7 +56,8 @@ impl Effort {
         EFFORTS.iter().copied().find(|e| e.as_str() == value)
     }
 }
-pub const EFFORTS: [Effort; 5] = [Effort::Low, Effort::Medium, Effort::High, Effort::Xhigh, Effort::Max];
+/// Every effort level a model may take, least first.
+pub const EFFORTS: [Effort; 7] = [Effort::None, Effort::Minimal, Effort::Low, Effort::Medium, Effort::High, Effort::Xhigh, Effort::Max];
 pub static USER_AGENT: LazyLock<String> = LazyLock::new(|| {
     let platform = match std::env::consts::OS {
         "macos" => "darwin",
@@ -238,7 +246,9 @@ pub async fn resolve_model(options: ResolveModelOptions) -> Result<ModelBinding,
             (key, identified)
         }
     };
-    let format = row.format_for(&model).map_err(|why| KumiError::new(FailureKind::Config, why))?;
+    // As models.dev routes the model (Zen's Claude models to Messages, say), by the provider's name rules for one it
+    // doesn't know.
+    let format = facts::format_for(row, &model, &catalog::current()).map_err(|why| KumiError::new(FailureKind::Config, why))?;
     let effort = options.effort;
     let extras = row.extras;
     let service_tier = options.service_tier.clone().filter(|_| extras.service_tier);

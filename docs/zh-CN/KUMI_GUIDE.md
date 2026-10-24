@@ -29,7 +29,16 @@ Kumi 是一个在终端里运行的制作人代理，为你在 Ableton Live 中�
 
 用 `/login` 保存的密钥优先使用；没有时，Kumi 使用环境变量中的密钥，而且无法从中退出登录（请改为取消设置该变量）。API 密钥只能粘贴到 Kumi 的密钥输入框或 `kumi login` 的提示中，绝不要粘贴到消息里。Kumi 不提供 Claude 和 Gemini 的订阅登录，因为它们的提供方不允许在第三方工具中使用。OpenCode 的 Gemini 模型暂不支持。
 
-`/model` 列出每个提供方的模型，这些模型直接从提供方读取，所以今天发布的模型无需更新 Kumi 就会出现。没有选择模型时，Kumi 使用你已登录的第一个提供方（按上表顺序）的第一个模型，并告诉你用的是哪个。`/effort` 设置模型思考的力度，可选级别取决于该模型；越低回答越快。两者都从你的下一条消息开始生效，并保留到下次使用。更换模型会保留对话，但先前模型的私有推理除外，那部分属于该模型。
+`/model` 列出每个提供方的模型，这些模型直接从提供方读取，所以今天发布的模型无需更新 Kumi 就会出现；输入文字可以缩小列表。没有选择模型时，Kumi 使用你已登录的第一个提供方（按上表顺序）的第一个模型，并告诉你用的是哪个。`/effort` 设置模型思考的力度，可选级别取决于该模型（从 `none` 到 `max`）；越低回答越快。两者都从你的下一条消息开始生效，并保留到下次使用。更换模型会保留对话，但先前模型的私有推理除外，那部分属于该模型。
+
+Kumi 对每个模型的了解（思考级别、能否使用工具、除文字外还接受什么）先来自提供方的列表，再来自 [models.dev](https://models.dev) 的目录，最后来自模型名称：
+
+- 不能对话的模型（图像、嵌入、语音）不会列出。
+- **chat only**：该模型不能使用工具。Kumi 可以和它谈论你的工程，但不能做任何修改，和你电脑上不能使用工具的模型一样。被要求使用工具时拒绝的模型，在 Kumi 重启前也按此处理。
+- **unverified**：提供方和 models.dev 都没有描述它，Kumi 只能根据名称判断。
+- **deprecated**：提供方即将停用它。
+
+Kumi 自带一份目录副本，最多每天获取一次更新的版本；在 `settings.json` 中设置 `"modelCatalog": false` 可以停止获取。
 
 当回答因缺少登录或登录被拒而失败时，Kumi 会提出帮你登录，然后重新发送你的消息。当提供方不提供所选模型时，Kumi 会提出让你另选一个。当你保存的模型不再出现在提供方自己的列表中（比如套餐登录不再提供它）时，Kumi 会在启动时说明，并打开 `/model`。当回答中途断开（比如连接断了）时，Kumi 会从断开处接着回答一次，并在状态行中说明；如果再次断开，Kumi 会提出重新发送你的消息。
 
@@ -479,6 +488,7 @@ Kumi 会在启动时检查是否有新版本，每天最多一次；没有新版
 - **音频**在你的电脑上分析；只有数字会发送给模型。如果有聆听模型，它会收到所判定修改的简短片段（每段最长 10 秒，单声道）：有 Gemini API 密钥时发给 Gemini，有 OpenAI API 密钥时发给 OpenAI，或发给 `KUMI_LISTENER` 或聆听槽位（`/slots`）指定的模型（设置了 `KUMI_LISTENER_KEY` 时连同它一起）。`KUMI_LISTENER=off` 或 `/slots listening off` 可以关闭；试用新的聆听模型时只会发送一段已知的测试音。
 - **你的声音**在你的电脑上转写，录音随即删除；只有你发送时的文字会离开。
 - **你的素材库**在你的电脑上学习；只有手册的页面来自网络。
+- **models.dev 的模型目录**最多每天获取一次；请求中不包含你的任何内容。`"modelCatalog": false` 可以停止获取。
 
 轨道、片段和设备的名称、工具结果以及网页对 Kumi 来说都是数据，绝不是指令。Kumi 把它的文件保存在 `~/.kumi` 中，只有你可以读取；登录信息保存在 `~/.kumi/auth.json`。终端的滚动记录，以及提供方自己的数据保留，不在此范围内。
 
@@ -497,7 +507,7 @@ Kumi 把一切都保存在 `~/.kumi` 中。`~/.kumi/settings.json` 包含：
 | 键 | 含义 |
 | --- | --- |
 | `model` | 所选模型，`<provider>/<model>`（`/model`、`kumi model`） |
-| `effort` | `low`、`medium`、`high`、`xhigh` 或 `max`；不设置时使用模型的默认值（`/effort`） |
+| `effort` | `none`、`minimal`、`low`、`medium`、`high`、`xhigh` 或 `max`；不设置时使用模型的默认值（`/effort`） |
 | `fast` | `true` 表示在提供方列出时使用模型的更快档位（`/fast`） |
 | `fallbackModel` | 你的模型达到套餐上限或提供方故障时接着回答的模型，`<provider>/<model>`（在 `/model` 中按 ctrl+f） |
 | `panelTab` | 你上次打开的 Live 面板标签页 |
@@ -514,8 +524,9 @@ Kumi 把一切都保存在 `~/.kumi` 中。`~/.kumi/settings.json` 包含：
 | `maxJobs` | 同时运行的后台任务数：1–8，默认 3 |
 | `workerModel` | 后台任务使用的模型，取自 `/model` 列表的 `<provider>/<model>`；不设置时与对话相同 |
 | `conversations` | `keepDays`：对话在最后一次使用后保留的天数，每个工程最近的 20 段不受此限（90；去掉后取 90 天与上次设定值中较长的一个）；`0` 表示全部保留 |
+| `modelCatalog` | `false`：不获取 models.dev 的模型目录，继续使用已有的副本（[选择模型](#登录并选择模型)） |
 
-`~/.kumi/slots.json` 保存你替换过的模型槽位（`/slots`），`~/.kumi/probes` 按设备和轨道保存每个旋钮起过的作用，`~/.kumi/models` 保存模型运行时和 Kumi 自己的模型。三者都跟随 `KUMI_HOME`。
+`~/.kumi/slots.json` 保存你替换过的模型槽位（`/slots`），`~/.kumi/probes` 按设备和轨道保存每个旋钮起过的作用，`~/.kumi/models` 保存模型运行时和 Kumi 自己的模型，`~/.kumi/cache/models-catalog.json` 保存 models.dev 目录的最新副本。四者都跟随 `KUMI_HOME`。
 
 `~/.kumi/bridges/reaper` 和 `~/.kumi/bridges/renoise` 保存 Kumi 为各 DAW 的桥接保留的内容：密钥（`bridge.secret`）、运行中的桥接用来报告自己位置的文件（`discovery`）、日志（`logs`）、安装回执（`install-receipt.json`）、为回滚保留的版本（`generations`）、你改动过的副本（`changed`），以及比较离开期间变化所用的状态（`snapshots`）。`~/.kumi/last-daw` 记录你上次使用的 DAW。
 

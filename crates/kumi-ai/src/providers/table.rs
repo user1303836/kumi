@@ -18,13 +18,16 @@ pub enum SignIn {
 }
 
 /// How a request to a model is written.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Format {
     /// OpenAI's Responses API.
+    #[serde(rename = "responses")]
     Responses,
     /// Anthropic's Messages API.
+    #[serde(rename = "anthropic")]
     Messages,
     /// Chat Completions, which most providers take.
+    #[serde(rename = "chat-completions")]
     ChatCompletions,
 }
 

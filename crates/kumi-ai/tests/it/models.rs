@@ -76,8 +76,14 @@ async fn chatgpt_catalog_keeps_priority_zero_and_its_supported_effort_levels() {
         json!([{"id":"priority","name":"Fast","description":"2x speed, increased usage"}]),
         "the faster tier the list names, read as it is"
     );
+    // What ChatGPT's list says, as it says it; models.dev adds what it knows of the model beside.
+    let mut luna = serde_json::to_value(&models[2]).unwrap();
+    assert_eq!(luna["factsFrom"], "provider");
+    for added in ["tools", "context", "reasoning", "inputs", "maxOutput", "cost", "factsFrom"] {
+        luna.as_object_mut().unwrap().remove(added);
+    }
     assert_eq!(
-        serde_json::to_value(&models[2]).unwrap(),
+        luna,
         json!({"id":"openai-codex/gpt-6-luna","provider":"openai-codex","model":"gpt-6-luna","name":"GPT-6 Luna","description":"Fast","efforts":[{"effort":"low","description":"Quick"},{"effort":"medium"}],"defaultEffort":"low"})
     );
     let seen = seen.borrow();
@@ -207,4 +213,23 @@ async fn catalogs_handle_malformed_rows_and_bound_names_using_js_string_lengths(
         check_api_key(ProviderId::parse("openai").unwrap(), "key", Transport { fetch: Some(fetch), signal: None }).await,
         ApiKeyCheck::Ok
     );
+}
+#[test]
+fn a_model_list_kept_before_kumi_knew_more_facts_reads_back_and_a_new_one_round_trips() {
+    // As the last release wrote one: its new facts are unknown, not wrong.
+    let old: kumi_ai::providers::models::ModelInfo = serde_json::from_value(json!({"id":"openai-codex/gpt-6-luna","provider":"openai-codex","model":"gpt-6-luna","name":"GPT-6 Luna","description":"Fast","efforts":[{"effort":"low","description":"Quick"},{"effort":"medium"}],"defaultEffort":"low","serviceTiers":[{"id":"priority","name":"Fast"}]})).unwrap();
+    assert_eq!((old.tools, old.reasoning, old.facts_from, old.inputs.len(), old.labels.len()), (None, None, None, 0, 0));
+    let mut new = old.clone();
+    new.efforts.insert(0, kumi_ai::providers::models::EffortInfo { effort: Effort::None, description: None });
+    new.inputs = vec![kumi_ai::providers::models::Input::Image, kumi_ai::providers::models::Input::Pdf];
+    new.format = Some(kumi_ai::providers::Format::Messages);
+    new.facts_from = Some(kumi_ai::providers::models::FactsFrom::Catalog);
+    new.cost = Some(kumi_ai::providers::models::Cost { input: Some(1.25), output: Some(10.), cache_read: None, cache_write: None });
+    let value = serde_json::to_value(&new).unwrap();
+    assert_eq!(value["efforts"][0], json!({"effort":"none"}));
+    assert_eq!(
+        (&value["inputs"], &value["format"], &value["factsFrom"]),
+        (&json!(["image", "pdf"]), &json!("anthropic"), &json!("catalog"))
+    );
+    assert_eq!(serde_json::from_value::<kumi_ai::providers::models::ModelInfo>(value).unwrap(), new);
 }
