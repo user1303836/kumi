@@ -8,7 +8,7 @@ use super::{
     pins::pin_context,
     project,
     references::{Moved, Shift},
-    remember::{CurrentProject, Remember},
+    remember::{CurrentProject, ExportMark, Remember},
     set_model::{DeviceNode, SetModel},
     track_ids,
     views::{self, ViewHost},
@@ -565,6 +565,7 @@ impl Observer {
             } else {
                 self.model_stale();
             }
+            let rows = rows_fingerprint(model_rows.as_ref());
             // What the next turns may reuse: the devices as this turn has them, when it has them all.
             // Kept only while Live's events are heard, since nothing else says when to read them again.
             let whole = model_rows.and_then(|(tracks, devices)| Some((tracks, devices?))).filter(|_| !more_tracks && !more_devices && connection.hears_live());
@@ -693,9 +694,24 @@ impl Observer {
             *self.previous.borrow_mut() =
                 Some(Previous { key: key.clone(), identity: identity.clone(), path: path.clone(), project: project_ref.clone() });
 
+            let saved_at = path
+                .as_ref()
+                .and_then(|p| std::fs::metadata(p).ok())
+                .and_then(|m| m.modified().ok())
+                .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+                .map(|t| t.as_secs() as f64 * 1000. + t.subsec_nanos() as f64 / 1_000_000.);
+            // The Set as this look saw it: the export it may schedule (a new Set's catch-up, else every SAVE_EVERY_MS
+            // while something changed) reads the Set whole through Live, so an unchanged Set isn't read again for it.
+            self.remember.note_look(ExportMark {
+                structure,
+                attachments: connection.attachments.get(),
+                tracks: track_revision.clone(),
+                file_modified: saved_at,
+                rows,
+            });
             if new_set {
                 self.remember.catch_up(identity.clone(), name.clone(), after_reconnect);
-            } else if kumi_common::time::now_ms() - self.remember.last_saved.get() > 5 * 60_000 {
+            } else if self.remember.save_due(kumi_common::time::now_ms()) {
                 self.remember.schedule_save(1000);
             }
             connection.ensure_catalog(signal.clone()).await?;
@@ -819,13 +835,6 @@ impl Observer {
             }
             context.insert("coverage".into(),json!("Current open Set only. Bounded discovery; details and track counts require fresh paged reads. Names/paths are not durable identity."));
 
-            let saved_at = path
-                .as_ref()
-                .and_then(|p| std::fs::metadata(p).ok())
-                .and_then(|m| m.modified().ok())
-                .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-                .map(|t| t.as_secs() as f64 * 1000. + t.subsec_nanos() as f64 / 1_000_000.);
-
             Ok(Observation {
                 key,
                 revision: Some(connection.tools().unwrap().generation().to_string()),
@@ -878,6 +887,26 @@ async fn start_background(work: impl std::future::Future<Output = ()> + 'static)
 }
 fn object(value: Value) -> JsonObject {
     value.as_object().cloned().unwrap_or_default()
+}
+/// The track and device rows as a look read them, hashed without what moves by itself (what plays or is fired,
+/// arming, monitoring, folds and visibility): two looks hash alike when nothing a producer edits changed in them.
+/// With `ExportMark`, what tells an export after the last one would read the same Set again.
+pub fn rows_fingerprint(rows: Option<&(Vec<JsonObject>, Option<Vec<JsonObject>>)>) -> u64 {
+    use std::hash::{Hash, Hasher};
+    const MOVING: [&str; 6] = ["playingSlotIndex", "firedSlotIndex", "armed", "monitoringState", "foldState", "isVisible"];
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    if let Some((tracks, devices)) = rows {
+        for row in tracks {
+            let lasting: JsonObject =
+                row.iter().filter(|(key, _)| !MOVING.contains(&key.as_str())).map(|(k, v)| (k.clone(), v.clone())).collect();
+            stringify(&Value::Object(lasting)).hash(&mut hasher);
+        }
+        for row in devices.iter().flatten() {
+            stringify(&Value::Object(row.clone())).hash(&mut hasher);
+        }
+        (tracks.len(), devices.as_ref().map(Vec::len)).hash(&mut hasher);
+    }
+    hasher.finish()
 }
 /// A read of devices: its rows, and whether it was cut short; none when Live answered with an error.
 fn device_page(read: &CallToolResult, epoch: f64) -> Result<Option<(Vec<JsonObject>, bool)>, ReadError> {

@@ -30,12 +30,34 @@ pub struct CurrentProject {
     pub unsaved: bool,
 }
 pub type Saving = Shared<LocalBoxFuture<'static, ()>>;
+/// How long after an export the next may come when the Set changed in a way a look can see, and after how long it
+/// comes whether or not one did (notes and parameters change with no word from Live).
+pub const SAVE_EVERY_MS: i64 = 5 * 60_000;
+pub const SAVE_AT_LEAST_EVERY_MS: i64 = 30 * 60_000;
+/// What a look saw of the Set without reading it whole. Two looks with the same mark found nothing changed in the
+/// Set's structure, its tracks' lasting fields, its devices or its file, so an export after the first would read the
+/// same again (`Remember::save_due`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct ExportMark {
+    /// Structure changes Live told of, and endpoints attached (events between two of them reach no one).
+    pub structure: u64,
+    pub attachments: u64,
+    /// The track page's revision: the tracks' identities, names and places.
+    pub tracks: Option<String>,
+    /// When the Set's file was last written, as `saved_at` has it.
+    pub file_modified: Option<f64>,
+    /// The track and device rows as read, hashed without what moves by itself (`observation::rows_fingerprint`).
+    pub rows: u64,
+}
 pub struct Remember {
     pub connection: Rc<LiveConnection>,
     pub store: Option<Rc<dyn ProjectStore>>,
     pub current: RefCell<Option<Rc<CurrentProject>>>,
     pub context: RefCell<Option<JsonObject>>,
     pub last_saved: Cell<i64>,
+    /// What the latest look saw (`ExportMark`), and what the last export was taken from.
+    looked: RefCell<Option<ExportMark>>,
+    exported: RefCell<Option<ExportMark>>,
     on_catch_up: Option<Rc<dyn Fn(CatchUp)>>,
     saving: RefCell<Saving>,
     timer: RefCell<Option<Signal>>,
@@ -52,6 +74,8 @@ impl Remember {
             current: RefCell::new(None),
             context: RefCell::new(None),
             last_saved: Cell::new(0),
+            looked: RefCell::new(None),
+            exported: RefCell::new(None),
             on_catch_up,
             saving: RefCell::new(async {}.boxed_local().shared()),
             timer: RefCell::new(None),
@@ -69,6 +93,39 @@ impl Remember {
         if let Some(timer) = self.timer.borrow_mut().take() {
             timer.cancel();
         }
+    }
+    /// Whether a save waits on the timer.
+    pub fn save_scheduled(&self) -> bool {
+        self.timer.borrow().is_some()
+    }
+    /// What this look saw of the Set, for `save_due`, and the mark its export records.
+    pub fn note_look(&self, mark: ExportMark) {
+        *self.looked.borrow_mut() = Some(mark);
+    }
+    /// Whether a look should have the Set exported again: SAVE_EVERY_MS after the last export when the Set changed in
+    /// a way the look can see (its mark moved), or when Live's events aren't heard (then nothing says what changed);
+    /// SAVE_AT_LEAST_EVERY_MS after it in any case. Kumi's own changes schedule their own save (`History::keep_soon`).
+    pub fn save_due(&self, now_ms: i64) -> bool {
+        let since = now_ms - self.last_saved.get();
+        if since <= SAVE_EVERY_MS {
+            return false;
+        }
+        let (looked, exported) = (self.looked.borrow(), self.exported.borrow());
+        match (looked.as_ref(), exported.as_ref()) {
+            (Some(looked), Some(exported)) if self.connection.hears_live() => looked != exported || since > SAVE_AT_LEAST_EVERY_MS,
+            _ => true,
+        }
+    }
+    /// An export was taken: the latest look's mark, with Live's counters as they stand now (a change Kumi made after
+    /// the look told of its structure before the export ran).
+    fn mark_exported(&self) {
+        let mark = self.looked.borrow().clone().map(|mark| ExportMark {
+            structure: self.connection.structure_events.get(),
+            attachments: self.connection.attachments.get(),
+            ..mark
+        });
+        *self.exported.borrow_mut() = mark;
+        self.last_saved.set(kumi_common::time::now_ms());
     }
     fn enqueue(self: &Rc<Self>, work: impl FnOnce(Rc<Self>) -> LocalBoxFuture<'static, Result<(), RuntimeError>> + 'static) -> Saving {
         let before = self.pending();
@@ -157,7 +214,7 @@ impl Remember {
                         },
                     )
                     .await?;
-                this.last_saved.set(kumi_common::time::now_ms());
+                this.mark_exported();
                 Ok(())
             }
             .boxed_local()
@@ -268,7 +325,7 @@ impl Remember {
      if let Some(callback)=&this.on_catch_up{let _=catch_unwind(AssertUnwindSafe(||callback(summary)));}
     }
    }
-   store.save(&project,&Baseline{version:1,path,name,saved_at:connection.now().timestamp_millis(),artifact_id:artifact_of(&pages)?,pages}).await?;this.last_saved.set(kumi_common::time::now_ms());Ok(())
+   store.save(&project,&Baseline{version:1,path,name,saved_at:connection.now().timestamp_millis(),artifact_id:artifact_of(&pages)?,pages}).await?;this.mark_exported();Ok(())
   }.boxed_local());
     }
 }
