@@ -31,23 +31,37 @@ pub fn half_blocks(scene: &Scene, cols: usize, rows: usize, ground: Rgb) -> Vec<
         .collect()
 }
 
-/// The scene's lines in braille, `cols` wide and `rows` tall: a cell takes the colour of the last line through it
-/// (what's there now over what came before).
+/// The scene's lines and dots in braille, `cols` wide and `rows` tall: a cell takes the colour of the last line
+/// through it (what's there now over what came before), or the colour most of its dots have.
 pub fn braille(scene: &Scene, cols: usize, rows: usize) -> Vec<Vec<Span>> {
     let (width, height) = (cols * 2, rows * 4);
     let mut dots = vec![0u8; cols * rows];
     let mut colors: Vec<Option<Rgb>> = vec![None; cols * rows];
+    // Each cell's dots by colour, in the order the colours came.
+    let mut counted: Vec<Vec<(Rgb, u32)>> = vec![vec![]; cols * rows];
+    let at = |(x, y): (f64, f64)| ((x * (width - 1) as f64).round() as i64, ((1. - y) * (height - 1) as f64).round() as i64);
+    let cell_of = |x: i64, y: i64| {
+        (x >= 0 && y >= 0 && x < width as i64 && y < height as i64)
+            .then(|| (y as usize / 4 * cols + x as usize / 2, DOT[x as usize % 2][y as usize % 4]))
+    };
     for shape in &scene.shapes {
-        let Shape::Line { points, color, .. } = shape else { continue };
-        let at = |(x, y): (f64, f64)| ((x * (width - 1) as f64).round() as i64, ((1. - y) * (height - 1) as f64).round() as i64);
-        let mut mark = |x: i64, y: i64| {
-            if x < 0 || y < 0 || x >= width as i64 || y >= height as i64 {
-                return;
+        if let Shape::Dot { x, y, color, .. } = shape {
+            let (x, y) = at((*x, *y));
+            if let Some((cell, dot)) = cell_of(x, y) {
+                dots[cell] |= dot;
+                match counted[cell].iter_mut().find(|(seen, _)| seen == color) {
+                    Some((_, count)) => *count += 1,
+                    None => counted[cell].push((*color, 1)),
+                }
             }
-            let (x, y) = (x as usize, y as usize);
-            let cell = (y / 4) * cols + x / 2;
-            dots[cell] |= DOT[x % 2][y % 4];
-            colors[cell] = Some(*color);
+            continue;
+        }
+        let Shape::Line { points, color, .. } = shape else { continue };
+        let mut mark = |x: i64, y: i64| {
+            if let Some((cell, dot)) = cell_of(x, y) {
+                dots[cell] |= dot;
+                colors[cell] = Some(*color);
+            }
         };
         let pixels: Vec<(i64, i64)> = points.iter().map(|p| at(*p)).collect();
         match pixels.as_slice() {
@@ -59,6 +73,12 @@ pub fn braille(scene: &Scene, cols: usize, rows: usize) -> Vec<Vec<Span>> {
                     }
                 }
             }
+        }
+    }
+    for (cell, counts) in counted.iter().enumerate() {
+        // The most common; of as many, the one that came last.
+        if let Some((color, _)) = counts.iter().max_by_key(|(_, count)| *count) {
+            colors[cell] = Some(*color);
         }
     }
     (0..rows)
@@ -126,6 +146,22 @@ mod tests {
         let scene = Scene { shapes: vec![line(1., [9, 9, 9]), line(0.9, [1, 1, 1])], lines: true };
         let rows = braille(&scene, 2, 1);
         assert_eq!(rows[0][0].style.fg, Some([1, 1, 1]));
+    }
+
+    #[test]
+    fn dots_mark_their_braille_dot_and_a_cell_takes_their_commonest_colour() {
+        let dot = |x: f64, y: f64, color: Rgb| Shape::Dot { x, y, radius: 5., color, alpha: 1. };
+        let (red, blue) = ([200, 0, 0], [0, 0, 200]);
+        // 4 × 4 dots across two cells: the left cell has two red and one blue, the right one blue then one red.
+        let scene = Scene {
+            shapes: vec![dot(0., 1., red), dot(0., 0., blue), dot(1. / 3., 0., red), dot(1., 1., blue), dot(1., 0., red)],
+            lines: false,
+        };
+        let rows = braille(&scene, 2, 1);
+        assert_eq!(text(&rows), ["\u{28c1}\u{2888}"]);
+        assert_eq!(rows[0][0].style.fg, Some(red), "two red to one blue");
+        assert_eq!(rows[0][1].style.fg, Some(red), "as many of each: the one that came last");
+        assert_eq!(text(&braille(&Scene { shapes: vec![dot(2., 2., red)], lines: false }, 2, 1)), ["  "], "off the picture: nothing");
     }
 
     #[test]

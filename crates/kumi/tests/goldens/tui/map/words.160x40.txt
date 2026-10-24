@@ -1,0 +1,40 @@
+ Map   Sounds 72   Songs 24
+
+  kick        12  Kick 09 · Kick 04 · Kick 12
+  snare       12  Snare 07 · Snare 09 · Snare 11
+  hat         12  Hat 03 · Hat 12 · Hat 05
+  bass        12  Bass 04 · Bass 10 · Bass 05
+  pad         12  Pad 01 · Pad 02 · Pad 04
+  vocal       12  Vox 04 · Vox 12 · Vox 07
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+ Kick 09  kick one-shot · 0.5 s  Samples / Kicks
+
+ up and down choose · space plays · enter asks Kumi · / filters · tab songs · esc closes

@@ -1,6 +1,6 @@
-//! A change's picture as shapes in a unit square (x right, y up): an equaliser's response, a compressor's curve, a
-//! clip's notes, an automation lane, an instrument's keyzones, items on the timeline. The rasterizers (RGBA for terminal graphics, braille and half-blocks for cells)
-//! draw these; nothing here knows the DAW.
+//! A picture as shapes in a unit square (x right, y up): a change's (an equaliser's response, a compressor's curve, a
+//! clip's notes, an automation lane, an instrument's keyzones, items on the timeline), or the map's points. The
+//! rasterizers (RGBA for terminal graphics, braille and half-blocks for cells) draw these; nothing here knows the DAW.
 
 use std::f64::consts::PI;
 
@@ -16,6 +16,8 @@ pub enum Shape {
     Line { points: Vec<(f64, f64)>, color: Rgb, alpha: f64, width: f64 },
     /// A filled box between two corners.
     Rect { x0: f64, y0: f64, x1: f64, y1: f64, color: Rgb, alpha: f64 },
+    /// A filled disc at (x, y), `radius` in thousandths of the picture's height.
+    Dot { x: f64, y: f64, radius: f64, color: Rgb, alpha: f64 },
 }
 
 /// What a picture draws, and whether it reads as lines (curves: braille in cells) or areas (notes: half-blocks).

@@ -913,6 +913,9 @@ a reference, sounds or values, it goes by those instead.
 - **Where it's kept.** `~/.kumi/music`, readable only by you. `/music` shows the
   folders, how many songs are heard and how it's going; it adds or removes a
   folder, pauses and resumes, and `/music forget` deletes all of it.
+- **On a map.** `/map` draws your songs by style, and your library's sounds by
+  class, songs that sound alike side by side. Move around with the arrows, hear
+  a point with Space, and Enter asks Kumi for more like it ([the keys](KUMI_TUI.md)).
 
 ## What Kumi remembers
 

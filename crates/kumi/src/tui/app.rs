@@ -9,6 +9,7 @@ mod events;
 mod input;
 mod jobs;
 mod live;
+mod map;
 mod music;
 mod panels;
 mod records;
@@ -100,6 +101,10 @@ pub struct TuiOptions {
     pub slots: Option<Rc<kumi_listening::slots::SlotsContext>>,
     /// /music: the producer's own music, which Kumi learns their taste from.
     pub music: Option<Rc<kumi_listening::music::learning::Music>>,
+    /// /map: reads the producer's sounds and songs on their maps, each time it opens.
+    pub map: Option<crate::map::LoadMap>,
+    /// What plays a point of the map.
+    pub player: Option<Rc<kumi_media::audio::player::Player>>,
     /// What's new since the producer last opened Kumi, shown once as it starts.
     pub whats_new: Option<crate::whats_new::News>,
     /// How this terminal shows Kumi's status and notifications; read from the environment when None.
@@ -175,6 +180,8 @@ impl TuiOptions {
             willington: None,
             slots: None,
             music: None,
+            map: None,
+            player: None,
             whats_new: None,
             terminal: None,
             away: AwaySettings::default(),
@@ -321,6 +328,9 @@ struct State {
     history_image: Option<String>,
     /// Pictures drawn, and images uploaded to the terminal.
     images: shown::Images,
+    /// /map while it's open, in place of the conversation, and the key of the image it has up.
+    map: Option<super::map::MapView>,
+    map_image: Option<String>,
     last_change: Option<(String, f64)>,
     last_action: Option<LastAction>,
     goal: Option<Value>,
@@ -457,6 +467,8 @@ impl State {
             expanded: None,
             history_image: None,
             images: shown::Images::default(),
+            map: None,
+            map_image: None,
             last_change: None,
             last_action: None,
             goal: None,

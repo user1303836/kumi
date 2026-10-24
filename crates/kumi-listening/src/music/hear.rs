@@ -3,7 +3,7 @@
 //! tool measures a track: up to 360 s). The file is decoded once, and only the stretch heard (a compressed file is
 //! converted from where it's heard on).
 
-use super::store::{Song, Stage, TOO_QUIET, TOO_SHORT, WONT_DECODE};
+use super::store::{song_name, Song, Stage, TOO_QUIET, TOO_SHORT, WONT_DECODE};
 use crate::{
     checklist::Profile,
     embed::{self, Say},
@@ -47,6 +47,12 @@ pub fn plan(seconds: f64, stage: Stage) -> Plan {
     let from = windows.iter().fold(profile.0, |from, at| from.min(*at));
     let until = windows.iter().fold(profile.0 + profile.1, |until, at| until.max(at + WINDOW)).min(seconds);
     Plan { profile, windows, decoded: (from, until - from) }
+}
+
+/// What of a song to play to stand for it: the window the style model hears first (halfway through), from where and
+/// how long, in seconds.
+pub fn heard_first(seconds: f64) -> (f64, f64) {
+    (plan(seconds, Stage::Light).windows[0], WINDOW.min(seconds))
 }
 
 /// What hearing a song gave.
@@ -138,11 +144,7 @@ pub struct Ears<'a> {
 
 /// A song's name as its profile carries it.
 pub fn label(song: &Song) -> String {
-    match (&song.tags.artist, &song.tags.title) {
-        (Some(artist), Some(title)) => format!("{artist} – {title}"),
-        (None, Some(title)) => title.clone(),
-        _ => song.path.rsplit(['/', '\\']).next().unwrap_or("").to_string(),
-    }
+    song_name(song.tags.artist.as_deref(), song.tags.title.as_deref(), &song.path)
 }
 
 /// How long a song is: its tags' length, else its file's (read as far as a full listen reaches).
