@@ -91,31 +91,51 @@ async fn a_stretch_of_a_file_plays_at_the_outputs_rate_in_each_of_its_channels()
     assert!(player.playing());
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn one_sound_at_a_time_a_new_one_takes_over_and_a_stop_ends_it() {
-    let folder = tempfile::tempdir().unwrap();
-    let file = tones(folder.path());
-    let (fake, player) = fake(44_100, 1);
-    player.play(&file, 0., 0.1, Signal::new()).await.unwrap();
-    player.play(&file, 0.5, 0.1, Signal::new()).await.unwrap();
-    assert_eq!(fake.started.borrow().len(), 2, "each handed over in its turn");
-    player.stop();
-    assert!(!player.playing());
-    assert_eq!(fake.stops.get(), 1);
-    // A play asked for while another's file is still being read: only the later one plays.
-    let (first, second) = tokio::join!(player.play(&file, 0., 0.1, Signal::new()), player.play(&file, 0.5, 0.1, Signal::new()));
-    assert_eq!((first, second), (Ok(()), Ok(())), "the one overtaken isn't an error");
-    let started = fake.started.borrow().clone();
-    assert_eq!(started.len(), 3);
-    let pitch = crossings_a_second(&started[2], 44_100.) / 2.;
-    assert!((pitch - 1_000.).abs() < 25., "the later one: {pitch} Hz");
-    // A stop while a file is still being read: nothing plays.
-    let (stopped, _) = tokio::join!(player.play(&file, 0., 0.1, Signal::new()), async {
-        tokio::task::yield_now().await;
-        player.stop();
+/// The runtime's one thread for blocking work, kept busy until the sender is dropped: a play's file read waits behind
+/// it, so a test can say what happens while a file is still being read, however fast the computer reads it.
+fn reads_held() -> std::sync::mpsc::Sender<()> {
+    let (release, held) = std::sync::mpsc::channel::<()>();
+    tokio::task::spawn_blocking(move || {
+        let _ = held.recv();
     });
-    assert_eq!(stopped, Ok(()));
-    assert_eq!(fake.started.borrow().len(), 3, "nothing more handed over");
+    release
+}
+
+#[test]
+fn one_sound_at_a_time_a_new_one_takes_over_and_a_stop_ends_it() {
+    let runtime = tokio::runtime::Builder::new_current_thread().max_blocking_threads(1).enable_all().build().unwrap();
+    runtime.block_on(async {
+        let folder = tempfile::tempdir().unwrap();
+        let file = tones(folder.path());
+        let (fake, player) = fake(44_100, 1);
+        player.play(&file, 0., 0.1, Signal::new()).await.unwrap();
+        player.play(&file, 0.5, 0.1, Signal::new()).await.unwrap();
+        assert_eq!(fake.started.borrow().len(), 2, "each handed over in its turn");
+        player.stop();
+        assert!(!player.playing());
+        assert_eq!(fake.stops.get(), 1);
+        // A play asked for while another's file is still being read: only the later one plays.
+        let release = reads_held();
+        let (first, second, _) =
+            tokio::join!(player.play(&file, 0., 0.1, Signal::new()), player.play(&file, 0.5, 0.1, Signal::new()), async {
+                tokio::task::yield_now().await;
+                drop(release);
+            });
+        assert_eq!((first, second), (Ok(()), Ok(())), "the one overtaken isn't an error");
+        let started = fake.started.borrow().clone();
+        assert_eq!(started.len(), 3);
+        let pitch = crossings_a_second(&started[2], 44_100.) / 2.;
+        assert!((pitch - 1_000.).abs() < 25., "the later one: {pitch} Hz");
+        // A stop while a file is still being read: nothing plays.
+        let release = reads_held();
+        let (stopped, _) = tokio::join!(player.play(&file, 0., 0.1, Signal::new()), async {
+            tokio::task::yield_now().await;
+            player.stop();
+            drop(release);
+        });
+        assert_eq!(stopped, Ok(()));
+        assert_eq!(fake.started.borrow().len(), 3, "nothing more handed over");
+    });
 }
 
 #[tokio::test(flavor = "current_thread")]

@@ -23,7 +23,7 @@ use kumi_listening::{
 use kumi_types::daw::DawProfile;
 use serde_json::{json, Value};
 use std::{
-    cell::RefCell,
+    cell::{Cell, RefCell},
     path::{Path, PathBuf},
     rc::Rc,
 };
@@ -109,6 +109,22 @@ impl Style for Fixed {
     }
     async fn embed(&self, _: &Path, _: &[f64], _: Option<f64>, _: Say<'_>, _: &Signal) -> Result<(Vec<f32>, String), String> {
         Ok((direction(3, 0, 0), MODEL.into()))
+    }
+}
+
+/// A style model that hears nothing until the scan stops, and says when it began: the scan is mid-song for as long as
+/// the test needs.
+struct Held(Rc<Cell<bool>>);
+
+#[async_trait(?Send)]
+impl Style for Held {
+    fn model(&self) -> &str {
+        MODEL
+    }
+    async fn embed(&self, _: &Path, _: &[f64], _: Option<f64>, _: Say<'_>, signal: &Signal) -> Result<(Vec<f32>, String), String> {
+        self.0.set(true);
+        signal.cancelled().await;
+        Err("stopped".into())
     }
 }
 
@@ -291,6 +307,36 @@ fn a_yes_keeps_the_folders_and_starts_learning_and_forget_takes_it_all_away() {
             .await
             .unwrap();
         assert!(refused.is_error);
+    });
+}
+
+#[test]
+fn forgotten_while_a_song_is_heard_nothing_is_learning_or_counted_after() {
+    local(async {
+        let dir = tempfile::tempdir().unwrap();
+        let songs = dir.path().join("Music");
+        std::fs::create_dir_all(songs.join("A/B")).unwrap();
+        let tone: Vec<f32> = (0..8_000 * 40).map(|n| 0.3 * (n as f32 * 0.35).sin()).collect();
+        std::fs::write(songs.join("A/B/01 One.wav"), kumi_media::audio::decode::float_wav(&[tone], 8_000)).unwrap();
+        let kumi = dir.path().join("kumi/music");
+        let hearing = Rc::new(Cell::new(false));
+        let mut options = MusicOptions::new(kumi.clone(), None, Default::default());
+        (options.fork, options.style, options.delay_ms) = (false, Some(Rc::new(Held(hearing.clone())) as Rc<dyn Style>), 3_600_000);
+        let taste = create_music(options);
+        taste.learn(vec![songs.to_string_lossy().into_owned()]).unwrap();
+        for _ in 0..1_000 {
+            if hearing.get() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        assert!(hearing.get(), "the scan hears the song: {:?}", taste.status());
+        taste.forget().await.unwrap();
+        // What the scan said as it stopped, and the counts read from music.db as it went, are behind it.
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        let status = taste.status();
+        assert_eq!((status.state, status.songs, status.light, status.full), (MusicState::Off, 0, 0, 0), "{status:?}");
+        assert!(!kumi.exists());
     });
 }
 

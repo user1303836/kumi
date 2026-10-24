@@ -147,6 +147,8 @@ pub struct Music {
     /// Learn again as soon as the scan under way has stopped (the folders changed, or the producer asked).
     again: Cell<bool>,
     closed: Cell<bool>,
+    /// Counts forgets: music.db's counts read before one are out of date after it.
+    forgets: Cell<u64>,
     timer: RefCell<Option<JoinHandle<()>>>,
 }
 
@@ -171,6 +173,7 @@ pub fn create_music(options: MusicOptions) -> Rc<Music> {
         held: Cell::new(false),
         again: Cell::new(false),
         closed: Cell::new(false),
+        forgets: Cell::new(0),
         timer: RefCell::new(None),
     });
     music.read_counts();
@@ -237,6 +240,7 @@ impl Music {
     pub async fn forget(self: &Rc<Self>) -> Result<(), String> {
         self.set_folders(None)?;
         self.stopped().await;
+        self.forgets.set(self.forgets.get() + 1);
         let dir = self.dir();
         let mut removed = tokio::fs::remove_dir_all(&dir).await;
         // A file the scan held a moment longer (Windows): once more, shortly.
@@ -311,7 +315,7 @@ impl Music {
 
     /// The counts music.db holds now, read off the app's thread.
     fn read_counts(&self) {
-        let (weak, file) = (self.weak.clone(), database(&self.dir()));
+        let (weak, file, forgets) = (self.weak.clone(), database(&self.dir()), self.forgets.get());
         tokio::task::spawn_local(async move {
             let read = tokio::task::spawn_blocking(move || {
                 let store = MusicStore::open_read(&file).ok().flatten()?;
@@ -321,7 +325,9 @@ impl Music {
             .await
             .ok()
             .flatten();
-            if let (Some(music), Some((counts, learned_at))) = (weak.upgrade(), read) {
+            // Read before a forget: music.db went since, and its counts with it.
+            let music = weak.upgrade().filter(|music| music.forgets.get() == forgets);
+            if let (Some(music), Some((counts, learned_at))) = (music, read) {
                 music.update(|status| {
                     (status.songs, status.light, status.full, status.skipped) = (counts.songs, counts.light, counts.full, counts.skipped);
                     status.learned_at = status.learned_at.max(learned_at);
@@ -413,6 +419,11 @@ impl Music {
     }
 
     fn heard(&self, reply: ScanReply) {
+        // Kumi stopped learning (forgotten, or every folder taken away) while a scan still ran: what it says as it stops
+        // changes nothing.
+        if self.folders().is_empty() {
+            return;
+        }
         let progress_of = |status: &mut MusicStatus, progress: &ScanProgress| {
             (status.songs, status.light, status.full, status.skipped) = (progress.songs, progress.light, progress.full, progress.skipped);
             if let Some(why) = &progress.unstyled {
