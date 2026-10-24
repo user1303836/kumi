@@ -3,6 +3,23 @@
 Kumi's releases. The Ableton bridge (`crates/ableton-mcp-server`) is versioned on its own;
 each Kumi release names the bridge it ships with.
 
+## 1.23.0 — 2026-10-24
+
+Ships with bridge 1.0.94, as 1.22.0 did.
+
+- Kumi can learn your taste from your own music folder, on your computer, and lean on it when you
+  leave the style open. /music shows and manages it.
+- Ask Kumi to make something like your own music: it measures your nearest songs and works toward
+  them.
+- Describe a style in plain words and Kumi finds the songs in your music that sound like it.
+- tune and sound matching remember what worked on each device and start from it next time.
+- /map draws your sounds and songs as a map: move around it, hear a point with Space, and find more
+  like it.
+- /map open shows the map in your browser, with names on hover and click to play.
+
+Tested with Live 12.4 on macOS. On Windows, installing and updating are tested; using Kumi with Live
+there is still new.
+
 ## 1.22.0 — 2026-10-24
 
 Ships with bridge 1.0.94, as 1.21.2 did.
