@@ -8,7 +8,7 @@ use super::{
     vectors::{VectorReader, DIMS},
 };
 use kumi_common::time::now_ms;
-use kumi_layout::{layout, Layout};
+use kumi_layout::{layout_until, Layout};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
@@ -71,6 +71,18 @@ pub fn changed(store: &MusicStore, reader: &VectorReader) -> Result<Changed, Mus
 
 /// The map made again from the songs `model` heard: each one's place, and what it was made from. How many it placed.
 pub fn lay_out(store: &mut MusicStore, music_dir: &Path, model: &str, how: &Layout) -> Result<usize, MusicError> {
+    Ok(lay_out_until(store, music_dir, model, how, &|| true)?.unwrap_or(0))
+}
+
+/// `lay_out`, asking `go_on` as the layout works (`kumi_layout::layout_until`): it may wait there (the scan waits while
+/// Kumi listens), and false ends it with nothing written (None).
+pub fn lay_out_until(
+    store: &mut MusicStore,
+    music_dir: &Path,
+    model: &str,
+    how: &Layout,
+    go_on: &(dyn Fn() -> bool + Sync),
+) -> Result<Option<usize>, MusicError> {
     let reader = VectorReader::open(music_dir, store, model)?;
     // In the songs' order (by id), so the same songs make the same map.
     let mut ids: Vec<i64> = store.heard_ids()?.into_iter().filter(|id| reader.has(*id)).collect();
@@ -79,11 +91,11 @@ pub fn lay_out(store: &mut MusicStore, music_dir: &Path, model: &str, how: &Layo
         Some(vector) => buffer.copy_from_slice(&vector[..DIMS]),
         None => buffer.fill(0.),
     };
-    let places = layout(ids.len(), DIMS, &read, how);
+    let Some(places) = layout_until(ids.len(), DIMS, &read, how, go_on) else { return Ok(None) };
     store.set_places(&ids.iter().copied().zip(places).collect::<Vec<_>>())?;
     let made = Made { model: model.to_string(), songs: ids.len(), made: now_ms() };
     store.set_meta("map", &serde_json::to_string(&made).map_err(|error| MusicError(error.to_string()))?)?;
-    Ok(ids.len())
+    Ok(Some(ids.len()))
 }
 
 #[cfg(test)]

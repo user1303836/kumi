@@ -264,6 +264,16 @@ fn holder(control: &Control, battery: (Option<Instant>, bool)) -> impl Fn() + Se
     }
 }
 
+/// What a layout asks as it works: it waits while the scan should (paused, on its battery), and goes on unless the scan
+/// was stopped.
+fn going(control: &Control, battery: (Option<Instant>, bool)) -> impl Fn() -> bool + Send + Sync + 'static {
+    let (hold, stop) = (holder(control, battery), control.stop.clone());
+    move || {
+        hold();
+        !stop.is_cancelled()
+    }
+}
+
 /// The library's places and the producer's sample folders: the walk leaves them out (and the offer's count).
 pub fn skipped_folders(daws: Daws, library_folders: &[String]) -> Vec<String> {
     let mut skip: Vec<String> = library_folders.to_vec();
@@ -557,12 +567,14 @@ pub async fn run(
             (store, clusters) = (back, made);
         }
         if remap {
+            // It waits while Kumi listens, as hearing does; a stop ends it, and the loop with it.
             let (back, laid) = blocking(store, {
-                let (dir, model) = (dir.clone(), model.clone());
-                move |store| map::lay_out(store, &dir, &model, &Layout::default())
+                let (dir, model, go_on) = (dir.clone(), model.clone(), going(control, battery));
+                move |store| map::lay_out_until(store, &dir, &model, &Layout::default(), &go_on)
             })
             .await?;
-            (store, mapped) = (back, Some(laid));
+            store = back;
+            mapped = laid.or(mapped);
         }
         if counted_at.elapsed() >= COUNTED_EVERY {
             counted_at = Instant::now();
@@ -597,10 +609,14 @@ pub async fn run(
                 store = back;
             }
             if changed.places || map::due(mapped, hearing.styled, true) {
-                let (back, _) = blocking(store, move |store| map::lay_out(store, &dir, &model, &Layout::default())).await?;
+                let go_on = going(control, battery);
+                let (back, _) = blocking(store, move |store| map::lay_out_until(store, &dir, &model, &Layout::default(), &go_on)).await?;
                 store = back;
             }
         }
+    }
+    // Stopped while the map was made: what was heard stays, and the next run makes it.
+    if !control.stop.is_cancelled() {
         progress.phase = ScanPhase::Done;
         progress.finished_at = Some(now_ms());
         store.set_meta("learned_at", &now_ms().to_string())?;
@@ -691,4 +707,29 @@ pub async fn main(daws: Daws, tools: Option<String>) -> io::Result<()> {
     input.abort();
     write.await.map_err(io::Error::other)??;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_layout_waits_while_the_scan_is_paused_and_ends_when_its_stopped() {
+        let control = Control::new(false);
+        let go_on = going(&control, (None, false));
+        assert!(go_on(), "neither paused nor stopped: it goes on");
+        control.pause(true);
+        let done = AtomicBool::new(false);
+        std::thread::scope(|scope| {
+            let waiting = scope.spawn(|| {
+                let went = go_on();
+                done.store(true, Ordering::Relaxed);
+                went
+            });
+            std::thread::sleep(Duration::from_millis(400));
+            assert!(!done.load(Ordering::Relaxed), "paused: it waits");
+            control.stop();
+            assert!(!waiting.join().unwrap(), "stopped: it ends");
+        });
+    }
 }

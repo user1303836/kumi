@@ -640,3 +640,40 @@ fn the_songs_taste_used_are_found_by_their_own_index() {
     let plan: Vec<String> = statement.query_map([], |row| row.get(3)).unwrap().map(Result::unwrap).collect();
     assert!(plan.iter().any(|step| step.contains("songs_used")), "{plan:?}");
 }
+
+#[test]
+fn a_map_told_to_end_places_nothing_and_one_held_waits() {
+    let dir = tempfile::tempdir().unwrap();
+    let kumi = dir.path().join("kumi");
+    let mut store = MusicStore::open(&database(&kumi)).unwrap();
+    let ids = heard_rows(&mut store, 12);
+    let mut writer = VectorWriter::open(&kumi, "model").unwrap();
+    for (n, id) in ids.iter().enumerate() {
+        writer.put(&store, *id, &pointing(n % 3)).unwrap();
+    }
+    writer.settle(&store).unwrap();
+    let how = kumi_layout::Layout { threads: 1, ..Default::default() };
+    // Stopped: nothing placed, no map made.
+    assert_eq!(map::lay_out_until(&mut store, &kumi, "model", &how, &|| false).unwrap(), None);
+    let placed: i64 = store.connection().query_row("SELECT count(*) FROM songs WHERE x IS NOT NULL", [], |row| row.get(0)).unwrap();
+    assert_eq!((placed, map::made(&store).unwrap()), (0, None));
+    // Held (Kumi listens): it waits, then goes on.
+    let (held, done) = (AtomicBool::new(true), AtomicBool::new(false));
+    std::thread::scope(|scope| {
+        scope.spawn(|| {
+            let go_on = || {
+                while held.load(Ordering::Relaxed) {
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+                true
+            };
+            assert_eq!(map::lay_out_until(&mut store, &kumi, "model", &how, &go_on).unwrap(), Some(12));
+            done.store(true, Ordering::Relaxed);
+        });
+        std::thread::sleep(Duration::from_millis(300));
+        assert!(!done.load(Ordering::Relaxed), "held: no map yet");
+        held.store(false, Ordering::Relaxed);
+    });
+    assert!(done.load(Ordering::Relaxed));
+    assert_eq!(map::made(&store).unwrap().map(|made| made.songs), Some(12));
+}

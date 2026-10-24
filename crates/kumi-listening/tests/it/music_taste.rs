@@ -307,7 +307,8 @@ fn an_offer_another_kumi_made_since_isnt_made_again() {
             })
         });
         let taste = create_music(options);
-        assert_eq!(ask(&taste, json!({})).await, r#"{"learned":0}"#);
+        let answer: Value = serde_json::from_str(&ask(&taste, json!({})).await).unwrap();
+        assert!(answer.get("offer").is_none() && answer["learned"] == 0, "no second offer: {answer}");
         assert!(asked.get() > 0, "the settings were asked before offering");
     });
 }
