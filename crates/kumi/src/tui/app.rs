@@ -333,6 +333,12 @@ struct State {
     map_image: Option<String>,
     /// /map open: the map served to the browser, until /map close or Kumi quits.
     map_page: Option<crate::map_server::MapServer>,
+    /// Counts /map open and what stops one (/map close, the music changing): a map read for an older one doesn't open;
+    /// and whether one is being read.
+    map_page_asked: u64,
+    map_page_opening: bool,
+    /// Counts the map's plays, stops and closings: only the latest play says when it ended.
+    map_play: u64,
     last_change: Option<(String, f64)>,
     last_action: Option<LastAction>,
     goal: Option<Value>,
@@ -472,6 +478,9 @@ impl State {
             map: None,
             map_image: None,
             map_page: None,
+            map_page_asked: 0,
+            map_page_opening: false,
+            map_play: 0,
             last_change: None,
             last_action: None,
             goal: None,

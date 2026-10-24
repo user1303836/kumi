@@ -276,10 +276,25 @@ function described(at) {
   return { name: points.name[at], place: each.places[points.place[at]], tags: each.tags[points.tags[at]] };
 }
 
+/* Why the clip asked for didn't play, until one plays. */
+let unplayed = false;
+function playSaid(words) { status(words); unplayed = Boolean(words); }
+audio.addEventListener("playing", () => { if (unplayed) playSaid(""); });
+
 function play(at) {
   audio.pause();
-  audio.src = "audio/" + encodeURIComponent(idOf(at));
-  audio.play().catch(() => status("This browser didn't play it."));
+  const clip = "audio/" + encodeURIComponent(idOf(at));
+  const asked = () => audio.src.endsWith("/" + clip);
+  audio.src = clip;
+  audio.play().catch((error) => {
+    // Another clip, Space or Esc before this one began: nothing went wrong.
+    if (error.name === "AbortError" || !asked()) return;
+    // Kumi says why it couldn't make the clip; one it made that didn't play is this browser's to say.
+    fetch(clip, { headers: { Range: "bytes=0-0" } })
+      .then((answer) => (answer.ok ? "This browser didn't play it." : answer.text()))
+      .catch(() => "Kumi couldn't send it: is it still running?")
+      .then((words) => { if (asked()) playSaid(words); });
+  });
 }
 
 async function act(action, at) {

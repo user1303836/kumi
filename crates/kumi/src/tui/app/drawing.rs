@@ -82,7 +82,7 @@ impl TuiApp {
             self.present(screen, cursor);
             return;
         }
-        if self.map_open() {
+        if self.map_shown() {
             self.keep_tree_fresh(None);
             let cursor = self.draw_map(&mut screen).filter(|_| !self.0.state.borrow().closing);
             self.present(screen, cursor);

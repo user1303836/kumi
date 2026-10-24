@@ -3,18 +3,25 @@
 //! milliseconds long so nothing clicks. The file is read as Kumi reads any (WAV and AIFF in place, other formats
 //! converted, only the stretch played), resampled to the output's rate and handed to it whole.
 //!
-//! The output is the computer's default one, through cpal: Core Audio on a Mac, WASAPI on Windows. On Linux cpal needs
-//! ALSA's library to build and to run, which Kumi's Linux bundle doesn't carry, so there the player is off unless Kumi
-//! was built with kumi-media's `linux-player`. Nothing opens the output until something plays.
+//! The output is the computer's default one, through cpal: Core Audio on a Mac, WASAPI on Windows. It opens, plays and
+//! closes on a thread of its own, never on Kumi's, and rests (its stream paused, holding neither the device nor the
+//! computer awake) once nothing has played for a few seconds. On Linux cpal needs ALSA's library to build and to run,
+//! which Kumi's Linux bundle doesn't carry, so there the player is off unless Kumi was built with kumi-media's
+//! `linux-player`. Nothing opens the output until something plays.
 
 use super::{
     decode::{open_audio_to, prepare_audio_range},
     dsp::resample,
 };
-use kumi_common::abort::Signal;
+use kumi_common::{abort::Signal, js::number::to_string};
 use std::{
     cell::{Cell, RefCell},
     path::Path,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        mpsc, Mutex,
+    },
+    time::{Duration, Instant},
 };
 
 /// How long a fade in or out takes, seconds: short enough not to be heard as one, long enough not to click.
@@ -44,6 +51,15 @@ pub enum PlayerError {
     Stopped,
 }
 
+/// What became of a play.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Played {
+    /// It began: it plays for its length, unless another play or a stop comes.
+    Began,
+    /// Another play, or a stop, came while its file was read: none of it played.
+    Overtaken,
+}
+
 /// Where the player's sound goes: the computer's output, or a test's.
 pub trait Output {
     fn format(&self) -> Format;
@@ -60,14 +76,26 @@ pub trait Output {
     }
 }
 
-/// How the player opens its output: the computer's default one (`open_default`), or a test's.
+/// How a test's player opens its output.
 pub type Opener = Box<dyn Fn() -> Result<Box<dyn Output>, PlayerError>>;
 
+/// Where the player's output comes from.
+enum Opens {
+    /// The computer's default one, opened on a thread of its own.
+    Default,
+    /// A test's.
+    With(Opener),
+}
+
 pub struct Player {
-    opener: Opener,
+    opens: Opens,
     output: RefCell<Option<Box<dyn Output>>>,
+    /// One output opens at a time: a play asked while one opens waits for it, and plays through it.
+    opening: tokio::sync::Mutex<()>,
     /// Counts plays and stops: a play whose file is still being read when another play or a stop comes plays nothing.
     turn: Cell<u64>,
+    /// The latest play's: the next play or a stop cancels it, so a file still being read stops being read.
+    reading: RefCell<Signal>,
 }
 
 impl Default for Player {
@@ -79,28 +107,45 @@ impl Default for Player {
 impl Player {
     /// A player through the computer's default output, opened the first time something plays.
     pub fn new() -> Self {
-        Self::with_opener(Box::new(open_default))
+        Self::opening(Opens::Default)
     }
 
     pub fn with_opener(opener: Opener) -> Self {
-        Self { opener, output: RefCell::new(None), turn: Cell::new(0) }
+        Self::opening(Opens::With(opener))
     }
 
-    /// Plays `seconds` of a file from `from` (seconds into it), in place of whatever plays; done once it has begun. When
-    /// another play or a stop comes while the file is still being read, this one plays nothing (and isn't an error).
-    pub async fn play(&self, path: impl AsRef<Path>, from: f64, seconds: f64, signal: Signal) -> Result<(), PlayerError> {
+    fn opening(opens: Opens) -> Self {
+        Self {
+            opens,
+            output: RefCell::new(None),
+            opening: tokio::sync::Mutex::new(()),
+            turn: Cell::new(0),
+            reading: RefCell::new(Signal::new()),
+        }
+    }
+
+    /// Plays `seconds` of a file from `from` (seconds into it), in place of whatever plays: Began once it has. When
+    /// another play or a stop comes while the file is still being read, this one stops reading it and plays nothing:
+    /// Overtaken, which isn't an error.
+    pub async fn play(&self, path: impl AsRef<Path>, from: f64, seconds: f64) -> Result<Played, PlayerError> {
         let turn = self.turn.get() + 1;
         self.turn.set(turn);
+        let signal = Signal::new();
+        self.reading.replace(signal.clone()).cancel();
+        let overtaken = || self.turn.get() != turn;
         // The output first: with none, there's nothing to read the file for.
-        let format = self.opened()?;
-        let clip = stretch(path.as_ref(), from, seconds, &signal).await?;
+        let format = self.opened().await?;
+        if overtaken() {
+            return Ok(Played::Overtaken);
+        }
+        let clip = match stretch(path.as_ref(), from, seconds, &signal).await {
+            Err(_) if overtaken() => return Ok(Played::Overtaken),
+            clip => clip?,
+        };
         let samples =
             tokio::task::spawn_blocking(move || shaped(clip, format)).await.map_err(|error| PlayerError::Output(error.to_string()))?;
-        if self.turn.get() != turn {
-            return Ok(());
-        }
-        if signal.is_cancelled() {
-            return Err(PlayerError::Stopped);
+        if overtaken() {
+            return Ok(Played::Overtaken);
         }
         // The output may have changed while the file was read (another default chosen): the sound is for this one.
         let started = match self.output.borrow().as_ref() {
@@ -111,12 +156,13 @@ impl Player {
             // Opened afresh for the next sound.
             self.output.borrow_mut().take();
         }
-        started
+        started.map(|()| Played::Began)
     }
 
     /// Ends the sound playing, and a play still reading its file.
     pub fn stop(&self) {
         self.turn.set(self.turn.get() + 1);
+        self.reading.borrow().cancel();
         if let Some(output) = self.output.borrow().as_ref() {
             output.stop();
         }
@@ -128,14 +174,19 @@ impl Player {
     }
 
     /// The output, opened when there's none yet or it isn't where sound should go any more: how it plays.
-    fn opened(&self) -> Result<Format, PlayerError> {
+    async fn opened(&self) -> Result<Format, PlayerError> {
+        let _one = self.opening.lock().await;
         if let Some(output) = self.output.borrow().as_ref().filter(|output| output.current()) {
             return Ok(output.format());
         }
+        // What the one before plays fades out, on its own thread, before it closes.
         if let Some(gone) = self.output.borrow_mut().take() {
             gone.stop();
         }
-        let output = (self.opener)()?;
+        let output = match &self.opens {
+            Opens::Default => open_default().await?,
+            Opens::With(opener) => opener()?,
+        };
         let format = output.format();
         if format.rate == 0 || format.channels == 0 {
             return Err(PlayerError::Output(format!("it plays {} channels at {} Hz", format.channels, format.rate)));
@@ -154,6 +205,12 @@ pub async fn stretch(path: &Path, from: f64, seconds: f64, signal: &Signal) -> R
     let prepared = prepare_audio_range(path, Some(signal.clone()), from, seconds).await.map_err(stopped)?;
     let mut source = open_audio_to(&prepared.path, Some(signal.clone()), None).await.map_err(stopped)?;
     let rate = source.sample_rate;
+    // A rate no file has (a broken header's): nothing is sized from it.
+    if !(8000.0..=384000.0).contains(&rate) {
+        let _ = source.close().await;
+        prepared.cleanup().await;
+        return Err(PlayerError::File(format!("Kumi can't play it: it says its sample rate is {} Hz.", to_string(rate))));
+    }
     // Seconds of the file, as seconds of what was converted.
     source.seek((from - prepared.start).max(0.) * rate);
     let wanted = (seconds * rate).round() as usize;
@@ -180,8 +237,8 @@ pub async fn stretch(path: &Path, from: f64, seconds: f64, signal: &Signal) -> R
     Ok((channels, rate))
 }
 
-/// A clip as an output plays it: at its rate, in its channels (one channel heard in each of them; two in the first two,
-/// or mixed into one), faded in and out.
+/// A clip as an output plays it: at its rate, in its first two channels (one channel heard in both; two each in its
+/// own, or mixed into one), faded in and out. An interface's other outputs stay silent.
 fn shaped((channels, rate): (Vec<Vec<f32>>, f64), format: Format) -> Vec<f32> {
     let resampled: Vec<Vec<f32>> = channels.iter().map(|channel| resample(channel, rate, format.rate as f64)).collect();
     let frames = resampled.iter().map(Vec::len).min().unwrap_or(0);
@@ -191,14 +248,11 @@ fn shaped((channels, rate): (Vec<Vec<f32>>, f64), format: Format) -> Vec<f32> {
     for frame in 0..frames {
         let gain = ((frame + 1).min(frames - frame) as f32 / fade as f32).min(1.);
         for channel in 0..wide {
-            let value = match resampled.as_slice() {
-                [mono] => mono[frame],
-                [left, right] if wide == 1 => (left[frame] + right[frame]) / 2.,
-                [left, right] => match channel {
-                    0 => left[frame],
-                    1 => right[frame],
-                    _ => 0.,
-                },
+            let value = match (resampled.as_slice(), channel) {
+                ([mono], 0 | 1) => mono[frame],
+                ([left, right], _) if wide == 1 => (left[frame] + right[frame]) / 2.,
+                ([left, _], 0) => left[frame],
+                ([_, right], 1) => right[frame],
                 _ => 0.,
             };
             samples.push((value * gain).clamp(-1., 1.));
@@ -266,57 +320,168 @@ impl Playback {
     }
 }
 
-/// The computer's default output: Core Audio on a Mac, WASAPI on Windows, ALSA on Linux with `linux-player`.
+/// What Kumi's thread asks an output's own thread. (Without the player, as on Linux, only its tests use it.)
+#[cfg_attr(all(target_os = "linux", not(feature = "linux-player")), allow(dead_code))]
+pub(crate) enum Asked {
+    /// A sound was handed over: the stream plays (again, if it rested).
+    Play,
+    /// The output is done with: what plays fades out, and it closes.
+    Close,
+}
+
+/// What an output's thread runs: cpal's stream, or a test's.
+#[cfg_attr(all(target_os = "linux", not(feature = "linux-player")), allow(dead_code))]
+pub(crate) trait Runs {
+    fn play(&self) -> Result<(), String>;
+    fn pause(&self);
+}
+
+/// An output's own thread, until it's closed (or Kumi's side goes): the stream plays when a sound is handed over and
+/// rests (paused) once nothing has played for `idle`; on closing, what plays fades out first (over `fade` frames,
+/// waited for a fifth of a second at most), so a sound that's replaced doesn't click.
+#[cfg_attr(all(target_os = "linux", not(feature = "linux-player")), allow(dead_code))]
+pub(crate) fn serve(
+    stream: &dyn Runs,
+    playback: &Mutex<Playback>,
+    broken: &AtomicBool,
+    asked: &mpsc::Receiver<Asked>,
+    fade: usize,
+    idle: Duration,
+) {
+    let lock = || playback.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let tick = (idle / 4).clamp(Duration::from_millis(5), Duration::from_millis(100));
+    let (mut running, mut quiet) = (false, None::<Instant>);
+    loop {
+        match asked.recv_timeout(tick) {
+            Ok(Asked::Play) => {
+                if !running && stream.play().is_err() {
+                    broken.store(true, Ordering::Relaxed);
+                }
+                (running, quiet) = (true, None);
+            }
+            Ok(Asked::Close) | Err(mpsc::RecvTimeoutError::Disconnected) => break,
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+        }
+        if !running || lock().playing() {
+            quiet = None;
+        } else if quiet.get_or_insert_with(Instant::now).elapsed() >= idle {
+            stream.pause();
+            (running, quiet) = (false, None);
+        }
+    }
+    if running {
+        lock().stop(fade);
+        let until = Instant::now() + Duration::from_millis(200);
+        while lock().playing() && Instant::now() < until {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+}
+
+/// The computer's default output, opened on its own thread: Core Audio on a Mac, WASAPI on Windows, ALSA on Linux with
+/// `linux-player`.
 #[cfg(any(not(target_os = "linux"), feature = "linux-player"))]
-pub fn open_default() -> Result<Box<dyn Output>, PlayerError> {
-    device::open().map(|output| Box::new(output) as Box<dyn Output>)
+async fn open_default() -> Result<Box<dyn Output>, PlayerError> {
+    device::open().await.map(|output| Box::new(output) as Box<dyn Output>)
 }
 
 /// Off: this Kumi was built without its player (Linux, without `linux-player`).
 #[cfg(all(target_os = "linux", not(feature = "linux-player")))]
-pub fn open_default() -> Result<Box<dyn Output>, PlayerError> {
+async fn open_default() -> Result<Box<dyn Output>, PlayerError> {
     Err(PlayerError::Off)
 }
 
 #[cfg(any(not(target_os = "linux"), feature = "linux-player"))]
 mod device {
-    use super::{Format, Output, Playback, PlayerError, FADE};
+    use super::{serve, Asked, Format, Output, Playback, PlayerError, Runs, FADE};
     use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-    use std::sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc, Mutex, MutexGuard,
+    use std::{
+        sync::{
+            atomic::{AtomicBool, Ordering},
+            mpsc, Arc, Mutex, MutexGuard,
+        },
+        time::Duration,
     };
 
-    /// The computer's default output, through cpal: a stream that plays the sound it's given, and silence after it.
+    /// How long the stream runs on with nothing to play before it rests.
+    const IDLE: Duration = Duration::from_secs(3);
+
+    /// The computer's default output, through cpal, on a thread of its own: the device opens, plays, rests and closes
+    /// there, never on Kumi's thread. Its stream plays the sound it's given, then silence, until it rests.
     pub(super) struct DeviceOutput {
-        stream: cpal::Stream,
         format: Format,
         /// Which device it is, to notice another default chosen since.
         id: Option<cpal::DeviceId>,
         playback: Arc<Mutex<Playback>>,
         /// The device went (unplugged, its driver restarted): the next sound opens the output again.
         broken: Arc<AtomicBool>,
+        asks: mpsc::Sender<Asked>,
     }
 
-    pub(super) fn open() -> Result<DeviceOutput, PlayerError> {
+    struct Cpal(cpal::Stream);
+
+    impl Runs for Cpal {
+        fn play(&self) -> Result<(), String> {
+            self.0.play().map_err(|error| error.to_string())
+        }
+        fn pause(&self) {
+            let _ = self.0.pause();
+        }
+    }
+
+    /// Whether an error from the stream ends it: an underrun, a route the system followed or a refused real-time
+    /// promotion leave it playing.
+    pub(super) fn breaks(kind: cpal::ErrorKind) -> bool {
+        !matches!(kind, cpal::ErrorKind::Xrun | cpal::ErrorKind::DeviceChanged | cpal::ErrorKind::RealtimeDenied)
+    }
+
+    fn fade(format: Format) -> usize {
+        (format.rate as f64 * FADE).round() as usize
+    }
+
+    pub(super) async fn open() -> Result<DeviceOutput, PlayerError> {
+        let (playback, broken) = (Arc::new(Mutex::new(Playback::default())), Arc::new(AtomicBool::new(false)));
+        let (asks, asked) = mpsc::channel();
+        let (opened, open) = tokio::sync::oneshot::channel();
+        let (played, gone) = (playback.clone(), broken.clone());
+        std::thread::Builder::new()
+            .name("kumi-player".into())
+            .spawn(move || match built(&played, &gone) {
+                Ok((stream, format, id)) => {
+                    let _ = opened.send(Ok((format, id)));
+                    serve(&Cpal(stream), &played, &gone, &asked, fade(format), IDLE);
+                }
+                Err(error) => {
+                    let _ = opened.send(Err(error));
+                }
+            })
+            .map_err(|error| PlayerError::Output(error.to_string()))?;
+        let (format, id) = open.await.map_err(|_| PlayerError::Output("its thread ended".into()))??;
+        Ok(DeviceOutput { format, id, playback, broken, asks })
+    }
+
+    /// The default device's stream (not playing yet), on the thread that runs it.
+    fn built(
+        playback: &Arc<Mutex<Playback>>,
+        broken: &Arc<AtomicBool>,
+    ) -> Result<(cpal::Stream, Format, Option<cpal::DeviceId>), PlayerError> {
         let device = cpal::default_host().default_output_device().ok_or(PlayerError::NoOutput)?;
         let wouldnt = |error: cpal::Error| PlayerError::Output(error.to_string());
         let supported = device.default_output_config().map_err(wouldnt)?;
         let format = Format { rate: supported.sample_rate(), channels: supported.channels() };
         let config = supported.config();
-        let (playback, broken) = (Arc::new(Mutex::new(Playback::default())), Arc::new(AtomicBool::new(false)));
         let stream = match supported.sample_format() {
-            cpal::SampleFormat::F32 => stream::<f32>(&device, config, &playback, &broken),
-            cpal::SampleFormat::F64 => stream::<f64>(&device, config, &playback, &broken),
-            cpal::SampleFormat::I16 => stream::<i16>(&device, config, &playback, &broken),
-            cpal::SampleFormat::I32 => stream::<i32>(&device, config, &playback, &broken),
-            cpal::SampleFormat::U16 => stream::<u16>(&device, config, &playback, &broken),
-            cpal::SampleFormat::I8 => stream::<i8>(&device, config, &playback, &broken),
-            cpal::SampleFormat::U8 => stream::<u8>(&device, config, &playback, &broken),
+            cpal::SampleFormat::F32 => stream::<f32>(&device, config, playback, broken),
+            cpal::SampleFormat::F64 => stream::<f64>(&device, config, playback, broken),
+            cpal::SampleFormat::I16 => stream::<i16>(&device, config, playback, broken),
+            cpal::SampleFormat::I32 => stream::<i32>(&device, config, playback, broken),
+            cpal::SampleFormat::U16 => stream::<u16>(&device, config, playback, broken),
+            cpal::SampleFormat::I8 => stream::<i8>(&device, config, playback, broken),
+            cpal::SampleFormat::U8 => stream::<u8>(&device, config, playback, broken),
             other => return Err(PlayerError::Output(format!("Kumi can't play to an output that takes {other} samples"))),
         }
         .map_err(wouldnt)?;
-        Ok(DeviceOutput { stream, format, id: device.id().ok(), playback, broken })
+        Ok((stream, format, device.id().ok()))
     }
 
     fn stream<T: cpal::SizedSample + cpal::FromSample<f32>>(
@@ -341,7 +506,11 @@ mod device {
                     *out = <T as cpal::Sample>::from_sample(*value);
                 }
             },
-            move |_| broken.store(true, Ordering::Relaxed),
+            move |error: cpal::Error| {
+                if breaks(error.kind()) {
+                    broken.store(true, Ordering::Relaxed);
+                }
+            },
             None,
         )
     }
@@ -350,8 +519,12 @@ mod device {
         fn playback(&self) -> MutexGuard<'_, Playback> {
             self.playback.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
         }
-        fn fade(&self) -> usize {
-            (self.format.rate as f64 * FADE).round() as usize
+    }
+
+    impl Drop for DeviceOutput {
+        fn drop(&mut self) {
+            // Its thread lets what plays fade out, then closes it.
+            let _ = self.asks.send(Asked::Close);
         }
     }
 
@@ -363,14 +536,14 @@ mod device {
             if self.broken.load(Ordering::Relaxed) {
                 return Err(PlayerError::Output("the output went away".into()));
             }
-            self.playback().start(samples, self.fade());
-            self.stream.play().map_err(|error| PlayerError::Output(error.to_string()))
+            self.playback().start(samples, fade(self.format));
+            self.asks.send(Asked::Play).map_err(|_| PlayerError::Output("the output went away".into()))
         }
         fn stop(&self) {
-            self.playback().stop(self.fade());
+            self.playback().stop(fade(self.format));
         }
         fn playing(&self) -> bool {
-            self.playback().playing()
+            !self.broken.load(Ordering::Relaxed) && self.playback().playing()
         }
         fn current(&self) -> bool {
             !self.broken.load(Ordering::Relaxed)
@@ -382,6 +555,7 @@ mod device {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
 
     fn played(playback: &mut Playback, frames: usize) -> Vec<f32> {
         let mut out = vec![9.; frames * 2];
@@ -437,5 +611,121 @@ mod tests {
         assert!(one.iter().all(|value| value.abs() < 1e-6), "two mixed into one");
         let four = shaped(two, Format { rate: 48_000, channels: 4 });
         assert_eq!(&four[2_000..2_004], [0.5, -0.5, 0., 0.], "left and right in the first two");
+        let four = shaped(mono, Format { rate: 48_000, channels: 4 });
+        assert_eq!(&four[2_000..2_004], [1., 1., 0., 0.], "one channel in the first two, as two are");
+    }
+
+    /// An output that plays nothing.
+    struct Silent;
+
+    impl Output for Silent {
+        fn format(&self) -> Format {
+            Format { rate: 48_000, channels: 2 }
+        }
+        fn start(&self, _: Vec<f32>) -> Result<(), PlayerError> {
+            Ok(())
+        }
+        fn stop(&self) {}
+        fn playing(&self) -> bool {
+            false
+        }
+    }
+
+    #[test]
+    fn a_play_reading_its_file_stops_reading_when_another_play_or_a_stop_comes() {
+        // One thread for blocking work, kept busy while both plays are asked: their file reads wait behind it, so
+        // each is still reading, however fast the computer is.
+        let runtime = tokio::runtime::Builder::new_current_thread().max_blocking_threads(1).enable_all().build().unwrap();
+        runtime.block_on(async {
+            let player = Player::with_opener(Box::new(|| Ok(Box::new(Silent) as Box<dyn Output>)));
+            let file = Path::new("there's no such file.wav");
+            let (release, held) = mpsc::channel::<()>();
+            tokio::task::spawn_blocking(move || {
+                let _ = held.recv();
+            });
+            let mut first = std::pin::pin!(player.play(file, 0., 1.));
+            assert!(futures::poll!(first.as_mut()).is_pending(), "reading its file");
+            let reading = player.reading.borrow().clone();
+            let mut second = std::pin::pin!(player.play(file, 0., 1.));
+            assert!(futures::poll!(second.as_mut()).is_pending());
+            assert!(reading.is_cancelled(), "the first stops reading");
+            drop(release);
+            assert_eq!(first.await, Ok(Played::Overtaken), "its file was missing, but it was overtaken first");
+            let reading = player.reading.borrow().clone();
+            player.stop();
+            assert!(reading.is_cancelled(), "a stop ends the second's reading too");
+            assert_eq!(second.await, Ok(Played::Overtaken));
+            assert!(matches!(player.play(file, 0., 1.).await, Err(PlayerError::File(_))), "alone, it says the file's missing");
+        });
+    }
+
+    /// A stream that says what it was asked.
+    #[derive(Default)]
+    struct Told(Mutex<Vec<&'static str>>);
+
+    impl Runs for Told {
+        fn play(&self) -> Result<(), String> {
+            self.0.lock().unwrap().push("play");
+            Ok(())
+        }
+        fn pause(&self) {
+            self.0.lock().unwrap().push("pause");
+        }
+    }
+
+    fn waits_for(what: impl Fn() -> bool) -> bool {
+        let until = Instant::now() + Duration::from_secs(10);
+        while !what() {
+            if Instant::now() > until {
+                return false;
+            }
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        true
+    }
+
+    #[test]
+    fn an_output_plays_when_a_sound_comes_rests_once_nothing_plays_and_lets_it_fade_out_as_it_closes() {
+        let (playback, broken, told) =
+            (Arc::new(Mutex::new(Playback::default())), Arc::new(AtomicBool::new(false)), Arc::new(Told::default()));
+        let (asks, asked) = mpsc::channel();
+        let thread = {
+            let (playback, broken, told) = (playback.clone(), broken.clone(), told.clone());
+            std::thread::spawn(move || serve(&*told, &playback, &broken, &asked, 2, Duration::from_millis(30)))
+        };
+        let said = || told.0.lock().unwrap().clone();
+        playback.lock().unwrap().start(vec![0.5; 8], 2);
+        asks.send(Asked::Play).unwrap();
+        assert!(waits_for(|| said() == ["play"]), "{:?}", said());
+        // While the sound lasts, the stream runs on.
+        std::thread::sleep(Duration::from_millis(120));
+        assert_eq!(said(), ["play"]);
+        // Played out (the audio callback took it all): it rests.
+        played(&mut playback.lock().unwrap(), 4);
+        assert!(waits_for(|| said() == ["play", "pause"]), "{:?}", said());
+        // The next sound plays it again.
+        playback.lock().unwrap().start(vec![0.5; 8], 2);
+        asks.send(Asked::Play).unwrap();
+        assert!(waits_for(|| said() == ["play", "pause", "play"]), "{:?}", said());
+        // Closed while it plays (replaced by another output): what plays fades out first, then the thread ends.
+        asks.send(Asked::Close).unwrap();
+        assert!(waits_for(|| playback.lock().unwrap().fading.is_some()), "a fade, not a cut");
+        played(&mut playback.lock().unwrap(), 4);
+        assert!(waits_for(|| thread.is_finished()));
+        thread.join().unwrap();
+        assert!(!playback.lock().unwrap().playing());
+        assert!(!broken.load(Ordering::Relaxed));
+    }
+
+    #[cfg(any(not(target_os = "linux"), feature = "linux-player"))]
+    #[test]
+    fn only_an_error_that_ends_the_stream_breaks_the_output() {
+        use cpal::ErrorKind::*;
+        for kind in [Xrun, DeviceChanged, RealtimeDenied] {
+            assert!(!device::breaks(kind), "{kind:?} leaves it playing");
+        }
+        for kind in [DeviceNotAvailable, StreamInvalidated, HostUnavailable, BackendError, Other] {
+            assert!(device::breaks(kind), "{kind:?}");
+        }
     }
 }
