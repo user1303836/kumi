@@ -8,7 +8,7 @@ use kumi_library::{
     sources::{Source, SourceKind},
     store::{pack_vector, Entry, Log},
 };
-use std::path::Path;
+use std::{path::Path, sync::Arc};
 
 /// Sound `n` in `folder`, in one of three groups by how it sounds (each group's numbers high in its own places), a
 /// little apart from the rest of its group.
@@ -22,11 +22,47 @@ fn how() -> Layout {
     Layout { threads: 1, ..Layout::default() }
 }
 
+/// A layout let go on to the end.
+fn go() -> Arc<dyn Fn() -> bool + Send + Sync> {
+    Arc::new(|| true)
+}
+
 #[test]
-fn the_map_is_due_when_there_is_none_or_the_sounds_change_by_a_tenth() {
-    assert!(!due(None, 0) && due(None, 5));
-    assert!(!due(Some(100), 109) && due(Some(100), 110) && due(Some(100), 90) && !due(Some(100), 100));
-    assert!(due(Some(5), 6), "a small library: one sound more");
+fn the_map_is_due_when_there_is_none_or_its_sounds_change_by_a_tenth() {
+    let paths = |from: usize, to: usize| (from..to).map(|n| format!("/Samples/{n:03}.wav")).collect::<Vec<_>>();
+    let due_with = |mapped: Option<Vec<String>>, measured: Vec<String>| {
+        let mapped: Option<Vec<&str>> = mapped.as_ref().map(|paths| paths.iter().map(String::as_str).collect());
+        due(mapped.as_deref(), &measured.iter().map(String::as_str).collect::<Vec<_>>())
+    };
+    assert!(!due_with(None, vec![]) && due_with(None, paths(0, 5)));
+    assert!(!due_with(Some(paths(0, 100)), paths(0, 109)) && due_with(Some(paths(0, 100)), paths(0, 110)));
+    assert!(due_with(Some(paths(0, 100)), paths(10, 100)) && !due_with(Some(paths(0, 100)), paths(0, 100)));
+    // As many sounds, some on new paths (a folder moved, a pack swapped one for one): what moved counts.
+    assert!(due_with(Some(paths(0, 100)), paths(5, 105)), "five moved: ten paths differ");
+    assert!(!due_with(Some(paths(0, 100)), paths(4, 104)), "four moved: eight differ");
+    assert!(due_with(Some(paths(0, 5)), paths(0, 6)), "a small library: one sound more");
+}
+
+#[tokio::test]
+async fn a_folder_unplugged_keeps_its_sounds_on_the_map_and_a_layout_stopped_writes_none() {
+    let dir = tempfile::tempdir().unwrap();
+    let (samples, drive) = (dir.path().join("Samples"), dir.path().join("Drive"));
+    std::fs::create_dir_all(&samples).unwrap();
+    std::fs::create_dir_all(&drive).unwrap();
+    let source =
+        |folder: &Path, label: &str| Source { path: folder.to_string_lossy().into_owned(), label: label.into(), kind: SourceKind::Folder };
+    let sources = [source(&samples, "Samples"), source(&drive, "Drive")];
+    let log = Log::<SoundEntry>::new(dir.path().join("sounds.jsonl"), "sounds", LOG_VERSION);
+    let entries: Vec<SoundEntry> = (0..20).map(|n| sound(&samples, n)).chain((20..40).map(|n| sound(&drive, n))).collect();
+    log.append(&entries).await.unwrap();
+    // Stopped before it's done (Kumi closing): no map.
+    assert_eq!(lay_out_sounds(dir.path(), &sources, &how(), Arc::new(|| false)).await.unwrap(), None);
+    assert!(read_sounds_map(dir.path()).is_none());
+    assert_eq!(lay_out_sounds(dir.path(), &sources, &how(), go()).await.unwrap(), Some(40));
+    // The drive unplugged: its sounds still count, so the map isn't made again without them.
+    std::fs::remove_dir_all(&drive).unwrap();
+    assert_eq!(lay_out_sounds(dir.path(), &sources, &how(), go()).await.unwrap(), None);
+    assert_eq!(read_sounds_map(dir.path()).unwrap().points.len(), 40);
 }
 
 #[tokio::test]
@@ -42,7 +78,7 @@ async fn measured_sounds_in_the_librarys_folders_are_placed_by_path() {
     entries.push(sound(&dir.path().join("Elsewhere"), 98));
     log.append(&entries).await.unwrap();
 
-    assert_eq!(lay_out_sounds(dir.path(), &[source.clone()], &how()).await.unwrap(), Some(30));
+    assert_eq!(lay_out_sounds(dir.path(), &[source.clone()], &how(), go()).await.unwrap(), Some(30));
     let map = read_sounds_map(dir.path()).unwrap();
     let paths: Vec<&str> = map.points.iter().map(|(path, ..)| path.as_str()).collect();
     let mut sorted = paths.clone();
@@ -65,9 +101,9 @@ async fn measured_sounds_in_the_librarys_folders_are_placed_by_path() {
     assert!(farthest_kick < apart(kicks, middle("pad")), "{farthest_kick} against {}", apart(kicks, middle("pad")));
 
     // Not due again until the sounds change by a tenth: two more aren't (of 30), and three more are.
-    assert_eq!(lay_out_sounds(dir.path(), &[source.clone()], &how()).await.unwrap(), None);
+    assert_eq!(lay_out_sounds(dir.path(), &[source.clone()], &how(), go()).await.unwrap(), None);
     log.append(&[sound(&samples, 30), sound(&samples, 31)]).await.unwrap();
-    assert_eq!(lay_out_sounds(dir.path(), &[source.clone()], &how()).await.unwrap(), None);
+    assert_eq!(lay_out_sounds(dir.path(), &[source.clone()], &how(), go()).await.unwrap(), None);
     log.append(&[sound(&samples, 32)]).await.unwrap();
-    assert_eq!(lay_out_sounds(dir.path(), &[source], &how()).await.unwrap(), Some(33));
+    assert_eq!(lay_out_sounds(dir.path(), &[source], &how(), go()).await.unwrap(), Some(33));
 }
