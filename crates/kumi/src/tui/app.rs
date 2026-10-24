@@ -69,6 +69,11 @@ pub struct PanelTab {
     pub load: Rc<dyn Fn() -> Option<String>>,
     pub save: Rc<dyn Fn(&str)>,
 }
+/// Whether the map's points play as the mouse rests on them, remembered between runs (h on the map changes it).
+pub struct MapHover {
+    pub load: Rc<dyn Fn() -> bool>,
+    pub save: Rc<dyn Fn(bool)>,
+}
 pub struct TuiOptions {
     pub controller: Rc<dyn SessionController>,
     pub input: Rc<dyn TtyInput>,
@@ -105,6 +110,8 @@ pub struct TuiOptions {
     pub map: Option<crate::map::LoadMap>,
     /// What plays a point of the map.
     pub player: Option<Rc<kumi_media::audio::player::Player>>,
+    /// Whether the map's points play as the mouse rests on them, remembered; they do when None.
+    pub map_hover: Option<MapHover>,
     /// What's new since the producer last opened Kumi, shown once as it starts.
     pub whats_new: Option<crate::whats_new::News>,
     /// How this terminal shows Kumi's status and notifications; read from the environment when None.
@@ -182,6 +189,7 @@ impl TuiOptions {
             music: None,
             map: None,
             player: None,
+            map_hover: None,
             whats_new: None,
             terminal: None,
             away: AwaySettings::default(),
@@ -339,6 +347,9 @@ struct State {
     map_page_opening: bool,
     /// Counts the map's plays, stops and closings: only the latest play says when it ended.
     map_play: u64,
+    /// Counts the mouse's rests on the map's points, and what ends one (the mouse leaving, h, closing): only the
+    /// latest rest plays.
+    map_hover: u64,
     last_change: Option<(String, f64)>,
     last_action: Option<LastAction>,
     goal: Option<Value>,
@@ -481,6 +492,7 @@ impl State {
             map_page_asked: 0,
             map_page_opening: false,
             map_play: 0,
+            map_hover: 0,
             last_change: None,
             last_action: None,
             goal: None,

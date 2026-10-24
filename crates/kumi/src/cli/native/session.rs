@@ -5,7 +5,7 @@ use crate::{
     history::open_input_history,
     models::{create_model_control, ModelControlOptions},
     terminal::{create_terminal, Terminal, TerminalOptions},
-    tui::app::{create_tui, AwaySettings, ConnectDaw, PanelTab, TuiOptions},
+    tui::app::{create_tui, AwaySettings, ConnectDaw, MapHover, PanelTab, TuiOptions},
     voice::{create_voice_control, VoiceControlOptions},
 };
 use async_trait::async_trait;
@@ -792,6 +792,21 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
                 Rc::new(move |id| {
                     let mut settings = read_settings(&settings_file);
                     settings.panel_tab = Some(id.into());
+                    let _ = write_settings(&settings_file, &serde_json::to_value(&settings).unwrap());
+                })
+            },
+        });
+        // h on the map: whether its points play as the mouse rests on them, kept in settings.json (only when they don't).
+        options.map_hover = Some(MapHover {
+            load: {
+                let settings_file = settings_file.clone();
+                Rc::new(move || read_settings(&settings_file).map_hover != Some(false))
+            },
+            save: {
+                let settings_file = settings_file.clone();
+                Rc::new(move |on| {
+                    let mut settings = read_settings(&settings_file);
+                    settings.map_hover = Some(on);
                     let _ = write_settings(&settings_file, &serde_json::to_value(&settings).unwrap());
                 })
             },

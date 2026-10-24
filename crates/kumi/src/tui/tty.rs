@@ -60,8 +60,13 @@ pub trait TtyOutput {
 // a key repeats and when it's let go (ctrl+t held down talks until it's let go). Others ignore it.
 const ENTER: &str = "\u{1b}[?1049h\u{1b}[?7l\u{1b}[?25l\u{1b}[?2004h\u{1b}[?1004h\u{1b}[>3u";
 const MOUSE_ON: &str = "\u{1b}[?1000h\u{1b}[?1002h\u{1b}[?1006h";
+// Any-event mouse reporting (1003): the mouse's moves with no button held, as well as its clicks and drags. On only
+// while something listens for them (the map, which plays the point the mouse rests on): otherwise they'd stream in
+// whenever the mouse crossed the window.
+const MOUSE_MOVES_ON: &str = "\u{1b}[?1003h";
+const MOUSE_MOVES_OFF: &str = "\u{1b}[?1003l";
 pub const RESTORE: &str =
-    "\u{1b}[?2026l\u{1b}[0m\u{1b}[<u\u{1b}[?1006l\u{1b}[?1002l\u{1b}[?1000l\u{1b}[?1004l\u{1b}[?2004l\u{1b}[?7h\u{1b}[?25h\u{1b}[?1049l";
+    "\u{1b}[?2026l\u{1b}[0m\u{1b}[<u\u{1b}[?1003l\u{1b}[?1006l\u{1b}[?1002l\u{1b}[?1000l\u{1b}[?1004l\u{1b}[?2004l\u{1b}[?7h\u{1b}[?25h\u{1b}[?1049l";
 
 pub struct TtyOptions {
     pub input: Rc<dyn TtyInput>,
@@ -89,6 +94,9 @@ struct Inner {
     /// The crash path gave the terminal back: a panic, which Kumi may have caught (a worker's) and lived on.
     taken: Arc<AtomicBool>,
     was_raw: Cell<bool>,
+    /// The mouse's moves are asked for (`report_moves`): reported while the terminal is Kumi's, and again when it's
+    /// taken back.
+    moves: Cell<bool>,
     parser: InputParser,
     decoder: RefCell<Utf8Decoder>,
     emergency: Cell<Option<u64>>,
@@ -108,6 +116,7 @@ impl Tty {
                 active: Arc::new(AtomicBool::new(false)),
                 taken: Arc::new(AtomicBool::new(false)),
                 was_raw: Cell::new(false),
+                moves: Cell::new(false),
                 parser,
                 decoder: RefCell::new(Utf8Decoder::new()),
                 emergency: Cell::new(None),
@@ -163,13 +172,26 @@ impl Tty {
             }
             taken.store(true, Ordering::SeqCst);
         }))));
-        output.write(&format!("{ENTER}{}", if inner.options.mouse { MOUSE_ON } else { "" }));
+        output.write(&inner.entering());
         Ok(())
     }
 
     pub fn write(&self, data: &str) {
         if self.is_active() && !data.is_empty() {
             self.inner.options.output.write(data);
+        }
+    }
+
+    /// Whether the terminal reports the mouse's moves (no button held) as well as its clicks: asked while the map is
+    /// open, which plays the point the mouse rests on, and taken back as it closes, so they don't stream in meanwhile.
+    /// Nothing where mouse reporting is off.
+    pub fn report_moves(&self, on: bool) {
+        let inner = &self.inner;
+        if !inner.options.mouse || inner.moves.replace(on) == on {
+            return;
+        }
+        if self.is_active() {
+            inner.options.output.write(if on { MOUSE_MOVES_ON } else { MOUSE_MOVES_OFF });
         }
     }
 
@@ -188,12 +210,20 @@ impl Tty {
         }
         let _ = inner.options.input.set_raw_mode(true);
         inner.active.store(true, Ordering::SeqCst);
-        inner.options.output.write(&format!("{ENTER}{}", if inner.options.mouse { MOUSE_ON } else { "" }));
+        inner.options.output.write(&inner.entering());
         true
     }
 }
 
 impl Inner {
+    /// What takes the terminal: the screen and the keys, mouse reporting where it's on, and the mouse's moves while
+    /// they're asked for.
+    fn entering(&self) -> String {
+        let mouse = if self.options.mouse { MOUSE_ON } else { "" };
+        let moves = if self.options.mouse && self.moves.get() { MOUSE_MOVES_ON } else { "" };
+        format!("{ENTER}{mouse}{moves}")
+    }
+
     fn restore(&self, sync: bool) {
         // Given back by the crash path and not taken again: what it didn't undo is still Kumi's to undo.
         let active = self.active.swap(false, Ordering::SeqCst);
@@ -807,6 +837,20 @@ mod tests {
         assert!(!tty.recover());
         tty.write("frame");
         assert!(terminal.written.borrow().ends_with("frame"));
+        // The map asks for the mouse's moves: reported from then on (asked once, however often), still when Kumi takes
+        // the terminal back after another caught panic, and no more once the map is done with them.
+        terminal.written.borrow_mut().clear();
+        tty.report_moves(true);
+        tty.report_moves(true);
+        assert_eq!(*terminal.written.borrow(), MOUSE_MOVES_ON);
+        let _ = std::thread::spawn(|| std::panic::catch_unwind(|| panic!("a third"))).join();
+        assert!(terminal.crashed.lock().unwrap().ends_with(RESTORE) && RESTORE.contains(MOUSE_MOVES_OFF), "given back without them");
+        terminal.written.borrow_mut().clear();
+        assert!(tty.recover());
+        assert_eq!(*terminal.written.borrow(), format!("{ENTER}{MOUSE_ON}{MOUSE_MOVES_ON}"));
+        terminal.written.borrow_mut().clear();
+        tty.report_moves(false);
+        assert_eq!(*terminal.written.borrow(), MOUSE_MOVES_OFF);
         // A second caught panic, then Kumi quits without a frame between: it's given back once (by the crash path, not
         // again on quitting, which would put the cursor back over the message), and nothing stays registered.
         terminal.written.borrow_mut().clear();

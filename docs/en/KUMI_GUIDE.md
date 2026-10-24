@@ -969,7 +969,8 @@ a reference, sounds or values, it goes by those instead.
   folder, pauses and resumes, and `/music forget` deletes all of it.
 - **On a map.** `/map` draws your songs by style, and your library's sounds by
   class, songs that sound alike side by side. Move around with the arrows, hear
-  a point with Space, and Enter asks Kumi for more like it ([the keys](KUMI_TUI.md)).
+  a point with Space or by resting the mouse on it, and Enter asks Kumi for more
+  like it ([the keys](KUMI_TUI.md)).
 - **In your browser.** `/map open` shows the same map in your browser: a name
   when you point at a point, the wheel to zoom, Shift and drag (or Lasso) to pick
   points, a filter, and a click to hear one. Its actions put their message in

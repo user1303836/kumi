@@ -170,10 +170,10 @@ fn unattended_settings_round_trip_and_survive_other_writes() {
     let folder = tempfile::tempdir().unwrap();
     let file = folder.path().join("settings.json").to_string_lossy().into_owned();
     let saved = || serde_json::from_str::<Value>(&std::fs::read_to_string(&file).unwrap()).unwrap();
-    let all =
-        json!({"notifications":"off","liveStatusBar":false,"keepAwake":false,"answerAfter":90,"fallbackModel":"anthropic/claude-sonnet-5"});
+    let all = json!({"notifications":"off","liveStatusBar":false,"keepAwake":false,"answerAfter":90,"fallbackModel":"anthropic/claude-sonnet-5","mapHover":false});
     write_settings(&file, &all).unwrap();
     assert_eq!(saved(), all);
+    assert_eq!(read_settings(&file).map_hover, Some(false));
     let settings = read_settings(&file);
     assert_eq!(settings.notifications.as_deref(), Some("off"));
     assert_eq!((settings.live_status_bar, settings.keep_awake, settings.answer_after), (Some(false), Some(false), Some(90)));
@@ -182,14 +182,17 @@ fn unattended_settings_round_trip_and_survive_other_writes() {
     write_settings(&file, &json!({"model":"openai-codex/gpt-6-sol","panelTab":"goal"})).unwrap();
     assert_eq!(
         saved(),
-        json!({"model":"openai-codex/gpt-6-sol","panelTab":"goal","notifications":"off","liveStatusBar":false,"keepAwake":false,"answerAfter":90,"fallbackModel":"anthropic/claude-sonnet-5"})
+        json!({"model":"openai-codex/gpt-6-sol","panelTab":"goal","mapHover":false,"notifications":"off","liveStatusBar":false,"keepAwake":false,"answerAfter":90,"fallbackModel":"anthropic/claude-sonnet-5"})
     );
     // So does the whole of what was read, written back as /model does.
     write_settings(&file, &serde_json::to_value(read_settings(&file)).unwrap()).unwrap();
     assert_eq!(saved()["fallbackModel"], "anthropic/claude-sonnet-5");
     // The defaults ("auto", true) aren't written; null clears the fallback; 0 never answers for the producer.
-    write_settings(&file, &json!({"notifications":"auto","liveStatusBar":true,"keepAwake":true,"answerAfter":0,"fallbackModel":null}))
-        .unwrap();
+    write_settings(
+        &file,
+        &json!({"notifications":"auto","liveStatusBar":true,"keepAwake":true,"answerAfter":0,"fallbackModel":null,"mapHover":true}),
+    )
+    .unwrap();
     assert_eq!(saved(), json!({"panelTab":"goal","answerAfter":0}));
     assert_eq!(read_settings(&file).answer_after, Some(0));
     // What isn't valid is dropped as it's read.
