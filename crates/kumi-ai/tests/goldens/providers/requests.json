@@ -899,7 +899,7 @@
     ]
   },
   "gateway/fixture-model": {
-    "refused": "KUMI_MODEL must be <provider>/<model> with provider one of openai-codex, openai, anthropic, opencode, opencode-go.",
+    "refused": "KUMI_MODEL must be <provider>/<model> with provider one of openai-codex, openai, anthropic, opencode, opencode-go, openrouter, venice, gemini, deepseek, xai, zai, moonshot, alibaba, minimax, xiaomi, stepfun, tencent, groq, cerebras, fireworks, together, deepinfra, mistral, ollama-cloud, nvidia, huggingface.",
     "requests": []
   },
   "ollama/qwen3:8b": {
@@ -1135,6 +1135,176 @@
           "stream_options": {
             "include_usage": true
           }
+        }
+      }
+    ]
+  },
+  "responses-box/gpt-local": {
+    "requests": [
+      {
+        "method": "POST",
+        "url": "http://192.168.1.30:8000/v1/responses",
+        "headers": {
+          "authorization": "Bearer key-fixture-value",
+          "content-type": "application/json",
+          "user-agent": "kumi/<version> (<system>)"
+        },
+        "body": {
+          "model": "gpt-local",
+          "input": [
+            {
+              "role": "user",
+              "content": [
+                {
+                  "type": "input_text",
+                  "text": "What's the tempo? Show me the arrangement."
+                }
+              ]
+            },
+            {
+              "type": "function_call",
+              "call_id": "call_1",
+              "name": "get_tempo",
+              "arguments": "{\"view\":\"arrangement\"}"
+            },
+            {
+              "type": "function_call_output",
+              "call_id": "call_1",
+              "output": [
+                {
+                  "type": "input_text",
+                  "text": "Tempo 120"
+                },
+                {
+                  "type": "input_image",
+                  "image_url": "data:image/jpeg;base64,/9j/",
+                  "detail": "high"
+                }
+              ]
+            }
+          ],
+          "store": false,
+          "instructions": "fixture instructions",
+          "prompt_cache_key": "session-1",
+          "tools": [
+            {
+              "type": "function",
+              "name": "get_tempo",
+              "description": "The Set's tempo, and a picture of a view",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "view": {
+                    "type": "string"
+                  }
+                }
+              },
+              "strict": false
+            }
+          ],
+          "tool_choice": "auto",
+          "stream": true
+        }
+      }
+    ]
+  },
+  "claude-proxy/claude-local": {
+    "requests": [
+      {
+        "method": "POST",
+        "url": "https://claude-proxy.example.test/v1/messages",
+        "headers": {
+          "anthropic-beta": "structured-outputs-2025-11-13",
+          "anthropic-version": "2023-06-01",
+          "content-type": "application/json",
+          "user-agent": "kumi/<version> (<system>)",
+          "x-api-key": "key-fixture-value"
+        },
+        "body": {
+          "model": "claude-local",
+          "max_tokens": 128000,
+          "output_config": {
+            "effort": "high"
+          },
+          "system": [
+            {
+              "type": "text",
+              "text": "fixture instructions",
+              "cache_control": {
+                "type": "ephemeral",
+                "ttl": "1h"
+              }
+            }
+          ],
+          "messages": [
+            {
+              "role": "user",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "What's the tempo? Show me the arrangement."
+                }
+              ]
+            },
+            {
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "tool_use",
+                  "id": "call_1",
+                  "name": "get_tempo",
+                  "input": {
+                    "view": "arrangement"
+                  }
+                }
+              ]
+            },
+            {
+              "role": "user",
+              "content": [
+                {
+                  "type": "tool_result",
+                  "tool_use_id": "call_1",
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "Tempo 120"
+                    },
+                    {
+                      "type": "image",
+                      "source": {
+                        "type": "base64",
+                        "media_type": "image/jpeg",
+                        "data": "/9j/"
+                      }
+                    }
+                  ],
+                  "cache_control": {
+                    "type": "ephemeral"
+                  }
+                }
+              ]
+            }
+          ],
+          "tools": [
+            {
+              "name": "get_tempo",
+              "description": "The Set's tempo, and a picture of a view",
+              "input_schema": {
+                "type": "object",
+                "properties": {
+                  "view": {
+                    "type": "string"
+                  }
+                }
+              },
+              "eager_input_streaming": true
+            }
+          ],
+          "tool_choice": {
+            "type": "auto"
+          },
+          "stream": true
         }
       }
     ]

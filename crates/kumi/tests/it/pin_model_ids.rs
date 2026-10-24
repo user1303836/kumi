@@ -46,7 +46,7 @@ fn settings() -> Vec<ServerSetting> {
         ("Venice", "http://10.0.0.2:9000"),
         ("My Server", "http://192.168.1.20:8080"),
     ]
-    .map(|(name, url)| ServerSetting { name: name.into(), base_url: url.into(), api_key: None })
+    .map(|(name, url)| ServerSetting { name: name.into(), base_url: url.into(), api_key: None, format: None })
     .into()
 }
 /// A long ID as its start and its length, so the golden stays readable.

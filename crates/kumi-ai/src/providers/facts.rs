@@ -116,8 +116,8 @@ pub fn with_facts(row: &ProviderRow, listed: Listed, catalog: &Catalog) -> Optio
         None if !efforts => info.efforts = levels(guessed_efforts(&info.model)),
         None => {}
     }
-    // A Chat Completions request carries no effort level yet: a model there offers none Kumi couldn't send.
-    if format == Format::ChatCompletions {
+    // A provider whose Chat Completions requests carry no effort level: a model there offers none Kumi couldn't send.
+    if format == Format::ChatCompletions && row.extras.chat_effort.is_none() {
         info.efforts.clear();
         info.default_effort = None;
     }

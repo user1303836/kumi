@@ -8,20 +8,25 @@ use kumi_ai::providers::{
 };
 use std::collections::HashMap;
 
-/// A provider added later, as Venice would be: only this test's thread has it.
+/// A provider added later, as Venice was: only this test's thread has it.
 static ADDED: [ProviderRow; 1] = [ProviderRow {
-    id: "venice",
-    name: "Venice AI",
-    short_name: "Venice",
-    credential: "venice",
-    key_env: &["VENICE_API_KEY"],
-    base_url: "https://api.venice.ai/api/v1",
+    id: "acme",
+    name: "Acme AI",
+    short_name: "Acme",
+    credential: "acme",
+    key_env: &["ACME_API_KEY"],
+    base_url: "https://api.acme.example.test/v1",
     ..API_KEY_ROW
 }];
 fn servers(names: &[&str]) -> Vec<LocalServer> {
     let settings: Vec<_> = names
         .iter()
-        .map(|name| ServerSetting { name: name.to_string(), base_url: "https://models.example.test/v1".into(), api_key: None })
+        .map(|name| ServerSetting {
+            name: name.to_string(),
+            base_url: "https://models.example.test/v1".into(),
+            api_key: None,
+            format: None,
+        })
         .collect();
     local_servers(&settings, &HashMap::new()).unwrap()
 }
@@ -42,16 +47,20 @@ fn the_first_five_providers_keep_their_ids_from_custom_servers() {
 #[test]
 fn a_provider_added_later_is_hidden_behind_the_custom_server_that_has_its_id() {
     add_test_rows(&ADDED);
-    let venice = ProviderId::parse("venice").unwrap();
-    assert!(!venice.row().reserved);
-    // The server named Venice keeps the ID it had before Kumi knew Venice; a second one takes the next, as before.
-    let named = servers(&["Venice", "Venice", "OpenAI"]);
-    assert_eq!(ids(&named), ["ollama", "lmstudio", "venice", "venice-2", "openai-2"]);
+    let acme = ProviderId::parse("acme").unwrap();
+    assert!(!acme.row().reserved);
+    // The server named Acme keeps the ID it had before Kumi knew Acme; a second one takes the next, as before.
+    let named = servers(&["Acme", "Acme", "OpenAI"]);
+    assert_eq!(ids(&named), ["ollama", "lmstudio", "acme", "acme-2", "openai-2"]);
     let hidden = hidden_providers(&named);
-    assert_eq!(hidden.iter().map(|(provider, server)| (provider.as_str(), server.id.as_str())).collect::<Vec<_>>(), [("venice", "venice")]);
+    assert_eq!(hidden.iter().map(|(provider, server)| (provider.as_str(), server.id.as_str())).collect::<Vec<_>>(), [("acme", "acme")]);
     // Its saved models stay the server's: a server is looked for first, and has them.
-    assert_eq!(parse_local_model_id("venice/qwen3-coder", &named).map(|parsed| parsed.server.name), Some("Venice".into()));
+    assert_eq!(parse_local_model_id("acme/qwen3-coder", &named).map(|parsed| parsed.server.name), Some("Acme".into()));
     // Without such a server, the provider is there for the producer.
     assert!(hidden_providers(&servers(&["My Server"])).is_empty());
-    assert_eq!(parse_model_id("venice/qwen3-coder").map(|parsed| parsed.provider), Some(venice));
+    assert_eq!(parse_model_id("acme/qwen3-coder").map(|parsed| parsed.provider), Some(acme));
+    // The same for the providers the table has now: a server named Venice from before keeps venice.
+    let named = servers(&["Venice"]);
+    assert_eq!(ids(&named), ["ollama", "lmstudio", "venice"]);
+    assert_eq!(hidden_providers(&named).iter().map(|(provider, _)| provider.as_str()).collect::<Vec<_>>(), ["venice"]);
 }

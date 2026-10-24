@@ -27,7 +27,7 @@ use kumi_types::errors::{FailureKind, KumiError, RuntimeError};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use std::{collections::HashMap, rc::Rc, sync::LazyLock};
-pub use table::{Format, KeyHeader, ProviderId, ProviderRow, SignIn};
+pub use table::{ChatEffort, Format, KeyHeader, ProviderId, ProviderRow, SignIn};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -120,6 +120,9 @@ pub enum KeySource {
 pub struct ApiKey {
     pub key: String,
     pub source: KeySource,
+    /// The environment variable it came from (Gemini's may be either of two).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub variable: Option<String>,
 }
 pub async fn api_key_for(
     provider: ProviderId,
@@ -130,14 +133,21 @@ pub async fn api_key_for(
     if row.sign_in != SignIn::ApiKey {
         return Ok(None);
     }
-    if let Some(Credential::ApiKey { key }) = store.get(row.credential).await? {
-        return Ok(Some(ApiKey { key, source: KeySource::Saved }));
+    Ok(api_key_from(provider, store.get(row.credential).await?.as_ref(), env))
+}
+/// A provider's key from its credential's entry, `saved` (read once for many providers), then the environment.
+pub fn api_key_from(provider: ProviderId, saved: Option<&Credential>, env: Option<&HashMap<String, String>>) -> Option<ApiKey> {
+    let row = provider.row();
+    if row.sign_in != SignIn::ApiKey {
+        return None;
     }
-    Ok(row
-        .key_env
-        .iter()
-        .find_map(|name| env.and_then(|env| env.get(*name)).filter(|key| !key.is_empty()))
-        .map(|key| ApiKey { key: key.clone(), source: KeySource::Env }))
+    if let Some(Credential::ApiKey { key }) = saved {
+        return Some(ApiKey { key: key.clone(), source: KeySource::Saved, variable: None });
+    }
+    row.key_env.iter().find_map(|name| {
+        let key = env.and_then(|env| env.get(*name)).filter(|key| !key.is_empty())?;
+        Some(ApiKey { key: key.clone(), source: KeySource::Env, variable: Some(name.to_string()) })
+    })
 }
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParsedModelId {
@@ -210,6 +220,10 @@ impl Fetch for CodexFetch {
 fn session_headers(header: Option<&'static str>, session: String) -> Option<crate::http::Headers> {
     header.map(|header| [(String::from(header), session)].into())
 }
+/// The headers a provider wants on every request.
+fn fixed_headers(headers: &[(&str, &str)]) -> crate::http::Headers {
+    headers.iter().map(|(name, value)| (name.to_string(), value.to_string())).collect()
+}
 pub async fn resolve_model(options: ResolveModelOptions) -> Result<ModelBinding, RuntimeError> {
     let parsed = parse_model_id(&options.model).ok_or_else(|| {
         KumiError::new(
@@ -248,7 +262,11 @@ pub async fn resolve_model(options: ResolveModelOptions) -> Result<ModelBinding,
     };
     // As models.dev routes the model (Zen's Claude models to Messages, say), by the provider's name rules for one it
     // doesn't know.
-    let format = facts::format_for(row, &model, &catalog::current()).map_err(|why| KumiError::new(FailureKind::Config, why))?;
+    let catalog = catalog::current();
+    let format = facts::format_for(row, &model, &catalog).map_err(|why| KumiError::new(FailureKind::Config, why))?;
+    // A model models.dev says reasons is asked to on Responses, whatever its name (xAI's Grok, say).
+    let reasons = row.catalog.and_then(|provider| catalog.model(provider, &model)).and_then(|known| known.reasoning) == Some(true);
+    let anthropic_cache = row.extras.anthropic_cache && model.starts_with("anthropic/");
     let effort = options.effort;
     let extras = row.extras;
     let service_tier = options.service_tier.clone().filter(|_| extras.service_tier);
@@ -256,7 +274,7 @@ pub async fn resolve_model(options: ResolveModelOptions) -> Result<ModelBinding,
     let base_url = row.base_url.to_string();
     Ok(match format {
         Format::Responses => bind(
-            openai_responses(ResponsesSettings { model, base_url, api_key: key, headers: Default::default(), fetch }),
+            openai_responses(ResponsesSettings { model, base_url, api_key: key, headers: fixed_headers(extras.headers), fetch }),
             Box::new(move |request: ModelRequest| {
                 let session = request.session_id.clone();
                 let mut extra = Map::new();
@@ -268,6 +286,9 @@ pub async fn resolve_model(options: ResolveModelOptions) -> Result<ModelBinding,
                 }
                 if let Some(tier) = &service_tier {
                     extra.insert("serviceTier".into(), json!(tier));
+                }
+                if reasons {
+                    extra.insert("forceReasoning".into(), json!(true));
                 }
                 let mut options = responses_request(request, extra);
                 options.headers = session_headers(extras.session_header, session);
@@ -282,7 +303,7 @@ pub async fn resolve_model(options: ResolveModelOptions) -> Result<ModelBinding,
                     base_url,
                     api_key: (!bearer).then(|| key.clone()),
                     auth_token: bearer.then_some(key),
-                    headers: Default::default(),
+                    headers: fixed_headers(extras.headers),
                     fetch,
                 }),
                 Box::new(move |request: ModelRequest| {
@@ -299,15 +320,36 @@ pub async fn resolve_model(options: ResolveModelOptions) -> Result<ModelBinding,
                 model,
                 base_url,
                 api_key: Some(key),
-                headers: Default::default(),
+                headers: fixed_headers(extras.headers),
                 fetch,
-                include_usage: true,
+                include_usage: extras.stream_usage,
             }),
             Box::new(move |request: ModelRequest| {
                 let mut prompt = vec![Message::System { content: request.instructions, provider_options: None }];
                 prompt.extend(words_only(request.messages));
-                let mut options =
-                    CallOptions { prompt, headers: session_headers(extras.session_header, request.session_id), ..Default::default() };
+                // What this provider takes beside the format's own: the effort level, and the conversation's ID.
+                let mut own = Map::new();
+                match (extras.chat_effort, effort) {
+                    (Some(ChatEffort::ReasoningEffort), Some(effort)) => {
+                        own.insert("reasoningEffort".into(), json!(effort));
+                    }
+                    (Some(ChatEffort::Reasoning), Some(effort)) => {
+                        own.insert("reasoning".into(), json!({"effort":effort}));
+                    }
+                    _ => {}
+                }
+                if let Some(field) = extras.session_field {
+                    own.insert(field.into(), json!(request.session_id));
+                }
+                if anthropic_cache {
+                    own.insert("cache_control".into(), json!({"type":"ephemeral"}));
+                }
+                let mut options = CallOptions {
+                    prompt,
+                    headers: session_headers(extras.session_header, request.session_id),
+                    provider_options: (!own.is_empty()).then(|| Map::from_iter([(provider.as_str().to_string(), Value::Object(own))])),
+                    ..Default::default()
+                };
                 tool_options(&mut options, request.tools);
                 options
             }),

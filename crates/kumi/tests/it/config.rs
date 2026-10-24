@@ -1,6 +1,6 @@
 //! Configuration, with full command, settings and error oracles.
 use kumi::config::*;
-use kumi_ai::providers::Effort;
+use kumi_ai::providers::{Effort, Format};
 use kumi_daw_ableton::app::folders::{find_bridge_config, live_user_library, remote_scripts_dir};
 use kumi_types::system::{self, Env};
 use serde_json::{json, Value};
@@ -391,4 +391,32 @@ fn the_model_catalog_stays_on_unless_turned_off_and_old_settings_still_load() {
     assert_eq!(saved(), json!({}));
     std::fs::write(&file, json!({"modelCatalog":"no"}).to_string()).unwrap();
     assert_eq!(read_settings(&file).model_catalog, None);
+}
+#[test]
+fn a_model_server_says_how_it_takes_a_request_and_old_entries_stay_chat_completions() {
+    let folder = tempfile::tempdir().unwrap();
+    let file = folder.path().join("settings.json").to_string_lossy().into_owned();
+    let servers = json!([
+        {"name":"Box","baseURL":"http://192.168.1.30:8000/v1","format":"responses"},
+        {"name":"Proxy","baseURL":"https://proxy.example.test/v1","apiKey":"key-fixture-value","format":"anthropic"},
+        {"name":"Plain","baseURL":"http://127.0.0.1:8080","format":"chat-completions"},
+        {"name":"Old","baseURL":"http://127.0.0.1:8081"},
+        {"name":"Typo","baseURL":"http://127.0.0.1:8082","format":"respones"}
+    ]);
+    std::fs::write(&file, json!({"modelServers":servers}).to_string()).unwrap();
+    let formats: Vec<_> = read_settings(&file).model_servers.into_iter().map(|server| (server.name, server.format)).collect();
+    assert_eq!(
+        formats,
+        [
+            ("Box".to_string(), Some(Format::Responses)),
+            ("Proxy".to_string(), Some(Format::Messages)),
+            ("Plain".to_string(), Some(Format::ChatCompletions)),
+            ("Old".to_string(), None),
+            ("Typo".to_string(), None)
+        ]
+    );
+    // Saving anything else keeps the entries as they were written.
+    write_settings(&file, &json!({"model":"box/gpt-local"})).unwrap();
+    let saved: Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+    assert_eq!(saved["modelServers"], servers);
 }

@@ -156,7 +156,7 @@ async fn sign_in_check(env: &Env, servers: &[ServerFinding]) -> Result<Check, Ru
                 serving.server.name, serving.server.r#where
             )));
         }
-        return Ok(Check::fix("Not signed in to a provider",Some(format!("{} login openai-codex (a ChatGPT plan), or login anthropic, openai or opencode with an API key; or open Ollama or LM Studio",*KUMI))));
+        return Ok(Check::fix("Not signed in to a provider",Some(format!("{} login openai-codex (a ChatGPT plan), or login anthropic, openai, opencode or another provider with an API key ({} auth lists them); or open Ollama or LM Studio",*KUMI,*KUMI))));
     };
     // A server first: a custom server keeps an ID that a provider added later has too.
     let on_server = parse_local_model_id(&model, &named);
@@ -202,8 +202,8 @@ async fn sign_in_check(env: &Env, servers: &[ServerFinding]) -> Result<Check, Ru
     Ok(Check::ok(format!(
         "{} API key {} · model {model}",
         parsed.provider,
-        if key.is_some_and(|key| key.source == KeySource::Env) {
-            format!("from {}", info.first_key_env().unwrap_or(""))
+        if let Some(key) = key.filter(|key| key.source == KeySource::Env) {
+            format!("from {}", key.variable.as_deref().or(info.first_key_env()).unwrap_or(""))
         } else {
             "saved in Kumi".into()
         }

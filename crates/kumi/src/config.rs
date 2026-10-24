@@ -393,7 +393,9 @@ fn server_settings(value: &Value) -> Vec<ServerSetting> {
                 .and_then(Value::as_str)
                 .filter(|k| (1..=4096).contains(&k.len()) && k.bytes().all(|c| (0x21..=0x7e).contains(&c)))
                 .map(str::to_string);
-            Some(ServerSetting { name: name.into(), base_url: url.to_string(), api_key })
+            // How it takes a request: Chat Completions unless it says another Kumi writes.
+            let format = entry.get("format").and_then(|format| serde_json::from_value(format.clone()).ok());
+            Some(ServerSetting { name: name.into(), base_url: url.to_string(), api_key, format })
         })
         .collect()
 }

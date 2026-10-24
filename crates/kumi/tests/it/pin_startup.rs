@@ -288,7 +288,7 @@ async fn quit(f: &Fixture, task: tokio::task::JoinHandle<i32>) {
 case!(inference_only_starts_and_says_this, async {
     // No bridge: Kumi never makes Ableton's integration, and runs inference-only.
     let f = Fixture::new();
-    f.settings(json!({"model":"anthropic/claude-sonnet-5-5","updateCheck":false,"libraryFolders":[]}));
+    f.settings(json!({"model":"anthropic/claude-sonnet-5-5","updateCheck":false,"modelCatalog":false,"libraryFolders":[]}));
     let task = tokio::task::spawn_local(run(f.io(&["--inference-only"]), unused_factory()));
     f.input.wait_ready().await;
     wait_for("the first look", || f.output().lines().any(|l| l.starts_with("[observation] "))).await;
@@ -306,7 +306,7 @@ async fn falls_back(message: &str) -> Value {
     let f = Fixture::new();
     let config = f.folder.path().join("bridge.json");
     std::fs::write(&config, "{}").unwrap();
-    f.settings(json!({"model":"anthropic/claude-sonnet-5-5","updateCheck":false,"libraryFolders":[]}));
+    f.settings(json!({"model":"anthropic/claude-sonnet-5-5","updateCheck":false,"modelCatalog":false,"libraryFolders":[]}));
     let starts = Rc::new(Cell::new(0));
     let count = starts.clone();
     let message = message.to_string();
