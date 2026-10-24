@@ -237,6 +237,13 @@ pub fn reset_words(resets_at_ms: f64, now_ms: f64) -> String {
     }
 }
 
+/// Whether a refused call says the account's balance or credit ran out.
+fn out_of_credit(error: &ApiCallError) -> bool {
+    static OUT: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"(?i)insufficient[_ ][\w ]{0,24}(?:balance|credits?|funds)|out of credits?|no credits? left").expect("regex")
+    });
+    OUT.is_match(error.response_body.as_deref().unwrap_or("")) || OUT.is_match(&error.message)
+}
 /// Map any inference failure to a message Kumi wrote, tagged with the provider it concerns so the
 /// app can offer the fix (sign in again, choose another model). Provider detail is bounded and never
 /// includes credentials.
@@ -301,6 +308,12 @@ pub fn describe_failure(error: &LanguageModelError, binding_id: &str) -> KumiErr
             Some(403) => KumiError::with_provider(
                 FailureKind::Auth,
                 format!("{name} says this sign-in can't use {model} (HTTP 403){}.", with(": ")),
+                provider,
+            ),
+            // A balance that ran out (Venice's INSUFFICIENT_BALANCE), said as the producer would say it.
+            Some(402) if out_of_credit(&error) => KumiError::with_provider(
+                FailureKind::Billing,
+                format!("You're out of {name} credit: add some, or choose another model."),
                 provider,
             ),
             Some(402) => KumiError::with_provider(

@@ -774,7 +774,11 @@ impl LanguageModel for ResponsesModel {
         let (body, warnings, opts) = self.arguments(&call)?;
         let mut wire = body.clone();
         wire["stream"] = json!(true);
-        let mut headers = Headers::from([("authorization".into(), format!("Bearer {}", self.0.api_key))]);
+        // A server on the producer's network may take no key.
+        let mut headers = Headers::new();
+        if !self.0.api_key.is_empty() {
+            headers.insert("authorization".into(), format!("Bearer {}", self.0.api_key));
+        }
         headers.extend(self.0.headers.iter().map(|(k, v)| (k.to_lowercase(), v.clone())));
         let agent = headers.entry("user-agent".into()).or_default();
         if !agent.is_empty() {

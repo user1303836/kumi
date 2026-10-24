@@ -11,23 +11,23 @@
                          ██                          ▀▀
                          ██ ▄█▀  ██  ██  ██▀▀██▀▀█▄  ██
                          ██▀█▄   ██  ██  ██  ██  ██  ██
-                         ▀▀  ▀▀   ▀▀▀▀▀  ▀▀  ▀▀  ▀▀  ▀▀
 
    Choose a model                                            type to filter
 
    ChatGPT                                                        signed in
      GPT-6 Astra              Frontier model for complex work       current
-     GPT-6 Luna               Fast and light                                      HISTORY ────────────────────────────
-   Anthropic                                                  not signed in       Nothing changed yet
-     Sign in to Anthropic     with an API key                       sign in
+     GPT-6 Luna               Fast and light
+   Anthropic                                                  not signed in       HISTORY ────────────────────────────
+     Sign in to Anthropic     with an API key                       sign in       Nothing changed yet
    OpenAI API                                                 not signed in
      Sign in to OpenAI API    with an API key                       sign in
    OpenCode Zen                                               not signed in
      Sign in to OpenCode Zen  with an API key                       sign in
    OpenCode Go                                                not signed in
      Sign in to OpenCode Go   with an API key                       sign in
-   On this computer
-     Open Ollama or LM Studio, and its models show here.
+   More providers                                             not signed in
+     Sign in to one           OpenRouter, Venice, Google Gemini a…  sign in
+   On this computer                                                ↓ 1 more
 
 
 

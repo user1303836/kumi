@@ -332,14 +332,14 @@ async fn local_models_need_no_signin_choose_a_loaded_tool_model_and_explain_limi
 let(server,task)=ollama().await;let folder=tempfile::tempdir().unwrap();let file=folder.path().join("settings.json");let servers=json!([{"name":"llama.cpp","baseURL":"http://127.0.0.1:9/v1"}]);std::fs::write(&file,json!({"modelServers":servers}).to_string()).unwrap();let said=Rc::new(RefCell::new(Vec::new()));let make=|file:&std::path::Path,auth:&str|create_model_control(ModelControlOptions{store:Rc::new(open_credential_store(folder.path().join(auth))),settings_file:file.to_string_lossy().into(),env:Env::from([("OLLAMA_HOST".into(),server.clone())]),fetch:Some(Rc::new(NoStudio)),changed:Rc::new(||async{Ok(())}.boxed_local()),say:Some(Rc::new({let said=said.clone();move|message|said.borrow_mut().push(message)})),installed:Some(Rc::new(|_|false))});let control=make(&file,"auth.json");assert_eq!(serde_json::to_value(control.local().await).unwrap(),json!([{"id":"ollama","name":"Ollama","where":"on this computer","running":true},{"id":"llama-cpp","name":"llama.cpp","where":"on this computer","running":false,"start":"Start it, or check its address (http://127.0.0.1:9/v1) in ~/.kumi/settings.json"}]));assert_eq!(control.models("ollama",false).await.unwrap().into_iter().map(|m|(m.id,m.description)).collect::<Vec<_>>(),vec![("ollama/qwen3:8b".into(),Some("8B · Q4_K_M · loaded".into())),("ollama/gemma3:4b".into(),Some("8B · Q4_K_M · can't change the Set".into()))]);let chosen=control.choose_default().await.unwrap().unwrap();assert_eq!(chosen.model.id,"ollama/qwen3:8b");assert_eq!(chosen.note,None);let mut current=serde_json::to_value(control.current()).unwrap();current.as_object_mut().unwrap().remove("efforts");assert_eq!(current,json!({"model":"ollama/qwen3:8b","provider":"ollama","name":"qwen3:8b","pinned":false,"where":"on this computer"}));assert_eq!(serde_json::from_str::<Value>(&std::fs::read_to_string(&file).unwrap()).unwrap(),json!({"model":"ollama/qwen3:8b","modelServers":servers}));assert_eq!(control.choose("ollama/gemma3:4b").await.unwrap().as_deref(),Some("gemma3:4b can't use tools, so Kumi can talk with it about your Set but can't change anything. qwen3:8b on Ollama can: /model chooses it."));assert_eq!(control.choose("ollama/gemma3:4b").await.unwrap(),None);assert_eq!(control.binding().await.unwrap().id,"ollama/gemma3:4b");assert!(said.borrow().is_empty());for(id,name)in[("ollama","Ollama"),("llama-cpp","llama.cpp"),("anthropic","Anthropic")]{assert_eq!(control.provider_name(id),name);}let racing=make(&folder.path().join("fresh-settings.json"),"fresh-auth.json");let(announced,bound)=tokio::join!(racing.choose_default(),racing.binding());assert_eq!(announced.unwrap().unwrap().model.id,"ollama/qwen3:8b");assert_eq!(bound.unwrap().id,"ollama/qwen3:8b");let later=make(&file,"auth.json");let binding=later.binding_with_info().await.unwrap();binding.asked.unwrap().await;tokio::task::yield_now().await;assert_eq!(said.borrow().len(),1);assert!(said.borrow()[0].starts_with("gemma3:4b can't use tools"));task.abort();
 }).await;
 }
-/// A provider added after the first five, as Venice would be: only this test's thread has it.
+/// A provider added after the first five, as Venice was: only this test's thread has it.
 static ADDED: [ProviderRow; 1] = [ProviderRow {
-    id: "venice",
-    name: "Venice AI",
-    short_name: "Venice",
-    credential: "venice",
-    key_env: &["VENICE_API_KEY"],
-    base_url: "https://api.venice.ai/api/v1",
+    id: "acme",
+    name: "Acme AI",
+    short_name: "Acme",
+    credential: "acme",
+    key_env: &["ACME_API_KEY"],
+    base_url: "https://api.acme.example.test/v1",
     ..API_KEY_ROW
 }];
 fn control_with(folder: &tempfile::TempDir, settings: Value) -> ModelControl {
@@ -361,24 +361,24 @@ async fn a_custom_server_keeps_its_id_and_hides_a_provider_added_later_that_has_
     let folder = tempfile::tempdir().unwrap();
     let control = control_with(
         &folder,
-        json!({"model":"venice/qwen3-coder","modelServers":[{"name":"Venice","baseURL":"https://venice.example.test/v1"}]}),
+        json!({"model":"acme/qwen3-coder","modelServers":[{"name":"Acme","baseURL":"https://acme.example.test/v1"}]}),
     );
     // The model saved as the server's is still the server's.
     let current = control.current();
-    assert_eq!((current.provider.as_deref(), current.r#where.as_deref()), (Some("venice"), Some("on venice.example.test")));
-    assert_eq!(control.provider_name("venice"), "Venice");
-    assert_eq!(control.cloud_provider("venice"), None);
+    assert_eq!((current.provider.as_deref(), current.r#where.as_deref()), (Some("acme"), Some("on acme.example.test")));
+    assert_eq!(control.provider_name("acme"), "Acme");
+    assert_eq!(control.cloud_provider("acme"), None);
     assert_eq!(missing_model(&control).await, None);
     // /login and the picker don't offer the provider it hides.
     let offered: Vec<_> = control.providers().await.unwrap().into_iter().map(|status| status.id.as_str()).collect();
-    assert_eq!(offered, ["openai-codex", "anthropic", "openai", "opencode", "opencode-go"]);
+    assert!(!offered.contains(&"acme") && offered.contains(&"venice"), "{offered:?}");
     // Without that server, the provider is offered, last, by its own name.
-    let control = control_with(&folder, json!({"model":"venice/qwen3-coder"}));
-    assert_eq!((control.current().provider.as_deref(), control.current().r#where), (Some("venice"), None));
-    assert_eq!(control.provider_name("venice"), "Venice AI");
-    assert_eq!(control.cloud_provider("venice"), ProviderId::parse("venice"));
+    let control = control_with(&folder, json!({"model":"acme/qwen3-coder"}));
+    assert_eq!((control.current().provider.as_deref(), control.current().r#where), (Some("acme"), None));
+    assert_eq!(control.provider_name("acme"), "Acme AI");
+    assert_eq!(control.cloud_provider("acme"), ProviderId::parse("acme"));
     let offered: Vec<_> = control.providers().await.unwrap().into_iter().map(|status| status.id.as_str()).collect();
-    assert_eq!(offered, ["openai-codex", "anthropic", "openai", "opencode", "opencode-go", "venice"]);
+    assert_eq!(offered.last(), Some(&"acme"));
 }
 /// OpenAI's API for a turn: its list, then each request kept and answered; a model that can't use tools turns a
 /// request with tools down, as a provider would.
@@ -452,4 +452,45 @@ async fn a_model_that_cant_use_tools_talks_without_them_whether_its_list_says_so
     let again = f.control.binding_for("openai/gpt-fixture-tools").await.unwrap();
     let _ = again.model.do_stream((again.prepare)(turn())).await;
     assert!(seen.borrow().last().unwrap().get("tools").is_none());
+}
+/// A custom server that takes Responses: its list, then each request kept.
+struct ResponsesBox {
+    seen: Rc<RefCell<Vec<String>>>,
+}
+#[async_trait(?Send)]
+impl Fetch for ResponsesBox {
+    async fn fetch(&self, url: &str, _: FetchInit) -> Result<Response, LanguageModelError> {
+        self.seen.borrow_mut().push(url.into());
+        Ok(if url.ends_with("/models") {
+            Response::json_response(200, json!({"data":[{"id":"gpt-local"}]}))
+        } else {
+            Response::json_response(400, json!({"error":{"message":"fixture rejection"}}))
+        })
+    }
+}
+#[tokio::test(flavor = "current_thread")]
+async fn a_custom_server_that_takes_responses_is_sent_responses() {
+    let folder = tempfile::tempdir().unwrap();
+    let settings_file = folder.path().join("settings.json");
+    let servers = json!([{"name":"Box","baseURL":"http://192.168.1.30:8000/v1","format":"responses"}]);
+    std::fs::write(&settings_file, json!({"modelServers":servers}).to_string()).unwrap();
+    let seen = Rc::new(RefCell::new(vec![]));
+    let control = create_model_control(ModelControlOptions {
+        store: Rc::new(open_credential_store(folder.path().join("auth.json"))),
+        settings_file: settings_file.to_string_lossy().into_owned(),
+        env: Env::new(),
+        fetch: Some(Rc::new(ResponsesBox { seen: seen.clone() })),
+        changed: Rc::new(|| async { Ok(()) }.boxed_local()),
+        say: None,
+        installed: Some(Rc::new(|_| false)),
+    });
+    let listed = control.models("box", false).await.unwrap();
+    assert_eq!(
+        listed.iter().map(|m| (m.id.as_str(), m.facts_from)).collect::<Vec<_>>(),
+        [("box/gpt-local", Some(kumi_ai::providers::models::FactsFrom::Guess))]
+    );
+    assert_eq!(control.choose("box/gpt-local").await.unwrap(), None);
+    let binding = control.binding().await.unwrap();
+    assert!(binding.model.do_stream((binding.prepare)(turn())).await.is_err());
+    assert_eq!(seen.borrow().last().map(String::as_str), Some("http://192.168.1.30:8000/v1/responses"));
 }

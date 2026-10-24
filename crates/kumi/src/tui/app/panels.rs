@@ -1646,6 +1646,9 @@ impl TuiApp {
             self.sign_in(provider, Some(self.action(|app| async move { app.open_fallbacks().await })));
             return Ok(());
         }
+        if value == "login:" {
+            return self.open_login().await;
+        }
         let model = value.strip_prefix("fallback:").unwrap_or(&value);
         let toggled_off = !resend && models.fallback().as_deref() == Some(model);
         let next = (!model.is_empty() && !toggled_off).then_some(model);
@@ -1674,6 +1677,9 @@ impl TuiApp {
         if let Some(provider) = value.strip_prefix("signin:").and_then(ProviderId::parse) {
             self.sign_in(provider, Some(self.action(|app| async move { app.open_models().await })));
             return Ok(());
+        }
+        if value == "login:" {
+            return self.open_login().await;
         }
         if value.starts_with("fallback:") {
             return self.choose_fallback(item, false).await;
@@ -1802,7 +1808,8 @@ impl TuiApp {
                 )
             })
             .collect();
-        self.pick(Picker::new("Sign in to", items), |app, item| async move {
+        let options = PickerOptions { filterable: true, ..Default::default() };
+        self.pick(Picker::with_options("Sign in to", items, options), |app, item| async move {
             if let Some(p) = item.value.as_deref().and_then(ProviderId::parse) {
                 app.sign_in(p, None);
             }
@@ -2165,7 +2172,9 @@ fn model_items(
         }
     };
     let mut items = vec![];
-    for p in statuses {
+    // A provider added after the first five shows here once signed in; the rest wait in /login.
+    let waiting: Vec<&str> = statuses.iter().filter(|p| !p.signed_in && !p.id.row().reserved).map(|p| p.name.as_str()).collect();
+    for p in statuses.iter().filter(|p| p.signed_in || p.id.row().reserved) {
         let listed = lists.get(p.id.as_str());
         let refused = matches!(listed, Some(Listed::Refused));
         let environment = p.via.as_deref() == Some("environment");
@@ -2202,6 +2211,15 @@ fn model_items(
                 _ => {}
             }
         }
+    }
+    if !waiting.is_empty() {
+        let named = match waiting.as_slice() {
+            [first, second, third, rest @ ..] if !rest.is_empty() => format!("{first}, {second}, {third} and {} more", rest.len()),
+            [.., last] if waiting.len() > 1 => format!("{} and {last}", waiting[..waiting.len() - 1].join(", ")),
+            _ => waiting.join(""),
+        };
+        items.push(noted(PickerItem::heading("More providers"), "not signed in", NoteTone::Faint));
+        items.push(noted(item("Sign in to one", "login:", named), "sign in", NoteTone::Accent));
     }
     if let Some(local) = local {
         if local.is_empty() {

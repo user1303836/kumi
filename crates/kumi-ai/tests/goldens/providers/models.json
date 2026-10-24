@@ -883,5 +883,27 @@
       "where": "on 192.168.1.20",
       "factsFrom": "guess"
     }
+  ],
+  "responses-box": [
+    {
+      "id": "responses-box/gpt-local",
+      "provider": "responses-box",
+      "model": "gpt-local",
+      "name": "gpt-local",
+      "efforts": [],
+      "where": "on 192.168.1.30",
+      "factsFrom": "guess"
+    }
+  ],
+  "claude-proxy": [
+    {
+      "id": "claude-proxy/claude-local",
+      "provider": "claude-proxy",
+      "model": "claude-local",
+      "name": "claude-local",
+      "efforts": [],
+      "where": "on claude-proxy.example.test",
+      "factsFrom": "guess"
+    }
   ]
 }

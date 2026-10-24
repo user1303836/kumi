@@ -279,6 +279,18 @@ impl ModelControl {
         self.tier_of(id).await.map(|tier| tier.id)
     }
     async fn bind(&self, id: &str, effort: Option<Effort>, tier: Option<String>) -> Result<Bound, RuntimeError> {
+        let profile = *crate::daw::profile();
+        // A custom server that takes Responses or Anthropic's format: bound as a cloud model is, under Kumi's one policy.
+        if let Some(Parsed { server: Some(server), model, .. }) =
+            self.parse(Some(id)).filter(|parsed| parsed.server.as_ref().is_some_and(|s| s.format.is_some()))
+        {
+            let binding = local::resolve_server_model(
+                &server,
+                model.clone(),
+                LocalModelOptions { fetch: self.inner.options.fetch.clone(), effort, on_note: None },
+            );
+            return Ok(Bound::Cloud(Rc::new(chat_only::chat_only(binding, false, self.inner.learned.clone(), profile, model)), None));
+        }
         if let Some(Parsed { server: Some(server), model, .. }) = self.parse(Some(id)) {
             let weak = Rc::downgrade(&self.inner);
             return Ok(Bound::Local(Rc::new(local::resolve_local_model(
@@ -308,7 +320,6 @@ impl ModelControl {
         let info = self.info_for(Some(id));
         let toolless = info.as_ref().is_some_and(|info| info.tools == Some(false));
         let name = info.map(|info| info.name).unwrap_or_else(|| id.split_once('/').map_or(id, |(_, model)| model).to_string());
-        let profile = *crate::daw::profile();
         let note = toolless.then(|| chat_only::talk_only(&name, &profile, "/model chooses one that can."));
         Ok(Bound::Cloud(Rc::new(chat_only::chat_only(binding, toolless, self.inner.learned.clone(), profile, name)), note))
     }

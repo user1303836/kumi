@@ -490,3 +490,56 @@ async fn tool_images_follow_each_native_api_and_words_only_keeps_other_metadata(
     }
     assert_eq!(words_only(vec![Message::user_text("unchanged")]), vec![Message::user_text("unchanged")]);
 }
+/// A Chat Completions stream, as `data:` lines and its end.
+fn chat_stream(chunks: Vec<Value>) -> Response {
+    let mut text: String = chunks.iter().map(|chunk| format!("data: {}\n\n", kumi_common::js::json::stringify(chunk))).collect();
+    text.push_str("data: [DONE]\n\n");
+    Response::text_response(200, text)
+}
+// What Gemini and DeepSeek give with a tool call must go back with it, or the next request is turned down: Gemini's
+// thought signature on the call, DeepSeek's reasoning on the message.
+#[tokio::test]
+async fn gemini_keeps_its_thought_signature_and_deepseek_its_reasoning_across_a_tool_call() {
+    LocalSet::new()
+        .run_until(async {
+            for (model, variable, said) in [
+                (
+                    "gemini/gemini-3-flash",
+                    "GEMINI_API_KEY",
+                    json!({"choices":[{"index":0,"delta":{"role":"assistant","tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"get_tempo","arguments":"{}"},"extra_content":{"google":{"thought_signature":"signature-1"}}}]},"finish_reason":null}]}),
+                ),
+                (
+                    "deepseek/deepseek-flash",
+                    "DEEPSEEK_API_KEY",
+                    json!({"choices":[{"index":0,"delta":{"role":"assistant","reasoning_content":"Read the tempo first.","tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"get_tempo","arguments":"{}"}}]},"finish_reason":null}]}),
+                ),
+            ] {
+                let (_dir, store) = store();
+                let (fetch, requests) = recorder(move |_, n| {
+                    if n == 1 {
+                        chat_stream(vec![said.clone(), json!({"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]})])
+                    } else {
+                        chat_stream(vec![json!({"choices":[{"index":0,"delta":{"content":"120"},"finish_reason":"stop"}]})])
+                    }
+                });
+                let mut opts = options(model, store, fetch);
+                opts.env = Some([(variable.into(), "key-fixture-value".into())].into());
+                let kernel = kernel(resolve_model(opts).await.unwrap());
+                kernel.run("tempo?", Signal::new(), Rc::new(|_| Ok(()))).await.unwrap();
+                {
+                    let requests = requests.borrow();
+                    assert_eq!(requests.len(), 2, "{model}");
+                    let messages = requests[1].body["messages"].as_array().unwrap();
+                    let assistant = messages.iter().find(|message| message["role"] == "assistant").unwrap();
+                    if model.starts_with("gemini/") {
+                        assert_eq!(assistant["tool_calls"][0]["extra_content"]["google"]["thought_signature"], "signature-1", "{assistant}");
+                    } else {
+                        assert_eq!(assistant["reasoning_content"], "Read the tempo first.", "{assistant}");
+                    }
+                    assert!(messages.iter().any(|message| message["role"] == "tool" && message["tool_call_id"] == "call_1"));
+                }
+                kernel.close().await;
+            }
+        })
+        .await;
+}

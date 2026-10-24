@@ -1,0 +1,3598 @@
+{
+  "openai-codex": {
+    "list": {
+      "request": {
+        "url": "https://chatgpt.com/backend-api/codex/models?client_version=1.0.0",
+        "headers": {
+          "authorization": "Bearer access-fixture",
+          "chatgpt-account-id": "account-fixture",
+          "originator": "kumi",
+          "user-agent": "kumi/<version> (<system>)"
+        }
+      },
+      "models": [
+        {
+          "id": "openai-codex/fixture-chat",
+          "tools": true,
+          "efforts": [
+            "medium"
+          ],
+          "default": null,
+          "status": null,
+          "labels": [],
+          "format": null,
+          "from": "provider"
+        },
+        {
+          "id": "openai-codex/org/fixture-slash",
+          "tools": true,
+          "efforts": [
+            "medium"
+          ],
+          "default": null,
+          "status": null,
+          "labels": [],
+          "format": null,
+          "from": "provider"
+        },
+        {
+          "id": "openai-codex/fixture-quiet",
+          "tools": false,
+          "efforts": [
+            "medium"
+          ],
+          "default": null,
+          "status": null,
+          "labels": [],
+          "format": null,
+          "from": "provider"
+        },
+        {
+          "id": "openai-codex/fixture-old",
+          "tools": true,
+          "efforts": [
+            "medium"
+          ],
+          "default": null,
+          "status": "deprecated",
+          "labels": [],
+          "format": null,
+          "from": "provider"
+        },
+        {
+          "id": "openai-codex/fixture-unknown",
+          "tools": null,
+          "efforts": [
+            "medium"
+          ],
+          "default": null,
+          "status": null,
+          "labels": [],
+          "format": null,
+          "from": "provider"
+        }
+      ]
+    },
+    "keyCheck": {
+      "request": null,
+      "verdicts": {}
+    },
+    "turn": {
+      "model": "openai-codex/fixture-chat",
+      "request": {
+        "url": "https://chatgpt.com/backend-api/codex/responses",
+        "headers": {
+          "authorization": "Bearer access-fixture",
+          "chatgpt-account-id": "account-fixture",
+          "content-type": "application/json",
+          "openai-beta": "responses=experimental",
+          "originator": "kumi",
+          "session-id": "session-1",
+          "user-agent": "kumi/<version> (<system>) ai-sdk/openai/4.0.78 ai-sdk/provider-utils/5.0.49 runtime/node.js/24"
+        },
+        "body": {
+          "model": "fixture-chat",
+          "input": [
+            {
+              "role": "user",
+              "content": [
+                {
+                  "type": "input_text",
+                  "text": "What's the tempo?"
+                }
+              ]
+            },
+            {
+              "type": "function_call",
+              "call_id": "call_1",
+              "name": "get_tempo",
+              "arguments": "{}"
+            },
+            {
+              "type": "function_call_output",
+              "call_id": "call_1",
+              "output": "Tempo 120"
+            }
+          ],
+          "text": {
+            "verbosity": "low"
+          },
+          "store": false,
+          "instructions": "fixture instructions",
+          "include": [
+            "reasoning.encrypted_content"
+          ],
+          "prompt_cache_key": "session-1",
+          "reasoning": {
+            "effort": "high",
+            "summary": "detailed"
+          },
+          "tools": [
+            {
+              "type": "function",
+              "name": "get_tempo",
+              "description": "The Set's tempo",
+              "parameters": {
+                "type": "object",
+                "properties": {}
+              },
+              "strict": false
+            }
+          ],
+          "tool_choice": "auto",
+          "stream": true
+        }
+      }
+    }
+  },
+  "openai": {
+    "list": {
+      "request": {
+        "url": "https://api.openai.com/v1/models",
+        "headers": {
+          "authorization": "Bearer key-fixture-value",
+          "user-agent": "kumi/<version> (<system>)"
+        }
+      },
+      "models": [
+        {
+          "id": "openai/fixture-old",
+          "tools": true,
+          "efforts": [],
+          "default": null,
+          "status": "deprecated",
+          "labels": [],
+          "format": null,
+          "from": "catalog"
+        },
+        {
+          "id": "openai/fixture-quiet",
+          "tools": false,
+          "efforts": [],
+          "default": null,
+          "status": null,
+          "labels": [],
+          "format": null,
+          "from": "catalog"
+        },
+        {
+          "id": "openai/org/fixture-slash",
+          "tools": true,
+          "efforts": [],
+          "default": null,
+          "status": null,
+          "labels": [],
+          "format": null,
+          "from": "catalog"
+        },
+        {
+          "id": "openai/fixture-chat",
+          "tools": true,
+          "efforts": [
+            "low",
+            "high"
+          ],
+          "default": null,
+          "status": null,
+          "labels": [],
+          "format": null,
+          "from": "catalog"
+        }
+      ]
+    },
+    "keyCheck": {
+      "request": {
+        "url": "https://api.openai.com/v1/models",
+        "headers": {
+          "authorization": "Bearer key-fixture-value",
+          "user-agent": "kumi/<version> (<system>)"
+        }
+      },
+      "verdicts": {
+        "200": "ok",
+        "401": "refused",
+        "no answer": "unreachable"
+      }
+    },
+    "turn": {
+      "model": "openai/fixture-old",
+      "request": {
+        "url": "https://api.openai.com/v1/responses",
+        "headers": {
+          "authorization": "Bearer key-fixture-value",
+          "content-type": "application/json",
+          "user-agent": "kumi/<version> (<system>) ai-sdk/openai/4.0.78 ai-sdk/provider-utils/5.0.49 runtime/node.js/24"
+        },
+        "body": {
+          "model": "fixture-old",
+          "input": [
+            {
+              "role": "user",
+              "content": [
+                {
+                  "type": "input_text",
+                  "text": "What's the tempo?"
+                }
+              ]
+            },
+            {
+              "type": "function_call",
+              "call_id": "call_1",
+              "name": "get_tempo",
+              "arguments": "{}"
+            },
+            {
+              "type": "function_call_output",
+              "call_id": "call_1",
+              "output": "Tempo 120"
+            }
+          ],
+          "store": false,
+          "instructions": "fixture instructions",
+          "prompt_cache_key": "session-1",
+          "tools": [
+            {
+              "type": "function",
+              "name": "get_tempo",
+              "description": "The Set's tempo",
+              "parameters": {
+                "type": "object",
+                "properties": {}
+              },
+              "strict": false
+            }
+          ],
+          "tool_choice": "auto",
+          "stream": true
+        }
+      }
+    }
+  },
+  "anthropic": {
+    "list": {
+      "request": {
+        "url": "https://api.anthropic.com/v1/models?limit=100",
+        "headers": {
+          "anthropic-version": "2023-06-01",
+          "user-agent": "kumi/<version> (<system>)",
+          "x-api-key": "key-fixture-value"
+        }
+      },
+      "models": [
+        {
+          "id": "anthropic/fixture-chat",
+          "tools": true,
+          "efforts": [
+            "low",
+            "high"
+          ],
+          "default": null,
+          "status": null,
+          "labels": [],
+          "format": null,
+          "from": "catalog"
+        },
+        {
+          "id": "anthropic/org/fixture-slash",
+          "tools": true,
+          "efforts": [],
+          "default": null,
+          "status": null,
+          "labels": [],
+          "format": null,
+          "from": "catalog"
+        },
+        {
+          "id": "anthropic/fixture-quiet",
+          "tools": false,
+          "efforts": [],
+          "default": null,
+          "status": null,
+          "labels": [],
+          "format": null,
+          "from": "catalog"
+        },
+        {
+          "id": "anthropic/fixture-old",
+          "tools": true,
+          "efforts": [],
+          "default": null,
+          "status": "deprecated",
+          "labels": [],
+          "format": null,
+          "from": "catalog"
+        },
+        {
+          "id": "anthropic/fixture-unknown",
+          "tools": null,
+          "efforts": [],
+          "default": null,
+          "status": null,
+          "labels": [],
+          "format": null,
+          "from": "guess"
+        }
+      ]
+    },
+    "keyCheck": {
+      "request": {
+        "url": "https://api.anthropic.com/v1/models?limit=100",
+        "headers": {
+          "anthropic-version": "2023-06-01",
+          "user-agent": "kumi/<version> (<system>)",
+          "x-api-key": "key-fixture-value"
+        }
+      },
+      "verdicts": {
+        "200": "ok",
+        "401": "refused",
+        "no answer": "unreachable"
+      }
+    },
+    "turn": {
+      "model": "anthropic/fixture-chat",
+      "request": {
+        "url": "https://api.anthropic.com/v1/messages",
+        "headers": {
+          "anthropic-version": "2023-06-01",
+          "content-type": "application/json",
+          "user-agent": "kumi/<version> (<system>) ai-sdk/anthropic/4.0.65 ai-sdk/provider-utils/5.0.49 runtime/node.js/24",
+          "x-api-key": "key-fixture-value"
+        },
+        "body": {
+          "model": "fixture-chat",
+          "max_tokens": 4096,
+          "output_config": {
+            "effort": "high"
+          },
+          "system": [
+            {
+              "type": "text",
+              "text": "fixture instructions",
+              "cache_control": {
+                "type": "ephemeral",
+                "ttl": "1h"
+              }
+            }
+          ],
+          "messages": [
+            {
+              "role": "user",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "What's the tempo?"
+                }
+              ]
+            },
+            {
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "tool_use",
+                  "id": "call_1",
+                  "name": "get_tempo",
+                  "input": {}
+                }
+              ]
+            },
+            {
+              "role": "user",
+              "content": [
+                {
+                  "type": "tool_result",
+                  "tool_use_id": "call_1",
+                  "content": "Tempo 120",
+                  "cache_control": {
+                    "type": "ephemeral"
+                  }
+                }
+              ]
+            }
+          ],
+          "tools": [
+            {
+              "name": "get_tempo",
+              "description": "The Set's tempo",
+              "input_schema": {
+                "type": "object",
+                "properties": {}
+              },
+              "eager_input_streaming": true
+            }
+          ],
+          "tool_choice": {
+            "type": "auto"
+          },
+          "stream": true
+        }
+      }
+    }
+  },
+  "opencode": {
+    "list": {
+      "request": {
+        "url": "https://opencode.ai/zen/v1/models",
+        "headers": {
+          "authorization": "Bearer key-fixture-value",
+          "user-agent": "kumi/<version> (<system>)"
+        }
+      },
+      "models": [
+        {
+          "id": "opencode/fixture-chat",
+          "tools": true,
+          "efforts": [],
+          "default": null,
+          "status": null,
+          "labels": [],
+          "format": null,
+          "from": "catalog"
+        },
+        {
+          "id": "opencode/org/fixture-slash",
+          "tools": true,
+          "efforts": [],
+          "default": null,
+          "status": null,
+          "labels": [],
+          "format": null,
+          "from": "catalog"
+        },
+        {
+          "id": "opencode/fixture-quiet",
+          "tools": false,
+          "efforts": [],
+          "default": null,
+          "status": null,
+          "labels": [],
+          "format": null,
+          "from": "catalog"
+        },
+        {
+          "id": "opencode/fixture-old",
+          "tools": true,
+          "efforts": [],
+          "default": null,
+          "status": "deprecated",
+          "labels": [],
+          "format": null,
+          "from": "catalog"
+        },
+        {
+          "id": "opencode/fixture-unknown",
+          "tools": null,
+          "efforts": [],
+          "default": null,
+          "status": null,
+          "labels": [],
+          "format": null,
+          "from": "guess"
+        }
+      ]
+    },
+    "keyCheck": {
+      "request": {
+        "url": "https://opencode.ai/zen/v1/models",
+        "headers": {
+          "authorization": "Bearer key-fixture-value",
+          "user-agent": "kumi/<version> (<system>)"
+        }
+      },
+      "verdicts": {
+        "200": "ok",
+        "401": "refused",
+        "no answer": "unreachable"
+      }
+    },
+    "turn": {
+      "model": "opencode/fixture-chat",
+      "request": {
+        "url": "https://opencode.ai/zen/v1/chat/completions",
+        "headers": {
+          "authorization": "Bearer key-fixture-value",
+          "content-type": "application/json",
+          "user-agent": "kumi/<version> (<system>) ai-sdk/openai-compatible/3.0.57 ai-sdk/provider-utils/5.0.49 runtime/node.js/24",
+          "x-opencode-session": "session-1"
+        },
+        "body": {
+          "model": "fixture-chat",
+          "messages": [
+            {
+              "role": "system",
+              "content": "fixture instructions"
+            },
+            {
+              "role": "user",
+              "content": "What's the tempo?"
+            },
+            {
+              "role": "assistant",
+              "content": null,
+              "tool_calls": [
+                {
+                  "id": "call_1",
+                  "type": "function",
+                  "function": {
+                    "name": "get_tempo",
+                    "arguments": "{}"
+                  }
+                }
+              ]
+            },
+            {
+              "role": "tool",
+              "tool_call_id": "call_1",
+              "content": "Tempo 120"
+            }
+          ],
+          "tools": [
+            {
+              "type": "function",
+              "function": {
+                "name": "get_tempo",
+                "description": "The Set's tempo",
+                "parameters": {
+                  "type": "object",
+                  "properties": {}
+                }
+              }
+            }
+          ],
+          "tool_choice": "auto",
+          "stream": true,
+          "stream_options": {
+            "include_usage": true
+          }
+        }
+      }
+    }
+  },
+  "opencode-go": {
+    "list": {
+      "request": {
+        "url": "https://opencode.ai/zen/go/v1/models",
+        "headers": {
+          "authorization": "Bearer key-fixture-value",
+          "user-agent": "kumi/<version> (<system>)"
+        }
+      },
+      "models": [
+        {
+          "id": "opencode-go/fixture-chat",
+          "tools": true,
+          "efforts": [],
+          "default": null,
+          "status": null,
+          "labels": [],
+          "format": null,
+          "from": "catalog"
+        },
+        {
+          "id": "opencode-go/org/fixture-slash",
+          "tools": true,
+          "efforts": [],
+          "default": null,
+          "status": null,
+          "labels": [],
+          "format": null,
+          "from": "catalog"
+        },
+        {
+          "id": "opencode-go/fixture-quiet",
+          "tools": false,
+          "efforts": [],
+          "default": null,
+          "status": null,
+          "labels": [],
+          "format": null,
+          "from": "catalog"
+        },
+        {
+          "id": "opencode-go/fixture-old",
+          "tools": true,
+          "efforts": [],
+          "default": null,
+          "status": "deprecated",
+          "labels": [],
+          "format": null,
+          "from": "catalog"
+        },
+        {
+          "id": "opencode-go/fixture-unknown",
+          "tools": null,
+          "efforts": [],
+          "default": null,
+          "status": null,
+          "labels": [],
+          "format": null,
+          "from": "guess"
+        }
+      ]
+    },
+    "keyCheck": {
+      "request": {
+        "url": "https://opencode.ai/zen/go/v1/models",
+        "headers": {
+          "authorization": "Bearer key-fixture-value",
+          "user-agent": "kumi/<version> (<system>)"
+        }
+      },
+      "verdicts": {
+        "200": "ok",
+        "401": "refused",
+        "no answer": "unreachable"
+      }
+    },
+    "turn": {
+      "model": "opencode-go/fixture-chat",
+      "request": {
+        "url": "https://opencode.ai/zen/go/v1/chat/completions",
+        "headers": {
+          "authorization": "Bearer key-fixture-value",
+          "content-type": "application/json",
+          "user-agent": "kumi/<version> (<system>) ai-sdk/openai-compatible/3.0.57 ai-sdk/provider-utils/5.0.49 runtime/node.js/24",
+          "x-opencode-session": "session-1"
+        },
+        "body": {
+          "model": "fixture-chat",
+          "messages": [
+            {
+              "role": "system",
+              "content": "fixture instructions"
+            },
+            {
+              "role": "user",
+              "content": "What's the tempo?"
+            },
+            {
+              "role": "assistant",
+              "content": null,
+              "tool_calls": [
+                {
+                  "id": "call_1",
+                  "type": "function",
+                  "function": {
+                    "name": "get_tempo",
+                    "arguments": "{}"
+                  }
+                }
+              ]
+            },
+            {
+              "role": "tool",
+              "tool_call_id": "call_1",
+              "content": "Tempo 120"
+            }
+          ],
+          "tools": [
+            {
+              "type": "function",
+              "function": {
+                "name": "get_tempo",
+                "description": "The Set's tempo",
+                "parameters": {
+                  "type": "object",
+                  "properties": {}
+                }
+              }
+            }
+          ],
+          "tool_choice": "auto",
+          "stream": true,
+          "stream_options": {
+            "include_usage": true
+          }
+        }
+      }
+    }
+  },
+  "openrouter": {
+    "list": {
+      "request": {
+        "url": "https://openrouter.ai/api/v1/models",
+        "headers": {
+          "authorization": "Bearer key-fixture-value",
+          "http-referer": "https://github.com/user1303836/kumi",
+          "user-agent": "kumi/<version> (<system>)",
+          "x-openrouter-title": "Kumi"
+        }
+      },
+      "models": [
+        {
+          "id": "openrouter/org/fixture-slash",
+          "tools": true,
+          "efforts": [
+            "low",
+            "high"
+          ],
+          "default": "low",
+          "status": null,
+          "labels": [],
+          "format": null,
+          "from": "provider"
+        },
+        {
+          "id": "openrouter/org/fixture-quiet",
+          "tools": false,
+          "efforts": [],
+          "default": null,
+          "status": "deprecated",
+          "labels": [],
+          "format": null,
+          "from": "provider"
+        }
+      ]
+    },
+    "keyCheck": {
+      "request": {
+        "url": "https://openrouter.ai/api/v1/key",
+        "headers": {
+          "authorization": "Bearer key-fixture-value",
+          "http-referer": "https://github.com/user1303836/kumi",
+          "user-agent": "kumi/<version> (<system>)",
+          "x-openrouter-title": "Kumi"
+        }
+      },
+      "verdicts": {
+        "200": "ok",
+        "401": "refused",
+        "no answer": "unreachable"
+      }
+    },
+    "turn": {
+      "model": "openrouter/org/fixture-slash",
+      "request": {
+        "url": "https://openrouter.ai/api/v1/chat/completions",
+        "headers": {
+          "authorization": "Bearer key-fixture-value",
+          "content-type": "application/json",
+          "http-referer": "https://github.com/user1303836/kumi",
+          "user-agent": "kumi/<version> (<system>) ai-sdk/openai-compatible/3.0.57 ai-sdk/provider-utils/5.0.49 runtime/node.js/24",
+          "x-openrouter-title": "Kumi"
+        },
+        "body": {
+          "model": "org/fixture-slash",
+          "reasoning": {
+            "effort": "high"
+          },
+          "session_id": "session-1",
+          "messages": [
+            {
+              "role": "system",
+              "content": "fixture instructions"
+            },
+            {
+              "role": "user",
+              "content": "What's the tempo?"
+            },
+            {
+              "role": "assistant",
+              "content": null,
+              "tool_calls": [
+                {
+                  "id": "call_1",
+                  "type": "function",
+                  "function": {
+                    "name": "get_tempo",
+                    "arguments": "{}"
+                  }
+                }
+              ]
+            },
+            {
+              "role": "tool",
+              "tool_call_id": "call_1",
+              "content": "Tempo 120"
+            }
+          ],
+          "tools": [
+            {
+              "type": "function",
+              "function": {
+                "name": "get_tempo",
+                "description": "The Set's tempo",
+                "parameters": {
+                  "type": "object",
+                  "properties": {}
+                }
+              }
+            }
+          ],
+          "tool_choice": "auto",
+          "stream": true,
+          "stream_options": {
+            "include_usage": true
+          }
+        }
+      }
+    }
+  },
+  "venice": {
+    "list": {
+      "request": {
+        "url": "https://api.venice.ai/api/v1/models?type=text",
+        "headers": {
+          "authorization": "Bearer key-fixture-value",
+          "user-agent": "kumi/<version> (<system>)"
+        }
+      },
+      "models": [
+        {
+          "id": "venice/fixture-chat",
+          "tools": true,
+          "efforts": [
+            "none",
+            "high"
+          ],
+          "default": "high",
+          "status": null,
+          "labels": [
+            "private"
+          ],
+          "format": null,
+          "from": "provider"
+        },
+        {
+          "id": "venice/fixture-quiet",
+          "tools": false,
+          "efforts": [],
+          "default": null,
+          "status": "deprecated",
+          "labels": [
+            "anonymized"
+          ],
+          "format": null,
+          "from": "provider"
+        }
+      ]
+    },
+    "keyCheck": {
+      "request": {
+        "url": "https://api.venice.ai/api/v1/api_keys/rate_limits",
+        "headers": {
+          "authorization": "Bearer key-fixture-value",
+          "user-agent": "kumi/<version> (<system>)"
+        }
+      },
+      "verdicts": {
+        "200": "ok",
+        "401": "refused",
+        "no answer": "unreachable"
+      }
+    },
+    "turn": {
+      "model": "venice/fixture-chat",
+      "request": {
+        "url": "https://api.venice.ai/api/v1/chat/completions",
+        "headers": {
+          "authorization": "Bearer key-fixture-value",
+          "content-type": "application/json",
+          "user-agent": "kumi/<version> (<system>) ai-sdk/openai-compatible/3.0.57 ai-sdk/provider-utils/5.0.49 runtime/node.js/24"
+        },
+        "body": {
+          "model": "fixture-chat",
+          "prompt_cache_key": "session-1",
+          "reasoning_effort": "high",
+          "messages": [
+            {
+              "role": "system",
+              "content": "fixture instructions"
+            },
+            {
+              "role": "user",
+              "content": "What's the tempo?"
+            },
+            {
+              "role": "assistant",
+              "content": null,
+              "tool_calls": [
+                {
+                  "id": "call_1",
+                  "type": "function",
+                  "function": {
+                    "name": "get_tempo",
+                    "arguments": "{}"
+                  }
+                }
+              ]
+            },
+            {
+              "role": "tool",
+              "tool_call_id": "call_1",
+              "content": "Tempo 120"
+            }
+          ],
+          "tools": [
+            {
+              "type": "function",
+              "function": {
+                "name": "get_tempo",
+                "description": "The Set's tempo",
+                "parameters": {
+                  "type": "object",
+                  "properties": {}
+                }
+              }
+            }
+          ],
+          "tool_choice": "auto",
+          "stream": true,
+          "stream_options": {
+            "include_usage": true
+          }
+        }
+      }
+    }
+  },
+  "gemini": {
+    "list": {
+      "request": {
+        "url": "https://generativelanguage.googleapis.com/v1beta/openai/models",
+        "headers": {
+          "authorization": "Bearer key-fixture-value",
+          "user-agent": "kumi/<version> (<system>)"
+        }
+      },
+      "models": [
+        {
+          "id": "gemini/fixture-chat",
+          "tools": true,
+          "efforts": [
+            "low",
+            "high"
+          ],
+          "default": null,
+          "status": null,
+          "labels": [],
+          "format": null,
+          "from": "catalog"
+        },
+        {
+          "id": "gemini/org/fixture-slash",
+          "tools": true,
+          "efforts": [],
+          "default": null,
+          "status": null,
+          "labels": [],
+          "format": null,
+          "from": "catalog"
+        },
+        {
+          "id": "gemini/fixture-quiet",
+          "tools": false,
+          "efforts": [],
+          "default": null,
+          "status": null,
+          "labels": [],
+          "format": null,
+          "from": "catalog"
+        },
+        {
+          "id": "gemini/fixture-old",
+          "tools": true,
+          "efforts": [],
+          "default": null,
+          "status": "deprecated",
+          "labels": [],
+          "format": null,
+          "from": "catalog"
+        }
+      ]
+    },
+    "keyCheck": {
+      "request": {
+        "url": "https://generativelanguage.googleapis.com/v1beta/openai/models",
+        "headers": {
+          "authorization": "Bearer key-fixture-value",
+          "user-agent": "kumi/<version> (<system>)"
+        }
+      },
+      "verdicts": {
+        "200": "ok",
+        "401": "refused",
+        "no answer": "unreachable"
+      }
+    },
+    "turn": {
+      "model": "gemini/fixture-chat",
+      "request": {
+        "url": "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+        "headers": {
+          "authorization": "Bearer key-fixture-value",
+          "content-type": "application/json",
+          "user-agent": "kumi/<version> (<system>) ai-sdk/openai-compatible/3.0.57 ai-sdk/provider-utils/5.0.49 runtime/node.js/24"
+        },
+        "body": {
+          "model": "fixture-chat",
+          "reasoning_effort": "high",
+          "messages": [
+            {
+              "role": "system",
+              "content": "fixture instructions"
+            },
+            {
+              "role": "user",
+              "content": "What's the tempo?"
+            },
+            {
+              "role": "assistant",
+              "content": null,
+              "tool_calls": [
+                {
+                  "id": "call_1",
+                  "type": "function",
+                  "function": {
+                    "name": "get_tempo",
+                    "arguments": "{}"
+                  }
+                }
+              ]
+            },
+            {
+              "role": "tool",
+              "tool_call_id": "call_1",
+              "content": "Tempo 120"
+            }
+          ],
+          "tools": [
+            {
+              "type": "function",
+              "function": {
+                "name": "get_tempo",
+                "description": "The Set's tempo",
+                "parameters": {
+                  "type": "object",
+                  "properties": {}
+                }
+              }
+            }
+          ],
+          "tool_choice": "auto",
+          "stream": true,
+          "stream_options": {
+            "include_usage": true
+          }
+        }
+      }
+    }
+  },
+  "deepseek": {
+    "list": {
+      "request": {
+        "url": "https://api.deepseek.com/models",
+        "headers": {
+          "authorization": "Bearer key-fixture-value",
+          "user-agent": "kumi/<version> (<system>)"
+        }
+      },
+      "models": [
+        {
+          "id": "deepseek/fixture-chat",
+          "tools": true,
+          "efforts": [
+            "low",
+            "high"
+          ],
+          "default": null,
+          "status": null,
+          "labels": [],
+          "format": null,
+          "from": "catalog"
+        },
+        {
+          "id": "deepseek/org/fixture-slash",
+          "tools": true,
+          "efforts": [],
+          "default": null,
+          "status": null,
+          "labels": [],
+          "format": null,
+          "from": "catalog"
+        },
+        {
+          "id": "deepseek/fixture-quiet",
+          "tools": false,
+          "efforts": [],
+          "default": null,
+          "status": null,
+          "labels": [],
+          "format": null,
+          "from": "catalog"
+        },
+        {
+          "id": "deepseek/fixture-old",
+          "tools": true,
+          "efforts": [],
+          "default": null,
+          "status": "deprecated",
+          "labels": [],
+          "format": null,
+          "from": "catalog"
+        },
+        {
+          "id": "deepseek/fixture-unknown",
+          "tools": null,
+          "efforts": [],
+          "default": null,
+          "status": null,
+          "labels": [],
+          "format": null,
+          "from": "guess"
+        }
+      ]
+    },
+    "keyCheck": {
+      "request": {
+        "url": "https://api.deepseek.com/models",
+        "headers": {
+          "authorization": "Bearer key-fixture-value",
+          "user-agent": "kumi/<version> (<system>)"
+        }
+      },
+      "verdicts": {
+        "200": "ok",
+        "401": "refused",
+        "no answer": "unreachable"
+      }
+    },
+    "turn": {
+      "model": "deepseek/fixture-chat",
+      "request": {
+        "url": "https://api.deepseek.com/chat/completions",
+        "headers": {
+          "authorization": "Bearer key-fixture-value",
+          "content-type": "application/json",
+          "user-agent": "kumi/<version> (<system>) ai-sdk/openai-compatible/3.0.57 ai-sdk/provider-utils/5.0.49 runtime/node.js/24"
+        },
+        "body": {
+          "model": "fixture-chat",
+          "reasoning_effort": "high",
+          "messages": [
+            {
+              "role": "system",
+              "content": "fixture instructions"
+            },
+            {
+              "role": "user",
+              "content": "What's the tempo?"
+            },
+            {
+              "role": "assistant",
+              "content": null,
+              "tool_calls": [
+                {
+                  "id": "call_1",
+                  "type": "function",
+                  "function": {
+                    "name": "get_tempo",
+                    "arguments": "{}"
+                  }
+                }
+              ]
+            },
+            {
+              "role": "tool",
+              "tool_call_id": "call_1",
+              "content": "Tempo 120"
+            }
+          ],
+          "tools": [
+            {
+              "type": "function",
+              "function": {
+                "name": "get_tempo",
+                "description": "The Set's tempo",
+                "parameters": {
+                  "type": "object",
+                  "properties": {}
+                }
+              }
+            }
+          ],
+          "tool_choice": "auto",
+          "stream": true,
+          "stream_options": {
+            "include_usage": true
+          }
+        }
+      }
+    }
+  },
+  "xai": {
+    "list": {
+      "request": {
+        "url": "https://api.x.ai/v1/models",
+        "headers": {
+          "authorization": "Bearer key-fixture-value",
+          "user-agent": "kumi/<version> (<system>)"
+        }
+      },
+      "models": [
+        {
+          "id": "xai/fixture-chat",
+          "tools": true,
+          "efforts": [
+            "low",
+            "high"
+          ],
+          "default": null,
+          "status": null,
+          "labels": [],
+          "format": null,
+          "from": "catalog"
+        },
+        {
+          "id": "xai/org/fixture-slash",
+          "tools": true,
+          "efforts": [],
+          "default": null,
+          "status": null,
+          "labels": [],
+          "format": null,
+          "from": "catalog"
+        },
+        {
+          "id": "xai/fixture-quiet",
+          "tools": false,
+          "efforts": [],
+          "default": null,
+          "status": null,
+          "labels": [],
+          "format": null,
+          "from": "catalog"
+        },
+        {
+          "id": "xai/fixture-old",
+          "tools": true,
+          "efforts": [],
+          "default": null,
+          "status": "deprecated",
+          "labels": [],
+          "format": null,
+          "from": "catalog"
+        },
+        {
+          "id": "xai/fixture-unknown",
+          "tools": null,
+          "efforts": [],
+          "default": null,
+          "status": null,
+          "labels": [],
+          "format": null,
+          "from": "guess"
+        }
+      ]
+    },
+    "keyCheck": {
+      "request": {
+        "url": "https://api.x.ai/v1/models",
+        "headers": {
+          "authorization": "Bearer key-fixture-value",
+          "user-agent": "kumi/<version> (<system>)"
+        }
+      },
+      "verdicts": {
+        "200": "ok",
+        "401": "refused",
+        "no answer": "unreachable"
+      }
+    },
+    "turn": {
+      "model": "xai/fixture-chat",
+      "request": {
+        "url": "https://api.x.ai/v1/responses",
+        "headers": {
+          "authorization": "Bearer key-fixture-value",
+          "content-type": "application/json",
+          "user-agent": "kumi/<version> (<system>) ai-sdk/openai/4.0.78 ai-sdk/provider-utils/5.0.49 runtime/node.js/24"
+        },
+        "body": {
+          "model": "fixture-chat",
+          "input": [
+            {
+              "role": "user",
+              "content": [
+                {
+                  "type": "input_text",
+                  "text": "What's the tempo?"
+                }
+              ]
+            },
+            {
+              "type": "function_call",
+              "call_id": "call_1",
+              "name": "get_tempo",
+              "arguments": "{}"
+            },
+            {
+              "type": "function_call_output",
+              "call_id": "call_1",
+              "output": "Tempo 120"
+            }
+          ],
+          "store": false,
+          "instructions": "fixture instructions",
+          "include": [
+            "reasoning.encrypted_content"
+          ],
+          "prompt_cache_key": "session-1",
+          "reasoning": {
+            "effort": "high",
+            "summary": "detailed"
+          },
+          "tools": [
+            {
+              "type": "function",
+              "name": "get_tempo",
+              "description": "The Set's tempo",
+              "parameters": {
+                "type": "object",
+                "properties": {}
+              },
+              "strict": false
+            }
+          ],
+          "tool_choice": "auto",
+          "stream": true
+        }
+      }
+    }
+  },
+  "zai": {
+    "list": {
+      "request": {
+        "url": "https://api.z.ai/api/paas/v4/models",
+        "headers": {
+          "authorization": "Bearer key-fixture-value",
+          "user-agent": "kumi/<version> (<system>)"
+        }
+      },
+      "models": [
+        {
+          "id": "zai/fixture-chat",
+          "tools": true,
+          "efforts": [
+            "low",
+            "high"
+          ],
+          "default": null,
+          "status": null,
+          "labels": [],
+          "format": null,
+          "from": "catalog"
+        },
+        {
+          "id": "zai/org/fixture-slash",
+          "tools": true,
+          "efforts": [],
+          "default": null,
+          "status": null,
+          "labels": [],
+          "format": null,
+          "from": "catalog"
+        },
+        {
+          "id": "zai/fixture-quiet",
+          "tools": false,
+          "efforts": [],
+          "default": null,
+          "status": null,
+          "labels": [],
+          "format": null,
+          "from": "catalog"
+        },
+        {
+          "id": "zai/fixture-old",
+          "tools": true,
+          "efforts": [],
+          "default": null,
+          "status": "deprecated",
+          "labels": [],
+          "format": null,
+          "from": "catalog"
+        },
+        {
+          "id": "zai/fixture-unknown",
+          "tools": null,
+          "efforts": [],
+          "default": null,
+          "status": null,
+          "labels": [],
+          "format": null,
+          "from": "guess"
+        }
+      ]
+    },
+    "keyCheck": {
+      "request": {
+        "url": "https://api.z.ai/api/paas/v4/models",
+        "headers": {
+          "authorization": "Bearer key-fixture-value",
+          "user-agent": "kumi/<version> (<system>)"
+        }
+      },
+      "verdicts": {
+        "200": "ok",
+        "401": "refused",
+        "no answer": "unreachable"
+      }
+    },
+    "turn": {
+      "model": "zai/fixture-chat",
+      "request": {
+        "url": "https://api.z.ai/api/paas/v4/chat/completions",
+        "headers": {
+          "authorization": "Bearer key-fixture-value",
+          "content-type": "application/json",
+          "user-agent": "kumi/<version> (<system>) ai-sdk/openai-compatible/3.0.57 ai-sdk/provider-utils/5.0.49 runtime/node.js/24"
+        },
+        "body": {
+          "model": "fixture-chat",
+          "reasoning_effort": "high",
+          "messages": [
+            {
+              "role": "system",
+              "content": "fixture instructions"
+            },
+            {
+              "role": "user",
+              "content": "What's the tempo?"
+            },
+            {
+              "role": "assistant",
+              "content": null,
+              "tool_calls": [
+                {
+                  "id": "call_1",
+                  "type": "function",
+                  "function": {
+                    "name": "get_tempo",
+                    "arguments": "{}"
+                  }
+                }
+              ]
+            },
+            {
+              "role": "tool",
+              "tool_call_id": "call_1",
+              "content": "Tempo 120"
+            }
+          ],
+          "tools": [
+            {
+              "type": "function",
+              "function": {
+                "name": "get_tempo",
+                "description": "The Set's tempo",
+                "parameters": {
+                  "type": "object",
+                  "properties": {}
+                }
+              }
+            }
+          ],
+          "tool_choice": "auto",
+          "stream": true,
+          "stream_options": {
+            "include_usage": true
+          }
+        }
+      }
+    }
+  },
+  "moonshot": {
+    "list": {
+      "request": {
+        "url": "https://api.moonshot.ai/v1/models",
+        "headers": {
+          "authorization": "Bearer key-fixture-value",
+          "user-agent": "kumi/<version> (<system>)"
+        }
+      },
+      "models": [
+        {
+          "id": "moonshot/fixture-chat",
+          "tools": true,
+          "efforts": [
+            "low",
+            "high"
+          ],
+          "default": null,
+          "status": null,
+          "labels": [],
+          "format": null,
+          "from": "catalog"
+        },
+        {
+          "id": "moonshot/org/fixture-slash",
+          "tools": true,
+          "efforts": [],
+          "default": null,
+          "status": null,
+          "labels": [],
+          "format": null,
+          "from": "catalog"
+        },
+        {
+          "id": "moonshot/fixture-quiet",
+          "tools": false,
+          "efforts": [],
+          "default": null,
+          "status": null,
+          "labels": [],
+          "format": null,
+          "from": "catalog"
+        },
+        {
+          "id": "moonshot/fixture-old",
+          "tools": true,
+          "efforts": [],
+          "default": null,
+          "status": "deprecated",
+          "labels": [],
+          "format": null,
+          "from": "catalog"
+        },
+        {
+          "id": "moonshot/fixture-unknown",
+          "tools": null,
+          "efforts": [],
+          "default": null,
+          "status": null,
+          "labels": [],
+          "format": null,
+          "from": "guess"
+        }
+      ]
+    },
+    "keyCheck": {
+      "request": {
+        "url": "https://api.moonshot.ai/v1/models",
+        "headers": {
+          "authorization": "Bearer key-fixture-value",
+          "user-agent": "kumi/<version> (<system>)"
+        }
+      },
+      "verdicts": {
+        "200": "ok",
+        "401": "refused",
+        "no answer": "unreachable"
+      }
+    },
+    "turn": {
+      "model": "moonshot/fixture-chat",
+      "request": {
+        "url": "https://api.moonshot.ai/v1/chat/completions",
+        "headers": {
+          "authorization": "Bearer key-fixture-value",
+          "content-type": "application/json",
+          "user-agent": "kumi/<version> (<system>) ai-sdk/openai-compatible/3.0.57 ai-sdk/provider-utils/5.0.49 runtime/node.js/24"
+        },
+        "body": {
+          "model": "fixture-chat",
+          "reasoning_effort": "high",
+          "messages": [
+            {
+              "role": "system",
+              "content": "fixture instructions"
+            },
+            {
+              "role": "user",
+              "content": "What's the tempo?"
+            },
+            {
+              "role": "assistant",
+              "content": null,
+              "tool_calls": [
+                {
+                  "id": "call_1",
+                  "type": "function",
+                  "function": {
+                    "name": "get_tempo",
+                    "arguments": "{}"
+                  }
+                }
+              ]
+            },
+            {
+              "role": "tool",
+              "tool_call_id": "call_1",
+              "content": "Tempo 120"
+            }
+          ],
+          "tools": [
+            {
+              "type": "function",
+              "function": {
+                "name": "get_tempo",
+                "description": "The Set's tempo",
+                "parameters": {
+                  "type": "object",
+                  "properties": {}
+                }
+              }
+            }
+          ],
+          "tool_choice": "auto",
+          "stream": true,
+          "stream_options": {
+            "include_usage": true
+          }
+        }
+      }
+    }
+  },
+  "alibaba": {
+    "list": {
+      "request": {
+        "url": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models",
+        "headers": {
+          "authorization": "Bearer key-fixture-value",
+          "user-agent": "kumi/<version> (<system>)"
+        }
+      },
+      "models": [
+        {
+          "id": "alibaba/fixture-chat",
+          "tools": true,
+          "efforts": [],
+          "default": null,
+          "status": null,
+          "labels": [],
+          "format": null,
+          "from": "catalog"
+        },
+        {
+          "id": "alibaba/org/fixture-slash",
+          "tools": true,
+          "efforts": [],
+          "default": null,
+          "status": null,
+          "labels": [],
+          "format": null,
+          "from": "catalog"
+        },
+        {
+          "id": "alibaba/fixture-quiet",
+          "tools": false,
+          "efforts": [],
+          "default": null,
+          "status": null,
+          "labels": [],
+          "format": null,
+          "from": "catalog"
+        },
+        {
+          "id": "alibaba/fixture-old",
+          "tools": true,
+          "efforts": [],
+          "default": null,
+          "status": "deprecated",
+          "labels": [],
+          "format": null,
+          "from": "catalog"
+        },
+        {
+          "id": "alibaba/fixture-unknown",
+          "tools": null,
+          "efforts": [],
+          "default": null,
+          "status": null,
+          "labels": [],
+          "format": null,
+          "from": "guess"
+        }
+      ]
+    },
+    "keyCheck": {
+      "request": {
+        "url": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models",
+        "headers": {
+          "authorization": "Bearer key-fixture-value",
+          "user-agent": "kumi/<version> (<system>)"
+        }
+      },
+      "verdicts": {
+        "200": "ok",
+        "401": "refused",
+        "no answer": "unreachable"
+      }
+    },
+    "turn": {
+      "model": "alibaba/fixture-chat",
+      "request": {
+        "url": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions",
+        "headers": {
+          "authorization": "Bearer key-fixture-value",
+          "content-type": "application/json",
+          "user-agent": "kumi/<version> (<system>) ai-sdk/openai-compatible/3.0.57 ai-sdk/provider-utils/5.0.49 runtime/node.js/24"
+        },
+        "body": {
+          "model": "fixture-chat",
+          "messages": [
+            {
+              "role": "system",
+              "content": "fixture instructions"
+            },
+            {
+              "role": "user",
+              "content": "What's the tempo?"
+            },
+            {
+              "role": "assistant",
+              "content": null,
+              "tool_calls": [
+                {
+                  "id": "call_1",
+                  "type": "function",
+                  "function": {
+                    "name": "get_tempo",
+                    "arguments": "{}"
+                  }
+                }
+              ]
+            },
+            {
+              "role": "tool",
+              "tool_call_id": "call_1",
+              "content": "Tempo 120"
+            }
+          ],
+          "tools": [
+            {
+              "type": "function",
+              "function": {
+                "name": "get_tempo",
+                "description": "The Set's tempo",
+                "parameters": {
+                  "type": "object",
+                  "properties": {}
+                }
+              }
+            }
+          ],
+          "tool_choice": "auto",
+          "stream": true,
+          "stream_options": {
+            "include_usage": true
+          }
+        }
+      }
+    }
+  },
+  "minimax": {
+    "list": {
+      "request": {
+        "url": "https://api.minimax.io/anthropic/v1/models",
+        "headers": {
+          "authorization": "Bearer key-fixture-value",
+          "user-agent": "kumi/<version> (<system>)"
+        }
+      },
+      "models": [
+        {
+          "id": "minimax/fixture-chat",
+          "tools": true,
+          "efforts": [
+            "low",
+            "high"
+          ],
+          "default": null,
+          "status": null,
+          "labels": [],
+          "format": null,
+          "from": "catalog"
+        },
+        {
+          "id": "minimax/org/fixture-slash",
+          "tools": true,
+          "efforts": [],
+          "default": null,
+          "status": null,
+          "labels": [],
+          "format": null,
+          "from": "catalog"
+        },
+        {
+          "id": "minimax/fixture-quiet",
+          "tools": false,
+          "efforts": [],
+          "default": null,
+          "status": null,
+          "labels": [],
+          "format": null,
+          "from": "catalog"
+        },
+        {
+          "id": "minimax/fixture-old",
+          "tools": true,
+          "efforts": [],
+          "default": null,
+          "status": "deprecated",
+          "labels": [],
+          "format": null,
+          "from": "catalog"
+        },
+        {
+          "id": "minimax/fixture-unknown",
+          "tools": null,
+          "efforts": [],
+          "default": null,
+          "status": null,
+          "labels": [],
+          "format": null,
+          "from": "guess"
+        }
+      ]
+    },
+    "keyCheck": {
+      "request": {
+        "url": "https://api.minimax.io/anthropic/v1/models",
+        "headers": {
+          "authorization": "Bearer key-fixture-value",
+          "user-agent": "kumi/<version> (<system>)"
+        }
+      },
+      "verdicts": {
+        "200": "ok",
+        "401": "refused",
+        "no answer": "unreachable"
+      }
+    },
+    "turn": {
+      "model": "minimax/fixture-chat",
+      "request": {
+        "url": "https://api.minimax.io/anthropic/v1/messages",
+        "headers": {
+          "anthropic-version": "2023-06-01",
+          "authorization": "Bearer key-fixture-value",
+          "content-type": "application/json",
+          "user-agent": "kumi/<version> (<system>) ai-sdk/anthropic/4.0.65 ai-sdk/provider-utils/5.0.49 runtime/node.js/24"
+        },
+        "body": {
+          "model": "fixture-chat",
+          "max_tokens": 4096,
+          "output_config": {
+            "effort": "high"
+          },
+          "system": [
+            {
+              "type": "text",
+              "text": "fixture instructions",
+              "cache_control": {
+                "type": "ephemeral",
+                "ttl": "1h"
+              }
+            }
+          ],
+          "messages": [
+            {
+              "role": "user",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "What's the tempo?"
+                }
+              ]
+            },
+            {
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "tool_use",
+                  "id": "call_1",
+                  "name": "get_tempo",
+                  "input": {}
+                }
+              ]
+            },
+            {
+              "role": "user",
+              "content": [
+                {
+                  "type": "tool_result",
+                  "tool_use_id": "call_1",
+                  "content": "Tempo 120",
+                  "cache_control": {
+                    "type": "ephemeral"
+                  }
+                }
+              ]
+            }
+          ],
+          "tools": [
+            {
+              "name": "get_tempo",
+              "description": "The Set's tempo",
+              "input_schema": {
+                "type": "object",
+                "properties": {}
+              },
+              "eager_input_streaming": true
+            }
+          ],
+          "tool_choice": {
+            "type": "auto"
+          },
+          "stream": true
+        }
+      }
+    }
+  },
+  "xiaomi": {
+    "list": {
+      "request": {
+        "url": "https://api.xiaomimimo.com/v1/models",
+        "headers": {
+          "authorization": "Bearer key-fixture-value",
+          "user-agent": "kumi/<version> (<system>)"
+        }
+      },
+      "models": [
+        {
+          "id": "xiaomi/fixture-chat",
+          "tools": true,
+          "efforts": [],
+          "default": null,
+          "status": null,
+          "labels": [],
+          "format": null,
+          "from": "catalog"
+        },
+        {
+          "id": "xiaomi/org/fixture-slash",
+          "tools": true,
+          "efforts": [],
+          "default": null,
+          "status": null,
+          "labels": [],
+          "format": null,
+          "from": "catalog"
+        },
+        {
+          "id": "xiaomi/fixture-quiet",
+          "tools": false,
+          "efforts": [],
+          "default": null,
+          "status": null,
+          "labels": [],
+          "format": null,
+          "from": "catalog"
+        },
+        {
+          "id": "xiaomi/fixture-old",
+          "tools": true,
+          "efforts": [],
+          "default": null,
+          "status": "deprecated",
+          "labels": [],
+          "format": null,
+          "from": "catalog"
+        },
+        {
+          "id": "xiaomi/fixture-unknown",
+          "tools": null,
+          "efforts": [],
+          "default": null,
+          "status": null,
+          "labels": [],
+          "format": null,
+          "from": "guess"
+        }
+      ]
+    },
+    "keyCheck": {
+      "request": {
+        "url": "https://api.xiaomimimo.com/v1/models",
+        "headers": {
+          "authorization": "Bearer key-fixture-value",
+          "user-agent": "kumi/<version> (<system>)"
+        }
+      },
+      "verdicts": {
+        "200": "ok",
+        "401": "refused",
+        "no answer": "unreachable"
+      }
+    },
+    "turn": {
+      "model": "xiaomi/fixture-chat",
+      "request": {
+        "url": "https://api.xiaomimimo.com/v1/chat/completions",
+        "headers": {
+          "authorization": "Bearer key-fixture-value",
+          "content-type": "application/json",
+          "user-agent": "kumi/<version> (<system>) ai-sdk/openai-compatible/3.0.57 ai-sdk/provider-utils/5.0.49 runtime/node.js/24"
+        },
+        "body": {
+          "model": "fixture-chat",
+          "messages": [
+            {
+              "role": "system",
+              "content": "fixture instructions"
+            },
+            {
+              "role": "user",
+              "content": "What's the tempo?"
+            },
+            {
+              "role": "assistant",
+              "content": null,
+              "tool_calls": [
+                {
+                  "id": "call_1",
+                  "type": "function",
+                  "function": {
+                    "name": "get_tempo",
+                    "arguments": "{}"
+                  }
+                }
+              ]
+            },
+            {
+              "role": "tool",
+              "tool_call_id": "call_1",
+              "content": "Tempo 120"
+            }
+          ],
+          "tools": [
+            {
+              "type": "function",
+              "function": {
+                "name": "get_tempo",
+                "description": "The Set's tempo",
+                "parameters": {
+                  "type": "object",
+                  "properties": {}
+                }
+              }
+            }
+          ],
+          "tool_choice": "auto",
+          "stream": true,
+          "stream_options": {
+            "include_usage": true
+          }
+        }
+      }
+    }
+  },
+  "stepfun": {
+    "list": {
+      "request": {
+        "url": "https://api.stepfun.ai/v1/models",
+        "headers": {
+          "authorization": "Bearer key-fixture-value",
+          "user-agent": "kumi/<version> (<system>)"
+        }
+      },
+      "models": [
+        {
+          "id": "stepfun/fixture-chat",
+          "tools": true,
+          "efforts": [
+            "low",
+            "high"
+          ],
+          "default": null,
+          "status": null,
+          "labels": [],
+          "format": null,
+          "from": "catalog"
+        },
+        {
+          "id": "stepfun/org/fixture-slash",
+          "tools": true,
+          "efforts": [],
+          "default": null,
+          "status": null,
+          "labels": [],
+          "format": null,
+          "from": "catalog"
+        },
+        {
+          "id": "stepfun/fixture-quiet",
+          "tools": false,
+          "efforts": [],
+          "default": null,
+          "status": null,
+          "labels": [],
+          "format": null,
+          "from": "catalog"
+        },
+        {
+          "id": "stepfun/fixture-old",
+          "tools": true,
+          "efforts": [],
+          "default": null,
+          "status": "deprecated",
+          "labels": [],
+          "format": null,
+          "from": "catalog"
+        },
+        {
+          "id": "stepfun/fixture-unknown",
+          "tools": null,
+          "efforts": [],
+          "default": null,
+          "status": null,
+          "labels": [],
+          "format": null,
+          "from": "guess"
+        }
+      ]
+    },
+    "keyCheck": {
+      "request": {
+        "url": "https://api.stepfun.ai/v1/models",
+        "headers": {
+          "authorization": "Bearer key-fixture-value",
+          "user-agent": "kumi/<version> (<system>)"
+        }
+      },
+      "verdicts": {
+        "200": "ok",
+        "401": "refused",
+        "no answer": "unreachable"
+      }
+    },
+    "turn": {
+      "model": "stepfun/fixture-chat",
+      "request": {
+        "url": "https://api.stepfun.ai/v1/chat/completions",
+        "headers": {
+          "authorization": "Bearer key-fixture-value",
+          "content-type": "application/json",
+          "user-agent": "kumi/<version> (<system>) ai-sdk/openai-compatible/3.0.57 ai-sdk/provider-utils/5.0.49 runtime/node.js/24"
+        },
+        "body": {
+          "model": "fixture-chat",
+          "reasoning_effort": "high",
+          "messages": [
+            {
+              "role": "system",
+              "content": "fixture instructions"
+            },
+            {
+              "role": "user",
+              "content": "What's the tempo?"
+            },
+            {
+              "role": "assistant",
+              "content": null,
+              "tool_calls": [
+                {
+                  "id": "call_1",
+                  "type": "function",
+                  "function": {
+                    "name": "get_tempo",
+                    "arguments": "{}"
+                  }
+                }
+              ]
+            },
+            {
+              "role": "tool",
+              "tool_call_id": "call_1",
+              "content": "Tempo 120"
+            }
+          ],
+          "tools": [
+            {
+              "type": "function",
+              "function": {
+                "name": "get_tempo",
+                "description": "The Set's tempo",
+                "parameters": {
+                  "type": "object",
+                  "properties": {}
+                }
+              }
+            }
+          ],
+          "tool_choice": "auto",
+          "stream": true,
+          "stream_options": {
+            "include_usage": true
+          }
+        }
+      }
+    }
+  },
+  "tencent": {
+    "list": {
+      "request": {
+        "url": "https://tokenhub-intl.tencentcloudmaas.com/v1/models",
+        "headers": {
+          "authorization": "Bearer key-fixture-value",
+          "user-agent": "kumi/<version> (<system>)"
+        }
+      },
+      "models": [
+        {
+          "id": "tencent/fixture-chat",
+          "tools": true,
+          "efforts": [],
+          "default": null,
+          "status": null,
+          "labels": [],
+          "format": null,
+          "from": "catalog"
+        },
+        {
+          "id": "tencent/org/fixture-slash",
+          "tools": true,
+          "efforts": [],
+          "default": null,
+          "status": null,
+          "labels": [],
+          "format": null,
+          "from": "catalog"
+        },
+        {
+          "id": "tencent/fixture-quiet",
+          "tools": false,
+          "efforts": [],
+          "default": null,
+          "status": null,
+          "labels": [],
+          "format": null,
+          "from": "catalog"
+        },
+        {
+          "id": "tencent/fixture-old",
+          "tools": true,
+          "efforts": [],
+          "default": null,
+          "status": "deprecated",
+          "labels": [],
+          "format": null,
+          "from": "catalog"
+        },
+        {
+          "id": "tencent/fixture-unknown",
+          "tools": null,
+          "efforts": [],
+          "default": null,
+          "status": null,
+          "labels": [],
+          "format": null,
+          "from": "guess"
+        }
+      ]
+    },
+    "keyCheck": {
+      "request": {
+        "url": "https://tokenhub-intl.tencentcloudmaas.com/v1/models",
+        "headers": {
+          "authorization": "Bearer key-fixture-value",
+          "user-agent": "kumi/<version> (<system>)"
+        }
+      },
+      "verdicts": {
+        "200": "ok",
+        "401": "refused",
+        "no answer": "unreachable"
+      }
+    },
+    "turn": {
+      "model": "tencent/fixture-chat",
+      "request": {
+        "url": "https://tokenhub-intl.tencentcloudmaas.com/v1/chat/completions",
+        "headers": {
+          "authorization": "Bearer key-fixture-value",
+          "content-type": "application/json",
+          "user-agent": "kumi/<version> (<system>) ai-sdk/openai-compatible/3.0.57 ai-sdk/provider-utils/5.0.49 runtime/node.js/24"
+        },
+        "body": {
+          "model": "fixture-chat",
+          "messages": [
+            {
+              "role": "system",
+              "content": "fixture instructions"
+            },
+            {
+              "role": "user",
+              "content": "What's the tempo?"
+            },
+            {
+              "role": "assistant",
+              "content": null,
+              "tool_calls": [
+                {
+                  "id": "call_1",
+                  "type": "function",
+                  "function": {
+                    "name": "get_tempo",
+                    "arguments": "{}"
+                  }
+                }
+              ]
+            },
+            {
+              "role": "tool",
+              "tool_call_id": "call_1",
+              "content": "Tempo 120"
+            }
+          ],
+          "tools": [
+            {
+              "type": "function",
+              "function": {
+                "name": "get_tempo",
+                "description": "The Set's tempo",
+                "parameters": {
+                  "type": "object",
+                  "properties": {}
+                }
+              }
+            }
+          ],
+          "tool_choice": "auto",
+          "stream": true,
+          "stream_options": {
+            "include_usage": true
+          }
+        }
+      }
+    }
+  },
+  "groq": {
+    "list": {
+      "request": {
+        "url": "https://api.groq.com/openai/v1/models",
+        "headers": {
+          "authorization": "Bearer key-fixture-value",
+          "user-agent": "kumi/<version> (<system>)"
+        }
+      },
+      "models": [
+        {
+          "id": "groq/fixture-chat",
+          "tools": true,
+          "efforts": [
+            "low",
+            "high"
+          ],
+          "default": null,
+          "status": null,
+          "labels": [],
+          "format": null,
+          "from": "catalog"
+        },
+        {
+          "id": "groq/org/fixture-slash",
+          "tools": true,
+          "efforts": [],
+          "default": null,
+          "status": null,
+          "labels": [],
+          "format": null,
+          "from": "catalog"
+        },
+        {
+          "id": "groq/fixture-quiet",
+          "tools": false,
+          "efforts": [],
+          "default": null,
+          "status": null,
+          "labels": [],
+          "format": null,
+          "from": "catalog"
+        },
+        {
+          "id": "groq/fixture-old",
+          "tools": true,
+          "efforts": [],
+          "default": null,
+          "status": "deprecated",
+          "labels": [],
+          "format": null,
+          "from": "catalog"
+        },
+        {
+          "id": "groq/fixture-unknown",
+          "tools": null,
+          "efforts": [],
+          "default": null,
+          "status": null,
+          "labels": [],
+          "format": null,
+          "from": "guess"
+        }
+      ]
+    },
+    "keyCheck": {
+      "request": {
+        "url": "https://api.groq.com/openai/v1/models",
+        "headers": {
+          "authorization": "Bearer key-fixture-value",
+          "user-agent": "kumi/<version> (<system>)"
+        }
+      },
+      "verdicts": {
+        "200": "ok",
+        "401": "refused",
+        "no answer": "unreachable"
+      }
+    },
+    "turn": {
+      "model": "groq/fixture-chat",
+      "request": {
+        "url": "https://api.groq.com/openai/v1/chat/completions",
+        "headers": {
+          "authorization": "Bearer key-fixture-value",
+          "content-type": "application/json",
+          "user-agent": "kumi/<version> (<system>) ai-sdk/openai-compatible/3.0.57 ai-sdk/provider-utils/5.0.49 runtime/node.js/24"
+        },
+        "body": {
+          "model": "fixture-chat",
+          "reasoning_effort": "high",
+          "messages": [
+            {
+              "role": "system",
+              "content": "fixture instructions"
+            },
+            {
+              "role": "user",
+              "content": "What's the tempo?"
+            },
+            {
+              "role": "assistant",
+              "content": null,
+              "tool_calls": [
+                {
+                  "id": "call_1",
+                  "type": "function",
+                  "function": {
+                    "name": "get_tempo",
+                    "arguments": "{}"
+                  }
+                }
+              ]
+            },
+            {
+              "role": "tool",
+              "tool_call_id": "call_1",
+              "content": "Tempo 120"
+            }
+          ],
+          "tools": [
+            {
+              "type": "function",
+              "function": {
+                "name": "get_tempo",
+                "description": "The Set's tempo",
+                "parameters": {
+                  "type": "object",
+                  "properties": {}
+                }
+              }
+            }
+          ],
+          "tool_choice": "auto",
+          "stream": true,
+          "stream_options": {
+            "include_usage": true
+          }
+        }
+      }
+    }
+  },
+  "cerebras": {
+    "list": {
+      "request": {
+        "url": "https://api.cerebras.ai/v1/models",
+        "headers": {
+          "authorization": "Bearer key-fixture-value",
+          "user-agent": "kumi/<version> (<system>)"
+        }
+      },
+      "models": [
+        {
+          "id": "cerebras/fixture-chat",
+          "tools": true,
+          "efforts": [
+            "low",
+            "high"
+          ],
+          "default": null,
+          "status": null,
+          "labels": [],
+          "format": null,
+          "from": "catalog"
+        },
+        {
+          "id": "cerebras/org/fixture-slash",
+          "tools": true,
+          "efforts": [],
+          "default": null,
+          "status": null,
+          "labels": [],
+          "format": null,
+          "from": "catalog"
+        },
+        {
+          "id": "cerebras/fixture-quiet",
+          "tools": false,
+          "efforts": [],
+          "default": null,
+          "status": null,
+          "labels": [],
+          "format": null,
+          "from": "catalog"
+        },
+        {
+          "id": "cerebras/fixture-old",
+          "tools": true,
+          "efforts": [],
+          "default": null,
+          "status": "deprecated",
+          "labels": [],
+          "format": null,
+          "from": "catalog"
+        },
+        {
+          "id": "cerebras/fixture-unknown",
+          "tools": null,
+          "efforts": [],
+          "default": null,
+          "status": null,
+          "labels": [],
+          "format": null,
+          "from": "guess"
+        }
+      ]
+    },
+    "keyCheck": {
+      "request": {
+        "url": "https://api.cerebras.ai/v1/models",
+        "headers": {
+          "authorization": "Bearer key-fixture-value",
+          "user-agent": "kumi/<version> (<system>)"
+        }
+      },
+      "verdicts": {
+        "200": "ok",
+        "401": "refused",
+        "no answer": "unreachable"
+      }
+    },
+    "turn": {
+      "model": "cerebras/fixture-chat",
+      "request": {
+        "url": "https://api.cerebras.ai/v1/chat/completions",
+        "headers": {
+          "authorization": "Bearer key-fixture-value",
+          "content-type": "application/json",
+          "user-agent": "kumi/<version> (<system>) ai-sdk/openai-compatible/3.0.57 ai-sdk/provider-utils/5.0.49 runtime/node.js/24"
+        },
+        "body": {
+          "model": "fixture-chat",
+          "prompt_cache_key": "session-1",
+          "reasoning_effort": "high",
+          "messages": [
+            {
+              "role": "system",
+              "content": "fixture instructions"
+            },
+            {
+              "role": "user",
+              "content": "What's the tempo?"
+            },
+            {
+              "role": "assistant",
+              "content": null,
+              "tool_calls": [
+                {
+                  "id": "call_1",
+                  "type": "function",
+                  "function": {
+                    "name": "get_tempo",
+                    "arguments": "{}"
+                  }
+                }
+              ]
+            },
+            {
+              "role": "tool",
+              "tool_call_id": "call_1",
+              "content": "Tempo 120"
+            }
+          ],
+          "tools": [
+            {
+              "type": "function",
+              "function": {
+                "name": "get_tempo",
+                "description": "The Set's tempo",
+                "parameters": {
+                  "type": "object",
+                  "properties": {}
+                }
+              }
+            }
+          ],
+          "tool_choice": "auto",
+          "stream": true,
+          "stream_options": {
+            "include_usage": true
+          }
+        }
+      }
+    }
+  },
+  "fireworks": {
+    "list": {
+      "request": {
+        "url": "https://api.fireworks.ai/inference/v1/models",
+        "headers": {
+          "authorization": "Bearer key-fixture-value",
+          "user-agent": "kumi/<version> (<system>)"
+        }
+      },
+      "models": [
+        {
+          "id": "fireworks/fixture-chat",
+          "tools": true,
+          "efforts": [
+            "low",
+            "high"
+          ],
+          "default": null,
+          "status": null,
+          "labels": [],
+          "format": null,
+          "from": "catalog"
+        },
+        {
+          "id": "fireworks/org/fixture-slash",
+          "tools": true,
+          "efforts": [],
+          "default": null,
+          "status": null,
+          "labels": [],
+          "format": null,
+          "from": "catalog"
+        },
+        {
+          "id": "fireworks/fixture-quiet",
+          "tools": false,
+          "efforts": [],
+          "default": null,
+          "status": null,
+          "labels": [],
+          "format": null,
+          "from": "catalog"
+        },
+        {
+          "id": "fireworks/fixture-old",
+          "tools": true,
+          "efforts": [],
+          "default": null,
+          "status": "deprecated",
+          "labels": [],
+          "format": null,
+          "from": "catalog"
+        },
+        {
+          "id": "fireworks/fixture-unknown",
+          "tools": null,
+          "efforts": [],
+          "default": null,
+          "status": null,
+          "labels": [],
+          "format": null,
+          "from": "guess"
+        }
+      ]
+    },
+    "keyCheck": {
+      "request": {
+        "url": "https://api.fireworks.ai/inference/v1/models",
+        "headers": {
+          "authorization": "Bearer key-fixture-value",
+          "user-agent": "kumi/<version> (<system>)"
+        }
+      },
+      "verdicts": {
+        "200": "ok",
+        "401": "refused",
+        "no answer": "unreachable"
+      }
+    },
+    "turn": {
+      "model": "fireworks/fixture-chat",
+      "request": {
+        "url": "https://api.fireworks.ai/inference/v1/chat/completions",
+        "headers": {
+          "authorization": "Bearer key-fixture-value",
+          "content-type": "application/json",
+          "user-agent": "kumi/<version> (<system>) ai-sdk/openai-compatible/3.0.57 ai-sdk/provider-utils/5.0.49 runtime/node.js/24"
+        },
+        "body": {
+          "model": "fixture-chat",
+          "prompt_cache_key": "session-1",
+          "reasoning_effort": "high",
+          "messages": [
+            {
+              "role": "system",
+              "content": "fixture instructions"
+            },
+            {
+              "role": "user",
+              "content": "What's the tempo?"
+            },
+            {
+              "role": "assistant",
+              "content": null,
+              "tool_calls": [
+                {
+                  "id": "call_1",
+                  "type": "function",
+                  "function": {
+                    "name": "get_tempo",
+                    "arguments": "{}"
+                  }
+                }
+              ]
+            },
+            {
+              "role": "tool",
+              "tool_call_id": "call_1",
+              "content": "Tempo 120"
+            }
+          ],
+          "tools": [
+            {
+              "type": "function",
+              "function": {
+                "name": "get_tempo",
+                "description": "The Set's tempo",
+                "parameters": {
+                  "type": "object",
+                  "properties": {}
+                }
+              }
+            }
+          ],
+          "tool_choice": "auto",
+          "stream": true,
+          "stream_options": {
+            "include_usage": true
+          }
+        }
+      }
+    }
+  },
+  "together": {
+    "list": {
+      "request": {
+        "url": "https://api.together.ai/v1/models",
+        "headers": {
+          "authorization": "Bearer key-fixture-value",
+          "user-agent": "kumi/<version> (<system>)"
+        }
+      },
+      "models": [
+        {
+          "id": "together/fixture-chat",
+          "tools": true,
+          "efforts": [
+            "low",
+            "high"
+          ],
+          "default": null,
+          "status": null,
+          "labels": [],
+          "format": null,
+          "from": "catalog"
+        },
+        {
+          "id": "together/org/fixture-slash",
+          "tools": true,
+          "efforts": [],
+          "default": null,
+          "status": null,
+          "labels": [],
+          "format": null,
+          "from": "catalog"
+        },
+        {
+          "id": "together/fixture-quiet",
+          "tools": false,
+          "efforts": [],
+          "default": null,
+          "status": null,
+          "labels": [],
+          "format": null,
+          "from": "catalog"
+        },
+        {
+          "id": "together/fixture-old",
+          "tools": true,
+          "efforts": [],
+          "default": null,
+          "status": "deprecated",
+          "labels": [],
+          "format": null,
+          "from": "catalog"
+        },
+        {
+          "id": "together/fixture-unknown",
+          "tools": null,
+          "efforts": [],
+          "default": null,
+          "status": null,
+          "labels": [],
+          "format": null,
+          "from": "guess"
+        }
+      ]
+    },
+    "keyCheck": {
+      "request": {
+        "url": "https://api.together.ai/v1/models",
+        "headers": {
+          "authorization": "Bearer key-fixture-value",
+          "user-agent": "kumi/<version> (<system>)"
+        }
+      },
+      "verdicts": {
+        "200": "ok",
+        "401": "refused",
+        "no answer": "unreachable"
+      }
+    },
+    "turn": {
+      "model": "together/fixture-chat",
+      "request": {
+        "url": "https://api.together.ai/v1/chat/completions",
+        "headers": {
+          "authorization": "Bearer key-fixture-value",
+          "content-type": "application/json",
+          "user-agent": "kumi/<version> (<system>) ai-sdk/openai-compatible/3.0.57 ai-sdk/provider-utils/5.0.49 runtime/node.js/24"
+        },
+        "body": {
+          "model": "fixture-chat",
+          "prompt_cache_key": "session-1",
+          "reasoning_effort": "high",
+          "messages": [
+            {
+              "role": "system",
+              "content": "fixture instructions"
+            },
+            {
+              "role": "user",
+              "content": "What's the tempo?"
+            },
+            {
+              "role": "assistant",
+              "content": null,
+              "tool_calls": [
+                {
+                  "id": "call_1",
+                  "type": "function",
+                  "function": {
+                    "name": "get_tempo",
+                    "arguments": "{}"
+                  }
+                }
+              ]
+            },
+            {
+              "role": "tool",
+              "tool_call_id": "call_1",
+              "content": "Tempo 120"
+            }
+          ],
+          "tools": [
+            {
+              "type": "function",
+              "function": {
+                "name": "get_tempo",
+                "description": "The Set's tempo",
+                "parameters": {
+                  "type": "object",
+                  "properties": {}
+                }
+              }
+            }
+          ],
+          "tool_choice": "auto",
+          "stream": true,
+          "stream_options": {
+            "include_usage": true
+          }
+        }
+      }
+    }
+  },
+  "deepinfra": {
+    "list": {
+      "request": {
+        "url": "https://api.deepinfra.com/v1/openai/models",
+        "headers": {
+          "authorization": "Bearer key-fixture-value",
+          "user-agent": "kumi/<version> (<system>)"
+        }
+      },
+      "models": [
+        {
+          "id": "deepinfra/fixture-chat",
+          "tools": true,
+          "efforts": [
+            "low",
+            "high"
+          ],
+          "default": null,
+          "status": null,
+          "labels": [],
+          "format": null,
+          "from": "catalog"
+        },
+        {
+          "id": "deepinfra/org/fixture-slash",
+          "tools": true,
+          "efforts": [],
+          "default": null,
+          "status": null,
+          "labels": [],
+          "format": null,
+          "from": "catalog"
+        },
+        {
+          "id": "deepinfra/fixture-quiet",
+          "tools": false,
+          "efforts": [],
+          "default": null,
+          "status": null,
+          "labels": [],
+          "format": null,
+          "from": "catalog"
+        },
+        {
+          "id": "deepinfra/fixture-old",
+          "tools": true,
+          "efforts": [],
+          "default": null,
+          "status": "deprecated",
+          "labels": [],
+          "format": null,
+          "from": "catalog"
+        },
+        {
+          "id": "deepinfra/fixture-unknown",
+          "tools": null,
+          "efforts": [],
+          "default": null,
+          "status": null,
+          "labels": [],
+          "format": null,
+          "from": "guess"
+        }
+      ]
+    },
+    "keyCheck": {
+      "request": {
+        "url": "https://api.deepinfra.com/v1/me",
+        "headers": {
+          "authorization": "Bearer key-fixture-value",
+          "user-agent": "kumi/<version> (<system>)"
+        }
+      },
+      "verdicts": {
+        "200": "ok",
+        "401": "refused",
+        "no answer": "unreachable"
+      }
+    },
+    "turn": {
+      "model": "deepinfra/fixture-chat",
+      "request": {
+        "url": "https://api.deepinfra.com/v1/openai/chat/completions",
+        "headers": {
+          "authorization": "Bearer key-fixture-value",
+          "content-type": "application/json",
+          "user-agent": "kumi/<version> (<system>) ai-sdk/openai-compatible/3.0.57 ai-sdk/provider-utils/5.0.49 runtime/node.js/24"
+        },
+        "body": {
+          "model": "fixture-chat",
+          "prompt_cache_key": "session-1",
+          "reasoning_effort": "high",
+          "messages": [
+            {
+              "role": "system",
+              "content": "fixture instructions"
+            },
+            {
+              "role": "user",
+              "content": "What's the tempo?"
+            },
+            {
+              "role": "assistant",
+              "content": null,
+              "tool_calls": [
+                {
+                  "id": "call_1",
+                  "type": "function",
+                  "function": {
+                    "name": "get_tempo",
+                    "arguments": "{}"
+                  }
+                }
+              ]
+            },
+            {
+              "role": "tool",
+              "tool_call_id": "call_1",
+              "content": "Tempo 120"
+            }
+          ],
+          "tools": [
+            {
+              "type": "function",
+              "function": {
+                "name": "get_tempo",
+                "description": "The Set's tempo",
+                "parameters": {
+                  "type": "object",
+                  "properties": {}
+                }
+              }
+            }
+          ],
+          "tool_choice": "auto",
+          "stream": true,
+          "stream_options": {
+            "include_usage": true
+          }
+        }
+      }
+    }
+  },
+  "mistral": {
+    "list": {
+      "request": {
+        "url": "https://api.mistral.ai/v1/models",
+        "headers": {
+          "authorization": "Bearer key-fixture-value",
+          "user-agent": "kumi/<version> (<system>)"
+        }
+      },
+      "models": [
+        {
+          "id": "mistral/fixture-chat",
+          "tools": true,
+          "efforts": [],
+          "default": null,
+          "status": null,
+          "labels": [],
+          "format": null,
+          "from": "catalog"
+        },
+        {
+          "id": "mistral/org/fixture-slash",
+          "tools": true,
+          "efforts": [],
+          "default": null,
+          "status": null,
+          "labels": [],
+          "format": null,
+          "from": "catalog"
+        },
+        {
+          "id": "mistral/fixture-quiet",
+          "tools": false,
+          "efforts": [],
+          "default": null,
+          "status": null,
+          "labels": [],
+          "format": null,
+          "from": "catalog"
+        },
+        {
+          "id": "mistral/fixture-old",
+          "tools": true,
+          "efforts": [],
+          "default": null,
+          "status": "deprecated",
+          "labels": [],
+          "format": null,
+          "from": "catalog"
+        },
+        {
+          "id": "mistral/fixture-unknown",
+          "tools": null,
+          "efforts": [],
+          "default": null,
+          "status": null,
+          "labels": [],
+          "format": null,
+          "from": "guess"
+        }
+      ]
+    },
+    "keyCheck": {
+      "request": {
+        "url": "https://api.mistral.ai/v1/models",
+        "headers": {
+          "authorization": "Bearer key-fixture-value",
+          "user-agent": "kumi/<version> (<system>)"
+        }
+      },
+      "verdicts": {
+        "200": "ok",
+        "401": "refused",
+        "no answer": "unreachable"
+      }
+    },
+    "turn": {
+      "model": "mistral/fixture-chat",
+      "request": {
+        "url": "https://api.mistral.ai/v1/chat/completions",
+        "headers": {
+          "authorization": "Bearer key-fixture-value",
+          "content-type": "application/json",
+          "user-agent": "kumi/<version> (<system>) ai-sdk/openai-compatible/3.0.57 ai-sdk/provider-utils/5.0.49 runtime/node.js/24"
+        },
+        "body": {
+          "model": "fixture-chat",
+          "prompt_cache_key": "session-1",
+          "messages": [
+            {
+              "role": "system",
+              "content": "fixture instructions"
+            },
+            {
+              "role": "user",
+              "content": "What's the tempo?"
+            },
+            {
+              "role": "assistant",
+              "content": null,
+              "tool_calls": [
+                {
+                  "id": "call_1",
+                  "type": "function",
+                  "function": {
+                    "name": "get_tempo",
+                    "arguments": "{}"
+                  }
+                }
+              ]
+            },
+            {
+              "role": "tool",
+              "tool_call_id": "call_1",
+              "content": "Tempo 120"
+            }
+          ],
+          "tools": [
+            {
+              "type": "function",
+              "function": {
+                "name": "get_tempo",
+                "description": "The Set's tempo",
+                "parameters": {
+                  "type": "object",
+                  "properties": {}
+                }
+              }
+            }
+          ],
+          "tool_choice": "auto",
+          "stream": true
+        }
+      }
+    }
+  },
+  "ollama-cloud": {
+    "list": {
+      "request": {
+        "url": "https://ollama.com/v1/models",
+        "headers": {
+          "authorization": "Bearer key-fixture-value",
+          "user-agent": "kumi/<version> (<system>)"
+        }
+      },
+      "models": [
+        {
+          "id": "ollama-cloud/fixture-chat",
+          "tools": true,
+          "efforts": [
+            "low",
+            "high"
+          ],
+          "default": null,
+          "status": null,
+          "labels": [],
+          "format": null,
+          "from": "catalog"
+        },
+        {
+          "id": "ollama-cloud/org/fixture-slash",
+          "tools": true,
+          "efforts": [],
+          "default": null,
+          "status": null,
+          "labels": [],
+          "format": null,
+          "from": "catalog"
+        },
+        {
+          "id": "ollama-cloud/fixture-quiet",
+          "tools": false,
+          "efforts": [],
+          "default": null,
+          "status": null,
+          "labels": [],
+          "format": null,
+          "from": "catalog"
+        },
+        {
+          "id": "ollama-cloud/fixture-old",
+          "tools": true,
+          "efforts": [],
+          "default": null,
+          "status": "deprecated",
+          "labels": [],
+          "format": null,
+          "from": "catalog"
+        },
+        {
+          "id": "ollama-cloud/fixture-unknown",
+          "tools": null,
+          "efforts": [],
+          "default": null,
+          "status": null,
+          "labels": [],
+          "format": null,
+          "from": "guess"
+        }
+      ]
+    },
+    "keyCheck": {
+      "request": {
+        "url": "https://ollama.com/api/balance",
+        "headers": {
+          "authorization": "Bearer key-fixture-value",
+          "user-agent": "kumi/<version> (<system>)"
+        }
+      },
+      "verdicts": {
+        "200": "ok",
+        "401": "refused",
+        "no answer": "unreachable"
+      }
+    },
+    "turn": {
+      "model": "ollama-cloud/fixture-chat",
+      "request": {
+        "url": "https://ollama.com/v1/chat/completions",
+        "headers": {
+          "authorization": "Bearer key-fixture-value",
+          "content-type": "application/json",
+          "user-agent": "kumi/<version> (<system>) ai-sdk/openai-compatible/3.0.57 ai-sdk/provider-utils/5.0.49 runtime/node.js/24"
+        },
+        "body": {
+          "model": "fixture-chat",
+          "reasoning_effort": "high",
+          "messages": [
+            {
+              "role": "system",
+              "content": "fixture instructions"
+            },
+            {
+              "role": "user",
+              "content": "What's the tempo?"
+            },
+            {
+              "role": "assistant",
+              "content": null,
+              "tool_calls": [
+                {
+                  "id": "call_1",
+                  "type": "function",
+                  "function": {
+                    "name": "get_tempo",
+                    "arguments": "{}"
+                  }
+                }
+              ]
+            },
+            {
+              "role": "tool",
+              "tool_call_id": "call_1",
+              "content": "Tempo 120"
+            }
+          ],
+          "tools": [
+            {
+              "type": "function",
+              "function": {
+                "name": "get_tempo",
+                "description": "The Set's tempo",
+                "parameters": {
+                  "type": "object",
+                  "properties": {}
+                }
+              }
+            }
+          ],
+          "tool_choice": "auto",
+          "stream": true,
+          "stream_options": {
+            "include_usage": true
+          }
+        }
+      }
+    }
+  },
+  "nvidia": {
+    "list": {
+      "request": {
+        "url": "https://integrate.api.nvidia.com/v1/models",
+        "headers": {
+          "authorization": "Bearer key-fixture-value",
+          "user-agent": "kumi/<version> (<system>)"
+        }
+      },
+      "models": [
+        {
+          "id": "nvidia/fixture-chat",
+          "tools": true,
+          "efforts": [],
+          "default": null,
+          "status": null,
+          "labels": [],
+          "format": null,
+          "from": "catalog"
+        },
+        {
+          "id": "nvidia/org/fixture-slash",
+          "tools": true,
+          "efforts": [],
+          "default": null,
+          "status": null,
+          "labels": [],
+          "format": null,
+          "from": "catalog"
+        },
+        {
+          "id": "nvidia/fixture-quiet",
+          "tools": false,
+          "efforts": [],
+          "default": null,
+          "status": null,
+          "labels": [],
+          "format": null,
+          "from": "catalog"
+        },
+        {
+          "id": "nvidia/fixture-old",
+          "tools": true,
+          "efforts": [],
+          "default": null,
+          "status": "deprecated",
+          "labels": [],
+          "format": null,
+          "from": "catalog"
+        },
+        {
+          "id": "nvidia/fixture-unknown",
+          "tools": null,
+          "efforts": [],
+          "default": null,
+          "status": null,
+          "labels": [],
+          "format": null,
+          "from": "guess"
+        }
+      ]
+    },
+    "keyCheck": {
+      "request": {
+        "url": "https://integrate.api.nvidia.com/v1/chat/completions",
+        "headers": {
+          "authorization": "Bearer key-fixture-value",
+          "content-type": "application/json",
+          "user-agent": "kumi/<version> (<system>)"
+        },
+        "body": {}
+      },
+      "verdicts": {
+        "200": "ok",
+        "401": "refused",
+        "no answer": "unreachable"
+      }
+    },
+    "turn": {
+      "model": "nvidia/fixture-chat",
+      "request": {
+        "url": "https://integrate.api.nvidia.com/v1/chat/completions",
+        "headers": {
+          "authorization": "Bearer key-fixture-value",
+          "content-type": "application/json",
+          "user-agent": "kumi/<version> (<system>) ai-sdk/openai-compatible/3.0.57 ai-sdk/provider-utils/5.0.49 runtime/node.js/24"
+        },
+        "body": {
+          "model": "fixture-chat",
+          "messages": [
+            {
+              "role": "system",
+              "content": "fixture instructions"
+            },
+            {
+              "role": "user",
+              "content": "What's the tempo?"
+            },
+            {
+              "role": "assistant",
+              "content": null,
+              "tool_calls": [
+                {
+                  "id": "call_1",
+                  "type": "function",
+                  "function": {
+                    "name": "get_tempo",
+                    "arguments": "{}"
+                  }
+                }
+              ]
+            },
+            {
+              "role": "tool",
+              "tool_call_id": "call_1",
+              "content": "Tempo 120"
+            }
+          ],
+          "tools": [
+            {
+              "type": "function",
+              "function": {
+                "name": "get_tempo",
+                "description": "The Set's tempo",
+                "parameters": {
+                  "type": "object",
+                  "properties": {}
+                }
+              }
+            }
+          ],
+          "tool_choice": "auto",
+          "stream": true
+        }
+      }
+    }
+  },
+  "huggingface": {
+    "list": {
+      "request": {
+        "url": "https://router.huggingface.co/v1/models",
+        "headers": {
+          "authorization": "Bearer key-fixture-value",
+          "user-agent": "kumi/<version> (<system>)"
+        }
+      },
+      "models": [
+        {
+          "id": "huggingface/org/fixture-slash",
+          "tools": true,
+          "efforts": [],
+          "default": null,
+          "status": null,
+          "labels": [],
+          "format": null,
+          "from": "provider"
+        },
+        {
+          "id": "huggingface/org/fixture-quiet",
+          "tools": false,
+          "efforts": [],
+          "default": null,
+          "status": null,
+          "labels": [],
+          "format": null,
+          "from": "provider"
+        }
+      ]
+    },
+    "keyCheck": {
+      "request": {
+        "url": "https://huggingface.co/api/whoami-v2",
+        "headers": {
+          "authorization": "Bearer key-fixture-value",
+          "user-agent": "kumi/<version> (<system>)"
+        }
+      },
+      "verdicts": {
+        "200": "ok",
+        "401": "refused",
+        "no answer": "unreachable"
+      }
+    },
+    "turn": {
+      "model": "huggingface/org/fixture-slash",
+      "request": {
+        "url": "https://router.huggingface.co/v1/chat/completions",
+        "headers": {
+          "authorization": "Bearer key-fixture-value",
+          "content-type": "application/json",
+          "user-agent": "kumi/<version> (<system>) ai-sdk/openai-compatible/3.0.57 ai-sdk/provider-utils/5.0.49 runtime/node.js/24"
+        },
+        "body": {
+          "model": "org/fixture-slash",
+          "messages": [
+            {
+              "role": "system",
+              "content": "fixture instructions"
+            },
+            {
+              "role": "user",
+              "content": "What's the tempo?"
+            },
+            {
+              "role": "assistant",
+              "content": null,
+              "tool_calls": [
+                {
+                  "id": "call_1",
+                  "type": "function",
+                  "function": {
+                    "name": "get_tempo",
+                    "arguments": "{}"
+                  }
+                }
+              ]
+            },
+            {
+              "role": "tool",
+              "tool_call_id": "call_1",
+              "content": "Tempo 120"
+            }
+          ],
+          "tools": [
+            {
+              "type": "function",
+              "function": {
+                "name": "get_tempo",
+                "description": "The Set's tempo",
+                "parameters": {
+                  "type": "object",
+                  "properties": {}
+                }
+              }
+            }
+          ],
+          "tool_choice": "auto",
+          "stream": true,
+          "stream_options": {
+            "include_usage": true
+          }
+        }
+      }
+    }
+  }
+}
