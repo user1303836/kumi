@@ -200,7 +200,7 @@ message, not a command.
 | `/recipes` | Your recipes: run one or forget it. One with blanks starts a `/recipe` line for you to finish, with what's pinned filled in |
 | `/recipe <name> blank=value …` | Run a recipe now, with no model call; a value with spaces goes in quotes, an unquoted number or true/false goes as itself (quote it to keep it words), and Kumi names any blank left empty |
 | `/jobs` | The background jobs: Enter opens one, where `x` stops it and `r` runs an interrupted one again. Works while Kumi answers |
-| `/status` | What Kumi is connected to, the model, how far it has got learning your library, how many settings its searches heard and remember (and on how many devices) and how often one remembered won the first round of a search that started from it, on an API key the tokens this session used, and the conversation with its id |
+| `/status` | What Kumi is connected to, the model, how far it has got learning your library, how many settings its searches heard and remember (and on how many devices) and how often one remembered won the round it was tried in, of the searches that started from one, on an API key the tokens this session used, and the conversation with its id |
 | `/voice` | Talking instead of typing: start or stop, "Send when you stop", the language you speak and the microphone |
 | `/update` | Get the newest Kumi: it asks, closes, updates and opens again with the same conversation |
 | `/changelog` | What's new in Kumi: every note since the version you updated from, or the latest three releases, and where the whole history is |

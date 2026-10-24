@@ -1502,7 +1502,7 @@ pub trait SessionController {
     fn library(&self) -> Option<LibraryStatus> {
         None
     }
-    /// What Kumi's searches remember (settings heard, their devices, how often one won a search's first round): None
+    /// What Kumi's searches remember (settings heard, their devices, how often one won the round it was tried in): None
     /// without its database.
     async fn remembered(&self) -> Option<crate::core::search_memory::SearchMemoryStatus> {
         None

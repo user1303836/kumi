@@ -26,6 +26,7 @@ use kumi_common::{
 };
 use kumi_types::{contracts::AuditionCandidate, errors::RuntimeError};
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 use std::rc::Rc;
 
 /// Generations a search hears at most, each in one pass.
@@ -700,15 +701,16 @@ impl Listening {
         }
         .await;
         self.host.close_copies(copies).await;
+        // Better than standing still by half a step (or half of what's left, near the target), as the judge counts better.
+        let better = search.best.as_ref().is_some_and(|(_, cost)| *cost < standing - (standing / 2.).min(0.5));
         if device.is_some() {
-            self.heard(SettingsHeard::Ended { run });
+            self.heard(SettingsHeard::Ended { run, kept: better && matches!(searched, Ok(Ok(()))) });
         }
         match searched? {
             Ok(()) => {}
             Err(why) => return Ok(Err(why)),
         }
-        // Better than standing still by half a step (or half of what's left, near the target), as the judge counts better.
-        if search.best.as_ref().is_none_or(|(_, cost)| !(*cost < standing - (standing / 2.).min(0.5))) {
+        if !better {
             return Ok(Err(format!(
                 "The search heard nothing better than where the knobs are (in {} generations of {}); they stay. Try other knobs or another device.",
                 search.generation, search.lambda
@@ -764,12 +766,15 @@ fn readings(checklist: &Checklist, values: &[Option<f64>]) -> serde_json::Map<St
         .collect()
 }
 
-/// What a search aims at, as Kumi remembers it: the item's kind (what it reads, a reference's own vector left out), and
-/// what it wants (its target, and where a knob turned for it should take it).
+/// What a search aims at, as Kumi remembers it: the item's kind (what it reads; a reference's own vector left out, a
+/// fingerprint of it kept as `towards`), and what it wants (its target, and where a knob turned for it should take it).
 fn aimed_at(item: &Item) -> Value {
     let mut target = serde_json::to_value(&item.quantity).unwrap_or_else(|_| json!({}));
     if let Some(object) = target.as_object_mut() {
-        object.remove("to");
+        if let Some(to) = object.remove("to") {
+            let towards = hex::encode(Sha256::digest(to.to_string().as_bytes()));
+            object.insert("towards".into(), json!(towards[..16]));
+        }
         object.insert("item".into(), json!(item.id));
         object.insert("unit".into(), json!(item.unit));
         object.insert("wanted".into(), serde_json::to_value(item.target).unwrap_or(Value::Null));
