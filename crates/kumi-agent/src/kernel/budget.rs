@@ -8,9 +8,10 @@
 use kumi_types::daw::DawProfile;
 use std::borrow::Cow;
 
-use kumi_common::js::json::stringify;
+use kumi_common::js::json::{stringify, write_into};
 use kumi_common::js::string::{head, trim, utf16_len};
 use serde_json::Value;
+use std::cell::RefCell;
 
 use super::agent::CARRY_ON_NOTE;
 use crate::core::contracts::{TranscriptLine, TranscriptRole};
@@ -247,24 +248,77 @@ fn strip_bytes(message: &mut Message) -> usize {
     }
 }
 
-/// Bytes as sent, with each image counted at what it costs a model rather than its size.
+/// How many raw images `strip_bytes` would replace in a message, without touching it.
+fn raw_images(message: &Message) -> usize {
+    fn raw(data: &FileData) -> usize {
+        usize::from(matches!(data, FileData::Data { data: DataContent::Bytes(_) }))
+    }
+    fn raw_in(output: &ToolResultOutput) -> usize {
+        match output {
+            ToolResultOutput::Content { value, .. } => {
+                value.iter().map(|item| if let ToolResultContentItem::File { data, .. } = item { raw(data) } else { 0 }).sum()
+            }
+            _ => 0,
+        }
+    }
+    match message {
+        Message::System { .. } => 0,
+        Message::User { content, .. } => content.iter().map(|part| if let UserPart::File(file) = part { raw(&file.data) } else { 0 }).sum(),
+        Message::Assistant { content, .. } => content
+            .iter()
+            .map(|part| match part {
+                AssistantPart::File(file) => raw(&file.data),
+                AssistantPart::ReasoningFile(file) => raw(&file.data),
+                AssistantPart::ToolResult(result) => raw_in(&result.output),
+                _ => 0,
+            })
+            .sum(),
+        Message::Tool { content, .. } => {
+            content.iter().map(|part| if let ToolPart::ToolResult(result) = part { raw_in(&result.output) } else { 0 }).sum()
+        }
+    }
+}
+
+thread_local! {
+    /// Where a message is written to be measured: one buffer, kept between measurements.
+    static MEASURED: RefCell<String> = const { RefCell::new(String::new()) };
+}
+
+/// `stringify(value).len()`, without keeping the text.
+fn stringified_len(value: &Value) -> usize {
+    MEASURED.with(|buffer| {
+        let mut buffer = buffer.borrow_mut();
+        buffer.clear();
+        write_into(value, &mut buffer);
+        let len = buffer.len();
+        // A page of megabytes was measured once: the buffer doesn't stay that big.
+        if buffer.capacity() > 1 << 20 {
+            buffer.shrink_to(1 << 20);
+        }
+        len
+    })
+}
+
+/// Bytes as sent, with each image counted at what it costs a model rather than its size: the array's brackets and
+/// commas, and each message as `bytes_of` measures it. This runs before every step of a turn, over the whole
+/// conversation, so it builds no text and copies a message only to put its raw images away.
 fn bytes(messages: &[Message]) -> usize {
-    let mut images = 0;
-    let measured: Vec<Message> = messages
-        .iter()
-        .map(|message| {
-            let mut message = message.clone();
-            images += strip_bytes(&mut message);
-            message
-        })
-        .collect();
-    stringify(&serde_json::to_value(&measured).expect("messages serialize")).len() + images * IMAGE_BYTES
+    if messages.is_empty() {
+        return 2;
+    }
+    messages.len() + 1 + messages.iter().map(bytes_of).sum::<usize>()
 }
 
 fn bytes_of(message: &Message) -> usize {
-    let mut measured = message.clone();
-    let images = strip_bytes(&mut measured);
-    stringify(&serde_json::to_value(&measured).expect("message serializes")).len() + images * IMAGE_BYTES
+    let images = raw_images(message);
+    let value = if images > 0 {
+        let mut measured = message.clone();
+        strip_bytes(&mut measured);
+        serde_json::to_value(&measured)
+    } else {
+        serde_json::to_value(message)
+    };
+    stringified_len(&value.expect("message serializes")) + images * IMAGE_BYTES
 }
 
 fn image_count(output: &ToolResultOutput) -> usize {
@@ -556,38 +610,56 @@ pub fn fit<'a>(history: &'a [Message], turn: &'a [Message], budget: &ContextBudg
 
 /// `fit`, with what a cleared result says in the DAW's words.
 pub fn fit_for<'a>(profile: &DawProfile, history: &'a [Message], turn: &'a [Message], budget: &ContextBudget) -> Fitted<'a> {
+    fit_measured(profile, history, None, turn, budget).0
+}
+
+/// `fit_for`, given the history's bytes when the caller measured this same history before (`None` otherwise), and
+/// giving back the fitted history's bytes for next time. The history is the bulk of a long conversation and this runs
+/// before every step, so each part is measured once, and again only when fitting changed it.
+pub fn fit_measured<'a>(
+    profile: &DawProfile,
+    history: &'a [Message],
+    history_bytes: Option<usize>,
+    turn: &'a [Message],
+    budget: &ContextBudget,
+) -> (Fitted<'a>, usize) {
     let cleared_note = cleared(profile);
     // A request carries only so many images: this turn's earliest go first.
     let mut turn: Cow<'a, [Message]> = put_away_images(turn, MAX_IMAGES, PutAway::Room);
     let mut history: Cow<'a, [Message]> = Cow::Borrowed(history);
-    let within = |history: &[Message], turn: &[Message], bound: f64| (bytes(history) + bytes(turn)) as f64 <= bound;
-    if within(&history, &turn, budget.clear_at) {
-        return Fitted { history, turn };
+    let mut history_bytes = history_bytes.unwrap_or_else(|| bytes(&history));
+    let mut turn_bytes = bytes(&turn);
+    let within = |history_bytes: usize, turn_bytes: usize, bound: f64| (history_bytes + turn_bytes) as f64 <= bound;
+    if within(history_bytes, turn_bytes, budget.clear_at) {
+        return (Fitted { history, turn }, history_bytes);
     }
     // Earlier turns first, keeping the one just before this whole: the producer may refer back to it.
     if let Some(cleared) = clear_until(&history, previous_turn(&history).unwrap_or(0), true, &cleared_note) {
         history = Cow::Owned(cleared);
+        history_bytes = bytes(&history);
     }
-    if within(&history, &turn, budget.limit) {
-        return Fitted { history, turn };
+    if within(history_bytes, turn_bytes, budget.limit) {
+        return (Fitted { history, turn }, history_bytes);
     }
     if let Some(cleared) = clear_until(&history, history.len(), true, &cleared_note) {
         history = Cow::Owned(cleared);
+        history_bytes = bytes(&history);
     }
-    if within(&history, &turn, budget.limit) {
-        return Fitted { history, turn };
+    if within(history_bytes, turn_bytes, budget.limit) {
+        return (Fitted { history, turn }, history_bytes);
     }
     // This turn's older reads, keeping its latest results and the observation it started with.
     if let Some(cleared) = clear_until(&turn, last_index(&turn, Role::Tool).unwrap_or(0), false, &cleared_note) {
         turn = Cow::Owned(cleared);
+        turn_bytes = bytes(&turn);
     }
-    if within(&history, &turn, budget.limit) {
-        return Fitted { history, turn };
+    if within(history_bytes, turn_bytes, budget.limit) {
+        return (Fitted { history, turn }, history_bytes);
     }
     // Then whole exchanges from the front, down to three quarters of the limit so this doesn't recur on every
     // request, with room kept for the note and the list of the producer's words from them.
     let listed = sent(SHORTENED) + sent(&list(&asks_in(&history))).min(ASKS + sent(ASKED) + 4);
-    let room = ((budget.limit * 0.75).floor() - (bytes(&turn) + listed) as f64).max(0.0) as usize;
+    let room = ((budget.limit * 0.75).floor() - (turn_bytes + listed) as f64).max(0.0) as usize;
     let kept = drop_earliest(&history, room);
     let asks = asks_in(&history[..history.len() - kept.len()]);
     let fitted = if kept.len() == history.len() {
@@ -598,15 +670,16 @@ pub fn fit_for<'a>(profile: &DawProfile, history: &'a [Message], turn: &'a [Mess
         Fitted { history: Cow::Owned(note_shortened(kept.to_vec(), asks)), turn }
     };
     // Last, when this turn alone is past the limit: its latest results, each cut to a share of the room left.
-    let total = bytes(&fitted.history) + bytes(&fitted.turn);
+    let history_bytes = bytes(&fitted.history);
+    let total = history_bytes + bytes(&fitted.turn);
     if total as f64 <= budget.limit {
-        return fitted;
+        return (fitted, history_bytes);
     }
-    let Some(at) = last_index(&fitted.turn, Role::Tool) else { return fitted };
+    let Some(at) = last_index(&fitted.turn, Role::Tool) else { return (fitted, history_bytes) };
     let room = (budget.limit as usize).saturating_sub(total - bytes_of(&fitted.turn[at]));
     match cut_latest(&fitted.turn, at, room) {
-        Some(turn) => Fitted { history: fitted.history, turn: Cow::Owned(turn) },
-        None => fitted,
+        Some(turn) => (Fitted { history: fitted.history, turn: Cow::Owned(turn) }, history_bytes),
+        None => (fitted, history_bytes),
     }
 }
 
@@ -669,5 +742,90 @@ fn cut_latest(turn: &[Message], at: usize, room: usize) -> Option<Vec<Message>> 
             return Some(turn);
         }
         share = (share / 2).max(floor);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use kumi_ai::types::{FilePart, ToolResultPart};
+
+    /// What `bytes` measured before it stopped building the text: every message copied with its raw images put away,
+    /// the vector serialized and stringified, each image counted at IMAGE_BYTES.
+    fn measured_the_long_way(messages: &[Message]) -> usize {
+        let mut images = 0;
+        let measured: Vec<Message> = messages
+            .iter()
+            .map(|message| {
+                let mut message = message.clone();
+                images += strip_bytes(&mut message);
+                message
+            })
+            .collect();
+        stringify(&serde_json::to_value(&measured).unwrap()).len() + images * IMAGE_BYTES
+    }
+
+    fn image_result(id: &str, bytes: usize) -> Message {
+        Message::Tool {
+            content: vec![ToolPart::ToolResult(ToolResultPart {
+                tool_call_id: id.into(),
+                tool_name: "watch_video".into(),
+                output: ToolResultOutput::Content {
+                    value: vec![
+                        ToolResultContentItem::Text { text: format!("frames {id}"), provider_options: None },
+                        ToolResultContentItem::File {
+                            data: FileData::Data { data: DataContent::Bytes(vec![0; bytes]) },
+                            media_type: "image/jpeg".into(),
+                            filename: None,
+                            provider_options: None,
+                        },
+                    ],
+                    provider_options: None,
+                },
+                provider_options: None,
+            })],
+            provider_options: None,
+        }
+    }
+
+    #[test]
+    fn bytes_count_as_the_stringified_conversation_did_images_included() {
+        let picture = Message::User {
+            content: vec![
+                UserPart::Text(TextPart { text: "what's in this? \u{1f3b9} \"quoted\"".into(), provider_options: None }),
+                UserPart::File(FilePart {
+                    filename: Some("shot.png".into()),
+                    data: FileData::Data { data: DataContent::Bytes(vec![7; 9_000]) },
+                    media_type: "image/png".into(),
+                    provider_options: None,
+                }),
+            ],
+            provider_options: None,
+        };
+        let conversations: Vec<Vec<Message>> = vec![
+            vec![],
+            vec![Message::user_text("hi")],
+            vec![Message::user_text("make it darker"), Message::assistant_text("Done: the filter sits at 1.5 kHz now, 3.0 dB down.")],
+            vec![Message::user_text("look"), image_result("c1", 20_000), picture, image_result("c2", 5)],
+        ];
+        for messages in &conversations {
+            assert_eq!(bytes(messages), measured_the_long_way(messages), "{} messages", messages.len());
+            for message in messages {
+                assert_eq!(bytes_of(message), measured_the_long_way(std::slice::from_ref(message)) - 2);
+            }
+        }
+    }
+
+    #[test]
+    fn a_fit_that_changes_nothing_gives_back_the_historys_bytes_and_takes_them_again() {
+        let history = vec![Message::user_text("one"), Message::assistant_text("two")];
+        let turn = vec![Message::user_text("three")];
+        let budget = ContextBudget { clear_at: 1_000_000., limit: 2_000_000. };
+        let (fitted, measured) = fit_measured(&DawProfile::ABLETON, &history, None, &turn, &budget);
+        assert!(!fitted.changed());
+        assert_eq!(measured, bytes(&history));
+        let (again, measured_again) = fit_measured(&DawProfile::ABLETON, &history, Some(measured), &turn, &budget);
+        assert!(!again.changed());
+        assert_eq!(measured_again, measured);
     }
 }
