@@ -7,8 +7,8 @@ use super::{
     database,
     hear::{hear, restyle, Clap, Ears, Heard, Style},
     map,
-    scan::{clustered, next as next_song, recluster, spread, tags_pass, Next, TagsPass, STYLE_WORDS},
-    store::{MusicError, MusicStore, LIVE},
+    scan::{clustered, next as next_song, recluster, spread, tags_pass, Aside, Next, TagsPass, STYLE_WORDS},
+    store::{Counts, MusicError, MusicStore, Stage, LIVE},
     vectors::{VectorReader, VectorWriter},
 };
 use futures::stream::{FuturesUnordered, StreamExt};
@@ -30,6 +30,10 @@ use std::{
     io,
     path::PathBuf,
     rc::Rc,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+    },
     time::{Duration, Instant},
 };
 use tokio::{
@@ -41,6 +45,11 @@ use tokio::{
 const AT_ONCE: usize = 2;
 /// How often the battery is looked at.
 const BATTERY_EVERY: Duration = Duration::from_secs(60);
+/// How often the counts are read again from music.db while hearing (a song the app heard in full meanwhile, for a
+/// reference): between, the scan counts what it hears itself.
+const COUNTED_EVERY: Duration = Duration::from_secs(60);
+/// How often the scan says again that it holds the music (a scan runs for days; a lock left a day counts as left).
+const HELD_EVERY: Duration = Duration::from_secs(5 * 60);
 
 /// What the scan is told to learn.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -55,6 +64,9 @@ pub struct ScanOptions {
     pub library_folders: Vec<String>,
     #[serde(default)]
     pub paused: bool,
+    /// Learn while the computer runs on its battery too (tests, which a laptop on its battery would hold).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub on_battery: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -85,6 +97,9 @@ pub struct ScanProgress {
     pub light: usize,
     pub full: usize,
     pub skipped: usize,
+    /// Songs not heard yet that are only in the cloud: heard once they're on this computer.
+    #[serde(default)]
+    pub cloud: usize,
     /// Songs heard (or skipped) in this run.
     pub heard: usize,
     pub started_at: i64,
@@ -120,6 +135,8 @@ pub enum ScanReply {
 #[derive(Clone)]
 pub struct Control {
     pub paused: Rc<Cell<bool>>,
+    /// The same, for the tags pass's threads.
+    pub held: Arc<AtomicBool>,
     pub wake: Rc<Notify>,
     pub stop: Signal,
     pub battery: bool,
@@ -127,10 +144,17 @@ pub struct Control {
 
 impl Control {
     pub fn new(battery: bool) -> Control {
-        Control { paused: Rc::new(Cell::new(false)), wake: Rc::new(Notify::new()), stop: Signal::new(), battery }
+        Control {
+            paused: Rc::new(Cell::new(false)),
+            held: Arc::new(AtomicBool::new(false)),
+            wake: Rc::new(Notify::new()),
+            stop: Signal::new(),
+            battery,
+        }
     }
     pub fn pause(&self, paused: bool) {
         self.paused.set(paused);
+        self.held.store(paused, Ordering::Relaxed);
         self.wake.notify_waiters();
     }
     pub fn stop(&self) {
@@ -187,32 +211,61 @@ pub fn on_battery() -> bool {
     }
 }
 
+/// Whether the scan should wait now: it's paused, or the computer is on its battery (looked at once a minute).
+fn waits(control: &Control, battery: &mut (Option<Instant>, bool)) -> bool {
+    if control.stop.is_cancelled() {
+        return false;
+    }
+    if control.paused.get() {
+        return true;
+    }
+    if control.battery && battery.0.is_none_or(|at| at.elapsed() >= BATTERY_EVERY) {
+        *battery = (Some(Instant::now()), on_battery());
+    }
+    control.battery && battery.1
+}
+
 /// Wait while the scan is paused, or the computer is on its battery; at once when it's stopped.
 async fn gate(control: &Control, battery: &mut (Option<Instant>, bool)) {
     loop {
-        if control.stop.is_cancelled() {
+        let woken = control.wake.notified();
+        if !waits(control, battery) {
             return;
         }
-        let woken = control.wake.notified();
-        if control.paused.get() {
-            tokio::select! { _ = woken => {}, _ = control.stop.cancelled() => return }
-            continue;
-        }
-        if control.battery {
-            if battery.0.is_none_or(|at| at.elapsed() >= BATTERY_EVERY) {
-                *battery = (Some(Instant::now()), on_battery());
-            }
-            if battery.1 {
+        match control.paused.get() {
+            true => tokio::select! { _ = woken => {}, _ = control.stop.cancelled() => return },
+            false => {
                 tokio::select! { _ = woken => {}, _ = control.stop.cancelled() => return, _ = tokio::time::sleep(BATTERY_EVERY) => {} }
-                continue;
             }
         }
-        return;
     }
 }
 
-/// The library's places and the producer's sample folders: the walk leaves them out.
-fn skipped_folders(daws: Daws, library_folders: &[String]) -> Vec<String> {
+/// The tags pass's own gate, for its threads: between one file and the next it waits while the scan is paused or the
+/// computer is on its battery (looked at once a minute), and returns at once when it's stopped.
+fn holder(control: &Control, battery: (Option<Instant>, bool)) -> impl Fn() + Send + Sync + 'static {
+    let (held, stop, watch) = (control.held.clone(), control.stop.clone(), control.battery);
+    let battery = Mutex::new((battery.0.unwrap_or_else(Instant::now), battery.1));
+    move || loop {
+        if stop.is_cancelled() {
+            return;
+        }
+        let on = watch && {
+            let mut battery = battery.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            if battery.0.elapsed() >= BATTERY_EVERY {
+                *battery = (Instant::now(), on_battery());
+            }
+            battery.1
+        };
+        if !held.load(Ordering::Relaxed) && !on {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(250));
+    }
+}
+
+/// The library's places and the producer's sample folders: the walk leaves them out (and the offer's count).
+pub fn skipped_folders(daws: Daws, library_folders: &[String]) -> Vec<String> {
     let mut skip: Vec<String> = library_folders.to_vec();
     if !daws.0.is_empty() {
         let options = SourceOptions { folders: Some(library_folders.to_vec()), ..Default::default() };
@@ -254,11 +307,11 @@ async fn style_words(
     Ok(Some(named))
 }
 
-/// The heard songs this style model hasn't heard, those taste used first, then the newest.
+/// The heard songs this style model hasn't heard, those taste used first, then the newest (none only in the cloud).
 fn missing(store: &MusicStore, reader: &VectorReader) -> Result<VecDeque<i64>, MusicError> {
-    let mut statement = store
-        .connection()
-        .prepare(&format!("SELECT id FROM songs WHERE {LIVE} AND stage >= 1 ORDER BY used_at IS NULL, used_at DESC, mtime DESC, id"))?;
+    let mut statement = store.connection().prepare(&format!(
+        "SELECT id FROM songs WHERE {LIVE} AND stage >= 1 AND cloud = 0 ORDER BY used_at IS NULL, used_at DESC, mtime DESC, id"
+    ))?;
     let ids: Vec<i64> = statement.query_map([], |row| row.get(0))?.collect::<Result<_, _>>()?;
     Ok(ids.into_iter().filter(|id| !reader.has(*id)).collect())
 }
@@ -276,6 +329,103 @@ async fn blocking<T: Send + 'static>(
     .await
     .map_err(|error| MusicError(error.to_string()))?;
     Ok((store, result?))
+}
+
+/// A song heard, or not.
+type Took = (Next, Result<Heard, Result<(Vec<f32>, String), String>>);
+
+/// What the hearing loop keeps as it goes.
+struct Hearing {
+    /// Songs under way.
+    busy: HashSet<i64>,
+    /// Songs that can't be heard this run (their files weren't there).
+    later: HashSet<i64>,
+    /// The producer's folders not there now: their songs wait.
+    away: Vec<String>,
+    /// Songs the style model heard (for the clusters and the map).
+    styled: usize,
+    progress: ScanProgress,
+}
+
+/// How hearing a song left the loop.
+enum Flow {
+    Go,
+    /// Stopped, or nothing can be heard now (the reason, when it's not a stop).
+    End(Option<String>),
+}
+
+/// A song heard, kept in music.db (and its vector in its file), and counted as it changed the counts.
+fn took(
+    hearing: &mut Hearing,
+    store: &MusicStore,
+    writer: &mut VectorWriter,
+    model: &str,
+    stop: &Signal,
+    took: Took,
+) -> Result<Flow, MusicError> {
+    let (next, heard) = took;
+    let song = next.song();
+    let was = (song.stage == Stage::Light as i64, song.stage == Stage::Full as i64);
+    hearing.busy.remove(&song.id);
+    let progress = &mut hearing.progress;
+    let unheard = |progress: &mut ScanProgress| {
+        progress.light -= usize::from(was.0).min(progress.light);
+        progress.full -= usize::from(was.1).min(progress.full);
+    };
+    match heard {
+        Ok(Heard::Done { profile, vector, unstyled, .. }) => {
+            let stage = match next {
+                Next::Hear(_, stage) => stage,
+                Next::Restyle(_, stage) => stage,
+            };
+            let profile = serde_json::to_string(&profile).map_err(|error| MusicError(error.to_string()))?;
+            store.heard(song.id, stage, &profile, now_ms())?;
+            unheard(progress);
+            match stage {
+                Stage::Full => progress.full += 1,
+                _ => progress.light += 1,
+            }
+            match vector.filter(|(_, by)| by == model) {
+                Some((vector, _)) => {
+                    writer.put(store, song.id, &vector)?;
+                    hearing.styled += usize::from(song.stage == 0);
+                }
+                None => progress.unstyled = progress.unstyled.take().or(unstyled),
+            }
+            progress.heard += 1;
+        }
+        Ok(Heard::Skipped(why)) => {
+            store.skip(song.id, &why, now_ms())?;
+            unheard(progress);
+            progress.skipped += 1;
+            progress.heard += 1;
+        }
+        Ok(Heard::Later { away, .. }) => {
+            hearing.later.insert(song.id);
+            if away && !hearing.away.contains(&song.folder) {
+                hearing.away.push(song.folder.clone());
+            }
+        }
+        Ok(Heard::Stop(why)) => return Ok(Flow::End((!stop.is_cancelled()).then_some(why))),
+        Err(Ok((vector, by))) if by == model => {
+            writer.put(store, song.id, &vector)?;
+            hearing.styled += 1;
+        }
+        // Heard by another model meanwhile, or not at all: a later run hears it again.
+        Err(Ok(_)) => {}
+        Err(Err(why)) => {
+            if stop.is_cancelled() {
+                return Ok(Flow::End(None));
+            }
+            progress.unstyled = progress.unstyled.take().or(Some(why));
+        }
+    }
+    Ok(Flow::Go)
+}
+
+fn counted(progress: &mut ScanProgress, counts: Counts) {
+    (progress.songs, progress.light, progress.full, progress.skipped, progress.cloud) =
+        (counts.songs, counts.light, counts.full, counts.skipped, counts.cloud);
 }
 
 /// One run of the scan: the tags pass, then hearing until there's nothing left to hear (or it's stopped). `style` is the
@@ -297,18 +447,18 @@ pub async fn run(
     }
     let store = MusicStore::open(&database(&dir))?;
     let (folders, skip, stop) = (options.folders.clone(), skipped_folders(daws, &options.library_folders), control.stop.clone());
-    let (mut store, _) = blocking(store, move |store| {
-        let pass = TagsPass { folders: &folders, skip: &skip, signal: &stop, readers: 4, progress: &|_| {} };
+    let hold = holder(control, battery);
+    let (mut store, (_, away)) = blocking(store, move |store| {
+        let pass = TagsPass { folders: &folders, skip: &skip, signal: &stop, readers: 4, progress: &|_| {}, hold: &hold };
         tags_pass(store, &pass)
     })
     .await?;
-    let counts = |store: &MusicStore, progress: &mut ScanProgress| -> Result<(), MusicError> {
-        let counts = store.counts()?;
-        (progress.songs, progress.light, progress.full, progress.skipped) = (counts.songs, counts.light, counts.full, counts.skipped);
-        Ok(())
-    };
+    let say = |text: &str| report(ScanReply::Said { text: text.to_string() });
+    for folder in &away {
+        say(&format!("Kumi can't read {folder} now: its songs wait for it."));
+    }
     progress.phase = ScanPhase::Hearing;
-    counts(&store, &mut progress)?;
+    counted(&mut progress, store.counts()?);
     report(ScanReply::Progress { progress: progress.clone() });
 
     // The style model and its vectors (none when the embeddings slot is off).
@@ -318,37 +468,49 @@ pub async fn run(
     };
     let model = style.as_ref().map(|style| style.model().to_string()).unwrap_or_default();
     let mut writer = VectorWriter::open(&dir, &model)?;
+    // Vectors a scan that ended early left waiting beside the file: into it.
+    writer.settle_left(&store)?;
     let mut missing = match style.is_some() {
         true => missing(&store, &VectorReader::open(&dir, &store, &model)?)?,
         false => VecDeque::new(),
     };
-    let mut styled = store.heard_ids()?.len().saturating_sub(missing.len());
     let mut clusters = clustered(&store, &model)?;
     let mut mapped = map::mapped(&store, &model)?;
     let spread = spread(&store)?;
     let mut spread_at = 0;
-    let say = |text: &str| report(ScanReply::Said { text: text.to_string() });
     // What the style words mean to the style model, to name its styles by (none: it has no words).
     let named: Option<std::sync::Arc<Vec<(String, Vec<f32>)>>> = match &style {
         Some(style) => style_words(&store, style.as_ref(), &say, &control.stop).await?.map(std::sync::Arc::new),
         None => None,
     };
     let ears = Ears { style: style.as_deref(), say: &say, signal: &control.stop };
+    let styled = store.heard_ids()?.len().saturating_sub(missing.len());
+    let mut hearing = Hearing { busy: HashSet::new(), later: HashSet::new(), away, styled, progress };
 
-    let mut busy: HashSet<i64> = HashSet::new();
-    let mut failed: HashSet<i64> = HashSet::new();
     let mut running = FuturesUnordered::new();
-    let mut told = Instant::now();
-    loop {
-        gate(control, &mut battery).await;
+    let (mut told, mut counted_at) = (Instant::now(), Instant::now());
+    let mut ended: Option<String> = None;
+    'hearing: loop {
         if control.stop.is_cancelled() {
             break;
         }
+        // The songs under way finish before the scan waits (paused, on its battery): none sits unheard past its
+        // converter's deadline, to be kept as one that won't decode.
+        if waits(control, &mut battery) {
+            while let Some(done) = running.next().await {
+                if let Flow::End(why) = took(&mut hearing, &store, &mut writer, &model, &control.stop, done)? {
+                    ended = why;
+                    break 'hearing;
+                }
+            }
+            gate(control, &mut battery).await;
+            continue;
+        }
         while running.len() < AT_ONCE {
-            let mut skipping: HashSet<i64> = busy.union(&failed).copied().collect();
-            skipping.extend(missing.iter().filter(|id| failed.contains(id)));
-            let Some(next) = next_song(&store, &skipping, &mut missing, &spread, &mut spread_at)? else { break };
-            busy.insert(next.song().id);
+            let aside: HashSet<i64> = hearing.busy.union(&hearing.later).copied().collect();
+            let around = Aside { songs: &aside, folders: &hearing.away, since: hearing.progress.started_at };
+            let Some(next) = next_song(&store, &around, &mut missing, &spread, &mut spread_at)? else { break };
+            hearing.busy.insert(next.song().id);
             let ears = &ears;
             running.push(async move {
                 let heard = match &next {
@@ -358,56 +520,28 @@ pub async fn run(
                 (next, heard)
             });
         }
-        let Some((next, heard)) = running.next().await else { break };
-        let id = next.song().id;
-        busy.remove(&id);
-        match heard {
-            Ok(Heard::Done { profile, vector, unstyled, .. }) => {
-                let stage = match next {
-                    Next::Hear(_, stage) => stage,
-                    Next::Restyle(_, stage) => stage,
-                };
-                let profile = serde_json::to_string(&profile).map_err(|error| MusicError(error.to_string()))?;
-                store.heard(id, stage, &profile, now_ms())?;
-                match vector.filter(|(_, by)| *by == model) {
-                    Some((vector, _)) => {
-                        writer.put(&store, id, &vector)?;
-                        styled += usize::from(next.song().stage == 0);
-                    }
-                    None => {
-                        failed.insert(id);
-                        progress.unstyled = progress.unstyled.or(unstyled);
-                    }
+        let Some(done) = running.next().await else { break };
+        let away = hearing.away.len();
+        if let Flow::End(why) = took(&mut hearing, &store, &mut writer, &model, &control.stop, done)? {
+            ended = why;
+            break;
+        }
+        if let Some(folder) = hearing.away.get(away) {
+            say(&format!("Kumi can't read {folder} now: its songs wait for it."));
+        }
+        // The clusters again once the songs the style model heard grow by a tenth (ten at least), and the map by the
+        // same rule; the songs under way finish first.
+        let regroup = style.is_some() && map::due(Some(clusters), hearing.styled, false);
+        let remap = style.is_some() && map::due(mapped, hearing.styled, false);
+        if regroup || remap {
+            while let Some(done) = running.next().await {
+                if let Flow::End(why) = took(&mut hearing, &store, &mut writer, &model, &control.stop, done)? {
+                    ended = why;
+                    break 'hearing;
                 }
-                progress.heard += 1;
-            }
-            Ok(Heard::Skipped(why)) => {
-                store.skip(id, &why, now_ms())?;
-                progress.heard += 1;
-            }
-            Ok(Heard::Stop(why)) => {
-                if control.stop.is_cancelled() {
-                    break;
-                }
-                return Err(MusicError(why));
-            }
-            Err(Ok((vector, by))) if by == model => {
-                writer.put(&store, id, &vector)?;
-                styled += 1;
-            }
-            Err(Ok(_)) => {
-                failed.insert(id);
-            }
-            Err(Err(why)) => {
-                if control.stop.is_cancelled() {
-                    break;
-                }
-                failed.insert(id);
-                progress.unstyled = progress.unstyled.or(Some(why));
             }
         }
-        // The clusters again once the songs the style model heard grow by a tenth (ten at least).
-        if styled >= clusters + (clusters / 10).max(10) {
+        if regroup {
             let (back, made) = blocking(store, {
                 let (dir, model) = (dir.clone(), model.clone());
                 let named = named.clone();
@@ -416,8 +550,7 @@ pub async fn run(
             .await?;
             (store, clusters) = (back, made);
         }
-        // The map again too, by the same rule.
-        if style.is_some() && map::due(mapped, styled, false) {
+        if remap {
             let (back, laid) = blocking(store, {
                 let (dir, model) = (dir.clone(), model.clone());
                 move |store| map::lay_out(store, &dir, &model, &Layout::default())
@@ -425,42 +558,69 @@ pub async fn run(
             .await?;
             (store, mapped) = (back, Some(laid));
         }
+        if counted_at.elapsed() >= COUNTED_EVERY {
+            counted_at = Instant::now();
+            counted(&mut hearing.progress, store.counts()?);
+        }
         if told.elapsed() >= Duration::from_secs(1) {
             told = Instant::now();
-            counts(&store, &mut progress)?;
-            report(ScanReply::Progress { progress: progress.clone() });
+            report(ScanReply::Progress { progress: hearing.progress.clone() });
         }
     }
     // Stopped: the songs under way are left for next time.
     drop(running);
+    let mut progress = hearing.progress;
+    if let Some(why) = ended {
+        return Err(MusicError(why));
+    }
     if !control.stop.is_cancelled() {
         writer.settle(&store)?;
-        if style.is_some() && styled != clusters {
-            let (back, _) = blocking(store, {
-                let (dir, model) = (dir.clone(), model.clone());
-                move |store| recluster(store, &dir, &model, named.as_deref().map(Vec::as_slice))
-            })
-            .await?;
-            store = back;
-        }
-        if style.is_some() && map::due(mapped, styled, true) {
-            let (back, _) = blocking(store, move |store| map::lay_out(store, &dir, &model, &Layout::default())).await?;
-            store = back;
+        // The clusters and the map at a scan's end when the songs on them changed at all: more or fewer, or others
+        // (a folder moved, a file changed).
+        if style.is_some() {
+            let changed = {
+                let reader = VectorReader::open(&dir, &store, &model)?;
+                map::changed(&store, &reader)?
+            };
+            if changed.clusters || hearing.styled != clusters {
+                let (back, _) = blocking(store, {
+                    let (dir, model) = (dir.clone(), model.clone());
+                    move |store| recluster(store, &dir, &model, named.as_deref().map(Vec::as_slice))
+                })
+                .await?;
+                store = back;
+            }
+            if changed.places || map::due(mapped, hearing.styled, true) {
+                let (back, _) = blocking(store, move |store| map::lay_out(store, &dir, &model, &Layout::default())).await?;
+                store = back;
+            }
         }
         progress.phase = ScanPhase::Done;
         progress.finished_at = Some(now_ms());
         store.set_meta("learned_at", &now_ms().to_string())?;
     }
-    counts(&store, &mut progress)?;
+    counted(&mut progress, store.counts()?);
     Ok(progress)
 }
 
-/// The worker process: one run, as it's told, then it ends (Kumi starts it again later to look for new songs).
-pub async fn main(daws: Daws) -> io::Result<()> {
+/// The worker process: one run, as it's told, then it ends (Kumi starts it again later to look for new songs). `tools`
+/// is where Kumi keeps the programs it fetches (its own ffmpeg, read or fetched there as the app does).
+pub async fn main(daws: Daws, tools: Option<String>) -> io::Result<()> {
     kumi_library::learner::low_priority();
     let control = Control::new(true);
     let (jobs, mut incoming) = mpsc::unbounded_channel();
     let (output, mut outgoing) = mpsc::unbounded_channel::<ScanReply>();
+    // A program fetched to hear the songs (ffmpeg on Windows and Linux) is said as a model's fetch is. Weakly: the
+    // replies end, and the process with them, once the run's done.
+    let fetching = output.downgrade();
+    kumi_media::programs::configure_programs(kumi_media::programs::ProgramDefaults {
+        tools_dir: tools,
+        on_fetch: Some(Arc::new(move |message: &str| {
+            if let Some(output) = fetching.upgrade() {
+                let _ = output.send(ScanReply::Said { text: message.to_string() });
+            }
+        })),
+    });
     let write = tokio::task::spawn_local(async move {
         let mut stdout = tokio::io::stdout();
         while let Some(reply) = outgoing.recv().await {
@@ -496,12 +656,24 @@ pub async fn main(daws: Daws) -> io::Result<()> {
                 let report = |reply: ScanReply| {
                     let _ = output.send(reply);
                 };
+                // Held for as long as the scan runs: another Kumi takes over only a lock that's stopped saying so.
+                let holding = {
+                    let lock = lock.holding();
+                    tokio::task::spawn_local(async move {
+                        loop {
+                            tokio::time::sleep(HELD_EVERY).await;
+                            let _ = lock.refresh().await;
+                        }
+                    })
+                };
+                let control = Control { battery: !options.on_battery, ..control.clone() };
                 match run(&options, daws, &control, None, &report).await {
                     Ok(progress) if progress.phase == ScanPhase::Done => report(ScanReply::Done { progress }),
                     Ok(progress) => report(ScanReply::Progress { progress }),
                     Err(error) if !control.stop.is_cancelled() => report(ScanReply::Failed { message: head(&error.to_string(), 300) }),
                     Err(_) => {}
                 }
+                holding.abort();
                 lock.release().await?;
             }
             None => {

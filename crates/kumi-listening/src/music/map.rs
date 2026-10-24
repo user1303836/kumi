@@ -1,10 +1,10 @@
 //! Where each heard song sits on the map: the style vectors of the songs the style model heard, laid out together
 //! (`kumi_layout`, so songs that sound alike sit together), kept in music.db as each song's `x` and `y` (from 0 to 1),
 //! with what the map was made from in `meta` ("map"). Made again when the songs heard grow by a tenth, and at the end
-//! of a scan when any more were heard.
+//! of a scan when the songs on it changed at all (more or fewer, or others: a folder moved, a file changed).
 
 use super::{
-    store::{MusicError, MusicStore},
+    store::{MusicError, MusicStore, LIVE},
     vectors::{VectorReader, DIMS},
 };
 use kumi_common::time::now_ms;
@@ -39,6 +39,34 @@ pub fn due(mapped: Option<usize>, heard: usize, ended: bool) -> bool {
             Some(songs) if ended => heard != songs,
             Some(songs) => heard >= songs + (songs / 10).max(10),
         }
+}
+
+/// Whether the songs the clusters and the map were made from are still the ones the style model heard: a song heard
+/// (with its vector) without a cluster or a place, or one with them that's gone, set aside or has no vector now.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Changed {
+    pub clusters: bool,
+    pub places: bool,
+}
+
+/// What changed among the songs `reader`'s style model heard since the clusters and the map were made.
+pub fn changed(store: &MusicStore, reader: &VectorReader) -> Result<Changed, MusicError> {
+    let heard = format!("({LIVE} AND stage >= 1)");
+    let mut statement = store.connection().prepare(&format!(
+        "SELECT id, {heard}, cluster IS NOT NULL, x IS NOT NULL AND y IS NOT NULL FROM songs WHERE {heard} OR cluster IS NOT NULL OR x IS NOT NULL"
+    ))?;
+    let mut rows = statement.query([])?;
+    let mut changed = Changed::default();
+    while let Some(row) = rows.next()? {
+        let (id, heard, clustered, placed): (i64, bool, bool, bool) = (row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?);
+        let wanted = heard && reader.has(id);
+        changed.clusters |= wanted != clustered;
+        changed.places |= wanted != placed;
+        if changed.clusters && changed.places {
+            break;
+        }
+    }
+    Ok(changed)
 }
 
 /// The map made again from the songs `model` heard: each one's place, and what it was made from. How many it placed.

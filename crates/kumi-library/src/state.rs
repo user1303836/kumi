@@ -1,6 +1,6 @@
 use super::{
     learn::{Counts, LearnPhase, LearnProgress},
-    store::{read_json, write_json},
+    store::{read_json, write_compact_json, write_json},
 };
 use kumi_common::{js::json::stringify, time::now_ms};
 use serde::{Deserialize, Serialize};
@@ -93,12 +93,38 @@ pub struct LibraryLock {
     file: PathBuf,
 }
 impl LibraryLock {
+    /// What says, now and then, that this lock's holder holds it still: a music scan runs for days, and a lock last
+    /// taken a day ago counts as left.
+    pub fn holding(&self) -> Holding {
+        Holding { file: self.file.clone() }
+    }
+    /// Let go, while it's still this process's: one another process took over meanwhile is theirs.
     pub async fn release(self) -> io::Result<()> {
+        if !held_here(&self.file).await {
+            return Ok(());
+        }
         match tokio::fs::remove_file(&self.file).await {
             Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
             other => other,
         }
     }
+}
+/// A lock's holder, saying it holds it still.
+pub struct Holding {
+    file: PathBuf,
+}
+impl Holding {
+    /// The lock taken again now, while it's this process's: written whole beside it, then put in its place.
+    pub async fn refresh(&self) -> io::Result<()> {
+        if !held_here(&self.file).await {
+            return Ok(());
+        }
+        write_compact_json(&self.file, &json!({"pid": std::process::id(), "at": now_ms()})).await
+    }
+}
+/// Whether a lock's file names this process.
+async fn held_here(file: &Path) -> bool {
+    read_json::<Value>(file).await.and_then(|holder| holder["pid"].as_f64()) == Some(std::process::id() as f64)
 }
 /// The logs being written afresh when a learner was stopped dead (`.sounds-<uuid>` and the like): only a lock's holder
 /// writes them, so once it's taken any left are a gone learner's.
