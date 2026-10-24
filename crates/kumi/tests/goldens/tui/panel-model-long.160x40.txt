@@ -1,0 +1,40 @@
+  Kumi  ·  Night Drive                                                                                                                        fixture   ● Live
+
+                                                                                                                    FOCUS
+                                                                                                                    Night Drive
+                                                                                                                    Your selection will show here
+
+
+                                                                                                                    NOW
+                                                                                                                    Ready
+
+
+
+                                          ██                          ▀▀
+                                          ██ ▄█▀  ██  ██  ██▀▀██▀▀█▄  ██
+                                          ██▀█▄   ██  ██  ██  ██  ██  ██
+                                          ▀▀  ▀▀   ▀▀▀▀▀  ▀▀  ▀▀  ▀▀  ▀▀
+
+
+   Choose a model                                            type to filter
+
+   ChatGPT                                                        signed in
+     It lists no models for this sign-in.                                                                           HISTORY ──────────────────────────────────
+   Anthropic                                                  not signed in                                         Nothing changed yet
+     Sign in to Anthropic   with an API key                         sign in
+   OpenAI API                                                 not signed in
+     Sign in to OpenAI API  with an API key                         sign in
+   OpenCode Zen                                                   signed in  es back to one.
+     Model 01               chat only
+     Model 02               unverified
+     Model 03               private
+     Model 04               deprecated
+     Model 05               A model the list describes
+     Model 06               chat only
+     Model 07               unverified                            ↓ 37 more
+
+
+
+   Ask Kumi about your Set
+                                         ↑↓ to move · enter to choose · ctrl+f sets the fallback · esc to close
+

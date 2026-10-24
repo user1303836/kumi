@@ -11,10 +11,10 @@ use kumi_ai::{
     binding::ModelBinding,
     http::Fetch,
     providers::{
-        api_key_for,
+        api_key_for, chat_only,
         local::{self, LocalBinding, LocalKind, LocalModelOptions, LocalServer},
         models::{check_api_key, list_models, ApiKeyCheck, EffortInfo, ListOptions, ModelInfo, ServiceTier, Transport},
-        parse_model_id, provider_info, resolve_model, Effort, KeySource, ProviderId, ResolveModelOptions, SignIn, PROVIDERS,
+        parse_model_id, resolve_model, table, Effort, KeySource, ProviderId, ResolveModelOptions, SignIn,
     },
 };
 use kumi_common::{
@@ -32,8 +32,6 @@ use std::{
     collections::{HashMap, HashSet},
     rc::Rc,
 };
-pub const OFFER_ORDER: [ProviderId; 5] =
-    [ProviderId::OpenaiCodex, ProviderId::Anthropic, ProviderId::Openai, ProviderId::Opencode, ProviderId::OpencodeGo];
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProviderStatus {
@@ -101,13 +99,14 @@ pub enum ChatGptSignIn {
 }
 #[derive(Clone)]
 enum Bound {
-    Cloud(Rc<ModelBinding>),
+    /// A cloud model, and what the producer hears of it once (a model that can't use tools).
+    Cloud(Rc<ModelBinding>, Option<String>),
     Local(Rc<LocalBinding>),
 }
 impl Bound {
     fn original(&self) -> &ModelBinding {
         match self {
-            Self::Cloud(b) => b,
+            Self::Cloud(b, _) => b,
             Self::Local(b) => &b.binding,
         }
     }
@@ -130,10 +129,9 @@ impl Bound {
         }
     }
     fn note(&self) -> Option<String> {
-        if let Self::Local(b) = self {
-            b.note()
-        } else {
-            None
+        match self {
+            Self::Local(b) => b.note(),
+            Self::Cloud(_, note) => note.clone(),
         }
     }
 }
@@ -171,6 +169,8 @@ struct Inner {
     options: ModelControlOptions,
     pinned: bool,
     state: RefCell<State>,
+    /// Cloud models found this session to turn tools down: they're sent none from then on.
+    learned: chat_only::Learned,
 }
 #[derive(Clone)]
 pub struct ModelControl {
@@ -200,6 +200,7 @@ pub fn create_model_control(options: ModelControlOptions) -> ModelControl {
                 heard: HashSet::new(),
                 defaulting: None,
             }),
+            learned: Default::default(),
         }),
     }
 }
@@ -215,14 +216,20 @@ impl ModelControl {
     }
     fn parse(&self, id: Option<&str>) -> Option<Parsed> {
         let id = id.filter(|s| !s.is_empty())?;
-        if let Some(cloud) = parse_model_id(id) {
-            return Some(Parsed { provider: cloud.provider.to_string(), model: cloud.model, server: None });
+        // A server first: a custom server keeps an ID that a provider added later has too (`hidden_providers`).
+        if let Some(local) = local::parse_local_model_id(id, &self.servers()) {
+            return Some(Parsed { provider: local.server.id.clone(), model: local.model, server: Some(local.server) });
         }
-        local::parse_local_model_id(id, &self.servers()).map(|local| Parsed {
-            provider: local.server.id.clone(),
-            model: local.model,
-            server: Some(local.server),
-        })
+        parse_model_id(id).map(|cloud| Parsed { provider: cloud.provider.to_string(), model: cloud.model, server: None })
+    }
+    /// The cloud provider of the model chosen now, if it's one.
+    fn current_provider(&self) -> Option<ProviderId> {
+        let model = self.inner.state.borrow().model.clone();
+        self.parse(model.as_deref()).filter(|parsed| parsed.server.is_none()).and_then(|parsed| ProviderId::parse(&parsed.provider))
+    }
+    /// The providers a custom server hides, keeping their IDs (`hidden_providers`).
+    fn hidden(&self) -> Vec<ProviderId> {
+        local::hidden_providers(&self.servers()).into_iter().map(|(provider, _)| provider).collect()
     }
     fn info_for(&self, id: Option<&str>) -> Option<ModelInfo> {
         let parsed = self.parse(id)?;
@@ -288,17 +295,22 @@ impl ModelControl {
                 },
             ))));
         }
-        Ok(Bound::Cloud(Rc::new(
-            resolve_model(ResolveModelOptions {
-                model: id.into(),
-                store: self.inner.options.store.clone(),
-                env: Some(self.inner.options.env.clone()),
-                fetch: self.inner.options.fetch.clone(),
-                effort,
-                service_tier: tier,
-            })
-            .await?,
-        )))
+        let binding = resolve_model(ResolveModelOptions {
+            model: id.into(),
+            store: self.inner.options.store.clone(),
+            env: Some(self.inner.options.env.clone()),
+            fetch: self.inner.options.fetch.clone(),
+            effort,
+            service_tier: tier,
+        })
+        .await?;
+        // A model its list says can't use tools is still there to talk with, as one on this computer is.
+        let info = self.info_for(Some(id));
+        let toolless = info.as_ref().is_some_and(|info| info.tools == Some(false));
+        let name = info.map(|info| info.name).unwrap_or_else(|| id.split_once('/').map_or(id, |(_, model)| model).to_string());
+        let profile = *crate::daw::profile();
+        let note = toolless.then(|| chat_only::talk_only(&name, &profile, "/model chooses one that can."));
+        Ok(Bound::Cloud(Rc::new(chat_only::chat_only(binding, toolless, self.inner.learned.clone(), profile, name)), note))
     }
     pub fn current(&self) -> CurrentModel {
         let (model, effort) = {
@@ -322,8 +334,9 @@ impl ModelControl {
     }
     pub async fn providers(&self) -> Result<Vec<ProviderStatus>, RuntimeError> {
         let mut statuses = Vec::new();
-        for id in OFFER_ORDER.into_iter().chain(PROVIDERS.into_iter().filter(|id| !OFFER_ORDER.contains(id))) {
-            let info = provider_info(id);
+        let hidden = self.hidden();
+        for id in table::offered().into_iter().filter(|id| !hidden.contains(id)) {
+            let info = id.row();
             let via = if info.sign_in == SignIn::Chatgpt {
                 matches!(self.inner.options.store.get(OPENAI_CODEX).await?, Some(Credential::Oauth(_))).then(|| "chatgpt".into())
             } else {
@@ -342,7 +355,7 @@ impl ModelControl {
                 signed_in: via.is_some(),
                 via,
                 key_page: info.key_page.map(str::to_string),
-                key_env: info.key_env.map(str::to_string),
+                key_env: info.first_key_env().map(str::to_string),
             });
         }
         Ok(statuses)
@@ -370,11 +383,15 @@ impl ModelControl {
         .collect()
     }
     pub fn provider_name(&self, id: &str) -> String {
-        if let Some(provider) = ProviderId::parse(id) {
-            provider_info(provider).name.into()
+        if let Some(server) = self.servers().into_iter().find(|s| s.id == id) {
+            server.name
         } else {
-            self.servers().into_iter().find(|s| s.id == id).map(|s| s.name).unwrap_or_else(|| id.into())
+            ProviderId::parse(id).map_or_else(|| id.into(), |provider| provider.row().name.into())
         }
+    }
+    /// The cloud provider `id` names, unless it's a custom server's (`hidden_providers`).
+    pub fn cloud_provider(&self, id: &str) -> Option<ProviderId> {
+        ProviderId::parse(id).filter(|_| !self.servers().iter().any(|server| server.id == id))
     }
     pub fn choose_default(&self) -> LocalBoxFuture<'static, Result<Option<DefaultModel>, RuntimeError>> {
         let control = self.clone();
@@ -516,7 +533,7 @@ impl ModelControl {
         self.set_effort(effort).await
     }
     pub async fn save_key(&self, provider: ProviderId, key: &str, signal: Option<Signal>) -> Result<ApiKeyCheck, RuntimeError> {
-        let info = provider_info(provider);
+        let info = provider.row();
         if info.sign_in != SignIn::ApiKey {
             return Err(KumiError::new(FailureKind::Config, format!("{} signs in with ChatGPT, not a key.", info.name)).into());
         }
@@ -530,18 +547,14 @@ impl ModelControl {
             .store
             .update(info.credential, Box::new(move |_| async move { Ok(Some(Credential::ApiKey { key })) }.boxed_local()))
             .await?;
-        let current = {
+        {
             let mut state = self.inner.state.borrow_mut();
-            state.catalog.remove(provider.as_str());
-            if provider == ProviderId::Opencode {
-                state.catalog.remove("opencode-go");
+            // Every provider the key opens lists afresh.
+            for row in table::rows().filter(|row| row.credential == info.credential) {
+                state.catalog.remove(row.id);
             }
-            if provider == ProviderId::OpencodeGo {
-                state.catalog.remove("opencode");
-            }
-            state.model.clone().and_then(|m| parse_model_id(&m)).map(|m| m.provider)
-        };
-        if current.is_some_and(|p| provider_info(p).credential == info.credential) {
+        }
+        if self.current_provider().is_some_and(|p| p.row().credential == info.credential) {
             self.inner.state.borrow_mut().bound = None;
             (self.inner.options.changed)().await?;
         }
@@ -557,31 +570,29 @@ impl ModelControl {
         self.inner.options.store.update(OPENAI_CODEX, Box::new(move |_| async move { Ok(Some(credential.into())) }.boxed_local())).await?;
         let model = {
             let mut state = self.inner.state.borrow_mut();
-            state.catalog.remove("openai-codex");
+            for row in table::rows().filter(|row| row.sign_in == SignIn::Chatgpt) {
+                state.catalog.remove(row.id);
+            }
             state.model.clone()
         };
         if model.as_ref().is_none_or(|s| s.is_empty()) {
             self.choose_default().await?;
             return Ok(());
         }
-        if model.as_deref().and_then(parse_model_id).is_some_and(|m| m.provider == ProviderId::OpenaiCodex) {
+        if self.current_provider().is_some_and(|provider| provider.row().sign_in == SignIn::Chatgpt) {
             self.inner.state.borrow_mut().bound = None;
             (self.inner.options.changed)().await?;
         }
         Ok(())
     }
     pub async fn sign_out(&self, provider: ProviderId) -> Result<bool, RuntimeError> {
-        let info = provider_info(provider);
+        let info = provider.row();
         if self.inner.options.store.get(info.credential).await?.is_none() {
             return Ok(false);
         }
         self.inner.options.store.update(info.credential, Box::new(|_| async { Ok(None) }.boxed_local())).await?;
-        let current = {
-            let mut state = self.inner.state.borrow_mut();
-            state.catalog.remove(provider.as_str());
-            state.model.clone().and_then(|m| parse_model_id(&m)).map(|m| m.provider)
-        };
-        if current.is_some_and(|p| provider_info(p).credential == info.credential) {
+        self.inner.state.borrow_mut().catalog.remove(provider.as_str());
+        if self.current_provider().is_some_and(|p| p.row().credential == info.credential) {
             self.inner.state.borrow_mut().bound = None;
             (self.inner.options.changed)().await?;
         }
@@ -648,6 +659,9 @@ impl ModelControl {
 /// this computer, and when the list can't be read (no sign-in, no network): then nothing new happens.
 pub async fn missing_model(models: &dyn ModelController) -> Option<String> {
     let current = models.current();
+    if current.r#where.is_some() {
+        return None;
+    }
     let (model, provider) = (current.model.filter(|_| !current.pinned)?, current.provider?);
     ProviderId::parse(&provider)?;
     let listed = models.models(&provider, false).await.ok()?;
@@ -665,6 +679,10 @@ pub trait ModelController {
     async fn providers(&self) -> Result<Vec<ProviderStatus>, RuntimeError>;
     async fn local(&self) -> Vec<LocalStatus>;
     fn provider_name(&self, id: &str) -> String;
+    /// The cloud provider `id` names (an error's or a model's provider), unless it's a model server's.
+    fn cloud_provider(&self, id: &str) -> Option<ProviderId> {
+        ProviderId::parse(id)
+    }
     async fn choose_default(&self) -> Result<Option<DefaultModel>, RuntimeError>;
     async fn models(&self, provider: &str, refresh: bool) -> Result<Vec<ModelInfo>, RuntimeError>;
     async fn choose(&self, next: &str) -> Result<Option<String>, RuntimeError>;
@@ -704,6 +722,9 @@ impl ModelController for ModelControl {
     }
     fn provider_name(&self, id: &str) -> String {
         ModelControl::provider_name(self, id)
+    }
+    fn cloud_provider(&self, id: &str) -> Option<ProviderId> {
+        ModelControl::cloud_provider(self, id)
     }
     async fn choose_default(&self) -> Result<Option<DefaultModel>, RuntimeError> {
         ModelControl::choose_default(self).await

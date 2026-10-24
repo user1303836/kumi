@@ -1,6 +1,6 @@
 use kumi_ai::providers::{
     local::{local_servers, parse_local_model_id, ServerSetting, LOCAL_PROVIDERS},
-    parse_model_id, provider_info, Effort, ProviderId, SignIn, PROVIDERS,
+    parse_model_id, table, Effort, ProviderId, SignIn,
 };
 use kumi_common::js::{
     json::file_text,
@@ -371,6 +371,9 @@ pub struct Settings {
     /// Kumi has offered to learn their music (once).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub music_offered: Option<bool>,
+    /// false: Kumi doesn't fetch models.dev's catalog of models; the copy it has stays in use.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model_catalog: Option<bool>,
 }
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -460,11 +463,12 @@ pub fn read_settings(file: &str) -> Settings {
             .map(|days| ConversationSettings { keep_days: Some(days as u32) }),
         music_folders: value["musicFolders"].is_array().then(|| folder_list(&value["musicFolders"])),
         music_offered: (value["musicOffered"] == true).then_some(true),
+        model_catalog: (value["modelCatalog"] == false).then_some(false),
         model_servers,
     }
 }
 /// The settings this Kumi reads: any other key in the file is a newer Kumi's, kept as it is when this one writes.
-const KNOWN_SETTINGS: [&str; 20] = [
+const KNOWN_SETTINGS: [&str; 21] = [
     "model",
     "effort",
     "fast",
@@ -485,6 +489,7 @@ const KNOWN_SETTINGS: [&str; 20] = [
     "conversations",
     "musicFolders",
     "musicOffered",
+    "modelCatalog",
 ];
 /// The longest wait before Kumi answers for the producer: an hour.
 const MAX_ANSWER_AFTER: u64 = 3600;
@@ -549,6 +554,9 @@ pub fn write_settings(file: &str, next: &Value) -> Result<(), RuntimeError> {
     if kept("musicOffered") == Some(&Value::Bool(true)) {
         settings.insert("musicOffered".into(), json!(true));
     }
+    if kept("modelCatalog") == Some(&Value::Bool(false)) {
+        settings.insert("modelCatalog".into(), json!(false));
+    }
     // A newer Kumi's settings stay, so going back to this one and forward again loses none of them.
     if let Some(Value::Object(raw)) = &raw {
         for (key, value) in raw {
@@ -599,7 +607,7 @@ pub fn valid_model(model: Option<&str>, servers: &[ServerSetting]) -> bool {
     })
 }
 fn sources() -> String {
-    format!("{} (or a server in settings.json)", PROVIDERS.iter().map(|p| p.as_str()).chain(LOCAL_PROVIDERS).collect::<Vec<_>>().join(", "))
+    format!("{} (or a server in settings.json)", table::rows().map(|row| row.id).chain(LOCAL_PROVIDERS).collect::<Vec<_>>().join(", "))
 }
 pub fn load_inference_config(env: &Env) -> Result<InferenceConfig, RuntimeError> {
     let settings = read_settings(&load_settings_file(env)?);
@@ -820,7 +828,7 @@ pub fn load_config(args: &[String], env: &Env) -> Result<AppConfig, RuntimeError
             return Err(RuntimeError::plain(format!(
                 "Use: {} <provider>, with provider one of {}.",
                 first.unwrap(),
-                PROVIDERS.iter().map(|p| p.as_str()).collect::<Vec<_>>().join(", ")
+                table::rows().map(|row| row.id).collect::<Vec<_>>().join(", ")
             )));
         };
         if first == Some("logout") {
@@ -829,7 +837,7 @@ pub fn load_config(args: &[String], env: &Env) -> Result<AppConfig, RuntimeError
             }
             return Ok(AppConfig::Logout { provider, auth_file: load_auth_file(env)? });
         }
-        let chatgpt = provider_info(provider).sign_in == SignIn::Chatgpt;
+        let chatgpt = provider.row().sign_in == SignIn::Chatgpt;
         let method = if chatgpt && args.len() <= 3 {
             match at(2).unwrap_or("") {
                 "" => Some(chatgpt_sign_in(env)),

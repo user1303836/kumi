@@ -847,6 +847,28 @@ scene!(panel_model, |width, height| {
     finish(h).await
 });
 
+scene!(panel_model_narrowed, |width, height| {
+    let fake = models::FakeModels::catalog();
+    let h = Harness::with(width, height, Rc::new(Control::default()), |o| o.models = Some(fake));
+    h.start().await;
+    h.connect();
+    h.type_text("/model\r").await;
+    h.wait_for("enter to choose").await;
+    h.type_text("luna").await;
+    h.wait_until_hidden("Sign in to Anthropic").await;
+    finish(h).await
+});
+
+scene!(panel_model_long, |width, height| {
+    let fake = models::FakeModels::long_catalog();
+    let h = Harness::with(width, height, Rc::new(Control::default()), |o| o.models = Some(fake));
+    h.start().await;
+    h.connect();
+    h.type_text("/model\r").await;
+    h.wait_for("Model 01").await;
+    finish(h).await
+});
+
 scene!(notice_help, |width, height| {
     let h = open(width, height, Rc::new(Control::default())).await;
     h.type_text("/help\r").await;

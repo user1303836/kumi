@@ -306,7 +306,7 @@ fn with_models(width: i32, settings: AwaySettings) -> (Harness, Rc<models::FakeM
 
 fn with_models_on(control: Rc<Control>, width: i32, settings: AwaySettings) -> (Harness, Rc<models::FakeModels>) {
     let fake = models::FakeModels::catalog();
-    fake.signed_in.borrow_mut().insert(kumi_ai::providers::ProviderId::Anthropic);
+    fake.signed_in.borrow_mut().insert(kumi_ai::providers::ProviderId::parse("anthropic").unwrap());
     let m = fake.clone();
     let h = Harness::with(width, 36, control, move |o| {
         o.terminal = Some(profile(NotifyChannel::Osc777));

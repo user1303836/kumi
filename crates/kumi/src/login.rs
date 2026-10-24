@@ -1,7 +1,7 @@
 use crate::{
     config::{read_settings, AppConfig, LoginMethod},
     input::TerminalInput,
-    models::{create_model_control, ModelControlOptions, OFFER_ORDER},
+    models::{create_model_control, ModelControlOptions},
     spinner::{spin, step, Spinning},
     tui::tty::TtyOutput,
 };
@@ -14,9 +14,9 @@ use kumi_ai::{
     http::{default_fetch, Fetch, FetchInit},
     providers::{
         api_key_for,
-        local::{local_servers, probe_local},
+        local::{hidden_providers, local_servers, probe_local},
         models::{ApiKeyCheck, Transport},
-        provider_info, KeySource, SignIn,
+        table, KeySource, SignIn,
     },
 };
 use kumi_common::{
@@ -54,7 +54,7 @@ pub async fn login(config: &AppConfig, io: LoginIo) -> Result<(), RuntimeError> 
         return Err(RuntimeError::plain("Expected a login configuration."));
     };
     let store: Rc<dyn CredentialStore> = Rc::new(open_credential_store(auth_file));
-    let info = provider_info(*provider);
+    let info = provider.row();
     if *method == LoginMethod::Key {
         let input = io.input.clone().ok_or_else(|| RuntimeError::plain("Kumi needs a terminal to ask for the key."))?;
         let prompt =
@@ -156,18 +156,18 @@ pub async fn login(config: &AppConfig, io: LoginIo) -> Result<(), RuntimeError> 
 pub async fn logout(config: &AppConfig, io: AuthIo) -> Result<(), RuntimeError> {
     let AppConfig::Logout { provider, auth_file } = config else { return Err(RuntimeError::plain("Expected a logout configuration.")) };
     let store = open_credential_store(auth_file);
-    let info = provider_info(*provider);
+    let info = provider.row();
     let existed = store.get(info.credential).await?.is_some();
     if existed {
         store.update(info.credential, Box::new(|_| async { Ok(None) }.boxed_local())).await?;
     }
-    let shared = if info.credential == "opencode" { " (OpenCode Zen and Go share it)" } else { "" };
+    let shared = info.shared_by.map(|names| format!(" ({names} share it)")).unwrap_or_default();
     io.out.write(&if existed {
         format!("Removed Kumi's {} sign-in{shared} from {}.\n", info.name, store.path().display())
     } else {
         format!("Kumi has no {} sign-in to remove.\n", info.name)
     });
-    if let Some(key_env) = info.key_env.filter(|key| io.env.get(*key).is_some_and(|v| !v.is_empty())) {
+    if let Some(key_env) = info.key_env.iter().find(|key| io.env.get(**key).is_some_and(|v| !v.is_empty())) {
         io.out.write(&format!("{key_env} is still set in your environment, and Kumi uses it; unset it to sign out fully.\n"));
     }
     Ok(())
@@ -175,9 +175,13 @@ pub async fn logout(config: &AppConfig, io: AuthIo) -> Result<(), RuntimeError> 
 pub async fn auth_status(config: &AppConfig, io: AuthIo) -> Result<(), RuntimeError> {
     let AppConfig::Auth { auth_file, settings_file } = config else { return Err(RuntimeError::plain("Expected an auth configuration.")) };
     let store = open_credential_store(auth_file);
+    let settings = read_settings(settings_file);
+    let servers = local_servers(&settings.model_servers, &io.env)?;
+    // A provider a custom server hides is that server's, which shows below while it runs.
+    let hidden: Vec<_> = hidden_providers(&servers).into_iter().map(|(provider, _)| provider).collect();
     let mut lines = Vec::new();
-    for provider in OFFER_ORDER {
-        let info = provider_info(provider);
+    for provider in table::offered().into_iter().filter(|provider| !hidden.contains(provider)) {
+        let info = provider.row();
         let status = if info.sign_in == SignIn::Chatgpt {
             match store.get(OPENAI_CODEX).await? {
                 Some(Credential::Oauth(c)) => {
@@ -192,15 +196,14 @@ pub async fn auth_status(config: &AppConfig, io: AuthIo) -> Result<(), RuntimeEr
             }
         } else {
             match api_key_for(provider, &store, Some(&io.env)).await? {
-                Some(key) if key.source == KeySource::Env => format!("API key from {}", info.key_env.unwrap_or("")),
+                Some(key) if key.source == KeySource::Env => format!("API key from {}", info.first_key_env().unwrap_or("")),
                 Some(_) => "API key saved in Kumi".into(),
                 None => format!("not signed in ({} login {provider})", *KUMI),
             }
         };
         lines.push(format!("{} {status}", pad_end(provider.as_str(), 13)));
     }
-    let settings = read_settings(settings_file);
-    for server in local_servers(&settings.model_servers, &io.env)? {
+    for server in servers {
         if probe_local(&server, Transport { fetch: io.fetch.clone(), signal: None }).await {
             lines.push(format!("{} running {}; no sign-in needed", pad_end(&server.id, 13), server.r#where));
         }

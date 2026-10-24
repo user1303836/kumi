@@ -25,7 +25,7 @@ fn models_are_provider_qualified_or_unset_and_need_no_gateway_key() {
     let expected =
         kumi_library::sources::join(&kumi_library::sources::normalize(&home::home_dir().unwrap().to_string_lossy()), ".kumi/auth.json");
     assert_eq!(load_inference_config(&env).unwrap(), InferenceConfig { model: None, auth_file: expected.clone() });
-    for model in ["", " \t\n", "guess", "gateway/model", "openai-codex/", "openai-codex/model\nInjected", "openai-codex/white space"] {
+    for model in ["", " \t\n", "guess", "gateway/model", "openai-codex/", "openai-codex/model\nInjected", "openai-codex/ white space"] {
         let mut env = env.clone();
         env.insert("KUMI_MODEL".into(), model.into());
         assert!(load_inference_config(&env).is_err());
@@ -36,6 +36,8 @@ fn models_are_provider_qualified_or_unset_and_need_no_gateway_key() {
         "anthropic/claude-haiku-4-5-20251001",
         "opencode/kimi-k2.6",
         "opencode-go/gpt-5.5",
+        "openai-codex/white space",
+        "opencode/deepseek/v4",
     ] {
         let mut env = env.clone();
         env.insert("KUMI_MODEL".into(), model.into());
@@ -391,4 +393,28 @@ fn export_and_import_take_a_conversation_a_format_and_a_file() {
             "{wrong:?}"
         );
     }
+}
+#[test]
+fn the_model_catalog_stays_on_unless_turned_off_and_old_settings_still_load() {
+    let folder = tempfile::tempdir().unwrap();
+    let file = folder.path().join("settings.json").to_string_lossy().into_owned();
+    let saved = || serde_json::from_str::<Value>(&std::fs::read_to_string(&file).unwrap()).unwrap();
+    // A file written before Kumi knew models.dev's catalog: on, and read as it was.
+    std::fs::write(&file, json!({"model":"openai-codex/gpt-6-astra","effort":"high","fast":true}).to_string()).unwrap();
+    let settings = read_settings(&file);
+    assert_eq!(
+        (settings.model_catalog, settings.model.as_deref(), settings.effort),
+        (None, Some("openai-codex/gpt-6-astra"), Some(Effort::High))
+    );
+    // Off: kept through other writes, as other preferences are.
+    std::fs::write(&file, json!({"modelCatalog":false}).to_string()).unwrap();
+    assert_eq!(read_settings(&file).model_catalog, Some(false));
+    write_settings(&file, &json!({"model":"openai/gpt-6-luna","effort":"minimal"})).unwrap();
+    assert_eq!(saved(), json!({"model":"openai/gpt-6-luna","effort":"minimal","modelCatalog":false}));
+    assert_eq!(read_settings(&file).effort, Some(Effort::Minimal));
+    // Anything but false leaves it on, and on isn't written.
+    write_settings(&file, &json!({"modelCatalog":true})).unwrap();
+    assert_eq!(saved(), json!({}));
+    std::fs::write(&file, json!({"modelCatalog":"no"}).to_string()).unwrap();
+    assert_eq!(read_settings(&file).model_catalog, None);
 }

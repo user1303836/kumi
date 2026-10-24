@@ -1,0 +1,8778 @@
+{
+ "anthropic": {
+  "env": [
+   "ANTHROPIC_API_KEY"
+  ],
+  "models": {
+   "claude-fable-5": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 1,
+     "cache_write": 12.5,
+     "input": 10,
+     "output": 50
+    },
+    "limit": {
+     "context": 1000000,
+     "output": 128000
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "pdf"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "Claude Fable 5",
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "low",
+       "medium",
+       "high",
+       "xhigh",
+       "max"
+      ]
+     }
+    ],
+    "release_date": "2026-06-07",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "claude-fable-5-1": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.25,
+     "cache_write": 12.5,
+     "input": 10,
+     "output": 50
+    },
+    "limit": {
+     "context": 1000000,
+     "output": 128000
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "pdf"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "Claude Fable 5.1",
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "low",
+       "medium",
+       "high",
+       "xhigh",
+       "max"
+      ]
+     }
+    ],
+    "release_date": "2026-09-01",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "claude-haiku-4-5": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.1,
+     "cache_write": 1.25,
+     "input": 1,
+     "output": 5
+    },
+    "limit": {
+     "context": 200000,
+     "output": 64000
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "pdf"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "Claude Haiku 4.5 (latest)",
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "min": 1024,
+      "type": "budget_tokens"
+     }
+    ],
+    "release_date": "2025-10-15",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "claude-haiku-4-5-20251001": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.1,
+     "cache_write": 1.25,
+     "input": 1,
+     "output": 5
+    },
+    "limit": {
+     "context": 200000,
+     "output": 64000
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "pdf"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "Claude Haiku 4.5",
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "min": 1024,
+      "type": "budget_tokens"
+     }
+    ],
+    "release_date": "2025-10-15",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "claude-haiku-5-5": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.01,
+     "cache_write": 0.125,
+     "input": 0.1,
+     "output": 0.5
+    },
+    "limit": {
+     "context": 1000000,
+     "output": 128000
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "pdf"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "Claude Haiku 5.5",
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "toggle"
+     },
+     {
+      "type": "effort",
+      "values": [
+       "low",
+       "medium",
+       "high",
+       "xhigh",
+       "max"
+      ]
+     }
+    ],
+    "release_date": "2026-10-07",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "claude-opus-4-5": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.5,
+     "cache_write": 6.25,
+     "input": 5,
+     "output": 25
+    },
+    "limit": {
+     "context": 200000,
+     "output": 64000
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "pdf"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "Claude Opus 4.5 (latest)",
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "low",
+       "medium",
+       "high"
+      ]
+     },
+     {
+      "min": 1024,
+      "type": "budget_tokens"
+     }
+    ],
+    "release_date": "2025-11-24",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "claude-opus-4-5-20251101": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.5,
+     "cache_write": 6.25,
+     "input": 5,
+     "output": 25
+    },
+    "limit": {
+     "context": 200000,
+     "output": 64000
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "pdf"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "Claude Opus 4.5",
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "low",
+       "medium",
+       "high"
+      ]
+     },
+     {
+      "min": 1024,
+      "type": "budget_tokens"
+     }
+    ],
+    "release_date": "2025-11-24",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "claude-opus-4-6": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.5,
+     "cache_write": 6.25,
+     "input": 5,
+     "output": 25
+    },
+    "limit": {
+     "context": 1000000,
+     "output": 128000
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "pdf"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "Claude Opus 4.6",
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "low",
+       "medium",
+       "high",
+       "max"
+      ]
+     },
+     {
+      "min": 1024,
+      "type": "budget_tokens"
+     }
+    ],
+    "release_date": "2026-02-04",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "claude-opus-4-7": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.5,
+     "cache_write": 6.25,
+     "input": 5,
+     "output": 25
+    },
+    "limit": {
+     "context": 1000000,
+     "output": 128000
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "pdf"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "Claude Opus 4.7",
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "low",
+       "medium",
+       "high",
+       "xhigh",
+       "max"
+      ]
+     }
+    ],
+    "release_date": "2026-04-14",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "claude-opus-4-8": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.5,
+     "cache_write": 6.25,
+     "input": 5,
+     "output": 25
+    },
+    "limit": {
+     "context": 1000000,
+     "output": 128000
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "pdf"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "Claude Opus 4.8",
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "low",
+       "medium",
+       "high",
+       "xhigh",
+       "max"
+      ]
+     }
+    ],
+    "release_date": "2026-05-28",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "claude-opus-5": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.5,
+     "cache_write": 6.25,
+     "input": 5,
+     "output": 25
+    },
+    "limit": {
+     "context": 1000000,
+     "output": 128000
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "pdf"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "Claude Opus 5",
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "low",
+       "medium",
+       "high",
+       "xhigh",
+       "max"
+      ]
+     }
+    ],
+    "release_date": "2026-07-24",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "claude-opus-5-5": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.2,
+     "cache_write": 5,
+     "input": 4,
+     "output": 20
+    },
+    "limit": {
+     "context": 1000000,
+     "output": 128000
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "pdf"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "Claude Opus 5.5",
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "low",
+       "medium",
+       "high",
+       "xhigh",
+       "max"
+      ]
+     }
+    ],
+    "release_date": "2026-09-22",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "claude-sonnet-4-5": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.3,
+     "cache_write": 3.75,
+     "input": 3,
+     "output": 15
+    },
+    "limit": {
+     "context": 200000,
+     "output": 64000
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "pdf"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "Claude Sonnet 4.5 (latest)",
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "min": 1024,
+      "type": "budget_tokens"
+     }
+    ],
+    "release_date": "2025-09-29",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "claude-sonnet-4-5-20250929": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.3,
+     "cache_write": 3.75,
+     "input": 3,
+     "output": 15
+    },
+    "limit": {
+     "context": 200000,
+     "output": 64000
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "pdf"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "Claude Sonnet 4.5",
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "min": 1024,
+      "type": "budget_tokens"
+     }
+    ],
+    "release_date": "2025-09-29",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "claude-sonnet-4-6": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.3,
+     "cache_write": 3.75,
+     "input": 3,
+     "output": 15
+    },
+    "limit": {
+     "context": 1000000,
+     "output": 128000
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "pdf"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "Claude Sonnet 4.6",
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "low",
+       "medium",
+       "high",
+       "max"
+      ]
+     },
+     {
+      "min": 1024,
+      "type": "budget_tokens"
+     }
+    ],
+    "release_date": "2026-02-17",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "claude-sonnet-5": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.2,
+     "cache_write": 2.5,
+     "input": 2,
+     "output": 10
+    },
+    "limit": {
+     "context": 1000000,
+     "output": 128000
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "pdf"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "Claude Sonnet 5",
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "toggle"
+     },
+     {
+      "type": "effort",
+      "values": [
+       "low",
+       "medium",
+       "high",
+       "xhigh",
+       "max"
+      ]
+     }
+    ],
+    "release_date": "2026-06-29",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "claude-sonnet-5-5": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.1,
+     "cache_write": 2.5,
+     "input": 2,
+     "output": 10
+    },
+    "limit": {
+     "context": 1000000,
+     "output": 128000
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "pdf"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "Claude Sonnet 5.5",
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "low",
+       "medium",
+       "high",
+       "xhigh",
+       "max"
+      ]
+     }
+    ],
+    "release_date": "2026-09-28",
+    "structured_output": true,
+    "tool_call": true
+   }
+  },
+  "npm": "@ai-sdk/anthropic"
+ },
+ "openai": {
+  "env": [
+   "OPENAI_API_KEY"
+  ],
+  "models": {
+   "chatgpt-image-latest": {
+    "attachment": true,
+    "limit": {
+     "context": 0,
+     "output": 0
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image"
+     ],
+     "output": [
+      "text",
+      "image"
+     ]
+    },
+    "name": "chatgpt-image-latest",
+    "reasoning": false,
+    "release_date": "2025-12-16",
+    "tool_call": false,
+    "type": "image"
+   },
+   "gpt-3.5-turbo": {
+    "attachment": false,
+    "cost": {
+     "cache_read": 0,
+     "input": 0.5,
+     "output": 1.5
+    },
+    "limit": {
+     "context": 16385,
+     "output": 4096
+    },
+    "modalities": {
+     "input": [
+      "text"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "GPT-3.5-turbo",
+    "reasoning": false,
+    "release_date": "2023-03-01",
+    "status": "deprecated",
+    "structured_output": false,
+    "tool_call": false
+   },
+   "gpt-4": {
+    "attachment": false,
+    "cost": {
+     "input": 30,
+     "output": 60
+    },
+    "limit": {
+     "context": 8192,
+     "output": 8192
+    },
+    "modalities": {
+     "input": [
+      "text"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "GPT-4",
+    "reasoning": false,
+    "release_date": "2023-11-06",
+    "status": "deprecated",
+    "structured_output": false,
+    "tool_call": true
+   },
+   "gpt-4-turbo": {
+    "attachment": true,
+    "cost": {
+     "input": 10,
+     "output": 30
+    },
+    "limit": {
+     "context": 128000,
+     "output": 4096
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "GPT-4 Turbo",
+    "reasoning": false,
+    "release_date": "2023-11-06",
+    "status": "deprecated",
+    "structured_output": false,
+    "tool_call": true
+   },
+   "gpt-4.1": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.5,
+     "input": 2,
+     "output": 8
+    },
+    "limit": {
+     "context": 1047576,
+     "output": 32768
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "pdf"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "GPT-4.1",
+    "reasoning": false,
+    "release_date": "2025-04-14",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "gpt-4.1-mini": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.1,
+     "input": 0.4,
+     "output": 1.6
+    },
+    "limit": {
+     "context": 1047576,
+     "output": 32768
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "pdf"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "GPT-4.1 mini",
+    "reasoning": false,
+    "release_date": "2025-04-14",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "gpt-4.1-nano": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.025,
+     "input": 0.1,
+     "output": 0.4
+    },
+    "limit": {
+     "context": 1047576,
+     "output": 32768
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "GPT-4.1 nano",
+    "reasoning": false,
+    "release_date": "2025-04-14",
+    "status": "deprecated",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "gpt-4o": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 1.25,
+     "input": 2.5,
+     "output": 10
+    },
+    "limit": {
+     "context": 128000,
+     "output": 16384
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "pdf"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "GPT-4o",
+    "reasoning": false,
+    "release_date": "2024-05-13",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "gpt-4o-2024-05-13": {
+    "attachment": true,
+    "cost": {
+     "input": 5,
+     "output": 15
+    },
+    "limit": {
+     "context": 128000,
+     "output": 4096
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "GPT-4o (2024-05-13)",
+    "reasoning": false,
+    "release_date": "2024-05-13",
+    "status": "deprecated",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "gpt-4o-2024-08-06": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 1.25,
+     "input": 2.5,
+     "output": 10
+    },
+    "limit": {
+     "context": 128000,
+     "output": 16384
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "GPT-4o (2024-08-06)",
+    "reasoning": false,
+    "release_date": "2024-08-06",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "gpt-4o-2024-11-20": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 1.25,
+     "input": 2.5,
+     "output": 10
+    },
+    "limit": {
+     "context": 128000,
+     "output": 16384
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "GPT-4o (2024-11-20)",
+    "reasoning": false,
+    "release_date": "2024-11-20",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "gpt-4o-mini": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.075,
+     "input": 0.15,
+     "output": 0.6
+    },
+    "limit": {
+     "context": 128000,
+     "output": 16384
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "pdf"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "GPT-4o mini",
+    "reasoning": false,
+    "release_date": "2024-07-18",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "gpt-5": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.125,
+     "input": 1.25,
+     "output": 10
+    },
+    "limit": {
+     "context": 400000,
+     "output": 128000
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "GPT-5",
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "minimal",
+       "low",
+       "medium",
+       "high"
+      ]
+     }
+    ],
+    "release_date": "2025-08-07",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "gpt-5-mini": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.025,
+     "input": 0.25,
+     "output": 2
+    },
+    "limit": {
+     "context": 400000,
+     "output": 128000
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "GPT-5 Mini",
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "minimal",
+       "low",
+       "medium",
+       "high"
+      ]
+     }
+    ],
+    "release_date": "2025-08-07",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "gpt-5-nano": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.005,
+     "input": 0.05,
+     "output": 0.4
+    },
+    "limit": {
+     "context": 400000,
+     "output": 128000
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "GPT-5 Nano",
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "minimal",
+       "low",
+       "medium",
+       "high"
+      ]
+     }
+    ],
+    "release_date": "2025-08-07",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "gpt-5-pro": {
+    "attachment": true,
+    "cost": {
+     "input": 15,
+     "output": 120
+    },
+    "limit": {
+     "context": 400000,
+     "output": 272000
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "GPT-5 Pro",
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "high"
+      ]
+     }
+    ],
+    "release_date": "2025-10-06",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "gpt-5.1": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.125,
+     "input": 1.25,
+     "output": 10
+    },
+    "limit": {
+     "context": 400000,
+     "output": 128000
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "GPT-5.1",
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "none",
+       "low",
+       "medium",
+       "high"
+      ]
+     }
+    ],
+    "release_date": "2025-11-13",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "gpt-5.2": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.175,
+     "input": 1.75,
+     "output": 14
+    },
+    "limit": {
+     "context": 400000,
+     "output": 128000
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "GPT-5.2",
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "none",
+       "low",
+       "medium",
+       "high",
+       "xhigh"
+      ]
+     }
+    ],
+    "release_date": "2025-12-11",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "gpt-5.2-pro": {
+    "attachment": true,
+    "cost": {
+     "input": 21,
+     "output": 168
+    },
+    "limit": {
+     "context": 400000,
+     "output": 128000
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "GPT-5.2 Pro",
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "medium",
+       "high",
+       "xhigh"
+      ]
+     }
+    ],
+    "release_date": "2025-12-11",
+    "structured_output": false,
+    "tool_call": true
+   },
+   "gpt-5.3-codex": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.175,
+     "input": 1.75,
+     "output": 14
+    },
+    "limit": {
+     "context": 400000,
+     "output": 128000
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "pdf"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "GPT-5.3 Codex",
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "none",
+       "low",
+       "medium",
+       "high",
+       "xhigh"
+      ]
+     }
+    ],
+    "release_date": "2026-02-05",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "gpt-5.3-codex-spark": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.175,
+     "input": 1.75,
+     "output": 14
+    },
+    "limit": {
+     "context": 128000,
+     "output": 32000
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "pdf"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "GPT-5.3 Codex Spark",
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "none",
+       "low",
+       "medium",
+       "high",
+       "xhigh"
+      ]
+     }
+    ],
+    "release_date": "2026-02-05",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "gpt-5.4": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.25,
+     "input": 2.5,
+     "output": 15
+    },
+    "limit": {
+     "context": 1050000,
+     "output": 128000
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "pdf"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "GPT-5.4",
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "none",
+       "low",
+       "medium",
+       "high",
+       "xhigh"
+      ]
+     }
+    ],
+    "release_date": "2026-03-05",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "gpt-5.4-mini": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.075,
+     "input": 0.75,
+     "output": 4.5
+    },
+    "limit": {
+     "context": 400000,
+     "output": 128000
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "GPT-5.4 mini",
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "none",
+       "low",
+       "medium",
+       "high",
+       "xhigh"
+      ]
+     }
+    ],
+    "release_date": "2026-03-17",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "gpt-5.4-nano": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.02,
+     "input": 0.2,
+     "output": 1.25
+    },
+    "limit": {
+     "context": 400000,
+     "output": 128000
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "GPT-5.4 nano",
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "none",
+       "low",
+       "medium",
+       "high",
+       "xhigh"
+      ]
+     }
+    ],
+    "release_date": "2026-03-17",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "gpt-5.4-pro": {
+    "attachment": true,
+    "cost": {
+     "input": 30,
+     "output": 180
+    },
+    "limit": {
+     "context": 1050000,
+     "output": 128000
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "GPT-5.4 Pro",
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "medium",
+       "high",
+       "xhigh"
+      ]
+     }
+    ],
+    "release_date": "2026-03-05",
+    "structured_output": false,
+    "tool_call": true
+   },
+   "gpt-5.5": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.5,
+     "input": 5,
+     "output": 30
+    },
+    "limit": {
+     "context": 1050000,
+     "output": 128000
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "pdf"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "GPT-5.5",
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "none",
+       "low",
+       "medium",
+       "high",
+       "xhigh"
+      ]
+     }
+    ],
+    "release_date": "2026-04-23",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "gpt-5.5-pro": {
+    "attachment": true,
+    "cost": {
+     "input": 30,
+     "output": 180
+    },
+    "limit": {
+     "context": 1050000,
+     "output": 128000
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "pdf"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "GPT-5.5 Pro",
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "medium",
+       "high",
+       "xhigh"
+      ]
+     }
+    ],
+    "release_date": "2026-04-23",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "gpt-5.6": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.4,
+     "cache_write": 5,
+     "input": 4,
+     "output": 20
+    },
+    "limit": {
+     "context": 1050000,
+     "output": 128000
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "pdf"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "GPT-5.6",
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "none",
+       "low",
+       "medium",
+       "high",
+       "xhigh",
+       "max"
+      ]
+     }
+    ],
+    "release_date": "2026-07-09",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "gpt-5.6-luna": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.02,
+     "cache_write": 0.25,
+     "input": 0.2,
+     "output": 1.2
+    },
+    "limit": {
+     "context": 1050000,
+     "output": 128000
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "pdf"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "GPT-5.6 Luna",
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "none",
+       "low",
+       "medium",
+       "high",
+       "xhigh",
+       "max"
+      ]
+     }
+    ],
+    "release_date": "2026-07-09",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "gpt-5.6-sol": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.4,
+     "cache_write": 5,
+     "input": 4,
+     "output": 20
+    },
+    "limit": {
+     "context": 1050000,
+     "output": 128000
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "pdf"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "GPT-5.6 Sol",
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "none",
+       "low",
+       "medium",
+       "high",
+       "xhigh",
+       "max"
+      ]
+     }
+    ],
+    "release_date": "2026-07-09",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "gpt-5.6-terra": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.2,
+     "cache_write": 2.5,
+     "input": 2,
+     "output": 12
+    },
+    "limit": {
+     "context": 1050000,
+     "output": 128000
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "pdf"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "GPT-5.6 Terra",
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "none",
+       "low",
+       "medium",
+       "high",
+       "xhigh",
+       "max"
+      ]
+     }
+    ],
+    "release_date": "2026-07-09",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "gpt-6-astra": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 1,
+     "cache_write": 12.5,
+     "input": 10,
+     "output": 50
+    },
+    "limit": {
+     "context": 1050000,
+     "output": 128000
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "pdf"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "GPT-6 Astra",
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "low",
+       "medium",
+       "high",
+       "xhigh",
+       "max"
+      ]
+     }
+    ],
+    "release_date": "2026-09-04",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "gpt-6-luna": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.01,
+     "cache_write": 0.125,
+     "input": 0.1,
+     "output": 0.5
+    },
+    "limit": {
+     "context": 1050000,
+     "output": 128000
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "pdf"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "GPT-6 Luna",
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "none",
+       "low",
+       "medium",
+       "high",
+       "xhigh",
+       "max"
+      ]
+     }
+    ],
+    "release_date": "2026-09-22",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "gpt-6-sol": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.2,
+     "cache_write": 2.5,
+     "input": 2,
+     "output": 10
+    },
+    "limit": {
+     "context": 1050000,
+     "output": 128000
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "pdf"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "GPT-6 Sol",
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "none",
+       "low",
+       "medium",
+       "high",
+       "xhigh",
+       "max"
+      ]
+     }
+    ],
+    "release_date": "2026-09-22",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "gpt-6.1-sol": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.1,
+     "cache_write": 2.5,
+     "input": 2,
+     "output": 10
+    },
+    "limit": {
+     "context": 1050000,
+     "output": 128000
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "pdf"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "GPT-6.1 Sol",
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "low",
+       "medium",
+       "high",
+       "xhigh",
+       "max"
+      ]
+     }
+    ],
+    "release_date": "2026-09-29",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "gpt-daybreak-blue-latest": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.4,
+     "cache_write": 5,
+     "input": 4,
+     "output": 20
+    },
+    "limit": {
+     "context": 1050000,
+     "output": 128000
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "pdf"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "Daybreak Blue",
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "none",
+       "low",
+       "medium",
+       "high",
+       "xhigh",
+       "max"
+      ]
+     }
+    ],
+    "release_date": "2026-08-07",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "gpt-daybreak-red-latest": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 1.25,
+     "cache_write": 15.625,
+     "input": 12.5,
+     "output": 75
+    },
+    "limit": {
+     "context": 400000,
+     "output": 128000
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "Daybreak Red",
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "none",
+       "low",
+       "medium",
+       "high",
+       "xhigh",
+       "max"
+      ]
+     }
+    ],
+    "release_date": "2026-08-07",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "gpt-image-1": {
+    "attachment": true,
+    "limit": {
+     "context": 0,
+     "output": 0
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image"
+     ],
+     "output": [
+      "image"
+     ]
+    },
+    "name": "gpt-image-1",
+    "reasoning": false,
+    "release_date": "2025-04-24",
+    "status": "deprecated",
+    "tool_call": false,
+    "type": "image"
+   },
+   "gpt-image-1-mini": {
+    "attachment": true,
+    "limit": {
+     "context": 0,
+     "output": 0
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image"
+     ],
+     "output": [
+      "text",
+      "image"
+     ]
+    },
+    "name": "gpt-image-1-mini",
+    "reasoning": false,
+    "release_date": "2025-09-26",
+    "tool_call": false,
+    "type": "image"
+   },
+   "gpt-image-1.5": {
+    "attachment": true,
+    "limit": {
+     "context": 0,
+     "output": 0
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image"
+     ],
+     "output": [
+      "text",
+      "image"
+     ]
+    },
+    "name": "gpt-image-1.5",
+    "reasoning": false,
+    "release_date": "2025-11-25",
+    "tool_call": false,
+    "type": "image"
+   },
+   "gpt-image-2": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 1.25,
+     "input": 5,
+     "output": 30
+    },
+    "limit": {
+     "context": 0,
+     "output": 0
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image"
+     ],
+     "output": [
+      "image"
+     ]
+    },
+    "name": "gpt-image-2",
+    "reasoning": false,
+    "release_date": "2026-04-21",
+    "tool_call": false,
+    "type": "image"
+   },
+   "gpt-realtime-2.1": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.4,
+     "input": 4,
+     "output": 24
+    },
+    "limit": {
+     "context": 128000,
+     "output": 32000
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "audio",
+      "image"
+     ],
+     "output": [
+      "text",
+      "audio"
+     ]
+    },
+    "name": "GPT-Realtime-2.1",
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "minimal",
+       "low",
+       "medium",
+       "high",
+       "xhigh"
+      ]
+     }
+    ],
+    "release_date": "2026-07-06",
+    "structured_output": false,
+    "tool_call": true,
+    "type": "realtime"
+   },
+   "o1": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 7.5,
+     "input": 15,
+     "output": 60
+    },
+    "limit": {
+     "context": 200000,
+     "output": 100000
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "pdf"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "o1",
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "low",
+       "medium",
+       "high"
+      ]
+     }
+    ],
+    "release_date": "2024-12-05",
+    "status": "deprecated",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "o1-pro": {
+    "attachment": true,
+    "cost": {
+     "input": 150,
+     "output": 600
+    },
+    "limit": {
+     "context": 200000,
+     "output": 100000
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "o1-pro",
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "low",
+       "medium",
+       "high"
+      ]
+     }
+    ],
+    "release_date": "2025-03-19",
+    "status": "deprecated",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "o3": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.5,
+     "input": 2,
+     "output": 8
+    },
+    "limit": {
+     "context": 200000,
+     "output": 100000
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "pdf"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "o3",
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "low",
+       "medium",
+       "high"
+      ]
+     }
+    ],
+    "release_date": "2025-04-16",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "o3-mini": {
+    "attachment": false,
+    "cost": {
+     "cache_read": 0.55,
+     "input": 1.1,
+     "output": 4.4
+    },
+    "limit": {
+     "context": 200000,
+     "output": 100000
+    },
+    "modalities": {
+     "input": [
+      "text"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "o3-mini",
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "low",
+       "medium",
+       "high"
+      ]
+     }
+    ],
+    "release_date": "2024-12-20",
+    "status": "deprecated",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "o3-pro": {
+    "attachment": true,
+    "cost": {
+     "input": 20,
+     "output": 80
+    },
+    "limit": {
+     "context": 200000,
+     "output": 100000
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "o3-pro",
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "low",
+       "medium",
+       "high"
+      ]
+     }
+    ],
+    "release_date": "2025-06-10",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "o4-mini": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.275,
+     "input": 1.1,
+     "output": 4.4
+    },
+    "limit": {
+     "context": 200000,
+     "output": 100000
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "o4-mini",
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "low",
+       "medium",
+       "high"
+      ]
+     }
+    ],
+    "release_date": "2025-04-16",
+    "status": "deprecated",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "text-embedding-3-large": {
+    "attachment": false,
+    "cost": {
+     "input": 0.13,
+     "output": 0
+    },
+    "limit": {
+     "context": 8191,
+     "output": 3072
+    },
+    "modalities": {
+     "input": [
+      "text"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "text-embedding-3-large",
+    "reasoning": false,
+    "release_date": "2024-01-25",
+    "tool_call": false,
+    "type": "embedding"
+   },
+   "text-embedding-3-small": {
+    "attachment": false,
+    "cost": {
+     "input": 0.02,
+     "output": 0
+    },
+    "limit": {
+     "context": 8191,
+     "output": 1536
+    },
+    "modalities": {
+     "input": [
+      "text"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "text-embedding-3-small",
+    "reasoning": false,
+    "release_date": "2024-01-25",
+    "tool_call": false,
+    "type": "embedding"
+   },
+   "text-embedding-ada-002": {
+    "attachment": false,
+    "cost": {
+     "input": 0.1,
+     "output": 0
+    },
+    "limit": {
+     "context": 8192,
+     "output": 1536
+    },
+    "modalities": {
+     "input": [
+      "text"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "text-embedding-ada-002",
+    "reasoning": false,
+    "release_date": "2022-12-15",
+    "tool_call": false,
+    "type": "embedding"
+   }
+  },
+  "npm": "@ai-sdk/openai"
+ },
+ "opencode": {
+  "api": "https://opencode.ai/inference/openai/v1",
+  "env": [
+   "OPENCODE_API_KEY"
+  ],
+  "models": {
+   "beam-free": {
+    "attachment": false,
+    "cost": {
+     "cache_read": 0,
+     "input": 0,
+     "output": 0
+    },
+    "limit": {
+     "context": 1048576,
+     "output": 131072
+    },
+    "modalities": {
+     "input": [
+      "text"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "Beam Free",
+    "provider": {
+     "api": "https://opencode.ai/inference/openai/v1"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "low",
+       "medium",
+       "high",
+       "xhigh",
+       "max"
+      ]
+     }
+    ],
+    "release_date": "2026-10-05",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "big-pickle": {
+    "attachment": false,
+    "cost": {
+     "cache_read": 0,
+     "cache_write": 0,
+     "input": 0,
+     "output": 0
+    },
+    "limit": {
+     "context": 200000,
+     "output": 32000
+    },
+    "modalities": {
+     "input": [
+      "text"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "Big Pickle",
+    "provider": {
+     "api": "https://opencode.ai/inference/openai/v1"
+    },
+    "reasoning": true,
+    "reasoning_options": [],
+    "release_date": "2025-10-17",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "cat-jam-free": {
+    "attachment": false,
+    "cost": {
+     "cache_read": 0,
+     "input": 0,
+     "output": 0
+    },
+    "limit": {
+     "context": 1048576,
+     "output": 131072
+    },
+    "modalities": {
+     "input": [
+      "text"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "Cat Jam Free",
+    "provider": {
+     "api": "https://opencode.ai/inference/openai/v1"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "low",
+       "medium",
+       "high",
+       "xhigh",
+       "max"
+      ]
+     }
+    ],
+    "release_date": "2026-10-12",
+    "status": "deprecated",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "claude-3-5-haiku": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.08,
+     "cache_write": 1,
+     "input": 0.8,
+     "output": 4
+    },
+    "limit": {
+     "context": 200000,
+     "output": 8192
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "pdf"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "Claude Haiku 3.5",
+    "provider": {
+     "api": "https://opencode.ai/inference/anthropic/v1",
+     "npm": "@ai-sdk/anthropic"
+    },
+    "reasoning": false,
+    "release_date": "2024-10-22",
+    "status": "deprecated",
+    "tool_call": true
+   },
+   "claude-fable-5": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 1,
+     "cache_write": 12.5,
+     "input": 10,
+     "output": 50
+    },
+    "limit": {
+     "context": 1000000,
+     "output": 128000
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "pdf"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "Claude Fable 5",
+    "provider": {
+     "api": "https://opencode.ai/inference/anthropic/v1",
+     "npm": "@ai-sdk/anthropic"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "low",
+       "medium",
+       "high",
+       "xhigh",
+       "max"
+      ]
+     }
+    ],
+    "release_date": "2026-06-09",
+    "tool_call": true
+   },
+   "claude-fable-5-1": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.25,
+     "cache_write": 12.5,
+     "input": 10,
+     "output": 50
+    },
+    "limit": {
+     "context": 1000000,
+     "output": 128000
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "pdf"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "Claude Fable 5.1",
+    "provider": {
+     "api": "https://opencode.ai/inference/anthropic/v1",
+     "npm": "@ai-sdk/anthropic"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "low",
+       "medium",
+       "high",
+       "xhigh",
+       "max"
+      ]
+     }
+    ],
+    "release_date": "2026-09-01",
+    "tool_call": true
+   },
+   "claude-haiku-4-5": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.1,
+     "cache_write": 1.25,
+     "input": 1,
+     "output": 5
+    },
+    "limit": {
+     "context": 200000,
+     "output": 64000
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "pdf"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "Claude Haiku 4.5",
+    "provider": {
+     "api": "https://opencode.ai/inference/anthropic/v1",
+     "npm": "@ai-sdk/anthropic"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "min": 1024,
+      "type": "budget_tokens"
+     }
+    ],
+    "release_date": "2025-10-15",
+    "tool_call": true
+   },
+   "claude-haiku-5-5": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.01,
+     "cache_write": 0.125,
+     "input": 0.1,
+     "output": 0.5
+    },
+    "limit": {
+     "context": 1000000,
+     "output": 128000
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "pdf"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "Claude Haiku 5.5",
+    "provider": {
+     "api": "https://opencode.ai/inference/anthropic/v1",
+     "npm": "@ai-sdk/anthropic"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "toggle"
+     },
+     {
+      "type": "effort",
+      "values": [
+       "low",
+       "medium",
+       "high",
+       "xhigh",
+       "max"
+      ]
+     }
+    ],
+    "release_date": "2026-10-07",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "claude-opus-4-1": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 1.5,
+     "cache_write": 18.75,
+     "input": 15,
+     "output": 75
+    },
+    "limit": {
+     "context": 200000,
+     "output": 32000
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "pdf"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "Claude Opus 4.1",
+    "provider": {
+     "api": "https://opencode.ai/inference/anthropic/v1",
+     "npm": "@ai-sdk/anthropic"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "min": 1024,
+      "type": "budget_tokens"
+     }
+    ],
+    "release_date": "2025-08-05",
+    "status": "deprecated",
+    "tool_call": true
+   },
+   "claude-opus-4-5": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.5,
+     "cache_write": 6.25,
+     "input": 5,
+     "output": 25
+    },
+    "limit": {
+     "context": 200000,
+     "output": 64000
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "pdf"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "Claude Opus 4.5",
+    "provider": {
+     "api": "https://opencode.ai/inference/anthropic/v1",
+     "npm": "@ai-sdk/anthropic"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "low",
+       "medium",
+       "high"
+      ]
+     },
+     {
+      "min": 1024,
+      "type": "budget_tokens"
+     }
+    ],
+    "release_date": "2025-11-24",
+    "tool_call": true
+   },
+   "claude-opus-4-6": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.5,
+     "cache_write": 6.25,
+     "input": 5,
+     "output": 25
+    },
+    "limit": {
+     "context": 1000000,
+     "output": 128000
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "pdf"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "Claude Opus 4.6",
+    "provider": {
+     "api": "https://opencode.ai/inference/anthropic/v1",
+     "npm": "@ai-sdk/anthropic"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "low",
+       "medium",
+       "high",
+       "max"
+      ]
+     },
+     {
+      "min": 1024,
+      "type": "budget_tokens"
+     }
+    ],
+    "release_date": "2026-02-05",
+    "tool_call": true
+   },
+   "claude-opus-4-7": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.5,
+     "cache_write": 6.25,
+     "input": 5,
+     "output": 25
+    },
+    "limit": {
+     "context": 1000000,
+     "output": 128000
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "pdf"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "Claude Opus 4.7",
+    "provider": {
+     "api": "https://opencode.ai/inference/anthropic/v1",
+     "npm": "@ai-sdk/anthropic"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "low",
+       "medium",
+       "high",
+       "xhigh",
+       "max"
+      ]
+     }
+    ],
+    "release_date": "2026-04-16",
+    "tool_call": true
+   },
+   "claude-opus-4-8": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.5,
+     "cache_write": 6.25,
+     "input": 5,
+     "output": 25
+    },
+    "limit": {
+     "context": 1000000,
+     "output": 128000
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "pdf"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "Claude Opus 4.8",
+    "provider": {
+     "api": "https://opencode.ai/inference/anthropic/v1",
+     "npm": "@ai-sdk/anthropic"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "low",
+       "medium",
+       "high",
+       "xhigh",
+       "max"
+      ]
+     }
+    ],
+    "release_date": "2026-05-28",
+    "tool_call": true
+   },
+   "claude-opus-5": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.5,
+     "cache_write": 6.25,
+     "input": 5,
+     "output": 25
+    },
+    "limit": {
+     "context": 1000000,
+     "output": 128000
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "pdf"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "Claude Opus 5",
+    "provider": {
+     "api": "https://opencode.ai/inference/anthropic/v1",
+     "npm": "@ai-sdk/anthropic"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "low",
+       "medium",
+       "high",
+       "xhigh",
+       "max"
+      ]
+     }
+    ],
+    "release_date": "2026-07-24",
+    "tool_call": true
+   },
+   "claude-opus-5-5": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.2,
+     "cache_write": 5,
+     "input": 4,
+     "output": 20
+    },
+    "limit": {
+     "context": 1000000,
+     "output": 128000
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "pdf"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "Claude Opus 5.5",
+    "provider": {
+     "api": "https://opencode.ai/inference/anthropic/v1",
+     "npm": "@ai-sdk/anthropic"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "low",
+       "medium",
+       "high",
+       "xhigh",
+       "max"
+      ]
+     }
+    ],
+    "release_date": "2026-09-22",
+    "tool_call": true
+   },
+   "claude-sonnet-4": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.3,
+     "cache_write": 3.75,
+     "input": 3,
+     "output": 15
+    },
+    "limit": {
+     "context": 1000000,
+     "output": 64000
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "pdf"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "Claude Sonnet 4",
+    "provider": {
+     "api": "https://opencode.ai/inference/anthropic/v1",
+     "npm": "@ai-sdk/anthropic"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "min": 1024,
+      "type": "budget_tokens"
+     }
+    ],
+    "release_date": "2025-05-22",
+    "status": "deprecated",
+    "tool_call": true
+   },
+   "claude-sonnet-4-5": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.3,
+     "cache_write": 3.75,
+     "input": 3,
+     "output": 15
+    },
+    "limit": {
+     "context": 1000000,
+     "output": 64000
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "pdf"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "Claude Sonnet 4.5",
+    "provider": {
+     "api": "https://opencode.ai/inference/anthropic/v1",
+     "npm": "@ai-sdk/anthropic"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "min": 1024,
+      "type": "budget_tokens"
+     }
+    ],
+    "release_date": "2025-09-29",
+    "tool_call": true
+   },
+   "claude-sonnet-4-6": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.3,
+     "cache_write": 3.75,
+     "input": 3,
+     "output": 15
+    },
+    "limit": {
+     "context": 1000000,
+     "output": 64000
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "pdf"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "Claude Sonnet 4.6",
+    "provider": {
+     "api": "https://opencode.ai/inference/anthropic/v1",
+     "npm": "@ai-sdk/anthropic"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "low",
+       "medium",
+       "high",
+       "max"
+      ]
+     },
+     {
+      "min": 1024,
+      "type": "budget_tokens"
+     }
+    ],
+    "release_date": "2026-02-17",
+    "tool_call": true
+   },
+   "claude-sonnet-5": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.2,
+     "cache_write": 2.5,
+     "input": 2,
+     "output": 10
+    },
+    "limit": {
+     "context": 1000000,
+     "output": 128000
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "pdf"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "Claude Sonnet 5",
+    "provider": {
+     "api": "https://opencode.ai/inference/anthropic/v1",
+     "npm": "@ai-sdk/anthropic"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "low",
+       "medium",
+       "high",
+       "xhigh",
+       "max"
+      ]
+     }
+    ],
+    "release_date": "2026-06-30",
+    "tool_call": true
+   },
+   "claude-sonnet-5-5": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.2,
+     "cache_write": 2.5,
+     "input": 2,
+     "output": 10
+    },
+    "limit": {
+     "context": 1000000,
+     "output": 128000
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "pdf"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "Claude Sonnet 5.5",
+    "provider": {
+     "api": "https://opencode.ai/inference/anthropic/v1",
+     "npm": "@ai-sdk/anthropic"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "low",
+       "medium",
+       "high",
+       "xhigh",
+       "max"
+      ]
+     }
+    ],
+    "release_date": "2026-09-28",
+    "tool_call": true
+   },
+   "deepseek-v4-flash": {
+    "attachment": false,
+    "cost": {
+     "cache_read": 0.028,
+     "input": 0.14,
+     "output": 0.28
+    },
+    "limit": {
+     "context": 1000000,
+     "output": 384000
+    },
+    "modalities": {
+     "input": [
+      "text"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "DeepSeek V4 Flash",
+    "provider": {
+     "api": "https://opencode.ai/inference/openai/v1"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "toggle"
+     },
+     {
+      "type": "effort",
+      "values": [
+       "low",
+       "high",
+       "max"
+      ]
+     }
+    ],
+    "release_date": "2026-07-31",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "deepseek-v4-flash-free": {
+    "attachment": false,
+    "cost": {
+     "cache_read": 0,
+     "input": 0,
+     "output": 0
+    },
+    "limit": {
+     "context": 200000,
+     "output": 128000
+    },
+    "modalities": {
+     "input": [
+      "text"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "DeepSeek V4 Flash Free",
+    "provider": {
+     "api": "https://opencode.ai/inference/openai/v1"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "low",
+       "high",
+       "max"
+      ]
+     }
+    ],
+    "release_date": "2026-07-31",
+    "status": "deprecated",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "deepseek-v4-flash-vision-exp": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.028,
+     "input": 0.14,
+     "output": 0.28
+    },
+    "limit": {
+     "context": 1000000,
+     "output": 384000
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "DeepSeek V4 Flash Vision Exp",
+    "provider": {
+     "api": "https://opencode.ai/inference/openai/v1"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "toggle"
+     },
+     {
+      "type": "effort",
+      "values": [
+       "low",
+       "high",
+       "max"
+      ]
+     }
+    ],
+    "release_date": "2026-08-21",
+    "status": "deprecated",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "deepseek-v4-pro": {
+    "attachment": false,
+    "cost": {
+     "cache_read": 0.145,
+     "input": 1.74,
+     "output": 3.48
+    },
+    "limit": {
+     "context": 1000000,
+     "output": 384000
+    },
+    "modalities": {
+     "input": [
+      "text"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "DeepSeek V4 Pro",
+    "provider": {
+     "api": "https://opencode.ai/inference/openai/v1"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "toggle"
+     },
+     {
+      "type": "effort",
+      "values": [
+       "high",
+       "max"
+      ]
+     }
+    ],
+    "release_date": "2026-04-24",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "deepseek-v4.1-flash": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.006,
+     "input": 0.3,
+     "output": 1.2
+    },
+    "limit": {
+     "context": 1000000,
+     "output": 384000
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "DeepSeek V4.1 Flash",
+    "provider": {
+     "api": "https://opencode.ai/inference/openai/v1"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "toggle"
+     },
+     {
+      "type": "effort",
+      "values": [
+       "low",
+       "high",
+       "max"
+      ]
+     }
+    ],
+    "release_date": "2026-09-10",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "deepseek-v4.1-flash-free": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0,
+     "input": 0,
+     "output": 0
+    },
+    "limit": {
+     "context": 200000,
+     "output": 32000
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "DeepSeek V4.1 Flash Free",
+    "provider": {
+     "api": "https://opencode.ai/inference/openai/v1"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "toggle"
+     },
+     {
+      "type": "effort",
+      "values": [
+       "low",
+       "high",
+       "max"
+      ]
+     }
+    ],
+    "release_date": "2026-09-10",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "exo-free": {
+    "attachment": true,
+    "cost": {
+     "input": 0,
+     "output": 0
+    },
+    "limit": {
+     "context": 1048576,
+     "output": 131072
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "Exo Free",
+    "provider": {
+     "api": "https://opencode.ai/inference/openai/v1"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "high"
+      ]
+     }
+    ],
+    "release_date": "2026-10-06",
+    "status": "deprecated",
+    "tool_call": true
+   },
+   "fledge-alpha-free": {
+    "attachment": true,
+    "cost": {
+     "input": 0,
+     "output": 0
+    },
+    "limit": {
+     "context": 1048576,
+     "output": 131072
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "Fledge Alpha Free",
+    "provider": {
+     "api": "https://opencode.ai/inference/openai/v1"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "low",
+       "high",
+       "max"
+      ]
+     }
+    ],
+    "release_date": "2026-10-01",
+    "status": "deprecated",
+    "tool_call": true
+   },
+   "flint-40b-free": {
+    "attachment": false,
+    "cost": {
+     "cache_read": 0,
+     "input": 0,
+     "output": 0
+    },
+    "limit": {
+     "context": 262144,
+     "output": 65536
+    },
+    "modalities": {
+     "input": [
+      "text"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "Flint 40B Free",
+    "provider": {
+     "api": "https://opencode.ai/inference/openai/v1"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "low",
+       "medium",
+       "high",
+       "xhigh",
+       "max"
+      ]
+     }
+    ],
+    "release_date": "2026-10-21",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "gemini-3-flash": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.05,
+     "input": 0.5,
+     "output": 3
+    },
+    "limit": {
+     "context": 1048576,
+     "output": 65536
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "video",
+      "audio",
+      "pdf"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "Gemini 3 Flash",
+    "provider": {
+     "api": "https://opencode.ai/inference/google/v1beta",
+     "npm": "@ai-sdk/google"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "minimal",
+       "low",
+       "medium",
+       "high"
+      ]
+     }
+    ],
+    "release_date": "2025-12-17",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "gemini-3-pro": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.2,
+     "input": 2,
+     "output": 12
+    },
+    "limit": {
+     "context": 1048576,
+     "output": 65536
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "video",
+      "audio",
+      "pdf"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "Gemini 3 Pro",
+    "provider": {
+     "api": "https://opencode.ai/inference/google/v1beta",
+     "npm": "@ai-sdk/google"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "low",
+       "high"
+      ]
+     }
+    ],
+    "release_date": "2025-11-18",
+    "status": "deprecated",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "gemini-3.1-pro": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.2,
+     "input": 2,
+     "output": 12
+    },
+    "limit": {
+     "context": 1048576,
+     "output": 65536
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "video",
+      "audio",
+      "pdf"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "Gemini 3.1 Pro Preview",
+    "provider": {
+     "api": "https://opencode.ai/inference/google/v1beta",
+     "npm": "@ai-sdk/google"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "low",
+       "medium",
+       "high"
+      ]
+     }
+    ],
+    "release_date": "2026-02-19",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "gemini-3.5-flash": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.15,
+     "input": 1.5,
+     "output": 9
+    },
+    "limit": {
+     "context": 1048576,
+     "output": 65536
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "video",
+      "audio",
+      "pdf"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "Gemini 3.5 Flash",
+    "provider": {
+     "api": "https://opencode.ai/inference/google/v1beta",
+     "npm": "@ai-sdk/google"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "minimal",
+       "low",
+       "medium",
+       "high"
+      ]
+     }
+    ],
+    "release_date": "2026-05-19",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "gemini-3.5-flash-lite": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.03,
+     "input": 0.3,
+     "output": 2.5
+    },
+    "limit": {
+     "context": 1048576,
+     "output": 65536
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "video",
+      "audio",
+      "pdf"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "Gemini 3.5 Flash Lite",
+    "provider": {
+     "api": "https://opencode.ai/inference/google/v1beta",
+     "npm": "@ai-sdk/google"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "minimal",
+       "low",
+       "medium",
+       "high"
+      ]
+     }
+    ],
+    "release_date": "2026-07-21",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "gemini-3.6-flash": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.15,
+     "input": 1.5,
+     "output": 7.5
+    },
+    "limit": {
+     "context": 1048576,
+     "output": 65536
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "video",
+      "audio",
+      "pdf"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "Gemini 3.6 Flash",
+    "provider": {
+     "api": "https://opencode.ai/inference/google/v1beta",
+     "npm": "@ai-sdk/google"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "minimal",
+       "low",
+       "medium",
+       "high"
+      ]
+     }
+    ],
+    "release_date": "2026-07-21",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "gemini-3.7-flash": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.15,
+     "input": 1.5,
+     "output": 7.5
+    },
+    "limit": {
+     "context": 1048576,
+     "output": 65536
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "video",
+      "audio",
+      "pdf"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "Gemini 3.7 Flash",
+    "provider": {
+     "api": "https://opencode.ai/inference/google/v1beta",
+     "npm": "@ai-sdk/google"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "low",
+       "medium",
+       "high"
+      ]
+     }
+    ],
+    "release_date": "2026-08-13",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "gemini-3.8-flash": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.15,
+     "input": 1.5,
+     "output": 7.5
+    },
+    "limit": {
+     "context": 1048576,
+     "output": 65536
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "video",
+      "audio",
+      "pdf"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "Gemini 3.8 Flash",
+    "provider": {
+     "api": "https://opencode.ai/inference/google/v1beta",
+     "npm": "@ai-sdk/google"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "low",
+       "medium",
+       "high"
+      ]
+     }
+    ],
+    "release_date": "2026-09-02",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "gemini-4-argon": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.1,
+     "input": 2,
+     "output": 10
+    },
+    "limit": {
+     "context": 1048576,
+     "output": 65536
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "video",
+      "audio",
+      "pdf"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "Gemini 4 Argon",
+    "provider": {
+     "api": "https://opencode.ai/inference/google/v1beta",
+     "npm": "@ai-sdk/google"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "low",
+       "medium",
+       "high"
+      ]
+     }
+    ],
+    "release_date": "2026-10-13",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "glm-4.6": {
+    "attachment": false,
+    "cost": {
+     "cache_read": 0.1,
+     "input": 0.6,
+     "output": 2.2
+    },
+    "limit": {
+     "context": 204800,
+     "output": 131072
+    },
+    "modalities": {
+     "input": [
+      "text"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "GLM-4.6",
+    "provider": {
+     "api": "https://opencode.ai/inference/openai/v1"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "toggle"
+     }
+    ],
+    "release_date": "2025-09-30",
+    "status": "deprecated",
+    "tool_call": true
+   },
+   "glm-4.7": {
+    "attachment": false,
+    "cost": {
+     "cache_read": 0.1,
+     "input": 0.6,
+     "output": 2.2
+    },
+    "limit": {
+     "context": 204800,
+     "output": 131072
+    },
+    "modalities": {
+     "input": [
+      "text"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "GLM-4.7",
+    "provider": {
+     "api": "https://opencode.ai/inference/openai/v1"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "toggle"
+     }
+    ],
+    "release_date": "2025-12-22",
+    "status": "deprecated",
+    "tool_call": true
+   },
+   "glm-4.7-free": {
+    "attachment": false,
+    "cost": {
+     "cache_read": 0,
+     "input": 0,
+     "output": 0
+    },
+    "limit": {
+     "context": 204800,
+     "output": 131072
+    },
+    "modalities": {
+     "input": [
+      "text"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "GLM-4.7 Free",
+    "provider": {
+     "api": "https://opencode.ai/inference/openai/v1"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "toggle"
+     }
+    ],
+    "release_date": "2025-12-22",
+    "status": "deprecated",
+    "tool_call": true
+   },
+   "glm-5": {
+    "attachment": false,
+    "cost": {
+     "cache_read": 0.2,
+     "input": 1,
+     "output": 3.2
+    },
+    "limit": {
+     "context": 204800,
+     "output": 131072
+    },
+    "modalities": {
+     "input": [
+      "text"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "GLM-5",
+    "provider": {
+     "api": "https://opencode.ai/inference/openai/v1"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "toggle"
+     }
+    ],
+    "release_date": "2026-02-12",
+    "tool_call": true
+   },
+   "glm-5-free": {
+    "attachment": false,
+    "cost": {
+     "cache_read": 0,
+     "input": 0,
+     "output": 0
+    },
+    "limit": {
+     "context": 204800,
+     "output": 131072
+    },
+    "modalities": {
+     "input": [
+      "text"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "GLM-5 Free",
+    "provider": {
+     "api": "https://opencode.ai/inference/openai/v1"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "toggle"
+     }
+    ],
+    "release_date": "2026-02-12",
+    "status": "deprecated",
+    "tool_call": true
+   },
+   "glm-5.1": {
+    "attachment": false,
+    "cost": {
+     "cache_read": 0.26,
+     "input": 1.4,
+     "output": 4.4
+    },
+    "limit": {
+     "context": 204800,
+     "output": 131072
+    },
+    "modalities": {
+     "input": [
+      "text"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "GLM-5.1",
+    "provider": {
+     "api": "https://opencode.ai/inference/openai/v1"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "toggle"
+     }
+    ],
+    "release_date": "2026-04-07",
+    "tool_call": true
+   },
+   "glm-5.2": {
+    "attachment": false,
+    "cost": {
+     "cache_read": 0.26,
+     "input": 1.4,
+     "output": 4.4
+    },
+    "limit": {
+     "context": 1000000,
+     "output": 131072
+    },
+    "modalities": {
+     "input": [
+      "text"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "GLM-5.2",
+    "provider": {
+     "api": "https://opencode.ai/inference/openai/v1"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "high",
+       "max"
+      ]
+     }
+    ],
+    "release_date": "2026-06-13",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "glm-5.3": {
+    "attachment": false,
+    "cost": {
+     "cache_read": 0.26,
+     "input": 1.4,
+     "output": 4.4
+    },
+    "limit": {
+     "context": 1000000,
+     "output": 131072
+    },
+    "modalities": {
+     "input": [
+      "text"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "GLM-5.3",
+    "provider": {
+     "api": "https://opencode.ai/inference/openai/v1"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "low",
+       "high",
+       "max"
+      ]
+     }
+    ],
+    "release_date": "2026-08-14",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "glm-5.3-flash": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.03,
+     "input": 0.15,
+     "output": 0.5
+    },
+    "limit": {
+     "context": 1000000,
+     "output": 131072
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "video",
+      "pdf"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "GLM-5.3-Flash",
+    "provider": {
+     "api": "https://opencode.ai/inference/openai/v1"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "low",
+       "high",
+       "max"
+      ]
+     }
+    ],
+    "release_date": "2026-08-26",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "glm-5.3-flash-free": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0,
+     "input": 0,
+     "output": 0
+    },
+    "limit": {
+     "context": 200000,
+     "output": 32000
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "video",
+      "pdf"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "GLM-5.3-Flash Free",
+    "provider": {
+     "api": "https://opencode.ai/inference/openai/v1"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "low",
+       "high",
+       "max"
+      ]
+     }
+    ],
+    "release_date": "2026-08-26",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "gpt-5": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.107,
+     "input": 1.07,
+     "output": 8.5
+    },
+    "limit": {
+     "context": 400000,
+     "output": 128000
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "GPT-5",
+    "provider": {
+     "api": "https://opencode.ai/inference/openai/v1",
+     "npm": "@ai-sdk/openai"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "minimal",
+       "low",
+       "medium",
+       "high"
+      ]
+     }
+    ],
+    "release_date": "2025-08-07",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "gpt-5-codex": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.107,
+     "input": 1.07,
+     "output": 8.5
+    },
+    "limit": {
+     "context": 400000,
+     "output": 128000
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "GPT-5 Codex",
+    "provider": {
+     "api": "https://opencode.ai/inference/openai/v1",
+     "npm": "@ai-sdk/openai"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "low",
+       "medium",
+       "high"
+      ]
+     }
+    ],
+    "release_date": "2025-09-15",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "gpt-5-nano": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.005,
+     "input": 0.05,
+     "output": 0.4
+    },
+    "limit": {
+     "context": 400000,
+     "output": 128000
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "GPT-5 Nano",
+    "provider": {
+     "api": "https://opencode.ai/inference/openai/v1",
+     "npm": "@ai-sdk/openai"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "minimal",
+       "low",
+       "medium",
+       "high"
+      ]
+     }
+    ],
+    "release_date": "2025-08-07",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "gpt-5.1": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.107,
+     "input": 1.07,
+     "output": 8.5
+    },
+    "limit": {
+     "context": 400000,
+     "output": 128000
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "GPT-5.1",
+    "provider": {
+     "api": "https://opencode.ai/inference/openai/v1",
+     "npm": "@ai-sdk/openai"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "none",
+       "low",
+       "medium",
+       "high"
+      ]
+     }
+    ],
+    "release_date": "2025-11-13",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "gpt-5.1-codex": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.107,
+     "input": 1.07,
+     "output": 8.5
+    },
+    "limit": {
+     "context": 400000,
+     "output": 128000
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "GPT-5.1 Codex",
+    "provider": {
+     "api": "https://opencode.ai/inference/openai/v1",
+     "npm": "@ai-sdk/openai"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "low",
+       "medium",
+       "high"
+      ]
+     }
+    ],
+    "release_date": "2025-11-13",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "gpt-5.1-codex-max": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.125,
+     "input": 1.25,
+     "output": 10
+    },
+    "limit": {
+     "context": 400000,
+     "output": 128000
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "GPT-5.1 Codex Max",
+    "provider": {
+     "api": "https://opencode.ai/inference/openai/v1",
+     "npm": "@ai-sdk/openai"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "low",
+       "medium",
+       "high",
+       "xhigh"
+      ]
+     }
+    ],
+    "release_date": "2025-11-13",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "gpt-5.1-codex-mini": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.025,
+     "input": 0.25,
+     "output": 2
+    },
+    "limit": {
+     "context": 400000,
+     "output": 128000
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "GPT-5.1 Codex Mini",
+    "provider": {
+     "api": "https://opencode.ai/inference/openai/v1",
+     "npm": "@ai-sdk/openai"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "low",
+       "medium",
+       "high"
+      ]
+     }
+    ],
+    "release_date": "2025-11-13",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "gpt-5.2": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.175,
+     "input": 1.75,
+     "output": 14
+    },
+    "limit": {
+     "context": 400000,
+     "output": 128000
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "GPT-5.2",
+    "provider": {
+     "api": "https://opencode.ai/inference/openai/v1",
+     "npm": "@ai-sdk/openai"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "none",
+       "low",
+       "medium",
+       "high",
+       "xhigh"
+      ]
+     }
+    ],
+    "release_date": "2025-12-11",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "gpt-5.2-codex": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.175,
+     "input": 1.75,
+     "output": 14
+    },
+    "limit": {
+     "context": 400000,
+     "output": 128000
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "pdf"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "GPT-5.2 Codex",
+    "provider": {
+     "api": "https://opencode.ai/inference/openai/v1",
+     "npm": "@ai-sdk/openai"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "low",
+       "medium",
+       "high",
+       "xhigh"
+      ]
+     }
+    ],
+    "release_date": "2025-12-11",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "gpt-5.3-codex": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.175,
+     "input": 1.75,
+     "output": 14
+    },
+    "limit": {
+     "context": 400000,
+     "output": 128000
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "pdf"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "GPT-5.3 Codex",
+    "provider": {
+     "api": "https://opencode.ai/inference/openai/v1",
+     "npm": "@ai-sdk/openai"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "none",
+       "low",
+       "medium",
+       "high",
+       "xhigh"
+      ]
+     }
+    ],
+    "release_date": "2026-02-05",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "gpt-5.3-codex-spark": {
+    "attachment": false,
+    "cost": {
+     "cache_read": 0.175,
+     "input": 1.75,
+     "output": 14
+    },
+    "limit": {
+     "context": 128000,
+     "output": 128000
+    },
+    "modalities": {
+     "input": [
+      "text"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "GPT-5.3 Codex Spark",
+    "provider": {
+     "api": "https://opencode.ai/inference/openai/v1",
+     "npm": "@ai-sdk/openai"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "low",
+       "medium",
+       "high",
+       "xhigh"
+      ]
+     }
+    ],
+    "release_date": "2026-02-05",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "gpt-5.4": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.25,
+     "input": 2.5,
+     "output": 15
+    },
+    "limit": {
+     "context": 1050000,
+     "output": 128000
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "pdf"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "GPT-5.4",
+    "provider": {
+     "api": "https://opencode.ai/inference/openai/v1",
+     "npm": "@ai-sdk/openai"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "none",
+       "low",
+       "medium",
+       "high",
+       "xhigh"
+      ]
+     }
+    ],
+    "release_date": "2026-03-05",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "gpt-5.4-mini": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.075,
+     "input": 0.75,
+     "output": 4.5
+    },
+    "limit": {
+     "context": 400000,
+     "output": 128000
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "pdf"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "GPT-5.4 Mini",
+    "provider": {
+     "api": "https://opencode.ai/inference/openai/v1",
+     "npm": "@ai-sdk/openai"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "none",
+       "low",
+       "medium",
+       "high",
+       "xhigh"
+      ]
+     }
+    ],
+    "release_date": "2026-03-17",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "gpt-5.4-nano": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.02,
+     "input": 0.2,
+     "output": 1.25
+    },
+    "limit": {
+     "context": 400000,
+     "output": 128000
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "pdf"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "GPT-5.4 Nano",
+    "provider": {
+     "api": "https://opencode.ai/inference/openai/v1",
+     "npm": "@ai-sdk/openai"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "none",
+       "low",
+       "medium",
+       "high",
+       "xhigh"
+      ]
+     }
+    ],
+    "release_date": "2026-03-17",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "gpt-5.4-pro": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 30,
+     "input": 30,
+     "output": 180
+    },
+    "limit": {
+     "context": 1050000,
+     "output": 128000
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "pdf"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "GPT-5.4 Pro",
+    "provider": {
+     "api": "https://opencode.ai/inference/openai/v1",
+     "npm": "@ai-sdk/openai"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "medium",
+       "high",
+       "xhigh"
+      ]
+     }
+    ],
+    "release_date": "2026-03-05",
+    "structured_output": false,
+    "tool_call": true
+   },
+   "gpt-5.5": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.5,
+     "input": 5,
+     "output": 30
+    },
+    "limit": {
+     "context": 1050000,
+     "output": 128000
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "pdf"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "GPT-5.5",
+    "provider": {
+     "api": "https://opencode.ai/inference/openai/v1",
+     "npm": "@ai-sdk/openai"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "none",
+       "low",
+       "medium",
+       "high",
+       "xhigh"
+      ]
+     }
+    ],
+    "release_date": "2026-04-23",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "gpt-5.5-pro": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 30,
+     "input": 30,
+     "output": 180
+    },
+    "limit": {
+     "context": 1050000,
+     "output": 128000
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "pdf"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "GPT-5.5 Pro",
+    "provider": {
+     "api": "https://opencode.ai/inference/openai/v1",
+     "npm": "@ai-sdk/openai"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "medium",
+       "high",
+       "xhigh"
+      ]
+     }
+    ],
+    "release_date": "2026-04-23",
+    "structured_output": false,
+    "tool_call": true
+   },
+   "gpt-5.6-luna": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.02,
+     "cache_write": 0.25,
+     "input": 0.2,
+     "output": 1.2
+    },
+    "limit": {
+     "context": 1050000,
+     "output": 128000
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "pdf"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "GPT-5.6 Luna",
+    "provider": {
+     "api": "https://opencode.ai/inference/openai/v1",
+     "npm": "@ai-sdk/openai"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "none",
+       "low",
+       "medium",
+       "high",
+       "xhigh",
+       "max"
+      ]
+     }
+    ],
+    "release_date": "2026-07-09",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "gpt-5.6-sol": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.4,
+     "cache_write": 5,
+     "input": 4,
+     "output": 20
+    },
+    "limit": {
+     "context": 1050000,
+     "output": 128000
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "pdf"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "GPT-5.6 Sol",
+    "provider": {
+     "api": "https://opencode.ai/inference/openai/v1",
+     "npm": "@ai-sdk/openai"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "none",
+       "low",
+       "medium",
+       "high",
+       "xhigh",
+       "max"
+      ]
+     }
+    ],
+    "release_date": "2026-07-09",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "gpt-5.6-terra": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.2,
+     "cache_write": 2.5,
+     "input": 2,
+     "output": 12
+    },
+    "limit": {
+     "context": 1050000,
+     "output": 128000
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "pdf"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "GPT-5.6 Terra",
+    "provider": {
+     "api": "https://opencode.ai/inference/openai/v1",
+     "npm": "@ai-sdk/openai"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "none",
+       "low",
+       "medium",
+       "high",
+       "xhigh",
+       "max"
+      ]
+     }
+    ],
+    "release_date": "2026-07-09",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "gpt-6-astra": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 1,
+     "cache_write": 12.5,
+     "input": 10,
+     "output": 50
+    },
+    "limit": {
+     "context": 1050000,
+     "output": 128000
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "pdf"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "GPT-6 Astra",
+    "provider": {
+     "api": "https://opencode.ai/inference/openai/v1",
+     "npm": "@ai-sdk/openai"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "low",
+       "medium",
+       "high",
+       "xhigh",
+       "max"
+      ]
+     }
+    ],
+    "release_date": "2026-09-04",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "gpt-6-luna": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.01,
+     "cache_write": 0.125,
+     "input": 0.1,
+     "output": 0.5
+    },
+    "limit": {
+     "context": 1050000,
+     "output": 128000
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "pdf"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "GPT-6 Luna",
+    "provider": {
+     "api": "https://opencode.ai/inference/openai/v1",
+     "npm": "@ai-sdk/openai"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "none",
+       "low",
+       "medium",
+       "high",
+       "xhigh",
+       "max"
+      ]
+     }
+    ],
+    "release_date": "2026-09-22",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "gpt-6-sol": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.2,
+     "cache_write": 2.5,
+     "input": 2,
+     "output": 10
+    },
+    "limit": {
+     "context": 1050000,
+     "output": 128000
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "pdf"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "GPT-6 Sol",
+    "provider": {
+     "api": "https://opencode.ai/inference/openai/v1",
+     "npm": "@ai-sdk/openai"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "none",
+       "low",
+       "medium",
+       "high",
+       "xhigh",
+       "max"
+      ]
+     }
+    ],
+    "release_date": "2026-09-22",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "gpt-6.1-sol": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.1,
+     "cache_write": 2.5,
+     "input": 2,
+     "output": 10
+    },
+    "limit": {
+     "context": 1050000,
+     "output": 128000
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "pdf"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "GPT-6.1 Sol",
+    "provider": {
+     "api": "https://opencode.ai/inference/openai/v1",
+     "npm": "@ai-sdk/openai"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "low",
+       "medium",
+       "high",
+       "xhigh",
+       "max"
+      ]
+     }
+    ],
+    "release_date": "2026-09-29",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "grok-4.5": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.3,
+     "input": 2,
+     "output": 6
+    },
+    "limit": {
+     "context": 500000,
+     "output": 500000
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "Grok 4.5",
+    "provider": {
+     "api": "https://opencode.ai/inference/openai/v1",
+     "npm": "@ai-sdk/openai"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "low",
+       "medium",
+       "high"
+      ]
+     }
+    ],
+    "release_date": "2026-07-08",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "grok-4.6": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.5,
+     "input": 2,
+     "output": 6
+    },
+    "limit": {
+     "context": 500000,
+     "output": 500000
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "Grok 4.6",
+    "provider": {
+     "api": "https://opencode.ai/inference/openai/v1",
+     "npm": "@ai-sdk/openai"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "low",
+       "medium",
+       "high",
+       "xhigh"
+      ]
+     }
+    ],
+    "release_date": "2026-08-12",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "grok-4.7": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.5,
+     "input": 2,
+     "output": 6
+    },
+    "limit": {
+     "context": 500000,
+     "output": 500000
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "pdf"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "Grok 4.7",
+    "provider": {
+     "api": "https://opencode.ai/inference/openai/v1",
+     "npm": "@ai-sdk/openai"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "low",
+       "medium",
+       "high",
+       "xhigh"
+      ]
+     }
+    ],
+    "release_date": "2026-09-21",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "grok-build-0.1": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.2,
+     "input": 1,
+     "output": 2
+    },
+    "limit": {
+     "context": 256000,
+     "output": 256000
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "pdf"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "Grok Build 0.1",
+    "provider": {
+     "api": "https://opencode.ai/inference/openai/v1",
+     "npm": "@ai-sdk/openai"
+    },
+    "reasoning": true,
+    "reasoning_options": [],
+    "release_date": "2026-04-16",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "grok-code": {
+    "attachment": false,
+    "cost": {
+     "cache_read": 0,
+     "cache_write": 0,
+     "input": 0,
+     "output": 0
+    },
+    "limit": {
+     "context": 256000,
+     "output": 256000
+    },
+    "modalities": {
+     "input": [
+      "text"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "Grok Code Fast 1",
+    "provider": {
+     "api": "https://opencode.ai/inference/openai/v1"
+    },
+    "reasoning": true,
+    "reasoning_options": [],
+    "release_date": "2025-09-02",
+    "status": "deprecated",
+    "tool_call": true
+   },
+   "hy3-free": {
+    "attachment": false,
+    "cost": {
+     "cache_read": 0,
+     "input": 0,
+     "output": 0
+    },
+    "limit": {
+     "context": 190000,
+     "output": 64000
+    },
+    "modalities": {
+     "input": [
+      "text"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "Hy3 Free",
+    "provider": {
+     "api": "https://opencode.ai/inference/openai/v1"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "toggle"
+     },
+     {
+      "type": "effort",
+      "values": [
+       "low",
+       "medium",
+       "high"
+      ]
+     }
+    ],
+    "release_date": "2026-07-06",
+    "status": "deprecated",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "hy3-preview-free": {
+    "attachment": false,
+    "cost": {
+     "cache_read": 0,
+     "input": 0,
+     "output": 0
+    },
+    "limit": {
+     "context": 256000,
+     "output": 64000
+    },
+    "modalities": {
+     "input": [
+      "text"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "Hy3 preview Free",
+    "provider": {
+     "api": "https://opencode.ai/inference/openai/v1"
+    },
+    "reasoning": true,
+    "reasoning_options": [],
+    "release_date": "2026-04-20",
+    "status": "deprecated",
+    "tool_call": true
+   },
+   "kimi-k2": {
+    "attachment": false,
+    "cost": {
+     "cache_read": 0.4,
+     "input": 0.4,
+     "output": 2.5
+    },
+    "limit": {
+     "context": 262144,
+     "output": 262144
+    },
+    "modalities": {
+     "input": [
+      "text"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "Kimi K2",
+    "provider": {
+     "api": "https://opencode.ai/inference/openai/v1"
+    },
+    "reasoning": false,
+    "release_date": "2025-09-05",
+    "status": "deprecated",
+    "tool_call": true
+   },
+   "kimi-k2-thinking": {
+    "attachment": false,
+    "cost": {
+     "cache_read": 0.4,
+     "input": 0.4,
+     "output": 2.5
+    },
+    "limit": {
+     "context": 262144,
+     "output": 262144
+    },
+    "modalities": {
+     "input": [
+      "text"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "Kimi K2 Thinking",
+    "provider": {
+     "api": "https://opencode.ai/inference/openai/v1"
+    },
+    "reasoning": true,
+    "reasoning_options": [],
+    "release_date": "2025-11-06",
+    "status": "deprecated",
+    "tool_call": true
+   },
+   "kimi-k2.5": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.1,
+     "input": 0.6,
+     "output": 3
+    },
+    "limit": {
+     "context": 262144,
+     "output": 65536
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "video"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "Kimi K2.5",
+    "provider": {
+     "api": "https://opencode.ai/inference/openai/v1"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "toggle"
+     }
+    ],
+    "release_date": "2026-01-27",
+    "tool_call": true
+   },
+   "kimi-k2.5-free": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0,
+     "input": 0,
+     "output": 0
+    },
+    "limit": {
+     "context": 262144,
+     "output": 262144
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "video"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "Kimi K2.5 Free",
+    "provider": {
+     "api": "https://opencode.ai/inference/openai/v1"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "toggle"
+     }
+    ],
+    "release_date": "2026-01-27",
+    "status": "deprecated",
+    "tool_call": true
+   },
+   "kimi-k2.6": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.16,
+     "input": 0.95,
+     "output": 4
+    },
+    "limit": {
+     "context": 262144,
+     "output": 65536
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "video"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "Kimi K2.6",
+    "provider": {
+     "api": "https://opencode.ai/inference/openai/v1"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "toggle"
+     }
+    ],
+    "release_date": "2026-04-20",
+    "tool_call": true
+   },
+   "kimi-k2.7-code": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.19,
+     "input": 0.95,
+     "output": 4
+    },
+    "limit": {
+     "context": 262144,
+     "output": 262144
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "video"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "Kimi K2.7 Code",
+    "provider": {
+     "api": "https://opencode.ai/inference/openai/v1"
+    },
+    "reasoning": true,
+    "reasoning_options": [],
+    "release_date": "2026-06-12",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "kimi-k3": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.3,
+     "cache_write": 3,
+     "input": 3,
+     "output": 15
+    },
+    "limit": {
+     "context": 1048576,
+     "output": 131072
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "video"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "Kimi K3",
+    "provider": {
+     "api": "https://opencode.ai/inference/openai/v1"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "toggle"
+     },
+     {
+      "type": "effort",
+      "values": [
+       "low",
+       "high",
+       "max"
+      ]
+     }
+    ],
+    "release_date": "2026-07-16",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "laguna-s-2.1-free": {
+    "attachment": false,
+    "cost": {
+     "cache_read": 0,
+     "input": 0,
+     "output": 0
+    },
+    "limit": {
+     "context": 256000,
+     "output": 32000
+    },
+    "modalities": {
+     "input": [
+      "text"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "Laguna S 2.1 Free",
+    "provider": {
+     "api": "https://opencode.ai/inference/openai/v1"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "low",
+       "medium",
+       "high"
+      ]
+     }
+    ],
+    "release_date": "2026-07-21",
+    "status": "deprecated",
+    "structured_output": false,
+    "tool_call": true
+   },
+   "ling-2.6-flash-free": {
+    "attachment": false,
+    "cost": {
+     "input": 0,
+     "output": 0
+    },
+    "limit": {
+     "context": 262100,
+     "output": 32800
+    },
+    "modalities": {
+     "input": [
+      "text"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "Ling 2.6 Flash Free",
+    "provider": {
+     "api": "https://opencode.ai/inference/openai/v1"
+    },
+    "reasoning": false,
+    "release_date": "2026-04-21",
+    "status": "deprecated",
+    "tool_call": true
+   },
+   "ling-3.0-flash-fin-free": {
+    "attachment": false,
+    "cost": {
+     "cache_read": 0,
+     "input": 0,
+     "output": 0
+    },
+    "limit": {
+     "context": 262144,
+     "output": 32768
+    },
+    "modalities": {
+     "input": [
+      "text"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "Ling 3.0 Flash Fin Free",
+    "provider": {
+     "api": "https://opencode.ai/inference/openai/v1"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "toggle"
+     }
+    ],
+    "release_date": "2026-08-27",
+    "status": "deprecated",
+    "structured_output": false,
+    "tool_call": true
+   },
+   "ling-3.0-flash-free": {
+    "attachment": false,
+    "cost": {
+     "cache_read": 0,
+     "input": 0,
+     "output": 0
+    },
+    "limit": {
+     "context": 262144,
+     "output": 32768
+    },
+    "modalities": {
+     "input": [
+      "text"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "Ling-3.0-flash Free",
+    "provider": {
+     "api": "https://opencode.ai/inference/openai/v1"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "low",
+       "medium",
+       "high"
+      ]
+     }
+    ],
+    "release_date": "2026-07-23",
+    "status": "deprecated",
+    "structured_output": false,
+    "tool_call": true
+   },
+   "ling-3.0-tiny-free": {
+    "attachment": false,
+    "cost": {
+     "input": 0,
+     "output": 0
+    },
+    "limit": {
+     "context": 262144,
+     "output": 32768
+    },
+    "modalities": {
+     "input": [
+      "text"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "Ling-3.0-tiny Free",
+    "provider": {
+     "api": "https://opencode.ai/inference/openai/v1"
+    },
+    "reasoning": true,
+    "reasoning_options": [],
+    "release_date": "2026-08-06",
+    "status": "deprecated",
+    "structured_output": false,
+    "tool_call": true
+   },
+   "ling-3.1-flash-free": {
+    "attachment": false,
+    "cost": {
+     "cache_read": 0,
+     "input": 0,
+     "output": 0
+    },
+    "limit": {
+     "context": 262144,
+     "output": 32768
+    },
+    "modalities": {
+     "input": [
+      "text"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "Ling 3.1 Flash Free",
+    "provider": {
+     "api": "https://opencode.ai/inference/openai/v1"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "toggle"
+     }
+    ],
+    "release_date": "2026-09-29",
+    "status": "deprecated",
+    "structured_output": false,
+    "tool_call": true
+   },
+   "ll-alpha-free": {
+    "attachment": false,
+    "cost": {
+     "cache_read": 0,
+     "input": 0,
+     "output": 0
+    },
+    "limit": {
+     "context": 262144,
+     "output": 65536
+    },
+    "modalities": {
+     "input": [
+      "text"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "LL Alpha Free",
+    "provider": {
+     "api": "https://opencode.ai/inference/openai/v1"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "low",
+       "medium",
+       "high",
+       "xhigh",
+       "max"
+      ]
+     }
+    ],
+    "release_date": "2026-10-15",
+    "status": "deprecated",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "longcat-2.0-free": {
+    "attachment": false,
+    "cost": {
+     "cache_read": 0,
+     "input": 0,
+     "output": 0
+    },
+    "limit": {
+     "context": 1000000,
+     "output": 131072
+    },
+    "modalities": {
+     "input": [
+      "text"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "LongCat-2.0 Free",
+    "provider": {
+     "api": "https://opencode.ai/inference/openai/v1"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "toggle"
+     }
+    ],
+    "release_date": "2026-06-30",
+    "status": "deprecated",
+    "tool_call": true
+   },
+   "longcat-2.5-preview-free": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0,
+     "input": 0,
+     "output": 0
+    },
+    "limit": {
+     "context": 1000000,
+     "output": 131072
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "LongCat 2.5 Preview Free",
+    "provider": {
+     "api": "https://opencode.ai/inference/openai/v1"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "toggle"
+     }
+    ],
+    "release_date": "2026-09-25",
+    "status": "deprecated",
+    "tool_call": true
+   },
+   "mimo-v2-flash-free": {
+    "attachment": false,
+    "cost": {
+     "cache_read": 0,
+     "input": 0,
+     "output": 0
+    },
+    "limit": {
+     "context": 262144,
+     "output": 65536
+    },
+    "modalities": {
+     "input": [
+      "text"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "MiMo V2 Flash Free",
+    "provider": {
+     "api": "https://opencode.ai/inference/openai/v1"
+    },
+    "reasoning": true,
+    "reasoning_options": [],
+    "release_date": "2025-12-16",
+    "status": "deprecated",
+    "tool_call": true
+   },
+   "mimo-v2-omni-free": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0,
+     "input": 0,
+     "output": 0
+    },
+    "limit": {
+     "context": 262144,
+     "output": 64000
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "audio",
+      "pdf"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "MiMo V2 Omni Free",
+    "provider": {
+     "api": "https://opencode.ai/inference/openai/v1"
+    },
+    "reasoning": true,
+    "reasoning_options": [],
+    "release_date": "2026-03-18",
+    "status": "deprecated",
+    "tool_call": true
+   },
+   "mimo-v2-pro-free": {
+    "attachment": false,
+    "cost": {
+     "cache_read": 0,
+     "input": 0,
+     "output": 0
+    },
+    "limit": {
+     "context": 1048576,
+     "output": 64000
+    },
+    "modalities": {
+     "input": [
+      "text"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "MiMo V2 Pro Free",
+    "provider": {
+     "api": "https://opencode.ai/inference/openai/v1"
+    },
+    "reasoning": true,
+    "reasoning_options": [],
+    "release_date": "2026-03-18",
+    "status": "deprecated",
+    "tool_call": true
+   },
+   "mimo-v2.5-free": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0,
+     "input": 0,
+     "output": 0
+    },
+    "limit": {
+     "context": 200000,
+     "output": 32000
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "audio",
+      "video"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "MiMo V2.5 Free",
+    "provider": {
+     "api": "https://opencode.ai/inference/openai/v1"
+    },
+    "reasoning": true,
+    "reasoning_options": [],
+    "release_date": "2026-04-22",
+    "status": "deprecated",
+    "tool_call": true
+   },
+   "mimo-v2.6-flash-free": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0,
+     "input": 0,
+     "output": 0
+    },
+    "limit": {
+     "context": 200000,
+     "output": 32000
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "audio",
+      "video"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "MiMo-V2.6-Flash Free",
+    "provider": {
+     "api": "https://opencode.ai/inference/openai/v1"
+    },
+    "reasoning": true,
+    "reasoning_options": [],
+    "release_date": "2026-09-22",
+    "tool_call": true
+   },
+   "minimax-m2.1": {
+    "attachment": false,
+    "cost": {
+     "cache_read": 0.1,
+     "input": 0.3,
+     "output": 1.2
+    },
+    "limit": {
+     "context": 204800,
+     "output": 131072
+    },
+    "modalities": {
+     "input": [
+      "text"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "MiniMax-M2.1",
+    "provider": {
+     "api": "https://opencode.ai/inference/openai/v1"
+    },
+    "reasoning": true,
+    "reasoning_options": [],
+    "release_date": "2025-12-23",
+    "status": "deprecated",
+    "tool_call": true
+   },
+   "minimax-m2.1-free": {
+    "attachment": false,
+    "cost": {
+     "cache_read": 0,
+     "input": 0,
+     "output": 0
+    },
+    "limit": {
+     "context": 204800,
+     "output": 131072
+    },
+    "modalities": {
+     "input": [
+      "text"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "MiniMax-M2.1 Free",
+    "provider": {
+     "api": "https://opencode.ai/inference/anthropic/v1",
+     "npm": "@ai-sdk/anthropic"
+    },
+    "reasoning": true,
+    "reasoning_options": [],
+    "release_date": "2025-12-23",
+    "status": "deprecated",
+    "tool_call": true
+   },
+   "minimax-m2.5": {
+    "attachment": false,
+    "cost": {
+     "cache_read": 0.06,
+     "input": 0.3,
+     "output": 1.2
+    },
+    "limit": {
+     "context": 204800,
+     "output": 131072
+    },
+    "modalities": {
+     "input": [
+      "text"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "MiniMax-M2.5",
+    "provider": {
+     "api": "https://opencode.ai/inference/openai/v1"
+    },
+    "reasoning": true,
+    "reasoning_options": [],
+    "release_date": "2026-02-12",
+    "tool_call": true
+   },
+   "minimax-m2.5-free": {
+    "attachment": false,
+    "cost": {
+     "cache_read": 0,
+     "input": 0,
+     "output": 0
+    },
+    "limit": {
+     "context": 204800,
+     "output": 131072
+    },
+    "modalities": {
+     "input": [
+      "text"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "MiniMax-M2.5 Free",
+    "provider": {
+     "api": "https://opencode.ai/inference/anthropic/v1",
+     "npm": "@ai-sdk/anthropic"
+    },
+    "reasoning": true,
+    "reasoning_options": [],
+    "release_date": "2026-02-12",
+    "status": "deprecated",
+    "tool_call": true
+   },
+   "minimax-m2.7": {
+    "attachment": false,
+    "cost": {
+     "cache_read": 0.06,
+     "input": 0.3,
+     "output": 1.2
+    },
+    "limit": {
+     "context": 204800,
+     "output": 131072
+    },
+    "modalities": {
+     "input": [
+      "text"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "MiniMax-M2.7",
+    "provider": {
+     "api": "https://opencode.ai/inference/openai/v1"
+    },
+    "reasoning": true,
+    "reasoning_options": [],
+    "release_date": "2026-03-18",
+    "tool_call": true
+   },
+   "minimax-m3": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.06,
+     "input": 0.3,
+     "output": 1.2
+    },
+    "limit": {
+     "context": 512000,
+     "output": 128000
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "video"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "MiniMax-M3",
+    "provider": {
+     "api": "https://opencode.ai/inference/openai/v1"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "toggle"
+     }
+    ],
+    "release_date": "2026-06-01",
+    "tool_call": true
+   },
+   "minimax-m3-free": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0,
+     "input": 0,
+     "output": 0
+    },
+    "limit": {
+     "context": 200000,
+     "output": 32000
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "video"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "MiniMax-M3 Free",
+    "provider": {
+     "api": "https://opencode.ai/inference/anthropic/v1",
+     "npm": "@ai-sdk/anthropic"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "toggle"
+     }
+    ],
+    "release_date": "2026-06-01",
+    "status": "deprecated",
+    "tool_call": true
+   },
+   "minimax-m3.1-flash-free": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0,
+     "input": 0,
+     "output": 0
+    },
+    "limit": {
+     "context": 1000000,
+     "output": 512000
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "video"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "MiniMax M3.1 Flash Free",
+    "provider": {
+     "api": "https://opencode.ai/inference/openai/v1"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "low",
+       "medium",
+       "high",
+       "xhigh",
+       "max"
+      ]
+     }
+    ],
+    "release_date": "2026-10-19",
+    "status": "deprecated",
+    "tool_call": true
+   },
+   "mistral-large-4": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.07,
+     "input": 0.68,
+     "output": 2.09
+    },
+    "limit": {
+     "context": 524288,
+     "output": 262144
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "Mistral Large 4",
+    "provider": {
+     "api": "https://opencode.ai/inference/openai/v1",
+     "npm": "@ai-sdk/mistral"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "none",
+       "high"
+      ]
+     }
+    ],
+    "release_date": "2026-10-06",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "muse-spark-1.2": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.15,
+     "input": 1.25,
+     "output": 4.25
+    },
+    "limit": {
+     "context": 1048576,
+     "output": 131072
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "video",
+      "pdf",
+      "audio"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "Muse Spark 1.2",
+    "provider": {
+     "api": "https://opencode.ai/inference/openai/v1",
+     "npm": "@ai-sdk/openai"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "minimal",
+       "low",
+       "medium",
+       "high",
+       "xhigh"
+      ]
+     }
+    ],
+    "release_date": "2026-08-05",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "muse-spark-1.2-contributor-free": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0,
+     "input": 0,
+     "output": 0
+    },
+    "limit": {
+     "context": 1048576,
+     "output": 131072
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "video",
+      "pdf",
+      "audio"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "Muse Spark 1.2 Free",
+    "provider": {
+     "api": "https://opencode.ai/inference/openai/v1",
+     "npm": "@ai-sdk/openai"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "minimal",
+       "low",
+       "medium",
+       "high",
+       "xhigh"
+      ]
+     }
+    ],
+    "release_date": "2026-08-05",
+    "status": "deprecated",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "muse-spark-1.3": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.15,
+     "input": 1.25,
+     "output": 4.25
+    },
+    "limit": {
+     "context": 1048576,
+     "output": 131072
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "video",
+      "pdf",
+      "audio"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "Muse Spark 1.3",
+    "provider": {
+     "api": "https://opencode.ai/inference/openai/v1",
+     "npm": "@ai-sdk/openai"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "minimal",
+       "low",
+       "medium",
+       "high",
+       "xhigh"
+      ]
+     }
+    ],
+    "release_date": "2026-09-02",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "muse-spark-1.3-contributor-free": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0,
+     "input": 0,
+     "output": 0
+    },
+    "limit": {
+     "context": 1048576,
+     "output": 131072
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "video",
+      "pdf",
+      "audio"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "Muse Spark 1.3 Free",
+    "provider": {
+     "api": "https://opencode.ai/inference/openai/v1",
+     "npm": "@ai-sdk/openai"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "minimal",
+       "low",
+       "medium",
+       "high",
+       "xhigh"
+      ]
+     }
+    ],
+    "release_date": "2026-09-02",
+    "status": "deprecated",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "muse-wonder-1.0": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.2,
+     "input": 4,
+     "output": 20
+    },
+    "limit": {
+     "context": 1048576,
+     "output": 131072
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "video",
+      "pdf",
+      "audio"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "Muse Wonder",
+    "provider": {
+     "api": "https://opencode.ai/inference/openai/v1",
+     "npm": "@ai-sdk/openai"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "minimal",
+       "low",
+       "medium",
+       "high",
+       "xhigh",
+       "max"
+      ]
+     }
+    ],
+    "release_date": "2026-10-12",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "nemotron-3-super-free": {
+    "attachment": false,
+    "cost": {
+     "cache_read": 0,
+     "input": 0,
+     "output": 0
+    },
+    "limit": {
+     "context": 204800,
+     "output": 128000
+    },
+    "modalities": {
+     "input": [
+      "text"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "Nemotron 3 Super Free",
+    "provider": {
+     "api": "https://opencode.ai/inference/openai/v1"
+    },
+    "reasoning": true,
+    "reasoning_options": [],
+    "release_date": "2026-03-11",
+    "status": "deprecated",
+    "tool_call": true
+   },
+   "nemotron-3-ultra-free": {
+    "attachment": false,
+    "cost": {
+     "cache_read": 0,
+     "input": 0,
+     "output": 0
+    },
+    "limit": {
+     "context": 1000000,
+     "output": 128000
+    },
+    "modalities": {
+     "input": [
+      "text"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "Nemotron 3 Ultra Free",
+    "provider": {
+     "api": "https://opencode.ai/inference/openai/v1"
+    },
+    "reasoning": true,
+    "reasoning_options": [],
+    "release_date": "2026-06-04",
+    "tool_call": true
+   },
+   "nemotron-3.5-lightning-free": {
+    "attachment": false,
+    "cost": {
+     "cache_read": 0,
+     "input": 0,
+     "output": 0
+    },
+    "limit": {
+     "context": 262144,
+     "output": 262144
+    },
+    "modalities": {
+     "input": [
+      "text"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "Nemotron 3.5 Lightning Free",
+    "provider": {
+     "api": "https://opencode.ai/inference/openai/v1"
+    },
+    "reasoning": true,
+    "reasoning_options": [],
+    "release_date": "2026-08-11",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "nemotron-3.5-super-vl-free": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0,
+     "input": 0,
+     "output": 0
+    },
+    "limit": {
+     "context": 1048576,
+     "output": 131072
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "Nemotron 3.5 Super VL Free",
+    "provider": {
+     "api": "https://opencode.ai/inference/openai/v1"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "none",
+       "minimal",
+       "low",
+       "medium",
+       "high",
+       "xhigh"
+      ]
+     }
+    ],
+    "release_date": "2026-10-15",
+    "tool_call": true
+   },
+   "north-mini-code-free": {
+    "attachment": false,
+    "cost": {
+     "input": 0,
+     "output": 0
+    },
+    "limit": {
+     "context": 256000,
+     "output": 64000
+    },
+    "modalities": {
+     "input": [
+      "text"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "North Mini Code Free",
+    "provider": {
+     "api": "https://opencode.ai/inference/openai/v1"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "none",
+       "high"
+      ]
+     }
+    ],
+    "release_date": "2026-06-09",
+    "status": "deprecated",
+    "structured_output": false,
+    "tool_call": true
+   },
+   "qwen3-coder": {
+    "attachment": false,
+    "cost": {
+     "input": 0.45,
+     "output": 1.8
+    },
+    "limit": {
+     "context": 262144,
+     "output": 65536
+    },
+    "modalities": {
+     "input": [
+      "text"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "Qwen3 Coder",
+    "provider": {
+     "api": "https://opencode.ai/inference/openai/v1"
+    },
+    "reasoning": false,
+    "release_date": "2025-07-22",
+    "status": "deprecated",
+    "tool_call": true
+   },
+   "qwen3.5-plus": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.02,
+     "cache_write": 0.25,
+     "input": 0.2,
+     "output": 1.2
+    },
+    "limit": {
+     "context": 262144,
+     "output": 65536
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "video"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "Qwen3.5 Plus",
+    "provider": {
+     "api": "https://opencode.ai/inference/anthropic/v1",
+     "npm": "@ai-sdk/anthropic"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "toggle"
+     },
+     {
+      "type": "budget_tokens"
+     }
+    ],
+    "release_date": "2026-02-16",
+    "tool_call": true
+   },
+   "qwen3.6-plus": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.05,
+     "cache_write": 0.625,
+     "input": 0.5,
+     "output": 3
+    },
+    "limit": {
+     "context": 262144,
+     "output": 65536
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "video"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "Qwen3.6 Plus",
+    "provider": {
+     "api": "https://opencode.ai/inference/anthropic/v1",
+     "npm": "@ai-sdk/anthropic"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "toggle"
+     },
+     {
+      "type": "budget_tokens"
+     }
+    ],
+    "release_date": "2026-04-02",
+    "tool_call": true
+   },
+   "qwen3.6-plus-free": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0,
+     "input": 0,
+     "output": 0
+    },
+    "limit": {
+     "context": 262144,
+     "output": 65536
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "video"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "Qwen3.6 Plus Free",
+    "provider": {
+     "api": "https://opencode.ai/inference/anthropic/v1",
+     "npm": "@ai-sdk/anthropic"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "toggle"
+     },
+     {
+      "type": "budget_tokens"
+     }
+    ],
+    "release_date": "2026-04-02",
+    "status": "deprecated",
+    "tool_call": true
+   },
+   "qwen3.8-flash": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.016,
+     "cache_write": 0.2,
+     "input": 0.15,
+     "output": 0.47
+    },
+    "limit": {
+     "context": 1000000,
+     "output": 131072
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "video"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "Qwen3.8 Flash",
+    "provider": {
+     "api": "https://opencode.ai/inference/anthropic/v1",
+     "npm": "@ai-sdk/anthropic"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "toggle"
+     },
+     {
+      "type": "effort",
+      "values": [
+       "low",
+       "medium",
+       "xhigh"
+      ]
+     },
+     {
+      "type": "budget_tokens"
+     }
+    ],
+    "release_date": "2026-08-26",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "qwen3.8-max": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.25,
+     "cache_write": 2.5,
+     "input": 2,
+     "output": 6
+    },
+    "limit": {
+     "context": 262144,
+     "output": 131072
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "Qwen3.8 Max",
+    "provider": {
+     "api": "https://opencode.ai/inference/openai/v1"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "toggle"
+     },
+     {
+      "type": "effort",
+      "values": [
+       "low",
+       "medium",
+       "xhigh"
+      ]
+     },
+     {
+      "min": 1024,
+      "type": "budget_tokens"
+     }
+    ],
+    "release_date": "2026-08-03",
+    "tool_call": true
+   },
+   "ring-2.6-1t-free": {
+    "attachment": false,
+    "cost": {
+     "input": 0,
+     "output": 0
+    },
+    "limit": {
+     "context": 262000,
+     "output": 66000
+    },
+    "modalities": {
+     "input": [
+      "text"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "Ring 2.6 1T Free",
+    "provider": {
+     "api": "https://opencode.ai/inference/openai/v1"
+    },
+    "reasoning": true,
+    "reasoning_options": [],
+    "release_date": "2026-05-08",
+    "status": "deprecated",
+    "tool_call": true
+   },
+   "space-bunny-free": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0,
+     "cache_write": 0,
+     "input": 0,
+     "output": 0
+    },
+    "limit": {
+     "context": 1048576,
+     "output": 524288
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "video"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "Space Bunny Free",
+    "provider": {
+     "api": "https://opencode.ai/inference/openai/v1"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "low",
+       "medium",
+       "high",
+       "xhigh",
+       "max"
+      ]
+     }
+    ],
+    "release_date": "2026-09-23",
+    "status": "deprecated",
+    "tool_call": true
+   },
+   "step-5-preview-free": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0,
+     "input": 0,
+     "output": 0
+    },
+    "limit": {
+     "context": 1000000,
+     "output": 65536
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "video"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "Step 5 Preview Free",
+    "provider": {
+     "api": "https://opencode.ai/inference/openai/v1"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "low",
+       "medium",
+       "high"
+      ]
+     }
+    ],
+    "release_date": "2026-09-16",
+    "status": "deprecated",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "trinity-large-preview-free": {
+    "attachment": false,
+    "cost": {
+     "input": 0,
+     "output": 0
+    },
+    "limit": {
+     "context": 131072,
+     "output": 131072
+    },
+    "modalities": {
+     "input": [
+      "text"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "Trinity Large Preview",
+    "provider": {
+     "api": "https://opencode.ai/inference/openai/v1"
+    },
+    "reasoning": false,
+    "release_date": "2026-01-27",
+    "status": "deprecated",
+    "tool_call": true
+   },
+   "x-preview-f-free": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0,
+     "input": 0,
+     "output": 0
+    },
+    "limit": {
+     "context": 1000000,
+     "output": 131072
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "video"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "Ox Alpha Free (Unlimited)",
+    "provider": {
+     "api": "https://opencode.ai/inference/openai/v1"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "low",
+       "high",
+       "max"
+      ]
+     }
+    ],
+    "release_date": "2026-08-21",
+    "status": "deprecated",
+    "structured_output": true,
+    "tool_call": true
+   }
+  },
+  "npm": "@ai-sdk/openai-compatible"
+ },
+ "opencode-go": {
+  "api": "https://opencode.ai/inference/go/openai/v1",
+  "env": [
+   "OPENCODE_API_KEY"
+  ],
+  "models": {
+   "beam-free": {
+    "attachment": false,
+    "cost": {
+     "cache_read": 0,
+     "input": 0,
+     "output": 0
+    },
+    "limit": {
+     "context": 1048576,
+     "output": 131072
+    },
+    "modalities": {
+     "input": [
+      "text"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "Beam Free",
+    "provider": {
+     "api": "https://opencode.ai/inference/go/openai/v1"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "low",
+       "medium",
+       "high",
+       "xhigh",
+       "max"
+      ]
+     }
+    ],
+    "release_date": "2026-10-05",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "cat-jam-free": {
+    "attachment": false,
+    "cost": {
+     "cache_read": 0,
+     "input": 0,
+     "output": 0
+    },
+    "limit": {
+     "context": 1048576,
+     "output": 131072
+    },
+    "modalities": {
+     "input": [
+      "text"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "Cat Jam Free",
+    "provider": {
+     "api": "https://opencode.ai/inference/go/openai/v1"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "low",
+       "medium",
+       "high",
+       "xhigh",
+       "max"
+      ]
+     }
+    ],
+    "release_date": "2026-10-12",
+    "status": "deprecated",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "claude-haiku-5-5": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.01,
+     "cache_write": 0.125,
+     "input": 0.1,
+     "output": 0.5
+    },
+    "limit": {
+     "context": 1000000,
+     "output": 128000
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "pdf"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "Claude Haiku 5.5",
+    "provider": {
+     "api": "https://opencode.ai/inference/go/anthropic/v1",
+     "npm": "@ai-sdk/anthropic"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "toggle"
+     },
+     {
+      "type": "effort",
+      "values": [
+       "low",
+       "medium",
+       "high",
+       "xhigh",
+       "max"
+      ]
+     }
+    ],
+    "release_date": "2026-10-07",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "deepseek-v4-pro": {
+    "attachment": false,
+    "cost": {
+     "cache_read": 0.022,
+     "input": 0.66,
+     "output": 1.98
+    },
+    "limit": {
+     "context": 1000000,
+     "output": 384000
+    },
+    "modalities": {
+     "input": [
+      "text"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "DeepSeek V4 Pro (New)",
+    "provider": {
+     "api": "https://opencode.ai/inference/go/openai/v1"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "high",
+       "max"
+      ]
+     }
+    ],
+    "release_date": "2026-04-24",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "deepseek-v4.1-flash": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.003,
+     "input": 0.15,
+     "output": 0.6
+    },
+    "limit": {
+     "context": 1000000,
+     "output": 384000
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "DeepSeek V4.1 Flash",
+    "provider": {
+     "api": "https://opencode.ai/inference/go/openai/v1"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "low",
+       "high",
+       "max"
+      ]
+     }
+    ],
+    "release_date": "2026-09-10",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "gemini-4-argon-contributor": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.2,
+     "input": 4,
+     "output": 20
+    },
+    "limit": {
+     "context": 1048576,
+     "output": 65536
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "video",
+      "audio",
+      "pdf"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "Gemini 4 Argon Contributor",
+    "provider": {
+     "api": "https://opencode.ai/inference/go/google/v1beta",
+     "npm": "@ai-sdk/google"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "low",
+       "medium",
+       "high"
+      ]
+     }
+    ],
+    "release_date": "2026-10-13",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "glm-5.2": {
+    "attachment": false,
+    "cost": {
+     "cache_read": 0.26,
+     "input": 1.4,
+     "output": 4.4
+    },
+    "limit": {
+     "context": 1000000,
+     "output": 131072
+    },
+    "modalities": {
+     "input": [
+      "text"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "GLM-5.2",
+    "provider": {
+     "api": "https://opencode.ai/inference/go/openai/v1"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "high",
+       "max"
+      ]
+     }
+    ],
+    "release_date": "2026-06-13",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "glm-5.3": {
+    "attachment": false,
+    "cost": {
+     "cache_read": 0.26,
+     "input": 1.4,
+     "output": 4.4
+    },
+    "limit": {
+     "context": 1000000,
+     "output": 131072
+    },
+    "modalities": {
+     "input": [
+      "text"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "GLM-5.3",
+    "provider": {
+     "api": "https://opencode.ai/inference/go/openai/v1"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "low",
+       "high",
+       "max"
+      ]
+     }
+    ],
+    "release_date": "2026-08-14",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "glm-5.3-flash": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.03,
+     "input": 0.15,
+     "output": 0.5
+    },
+    "limit": {
+     "context": 1000000,
+     "output": 131072
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "video",
+      "pdf"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "GLM-5.3-Flash",
+    "provider": {
+     "api": "https://opencode.ai/inference/go/openai/v1"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "low",
+       "high",
+       "max"
+      ]
+     }
+    ],
+    "release_date": "2026-08-26",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "gpt-5.6-luna": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.02,
+     "cache_write": 0.25,
+     "input": 0.2,
+     "output": 1.2
+    },
+    "limit": {
+     "context": 1050000,
+     "output": 128000
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "pdf"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "GPT-5.6 Luna",
+    "provider": {
+     "api": "https://opencode.ai/inference/go/openai/v1",
+     "npm": "@ai-sdk/openai"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "none",
+       "low",
+       "medium",
+       "high",
+       "xhigh",
+       "max"
+      ]
+     }
+    ],
+    "release_date": "2026-07-09",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "gpt-6-luna": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.01,
+     "cache_write": 0.125,
+     "input": 0.1,
+     "output": 0.5
+    },
+    "limit": {
+     "context": 1050000,
+     "output": 128000
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "pdf"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "GPT-6 Luna",
+    "provider": {
+     "api": "https://opencode.ai/inference/go/openai/v1",
+     "npm": "@ai-sdk/openai"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "none",
+       "low",
+       "medium",
+       "high",
+       "xhigh",
+       "max"
+      ]
+     }
+    ],
+    "release_date": "2026-09-22",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "grok-4.7": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.5,
+     "input": 2,
+     "output": 6
+    },
+    "limit": {
+     "context": 500000,
+     "output": 500000
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "pdf"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "Grok 4.7",
+    "provider": {
+     "api": "https://opencode.ai/inference/go/openai/v1",
+     "npm": "@ai-sdk/openai"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "low",
+       "medium",
+       "high",
+       "xhigh"
+      ]
+     }
+    ],
+    "release_date": "2026-09-21",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "hy3": {
+    "attachment": false,
+    "cost": {
+     "cache_read": 0.035,
+     "input": 0.14,
+     "output": 0.58
+    },
+    "limit": {
+     "context": 256000,
+     "output": 128000
+    },
+    "modalities": {
+     "input": [
+      "text"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "Hy3",
+    "provider": {
+     "api": "https://opencode.ai/inference/go/openai/v1"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "none",
+       "low",
+       "high"
+      ]
+     }
+    ],
+    "release_date": "2026-07-06",
+    "tool_call": true
+   },
+   "hy4-preview": {
+    "attachment": false,
+    "cost": {
+     "cache_read": 0.042,
+     "input": 0.834,
+     "output": 2.501
+    },
+    "limit": {
+     "context": 1024000,
+     "output": 64000
+    },
+    "modalities": {
+     "input": [
+      "text"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "Hy4 preview",
+    "provider": {
+     "api": "https://opencode.ai/inference/go/openai/v1"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "none",
+       "high"
+      ]
+     }
+    ],
+    "release_date": "2026-08-28",
+    "tool_call": true
+   },
+   "kimi-k2.7-code": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.19,
+     "input": 0.95,
+     "output": 4
+    },
+    "limit": {
+     "context": 262144,
+     "output": 262144
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "video"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "Kimi K2.7 Code",
+    "provider": {
+     "api": "https://opencode.ai/inference/go/openai/v1"
+    },
+    "reasoning": true,
+    "reasoning_options": [],
+    "release_date": "2026-06-12",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "kimi-k3": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.3,
+     "cache_write": 3,
+     "input": 3,
+     "output": 15
+    },
+    "limit": {
+     "context": 1048576,
+     "output": 131072
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "video"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "Kimi K3",
+    "provider": {
+     "api": "https://opencode.ai/inference/go/openai/v1"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "max"
+      ]
+     }
+    ],
+    "release_date": "2026-07-16",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "kimi-k3.1-pro": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.2,
+     "cache_write": 2,
+     "input": 2,
+     "output": 10
+    },
+    "limit": {
+     "context": 1048576,
+     "output": 131072
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "video"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "Kimi K3.1 Pro",
+    "provider": {
+     "api": "https://opencode.ai/inference/go/openai/v1"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "low",
+       "high",
+       "max"
+      ]
+     }
+    ],
+    "release_date": "2026-10-23",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "longcat-2.0": {
+    "attachment": false,
+    "cost": {
+     "cache_read": 0.006,
+     "input": 0.3,
+     "output": 1.2
+    },
+    "limit": {
+     "context": 1000000,
+     "output": 131072
+    },
+    "modalities": {
+     "input": [
+      "text"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "LongCat-2.0",
+    "provider": {
+     "api": "https://opencode.ai/inference/go/openai/v1"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "toggle"
+     }
+    ],
+    "release_date": "2026-06-30",
+    "tool_call": true
+   },
+   "longcat-2.5-preview-free": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0,
+     "input": 0,
+     "output": 0
+    },
+    "limit": {
+     "context": 1000000,
+     "output": 131072
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "LongCat 2.5 Preview Free",
+    "provider": {
+     "api": "https://opencode.ai/inference/go/openai/v1"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "toggle"
+     }
+    ],
+    "release_date": "2026-09-25",
+    "status": "deprecated",
+    "tool_call": true
+   },
+   "mimo-v2.5": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.0028,
+     "input": 0.14,
+     "output": 0.28
+    },
+    "limit": {
+     "context": 1000000,
+     "output": 128000
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "audio",
+      "video"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "MiMo V2.5",
+    "provider": {
+     "api": "https://opencode.ai/inference/go/openai/v1"
+    },
+    "reasoning": true,
+    "reasoning_options": [],
+    "release_date": "2026-04-22",
+    "tool_call": true
+   },
+   "mimo-v2.5-pro": {
+    "attachment": false,
+    "cost": {
+     "cache_read": 0.003625,
+     "input": 0.435,
+     "output": 0.87
+    },
+    "limit": {
+     "context": 1048576,
+     "output": 128000
+    },
+    "modalities": {
+     "input": [
+      "text"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "MiMo V2.5 Pro",
+    "provider": {
+     "api": "https://opencode.ai/inference/go/openai/v1"
+    },
+    "reasoning": true,
+    "reasoning_options": [],
+    "release_date": "2026-04-22",
+    "tool_call": true
+   },
+   "mimo-v2.6-flash": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.0028,
+     "input": 0.14,
+     "output": 0.28
+    },
+    "limit": {
+     "context": 1048576,
+     "output": 131072
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "audio",
+      "video"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "MiMo-V2.6-Flash",
+    "provider": {
+     "api": "https://opencode.ai/inference/go/openai/v1"
+    },
+    "reasoning": true,
+    "reasoning_options": [],
+    "release_date": "2026-09-22",
+    "tool_call": true
+   },
+   "mimo-v2.6-pro": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.003625,
+     "input": 0.435,
+     "output": 0.87
+    },
+    "limit": {
+     "context": 1048576,
+     "output": 131072
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "audio",
+      "video"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "MiMo-V2.6-Pro",
+    "provider": {
+     "api": "https://opencode.ai/inference/go/openai/v1"
+    },
+    "reasoning": true,
+    "reasoning_options": [],
+    "release_date": "2026-09-22",
+    "tool_call": true
+   },
+   "minimax-m2.7": {
+    "attachment": false,
+    "cost": {
+     "cache_read": 0.06,
+     "cache_write": 0.375,
+     "input": 0.3,
+     "output": 1.2
+    },
+    "limit": {
+     "context": 204800,
+     "output": 131072
+    },
+    "modalities": {
+     "input": [
+      "text"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "MiniMax-M2.7",
+    "provider": {
+     "api": "https://opencode.ai/inference/go/anthropic/v1",
+     "npm": "@ai-sdk/anthropic"
+    },
+    "reasoning": true,
+    "reasoning_options": [],
+    "release_date": "2026-03-18",
+    "status": "deprecated",
+    "tool_call": true
+   },
+   "minimax-m3": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.06,
+     "input": 0.3,
+     "output": 1.2
+    },
+    "limit": {
+     "context": 1000000,
+     "output": 131072
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "video"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "MiniMax-M3",
+    "provider": {
+     "api": "https://opencode.ai/inference/go/anthropic/v1",
+     "npm": "@ai-sdk/anthropic"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "toggle"
+     }
+    ],
+    "release_date": "2026-06-01",
+    "tool_call": true
+   },
+   "minimax-m3.1-flash": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.015,
+     "input": 0.15,
+     "output": 0.6
+    },
+    "limit": {
+     "context": 1000000,
+     "output": 512000
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "video"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "MiniMax M3.1 Flash",
+    "provider": {
+     "api": "https://opencode.ai/inference/go/openai/v1"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "low",
+       "medium",
+       "high",
+       "xhigh",
+       "max"
+      ]
+     }
+    ],
+    "release_date": "2026-10-19",
+    "tool_call": true
+   },
+   "minimax-m3.1-flash-free": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0,
+     "input": 0,
+     "output": 0
+    },
+    "limit": {
+     "context": 1000000,
+     "output": 512000
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "video"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "MiniMax M3.1 Flash Free",
+    "provider": {
+     "api": "https://opencode.ai/inference/go/openai/v1"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "low",
+       "medium",
+       "high",
+       "xhigh",
+       "max"
+      ]
+     }
+    ],
+    "release_date": "2026-10-19",
+    "status": "deprecated",
+    "tool_call": true
+   },
+   "muse-spark-1.2-contributor": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.002,
+     "input": 0.1,
+     "output": 0.2
+    },
+    "limit": {
+     "context": 1048576,
+     "output": 131072
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "video",
+      "pdf",
+      "audio"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "Muse Spark 1.2 Contributor",
+    "provider": {
+     "api": "https://opencode.ai/inference/go/openai/v1",
+     "npm": "@ai-sdk/openai"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "minimal",
+       "low",
+       "medium",
+       "high",
+       "xhigh"
+      ]
+     }
+    ],
+    "release_date": "2026-08-05",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "muse-spark-1.3-contributor": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.002,
+     "input": 0.1,
+     "output": 0.2
+    },
+    "limit": {
+     "context": 1048576,
+     "output": 131072
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "video",
+      "pdf",
+      "audio"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "Muse Spark 1.3 Contributor",
+    "provider": {
+     "api": "https://opencode.ai/inference/go/openai/v1",
+     "npm": "@ai-sdk/openai"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "minimal",
+       "low",
+       "medium",
+       "high",
+       "xhigh"
+      ]
+     }
+    ],
+    "release_date": "2026-09-02",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "qwen3.7-plus": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.04,
+     "cache_write": 0.5,
+     "input": 0.4,
+     "output": 1.6
+    },
+    "limit": {
+     "context": 1000000,
+     "output": 65536
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "video"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "Qwen3.7 Plus",
+    "provider": {
+     "api": "https://opencode.ai/inference/go/anthropic/v1",
+     "npm": "@ai-sdk/anthropic"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "toggle"
+     },
+     {
+      "max": 262144,
+      "type": "budget_tokens"
+     }
+    ],
+    "release_date": "2026-06-02",
+    "tool_call": true
+   },
+   "qwen3.8-flash": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.016,
+     "cache_write": 0.2,
+     "input": 0.15,
+     "output": 0.47
+    },
+    "limit": {
+     "context": 1000000,
+     "output": 131072
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "video"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "Qwen3.8 Flash",
+    "provider": {
+     "api": "https://opencode.ai/inference/go/anthropic/v1",
+     "npm": "@ai-sdk/anthropic"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "toggle"
+     },
+     {
+      "type": "effort",
+      "values": [
+       "low",
+       "medium",
+       "xhigh"
+      ]
+     },
+     {
+      "type": "budget_tokens"
+     }
+    ],
+    "release_date": "2026-08-26",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "qwen3.8-max": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.25,
+     "cache_write": 2.5,
+     "input": 2,
+     "output": 6
+    },
+    "limit": {
+     "context": 1000000,
+     "output": 131072
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "video"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "Qwen3.8 Max",
+    "provider": {
+     "api": "https://opencode.ai/inference/go/anthropic/v1",
+     "npm": "@ai-sdk/anthropic"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "toggle"
+     },
+     {
+      "type": "effort",
+      "values": [
+       "low",
+       "medium",
+       "xhigh"
+      ]
+     },
+     {
+      "max": 262144,
+      "type": "budget_tokens"
+     }
+    ],
+    "release_date": "2026-08-03",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "space-bunny": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.03,
+     "cache_write": 0,
+     "input": 0.15,
+     "output": 0.6
+    },
+    "limit": {
+     "context": 1048576,
+     "output": 524288
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "video"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "Space Bunny",
+    "provider": {
+     "api": "https://opencode.ai/inference/go/openai/v1"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "low",
+       "medium",
+       "high",
+       "xhigh",
+       "max"
+      ]
+     }
+    ],
+    "release_date": "2026-09-23",
+    "status": "deprecated",
+    "tool_call": true
+   },
+   "step-5-preview": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0.1,
+     "input": 1,
+     "output": 2.7
+    },
+    "limit": {
+     "context": 1000000,
+     "output": 65536
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "video"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "Step 5 Preview",
+    "provider": {
+     "api": "https://opencode.ai/inference/go/openai/v1"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "low",
+       "medium",
+       "high"
+      ]
+     }
+    ],
+    "release_date": "2026-09-16",
+    "structured_output": true,
+    "tool_call": true
+   },
+   "step-5-preview-free": {
+    "attachment": true,
+    "cost": {
+     "cache_read": 0,
+     "input": 0,
+     "output": 0
+    },
+    "limit": {
+     "context": 1000000,
+     "output": 65536
+    },
+    "modalities": {
+     "input": [
+      "text",
+      "image",
+      "video"
+     ],
+     "output": [
+      "text"
+     ]
+    },
+    "name": "Step 5 Preview Free",
+    "provider": {
+     "api": "https://opencode.ai/inference/go/openai/v1"
+    },
+    "reasoning": true,
+    "reasoning_options": [
+     {
+      "type": "effort",
+      "values": [
+       "low",
+       "medium",
+       "high"
+      ]
+     }
+    ],
+    "release_date": "2026-09-16",
+    "status": "deprecated",
+    "structured_output": true,
+    "tool_call": true
+   }
+  },
+  "npm": "@ai-sdk/openai-compatible"
+ }
+}

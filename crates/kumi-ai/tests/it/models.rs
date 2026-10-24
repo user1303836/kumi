@@ -64,7 +64,7 @@ async fn chatgpt_catalog_keeps_priority_zero_and_its_supported_effort_levels() {
             ]}),
         ))
     });
-    let models = list_models(ProviderId::OpenaiCodex, opts(store, fetch)).await.unwrap();
+    let models = list_models(ProviderId::parse("openai-codex").unwrap(), opts(store, fetch)).await.unwrap();
     assert_eq!(
         models.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(),
         ["openai-codex/gpt-6-nova", "openai-codex/gpt-6-astra", "openai-codex/gpt-6-luna", "openai-codex/gpt-6-draft"]
@@ -76,8 +76,14 @@ async fn chatgpt_catalog_keeps_priority_zero_and_its_supported_effort_levels() {
         json!([{"id":"priority","name":"Fast","description":"2x speed, increased usage"}]),
         "the faster tier the list names, read as it is"
     );
+    // What ChatGPT's list says, as it says it; models.dev adds what it knows of the model beside.
+    let mut luna = serde_json::to_value(&models[2]).unwrap();
+    assert_eq!(luna["factsFrom"], "provider");
+    for added in ["tools", "context", "reasoning", "inputs", "maxOutput", "cost", "factsFrom"] {
+        luna.as_object_mut().unwrap().remove(added);
+    }
     assert_eq!(
-        serde_json::to_value(&models[2]).unwrap(),
+        luna,
         json!({"id":"openai-codex/gpt-6-luna","provider":"openai-codex","model":"gpt-6-luna","name":"GPT-6 Luna","description":"Fast","efforts":[{"effort":"low","description":"Quick"},{"effort":"medium"}],"defaultEffort":"low"})
     );
     let seen = seen.borrow();
@@ -90,7 +96,7 @@ async fn saved_or_environment_keys_list_models_with_provider_capabilities_and_fi
     let (_dir, store) = store();
     let (fetch, _) = server(|_, _| panic!("missing credentials must fail before network"));
     assert!(
-        matches!(list_models(ProviderId::Anthropic,opts(store.clone(),fetch)).await,Err(RuntimeError::Kumi(e))if e.kind==FailureKind::Auth&&e.provider.as_deref()==Some("anthropic"))
+        matches!(list_models(ProviderId::parse("anthropic").unwrap(),opts(store.clone(),fetch)).await,Err(RuntimeError::Kumi(e))if e.kind==FailureKind::Auth&&e.provider.as_deref()==Some("anthropic"))
     );
     store.update_with("anthropic", |_| async { Ok(Some(Credential::ApiKey { key: "sk-ant-saved-0000".into() })) }).await.unwrap();
     let (fetch, seen) = server(|url, headers| {
@@ -116,7 +122,7 @@ async fn saved_or_environment_keys_list_models_with_provider_capabilities_and_fi
             _ => Response::text_response(404, "not found"),
         })
     });
-    let models = list_models(ProviderId::Anthropic, opts(store.clone(), fetch.clone())).await.unwrap();
+    let models = list_models(ProviderId::parse("anthropic").unwrap(), opts(store.clone(), fetch.clone())).await.unwrap();
     assert_eq!(
         models
             .iter()
@@ -131,22 +137,22 @@ async fn saved_or_environment_keys_list_models_with_provider_capabilities_and_fi
     );
     let mut options = opts(store.clone(), fetch.clone());
     options.env = Some([("OPENAI_API_KEY".into(), "sk-env-openai".into())].into());
-    let models = list_models(ProviderId::Openai, options).await.unwrap();
+    let models = list_models(ProviderId::parse("openai").unwrap(), options).await.unwrap();
     assert_eq!(models.iter().map(|m| m.model.as_str()).collect::<Vec<_>>(), ["gpt-6-astra", "gpt-6-luna", "o5-mini"]);
     assert_eq!(models[0].efforts.len(), 5);
     assert_eq!(models[2].efforts.len(), 3);
     let mut options = opts(store.clone(), fetch.clone());
     options.env = Some([("OPENCODE_API_KEY".into(), "oc-env-key".into())].into());
-    let models = list_models(ProviderId::Opencode, options).await.unwrap();
+    let models = list_models(ProviderId::parse("opencode").unwrap(), options).await.unwrap();
     assert_eq!(models.iter().map(|m| m.model.as_str()).collect::<Vec<_>>(), ["claude-sonnet-5-5", "kimi-k2.6"]);
     let mut options = opts(store.clone(), fetch.clone());
     options.env = Some([("ANTHROPIC_API_KEY".into(), "sk-ant-env-1111".into())].into());
-    list_models(ProviderId::Anthropic, options).await.unwrap();
+    list_models(ProviderId::parse("anthropic").unwrap(), options).await.unwrap();
     assert_eq!(seen.borrow().last().unwrap().1["x-api-key"], "sk-ant-saved-0000");
     store.update_with("anthropic", |_| async { Ok(None) }).await.unwrap();
     let mut options = opts(store, fetch);
     options.env = Some([("ANTHROPIC_API_KEY".into(), "sk-ant-env-1111".into())].into());
-    assert!(list_models(ProviderId::Anthropic, options).await.is_err());
+    assert!(list_models(ProviderId::parse("anthropic").unwrap(), options).await.is_err());
     assert_eq!(seen.borrow().last().unwrap().1["x-api-key"], "sk-ant-env-1111");
 }
 #[tokio::test]
@@ -159,21 +165,22 @@ async fn keys_are_checked_before_saving_and_transport_failure_is_not_rejection()
         })
     });
     assert_eq!(
-        check_api_key(ProviderId::Anthropic, "good-key-123", Transport { fetch: Some(fetch.clone()), signal: None }).await,
+        check_api_key(ProviderId::parse("anthropic").unwrap(), "good-key-123", Transport { fetch: Some(fetch.clone()), signal: None })
+            .await,
         ApiKeyCheck::Ok
     );
     assert_eq!(
-        check_api_key(ProviderId::Anthropic, "bad-key-456", Transport { fetch: Some(fetch), signal: None }).await,
+        check_api_key(ProviderId::parse("anthropic").unwrap(), "bad-key-456", Transport { fetch: Some(fetch), signal: None }).await,
         ApiKeyCheck::Refused
     );
     let (fetch, _) = server(|_, _| Err(LanguageModelError::other("fetch failed")));
     assert_eq!(
-        check_api_key(ProviderId::Anthropic, "good-key-123", Transport { fetch: Some(fetch), signal: None }).await,
+        check_api_key(ProviderId::parse("anthropic").unwrap(), "good-key-123", Transport { fetch: Some(fetch), signal: None }).await,
         ApiKeyCheck::Unreachable
     );
     let (fetch, _) = server(|_, _| Ok(Response::json_response(500, json!({}))));
     assert_eq!(
-        check_api_key(ProviderId::Anthropic, "good-key-123", Transport { fetch: Some(fetch), signal: None }).await,
+        check_api_key(ProviderId::parse("anthropic").unwrap(), "good-key-123", Transport { fetch: Some(fetch), signal: None }).await,
         ApiKeyCheck::Unreachable
     );
 }
@@ -197,10 +204,32 @@ async fn catalogs_handle_malformed_rows_and_bound_names_using_js_string_lengths(
             json!({"models":[null,[],5,{"slug":1},{"slug":"last"},{"slug":"first","priority":" -1 ","display_name":format!("  {}  ","😀".repeat(31)),"description":"  description  "},{"slug":"middle","priority":"0x10"}]}),
         ))
     });
-    let models = list_models(ProviderId::OpenaiCodex, opts(store, fetch)).await.unwrap();
+    let models = list_models(ProviderId::parse("openai-codex").unwrap(), opts(store, fetch)).await.unwrap();
     assert_eq!(models.iter().map(|m| m.model.as_str()).collect::<Vec<_>>(), ["first", "middle", "last"]);
     assert_eq!(models[0].name, "😀".repeat(30));
     assert_eq!(models[0].description.as_deref(), Some("description"));
     let (fetch, _) = server(|_, _| Ok(Response::json_response(200, Value::Null)));
-    assert_eq!(check_api_key(ProviderId::Openai, "key", Transport { fetch: Some(fetch), signal: None }).await, ApiKeyCheck::Ok);
+    assert_eq!(
+        check_api_key(ProviderId::parse("openai").unwrap(), "key", Transport { fetch: Some(fetch), signal: None }).await,
+        ApiKeyCheck::Ok
+    );
+}
+#[test]
+fn a_model_list_kept_before_kumi_knew_more_facts_reads_back_and_a_new_one_round_trips() {
+    // As the last release wrote one: its new facts are unknown, not wrong.
+    let old: kumi_ai::providers::models::ModelInfo = serde_json::from_value(json!({"id":"openai-codex/gpt-6-luna","provider":"openai-codex","model":"gpt-6-luna","name":"GPT-6 Luna","description":"Fast","efforts":[{"effort":"low","description":"Quick"},{"effort":"medium"}],"defaultEffort":"low","serviceTiers":[{"id":"priority","name":"Fast"}]})).unwrap();
+    assert_eq!((old.tools, old.reasoning, old.facts_from, old.inputs.len(), old.labels.len()), (None, None, None, 0, 0));
+    let mut new = old.clone();
+    new.efforts.insert(0, kumi_ai::providers::models::EffortInfo { effort: Effort::None, description: None });
+    new.inputs = vec![kumi_ai::providers::models::Input::Image, kumi_ai::providers::models::Input::Pdf];
+    new.format = Some(kumi_ai::providers::Format::Messages);
+    new.facts_from = Some(kumi_ai::providers::models::FactsFrom::Catalog);
+    new.cost = Some(kumi_ai::providers::models::Cost { input: Some(1.25), output: Some(10.), cache_read: None, cache_write: None });
+    let value = serde_json::to_value(&new).unwrap();
+    assert_eq!(value["efforts"][0], json!({"effort":"none"}));
+    assert_eq!(
+        (&value["inputs"], &value["format"], &value["factsFrom"]),
+        (&json!(["image", "pdf"]), &json!("anthropic"), &json!("catalog"))
+    );
+    assert_eq!(serde_json::from_value::<kumi_ai::providers::models::ModelInfo>(value).unwrap(), new);
 }

@@ -5,13 +5,19 @@ use kumi_ai::{
     auth::store::{open_credential_store, Credential, CredentialStore},
     error::LanguageModelError,
     http::{default_fetch, Fetch, FetchInit, Response},
-    providers::{models::ApiKeyCheck, Effort, ProviderId},
+    providers::{
+        catalog::{self, Catalog},
+        models::ApiKeyCheck,
+        table::{add_test_rows, ProviderRow, API_KEY_ROW},
+        Effort, ProviderId,
+    },
 };
 use kumi_types::{errors::FailureKind, system::Env};
 use serde_json::{json, Value};
 use std::{
     cell::{Cell, RefCell},
     rc::Rc,
+    sync::Arc,
 };
 const GOOD: &str = "sk-ant-fixture-good-0001";
 struct Anthropic;
@@ -96,16 +102,19 @@ impl Fixture {
 #[tokio::test(flavor = "current_thread")]
 async fn keys_are_kept_only_when_the_provider_accepts_them_then_models_are_available() {
     let f = Fixture::new(Env::new());
-    assert!(!f.control.providers().await.unwrap().iter().find(|p| p.id == ProviderId::Anthropic).unwrap().signed_in);
+    assert!(!f.control.providers().await.unwrap().iter().find(|p| p.id == ProviderId::parse("anthropic").unwrap()).unwrap().signed_in);
     let error = f.control.choose("anthropic/claude-sonnet-5-5").await.unwrap_err();
     assert_eq!(error.kumi().unwrap().kind, FailureKind::Auth);
     assert_eq!(error.kumi().unwrap().provider.as_deref(), Some("anthropic"));
-    assert_eq!(f.control.save_key(ProviderId::Anthropic, "sk-ant-fixture-bad-0002", None).await.unwrap(), ApiKeyCheck::Refused);
+    assert_eq!(
+        f.control.save_key(ProviderId::parse("anthropic").unwrap(), "sk-ant-fixture-bad-0002", None).await.unwrap(),
+        ApiKeyCheck::Refused
+    );
     assert!(f.store.get("anthropic").await.unwrap().is_none());
-    assert_eq!(f.control.save_key(ProviderId::Anthropic, &format!(" {GOOD}\n"), None).await.unwrap(), ApiKeyCheck::Ok);
+    assert_eq!(f.control.save_key(ProviderId::parse("anthropic").unwrap(), &format!(" {GOOD}\n"), None).await.unwrap(), ApiKeyCheck::Ok);
     assert_eq!(f.store.get("anthropic").await.unwrap(), Some(Credential::ApiKey { key: GOOD.into() }));
     assert_eq!(
-        f.control.providers().await.unwrap().iter().find(|p| p.id == ProviderId::Anthropic).unwrap().via.as_deref(),
+        f.control.providers().await.unwrap().iter().find(|p| p.id == ProviderId::parse("anthropic").unwrap()).unwrap().via.as_deref(),
         Some("saved key")
     );
     assert_eq!(
@@ -116,7 +125,7 @@ async fn keys_are_kept_only_when_the_provider_accepts_them_then_models_are_avail
 #[tokio::test(flavor = "current_thread")]
 async fn model_and_effort_persist_an_unsupported_effort_reverts_and_signout_is_applied() {
     let f = Fixture::new(Env::new());
-    f.control.save_key(ProviderId::Anthropic, GOOD, None).await.unwrap();
+    f.control.save_key(ProviderId::parse("anthropic").unwrap(), GOOD, None).await.unwrap();
     assert_eq!(f.control.choose_default().await.unwrap().unwrap().model.id, "anthropic/claude-sonnet-5-5");
     f.control.set_effort(Some(Effort::Max)).await.unwrap();
     assert_eq!(f.settings(), json!({"model":"anthropic/claude-sonnet-5-5","effort":"max"}));
@@ -132,11 +141,11 @@ async fn model_and_effort_persist_an_unsupported_effort_reverts_and_signout_is_a
     f.control.choose("anthropic/claude-haiku-4-5").await.unwrap();
     assert_eq!(f.settings(), json!({"model":"anthropic/claude-haiku-4-5"}));
     assert!(f.changes.get() >= 3);
-    assert!(f.control.sign_out(ProviderId::Anthropic).await.unwrap());
+    assert!(f.control.sign_out(ProviderId::parse("anthropic").unwrap()).await.unwrap());
     let error = f.control.binding().await.err().unwrap();
     assert_eq!(error.kumi().unwrap().kind, FailureKind::Auth);
     assert_eq!(error.kumi().unwrap().provider.as_deref(), Some("anthropic"));
-    assert!(!f.control.sign_out(ProviderId::Anthropic).await.unwrap());
+    assert!(!f.control.sign_out(ProviderId::parse("anthropic").unwrap()).await.unwrap());
 }
 /// Signed in to ChatGPT, with a token good for a day.
 async fn sign_in_chatgpt(store: &Rc<dyn CredentialStore>) {
@@ -203,7 +212,10 @@ async fn opencode_zen_and_go_share_new_keys_and_invalidate_the_current_binding()
         say: None,
         installed: None,
     });
-    assert_eq!(control.save_key(ProviderId::Opencode, "oc-fixture-key-0001", None).await.unwrap(), ApiKeyCheck::Unreachable);
+    assert_eq!(
+        control.save_key(ProviderId::parse("opencode").unwrap(), "oc-fixture-key-0001", None).await.unwrap(),
+        ApiKeyCheck::Unreachable
+    );
     assert_eq!(changes.get(), 1);
 }
 #[tokio::test(flavor = "current_thread")]
@@ -220,7 +232,7 @@ async fn a_saved_model_its_providers_list_no_longer_shows_is_said() {
     offline.control.choose("openai-codex/gpt-5.5").await.unwrap();
     assert_eq!(missing_model(&offline.control).await, None);
     f.control.choose("openai-codex/gpt-5.5").await.unwrap();
-    assert!(f.control.sign_out(ProviderId::OpenaiCodex).await.unwrap());
+    assert!(f.control.sign_out(ProviderId::parse("openai-codex").unwrap()).await.unwrap());
     assert_eq!(missing_model(&f.control).await, None);
     let pinned = Fixture::with_fetch(Env::from([("KUMI_MODEL".into(), "openai-codex/gpt-5.5".into())]), Rc::new(Chatgpt));
     sign_in_chatgpt(&pinned.store).await;
@@ -232,13 +244,13 @@ async fn environment_model_choices_are_temporary_and_environment_keys_cannot_be_
         Fixture::new(Env::from([("KUMI_MODEL".into(), "anthropic/claude-sonnet-5-5".into()), ("ANTHROPIC_API_KEY".into(), GOOD.into())]));
     assert!(f.control.current().pinned);
     assert_eq!(
-        f.control.providers().await.unwrap().iter().find(|p| p.id == ProviderId::Anthropic).unwrap().via.as_deref(),
+        f.control.providers().await.unwrap().iter().find(|p| p.id == ProviderId::parse("anthropic").unwrap()).unwrap().via.as_deref(),
         Some("environment")
     );
     f.control.choose("anthropic/claude-haiku-4-5").await.unwrap();
     assert_eq!(f.control.current().model.as_deref(), Some("anthropic/claude-haiku-4-5"));
     assert_eq!(f.settings(), json!({}));
-    assert!(!f.control.sign_out(ProviderId::Anthropic).await.unwrap());
+    assert!(!f.control.sign_out(ProviderId::parse("anthropic").unwrap()).await.unwrap());
     let none = Fixture::new(Env::new());
     assert!(none.control.binding().await.err().unwrap().to_string().contains("Choose a model to talk to: type /model"));
 }
@@ -319,4 +331,125 @@ async fn local_models_need_no_signin_choose_a_loaded_tool_model_and_explain_limi
     tokio::task::LocalSet::new().run_until(async{
 let(server,task)=ollama().await;let folder=tempfile::tempdir().unwrap();let file=folder.path().join("settings.json");let servers=json!([{"name":"llama.cpp","baseURL":"http://127.0.0.1:9/v1"}]);std::fs::write(&file,json!({"modelServers":servers}).to_string()).unwrap();let said=Rc::new(RefCell::new(Vec::new()));let make=|file:&std::path::Path,auth:&str|create_model_control(ModelControlOptions{store:Rc::new(open_credential_store(folder.path().join(auth))),settings_file:file.to_string_lossy().into(),env:Env::from([("OLLAMA_HOST".into(),server.clone())]),fetch:Some(Rc::new(NoStudio)),changed:Rc::new(||async{Ok(())}.boxed_local()),say:Some(Rc::new({let said=said.clone();move|message|said.borrow_mut().push(message)})),installed:Some(Rc::new(|_|false))});let control=make(&file,"auth.json");assert_eq!(serde_json::to_value(control.local().await).unwrap(),json!([{"id":"ollama","name":"Ollama","where":"on this computer","running":true},{"id":"llama-cpp","name":"llama.cpp","where":"on this computer","running":false,"start":"Start it, or check its address (http://127.0.0.1:9/v1) in ~/.kumi/settings.json"}]));assert_eq!(control.models("ollama",false).await.unwrap().into_iter().map(|m|(m.id,m.description)).collect::<Vec<_>>(),vec![("ollama/qwen3:8b".into(),Some("8B · Q4_K_M · loaded".into())),("ollama/gemma3:4b".into(),Some("8B · Q4_K_M · can't change the Set".into()))]);let chosen=control.choose_default().await.unwrap().unwrap();assert_eq!(chosen.model.id,"ollama/qwen3:8b");assert_eq!(chosen.note,None);let mut current=serde_json::to_value(control.current()).unwrap();current.as_object_mut().unwrap().remove("efforts");assert_eq!(current,json!({"model":"ollama/qwen3:8b","provider":"ollama","name":"qwen3:8b","pinned":false,"where":"on this computer"}));assert_eq!(serde_json::from_str::<Value>(&std::fs::read_to_string(&file).unwrap()).unwrap(),json!({"model":"ollama/qwen3:8b","modelServers":servers}));assert_eq!(control.choose("ollama/gemma3:4b").await.unwrap().as_deref(),Some("gemma3:4b can't use tools, so Kumi can talk with it about your Set but can't change anything. qwen3:8b on Ollama can: /model chooses it."));assert_eq!(control.choose("ollama/gemma3:4b").await.unwrap(),None);assert_eq!(control.binding().await.unwrap().id,"ollama/gemma3:4b");assert!(said.borrow().is_empty());for(id,name)in[("ollama","Ollama"),("llama-cpp","llama.cpp"),("anthropic","Anthropic")]{assert_eq!(control.provider_name(id),name);}let racing=make(&folder.path().join("fresh-settings.json"),"fresh-auth.json");let(announced,bound)=tokio::join!(racing.choose_default(),racing.binding());assert_eq!(announced.unwrap().unwrap().model.id,"ollama/qwen3:8b");assert_eq!(bound.unwrap().id,"ollama/qwen3:8b");let later=make(&file,"auth.json");let binding=later.binding_with_info().await.unwrap();binding.asked.unwrap().await;tokio::task::yield_now().await;assert_eq!(said.borrow().len(),1);assert!(said.borrow()[0].starts_with("gemma3:4b can't use tools"));task.abort();
 }).await;
+}
+/// A provider added after the first five, as Venice would be: only this test's thread has it.
+static ADDED: [ProviderRow; 1] = [ProviderRow {
+    id: "venice",
+    name: "Venice AI",
+    short_name: "Venice",
+    credential: "venice",
+    key_env: &["VENICE_API_KEY"],
+    base_url: "https://api.venice.ai/api/v1",
+    ..API_KEY_ROW
+}];
+fn control_with(folder: &tempfile::TempDir, settings: Value) -> ModelControl {
+    let settings_file = folder.path().join("settings.json");
+    std::fs::write(&settings_file, settings.to_string()).unwrap();
+    create_model_control(ModelControlOptions {
+        store: Rc::new(open_credential_store(folder.path().join("auth.json"))),
+        settings_file: settings_file.to_string_lossy().into_owned(),
+        env: Env::new(),
+        fetch: Some(Rc::new(Offline)),
+        changed: Rc::new(|| async { Ok(()) }.boxed_local()),
+        say: None,
+        installed: Some(Rc::new(|_| false)),
+    })
+}
+#[tokio::test(flavor = "current_thread")]
+async fn a_custom_server_keeps_its_id_and_hides_a_provider_added_later_that_has_it() {
+    add_test_rows(&ADDED);
+    let folder = tempfile::tempdir().unwrap();
+    let control = control_with(
+        &folder,
+        json!({"model":"venice/qwen3-coder","modelServers":[{"name":"Venice","baseURL":"https://venice.example.test/v1"}]}),
+    );
+    // The model saved as the server's is still the server's.
+    let current = control.current();
+    assert_eq!((current.provider.as_deref(), current.r#where.as_deref()), (Some("venice"), Some("on venice.example.test")));
+    assert_eq!(control.provider_name("venice"), "Venice");
+    assert_eq!(control.cloud_provider("venice"), None);
+    assert_eq!(missing_model(&control).await, None);
+    // /login and the picker don't offer the provider it hides.
+    let offered: Vec<_> = control.providers().await.unwrap().into_iter().map(|status| status.id.as_str()).collect();
+    assert_eq!(offered, ["openai-codex", "anthropic", "openai", "opencode", "opencode-go"]);
+    // Without that server, the provider is offered, last, by its own name.
+    let control = control_with(&folder, json!({"model":"venice/qwen3-coder"}));
+    assert_eq!((control.current().provider.as_deref(), control.current().r#where), (Some("venice"), None));
+    assert_eq!(control.provider_name("venice"), "Venice AI");
+    assert_eq!(control.cloud_provider("venice"), ProviderId::parse("venice"));
+    let offered: Vec<_> = control.providers().await.unwrap().into_iter().map(|status| status.id.as_str()).collect();
+    assert_eq!(offered, ["openai-codex", "anthropic", "openai", "opencode", "opencode-go", "venice"]);
+}
+/// OpenAI's API for a turn: its list, then each request kept and answered; a model that can't use tools turns a
+/// request with tools down, as a provider would.
+struct ToolsApi {
+    seen: Rc<RefCell<Vec<Value>>>,
+}
+#[async_trait(?Send)]
+impl Fetch for ToolsApi {
+    async fn fetch(&self, url: &str, init: FetchInit) -> Result<Response, LanguageModelError> {
+        if url == "https://api.openai.com/v1/models" {
+            return Ok(Response::json_response(
+                200,
+                json!({"data":[{"id":"gpt-fixture-chat","created":2},{"id":"gpt-fixture-tools","created":1}]}),
+            ));
+        }
+        let body: Value = serde_json::from_str(init.body.as_deref().unwrap_or("{}")).unwrap();
+        self.seen.borrow_mut().push(body.clone());
+        Ok(if body["model"] == "gpt-fixture-tools" && body["tools"].is_array() {
+            Response::json_response(400, json!({"error":{"message":"This model does not support tools."}}))
+        } else {
+            Response::json_response(400, json!({"error":{"message":"fixture rejection"}}))
+        })
+    }
+}
+fn turn() -> kumi_ai::binding::ModelRequest {
+    kumi_ai::binding::ModelRequest {
+        instructions: "fixture instructions".into(),
+        messages: vec![kumi_ai::types::Message::user_text("tempo?")],
+        tools: vec![kumi_ai::types::FunctionTool::new("get_tempo", "tempo", json!({"type":"object","properties":{}}))],
+        session_id: "session-1".into(),
+    }
+}
+#[tokio::test(flavor = "current_thread")]
+async fn a_model_that_cant_use_tools_talks_without_them_whether_its_list_says_so_or_a_call_does() {
+    // What models.dev says of the two, on this test's thread only.
+    catalog::install(Arc::new(Catalog::read(&json!({"openai":{"models":{
+        "gpt-fixture-chat":{"name":"Fixture Chat","tool_call":false},
+        "gpt-fixture-tools":{"name":"Fixture Tools","tool_call":true}
+    }}}))));
+    let seen = Rc::new(RefCell::new(vec![]));
+    let f =
+        Fixture::with_fetch(Env::from([("OPENAI_API_KEY".into(), "key-fixture-value".into())]), Rc::new(ToolsApi { seen: seen.clone() }));
+    let listed = f.control.models("openai", false).await.unwrap();
+    assert_eq!(
+        listed.iter().map(|m| (m.name.as_str(), m.tools)).collect::<Vec<_>>(),
+        [("Fixture Chat", Some(false)), ("Fixture Tools", Some(true))]
+    );
+    let no_tools = "This model can't use tools here: you see the Set only as it's described above";
+    // Its list says it can't: chosen, Kumi says so once, and its requests go without tools.
+    assert_eq!(
+        f.control.choose("openai/gpt-fixture-chat").await.unwrap().as_deref(),
+        Some(
+            "Fixture Chat can't use tools, so Kumi can talk with it about your Set but can't change anything. /model chooses one that can."
+        )
+    );
+    let binding = f.control.binding().await.unwrap();
+    assert!(binding.model.do_stream((binding.prepare)(turn())).await.is_err());
+    let body = seen.borrow().last().unwrap().clone();
+    assert!(body.get("tools").is_none(), "{body}");
+    assert!(body["instructions"].as_str().unwrap().contains(no_tools), "{body}");
+    // Its list says it can, but a call is turned down for its tools: the turn says so, and from then on it's sent none.
+    assert_eq!(f.control.choose("openai/gpt-fixture-tools").await.unwrap(), None);
+    let binding = f.control.binding().await.unwrap();
+    let refused = binding.model.do_stream((binding.prepare)(turn())).await.err().unwrap().to_string();
+    assert!(refused.starts_with("Fixture Tools can't use tools, so Kumi can talk with it about your Set"), "{refused}");
+    assert!(seen.borrow().last().unwrap()["tools"].is_array());
+    assert!(binding.model.do_stream((binding.prepare)(turn())).await.err().unwrap().to_string().contains("fixture rejection"));
+    let body = seen.borrow().last().unwrap().clone();
+    assert!(body.get("tools").is_none() && body["instructions"].as_str().unwrap().contains(no_tools), "{body}");
+    // The same model bound again (a new kernel) remembers it for the session.
+    let again = f.control.binding_for("openai/gpt-fixture-tools").await.unwrap();
+    let _ = again.model.do_stream((again.prepare)(turn())).await;
+    assert!(seen.borrow().last().unwrap().get("tools").is_none());
 }
