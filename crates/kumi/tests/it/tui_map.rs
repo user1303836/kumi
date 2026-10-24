@@ -5,6 +5,7 @@
 //! braille text there, to look at.
 #[path = "../support/tui_app.rs"]
 mod support;
+use crate::map_server::{ask, get, post};
 use futures::FutureExt;
 use kumi::map::{songs_layer, sounds_layer, LoadMap, MapData};
 use kumi::tui::map::MapView;
@@ -258,6 +259,81 @@ case!(enter_offers_what_to_ask_and_an_action_fills_the_input_box_without_sending
     h.type_text("\x1b[C").await;
     h.type_text("\r").await;
     h.wait_for("Use “Artist").await;
+    h.close().await;
+});
+
+/// The port and the token's path of the browser's map, from the link Kumi opened.
+fn served_at(url: &str) -> (u16, String) {
+    let url: url::Url = url.parse().unwrap();
+    (url.port().unwrap(), url.path().to_string())
+}
+
+case!(map_open_serves_the_map_to_the_browser_whose_actions_fill_the_input_box, async {
+    let h = Harness::with(160, 40, Rc::new(Control::default()), |o| o.map = Some(loader(fixture(12, 8))));
+    h.start().await;
+    h.connect();
+    h.type_text("/map open\r").await;
+    h.wait_for("The map is open in your browser").await;
+    let opened = h.browsed.borrow().clone();
+    assert_eq!(opened.len(), 1, "{opened:?}");
+    assert!(opened[0].starts_with("http://127.0.0.1:"), "{}", opened[0]);
+    h.has(&opened[0]);
+    let (port, home) = served_at(&opened[0]);
+    let host = format!("127.0.0.1:{port}");
+    let (status, _, body) = ask(port, &get(&format!("{home}points"), &host, "")).await;
+    let map: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!((status, map["layers"][0]["points"]["x"].as_array().unwrap().len()), (200, 72));
+    // An action chosen there lands in the input box, unsent; with the terminal's map open, that closes so it shows.
+    h.type_text("/map\r").await;
+    h.wait_for("Sounds 72").await;
+    let more = r#"{"action":"more","id":"sounds:0"}"#;
+    assert_eq!(ask(port, &post(&format!("{home}action"), &host, &format!("http://{host}"), more)).await.0, 204);
+    h.wait_for("Find sounds like this one: /Samples/Kicks/Kick 01.wav").await;
+    assert!(!h.screen().iter().any(|line| line.contains("Sounds 72")), "the terminal's map closed");
+    assert!(!h.calls().iter().any(|call| call.starts_with("submit")), "nothing sent: {:?}", h.calls());
+    let song = r#"{"action":"reference","id":"songs:9"}"#;
+    assert_eq!(ask(port, &post(&format!("{home}action"), &host, &format!("http://{host}"), song)).await.0, 204);
+    h.wait_for("Use “Artist 1 – Song 01” as the reference: /Music/Artist 1/Song 01.flac").await;
+    // A second /map open serves afresh, and the first stops answering.
+    h.type_text("\x15/map open\r").await;
+    for _ in 0..500 {
+        if h.browsed.borrow().len() > 1 {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    let again = h.browsed.borrow()[1].clone();
+    assert_ne!(again, opened[0]);
+    assert!(tokio::net::TcpStream::connect(("127.0.0.1", port)).await.is_err(), "the first closed");
+    // /map close: nothing answers there.
+    let (port, _) = served_at(&again);
+    h.type_text("/map close\r").await;
+    h.wait_for("The map in your browser is closed.").await;
+    assert!(tokio::net::TcpStream::connect(("127.0.0.1", port)).await.is_err(), "closed");
+    h.type_text("/map close\r").await;
+    h.wait_for("The map isn't open in your browser: /map open opens it.").await;
+    h.type_text("/map wander\r").await;
+    h.wait_for("/map open shows it in your browser, and /map close closes that.").await;
+    h.close().await;
+});
+
+case!(over_ssh_map_open_says_how_to_reach_the_map_and_opens_no_browser_there, async {
+    let h = Harness::with(160, 40, Rc::new(Control::default()), |o| {
+        o.map = Some(loader(fixture(2, 1)));
+        o.remote = true;
+    });
+    h.start().await;
+    h.connect();
+    h.type_text("/map open\r").await;
+    h.wait_for("over SSH").await;
+    assert!(h.browsed.borrow().is_empty(), "no browser on the computer Kumi runs on");
+    // The notice wraps beside the panes: its words, each whole.
+    let said = h.screen().join(" ");
+    let words: Vec<&str> = said.split_whitespace().collect();
+    let url = words.iter().find(|word| word.starts_with("http://127.0.0.1:")).expect("the map's link");
+    let (port, _) = served_at(url);
+    assert!(words.contains(&"ssh") && words.contains(&"-L"), "{said}");
+    assert!(words.contains(&format!("{port}:127.0.0.1:{port}").as_str()), "the same port here as there: {said}");
     h.close().await;
 });
 

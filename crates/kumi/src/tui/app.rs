@@ -331,6 +331,8 @@ struct State {
     /// /map while it's open, in place of the conversation, and the key of the image it has up.
     map: Option<super::map::MapView>,
     map_image: Option<String>,
+    /// /map open: the map served to the browser, until /map close or Kumi quits.
+    map_page: Option<crate::map_server::MapServer>,
     last_change: Option<(String, f64)>,
     last_action: Option<LastAction>,
     goal: Option<Value>,
@@ -469,6 +471,7 @@ impl State {
             images: shown::Images::default(),
             map: None,
             map_image: None,
+            map_page: None,
             last_change: None,
             last_action: None,
             goal: None,
@@ -819,6 +822,8 @@ impl TuiApp {
             if let Some(setup) = state.setup.as_mut() {
                 setup.stop();
             }
+            // The browser's map stops answering as Kumi closes.
+            state.map_page = None;
             for aside in &state.asides {
                 if aside.borrow().state == "asking" {
                     aside.borrow().abort.cancel();

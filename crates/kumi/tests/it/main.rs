@@ -34,6 +34,7 @@ mod library_stop;
 mod library_tools;
 mod live_extension;
 mod login;
+mod map_server;
 mod markdown;
 mod models;
 mod music_learner;

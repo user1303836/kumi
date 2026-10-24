@@ -25,9 +25,9 @@
    your own music, which Kumi learns your taste from on this computer, and
    adds or removes a folder, pauses or forgets it; /map draws your sounds and
    songs as a map to move around, where space plays a point and enter asks
-   Kumi for more like it; /login and /logout sign in and out · /memory shows
-   what Kumi remembers (notes, techniques, recipes and what it learned from
-   your Sets), and forget in MEMORY drops one; /recipes you
+   Kumi for more like it, and /map open shows it in your browser; /login and
+   /logout sign in and out · /memory shows what Kumi remembers (notes,
+   techniques, recipes and what it learned from your Sets), and
 
 
 

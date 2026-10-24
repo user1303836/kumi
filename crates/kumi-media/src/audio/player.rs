@@ -93,7 +93,7 @@ impl Player {
         self.turn.set(turn);
         // The output first: with none, there's nothing to read the file for.
         let format = self.opened()?;
-        let clip = read(path.as_ref(), from, seconds, &signal).await?;
+        let clip = stretch(path.as_ref(), from, seconds, &signal).await?;
         let samples =
             tokio::task::spawn_blocking(move || shaped(clip, format)).await.map_err(|error| PlayerError::Output(error.to_string()))?;
         if self.turn.get() != turn {
@@ -145,9 +145,10 @@ impl Player {
     }
 }
 
-/// A stretch of a file as its channels (one, or the first two) at its own rate. Only the stretch is converted (a song's
-/// middle without what comes before it), where the file needs converting.
-async fn read(path: &Path, from: f64, seconds: f64, signal: &Signal) -> Result<(Vec<Vec<f32>>, f64), PlayerError> {
+/// A stretch of a file as its channels (one, or the first two) at its own rate: what the player plays, and what the map's
+/// page plays. Only the stretch is converted (a song's middle without what comes before it), where the file needs
+/// converting.
+pub async fn stretch(path: &Path, from: f64, seconds: f64, signal: &Signal) -> Result<(Vec<Vec<f32>>, f64), PlayerError> {
     let (from, seconds) = (from.max(0.), seconds.max(0.));
     let stopped = |error: super::AudioError| if signal.is_cancelled() { PlayerError::Stopped } else { PlayerError::File(error.0) };
     let prepared = prepare_audio_range(path, Some(signal.clone()), from, seconds).await.map_err(stopped)?;

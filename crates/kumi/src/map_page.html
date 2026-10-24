@@ -1,0 +1,474 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kumi's map</title>
+<style>
+:root {
+  --bg: #f4f3ef; --panel: #fbfaf8; --text: #1d1d1f; --muted: #686c73; --line: #d8d6d0; --accent: #2c64c9; --chosen: #111;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #101113; --panel: #17181b; --text: #ebebec; --muted: #9a9ea6; --line: #2b2d32; --accent: #79a6ff; --chosen: #fff; }
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body {
+  background: var(--bg); color: var(--text); font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  display: grid; grid-template-columns: minmax(0, 1fr) 320px; grid-template-rows: auto minmax(0, 1fr); height: 100vh;
+}
+header {
+  grid-column: 1 / 3; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 8px 12px;
+  border-bottom: 1px solid var(--line); background: var(--panel);
+}
+header strong { margin-right: 4px; }
+button, input {
+  font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 4px 10px;
+}
+button { cursor: pointer; }
+button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+input[type="search"] { min-width: 0; flex: 1 1 200px; max-width: 360px; }
+#status { color: var(--muted); font-size: 13px; }
+#map { position: relative; min-height: 0; }
+canvas { width: 100%; height: 100%; display: block; cursor: crosshair; touch-action: none; }
+#empty { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; padding: 24px; text-align: center; color: var(--muted); }
+#tip {
+  position: absolute; pointer-events: none; display: none; max-width: 340px; padding: 6px 9px; border-radius: 6px;
+  background: var(--panel); border: 1px solid var(--line); font-size: 12px; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+#tip b { display: block; font-size: 13px; }
+aside { border-left: 1px solid var(--line); background: var(--panel); padding: 12px; overflow: auto; min-height: 0; }
+aside h3 { margin: 14px 0 6px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
+aside h3:first-child { margin-top: 0; }
+.muted { color: var(--muted); }
+.actions { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.actions button { text-align: left; }
+.group { display: flex; align-items: center; gap: 8px; padding: 2px 0; cursor: pointer; }
+.swatch { width: 12px; height: 12px; border-radius: 3px; flex: none; }
+.count { margin-left: auto; color: var(--muted); font-variant-numeric: tabular-nums; }
+.picked { display: block; width: 100%; text-align: left; border: none; background: none; padding: 2px 0; color: var(--accent); }
+@media (max-width: 760px) {
+  body { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto 60vh auto; height: auto; min-height: 100vh; }
+  header { grid-column: 1; }
+  aside { border-left: none; border-top: 1px solid var(--line); }
+}
+</style>
+</head>
+<body>
+<header>
+  <strong>Kumi's map</strong>
+  <span id="layers"></span>
+  <input id="filter" type="search" placeholder="Filter by name, folder or tag" aria-label="Filter">
+  <button id="lasso" aria-pressed="false" title="Draw around points to pick them (or hold Shift and drag)">Lasso</button>
+  <button id="zoomIn" title="Zoom in (+)">+</button>
+  <button id="zoomOut" title="Zoom out (−)">−</button>
+  <button id="fit" title="See it all (0)">Fit</button>
+  <span id="status"></span>
+</header>
+<main id="map">
+  <canvas id="canvas"></canvas>
+  <div id="empty"></div>
+  <div id="tip"></div>
+</main>
+<aside>
+  <h3>Chosen</h3>
+  <div id="chosen" class="muted">Click a point to hear it. Space plays it again; Esc stops.</div>
+  <h3 id="pickedTitle" hidden>Picked</h3>
+  <div id="picked"></div>
+  <h3>Groups</h3>
+  <div id="groups"></div>
+</aside>
+<script>
+"use strict";
+/* The map Kumi lays out from the producer's sounds and songs, served by Kumi itself: the points come from "points",
+   a point plays from "audio/<id>", and an action goes to "action", which puts its words in Kumi's input box. */
+const canvas = document.getElementById("canvas");
+const context = canvas.getContext("2d");
+const tip = document.getElementById("tip");
+const audio = new Audio();
+const state = {
+  data: null, at: 0, view: { x: 0.5, y: 0.5, zoom: 1 }, hidden: new Set(), words: "", shown: null, grid: null,
+  colours: [], chosen: -1, picked: [], lasso: false, path: null, drag: null, moved: false, image: null, count: 0,
+};
+
+function status(words) { document.getElementById("status").textContent = words || ""; }
+function layer() { return state.data.layers[state.at]; }
+function idOf(at) { return layer().kind + ":" + layer().points.id[at]; }
+function rgb(hex) { const n = parseInt(hex.slice(1), 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; }
+
+async function load() {
+  status("Loading the map…");
+  try {
+    const answer = await fetch("points");
+    if (!answer.ok) throw new Error(String(answer.status));
+    state.data = await answer.json();
+  } catch (error) {
+    status("Kumi couldn't send the map: is Kumi still running?");
+    return;
+  }
+  status("");
+  const layers = document.getElementById("layers");
+  state.data.layers.forEach((each, at) => {
+    const button = document.createElement("button");
+    button.textContent = each.title + " (" + each.points.x.length.toLocaleString() + ")";
+    button.addEventListener("click", () => show(at));
+    layers.appendChild(button);
+  });
+  const first = state.data.layers.findIndex((each) => each.points.x.length > 0);
+  show(first < 0 ? 0 : first);
+}
+
+function show(at) {
+  state.at = at;
+  tip.style.display = "none";
+  state.hidden = new Set();
+  state.chosen = -1;
+  state.picked = [];
+  state.colours = layer().groups.map((group) => rgb(group.color));
+  [...document.getElementById("layers").children].forEach((button, each) => button.setAttribute("aria-pressed", String(each === at)));
+  const empty = document.getElementById("empty");
+  empty.textContent = layer().empty || "";
+  empty.style.display = layer().points.x.length ? "none" : "flex";
+  index();
+  fit();
+  panels();
+}
+
+/* The points by place on a grid over the map, for finding the one under the pointer quickly. */
+function index() {
+  const points = layer().points, count = points.x.length, size = 256;
+  const starts = new Uint32Array(size * size + 1), cells = new Uint32Array(count);
+  for (let at = 0; at < count; at++) {
+    const cx = Math.min(size - 1, Math.max(0, Math.floor(points.x[at] * size)));
+    const cy = Math.min(size - 1, Math.max(0, Math.floor(points.y[at] * size)));
+    cells[at] = cy * size + cx;
+    starts[cells[at] + 1]++;
+  }
+  for (let cell = 0; cell < size * size; cell++) starts[cell + 1] += starts[cell];
+  const next = starts.slice(0, size * size), items = new Uint32Array(count);
+  for (let at = 0; at < count; at++) items[next[cells[at]]++] = at;
+  state.grid = { size, starts, items };
+  shown();
+}
+
+/* Which points show: their group's not hidden, and the filter's words are in their name, folder or tags. */
+/* The points shown: in a group that isn't hidden, and with every word of the filter in their name, folder, tags or
+   group, as the terminal's map filters. */
+function shown() {
+  const each = layer(), points = each.points, count = points.x.length;
+  const words = state.words.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const groups = each.groups.map((group) => group.name.toLowerCase());
+  const mask = new Uint8Array(count);
+  let total = 0;
+  for (let at = 0; at < count; at++) {
+    if (state.hidden.has(points.group[at])) continue;
+    if (words.length) {
+      const hay = (points.name[at] + " " + each.places[points.place[at]] + " " + each.tags[points.tags[at]]).toLowerCase() + " " + groups[points.group[at]];
+      if (!words.every((word) => hay.includes(word))) continue;
+    }
+    mask[at] = 1;
+    total++;
+  }
+  state.shown = mask;
+  state.count = total;
+  draw();
+}
+
+function scale() { return state.view.zoom * Math.min(canvas.width, canvas.height) * 0.92; }
+function toScreen(x, y) { const s = scale(); return [(x - state.view.x) * s + canvas.width / 2, (state.view.y - y) * s + canvas.height / 2]; }
+function toMap(px, py) { const s = scale(); return [(px - canvas.width / 2) / s + state.view.x, state.view.y - (py - canvas.height / 2) / s]; }
+function pointer(event) { const box = canvas.getBoundingClientRect(), ratio = canvas.width / box.width; return [(event.clientX - box.left) * ratio, (event.clientY - box.top) * ratio]; }
+
+function fit() { state.view = { x: 0.5, y: 0.5, zoom: 1 }; draw(); }
+
+function zoomAt(factor, px, py) {
+  const [x, y] = toMap(px, py);
+  state.view.zoom = Math.min(400, Math.max(0.5, state.view.zoom * factor));
+  const [nx, ny] = toMap(px, py);
+  state.view.x += x - nx;
+  state.view.y += y - ny;
+  draw();
+}
+
+/* Every shown point, straight into the picture's pixels: each blends half into what's there, so busier places show
+   brighter and solid, and one point alone shows faint until the map's zoomed in on it. */
+function draw() {
+  if (!state.data) return;
+  const ratio = Math.min(window.devicePixelRatio || 1, 2);
+  const width = Math.max(1, Math.floor(canvas.clientWidth * ratio)), height = Math.max(1, Math.floor(canvas.clientHeight * ratio));
+  if (canvas.width !== width || canvas.height !== height) { canvas.width = width; canvas.height = height; state.image = null; }
+  if (!state.image) state.image = context.createImageData(width, height);
+  const pixels = state.image.data, back = rgb(getComputedStyle(document.body).getPropertyValue("--bg").trim() || "#101113");
+  for (let at = 0; at < pixels.length; at += 4) { pixels[at] = back[0]; pixels[at + 1] = back[1]; pixels[at + 2] = back[2]; pixels[at + 3] = 255; }
+  const points = layer().points, count = points.x.length, s = scale(), across = s / ratio;
+  // Bigger as the map's zoomed in, and where few points show at all.
+  const few = state.count <= 2000 ? 2 : state.count <= 10000 ? 1 : 0.5;
+  const radius = Math.round(Math.max(few, across > 4500 ? 3 : across > 1500 ? 2 : across > 500 ? 1 : 0.5) * ratio - 0.25);
+  const strength = radius >= 2 ? 0.85 : 0.5;
+  const half = width / 2, middle = height / 2, vx = state.view.x, vy = state.view.y;
+  for (let at = 0; at < count; at++) {
+    if (!state.shown[at]) continue;
+    const px = Math.round((points.x[at] - vx) * s + half), py = Math.round((vy - points.y[at]) * s + middle);
+    if (px < -radius || py < -radius || px >= width + radius || py >= height + radius) continue;
+    const colour = state.colours[points.group[at]] || [128, 128, 128];
+    for (let dy = -radius; dy <= radius; dy++) {
+      const y = py + dy;
+      if (y < 0 || y >= height) continue;
+      for (let dx = -radius; dx <= radius; dx++) {
+        const x = px + dx;
+        if (x < 0 || x >= width || dx * dx + dy * dy > radius * radius + radius) continue;
+        const pixel = (y * width + x) * 4;
+        pixels[pixel] += (colour[0] - pixels[pixel]) * strength;
+        pixels[pixel + 1] += (colour[1] - pixels[pixel + 1]) * strength;
+        pixels[pixel + 2] += (colour[2] - pixels[pixel + 2]) * strength;
+      }
+    }
+  }
+  context.putImageData(state.image, 0, 0);
+  const chosen = getComputedStyle(document.body).getPropertyValue("--chosen").trim();
+  context.lineWidth = 1.5 * ratio;
+  context.strokeStyle = chosen;
+  context.fillStyle = chosen;
+  /* A few picked points ringed; many, each a small dot, so the place they're in still shows. */
+  if (state.picked.length <= 60) for (const at of state.picked) ring(at, 4 * ratio);
+  else for (const at of state.picked) { const [x, y] = toScreen(points.x[at], points.y[at]); context.fillRect(x - ratio, y - ratio, 2 * ratio, 2 * ratio); }
+  if (state.chosen >= 0) { context.lineWidth = 2.5 * ratio; ring(state.chosen, 8 * ratio); }
+  if (state.path && state.path.length > 1) {
+    context.lineWidth = 1.5 * ratio;
+    context.setLineDash([6 * ratio, 4 * ratio]);
+    context.beginPath();
+    context.moveTo(state.path[0][0], state.path[0][1]);
+    for (const [x, y] of state.path.slice(1)) context.lineTo(x, y);
+    context.stroke();
+    context.setLineDash([]);
+  }
+}
+
+function ring(at, size) {
+  const points = layer().points, [x, y] = toScreen(points.x[at], points.y[at]);
+  context.beginPath();
+  context.arc(x, y, size, 0, Math.PI * 2);
+  context.stroke();
+}
+
+/* The shown point nearest the pointer, within a few pixels of it: -1 when there's none. */
+function nearest(px, py) {
+  const [x, y] = toMap(px, py), reach = (10 * canvas.width) / Math.max(1, canvas.clientWidth) / scale();
+  const { size, starts, items } = state.grid, points = layer().points;
+  const low = (value) => Math.max(0, Math.floor((value - reach) * size)), high = (value) => Math.min(size - 1, Math.floor((value + reach) * size));
+  let best = -1, bestApart = reach * reach;
+  for (let cy = low(y); cy <= high(y); cy++) {
+    for (let cx = low(x); cx <= high(x); cx++) {
+      const cell = cy * size + cx;
+      for (let slot = starts[cell]; slot < starts[cell + 1]; slot++) {
+        const at = items[slot];
+        if (!state.shown[at]) continue;
+        const apart = (points.x[at] - x) ** 2 + (points.y[at] - y) ** 2;
+        if (apart <= bestApart) { best = at; bestApart = apart; }
+      }
+    }
+  }
+  return best;
+}
+
+function described(at) {
+  const each = layer(), points = each.points;
+  return { name: points.name[at], place: each.places[points.place[at]], tags: each.tags[points.tags[at]] };
+}
+
+function play(at) {
+  audio.pause();
+  audio.src = "audio/" + encodeURIComponent(idOf(at));
+  audio.play().catch(() => status("This browser didn't play it."));
+}
+
+async function act(action, at) {
+  const answer = await fetch("action", {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: action, id: idOf(at) }),
+  }).catch(() => null);
+  status(answer && answer.ok ? "It's in Kumi's input box: send it there." : "Kumi couldn't take that: is it still running?");
+}
+
+function choose(at, hear) {
+  state.chosen = at;
+  const box = document.getElementById("chosen");
+  box.replaceChildren();
+  box.classList.toggle("muted", at < 0);
+  if (at < 0) {
+    box.textContent = "Click a point to hear it. Space plays it again; Esc stops.";
+  } else {
+    const about = described(at);
+    const name = document.createElement("strong");
+    name.textContent = about.name;
+    const where = document.createElement("div");
+    where.className = "muted";
+    where.textContent = [about.place, about.tags].filter(Boolean).join(" · ");
+    const actions = document.createElement("div");
+    actions.className = "actions";
+    const hearIt = document.createElement("button");
+    hearIt.textContent = "Hear it (Space)";
+    hearIt.addEventListener("click", () => play(at));
+    actions.appendChild(hearIt);
+    for (const each of state.data.actions) {
+      const button = document.createElement("button");
+      button.textContent = each.label;
+      button.addEventListener("click", () => act(each.action, at));
+      actions.appendChild(button);
+    }
+    box.append(name, where, actions);
+    if (hear) play(at);
+  }
+  draw();
+}
+
+function panels() {
+  const groups = document.getElementById("groups");
+  groups.replaceChildren();
+  // The groups that have points, the biggest first.
+  const order = layer().groups.map((group, at) => at).filter((at) => layer().groups[at].count > 0);
+  order.sort((a, b) => layer().groups[b].count - layer().groups[a].count);
+  order.forEach((at) => {
+    const group = layer().groups[at];
+    const row = document.createElement("label");
+    row.className = "group";
+    const box = document.createElement("input");
+    box.type = "checkbox";
+    box.checked = !state.hidden.has(at);
+    box.addEventListener("change", () => { if (box.checked) state.hidden.delete(at); else state.hidden.add(at); shown(); });
+    const swatch = document.createElement("span");
+    swatch.className = "swatch";
+    swatch.style.background = group.color;
+    const name = document.createElement("span");
+    name.textContent = group.name;
+    const count = document.createElement("span");
+    count.className = "count";
+    count.textContent = group.count.toLocaleString();
+    row.append(box, swatch, name, count);
+    groups.appendChild(row);
+  });
+  choose(-1, false);
+  picked();
+}
+
+function picked() {
+  const box = document.getElementById("picked"), title = document.getElementById("pickedTitle");
+  box.replaceChildren();
+  title.hidden = state.picked.length === 0;
+  if (!state.picked.length) return;
+  const count = document.createElement("div");
+  count.className = "muted";
+  count.textContent = state.picked.length.toLocaleString() + (state.picked.length === 1 ? " point" : " points") + (state.picked.length > 100 ? "; the first 100:" : ":");
+  box.appendChild(count);
+  for (const at of state.picked.slice(0, 100)) {
+    const button = document.createElement("button");
+    button.className = "picked";
+    button.textContent = layer().points.name[at];
+    button.addEventListener("click", () => choose(at, true));
+    box.appendChild(button);
+  }
+}
+
+/* Whether a point (on screen) is inside the lasso's outline. */
+function inside(path, x, y) {
+  let within = false;
+  for (let at = 0, before = path.length - 1; at < path.length; before = at++) {
+    const [xa, ya] = path[at], [xb, yb] = path[before];
+    if ((ya > y) !== (yb > y) && x < ((xb - xa) * (y - ya)) / (yb - ya) + xa) within = !within;
+  }
+  return within;
+}
+
+canvas.addEventListener("pointerdown", (event) => {
+  try { canvas.setPointerCapture(event.pointerId); } catch (error) { /* a pointer the page didn't see go down */ }
+  const [px, py] = pointer(event);
+  state.moved = false;
+  if (state.lasso || event.shiftKey) state.path = [[px, py]];
+  else state.drag = { px, py, x: state.view.x, y: state.view.y };
+});
+canvas.addEventListener("pointermove", (event) => {
+  const [px, py] = pointer(event);
+  if (state.path) {
+    state.path.push([px, py]);
+    draw();
+    return;
+  }
+  if (state.drag) {
+    const s = scale();
+    if (Math.abs(px - state.drag.px) + Math.abs(py - state.drag.py) > 4) state.moved = true;
+    state.view.x = state.drag.x - (px - state.drag.px) / s;
+    state.view.y = state.drag.y + (py - state.drag.py) / s;
+    draw();
+    return;
+  }
+  const at = nearest(px, py);
+  if (at < 0) { tip.style.display = "none"; return; }
+  const about = described(at);
+  tip.replaceChildren();
+  const name = document.createElement("b");
+  name.textContent = about.name;
+  const where = document.createElement("span");
+  where.textContent = [about.place, about.tags].filter(Boolean).join(" · ");
+  tip.append(name, where);
+  const box = canvas.getBoundingClientRect();
+  tip.style.left = Math.min(event.clientX - box.left + 14, box.width - 240) + "px";
+  tip.style.top = event.clientY - box.top + 14 + "px";
+  tip.style.display = "block";
+});
+canvas.addEventListener("pointerup", (event) => {
+  const [px, py] = pointer(event);
+  if (state.path) {
+    const path = state.path, points = layer().points, chosen = [];
+    state.path = null;
+    if (path.length > 2) {
+      for (let at = 0; at < points.x.length; at++) {
+        if (!state.shown[at]) continue;
+        const [x, y] = toScreen(points.x[at], points.y[at]);
+        if (inside(path, x, y)) chosen.push(at);
+      }
+    }
+    state.picked = chosen;
+    picked();
+    draw();
+    return;
+  }
+  const dragged = state.moved;
+  state.drag = null;
+  if (!dragged) choose(nearest(px, py), true);
+});
+canvas.addEventListener("pointerleave", () => { tip.style.display = "none"; });
+canvas.addEventListener("wheel", (event) => {
+  event.preventDefault();
+  const [px, py] = pointer(event);
+  zoomAt(Math.exp(-event.deltaY * 0.0015), px, py);
+}, { passive: false });
+
+document.getElementById("zoomIn").addEventListener("click", () => zoomAt(1.6, canvas.width / 2, canvas.height / 2));
+document.getElementById("zoomOut").addEventListener("click", () => zoomAt(1 / 1.6, canvas.width / 2, canvas.height / 2));
+document.getElementById("fit").addEventListener("click", fit);
+document.getElementById("lasso").addEventListener("click", (event) => {
+  state.lasso = !state.lasso;
+  event.currentTarget.setAttribute("aria-pressed", String(state.lasso));
+});
+let typing = 0;
+document.getElementById("filter").addEventListener("input", (event) => {
+  clearTimeout(typing);
+  typing = setTimeout(() => { state.words = event.target.value; shown(); }, 150);
+});
+document.addEventListener("keydown", (event) => {
+  if (event.target instanceof HTMLInputElement) return;
+  const step = 0.1 / state.view.zoom;
+  if (event.key === " " && state.chosen >= 0) { event.preventDefault(); if (audio.paused) play(state.chosen); else audio.pause(); }
+  else if (event.key === "Escape") { audio.pause(); state.picked = []; picked(); choose(-1, false); }
+  else if (event.key === "+" || event.key === "=") zoomAt(1.6, canvas.width / 2, canvas.height / 2);
+  else if (event.key === "-" || event.key === "_") zoomAt(1 / 1.6, canvas.width / 2, canvas.height / 2);
+  else if (event.key === "0") fit();
+  else if (event.key === "ArrowLeft") { state.view.x -= step; draw(); }
+  else if (event.key === "ArrowRight") { state.view.x += step; draw(); }
+  else if (event.key === "ArrowUp") { state.view.y += step; draw(); }
+  else if (event.key === "ArrowDown") { state.view.y -= step; draw(); }
+});
+window.addEventListener("resize", draw);
+load();
+</script>
+</body>
+</html>
