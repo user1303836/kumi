@@ -113,7 +113,7 @@ CREATE INDEX observations_at ON observations (at);
 
 /// Every setting a search heard on a device (`heard_settings`), with how it sounded: tune's knob search, a match
 /// run's, a goal's. A later search on the same device starts from what worked there. A device keeps its newest rows
-/// (`heard_settings::PER_DEVICE`), a search's best whatever its age.
+/// (`heard_settings::PER_DEVICE`) and its searches' newest bests (`heard_settings::BESTS_PER_DEVICE`).
 const V4: &str = "
 CREATE TABLE heard_settings (
   id TEXT PRIMARY KEY,
@@ -136,7 +136,7 @@ CREATE INDEX heard_settings_run ON heard_settings (run_id);
 ";
 
 /// Which generation of its search heard a setting (1 the first), and the remembered setting it was when a search started
-/// from one (a row's id): how often what worked before wins a search's first round.
+/// from one (a row's id): how often what worked before wins the round it's tried in.
 const V5: &str = "
 ALTER TABLE heard_settings ADD COLUMN generation INTEGER;
 ALTER TABLE heard_settings ADD COLUMN remembered TEXT;

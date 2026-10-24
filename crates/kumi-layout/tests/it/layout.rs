@@ -1,6 +1,7 @@
 //! The map's layout: the same map for the same points, groups that sound apart kept apart, landmarks past a size.
 
-use kumi_layout::{layout, Layout};
+use kumi_layout::{layout, layout_until, Layout};
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 /// A number in [0, 1) for `at`, the same every time (SplitMix64).
 pub fn noise(at: u64) -> f64 {
@@ -140,4 +141,16 @@ fn a_few_points_still_have_places() {
     // The same point many times: one place, the middle.
     let same = layout(20, 8, &|_, buffer| buffer.fill(0.25), &how(1));
     assert!(same.iter().all(|place| *place == [0.5, 0.5]), "{same:?}");
+}
+
+#[test]
+fn a_layout_asked_to_stop_gives_no_places_and_one_let_go_on_is_the_same_map() {
+    let read = |at: usize, buffer: &mut [f32]| grouped(at, 16, 3, 0.3, buffer);
+    let how = Layout { rounds: 60, threads: 2, ..Layout::default() };
+    let asked = AtomicUsize::new(0);
+    let going = layout_until(300, 16, &read, &how, &|| asked.fetch_add(1, Ordering::Relaxed) < usize::MAX);
+    assert_eq!(going.as_deref(), Some(layout(300, 16, &read, &how).as_slice()), "asking changes nothing");
+    assert!(asked.load(Ordering::Relaxed) >= 60, "asked at least every round: {}", asked.load(Ordering::Relaxed));
+    let stopping = AtomicUsize::new(0);
+    assert_eq!(layout_until(300, 16, &read, &how, &|| stopping.fetch_add(1, Ordering::Relaxed) < 20), None);
 }

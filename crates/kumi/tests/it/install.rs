@@ -1278,7 +1278,7 @@ fn with_no_bridge_in_live_an_update_says_how_to_connect_it_only_where_live_runs(
 }
 
 /// Everything a producer keeps in Kumi's folder, which no uninstall without --all may touch.
-const THEIRS: [&str; 17] = [
+const THEIRS: [&str; 18] = [
     "auth.json",
     "settings.json",
     "kumi.db",
@@ -1290,6 +1290,7 @@ const THEIRS: [&str; 17] = [
     "timings.jsonl",
     "input-history",
     "whats-new.json",
+    "music-answer.json",
     "audition-restore.json",
     "projects/0123456789abcdef/conversations/night-drive.json",
     "recipes/warm-pad.json",

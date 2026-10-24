@@ -413,7 +413,7 @@ impl Session {
                 evolution.add(NewSlot { name: slot.name, label: slot.label, chain: slot.chain, knobs: slot.knobs, score: None, heard: None });
             }
             for name in names {
-                self.suggest_remembered(&mut evolution, &mut searches, &name).await;
+                self.suggest_remembered(&mut evolution, &mut searches, &name, &target).await;
             }
             let winner = evolution.slots.first().cloned().ok_or_else(|| RuntimeError::plain("Empty goal rig"))?;
 
@@ -479,7 +479,7 @@ impl Session {
             }
             .await;
 
-            self.searches_ended(&searches);
+            self.searches_ended(&searches, kept.is_some());
             let mut notes = rig
                 .close()
                 .await
@@ -561,26 +561,33 @@ impl Session {
             }
         }
     }
-    /// A new slot starts from what worked on its devices before: the best a past goal or match run heard there, tried
-    /// once the slot's own start is heard (it's kept only if it scores better).
-    pub(super) async fn suggest_remembered(&self, evolution: &mut Evolution, searches: &mut HashMap<String, SlotSearch>, slot: &str) {
+    /// A new slot starts from what worked on its devices before: the best a past goal or match run heard there (toward
+    /// the same reference as `target`'s, when one did), tried once the slot's own start is heard (it's kept only if it
+    /// scores better).
+    pub(super) async fn suggest_remembered(
+        &self,
+        evolution: &mut Evolution,
+        searches: &mut HashMap<String, SlotSearch>,
+        slot: &str,
+        target: &Value,
+    ) {
         let Some(memory) = self.0.search_memory.clone() else { return };
         let Some((knobs, elite)) = evolution.slots.iter().find(|s| s.name == slot).map(|s| (s.knobs.clone(), s.elite.clone())) else {
             return;
         };
         let Some(search) = searches.get(slot) else { return };
-        if let Some((values, from)) = memory.suggestion(search, &knobs, &elite).await {
+        if let Some((values, from)) = memory.suggestion(search, &target["reference"], &knobs, &elite).await {
             evolution.suggest(slot, values);
             if let Some(search) = searches.get_mut(slot) {
                 search.suggested = from;
             }
         }
     }
-    /// The slots' searches ended: each one's best is marked.
-    pub(super) fn searches_ended(&self, searches: &HashMap<String, SlotSearch>) {
+    /// The slots' searches ended: each one's best is marked when it was `kept` on the slot.
+    pub(super) fn searches_ended(&self, searches: &HashMap<String, SlotSearch>, kept: bool) {
         if let Some(memory) = &self.0.search_memory {
             for search in searches.values() {
-                memory.heard(SettingsHeard::Ended { run: search.run.clone() });
+                memory.heard(SettingsHeard::Ended { run: search.run.clone(), kept });
             }
         }
     }

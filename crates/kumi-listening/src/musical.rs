@@ -7,6 +7,7 @@ use crate::{
     notes::{fit_grid, fit_swing, push_of},
 };
 use kumi_media::audio::analyze::{estimate_key, estimate_tempo};
+use std::f64::consts::TAU;
 
 /// The music in a listen.
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -109,14 +110,28 @@ pub fn key(frames: &Frames) -> Option<String> {
 
 /// How a run of onsets (seconds, each with how hard it hit) grooves at about `tempo`: a grid fitted to them, the
 /// harder hits counting for more (a kick on the beat places it, not the hats between), then their swing and push on it
-/// (as the groove judge reads a part's).
+/// (as the groove judge reads a part's). The grid's phase is then taken again from the swung pairs' first steps alone:
+/// fitted to every onset, the pairs' late second steps would pull it late, and the beats would read ahead of it.
 pub fn groove(onsets: &[(f64, f64)], tempo: f64) -> Option<Feel> {
     if onsets.len() < FEW || !(tempo > 0.) {
         return None;
     }
     let grid = fit_grid(onsets, tempo, 4., false, None);
     let beats: Vec<f64> = onsets.iter().map(|(at, _)| (at - grid.downbeat) * grid.tempo / 60.).collect();
-    let (_, swing) = fit_swing(&beats);
+    let (steps, swing) = fit_swing(&beats);
+    // A pair of steps, in beats (an eighth's for sixteenths); its first step sits where swing can't move it.
+    let pair = 8. / steps as f64;
+    let (x, y) = onsets.iter().zip(&beats).fold((0., 0.), |(x, y), ((_, weight), beat)| {
+        let base = (beat / pair).floor() * pair;
+        let first = if beat - base <= base + pair - beat { base } else { base + pair };
+        if (beat - (base + pair * swing / 100.)).abs() < (beat - first).abs() {
+            return (x, y);
+        }
+        let angle = TAU * (beat - first) / pair;
+        (x + weight * angle.cos(), y + weight * angle.sin())
+    });
+    let shift = if x == 0. && y == 0. { 0. } else { f64::atan2(y, x) / TAU * pair };
+    let beats: Vec<f64> = beats.iter().map(|beat| beat - shift).collect();
     let push = push_of(&beats) * 60_000. / grid.tempo;
     Some(Feel { swing_ratio: swing / (100. - swing), push_ms: push })
 }
@@ -162,6 +177,14 @@ mod tests {
         assert!((feel.swing_ratio - 1.5).abs() < 0.1, "{feel:?}");
         let triplets = groove(&sixteenths(100., 8, 66.7, 0.), 100.).unwrap();
         assert!((triplets.swing_ratio - 2.).abs() < 0.15, "{triplets:?}");
+    }
+
+    #[test]
+    fn swing_on_the_grid_doesnt_read_as_ahead_of_the_beat() {
+        for (tempo, swing) in [(100., 60.), (100., 66.7), (90., 62.), (120., 50.)] {
+            let feel = groove(&sixteenths(tempo, 8, swing, 0.), tempo).unwrap();
+            assert!(feel.push_ms.abs() < 2., "{tempo} BPM, swing {swing}: {feel:?}");
+        }
     }
 
     #[test]

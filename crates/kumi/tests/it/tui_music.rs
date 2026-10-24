@@ -2,13 +2,34 @@
 //! names reach the model), a folder added, learning paused, and all of it forgotten after a confirm.
 #[path = "../support/tui_app.rs"]
 mod support;
+use async_trait::async_trait;
 use kumi::tui::app::{music_lines, parse_music, MusicAsked};
-use kumi_listening::music::{
-    folders::Found,
-    learning::{create_music, MusicOptions, MusicState, MusicStatus},
+use kumi_common::abort::Signal;
+use kumi_listening::{
+    embed::Say,
+    music::{
+        folders::Found,
+        hear::Style,
+        learning::{create_music, MusicOptions, MusicState, MusicStatus},
+        vectors::DIMS,
+    },
 };
-use std::rc::Rc;
+use std::{path::Path, rc::Rc};
 use support::*;
+
+/// A style model of the test's own: the scan never reaches for Kumi's, which it would fetch (the runtime, its words
+/// model) over the network.
+struct Plain;
+
+#[async_trait(?Send)]
+impl Style for Plain {
+    fn model(&self) -> &str {
+        "test-model"
+    }
+    async fn embed(&self, _: &Path, _: &[f64], _: Option<f64>, _: Say<'_>, _: &Signal) -> Result<(Vec<f32>, String), String> {
+        Ok((vec![1. / (DIMS as f32).sqrt(); DIMS], "test-model".into()))
+    }
+}
 
 #[test]
 fn music_words_are_read_in_any_case() {
@@ -73,6 +94,7 @@ async fn music_is_shown_added_paused_and_forgotten() {
             let kept = folder.path().join("kumi/music");
             let mut options = MusicOptions::new(kept.clone(), None, Default::default());
             (options.places, options.fork, options.delay_ms) = (Some(vec![songs.clone()]), false, 3_600_000);
+            options.style = Some(Rc::new(Plain) as Rc<dyn Style>);
             let music = create_music(options);
             let h = Harness::with(160, 40, Rc::new(Control::default()), |options| options.music = Some(music.clone()));
             h.start().await;

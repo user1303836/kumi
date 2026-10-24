@@ -53,9 +53,11 @@ fn identities(read: &Knobs) -> std::collections::BTreeMap<String, String> {
         .iter()
         .enumerate()
         .filter_map(|(index, device)| {
-            let class = device.get("className").and_then(Value::as_str).unwrap_or("");
-            let name = device.get("name").and_then(Value::as_str).unwrap_or("");
-            Some((format!("{index}:{}", device_name(device)), super::probe::identity_of(class, name)?))
+            let text = |key: &str| device.get(key).and_then(Value::as_str).unwrap_or("");
+            Some((
+                format!("{index}:{}", device_name(device)),
+                super::probe::identity_of(text("className"), text("classDisplayName"), text("name"))?,
+            ))
         })
         .collect()
 }

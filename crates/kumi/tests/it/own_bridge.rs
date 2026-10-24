@@ -347,6 +347,42 @@ async fn with_nothing_drawing_the_focus_the_daw_is_asked_about_once_a_second() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn a_daw_gone_mid_playback_plays_nothing_any_more() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let focus = json!({
+                "epoch": "1", "view": "arrange", "changed": 1,
+                "selection": {"trackRef": BASS, "track": {"name": "Bass", "color": "#3c7cf5", "type": "midi"}},
+                "transport": {"playing": true, "beat": 9.0, "tempo": 120, "beatsPerBar": 4},
+            });
+            let host = Rc::new(Host {
+                answers: RefCell::new(vec![("status", json!({"connected": true}), false), ("focus", focus, false)]),
+                asked: RefCell::default(),
+            });
+            let played: Rc<RefCell<Vec<Option<bool>>>> = Rc::default();
+            let mut options = options(host.clone(), Rc::new(RefCell::new(vec![])));
+            let told = played.clone();
+            options.context.on_focus = Some(Rc::new(|_| {}));
+            options.context.on_transport = Some(Rc::new(move |transport| told.borrow_mut().push(transport.map(|t| t.playing))));
+            options.context.focus_interval_ms = Some(50);
+            let reaper = create_reaper_integration(options);
+            reaper.start(Signal::new()).await.unwrap();
+            tokio::time::sleep(std::time::Duration::from_millis(180)).await;
+            assert_eq!(played.borrow().first(), Some(&Some(true)));
+            // REAPER crashes while it plays: the host says it's gone.
+            host.answers.borrow_mut().push((
+                "focus",
+                json!({"error": "no REAPER with Kumi's bridge is running", "connected": false}),
+                true,
+            ));
+            tokio::time::sleep(std::time::Duration::from_millis(180)).await;
+            assert_eq!(played.borrow().last(), Some(&None), "{:?}", played.borrow());
+            reaper.close().await.unwrap();
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn reapers_focus_is_read_while_focus_shows_and_its_bodies_come_neutral() {
     tokio::task::LocalSet::new()
         .run_until(async {

@@ -307,7 +307,7 @@ impl Session {
         }
         // A slot new to the goal starts from what worked on its devices before.
         for name in fresh {
-            self.suggest_remembered(&mut evolution, &mut searches, &name).await;
+            self.suggest_remembered(&mut evolution, &mut searches, &name, &target).await;
         }
         evolution.generation = state.generation;
         evolution.rendered = state.rendered;
@@ -456,14 +456,11 @@ impl Session {
                     for slot in rig.slots() {
                         let search =
                             searches.entry(slot.name.clone()).or_insert_with(|| SlotSearch::new(&slot.name, &slot.knobs, BTreeMap::new()));
-                        search.devices.extend(slot.devices.clone());
-                        for knob in &slot.knobs {
-                            search.before.entry((knob.device.clone(), knob.name.clone())).or_insert(knob.value);
-                        }
+                        search.extend(&slot.knobs, &slot.devices);
                         if !evolution.slots.iter().any(|s| s.name == slot.name) {
                             let name = slot.name.clone();
                             join(&mut evolution, slot, &state);
-                            self.suggest_remembered(&mut evolution, &mut searches, &name).await;
+                            self.suggest_remembered(&mut evolution, &mut searches, &name, &target).await;
                         }
                     }
                     sync(&mut state, &evolution, started);
@@ -474,7 +471,8 @@ impl Session {
             Ok::<(), RuntimeError>(())
         }.await;
 
-        self.searches_ended(&searches);
+        // A goal's slots keep their best as they go.
+        self.searches_ended(&searches, true);
         if let Err(error) = searching {
             if !op.signal.is_cancelled() {
                 state.status = GoalRun::Paused;
