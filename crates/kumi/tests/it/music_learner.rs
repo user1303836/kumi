@@ -32,9 +32,11 @@ async fn learn(home: &Path, music: &Path) -> Vec<ScanReply> {
         .kill_on_drop(true)
         .spawn()
         .unwrap();
+    // Learning on the battery too: a laptop on its battery would hold the job, waiting for the mains.
     let options = ScanOptions {
         dir: home.join("music").to_string_lossy().into(),
         folders: vec![music.to_string_lossy().into()],
+        on_battery: true,
         ..Default::default()
     };
     let mut input = child.stdin.take().unwrap();

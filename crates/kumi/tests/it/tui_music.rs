@@ -32,6 +32,7 @@ fn music_lines_say_the_folders_the_songs_and_how_learning_goes() {
         light: 1_200,
         full: 300,
         skipped: 12,
+        cloud: 0,
         learned_at: Some(1_000),
         said: None,
     };
@@ -49,9 +50,18 @@ fn music_lines_say_the_folders_the_songs_and_how_learning_goes() {
         music_lines(&status(MusicState::Done), true, false, None, 3_601_000.).last().unwrap(),
         "Now: up to date, learned 1 hour ago (Kumi looks for new songs every half hour)"
     );
-    let off =
-        MusicStatus { state: MusicState::Off, folders: vec![], songs: 0, light: 0, full: 0, skipped: 0, learned_at: None, said: None };
-    let found = Found { folder: "/somewhere/Music".into(), songs: 2_391, capped: false };
+    let off = MusicStatus {
+        state: MusicState::Off,
+        folders: vec![],
+        songs: 0,
+        light: 0,
+        full: 0,
+        skipped: 0,
+        cloud: 0,
+        learned_at: None,
+        said: None,
+    };
+    let found = Found { folder: "/somewhere/Music".into(), songs: 2_391, ..Default::default() };
     assert_eq!(
         music_lines(&off, false, false, Some(&found), 0.),
         [

@@ -12,7 +12,7 @@ use kumi_listening::{
         describe::describe,
         folders::Walked,
         hear::Style,
-        learning::{create_music, Music, MusicOptions, MusicState},
+        learning::{create_music, Music, MusicOptions, MusicState, FORGETTING},
         scan::recluster,
         store::{MusicStore, Stage},
         tags::{NamesFrom, Tags},
@@ -128,6 +128,19 @@ impl Style for Held {
     }
 }
 
+/// A style model taste hears with that hears everything elsewhere than `Fixed` does.
+struct Elsewhere;
+
+#[async_trait(?Send)]
+impl Style for Elsewhere {
+    fn model(&self) -> &str {
+        MODEL
+    }
+    async fn embed(&self, _: &Path, _: &[f64], _: Option<f64>, _: Say<'_>, _: &Signal) -> Result<(Vec<f32>, String), String> {
+        Ok((direction(200, 0, 0), MODEL.into()))
+    }
+}
+
 /// The test's style model with a text side: words for a style point where its songs do.
 struct Worded;
 
@@ -175,7 +188,7 @@ fn library(root: &Path) -> (PathBuf, String) {
             let (artist, album) = styled.artists[n % 3];
             let title = if n < 3 { styled.titles[n].to_string() } else { format!("{} Track {n}", styled.genre) };
             let path = if style == 0 && n == 0 { archangel.clone() } else { format!("/library/{artist}/{album}/{n:02} {title}.mp3") };
-            let file = Walked { path, folder: "/library".into(), size: 1, mtime: (style * 50 + n) as i64, protected: false };
+            let file = Walked { path, folder: "/library".into(), size: 1, mtime: (style * 50 + n) as i64, ..Default::default() };
             let tags = Tags {
                 artist: Some(artist.into()),
                 album: Some(album.into()),
@@ -468,8 +481,12 @@ fn keep_hears_the_nearest_songs_in_full_and_keeps_them_for_the_judge_by_name() {
         store.connection().execute("UPDATE songs SET stage = 1 WHERE title IN ('Song 1')", []).unwrap();
         drop(store);
         let references = Rc::new(ReferenceStore::new(dir.path().join("references")));
-        let (taste, _) = music(&kumi, Some(vec![folder]), true, vec![]);
+        // Taste hears with a style model of its own: a vector it wrote would show in the file.
+        let mut options = MusicOptions::new(kumi.clone(), Some(vec![folder]), Default::default());
+        (options.fork, options.style, options.delay_ms) = (false, Some(Rc::new(Elsewhere) as Rc<dyn Style>), 3_600_000);
+        let taste = create_music(options);
         counted(&taste).await;
+        let vectors = std::fs::read(kumi_listening::music::vectors::file_for(&kumi, MODEL)).unwrap();
         let tool = taste_tools_for(&DawProfile::ABLETON, taste.clone(), None, Some(references.clone())).remove(0);
         let result = tool.execute(json!({"like": "Artist A", "keep": true}).as_object().unwrap().clone(), Signal::new()).await.unwrap();
         let answer: Value = serde_json::from_str(&result.text).unwrap();
@@ -481,10 +498,11 @@ fn keep_hears_the_nearest_songs_in_full_and_keeps_them_for_the_judge_by_name() {
         assert!(kept.tracks.iter().all(|track| Path::new(&track.source).is_file()), "its tracks are the song files");
         assert_eq!((kept.profile.tracks, kept.profile.vibe_model.as_deref()), (6, Some(MODEL)));
         assert!(kept.profile.vibe.is_some(), "the judge guards their style");
-        // Heard in full now.
+        // Heard in full now; their style vectors left to the scan, which alone writes them.
         let store = MusicStore::open_read(&database(&kumi)).unwrap().unwrap();
         let light: i64 = store.connection().query_row("SELECT count(*) FROM songs WHERE stage < 2", [], |row| row.get(0)).unwrap();
         assert_eq!(light, 0);
+        assert!(std::fs::read(kumi_listening::music::vectors::file_for(&kumi, MODEL)).unwrap() == vectors, "the file as the scan left it");
         // A style by its label, kept the same way; never the whole library.
         let result = tool.execute(json!({"keep": true}).as_object().unwrap().clone(), Signal::new()).await.unwrap();
         let answer: Value = serde_json::from_str(&result.text).unwrap();
@@ -495,7 +513,7 @@ fn keep_hears_the_nearest_songs_in_full_and_keeps_them_for_the_judge_by_name() {
 }
 
 #[test]
-fn a_reference_kept_by_an_older_kumi_is_measured_again() {
+fn a_reference_kept_before_the_music_in_it_was_kept_is_read_as_it_is() {
     use kumi_listening::references::store::{KeptReference, ReferenceStore, KEPT_VERSION};
     local(async {
         let dir = tempfile::tempdir().unwrap();
@@ -511,10 +529,201 @@ fn a_reference_kept_by_an_older_kumi_is_measured_again() {
             mbid: None,
             stamp: None,
         };
-        references.save(&kept(KEPT_VERSION - 1)).await.unwrap();
-        assert!(references.load("dub techno").await.is_none(), "an older one is measured again (its tempo, key and groove)");
-        references.save(&kept(KEPT_VERSION)).await.unwrap();
-        assert!(references.load("dub techno").await.is_some());
+        // One whose measures meant something else is measured again.
+        references.save(&kept(1)).await.unwrap();
+        assert!(references.load("dub techno").await.is_none());
+        // One Kumi 1.22 kept, without its tempo, key and groove (they came later, and change no measure): read as it is.
+        assert_eq!(KEPT_VERSION, 2);
+        let before = kept(2);
+        assert!(before.profile.tempo.is_none() && before.profile.groove.is_none());
+        references.save(&before).await.unwrap();
+        assert_eq!(references.load("dub techno").await, Some(before));
+    });
+}
+
+#[test]
+fn forgetting_their_music_takes_the_references_taste_made_from_it() {
+    use kumi_listening::references::store::{KeptReference, ReferenceStore, KEPT_VERSION};
+    local(async {
+        let dir = tempfile::tempdir().unwrap();
+        let (kumi, _) = library(dir.path());
+        let folder = dir.path().join("references");
+        let references = ReferenceStore::new(&folder);
+        for (name, kind) in [("your music near Archangel", "music"), ("dub techno", "genre")] {
+            let reference = KeptReference {
+                version: KEPT_VERSION,
+                key: ReferenceStore::key(name),
+                name: name.into(),
+                kind: kind.into(),
+                tracks: vec![],
+                profile: (STYLES[0].sound)(0.),
+                at: 1,
+                mbid: None,
+                stamp: None,
+            };
+            references.save(&reference).await.unwrap();
+        }
+        let mut options = MusicOptions::new(kumi.clone(), Some(vec!["/library".into()]), Default::default());
+        (options.fork, options.style, options.delay_ms) = (false, Some(Rc::new(Fixed) as Rc<dyn Style>), 3_600_000);
+        options.references = Some(folder.clone());
+        let taste = create_music(options);
+        taste.forget().await.unwrap();
+        assert!(references.load("your music near Archangel").await.is_none(), "made from their songs: forgotten with them");
+        assert!(references.load("dub techno").await.is_some(), "a genre's isn't theirs");
+        // What taste writes after it finds no music.db to write to: none is made again.
+        assert!(MusicStore::open_existing(&database(&kumi)).unwrap().is_none());
+        assert!(!kumi.exists());
+    });
+}
+
+#[test]
+fn forget_deletes_it_all_even_when_their_settings_cant_be_written_and_says_so() {
+    local(async {
+        let dir = tempfile::tempdir().unwrap();
+        let (kumi, _) = library(dir.path());
+        let mut options = MusicOptions::new(kumi.clone(), Some(vec!["/library".into()]), Default::default());
+        (options.fork, options.style, options.delay_ms) = (false, Some(Rc::new(Fixed) as Rc<dyn Style>), 3_600_000);
+        options.save = Some(Rc::new(|_: Option<&[String]>, _: bool| Err("the disk is full".to_string())));
+        let taste = create_music(options);
+        let error = taste.forget().await.unwrap_err();
+        assert!(error.contains("settings") && error.contains("the disk is full"), "{error}");
+        assert!(!kumi.exists(), "forgotten all the same");
+        assert_eq!((taste.status().state, taste.status().songs), (MusicState::Off, 0));
+    });
+}
+
+#[test]
+fn a_folder_added_while_kumi_forgets_waits_for_the_forget() {
+    local(async {
+        let dir = tempfile::tempdir().unwrap();
+        let songs = dir.path().join("Music");
+        std::fs::create_dir_all(songs.join("A/B")).unwrap();
+        let tone: Vec<f32> = (0..8_000 * 40).map(|n| 0.3 * (n as f32 * 0.35).sin()).collect();
+        std::fs::write(songs.join("A/B/01 One.wav"), kumi_media::audio::decode::float_wav(&[tone], 8_000)).unwrap();
+        let kumi = dir.path().join("kumi/music");
+        let hearing = Rc::new(Cell::new(false));
+        let mut options = MusicOptions::new(kumi.clone(), None, Default::default());
+        (options.fork, options.style, options.delay_ms) = (false, Some(Rc::new(Held(hearing.clone())) as Rc<dyn Style>), 3_600_000);
+        let taste = create_music(options);
+        let folder = songs.to_string_lossy().into_owned();
+        taste.learn(vec![folder.clone()]).unwrap();
+        for _ in 0..1_000 {
+            if hearing.get() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        let (forgot, added) = tokio::join!(taste.forget(), async {
+            tokio::task::yield_now().await;
+            taste.learn(vec![folder.clone()])
+        });
+        assert_eq!((forgot, added), (Ok(()), Err(FORGETTING.to_string())), "its scan isn't killed, nor its music.db deleted under it");
+        assert!(!kumi.exists());
+        // Forgotten: a folder is added again as ever.
+        taste.learn(vec![folder.clone()]).unwrap();
+        assert_eq!(taste.folders(), [folder]);
+        taste.close().await;
+    });
+}
+
+#[test]
+fn taking_away_their_last_folder_sets_its_songs_aside() {
+    local(async {
+        let dir = tempfile::tempdir().unwrap();
+        let (kumi, _) = library(dir.path());
+        let (taste, _) = music(&kumi, Some(vec!["/library".into()]), true, vec![]);
+        counted(&taste).await;
+        taste.set_folders(Some(vec![])).unwrap();
+        for _ in 0..400 {
+            if taste.status().songs == 0 {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        assert_eq!((taste.status().songs, taste.status().heard()), (0, 0), "as /music remove says: set aside as gone");
+        let store = MusicStore::open_read(&database(&kumi)).unwrap().unwrap();
+        assert_eq!(store.counts().unwrap().gone, 150, "kept as heard, for a folder added again");
+        let answer: Value = serde_json::from_str(&ask(&taste, json!({"like": "Burial"})).await).unwrap();
+        assert!(answer.get("songs").is_none() && answer["note"].as_str().unwrap().contains("hasn't let Kumi learn"), "{answer}");
+    });
+}
+
+#[test]
+fn learn_adds_their_folders_to_the_ones_kumi_learns_from() {
+    local(async {
+        let dir = tempfile::tempdir().unwrap();
+        let (first, second) = (dir.path().join("First"), dir.path().join("Second"));
+        std::fs::create_dir_all(&first).unwrap();
+        std::fs::create_dir_all(&second).unwrap();
+        let (first, second) = (first.to_string_lossy().into_owned(), second.to_string_lossy().into_owned());
+        let (taste, saved) = music(&dir.path().join("kumi/music"), Some(vec![first.clone()]), true, vec![]);
+        let answer: Value = serde_json::from_str(&ask(&taste, json!({"learn": [second.clone(), first.clone()]})).await).unwrap();
+        assert_eq!(taste.folders(), [first.clone(), second.clone()], "added, the one known once");
+        assert_eq!(answer["folders"], json!([first.clone(), second.clone()]));
+        assert_eq!(saved.borrow().last(), Some(&(Some(vec![first, second]), true)));
+        taste.close().await;
+    });
+}
+
+#[test]
+fn taste_stays_out_of_the_requests_once_the_producer_said_no() {
+    local(async {
+        let dir = tempfile::tempdir().unwrap();
+        let kumi = dir.path().join("kumi/music");
+        let tool = |music: Rc<Music>| taste_tools_for(&DawProfile::ABLETON, music, None, None).remove(0);
+        let (declined, _) = music(&kumi, None, true, vec![]);
+        assert!(tool(declined.clone()).deferred(), "it can do nothing: found when it's looked for");
+        assert!(ask(&declined, json!({})).await.contains("hasn't let Kumi learn"));
+        let (fresh, _) = music(&kumi, None, false, vec![]);
+        assert!(!tool(fresh).deferred(), "it may offer");
+        let (agreed, _) = music(&kumi, Some(vec!["/library".into()]), true, vec![]);
+        assert!(!tool(agreed).deferred());
+    });
+}
+
+#[test]
+fn keep_with_words_that_name_none_of_their_styles_keeps_nothing() {
+    use kumi_listening::references::store::ReferenceStore;
+    local(async {
+        let dir = tempfile::tempdir().unwrap();
+        let (kumi, _) = library(dir.path());
+        let folder = dir.path().join("references");
+        let (taste, _) = music(&kumi, Some(vec!["/library".into()]), true, vec![]);
+        counted(&taste).await;
+        let tool = taste_tools_for(&DawProfile::ABLETON, taste.clone(), None, Some(Rc::new(ReferenceStore::new(&folder)))).remove(0);
+        let input = json!({"words": "baroque harpsichord", "keep": true});
+        let result = tool.execute(input.as_object().unwrap().clone(), Signal::new()).await.unwrap();
+        let answer: Value = serde_json::from_str(&result.text).unwrap();
+        assert!(answer["clusters"].is_array() && answer["keep"].as_str().unwrap().starts_with("not kept"), "{answer}");
+        assert!(std::fs::read_dir(&folder).map_or(true, |mut entries| entries.next().is_none()), "no reference of every style");
+    });
+}
+
+#[test]
+fn a_learner_that_cant_start_is_tried_again_later() {
+    local(async {
+        let dir = tempfile::tempdir().unwrap();
+        std::env::set_var("KUMI_LIBRARY_LEARNER_BIN", dir.path().join("no-learner-here"));
+        let mut options =
+            MusicOptions::new(dir.path().join("kumi/music"), Some(vec![dir.path().to_string_lossy().into_owned()]), Default::default());
+        (options.delay_ms, options.every_ms) = (0, 40);
+        let music = create_music(options);
+        let tries = Rc::new(Cell::new(0));
+        let _unlisten = music.on_status({
+            let tries = tries.clone();
+            Rc::new(move |status: kumi_listening::music::learning::MusicStatus| {
+                tries.set(tries.get() + usize::from(status.state == MusicState::Learning))
+            })
+        });
+        music.start();
+        tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+        assert!(tries.get() >= 2, "tried again: {}", tries.get());
+        let status = music.status();
+        assert_eq!(
+            (status.state, status.said.as_deref()),
+            (MusicState::Done, Some("Kumi's learner couldn't start; it tries again later."))
+        );
+        music.close().await;
     });
 }
 

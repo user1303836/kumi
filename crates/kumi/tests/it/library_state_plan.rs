@@ -92,6 +92,31 @@ async fn locks_exclude_other_processes_but_replace_same_process_dead_and_day_old
     }
 }
 #[tokio::test]
+async fn a_held_lock_says_so_again_and_a_release_leaves_one_another_took() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path().join("music");
+    let dir = dir.to_str().unwrap();
+    let lock = Path::new(dir).join("learning.lock");
+    let held = acquire_lock(dir).await.unwrap().unwrap();
+    let at = || -> f64 { serde_json::from_slice::<serde_json::Value>(&std::fs::read(&lock).unwrap()).unwrap()["at"].as_f64().unwrap() };
+    // Taken over a day ago, as a music scan's is after its first day: said again, it's fresh.
+    put(&lock, serde_json::to_vec(&json!({"pid":std::process::id(),"at":0})).unwrap());
+    held.holding().refresh().await.unwrap();
+    assert!(at() > kumi_common::time::now_ms() as f64 - 60_000., "{}", at());
+    #[cfg(unix)]
+    {
+        // Another process took it (this one's heartbeat stopped): neither a refresh nor the release touches theirs.
+        let mut child = std::process::Command::new("sleep").arg("30").spawn().unwrap();
+        let theirs = serde_json::to_vec(&json!({"pid":child.id(),"at":kumi_common::time::now_ms()})).unwrap();
+        put(&lock, theirs.clone());
+        held.holding().refresh().await.unwrap();
+        held.release().await.unwrap();
+        assert_eq!(std::fs::read(&lock).unwrap(), theirs);
+        child.kill().unwrap();
+        child.wait().unwrap();
+    }
+}
+#[tokio::test]
 async fn plan_reads_bounded_project_records_remembers_folders_and_excludes_pack_demos() {
     let tmp = tempfile::tempdir().unwrap();
     let home = tmp.path();

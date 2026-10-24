@@ -10,11 +10,11 @@ use kumi_listening::{
         database,
         folders::Walked,
         hear::Style,
-        scan::{next, spread_sample, Next},
+        scan::{next, spread_sample, Aside, Next},
         store::{MusicStore, Stage, TOO_QUIET, TOO_SHORT},
         tags::{NamesFrom, Tags},
         vectors::{file_for, quantize, scale_of, VectorReader, DIMS, SCALE_FROM},
-        worker::{run, Control, ScanOptions, ScanPhase, ScanProgress},
+        worker::{run, Control, ScanOptions, ScanPhase, ScanProgress, ScanReply},
     },
 };
 use std::{
@@ -121,7 +121,7 @@ fn the_spread_sample_takes_each_artist_in_turn_newest_first() {
     let mut store = MusicStore::open(&database(dir.path())).unwrap();
     let mut rows = vec![];
     for (n, artist) in ["A", "A", "A", "A", "A", "B", "B", "B", "C"].into_iter().enumerate() {
-        let file = Walked { path: format!("/m/{artist}/{n}.mp3"), folder: "/m".into(), size: 1, mtime: n as i64, protected: false };
+        let file = Walked { path: format!("/m/{artist}/{n}.mp3"), folder: "/m".into(), size: 1, mtime: n as i64, ..Default::default() };
         let tags = Tags { artist: Some(artist.into()), title: Some(format!("{n}")), names_from: NamesFrom::Tags, ..Default::default() };
         rows.push((file, tags));
     }
@@ -139,7 +139,7 @@ fn songs_are_heard_used_first_then_the_spread_sample_then_lightly_newest_first()
     let mut store = MusicStore::open(&database(dir.path())).unwrap();
     let rows: Vec<(Walked, Tags)> = (0..6)
         .map(|n| {
-            let file = Walked { path: format!("/m/{n}.mp3"), folder: "/m".into(), size: 1, mtime: n, protected: false };
+            let file = Walked { path: format!("/m/{n}.mp3"), folder: "/m".into(), size: 1, mtime: n, ..Default::default() };
             (file, Tags { artist: Some(format!("artist {n}")), title: Some("t".into()), names_from: NamesFrom::Tags, ..Default::default() })
         })
         .collect();
@@ -151,7 +151,7 @@ fn songs_are_heard_used_first_then_the_spread_sample_then_lightly_newest_first()
     let (mut missing, mut at) = (VecDeque::new(), 0);
     let mut busy = HashSet::new();
     let mut order = vec![];
-    while let Some(next) = next(&store, &busy, &mut missing, &spread, &mut at).unwrap() {
+    while let Some(next) = next(&store, &Aside { songs: &busy, folders: &[], since: i64::MAX }, &mut missing, &spread, &mut at).unwrap() {
         let (song, stage) = match &next {
             Next::Hear(song, stage) => (song.clone(), *stage),
             Next::Restyle(..) => unreachable!(),
@@ -358,9 +358,10 @@ async fn timing_songs_heard_lightly_and_in_full() {
         signal: &signal,
         readers: 4,
         progress: &|_| {},
+        hold: &|| {},
     };
     let started = std::time::Instant::now();
-    let passed = kumi_listening::music::scan::tags_pass(&mut store, &pass).unwrap();
+    let (passed, _) = kumi_listening::music::scan::tags_pass(&mut store, &pass).unwrap();
     eprintln!("tags pass: {} songs in {:.2} s", passed.walked, started.elapsed().as_secs_f64());
     let say = |_: &str| {};
     let ears = Ears { style: Some(&clap), say: &say, signal: &signal };
@@ -436,6 +437,286 @@ async fn the_app_sees_the_scan_wait_while_kumi_listens_then_learn_and_finish() {
             handle.set_folders(Some(vec![])).unwrap();
             assert_eq!(handle.status().state, MusicState::Off);
             handle.close().await;
+        })
+        .await;
+}
+
+/// A style model of the test's own that does something as it hears: `hook` is told each call's count and file.
+struct Hooked {
+    calls: Cell<usize>,
+    hook: Box<dyn Fn(usize, &Path)>,
+}
+
+#[async_trait(?Send)]
+impl Style for Hooked {
+    fn model(&self) -> &str {
+        "test-model"
+    }
+    async fn embed(
+        &self,
+        file: &Path,
+        _: &[f64],
+        _: Option<f64>,
+        _: Say<'_>,
+        _: &kumi_common::abort::Signal,
+    ) -> Result<(Vec<f32>, String), String> {
+        self.calls.set(self.calls.get() + 1);
+        (self.hook)(self.calls.get(), file);
+        let folder = file.parent().and_then(Path::parent).and_then(|folder| folder.file_name()).unwrap().to_string_lossy().into_owned();
+        let mut vector = vec![0.01f32; DIMS];
+        vector[folder.bytes().map(usize::from).sum::<usize>() % DIMS] = 1.;
+        Ok((vector, "test-model".into()))
+    }
+}
+
+/// A song as music.db keeps it, for a song that's in it.
+fn kept(store: &MusicStore, path: &str) -> kumi_listening::music::store::Song {
+    store.song_at(path).unwrap().unwrap()
+}
+
+#[test]
+fn the_full_pass_takes_the_songs_heard_lightly_before_this_run() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut store = MusicStore::open(&database(dir.path())).unwrap();
+    let rows: Vec<(Walked, Tags)> = (0..3)
+        .map(|n| {
+            let file = Walked { path: format!("/m/{n}.mp3"), folder: "/m".into(), size: 1, mtime: n, ..Default::default() };
+            (file, Tags { artist: Some(format!("artist {n}")), title: Some("t".into()), names_from: NamesFrom::Tags, ..Default::default() })
+        })
+        .collect();
+    store.write_songs(&rows).unwrap();
+    // 0 heard lightly before this run (which began at 200), 1 during it, 2 not yet.
+    store.connection().execute("UPDATE songs SET stage = 1, heard_at = 100 WHERE path = '/m/0.mp3'", []).unwrap();
+    store.connection().execute("UPDATE songs SET stage = 1, heard_at = 500 WHERE path = '/m/1.mp3'", []).unwrap();
+    let mut busy = HashSet::new();
+    let mut order = vec![];
+    while let Some(next) = next(&store, &Aside { songs: &busy, folders: &[], since: 200 }, &mut VecDeque::new(), &[], &mut 0).unwrap() {
+        let Next::Hear(song, stage) = next else { unreachable!() };
+        order.push((song.path.clone(), stage));
+        busy.insert(song.id);
+    }
+    assert_eq!(
+        order,
+        [("/m/2.mp3".to_string(), Stage::Light), ("/m/0.mp3".to_string(), Stage::Full)],
+        "this run's light pass waits for the next run"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_song_whose_file_isnt_there_now_is_left_for_later() {
+    use kumi_listening::music::hear::{hear, Ears, Heard};
+    let dir = tempfile::tempdir().unwrap();
+    let mut store = MusicStore::open(&database(&dir.path().join("kumi"))).unwrap();
+    let music = dir.path().join("Music").to_string_lossy().into_owned();
+    std::fs::create_dir_all(&music).unwrap();
+    let file = |folder: &str, name: &str| Walked { path: at(folder, name), folder: folder.into(), size: 1, mtime: 1, ..Default::default() };
+    let unplugged = dir.path().join("Unplugged").to_string_lossy().into_owned();
+    store
+        .write_songs(&[(file(&music, "A/B/01 Gone.wav"), Tags::default()), (file(&unplugged, "C/D/01 Away.wav"), Tags::default())])
+        .unwrap();
+    let (signal, say) = (kumi_common::abort::Signal::new(), |_: &str| {});
+    let ears = Ears { style: None, say: &say, signal: &signal };
+    let heard = hear(&kept(&store, &at(&music, "A/B/01 Gone.wav")), Stage::Light, &ears).await;
+    assert!(matches!(heard, Heard::Later { away: false, .. }), "gone since the walk, which sees it next: {heard:?}");
+    let heard = hear(&kept(&store, &at(&unplugged, "C/D/01 Away.wav")), Stage::Light, &ears).await;
+    assert!(matches!(&heard, Heard::Later { away: true, why } if why.contains("Unplugged")), "its drive away: {heard:?}");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_stop_while_a_songs_length_is_read_keeps_nothing_against_it() {
+    use kumi_listening::music::hear::{hear, Ears, Heard};
+    let dir = tempfile::tempdir().unwrap();
+    let mut store = MusicStore::open(&database(&dir.path().join("kumi"))).unwrap();
+    let music = dir.path().join("Music").to_string_lossy().into_owned();
+    // No length in its tags: its file is decoded to find it.
+    let path = at(&music, "A/B/01 Untagged.mp3");
+    std::fs::create_dir_all(Path::new(&path).parent().unwrap()).unwrap();
+    std::fs::write(&path, b"not really an mp3").unwrap();
+    store
+        .write_songs(&[(Walked { path: path.clone(), folder: music.clone(), size: 17, mtime: 1, ..Default::default() }, Tags::default())])
+        .unwrap();
+    let (signal, say) = (kumi_common::abort::Signal::new(), |_: &str| {});
+    signal.cancel();
+    let heard = hear(&kept(&store, &path), Stage::Light, &Ears { style: None, say: &say, signal: &signal }).await;
+    assert!(matches!(heard, Heard::Stop(_)), "stopped, not a song that won't decode: {heard:?}");
+}
+
+#[cfg(not(target_os = "macos"))]
+#[tokio::test(flavor = "current_thread")]
+async fn with_no_ffmpeg_here_the_scan_stops_and_keeps_nothing_against_the_song() {
+    use kumi_listening::music::hear::{hear, Ears, Heard};
+    let dir = tempfile::tempdir().unwrap();
+    // No ffmpeg Kumi can find, and none it can fetch.
+    std::env::set_var("KUMI_FFMPEG", dir.path().join("no-ffmpeg"));
+    let mut store = MusicStore::open(&database(&dir.path().join("kumi"))).unwrap();
+    let music = dir.path().join("Music").to_string_lossy().into_owned();
+    let path = at(&music, "A/B/01 Song.mp3");
+    std::fs::create_dir_all(Path::new(&path).parent().unwrap()).unwrap();
+    std::fs::write(&path, b"an mp3 Kumi can't read itself").unwrap();
+    let tags = Tags { seconds: Some(200.), ..Default::default() };
+    store.write_songs(&[(Walked { path: path.clone(), folder: music.clone(), size: 29, mtime: 1, ..Default::default() }, tags)]).unwrap();
+    let (signal, say) = (kumi_common::abort::Signal::new(), |_: &str| {});
+    let heard = hear(&kept(&store, &path), Stage::Light, &Ears { style: None, say: &say, signal: &signal }).await;
+    assert!(matches!(&heard, Heard::Stop(why) if why.contains("ffmpeg")), "{heard:?}");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_scan_over_songs_too_short_to_hear_ends_done_having_skipped_them() {
+    let dir = tempfile::tempdir().unwrap();
+    let music = dir.path().join("Music");
+    for n in 1..=3 {
+        song(Path::new(&at(&music.to_string_lossy(), &format!("A{n}/Album/01 Short {n}.wav"))), 2., 440., 0.5);
+    }
+    let reports = RefCell::new(vec![]);
+    let options = ScanOptions {
+        dir: dir.path().join("kumi").to_string_lossy().into_owned(),
+        folders: vec![music.to_string_lossy().into_owned()],
+        ..Default::default()
+    };
+    let progress =
+        run(&options, Default::default(), &Control::new(false), Some(Fake::new("test-model")), &|reply| reports.borrow_mut().push(reply))
+            .await
+            .unwrap();
+    assert_eq!(
+        (progress.phase, progress.songs, progress.skipped, progress.heard, progress.light),
+        (ScanPhase::Done, 3, 3, 3, 0),
+        "{progress:?}"
+    );
+    assert!(reports.borrow().iter().any(|reply| matches!(reply, ScanReply::Progress { progress } if progress.phase == ScanPhase::Hearing)));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_song_away_while_its_heard_waits_for_its_drive_and_is_heard_once_its_back() {
+    let dir = tempfile::tempdir().unwrap();
+    let (near, far) = (dir.path().join("Near"), dir.path().join("Far"));
+    // Heard newest first: the far drive's song, the oldest, is picked after the first song is heard.
+    let songs = [(&near, "A/Album/01 A.wav", 110.), (&near, "B/Album/01 B.wav", 2_000.), (&far, "C/Album/01 C.wav", 440.)];
+    for (n, (folder, name, hz)) in songs.iter().enumerate() {
+        let path = at(&folder.to_string_lossy(), name);
+        song(Path::new(&path), 31., *hz, 0.5);
+        let when = std::time::SystemTime::now() - std::time::Duration::from_secs(600 * n as u64);
+        std::fs::File::options().write(true).open(&path).unwrap().set_modified(when).unwrap();
+    }
+    let kumi = dir.path().join("kumi");
+    let options = ScanOptions {
+        dir: kumi.to_string_lossy().into_owned(),
+        folders: vec![near.to_string_lossy().into_owned(), far.to_string_lossy().into_owned()],
+        ..Default::default()
+    };
+    // The far drive is unplugged as the first song is heard (all three were walked).
+    let (unplugged, moved) = (dir.path().join("Unplugged"), far.clone());
+    let style = Rc::new(Hooked {
+        calls: Cell::new(0),
+        hook: Box::new(move |call, _| {
+            if call == 1 {
+                std::fs::rename(&moved, &unplugged).unwrap();
+            }
+        }),
+    });
+    let said = RefCell::new(vec![]);
+    let report = |reply: ScanReply| {
+        if let ScanReply::Said { text } = reply {
+            said.borrow_mut().push(text);
+        }
+    };
+    let first = run(&options, Default::default(), &Control::new(false), Some(style.clone()), &report).await.unwrap();
+    assert_eq!((first.phase, first.full, first.skipped), (ScanPhase::Done, 2, 0), "{first:?}");
+    let far_song = kept(&store(&kumi), &at(&far.to_string_lossy(), "C/Album/01 C.wav"));
+    assert_eq!((far_song.stage, far_song.skipped, far_song.gone), (0, None, false), "nothing kept against it");
+    assert!(said.borrow().iter().any(|text| text.contains("Far") && text.contains("its songs wait")), "{:?}", said.borrow());
+    // Plugged in again: heard.
+    std::fs::rename(dir.path().join("Unplugged"), &far).unwrap();
+    let second = run(&options, Default::default(), &Control::new(false), Some(Fake::new("test-model")), &|_| {}).await.unwrap();
+    assert_eq!((second.phase, second.full), (ScanPhase::Done, 3), "{second:?}");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn songs_moved_one_for_one_are_on_the_map_and_in_the_clusters_at_the_scans_end() {
+    let dir = tempfile::tempdir().unwrap();
+    let music = library(dir.path());
+    let kumi = dir.path().join("kumi");
+    scan(&kumi, &music, Fake::new("test-model"), &Control::new(false)).await;
+    // The producer moves an artist's folder: as many songs, at new paths.
+    std::fs::rename(at(&music, "Low"), at(&music, "Bass")).unwrap();
+    let progress = scan(&kumi, &music, Fake::new("test-model"), &Control::new(false)).await;
+    // Heard lightly this run (in full the next).
+    assert_eq!((progress.phase, progress.full, progress.light), (ScanPhase::Done, 2, 2), "{progress:?}");
+    let store = store(&kumi);
+    let moved = kept(&store, &at(&music, "Bass/Album/01 Low 0.wav"));
+    let place: (Option<f64>, Option<i64>) = store
+        .connection()
+        .query_row("SELECT x, cluster FROM songs WHERE id = ?1", [moved.id], |row| Ok((row.get(0)?, row.get(1)?)))
+        .unwrap();
+    assert!(place.0.is_some() && place.1.is_some(), "the moved songs are on the map, in a style: {place:?}");
+    let (songs, _) = store.map().unwrap();
+    assert_eq!(songs.len(), 4, "the songs gone are off it");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn while_hearing_the_counts_said_follow_the_songs_heard() {
+    let dir = tempfile::tempdir().unwrap();
+    let music = library(dir.path());
+    let reports = RefCell::new(vec![]);
+    let options = ScanOptions { dir: dir.path().join("kumi").to_string_lossy().into_owned(), folders: vec![music], ..Default::default() };
+    let progress =
+        run(&options, Default::default(), &Control::new(false), Some(Fake::new("test-model")), &|reply| reports.borrow_mut().push(reply))
+            .await
+            .unwrap();
+    let said: Vec<ScanProgress> = reports
+        .borrow()
+        .iter()
+        .filter_map(|reply| match reply {
+            ScanReply::Progress { progress } if progress.phase == ScanPhase::Hearing => Some(progress.clone()),
+            _ => None,
+        })
+        .collect();
+    assert!(!said.is_empty());
+    for (before, after) in said.iter().zip(&said[1..]) {
+        assert!(after.light + after.full + after.skipped >= before.light + before.full + before.skipped, "{before:?} then {after:?}");
+    }
+    assert!(said.iter().all(|progress| progress.light + progress.full + progress.skipped <= progress.songs));
+    assert_eq!((progress.full, progress.skipped), (4, 2));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_pause_lets_the_songs_under_way_finish_before_the_scan_waits() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let dir = tempfile::tempdir().unwrap();
+            let music = library(dir.path());
+            let kumi = dir.path().join("kumi");
+            let control = Control::new(false);
+            // Kumi starts listening as the first song is with the style model; another song is under way.
+            let pausing = control.clone();
+            let style = Rc::new(Hooked {
+                calls: Cell::new(0),
+                hook: Box::new(move |call, _| {
+                    if call == 1 {
+                        pausing.pause(true);
+                    }
+                }),
+            });
+            let options = ScanOptions { dir: kumi.to_string_lossy().into_owned(), folders: vec![music], ..Default::default() };
+            let running = tokio::task::spawn_local({
+                let (control, style) = (control.clone(), style.clone());
+                async move { run(&options, Default::default(), &control, Some(style), &|_| {}).await.unwrap() }
+            });
+            let heard = || -> i64 {
+                let Ok(store) = MusicStore::open(&database(&kumi)) else { return 0 };
+                store.connection().query_row("SELECT count(*) FROM songs WHERE stage >= 1", [], |row| row.get(0)).unwrap()
+            };
+            // While it waits, the song that was under way is heard and kept, not left to its converter's deadline.
+            let started = std::time::Instant::now();
+            while heard() < 2 {
+                assert!(started.elapsed() < std::time::Duration::from_secs(120), "the song under way sits unheard: {}", heard());
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+            assert_eq!((heard(), style.calls.get()), (2, 2), "and nothing more while it waits");
+            assert!(!running.is_finished());
+            control.pause(false);
+            let progress = running.await.unwrap();
+            assert_eq!((progress.phase, progress.full, progress.skipped), (ScanPhase::Done, 4, 2));
         })
         .await;
 }

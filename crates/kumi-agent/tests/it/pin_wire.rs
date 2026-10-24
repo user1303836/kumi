@@ -679,13 +679,14 @@ fn events() -> Vec<SessionEvent> {
             light: 900,
             full: 300,
             skipped: 12,
+            cloud: 0,
             learned_at: Some(AT),
             said: Some("Kumi is fetching its style model, LAION-CLAP…".into()),
         },
     }));
     events.extend([MusicState::Off, MusicState::Learning, MusicState::Paused, MusicState::Done, MusicState::Elsewhere].map(|state| {
         SessionEvent::Music(MusicEvent {
-            status: MusicStatus { state, folders: vec![], songs: 0, light: 0, full: 0, skipped: 0, learned_at: None, said: None },
+            status: MusicStatus { state, folders: vec![], songs: 0, light: 0, full: 0, skipped: 0, cloud: 0, learned_at: None, said: None },
         })
     }));
     events.extend(
