@@ -230,8 +230,8 @@ impl TasteTool {
         if self.music.offered() {
             return json!({"learned": 0, "note": DECLINED});
         }
-        let (places, skip) = (self.music.places(), self.music.skipped());
-        let Some(found) = tokio::task::spawn_blocking(move || folders::found_in(places, &skip)).await.ok().flatten() else {
+        let (places, skip) = (self.music.places(), self.music.skipping());
+        let Some(found) = tokio::task::spawn_blocking(move || folders::found_in(places, &skip())).await.ok().flatten() else {
             return json!({"learned": 0});
         };
         // Offered once, however the producer answers (a settings file Kumi can't write offers again next time).

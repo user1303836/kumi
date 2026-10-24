@@ -233,11 +233,15 @@ impl Music {
         self.options.borrow().library_folders.clone()
     }
 
-    /// What every walk leaves out: their sample folders and the library's places (Live's User Library and Packs, under
-    /// ~/Music on a Mac), so the offer counts the songs Kumi would learn.
-    pub fn skipped(&self) -> Vec<String> {
-        let options = self.options.borrow();
-        super::worker::skipped_folders(options.daws, &options.library_folders)
+    /// What every walk leaves out, so the offer counts the songs Kumi would learn: their sample folders and the library's
+    /// places (Live's User Library and Packs, under ~/Music on a Mac). Found where it's called (it looks at the DAWs'
+    /// own settings): off the app's thread.
+    pub fn skipping(&self) -> impl FnOnce() -> Vec<String> + Send + 'static {
+        let (daws, folders) = {
+            let options = self.options.borrow();
+            (options.daws, options.library_folders.clone())
+        };
+        move || super::worker::skipped_folders(daws, &folders)
     }
 
     /// Whether a forget is under way.

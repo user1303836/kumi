@@ -490,6 +490,14 @@ pub async fn run(
     let mut running = FuturesUnordered::new();
     let (mut told, mut counted_at) = (Instant::now(), Instant::now());
     let mut ended: Option<String> = None;
+    // The folders found away so far, said once each.
+    let mut said_away = hearing.away.len();
+    let mut say_away = |hearing: &Hearing| {
+        for folder in &hearing.away[said_away..] {
+            say(&format!("Kumi can't read {folder} now: its songs wait for it."));
+        }
+        said_away = hearing.away.len();
+    };
     'hearing: loop {
         if control.stop.is_cancelled() {
             break;
@@ -503,6 +511,7 @@ pub async fn run(
                     break 'hearing;
                 }
             }
+            say_away(&hearing);
             gate(control, &mut battery).await;
             continue;
         }
@@ -521,13 +530,9 @@ pub async fn run(
             });
         }
         let Some(done) = running.next().await else { break };
-        let away = hearing.away.len();
         if let Flow::End(why) = took(&mut hearing, &store, &mut writer, &model, &control.stop, done)? {
             ended = why;
             break;
-        }
-        if let Some(folder) = hearing.away.get(away) {
-            say(&format!("Kumi can't read {folder} now: its songs wait for it."));
         }
         // The clusters again once the songs the style model heard grow by a tenth (ten at least), and the map by the
         // same rule; the songs under way finish first.
@@ -541,6 +546,7 @@ pub async fn run(
                 }
             }
         }
+        say_away(&hearing);
         if regroup {
             let (back, made) = blocking(store, {
                 let (dir, model) = (dir.clone(), model.clone());

@@ -93,8 +93,8 @@ impl TuiApp {
             MusicAsked::Show => {
                 let found = match music.folders().is_empty() {
                     true => {
-                        let (places, skip) = (music.places(), music.skipped());
-                        tokio::task::spawn_blocking(move || folders::found_in(places, &skip)).await.ok().flatten()
+                        let (places, skip) = (music.places(), music.skipping());
+                        tokio::task::spawn_blocking(move || folders::found_in(places, &skip())).await.ok().flatten()
                     }
                     false => None,
                 };

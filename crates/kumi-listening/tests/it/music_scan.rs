@@ -696,13 +696,15 @@ async fn a_pause_lets_the_songs_under_way_finish_before_the_scan_waits() {
                     }
                 }),
             });
+            // A map made already, a big one: none is due mid-scan, so only the wait's own drain can finish a song.
+            store(&kumi).set_meta("map", r#"{"model": "test-model", "songs": 100, "made": 1}"#).unwrap();
             let options = ScanOptions { dir: kumi.to_string_lossy().into_owned(), folders: vec![music], ..Default::default() };
             let running = tokio::task::spawn_local({
                 let (control, style) = (control.clone(), style.clone());
                 async move { run(&options, Default::default(), &control, Some(style), &|_| {}).await.unwrap() }
             });
             let heard = || -> i64 {
-                let Ok(store) = MusicStore::open(&database(&kumi)) else { return 0 };
+                let Ok(Some(store)) = MusicStore::open_read(&database(&kumi)) else { return 0 };
                 store.connection().query_row("SELECT count(*) FROM songs WHERE stage >= 1", [], |row| row.get(0)).unwrap()
             };
             // While it waits, the song that was under way is heard and kept, not left to its converter's deadline.
