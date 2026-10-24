@@ -86,6 +86,14 @@ impl Style for Fake {
 
 /// A library of songs: two low tones, two high ones, one too short and one too quiet.
 fn library(root: &Path) -> String {
+    let music = tones(root);
+    song(Path::new(&at(&music, "Short/Album/01 Short.wav")), 5., 440., 0.5);
+    song(Path::new(&at(&music, "Quiet/Album/01 Quiet.wav")), 31., 440., 0.000_02);
+    music
+}
+
+/// Only songs that can be heard: two low tones and two high ones.
+fn tones(root: &Path) -> String {
     let music = root.join("Music");
     for n in 0..2 {
         song(&std::path::Path::new(&at(&music.to_string_lossy(), &format!("Low/Album/0{} Low {n}.wav", n + 1))), 31. + n as f64, 110., 0.5);
@@ -96,8 +104,6 @@ fn library(root: &Path) -> String {
             0.5,
         );
     }
-    song(Path::new(&at(&music.to_string_lossy(), "Short/Album/01 Short.wav")), 5., 440., 0.5);
-    song(Path::new(&at(&music.to_string_lossy(), "Quiet/Album/01 Quiet.wav")), 31., 440., 0.000_02);
     music.to_string_lossy().into_owned()
 }
 
@@ -683,7 +689,9 @@ async fn a_pause_lets_the_songs_under_way_finish_before_the_scan_waits() {
     tokio::task::LocalSet::new()
         .run_until(async {
             let dir = tempfile::tempdir().unwrap();
-            let music = library(dir.path());
+            // Songs that can all be heard: whichever is under way beside the first is one the style model hears (one
+            // skipped, too short or too quiet, would end without it and leave nothing to count).
+            let music = tones(dir.path());
             let kumi = dir.path().join("kumi");
             let control = Control::new(false);
             // Kumi starts listening as the first song is with the style model; another song is under way.
@@ -718,7 +726,7 @@ async fn a_pause_lets_the_songs_under_way_finish_before_the_scan_waits() {
             assert!(!running.is_finished());
             control.pause(false);
             let progress = running.await.unwrap();
-            assert_eq!((progress.phase, progress.full, progress.skipped), (ScanPhase::Done, 4, 2));
+            assert_eq!((progress.phase, progress.full, progress.skipped), (ScanPhase::Done, 4, 0));
         })
         .await;
 }
