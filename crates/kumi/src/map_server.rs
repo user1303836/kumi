@@ -353,16 +353,19 @@ async fn audio(stream: &mut TcpStream, serving: &Serving, id: &str, range: Optio
 }
 
 /// `work`, unless the page that asked goes away first (its connection closes, as when it asks for another clip): then
-/// `signal` stops the work, which tidies up after itself, and nothing comes of it.
+/// `signal` stops the work, which tidies up after itself, and nothing comes of it. What else the page sends meanwhile
+/// is let go.
 async fn while_asked<T>(stream: &mut TcpStream, signal: &Signal, work: impl Future<Output = T>) -> Option<T> {
     tokio::pin!(work);
-    let mut gone = [0u8; 1];
-    tokio::select! {
-        done = &mut work => Some(done),
-        _ = stream.read(&mut gone) => {
-            signal.cancel();
-            let _ = work.await;
-            None
+    let mut sent = [0u8; 1024];
+    loop {
+        tokio::select! {
+            done = &mut work => return Some(done),
+            read = stream.read(&mut sent) => if !matches!(read, Ok(read) if read > 0) {
+                signal.cancel();
+                let _ = work.await;
+                return None;
+            },
         }
     }
 }
@@ -406,6 +409,17 @@ mod tests {
         let (mut stream, _) = listener.accept().await.unwrap();
         let signal = Signal::new();
         assert_eq!(while_asked(&mut stream, &signal, async { "made" }).await, Some("made"));
+        assert!(!signal.is_cancelled());
+        // A page that sends something more meanwhile is still there: the work goes on.
+        let mut client = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+        let (mut stream, _) = listener.accept().await.unwrap();
+        tokio::io::AsyncWriteExt::write_all(&mut client, b"more").await.unwrap();
+        let signal = Signal::new();
+        let work = async {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            "made"
+        };
+        assert_eq!(while_asked(&mut stream, &signal, work).await, Some("made"));
         assert!(!signal.is_cancelled());
     }
 }
