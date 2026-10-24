@@ -146,9 +146,14 @@ fn sign_in_choices() -> Vec<Choice> {
         .collect()
 }
 
-/// Models on this computer, offered beside the providers while one of their servers runs.
-fn local_choice(running: &[String]) -> Choice {
-    choice("On this computer", &format!("{} · no sign-in", running.join(" or ")), "local")
+/// The model servers running (on this computer, or one named in settings.json elsewhere), offered beside the providers.
+fn local_choice(running: &[(String, String)]) -> Choice {
+    let here = running.iter().all(|(_, place)| place == "on this computer");
+    let named: Vec<String> = running
+        .iter()
+        .map(|(name, place)| if here || place == "on this computer" { name.clone() } else { format!("{name} {place}") })
+        .collect();
+    choice(if here { "On this computer" } else { "Your model servers" }, &format!("{} · no sign-in", named.join(" or ")), "local")
 }
 
 const CHOOSE_HINT: &str = "↑↓ choose · enter select · esc later";
@@ -435,7 +440,8 @@ impl TuiApp {
                 if self.default_found().await {
                     break;
                 }
-                self.setup_failed(&format!("{} has no model to talk to yet: add one there, then choose this again.", running.join(" or ")));
+                let names: Vec<_> = running.iter().map(|(name, _)| name.as_str()).collect();
+                self.setup_failed(&format!("{} has no model to talk to yet: add one there, then choose this again.", names.join(" or ")));
                 continue;
             }
             let Some(provider) = ProviderId::parse(&value) else { continue };
@@ -457,13 +463,20 @@ impl TuiApp {
 
     /// How to sign in, with models on this computer offered too once one of their servers runs: looked for only
     /// here, now and every few seconds while the producer chooses. The choice, and what runs here.
-    async fn sign_in_choice(&self, models: &Rc<dyn ModelController>) -> Option<(String, Vec<String>)> {
-        let chosen = self.setup_choose("now", vec!["How do you want to sign in?".into()], sign_in_choices());
+    async fn sign_in_choice(&self, models: &Rc<dyn ModelController>) -> Option<(String, Vec<(String, String)>)> {
+        let chosen = self.setup_choose(
+            "now",
+            vec![
+                "How do you want to sign in?".into(),
+                "Other providers (OpenRouter, Gemini, DeepSeek and more): /login, once Kumi's open.".into(),
+            ],
+            sign_in_choices(),
+        );
         tokio::pin!(chosen);
         let looking = async {
             loop {
-                let running: Vec<String> =
-                    models.local().await.into_iter().filter(|server| server.running).map(|server| server.name).collect();
+                let running: Vec<(String, String)> =
+                    models.local().await.into_iter().filter(|server| server.running).map(|server| (server.name, server.r#where)).collect();
                 if !running.is_empty() {
                     return running;
                 }

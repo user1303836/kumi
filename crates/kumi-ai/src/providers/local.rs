@@ -4,7 +4,9 @@ use super::{
     compat::mending_fetch,
     models::{EffortInfo, FactsFrom, Input, ModelInfo},
     ollama::{ollama_chat, FailurePhase, OllamaChatSettings, OllamaShape},
-    split_model_id, table, words_only, Effort, ProviderId, USER_AGENT,
+    split_model_id, table,
+    table::Format,
+    words_only, Effort, ProviderId, USER_AGENT,
 };
 use crate::{
     binding::{budget_for, LanguageModel, ModelBinding, ModelRequest, BYTES_PER_TOKEN},
@@ -57,14 +59,20 @@ pub struct LocalServer {
     #[serde(rename = "apiKey", default, skip_serializing_if = "Option::is_none")]
     pub api_key: Option<String>,
     pub r#where: String,
+    /// How a custom server takes a request, when it isn't Chat Completions (`responses`, `anthropic`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub format: Option<Format>,
 }
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ServerSetting {
     pub name: String,
     #[serde(rename = "baseURL")]
     pub base_url: String,
     #[serde(rename = "apiKey", default, skip_serializing_if = "Option::is_none")]
     pub api_key: Option<String>,
+    /// `chat-completions` (none says so), `responses` or `anthropic`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub format: Option<Format>,
 }
 pub const LOCAL_PROVIDERS: [&str; 2] = ["ollama", "lmstudio"];
 const HERE: &str = "on this computer";
@@ -119,7 +127,15 @@ fn server(id: &str, kind: LocalKind, name: &str, base_url: String, api_key: Opti
     let host = parsed.host_str().unwrap_or("").trim_start_matches('[').trim_end_matches(']');
     static LOOPBACK: LazyLock<regex::Regex> = LazyLock::new(|| regex::Regex::new(r"(?i)^(localhost|127(\.\d{1,3}){3}|::1)$").unwrap());
     let location = if LOOPBACK.is_match(host) { HERE.into() } else { format!("on {host}") };
-    Ok(LocalServer { id: id.into(), kind, name: name.into(), base_url, api_key: api_key.filter(|k| !k.is_empty()), r#where: location })
+    Ok(LocalServer {
+        id: id.into(),
+        kind,
+        name: name.into(),
+        base_url,
+        api_key: api_key.filter(|k| !k.is_empty()),
+        r#where: location,
+        format: None,
+    })
 }
 fn ollama_address(host: Option<&String>) -> String {
     let value = host.map(|v| trim(v)).unwrap_or("");
@@ -167,13 +183,10 @@ pub fn local_servers(settings: &[ServerSetting], env: &HashMap<String, String>) 
             n += 1;
         }
         taken.insert(id.clone());
-        servers.push(server(
-            &id,
-            LocalKind::OpenaiCompatible,
-            &setting.name,
-            compatible_address(&setting.base_url)?,
-            setting.api_key.clone(),
-        )?);
+        let mut custom =
+            server(&id, LocalKind::OpenaiCompatible, &setting.name, compatible_address(&setting.base_url)?, setting.api_key.clone())?;
+        custom.format = setting.format.filter(|format| *format != Format::ChatCompletions);
+        servers.push(custom);
     }
     Ok(servers)
 }
@@ -243,7 +256,12 @@ async fn request_json(
         headers.insert("content-type".into(), "application/json".into());
     }
     if let Some(key) = &server.api_key {
-        headers.insert("authorization".into(), format!("Bearer {key}"));
+        if server.format == Some(Format::Messages) {
+            headers.insert("x-api-key".into(), key.clone());
+            headers.insert("anthropic-version".into(), "2023-06-01".into());
+        } else {
+            headers.insert("authorization".into(), format!("Bearer {key}"));
+        }
     }
     // On the producer's computer or network: the variables' proxies alone, never the system's.
     let result = options
@@ -562,6 +580,41 @@ impl Fetch for Identified {
     async fn fetch(&self, url: &str, mut init: FetchInit) -> Result<Response, LanguageModelError> {
         init.headers.insert("user-agent".into(), USER_AGENT.clone());
         self.0.fetch(url, init).await
+    }
+}
+/// A model on a custom server that takes OpenAI's Responses or Anthropic's Messages (its `format` in settings.json):
+/// requests in that format, with the server's key. What Kumi knows of its models comes from its `/models` alone.
+pub fn resolve_server_model(server: &LocalServer, model: String, options: LocalModelOptions) -> ModelBinding {
+    let fetch: Rc<dyn Fetch> = Rc::new(Identified(options.fetch.unwrap_or_else(model_server_fetch)));
+    let id = format!("{}/{model}", server.id);
+    let base_url = server.base_url.clone();
+    let effort = options.effort;
+    if server.format == Some(Format::Messages) {
+        let model = crate::anthropic::anthropic(crate::anthropic::AnthropicSettings {
+            model,
+            base_url,
+            api_key: server.api_key.clone(),
+            auth_token: None,
+            headers: Default::default(),
+            fetch,
+        });
+        return ModelBinding { id, model, prepare: Box::new(move |request| super::anthropic_request(request, effort)), budget: None };
+    }
+    let model = crate::openai_responses::openai_responses(crate::openai_responses::ResponsesSettings {
+        model,
+        base_url,
+        api_key: server.api_key.clone().unwrap_or_default(),
+        headers: Default::default(),
+        fetch,
+    });
+    ModelBinding {
+        id,
+        model,
+        prepare: Box::new(move |request| {
+            let extra = effort.map(|effort| Map::from_iter([("reasoningEffort".into(), json!(effort))])).unwrap_or_default();
+            super::responses_request(request, extra)
+        }),
+        budget: None,
     }
 }
 struct LocalState {

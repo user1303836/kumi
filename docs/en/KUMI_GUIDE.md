@@ -20,7 +20,7 @@ This guide covers everything after that. For the keys and the screen, see
 
 Inside Kumi, `/login` signs in (the first time, Kumi's setup asks first): to
 ChatGPT with your plan (the browser opens and
-the sign-in comes back on `localhost:1455`), or to Anthropic, OpenAI or OpenCode
+the sign-in comes back on `localhost:1455`), or to any other provider below
 with an API key, pasted into a box that shows only dots. Kumi checks a key with
 its provider before keeping it; if the provider can't be reached, it keeps the
 key and says it isn't checked yet. `/logout` signs out.
@@ -36,15 +36,48 @@ In setup's sign-in step:
 - The browser's link shows whole, and **c** copies it.
 - While Ollama or LM Studio runs, **On this computer** is a choice too.
 
-| Provider | Model names | Sign-in |
-| --- | --- | --- |
-| ChatGPT plan | `openai-codex/<model>` | `/login` (browser, or a code: **d**), or `kumi login openai-codex` (`--device` without a browser; over SSH a code by itself, `--browser` for the browser) |
-| Anthropic API | `anthropic/<model>` | `/login` with an API key, or `ANTHROPIC_API_KEY` |
-| OpenAI API | `openai/<model>` | `/login` with an API key, or `OPENAI_API_KEY` |
-| OpenCode Zen and Go | `opencode/<model>`, `opencode-go/<model>` | `/login` with an API key (one for both), or `OPENCODE_API_KEY` |
-| Ollama, on your computer | `ollama/<model>` | None: found while it runs |
-| LM Studio, on your computer | `lmstudio/<model>` | None: found while its server runs |
-| Another OpenAI-compatible server | `<name>/<model>` | Named in `settings.json` ([below](#models-on-your-computer)), with a key if it wants one |
+**Providers.** Sign in to any of these with `/login` or `kumi login <id>`; `kumi auth` shows
+which you're signed in to. A key variable works too, and a key saved with
+`/login` comes first.
+
+| Provider | Model names | Key variable | Where to get a key |
+| --- | --- | --- | --- |
+| ChatGPT plan | `openai-codex/<model>` | none: `/login` opens the browser (**d** for a code), or `kumi login openai-codex` (`--device` without a browser; over SSH a code by itself, `--browser` for the browser) | your ChatGPT plan |
+| Anthropic API | `anthropic/<model>` | `ANTHROPIC_API_KEY` | platform.claude.com (API keys) |
+| OpenAI API | `openai/<model>` | `OPENAI_API_KEY` | platform.openai.com/api-keys |
+| OpenCode Zen and Go | `opencode/<model>`, `opencode-go/<model>` | `OPENCODE_API_KEY` (one for both) | opencode.ai/auth |
+| OpenRouter | `openrouter/<model>` | `OPENROUTER_API_KEY` | openrouter.ai/settings/keys |
+| Venice | `venice/<model>` | `VENICE_API_KEY` | venice.ai/settings/api |
+| Google Gemini | `gemini/<model>` | `GEMINI_API_KEY`, `GOOGLE_API_KEY` (the listening model's key too) | aistudio.google.com/apikey |
+| DeepSeek | `deepseek/<model>` | `DEEPSEEK_API_KEY` | platform.deepseek.com/api_keys |
+| xAI | `xai/<model>` | `XAI_API_KEY` | console.x.ai |
+| Z.ai (GLM) | `zai/<model>` | `ZAI_API_KEY`, `ZHIPU_API_KEY` | z.ai/manage-apikey/apikey-list |
+| Moonshot (Kimi) | `moonshot/<model>` | `MOONSHOT_API_KEY` | platform.kimi.ai/console/api-keys |
+| Alibaba Cloud (Qwen) | `alibaba/<model>` | `DASHSCOPE_API_KEY` | modelstudio.console.alibabacloud.com (API keys) |
+| MiniMax | `minimax/<model>` | `MINIMAX_API_KEY` | platform.minimax.io (interface key) |
+| Xiaomi MiMo | `xiaomi/<model>` | `MIMO_API_KEY`, `XIAOMI_API_KEY` | platform.xiaomimimo.com (API keys) |
+| StepFun | `stepfun/<model>` | `STEPFUN_API_KEY`, `STEP_API_KEY` | platform.stepfun.ai/interface-key |
+| Tencent TokenHub | `tencent/<model>` | `TENCENT_TOKENHUB_API_KEY` | console.tencentcloud.com/tokenhub/apikey |
+| Groq | `groq/<model>` | `GROQ_API_KEY` | console.groq.com/keys |
+| Cerebras | `cerebras/<model>` | `CEREBRAS_API_KEY` | cloud.cerebras.ai (API keys) |
+| Fireworks AI | `fireworks/<model>` | `FIREWORKS_API_KEY` | app.fireworks.ai/settings/users/api-keys |
+| Together AI | `together/<model>` | `TOGETHER_API_KEY` | api.together.ai/settings/api-keys |
+| DeepInfra | `deepinfra/<model>` | `DEEPINFRA_API_KEY` | deepinfra.com/dash/api_keys |
+| Mistral | `mistral/<model>` | `MISTRAL_API_KEY` | console.mistral.ai (API keys) |
+| Ollama Cloud | `ollama-cloud/<model>` | `OLLAMA_API_KEY` | ollama.com/settings/keys |
+| NVIDIA | `nvidia/<model>` | `NVIDIA_API_KEY` | build.nvidia.com (API keys) |
+| Hugging Face | `huggingface/<model>` | `HF_TOKEN` | huggingface.co/settings/tokens |
+| Ollama, on your computer | `ollama/<model>` | none: found while it runs | — |
+| LM Studio, on your computer | `lmstudio/<model>` | none: found while its server runs | — |
+| Another server | `<name>/<model>` | its `apiKey` in `settings.json` ([below](#models-on-your-computer)) | — |
+
+- A model name keeps its provider's `/` (`openrouter/moonshotai/kimi-k3.1-pro`).
+- Use a pay-as-you-go key with Z.ai and StepFun: their coding plans are limited to the tools they list.
+- NVIDIA's free trial keys are for testing and evaluation only; some of its models answer late and don't work with Kumi yet.
+- Hugging Face needs a fine-grained token with the Inference Providers permission.
+- Google's Gemini API terms are for professional use, and in the EEA, Switzerland and the UK need its paid tier.
+- `/model` lists ChatGPT, Anthropic, OpenAI and OpenCode whether you're signed in or not, and the others once you are; its **More providers** opens `/login`.
+- A custom server named like a provider Kumi added later keeps its name's id: Kumi hides that provider for you, and `kumi doctor` says how to switch.
 
 A key saved with `/login` is used first; without one, Kumi uses the key in the
 environment, and can't sign out of that (unset it instead). Paste an API key
@@ -114,14 +147,18 @@ again.
   models it has; one that's installed but closed says how to start it. Signed in
   nowhere, Kumi starts with one of their models that can change the Set,
   preferring one already loaded.
-- **Another OpenAI-compatible server** (llama.cpp's `llama-server`, vLLM, Jan…)
-  goes in `~/.kumi/settings.json`. Its name becomes its id (`llama.cpp` is
-  `llama-cpp/<model>`):
+- **Another server** (llama.cpp's `llama-server`, vLLM, Jan, a gateway…) goes in
+  `~/.kumi/settings.json`, on this computer or elsewhere. Its name becomes its id
+  (`llama.cpp` is `llama-cpp/<model>`). `format` says how it takes a request:
+  `chat-completions` (OpenAI's Chat Completions, without `format`), `responses`
+  (OpenAI's Responses) or `anthropic` (Anthropic's Messages). What Kumi knows of
+  its models comes from its own list, so they're marked unverified:
 
   ```json
   { "modelServers": [
     { "name": "llama.cpp", "baseURL": "http://127.0.0.1:8080/v1" },
-    { "name": "Studio PC", "baseURL": "http://192.168.1.20:8000/v1", "apiKey": "…" }
+    { "name": "Studio PC", "baseURL": "http://192.168.1.20:8000/v1", "apiKey": "…" },
+    { "name": "Gateway", "baseURL": "https://llm.example.com/v1", "apiKey": "…", "format": "anthropic" }
   ] }
   ```
 
@@ -281,8 +318,8 @@ Kumi about this**), Live's own commands and Live's manual.
 
 **Versions.** Each Kumi release ships with an extension and a tool, which
 `kumi update` brings up to date ([updating](#updating-reporting-and-uninstalling)).
-Kumi 1.21.2 with REAPER extension 0.1.2, 1.21.0 to 1.21.1 with 0.1.1, 1.20.0 with 0.1.0.
-Kumi 1.21.0 to 1.21.2 with Renoise tool 1.0.1, 1.20.0 with 1.0.0.
+Kumi 1.21.2 to 1.22.0 with REAPER extension 0.1.2, 1.21.0 to 1.21.1 with 0.1.1, 1.20.0 with 0.1.0.
+Kumi 1.21.0 to 1.22.0 with Renoise tool 1.0.1, 1.20.0 with 1.0.0.
 
 ## Working with Kumi
 
@@ -1369,7 +1406,7 @@ Kumi keeps everything in `~/.kumi`. `~/.kumi/settings.json` holds:
 | `keepAwake` | `false`: the computer may sleep while Kumi works |
 | `answerAfter` | Seconds before Kumi takes its recommended answer when nobody's there (60); `0` never does |
 | `instantPhrases` | `false`: fixed phrases ("tempo 124", "mute drums") go to the model like any other message ([instant phrases](KUMI_TUI.md#instant-phrases)) |
-| `modelServers` | OpenAI-compatible model servers: `[{ "name", "baseURL", "apiKey" }]` ([models on your computer](#models-on-your-computer)) |
+| `modelServers` | Model servers you name: `[{ "name", "baseURL", "apiKey", "format" }]` ([models on your computer](#models-on-your-computer)) |
 | `libraryFolders` | More folders for Kumi to learn sounds, presets and Sets from |
 | `musicFolders` | The folders of your own music Kumi learns your taste from (`/music add`); absent until you agree |
 | `musicOffered` | `true` once Kumi has asked whether to learn your music: it asks once |

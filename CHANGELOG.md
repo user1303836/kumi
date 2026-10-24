@@ -3,6 +3,27 @@
 Kumi's releases. The Ableton bridge (`crates/ableton-mcp-server`) is versioned on its own;
 each Kumi release names the bridge it ships with.
 
+## 1.22.0 — 2026-10-24
+
+Ships with bridge 1.0.94, as 1.21.2 did.
+
+- /model shows what each model can do, from its provider and models.dev: the effort levels it really
+  has (none and minimal too), and marks for chat only, deprecated and unverified models
+- A model that can't use tools stays choosable: Kumi talks with it about your Set without changing
+  anything, and learns it when a call says so
+- OpenCode Zen and Go send each model the request format it takes (their MiniMax and Qwen Plus models
+  go through Anthropic's, Grok Code through Chat Completions)
+- Kumi fetches models.dev's catalog of models at most once a day; "modelCatalog": false in
+  settings.json turns that off
+- 21 more providers to sign in to with an API key: OpenRouter, Venice, Google Gemini, DeepSeek, xAI,
+  Z.ai, Moonshot (Kimi), Alibaba Cloud (Qwen), MiniMax, Xiaomi MiMo, StepFun, Tencent TokenHub, Groq,
+  Cerebras, Fireworks AI, Together AI, DeepInfra, Mistral, Ollama Cloud, NVIDIA and Hugging Face
+- A model server in settings.json can take OpenAI's Responses or Anthropic's format: "format":
+  "responses" or "anthropic"
+
+Tested with Live 12.4 on macOS. On Windows, installing and updating are tested; using Kumi with Live
+there is still new.
+
 ## 1.21.2 — 2026-10-23
 
 Ships with bridge 1.0.94, which Live loads when it restarts. After updating, Kumi offers to quit Live

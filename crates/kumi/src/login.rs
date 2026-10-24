@@ -196,7 +196,9 @@ pub async fn auth_status(config: &AppConfig, io: AuthIo) -> Result<(), RuntimeEr
             }
         } else {
             match api_key_for(provider, &store, Some(&io.env)).await? {
-                Some(key) if key.source == KeySource::Env => format!("API key from {}", info.first_key_env().unwrap_or("")),
+                Some(key) if key.source == KeySource::Env => {
+                    format!("API key from {}", key.variable.as_deref().or(info.first_key_env()).unwrap_or(""))
+                }
                 Some(_) => "API key saved in Kumi".into(),
                 None => format!("not signed in ({} login {provider})", *KUMI),
             }

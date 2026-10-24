@@ -8,7 +8,7 @@ Kumi 是一个在终端里运行的制作人代理，为你在 Ableton Live 中�
 
 ## 登录并选择模型
 
-在 Kumi 中，`/login` 用于登录（第一次时，Kumi 的设置会先问你）：用你的套餐登录 ChatGPT（浏览器会打开，登录结果通过 `localhost:1455` 返回），或用 API 密钥登录 Anthropic、OpenAI 或 OpenCode，密钥粘贴到只显示圆点的输入框中。Kumi 在保存密钥之前会先向其提供方验证；如果连不上提供方，它会保存密钥，并说明尚未验证。`/logout` 用于退出登录。
+在 Kumi 中，`/login` 用于登录（第一次时，Kumi 的设置会先问你）：用你的套餐登录 ChatGPT（浏览器会打开，登录结果通过 `localhost:1455` 返回），或用 API 密钥登录下表中的其他提供方，密钥粘贴到只显示圆点的输入框中。Kumi 在保存密钥之前会先向其提供方验证；如果连不上提供方，它会保存密钥，并说明尚未验证。`/logout` 用于退出登录。
 
 在设置的登录步骤中：
 
@@ -17,15 +17,46 @@ Kumi 是一个在终端里运行的制作人代理，为你在 Ableton Live 中�
 - 浏览器链接会完整显示，按 **c** 可复制。
 - Ollama 或 LM Studio 运行时，还可以选择 **On this computer**。
 
-| 提供方 | 模型名称 | 登录方式 |
-| --- | --- | --- |
-| ChatGPT 套餐 | `openai-codex/<model>` | `/login`（浏览器，或代码：**d**），或 `kumi login openai-codex`（没有浏览器时加 `--device`；通过 SSH 时自动使用代码，要用浏览器则加 `--browser`） |
-| Anthropic API | `anthropic/<model>` | 用 API 密钥 `/login`，或 `ANTHROPIC_API_KEY` |
-| OpenAI API | `openai/<model>` | 用 API 密钥 `/login`，或 `OPENAI_API_KEY` |
-| OpenCode Zen 和 Go | `opencode/<model>`、`opencode-go/<model>` | 用 API 密钥 `/login`（两者共用一个密钥），或 `OPENCODE_API_KEY` |
-| Ollama（在你的电脑上） | `ollama/<model>` | 无需：运行时即可找到 |
-| LM Studio（在你的电脑上） | `lmstudio/<model>` | 无需：其服务器运行时即可找到 |
-| 其他兼容 OpenAI 的服务器 | `<name>/<model>` | 在 `settings.json` 中写上名称（[见下文](#你电脑上的模型)），需要时附上密钥 |
+**提供方。** 以下任意一个都可以用 `/login` 或 `kumi login <id>` 登录；`kumi auth` 会显示你登录了哪些。也可以用密钥环境变量，但用 `/login` 保存的密钥优先。
+
+| 提供方 | 模型名称 | 密钥环境变量 | 在哪里获取密钥 |
+| --- | --- | --- | --- |
+| ChatGPT 套餐 | `openai-codex/<model>` | 无：`/login` 打开浏览器（用代码则按 **d**），或 `kumi login openai-codex`（没有浏览器时加 `--device`；通过 SSH 时自动使用代码，要用浏览器则加 `--browser`） | 你的 ChatGPT 套餐 |
+| Anthropic API | `anthropic/<model>` | `ANTHROPIC_API_KEY` | platform.claude.com（API 密钥） |
+| OpenAI API | `openai/<model>` | `OPENAI_API_KEY` | platform.openai.com/api-keys |
+| OpenCode Zen 和 Go | `opencode/<model>`、`opencode-go/<model>` | `OPENCODE_API_KEY`（两者共用） | opencode.ai/auth |
+| OpenRouter | `openrouter/<model>` | `OPENROUTER_API_KEY` | openrouter.ai/settings/keys |
+| Venice | `venice/<model>` | `VENICE_API_KEY` | venice.ai/settings/api |
+| Google Gemini | `gemini/<model>` | `GEMINI_API_KEY`, `GOOGLE_API_KEY`（也是聆听模型的密钥） | aistudio.google.com/apikey |
+| DeepSeek | `deepseek/<model>` | `DEEPSEEK_API_KEY` | platform.deepseek.com/api_keys |
+| xAI | `xai/<model>` | `XAI_API_KEY` | console.x.ai |
+| Z.ai (GLM) | `zai/<model>` | `ZAI_API_KEY`, `ZHIPU_API_KEY` | z.ai/manage-apikey/apikey-list |
+| Moonshot (Kimi) | `moonshot/<model>` | `MOONSHOT_API_KEY` | platform.kimi.ai/console/api-keys |
+| Alibaba Cloud (Qwen) | `alibaba/<model>` | `DASHSCOPE_API_KEY` | modelstudio.console.alibabacloud.com |
+| MiniMax | `minimax/<model>` | `MINIMAX_API_KEY` | platform.minimax.io |
+| Xiaomi MiMo | `xiaomi/<model>` | `MIMO_API_KEY`, `XIAOMI_API_KEY` | platform.xiaomimimo.com |
+| StepFun | `stepfun/<model>` | `STEPFUN_API_KEY`, `STEP_API_KEY` | platform.stepfun.ai/interface-key |
+| Tencent TokenHub | `tencent/<model>` | `TENCENT_TOKENHUB_API_KEY` | console.tencentcloud.com/tokenhub/apikey |
+| Groq | `groq/<model>` | `GROQ_API_KEY` | console.groq.com/keys |
+| Cerebras | `cerebras/<model>` | `CEREBRAS_API_KEY` | cloud.cerebras.ai |
+| Fireworks AI | `fireworks/<model>` | `FIREWORKS_API_KEY` | app.fireworks.ai/settings/users/api-keys |
+| Together AI | `together/<model>` | `TOGETHER_API_KEY` | api.together.ai/settings/api-keys |
+| DeepInfra | `deepinfra/<model>` | `DEEPINFRA_API_KEY` | deepinfra.com/dash/api_keys |
+| Mistral | `mistral/<model>` | `MISTRAL_API_KEY` | console.mistral.ai |
+| Ollama Cloud | `ollama-cloud/<model>` | `OLLAMA_API_KEY` | ollama.com/settings/keys |
+| NVIDIA | `nvidia/<model>` | `NVIDIA_API_KEY` | build.nvidia.com |
+| Hugging Face | `huggingface/<model>` | `HF_TOKEN` | huggingface.co/settings/tokens |
+| Ollama（在你的电脑上） | `ollama/<model>` | 无需：运行时即可找到 | — |
+| LM Studio（在你的电脑上） | `lmstudio/<model>` | 无需：其服务器运行时即可找到 | — |
+| 其他服务器 | `<name>/<model>` | `settings.json` 中的 `apiKey`（[见下文](#你电脑上的模型)） | — |
+
+- 模型名称保留提供方的 `/`（`openrouter/moonshotai/kimi-k3.1-pro`）。
+- Z.ai 和 StepFun 请使用按量付费的密钥：它们的编程套餐只能用于其列出的工具。
+- NVIDIA 的免费试用密钥仅供测试和评估；它的部分模型回答会延后送达，Kumi 暂时还不能使用。
+- Hugging Face 需要带有 Inference Providers 权限的 fine-grained 令牌。
+- Google 的 Gemini API 条款面向职业用途，在欧洲经济区、瑞士和英国需要使用其付费方案。
+- `/model` 始终列出 ChatGPT、Anthropic、OpenAI 和 OpenCode，其他提供方在你登录后才会出现；其中的 **More providers** 会打开 `/login`。
+- 与 Kumi 后来新增的提供方同名的自定义服务器会保留按名称生成的 ID：Kumi 会对你隐藏该提供方，`kumi doctor` 会说明如何切换。
 
 用 `/login` 保存的密钥优先使用；没有时，Kumi 使用环境变量中的密钥，而且无法从中退出登录（请改为取消设置该变量）。API 密钥只能粘贴到 Kumi 的密钥输入框或 `kumi login` 的提示中，绝不要粘贴到消息里。Kumi 不提供 Claude 和 Gemini 的订阅登录，因为它们的提供方不允许在第三方工具中使用。OpenCode 的 Gemini 模型暂不支持。
 
@@ -53,12 +84,13 @@ Kumi 自带一份目录副本，最多每天获取一次更新的版本；在 `s
 ### 你电脑上的模型
 
 - **Ollama** 和 **LM Studio** 只要在运行就会被找到，无需登录。`/model` 会把它们各自列为一个提供方（“Ollama · on this computer”），并列出该服务器上的模型；已安装但未运行的会说明如何启动。如果你没有登录任何提供方，Kumi 会从其中能修改工程的模型开始（优先选择已加载的）。
-- **其他兼容 OpenAI 的服务器**（llama.cpp 的 `llama-server`、vLLM、Jan 等）写在 `~/.kumi/settings.json` 中。名称就是它的 ID（`llama.cpp` 即 `llama-cpp/<model>`）：
+- **其他服务器**（llama.cpp 的 `llama-server`、vLLM、Jan、网关等）无论在这台电脑上还是别处，都写在 `~/.kumi/settings.json` 中。名称就是它的 ID（`llama.cpp` 即 `llama-cpp/<model>`）。`format` 说明它接受哪种请求：`chat-completions`（OpenAI 的 Chat Completions，不写 `format` 时即为此）、`responses`（OpenAI 的 Responses）或 `anthropic`（Anthropic 的 Messages）。Kumi 对其模型的了解只来自它自己的列表，所以会标为 unverified：
 
   ```json
   { "modelServers": [
     { "name": "llama.cpp", "baseURL": "http://127.0.0.1:8080/v1" },
-    { "name": "Studio PC", "baseURL": "http://192.168.1.20:8000/v1", "apiKey": "…" }
+    { "name": "Studio PC", "baseURL": "http://192.168.1.20:8000/v1", "apiKey": "…" },
+    { "name": "Gateway", "baseURL": "https://llm.example.com/v1", "apiKey": "…", "format": "anthropic" }
   ] }
   ```
 
@@ -114,8 +146,8 @@ Kumi 可以在 REAPER 7 及更高版本和 Renoise 3.5 及更高版本中工作�
 **在那里能做什么。** Kumi 读取工程或歌曲，并带撤销地修改它（能修改什么、撤销在那里如何工作，见 [REAPER 与 Renoise](KUMI_CHANGES.md#reaper-与-renoise)）；FOCUS、NOW 和 HISTORY 跟随 DAW 自己的视图（[命令、按键与界面](KUMI_TUI.md#reaper-与-renoise)）。它会聆听、判定自己的修改、配合 `/loop` 和 `/goal` 工作、匹配参考曲、执行即时短语、告诉你它关闭期间的变化、把你手动做的操作变成配方，并使用你的素材库、笔记和对话，全部用这个 DAW 的说法（各 DAW 的对照见 [Kumi 在 Live、REAPER 和 Renoise 中能做什么](DAWS.md)）。在 REAPER 中它还能运行 REAPER 的动作（action）、API 和 Lua（ReaScript）；在 Renoise 中能运行 Lua。以下仍只属于 Live：Max for Live 设备、Kumi Ears、Willington、Kumi 的 Live 扩展（含 **Ask Kumi about this**）、Live 自己的命令和 Live 的手册。
 
 **版本。** 每个 Kumi 版本都附带一个扩展和一个工具，`kumi update` 会把它们更新到最新（见下文“更新、报告与卸载”）。
-Kumi 1.21.2 附带 REAPER 扩展 0.1.2，1.21.0 至 1.21.1 附带 0.1.1，1.20.0 附带 0.1.0。
-Kumi 1.21.0 至 1.21.2 附带 Renoise 工具 1.0.1，1.20.0 附带 1.0.0。
+Kumi 1.21.2 至 1.22.0 附带 REAPER 扩展 0.1.2，1.21.0 至 1.21.1 附带 0.1.1，1.20.0 附带 0.1.0。
+Kumi 1.21.0 至 1.22.0 附带 Renoise 工具 1.0.1，1.20.0 附带 1.0.0。
 
 ## 使用 Kumi
 
@@ -533,7 +565,7 @@ Kumi 把一切都保存在 `~/.kumi` 中。`~/.kumi/settings.json` 包含：
 | `keepAwake` | `false`：Kumi 工作时允许电脑休眠 |
 | `answerAfter` | 没人在时 Kumi 选择推荐答案之前的秒数（60）；`0` 表示从不 |
 | `instantPhrases` | `false`：固定短语（"tempo 124"、"mute drums"）也像其他消息一样发给模型（[即时短语](KUMI_TUI.md#即时短语)） |
-| `modelServers` | 兼容 OpenAI 的模型服务器：`[{ "name", "baseURL", "apiKey" }]`（[你电脑上的模型](#你电脑上的模型)） |
+| `modelServers` | 你命名的模型服务器：`[{ "name", "baseURL", "apiKey", "format" }]`（[你电脑上的模型](#你电脑上的模型)） |
 | `libraryFolders` | 供 Kumi 学习声音、预设和工程的其他文件夹 |
 | `musicFolders` | Kumi 用来学习你口味的、你自己的音乐文件夹（`/music add`）；在你同意之前不存在 |
 | `musicOffered` | Kumi 问过是否学习你的音乐后为 `true`：只问一次 |

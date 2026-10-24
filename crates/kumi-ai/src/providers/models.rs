@@ -157,18 +157,21 @@ async fn get_json(url: &str, mut headers: Headers, options: &Transport, provider
         .await
         .map_err(error)?;
     let name = provider.row().name;
-    if matches!(response.status, 401 | 403) {
-        return Err(KumiError::with_provider(
-            FailureKind::Auth,
-            format!("{name} didn't accept this sign-in (HTTP {}).", response.status),
-            provider.as_str(),
-        )
-        .into());
+    let status = response.status;
+    let refused = || -> RuntimeError {
+        KumiError::with_provider(FailureKind::Auth, format!("{name} didn't accept this sign-in (HTTP {status})."), provider.as_str()).into()
+    };
+    if matches!(status, 401 | 403) {
+        return Err(refused());
     }
     if !response.ok() {
+        // Gemini turns down a key it doesn't know with a 400 that says so.
+        if status == 400 && response.text().await.is_ok_and(|body| body.contains("API_KEY_INVALID") || body.contains("API key not valid")) {
+            return Err(refused());
+        }
         return Err(KumiError::with_provider(
             FailureKind::Provider,
-            format!("{name} couldn't list its models (HTTP {}).", response.status),
+            format!("{name} couldn't list its models (HTTP {status})."),
             provider.as_str(),
         )
         .into());
@@ -286,12 +289,14 @@ pub async fn list_models(provider: ProviderId, options: ListOptions) -> Result<V
 fn list_url(row: &ProviderRow) -> String {
     format!("{}{}", row.base_url, row.list.0)
 }
-/// The headers that carry a key to a provider's API.
+/// The headers that carry a key to a provider's API, with those it wants on every request.
 fn key_headers(row: &ProviderRow, key: &str) -> Headers {
-    match row.key_header {
+    let mut headers: Headers = match row.key_header {
         KeyHeader::Bearer => [("authorization".into(), format!("Bearer {key}"))].into(),
         KeyHeader::Anthropic => [("x-api-key".into(), key.into()), ("anthropic-version".into(), "2023-06-01".into())].into(),
-    }
+    };
+    headers.extend(row.extras.headers.iter().map(|(name, value)| (name.to_string(), value.to_string())));
+    headers
 }
 async fn list_with_key(provider: ProviderId, key: &str, options: &Transport) -> Result<Vec<ModelInfo>, RuntimeError> {
     let row = provider.row();
@@ -300,7 +305,8 @@ async fn list_with_key(provider: ProviderId, key: &str, options: &Transport) -> 
         return Ok(vec![]);
     }
     let body = get_json(&list_url(row), key_headers(row, key), options, provider).await?;
-    let mut rows: Vec<_> = body["data"].as_array().into_iter().flatten().filter(|r| r["id"].is_string()).collect();
+    // OpenAI's shape (`data`), or the list alone, as some providers answer it.
+    let mut rows: Vec<_> = body["data"].as_array().or(body.as_array()).into_iter().flatten().filter(|r| r["id"].is_string()).collect();
     let catalog = catalog::current();
     if listing == Listing::OpenaiChat {
         // OpenAI lists every model it has: models.dev says which chat, and for one it doesn't know, the name decides.
@@ -313,6 +319,37 @@ async fn list_with_key(provider: ProviderId, key: &str, options: &Transport) -> 
                     && !EXCLUDED.is_match(model)
         });
         rows.sort_by(|a, b| created(&b["created"]).partial_cmp(&created(&a["created"])).unwrap_or(std::cmp::Ordering::Equal));
+    }
+    if matches!(listing, Listing::OpenRouter | Listing::Venice | Listing::HuggingFace) {
+        return Ok(rows
+            .into_iter()
+            .filter_map(|listed| {
+                let described = match listing {
+                    Listing::OpenRouter => openrouter_model(provider, listed)?,
+                    Listing::Venice => venice_model(provider, listed)?,
+                    _ => huggingface_model(provider, listed)?,
+                };
+                with_facts(row, described, &catalog)
+            })
+            .collect());
+    }
+    if listing == Listing::Gemini {
+        // `models/gemini-…`, as Gemini names them; a request names them without `models/`.
+        static OTHER: LazyLock<regex::Regex> =
+            LazyLock::new(|| regex::Regex::new("embedding|imagen|veo|tts|image|live|audio|aqa").unwrap());
+        return Ok(rows
+            .into_iter()
+            .filter_map(|listed| {
+                let id = listed["id"].as_str()?;
+                let model = id.strip_prefix("models/").unwrap_or(id);
+                // One models.dev doesn't know is offered by its name: a Gemini or Gemma model that chats.
+                let known = row.catalog.and_then(|provider| catalog.model(provider, model)).is_some();
+                if !known && (!(model.starts_with("gemini-") || model.starts_with("gemma-")) || OTHER.is_match(model)) {
+                    return None;
+                }
+                with_facts(row, Listed::named(named(provider, model, None)), &catalog)
+            })
+            .collect());
     }
     Ok(rows
         .into_iter()
@@ -333,6 +370,124 @@ async fn list_with_key(provider: ProviderId, key: &str, options: &Transport) -> 
         })
         .collect())
 }
+/// The effort levels a list names, in Kumi's order, and the one it starts at.
+fn named_efforts(values: &Value, default: &Value) -> (Vec<EffortInfo>, Option<Effort>) {
+    let named: Vec<&str> = values.as_array().into_iter().flatten().filter_map(Value::as_str).collect();
+    let efforts = levels(&EFFORTS.into_iter().filter(|effort| named.contains(&effort.as_str())).collect::<Vec<_>>());
+    let default = default.as_str().and_then(Effort::parse).filter(|effort| efforts.iter().any(|level| level.effort == *effort));
+    (efforts, default)
+}
+/// Dollars per million tokens, from a price per token as OpenRouter writes it ("0.000002").
+fn per_million(value: &Value) -> Option<f64> {
+    value
+        .as_str()
+        .and_then(number::parse)
+        .or_else(|| value.as_f64())
+        .filter(|n| n.is_finite() && *n >= 0.)
+        .map(|n| (n * 1e6 * 1e6).round() / 1e6)
+}
+/// One model of OpenRouter's list, described; None for one that doesn't answer in words.
+fn openrouter_model(provider: ProviderId, listed: &Value) -> Option<Listed> {
+    let architecture = &listed["architecture"];
+    if architecture["output_modalities"].as_array().is_some_and(|out| !out.contains(&Value::from("text"))) {
+        return None;
+    }
+    let mut info = named(provider, listed["id"].as_str()?, text(&listed["name"], 60));
+    let parameters: Vec<&str> = listed["supported_parameters"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
+    info.tools = Some(parameters.contains(&"tools"));
+    let reasoning = &listed["reasoning"];
+    (info.efforts, info.default_effort) = named_efforts(&reasoning["supported_efforts"], &reasoning["default_effort"]);
+    info.reasoning = Some(parameters.contains(&"reasoning") || !info.efforts.is_empty());
+    info.inputs = architecture["input_modalities"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .filter_map(|input| Input::parse(if input == "file" { "pdf" } else { input }))
+        .collect();
+    info.context = local_count(&listed["context_length"]).or_else(|| local_count(&listed["top_provider"]["context_length"]));
+    info.max_output = local_count(&listed["top_provider"]["max_completion_tokens"]);
+    let pricing = &listed["pricing"];
+    info.cost = Some(Cost {
+        input: per_million(&pricing["prompt"]),
+        output: per_million(&pricing["completion"]),
+        cache_read: per_million(&pricing["input_cache_read"]),
+        cache_write: per_million(&pricing["input_cache_write"]),
+    })
+    .filter(|cost| cost.input.is_some() || cost.output.is_some());
+    // A model OpenRouter is about to retire carries the date it goes.
+    info.status = listed["expiration_date"].as_str().filter(|date| !date.is_empty()).map(|_| "deprecated".to_string());
+    Some(Listed { info, efforts: true, described: true })
+}
+/// One text model of Venice's list, described; None for one that's offline.
+fn venice_model(provider: ProviderId, listed: &Value) -> Option<Listed> {
+    let spec = &listed["model_spec"];
+    if spec["offline"] == true {
+        return None;
+    }
+    let capabilities = &spec["capabilities"];
+    let mut info = named(provider, listed["id"].as_str()?, text(&spec["name"], 60));
+    info.tools = capabilities["supportsFunctionCalling"].as_bool();
+    info.reasoning = capabilities["supportsReasoning"].as_bool();
+    if capabilities["supportsReasoningEffort"] == true {
+        (info.efforts, info.default_effort) =
+            named_efforts(&capabilities["reasoningEffortOptions"], &capabilities["defaultReasoningEffort"]);
+    }
+    info.inputs = [("supportsVision", Input::Image), ("supportsAudioInput", Input::Audio), ("supportsVideoInput", Input::Video)]
+        .into_iter()
+        .filter(|(capability, _)| capabilities[*capability] == true)
+        .map(|(_, input)| input)
+        .collect();
+    info.context = local_count(&spec["availableContextTokens"]).or_else(|| local_count(&listed["context_length"]));
+    info.max_output = local_count(&spec["maxCompletionTokens"]);
+    let pricing = &spec["pricing"];
+    info.cost = Some(Cost {
+        input: pricing["input"]["usd"].as_f64(),
+        output: pricing["output"]["usd"].as_f64(),
+        cache_read: pricing["cache_input"]["usd"].as_f64(),
+        cache_write: None,
+    })
+    .filter(|cost| cost.input.is_some() || cost.output.is_some());
+    // Venice says whether a model's prompts stay private to it, or reach its host anonymized.
+    info.labels = text(&spec["privacy"], 20).into_iter().collect();
+    info.status =
+        if spec["deprecation"].is_object() { Some("deprecated".into()) } else { (spec["betaModel"] == true).then(|| "beta".into()) };
+    Some(Listed { info, efforts: true, described: true })
+}
+/// What a provider makes of an empty request with `key` (`KeyCheck::Empty`).
+async fn empty_request(row: &ProviderRow, key: &str, path: &str, options: &Transport) -> ApiKeyCheck {
+    let mut headers = key_headers(row, key);
+    headers.insert("user-agent".into(), USER_AGENT.clone());
+    headers.insert("content-type".into(), "application/json".into());
+    let init = FetchInit { method: "POST".into(), headers, body: Some("{}".into()), signal: options.signal.clone() };
+    match options.fetch.clone().unwrap_or_else(default_fetch).fetch(&format!("{}{path}", row.base_url), init).await {
+        Ok(response) if matches!(response.status, 401 | 403) => ApiKeyCheck::Refused,
+        Ok(response) if response.ok() || matches!(response.status, 400 | 422) => ApiKeyCheck::Ok,
+        _ => ApiKeyCheck::Unreachable,
+    }
+}
+/// One model of Hugging Face's router, described by the providers that serve it: it takes tools when one of them does.
+fn huggingface_model(provider: ProviderId, listed: &Value) -> Option<Listed> {
+    let mut info = named(provider, listed["id"].as_str()?, None);
+    let served: Vec<&Value> = listed["providers"].as_array().into_iter().flatten().filter(|p| p["status"] != "error").collect();
+    if !served.is_empty() {
+        info.tools = Some(served.iter().any(|p| p["supports_tools"] == true));
+        info.context = served.iter().filter_map(|p| local_count(&p["context_length"])).reduce(f64::max);
+    }
+    info.inputs = listed["architecture"]["input_modalities"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .filter_map(Input::parse)
+        .collect();
+    let described = !served.is_empty();
+    Some(Listed { info, efforts: false, described })
+}
+/// A positive whole count (tokens), as a list writes it.
+fn local_count(value: &Value) -> Option<f64> {
+    value.as_f64().filter(|n| *n > 0. && n.fract() == 0. && *n <= 1e12)
+}
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ApiKeyCheck {
@@ -341,8 +496,14 @@ pub enum ApiKeyCheck {
     Unreachable,
 }
 pub async fn check_api_key(provider: ProviderId, key: &str, options: Transport) -> ApiKeyCheck {
-    let checked = match provider.row().key_check {
+    let row = provider.row();
+    let checked = match row.key_check {
         KeyCheck::List => list_with_key(provider, key, &options).await.map(|_| ()),
+        KeyCheck::Get(path) => {
+            let url = if path.starts_with("https://") { path.to_string() } else { format!("{}{path}", row.base_url) };
+            get_json(&url, key_headers(row, key), &options, provider).await.map(|_| ())
+        }
+        KeyCheck::Empty(path) => return empty_request(row, key, path, &options).await,
     };
     match checked {
         Ok(()) => ApiKeyCheck::Ok,

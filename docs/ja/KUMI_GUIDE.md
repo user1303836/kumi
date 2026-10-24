@@ -8,7 +8,7 @@ Kumi をインストールして Live につなぐには、[クイックスタ�
 
 ## サインインとモデルの選択
 
-Kumi の中で `/login` を使うとサインインします（初回は Kumi のセットアップが先に尋ねます）。ChatGPT にはお使いのプランでサインインするか（ブラウザが開き、サインインの結果は `localhost:1455` に戻ってきます）、Anthropic、OpenAI、OpenCode には API キーでサインインします。キーは、ドットだけが表示される入力欄に貼り付けます。Kumi はキーを保存する前に、そのプロバイダーでキーを確認します。プロバイダーに接続できない場合は、キーを保存し、まだ確認していないことを伝えます。`/logout` でサインアウトします。
+Kumi の中で `/login` を使うとサインインします（初回は Kumi のセットアップが先に尋ねます）。ChatGPT にはお使いのプランでサインインするか（ブラウザが開き、サインインの結果は `localhost:1455` に戻ってきます）、下の表のほかのプロバイダーには API キーでサインインします。キーは、ドットだけが表示される入力欄に貼り付けます。Kumi はキーを保存する前に、そのプロバイダーでキーを確認します。プロバイダーに接続できない場合は、キーを保存し、まだ確認していないことを伝えます。`/logout` でサインアウトします。
 
 セットアップのサインインのステップでは：
 
@@ -17,15 +17,46 @@ Kumi の中で `/login` を使うとサインインします（初回は Kumi �
 - ブラウザ用のリンクは全体が表示され、**c** でコピーできます。
 - Ollama か LM Studio が起動している間は、**On this computer** も選べます。
 
-| プロバイダー | モデル名 | サインイン |
-| --- | --- | --- |
-| ChatGPT プラン | `openai-codex/<model>` | `/login`（ブラウザ、またはコード：**d**）、または `kumi login openai-codex`（ブラウザがなければ `--device`。SSH 経由では自動でコード、ブラウザなら `--browser`） |
-| Anthropic API | `anthropic/<model>` | API キーで `/login`、または `ANTHROPIC_API_KEY` |
-| OpenAI API | `openai/<model>` | API キーで `/login`、または `OPENAI_API_KEY` |
-| OpenCode Zen と Go | `opencode/<model>`、`opencode-go/<model>` | API キー（両方で一つ）で `/login`、または `OPENCODE_API_KEY` |
-| Ollama（このコンピューター上） | `ollama/<model>` | 不要：起動していれば見つかります |
-| LM Studio（このコンピューター上） | `lmstudio/<model>` | 不要：サーバーが起動していれば見つかります |
-| その他の OpenAI 互換サーバー | `<name>/<model>` | `settings.json` に名前を書きます（[下記](#このコンピューター上のモデル)）。必要ならキーも |
+**プロバイダー。** 次のどれにも `/login` か `kumi login <id>` でサインインできます。`kumi auth` でサインイン状況がわかります。キーの環境変数も使えますが、`/login` で保存したキーが優先されます。
+
+| プロバイダー | モデル名 | キーの環境変数 | キーの取得先 |
+| --- | --- | --- | --- |
+| ChatGPT プラン | `openai-codex/<model>` | なし：`/login` でブラウザが開きます（コードなら **d**）。または `kumi login openai-codex`（ブラウザがなければ `--device`。SSH 経由では自動でコード、ブラウザなら `--browser`） | お使いの ChatGPT プラン |
+| Anthropic API | `anthropic/<model>` | `ANTHROPIC_API_KEY` | platform.claude.com（API キー） |
+| OpenAI API | `openai/<model>` | `OPENAI_API_KEY` | platform.openai.com/api-keys |
+| OpenCode Zen と Go | `opencode/<model>`、`opencode-go/<model>` | `OPENCODE_API_KEY`（両方で一つ） | opencode.ai/auth |
+| OpenRouter | `openrouter/<model>` | `OPENROUTER_API_KEY` | openrouter.ai/settings/keys |
+| Venice | `venice/<model>` | `VENICE_API_KEY` | venice.ai/settings/api |
+| Google Gemini | `gemini/<model>` | `GEMINI_API_KEY`, `GOOGLE_API_KEY`（リスニングモデルのキーと共通） | aistudio.google.com/apikey |
+| DeepSeek | `deepseek/<model>` | `DEEPSEEK_API_KEY` | platform.deepseek.com/api_keys |
+| xAI | `xai/<model>` | `XAI_API_KEY` | console.x.ai |
+| Z.ai (GLM) | `zai/<model>` | `ZAI_API_KEY`, `ZHIPU_API_KEY` | z.ai/manage-apikey/apikey-list |
+| Moonshot (Kimi) | `moonshot/<model>` | `MOONSHOT_API_KEY` | platform.kimi.ai/console/api-keys |
+| Alibaba Cloud (Qwen) | `alibaba/<model>` | `DASHSCOPE_API_KEY` | modelstudio.console.alibabacloud.com |
+| MiniMax | `minimax/<model>` | `MINIMAX_API_KEY` | platform.minimax.io |
+| Xiaomi MiMo | `xiaomi/<model>` | `MIMO_API_KEY`, `XIAOMI_API_KEY` | platform.xiaomimimo.com |
+| StepFun | `stepfun/<model>` | `STEPFUN_API_KEY`, `STEP_API_KEY` | platform.stepfun.ai/interface-key |
+| Tencent TokenHub | `tencent/<model>` | `TENCENT_TOKENHUB_API_KEY` | console.tencentcloud.com/tokenhub/apikey |
+| Groq | `groq/<model>` | `GROQ_API_KEY` | console.groq.com/keys |
+| Cerebras | `cerebras/<model>` | `CEREBRAS_API_KEY` | cloud.cerebras.ai |
+| Fireworks AI | `fireworks/<model>` | `FIREWORKS_API_KEY` | app.fireworks.ai/settings/users/api-keys |
+| Together AI | `together/<model>` | `TOGETHER_API_KEY` | api.together.ai/settings/api-keys |
+| DeepInfra | `deepinfra/<model>` | `DEEPINFRA_API_KEY` | deepinfra.com/dash/api_keys |
+| Mistral | `mistral/<model>` | `MISTRAL_API_KEY` | console.mistral.ai |
+| Ollama Cloud | `ollama-cloud/<model>` | `OLLAMA_API_KEY` | ollama.com/settings/keys |
+| NVIDIA | `nvidia/<model>` | `NVIDIA_API_KEY` | build.nvidia.com |
+| Hugging Face | `huggingface/<model>` | `HF_TOKEN` | huggingface.co/settings/tokens |
+| Ollama（このコンピューター上） | `ollama/<model>` | 不要：起動していれば見つかります | — |
+| LM Studio（このコンピューター上） | `lmstudio/<model>` | 不要：サーバーが起動していれば見つかります | — |
+| その他のサーバー | `<name>/<model>` | `settings.json` の `apiKey`（[下記](#このコンピューター上のモデル)） | — |
+
+- モデル名にはプロバイダーの `/` がそのまま入ります（`openrouter/moonshotai/kimi-k3.1-pro`）。
+- Z.ai と StepFun では従量課金のキーを使ってください。両社のコーディングプランは、それぞれが挙げるツールでしか使えません。
+- NVIDIA の無料トライアルキーはテストと評価のためだけのものです。一部のモデルは応答が遅れて届き、まだ Kumi では使えません。
+- Hugging Face には、Inference Providers の権限を持つ fine-grained トークンが必要です。
+- Google の Gemini API の規約は業務での利用向けで、EEA、スイス、英国では有料プランが必要です。
+- `/model` には ChatGPT、Anthropic、OpenAI、OpenCode が常に、ほかのプロバイダーはサインインすると表示されます。その **More providers** で `/login` が開きます。
+- 後から Kumi に加わったプロバイダーと同じ名前のカスタムサーバーは、その名前の ID のままです。Kumi はそのプロバイダーをあなたには表示せず、切り替え方は `kumi doctor` が伝えます。
 
 `/login` で保存したキーが優先されます。保存したキーがなければ、Kumi は環境変数のキーを使います。この場合 Kumi からはサインアウトできないので、環境変数のほうを削除してください。API キーは Kumi のキー入力欄か `kumi login` のプロンプトにだけ貼り付け、メッセージには決して貼り付けないでください。Claude と Gemini のサブスクリプションによるサインインは提供していません。それぞれのプロバイダーが、サードパーティのツールでの使用を認めていないためです。OpenCode の Gemini モデルにはまだ対応していません。
 
@@ -53,12 +84,13 @@ Kumi はカタログの写しを持っていて、新しいものを多くても
 ### このコンピューター上のモデル
 
 - **Ollama** と **LM Studio** は、起動していればサインインなしで見つかります。`/model` はそれぞれを一つのプロバイダー（「Ollama · on this computer」）として、そのサーバーにあるモデルとともに表示します。インストール済みで閉じているものは、起動のしかたを示します。どこにもサインインしていなければ、Kumi はそれらのモデルのうち Set を変更できるもの（読み込み済みのものを優先）で始めます。
-- **その他の OpenAI 互換サーバー**（llama.cpp の `llama-server`、vLLM、Jan など）は `~/.kumi/settings.json` に書きます。名前がその ID になります（`llama.cpp` なら `llama-cpp/<model>`）：
+- **その他のサーバー**（llama.cpp の `llama-server`、vLLM、Jan、ゲートウェイなど）は、このコンピューター上でも別の場所でも `~/.kumi/settings.json` に書きます。名前がその ID になります（`llama.cpp` なら `llama-cpp/<model>`）。`format` で要求の書き方を指定します：`chat-completions`（OpenAI の Chat Completions。`format` がなければこれ）、`responses`（OpenAI の Responses）、`anthropic`（Anthropic の Messages）。そのモデルについて Kumi が知ることはサーバー自身の一覧から来るので、unverified と表示されます：
 
   ```json
   { "modelServers": [
     { "name": "llama.cpp", "baseURL": "http://127.0.0.1:8080/v1" },
-    { "name": "Studio PC", "baseURL": "http://192.168.1.20:8000/v1", "apiKey": "…" }
+    { "name": "Studio PC", "baseURL": "http://192.168.1.20:8000/v1", "apiKey": "…" },
+    { "name": "Gateway", "baseURL": "https://llm.example.com/v1", "apiKey": "…", "format": "anthropic" }
   ] }
   ```
 
@@ -114,8 +146,8 @@ Kumi は REAPER 7 以降と Renoise 3.5 以降で、macOS、Windows、Linux の�
 **そこでできること。** Kumi はプロジェクトやソングを読み、取り消し付きで変更します（何を変更できるか、取り消しがどう働くかは [REAPER と Renoise](KUMI_CHANGES.md#reaper-と-renoise) にあります）。FOCUS、NOW、HISTORY は DAW 自身のビューに沿って表示されます（[コマンド、キー、画面](KUMI_TUI.md#reaper-と-renoise)）。聴く、自分の変更を判定する、`/loop` と `/goal`、リファレンスに合わせる、インスタントフレーズ、閉じていた間の変化を伝える、手作業をレシピにする、ライブラリーやメモや会話を使う、のすべてを DAW の言葉で行います（DAW ごとの一覧は [Live、REAPER、Renoise で Kumi ができること](DAWS.md)）。REAPER ではアクション、API、Lua（ReaScript）も、Renoise では Lua も実行できます。Max for Live デバイス、Kumi Ears、Willington、Kumi の Live 拡張機能（**Ask Kumi about this**）、Live 自身のコマンド、Live のマニュアルは Live だけのものです。
 
 **バージョン。** Kumi の各リリースには拡張機能とツールが付属し、`kumi update` がそれを最新にします（下の「更新、レポート、アンインストール」）。
-Kumi 1.21.2 には REAPER 拡張機能 0.1.2、1.21.0〜1.21.1 には 0.1.1、1.20.0 には 0.1.0。
-Kumi 1.21.0〜1.21.2 には Renoise ツール 1.0.1、1.20.0 には 1.0.0。
+Kumi 1.21.2〜1.22.0 には REAPER 拡張機能 0.1.2、1.21.0〜1.21.1 には 0.1.1、1.20.0 には 0.1.0。
+Kumi 1.21.0〜1.22.0 には Renoise ツール 1.0.1、1.20.0 には 1.0.0。
 
 ## Kumi との作業
 
@@ -533,7 +565,7 @@ Kumi はすべてを `~/.kumi` に保存します。`~/.kumi/settings.json` に�
 | `keepAwake` | `false`：Kumi が作業している間もコンピューターはスリープできる |
 | `answerAfter` | 誰もいないときに Kumi がおすすめの答えを選ぶまでの秒数（60）。`0` は選ばない |
 | `instantPhrases` | `false` で、決まったフレーズ（"tempo 124"、"mute drums"）もほかのメッセージと同じくモデルに送る（[即時フレーズ](KUMI_TUI.md#即時フレーズ)） |
-| `modelServers` | OpenAI 互換のモデルサーバー：`[{ "name", "baseURL", "apiKey" }]`（[このコンピューター上のモデル](#このコンピューター上のモデル)） |
+| `modelServers` | 名前を付けたモデルサーバー：`[{ "name", "baseURL", "apiKey", "format" }]`（[このコンピューター上のモデル](#このコンピューター上のモデル)） |
 | `libraryFolders` | Kumi がサウンド、プリセット、Set を学習する追加のフォルダー |
 | `musicFolders` | Kumi があなたの好みを学ぶ、あなた自身の音楽のフォルダー（`/music add`）。同意するまではありません |
 | `musicOffered` | あなたの音楽を学ぶかどうかを Kumi が尋ねたら `true`。尋ねるのは一度だけです |

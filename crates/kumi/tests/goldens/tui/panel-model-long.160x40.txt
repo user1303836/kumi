@@ -31,7 +31,7 @@
      Model 04               deprecated
      Model 05               A model the list describes
      Model 06               chat only
-     Model 07               unverified                            ↓ 37 more
+     Model 07               unverified                            ↓ 39 more
 
 
 

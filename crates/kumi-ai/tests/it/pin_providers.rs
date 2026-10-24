@@ -8,9 +8,11 @@ use kumi_ai::{
     error::LanguageModelError,
     http::{Fetch, FetchInit, Headers, Response},
     providers::{
-        local::{list_local_models, local_servers, resolve_local_model, LocalModelOptions, LocalServer, ServerSetting},
+        local::{
+            list_local_models, local_servers, resolve_local_model, resolve_server_model, LocalModelOptions, LocalServer, ServerSetting,
+        },
         models::{check_api_key, list_models, ListOptions, Transport},
-        resolve_model, Effort, ProviderId, ResolveModelOptions,
+        resolve_model, Effort, Format, ProviderId, ResolveModelOptions,
     },
     types::*,
 };
@@ -116,10 +118,29 @@ fn rejection() -> Response {
     Response::json_response(400, json!({"error":{"message":"fixture rejection"}}))
 }
 
-/// A custom server on another computer, beside Ollama and LM Studio.
+/// Custom servers beside Ollama and LM Studio: one on another computer, one that takes Responses, one Anthropic's format.
 fn servers() -> Vec<LocalServer> {
     local_servers(
-        &[ServerSetting { name: "My Server".into(), base_url: "http://192.168.1.20:8080".into(), api_key: Some(KEY.into()) }],
+        &[
+            ServerSetting {
+                name: "My Server".into(),
+                base_url: "http://192.168.1.20:8080".into(),
+                api_key: Some(KEY.into()),
+                format: None,
+            },
+            ServerSetting {
+                name: "Responses Box".into(),
+                base_url: "http://192.168.1.30:8000/v1".into(),
+                api_key: Some(KEY.into()),
+                format: Some(Format::Responses),
+            },
+            ServerSetting {
+                name: "Claude Proxy".into(),
+                base_url: "https://claude-proxy.example.test/v1".into(),
+                api_key: Some(KEY.into()),
+                format: Some(Format::Messages),
+            },
+        ],
         &HashMap::new(),
     )
     .unwrap()
@@ -197,6 +218,12 @@ fn answer(url: &str, body: &Value) -> Result<Response, LanguageModelError> {
             show => listed(show),
         },
         "http://127.0.0.1:1234/api/v1/models" => listed(lm_studio_models()),
+        "http://192.168.1.30:8000/v1/models" => {
+            listed(json!({"object":"list","data":[{"id":"gpt-local","object":"model"},{"id":"embed-local","object":"model"}]}))
+        }
+        "https://claude-proxy.example.test/v1/models" => {
+            listed(json!({"data":[{"id":"claude-local","display_name":"Claude Local","type":"model"}],"has_more":false}))
+        }
         "http://192.168.1.20:8080/v1/models" => listed(json!({"data":[
             {"id":"llama-4","owned_by":"me","context_length":65536},{"id":"text-embed-3"},{"id":"qwen/qwen3-coder","max_model_len":131072},{"id":"Odd Name ✦"}
         ]})),
@@ -305,6 +332,16 @@ async fn every_route_sends_one_turn_with_a_tool_an_effort_and_a_picture_as_it_di
                 );
                 let result = local.binding.model.do_stream((local.binding.prepare)(turn())).await;
                 assert!(result.is_err(), "{id}: the fixture turns the chat down");
+                routes.insert(format!("{id}/{model}"), json!({"requests": seen.borrow().clone()}));
+            }
+            for (id, model) in [("responses-box", "gpt-local"), ("claude-proxy", "claude-local")] {
+                let (fetch, seen) = recorder(|_, _| Ok(rejection()));
+                let binding = resolve_server_model(
+                    &server(id),
+                    model.into(),
+                    LocalModelOptions { fetch: Some(fetch), effort: Some(Effort::High), on_note: None },
+                );
+                assert!(binding.model.do_stream((binding.prepare)(turn())).await.is_err(), "{id}: the fixture turns the call down");
                 routes.insert(format!("{id}/{model}"), json!({"requests": seen.borrow().clone()}));
             }
             golden("requests.json", &Value::Object(routes));

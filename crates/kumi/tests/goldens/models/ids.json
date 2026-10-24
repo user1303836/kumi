@@ -230,13 +230,19 @@
     },
     {
       "id": "openrouter/moonshotai/kimi-k3.1-pro",
-      "cloud": null,
+      "cloud": [
+        "openrouter",
+        "moonshotai/kimi-k3.1-pro"
+      ],
       "local": null,
-      "settings": false
+      "settings": true
     },
     {
       "id": "venice/x",
-      "cloud": null,
+      "cloud": [
+        "venice",
+        "x"
+      ],
       "local": [
         "venice",
         "x"
@@ -454,9 +460,9 @@
     }
   ],
   "errors": {
-    "KUMI_MODEL=nope": "KUMI_MODEL must be <provider>/<model> with provider one of openai-codex, openai, anthropic, opencode, opencode-go, ollama, lmstudio (or a server in settings.json).",
-    "login nope": "Use: login <provider>, with provider one of openai-codex, openai, anthropic, opencode, opencode-go.",
-    "logout nope": "Use: logout <provider>, with provider one of openai-codex, openai, anthropic, opencode, opencode-go.",
-    "model nope": "Use: model <provider>/<model>, with provider one of openai-codex, openai, anthropic, opencode, opencode-go, ollama, lmstudio (or a server in settings.json)."
+    "KUMI_MODEL=nope": "KUMI_MODEL must be <provider>/<model> with provider one of openai-codex, openai, anthropic, opencode, opencode-go, openrouter, venice, gemini, deepseek, xai, zai, moonshot, alibaba, minimax, xiaomi, stepfun, tencent, groq, cerebras, fireworks, together, deepinfra, mistral, ollama-cloud, nvidia, huggingface, ollama, lmstudio (or a server in settings.json).",
+    "login nope": "Use: login <provider>, with provider one of openai-codex, openai, anthropic, opencode, opencode-go, openrouter, venice, gemini, deepseek, xai, zai, moonshot, alibaba, minimax, xiaomi, stepfun, tencent, groq, cerebras, fireworks, together, deepinfra, mistral, ollama-cloud, nvidia, huggingface.",
+    "logout nope": "Use: logout <provider>, with provider one of openai-codex, openai, anthropic, opencode, opencode-go, openrouter, venice, gemini, deepseek, xai, zai, moonshot, alibaba, minimax, xiaomi, stepfun, tencent, groq, cerebras, fireworks, together, deepinfra, mistral, ollama-cloud, nvidia, huggingface.",
+    "model nope": "Use: model <provider>/<model>, with provider one of openai-codex, openai, anthropic, opencode, opencode-go, openrouter, venice, gemini, deepseek, xai, zai, moonshot, alibaba, minimax, xiaomi, stepfun, tencent, groq, cerebras, fireworks, together, deepinfra, mistral, ollama-cloud, nvidia, huggingface, ollama, lmstudio (or a server in settings.json)."
   }
 }

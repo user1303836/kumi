@@ -321,7 +321,7 @@
         "model",
         "x/test-only-secret-do-not-log"
       ],
-      "error": "Use: model <provider>/<model>, with provider one of openai-codex, openai, anthropic, opencode, opencode-go, ollama, lmstudio (or a server in settings.json)."
+      "error": "Use: model <provider>/<model>, with provider one of openai-codex, openai, anthropic, opencode, opencode-go, openrouter, venice, gemini, deepseek, xai, zai, moonshot, alibaba, minimax, xiaomi, stepfun, tencent, groq, cerebras, fireworks, together, deepinfra, mistral, ollama-cloud, nvidia, huggingface, ollama, lmstudio (or a server in settings.json)."
     },
     {
       "args": [
@@ -350,14 +350,14 @@
       "args": [
         "logout"
       ],
-      "error": "Use: logout <provider>, with provider one of openai-codex, openai, anthropic, opencode, opencode-go."
+      "error": "Use: logout <provider>, with provider one of openai-codex, openai, anthropic, opencode, opencode-go, openrouter, venice, gemini, deepseek, xai, zai, moonshot, alibaba, minimax, xiaomi, stepfun, tencent, groq, cerebras, fireworks, together, deepinfra, mistral, ollama-cloud, nvidia, huggingface."
     },
     {
       "args": [
         "login",
         "test-only-secret-do-not-log"
       ],
-      "error": "Use: login <provider>, with provider one of openai-codex, openai, anthropic, opencode, opencode-go."
+      "error": "Use: login <provider>, with provider one of openai-codex, openai, anthropic, opencode, opencode-go, openrouter, venice, gemini, deepseek, xai, zai, moonshot, alibaba, minimax, xiaomi, stepfun, tencent, groq, cerebras, fireworks, together, deepinfra, mistral, ollama-cloud, nvidia, huggingface."
     },
     {
       "args": [

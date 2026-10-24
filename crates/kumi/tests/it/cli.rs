@@ -222,7 +222,7 @@ case!(existing_credentials_remain_usable_and_logout_keeps_other_providers, async
 });
 case!(inference_only_reports_missing_signin_and_closes_pipe_without_live, async {
     let f = Fixture::new(false);
-    f.settings(json!({"model":"anthropic/claude-sonnet-5-5","updateCheck":false,"libraryFolders":[]}));
+    f.settings(json!({"model":"anthropic/claude-sonnet-5-5","updateCheck":false,"modelCatalog":false,"libraryFolders":[]}));
     let task = tokio::task::spawn_local(run(f.io(&["--inference-only"]), unused_factory()));
     f.input.wait_ready().await;
     f.input.write("hello\n");
@@ -240,7 +240,7 @@ case!(live_binding_passes_callbacks_and_stores_to_native_session, async {
     let config = f.folder.path().join("bridge.json");
     std::fs::write(&config, "{}").unwrap();
     f.env.insert("KUMI_BRIDGE_CONFIG".into(), config.display().to_string());
-    f.settings(json!({"model":"anthropic/claude-sonnet-5-5","updateCheck":false}));
+    f.settings(json!({"model":"anthropic/claude-sonnet-5-5","updateCheck":false,"modelCatalog":false}));
     let called = Rc::new(Cell::new(false));
     let mark = called.clone();
     let judged = Rc::new(RefCell::new(None));
@@ -301,7 +301,7 @@ fn judged_round() -> kumi_listening::round::Round {
 }
 case!(a_database_that_cant_open_leaves_notes_in_their_files_and_says_so, async {
     let f = Fixture::new(false);
-    f.settings(json!({"model":"anthropic/claude-sonnet-5-5","updateCheck":false,"libraryFolders":[]}));
+    f.settings(json!({"model":"anthropic/claude-sonnet-5-5","updateCheck":false,"modelCatalog":false,"libraryFolders":[]}));
     let memory = f.folder.path().join("memory.json");
     std::fs::write(
         &memory,
@@ -340,7 +340,7 @@ case!(continue_and_resume_in_live_leave_another_daws_conversation_to_that_daw, a
     // Review L4: the newest conversation is REAPER's; Live's -c takes up Live's, and -r of REAPER's says whose it is.
     use kumi_agent::ConversationStore;
     let f = Fixture::new(false);
-    f.settings(json!({"model":"anthropic/claude-sonnet-5-5","updateCheck":false,"libraryFolders":[]}));
+    f.settings(json!({"model":"anthropic/claude-sonnet-5-5","updateCheck":false,"modelCatalog":false,"libraryFolders":[]}));
     let (set, project) = ("a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1", "reaper-b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2");
     let said = |text: &str, at: i64| -> kumi_agent::SavedConversation {
         serde_json::from_value(json!({"savedAt":at,"checkpoint":{"version":1,"messages":[{"role":"user","content":text},{"role":"assistant","content":"done"}]}}))
@@ -372,7 +372,7 @@ case!(continue_and_resume_in_live_leave_another_daws_conversation_to_that_daw, a
 case!(continue_and_resume_take_up_a_kept_conversation_or_say_why_not, async {
     use kumi_agent::ConversationStore;
     let f = Fixture::new(false);
-    f.settings(json!({"model":"anthropic/claude-sonnet-5-5","updateCheck":false,"libraryFolders":[]}));
+    f.settings(json!({"model":"anthropic/claude-sonnet-5-5","updateCheck":false,"modelCatalog":false,"libraryFolders":[]}));
     let (a, b) = ("a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1", "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2");
     let said = |text: &str, at: i64| -> kumi_agent::SavedConversation {
         serde_json::from_value(json!({"savedAt":at,"checkpoint":{"version":1,"messages":[{"role":"user","content":text},{"role":"assistant","content":"done"}]}}))

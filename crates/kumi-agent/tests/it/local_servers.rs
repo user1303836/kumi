@@ -127,12 +127,16 @@ fn lm_at() -> LocalServer {
         base_url: "http://127.0.0.1:1234/v1".into(),
         api_key: None,
         r#where: "on this computer".into(),
+        format: None,
     }
 }
 fn custom() -> LocalServer {
-    local_servers(&[ServerSetting { name: "llama.cpp".into(), base_url: "http://127.0.0.1:8080".into(), api_key: None }], &HashMap::new())
-        .unwrap()
-        .remove(2)
+    local_servers(
+        &[ServerSetting { name: "llama.cpp".into(), base_url: "http://127.0.0.1:8080".into(), api_key: None, format: None }],
+        &HashMap::new(),
+    )
+    .unwrap()
+    .remove(2)
 }
 struct Tool {
     name: String,

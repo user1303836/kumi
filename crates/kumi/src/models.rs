@@ -11,7 +11,7 @@ use kumi_ai::{
     binding::ModelBinding,
     http::Fetch,
     providers::{
-        api_key_for, chat_only,
+        api_key_from, chat_only,
         local::{self, LocalBinding, LocalKind, LocalModelOptions, LocalServer},
         models::{check_api_key, list_models, ApiKeyCheck, EffortInfo, ListOptions, ModelInfo, ServiceTier, Transport},
         parse_model_id, resolve_model, table, Effort, KeySource, ProviderId, ResolveModelOptions, SignIn,
@@ -279,6 +279,18 @@ impl ModelControl {
         self.tier_of(id).await.map(|tier| tier.id)
     }
     async fn bind(&self, id: &str, effort: Option<Effort>, tier: Option<String>) -> Result<Bound, RuntimeError> {
+        let profile = *crate::daw::profile();
+        // A custom server that takes Responses or Anthropic's format: bound as a cloud model is, under Kumi's one policy.
+        if let Some(Parsed { server: Some(server), model, .. }) =
+            self.parse(Some(id)).filter(|parsed| parsed.server.as_ref().is_some_and(|s| s.format.is_some()))
+        {
+            let binding = local::resolve_server_model(
+                &server,
+                model.clone(),
+                LocalModelOptions { fetch: self.inner.options.fetch.clone(), effort, on_note: None },
+            );
+            return Ok(Bound::Cloud(Rc::new(chat_only::chat_only(binding, false, self.inner.learned.clone(), profile, model)), None));
+        }
         if let Some(Parsed { server: Some(server), model, .. }) = self.parse(Some(id)) {
             let weak = Rc::downgrade(&self.inner);
             return Ok(Bound::Local(Rc::new(local::resolve_local_model(
@@ -308,7 +320,6 @@ impl ModelControl {
         let info = self.info_for(Some(id));
         let toolless = info.as_ref().is_some_and(|info| info.tools == Some(false));
         let name = info.map(|info| info.name).unwrap_or_else(|| id.split_once('/').map_or(id, |(_, model)| model).to_string());
-        let profile = *crate::daw::profile();
         let note = toolless.then(|| chat_only::talk_only(&name, &profile, "/model chooses one that can."));
         Ok(Bound::Cloud(Rc::new(chat_only::chat_only(binding, toolless, self.inner.learned.clone(), profile, name)), note))
     }
@@ -335,13 +346,18 @@ impl ModelControl {
     pub async fn providers(&self) -> Result<Vec<ProviderStatus>, RuntimeError> {
         let mut statuses = Vec::new();
         let hidden = self.hidden();
+        // Every provider's sign-in, from one read of the credential file.
+        let saved = self.inner.options.store.list().await?;
         for id in table::offered().into_iter().filter(|id| !hidden.contains(id)) {
             let info = id.row();
+            // The variable a key from the environment came from, else the first it may be in.
+            let mut key_env = info.first_key_env().map(str::to_string);
             let via = if info.sign_in == SignIn::Chatgpt {
-                matches!(self.inner.options.store.get(OPENAI_CODEX).await?, Some(Credential::Oauth(_))).then(|| "chatgpt".into())
+                matches!(saved.get(OPENAI_CODEX), Some(Credential::Oauth(_))).then(|| "chatgpt".into())
             } else {
-                api_key_for(id, self.inner.options.store.as_ref(), Some(&self.inner.options.env)).await?.map(|k| {
+                api_key_from(id, saved.get(info.credential), Some(&self.inner.options.env)).map(|k| {
                     if k.source == KeySource::Env {
+                        key_env = k.variable.or(key_env.take());
                         "environment".into()
                     } else {
                         "saved key".into()
@@ -355,7 +371,7 @@ impl ModelControl {
                 signed_in: via.is_some(),
                 via,
                 key_page: info.key_page.map(str::to_string),
-                key_env: info.first_key_env().map(str::to_string),
+                key_env,
             });
         }
         Ok(statuses)

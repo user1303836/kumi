@@ -184,7 +184,7 @@ impl AppLab {
         std::fs::write(paths.receipt(), serde_json::to_string(&receipt).unwrap()).unwrap();
         std::fs::write(
             kumi_home.join("settings.json"),
-            json!({"model": "anthropic/claude-sonnet-5-5", "updateCheck": false, "libraryFolders": [], "keepAwake": false, "notifications": "off"})
+            json!({"model": "anthropic/claude-sonnet-5-5", "updateCheck": false, "modelCatalog": false, "libraryFolders": [], "keepAwake": false, "notifications": "off"})
                 .to_string(),
         )
         .unwrap();
