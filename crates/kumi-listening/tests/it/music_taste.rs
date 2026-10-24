@@ -277,6 +277,29 @@ fn not_set_up_it_offers_once_when_it_finds_songs_and_never_when_it_finds_none() 
 }
 
 #[test]
+fn an_offer_another_kumi_made_since_isnt_made_again() {
+    local(async {
+        let dir = tempfile::tempdir().unwrap();
+        let found = dir.path().join("Music");
+        std::fs::create_dir_all(found.join("Artist/Album")).unwrap();
+        std::fs::write(found.join("Artist/Album/01 Song.mp3"), b"tagless").unwrap();
+        let mut options = MusicOptions::new(dir.path().join("kumi/music"), None, Default::default());
+        (options.fork, options.style, options.places) = (false, Some(Rc::new(Fixed) as Rc<dyn Style>), Some(vec![found]));
+        let asked = Rc::new(Cell::new(0));
+        options.offered_since = Some({
+            let asked = asked.clone();
+            Rc::new(move || {
+                asked.set(asked.get() + 1);
+                true
+            })
+        });
+        let taste = create_music(options);
+        assert_eq!(ask(&taste, json!({})).await, r#"{"learned":0}"#);
+        assert!(asked.get() > 0, "the settings were asked before offering");
+    });
+}
+
+#[test]
 fn a_yes_keeps_the_folders_and_starts_learning_and_forget_takes_it_all_away() {
     local(async {
         let dir = tempfile::tempdir().unwrap();

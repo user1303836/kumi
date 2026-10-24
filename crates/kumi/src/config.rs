@@ -495,6 +495,36 @@ const KNOWN_SETTINGS: [&str; 21] = [
 ];
 /// The longest wait before Kumi answers for the producer: an hour.
 const MAX_ANSWER_AFTER: u64 = 3600;
+/// Keeps the producer's answer about their music (`musicFolders`, `musicOffered`) and changes nothing else in the file,
+/// so a newer Kumi's settings and the ones this Kumi can't read stay as they are. The folders are applied to what the
+/// file holds now: what this Kumi added or took away since `before` (the folders it last kept, or read), so another
+/// Kumi's folders stay too. None forgets them all.
+pub fn write_music_settings(file: &str, folders: Option<&[String]>, before: Option<&[String]>, offered: bool) -> Result<(), RuntimeError> {
+    let mut next = match read_json(file) {
+        Some(Value::Object(raw)) => raw,
+        _ => Map::new(),
+    };
+    let folders = folders.map(|folders| {
+        let before = before.unwrap_or_default();
+        let mut kept = next.get("musicFolders").map(folder_list).unwrap_or_default();
+        kept.retain(|folder| folders.contains(folder) || !before.contains(folder));
+        for folder in folders.iter().filter(|folder| !before.contains(folder)) {
+            if !kept.contains(folder) {
+                kept.push(folder.clone());
+            }
+        }
+        kept
+    });
+    next.insert("musicFolders".into(), json!(folders));
+    if offered {
+        next.insert("musicOffered".into(), json!(true));
+    }
+    write_settings(file, &Value::Object(next))
+}
+/// Whether the file says Kumi offered to learn the producer's music (another Kumi may have since this one read it).
+pub fn music_offered(file: &str) -> bool {
+    read_json(file).is_some_and(|value| value["musicOffered"] == true)
+}
 /// A JSON object preserves the difference between omitting a setting and explicitly clearing it.
 pub fn write_settings(file: &str, next: &Value) -> Result<(), RuntimeError> {
     let before = serde_json::to_value(read_settings(file)).unwrap();
