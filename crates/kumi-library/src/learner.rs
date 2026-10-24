@@ -17,6 +17,10 @@ use std::{
     cell::{Cell, RefCell},
     io,
     rc::Rc,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
     time::Duration,
 };
 use tokio::{
@@ -75,6 +79,8 @@ pub async fn main(daws: Daws) -> io::Result<()> {
     low_priority();
     let stop = Signal::new();
     let paused = Rc::new(Cell::new(false));
+    // The same, for the sounds' map laid out off this thread.
+    let held = Arc::new(AtomicBool::new(false));
     let wake = Rc::new(Notify::new());
     let (jobs, mut incoming) = mpsc::unbounded_channel();
     let (output, mut outgoing) = mpsc::unbounded_channel::<Value>();
@@ -86,14 +92,18 @@ pub async fn main(daws: Daws) -> io::Result<()> {
         }
         Ok::<_, io::Error>(())
     });
-    let (input_stop, input_paused, input_wake) = (stop.clone(), paused.clone(), wake.clone());
+    let (input_stop, input_paused, input_wake, input_held) = (stop.clone(), paused.clone(), wake.clone(), held.clone());
     let input = tokio::task::spawn_local(async move {
         let mut lines = BufReader::new(tokio::io::stdin()).lines();
         while let Ok(Some(line)) = lines.next_line().await {
             match serde_json::from_str::<LearnerMessage>(&line) {
-                Ok(LearnerMessage::Pause) => input_paused.set(true),
+                Ok(LearnerMessage::Pause) => {
+                    input_paused.set(true);
+                    input_held.store(true, Ordering::Relaxed);
+                }
                 Ok(LearnerMessage::Resume) => {
                     input_paused.set(false);
+                    input_held.store(false, Ordering::Relaxed);
                     input_wake.notify_waiters();
                 }
                 Ok(LearnerMessage::Stop) => {
@@ -103,6 +113,7 @@ pub async fn main(daws: Daws) -> io::Result<()> {
                 }
                 Ok(LearnerMessage::Learn { options }) => {
                     input_paused.set(options.paused);
+                    input_held.store(options.paused, Ordering::Relaxed);
                     let _ = jobs.send(options);
                 }
                 Err(_) => {}
@@ -149,9 +160,23 @@ pub async fn main(daws: Daws) -> io::Result<()> {
                     *latest.borrow_mut() = Some(progress.clone());
                     let _ = write_state(&dir, &progress, false).await;
                     send(&output, LearnerReply::Done { progress });
-                    // Then the sounds' map, when it's due, while the library is still this learner's.
+                    // Then the sounds' map, when it's due, while the library is still this learner's: it waits while
+                    // the learner's paused (the DAW plays), and ends when it's stopped.
                     if !stop.is_cancelled() {
-                        let _ = lay_out_sounds(std::path::Path::new(&dir), &sources, &kumi_layout::Layout::default()).await;
+                        let (held, stopped) = (held.clone(), stop.clone());
+                        let go_on = Arc::new(move || {
+                            while held.load(Ordering::Relaxed) && !stopped.is_cancelled() {
+                                std::thread::sleep(Duration::from_millis(100));
+                            }
+                            !stopped.is_cancelled()
+                        });
+                        let how = kumi_layout::Layout::default();
+                        if let Err(error) = lay_out_sounds(std::path::Path::new(&dir), &sources, &how, go_on).await {
+                            send(
+                                &output,
+                                LearnerReply::Failed { message: head(&format!("Kumi couldn't make the sounds' map: {error}"), 300) },
+                            );
+                        }
                     }
                 }
                 Err(error) => {

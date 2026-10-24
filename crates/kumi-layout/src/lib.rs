@@ -6,7 +6,7 @@
 //! 50 main directions. Past 50,000 points, t-SNE lays out 50,000 landmarks spread over them, and every other point sits
 //! at the distance-weighted mean of its 5 nearest landmarks. Places are in [0, 1] on both axes.
 
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 /// How a map is made: the map's own, or smaller for tests.
 #[derive(Debug, Clone)]
@@ -51,22 +51,41 @@ const SPREAD_CHUNK: usize = 4_096;
 /// Each of `count` points' place on the map (x, y in [0, 1]), its `dims` numbers read into a buffer by `read`. Points
 /// that are alike in the same proportion sit as close: give each number the weight it has in how alike they sound.
 pub fn layout(count: usize, dims: usize, read: &(dyn Fn(usize, &mut [f32]) + Sync), how: &Layout) -> Vec<[f32; 2]> {
+    layout_until(count, dims, read, how, &|| true).unwrap_or_default()
+}
+
+/// `layout`, asking `go_on` as it works (between t-SNE's rounds, and as each point is weighed or placed): it may wait
+/// there (the learner waits while the DAW plays), and false ends the layout, with no places (None).
+pub fn layout_until(
+    count: usize,
+    dims: usize,
+    read: &(dyn Fn(usize, &mut [f32]) + Sync),
+    how: &Layout,
+    go_on: &(dyn Fn() -> bool + Sync),
+) -> Option<Vec<[f32; 2]>> {
     if count == 0 {
-        return vec![];
+        return Some(vec![]);
     }
     if dims == 0 {
-        return vec![[0.5, 0.5]; count];
+        return Some(vec![[0.5, 0.5]; count]);
     }
+    let going = Going { go_on, stopped: AtomicBool::new(false) };
     let threads = how.threads.max(1);
     let most = how.landmarks.max(1);
     // Their main directions, from points spread through them by their order (every so many), then every point in them.
     let sample: Vec<usize> = (0..count).step_by(count.div_ceil(most)).collect();
     let axes = Axes::of(&sample, dims, read, threads);
     let k = axes.k;
+    if !going.on() {
+        return None;
+    }
     let reduced = axes.project(count, read, threads);
     let landmarks: Vec<usize> = if count <= most { (0..count).collect() } else { spread(&reduced, k, most) };
     let points: Vec<f32> = landmarks.iter().flat_map(|at| reduced[at * k..(at + 1) * k].iter().copied()).collect();
-    let laid = tsne(&points, k, how, threads);
+    if !going.on() {
+        return None;
+    }
+    let laid = tsne(&points, k, how, threads, &going)?;
     let mut places = vec![[0f64; 2]; count];
     if landmarks.len() == count {
         places = laid;
@@ -83,15 +102,39 @@ pub fn layout(count: usize, dims: usize, read: &(dyn Fn(usize, &mut [f32]) + Syn
             2,
             || (),
             |_, row, place: &mut [f64]| {
-                let at = others[row];
-                place.copy_from_slice(&among(&reduced[at * k..(at + 1) * k], &points, k, &laid));
+                if going.on() {
+                    let at = others[row];
+                    place.copy_from_slice(&among(&reduced[at * k..(at + 1) * k], &points, k, &laid));
+                }
             },
         );
+        if going.stopped() {
+            return None;
+        }
         for (at, place) in others.iter().zip(placed.chunks(2)) {
             places[*at] = [place[0], place[1]];
         }
     }
-    unit_square(&places)
+    Some(unit_square(&places))
+}
+
+/// Whether a layout goes on: its `go_on`, until that says no once.
+struct Going<'a> {
+    go_on: &'a (dyn Fn() -> bool + Sync),
+    stopped: AtomicBool,
+}
+
+impl Going<'_> {
+    fn on(&self) -> bool {
+        if self.stopped() || (self.go_on)() {
+            return !self.stopped();
+        }
+        self.stopped.store(true, Ordering::Relaxed);
+        false
+    }
+    fn stopped(&self) -> bool {
+        self.stopped.load(Ordering::Relaxed)
+    }
 }
 
 /// A point that isn't a landmark: at its nearest landmarks' places, each counting for one over its distance.
@@ -336,7 +379,9 @@ fn spread(reduced: &[f32], k: usize, most: usize) -> Vec<usize> {
     chosen
 }
 
-/// A squared distance, added up in eight lanes (so it's quick) in a fixed order (so it's the same everywhere).
+/// A squared distance, added up in eight lanes (so it's quick) in a fixed order (so it's the same everywhere): what
+/// `distance_within` gives when it isn't cut short.
+#[cfg(test)]
 fn distance(a: &[f32], b: &[f32]) -> f32 {
     let mut lanes = [0f32; 8];
     let (a8, b8) = (a.chunks_exact(8), b.chunks_exact(8));
@@ -347,11 +392,38 @@ fn distance(a: &[f32], b: &[f32]) -> f32 {
             lanes[lane] += d * d;
         }
     }
-    let mut sum = ((lanes[0] + lanes[1]) + (lanes[2] + lanes[3])) + ((lanes[4] + lanes[5]) + (lanes[6] + lanes[7]));
+    let mut sum = lanes_sum(&lanes);
     for (a, b) in a_rest.iter().zip(b_rest) {
         sum += (a - b) * (a - b);
     }
     sum
+}
+
+fn lanes_sum(lanes: &[f32; 8]) -> f32 {
+    ((lanes[0] + lanes[1]) + (lanes[2] + lanes[3])) + ((lanes[4] + lanes[5]) + (lanes[6] + lanes[7]))
+}
+
+/// `distance`, the same number to the bit, or None once it's sure to be more than `limit`: each lane only grows, and so
+/// does their sum, so what they add up to so far is never more than the whole. The points' numbers come widest first,
+/// so a point far off is known for one in a few eights.
+fn distance_within(a: &[f32], b: &[f32], limit: f32) -> Option<f32> {
+    let mut lanes = [0f32; 8];
+    let (a8, b8) = (a.chunks_exact(8), b.chunks_exact(8));
+    let (a_rest, b_rest) = (a8.remainder(), b8.remainder());
+    for (a, b) in a8.zip(b8) {
+        for lane in 0..8 {
+            let d = a[lane] - b[lane];
+            lanes[lane] += d * d;
+        }
+        if lanes_sum(&lanes) > limit {
+            return None;
+        }
+    }
+    let mut sum = lanes_sum(&lanes);
+    for (a, b) in a_rest.iter().zip(b_rest) {
+        sum += (a - b) * (a - b);
+    }
+    Some(sum)
 }
 
 /// The `most` points of `points` (rows of `k`) nearest `point`: squared distances and indexes, nearest first, ties by
@@ -362,7 +434,9 @@ fn nearest_to(point: &[f32], points: &[f32], k: usize, most: usize, skip: Option
         if skip == Some(at) {
             continue;
         }
-        let candidate = (distance(point, row), at as u32);
+        let farthest = if best.len() == most { best[most - 1].0 } else { f32::INFINITY };
+        let Some(apart) = distance_within(point, row, farthest) else { continue };
+        let candidate = (apart, at as u32);
         if best.len() == most && !closer(candidate, best[most - 1]) {
             continue;
         }
@@ -386,7 +460,7 @@ struct Pulls {
 
 /// Each point's neighbours, weighted by a Gaussian whose width gives it `perplexity` neighbours in effect, then made the
 /// same both ways (i on j as j on i) and summing to 1.
-fn pulls(points: &[f32], k: usize, perplexity: f64, threads: usize) -> Pulls {
+fn pulls(points: &[f32], k: usize, perplexity: f64, threads: usize, going: &Going) -> Option<Pulls> {
     let n = points.len() / k;
     let near = ((3. * perplexity) as usize).clamp(1, n - 1);
     // Each point's nearest, and its weights on them.
@@ -396,6 +470,9 @@ fn pulls(points: &[f32], k: usize, perplexity: f64, threads: usize) -> Pulls {
         near,
         || (),
         |_, at, row: &mut [(u32, f32)]| {
+            if !going.on() {
+                return;
+            }
             let nearest = nearest_to(&points[at * k..(at + 1) * k], points, k, near, Some(at));
             let distances: Vec<f64> = nearest.iter().map(|(distance, _)| *distance as f64).collect();
             for (slot, ((_, other), weight)) in row.iter_mut().zip(nearest.iter().zip(calibrated(&distances, perplexity))) {
@@ -403,6 +480,9 @@ fn pulls(points: &[f32], k: usize, perplexity: f64, threads: usize) -> Pulls {
             }
         },
     );
+    if going.stopped() {
+        return None;
+    }
     // Each pair both ways, a row a point: its own weights, then those its neighbours give it.
     let mut sizes = vec![near; n];
     for (other, _) in &forward {
@@ -449,7 +529,7 @@ fn pulls(points: &[f32], k: usize, perplexity: f64, threads: usize) -> Pulls {
     }
     starts[n] = written;
     entries.truncate(written);
-    Pulls { starts, entries }
+    Some(Pulls { starts, entries })
 }
 
 /// A point's weights on its neighbours (by squared distance, nearest first): a Gaussian's, its width found by halving
@@ -482,24 +562,27 @@ fn calibrated(distances: &[f64], perplexity: f64) -> Vec<f64> {
 }
 
 /// t-SNE on points (rows of `k` numbers): their places in two dimensions.
-fn tsne(points: &[f32], k: usize, how: &Layout, threads: usize) -> Vec<[f64; 2]> {
+fn tsne(points: &[f32], k: usize, how: &Layout, threads: usize, going: &Going) -> Option<Vec<[f64; 2]>> {
     let n = points.len() / k;
     // It starts from the first two main directions, small.
     let mut places: Vec<[f64; 2]> = points.chunks(k).map(|row| [row[0] as f64, row.get(1).copied().unwrap_or(0.) as f64]).collect();
     if n < 4 {
-        return places;
+        return Some(places);
     }
     let mean = places.iter().map(|place| place[0]).sum::<f64>() / n as f64;
     let wide = (places.iter().map(|place| (place[0] - mean).powi(2)).sum::<f64>() / n as f64).sqrt();
     let scale = if wide > 0. { 1e-4 / wide } else { 1. };
     places.iter_mut().for_each(|place| *place = [place[0] * scale, place[1] * scale]);
     let perplexity = how.perplexity.min((n - 1) as f64 / 3.).max(1.);
-    let pulls = pulls(points, k, perplexity, threads);
+    let pulls = pulls(points, k, perplexity, threads, going)?;
     // Steps as big as the points are many (Belkina et al., 2019), with each place's own gains.
     let rate = (n as f64 / EXAGGERATION / 4.).max(50.);
     let exaggerated = EXAGGERATED.min(how.rounds / 3);
     let (mut moves, mut gains) = (vec![[0f64; 2]; n], vec![[1f64; 2]; n]);
     for round in 0..how.rounds {
+        if !going.on() {
+            return None;
+        }
         let (exaggeration, momentum) = if round < exaggerated { (EXAGGERATION, 0.5) } else { (1., 0.8) };
         let tree = Tree::of(&places);
         // Each point's pull from its neighbours and push from the rest, and its part of the push's sum.
@@ -537,7 +620,7 @@ fn tsne(points: &[f32], k: usize, how: &Layout, threads: usize) -> Vec<[f64; 2]>
         let centre = [centre[0] / n as f64, centre[1] / n as f64];
         places.iter_mut().for_each(|place| *place = [place[0] - centre[0], place[1] - centre[1]]);
     }
-    places
+    Some(places)
 }
 
 /// A quadtree over the places, for Barnes–Hut: each cell's centre of mass, its count, its width, and its points or
@@ -784,6 +867,29 @@ mod tests {
         let a: Vec<f32> = (0..13).map(|at| at as f32).collect();
         let b = vec![0f32; 13];
         assert_eq!(distance(&a, &b), (0..13).map(|at| (at * at) as f32).sum::<f32>());
+    }
+
+    #[test]
+    fn a_distance_cut_short_is_the_same_to_the_bit_or_more_than_its_limit() {
+        // Points of 50 numbers, a pseudo-random walk, each pair's distance against limits around it.
+        let mut seed = 7u32;
+        let mut next = || {
+            seed = seed.wrapping_mul(1_103_515_245).wrapping_add(12_345);
+            (seed >> 8) as f32 / (1 << 24) as f32 - 0.5
+        };
+        let points: Vec<Vec<f32>> = (0..60).map(|_| (0..50).map(|_| next()).collect()).collect();
+        for a in &points {
+            for b in &points {
+                let whole = distance(a, b);
+                for limit in [f32::INFINITY, whole, whole * 1.0001, whole * 0.5, 0.] {
+                    match distance_within(a, b, limit) {
+                        Some(within) => assert_eq!(within.to_bits(), whole.to_bits()),
+                        None => assert!(whole > limit, "{whole} cut short at {limit}"),
+                    }
+                }
+                assert_eq!(distance_within(a, b, whole), Some(whole), "a tie isn't cut short");
+            }
+        }
     }
 
     #[test]

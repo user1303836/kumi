@@ -246,15 +246,17 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
         options.references = Some(load_references_dir(&io.env)?.into());
         options.library_folders = settings.library_folders.clone();
         options.offered = settings.music_offered == Some(true);
-        // The producer's answer, kept in settings.json with the rest of their settings.
+        // The producer's answer, kept in settings.json beside the rest of their settings: what this Kumi changed, applied
+        // to the file as it is now (another Kumi may have changed it since).
         let file = settings_file.clone();
+        let before = RefCell::new(settings.music_folders.clone());
         options.save = Some(Rc::new(move |folders: Option<&[String]>, offered: bool| {
-            let mut settings = read_settings(&file);
-            settings.music_folders = folders.map(<[String]>::to_vec);
-            settings.music_offered = offered.then_some(true);
-            let value = serde_json::to_value(settings).map_err(|error| error.to_string())?;
-            write_settings(&file, &value).map_err(|error| error.to_string())
+            crate::config::write_music_settings(&file, folders, before.borrow().as_deref(), offered).map_err(|error| error.to_string())?;
+            *before.borrow_mut() = folders.map(<[String]>::to_vec);
+            Ok(())
         }));
+        let file = settings_file.clone();
+        options.offered_since = Some(Rc::new(move || crate::config::music_offered(&file)));
         kumi_listening::music::learning::create_music(options)
     };
     let library = create_library(LibraryOptions {

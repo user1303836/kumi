@@ -87,6 +87,7 @@ pub enum SettingsHeard {
         before: Option<Value>,
         settings: Vec<Setting>,
     },
-    /// The search ended (however it did): its best can be told from what it heard.
-    Ended { run: String },
+    /// The search ended (however it did): its best can be told from what it heard. `kept`: the device took it (it beat
+    /// where the knobs were); a search whose best wasn't kept marks none, so it isn't remembered as what worked.
+    Ended { run: String, kept: bool },
 }

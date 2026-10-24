@@ -88,6 +88,8 @@ pub struct MusicOptions {
     pub folders: Option<Vec<String>>,
     /// Kumi offered to learn their music (`musicOffered`).
     pub offered: bool,
+    /// Whether another Kumi has offered since this one read `offered` (none: nothing else to ask).
+    pub offered_since: Option<Rc<dyn Fn() -> bool>>,
     /// Where their answer is kept (none: nowhere, as in tests).
     pub save: Option<SaveMusic>,
     /// Their sample folders (`libraryFolders`), which the walk leaves out with the library's places.
@@ -114,6 +116,7 @@ impl MusicOptions {
             dir,
             folders,
             offered: false,
+            offered_since: None,
             save: None,
             library_folders: vec![],
             fork: true,
@@ -213,9 +216,10 @@ impl Music {
         self.options.borrow().folders.is_some()
     }
 
-    /// Whether Kumi offered to learn it.
+    /// Whether Kumi offered to learn it: this Kumi, or another since this one started.
     pub fn offered(&self) -> bool {
-        self.options.borrow().offered
+        let options = self.options.borrow();
+        options.offered || options.offered_since.as_ref().is_some_and(|offered| offered())
     }
 
     /// The style model a test gave (none: CLAP, as the embeddings slot runs it).

@@ -287,7 +287,7 @@ pub fn library_line(status: Option<&LibraryStatus>) -> Option<String> {
 }
 
 /// What Kumi's searches remember, in a line: how many settings they heard and on how many devices, and how often one
-/// remembered won the first round of a search that started from it. Nothing until a search has heard something, as for a
+/// remembered won the round it was tried in, of the searches that started from one. Nothing until a search has heard something, as for a
 /// library not learned yet.
 pub fn remembered_line(remembered: Option<SearchMemoryStatus>) -> Option<String> {
     let status = remembered.filter(|status| status.settings > 0)?;
@@ -295,7 +295,7 @@ pub fn remembered_line(remembered: Option<SearchMemoryStatus>) -> Option<String>
     let first_rounds = match status.started {
         0 => String::new(),
         started => format!(
-            "; remembered settings won the first round {} in {} that started from one",
+            "; remembered settings won the round they were tried in {} in {} that started from one",
             count(status.won, "time", "times"),
             count(started, "search", "searches")
         ),
@@ -319,11 +319,11 @@ mod tests {
         assert_eq!(remembered_line(status(1, 1, 0, 0)).as_deref(), Some("Kumi remembers 1 setting its searches heard, on 1 device"));
         assert_eq!(
             remembered_line(status(12_345, 7, 5, 3)).as_deref(),
-            Some("Kumi remembers 12,345 settings its searches heard, on 7 devices; remembered settings won the first round 3 times in 5 searches that started from one")
+            Some("Kumi remembers 12,345 settings its searches heard, on 7 devices; remembered settings won the round they were tried in 3 times in 5 searches that started from one")
         );
         assert_eq!(
             remembered_line(status(40, 1, 1, 1)).as_deref(),
-            Some("Kumi remembers 40 settings its searches heard, on 1 device; remembered settings won the first round 1 time in 1 search that started from one")
+            Some("Kumi remembers 40 settings its searches heard, on 1 device; remembered settings won the round they were tried in 1 time in 1 search that started from one")
         );
     }
 

@@ -42,7 +42,8 @@ pub struct SearchMemoryStatus {
     /// Settings kept, and the devices they're on.
     pub settings: usize,
     pub devices: usize,
-    /// Searches whose first generation heard a remembered setting, and those where one was that generation's best.
+    /// Searches that heard a remembered setting beside others in a generation, and those where one was its
+    /// generation's best.
     pub started: usize,
     pub won: usize,
 }
@@ -64,7 +65,7 @@ impl SearchMemory {
         Rc::new(SearchMemory { store, daw, runs: RefCell::default(), now })
     }
 
-    /// How many settings Kumi keeps and on how many devices, and how often one remembered won a search's first round.
+    /// How many settings Kumi keeps and on how many devices, and how often one remembered won the round it was tried in.
     pub async fn status(&self) -> Result<SearchMemoryStatus, StoreError> {
         let ((settings, devices), (started, won)) =
             self.store.read(|c| Ok((heard_settings::counts(c)?, heard_settings::first_rounds(c)?))).await?;
@@ -72,10 +73,17 @@ impl SearchMemory {
     }
 
     /// A setting to try on a goal's or a match run's slot: for each of its devices, the best a past goal or match run
-    /// heard there (the closest it came to its reference), on the knobs it shares; one value for each of `knobs` (the
-    /// rest as `elite` has them), and which remembered setting each device's came from. None when nothing is remembered
-    /// for them, or it's where the slot already is.
-    pub async fn suggestion(&self, search: &SlotSearch, knobs: &[Knob], elite: &[f64]) -> Option<(Vec<f64>, BTreeMap<String, String>)> {
+    /// heard there, on the knobs it shares: of the searches toward the same `reference`, the closest one came (how close
+    /// is to each search's own reference, so it compares only between searches toward one), else the newest search's.
+    /// One value for each of `knobs` (the rest as `elite` has them), and which remembered setting each device's came
+    /// from. None when nothing is remembered for them, or it's where the slot already is.
+    pub async fn suggestion(
+        &self,
+        search: &SlotSearch,
+        reference: &Value,
+        knobs: &[Knob],
+        elite: &[f64],
+    ) -> Option<(Vec<f64>, BTreeMap<String, String>)> {
         let mut values: Vec<f64> = knobs.iter().enumerate().map(|(i, knob)| elite.get(i).copied().unwrap_or(knob.value)).collect();
         let mut from = BTreeMap::new();
         // Each device once, in the order its knobs first come.
@@ -86,11 +94,16 @@ impl SearchMemory {
             }
         }
         for device in devices {
-            let past = self.bests(None, &device, &[SearchKind::Goal, SearchKind::Match]).await;
-            let Some(best) = past
+            // Newest first.
+            let past: Vec<Remembered> = self
+                .bests(None, &device, &[SearchKind::Goal, SearchKind::Match])
+                .await
                 .into_iter()
                 .filter(|past| past.target.get("kind").and_then(Value::as_str) == Some("reference"))
-                .min_by(|a, b| a.cost.total_cmp(&b.cost).then(b.at.cmp(&a.at)))
+                .collect();
+            let toward = |past: &&Remembered| !reference.is_null() && past.target.get("reference") == Some(reference);
+            let Some(best) =
+                past.iter().filter(toward).min_by(|a, b| a.cost.total_cmp(&b.cost).then(b.at.cmp(&a.at))).or_else(|| past.first())
             else {
                 continue;
             };
@@ -150,8 +163,8 @@ impl SettingsMemory for SearchMemory {
                     self.store.store().write(move |connection| heard_settings::add(connection, &rows), |_| {});
                 }
             }
-            SettingsHeard::Ended { run } => {
-                let Some(best) = self.runs.borrow_mut().remove(&run) else { return };
+            SettingsHeard::Ended { run, kept } => {
+                let Some(best) = self.runs.borrow_mut().remove(&run).filter(|_| kept) else { return };
                 let ids: Vec<String> = best.into_values().map(|best| best.id).collect();
                 if !ids.is_empty() {
                     self.store.store().write(move |connection| heard_settings::mark_best(connection, &run, &ids), |_| {});
@@ -213,6 +226,8 @@ pub struct SlotSearch {
     pub devices: BTreeMap<String, String>,
     /// Each knob's value before the search moved it, by `Knob::device` and name.
     pub before: HashMap<(String, String), f64>,
+    /// The knobs' devices (`Knob::device`) in the chain's order.
+    pub chain: Vec<String>,
     /// The remembered setting the slot tries (`SearchMemory::suggestion`): which remembered row each device's knobs came
     /// from.
     pub suggested: BTreeMap<String, String>,
@@ -221,21 +236,44 @@ pub struct SlotSearch {
 impl SlotSearch {
     /// A search over a slot's knobs as they are now (before any trial moved them).
     pub fn new(track: &str, knobs: &[Knob], devices: BTreeMap<String, String>) -> Self {
-        SlotSearch {
+        let mut search = SlotSearch {
             run: new_id(),
             track: track.into(),
-            devices,
-            before: knobs.iter().map(|knob| ((knob.device.clone(), knob.name.clone()), knob.value)).collect(),
+            devices: BTreeMap::new(),
+            before: HashMap::new(),
+            chain: vec![],
             suggested: BTreeMap::new(),
+        };
+        search.extend(knobs, &devices);
+        search
+    }
+    /// More of the slot's knobs (its rig made again), as they are now, and who their devices are.
+    pub fn extend(&mut self, knobs: &[Knob], devices: &BTreeMap<String, String>) {
+        self.devices.extend(devices.clone());
+        for knob in knobs {
+            self.before.entry((knob.device.clone(), knob.name.clone())).or_insert(knob.value);
+            if !self.chain.contains(&knob.device) {
+                self.chain.push(knob.device.clone());
+            }
         }
     }
-    /// Who a knob's device is: what the rig said, else its name in the chain (never its place).
+    /// Who a knob's device is: what the rig said, else its name in the chain (never its place). The same device twice in
+    /// the chain (two EQ Eights) is two: the second is remembered as "EQ Eight #2".
     pub fn device(&self, knob: &Knob) -> String {
-        self.devices.get(&knob.device).cloned().unwrap_or_else(|| {
-            knob.device
+        let who = self.identity(&knob.device);
+        let before = self.chain.iter().take_while(|device| **device != knob.device).filter(|device| self.identity(device) == who).count();
+        if before == 0 {
+            who
+        } else {
+            format!("{who} #{}", before + 1)
+        }
+    }
+    fn identity(&self, device: &str) -> String {
+        self.devices.get(device).cloned().unwrap_or_else(|| {
+            device
                 .split_once(':')
                 .filter(|(place, _)| !place.is_empty() && place.bytes().all(|b| b.is_ascii_digit()))
-                .map_or(knob.device.clone(), |(_, name)| name.to_string())
+                .map_or(device.to_string(), |(_, name)| name.to_string())
         })
     }
 }

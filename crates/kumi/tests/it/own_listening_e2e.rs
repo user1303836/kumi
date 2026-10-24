@@ -1451,7 +1451,7 @@ async fn a_tune_search_hands_out_what_it_heard_and_the_next_starts_from_what_wor
                 }
             }
             assert_eq!(runs.len(), 1, "one search");
-            assert_eq!(ended, [&SettingsHeard::Ended { run: runs.into_iter().next().unwrap() }], "then its end");
+            assert_eq!(ended, [&SettingsHeard::Ended { run: runs.into_iter().next().unwrap(), kept: true }], "then its end, kept");
             // The producer puts the bands back where they were; the next search on that FX starts from what worked.
             let guid = eq.strip_prefix("r:fx:").unwrap();
             script.set_param(guid, 4, 0.5);
