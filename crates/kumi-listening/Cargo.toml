@@ -15,6 +15,7 @@ kumi-layout.workspace = true
 kumi-library.workspace = true
 kumi-media.workspace = true
 kumi-net.workspace = true
+kumi-store.workspace = true
 kumi-types.workspace = true
 kumi-web.workspace = true
 async-trait.workspace = true

@@ -3110,7 +3110,7 @@ local_test!(taste_is_offered_in_every_session_and_the_system_text_says_so_once_s
     let dir = temp.path().join("music");
     let mut store = MusicStore::open(&database(&dir)).unwrap();
     let song = |n: i64| {
-        let file = Walked { path: format!("/m/{n}.mp3"), folder: "/m".into(), size: 1, mtime: n, protected: false };
+        let file = Walked { path: format!("/m/{n}.mp3"), folder: "/m".into(), size: 1, mtime: n, ..Default::default() };
         (file, Tags { artist: Some("A".into()), title: Some(format!("{n}")), names_from: NamesFrom::Tags, ..Default::default() })
     };
     store.write_songs(&[song(1), song(2)]).unwrap();

@@ -24,21 +24,21 @@ fn three_hundred_thousand_songs_pass_well_inside_ten_minutes() {
                 folder: folder.clone(),
                 size: 5_000_000 + n as u64,
                 mtime: 1_700_000_000_000 + n as i64,
-                protected: false,
+                ..Default::default()
             })
             .collect()
     };
     let read = |file: &Path, folder: &Path| from_path(file, folder);
     let signal = Signal::new();
-    let pass = TagsPass { folders: std::slice::from_ref(&folder), skip: &[], signal: &signal, readers: 4, progress: &|_| {} };
+    let pass = TagsPass { folders: std::slice::from_ref(&folder), skip: &[], signal: &signal, readers: 4, progress: &|_| {}, hold: &|| {} };
     let started = Instant::now();
-    let first = apply_walk(&mut store, std::slice::from_ref(&folder), std::slice::from_ref(&folder), walked(), &read, &pass).unwrap();
+    let first = apply_walk(&mut store, std::slice::from_ref(&folder), std::slice::from_ref(&folder), &[], walked(), &read, &pass).unwrap();
     let took = started.elapsed();
     assert_eq!((first.new, store.counts().unwrap().songs), (SONGS, SONGS));
     eprintln!("{SONGS} songs' first pass: {took:?}");
     assert!(took.as_secs() < 600, "{took:?}");
     let started = Instant::now();
-    let again = apply_walk(&mut store, std::slice::from_ref(&folder), std::slice::from_ref(&folder), walked(), &read, &pass).unwrap();
+    let again = apply_walk(&mut store, std::slice::from_ref(&folder), std::slice::from_ref(&folder), &[], walked(), &read, &pass).unwrap();
     eprintln!("again, nothing changed: {:?}", started.elapsed());
     assert_eq!(again.written, 0);
 }

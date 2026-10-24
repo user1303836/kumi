@@ -4,7 +4,9 @@ fn main() {
     let local = tokio::task::LocalSet::new();
     let daws = kumi::daw::registry::libraries();
     let result = if std::env::args().nth(1).as_deref() == Some("--music") {
-        runtime.block_on(local.run_until(kumi_listening::music::worker::main(daws)))
+        // Where Kumi keeps the programs it fetches: the scan finds its ffmpeg there (or fetches it), as the app does.
+        let tools = kumi::config::load_tools_dir(&kumi_types::system::process_env()).ok();
+        runtime.block_on(local.run_until(kumi_listening::music::worker::main(daws, tools)))
     } else {
         runtime.block_on(local.run_until(kumi_library::learner::main(daws)))
     };

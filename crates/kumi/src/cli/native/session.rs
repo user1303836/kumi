@@ -242,6 +242,8 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
             settings.music_folders.clone(),
             crate::daw::registry::libraries(),
         );
+        // The references taste makes from their songs, which forgetting their music deletes too.
+        options.references = Some(load_references_dir(&io.env)?.into());
         options.library_folders = settings.library_folders.clone();
         options.offered = settings.music_offered == Some(true);
         // The producer's answer, kept in settings.json beside the rest of their settings: what this Kumi changed, applied

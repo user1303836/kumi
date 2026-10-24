@@ -50,6 +50,9 @@ pub struct MusicStatus {
     pub light: usize,
     pub full: usize,
     pub skipped: usize,
+    /// Songs not heard yet because they're only in the cloud: heard once they're on this computer.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub cloud: usize,
     /// When a scan last heard everything it could.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub learned_at: Option<i64>,
@@ -64,6 +67,13 @@ impl MusicStatus {
         self.light + self.full
     }
 }
+
+fn is_zero(count: &usize) -> bool {
+    *count == 0
+}
+
+/// Why a folder can't be added while Kumi forgets the producer's music.
+pub const FORGETTING: &str = "Kumi is still forgetting your music: add the folder again in a moment.";
 
 /// Keeps the producer's answer (settings.json's `musicFolders` and `musicOffered`): the folders they agreed Kumi may
 /// learn from (none until they agree), and whether Kumi offered.
@@ -95,6 +105,9 @@ pub struct MusicOptions {
     pub every_ms: u64,
     /// What the DAWs the app registers tell the library (their places, which the walk leaves out).
     pub daws: Daws,
+    /// Where taste keeps the references it makes from their songs (none: nowhere, as in tests), which a forget takes
+    /// too.
+    pub references: Option<PathBuf>,
 }
 
 impl MusicOptions {
@@ -112,6 +125,7 @@ impl MusicOptions {
             delay_ms: 4_000,
             every_ms: 30 * 60_000,
             daws,
+            references: None,
         }
     }
     /// The folders a scan walks: none until the producer agreed.
@@ -152,6 +166,8 @@ pub struct Music {
     closed: Cell<bool>,
     /// Counts forgets: music.db's counts read before one are out of date after it.
     forgets: Cell<u64>,
+    /// A forget under way: no folder is added (and nothing written) until it's done.
+    forgetting: Cell<bool>,
     timer: RefCell<Option<JoinHandle<()>>>,
 }
 
@@ -164,7 +180,8 @@ fn cancel(timer: &RefCell<Option<JoinHandle<()>>>) {
 /// Create inside the runtime's LocalSet: its scan reports through local tasks.
 pub fn create_music(options: MusicOptions) -> Rc<Music> {
     let state = if options.walked().is_empty() { MusicState::Off } else { MusicState::Done };
-    let status = MusicStatus { state, folders: options.walked(), songs: 0, light: 0, full: 0, skipped: 0, learned_at: None, said: None };
+    let status =
+        MusicStatus { state, folders: options.walked(), songs: 0, light: 0, full: 0, skipped: 0, cloud: 0, learned_at: None, said: None };
     let music = Rc::new_cyclic(|weak| Music {
         options: RefCell::new(options),
         weak: weak.clone(),
@@ -177,6 +194,7 @@ pub fn create_music(options: MusicOptions) -> Rc<Music> {
         again: Cell::new(false),
         closed: Cell::new(false),
         forgets: Cell::new(0),
+        forgetting: Cell::new(false),
         timer: RefCell::new(None),
     });
     music.read_counts();
@@ -219,6 +237,22 @@ impl Music {
         self.options.borrow().library_folders.clone()
     }
 
+    /// What every walk leaves out, so the offer counts the songs Kumi would learn: their sample folders and the library's
+    /// places (Live's User Library and Packs, under ~/Music on a Mac). Found where it's called (it looks at the DAWs'
+    /// own settings): off the app's thread.
+    pub fn skipping(&self) -> impl FnOnce() -> Vec<String> + Send + 'static {
+        let (daws, folders) = {
+            let options = self.options.borrow();
+            (options.daws, options.library_folders.clone())
+        };
+        move || super::worker::skipped_folders(daws, &folders)
+    }
+
+    /// Whether a forget is under way.
+    pub fn forgetting(&self) -> bool {
+        self.forgetting.get()
+    }
+
     fn save(&self) -> Result<(), String> {
         let options = self.options.borrow().clone();
         match &options.save {
@@ -239,10 +273,12 @@ impl Music {
         self.set_folders(Some(folders))
     }
 
-    /// Forget what Kumi learned of their music (music.db, the style vectors, the map): the scan stops, the folder goes,
-    /// and Kumi learns nothing more until they add a folder again (it doesn't offer again).
+    /// Forget what Kumi learned of their music (music.db, the style vectors, the map, and the references taste made from
+    /// their songs): the scan stops, the folder goes, and Kumi learns nothing more until they add a folder again (it
+    /// doesn't offer again). All of it goes even when their settings can't be written; then that's said.
     pub async fn forget(self: &Rc<Self>) -> Result<(), String> {
-        self.set_folders(None)?;
+        self.forgetting.set(true);
+        let saved = self.set_folders(None);
         self.stopped().await;
         self.forgets.set(self.forgets.get() + 1);
         let dir = self.dir();
@@ -252,9 +288,21 @@ impl Music {
             tokio::time::sleep(Duration::from_millis(500)).await;
             removed = tokio::fs::remove_dir_all(&dir).await;
         }
-        self.update(|status| (status.songs, status.light, status.full, status.skipped, status.learned_at) = (0, 0, 0, 0, None));
-        match removed {
-            Err(error) if error.kind() != std::io::ErrorKind::NotFound => Err(format!("Kumi couldn't delete {}: {error}", dir.display())),
+        let references = self.options.borrow().references.clone();
+        let references = match references {
+            Some(folder) => crate::references::store::ReferenceStore::new(folder).forget_kind("music").await,
+            None => Ok(()),
+        };
+        self.update(|status| {
+            (status.songs, status.light, status.full, status.skipped, status.cloud, status.learned_at) = (0, 0, 0, 0, 0, None)
+        });
+        self.forgetting.set(false);
+        match (removed, references, saved) {
+            (Err(error), ..) if error.kind() != std::io::ErrorKind::NotFound => Err(format!("Kumi couldn't delete {}: {error}", dir.display())),
+            (_, Err(why), _) => Err(format!("Kumi couldn't delete the references it kept from your songs: {why}")),
+            (_, _, Err(why)) => Err(format!(
+                "Kumi forgot your music, but couldn't take your folders out of its settings ({why}): it learns from them again when it starts, unless you /music remove them then."
+            )),
             _ => Ok(()),
         }
     }
@@ -333,7 +381,8 @@ impl Music {
             let music = weak.upgrade().filter(|music| music.forgets.get() == forgets);
             if let (Some(music), Some((counts, learned_at))) = (music, read) {
                 music.update(|status| {
-                    (status.songs, status.light, status.full, status.skipped) = (counts.songs, counts.light, counts.full, counts.skipped);
+                    (status.songs, status.light, status.full, status.skipped, status.cloud) =
+                        (counts.songs, counts.light, counts.full, counts.skipped, counts.cloud);
                     status.learned_at = status.learned_at.max(learned_at);
                 });
             }
@@ -390,8 +439,12 @@ impl Music {
     }
 
     /// Learn from these folders from now on (kept as the producer's): the scan under way stops, and one over the new
-    /// folders starts. None, or none left: Kumi stops learning.
+    /// folders starts. None, or none left: Kumi stops learning; with none left, what it heard is set aside as gone (a
+    /// folder added again brings back the songs found as they were).
     pub fn set_folders(self: &Rc<Self>, folders: Option<Vec<String>>) -> Result<(), String> {
+        if self.forgetting.get() && folders.as_ref().is_some_and(|folders| !folders.is_empty()) {
+            return Err(FORGETTING.into());
+        }
         self.options.borrow_mut().folders = folders;
         let walked = self.folders();
         self.update(|status| status.folders = walked.clone());
@@ -399,10 +452,29 @@ impl Music {
             cancel(&self.timer);
             self.send(ScanMessage::Stop);
             self.update(|status| status.state = MusicState::Off);
+            if self.agreed() {
+                self.set_aside();
+            }
         } else {
             self.learn_now();
         }
         self.save()
+    }
+
+    /// Every song set aside as gone once the scan under way has stopped, while no folder is left.
+    fn set_aside(&self) {
+        let weak = self.weak.clone();
+        tokio::task::spawn_local(async move {
+            let Some(music) = weak.upgrade() else { return };
+            music.stopped().await;
+            if !music.folders().is_empty() || !music.agreed() || music.forgetting.get() {
+                return;
+            }
+            let file = database(&music.dir());
+            let _ = tokio::task::spawn_blocking(move || MusicStore::open_existing(&file).ok().flatten().map(|store| store.set_all_gone()))
+                .await;
+            music.read_counts();
+        });
     }
 
     /// Start learning a moment after Kumi starts (nothing, without music folders).
@@ -429,7 +501,8 @@ impl Music {
             return;
         }
         let progress_of = |status: &mut MusicStatus, progress: &ScanProgress| {
-            (status.songs, status.light, status.full, status.skipped) = (progress.songs, progress.light, progress.full, progress.skipped);
+            (status.songs, status.light, status.full, status.skipped, status.cloud) =
+                (progress.songs, progress.light, progress.full, progress.skipped, progress.cloud);
             if let Some(why) = &progress.unstyled {
                 status.said = Some(format!("The style model couldn't hear: {why}"));
             }
@@ -466,6 +539,7 @@ impl Music {
             folders: options.walked(),
             library_folders: options.library_folders.clone(),
             paused,
+            on_battery: false,
         };
         let weak = self.weak.clone();
         if !options.fork {
@@ -497,8 +571,11 @@ impl Music {
             .kill_on_drop(true)
             .spawn();
         let Ok(mut child) = spawned else {
-            self.update(|status| status.said = Some("Kumi's learner couldn't start; it tries again later.".into()));
-            self.finished(id);
+            self.update(|status| {
+                status.said = Some("Kumi's learner couldn't start; it tries again later.".into());
+                status.state = MusicState::Done;
+            });
+            self.next_scan(options.every_ms);
             return;
         };
         let mut input = child.stdin.take().unwrap();
@@ -561,8 +638,12 @@ impl Music {
                 status.state = if paused { MusicState::Paused } else { MusicState::Done };
             }
         });
+        self.next_scan(if self.again.replace(false) { 0 } else { options.every_ms });
+    }
+
+    /// The next scan, `delay` ms from now.
+    fn next_scan(&self, delay: u64) {
         let weak = self.weak.clone();
-        let delay = if self.again.replace(false) { 0 } else { options.every_ms };
         cancel(&self.timer);
         *self.timer.borrow_mut() = Some(tokio::task::spawn_local(async move {
             tokio::time::sleep(Duration::from_millis(delay)).await;

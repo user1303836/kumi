@@ -20,8 +20,10 @@ pub struct KeptTrack {
 
 /// The kept references' version: one kept by an older Kumi, whose measures meant something else, is measured again.
 /// 2: width stops at −30 dB, top is kept to a third-octave, no echoes reads as a 60 dB fall, and a sound's pumping and
-/// each hit's crest are kept. 3: the music in it is kept too (its tempo, key, busyness and groove).
-pub const KEPT_VERSION: u32 = 3;
+/// each hit's crest are kept. What's added without changing a measure's meaning (the music in it: its tempo, key,
+/// busyness and groove) doesn't bump it: a reference kept before reads without it until it's measured again, and an
+/// older Kumi reads one kept since, leaving what it doesn't know.
+pub const KEPT_VERSION: u32 = 2;
 
 /// A measured reference.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -133,6 +135,25 @@ impl ReferenceStore {
         if let Err(error) = written {
             let _ = tokio::fs::remove_file(&temporary).await;
             return Err(error.to_string());
+        }
+        Ok(())
+    }
+    /// Every reference of a kind deleted (the producer's own music's, `music`, when they forget it).
+    pub async fn forget_kind(&self, kind: &str) -> Result<(), String> {
+        let Ok(mut entries) = tokio::fs::read_dir(&self.folder).await else { return Ok(()) };
+        while let Some(entry) = entries.next_entry().await.map_err(|error| error.to_string())? {
+            let path = entry.path();
+            if path.extension().is_none_or(|ext| ext != "json") {
+                continue;
+            }
+            let Ok(bytes) = tokio::fs::read(&path).await else { continue };
+            let of_kind = serde_json::from_slice::<serde_json::Value>(&bytes).is_ok_and(|kept| kept["kind"] == kind);
+            if of_kind {
+                match tokio::fs::remove_file(&path).await {
+                    Err(error) if error.kind() != std::io::ErrorKind::NotFound => return Err(error.to_string()),
+                    _ => {}
+                }
+            }
         }
         Ok(())
     }
