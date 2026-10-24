@@ -202,8 +202,8 @@ async fn sign_in_check(env: &Env, servers: &[ServerFinding]) -> Result<Check, Ru
     Ok(Check::ok(format!(
         "{} API key {} · model {model}",
         parsed.provider,
-        if key.is_some_and(|key| key.source == KeySource::Env) {
-            format!("from {}", info.first_key_env().unwrap_or(""))
+        if let Some(key) = key.filter(|key| key.source == KeySource::Env) {
+            format!("from {}", key.variable.as_deref().or(info.first_key_env()).unwrap_or(""))
         } else {
             "saved in Kumi".into()
         }

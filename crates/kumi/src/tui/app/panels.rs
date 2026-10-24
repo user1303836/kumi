@@ -1862,10 +1862,10 @@ impl TuiApp {
                     }
                     let models = app.0.options.models.as_ref().unwrap();
                     let removed = models.sign_out(provider).await?;
-                    let still = if models.providers().await?.iter().find(|p| p.id == provider).and_then(|p| p.via.as_deref())
-                        == Some("environment")
-                    {
-                        format!(" {} is still set, so Kumi uses that key now.", info.first_key_env().unwrap_or("undefined"))
+                    let status = models.providers().await?.into_iter().find(|p| p.id == provider);
+                    let still = if status.as_ref().and_then(|p| p.via.as_deref()) == Some("environment") {
+                        let variable = status.and_then(|p| p.key_env).or(info.first_key_env().map(str::to_string));
+                        format!(" {} is still set, so Kumi uses that key now.", variable.as_deref().unwrap_or("undefined"))
                     } else {
                         String::new()
                     };

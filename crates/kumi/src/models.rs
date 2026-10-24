@@ -348,11 +348,14 @@ impl ModelControl {
         let hidden = self.hidden();
         for id in table::offered().into_iter().filter(|id| !hidden.contains(id)) {
             let info = id.row();
+            // The variable a key from the environment came from, else the first it may be in.
+            let mut key_env = info.first_key_env().map(str::to_string);
             let via = if info.sign_in == SignIn::Chatgpt {
                 matches!(self.inner.options.store.get(OPENAI_CODEX).await?, Some(Credential::Oauth(_))).then(|| "chatgpt".into())
             } else {
                 api_key_for(id, self.inner.options.store.as_ref(), Some(&self.inner.options.env)).await?.map(|k| {
                     if k.source == KeySource::Env {
+                        key_env = k.variable.or(key_env.take());
                         "environment".into()
                     } else {
                         "saved key".into()
@@ -366,7 +369,7 @@ impl ModelControl {
                 signed_in: via.is_some(),
                 via,
                 key_page: info.key_page.map(str::to_string),
-                key_env: info.first_key_env().map(str::to_string),
+                key_env,
             });
         }
         Ok(statuses)

@@ -120,6 +120,9 @@ pub enum KeySource {
 pub struct ApiKey {
     pub key: String,
     pub source: KeySource,
+    /// The environment variable it came from (Gemini's may be either of two).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub variable: Option<String>,
 }
 pub async fn api_key_for(
     provider: ProviderId,
@@ -131,13 +134,12 @@ pub async fn api_key_for(
         return Ok(None);
     }
     if let Some(Credential::ApiKey { key }) = store.get(row.credential).await? {
-        return Ok(Some(ApiKey { key, source: KeySource::Saved }));
+        return Ok(Some(ApiKey { key, source: KeySource::Saved, variable: None }));
     }
-    Ok(row
-        .key_env
-        .iter()
-        .find_map(|name| env.and_then(|env| env.get(*name)).filter(|key| !key.is_empty()))
-        .map(|key| ApiKey { key: key.clone(), source: KeySource::Env }))
+    Ok(row.key_env.iter().find_map(|name| {
+        let key = env.and_then(|env| env.get(*name)).filter(|key| !key.is_empty())?;
+        Some(ApiKey { key: key.clone(), source: KeySource::Env, variable: Some(name.to_string()) })
+    }))
 }
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParsedModelId {

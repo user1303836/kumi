@@ -147,7 +147,7 @@ async fn chat_and_listening_share_one_gemini_key() {
     let gemini = provider("gemini");
     let env: HashMap<String, String> = [("GOOGLE_API_KEY".into(), "google-fixture-key".into())].into();
     let key = api_key_for(gemini, &store, Some(&env)).await.unwrap().unwrap();
-    assert_eq!((key.key.as_str(), key.source), ("google-fixture-key", KeySource::Env));
+    assert_eq!((key.key.as_str(), key.source, key.variable.as_deref()), ("google-fixture-key", KeySource::Env, Some("GOOGLE_API_KEY")));
     let both: HashMap<String, String> =
         [("GOOGLE_API_KEY".into(), "google-fixture-key".into()), ("GEMINI_API_KEY".into(), "gemini-fixture-key".into())].into();
     assert_eq!(

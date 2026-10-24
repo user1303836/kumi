@@ -494,3 +494,12 @@ async fn a_custom_server_that_takes_responses_is_sent_responses() {
     assert!(binding.model.do_stream((binding.prepare)(turn())).await.is_err());
     assert_eq!(seen.borrow().last().map(String::as_str), Some("http://192.168.1.30:8000/v1/responses"));
 }
+#[tokio::test(flavor = "current_thread")]
+async fn a_key_from_the_environment_names_the_variable_it_came_from() {
+    let f = Fixture::new(Env::from([("GOOGLE_API_KEY".into(), "google-fixture-key".into())]));
+    let gemini = f.control.providers().await.unwrap().into_iter().find(|p| p.id.as_str() == "gemini").unwrap();
+    assert_eq!((gemini.via.as_deref(), gemini.key_env.as_deref()), (Some("environment"), Some("GOOGLE_API_KEY")));
+    // Not signed in, it names the first variable it would read.
+    let openrouter = f.control.providers().await.unwrap().into_iter().find(|p| p.id.as_str() == "openrouter").unwrap();
+    assert_eq!((openrouter.signed_in, openrouter.key_env.as_deref()), (false, Some("OPENROUTER_API_KEY")));
+}
