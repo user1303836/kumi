@@ -11,7 +11,7 @@ use kumi_ai::{
     binding::ModelBinding,
     http::Fetch,
     providers::{
-        api_key_for, chat_only,
+        api_key_from, chat_only,
         local::{self, LocalBinding, LocalKind, LocalModelOptions, LocalServer},
         models::{check_api_key, list_models, ApiKeyCheck, EffortInfo, ListOptions, ModelInfo, ServiceTier, Transport},
         parse_model_id, resolve_model, table, Effort, KeySource, ProviderId, ResolveModelOptions, SignIn,
@@ -346,14 +346,16 @@ impl ModelControl {
     pub async fn providers(&self) -> Result<Vec<ProviderStatus>, RuntimeError> {
         let mut statuses = Vec::new();
         let hidden = self.hidden();
+        // Every provider's sign-in, from one read of the credential file.
+        let saved = self.inner.options.store.list().await?;
         for id in table::offered().into_iter().filter(|id| !hidden.contains(id)) {
             let info = id.row();
             // The variable a key from the environment came from, else the first it may be in.
             let mut key_env = info.first_key_env().map(str::to_string);
             let via = if info.sign_in == SignIn::Chatgpt {
-                matches!(self.inner.options.store.get(OPENAI_CODEX).await?, Some(Credential::Oauth(_))).then(|| "chatgpt".into())
+                matches!(saved.get(OPENAI_CODEX), Some(Credential::Oauth(_))).then(|| "chatgpt".into())
             } else {
-                api_key_for(id, self.inner.options.store.as_ref(), Some(&self.inner.options.env)).await?.map(|k| {
+                api_key_from(id, saved.get(info.credential), Some(&self.inner.options.env)).map(|k| {
                     if k.source == KeySource::Env {
                         key_env = k.variable.or(key_env.take());
                         "environment".into()

@@ -133,13 +133,21 @@ pub async fn api_key_for(
     if row.sign_in != SignIn::ApiKey {
         return Ok(None);
     }
-    if let Some(Credential::ApiKey { key }) = store.get(row.credential).await? {
-        return Ok(Some(ApiKey { key, source: KeySource::Saved, variable: None }));
+    Ok(api_key_from(provider, store.get(row.credential).await?.as_ref(), env))
+}
+/// A provider's key from its credential's entry, `saved` (read once for many providers), then the environment.
+pub fn api_key_from(provider: ProviderId, saved: Option<&Credential>, env: Option<&HashMap<String, String>>) -> Option<ApiKey> {
+    let row = provider.row();
+    if row.sign_in != SignIn::ApiKey {
+        return None;
     }
-    Ok(row.key_env.iter().find_map(|name| {
+    if let Some(Credential::ApiKey { key }) = saved {
+        return Some(ApiKey { key: key.clone(), source: KeySource::Saved, variable: None });
+    }
+    row.key_env.iter().find_map(|name| {
         let key = env.and_then(|env| env.get(*name)).filter(|key| !key.is_empty())?;
         Some(ApiKey { key: key.clone(), source: KeySource::Env, variable: Some(name.to_string()) })
-    }))
+    })
 }
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParsedModelId {
