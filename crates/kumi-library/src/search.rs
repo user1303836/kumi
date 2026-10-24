@@ -265,7 +265,13 @@ pub struct SoundIndex {
 }
 impl SoundIndex {
     pub fn new(entries: impl IntoIterator<Item = SoundEntry>, sources: &[Source]) -> Self {
-        let mut roots: Vec<_> = sources.iter().filter(|s| Path::new(&s.path).exists()).collect();
+        Self::rooted(entries, sources.iter().filter(|s| Path::new(&s.path).exists()).collect())
+    }
+    /// The sounds of every one of `sources`, its folder there now or not (the map lays them all out).
+    pub fn of_every_source(entries: impl IntoIterator<Item = SoundEntry>, sources: &[Source]) -> Self {
+        Self::rooted(entries, sources.iter().collect())
+    }
+    fn rooted(entries: impl IntoIterator<Item = SoundEntry>, mut roots: Vec<&Source>) -> Self {
         roots.sort_by_key(|s| std::cmp::Reverse(s.path.encode_utf16().count()));
         let rows: Vec<_> = entries
             .into_iter()

@@ -4,13 +4,16 @@
 //!
 //! A device is who it is in every session (a built-in device's own name, a plug-in's format, maker and name as far as
 //! the DAW says them), never its place on a track. Knobs are by name, each a fraction of its range. A device keeps its
-//! newest `PER_DEVICE` rows: older ones go first, but never a search's best.
+//! newest `PER_DEVICE` rows besides its searches' bests, a search at a time (oldest first), and its newest
+//! `BESTS_PER_DEVICE` bests.
 
 use crate::{params, Connection, StoreError};
 use serde_json::Value;
 
-/// The rows a device keeps (a search's best are kept beyond them).
+/// The rows a device keeps besides its searches' bests.
 pub const PER_DEVICE: usize = 5_000;
+/// The searches' bests a device keeps, newest first: more than a new search reads of them.
+pub const BESTS_PER_DEVICE: usize = 500;
 
 /// Which search heard a setting.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -69,10 +72,11 @@ pub struct HeardSetting {
     pub remembered: Option<String>,
 }
 
-/// Keep these settings, then trim each device they're on to its newest `PER_DEVICE` rows (a search's best stay).
+/// Keep these settings, then trim each device they're on (`trim`).
 pub fn add(connection: &Connection, settings: &[HeardSetting]) -> Result<(), StoreError> {
     let json = |value: &Value| serde_json::to_string(value).map_err(|error| StoreError::Io(error.to_string()));
     let mut devices: Vec<(&str, &str)> = vec![];
+    let mut runs: Vec<&str> = vec![];
     for setting in settings {
         connection
             .prepare_cached(
@@ -101,29 +105,52 @@ pub fn add(connection: &Connection, settings: &[HeardSetting]) -> Result<(), Sto
         if !devices.contains(&(setting.daw.as_str(), setting.device.as_str())) {
             devices.push((&setting.daw, &setting.device));
         }
+        if !runs.contains(&setting.run_id.as_str()) {
+            runs.push(&setting.run_id);
+        }
     }
     for (daw, device) in devices {
-        trim(connection, daw, device, PER_DEVICE)?;
+        trim(connection, daw, device, &runs)?;
     }
     Ok(())
 }
 
-/// A device's oldest rows past its newest `most`, gone (never a search's best): how many went.
-fn trim(connection: &Connection, daw: &str, device: &str, most: usize) -> Result<usize, StoreError> {
-    let kept: i64 = connection
-        .prepare_cached("SELECT count(*) FROM heard_settings WHERE daw = ?1 AND device = ?2")?
-        .query_row(params![daw, device], |row| row.get(0))?;
-    let over = kept - most as i64;
-    if over <= 0 {
-        return Ok(0);
+/// A device trimmed to its newest `PER_DEVICE` rows that aren't a search's best, and its newest `BESTS_PER_DEVICE`
+/// bests: how many rows went. Rows go a search at a time, the oldest first and the searches being added (`adding`) last,
+/// so a search under way keeps its rows until its best is marked, and a search kept is kept whole.
+fn trim(connection: &Connection, daw: &str, device: &str, adding: &[&str]) -> Result<usize, StoreError> {
+    let count = |best: bool| -> Result<i64, StoreError> {
+        Ok(connection
+            .prepare_cached("SELECT count(*) FROM heard_settings WHERE daw = ?1 AND device = ?2 AND best = ?3")?
+            .query_row(params![daw, device, best], |row| row.get(0))?)
+    };
+    let adding = serde_json::to_string(adding).map_err(|error| StoreError::Io(error.to_string()))?;
+    let mut gone = 0;
+    let over = count(false)? - PER_DEVICE as i64;
+    if over > 0 {
+        gone += connection
+            .prepare_cached(
+                "DELETE FROM heard_settings WHERE daw = ?1 AND device = ?2 AND best = 0 AND run_id IN (
+                   SELECT run_id FROM (
+                     SELECT run_id, count(*) AS rows,
+                       sum(count(*)) OVER (ORDER BY run_id IN (SELECT value FROM json_each(?4)), max(at), run_id) AS upto
+                     FROM heard_settings WHERE daw = ?1 AND device = ?2 AND best = 0 GROUP BY run_id
+                   ) WHERE upto - rows < ?3
+                 )",
+            )?
+            .execute(params![daw, device, over, adding])?;
     }
-    Ok(connection
-        .prepare_cached(
-            "DELETE FROM heard_settings WHERE id IN (
-               SELECT id FROM heard_settings WHERE daw = ?1 AND device = ?2 AND best = 0 ORDER BY at, id LIMIT ?3
-             )",
-        )?
-        .execute(params![daw, device, over])?)
+    let over = count(true)? - BESTS_PER_DEVICE as i64;
+    if over > 0 {
+        gone += connection
+            .prepare_cached(
+                "DELETE FROM heard_settings WHERE id IN (
+                   SELECT id FROM heard_settings WHERE daw = ?1 AND device = ?2 AND best = 1 ORDER BY at, id LIMIT ?3
+                 )",
+            )?
+            .execute(params![daw, device, over])?;
+    }
+    Ok(gone)
 }
 
 /// A search's best: `best` (rows of `run`) are, the rest of its rows aren't. How many rows of the run there are.
@@ -176,16 +203,18 @@ pub fn bests_on_device(
     )
 }
 
-/// How often a remembered setting won a search's first round: the searches whose first generation heard one, and those
-/// where one of them was that generation's best.
+/// How often a remembered setting won the round it was tried in: the searches whose generations heard one beside other
+/// settings, and those where one of them was its generation's best. A search trimmed away (its best alone left) counts
+/// in neither.
 pub fn first_rounds(connection: &Connection) -> Result<(usize, usize), StoreError> {
     Ok(connection
         .prepare_cached(
-            "WITH first AS (SELECT run_id, remembered, cost FROM heard_settings WHERE generation = 1),
-                  started AS (SELECT DISTINCT run_id FROM first WHERE remembered IS NOT NULL),
-                  won AS (SELECT DISTINCT f.run_id FROM first f WHERE f.remembered IS NOT NULL
-                            AND f.cost <= (SELECT min(g.cost) FROM first g WHERE g.run_id = f.run_id))
-             SELECT (SELECT count(*) FROM started), (SELECT count(*) FROM won)",
+            "WITH tried AS (
+               SELECT t.run_id, t.cost,
+                 (SELECT min(g.cost) FROM heard_settings g WHERE g.run_id = t.run_id AND g.generation = t.generation) AS least,
+                 (SELECT count(*) FROM heard_settings g WHERE g.run_id = t.run_id AND g.generation = t.generation) AS heard
+               FROM heard_settings t WHERE t.remembered IS NOT NULL AND t.generation IS NOT NULL)
+             SELECT count(DISTINCT run_id), count(DISTINCT CASE WHEN cost <= least THEN run_id END) FROM tried WHERE heard > 1",
         )?
         .query_row([], |row| Ok((row.get::<_, i64>(0)? as usize, row.get::<_, i64>(1)? as usize)))?)
 }

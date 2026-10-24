@@ -365,6 +365,66 @@ fn music_settings_round_trip_and_a_newer_kumis_settings_stay() {
     assert_eq!(saved()["laterSetting"], json!({"on": true}));
 }
 #[test]
+fn the_music_answer_changes_only_its_own_settings_and_a_forget_clears_the_folders() {
+    let folder = tempfile::tempdir().unwrap();
+    let file = folder.path().join("settings.json").to_string_lossy().into_owned();
+    let saved = || serde_json::from_str::<Value>(&std::fs::read_to_string(&file).unwrap()).unwrap();
+    let list = |folders: &[&str]| folders.iter().map(|folder| folder.to_string()).collect::<Vec<_>>();
+    // What this Kumi can't read (a newer Kumi's effort level and fallback provider) goes through as it is.
+    let theirs =
+        json!({"model": "openai/gpt-6-luna", "effort": "beyond", "fallbackModel": "newer-provider/m1", "laterSetting": {"on": true}});
+    std::fs::write(&file, theirs.to_string()).unwrap();
+    assert!(!music_offered(&file));
+    write_music_settings(&file, Some(&list(&["~/Music"])), None, true).unwrap();
+    let mut expected = theirs.clone();
+    (expected["musicFolders"], expected["musicOffered"]) = (json!(["~/Music"]), json!(true));
+    assert_eq!(saved(), expected);
+    assert!(music_offered(&file));
+    // Forgotten: the folders go from the file (the next start learns nothing), and the offer stays made.
+    write_music_settings(&file, None, Some(&list(&["~/Music"])), true).unwrap();
+    expected.as_object_mut().unwrap().remove("musicFolders");
+    assert_eq!(saved(), expected);
+    assert_eq!((read_settings(&file).music_folders, read_settings(&file).music_offered), (None, Some(true)));
+}
+#[test]
+fn two_kumis_open_at_once_keep_each_others_music_folders() {
+    let folder = tempfile::tempdir().unwrap();
+    let file = folder.path().join("settings.json").to_string_lossy().into_owned();
+    let list = |folders: &[&str]| folders.iter().map(|folder| folder.to_string()).collect::<Vec<_>>();
+    std::fs::write(&file, json!({"musicFolders": ["~/Music"], "musicOffered": true}).to_string()).unwrap();
+    // Both started with ~/Music: one adds ~/Mixes; the other adds ~/Stems, then takes it away again.
+    write_music_settings(&file, Some(&list(&["~/Music", "~/Mixes"])), Some(&list(&["~/Music"])), true).unwrap();
+    write_music_settings(&file, Some(&list(&["~/Music", "~/Stems"])), Some(&list(&["~/Music"])), true).unwrap();
+    assert_eq!(read_settings(&file).music_folders, Some(list(&["~/Music", "~/Mixes", "~/Stems"])));
+    write_music_settings(&file, Some(&list(&["~/Music"])), Some(&list(&["~/Music", "~/Stems"])), true).unwrap();
+    assert_eq!(read_settings(&file).music_folders, Some(list(&["~/Music", "~/Mixes"])));
+    // The first takes ~/Music away: the second's next change doesn't bring it back.
+    write_music_settings(&file, Some(&list(&["~/Mixes"])), Some(&list(&["~/Music", "~/Mixes"])), true).unwrap();
+    write_music_settings(&file, Some(&list(&["~/Music", "~/Beats"])), Some(&list(&["~/Music"])), true).unwrap();
+    assert_eq!(read_settings(&file).music_folders, Some(list(&["~/Mixes", "~/Beats"])));
+}
+#[test]
+fn the_music_answer_outlives_an_older_kumi_rewriting_the_settings() {
+    let folder = tempfile::tempdir().unwrap();
+    let file = folder.path().join("settings.json").to_string_lossy().into_owned();
+    let saved = || serde_json::from_str::<Value>(&std::fs::read_to_string(&file).unwrap()).unwrap();
+    let list = |folders: &[&str]| folders.iter().map(|folder| folder.to_string()).collect::<Vec<_>>();
+    std::fs::write(&file, "{}").unwrap();
+    write_music_settings(&file, Some(&list(&["/Volumes/Drive/Music"])), None, true).unwrap();
+    // An older Kumi writes its settings with only the keys it knows.
+    std::fs::write(&file, json!({"model": "openai/gpt-6-luna", "panelTab": "goal"}).to_string()).unwrap();
+    let settings = read_settings(&file);
+    assert_eq!((settings.music_folders, settings.music_offered), (Some(list(&["/Volumes/Drive/Music"])), Some(true)));
+    // This Kumi's next write, of anything, puts them back in settings.json.
+    write_settings(&file, &json!({"model": "anthropic/claude-sonnet-5"})).unwrap();
+    assert_eq!((&saved()["musicFolders"], &saved()["musicOffered"]), (&json!(["/Volumes/Drive/Music"]), &json!(true)));
+    // A forget is kept the same way: nothing to learn, and the offer made.
+    write_music_settings(&file, None, Some(&list(&["/Volumes/Drive/Music"])), true).unwrap();
+    std::fs::write(&file, json!({"model": "openai/gpt-6-luna"}).to_string()).unwrap();
+    assert_eq!((read_settings(&file).music_folders, read_settings(&file).music_offered), (None, Some(true)));
+    assert!(music_offered(&file));
+}
+#[test]
 fn export_and_import_take_a_conversation_a_format_and_a_file() {
     let env = env();
     assert_eq!(value(&["export"], &env), json!({"mode": "export", "format": "md", "full": false, "raw": false}));

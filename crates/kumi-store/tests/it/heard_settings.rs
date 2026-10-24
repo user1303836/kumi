@@ -1,5 +1,5 @@
 use kumi_store::{
-    heard_settings::{self, HeardSetting, Source, PER_DEVICE},
+    heard_settings::{self, HeardSetting, Source, BESTS_PER_DEVICE, PER_DEVICE},
     ids::new_id,
     Store,
 };
@@ -69,14 +69,38 @@ fn a_device_keeps_its_newest_settings_and_every_searchs_best() {
     let full: Vec<HeardSetting> = (0..PER_DEVICE as i64).map(|n| setting(10 + n, "Compressor2", "full", 2.0)).collect();
     store.write_wait(move |c| heard_settings::add(c, &full)).unwrap();
     let read = store.read(|c| heard_settings::on_device(c, "ableton", "Compressor2", PER_DEVICE * 2)).unwrap();
-    assert_eq!(read.len(), PER_DEVICE, "at most {PER_DEVICE} a device");
+    assert_eq!(read.len(), PER_DEVICE + 2, "at most {PER_DEVICE} a device, besides its searches' bests");
     let ids: Vec<&str> = read.iter().map(|s| s.id.as_str()).collect();
     assert!(ids.contains(&old[0].id.as_str()) && ids.contains(&old[1].id.as_str()), "a search's best stays, however old");
     assert!(!ids.contains(&old[2].id.as_str()) && !ids.contains(&old[3].id.as_str()), "the oldest others went");
     let others: Vec<i64> = read.iter().filter(|s| !s.best).map(|s| s.at).collect();
-    assert_eq!(others.last(), Some(&12), "then the oldest of the full search's, two of them");
+    assert_eq!((others.len(), others.last()), (PER_DEVICE, Some(&10)), "the search being added, whole");
     assert_eq!(store.read(|c| heard_settings::on_device(c, "ableton", "AU: Pro-Q 3", 10)).unwrap(), vec![other]);
-    assert_eq!(store.read(heard_settings::counts).unwrap(), (PER_DEVICE + 1, 2));
+    assert_eq!(store.read(heard_settings::counts).unwrap(), (PER_DEVICE + 3, 2));
+    // The next search makes room a search at a time: the oldest goes whole, its best aside.
+    let next: Vec<HeardSetting> = (0..10).map(|n| setting(20_000 + n, "Compressor2", "next", 1.0)).collect();
+    store.write_wait(move |c| heard_settings::add(c, &next)).unwrap();
+    let read = store.read(|c| heard_settings::on_device(c, "ableton", "Compressor2", PER_DEVICE * 2)).unwrap();
+    assert_eq!(read.iter().filter(|s| !s.best).map(|s| s.run_id.as_str()).collect::<Vec<_>>(), ["next"; 10]);
+    assert_eq!(read.iter().filter(|s| s.best).count(), 2);
+}
+
+#[test]
+fn a_search_under_way_keeps_its_rows_however_many_bests_its_device_has() {
+    let folder = tempfile::tempdir().unwrap();
+    let store = Store::open(folder.path().join("kumi.db")).unwrap();
+    // As many past searches' bests as a device keeps rows: a new search's rows were trimmed as they came, and its best
+    // could never be marked.
+    let bests: Vec<HeardSetting> =
+        (0..PER_DEVICE as i64).map(|n| HeardSetting { best: true, ..setting(n, "Eq8", &format!("past-{n}"), 1.0) }).collect();
+    store.write_wait(move |c| heard_settings::add(c, &bests)).unwrap();
+    let new: Vec<HeardSetting> = (0..10).map(|n| setting(10_000 + n, "Eq8", "new", 2.0 - n as f64 / 10.)).collect();
+    let (kept, best) = (new.clone(), new[9].id.clone());
+    store.write_wait(move |c| heard_settings::add(c, &kept)).unwrap();
+    assert_eq!(store.write_wait(move |c| heard_settings::mark_best(c, "new", &[best])).unwrap(), 10, "all ten kept");
+    let bests = store.read(|c| heard_settings::bests_on_device(c, "ableton", "Eq8", &[Source::Tune], PER_DEVICE * 2)).unwrap();
+    assert_eq!(bests.len(), BESTS_PER_DEVICE + 1, "the newest bests, and the new search's");
+    assert_eq!((bests[0].run_id.as_str(), bests.last().map(|best| best.at)), ("new", Some((PER_DEVICE - BESTS_PER_DEVICE) as i64)));
 }
 
 #[test]
@@ -124,4 +148,31 @@ fn a_remembered_setting_that_won_a_searchs_first_round_is_counted() {
     ];
     store.write_wait(move |c| heard_settings::add(c, &rows)).unwrap();
     assert_eq!(store.read(heard_settings::first_rounds).unwrap(), (2, 1), "two searches started from one; it won one first round");
+}
+
+#[test]
+fn a_remembered_setting_is_judged_in_the_round_it_was_tried_and_a_search_trimmed_away_isnt_counted() {
+    let folder = tempfile::tempdir().unwrap();
+    let store = Store::open(folder.path().join("kumi.db")).unwrap();
+    let heard = |at: i64, run: &str, cost: f64, generation: u32, remembered: bool| HeardSetting {
+        source: Source::Goal,
+        generation: Some(generation),
+        remembered: remembered.then(|| "old".to_string()),
+        ..setting(at, "Eq8", run, cost)
+    };
+    let rows = vec![
+        // A goal's slot hears its start first, then the remembered setting beside two others: it won that round.
+        heard(1, "won", 3.0, 1, false),
+        heard(2, "won", 0.5, 2, true),
+        heard(3, "won", 0.9, 2, false),
+        heard(4, "won", 1.1, 2, false),
+        // Another goal's remembered setting lost its round.
+        heard(5, "lost", 2.0, 1, false),
+        heard(6, "lost", 1.5, 3, true),
+        heard(7, "lost", 1.0, 3, false),
+        // Kept only by its best (the rest trimmed away): how its round went can't be told.
+        HeardSetting { best: true, ..heard(8, "trimmed", 0.1, 2, true) },
+    ];
+    store.write_wait(move |c| heard_settings::add(c, &rows)).unwrap();
+    assert_eq!(store.read(heard_settings::first_rounds).unwrap(), (2, 1));
 }
