@@ -3,7 +3,7 @@
 //! churns while songs are heard. The scan writes it; the app reads it beside, on connections of its own.
 
 use super::{folders::Walked, tags::Tags};
-use rusqlite::{params, Connection, OpenFlags, OptionalExtension, TransactionBehavior};
+use rusqlite::{params, Connection, OpenFlags, OptionalExtension};
 use std::{collections::HashMap, fmt, path::Path, time::Duration};
 
 const V1: &str = "
@@ -34,11 +34,18 @@ CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL) STRICT;
 CREATE TABLE vectors_pending (model TEXT NOT NULL, id INTEGER NOT NULL, vector BLOB NOT NULL, PRIMARY KEY (model, id)) STRICT;
 ";
 
+/// The songs taste used, which the scan hears first, found without walking every song not heard in full; and the
+/// songs only in the cloud now, named but not heard until they're on this computer.
+const V2: &str = "
+CREATE INDEX songs_used ON songs(used_at) WHERE used_at IS NOT NULL;
+ALTER TABLE songs ADD COLUMN cloud INTEGER NOT NULL DEFAULT 0;
+";
+
 /// Forward-only, as kumi.db's: migration N brings music.db from version N-1 to N (SQLite's `user_version`).
-const MIGRATIONS: &[&str] = &[V1];
+const MIGRATIONS: &[&str] = &[V1, V2];
 /// The schema version this build writes.
 pub const SCHEMA_VERSION: usize = MIGRATIONS.len();
-/// How long a write waits for another (the scan's, the app's) to finish.
+/// How long a read waits for another process's write (the scan's, the app's) to finish.
 const BUSY: Duration = Duration::from_secs(5);
 /// Rows written in one transaction.
 pub const BATCH: usize = 2_000;
@@ -84,6 +91,10 @@ pub struct Stamp {
     pub size: u64,
     pub mtime: i64,
     pub gone: bool,
+    /// Only in the cloud when it was walked.
+    pub cloud: bool,
+    /// How far it's heard (`Stage`).
+    pub stage: i64,
 }
 
 /// A song, as kept.
@@ -103,6 +114,8 @@ pub struct Song {
     pub heard_at: Option<i64>,
     pub used_at: Option<i64>,
     pub cluster: Option<i64>,
+    /// Only in the cloud now: not heard until it's on this computer.
+    pub cloud: bool,
 }
 
 /// How many songs there are, and how far they're heard: songs counts each once (no duplicate, nothing gone).
@@ -114,6 +127,8 @@ pub struct Counts {
     pub skipped: usize,
     pub duplicates: usize,
     pub gone: usize,
+    /// Songs not heard yet that are only in the cloud.
+    pub cloud: usize,
 }
 
 pub struct MusicStore {
@@ -121,41 +136,30 @@ pub struct MusicStore {
 }
 
 impl MusicStore {
-    /// Open music.db for writing, making it (and its folder, only the producer's) and bringing its schema up to date. A
-    /// music.db from a newer Kumi isn't opened.
+    /// Open music.db for writing, making it (and its folder, only the producer's) and bringing its schema up to date, as
+    /// kumi.db is opened. A music.db from a newer Kumi isn't opened. A new one starts without the vector files an older
+    /// one left (their rows are that one's songs).
     pub fn open(path: &Path) -> Result<MusicStore, MusicError> {
-        if let Some(folder) = path.parent().filter(|folder| !folder.as_os_str().is_empty()) {
-            let mut builder = std::fs::DirBuilder::new();
-            builder.recursive(true);
-            #[cfg(unix)]
-            std::os::unix::fs::DirBuilderExt::mode(&mut builder, 0o700);
-            builder.create(folder)?;
+        let made = version_of(path) == Some(0);
+        let connection = kumi_store::open_connection(path, MIGRATIONS).map_err(|error| match error {
+            kumi_store::StoreError::Newer { found, .. } => newer(found),
+            kumi_store::StoreError::Sqlite(text) | kumi_store::StoreError::Io(text) => MusicError(text),
+            other => MusicError(other.to_string()),
+        })?;
+        if made {
+            if let Some(folder) = path.parent() {
+                super::vectors::remove_files(folder)?;
+            }
         }
-        let mut options = std::fs::OpenOptions::new();
-        options.create(true).append(true);
-        #[cfg(unix)]
-        std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
-        options.open(path)?;
-        let mut connection = Connection::open(path)?;
-        connection.busy_timeout(BUSY)?;
-        let mode: String = connection.query_row("PRAGMA journal_mode = WAL", [], |row| row.get(0))?;
-        if !mode.eq_ignore_ascii_case("wal") {
-            return Err(MusicError(format!("SQLite kept journal mode {mode} instead of WAL for music.db")));
-        }
-        connection.execute_batch("PRAGMA synchronous = NORMAL; PRAGMA temp_store = MEMORY;")?;
-        let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let found = transaction.query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))?.max(0) as usize;
-        if found > SCHEMA_VERSION {
-            return Err(newer(found));
-        }
-        for migration in &MIGRATIONS[found..] {
-            transaction.execute_batch(migration)?;
-        }
-        if found < SCHEMA_VERSION {
-            transaction.pragma_update(None, "user_version", SCHEMA_VERSION as i64)?;
-        }
-        transaction.commit()?;
         Ok(MusicStore { connection })
+    }
+
+    /// Open music.db for writing only while it's there: what taste writes after a forget makes no new one.
+    pub fn open_existing(path: &Path) -> Result<Option<MusicStore>, MusicError> {
+        if !path.is_file() {
+            return Ok(None);
+        }
+        MusicStore::open(path).map(Some)
     }
 
     /// Open music.db only to read it, writing nothing: None when there's none yet (or it's from a newer Kumi).
@@ -176,31 +180,46 @@ impl MusicStore {
         &self.connection
     }
 
+    /// Kumi's music folder, where music.db is: its vector files sit beside it.
+    pub fn dir(&self) -> Option<std::path::PathBuf> {
+        let path = Path::new(self.connection.path()?);
+        path.parent().map(Path::to_path_buf)
+    }
+
     /// Every song's file as last walked, by path.
     pub fn stamps(&self) -> Result<HashMap<String, Stamp>, MusicError> {
-        let mut statement = self.connection.prepare("SELECT path, id, folder, size, mtime, gone FROM songs")?;
+        let mut statement = self.connection.prepare("SELECT path, id, folder, size, mtime, gone, cloud, stage FROM songs")?;
         let rows = statement.query_map([], |row| {
             Ok((
                 row.get::<_, String>(0)?,
-                Stamp { id: row.get(1)?, folder: row.get(2)?, size: row.get::<_, i64>(3)? as u64, mtime: row.get(4)?, gone: row.get(5)? },
+                Stamp {
+                    id: row.get(1)?,
+                    folder: row.get(2)?,
+                    size: row.get::<_, i64>(3)? as u64,
+                    mtime: row.get(4)?,
+                    gone: row.get(5)?,
+                    cloud: row.get(6)?,
+                    stage: row.get(7)?,
+                },
             ))
         })?;
         Ok(rows.collect::<Result<_, _>>()?)
     }
 
     /// New and changed files with their tags, in one transaction: a changed file is a song to hear again (what was
-    /// heard of it goes). A protected file is known but never heard. The rows written.
+    /// heard of it goes, and its place on the map; its style vectors go with `vectors::forget`). A protected file is
+    /// known but never heard. The rows written.
     pub fn write_songs(&mut self, songs: &[(Walked, Tags)]) -> Result<usize, MusicError> {
         let transaction = self.connection.transaction()?;
         {
             let mut statement = transaction.prepare_cached(
-                "INSERT INTO songs (path, folder, size, mtime, seconds, artist, album_artist, album, title, genre, year, track, names_from, skipped)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
+                "INSERT INTO songs (path, folder, size, mtime, seconds, artist, album_artist, album, title, genre, year, track, names_from, skipped, cloud)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
                  ON CONFLICT(path) DO UPDATE SET folder = excluded.folder, size = excluded.size, mtime = excluded.mtime,
                    seconds = excluded.seconds, artist = excluded.artist, album_artist = excluded.album_artist, album = excluded.album,
                    title = excluded.title, genre = excluded.genre, year = excluded.year, track = excluded.track,
-                   names_from = excluded.names_from, skipped = excluded.skipped, gone = 0, stage = 0, profile = NULL,
-                   heard_at = NULL, cluster = NULL, duplicate_of = NULL",
+                   names_from = excluded.names_from, skipped = excluded.skipped, cloud = excluded.cloud, gone = 0, stage = 0,
+                   profile = NULL, heard_at = NULL, cluster = NULL, duplicate_of = NULL, x = NULL, y = NULL",
             )?;
             for (file, tags) in songs {
                 statement.execute(params![
@@ -218,11 +237,61 @@ impl MusicStore {
                     tags.track,
                     tags.names_from.as_str(),
                     file.protected.then_some(PROTECTED),
+                    file.cloud,
                 ])?;
             }
         }
         transaction.commit()?;
         Ok(songs.len())
+    }
+
+    /// Songs whose files are as they were, now under another of the producer's folders (one around theirs added, or
+    /// taken away): their folder and the names read again, in one transaction, and what was heard of them kept. The
+    /// rows written.
+    pub fn move_songs(&mut self, songs: &[(Walked, Tags)]) -> Result<usize, MusicError> {
+        let transaction = self.connection.transaction()?;
+        {
+            let mut statement = transaction.prepare_cached(
+                "UPDATE songs SET folder = ?2, artist = ?3, album_artist = ?4, album = ?5, title = ?6, genre = ?7, year = ?8,
+                   track = ?9, names_from = ?10, cloud = ?11, gone = 0 WHERE path = ?1",
+            )?;
+            for (file, tags) in songs {
+                statement.execute(params![
+                    file.path,
+                    file.folder,
+                    tags.artist,
+                    tags.album_artist,
+                    tags.album,
+                    tags.title,
+                    tags.genre,
+                    tags.year,
+                    tags.track,
+                    tags.names_from.as_str(),
+                    file.cloud,
+                ])?;
+            }
+        }
+        transaction.commit()?;
+        Ok(songs.len())
+    }
+
+    /// Songs found only in the cloud now (or on this computer again), as they are otherwise: the rows changed.
+    pub fn set_cloud(&mut self, songs: &[(i64, bool)]) -> Result<usize, MusicError> {
+        let transaction = self.connection.transaction()?;
+        let mut changed = 0;
+        {
+            let mut statement = transaction.prepare_cached("UPDATE songs SET cloud = ?2 WHERE id = ?1 AND cloud != ?2")?;
+            for (id, cloud) in songs {
+                changed += statement.execute(params![id, cloud])?;
+            }
+        }
+        transaction.commit()?;
+        Ok(changed)
+    }
+
+    /// Every song set aside as gone (the producer took away their last music folder): found as it was, it's back.
+    pub fn set_all_gone(&self) -> Result<usize, MusicError> {
+        Ok(self.connection.execute("UPDATE songs SET gone = 1 WHERE gone = 0", [])?)
     }
 
     /// Songs marked gone (or back): the rows changed.
@@ -239,12 +308,14 @@ impl MusicStore {
         Ok(changed)
     }
 
-    /// Duplicates found again: the same artist and title (any case) within 2 s of length are one song, kept as its
-    /// lossless file (else its biggest). The rows changed.
+    /// Duplicates found again: the same artist and title (any case) within 2 s of length are one song, kept as a file
+    /// that can be heard (a protected one, or one that won't decode, hands over to its copy), its lossless one before
+    /// others, then its biggest. The rows changed.
     pub fn resolve_duplicates(&mut self) -> Result<usize, MusicError> {
         struct Row {
             id: i64,
             seconds: Option<f64>,
+            playable: bool,
             lossless: bool,
             size: i64,
             was: Option<i64>,
@@ -252,8 +323,9 @@ impl MusicStore {
         let mut groups: HashMap<(String, String), Vec<Row>> = HashMap::new();
         let mut alone: Vec<(i64, Option<i64>)> = vec![];
         {
-            let mut statement =
-                self.connection.prepare("SELECT id, artist, title, seconds, path, size, duplicate_of FROM songs WHERE gone = 0")?;
+            let mut statement = self
+                .connection
+                .prepare("SELECT id, artist, title, seconds, path, size, duplicate_of, skipped IS NULL FROM songs WHERE gone = 0")?;
             let mut rows = statement.query([])?;
             while let Some(row) = rows.next()? {
                 let (id, artist, title): (i64, Option<String>, Option<String>) = (row.get(0)?, row.get(1)?, row.get(2)?);
@@ -268,6 +340,7 @@ impl MusicStore {
                 groups.entry((folded(&artist), folded(&title))).or_default().push(Row {
                     id,
                     seconds: row.get(3)?,
+                    playable: row.get(7)?,
                     lossless,
                     size: row.get(5)?,
                     was,
@@ -287,7 +360,9 @@ impl MusicStore {
                 };
                 let keeper = rows[at..end]
                     .iter()
-                    .max_by(|a, b| a.lossless.cmp(&b.lossless).then(a.size.cmp(&b.size)).then(b.id.cmp(&a.id)))
+                    .max_by(|a, b| {
+                        a.playable.cmp(&b.playable).then(a.lossless.cmp(&b.lossless)).then(a.size.cmp(&b.size)).then(b.id.cmp(&a.id))
+                    })
                     .map(|row| row.id)
                     .unwrap();
                 for row in &rows[at..end] {
@@ -319,7 +394,8 @@ impl MusicStore {
                count(*) FILTER (WHERE gone = 0 AND duplicate_of IS NULL AND skipped IS NULL AND stage = 2),
                count(*) FILTER (WHERE gone = 0 AND duplicate_of IS NULL AND skipped IS NOT NULL),
                count(*) FILTER (WHERE gone = 0 AND duplicate_of IS NOT NULL),
-               count(*) FILTER (WHERE gone = 1)
+               count(*) FILTER (WHERE gone = 1),
+               count(*) FILTER (WHERE gone = 0 AND duplicate_of IS NULL AND skipped IS NULL AND stage = 0 AND cloud = 1)
              FROM songs",
             [],
             |row| {
@@ -331,6 +407,7 @@ impl MusicStore {
                     skipped: count(3)?,
                     duplicates: count(4)?,
                     gone: count(5)?,
+                    cloud: count(6)?,
                 })
             },
         )?)
@@ -387,31 +464,64 @@ impl MusicStore {
         Ok(ids)
     }
 
-    /// Each heard song's cluster (the rest none), in one transaction.
+    /// Each heard song's cluster (the rest none). Only the songs whose cluster changed are written, `BATCH` to a
+    /// transaction, so the app's own writes never wait long behind them.
     pub fn set_clusters(&mut self, clusters: &[(i64, usize)]) -> Result<(), MusicError> {
-        let transaction = self.connection.transaction()?;
-        transaction.execute("UPDATE songs SET cluster = NULL WHERE cluster IS NOT NULL", [])?;
-        {
-            let mut statement = transaction.prepare_cached("UPDATE songs SET cluster = ?2 WHERE id = ?1")?;
-            for (id, cluster) in clusters {
-                statement.execute(params![id, *cluster as i64])?;
+        let mut was: HashMap<i64, i64> = {
+            let mut statement = self.connection.prepare("SELECT id, cluster FROM songs WHERE cluster IS NOT NULL")?;
+            let rows = statement.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?;
+            rows.collect::<Result<_, _>>()?
+        };
+        let mut changed: Vec<(i64, Option<i64>)> = vec![];
+        for (id, cluster) in clusters {
+            if was.remove(id) != Some(*cluster as i64) {
+                changed.push((*id, Some(*cluster as i64)));
             }
         }
-        transaction.commit()?;
-        Ok(())
+        changed.extend(was.into_keys().map(|id| (id, None)));
+        self.in_batches(&changed, "UPDATE songs SET cluster = ?2 WHERE id = ?1", |statement, (id, cluster)| {
+            statement.execute(params![id, cluster])
+        })
     }
 
-    /// Each laid out song's place on the map (x, y in [0, 1]); every other song has none.
+    /// Each laid out song's place on the map (x, y in [0, 1]); every other song has none. Only the places that changed
+    /// are written, as `set_clusters` writes.
     pub fn set_places(&mut self, places: &[(i64, [f32; 2])]) -> Result<(), MusicError> {
-        let transaction = self.connection.transaction()?;
-        transaction.execute("UPDATE songs SET x = NULL, y = NULL WHERE x IS NOT NULL OR y IS NOT NULL", [])?;
-        {
-            let mut statement = transaction.prepare_cached("UPDATE songs SET x = ?2, y = ?3 WHERE id = ?1")?;
-            for (id, [x, y]) in places {
-                statement.execute(params![id, *x as f64, *y as f64])?;
+        let mut was: HashMap<i64, (Option<f64>, Option<f64>)> = {
+            let mut statement = self.connection.prepare("SELECT id, x, y FROM songs WHERE x IS NOT NULL OR y IS NOT NULL")?;
+            let rows = statement.query_map([], |row| Ok((row.get(0)?, (row.get(1)?, row.get(2)?))))?;
+            rows.collect::<Result<_, _>>()?
+        };
+        let mut changed: Vec<(i64, Option<f64>, Option<f64>)> = vec![];
+        for (id, [x, y]) in places {
+            let place = (Some(*x as f64), Some(*y as f64));
+            if was.remove(id) != Some(place) {
+                changed.push((*id, place.0, place.1));
             }
         }
-        transaction.commit()?;
+        changed.extend(was.into_keys().map(|id| (id, None, None)));
+        self.in_batches(&changed, "UPDATE songs SET x = ?2, y = ?3 WHERE id = ?1", |statement, (id, x, y)| {
+            statement.execute(params![id, x, y])
+        })
+    }
+
+    /// `rows` written with `sql`, `BATCH` to a transaction.
+    fn in_batches<T>(
+        &mut self,
+        rows: &[T],
+        sql: &str,
+        write: impl Fn(&mut rusqlite::CachedStatement, &T) -> rusqlite::Result<usize>,
+    ) -> Result<(), MusicError> {
+        for batch in rows.chunks(BATCH) {
+            let transaction = self.connection.transaction()?;
+            {
+                let mut statement = transaction.prepare_cached(sql)?;
+                for row in batch {
+                    write(&mut statement, row)?;
+                }
+            }
+            transaction.commit()?;
+        }
         Ok(())
     }
 
@@ -582,7 +692,7 @@ pub const LIVE: &str = "gone = 0 AND duplicate_of IS NULL AND skipped IS NULL";
 /// The columns `song_row` reads, in its order.
 pub const SONG_COLUMNS: &str =
     "id, path, folder, size, mtime, seconds, artist, album_artist, album, title, genre, year, track, names_from, \
-     duplicate_of, gone, stage, skipped, profile, heard_at, used_at, cluster";
+     duplicate_of, gone, stage, skipped, profile, heard_at, used_at, cluster, cloud";
 
 /// A song from a row of `SONG_COLUMNS`.
 pub fn song_row(row: &rusqlite::Row) -> rusqlite::Result<Song> {
@@ -611,7 +721,17 @@ pub fn song_row(row: &rusqlite::Row) -> rusqlite::Result<Song> {
         heard_at: row.get(19)?,
         used_at: row.get(20)?,
         cluster: row.get(21)?,
+        cloud: row.get(22)?,
     })
+}
+
+/// A music.db's schema version, making nothing: 0 when there's none yet, None when it can't be read now.
+fn version_of(path: &Path) -> Option<usize> {
+    if !path.exists() {
+        return Some(0);
+    }
+    let connection = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX).ok()?;
+    connection.query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0)).ok().map(|version| version.max(0) as usize)
 }
 
 fn newer(found: usize) -> MusicError {

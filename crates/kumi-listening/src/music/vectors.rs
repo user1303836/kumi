@@ -53,6 +53,14 @@ pub fn scale_of(vectors: &[Vec<f32>]) -> f32 {
     values[at].max(1e-6)
 }
 
+/// A vector at `DIMS` numbers, as every file row and waiting vector is kept: a style model of another size (one a slot
+/// runs) is cut to them, or filled out with zeros, so every vector of a model has the one length.
+pub fn fitted(vector: &[f32]) -> Vec<f32> {
+    let mut fitted = vector[..vector.len().min(DIMS)].to_vec();
+    fitted.resize(DIMS, 0.);
+    fitted
+}
+
 /// A vector as a file keeps it: each value at `scale` maps to 127, clamped beyond. A vector that's all zero stays a
 /// "not yet", so it's kept as the smallest step instead.
 pub fn quantize(vector: &[f32], scale: f32) -> Vec<i8> {
@@ -130,7 +138,7 @@ impl VectorWriter {
             file.write_all(&quantize(vector, *scale).iter().map(|value| *value as u8).collect::<Vec<_>>())?;
             return Ok(());
         }
-        let bytes: Vec<u8> = vector.iter().flat_map(|value| value.to_le_bytes()).collect();
+        let bytes: Vec<u8> = fitted(vector).iter().flat_map(|value| value.to_le_bytes()).collect();
         store.connection().execute(
             "INSERT INTO vectors_pending (model, id, vector) VALUES (?1, ?2, ?3)
              ON CONFLICT(model, id) DO UPDATE SET vector = excluded.vector",
@@ -146,7 +154,7 @@ impl VectorWriter {
     /// made and the waiting vectors written to it.
     pub fn settle(&mut self, store: &MusicStore) -> Result<(), MusicError> {
         if self.file.is_some() {
-            return Ok(());
+            return self.settle_left(store);
         }
         let waiting = pending(store, &self.model)?;
         if waiting.is_empty() {
@@ -169,20 +177,89 @@ impl VectorWriter {
         Ok(())
     }
 
+    /// With the file made, the vectors still waiting beside it (a scan ended between making it and clearing them):
+    /// written to it, so a song's waiting copy never stands in for its row. Nothing before the file is made.
+    pub fn settle_left(&mut self, store: &MusicStore) -> Result<(), MusicError> {
+        let Some((file, scale)) = &mut self.file else { return Ok(()) };
+        let waiting = pending(store, &self.model)?;
+        if waiting.is_empty() {
+            return Ok(());
+        }
+        let mut ids: Vec<&i64> = waiting.keys().collect();
+        ids.sort();
+        for id in ids {
+            file.seek(SeekFrom::Start((HEADER + *id as usize * DIMS) as u64))?;
+            file.write_all(&quantize(&waiting[id], *scale).iter().map(|value| *value as u8).collect::<Vec<_>>())?;
+        }
+        file.sync_all()?;
+        store.connection().execute("DELETE FROM vectors_pending WHERE model = ?1", [&self.model])?;
+        Ok(())
+    }
+
     /// Whether the scale is set (the vectors are in the file).
     pub fn settled(&self) -> bool {
         self.file.is_some()
     }
 }
 
-/// The vectors waiting for a model's file, by song.
+/// The vectors waiting for a model's file, by song (each at `DIMS` numbers).
 fn pending(store: &MusicStore, model: &str) -> Result<HashMap<i64, Vec<f32>>, MusicError> {
     let mut statement = store.connection().prepare_cached("SELECT id, vector FROM vectors_pending WHERE model = ?1")?;
     let rows = statement.query_map([model], |row| {
         let bytes: Vec<u8> = row.get(1)?;
-        Ok((row.get::<_, i64>(0)?, bytes.chunks_exact(4).map(|four| f32::from_le_bytes(four.try_into().unwrap())).collect()))
+        let vector: Vec<f32> = bytes.chunks_exact(4).map(|four| f32::from_le_bytes(four.try_into().unwrap())).collect();
+        Ok((row.get::<_, i64>(0)?, fitted(&vector)))
     })?;
     Ok(rows.collect::<Result<_, _>>()?)
+}
+
+/// The vector files in a music folder, one for each style model that heard its songs.
+fn files_in(music_dir: &Path) -> Vec<PathBuf> {
+    let Ok(entries) = std::fs::read_dir(music_dir) else { return vec![] };
+    entries
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.file_name().and_then(|name| name.to_str()).is_some_and(|name| name.starts_with("vectors-") && name.ends_with(".i8"))
+        })
+        .collect()
+}
+
+/// Songs whose files changed: what every style model heard of them goes (their rows emptied, their waiting vectors
+/// dropped), so they're heard afresh and never stand for the audio they had.
+pub fn forget(music_dir: &Path, store: &MusicStore, ids: &[i64]) -> Result<(), MusicError> {
+    if ids.is_empty() {
+        return Ok(());
+    }
+    for chunk in ids.chunks(500) {
+        let list = chunk.iter().map(i64::to_string).collect::<Vec<_>>().join(",");
+        store.connection().execute(&format!("DELETE FROM vectors_pending WHERE id IN ({list})"), [])?;
+    }
+    let empty = [0u8; DIMS];
+    for path in files_in(music_dir) {
+        let mut file = std::fs::OpenOptions::new().read(true).write(true).open(&path)?;
+        let length = file.metadata()?.len();
+        for id in ids {
+            let at = (HEADER + usize::try_from(*id).unwrap_or(0) * DIMS) as u64;
+            if *id >= 0 && at + DIMS as u64 <= length {
+                file.seek(SeekFrom::Start(at))?;
+                file.write_all(&empty)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Every vector file in a music folder taken away: a music.db made afresh numbers its songs from 1 again, so rows
+/// another one wrote would stand for other songs.
+pub fn remove_files(music_dir: &Path) -> Result<(), MusicError> {
+    for path in files_in(music_dir) {
+        match std::fs::remove_file(&path) {
+            Err(error) if error.kind() != std::io::ErrorKind::NotFound => return Err(error.into()),
+            _ => {}
+        }
+    }
+    Ok(())
 }
 
 /// The vectors one style model made, as the app reads them: the file through a memory map, and those still waiting.
