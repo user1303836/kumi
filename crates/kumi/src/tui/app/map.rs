@@ -17,6 +17,13 @@ impl TuiApp {
         self.0.state.borrow().map.is_some()
     }
 
+    /// The map is on the screen, taking the keys: open, with nothing Kumi asked over it. A panel that opens meanwhile
+    /// (answers to pick at a turn's end, a question) shows in its place until it's done with, and the map then comes back.
+    pub(super) fn map_shown(&self) -> bool {
+        let state = self.0.state.borrow();
+        state.map.is_some() && state.panel.is_none()
+    }
+
     /// /map opens the map, and reads it; /map open shows it in the browser, and /map close closes that.
     pub(super) async fn map_command(&self, load: crate::map::LoadMap, words: &str) {
         match words.trim() {
@@ -30,6 +37,10 @@ impl TuiApp {
                 );
                 return;
             }
+        }
+        // The map can't show the microphone's keys or what it hears: talking stops as it opens.
+        if let Some(voice) = self.0.voice.as_ref().filter(|voice| voice.active()) {
+            voice.cancel();
         }
         self.0.state.borrow_mut().map = Some(MapView::new(self.0.graphics));
         self.0.scheduler.request();
@@ -106,8 +117,19 @@ impl TuiApp {
         self.put_in_box(words);
     }
 
-    /// Words for the producer to send, in the input box in place of what's there.
+    /// Words for the producer to send, in the input box in place of what's there. Answers Kumi offered give way, so
+    /// Enter sends these words.
     pub fn put_in_box(&self, words: &str) {
+        let answers = self
+            .0
+            .state
+            .borrow()
+            .panel
+            .as_ref()
+            .is_some_and(|panel| matches!(&*panel.borrow(), Panel::Pick { picker, .. } if picker.borrow().options.answers));
+        if answers {
+            self.close_panel();
+        }
         let mut state = self.0.state.borrow_mut();
         state.editor.set(words);
         state.menu_dismissed = false;
@@ -170,7 +192,8 @@ impl TuiApp {
         self.0.scheduler.request();
     }
 
-    /// The map closes, its image comes down, and what it played stops.
+    /// The map closes, its image comes down, and what it played stops. A job's answer that waited for the producer may
+    /// start now.
     fn close_map(&self) {
         let mut state = self.0.state.borrow_mut();
         state.map = None;
@@ -181,6 +204,7 @@ impl TuiApp {
         if let Some(player) = &self.0.options.player {
             player.stop();
         }
+        self.maybe_carry_on();
     }
 
     /// A point played: shown as playing until it ends, or why it didn't play. Only the latest play (no other, no stop

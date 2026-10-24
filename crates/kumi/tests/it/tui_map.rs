@@ -474,6 +474,49 @@ fn how_long_a_key_takes_at_300_000_points() {
     }
 }
 
+/// The answer to a request, ending on a question with options.
+fn asks_which(h: &Harness) {
+    h.emit(serde_json::json!({"type":"text","text":"Which track should get the reverb?\n\n1. Bubbles\n2. Drums"}));
+    h.emit(serde_json::json!({"type":"turn-complete","result":{"stopReason":"completed"},"elapsedMs":900}));
+    h.emit(serde_json::json!({"type":"state","state":"idle"}));
+}
+
+case!(a_question_kumi_asks_while_the_map_is_open_shows_in_its_place_and_the_map_comes_back_after, async {
+    let h = Harness::with(160, 40, Rc::new(Control::default()), |o| o.map = Some(loader(fixture(12, 8))));
+    h.start().await;
+    h.connect();
+    h.type_text("add a reverb\r").await;
+    h.emit(serde_json::json!({"type":"state","state":"running"}));
+    h.type_text("/map\r").await;
+    h.wait_for("Sounds 72").await;
+    // The answer ends asking which: its options show in the map's place, and take the keys.
+    asks_which(&h);
+    h.wait_for("Your answer").await;
+    assert!(!has(&h.screen(), "Sounds 72"), "the map gives way");
+    h.type_text("2").await;
+    h.type_text("\r").await;
+    h.wait_for_call("submit:Drums").await;
+    // Answered: the map's back.
+    h.wait_for("Sounds 72").await;
+    h.close().await;
+});
+
+case!(a_jobs_answer_waits_while_the_producer_is_in_the_map, async {
+    let h = Harness::with(160, 40, Rc::new(Control::default()), |o| o.map = Some(loader(fixture(12, 8))));
+    h.start().await;
+    h.connect();
+    h.type_text("/map\r").await;
+    h.wait_for("Sounds 72").await;
+    let job = |state: &str| serde_json::json!({"type":"job","id":1,"kind":"worker","title":"Burial vocal chops","state":state,"whenDone":"continue","startedAt":1,"steps":0,"sources":0,"line":"Done.","endedAt":2});
+    h.emit(job("running"));
+    h.emit(job("done"));
+    delay(100).await;
+    assert!(!h.calls().iter().any(|call| call.starts_with("carry-on")), "not while they're in the map: {:?}", h.calls());
+    h.type_text("\x1b").await;
+    h.wait_for_call("carry-on:1").await;
+    h.close().await;
+});
+
 /// An output that plays for as long as what it's given lasts, and `tail` more (the last block, a fade).
 struct Timed {
     ends: Rc<std::cell::Cell<Option<std::time::Instant>>>,
