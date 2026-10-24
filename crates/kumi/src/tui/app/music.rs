@@ -5,7 +5,7 @@ use super::*;
 use kumi_common::time::since;
 use kumi_listening::music::{
     folders::{self, Found},
-    learning::{Music, MusicState, MusicStatus},
+    learning::{Music, MusicState, MusicStatus, FORGETTING},
     tool::{about, grouped, tilde},
 };
 
@@ -65,6 +65,9 @@ pub fn music_lines(status: &MusicStatus, agreed: bool, held: bool, found: Option
             grouped(status.skipped)
         ));
     }
+    if status.cloud > 0 {
+        lines.push(format!("Only in the cloud: {} (heard once they're on this computer)", grouped(status.cloud)));
+    }
     lines.push(match status.state {
         MusicState::Off if !agreed => "Now: off (Kumi asks before it learns your music)".into(),
         MusicState::Off => "Now: off, with no folder to learn from".into(),
@@ -90,7 +93,7 @@ impl TuiApp {
             MusicAsked::Show => {
                 let found = match music.folders().is_empty() {
                     true => {
-                        let (places, skip) = (music.places(), music.library_folders());
+                        let (places, skip) = (music.places(), music.skipped());
                         tokio::task::spawn_blocking(move || folders::found_in(places, &skip)).await.ok().flatten()
                     }
                     false => None,
@@ -124,6 +127,7 @@ impl TuiApp {
                         &format!("Kumi learns your music in {} too, in the background (/music shows how far it's got).", tilde(&path)),
                         NoticeTone::Info,
                     ),
+                    Err(why) if why == FORGETTING => self.notice(&why, NoticeTone::Warn),
                     Err(why) => self.notice(&format!("Kumi couldn't keep that in its settings: {why}"), NoticeTone::Warn),
                 }
             }
