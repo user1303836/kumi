@@ -9,6 +9,7 @@ local base = import("changes_base")
 local places_ = import("instruments")
 local instruments_ = import("changes_instruments")
 local modfx_ = import("changes_modfx")
+local material_ = import("changes_material")
 
 local bad, fail = base.bad, base.fail
 local q = base.q
@@ -25,7 +26,7 @@ M.UNDO_COVERS = { plugin = true, preset = true, midi = true }
 local NOT_IN_UNDO = "Renoise's own undo won't take this back; Kumi can."
 
 local function state_hash(text)
-  return base.hash(text)
+  return material_.hash_of(text)
 end
 
 local function plugin_now(instrument)
@@ -219,7 +220,7 @@ base.register({
     end
     if not M.UNDO_COVERS.preset then display.note = NOT_IN_UNDO end
     return {
-      applied = { preset = plan.device.active_preset, hash = state_hash(plan.device.active_preset_data or "") }, material = { state = plan.state, path = plan.path },
+      applied = { preset = plan.device.active_preset, hash = kept_hash }, material = { state = plan.state, path = plan.path },
       target = places_.target_of(env, "instrument", plan.n), display = display, undo = { desc = desc, entry = M.UNDO_COVERS.preset },
       prior = { preset = plan.now }, place = places_.journal_place("instrument", plan.n),
     }

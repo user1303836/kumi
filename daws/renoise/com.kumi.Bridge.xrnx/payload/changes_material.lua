@@ -387,8 +387,8 @@ end
 -- (a text's print made now and kept nowhere: for a text derived from another, whose prints are kept under that one)
 M.print_now = print_now
 
--- The prints of a text, kept by the text (`print` below, `shape` in changes_presets.lua, `content`; each made when it is
--- first asked for). A change prints what it replaces and what it wrote several times over (its fence, its record, the
+-- The prints of a text, kept by the text (`print` below, `hash`, `shape` in changes_presets.lua, `content`; each made when it
+-- is first asked for). A change prints what it replaces and what it wrote several times over (its fence, its record, the
 -- journal's entry), every producer undo reads every journalled device's data again, and the journal polls its containers
 -- about once a second: Lua gives the same text the same string, so a print made once serves them all. A kept text stays
 -- in memory by its key, so past PRINTS_KEPT texts, or PRINTS_BYTES of them, the ones asked for least recently are let go
@@ -429,6 +429,18 @@ function M.print_of(text)
     kept.print = printed
   end
   return printed
+end
+
+-- A text's short print (changes_base.lua `hash`), kept by the text with its other prints: a plug-in's state, megabytes for a
+-- big synth, is hashed by a change's fence, its record and every look the journal takes after a producer's undo or redo.
+function M.hash_of(text)
+  local kept = M.prints_of(text)
+  local hashed = kept.hash
+  if hashed == nil then
+    hashed = base.hash(text)
+    kept.hash = hashed
+  end
+  return hashed
 end
 
 -- Preset data as it reads, values and all, with what moves by itself left out: the inner devices' SelectedPresetIsModified and

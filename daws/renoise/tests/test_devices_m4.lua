@@ -2051,6 +2051,20 @@ test("devices m4: a text's print and hash are the host's numbers, made sixteen b
   eq(material.device_state(device).state, one_at_a_time(table.concat(values)):sub(1, 16))
 end)
 
+test("devices m4: a plug-in's state is hashed once a text, kept with the text's prints, as changes_base hashes it (second sweep RN2)", function()
+  local material = T.load_payload_module("changes_material")
+  local base = T.load_payload_module("changes_base")
+  local state = "<PluginState>" .. string.rep("c3ludGggc3RhdGU=", 8192) .. "</PluginState>"
+  local sums, summed = base.sums, 0
+  base.sums = function(text) summed = summed + 1 return sums(text) end
+  local first, again = material.hash_of(state), material.hash_of(state)
+  base.sums = sums
+  eq(summed, 1, "summed once")
+  eq(again, first)
+  eq(first, base.hash(state), "the hash a fence, a record and the journal kept before")
+  eq(material.prints_of(state).hash, first, "kept with the text's prints")
+end)
+
 test("devices m4: a text's prints are made once and kept by the text, within bounds (perf N1)", function()
   local material = T.load_payload_module("changes_material")
   local presets = T.load_payload_module("changes_presets")
