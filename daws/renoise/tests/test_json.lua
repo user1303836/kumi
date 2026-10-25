@@ -179,3 +179,28 @@ test("json: a list with a hole is refused, marked as a list or not", function()
   eq(enc(json.array({ 1, 2, 3 })), "[1,2,3]")
   eq(enc(json.array()), "[]")
 end)
+
+test("json: a raw text goes into a document as it is, and a document of raws is the bytes of the document of their values (perf N4)", function()
+  eq(json.encode(json.array({ json.raw('{"x":1}') })), '[{"x":1}]')
+  eq(json.encode({ r = json.raw("[1, 2]") }), '{"r":[1, 2]}', "verbatim, spaces and all")
+  eq(json.encode(json.raw("null")), "null")
+  -- (a page's rows: the same row tables, once encoded as they are and once as raws of their own texts, give one text)
+  local rows = {}
+  for i = 1, 50 do
+    rows[i] = { line = i, notes = json.array({ { col = 1, note = "C-4", instrument = "00" }, { col = 2, note = "E-5", volume = "40" } }), effects = json.array({ { col = 1, number = "0G", amount = "10" } }) }
+  end
+  local doc = { items = json.array(rows), epoch = "1a2b", nextCursor = "1a2b.1.51" }
+  local plain = json.encode(doc)
+  local raws = {}
+  for i, row in ipairs(rows) do raws[i] = json.raw(json.encode(row)) end
+  doc.items = json.array(raws)
+  local spliced = json.encode(doc)
+  eq(spliced, plain, "the same bytes")
+  ok(json.is_raw(raws[1]) and not json.is_raw(rows[1]) and not json.is_array(raws[1]))
+  -- (the sliced encoder takes them too)
+  local sliced_job = json.sliced_encoder(doc)
+  local done, text
+  repeat done, text = sliced_job:step(1000) until done ~= false
+  eq(done, true)
+  eq(text, spliced)
+end)

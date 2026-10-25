@@ -27,6 +27,18 @@ function M.is_array(t)
   return getmetatable(t) == array_mt
 end
 
+-- A text this encoder made of a value, put into a document as it is where the value would go. A page measures each row it
+-- takes by encoding it once, and sends the texts: the frame then costs no second encoding of every row, and holds the same
+-- bytes it did when the rows were encoded again. (The text is trusted as a whole: its own nesting isn't counted again.)
+local raw_mt = { __jsontype = "raw" }
+function M.raw(text)
+  return setmetatable({ text = text }, raw_mt)
+end
+
+function M.is_raw(t)
+  return getmetatable(t) == raw_mt
+end
+
 -- The deepest a document nests, the outermost object or array counting as the first level: the same limit as
 -- crates/daw-bridge (MAX_JSON_DEPTH), so a line one side writes is never one the other refuses.
 M.MAX_DEPTH = 64
@@ -213,7 +225,11 @@ local function new_encoder(options)
     elseif v == nil or v == M.null then
       n = n + 1; buf[n] = "null"
     elseif kind == "table" then
-      encode_table(v, depth)
+      if getmetatable(v) == raw_mt then
+        n = n + 1; buf[n] = v.text
+      else
+        encode_table(v, depth)
+      end
     else
       encode_error("cannot encode a " .. kind)
     end

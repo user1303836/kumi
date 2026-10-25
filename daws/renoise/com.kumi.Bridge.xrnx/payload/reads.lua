@@ -47,7 +47,9 @@ local function limit_of(params)
 end
 
 -- The rows from `row_at(i)`, i from the cursor to `total`, up to the limit (nil rows are skipped, not counted), as
--- {items, nextCursor?, epoch, ...extra}, cut to the byte budget by dropping rows off the end.
+-- {items, nextCursor?, epoch, ...extra}, cut to the byte budget by dropping rows off the end. Each row is encoded once, as it
+-- is taken, and goes into the answer as that text (json.raw): the budget's measure and the frame then cost no encoding of the
+-- rows again, and the frame holds the bytes it always did.
 local function page(job, epoch, params, total, row_at, sparse, extra)
   local from = cursor_start(params, epoch, job.layout)
   local limit = limit_of(params)
@@ -57,7 +59,8 @@ local function page(job, epoch, params, total, row_at, sparse, extra)
     local waited = job.slice()
     local row = row_at(i, waited)
     if row ~= nil then
-      items[#items + 1] = row
+      local text = json.encode(row)
+      items[#items + 1] = text and json.raw(text) or row
       after[#items] = i + 1
     end
     i = i + 1

@@ -198,14 +198,18 @@ local function pattern_for_body(song, params, epoch)
 end
 
 -- The tracks of a grid, cut from the end of the window down to what a page holds. `entries` hold every row read, each
--- with its line number; `result` is the answer so far (without `tracks` and `window`).
+-- with its line number (and, where the body encoded the rows as it measured them, each row's text under `texts`, sent as
+-- it is); `result` is the answer so far (without `tracks` and `window`).
 local function fit(result, entries, from, to, cut)
   while true do
     local shown = {}
     for t, entry in ipairs(entries) do
       local kept = {}
-      for _, row in ipairs(entry.rows) do
-        if row.line <= to then kept[#kept + 1] = row end
+      for k, row in ipairs(entry.rows) do
+        if row.line <= to then
+          local text = entry.texts and entry.texts[k]
+          kept[#kept + 1] = text and json.raw(text) or row
+        end
       end
       shown[t] = {
         ref = entry.ref, name = entry.name, color = entry.color, noteColumns = entry.noteColumns,
@@ -270,7 +274,7 @@ local function pattern_body(job, params, epoch)
     shape[t] = { track.visible_note_columns, track.visible_effect_columns }
     entries[t] = {
       ref = refs.make(epoch, "track", t), name = track.name, color = hex(track.color),
-      noteColumns = shape[t][1], effectColumns = shape[t][2], rows = {},
+      noteColumns = shape[t][1], effectColumns = shape[t][2], rows = {}, texts = {},
       aliasOf = alias > 0 and alias or nil, aliasRef = alias > 0 and refs.make(epoch, "pattern", alias) or nil,
     }
     entries[t].mutedColumns = rows.column_state(track)
@@ -290,9 +294,11 @@ local function pattern_body(job, params, epoch)
     for t = 1, tracks do
       local row = line_row(live_tracks[t]:line(i), i, shape[t][1], shape[t][2], hidden)
       if row then
-        local read = entries[t].rows
-        read[#read + 1] = row
-        bytes = bytes + #json.encode(row) + 1
+        -- (each row encoded once, here where it is measured: `fit` sends the texts)
+        local entry, text = entries[t], json.encode(row)
+        entry.rows[#entry.rows + 1] = row
+        entry.texts[#entry.rows] = text or false
+        bytes = bytes + (text and #text or 0) + 1
       end
     end
     if bytes > M.BODY_BYTES and i < to then
