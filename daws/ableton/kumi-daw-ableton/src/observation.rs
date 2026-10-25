@@ -326,8 +326,9 @@ impl Observer {
             return Ok(self.away());
         }
         let result: Result<Observation, ReadError> = async {
-            connection.tools().unwrap().refresh(signal.clone()).await?;
-            connection.assert_lease(lease, &signal)?;
+            // The bridge's tools are read again only once they're out of date: it said they changed
+            // (notifications/tools/list_changed), it dropped, or it's a fresh bridge. A whole listing is about 290 KB,
+            // and each turn would wait for it before the Set reads.
             connection.ensure_catalog(signal.clone()).await?;
             connection.assert_lease(lease, &signal)?;
 
