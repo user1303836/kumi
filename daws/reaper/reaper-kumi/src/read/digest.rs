@@ -9,6 +9,11 @@
 //! points is read over several pages, and read once for all its pages); parameters, envelope points and (with `values`)
 //! parameter values have budgets for the whole digest, carried in the cursor. `content: false` (watch_me's looks) leaves
 //! out items and envelope points.
+//!
+//! Kept: a page goes out encoded, each record written once, and a digest read whole while REAPER's count of the
+//! project's state changes stayed what it was is kept as its pages went out (bounded). A page of it asked again under the
+//! same count, in the same tab's epoch (watch_me's next look at a project nobody touched, a baseline taken again) goes out
+//! as it was, with no read of the project: an edit moves the count, a tab switch or another project in the tab the epoch.
 
 use std::cell::RefCell;
 use std::collections::{HashSet, VecDeque};
@@ -17,7 +22,7 @@ use std::time::{Duration, Instant};
 use serde_json::{json, Map, Value};
 
 use super::{active, bad, Reads};
-use crate::queue::Answer;
+use crate::queue::Reply;
 use crate::reaper::{Fx, FxOwner, Project, Reaper, Track, INPUT_FX};
 use crate::refs;
 use crate::rows;
@@ -39,6 +44,10 @@ const PAGE_TIME: Duration = Duration::from_millis(20);
 
 /// Tracks read part way (or read, for their later pages) kept at once: a few digests may go on side by side.
 const KEPT_WORK: usize = 4;
+/// A digest kept whole takes at most this much (its pages as they went out); a bigger one is read again each time.
+const CACHE_BYTES: usize = 4 * 1024 * 1024;
+/// Digests kept whole at once: one per shape asked (`values`, `content`) under the tab's epoch, at most.
+const MOST_CACHED: usize = 4;
 
 #[cfg(test)]
 thread_local! {
@@ -46,6 +55,16 @@ thread_local! {
     pub static TEST_LIMITS: std::cell::Cell<Option<(usize, usize, usize)>> = const { std::cell::Cell::new(None) };
     /// A test's page share of the main thread as a number of points and items read, in place of `PAGE_TIME`.
     pub static TEST_READS: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) };
+    /// A test's own bound on a kept digest, in place of `CACHE_BYTES`.
+    pub static TEST_CACHE_BYTES: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) };
+}
+
+fn cache_bytes() -> usize {
+    #[cfg(test)]
+    if let Some(most) = TEST_CACHE_BYTES.with(|most| most.get()) {
+        return most;
+    }
+    CACHE_BYTES
 }
 
 /// A page's share of REAPER's main thread.
@@ -221,16 +240,159 @@ impl Work {
     }
 }
 
+/// What a kept digest is good for: the tab's epoch, the shape asked, and REAPER's count of the project's state changes.
+#[derive(Debug, Clone, PartialEq)]
+struct CacheKey {
+    epoch: String,
+    values: bool,
+    content: bool,
+    changed: i32,
+}
+
+/// A page as it went out: the cursor it was asked with (none for the first), its records encoded (the inside of the
+/// array) and the fields after them (`changed`, `nextCursor`, and on a first page `project`, `facts`, `summaries`,
+/// `bounded`), `project` named anew when the page goes out again (a save, or Save As, changes it and not the count).
+struct CachedPage {
+    cursor: Option<String>,
+    records: Vec<u8>,
+    rest: Map<String, Value>,
+}
+
+/// A digest's pages so far (by its serial, while it is read), or all of them (by its key, once read whole).
+struct CachedDigest {
+    serial: u64,
+    key: CacheKey,
+    pages: Vec<CachedPage>,
+    bytes: usize,
+}
+
 #[derive(Default)]
 struct Kept {
     /// The serial the next digest takes.
     next: u64,
     works: VecDeque<Work>,
+    /// Digests being read, by serial: their pages so far, kept whole once the last goes out, unless the count moved under
+    /// them or they grew past `CACHE_BYTES`.
+    building: VecDeque<CachedDigest>,
+    /// Digests read whole under one count, oldest first.
+    cached: VecDeque<CachedDigest>,
 }
 
 thread_local! {
-    /// The tracks read part way, or read for their later pages (REAPER's main thread reads them all).
+    /// The tracks read part way, or read for their later pages, and the digests kept (REAPER's main thread reads them all).
     static KEPT: RefCell<Kept> = RefCell::new(Kept::default());
+}
+
+/// A page of a digest kept whole under this key, as it went out, the project named anew on a first page.
+fn kept_page(key: &CacheKey, cursor: Option<&str>, epoch: &str, project: Option<&Value>) -> Option<Vec<u8>> {
+    KEPT.with(|kept| {
+        let kept = kept.borrow();
+        let digest = kept.cached.iter().find(|digest| digest.key == *key)?;
+        let page = digest.pages.iter().find(|page| page.cursor.as_deref() == cursor)?;
+        Some(encode_page(epoch, page, project))
+    })
+}
+
+/// Keeps a page of the digest being read (its first page begins it); the last makes it whole, kept in place of the one
+/// under the same epoch and shape. A page asked twice, a count that moved since the page before or a digest past
+/// `CACHE_BYTES` drops what was kept of it.
+fn keep_page(serial: u64, key: &CacheKey, page: CachedPage, last: bool) {
+    KEPT.with(|kept| {
+        let mut kept = kept.borrow_mut();
+        let at = match kept.building.iter().position(|digest| digest.serial == serial) {
+            Some(at) => at,
+            None if page.cursor.is_none() => {
+                kept.building.push_back(CachedDigest { serial, key: key.clone(), pages: vec![], bytes: 0 });
+                while kept.building.len() > KEPT_WORK {
+                    kept.building.pop_front();
+                }
+                kept.building.len() - 1
+            }
+            // (a digest dropped, or one that went on from a kept digest's page)
+            None => return,
+        };
+        // (the fields after the records are a few hundred bytes)
+        let size = page.records.len() + 1024;
+        let digest = &mut kept.building[at];
+        let repeated = digest.pages.iter().any(|kept| kept.cursor == page.cursor);
+        if digest.key != *key || repeated || digest.bytes + size > cache_bytes() {
+            kept.building.remove(at);
+            return;
+        }
+        digest.bytes += size;
+        digest.pages.push(page);
+        if last {
+            let Some(done) = kept.building.remove(at) else { return };
+            kept.cached.retain(|kept| kept.key.epoch == done.key.epoch && (kept.key.values, kept.key.content) != (done.key.values, done.key.content));
+            kept.cached.push_back(done);
+            while kept.cached.len() > MOST_CACHED {
+                kept.cached.pop_front();
+            }
+        }
+    })
+}
+
+/// The digest being read isn't kept: the count moved under it.
+fn drop_building(serial: u64) {
+    KEPT.with(|kept| kept.borrow_mut().building.retain(|digest| digest.serial != serial));
+}
+
+/// Forgets the digests kept and being kept: the epoch moved (a tab switch, another project in the tab).
+pub(super) fn forget() {
+    KEPT.with(|kept| {
+        let mut kept = kept.borrow_mut();
+        kept.building.clear();
+        kept.cached.clear();
+    });
+}
+
+/// The page as its bytes on the wire: what the answer as a tree would encode to, the project named anew when given.
+fn encode_page(epoch: &str, page: &CachedPage, project: Option<&Value>) -> Vec<u8> {
+    let mut out = Vec::with_capacity(page.records.len() + 1024);
+    out.extend_from_slice(b"{\"epoch\":");
+    write_text(&mut out, epoch);
+    out.extend_from_slice(b",\"records\":[");
+    out.extend_from_slice(&page.records);
+    out.push(b']');
+    for (name, value) in &page.rest {
+        out.push(b',');
+        write_text(&mut out, name);
+        out.push(b':');
+        write_value(&mut out, if name == "project" { project.unwrap_or(value) } else { value });
+    }
+    out.push(b'}');
+    out
+}
+
+// (A tree of values always encodes: a failure here would be the bridge's own, and a panic the request's guard answers as
+// internal, rather than a page cut short.)
+fn write_text(out: &mut Vec<u8>, text: &str) {
+    serde_json::to_writer(out, text).expect("text encodes");
+}
+
+fn write_value(out: &mut Vec<u8>, value: &Value) {
+    serde_json::to_writer(out, value).expect("a JSON tree encodes");
+}
+
+/// Appends a record to the page's records unless the page is full (its bytes, or its share of the main thread): a page
+/// always takes its first. A record's size counts the comma that joins it (or, for the first, the bracket that closes).
+fn append(records: &mut Vec<u8>, count: &mut usize, bytes: &mut usize, record: &Value, page_bytes: usize, clock: &Clock) -> bool {
+    if *count > 0 && clock.over() {
+        return false;
+    }
+    let at = records.len();
+    if *count > 0 {
+        records.push(b',');
+    }
+    write_value(records, record);
+    let size = records.len() - at + usize::from(*count == 0);
+    if *count > 0 && *bytes + size > page_bytes {
+        records.truncate(at);
+        return false;
+    }
+    *bytes += size;
+    *count += 1;
+    true
 }
 
 /// A new digest's serial.
@@ -295,17 +457,56 @@ fn automated(reaper: &Reaper, track: Track) -> Automated {
 }
 
 impl Reads {
-    /// `digest`: one page of the project's records.
-    pub fn digest(&self, reaper: &Reaper, params: &Value) -> Answer {
+    /// `digest`: one page of the project's records, as its bytes on the wire. A page of a digest kept whole (read while the
+    /// count stayed what it is now) goes out as it was, with no read of the project.
+    pub fn digest(&self, reaper: &Reaper, params: &Value) -> Reply {
+        match self.digest_page(reaper, params) {
+            Ok(page) => Reply::Encoded(page),
+            Err(error) => Reply::Answer(Err(error)),
+        }
+    }
+
+    fn digest_page(&self, reaper: &Reaper, params: &Value) -> Result<Vec<u8>, (String, String)> {
         let (proj, info) = active(reaper)?;
         let values = params.get("values") == Some(&Value::Bool(true));
         let content = params.get("content") != Some(&Value::Bool(false));
         let epoch = self.epoch();
+        let given = match params.get("cursor") {
+            None | Some(Value::Null) => None,
+            Some(Value::String(text)) => {
+                let cursor = Cursor::parse(text).ok_or_else(|| bad("cursor: the nextCursor an earlier page gave, unchanged"))?;
+                if cursor.epoch != epoch {
+                    return Err((
+                        daw_bridge::wire::code::STALE.into(),
+                        "the project in the tab changed since the first page: read again".into(),
+                    ));
+                }
+                Some((text.as_str(), cursor))
+            }
+            Some(_) => return Err(bad("cursor must be a string")),
+        };
+        let cursor_text = given.as_ref().map(|(text, _)| *text);
+        let first = given.as_ref().is_none_or(|(_, cursor)| cursor.n == 0 && cursor.sub == 0);
+        let changed = reaper.state_change_count(proj);
+        // (named on every first page, kept or not: a save, or Save As, changes it and not the count)
+        let project = first.then(|| {
+            json!({
+                "id": self.project_id(reaper, proj, &info),
+                "identity": self.identity(proj),
+                "name": rows::clip(&info.name),
+                "path": rows::clip(&info.path),
+            })
+        });
+        let key = changed.map(|changed| CacheKey { epoch: epoch.clone(), values, content, changed });
+        if let Some(page) = key.as_ref().and_then(|key| kept_page(key, cursor_text, &epoch, project.as_ref())) {
+            return Ok(page);
+        }
         let (page_bytes, most_items, most_markers) = limits();
         let track_total = reaper.track_count(proj).max(0) as usize + 1;
         let marker_total = reaper.marker_count(proj).max(0) as usize;
-        let mut cursor = match params.get("cursor") {
-            None | Some(Value::Null) => {
+        let mut cursor = match given {
+            Some((_, cursor)) => cursor,
+            None => {
                 let items: usize = (1..track_total)
                     .filter_map(|n| reaper.track_at(proj, n as i32 - 1))
                     .map(|t| reaper.track_item_count(t).max(0) as usize)
@@ -322,22 +523,11 @@ impl Reads {
                     markers: marker_total <= most_markers,
                 }
             }
-            Some(Value::String(text)) => {
-                let cursor = Cursor::parse(text).ok_or_else(|| bad("cursor: the nextCursor an earlier page gave, unchanged"))?;
-                if cursor.epoch != epoch {
-                    return Err((
-                        daw_bridge::wire::code::STALE.into(),
-                        "the project in the tab changed since the first page: read again".into(),
-                    ));
-                }
-                cursor
-            }
-            Some(_) => return Err(bad("cursor must be a string")),
         };
-        let first = cursor.n == 0 && cursor.sub == 0;
         let mut clock = Clock { started: Instant::now(), reads: 0 };
-        let changed = reaper.state_change_count(proj);
-        let mut records: Vec<Value> = vec![];
+        // The page's records, encoded as they come (the inside of the array), their count and their bytes on the wire.
+        let mut records: Vec<u8> = vec![];
+        let mut count = 0;
         let mut bytes = 0;
         let mut next: Option<Cursor> = None;
         // Tracks, each with its FX and items.
@@ -368,13 +558,10 @@ impl Reads {
             let stream = work.records.as_deref().unwrap_or_default();
             let mut full = false;
             for record in stream.iter().skip(cursor.sub) {
-                let size = super::json_len(record) + 1;
-                if !records.is_empty() && (bytes + size > page_bytes || clock.over()) {
+                if !append(&mut records, &mut count, &mut bytes, record, page_bytes, &clock) {
                     full = true;
                     break;
                 }
-                bytes += size;
-                records.push(record.clone());
                 cursor.sub += 1;
             }
             if full {
@@ -404,33 +591,26 @@ impl Reads {
                             "lane": marker.lane,
                         },
                     });
-                    let size = super::json_len(&record) + 1;
-                    if !records.is_empty() && (bytes + size > page_bytes || clock.over()) {
+                    if !append(&mut records, &mut count, &mut bytes, &record, page_bytes, &clock) {
                         next = Some(cursor.clone());
                         break;
                     }
-                    bytes += size;
-                    records.push(record);
                 }
                 cursor.n += 1;
             }
         }
-        let mut answer = json!({"epoch": epoch, "records": records});
+        // The fields after the records, in the order they go out.
+        let mut rest = Map::new();
         // (every page says the change count, so a digest the producer edited in the middle of is read again)
-        answer["changed"] = reaper.state_change_count(proj).map_or(Value::Null, Value::from);
+        let changed_now = reaper.state_change_count(proj);
+        rest.insert("changed".into(), changed_now.map_or(Value::Null, Value::from));
         if let Some(next) = &next {
-            answer["nextCursor"] = next.text().into();
+            rest.insert("nextCursor".into(), next.text().into());
         }
-        if first {
-            let identity = self.identity(proj);
-            answer["project"] = json!({
-                "id": self.project_id(reaper, proj, &info),
-                "identity": identity,
-                "name": rows::clip(&info.name),
-                "path": rows::clip(&info.path),
-            });
-            answer["facts"] = facts(reaper, proj, marker_total);
-            answer["summaries"] = json!({"FX": "FX", "item": "items", "marker": "markers", "region": "markers"});
+        if let Some(project) = project {
+            rest.insert("project".into(), project);
+            rest.insert("facts".into(), facts(reaper, proj, marker_total));
+            rest.insert("summaries".into(), json!({"FX": "FX", "item": "items", "marker": "markers", "region": "markers"}));
             let mut bounded = Map::new();
             if !cursor.items && content {
                 bounded.insert("item".into(), format!("more than {most_items} items: each track's are summed up").into());
@@ -442,7 +622,7 @@ impl Reads {
             if !content {
                 bounded.insert("item".into(), "not read (a quick look)".into());
             }
-            answer["bounded"] = Value::Object(bounded);
+            rest.insert("bounded".into(), Value::Object(bounded));
         }
         if next.is_none() {
             let mut bounded = Map::new();
@@ -453,13 +633,20 @@ impl Reads {
                 bounded.insert("points".into(), format!("more than {POINTS_BUDGET} envelope points: the rest aren't compared").into());
             }
             if !bounded.is_empty() {
-                let into = answer.as_object_mut().unwrap().entry("bounded").or_insert_with(|| json!({}));
+                let into = rest.entry("bounded").or_insert_with(|| json!({}));
                 if let Some(into) = into.as_object_mut() {
                     into.extend(bounded);
                 }
             }
         }
-        Ok(answer)
+        let page = CachedPage { cursor: cursor_text.map(str::to_owned), records, rest };
+        let encoded = encode_page(&epoch, &page, None);
+        match key {
+            // Kept while the count stays what it was, from the digest's first page to this page's end.
+            Some(key) if changed_now == Some(key.changed) => keep_page(cursor.digest, &key, page, next.is_none()),
+            _ => drop_building(cursor.digest),
+        }
+        Ok(encoded)
     }
 
     /// Reads a track's records into `work` as far as the page's share of time goes: its envelopes' points, its items,

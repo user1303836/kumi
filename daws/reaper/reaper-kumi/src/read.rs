@@ -288,10 +288,12 @@ impl Reads {
         self.eras.borrow().iter().any(|(known, of)| known == epoch && *of == identity)
     }
 
-    /// Refs stop meaning what they meant: a tab switch, or a new project in the tab.
+    /// Refs stop meaning what they meant: a tab switch, or a new project in the tab. The digests kept are of the project
+    /// the tab had.
     pub fn bump_epoch(&self) {
         self.epoch.borrow_mut().bump();
         self.registry.borrow_mut().clear();
+        digest::forget();
     }
 
     /// What names the project open in this tab while it stays open in this REAPER: this process and the project's serial.

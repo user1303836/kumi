@@ -576,12 +576,13 @@ impl Shared {
         let _ = lock(&self.jobs).send(job);
     }
 
-    fn answer(&self, conn: u64, request: Request) -> Frame {
+    /// A request's response, as its line on the wire.
+    fn answer(&self, conn: u64, request: Request) -> Vec<u8> {
         let id = request.id;
         match request.method.as_str() {
-            "ping" => return Frame::ok(id, json!({})),
-            "status" => return Frame::ok(id, self.status()),
-            "focus" => return self.focus(id),
+            "ping" => return Frame::ok(id, json!({})).encode(),
+            "status" => return Frame::ok(id, self.status()).encode(),
+            "focus" => return self.focus(id).encode(),
             // M5 listening (m5-reaper).
             "listen_status" | "listen_cancel" | "audition_stop" => {
                 let board = self.listening();
@@ -593,23 +594,24 @@ impl Shared {
                 return match answer {
                     Ok(result) => Frame::ok(id, result),
                     Err((code, message)) => Frame::error(id, &code, message),
-                };
+                }
+                .encode();
             }
             _ => {}
         }
         if self.stopping.load(Ordering::Acquire) {
-            return Frame::error(id, code::FAILED, CLOSING);
+            return Frame::error(id, code::FAILED, CLOSING).encode();
         }
         let now = unix_ms();
         let wait = match request.deadline_ms {
             Some(deadline) if deadline <= now => {
-                return Frame::error(id, code::DEADLINE, "the deadline passed before REAPER got to it; nothing changed")
+                return Frame::error(id, code::DEADLINE, "the deadline passed before REAPER got to it; nothing changed").encode()
             }
             Some(deadline) => Duration::from_millis(deadline - now),
             None => DEFAULT_WAIT,
         };
         if !MAIN_METHODS.contains(&request.method.as_str()) && !LISTENING_MAIN_METHODS.contains(&request.method.as_str()) {
-            return Frame::error(id, code::UNKNOWN_METHOD, format!("the REAPER bridge has no method {:?}", request.method));
+            return Frame::error(id, code::UNKNOWN_METHOD, format!("the REAPER bridge has no method {:?}", request.method)).encode();
         }
         // REAPER can't take work (a dialog has the main window, it loads, saves or renders, or the main thread isn't
         // ticking): the work would sit until the wait ran out, and then be cancelled. Say so now, and why.
@@ -617,15 +619,15 @@ impl Shared {
             // A plan's step that Kumi stopped because REAPER went busy must still be closed: it is taken for the first free
             // tick, and answered as such, so that the block isn't left open over the producer's own edits.
             if request.method == "undo_step_end" {
-                return self.defer_step_end(id, request.params);
+                return self.defer_step_end(id, request.params).encode();
             }
-            return Frame::error(id, code::BUSY, format!("{}; nothing changed", busy.reason()));
+            return Frame::error(id, code::BUSY, format!("{}; nothing changed", busy.reason())).encode();
         }
         let begun = (request.method == "undo_step_begin").then(|| request.params["label"].as_str().unwrap_or_default().to_string());
         let ending = (request.method == "undo_step_end").then(|| request.params["stepId"].as_str().unwrap_or_default().to_string());
         let (job, waiter) = queue::job(&request.method, request.params);
         if lock(&self.jobs).send(job).is_err() {
-            return Frame::error(id, code::FAILED, CLOSING);
+            return Frame::error(id, code::FAILED, CLOSING).encode();
         }
         // Whatever stops REAPER taking work while the request waits ends the wait: nothing would run it until that is over.
         // Once the main thread runs it, the request waits for its own answer.
@@ -641,6 +643,8 @@ impl Shared {
                 }
                 Frame::ok(id, result)
             }
+            // (a result the main thread had encoded already: the line is put around it as it is)
+            Outcome::Encoded(result) => return Frame::encode_ok(id, &result),
             Outcome::Answered(Err((code, message))) => Frame::error(id, &code, message),
             Outcome::Cancelled => match self.busy() {
                 Some(busy) => Frame::error(id, code::BUSY, format!("{}; nothing changed", busy.reason())),
@@ -654,6 +658,7 @@ impl Shared {
             }
             Outcome::Closed => Frame::error(id, code::FAILED, CLOSING),
         }
+        .encode()
     }
 }
 
@@ -841,8 +846,7 @@ fn serve(conn: &Arc<Conn>, mut state: ServerConnection, mut stream: TcpStream, s
                 }
                 ServerAction::Authenticated => conn.authenticated.store(true, Ordering::Release),
                 ServerAction::Request(request) => {
-                    let response = shared.answer(conn.id, request);
-                    if conn.out.send(response.encode()).is_err() {
+                    if conn.out.send(shared.answer(conn.id, request)).is_err() {
                         return;
                     }
                 }
@@ -1099,6 +1103,25 @@ mod tests {
         });
         assert_eq!(request(&mut stream, &mut reader, 1, "read")["result"], json!({"method": "read"}));
         assert_eq!(request(&mut stream, &mut reader, 2, "snapshot")["result"], json!({"method": "snapshot"}));
+        main.join().unwrap();
+    }
+
+    #[test]
+    fn a_result_the_main_thread_encoded_goes_out_as_it_is() {
+        let mut lab = Lab::start(VECTOR_SECRET, ServerConnection::new);
+        let (mut stream, mut reader, _) = lab.authenticated();
+        let jobs = std::mem::replace(&mut lab.jobs, mpsc::channel().1);
+        let main = thread::spawn(move || {
+            let job = jobs.recv_timeout(Duration::from_secs(5)).unwrap();
+            assert!(job.claim());
+            assert_eq!(job.method, "digest");
+            job.reply(queue::Reply::Encoded(br#"{"epoch":"1-2","records":[{"k":"track","id":"{AAAA}"}],"changed":11}"#.to_vec()));
+        });
+        let response = request(&mut stream, &mut reader, 3, "digest");
+        assert_eq!(
+            response,
+            json!({"type": "response", "id": 3, "ok": true, "result": {"epoch": "1-2", "records": [{"k": "track", "id": "{AAAA}"}], "changed": 11}})
+        );
         main.join().unwrap();
     }
 
