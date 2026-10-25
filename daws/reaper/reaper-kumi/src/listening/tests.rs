@@ -646,6 +646,7 @@ fn status_cancel_and_a_previews_stop_answer_while_the_main_thread_is_held() {
         port: None,
         log_dir: None,
         connection: ServerConnection::new,
+        stall: Duration::from_millis(1500),
     };
     let board = Arc::new(Board::default());
     let mut running = board::Job::new("j1", board::Kind::Render, true);

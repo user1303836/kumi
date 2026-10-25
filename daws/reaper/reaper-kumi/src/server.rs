@@ -27,7 +27,8 @@ use crate::reaper::Busy;
 const DEFAULT_WAIT: Duration = Duration::from_secs(2);
 /// The longest a request waits for the main thread, whatever deadline it names.
 const MAX_WAIT: Duration = Duration::from_secs(60);
-/// No tick for this long: the main thread is held (a modal dialog, a long load or render).
+/// No tick for this long: the main thread is held (a modal dialog, a long load or render). `Config::stall`; a test that
+/// waits for it sets its own.
 const STALL: Duration = Duration::from_millis(1500);
 /// Frames queued for one connection before it counts as stuck and is closed.
 const OUTBOX_FRAMES: usize = 4096;
@@ -205,6 +206,8 @@ pub struct Config {
     pub log_dir: Option<PathBuf>,
     /// Makes each accepted connection's handshake: random nonces, or the conformance vectors' fixed ones.
     pub connection: fn(Secret, u64) -> ServerConnection,
+    /// No tick for this long and the main thread counts as held (`STALL`).
+    pub stall: Duration,
 }
 
 impl Config {
@@ -215,6 +218,7 @@ impl Config {
             port: reference.port,
             log_dir: reference.log_dir.clone().map(PathBuf::from),
             connection: ServerConnection::new,
+            stall: STALL,
         }
     }
 
@@ -472,11 +476,12 @@ impl Shared {
     /// Why the main thread isn't ticking, if it isn't: nothing queued would run soon.
     fn stalled(&self) -> Option<Busy> {
         let snapshot = lock(&self.snapshot);
+        let stall = self.config.stall;
         match snapshot.last_tick {
-            Some(tick) if tick.elapsed() > STALL => match snapshot.working {
+            Some(tick) if tick.elapsed() > stall => match snapshot.working {
                 // Running a request it claimed, the main thread doesn't tick: that isn't a stall while the request is young.
                 // One that runs longer may be inside a dialog it opened: what comes meanwhile is answered busy.
-                Some(since) if since.elapsed() <= STALL => None,
+                Some(since) if since.elapsed() <= stall => None,
                 Some(_) => Some(Busy::Working),
                 None => Some(snapshot.busy.unwrap_or(Busy::Modal)),
             },
@@ -885,6 +890,12 @@ mod tests {
 
     impl Lab {
         fn start(secret: &str, connection: fn(Secret, u64) -> ServerConnection) -> Lab {
+            Self::start_with_stall(secret, connection, STALL)
+        }
+
+        /// A lab whose main thread counts as held after `stall` without a tick (the tests tick nothing: each has that long
+        /// from here for its requests to be taken, unless it holds the main thread itself).
+        fn start_with_stall(secret: &str, connection: fn(Secret, u64) -> ServerConnection, stall: Duration) -> Lab {
             let dir = tempfile::tempdir().unwrap();
             let bridge = dir.path().join("bridges").join("reaper");
             std::fs::create_dir_all(&bridge).unwrap();
@@ -895,6 +906,7 @@ mod tests {
                 port: None,
                 log_dir: None,
                 connection,
+                stall,
             };
             let snapshot = Arc::new(Mutex::new(Snapshot {
                 daw_version: "7.82/macOS-arm64".into(),
@@ -1253,10 +1265,14 @@ mod tests {
         assert!(jobs.try_recv().is_err(), "once");
     }
 
+    // (the optimization audit's R9: this slept 4.4 s through the production stall of 1.5 s; the lab's stall is 300 ms here)
     #[test]
     fn the_main_thread_running_a_slow_request_is_working_and_that_request_is_answered_while_others_are_told_busy() {
-        let mut lab = Lab::start(VECTOR_SECRET, ServerConnection::new);
+        let stall = Duration::from_millis(300);
+        let mut lab = Lab::start_with_stall(VECTOR_SECRET, ServerConnection::new, stall);
         let (mut stream, mut reader, _) = lab.authenticated();
+        // (the lab ticked when it started: the request below is taken whatever the handshake took)
+        lab.snapshot.lock().unwrap().last_tick = Some(Instant::now());
         let jobs = std::mem::replace(&mut lab.jobs, mpsc::channel().1);
         let snapshot = lab.snapshot.clone();
         let main = thread::spawn(move || {
@@ -1268,7 +1284,7 @@ mod tests {
                 snapshot.working = Some(Instant::now());
                 snapshot.last_tick = Some(Instant::now() - Duration::from_secs(5));
             }
-            thread::sleep(Duration::from_millis(2600));
+            thread::sleep(Duration::from_millis(600));
             {
                 let mut snapshot = snapshot.lock().unwrap();
                 snapshot.working = None;
@@ -1279,15 +1295,15 @@ mod tests {
         let frame = Request { id: 1, method: "change_apply".into(), params: json!({}), deadline_ms: Some(unix_ms() + 15_000) };
         stream.write_all(&Frame::Request(frame).encode()).unwrap();
         // While it is young, status (on another connection) says it works and not that REAPER is stuck.
-        thread::sleep(Duration::from_millis(800));
+        thread::sleep(Duration::from_millis(100));
         let (mut other, mut other_reader, _) = lab.authenticated();
         let status = request(&mut other, &mut other_reader, 2, "status")["result"].clone();
         assert_eq!((&status["busy"], &status["working"]), (&json!(false), &json!(true)));
         // Past the stall limit, what else comes is answered busy at once, not after its deadline.
-        thread::sleep(Duration::from_millis(1000));
+        thread::sleep(Duration::from_millis(350));
         let status = request(&mut other, &mut other_reader, 3, "status")["result"].clone();
         assert_eq!((&status["busy"], &status["working"]), (&json!("working"), &json!(true)));
-        assert!(status["workingMs"].as_u64().unwrap() >= 1500, "{status}");
+        assert!(status["workingMs"].as_u64().unwrap() >= stall.as_millis() as u64, "{status}");
         let started = Instant::now();
         let read = Request { id: 4, method: "read".into(), params: json!({"kind": "track"}), deadline_ms: Some(unix_ms() + 15_000) };
         other.write_all(&Frame::Request(read).encode()).unwrap();
@@ -1591,12 +1607,12 @@ mod tests {
     #[test]
     fn a_heartbeat_counts_from_the_connection_not_from_the_server() {
         let mut lab = Lab::start(VECTOR_SECRET, ServerConnection::new);
-        thread::sleep(Duration::from_millis(1200));
+        thread::sleep(Duration::from_millis(300));
         let (_stream, mut reader, _) = lab.authenticated();
         lab.hub.heartbeat();
         let beat: Value = serde_json::from_str(&read_line(&mut reader).unwrap()).unwrap();
         assert_eq!(beat["type"], "heartbeat");
-        assert!(beat["ms"].as_u64().unwrap() < 900, "{beat}");
+        assert!(beat["ms"].as_u64().unwrap() < 200, "{beat}");
     }
 
     /// The welcome and the connection's opening to events are one step: an event sent the moment the host has read
