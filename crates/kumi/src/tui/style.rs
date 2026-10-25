@@ -1,6 +1,6 @@
 //! Colours, text styles and the terminal escape codes that draw them.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::sync::LazyLock;
 
@@ -251,6 +251,8 @@ pub fn style_key(style: &Style) -> String {
 pub struct StyleTable {
     ids: RefCell<HashMap<Style, u32>>,
     styles: RefCell<Vec<Style>>,
+    /// The style asked for last, with its id: a row's cells mostly share one, and a frame asks per cell.
+    last: Cell<(Style, u32)>,
 }
 
 impl Default for StyleTable {
@@ -261,17 +263,27 @@ impl Default for StyleTable {
 
 impl StyleTable {
     pub fn new() -> StyleTable {
-        StyleTable { ids: RefCell::new(HashMap::from([(Style::default(), 0)])), styles: RefCell::new(vec![Style::default()]) }
+        StyleTable {
+            ids: RefCell::new(HashMap::from([(Style::default(), 0)])),
+            styles: RefCell::new(vec![Style::default()]),
+            last: Cell::new((Style::default(), 0)),
+        }
     }
 
     pub fn id(&self, style: &Style) -> u32 {
-        if let Some(id) = self.ids.borrow().get(style) {
-            return *id;
+        let last = self.last.get();
+        if last.0 == *style {
+            return last.1;
         }
-        let mut styles = self.styles.borrow_mut();
-        let id = styles.len() as u32;
-        styles.push(*style);
-        self.ids.borrow_mut().insert(*style, id);
+        let known = self.ids.borrow().get(style).copied();
+        let id = known.unwrap_or_else(|| {
+            let mut styles = self.styles.borrow_mut();
+            let id = styles.len() as u32;
+            styles.push(*style);
+            self.ids.borrow_mut().insert(*style, id);
+            id
+        });
+        self.last.set((*style, id));
         id
     }
 

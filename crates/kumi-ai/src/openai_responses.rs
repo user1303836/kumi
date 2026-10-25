@@ -1,4 +1,5 @@
 //! Native Responses transport for the OpenAI SDK surface used by Kumi.
+use super::types::ProviderMetadata;
 use super::{
     error::{ApiCallError, LanguageModelError},
     http::{post_json, Fetch, Headers},
@@ -11,6 +12,7 @@ use base64::{engine::general_purpose::STANDARD, Engine};
 use futures::{Stream, StreamExt};
 use kumi_common::js::json::stringify;
 use serde_json::{json, Map, Value};
+use std::sync::LazyLock;
 use std::{
     collections::{BTreeMap, HashMap, VecDeque},
     pin::Pin,
@@ -61,14 +63,14 @@ struct Capabilities {
     efforts: Option<Vec<&'static str>>,
 }
 fn capabilities(model: &str) -> Capabilities {
-    let gpt = regex::Regex::new(r"^gpt-(\d+)(?:\.(\d+))?(?:-(.+))?$").unwrap();
-    let gpt = gpt.captures(model);
+    static GPT: LazyLock<regex::Regex> = LazyLock::new(|| regex::Regex::new(r"^gpt-(\d+)(?:\.(\d+))?(?:-(.+))?$").unwrap());
+    static O: LazyLock<regex::Regex> = LazyLock::new(|| regex::Regex::new(r"^o(\d+)(?:-|$)").unwrap());
+    let gpt = GPT.captures(model);
     let major = gpt.as_ref().and_then(|m| m[1].parse::<u32>().ok()).unwrap_or(0);
     let minor = gpt.as_ref().and_then(|m| m.get(2)).and_then(|m| m.as_str().parse::<u32>().ok());
     let variant = gpt.as_ref().and_then(|m| m.get(3)).map(|m| m.as_str()).unwrap_or("");
     let chat = minor.is_none() && variant.starts_with("chat");
-    let o = regex::Regex::new(r"^o(\d+)(?:-|$)").unwrap();
-    let o = o.captures(model).and_then(|m| m[1].parse::<u32>().ok());
+    let o = O.captures(model).and_then(|m| m[1].parse::<u32>().ok());
     let gpt6 = major >= 6;
     Capabilities {
         reasoning: o.is_some() || major >= 5 && !chat,
@@ -771,9 +773,10 @@ fn output_chunk(value: &Value) -> bool {
 #[async_trait(?Send)]
 impl LanguageModel for ResponsesModel {
     async fn do_stream(&self, call: CallOptions) -> Result<StreamParts, LanguageModelError> {
-        let (body, warnings, opts) = self.arguments(&call)?;
-        let mut wire = body.clone();
-        wire["stream"] = json!(true);
+        let (mut body, warnings, opts) = self.arguments(&call)?;
+        // One copy of the request: what goes on the wire is what an error reports.
+        body["stream"] = json!(true);
+        let body = Rc::new(body);
         // A server on the producer's network may take no key.
         let mut headers = Headers::new();
         if !self.0.api_key.is_empty() {
@@ -790,7 +793,7 @@ impl LanguageModel for ResponsesModel {
         }
         headers.entry("user-agent".into()).or_default().push_str(" ai-sdk/provider-utils/5.0.49 runtime/node.js/24");
         let url = format!("{}/responses", self.0.base_url.trim_end_matches('/'));
-        let response = post_json(self.0.fetch.as_ref(), &url, headers, wire, call.abort_signal).await?;
+        let response = post_json(self.0.fetch.as_ref(), &url, headers, body.clone(), call.abort_signal).await?;
         let mut input: Pin<Box<dyn Stream<Item = Result<Value, LanguageModelError>>>> = Box::pin(json_stream(response.body.unwrap()));
         let mut initial = vec![];
         let mut accepted = false;
@@ -820,7 +823,14 @@ impl LanguageModel for ResponsesModel {
                             .and_then(|m| m["message"].as_str())
                             .unwrap_or("OpenAI stream failed before any output was generated"),
                         url,
-                        Some(body),
+                        // The request as the SDK reports it: without the stream flag it sets on the wire copy alone.
+                        Some({
+                            let mut reported = Value::clone(&body);
+                            if let Some(object) = reported.as_object_mut() {
+                                object.shift_remove("stream");
+                            }
+                            reported
+                        }),
                         Some(normalized.as_ref().and_then(|m| m["statusCode"].as_u64()).unwrap_or(500) as u16),
                     );
                     error.response_headers = Some(response.headers);
@@ -934,6 +944,23 @@ impl State {
             Err(error) => self.error(LanguageModelError::other(format!("Invalid OpenAI stream part: {error}"))),
         }
     }
+
+    /// A text or reasoning delta straight to the queue, without building it as JSON first: there is one per token.
+    /// What isn't words is read the schema's way, for its error.
+    fn delta(&mut self, reasoning: bool, id: String, delta: &Value, provider_metadata: Option<ProviderMetadata>) {
+        match delta.as_str() {
+            Some(text) if reasoning => {
+                self.pending.push_back(StreamPart::ReasoningDelta { id, delta: text.to_owned(), provider_metadata });
+            }
+            Some(text) => self.pending.push_back(StreamPart::TextDelta { id, delta: text.to_owned(), provider_metadata }),
+            None => self.emit(json!({
+                "type": if reasoning { "reasoning-delta" } else { "text-delta" },
+                "id": id,
+                "delta": delta,
+                "providerMetadata": provider_metadata,
+            })),
+        }
+    }
     fn error(&mut self, error: LanguageModelError) {
         self.failed = true;
         self.finish = FinishReason { unified: FinishReasonUnified::Error, raw: None };
@@ -996,11 +1023,11 @@ impl State {
                 },_=>{},
             },
             Some("response.function_call_arguments.delta")=>{if let Some(call)=self.calls.get_mut(&index){if call.suppressed{call.deltas.push(string(&value,"delta"));}else{let id=call.id.clone();self.emit(json!({"type":"tool-input-delta","id":id,"delta":value["delta"]}));}}},
-            Some("response.output_text.delta")=>{self.emit(json!({"type":"text-delta","id":self.resolved(&value),"delta":value["delta"]}));if self.logprobs_enabled&&!value["logprobs"].is_null(){self.logprobs.push(value["logprobs"].clone());}},
+            Some("response.output_text.delta")=>{let id=self.resolved(&value);self.delta(false,id,&value["delta"],None);if self.logprobs_enabled&&!value["logprobs"].is_null(){self.logprobs.push(value["logprobs"].clone());}},
             Some("response.reasoning_summary_part.added")=>{
                 let id=self.resolved(&value);let Some(part)=value["summary_index"].as_f64().filter(|n|*n>=0.0&&n.fract()==0.0).map(|n|n as u64) else{return};if part>0{if let Some(reasoning)=self.reasoning.get_mut(&id){reasoning.parts.insert(part,0);let mut ends=vec![];for(index,status)in &mut reasoning.parts{if *status==1{*status=2;ends.push(*index);}}let encrypted=reasoning.encrypted.clone();for index in ends{self.emit(json!({"type":"reasoning-end","id":format!("{id}:{index}"),"providerMetadata":{"openai":{"itemId":id}}}));}self.emit(json!({"type":"reasoning-start","id":format!("{id}:{part}"),"providerMetadata":{"openai":{"itemId":id,"reasoningEncryptedContent":encrypted}}}));}}
             },
-            Some("response.reasoning_summary_text.delta")=>{let id=self.resolved(&value);self.emit(json!({"type":"reasoning-delta","id":format!("{id}:{}",value["summary_index"]),"delta":value["delta"],"providerMetadata":{"openai":{"itemId":id}}}));},
+            Some("response.reasoning_summary_text.delta")=>{let id=self.resolved(&value);let mut meta=ProviderMetadata::new();meta.insert("openai".into(),json!({"itemId":id}));self.delta(true,format!("{id}:{}",value["summary_index"]),&value["delta"],Some(meta));},
             Some("response.reasoning_summary_part.done")=>{let id=self.resolved(&value);let Some(part)=value["summary_index"].as_f64().filter(|n|*n>=0.0&&n.fract()==0.0).map(|n|n as u64) else{return};if let Some(reasoning)=self.reasoning.get_mut(&id){reasoning.parts.insert(part,if self.store{2}else{1});if self.store{self.emit(json!({"type":"reasoning-end","id":format!("{id}:{part}"),"providerMetadata":{"openai":{"itemId":id}}}));}}},
             Some("response.completed"|"response.incomplete")=>{if !self.failed{self.finish=finish(value["response"]["incomplete_details"]["reason"].as_str().map(str::to_string),self.has_function);}self.usage=nonnull(&value["response"],"usage");self.service=nonnull(&value["response"],"service_tier").or(self.service.take());self.context=nonnull(&value["response"]["reasoning"],"context").or(self.context.take());},
             Some("response.failed")=>{let reason=value["response"]["incomplete_details"]["reason"].as_str().map(str::to_string);self.finish=if reason.is_some(){finish(reason,self.has_function)}else{FinishReason{unified:FinishReasonUnified::Error,raw:Some("error".into())}};self.usage=nonnull(&value["response"],"usage");self.context=nonnull(&value["response"]["reasoning"],"context").or(self.context.take());if !self.failed&&!value["response"]["error"].is_null(){self.failed=true;let mut frame=select_fields(&value,&["type","sequence_number"]);frame["response"]=select_fields(&value["response"],&["error","incomplete_details","service_tier"]);if let Some(error)=stream_error(&frame){self.pending.push_back(StreamPart::Error{error:LanguageModelError::ProviderStream(error)});}}},

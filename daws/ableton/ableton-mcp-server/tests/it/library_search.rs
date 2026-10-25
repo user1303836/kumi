@@ -10,9 +10,9 @@ use std::collections::HashMap;
 use std::fs;
 
 use ableton_mcp_server::project::library_search::{
-    assert_supported_files_schema, assert_supported_plugins_schema, query_library_files, query_library_plugins,
-    query_library_tag_vocabulary, LibraryItem, LibraryKind, LibraryMode, LibraryPluginItem, LibraryQuery, LibrarySearchError, LibrarySort,
-    LibraryTagEntry, PluginFormat, SUPPORTED_FILES_SCHEMA_VERSIONS,
+    assert_supported_files_schema, assert_supported_plugins_schema, index_library, query_library_files, query_library_plugins,
+    query_library_tag_vocabulary, LibraryIndex, LibraryItem, LibraryKind, LibraryMode, LibraryPluginItem, LibraryQuery, LibrarySearchError,
+    LibrarySort, LibraryTagEntry, PluginFormat, SUPPORTED_FILES_SCHEMA_VERSIONS,
 };
 use ableton_mcp_server::project::sqlite_reader::SqliteReader;
 use serde::Serialize;
@@ -26,13 +26,18 @@ fn plugins_reader() -> SqliteReader {
     SqliteReader::new(library_fixtures::plugins_db()).unwrap()
 }
 
+/// The files database decoded once, as the host keeps it between queries.
+fn files_index() -> LibraryIndex {
+    index_library(&files_reader()).unwrap()
+}
+
 /// The query the host builds from `{ database, allowlistRoot }` alone.
 fn files_args() -> LibraryQuery {
     LibraryQuery::new(LibraryMode::Files, 50)
 }
 
-fn files(reader: &SqliteReader, query: &LibraryQuery) -> Vec<LibraryItem> {
-    query_library_files(reader, query).unwrap().items
+fn files(index: &LibraryIndex, query: &LibraryQuery) -> Vec<LibraryItem> {
+    query_library_files(index, query).unwrap().items
 }
 
 fn names(items: &[LibraryItem]) -> Vec<&str> {
@@ -60,7 +65,8 @@ fn files_mode_classifies_kinds_with_evidence_and_sorts_by_usage_count() {
     let reader = files_reader();
     assert_eq!(assert_supported_files_schema(&reader).unwrap(), 12300);
     assert_eq!(SUPPORTED_FILES_SCHEMA_VERSIONS, &[12300]);
-    let items = files(&reader, &files_args());
+    let index = index_library(&reader).unwrap();
+    let items = files(&index, &files_args());
     assert_eq!(
         names(&items),
         ["Kick 909 Core.wav", "Wavetable", "My Set.als", "FX Rack.adg", "Envelope MIDI.amxd", "Operator", "Dusty Rhodes.aif"]
@@ -80,22 +86,22 @@ fn files_mode_classifies_kinds_with_evidence_and_sorts_by_usage_count() {
 
 #[test]
 fn name_wildcard_kind_source_and_sort_filters_compose() {
-    let reader = files_reader();
-    let substring = files(&reader, &LibraryQuery { query: Some("kick".to_string()), ..files_args() });
+    let index = files_index();
+    let substring = files(&index, &LibraryQuery { query: Some("kick".to_string()), ..files_args() });
     assert_eq!(names(&substring), ["Kick 909 Core.wav"]);
-    let wildcard = files(&reader, &LibraryQuery { query: Some("*.a*".to_string()), ..files_args() });
+    let wildcard = files(&index, &LibraryQuery { query: Some("*.a*".to_string()), ..files_args() });
     let mut wildcard_names = names(&wildcard);
     wildcard_names.sort();
     let mut expected = ["Dusty Rhodes.aif", "FX Rack.adg", "Envelope MIDI.amxd", "My Set.als"];
     expected.sort();
     assert_eq!(wildcard_names, expected);
-    let audio = files(&reader, &LibraryQuery { kinds: Some(vec![LibraryKind::Audio]), ..files_args() });
+    let audio = files(&index, &LibraryQuery { kinds: Some(vec![LibraryKind::Audio]), ..files_args() });
     assert_eq!(names(&audio), ["Kick 909 Core.wav", "Dusty Rhodes.aif"]);
-    let user_library = files(&reader, &LibraryQuery { sources: Some(vec!["User Library".to_string()]), ..files_args() });
+    let user_library = files(&index, &LibraryQuery { sources: Some(vec!["User Library".to_string()]), ..files_args() });
     assert_eq!(names(&user_library), ["Kick 909 Core.wav", "Dusty Rhodes.aif"]);
-    let by_modified = files(&reader, &LibraryQuery { sort: Some(LibrarySort::Modified), ..files_args() });
+    let by_modified = files(&index, &LibraryQuery { sort: Some(LibrarySort::Modified), ..files_args() });
     assert_eq!(by_modified[0].name, "My Set.als");
-    let by_name = files(&reader, &LibraryQuery { sort: Some(LibrarySort::Name), ..files_args() });
+    let by_name = files(&index, &LibraryQuery { sort: Some(LibrarySort::Name), ..files_args() });
     let mut sorted = names(&by_name);
     sorted.sort();
     assert_eq!(names(&by_name), sorted);
@@ -103,9 +109,9 @@ fn name_wildcard_kind_source_and_sort_filters_compose() {
 
 #[test]
 fn tag_conjunction_filters_accept_leaf_names_and_full_paths() {
-    let reader = files_reader();
+    let index = files_index();
     let with_tags =
-        |tags: &[&str]| files(&reader, &LibraryQuery { tags: Some(tags.iter().map(|tag| tag.to_string()).collect()), ..files_args() });
+        |tags: &[&str]| files(&index, &LibraryQuery { tags: Some(tags.iter().map(|tag| tag.to_string()).collect()), ..files_args() });
     let kick = with_tags(&["Kick"]);
     assert_eq!(names(&kick), ["Kick 909 Core.wav"]);
     let conjunction = with_tags(&["Drums", "Kick"]);
@@ -125,35 +131,33 @@ fn tag_conjunction_filters_accept_leaf_names_and_full_paths() {
 
 #[test]
 fn paging_is_revision_bound_and_honest_about_truncation() {
-    let reader = files_reader();
-    let first = query_library_files(&reader, &LibraryQuery { limit: 3, ..files_args() }).unwrap();
+    let index = files_index();
+    let first = query_library_files(&index, &LibraryQuery { limit: 3, ..files_args() }).unwrap();
     assert_eq!(first.paging.returned, 3);
     assert_eq!(first.paging.total, 7);
     assert!(!first.paging.complete);
     assert!(!first.paging.truncated);
-    let second =
-        query_library_files(&reader, &LibraryQuery { limit: 3, cursor: first.paging.next_cursor.clone(), ..files_args() }).unwrap();
+    let second = query_library_files(&index, &LibraryQuery { limit: 3, cursor: first.paging.next_cursor.clone(), ..files_args() }).unwrap();
     assert_eq!(second.paging.returned, 3);
-    let third =
-        query_library_files(&reader, &LibraryQuery { limit: 3, cursor: second.paging.next_cursor.clone(), ..files_args() }).unwrap();
+    let third = query_library_files(&index, &LibraryQuery { limit: 3, cursor: second.paging.next_cursor.clone(), ..files_args() }).unwrap();
     assert_eq!(third.paging.returned, 1);
     assert!(third.paging.complete);
     let all: std::collections::HashSet<&str> =
         first.items.iter().chain(&second.items).chain(&third.items).map(|item| item.name.as_str()).collect();
     assert_eq!(all.len(), 7, "pages are disjoint and cover the match set");
     let stale = query_library_files(
-        &reader,
+        &index,
         &LibraryQuery { query: Some("kick".to_string()), limit: 3, cursor: first.paging.next_cursor.clone(), ..files_args() },
     );
     assert!(is_unavailable(&stale.unwrap_err()), "a cursor from a different query is stale");
-    let garbage = query_library_files(&reader, &LibraryQuery { cursor: Some("!!not-a-cursor!!".to_string()), ..files_args() });
+    let garbage = query_library_files(&index, &LibraryQuery { cursor: Some("!!not-a-cursor!!".to_string()), ..files_args() });
     assert!(is_unavailable(&garbage.unwrap_err()));
 }
 
 #[test]
 fn browser_candidates_resolve_only_with_device_class_evidence_everything_else_is_discovery_only() {
-    let reader = files_reader();
-    let items = files(&reader, &files_args());
+    let index = files_index();
+    let items = files(&index, &files_args());
     let wavetable = items.iter().find(|item| item.name == "Wavetable").unwrap();
     assert_eq!(wavetable.browser_candidate.as_ref().unwrap().item_id, "instruments/Wavetable");
     assert!(!wavetable.discovery_only);
@@ -186,16 +190,16 @@ fn plug_in_inventory_covers_vendor_and_format_filters_with_redacted_paths() {
 
 #[test]
 fn tag_vocabulary_mode_lists_the_tag_tree_with_usage_counts() {
-    let reader = files_reader();
+    let index = files_index();
     let tags_args = || LibraryQuery::new(LibraryMode::Tags, 50);
-    let response = query_library_tag_vocabulary(&reader, &tags_args()).unwrap();
+    let response = query_library_tag_vocabulary(&index, &tags_args()).unwrap();
     let by_path: HashMap<&str, &LibraryTagEntry> = response.items.iter().map(|item| (item.path.as_str(), item)).collect();
     assert_eq!(by_path["Devices|Synthesizer"].usage_count, 2);
     assert_eq!(by_path["Devices|Synthesizer|FM"].usage_count, 1);
     assert_eq!(by_path["Drums|Kick"].usage_count, 1);
     assert_eq!(by_path["Devices|Delay"].usage_count, 1);
     assert_eq!(by_path["Keys"].usage_count, 1);
-    let filtered = query_library_tag_vocabulary(&reader, &LibraryQuery { query: Some("synth".to_string()), ..tags_args() }).unwrap();
+    let filtered = query_library_tag_vocabulary(&index, &LibraryQuery { query: Some("synth".to_string()), ..tags_args() }).unwrap();
     assert_eq!(filtered.items.iter().map(|item| item.path.as_str()).collect::<Vec<_>>(), ["Devices|Synthesizer", "Devices|Synthesizer|FM"]);
 }
 
@@ -240,8 +244,9 @@ fn library_search_never_writes_to_any_live_file() {
     let before_listing = listing();
     let files_reader = SqliteReader::new(fs::read(&files_db).unwrap()).unwrap();
     let plugins_reader = SqliteReader::new(fs::read(&plugins_db).unwrap()).unwrap();
-    query_library_files(&files_reader, &files_args()).unwrap();
-    query_library_tag_vocabulary(&files_reader, &LibraryQuery::new(LibraryMode::Tags, 50)).unwrap();
+    let files_index = index_library(&files_reader).unwrap();
+    query_library_files(&files_index, &files_args()).unwrap();
+    query_library_tag_vocabulary(&files_index, &LibraryQuery::new(LibraryMode::Tags, 50)).unwrap();
     query_library_plugins(&plugins_reader, &LibraryQuery::new(LibraryMode::Plugins, 50)).unwrap();
     assert_eq!(fs::read(&files_db).unwrap(), before_files, "the files database is byte-identical after queries");
     assert_eq!(fs::read(&plugins_db).unwrap(), before_plugins, "the plug-ins database is byte-identical after queries");
@@ -253,20 +258,20 @@ fn library_search_never_writes_to_any_live_file() {
 #[test]
 fn serialized_pages_and_cursors_match_the_typescript_byte_for_byte() {
     let reader = files_reader();
-    let first = query_library_files(&reader, &LibraryQuery { limit: 3, ..files_args() }).unwrap();
+    let index = index_library(&reader).unwrap();
+    let first = query_library_files(&index, &LibraryQuery { limit: 3, ..files_args() }).unwrap();
     assert_eq!(
         first.paging.next_cursor.as_deref(),
         Some("eyJyZXZpc2lvbiI6ImUyNmU1ZThmMjZmZWJjMTM3OWEzNGJiMWZjMDk3YmIzMGMyOGIwNDE5ZDg0Mjk0MTIyYjVlNGY2YzI4ZGE0NDciLCJvZmZzZXQiOjN9")
     );
-    let second =
-        query_library_files(&reader, &LibraryQuery { limit: 3, cursor: first.paging.next_cursor.clone(), ..files_args() }).unwrap();
+    let second = query_library_files(&index, &LibraryQuery { limit: 3, cursor: first.paging.next_cursor.clone(), ..files_args() }).unwrap();
     assert_eq!(
         second.paging.next_cursor.as_deref(),
         Some("eyJyZXZpc2lvbiI6ImUyNmU1ZThmMjZmZWJjMTM3OWEzNGJiMWZjMDk3YmIzMGMyOGIwNDE5ZDg0Mjk0MTIyYjVlNGY2YzI4ZGE0NDciLCJvZmZzZXQiOjZ9")
     );
     let digest = |text: String| hex::encode(Sha256::digest(text.as_bytes()));
     assert_eq!(
-        digest(json(&query_library_files(&reader, &files_args()).unwrap())),
+        digest(json(&query_library_files(&index, &files_args()).unwrap())),
         "e90854a51089db5064c04a3355d4b86277ff7bef6966453d0ef80cf2d162adb1"
     );
     assert_eq!(
@@ -274,7 +279,7 @@ fn serialized_pages_and_cursors_match_the_typescript_byte_for_byte() {
         "ca809df00ce87ff383c7042308c2ba85eac693b35045ec870631fb99d575425d"
     );
     assert_eq!(
-        digest(json(&query_library_tag_vocabulary(&reader, &LibraryQuery::new(LibraryMode::Tags, 50)).unwrap())),
+        digest(json(&query_library_tag_vocabulary(&index, &LibraryQuery::new(LibraryMode::Tags, 50)).unwrap())),
         "a0fbc3668f1b19089375776bd7e5510df56fe189e51d62faef17973d5ba21ff1"
     );
     assert_eq!(reader.table_names().join(","), "ancestors,devices,fe_values,fe_values_record,file_devices,files,keywords,metadata,metadata_values,places,sqlite_sequence,version,vfolder_patterns,vfolders");
@@ -283,8 +288,7 @@ fn serialized_pages_and_cursors_match_the_typescript_byte_for_byte() {
 
 #[test]
 fn results_redact_the_database_path_and_owner_allowlist_root() {
-    let reader = files_reader();
-    let serialized = json(&query_library_files(&reader, &files_args()).unwrap());
+    let serialized = json(&query_library_files(&files_index(), &files_args()).unwrap());
     assert!(!serialized.contains("Live-files-12300.db"), "the database path never appears in results");
     assert!(!serialized.contains("/Users/"), "no filesystem path appears in results");
 }

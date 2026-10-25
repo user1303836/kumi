@@ -178,7 +178,7 @@ impl TuiApp {
                         }
                     }
                     if aside.state == "asking" {
-                        self.0.scheduler.request();
+                        self.0.scheduler.request_animation();
                     }
                 }
             }
@@ -211,7 +211,7 @@ impl TuiApp {
                         lines.push(line);
                     }
                     if detail.status.state == kumi_agent::core::jobs::JobState::Running {
-                        self.0.scheduler.request();
+                        self.0.scheduler.request_animation();
                     }
                 }
             },

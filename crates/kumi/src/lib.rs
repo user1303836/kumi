@@ -21,4 +21,5 @@ pub mod tui;
 pub mod update;
 pub mod voice;
 pub mod whats_new;
+pub mod workers;
 // Live's own parts of the app, at the paths they always had.

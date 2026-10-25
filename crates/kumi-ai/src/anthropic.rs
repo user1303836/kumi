@@ -1,5 +1,6 @@
 //! Native Messages transport for the Anthropic SDK surface used by Kumi.
 
+use super::types::ProviderMetadata;
 use super::{
     error::{ApiCallError, LanguageModelError},
     http::{post_json, Fetch, Headers},
@@ -12,6 +13,7 @@ use base64::{engine::general_purpose::STANDARD, Engine};
 use futures::{Stream, StreamExt};
 use kumi_common::js::json::stringify;
 use serde_json::{json, Map, Value};
+use std::sync::LazyLock;
 use std::{
     collections::{HashMap, VecDeque},
     pin::Pin,
@@ -343,6 +345,9 @@ struct Capabilities {
     rejects_sampling: bool,
     rejects_forced: bool,
 }
+/// Claude Instant, 2 and 3: the models before extended output.
+static EARLY: LazyLock<regex::Regex> =
+    LazyLock::new(|| regex::Regex::new(r"claude-(?:instant(?:-|$)|v?2(?:$|[-.:])|3(?:$|[-.]))").unwrap());
 fn capabilities(model: &str) -> Capabilities {
     let has = |names: &[&str]| names.iter().any(|name| model.contains(name));
     let (max, structured, known, rejects_sampling) =
@@ -360,7 +365,7 @@ fn capabilities(model: &str) -> Capabilities {
             (32000., false, true, false)
         } else if model.contains("claude-3-haiku") {
             (4096., false, true, false)
-        } else if regex::Regex::new(r"claude-(?:instant(?:-|$)|v?2(?:$|[-.:])|3(?:$|[-.]))").unwrap().is_match(model) {
+        } else if EARLY.is_match(model) {
             (4096., false, false, false)
         } else if model.contains("claude-") {
             (128000., true, false, true)
@@ -456,7 +461,8 @@ impl AnthropicModel {
         }
         let mut tools = vec![];
         for tool in call.tools.as_deref().unwrap_or(&[]) {
-            let v = serde_json::to_value(tool).unwrap();
+            // Only the tool's provider options are read here: its schema isn't serialized to find them.
+            let v = json!({"providerOptions": tool.provider_options});
             let meta = metadata(&v);
             let mut wire = json!({"name":tool.name});
             field(&mut wire, "description", tool.description.as_ref().map(|v| json!(v)));
@@ -552,6 +558,7 @@ impl LanguageModel for AnthropicModel {
         }
         headers.entry("user-agent".into()).or_default().push_str(" ai-sdk/provider-utils/5.0.49 runtime/node.js/24");
         let url = format!("{}/messages", self.0.base_url.trim_end_matches('/'));
+        let body = Rc::new(body);
         let response = post_json(self.0.fetch.as_ref(), &url, headers, body.clone(), options.abort_signal).await?;
         let response_headers = response.headers;
         let documents = options
@@ -596,7 +603,7 @@ impl LanguageModel for AnthropicModel {
                 let mut api = ApiCallError::new(
                     error["message"].as_str().unwrap_or(""),
                     url,
-                    Some(body),
+                    Some(Value::clone(&body)),
                     Some(error.get("statusCode").and_then(Value::as_u64).unwrap_or(500) as u16),
                 );
                 api.response_headers = Some(response_headers);
@@ -751,6 +758,23 @@ impl StreamState {
                 .push_back(StreamPart::Error { error: LanguageModelError::other(format!("Invalid Anthropic stream part: {error}")) }),
         }
     }
+
+    /// A text or reasoning delta straight to the queue, without building it as JSON first: there is one per token.
+    /// What isn't words is read the schema's way, for its error.
+    fn delta(&mut self, reasoning: bool, id: String, delta: &Value, provider_metadata: Option<ProviderMetadata>) {
+        match delta.as_str() {
+            Some(text) if reasoning => {
+                self.pending.push_back(StreamPart::ReasoningDelta { id, delta: text.to_owned(), provider_metadata });
+            }
+            Some(text) => self.pending.push_back(StreamPart::TextDelta { id, delta: text.to_owned(), provider_metadata }),
+            None => self.emit(json!({
+                "type": if reasoning { "reasoning-delta" } else { "text-delta" },
+                "id": id,
+                "delta": delta,
+                "providerMetadata": provider_metadata,
+            })),
+        }
+    }
     fn tool(&mut self, id: &str, name: &str, input: &str, caller: Option<Value>) {
         let mut value = json!({"type":"tool-call","toolCallId":id,"toolName":name,"input":input});
         if let Some(caller) = caller {
@@ -854,10 +878,10 @@ impl StreamState {
             "content_block_delta" => {
                 let delta = &value["delta"];
                 match delta["type"].as_str(){
-                    Some("text_delta")=>self.emit(json!({"type":"text-delta","id":index,"delta":delta["text"]})),
-                    Some("thinking_delta")=>self.emit(json!({"type":"reasoning-delta","id":index,"delta":delta["thinking"]})),
+                    Some("text_delta")=>self.delta(false,index.clone(),&delta["text"],None),
+                    Some("thinking_delta")=>self.delta(true,index.clone(),&delta["thinking"],None),
                     Some("signature_delta") if self.block_type=="thinking"=>self.emit(json!({"type":"reasoning-delta","id":index,"delta":"","providerMetadata":{"anthropic":{"signature":delta["signature"]}}})),
-                    Some("compaction_delta") if !delta["content"].is_null()=>self.emit(json!({"type":"text-delta","id":index,"delta":delta["content"]})),
+                    Some("compaction_delta") if !delta["content"].is_null()=>self.delta(false,index.clone(),&delta["content"],None),
                     Some("input_json_delta")=>{
                         let delta=string(delta,"partial_json");if delta.is_empty(){return;}
                         if let Some(block)=self.blocks.get_mut(&index).filter(|b|b.kind=="tool_use"){block.input+=&delta;let id=block.id.clone();self.emit(json!({"type":"tool-input-delta","id":id,"delta":delta}));}

@@ -66,6 +66,12 @@ impl FrameScheduler {
         self.request_within(self.inner.interval_ms);
     }
 
+    /// Draw at the animation's pace: for what a frame finds still moving as it draws (a glyph in a panel), and for
+    /// what arrives on its own (a model's words, the DAW's events) rather than from the producer's hands.
+    pub fn request_animation(&self) {
+        self.request_within(self.inner.animation_ms);
+    }
+
     /// A frame `interval_ms` after the last one (at once when that has passed), unless one is due sooner already.
     fn request_within(&self, interval_ms: f64) {
         let mut state = self.inner.state.borrow_mut();

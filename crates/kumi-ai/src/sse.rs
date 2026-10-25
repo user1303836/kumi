@@ -24,19 +24,28 @@ pub struct SseParser {
 impl SseParser {
     pub fn push(&mut self, bytes: &[u8]) -> Vec<Event> {
         let mut events = Vec::new();
-        for &byte in bytes {
+        let mut at = 0;
+        while at < bytes.len() {
             if self.skip_lf {
                 self.skip_lf = false;
                 self.finish_line(&mut events);
-                if byte == b'\n' {
+                if bytes[at] == b'\n' {
+                    at += 1;
                     continue;
                 }
             }
-            match byte {
+            // A line's bytes are taken in one piece, up to the next line end: a token's event is a few dozen bytes
+            // and an answer is thousands of them.
+            let Some(end) = memchr::memchr2(b'\r', b'\n', &bytes[at..]) else {
+                self.line.extend_from_slice(&bytes[at..]);
+                break;
+            };
+            self.line.extend_from_slice(&bytes[at..at + end]);
+            match bytes[at + end] {
                 b'\r' => self.skip_lf = true,
-                b'\n' => self.finish_line(&mut events),
-                _ => self.line.push(byte),
+                _ => self.finish_line(&mut events),
             }
+            at += end + 1;
         }
         events
     }

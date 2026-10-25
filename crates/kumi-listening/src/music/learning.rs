@@ -1,5 +1,5 @@
 //! The producer's music as the app holds it: whether Kumi learns it (their music folders), how the scan is going (a
-//! `kumi-library-learner --music` process, started again every half hour to find new songs), and pausing it while
+//! `kumi __library-learner --music` process, started again every half hour to find new songs), and pausing it while
 //! Kumi listens or renders, or when the producer asks.
 
 use super::{
@@ -10,7 +10,7 @@ use super::{
 };
 use indexmap::IndexMap;
 use kumi_common::{abort::Signal, time::now_ms};
-use kumi_library::{daws::Daws, measure_worker::worker_binary};
+use kumi_library::{daws::Daws, measure_worker::worker_program};
 use serde::{Deserialize, Serialize};
 use std::{
     cell::{Cell, RefCell},
@@ -563,7 +563,8 @@ impl Music {
             });
             return;
         }
-        let spawned = Command::new(worker_binary("kumi-library-learner", "KUMI_LIBRARY_LEARNER_BIN"))
+        let spawned = worker_program("library-learner", "KUMI_LIBRARY_LEARNER_BIN")
+            .command()
             .arg("--music")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())

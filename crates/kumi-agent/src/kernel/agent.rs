@@ -553,7 +553,22 @@ impl Kernel for AgentKernel {
         true
     }
     fn checkpoint(&self) -> Result<KernelCheckpoint, RuntimeError> {
-        AgentKernel::checkpoint(self).map(Into::into)
+        if self.inner.running.borrow().is_some() {
+            return Err(RuntimeError::plain("Kernel is busy; checkpoint between turns"));
+        }
+        // Straight from the history: the settled messages are serialized once, not copied first.
+        Ok(KernelCheckpoint {
+            version: 1,
+            messages: self
+                .inner
+                .history
+                .borrow()
+                .iter()
+                .map(|message| serde_json::to_value(message).expect("message serializes"))
+                .collect(),
+            origin: Some(self.inner.binding().id.clone()),
+            tools: Some(self.inner.tools_key.clone()),
+        })
     }
     fn has_transcript(&self) -> bool {
         true

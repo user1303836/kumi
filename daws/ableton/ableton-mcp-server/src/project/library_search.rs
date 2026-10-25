@@ -421,6 +421,8 @@ struct FileRow {
     file_type: Option<i64>,
     mod_date: Option<i64>,
     name: String,
+    /// The name lowercased once, for every query's text match.
+    lower_name: String,
     use_count: i64,
     place_id: Option<i64>,
     device_id: Option<String>,
@@ -453,6 +455,7 @@ fn read_library_files(reader: &SqliteReader) -> Result<Vec<FileRow>, LibrarySear
             parent_id: row_number(row, files_columns::PARENT_ID),
             file_type: row_number(row, files_columns::FILE_TYPE),
             mod_date: row_number(row, files_columns::MOD_DATE),
+            lower_name: name.to_lowercase(),
             name,
             use_count: row_number(row, files_columns::USE_COUNT).unwrap_or(0),
             place_id: row_number(row, files_columns::PLACE_ID),
@@ -771,10 +774,24 @@ fn host_enum_seed(query: &LibraryQuery, key: &str) -> Option<String> {
     Some(strings.join(","))
 }
 
-pub fn query_library_files(reader: &SqliteReader, query: &LibraryQuery) -> Result<LibraryPage<LibraryItem>, LibrarySearchError> {
+/// A files database decoded once: its file rows, its tag index and its places. Every file or tag query, and every
+/// page of one, runs over this; a library of a hundred thousand rows is decoded when the database changes, not per
+/// query (the host keeps it beside the parsed database).
+pub struct LibraryIndex {
+    files: Vec<FileRow>,
+    tags: TagIndex,
+    places: HashMap<i64, String>,
+}
+
+pub fn index_library(reader: &SqliteReader) -> Result<LibraryIndex, LibrarySearchError> {
     let files = read_library_files(reader)?;
-    let TagIndex { tags_by_file, .. } = build_tag_index(reader, &files)?;
+    let tags = build_tag_index(reader, &files)?;
     let places = place_map(reader)?;
+    Ok(LibraryIndex { files, tags, places })
+}
+
+pub fn query_library_files(index: &LibraryIndex, query: &LibraryQuery) -> Result<LibraryPage<LibraryItem>, LibrarySearchError> {
+    let LibraryIndex { files, tags: TagIndex { tags_by_file, .. }, places } = index;
     let excluded_fourccs = ["keyw", "fldr", "pref"];
     let query_text = query.query.as_deref().filter(|text| !text.is_empty());
     let name_matcher = query_text.filter(|text| text.contains('*') || text.contains('?')).map(wildcard_to_regex);
@@ -786,7 +803,7 @@ pub fn query_library_files(reader: &SqliteReader, query: &LibraryQuery) -> Resul
         query.sources.as_ref().filter(|sources| !sources.is_empty()).map(|sources| sources.iter().cloned().collect());
     let mut matched: Vec<LibraryItem> = Vec::new();
     let mut scanned_rows = 0;
-    for row in &files {
+    for row in files {
         scanned_rows += 1;
         if matched.len() >= MAX_LIBRARY_MATCHES {
             break;
@@ -804,7 +821,7 @@ pub fn query_library_files(reader: &SqliteReader, query: &LibraryQuery) -> Resul
         }
         let name_rejected = match (&name_matcher, &lowered_query) {
             (Some(matcher), _) => !matcher.is_match(&row.name),
-            (None, Some(lowered)) => !row.name.to_lowercase().contains(lowered.as_str()),
+            (None, Some(lowered)) => !row.lower_name.contains(lowered.as_str()),
             (None, None) => false,
         };
         if name_rejected {
@@ -936,11 +953,10 @@ pub fn query_library_plugins(reader: &SqliteReader, query: &LibraryQuery) -> Res
 }
 
 pub fn query_library_tag_vocabulary(
-    reader: &SqliteReader,
+    index: &LibraryIndex,
     query: &LibraryQuery,
 ) -> Result<LibraryPage<LibraryTagEntry>, LibrarySearchError> {
-    let files = read_library_files(reader)?;
-    let TagIndex { vocabulary, .. } = build_tag_index(reader, &files)?;
+    let vocabulary = index.tags.vocabulary.clone();
     let filtered: Vec<LibraryTagEntry> = match query.query.as_deref().filter(|text| !text.is_empty()) {
         None => vocabulary,
         Some(text) => {
@@ -963,7 +979,17 @@ pub fn query_library_tag_vocabulary(
 mod tests {
     use super::*;
     fn row(file_id: i64, parent_id: Option<i64>, name: &str) -> FileRow {
-        FileRow { file_id, parent_id, file_type: None, mod_date: None, name: name.into(), use_count: 0, place_id: None, device_id: None }
+        FileRow {
+            file_id,
+            parent_id,
+            file_type: None,
+            mod_date: None,
+            lower_name: name.to_lowercase(),
+            name: name.into(),
+            use_count: 0,
+            place_id: None,
+            device_id: None,
+        }
     }
     #[test]
     fn a_tag_path_walks_its_parents_without_recursion_and_the_same_way_in_any_order() {
