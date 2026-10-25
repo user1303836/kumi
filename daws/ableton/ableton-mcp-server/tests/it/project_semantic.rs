@@ -166,3 +166,37 @@ fn source_platform_path_classification_and_locators() {
         equal(&actual["artifact"], &row["identity"], label);
     }
 }
+
+#[test]
+#[ignore = "a timing: --run-ignored only --no-capture, best measured with the bridge built optimized"]
+fn the_export_of_a_big_set_takes() {
+    // Case 0's Set with 400 copies of its track, its clips and devices: an export of thousands of records.
+    let f = fixture();
+    let mut snapshot = f["cases"][0]["snapshot"].clone();
+    let base = snapshot["tracks"][0].clone();
+    let tracks: Vec<_> = (0..400)
+        .map(|i| {
+            let mut track = base.clone();
+            track["ref"] = json!(format!("track:big-{i}"));
+            track["name"] = json!(format!("Track {i}"));
+            track
+        })
+        .collect();
+    snapshot["tracks"] = json!(tracks);
+    let options: CreateSemanticProjectOptions = serde_json::from_value(f["cases"][0]["options"].clone()).unwrap();
+    let artifact = create_semantic_project_snapshot(&snapshot, &options).unwrap();
+    let bytes = canonical_semantic_json(&artifact).unwrap().len();
+    let runs = 5;
+    let started = std::time::Instant::now();
+    for _ in 0..runs {
+        assert_eq!(create_semantic_project_snapshot(&snapshot, &options).unwrap()["artifact"], artifact["artifact"]);
+    }
+    let each = started.elapsed().as_secs_f64() * 1000. / runs as f64;
+    let started = std::time::Instant::now();
+    for _ in 0..runs {
+        validate_semantic_project_artifact(&artifact).unwrap();
+    }
+    let validation = started.elapsed().as_secs_f64() * 1000. / runs as f64;
+    let records = artifact["records"].as_array().unwrap().len();
+    println!("an export of {records} records ({bytes} canonical bytes): {each:.1} ms, of which its validation {validation:.1} ms");
+}
