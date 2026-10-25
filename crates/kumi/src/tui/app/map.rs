@@ -217,6 +217,7 @@ impl TuiApp {
 
     /// Keys, typing and the mouse go to the map while it's open; ctrl+c closes it.
     pub(super) fn map_input(&self, event: InputEvent) {
+        let moved = matches!(event, InputEvent::Mouse { action: MouseAction::Move, .. });
         let asked = {
             let mut state = self.0.state.borrow_mut();
             let Some(view) = state.map.as_mut() else { return };
@@ -238,6 +239,10 @@ impl TuiApp {
                 _ => Asked::Nothing,
             }
         };
+        // The mouse crossing the map changes nothing on screen until it comes to a point or leaves one.
+        if moved && asked == Asked::Nothing {
+            return;
+        }
         match asked {
             Asked::Nothing => {}
             Asked::Close => self.close_map(),
@@ -245,7 +250,11 @@ impl TuiApp {
                 self.close_map();
                 self.put_in_box(&words);
             }
-            Asked::Play { path, from, seconds, name } => self.map_play(path, from, seconds, 0., name),
+            Asked::Play { path, from, seconds, name } => {
+                // Space's play: a hover about to start doesn't, so it can't take Space's play over.
+                self.0.state.borrow_mut().map_hover += 1;
+                self.map_play(path, from, seconds, 0., name);
+            }
             Asked::Stop => {
                 self.0.state.borrow_mut().map_play += 1;
                 if let Some(player) = &self.0.options.player {
@@ -283,7 +292,9 @@ impl TuiApp {
                     return;
                 }
                 let Some(view) = state.map.as_mut() else { return };
-                view.hover_plays();
+                if !view.hover_plays() {
+                    return;
+                }
             }
             app.map_play(path, from, seconds, fade, name);
             app.0.scheduler.request();

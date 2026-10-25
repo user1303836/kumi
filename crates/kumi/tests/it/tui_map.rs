@@ -389,6 +389,17 @@ fn sounding(dir: &std::path::Path, mut data: MapData) -> MapData {
     data
 }
 
+/// The map's sounds as real files `seconds` long, each played whole: longer than a hover's preview.
+fn sounding_for(dir: &std::path::Path, mut data: MapData, seconds: f32) -> MapData {
+    for point in data.sounds.points.iter_mut() {
+        let file = dir.join(format!("{}.wav", point.name));
+        let samples: Vec<f32> = (0..(48_000. * seconds) as usize).map(|n| (n as f32 * 0.05).sin() * 0.2).collect();
+        std::fs::write(&file, kumi_media::audio::decode::float_wav(&[samples], 48_000)).unwrap();
+        (point.path, point.seconds) = (file.to_str().unwrap().to_string(), seconds);
+    }
+    data
+}
+
 /// How a player opens a Kept output.
 fn kept(started: &Rc<RefCell<Vec<usize>>>, playing: &Rc<RefCell<bool>>) -> Opener {
     let (started, playing) = (started.clone(), playing.clone());
@@ -461,9 +472,9 @@ case!(a_point_plays_as_the_mouse_rests_on_it_and_stops_as_the_mouse_leaves, asyn
     h.type_text(&moved(1, 2)).await;
     h.wait_until_hidden("▶ ").await;
     assert!(!*playing.borrow(), "stopped");
-    // A sweep across the point, off it again before it has rested: nothing plays.
-    h.type_text(&moved(column, row)).await;
-    h.type_text(&moved(1, 2)).await;
+    // A sweep across the point, off it again before it has rested: nothing plays. (Both moves in one write: they're read
+    // and handled back to back, however slow the computer.)
+    h.type_text(&format!("{}{}", moved(column, row), moved(1, 2))).await;
     delay(300).await;
     assert_eq!(started.borrow().len(), 1, "a sweep plays nothing");
     // h: hover plays off, remembered, and the mouse resting on a point plays nothing; h again turns them on.
@@ -481,6 +492,48 @@ case!(a_point_plays_as_the_mouse_rests_on_it_and_stops_as_the_mouse_leaves, asyn
     h.wait_until_hidden("Sounds 12").await;
     let written = h.output.text.borrow().clone();
     assert!(written.rfind("\x1b[?1003l") > written.rfind("\x1b[?1003h"), "no more moves once the map closed");
+    h.close().await;
+});
+
+case!(space_over_a_hovers_preview_plays_the_point_whole, async {
+    let dir = tempfile::tempdir().unwrap();
+    let (started, playing) = (Rc::new(RefCell::new(vec![])), Rc::new(RefCell::new(false)));
+    let h = Harness::with(160, 40, Rc::new(Control::default()), |o| {
+        o.map = Some(loader(sounding_for(dir.path(), fixture(2, 1), 3.)));
+        o.player = Some(Rc::new(Player::with_opener(kept(&started, &playing))));
+        o.map_hover = Some(MapHover { load: Rc::new(|| true), save: Rc::new(|_| {}) });
+    });
+    h.start().await;
+    h.connect();
+    h.type_text("/map\r").await;
+    h.wait_for("Sounds 12").await;
+    // Three seconds long: the mouse resting on the point chosen hears two of them (both channels at 48 kHz).
+    let (row, column) = marker(&h.screen());
+    h.type_text(&moved(column, row)).await;
+    given(&started, 1).await;
+    let (preview, whole) = (2 * 48_000 * 2, 3 * 48_000 * 2);
+    assert!(started.borrow()[0] <= preview, "{}", started.borrow()[0]);
+    // Space over the preview: the whole of it, not a stop.
+    h.type_text(" ").await;
+    given(&started, 2).await;
+    assert!(started.borrow()[1] > preview && started.borrow()[1] <= whole, "{}", started.borrow()[1]);
+    assert!(*playing.borrow());
+    // Off the point and back: Space's play goes on, and no preview takes it over.
+    h.type_text(&moved(1, 2)).await;
+    h.type_text(&moved(column, row)).await;
+    delay(300).await;
+    assert_eq!(started.borrow().len(), 2, "no preview took over");
+    assert!(*playing.borrow(), "Space's play goes on");
+    // Space again stops it. Then Space as the mouse comes to rest on the point: Space's play, whole, and the hover that
+    // was about to start doesn't take it over.
+    h.type_text(" ").await;
+    h.wait_until_hidden("▶ playing").await;
+    h.type_text(&moved(1, 2)).await;
+    h.type_text(&format!("{} ", moved(column, row))).await;
+    given(&started, 3).await;
+    delay(300).await;
+    assert_eq!(started.borrow().len(), 3, "the hover about to start didn't");
+    assert!(started.borrow()[2] > preview, "{}", started.borrow()[2]);
     h.close().await;
 });
 
