@@ -369,13 +369,16 @@ fn truthy(value: &Value) -> bool {
         _ => true,
     }
 }
-fn sort_json(rows: &mut [Value]) -> Result<(), ProjectError> {
-    let mut keyed = rows.iter().map(|row| Ok((canonical_semantic_json(row)?, row.clone()))).collect::<Result<Vec<_>, ProjectError>>()?;
+fn sort_json(rows: &mut Vec<Value>) -> Result<(), ProjectError> {
+    let mut keyed =
+        std::mem::take(rows).into_iter().map(|row| Ok((canonical_semantic_json(&row)?, row))).collect::<Result<Vec<_>, ProjectError>>()?;
     keyed.sort_by(|a, b| compare_semantic_strings(&a.0, &b.0));
-    for (target, (_, row)) in rows.iter_mut().zip(keyed) {
-        *target = row;
-    }
+    *rows = keyed.into_iter().map(|(_, row)| row).collect();
     Ok(())
+}
+// The digest of `rows` as one array, without copying them into one.
+fn digest_rows(rows: &[Value]) -> Result<String, ProjectError> {
+    digest_array(&rows.iter().collect::<Vec<_>>())
 }
 fn note_content(notes: &Value) -> Result<Value, ProjectError> {
     let mut rows = vec![];
@@ -393,7 +396,7 @@ fn note_content(notes: &Value) -> Result<Value, ProjectError> {
     if end.is_some_and(|n| !n.is_finite()) {
         return Err(fail("semantic artifact contains a non-finite number"));
     }
-    Ok(json!({"count":rows.len(),"pitchMin":min,"pitchMax":max,"end":end,"hash":digest(&json!(rows))?}))
+    Ok(json!({"count":rows.len(),"pitchMin":min,"pitchMax":max,"end":end,"hash":digest_rows(&rows)?}))
 }
 fn automation_summary(clip: &Value) -> Result<Value, ProjectError> {
     fn points(points: &Value) -> Result<Vec<Value>, ProjectError> {
@@ -408,12 +411,13 @@ fn automation_summary(clip: &Value) -> Result<Value, ProjectError> {
     let mut envelopes = vec![];
     for rows in clip["envelopes"].as_object().into_iter().flat_map(|o| o.values()) {
         let rows = points(rows)?;
-        envelopes.push(json!({"points":rows.len(),"hash":digest(&json!(rows))?}));
+        envelopes.push(json!({"points":rows.len(),"hash":digest_rows(&rows)?}));
     }
     envelopes.sort_by(|a, b| compare_semantic_strings(a["hash"].as_str().unwrap(), b["hash"].as_str().unwrap()));
-    Ok(
-        json!({"envelopeCount":envelopes.len(),"pointCount":direct.len()+envelopes.iter().map(|v|v["points"].as_u64().unwrap() as usize).sum::<usize>(),"contentHash":digest(&json!({"direct":direct,"envelopePointLists":envelopes}))?}),
-    )
+    let (envelope_count, point_count) =
+        (envelopes.len(), direct.len() + envelopes.iter().map(|v| v["points"].as_u64().unwrap() as usize).sum::<usize>());
+    let content = digest_fields(&[("direct", &Value::Array(direct)), ("envelopePointLists", &Value::Array(envelopes))])?;
+    Ok(json!({"envelopeCount":envelope_count,"pointCount":point_count,"contentHash":content}))
 }
 fn device_state(device: &Value) -> Result<Value, ProjectError> {
     let mut parameters = vec![];
@@ -429,12 +433,12 @@ fn device_state(device: &Value) -> Result<Value, ProjectError> {
         row["valueItems"] = json!(array(&p["valueItems"]).iter().take(256).map(bounded_string).collect::<Vec<_>>());
         parameters.push(row);
     }
-    let mut keyed = parameters
-        .iter()
-        .map(|p| Ok((p["name"].as_str().unwrap().to_owned(), canonical_semantic_json(p)?, p.clone())))
-        .collect::<Result<Vec<_>, ProjectError>>()?;
-    keyed.sort_by(|a, b| compare_semantic_strings(&a.0, &b.0).then_with(|| compare_semantic_strings(&a.1, &b.1)));
-    parameters = keyed.into_iter().map(|(_, _, p)| p).collect();
+    let mut keyed = parameters.into_iter().map(|p| Ok((canonical_semantic_json(&p)?, p))).collect::<Result<Vec<_>, ProjectError>>()?;
+    fn name(parameter: &Value) -> &str {
+        parameter["name"].as_str().unwrap()
+    }
+    keyed.sort_by(|a, b| compare_semantic_strings(name(&a.1), name(&b.1)).then_with(|| compare_semantic_strings(&a.0, &b.0)));
+    let parameters: Vec<_> = keyed.into_iter().map(|(_, p)| p).collect();
     let schema: Vec<_> = parameters
         .iter()
         .map(|p| {
@@ -472,9 +476,9 @@ fn device_state(device: &Value) -> Result<Value, ProjectError> {
     }
     let selected = |v: &Value| if nonnegative_integer(v) { v.clone() } else { Value::Null };
     let visible = json!({"enabled":device["enabled"],"latencySamples":device["latencySamples"],"parameterCount":parameters.len(),"pluginPresetIndex":selected(&device["plugin"]["selectedPresetIndex"]),"pluginPresetCount":device["plugin"]["presets"].as_array().map(|v|v.len()),"rackVariationCount":device["variationCount"],"selectedVariationIndex":selected(&device["selectedVariationIndex"]),"specializedHash":digest(&specialized)?});
-    Ok(
-        json!({"schemaHash":digest(&json!(schema))?,"stateHash":digest(&json!({"parameters":parameters,"visible":visible}))?,"visible":visible}),
-    )
+    let schema = digest_rows(&schema)?;
+    let state = digest_fields(&[("parameters", &Value::Array(parameters)), ("visible", &visible)])?;
+    Ok(json!({"schemaHash":schema,"stateHash":state,"visible":visible}))
 }
 fn track_structure(track: &Value) -> Value {
     let mut clips: Vec<_> = array(&track["clips"]).iter().map(|c| c["kind"].as_str().unwrap_or("undefined").to_owned()).collect();
@@ -587,17 +591,19 @@ fn path_locator(profile: &str, raw: &str, resolved: Option<&str>, project: Optio
 fn nonnegative_integer(v: &Value) -> bool {
     v.as_f64().is_some_and(|n| n >= 0. && n.fract() == 0.)
 }
+/// A clip's record, with its notes' summary (`note_content`, which its scene's structure may have made already).
+#[allow(clippy::too_many_arguments)]
 fn add_clip(
     rows: &mut Records,
     dependencies: &mut Vec<Value>,
     profile: &str,
     clip: &Value,
+    notes: Value,
     order: usize,
     location: Value,
     parent: Value,
 ) -> Result<(), ProjectError> {
     let name = semantic_project_name(profile, "clip", &clip["name"]);
-    let notes = note_content(&clip["notes"])?;
     let automation = automation_summary(clip)?;
     let mut audio = pick(clip, &["gain", "pitchCoarse", "pitchFine", "warpMode", "sampleLength"]);
     audio["warping"] = nullish(&clip["warping"], &clip["warp"]).clone();
@@ -650,6 +656,8 @@ pub fn create_semantic_project_snapshot(snapshot: &Value, options: &CreateSemant
     rows.push(create_record("set", 0, Some(set_name), set_data, json!({"kind":"set"}))?);
     let mut coords = HashMap::new();
     let mut counts: HashMap<String, usize> = HashMap::new();
+    // Each track's name and structure hash, for its coordinate here and its record below.
+    let mut summaries = Vec::with_capacity(tracks.len());
     for track in tracks {
         let name = semantic_project_name(profile, "track", &track["name"]);
         let hash = digest(&track_structure(track))?;
@@ -657,11 +665,10 @@ pub fn create_semantic_project_snapshot(snapshot: &Value, options: &CreateSemant
         let count = counts.entry(base.clone()).or_default();
         *count += 1;
         coords.insert(track["ref"].as_str().unwrap_or(""), json!(format!("{base}-{count}")));
+        summaries.push((name, hash));
     }
     let coordinate = |reference: &Value| coords.get(reference.as_str().unwrap_or("")).cloned().unwrap_or(Value::Null);
-    for (index, track) in tracks.iter().enumerate() {
-        let name = semantic_project_name(profile, "track", &track["name"]);
-        let hash = digest(&track_structure(track))?;
+    for (index, (track, (name, hash))) in tracks.iter().zip(summaries).enumerate() {
         let full = truthy(&track["mixer"]);
         let mixer_source = if full { &track["mixer"] } else { track };
         let mixer_keys = if full {
@@ -703,7 +710,7 @@ pub fn create_semantic_project_snapshot(snapshot: &Value, options: &CreateSemant
     fn number_key(number: f64) -> u64 {
         (if number == 0. { 0f64 } else { number }).to_bits()
     }
-    let lookups: Vec<(HashMap<u64, &Value>, HashMap<&str, &Value>)> = tracks
+    let lookups: Vec<(HashMap<u64, &Value>, HashMap<&str, usize>)> = tracks
         .iter()
         .map(|track| {
             let mut slots = HashMap::new();
@@ -713,33 +720,40 @@ pub fn create_semantic_project_snapshot(snapshot: &Value, options: &CreateSemant
                 }
             }
             let mut clips = HashMap::new();
-            for clip in array(&track["clips"]) {
+            for (index, clip) in array(&track["clips"]).iter().enumerate() {
                 if let Some(reference) = clip["ref"].as_str() {
-                    clips.entry(reference).or_insert(clip);
+                    clips.entry(reference).or_insert(index);
                 }
             }
             (slots, clips)
         })
         .collect();
+    // The note summaries the scenes make, by (track, clip) place: each clip's record takes its own.
+    let mut note_summaries: HashMap<(usize, usize), Value> = HashMap::new();
     for (index, scene) in scenes.iter().enumerate() {
         let mut contents = vec![];
-        for (track, (slots, clips)) in tracks.iter().zip(&lookups) {
+        for (track_index, (track, (slots, clips))) in tracks.iter().zip(&lookups).enumerate() {
             let slot = match scene["index"].as_f64() {
                 Some(index) => slots.get(&number_key(index)).copied(),
                 None => array(&track["clipSlots"]).iter().find(|slot| js_equal(&slot["sceneIndex"], &scene["index"])),
             };
             if let Some(slot) = slot.filter(|s| truthy(&s["clipRef"])) {
-                let clip = match slot["clipRef"].as_str() {
+                let place = match slot["clipRef"].as_str() {
                     Some(reference) => clips.get(reference).copied(),
-                    None => array(&track["clips"]).iter().find(|c| c["ref"] == slot["clipRef"]),
+                    None => array(&track["clips"]).iter().position(|c| c["ref"] == slot["clipRef"]),
                 };
-                if let Some(clip) = clip {
-                    contents.push(json!({"kind":clip["kind"],"content":note_content(&clip["notes"])?["hash"],"length":clip["length"]}));
+                if let Some(place) = place {
+                    let clip = &array(&track["clips"])[place];
+                    let notes = match note_summaries.entry((track_index, place)) {
+                        std::collections::hash_map::Entry::Occupied(entry) => entry.into_mut(),
+                        std::collections::hash_map::Entry::Vacant(entry) => entry.insert(note_content(&clip["notes"])?),
+                    };
+                    contents.push(json!({"kind":clip["kind"],"content":notes["hash"],"length":clip["length"]}));
                 }
             }
         }
         sort_json(&mut contents)?;
-        let hash = digest(&json!(contents))?;
+        let hash = digest_rows(&contents)?;
         let mut data = pick(scene, &["colorIndex", "tempoEnabled", "isEmpty"]);
         for key in ["tempo", "signatureNumerator", "signatureDenominator"] {
             data[key] = if scene[key].as_f64().is_some_and(|n| n >= 0.) { scene[key].clone() } else { Value::Null };
@@ -759,7 +773,7 @@ pub fn create_semantic_project_snapshot(snapshot: &Value, options: &CreateSemant
     }
     let mut dependencies = vec![];
     let mut clip_order = 0;
-    for track in tracks {
+    for (track_index, track) in tracks.iter().enumerate() {
         let parent = coordinate(&track["ref"]);
         let mut slots = HashMap::new();
         for slot in array(&track["clipSlots"]) {
@@ -767,13 +781,18 @@ pub fn create_semantic_project_snapshot(snapshot: &Value, options: &CreateSemant
                 slots.insert(slot["clipRef"].as_str().unwrap_or(""), slot["sceneIndex"].clone());
             }
         }
-        for clip in array(&track["clips"]) {
+        for (place, clip) in array(&track["clips"]).iter().enumerate() {
             let scene = slots.get(clip["ref"].as_str().unwrap_or("")).cloned().unwrap_or(Value::Null);
+            let notes = match note_summaries.remove(&(track_index, place)) {
+                Some(notes) => notes,
+                None => note_content(&clip["notes"])?,
+            };
             add_clip(
                 &mut rows,
                 &mut dependencies,
                 profile,
                 clip,
+                notes,
                 clip_order,
                 json!({"lane":"session","sceneOrder":scene}),
                 parent.clone(),
@@ -787,6 +806,7 @@ pub fn create_semantic_project_snapshot(snapshot: &Value, options: &CreateSemant
                     &mut dependencies,
                     profile,
                     clip,
+                    note_content(&clip["notes"])?,
                     clip_order,
                     json!({"lane":"take-lane","laneOrder":lane["index"]}),
                     parent.clone(),
@@ -801,6 +821,7 @@ pub fn create_semantic_project_snapshot(snapshot: &Value, options: &CreateSemant
             &mut dependencies,
             profile,
             &entry["clip"],
+            note_content(&entry["clip"]["notes"])?,
             clip_order,
             json!({"lane":"arrangement"}),
             coordinate(&entry["trackRef"]),

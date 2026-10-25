@@ -169,6 +169,55 @@ fn source_platform_path_classification_and_locators() {
 
 #[test]
 #[ignore = "a timing: --run-ignored only --no-capture, best measured with the bridge built optimized"]
+fn the_export_of_a_set_of_many_notes_and_parameters_takes() {
+    // Case 0's Set with 100 copies of its track, each clip (in the first scene) of 1,000 notes and each device of 128
+    // parameters: 100,000 notes, whose summaries the scene and the clip both hash.
+    let f = fixture();
+    let mut snapshot = f["cases"][0]["snapshot"].clone();
+    let base = snapshot["tracks"][0].clone();
+    let note = base["clips"][0]["notes"][0].clone();
+    let parameter = base["devices"][0]["parameters"][0].clone();
+    let tracks: Vec<_> = (0..100)
+        .map(|i| {
+            let mut track = base.clone();
+            track["ref"] = json!(format!("track:notes-{i}"));
+            track["name"] = json!(format!("Track {i}"));
+            track["clips"][0]["notes"] = json!((0..1000)
+                .map(|n| {
+                    let mut row = note.clone();
+                    row["pitch"] = json!(36 + (n * 7 + i) % 48);
+                    row["start"] = json!(n as f64 * 0.25);
+                    row["velocity"] = json!(40 + (n * 13) % 87);
+                    row["id"] = json!(n + 1);
+                    row
+                })
+                .collect::<Vec<_>>());
+            track["devices"][0]["parameters"] = json!((0..128)
+                .map(|n| {
+                    let mut row = parameter.clone();
+                    row["name"] = json!(format!("Parameter {n}"));
+                    row["originalName"] = json!(format!("Parameter {n}"));
+                    row["value"] = json!((n % 10) as f64 / 10.);
+                    row
+                })
+                .collect::<Vec<_>>());
+            track
+        })
+        .collect();
+    snapshot["tracks"] = json!(tracks);
+    let options: CreateSemanticProjectOptions = serde_json::from_value(f["cases"][0]["options"].clone()).unwrap();
+    let artifact = create_semantic_project_snapshot(&snapshot, &options).unwrap();
+    let runs = 5;
+    let started = std::time::Instant::now();
+    for _ in 0..runs {
+        assert_eq!(create_semantic_project_snapshot(&snapshot, &options).unwrap()["artifact"], artifact["artifact"]);
+    }
+    let each = started.elapsed().as_secs_f64() * 1000. / runs as f64;
+    let records = artifact["records"].as_array().unwrap().len();
+    println!("an export of 100,000 notes and 12,800 parameters ({records} records): {each:.1} ms, artifact {}", artifact["artifact"]["id"]);
+}
+#[test]
+#[ignore = "a timing: --run-ignored only --no-capture, best measured with the bridge built optimized"]
 fn the_export_of_a_big_set_takes() {
     // Case 0's Set with 400 copies of its track, its clips and devices: an export of thousands of records.
     let f = fixture();
