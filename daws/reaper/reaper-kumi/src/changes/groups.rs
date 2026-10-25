@@ -83,10 +83,14 @@ fn roles_now(reaper: &Reaper, track: Track, group: i64, of: &Value) -> Done<Valu
 
 fn write_roles(reaper: &Reaper, track: Track, group: i64, state: &Value) -> bool {
     let (high, bit) = place(group);
-    state.as_object().into_iter().flatten().all(|(role, on)| {
+    let written = state.as_object().into_iter().flatten().all(|(role, on)| {
         reaper_role(role)
             .is_some_and(|name| reaper.set_group_membership(track, name, high, bit, if *on == true { bit } else { 0 }).is_some())
-    })
+    });
+    // (the rows keep the groups they read while the project's state change count stays: Kumi's own write forgets them,
+    // whether or not REAPER counts the block it is in)
+    crate::rows::forget_groups();
+    written
 }
 
 fn title(ctx: &Ctx, name: &str, group: i64, state: &Value) -> String {

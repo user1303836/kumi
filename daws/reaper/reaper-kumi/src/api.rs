@@ -64,10 +64,17 @@ pub unsafe fn string(ptr: *const c_char) -> String {
     }
 }
 
+/// The buffer string getters write into, and how many of its leading bytes the last read may have left other than zero
+/// (its text's, or a whole size when no NUL was found in it).
+struct ReadBuf {
+    bytes: Vec<u8>,
+    dirty: usize,
+}
+
 thread_local! {
     /// The buffer string getters write into, kept from one read to the next: REAPER's main thread reads one text at a
     /// time (a read inside another's call, through a callback, takes a buffer of its own).
-    static READ_BUF: std::cell::RefCell<Vec<u8>> = const { std::cell::RefCell::new(Vec::new()) };
+    static READ_BUF: std::cell::RefCell<ReadBuf> = const { std::cell::RefCell::new(ReadBuf { bytes: Vec::new(), dirty: 0 }) };
 }
 
 /// What the kept buffer shrinks back to after a long text.
@@ -77,25 +84,29 @@ const READ_BUF_KEPT: usize = 16 * 1024;
 pub fn read_buffer(mut fill: impl FnMut(*mut c_char, c_int)) -> String {
     READ_BUF.with(|cell| match cell.try_borrow_mut() {
         Ok(mut buf) => read_into(&mut buf, &mut fill),
-        Err(_) => read_into(&mut Vec::new(), &mut fill),
+        Err(_) => read_into(&mut ReadBuf { bytes: Vec::new(), dirty: 0 }, &mut fill),
     })
 }
 
-fn read_into(buf: &mut Vec<u8>, fill: &mut impl FnMut(*mut c_char, c_int)) -> String {
+fn read_into(buf: &mut ReadBuf, fill: &mut impl FnMut(*mut c_char, c_int)) -> String {
+    // What the read before left is zeroed first (its bytes, not a kilobyte): a getter that writes nothing, less than it
+    // did, or its text without a NUL, is read as it wrote, as when every read had a fresh zeroed buffer.
+    let dirty = buf.dirty.min(buf.bytes.len());
+    buf.bytes[..dirty].fill(0);
+    buf.dirty = 0;
     let mut size = 1024usize;
     loop {
-        if buf.len() < size {
-            buf.resize(size, 0);
+        if buf.bytes.len() < size {
+            buf.bytes.resize(size, 0);
         }
-        // (what an earlier read left is never taken for this one's: a getter that writes nothing gives the empty text)
-        buf[0] = 0;
-        fill(buf.as_mut_ptr().cast(), size as c_int);
-        let len = buf[..size].iter().position(|&b| b == 0).unwrap_or(size);
+        fill(buf.bytes.as_mut_ptr().cast(), size as c_int);
+        let len = buf.bytes[..size].iter().position(|&b| b == 0).unwrap_or(size);
+        buf.dirty = buf.dirty.max(len);
         if len + 1 < size || size >= 1 << 20 {
-            let text = String::from_utf8_lossy(&buf[..len]).into_owned();
-            if buf.len() > READ_BUF_KEPT {
-                buf.truncate(READ_BUF_KEPT);
-                buf.shrink_to_fit();
+            let text = String::from_utf8_lossy(&buf.bytes[..len]).into_owned();
+            if buf.bytes.len() > READ_BUF_KEPT {
+                buf.bytes.truncate(READ_BUF_KEPT);
+                buf.bytes.shrink_to_fit();
             }
             return text;
         }
@@ -154,6 +165,25 @@ mod tests {
             write(buf, size, "outer");
         });
         assert_eq!(outer, "outer");
+    }
+
+    // Its review: the old buffer was zero-filled for each read, so a getter that wrote its text without a NUL still read
+    // right. The kept buffer zeroes what the last read left (its bytes, not a kilobyte), and so it does too.
+    #[test]
+    fn a_getter_that_writes_no_nul_after_a_long_read_is_read_as_it_wrote() {
+        let bare = |text: &'static str| {
+            move |buf: *mut c_char, _size: c_int| unsafe { std::ptr::copy_nonoverlapping(text.as_ptr(), buf.cast(), text.len()) }
+        };
+        assert_eq!(read_buffer(|buf, size| write(buf, size, &"y".repeat(5000))).len(), 5000);
+        assert_eq!(read_buffer(bare("abc")), "abc", "the long read's tail isn't taken for this one's");
+        // After a read that filled a kilobyte, grew and found its end, and after a getter that wrote a kilobyte of text
+        // with no NUL at all (read whole, up to a megabyte, as before).
+        assert_eq!(read_buffer(|buf, size| write(buf, size, &"x".repeat(1023))), "x".repeat(1023));
+        assert_eq!(read_buffer(bare("de")), "de");
+        let kilobyte: &'static str = "z".repeat(1024).leak();
+        assert_eq!(read_buffer(bare(kilobyte)), kilobyte);
+        assert_eq!(read_buffer(bare("f")), "f");
+        assert_eq!(read_buffer(|_, _| {}), "");
     }
 
     #[test]
