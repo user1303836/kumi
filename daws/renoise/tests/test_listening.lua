@@ -376,9 +376,39 @@ test("listening: a read of the song's tempo commands works out each pattern's ca
   mock.alias_reads = 0
   result((start(peer, "j81", { { id = "mix", what = "master" } }, { fromBeat = 4, beats = 4 })))
   mock.finish_render()
-  local tracks = #mock.data.tracks
-  -- (the render's read of the timeline, and the warm-up's look on a later tick: each once per pattern and track)
-  ok(mock.alias_reads <= 2 * 3 * tracks, "once per pattern and track in each read: " .. mock.alias_reads .. " (30 slots, " .. tracks .. " tracks)")
+  H.tick(10)
+  -- (the render's read of the timeline, and the warm-up's look on a later tick: while every pattern's own mark holds, its
+  -- alias tracks are the ones found before, and no track is asked; perf N3)
+  eq(mock.alias_reads, 0, "alias reads in a read, and a warm pass, whose marks hold")
+  H.no_dialogs()
+end)
+
+test("listening: a track made an alias after a read is seen by the next read: its pattern's mark moves and its aliases are found again (perf N3)", function()
+  -- (slot 1 plays pattern 2, whose Hat track comes to show pattern 1's Hat lines only after the first read)
+  local env, peer = setup(nil, { sequence = { 2, 1, 3 } })
+  local function command(text)
+    local digits = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    return 256 + (digits:find(text:sub(1, 1), 1, true) - 1) * 36 + (digits:find(text:sub(2, 2), 1, true) - 1)
+  end
+  result((start(peer, "j90", { { id = "mix", what = "master" } }, { fromBeat = 0, beats = 12 })))
+  mock.finish_render()
+  H.tick(10)
+  mock.alias_reads = 0
+  result((start(peer, "j91", { { id = "mix", what = "master" } }, { fromBeat = 0, beats = 12 })))
+  mock.finish_render()
+  H.tick(10)
+  eq(mock.alias_reads, 0, "nothing asked while the marks hold")
+  mock.ops.alias(2, 2, 1)
+  H.tick(2)
+  -- (a ZL08 on line 9 of pattern 1's Hat: pattern 1's line notifiers tell it, and slot 1 shows it through the alias)
+  mock.ops.set_effect(1, 2, 9, 1, command("ZL"), 8)
+  H.tick(2)
+  result((start(peer, "j92", { { id = "mix", what = "master" } }, { fromBeat = 3, beats = 1 })))
+  local r = mock.renders[#mock.renders]
+  eq(r.options.start_pos.sequence, 2, "slot 1 is 8 lines at LPB 4 and 8 at LPB 8: 3 beats")
+  eq(r.options.start_pos.line, 1)
+  mock.finish_render()
+  ok(mock.alias_reads >= 1, "the aliases of the pattern whose mark moved were found again: " .. mock.alias_reads)
   H.no_dialogs()
 end)
 
