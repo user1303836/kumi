@@ -591,6 +591,24 @@ fn the_map_drawn_for_a_look() {
     }
 }
 
+#[test]
+fn an_images_placeholders_carry_the_id_it_is_up_under_frame_after_frame() {
+    let mut view = MapView::new(Graphics::Kitty, true);
+    view.loaded(fixture(200, 12));
+    let mut screen = Screen::new(80, 24);
+    // The same id while the image stays up; another once it was taken down unseen and put up again.
+    for id in [1, 1, 7, 7] {
+        view.draw(&mut screen, &mut |_, _, _, _| id);
+        let placeholders: Vec<_> = (0..screen.height)
+            .flat_map(|y| (0..screen.width).map(move |x| (x, y)))
+            .map(|(x, y)| screen.at(x, y))
+            .filter(|cell| cell.char.starts_with('\u{10EEEE}'))
+            .collect();
+        assert!(placeholders.len() > 1_000, "{} placeholders", placeholders.len());
+        assert!(placeholders.iter().all(|cell| cell.style.fg == Some([0, 0, id as u8])), "every placeholder in image {id}'s colour");
+    }
+}
+
 /// How long the map takes to answer a key at 300,000 points, in the build at hand: run by hand
 /// (`--run-ignored only --no-capture`); it says, and checks nothing. An image goes up once per picture, as the app
 /// sends it.
