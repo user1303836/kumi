@@ -1674,7 +1674,7 @@ impl Session {
                 from = resumed.as_ref().map(|kept| kept.checkpoint.clone());
             } else if from.is_some() {
             } else if let Some(switched) = switched.filter(|s| s.key == observation.key) {
-                from = Some(switched.checkpoint);
+                from = Some(KernelCheckpoint::clone(&switched.checkpoint));
             } else if let Some((checkpoint, _)) = carry {
                 from = Some(checkpoint);
             } else if let Some(settled) = settled.filter(|s| reason == Some("cancelled") && s.key == observation.key) {

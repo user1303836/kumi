@@ -951,7 +951,7 @@ impl ConversationStore for FileConversationStore {
             turns: Some(conversation.turns.unwrap_or(0).max(said.len() as u32)),
         };
         self.file(place, id)?;
-        write_privately(&self.kept(place)?, &format!("{id}.json"), &stringify(&serde_json::to_value(saved).map_err(error)?)).await?;
+        write_privately(&self.kept(place)?, &format!("{id}.json"), &stringify(&serde_json::to_value(&saved).map_err(error)?)).await?;
         write_privately(&self.folder(place)?, "current", id).await?;
         self.trim(place).await?;
         self.note_saved(place, id, &saved).await;

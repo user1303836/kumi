@@ -831,11 +831,20 @@ mod tests {
             ],
             provider_options: None,
         };
+        let drawn = Message::Assistant {
+            content: vec![AssistantPart::File(FilePart {
+                filename: None,
+                data: FileData::Data { data: DataContent::Bytes(vec![1; 3_000]) },
+                media_type: "image/png".into(),
+                provider_options: None,
+            })],
+            provider_options: None,
+        };
         let conversations: Vec<Vec<Message>> = vec![
             vec![],
             vec![Message::user_text("hi")],
             vec![Message::user_text("make it darker"), Message::assistant_text("Done: the filter sits at 1.5 kHz now, 3.0 dB down.")],
-            vec![Message::user_text("look"), image_result("c1", 20_000), picture, image_result("c2", 5)],
+            vec![Message::user_text("look"), image_result("c1", 20_000), picture, image_result("c2", 5), drawn],
         ];
         for messages in &conversations {
             assert_eq!(bytes(messages), measured_the_long_way(messages), "{} messages", messages.len());
