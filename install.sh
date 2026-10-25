@@ -319,6 +319,12 @@ main() {
   finish "checked against its checksum"
   begin "Install"
   if ! { mkdir -p "$work/app" && tar $unpack "$archive" -C "$work/app"; }; then fail "couldn't unpack Kumi."; fi
+  # Live's bridge comes as the lifecycle's own tarball under app/bridge; its package is unpacked beside it, where Kumi
+  # runs it from and the lifecycle copies it into Live. (A release from before carries the package itself.)
+  for artifact in "$work/app/bridge/"*.tar.gz; do
+    [ -f "$artifact" ] || continue
+    tar -xzf "$artifact" -C "$work/app/bridge" || fail "couldn't unpack Live's bridge."
+  done
   KUMI_INSTALLED=1 KUMI_HOME="$KUMI_HOME" "$work/app/kumi" --version >/dev/null 2>"$work/start.err"; started=$?
   if [ "$started" -ne 0 ]; then
     said="$(sed '/^[[:space:]]*$/d' "$work/start.err" | tail -n 1 | cut -c1-300)"

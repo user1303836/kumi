@@ -718,9 +718,11 @@ def build_release(root: Path, binaries: Path, out: Path, target: str, source: di
         json_write(bundle / "kumi-install.json", {"kumi": version, "bridge": metadata["bridge"], **daws, "runtime": "rust-native", "target": target})
         for name in ("LICENSE.md", "THIRD_PARTY_NOTICES.md", "README.md", "CHANGELOG.md"):
             copy(root / name, bundle / name)
+        # Live's bridge travels once, as the lifecycle's own tarball: the installers and `kumi update` unpack its package
+        # beside it (bridge/package), where Kumi runs it from and the lifecycle copies it into Live.
         prepared = bundle / "bridge"
         prepared.mkdir()
-        shutil.move(package, prepared / "package")
+        shutil.rmtree(package)
         shutil.move(artifact, prepared / artifact_name)
         json_write(prepared / "prepared.json", {"artifact": artifact_name, "sha256": artifact_hash, "version": metadata["bridge"]})
         bundle_name = f"kumi-{target}.tar.gz"

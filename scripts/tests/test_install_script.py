@@ -116,9 +116,10 @@ class InstallScript(unittest.TestCase):
         self.directory.cleanup()
 
     # ── Releases ───────────────────────────────────────────────────────────
-    def release(self, version, kumi=None, sha=None, xz=False):
+    def release(self, version, kumi=None, sha=None, xz=False, bridge=False):
         """A folder holding Kumi `version` for this computer, as a release does; served from self.url. `xz`: the release
-        names an xz bundle beside the gzipped one, as releases from 1.24 do."""
+        names an xz bundle beside the gzipped one, as releases from 1.24 do. `bridge`: the bundle carries Live's bridge
+        as the lifecycle's tarball under bridge/, as releases do."""
         folder = self.root / "releases" / version
         folder.mkdir(parents=True)
         stage = self.root / "stage" / version
@@ -127,6 +128,18 @@ class InstallScript(unittest.TestCase):
         program.write_text((kumi or FIXTURE).replace("VERSION", version))
         program.chmod(0o755)
         (stage / "package.json").write_text(json.dumps({"name": "kumi", "version": version, "runtime": "rust-native"}, indent=2))
+        if bridge:
+            packaged = self.root / "bridge-stage" / version / "package"
+            packaged.mkdir(parents=True)
+            (packaged / "ableton-mcp-server").write_text("#!/bin/sh\necho ableton-mcp-server 1.0.0\n")
+            (packaged / "ableton-mcp-server").chmod(0o755)
+            (packaged / "package.json").write_text("{}")
+            (stage / "bridge").mkdir()
+            artifact = f"ableton-mcp-server-1.0.0-{self.target}.tar.gz"
+            with tarfile.open(stage / "bridge" / artifact, "w:gz") as inner:
+                inner.add(packaged, arcname="package")
+            digest = hashlib.sha256((stage / "bridge" / artifact).read_bytes()).hexdigest()
+            (stage / "bridge" / "prepared.json").write_text(json.dumps({"artifact": artifact, "sha256": digest, "version": "1.0.0"}))
         bundle = f"kumi-{self.target}.tar.gz"
         with tarfile.open(folder / bundle, "w:gz") as archive:
             for path in sorted(stage.iterdir()):
@@ -264,6 +277,16 @@ exit $status
         self.assertEqual(self.install(home).returncode, 0)
         self.assertEqual(self.version(home / ".kumi/app"), "2.0.0")
         self.assertEqual([path for path in self.server.asked if path.endswith((".tar.gz", ".tar.xz"))], [f"/kumi-{self.target}.tar.gz"])
+
+    def test_lives_bridge_package_is_unpacked_from_its_tarball_beside_it(self):
+        home = self.home()
+        self.serve(self.release("1.0.0", bridge=True))
+        run = self.install(home)
+        self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
+        bridge = home / ".kumi/app/bridge"
+        self.assertTrue((bridge / "package/ableton-mcp-server").exists(), "the package is unpacked beside the tarball")
+        self.assertTrue(os.access(bridge / "package/ableton-mcp-server", os.X_OK))
+        self.assertTrue((bridge / f"ableton-mcp-server-1.0.0-{self.target}.tar.gz").exists(), "the tarball stays for the lifecycle to verify")
 
     def test_a_bad_checksum_leaves_the_kumi_that_was_there(self):
         home = self.home()

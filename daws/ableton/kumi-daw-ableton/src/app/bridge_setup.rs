@@ -116,6 +116,7 @@ fn error(e: impl std::fmt::Display) -> RuntimeError {
 pub fn bundled_bridge_dir() -> String {
     let folder = executable_dir();
     if Path::new(&join(&folder, "package.json")).exists() {
+        let _ = unpack_prepared_bridge(&join(&folder, "bridge"));
         bridge_dir_in(&folder)
     } else {
         join(&repository_dir(), "daws/ableton/ableton-mcp-server")
@@ -130,6 +131,37 @@ pub fn bridge_dir_in(folder: &str) -> String {
     } else {
         folder.to_string()
     }
+}
+/// Live's bridge package, unpacked beside the lifecycle's tarball it came in (`bridge/<artifact>.tar.gz`, named by
+/// `bridge/prepared.json`) when it isn't there. A bundle carries the bridge once, as that tarball; the installers and
+/// `kumi update` unpack it at install, and this covers a bundle unpacked by hand. Nothing happens when the package is
+/// there, or the folder names no tarball. Err: what tar said.
+pub fn unpack_prepared_bridge(bridge_dir: &str) -> Result<(), String> {
+    if Path::new(&join(&join(bridge_dir, "package"), &executable_name("ableton-mcp-server"))).exists() {
+        return Ok(());
+    }
+    let manifest: Option<Value> = fs::read(join(bridge_dir, "prepared.json")).ok().and_then(|bytes| serde_json::from_slice(&bytes).ok());
+    let Some(artifact) = manifest.as_ref().and_then(|manifest| manifest.get("artifact")?.as_str()).map(str::to_string) else {
+        return Ok(());
+    };
+    if Path::new(&artifact).file_name().and_then(|name| name.to_str()) != Some(artifact.as_str())
+        || !Path::new(&join(bridge_dir, &artifact)).exists()
+    {
+        return Ok(());
+    }
+    // tar.exe reads its arguments in Windows' code page, which can't spell every folder name: run in the folder, it's
+    // given the tarball's plain name.
+    let ran = std::process::Command::new(system::system_program_default(SystemProgram::Tar))
+        .args(["-xzf", &artifact, "-C", "."])
+        .current_dir(bridge_dir)
+        .stdin(std::process::Stdio::null())
+        .output()
+        .map_err(|error| error.to_string())?;
+    if ran.status.success() {
+        return Ok(());
+    }
+    let said = String::from_utf8_lossy(if ran.stderr.is_empty() { &ran.stdout } else { &ran.stderr });
+    Err(said.trim().lines().next_back().unwrap_or("tar failed").to_string())
 }
 /// The bridge binary this Kumi brings, when it is built: the one a Live session starts. In its bundled package, or
 /// beside the executable (a checkout's build, an app installed before the bridge moved into its package).
@@ -163,6 +195,7 @@ struct Prepared {
     root: String,
 }
 fn prepared_bridge(dir: &str) -> Option<Prepared> {
+    let _ = unpack_prepared_bridge(dir);
     let manifest: Value = serde_json::from_slice(&fs::read(join(dir, "prepared.json")).ok()?).ok()?;
     let artifact = manifest.get("artifact")?.as_str()?;
     let sha256 = manifest.get("sha256")?.as_str()?;
@@ -835,5 +868,50 @@ mod tests {
         fs::write(join(&folder, &format!("bridge/package/{exe}")), b"packaged").unwrap();
         assert_eq!(bridge_dir_in(&folder), join(&folder, "bridge/package"));
         assert_eq!(bridge_binary_in(&folder), Some(join(&folder, &format!("bridge/package/{exe}"))));
+    }
+
+    /// A bundle carries the bridge as the lifecycle's tarball; Kumi unpacks the package beside it when nothing did.
+    #[test]
+    fn the_bridge_package_is_unpacked_from_its_tarball_when_it_isnt_there() {
+        let app = tempfile::tempdir().unwrap();
+        let root = app.path().display().to_string();
+        let bridge = join(&root, "bridge");
+        let staged = app.path().join("staged/package");
+        fs::create_dir_all(&staged).unwrap();
+        let exe = executable_name("ableton-mcp-server");
+        fs::write(staged.join(&exe), b"the bridge").unwrap();
+        fs::write(staged.join("package.json"), b"{}").unwrap();
+        fs::create_dir_all(&bridge).unwrap();
+        let artifact = "ableton-mcp-server-1.0.0-test.tar.gz";
+        let made = std::process::Command::new(system::system_program_default(SystemProgram::Tar))
+            .args(["-czf", &join(&bridge, artifact), "-C", app.path().join("staged").to_str().unwrap(), "package"])
+            .status()
+            .unwrap();
+        assert!(made.success());
+        // Nothing to unpack from yet: the folder names no tarball.
+        assert_eq!(unpack_prepared_bridge(&bridge), Ok(()));
+        assert!(!Path::new(&join(&bridge, "package")).exists());
+        fs::write(join(&bridge, "prepared.json"), format!(r#"{{"artifact":"{artifact}","sha256":"x","version":"1.0.0"}}"#)).unwrap();
+        assert_eq!(unpack_prepared_bridge(&bridge), Ok(()));
+        assert_eq!(fs::read(join(&join(&bridge, "package"), &exe)).unwrap(), b"the bridge");
+        assert_eq!(bridge_dir_in(&root), join(&bridge, "package"));
+        assert!(Path::new(&join(&bridge, artifact)).exists(), "the tarball stays for the lifecycle to verify");
+        // Unpacked already: nothing is done again.
+        fs::write(join(&join(&bridge, "package"), &exe), b"changed since").unwrap();
+        assert_eq!(unpack_prepared_bridge(&bridge), Ok(()));
+        assert_eq!(fs::read(join(&join(&bridge, "package"), &exe)).unwrap(), b"changed since");
+        // A tarball named with a path isn't followed.
+        let elsewhere = join(&root, "elsewhere");
+        fs::create_dir_all(&elsewhere).unwrap();
+        fs::write(join(&elsewhere, "prepared.json"), format!(r#"{{"artifact":"../bridge/{artifact}"}}"#)).unwrap();
+        assert_eq!(unpack_prepared_bridge(&elsewhere), Ok(()));
+        assert!(!Path::new(&join(&elsewhere, "package")).exists());
+        // A broken tarball: what tar said, and no package.
+        let broken = join(&root, "broken");
+        fs::create_dir_all(&broken).unwrap();
+        fs::write(join(&broken, "bridge.tar.gz"), b"not a tarball").unwrap();
+        fs::write(join(&broken, "prepared.json"), r#"{"artifact":"bridge.tar.gz"}"#).unwrap();
+        assert!(unpack_prepared_bridge(&broken).is_err());
+        assert!(!Path::new(&join(&broken, "package")).join(&exe).exists());
     }
 }
