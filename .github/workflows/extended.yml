@@ -37,18 +37,20 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { os: ubuntu-24.04, label: Linux, part: 1, parts: 3 }
-          - { os: ubuntu-24.04, label: Linux, part: 2, parts: 3 }
-          - { os: ubuntu-24.04, label: Linux, part: 3, parts: 3 }
-          - { os: macos-15, label: macOS, part: 1, parts: 2 }
-          - { os: macos-15, label: macOS, part: 2, parts: 2 }
+          - { os: ubuntu-24.04, label: Linux, part: 1, parts: 3, cache: kumi-rust-linux }
+          - { os: ubuntu-24.04, label: Linux, part: 2, parts: 3, cache: kumi-rust-linux }
+          - { os: ubuntu-24.04, label: Linux, part: 3, parts: 3, cache: kumi-rust-linux }
+          - { os: macos-15, label: macOS, part: 1, parts: 2, cache: rust-platforms }
+          - { os: macos-15, label: macOS, part: 2, parts: 2, cache: rust-platforms }
           # (Windows runs the slowest: three shards took 12, 18 and 20 minutes, the last at its limit)
-          - { os: windows-2025, label: Windows, part: 1, parts: 4 }
-          - { os: windows-2025, label: Windows, part: 2, parts: 4 }
-          - { os: windows-2025, label: Windows, part: 3, parts: 4 }
-          - { os: windows-2025, label: Windows, part: 4, parts: 4 }
+          - { os: windows-2025, label: Windows, part: 1, parts: 4, cache: app-rust-windows, linker: rust-lld }
+          - { os: windows-2025, label: Windows, part: 2, parts: 4, cache: app-rust-windows, linker: rust-lld }
+          - { os: windows-2025, label: Windows, part: 3, parts: 4, cache: app-rust-windows, linker: rust-lld }
+          - { os: windows-2025, label: Windows, part: 4, parts: 4, cache: app-rust-windows, linker: rust-lld }
     env:
-      CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER: rust-lld
+      # Rust's own linker on Windows, as CI's Windows jobs have it, and empty elsewhere: rust-cache keys a cache on the
+      # CARGO* and RUST* variables that are set, so one that CI's Linux and macOS jobs don't set misses their caches.
+      CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER: ${{ matrix.linker }}
     steps:
       - name: Stop Windows Defender scanning the workspace (it slows every file the build touches)
         if: runner.os == 'Windows'
@@ -57,9 +59,12 @@ jobs:
         run: Set-MpPreference -DisableRealtimeMonitoring $true
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
-      # Restores main's cache (CI saves it); saves none of its own, so the repository's 10 GB keeps main's.
+      # Restores the cache CI saves from main for this platform, by its name; saves none of its own, so the repository's
+      # 10 GB keeps main's. On Windows the app's: it builds its crates from crates.io with the features every test gives
+      # them, where the other part builds windows-sys with others, and every crate above it would build again.
       - uses: Swatinem/rust-cache@63fed3e2fecf6f7b51dc6f043341b79ef82a9ae7 # v2.9.2
         with:
+          shared-key: ${{ matrix.cache }}
           save-if: false
       - uses: taiki-e/install-action@e407f7bafb71fd004bc5c2da3032e5470cbb6ef0 # v2
         with:
@@ -137,8 +142,10 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
+      # CI's, as the tests'.
       - uses: Swatinem/rust-cache@63fed3e2fecf6f7b51dc6f043341b79ef82a9ae7 # v2.9.2
         with:
+          shared-key: kumi-rust-linux
           save-if: false
       - run: cargo test --workspace --locked --doc
       # The eval runner's own tests (its lab guard, and that its Live-words and names checks can fail): an example's tests,
@@ -158,8 +165,10 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
+      # CI's for the bridges, which builds the extension's crates from crates.io.
       - uses: Swatinem/rust-cache@63fed3e2fecf6f7b51dc6f043341b79ef82a9ae7 # v2.9.2
         with:
+          shared-key: bridges-rust-linux
           save-if: false
       - name: The newest SDK headers, and the functions they add, take away or change
         id: sdk
