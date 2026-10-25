@@ -1,6 +1,6 @@
 [package]
 name = "reaper-kumi"
-version = "0.1.4"
+version = "0.1.5"
 description = "Kumi's REAPER extension: the bridge REAPER loads from UserPlugins."
 edition.workspace = true
 license.workspace = true
