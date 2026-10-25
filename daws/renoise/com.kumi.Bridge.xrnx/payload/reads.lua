@@ -222,7 +222,10 @@ end
 -- frames from the first that isn't silence, and 16 points over its first second), so padded hits don't print alike, and a
 -- print of the instrument's settings (its devices, macros and samples' settings, not their names); `tidy-notes` counts the
 -- notes of the song's patterns (from the one numbered `cursor`) that play each instrument, hidden columns too, and with byTrack
--- the same by track (its number, from 1): which tracks play an instrument (#401, layering breaks).
+-- the same by track (its number, from 1): which tracks play an instrument (#401, layering breaks). A page runs in its job's
+-- slices: one may end before any sample (up to ~850 reads of its buffer), an instrument's settings or a pattern track (up to
+-- 13 reads a line), and what was held is looked up again by its number after (a list that changed meanwhile ends the read:
+-- epoch-changed or changed).
 M.TIDY_READS = 300000
 M.TIDY_CALLS = 120000
 M.TIDY_SEEK = 32768
@@ -266,13 +269,14 @@ local function settings_print(instruments_, instrument)
   return string.format("%08x", sum_of(5381, json.encode(work, { sort_keys = true })))
 end
 
-local function tidy_page(song, epoch, from)
+local function tidy_page(job, epoch, from)
   local instruments_ = import("instruments")
   local out, spent, i = {}, 0, from
-  while i <= #song.instruments and spent <= M.TIDY_CALLS do
-    local instrument = song:instrument(i)
+  while i <= #the_song().instruments and spent <= M.TIDY_CALLS do
+    local instrument = the_song():instrument(i)
     local samples = {}
     for s = 1, #instrument.samples do
+      if job.slice() then instrument = the_song():instrument(i) end
       local sample = instrument:sample(s)
       if not sample.is_slice_alias then
         local print
@@ -280,6 +284,7 @@ local function tidy_page(song, epoch, from)
         samples[#samples + 1] = { name = sample.name, print = print or json.null }
       end
     end
+    if job.slice() then instrument = the_song():instrument(i) end
     out[#out + 1] = {
       ref = refs.make(epoch, "instrument", i), index = i - 1, name = instrument.name, samples = array(samples),
       settings = settings_print(instruments_, instrument), plugin = instrument.plugin_properties.plugin_loaded,
@@ -287,15 +292,20 @@ local function tidy_page(song, epoch, from)
     }
     i = i + 1
   end
-  return { items = array(out), epoch = epoch, nextCursor = i <= #song.instruments and tostring(i) or nil }
+  return { items = array(out), epoch = epoch, nextCursor = i <= #the_song().instruments and tostring(i) or nil }
 end
 
-local function notes_page(song, from, by_track)
+local function notes_page(job, from, by_track)
   local counts, tracks_counts, reads, p = {}, {}, 0, from
+  local song = the_song()
   local tracks = track_count(song)
   while p <= #song.patterns and reads <= M.TIDY_READS do
     local pattern = song:pattern(p)
     for t = 1, tracks do
+      if job.slice() then
+        song = the_song()
+        pattern = song:pattern(p)
+      end
       local pattern_track = pattern:track(t)
       reads = reads + 1
       -- (an alias's lines are its source pattern's, counted there)
@@ -542,9 +552,9 @@ function M.read(job, params, epoch)
       return with_grid and with_grid(row, live:track(t):device(d):parameter(k)) or row
     end)
   elseif kind == "tidy" then
-    return tidy_page(song, epoch, tidy_from(params))
+    return tidy_page(job, epoch, tidy_from(params))
   elseif kind == "tidy-notes" then
-    return notes_page(song, tidy_from(params), params.byTrack == true)
+    return notes_page(job, tidy_from(params), params.byTrack == true)
   elseif kind == "spans" then
     return reads_listening.spans(job, params, epoch, page)
   elseif kind == "modset" or kind == "chain" then
