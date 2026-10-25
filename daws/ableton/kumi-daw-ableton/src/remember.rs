@@ -55,9 +55,11 @@ pub struct Remember {
     pub current: RefCell<Option<Rc<CurrentProject>>>,
     pub context: RefCell<Option<JsonObject>>,
     pub last_saved: Cell<i64>,
-    /// When an export last failed (ms; a Set too large to remember, or one past its bound): it isn't asked for again
-    /// before SAVE_AT_LEAST_EVERY_MS, where every look would otherwise read it again.
+    /// When an export last failed (ms), and how many failed in a row: a Set too large to remember, or one past its
+    /// bound, would otherwise be read again at every look. The wait grows with the run (`failed_hold_ms`), so a
+    /// failure that won't repeat (a disconnect mid-export, a store that couldn't be written) costs one period.
     pub last_failed: Cell<i64>,
+    pub failures: Cell<u32>,
     /// What the latest look saw (`ExportMark`), and what the last export was taken from.
     looked: RefCell<Option<ExportMark>>,
     exported: RefCell<Option<ExportMark>>,
@@ -78,6 +80,7 @@ impl Remember {
             context: RefCell::new(None),
             last_saved: Cell::new(0),
             last_failed: Cell::new(0),
+            failures: Cell::new(0),
             looked: RefCell::new(None),
             exported: RefCell::new(None),
             on_catch_up,
@@ -115,7 +118,7 @@ impl Remember {
             return false;
         }
         // The last export failed: a Set too large to remember would otherwise be read again at every look.
-        if self.last_failed.get() > self.last_saved.get() && now_ms - self.last_failed.get() <= SAVE_AT_LEAST_EVERY_MS {
+        if self.last_failed.get() > self.last_saved.get() && now_ms - self.last_failed.get() <= self.failed_hold_ms() {
             return false;
         }
         let (looked, exported) = (self.looked.borrow(), self.exported.borrow());
@@ -138,6 +141,16 @@ impl Remember {
     fn export_kept(&self, mark: Option<ExportMark>) {
         *self.exported.borrow_mut() = mark;
         self.last_saved.set(kumi_common::time::now_ms());
+        self.failures.set(0);
+    }
+    /// How long after a failed export the next waits: five minutes after the first failure (one that won't repeat
+    /// costs nothing more than the period), ten after the second, thirty from the third on.
+    fn failed_hold_ms(&self) -> i64 {
+        match self.failures.get() {
+            0 | 1 => SAVE_EVERY_MS,
+            2 => 2 * SAVE_EVERY_MS,
+            _ => SAVE_AT_LEAST_EVERY_MS,
+        }
     }
     fn enqueue(self: &Rc<Self>, work: impl FnOnce(Rc<Self>) -> LocalBoxFuture<'static, Result<(), RuntimeError>> + 'static) -> Saving {
         let before = self.pending();
@@ -147,6 +160,7 @@ impl Remember {
             // The queued work is an export (a save, a catch-up): one that fails is noted for `save_due`.
             if work(this.clone()).await.is_err() {
                 this.last_failed.set(kumi_common::time::now_ms());
+                this.failures.set(this.failures.get().saturating_add(1));
             }
         }
         .boxed_local()

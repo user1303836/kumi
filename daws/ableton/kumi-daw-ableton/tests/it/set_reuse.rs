@@ -734,7 +734,7 @@ async fn mixer_values_moving_with_automation_dont_export_the_set_but_a_mute_does
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn a_set_too_large_to_remember_isnt_read_again_at_every_look() {
+async fn a_set_too_large_to_remember_is_tried_again_after_five_then_ten_then_thirty_minutes() {
     tokio::task::LocalSet::new()
         .run_until(async {
             let folder = tempfile::tempdir().unwrap();
@@ -743,14 +743,37 @@ async fn a_set_too_large_to_remember_isnt_read_again_at_every_look() {
             session.live.endless_export.set(true);
             session.turn().await;
             session.remember.pending().await;
-            // The catch-up's export gave up after 64 pages: nothing kept, and not tried again for half an hour.
+            // The catch-up's export gave up after 64 pages: nothing kept.
             assert_eq!((session.live.exports.get(), store.saves.get()), (64, 0));
-            session.remember.last_saved.set(now_ms() - 6 * 60_000);
+            // One failure costs only the period: six minutes on it's tried again, and fails again.
+            session.remember.last_failed.set(now_ms() - 6 * 60_000);
             session.turn().await;
-            assert!(!session.remember.save_scheduled(), "it failed a moment ago");
+            assert!(session.remember.save_scheduled(), "the first failure is tried again after five minutes");
+            session.remember.cancel_timer();
+            session.remember.save_now(None).await;
+            assert_eq!((session.live.exports.get(), session.remember.failures.get()), (128, 2));
+            // Two in a row: ten minutes.
+            session.remember.last_failed.set(now_ms() - 6 * 60_000);
+            session.turn().await;
+            assert!(!session.remember.save_scheduled(), "two failures: not before ten minutes");
+            session.remember.last_failed.set(now_ms() - 11 * 60_000);
+            session.turn().await;
+            assert!(session.remember.save_scheduled());
+            session.remember.cancel_timer();
+            session.remember.save_now(None).await;
+            assert_eq!(session.remember.failures.get(), 3);
+            // Three or more: thirty.
+            session.remember.last_failed.set(now_ms() - 11 * 60_000);
+            session.turn().await;
+            assert!(!session.remember.save_scheduled(), "three failures: not before thirty minutes");
             session.remember.last_failed.set(now_ms() - 31 * 60_000);
             session.turn().await;
             assert!(session.remember.save_scheduled(), "half an hour on, it's tried again");
+            session.remember.cancel_timer();
+            // An export that goes through again starts the count over.
+            session.live.endless_export.set(false);
+            session.remember.save_now(None).await;
+            assert_eq!((store.saves.get(), session.remember.failures.get()), (1, 0));
             session.close().await;
         })
         .await;
