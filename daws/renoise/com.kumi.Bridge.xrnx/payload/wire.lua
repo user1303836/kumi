@@ -7,6 +7,7 @@ local sha256 = import("sha256")
 
 local byte, find, sub, format = string.byte, string.find, string.sub, string.format
 local concat = table.concat
+local floor = math.floor
 
 local M = {}
 
@@ -161,6 +162,18 @@ function M.random28()
     return ((b1 % 16 * 256 + b2) * 256 + b3) * 256 + b4
   end
   return tonumber(sub(M.nonce(), 1, 7), 16)
+end
+
+-- A whole number as hex text, and hex text back (the epoch's 44 bits), past 2^32 in two halves: a Lua 5.1 built with a
+-- 32-bit long, as on Windows, formats %x and reads base 16 through one, which can't hold them. Otherwise these are
+-- %x and tonumber(text, 16).
+function M.hex(n)
+  if n < 2 ^ 32 then return format("%x", n) end
+  return format("%x%08x", floor(n / 2 ^ 32), n % 2 ^ 32)
+end
+function M.from_hex(text)
+  if type(text) ~= "string" or #text <= 8 or #text > 16 or not find(text, "^%x+$") then return tonumber(text, 16) end
+  return tonumber(sub(text, 1, -9), 16) * 2 ^ 32 + tonumber(sub(text, -8), 16)
 end
 
 -- Secrets: one line of 32 to 512 printable ASCII characters without spaces.

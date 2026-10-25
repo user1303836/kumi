@@ -80,6 +80,48 @@ function T.load_payload_module(name)
   return import(name)
 end
 
+-- A payload module loaded on its own as a Lua 5.1 built with a 32-bit long runs it, as on Windows: string.format's
+-- integer conversions (%d, %i, %c, %o, %u, %x, %X) and tonumber(text, base) go through a long there, and a number one
+-- can't hold is undefined (MSVC prints %d of 2^31 as -2147483648). Here it fails, by name. The modules it imports are
+-- the usual ones.
+function T.load_with_32_bit_long(name)
+  local real_format, real_tonumber = string.format, tonumber
+  local function fits(value, unsigned)
+    if type(value) ~= "number" then return true end
+    if unsigned then return value >= 0 and value < 2 ^ 32 end
+    return value >= -2 ^ 31 and value < 2 ^ 31
+  end
+  local function format(spec, ...)
+    local at, n = 1, 0
+    while true do
+      local percent = spec:find("%", at, true)
+      if not percent then break end
+      if spec:sub(percent + 1, percent + 1) == "%" then
+        at = percent + 2
+      else
+        local _, last, conversion = spec:find("^[-+ #0]*%d*%.?%d*(%a)", percent + 1)
+        n = n + 1
+        if conversion and conversion:find("^[dic]$") and not fits(select(n, ...), false) or
+          conversion and conversion:find("^[ouxX]$") and not fits(select(n, ...), true) then
+          error(real_format("a 32-bit long can't hold %.17g (string.format %%%s)", select(n, ...), conversion), 2)
+        end
+        at = (last or percent) + 1
+      end
+    end
+    return real_format(spec, ...)
+  end
+  local function tonumber(text, base)
+    local value = real_tonumber(text, base)
+    if base and base ~= 10 and value and not fits(value, true) then
+      error(real_format("a 32-bit long can't hold %s (tonumber in base %d)", tostring(text), base), 2)
+    end
+    return value
+  end
+  local chunk = assert(loadfile(T.tool_dir .. "payload/" .. name .. ".lua"))
+  setfenv(chunk, setmetatable({ string = setmetatable({ format = format }, { __index = string }), tonumber = tonumber }, { __index = _G }))
+  return chunk(T.load_payload_module)
+end
+
 T.mock = assert(loadfile(tests_dir .. "mock_renoise.lua"))(tests_dir)
 
 for _, file in ipairs({ "test_json.lua", "test_sha256.lua", "test_wire.lua", "test_vectors.lua", "test_mock.lua", "test_bridge.lua", "test_reads.lua", "test_retire.lua", "test_changes.lua", "test_review.lua",

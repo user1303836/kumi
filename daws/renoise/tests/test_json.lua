@@ -212,3 +212,13 @@ test("json: a raw text goes into a document as it is, and a document of raws is 
   eq(done, true)
   eq(text, spliced)
 end)
+
+test("json: integers past 2^31 print whole on a 32-bit long too (Windows)", function()
+  local json32 = T.load_with_32_bit_long("json")
+  -- (the discovery file's startedMs, a file's size, the largest integers kept exact)
+  for _, v in ipairs({ 2 ^ 31, -(2 ^ 31) - 1, 2 ^ 32, 1760000000000, 2 ^ 44, 2 ^ 53, -(2 ^ 53) }) do
+    eq(json32.encode(v), enc(v), "as on 64 bits: " .. string.format("%.17g", v))
+  end
+  eq(json32.encode(1760000000000), "1760000000000")
+  eq(json32.encode(-7), "-7")
+end)
