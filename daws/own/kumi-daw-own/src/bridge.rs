@@ -505,20 +505,29 @@ pub fn stopped_or<T>(outcome: Result<T, RuntimeError>, signal: &Signal) -> Resul
 }
 
 /// The JSON a host tool answered with, or why it couldn't.
-pub fn answer_of(result: &CallToolResult) -> Result<Value, Refused> {
-    let text = result
-        .content
-        .iter()
-        .filter_map(|block| match block {
-            ContentBlock::Text { text, .. } => Some(text.as_str()),
-            _ => None,
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
-    let value: Value = serde_json::from_str(&text).unwrap_or(Value::String(text.clone()));
+pub fn answer_of(result: CallToolResult) -> Result<Value, Refused> {
+    let text = |content: &[ContentBlock]| {
+        content
+            .iter()
+            .filter_map(|block| match block {
+                ContentBlock::Text { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    // The host sends its JSON twice, as the text and as structured content: the structured copy was read with the
+    // message, so it's taken as it is, and the text parsed only when there's none.
+    let value: Value = match result.structured_content {
+        Some(object) => Value::Object(object),
+        None => {
+            let text = text(&result.content);
+            serde_json::from_str(&text).unwrap_or(Value::String(text))
+        }
+    };
     if result.is_error == Some(true) {
         return Err(Refused {
-            why: value.get("error").and_then(Value::as_str).map(str::to_owned).unwrap_or(text),
+            why: value.get("error").and_then(Value::as_str).map(str::to_owned).unwrap_or_else(|| text(&result.content)),
             there: value.get("connected") != Some(&Value::Bool(false)),
             // The bridge's busy, or the host's own word that the DAW didn't answer in time (a dialog may be open).
             busy: value.get("code").and_then(Value::as_str) == Some("busy") || value.get("busy") == Some(&Value::Bool(true)),
@@ -700,7 +709,7 @@ impl<S: RefScheme + 'static> OwnIntegration<S> {
         let endpoint = self.endpoint(signal.clone()).await?;
         let args = args.as_object().cloned().unwrap_or_default();
         let bounded = abort::any([signal, abort::timeout(CALL_MS)]);
-        stopped_or(endpoint.call(tool, args, bounded.clone()).await.map(|result| answer_of(&result)), &bounded)
+        stopped_or(endpoint.call(tool, args, bounded.clone()).await.map(answer_of), &bounded)
     }
 
     /// A pin as the model sees it, in the turn's short refs. Where refs are positions, its refs are carried through the
@@ -837,7 +846,7 @@ impl<S: RefScheme + 'static> OwnIntegration<S> {
             while !closed.get() {
                 tokio::time::sleep(std::time::Duration::from_millis(focus_pause(period, quiet, was_playing))).await;
                 let Some(host) = endpoint.borrow().clone() else { continue };
-                let read = host.call("focus", JsonObject::new(), abort::timeout(2_000)).await.ok().map(|result| answer_of(&result));
+                let read = host.call("focus", JsonObject::new(), abort::timeout(2_000)).await.ok().map(answer_of);
                 if closed.get() {
                     break;
                 }
@@ -884,7 +893,7 @@ impl<S: RefScheme + 'static> OwnIntegration<S> {
                 if last_epoch.is_some() && epoch != last_epoch {
                     let mut args = JsonObject::new();
                     args.insert("kind".into(), daw.project_kind.into());
-                    let row = host.call("read", args, abort::timeout(2_000)).await.ok().and_then(|result| answer_of(&result).ok());
+                    let row = host.call("read", args, abort::timeout(2_000)).await.ok().and_then(|result| answer_of(result).ok());
                     let now = row.as_ref().and_then(|row| row.pointer("/items/0/identity")).and_then(Value::as_str).map(str::to_owned);
                     let before = identity.borrow().clone();
                     if now.is_some() && before.is_some() && now != before {
@@ -1956,7 +1965,7 @@ impl<S: RefScheme + 'static> KernelTool for ReadTool<S> {
         let mut tries = 0;
         loop {
             let result = endpoint.call("read", args.clone(), abort::any([signal.clone(), abort::timeout(CALL_MS)])).await?;
-            match answer_of(&result) {
+            match answer_of(result) {
                 Ok(page) => {
                     follow_epoch(&self.book, &self.epoch, &self.layout, &page);
                     if layout_of(&self.book, &self.layout, page.get("layout").and_then(Value::as_u64)).await == Layout::Older {
@@ -2026,6 +2035,42 @@ impl<S: RefScheme + 'static> KernelTool for ReadTool<S> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn answered(message: Value) -> CallToolResult {
+        CallToolResult::from_object(message.as_object().cloned().unwrap()).unwrap()
+    }
+
+    fn answer(result: CallToolResult) -> Value {
+        answer_of(result).unwrap_or_else(|refused| panic!("refused: {}", refused.why))
+    }
+
+    /// The host's answer is its structured content, the JSON its text holds too, taken as read rather than parsed again;
+    /// without any, the text is parsed, and text that isn't JSON is the answer as words. An error says the host's why,
+    /// else its text.
+    #[test]
+    fn a_host_answer_is_its_structured_content_else_its_text() {
+        let both = |value: Value, is_error: bool| {
+            answered(json!({"content": [{"type": "text", "text": value.to_string()}], "structuredContent": value, "isError": is_error}))
+        };
+        let page = json!({"items": [{"ref": "1:track:2", "name": "Bass", "volume": -6.5}], "nextCursor": null, "layout": 3});
+        assert_eq!(answer(both(page.clone(), false)), page);
+        // (as the host never sends them: which copy is read)
+        let differ = answered(
+            json!({"content": [{"type": "text", "text": "{\"from\": \"the text\"}"}], "structuredContent": {"from": "the structure"}}),
+        );
+        assert_eq!(answer(differ), json!({"from": "the structure"}));
+        let text_only = |text: &str| answered(json!({"content": [{"type": "text", "text": text}]}));
+        assert_eq!(answer(text_only("{\"from\": \"the text\"}")), json!({"from": "the text"}));
+        assert_eq!(answer(text_only("Only words")), json!("Only words"));
+        let refused = answer_of(both(json!({"error": "REAPER is busy", "code": "busy", "connected": true}), true)).unwrap_err();
+        assert_eq!(
+            (refused.why.as_str(), refused.busy, refused.there, refused.code.as_deref()),
+            ("REAPER is busy", true, true, Some("busy"))
+        );
+        let refused = answer_of(both(json!({"connected": false}), true)).unwrap_err();
+        assert_eq!((refused.why.as_str(), refused.there), (r#"{"connected":false}"#, false));
+        assert_eq!(answer_of(answered(json!({"content": [{"type": "text", "text": "No"}], "isError": true}))).unwrap_err().why, "No");
+    }
 
     #[test]
     fn the_focus_poll_slows_down_while_nothing_moves_and_never_while_the_daw_plays() {

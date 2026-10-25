@@ -245,8 +245,21 @@ fn layout_arg(arguments: &Value, params: &mut Map<String, Value>) -> Result<(), 
     }
 }
 
+/// An answer's size as JSON, counted as it's written rather than written out: a page runs to MAX_ANSWER_BYTES, and is
+/// written again as the tool's text.
 fn size_of(value: &Value) -> usize {
-    serde_json::to_string(value).map(|text| text.len()).unwrap_or(usize::MAX)
+    struct Counted(usize);
+    impl std::io::Write for Counted {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0 += bytes.len();
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    let mut counted = Counted(0);
+    serde_json::to_writer(&mut counted, value).map(|()| counted.0).unwrap_or(usize::MAX)
 }
 
 impl Host {
@@ -354,6 +367,18 @@ impl Host {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_answers_size_is_its_json_counted_as_written() {
+        for value in [
+            json!({"items": [{"name": "Bass \"Sub\" ✓ \u{1}", "volume": -6.5, "n": 3, "big": 1e300, "tiny": 1.5e-7}], "next": null}),
+            json!([]),
+            json!("words"),
+            json!(0.1),
+        ] {
+            assert_eq!(size_of(&value), serde_json::to_string(&value).unwrap().len(), "{value}");
+        }
+    }
 
     #[test]
     fn a_wheres_items_are_forwarded_and_anything_else_under_items_refused() {
