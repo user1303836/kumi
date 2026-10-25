@@ -143,28 +143,29 @@ fn learn(state: &mut State, guid: &str, params: impl IntoIterator<Item = i32>) {
     state.learned.entry(guid.to_string()).or_default().extend(params);
 }
 
-/// The parameters to leave out of a new signature of this FX: by name, by moving between two reads in this call, or found
-/// by an earlier watch.
-pub(super) fn moving(ctx: &Ctx, fx: Fx) -> Vec<i32> {
+/// The parameters to leave out of a new signature of this FX (by name, by moving between two reads in this call, or found
+/// by an earlier watch), and the values as the second read had them: what the signature hashes and keeps as its look, so
+/// the sweep isn't read a third and fourth time for them.
+pub(super) fn moving(ctx: &Ctx, fx: Fx) -> (Vec<i32>, Vec<f32>) {
     let guid = ctx.reaper.fx_guid(fx);
     let now = values(ctx.reaper, fx);
     let names = named(ctx.reaper, fx, now.len() as i32);
     // (read again after the names: the time between the two reads is what a meter has to move in)
     let again = values(ctx.reaper, fx);
-    STATE.with(|state| {
+    let volatile = STATE.with(|state| {
         let mut state = state.borrow_mut();
         learn(&mut state, &guid, moved(&now, &again).collect::<Vec<_>>());
         let mut all: BTreeSet<i32> = names.into_iter().collect();
         all.extend(state.learned.get(&guid).into_iter().flatten().copied());
         all.into_iter().collect()
-    })
+    });
+    (volatile, again)
 }
 
-/// A signature was taken of this FX: the look it hashed is kept, and the ticks watch the FX again (afresh: what an
-/// earlier watch of it counted is dropped).
-pub(super) fn remember(ctx: &Ctx, fx: Fx, signature: &Value) {
+/// A signature was taken of this FX from `values`: the look it hashed is kept, and the ticks watch the FX again (afresh:
+/// what an earlier watch of it counted is dropped).
+pub(super) fn remember(ctx: &Ctx, fx: Fx, signature: &Value, values: Vec<f32>) {
     let guid = ctx.reaper.fx_guid(fx);
-    let values = values(ctx.reaper, fx);
     let hash = signature["hash"].as_str().unwrap_or_default().to_string();
     STATE.with(|state| {
         let mut state = state.borrow_mut();

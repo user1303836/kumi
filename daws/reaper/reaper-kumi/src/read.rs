@@ -293,6 +293,7 @@ impl Reads {
         self.epoch.borrow_mut().bump();
         self.registry.borrow_mut().clear();
         digest::forget();
+        rows::forget_groups();
     }
 
     /// What names the project open in this tab while it stays open in this REAPER: this process and the project's serial.
@@ -616,7 +617,7 @@ impl Reads {
     /// `read {ref}`: the one object a ref names.
     fn read_one(&self, reaper: &Reaper, proj: Project, reference: &str, grid: Option<usize>) -> Answer {
         let row = match Ref::parse(reference).map_err(bad)? {
-            Ref::Track(id) => rows::track_row(reaper, self.track_by_id(reaper, proj, &id)?),
+            Ref::Track(id) => rows::track_row_detailed(reaper, self.track_by_id(reaper, proj, &id)?, &self.groups_under(reaper, proj)),
             Ref::Item(guid) => rows::item_row(reaper, proj, self.item_by_guid(reaper, proj, &guid)?),
             Ref::Take(guid) => take_row(reaper, self.take_by_guid(reaper, proj, &guid)?, None),
             Ref::Fx(guid) => {
@@ -709,9 +710,15 @@ impl Reads {
 
     // ----- tracks -----
 
+    /// Under what the tracks' groups are read, for the rows: the epoch and REAPER's state change count (one call).
+    fn groups_under(&self, reaper: &Reaper, proj: Project) -> rows::Under {
+        rows::Under { epoch: self.epoch(), changed: reaper.state_change_count(proj) }
+    }
+
     /// Rows of the master (position 0) and the tracks (1 and on).
     pub fn track_page(&self, reaper: &Reaper, proj: Project, pager: &mut Pager, start: usize) -> Option<usize> {
         let count = reaper.track_count(proj) as usize;
+        let under = self.groups_under(reaper, proj);
         let mut position = start;
         while position <= count {
             if !pager.open() {
@@ -719,7 +726,7 @@ impl Reads {
             }
             let track = if position == 0 { reaper.master_track(proj) } else { reaper.track_at(proj, position as i32 - 1) };
             if let Some(track) = track {
-                if !pager.push(rows::track_row(reaper, track)) {
+                if !pager.push(rows::track_row(reaper, track, &under)) {
                     return Some(position);
                 }
             }
@@ -2055,6 +2062,85 @@ mod tests {
         assert_eq!((&rows[0]["fxRef"], &rows[0]["param"]), (&json!("r:fx:{FX-BIG}"), &json!(7000)));
         let calls = fake::with(|s| s.calls);
         assert!(calls < 100, "{calls} calls to find one envelope");
+    }
+
+    // The optimization audit's R5, and its review: every track row read fifty group masks (25 roles, low and high),
+    // nearly always all zero; and the snapshot's rows are what the model sees each turn, so they keep their `groups`
+    // (which tracks lead or follow which VCA): read under REAPER's state change count and kept while it stays, read anew
+    // once it moved (a group edit in REAPER is an undo point, which moves it) or the bound passed.
+    #[test]
+    fn rows_keep_their_groups_and_read_them_once_while_the_state_count_stays() {
+        let lab = Lab::new();
+        let guid = fake::with(|s| s.tracks[1].guid.clone());
+        fake::extra(|e| e.groups.insert((guid.clone(), "VOLUME_VCA_FOLLOW".into(), false), 1 | 4));
+        let calls = || fake::with(|s| s.calls);
+        let kick = |rows: &[Value]| rows.iter().find(|row| row["name"] == "Kick").unwrap().clone();
+        let vca = json!([{"group": 1, "roles": ["vca-follow"]}, {"group": 3, "roles": ["vca-follow"]}]);
+        let before = calls();
+        let rows = lab.rows(json!({"kind": "track"}));
+        let first = calls() - before;
+        assert_eq!(kick(&rows)["groups"], vca);
+        assert!(rows.iter().filter(|row| row["name"] != "Kick").all(|row| row.get("groups").is_none()), "{rows:?}");
+        // The same look again: the groups are kept, fifty calls a track fewer (the master is in no group).
+        let before = calls();
+        let again = lab.rows(json!({"kind": "track"}));
+        let kept = calls() - before;
+        assert_eq!(again, rows);
+        let tracks = rows.len() as u64 - 1;
+        assert_eq!(first - kept, 50 * tracks, "{first} calls for the first look, {kept} with the groups kept");
+        // The snapshot's rows are these rows.
+        let snapshot = lab.reads.snapshot(&Reaper::new(&fake::api())).unwrap();
+        assert_eq!(kick(snapshot["tracks"].as_array().unwrap())["groups"], vca);
+        // The producer puts the track in group 2 too, in REAPER's Grouping dialog: an undo point, and the count moves.
+        fake::extra(|e| e.groups.insert((guid.clone(), "MUTE_FOLLOW".into(), false), 2));
+        fake::producer_edit("Track grouping");
+        let three =
+            json!([{"group": 1, "roles": ["vca-follow"]}, {"group": 2, "roles": ["mute-follow"]}, {"group": 3, "roles": ["vca-follow"]}]);
+        assert_eq!(kick(&lab.rows(json!({"kind": "track"})))["groups"], three);
+        // A bare write of a script's (no undo point: the count where it was) isn't in the rows yet. The one track asked
+        // about reads its groups anew (fifty calls), and what it read is what the rows show from then on.
+        fake::extra(|e| e.groups.insert((guid.clone(), "SOLO_LEAD".into(), true), 1));
+        let listed = kick(&lab.rows(json!({"kind": "track"})));
+        assert_eq!(listed["groups"], three);
+        let before = calls();
+        let one = lab.rows(json!({"ref": listed["ref"]}));
+        assert!(calls() - before >= 50, "{} calls for the one track", calls() - before);
+        assert_eq!(one[0]["groups"][3], json!({"group": 33, "roles": ["solo-lead"]}));
+        assert_eq!(kick(&lab.rows(json!({"kind": "track"})))["groups"], one[0]["groups"]);
+    }
+
+    #[test]
+    fn kept_groups_are_read_again_after_a_while_forgotten_with_the_epoch_and_bounded() {
+        let lab = Lab::new();
+        let guid = fake::with(|s| s.tracks[1].guid.clone());
+        let calls = || fake::with(|s| s.calls);
+        let kick = |rows: &[Value]| rows.iter().find(|row| row["name"] == "Kick").unwrap().clone();
+        let rows = lab.rows(json!({"kind": "track"}));
+        assert_eq!(kick(&rows).get("groups"), None);
+        let tracks = rows.len() as u64 - 1;
+        // A bare write that moved no count shows once the bound passes, whatever the count says.
+        fake::extra(|e| e.groups.insert((guid.clone(), "PAN_LEAD".into(), false), 1 << 4));
+        assert_eq!(kick(&lab.rows(json!({"kind": "track"}))).get("groups"), None, "kept");
+        rows::TEST_GROUPS_KEPT_FOR.with(|bound| bound.set(Some(Duration::ZERO)));
+        assert_eq!(kick(&lab.rows(json!({"kind": "track"})))["groups"], json!([{"group": 5, "roles": ["pan-lead"]}]));
+        rows::TEST_GROUPS_KEPT_FOR.with(|bound| bound.set(None));
+        // Another project in the tab: nothing kept is of it.
+        lab.rows(json!({"kind": "track"}));
+        let before = calls();
+        lab.rows(json!({"kind": "track"}));
+        let kept = calls() - before;
+        lab.reads.bump_epoch();
+        let before = calls();
+        lab.rows(json!({"kind": "track"}));
+        assert_eq!(calls() - before, kept + 50 * tracks, "read as a first look is");
+        // Kept for so many tracks: past the bound, the rest are read each time.
+        rows::TEST_GROUPS_KEPT.with(|most| most.set(Some(1)));
+        fake::producer_edit("Track grouping");
+        lab.rows(json!({"kind": "track"}));
+        let before = calls();
+        lab.rows(json!({"kind": "track"}));
+        assert_eq!(calls() - before, kept + 50 * (tracks - 1), "one track's groups kept, the rest read again");
+        rows::TEST_GROUPS_KEPT.with(|most| most.set(None));
     }
 
     #[test]

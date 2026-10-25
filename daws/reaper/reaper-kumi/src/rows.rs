@@ -1,7 +1,9 @@
 //! The rows `read`, `snapshot` and the FOCUS bodies answer with: one JSON object per REAPER object, named in camelCase
 //! (the shapes are in the M2 contract). Times are seconds, positions in MIDI and sends in quarter notes, gains in dB.
 
+use std::cell::RefCell;
 use std::collections::HashMap;
+use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
 
@@ -208,7 +210,137 @@ fn add_project_settings(reaper: &Reaper, proj: Project, row: &mut Value) {
     }
 }
 
-pub fn track_row(reaper: &Reaper, track: Track) -> Value {
+/// Under what a look at the tracks reads their groups: the tab's epoch and REAPER's count of the project's state
+/// changes, which the groups kept across looks are good for (None when REAPER has no count: nothing is kept).
+pub struct Under {
+    pub epoch: String,
+    pub changed: Option<i32>,
+}
+
+/// The groups each track is in, by its ref, as read under one epoch and state change count. A track's are fifty REAPER
+/// calls (25 roles, low and high masks), nearly always for no group at all: 10,000 for a 200-track snapshot. A group edit
+/// in REAPER (the Grouping dialog, the TCP's group button) is an undo point, which moves the count, and Kumi's own
+/// `track-group` change moves it too (an undo block; it forgets what is kept as well): what was read under the count
+/// stands until it moves, or `GROUPS_KEPT_FOR` passes since the first was kept (a bare API write of another extension's
+/// moves nothing: it shows within that, and at once in the one track asked about).
+#[derive(Default)]
+struct KeptGroups {
+    under: Option<(String, i32, Instant)>,
+    by_track: HashMap<String, Vec<Value>>,
+}
+
+/// Tracks whose groups are kept, at most: past it, the rest are read each time.
+const GROUPS_KEPT: usize = 4096;
+/// How long a track's groups are kept at most: read again after this, whatever the count says.
+const GROUPS_KEPT_FOR: Duration = Duration::from_secs(30);
+
+thread_local! {
+    /// The groups kept (REAPER's main thread reads every row).
+    static KEPT_GROUPS: RefCell<KeptGroups> = RefCell::new(KeptGroups::default());
+}
+
+#[cfg(test)]
+thread_local! {
+    /// A test's own bound on the tracks whose groups are kept, in place of `GROUPS_KEPT`.
+    pub static TEST_GROUPS_KEPT: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) };
+    /// A test's own time bound on the groups kept, in place of `GROUPS_KEPT_FOR`.
+    pub static TEST_GROUPS_KEPT_FOR: std::cell::Cell<Option<Duration>> = const { std::cell::Cell::new(None) };
+}
+
+fn groups_kept() -> usize {
+    #[cfg(test)]
+    if let Some(most) = TEST_GROUPS_KEPT.with(|most| most.get()) {
+        return most;
+    }
+    GROUPS_KEPT
+}
+
+fn groups_kept_for() -> Duration {
+    #[cfg(test)]
+    if let Some(bound) = TEST_GROUPS_KEPT_FOR.with(|bound| bound.get()) {
+        return bound;
+    }
+    GROUPS_KEPT_FOR
+}
+
+impl KeptGroups {
+    fn is_under(&self, under: &Under, changed: i32) -> bool {
+        self.under
+            .as_ref()
+            .is_some_and(|(epoch, count, since)| *epoch == under.epoch && *count == changed && since.elapsed() < groups_kept_for())
+    }
+}
+
+/// A track's groups as they were read under this epoch and count, if kept.
+fn kept_groups(under: &Under, track_ref: &str) -> Option<Vec<Value>> {
+    let changed = under.changed?;
+    KEPT_GROUPS.with(|kept| {
+        let kept = kept.borrow();
+        if !kept.is_under(under, changed) {
+            return None;
+        }
+        kept.by_track.get(track_ref).cloned()
+    })
+}
+
+/// Keeps a track's groups as read under this epoch and count, for up to `GROUPS_KEPT` tracks: a count (or an epoch)
+/// that moved, or `GROUPS_KEPT_FOR` gone by, forgets what was kept under the last.
+fn keep_groups(under: &Under, track_ref: &str, groups: &[Value]) {
+    let Some(changed) = under.changed else { return };
+    KEPT_GROUPS.with(|kept| {
+        let mut kept = kept.borrow_mut();
+        if !kept.is_under(under, changed) {
+            *kept = KeptGroups { under: Some((under.epoch.clone(), changed, Instant::now())), by_track: HashMap::new() };
+        }
+        if kept.by_track.len() >= groups_kept() && !kept.by_track.contains_key(track_ref) {
+            return;
+        }
+        kept.by_track.insert(track_ref.to_string(), groups.to_vec());
+    })
+}
+
+/// Forgets the groups kept: the epoch moved (a tab switch, another project in the tab), or Kumi wrote a track's groups.
+pub fn forget_groups() {
+    KEPT_GROUPS.with(|kept| *kept.borrow_mut() = KeptGroups::default());
+}
+
+fn add_groups(row: &mut Value, groups: Vec<Value>) {
+    if !groups.is_empty() {
+        row["groups"] = groups.into();
+    }
+}
+
+/// A track's row for a list or a snapshot, its groups among it: those kept under the look's epoch and count, read (fifty
+/// calls) only when none are.
+pub fn track_row(reaper: &Reaper, track: Track, under: &Under) -> Value {
+    let mut row = track_row_without_groups(reaper, track);
+    if row["master"] == true {
+        return row;
+    }
+    let track_ref = row["ref"].as_str().unwrap_or_default().to_string();
+    let groups = kept_groups(under, &track_ref).unwrap_or_else(|| {
+        let groups = track_groups(reaper, track);
+        keep_groups(under, &track_ref, &groups);
+        groups
+    });
+    add_groups(&mut row, groups);
+    row
+}
+
+/// A track's row as the single-track read gives it: the list's row, with the groups the track is in read anew (fifty
+/// calls, for the one track asked about), and kept for the rows after it.
+pub fn track_row_detailed(reaper: &Reaper, track: Track, under: &Under) -> Value {
+    let mut row = track_row_without_groups(reaper, track);
+    if row["master"] == true {
+        return row;
+    }
+    let groups = track_groups(reaper, track);
+    keep_groups(under, row["ref"].as_str().unwrap_or_default(), &groups);
+    add_groups(&mut row, groups);
+    row
+}
+
+fn track_row_without_groups(reaper: &Reaper, track: Track) -> Value {
     let id = track_id(reaper, track);
     let master = id == TrackId::Master;
     let number = reaper.track_value(track, "IP_TRACKNUMBER");
@@ -370,10 +502,6 @@ fn add_track_state(reaper: &Reaper, track: Track, master: bool, row: &mut Value)
     let midi_out = value("I_MIDIHWOUT") as i64;
     if midi_out >= 0 {
         row["midiOut"] = json!({"device": (midi_out >> 5) & 31, "channel": midi_out & 31});
-    }
-    let groups = track_groups(reaper, track);
-    if !groups.is_empty() {
-        row["groups"] = groups.into();
     }
     // Fixed lanes (comping): how many, what each is called and which play.
     let free_mode = value("I_FREEMODE") as i64;

@@ -404,22 +404,48 @@ fn a_track_joins_a_group_as_vca_follower_and_its_undo_puts_back_exactly_those_bi
     // The producer's own membership of group 1 stays whatever Kumi does in group 3.
     let guid = state(|s| s.tracks[1].guid.clone());
     fake::extra(|e| e.groups.insert((guid.clone(), "VOLUME_VCA_FOLLOW".into(), false), 1));
+    let kick_row = || {
+        let rows = lab.call("read", json!({"kind": "track"})).unwrap();
+        rows["items"].as_array().unwrap().iter().find(|r| r["name"] == "Kick").cloned().unwrap()
+    };
+    // (the rows read before the change keep the groups they read)
+    assert_eq!(kick_row()["groups"], json!([{"group": 1, "roles": ["vca-follow"]}]));
     let input = json!({"ref": KICK, "groupNumber": 3, "add": ["vca-follow", "mute-follow"]});
     let (preview, made) = lab.make("track-group", input, "Kumi: x (kg001)");
     assert_eq!(made["display"]["title"], "Kick in group 3 “Drums VCA” as vca-follow, mute-follow");
     assert_eq!((kick_roles("VOLUME_VCA_FOLLOW", false), kick_roles("MUTE_FOLLOW", false)), (1 | 4, 4));
     assert_eq!(made["undo"]["entry"], true);
-    // The track rows say it.
-    let rows = lab.call("read", json!({"kind": "track"})).unwrap();
-    let kick = rows["items"].as_array().unwrap().iter().find(|r| r["name"] == "Kick").cloned().unwrap();
+    // The track rows say it: Kumi's own write forgot the groups kept, and its block moved REAPER's count.
+    let kick = kick_row();
     assert_eq!(kick["groups"], json!([{"group": 1, "roles": ["vca-follow"]}, {"group": 3, "roles": ["vca-follow", "mute-follow"]}]));
+    assert_eq!(lab.call("read", json!({"ref": kick["ref"]})).unwrap()["items"][0]["groups"], kick["groups"]);
     lab.undo("track-group", &preview, &made, "Kumi: undo (kg002)").unwrap();
     assert_eq!((kick_roles("VOLUME_VCA_FOLLOW", false), kick_roles("MUTE_FOLLOW", false)), (1, 0));
+    assert_eq!(kick_row()["groups"], json!([{"group": 1, "roles": ["vca-follow"]}]), "put back in the rows too");
     // Groups 33 to 64 are REAPER's other call.
     let (preview, made) = lab.make("track-group", json!({"ref": KICK, "groupNumber": 40, "add": ["volume-lead"]}), "Kumi: x (kg003)");
     assert_eq!(kick_roles("VOLUME_LEAD", true), 1 << 7);
     lab.undo("track-group", &preview, &made, "Kumi: undo (kg004)").unwrap();
     assert_eq!(kick_roles("VOLUME_LEAD", true), 0);
+}
+
+// Inside a plan the block is the plan's, and REAPER's count moves only when it ends: a track read between two of the
+// plan's changes shows the groups Kumi set all the same, because Kumi's own write forgets what the rows kept.
+#[test]
+fn a_tracks_groups_set_inside_a_plan_show_in_the_rows_before_the_plan_ends() {
+    let lab = Lab::new();
+    let kick_groups = || {
+        let rows = lab.call("read", json!({"kind": "track"})).unwrap();
+        rows["items"].as_array().unwrap().iter().find(|r| r["name"] == "Kick").unwrap().get("groups").cloned()
+    };
+    assert_eq!(kick_groups(), None);
+    let step = lab.call("undo_step_begin", json!({"label": "Kumi: groups (kg010)"})).unwrap();
+    let count = state(|s| s.state_count);
+    lab.make("track-group", json!({"ref": KICK, "groupNumber": 2, "add": ["volume-follow"]}), "Kumi: x (kg011)");
+    assert_eq!(state(|s| s.state_count), count, "the plan's block is open: REAPER counts at its end");
+    assert_eq!(kick_groups(), Some(json!([{"group": 2, "roles": ["volume-follow"]}])));
+    lab.call("undo_step_end", json!({"stepId": step["stepId"]})).unwrap();
+    assert_eq!(kick_groups(), Some(json!([{"group": 2, "roles": ["volume-follow"]}])));
 }
 
 #[test]
