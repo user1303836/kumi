@@ -2978,8 +2978,9 @@ impl SessionController for Session {
         {
             let mut s = self.0.state.borrow_mut();
             s.seen.insert(change.id.clone(), change.clone());
-            if s.seen.len() > 20_000 {
-                s.seen.shift_remove_index(0);
+            // Trimmed a thousand at a time: shifting the oldest out one by one is a walk of the whole map per event.
+            if s.seen.len() > 21_000 {
+                s.seen.drain(..1_000);
             }
             // Only the newest changes keep their pictures here; the conversation keeps its own (`changes`).
             if let Some((_, older)) = s.seen.iter_mut().rev().nth(500) {
