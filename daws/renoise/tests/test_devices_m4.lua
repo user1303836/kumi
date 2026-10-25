@@ -2054,7 +2054,15 @@ end)
 test("devices m4: a text's prints are made once and kept by the text, within bounds (perf N1)", function()
   local material = T.load_payload_module("changes_material")
   local presets = T.load_payload_module("changes_presets")
+  local count, bytes = material.PRINTS_KEPT, material.PRINTS_BYTES
+  -- (the kept prints are the module's, shared by every test here: let the earlier ones go to start from one known text)
+  local function only(text_)
+    material.PRINTS_KEPT = 1
+    material.prints_of(text_)
+  end
   local text = "<a><Value>1</Value><IsSelected>true</IsSelected><b>" .. string.rep("x", 100) .. "</b></a>"
+  only("first")
+  material.PRINTS_KEPT = 4
   local kept = material.prints_of(text)
   ok(kept == material.prints_of(text), "the same record for the same text")
   ok(kept.print == nil and kept.shape == nil and kept.content == nil, "nothing made before it is asked for")
@@ -2062,19 +2070,29 @@ test("devices m4: a text's prints are made once and kept by the text, within bou
   eq(presets.shape_of(text), kept.shape)
   eq(material.content_of(text), kept.content)
   ok(kept.print ~= kept.content and kept.content ~= kept.shape, "a print, a content and a shape")
-  ok(material.prints_of(text .. "y") ~= kept, "another text, another record")
-  -- (past PRINTS_KEPT texts the kept are let go together: the text gets a new, empty record, and the same number again)
-  for i = 1, material.PRINTS_KEPT do material.prints_of("filler " .. i) end
-  local again = material.prints_of(text)
-  ok(again ~= kept and again.print == nil, "let go")
-  eq(material.print_of(text), kept.print)
-  -- (a text bigger than PRINTS_BYTES by itself isn't kept, and the kept stay)
-  local bytes = material.PRINTS_BYTES
-  material.PRINTS_BYTES = 1000
+  -- (past PRINTS_KEPT texts, the ones asked for least recently go first: "first", then the fillers; the text, asked for
+  -- again just before, stays with its prints, and a filler that went gets a new, empty record)
+  local filler = material.prints_of("filler 1")
+  material.prints_of("filler 2")
+  material.prints_of("filler 3")
+  ok(material.prints_of(text) == kept, "kept while there is room")
+  material.prints_of("one more")
+  ok(material.prints_of(text) == kept and kept.print ~= nil, "the text asked for lately stays, prints and all")
+  local again = material.prints_of("filler 1")
+  ok(again ~= filler and again.print == nil, "the one asked for longest ago went")
+  -- (a text bigger than PRINTS_BYTES by itself isn't kept; past PRINTS_BYTES of kept texts the least recently asked for go
+  -- until the new one fits, and the rest stay)
+  only("first")
+  material.PRINTS_KEPT, material.PRINTS_BYTES = 1000, 1000
   local big = string.rep("b", 1001)
   ok(material.prints_of(big) ~= material.prints_of(big), "not kept")
-  ok(material.prints_of(text) == again, "the kept stay")
-  material.PRINTS_BYTES = bytes
+  local a, b, c = string.rep("a", 400), string.rep("b", 400), string.rep("c", 400)
+  local kept_a, kept_b = material.prints_of(a), material.prints_of(b)
+  ok(material.prints_of(a) == kept_a, "asked for again: the most recent")
+  material.prints_of(c)
+  ok(material.prints_of(a) == kept_a, "the one asked for lately stays")
+  ok(material.prints_of(b) ~= kept_b, "the one asked for longest ago went for room")
+  material.PRINTS_KEPT, material.PRINTS_BYTES = count, bytes
 end)
 
 test("devices m4: a container change prints each text once, and Renoise's undo of it prints nothing printed before (perf N1)", function()

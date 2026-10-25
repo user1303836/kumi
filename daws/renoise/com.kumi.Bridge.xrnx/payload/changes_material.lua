@@ -391,16 +391,32 @@ M.print_now = print_now
 -- first asked for). A change prints what it replaces and what it wrote several times over (its fence, its record, the
 -- journal's entry), every producer undo reads every journalled device's data again, and the journal polls its containers
 -- about once a second: Lua gives the same text the same string, so a print made once serves them all. A kept text stays
--- in memory by its key, so past PRINTS_KEPT texts, or PRINTS_BYTES of them, the kept are let go together (and a text that
--- big by itself isn't kept).
-M.PRINTS_KEPT, M.PRINTS_BYTES = 64, 32 * 1048576
-local kept_prints, kept_count, kept_bytes = {}, 0, 0
+-- in memory by its key, so past PRINTS_KEPT texts, or PRINTS_BYTES of them, the ones asked for least recently are let go
+-- until the new one fits (and a text that big by itself isn't kept). PRINTS_BYTES holds what one poll can read: the
+-- journal polls up to eight containers (bridge.lua POLL_MOST), each of up to the material bound (8 MB), so the polled
+-- texts stay kept however big they are and the poll never prints them again.
+M.PRINTS_KEPT, M.PRINTS_BYTES = 64, 64 * 1048576
+local kept_prints, kept_count, kept_bytes, kept_uses = {}, 0, 0, 0
+local function let_go(room)
+  local all = {}
+  for text, kept in pairs(kept_prints) do all[#all + 1] = { text = text, used = kept.used } end
+  table.sort(all, function(x, y) return x.used < y.used end)
+  for _, entry in ipairs(all) do
+    if kept_count < M.PRINTS_KEPT and kept_bytes + room <= M.PRINTS_BYTES then break end
+    kept_prints[entry.text] = nil
+    kept_count, kept_bytes = kept_count - 1, kept_bytes - #entry.text
+  end
+end
 function M.prints_of(text)
+  kept_uses = kept_uses + 1
   local kept = kept_prints[text]
-  if kept then return kept end
-  kept = {}
+  if kept then
+    kept.used = kept_uses
+    return kept
+  end
+  kept = { used = kept_uses }
   if #text > M.PRINTS_BYTES then return kept end
-  if kept_count >= M.PRINTS_KEPT or kept_bytes + #text > M.PRINTS_BYTES then kept_prints, kept_count, kept_bytes = {}, 0, 0 end
+  if kept_count >= M.PRINTS_KEPT or kept_bytes + #text > M.PRINTS_BYTES then let_go(#text) end
   kept_prints[text], kept_count, kept_bytes = kept, kept_count + 1, kept_bytes + #text
   return kept
 end
