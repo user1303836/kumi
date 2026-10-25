@@ -23,7 +23,7 @@ use tokio::sync::watch;
 use crate::core::contracts::{
     Kernel, KernelCheckpoint, KernelEmit, KernelEvent, OnText, Picture, StopReason, TranscriptLine, TurnResult, WaitFor,
 };
-use crate::kernel::budget::{fit_for, opening, put_away_images, transcript_of, PutAway};
+use crate::kernel::budget::{fit_for, fit_measured, opening, put_away_images, transcript_of, PutAway};
 use crate::kernel::deferred::{self, Shelf, CALL_TOOL};
 use kumi_ai::binding::{ContextBudget, DEFAULT_BUDGET};
 use kumi_ai::error::LanguageModelError;
@@ -606,6 +606,9 @@ struct Turn {
     /// What this turn sends as the earlier conversation, fitted to the budget. It becomes the
     /// history only when the turn settles; fitting is deterministic, so the next turn sends the same.
     earlier: Rc<RefCell<Vec<Message>>>,
+    /// `earlier`'s bytes as the budget measured them, kept while it stays the same: fitting measures the
+    /// conversation before every step, and the earlier part is the bulk of a long one.
+    earlier_bytes: Cell<Option<usize>>,
     /// A call already running while the model writes it (a plan whose first steps are under way).
     early: RefCell<HashMap<String, Rc<Early>>>,
     spoke: Cell<bool>,
@@ -636,6 +639,7 @@ async fn turn(inner: Rc<Inner>, first: Message, signal: Signal, emit: KernelEmit
         deliver,
         messages: Rc::new(RefCell::new(vec![first])),
         earlier: Rc::new(RefCell::new(inner.history.borrow().clone())),
+        earlier_bytes: Cell::new(None),
         early: RefCell::new(HashMap::new()),
         spoke: Cell::new(false),
         shown: RefCell::new(String::new()),
@@ -833,11 +837,14 @@ impl Turn {
         let refitted = {
             let earlier = self.earlier.borrow();
             let messages = self.messages.borrow();
-            let fitted = fit_for(&self.inner.profile.get(), &earlier, &messages, &budget);
+            let (fitted, earlier_bytes) = fit_measured(&self.inner.profile.get(), &earlier, self.earlier_bytes.get(), &messages, &budget);
+            let changed = fitted.changed();
+            // The number holds for `earlier` as it is; what replaces it below is measured afresh next step.
+            self.earlier_bytes.set((!changed).then_some(earlier_bytes));
             // Kumi just changed what came before. Some providers bind a model's reasoning to the exact
             // conversation it saw (Anthropic's current models refuse the request otherwise), so the
             // reasoning goes, once: what was said, called and read stays.
-            fitted.changed().then(|| (without_reasoning(&fitted.history), without_reasoning(&fitted.turn)))
+            changed.then(|| (without_reasoning(&fitted.history), without_reasoning(&fitted.turn)))
         };
         if let Some((earlier, messages)) = refitted {
             *self.earlier.borrow_mut() = earlier;
@@ -910,6 +917,7 @@ impl Turn {
         let earlier = without_reasoning(&self.earlier.borrow());
         let messages = without_reasoning(&self.messages.borrow());
         *self.earlier.borrow_mut() = earlier;
+        self.earlier_bytes.set(None);
         *self.messages.borrow_mut() = messages;
         (self.deliver)(KernelEvent::ModelSwitch { model: fallback.id.clone(), reason: why, back: false });
     }
