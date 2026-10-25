@@ -44,13 +44,15 @@ pub async fn serve<I: AsyncRead + 'static, O: AsyncWrite + 'static, D: AsyncWrit
         }))?;
         let owner = host.clone();
         let stopping = host.clone();
-        let handler = Rc::new(move |line: String, context: Option<stdio::RecordContext>| {
+        // The record's text isn't kept: the transport parsed it already, and a big request (two page bundles to
+        // diff, audio to analyse) is held once, as JSON, while it's handled.
+        let handler = Rc::new(move |_: String, parsed: Option<Value>, context: Option<stdio::RecordContext>| {
             let host = owner.clone();
             let diagnostics = diagnostics.clone();
             async move {
-                let value: Value = match serde_json::from_str(&line) {
-                    Ok(value) => value,
-                    Err(_) => {
+                let value = match parsed {
+                    Some(value) => value,
+                    None => {
                         diagnostics.lock().await.write_all(b"mcp-host: malformed input\n").await.map_err(|e| e.to_string())?;
                         return Ok(Some(stringify(&error(&Value::Null, -32700, "Parse error", None))));
                     }
