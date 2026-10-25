@@ -33,10 +33,10 @@ pub(super) fn target_fence(authority: &Value, fingerprint: &str, track: &Value, 
 
 impl McpHost {
     pub(super) fn arrangement_fence(&self, snapshot: &LiveSnapshot, track_refs: &[Value]) -> Result<String, LiveError> {
-        let s = serde_json::to_value(snapshot).unwrap();
+        let arrangement = serde_json::to_value(&snapshot.arrangement).unwrap();
         let tracks: HashSet<_> = track_refs.iter().filter_map(Value::as_str).collect();
         let mut clips = vec![];
-        for clip in rows(&s["arrangement"]["clips"]) {
+        for clip in rows(&arrangement["clips"]) {
             if !clip.is_object() || !tracks.contains(string_field(clip, "trackRef")?.as_str()) {
                 continue;
             }
@@ -127,8 +127,8 @@ impl McpHost {
                 // nothing is copied over another clip yet.
                 let start = params["arrangementPosition"].as_f64().unwrap_or(f64::NAN);
                 let end = start + source.clip["length"].as_f64().unwrap_or(f64::NAN);
-                let value = serde_json::to_value(&snapshot).unwrap();
-                if let Some(other) = value["arrangement"]["clips"].as_array().into_iter().flatten().find(|clip| {
+                let arrangement = serde_json::to_value(&snapshot.arrangement).unwrap();
+                if let Some(other) = arrangement["clips"].as_array().into_iter().flatten().find(|clip| {
                     clip["trackRef"] == *track
                         && clip["start"].as_f64().is_some_and(|other_start| other_start < end - 1e-6)
                         && helpers::arrangement_clip_end(clip) > start + 1e-6

@@ -241,7 +241,7 @@ impl McpHost {
                 params.get("cursor"),
                 512,
             )?;
-            let s = serde_json::to_value(&snapshot).unwrap();
+            let song = serde_json::to_value(&snapshot.song).unwrap();
             let mut clip = fields(&located.clip, &["objectIdentity", "start", "length"]);
             clip["ref"] = params["clipRef"].clone();
             clip["arrangement"] = json!(true);
@@ -251,7 +251,7 @@ impl McpHost {
                 // `exists: false` there isn't "no envelope".
                 envelope["note"] = json!("This Live doesn't list an Arrangement clip's envelopes, so whether this parameter has one isn't known.");
             }
-            Ok(json!({"clip":clip,"parameter":{"ref":params["parameterRef"],"name":text_or_null(&parameter["name"]),"ownerRef":text_or_null(&parameter["parentRef"]),"identity":text_or_null(&parameter["objectIdentity"])},"envelope":envelope,"range":if points.is_empty(){Value::Null}else{json!({"from":points[0]["time"],"to":points.last().unwrap()["time"]})},"points":page["items"],"paging":page_paging(&page,"pointBound",512),"curve":{"available":false,"reason":"curve shapes are not exposed by the negotiated arrangement.automation.read contract"},"revision":revision,"sessionState":{"arrangementOverdub":s["song"]["arrangementOverdub"],"sessionAutomationRecord":s["song"]["sessionAutomationRecord"],"reEnableAutomationEnabled":s["song"]["reEnableAutomationEnabled"],"note":if s.get("song").is_some_and(|v|!v.is_null()){"authoritative song automation-record state at read time"}else{"the adapter did not expose song automation-record state; external controller state is not authoritatively enumerable"}},"mutation":{"advertised":false,"note":"no arrangement automation create/delete/insert operation is advertised; mutation requires a separate reviewed issue with exact prior-state restoration evidence"},"probe":probe_envelope(&status)}))
+            Ok(json!({"clip":clip,"parameter":{"ref":params["parameterRef"],"name":text_or_null(&parameter["name"]),"ownerRef":text_or_null(&parameter["parentRef"]),"identity":text_or_null(&parameter["objectIdentity"])},"envelope":envelope,"range":if points.is_empty(){Value::Null}else{json!({"from":points[0]["time"],"to":points.last().unwrap()["time"]})},"points":page["items"],"paging":page_paging(&page,"pointBound",512),"curve":{"available":false,"reason":"curve shapes are not exposed by the negotiated arrangement.automation.read contract"},"revision":revision,"sessionState":{"arrangementOverdub":song["arrangementOverdub"],"sessionAutomationRecord":song["sessionAutomationRecord"],"reEnableAutomationEnabled":song["reEnableAutomationEnabled"],"note":if !song.is_null(){"authoritative song automation-record state at read time"}else{"the adapter did not expose song automation-record state; external controller state is not authoritatively enumerable"}},"mutation":{"advertised":false,"note":"no arrangement automation create/delete/insert operation is advertised; mutation requires a separate reviewed issue with exact prior-state restoration evidence"},"probe":probe_envelope(&status)}))
         }
         .await;
         outcome(
@@ -530,34 +530,31 @@ clip["ref"]=params["clipRef"].clone();
         .await;
         outcome(id, result, "Browser inspection requires an available Live Browser and an exact item id from a fresh search.")
     }
+    /// The parameter (or macro) `reference` names, as the snapshot's JSON has it: found on the typed snapshot, so only it
+    /// is made JSON.
     pub(super) fn parameter_row(&self, snapshot: &LiveSnapshot, reference: &str) -> Result<Value, LiveError> {
-        fn walk<'a>(devices: impl Iterator<Item = &'a Value>, reference: &str) -> Option<&'a Value> {
+        fn walk(devices: &[Device], reference: &str) -> Option<Value> {
             for device in devices {
-                if let Some(found) = rows(&device["parameters"]).chain(rows(&device["macros"])).find(|v| v["ref"] == reference) {
-                    return Some(found);
+                if let Some(found) = device.parameters.iter().find(|p| p.ref_.0 == reference) {
+                    return Some(serde_json::to_value(found).unwrap());
                 }
-                for chain in rows(&device["chains"]) {
-                    if let Some(found) = walk(rows(&chain["devices"]), reference) {
+                if let Some(found) = device.macros.iter().flatten().find(|m| m.ref_.0 == reference) {
+                    return Some(serde_json::to_value(found).unwrap());
+                }
+                for chain in device.chains.iter().flatten().chain(device.drum_pads.iter().flatten().flat_map(|pad| &pad.chains)) {
+                    if let Some(found) = walk(&chain.devices, reference) {
                         return Some(found);
-                    }
-                }
-                for pad in rows(&device["drumPads"]) {
-                    for chain in rows(&pad["chains"]) {
-                        if let Some(found) = walk(rows(&chain["devices"]), reference) {
-                            return Some(found);
-                        }
                     }
                 }
             }
             None
         }
-        let s = serde_json::to_value(snapshot).unwrap();
-        for track in rows(&s["tracks"]) {
-            if let Some(found) = walk(rows(&track["devices"]), reference) {
-                return Ok(found.clone());
-            }
-        }
-        Err(LiveError::error("parameter reference is not authoritative"))
+        snapshot
+            .tracks
+            .iter()
+            .flatten()
+            .find_map(|track| walk(&track.devices, reference))
+            .ok_or_else(|| LiveError::error("parameter reference is not authoritative"))
     }
     pub(super) fn bounded_clip_content_digest(&self, clip: &Value) -> Result<String, LiveError> {
         let keys = [
@@ -639,9 +636,9 @@ clip["ref"]=params["clipRef"].clone();
         }
     }
     pub(super) fn arrangement_collection_revision(&self, snapshot: &LiveSnapshot, track: &str) -> Result<String, LiveError> {
-        let s = serde_json::to_value(snapshot).unwrap();
+        let arrangement = serde_json::to_value(&snapshot.arrangement).unwrap();
         let clips: Vec<_> =
-            rows(&s["arrangement"]["clips"]).filter(|v| v["trackRef"] == track).map(|v| fields(v, &["ref", "objectIdentity"])).collect();
+            rows(&arrangement["clips"]).filter(|v| v["trackRef"] == track).map(|v| fields(v, &["ref", "objectIdentity"])).collect();
         if clips.iter().any(|v| !is_non_empty_string(&v["ref"], 256) || !is_non_empty_string(&v["objectIdentity"], 256)) {
             return Err(LiveError::error("Arrangement clip collection authority is incomplete"));
         }
@@ -657,8 +654,8 @@ clip["ref"]=params["clipRef"].clone();
         {
             return Err(LiveError::error("Arrangement clip hierarchy authority is incomplete"));
         }
-        let s = serde_json::to_value(snapshot).unwrap();
-        let siblings: Vec<_> = rows(&s["arrangement"]["clips"])
+        let arrangement = serde_json::to_value(&snapshot.arrangement).unwrap();
+        let siblings: Vec<_> = rows(&arrangement["clips"])
             .filter(|v| v["trackRef"] == track["ref"])
             .map(|v| authority_fields(v, &["ref", "objectIdentity"]))
             .collect::<Result<_, _>>()?;
@@ -680,8 +677,8 @@ clip["ref"]=params["clipRef"].clone();
             return Err(LiveError::error("clip track authority is incomplete"));
         }
         let slot = rows(&track["clipSlots"]).find(|v| v["clipRef"] == reference).unwrap_or(&Value::Null);
-        let s = serde_json::to_value(snapshot).unwrap();
-        let scene = rows(&s["scenes"]).find(|v| v["index"].as_f64() == slot["sceneIndex"].as_f64()).unwrap_or(&Value::Null);
+        let scenes = serde_json::to_value(&snapshot.scenes).unwrap();
+        let scene = rows(&scenes).find(|v| v["index"].as_f64() == slot["sceneIndex"].as_f64()).unwrap_or(&Value::Null);
         if !is_non_empty_string(&slot["ref"], 256)
             || !is_non_empty_string(&slot["objectIdentity"], 256)
             || !is_non_empty_string(&scene["ref"], 256)
@@ -741,5 +738,61 @@ mod tests {
             "clip content string is too large"
         );
         assert!(host.bounded_clip_content_digest(&json!({"warpMarkers":vec![json!({"beatTime":0,"sampleTime":0});4096]})).is_ok());
+    }
+    #[test]
+    #[ignore = "a timing: --run-ignored only --no-capture, best measured with the bridge built optimized"]
+    fn lookups_in_a_big_view_take() {
+        // The simulator's Set with 40 copies of its first track, each with 2,000 notes in its first clip and 500
+        // parameters on its first device; what's looked up is on the last copy.
+        let mut whole = serde_json::to_value(crate::live::DeterministicLiveSimulator::new().snapshot().unwrap()).unwrap();
+        let base = whole["tracks"][0].clone();
+        let tracks: Vec<_> = (0..40)
+            .map(|i| {
+                let mut track = base.clone();
+                track["ref"] = json!(format!("track:big-{i}"));
+                track["objectIdentity"] = json!(format!("simulator:track:big-{i}"));
+                track["clips"][0]["notes"] = json!((0..2000)
+                    .map(
+                        |n| json!({"id":n+1,"pitch":36+n%48,"start":n as f64*0.25,"duration":0.25,"velocity":100,"channel":1,"mute":false})
+                    )
+                    .collect::<Vec<_>>());
+                let parameter = track["devices"][0]["parameters"][0].clone();
+                track["devices"][0]["parameters"] = json!((0..500)
+                    .map(|n| {
+                        let mut row = parameter.clone();
+                        row["ref"] = json!(format!("parameter:big-{i}-{n}"));
+                        row["objectIdentity"] = json!(format!("simulator:parameter:big-{i}-{n}"));
+                        row
+                    })
+                    .collect::<Vec<_>>());
+                track
+            })
+            .collect();
+        whole["tracks"] = json!(tracks);
+        let last = &mut whole["tracks"][39];
+        let clip = last["clips"][0]["ref"].clone();
+        last["clips"][0]["ref"] = json!("clip:target");
+        for slot in last["clipSlots"].as_array_mut().unwrap() {
+            if slot["clipRef"] == clip {
+                slot["clipRef"] = json!("clip:target");
+            }
+        }
+        last["devices"][0]["ref"] = json!("device:target");
+        let snapshot: LiveSnapshot = serde_json::from_value(whole).unwrap();
+        let host = McpHost::default();
+        let runs = 20;
+        let time = |label: &str, mut work: Box<dyn FnMut() + '_>| {
+            let started = std::time::Instant::now();
+            for _ in 0..runs {
+                work();
+            }
+            println!("{label}: {:.2} ms", started.elapsed().as_secs_f64() * 1000. / runs as f64);
+        };
+        time("the view made JSON", Box::new(|| drop(serde_json::to_value(&snapshot).unwrap())));
+        time("clip_row", Box::new(|| drop(host.clip_row(&snapshot, "clip:target").unwrap())));
+        time("clip_authority_digest", Box::new(|| drop(host.clip_authority_digest(&snapshot, "clip:target").unwrap())));
+        time("device_row", Box::new(|| drop(host.device_row(&snapshot, "device:target").unwrap())));
+        time("parameter_row", Box::new(|| drop(host.parameter_row(&snapshot, "parameter:big-39-499").unwrap())));
+        time("structure_revision", Box::new(|| drop(host.structure_revision(&snapshot))));
     }
 }

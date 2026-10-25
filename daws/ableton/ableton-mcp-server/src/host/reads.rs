@@ -667,33 +667,31 @@ impl McpHost {
             "Browser roots requires a fresh connection.",
         )
     }
+    /// The clip `reference` names, with its track (and take lane), as the snapshot's JSON has them. Found on the typed
+    /// snapshot, so only what's found is made JSON: a whole view's conversion copied every clip, note and parameter in
+    /// it, and a preview or apply looks clips up several times.
     pub(super) fn clip_row(&self, snapshot: &LiveSnapshot, reference: &str) -> Result<ClipRow, LiveError> {
-        let snapshot = serde_json::to_value(snapshot).unwrap();
-        let tracks = snapshot["tracks"].as_array().ok_or_else(|| LiveError::type_error("snapshot.tracks is not iterable"))?;
+        fn json(row: &impl serde::Serialize) -> Value {
+            serde_json::to_value(row).unwrap()
+        }
+        let tracks = snapshot.tracks.as_ref().ok_or_else(|| LiveError::type_error("snapshot.tracks is not iterable"))?;
         for track in tracks {
-            let clips =
-                track["clips"].as_array().ok_or_else(|| LiveError::type_error("Cannot read properties of undefined (reading 'filter')"))?;
-            if let Some(clip) = clips.iter().find(|clip| clip.is_object() && clip["ref"] == reference) {
-                return Ok(ClipRow { track: Some(track.clone()), clip: clip.clone(), arrangement: false, take_lane: None });
+            if let Some(clip) = track.clips.iter().find(|clip| clip.ref_.0 == reference) {
+                return Ok(ClipRow { track: Some(json(track)), clip: json(clip), arrangement: false, take_lane: None });
             }
-            for lane in track["takeLanes"].as_array().into_iter().flatten().filter(|v| v.is_object()) {
-                if let Some(clip) = lane["clips"].as_array().into_iter().flatten().find(|v| v.is_object() && v["ref"] == reference) {
-                    return Ok(ClipRow {
-                        track: Some(track.clone()),
-                        clip: clip.clone(),
-                        arrangement: true,
-                        take_lane: Some(lane.clone()),
-                    });
+            for lane in track.take_lanes.iter().flatten() {
+                if let Some(clip) = lane.clips.iter().find(|clip| clip.ref_.0 == reference) {
+                    return Ok(ClipRow { track: Some(json(track)), clip: json(clip), arrangement: true, take_lane: Some(json(lane)) });
                 }
             }
         }
         let arrangement =
-            snapshot.get("arrangement").ok_or_else(|| LiveError::type_error("Cannot read properties of undefined (reading 'clips')"))?;
-        let clips = property(arrangement, "clips")?;
-        if let Some(clip) = clips.as_array().into_iter().flatten().find(|v| v.is_object() && v["ref"] == reference) {
+            snapshot.arrangement.as_ref().ok_or_else(|| LiveError::type_error("Cannot read properties of undefined (reading 'clips')"))?;
+        if let Some(clip) = arrangement.clips.iter().flatten().find(|clip| clip.get("ref").and_then(Value::as_str) == Some(reference)) {
+            let owner = clip.get("trackRef").and_then(Value::as_str);
             return Ok(ClipRow {
-                track: tracks.iter().find(|t| t["ref"] == clip["trackRef"]).cloned(),
-                clip: clip.clone(),
+                track: tracks.iter().find(|track| Some(track.ref_.0.as_str()) == owner).map(json),
+                clip: Value::Object(clip.clone()),
                 arrangement: true,
                 take_lane: None,
             });
