@@ -19,6 +19,16 @@ fn outcome(id: &Value, result: Result<Value, LiveError>, remediation: &str) -> V
         Err(error) => adapter_tool_error(id, &error, remediation),
     }
 }
+/// `work` on the blocking pool. The bridge serves every request on one thread: a big Set's export, an .als read or a diff
+/// of two exports held it for up to seconds, and every other request waited (FOCUS's twice-a-second poll among them).
+async fn off_thread<T: Send + 'static>(work: impl FnOnce() -> Result<T, LiveError> + Send + 'static) -> Result<T, LiveError> {
+    match tokio::task::spawn_blocking(work).await {
+        Ok(result) => result,
+        // A panic is the same panic it was on the bridge's thread.
+        Err(error) if error.is_panic() => std::panic::resume_unwind(error.into_panic()),
+        Err(error) => Err(LiveError::error(format!("the bridge stopped before the work finished ({error})"))),
+    }
+}
 fn optional_limit(params: &Value) -> bool {
     params.get("limit").is_none_or(|v| is_integer_in_range(v, 1., 200.))
 }
@@ -90,10 +100,10 @@ impl McpHost {
         let params = call.arguments.as_ref().unwrap_or(&Value::Null);
         Some(Ok(match call.name.as_str() {
             "live_project_snapshot_export" => self.live_project_snapshot_export_async(id, params).await,
-            "live_project_snapshot_diff" => self.live_project_snapshot_diff(id, params),
-            "als_read" => self.als_read(id, params),
-            "als_lint" => self.als_lint(id, params),
-            "als_diff" => self.als_diff(id, params),
+            "live_project_snapshot_diff" => self.live_project_snapshot_diff(id, params).await,
+            "als_read" => self.als_read(id, params).await,
+            "als_lint" => self.als_lint(id, params).await,
+            "als_diff" => self.als_diff(id, params).await,
             "live_project_info" => self.live_project_info_async(id, params).await,
             "live_project_backup_preview" => self.live_project_backup_preview_async(id, params).await,
             "live_project_backup_apply" => self.live_project_backup_apply_async(id, params, signal).await,
@@ -139,23 +149,28 @@ impl McpHost {
                 if let Some(hash) = status.registry_hash {
                     live["registryHash"] = json!(hash);
                 }
-                let artifact = project(create_semantic_project_snapshot(
-                    &serde_json::to_value(snapshot).unwrap(),
-                    &CreateSemanticProjectOptions {
-                        profile: Some(wanted.into()),
-                        exporter_version: self.server_version().into(),
-                        live,
-                        project_path: path,
-                        source_evidence: None,
-                        max_records: None,
-                        source_kind: None,
-                        extra_unavailable: vec![],
-                    },
-                ))?;
+                let options = CreateSemanticProjectOptions {
+                    profile: Some(wanted.into()),
+                    exporter_version: self.server_version().into(),
+                    live,
+                    project_path: path,
+                    source_evidence: None,
+                    max_records: None,
+                    source_kind: None,
+                    extra_unavailable: vec![],
+                };
+                let paging = page_options(params);
+                let (artifact, page) = off_thread(move || {
+                    let artifact = project(create_semantic_project_snapshot(&serde_json::to_value(snapshot).unwrap(), &options))?;
+                    let page = page_valid_semantic_project_snapshot(&artifact, &paging);
+                    Ok((artifact, page))
+                })
+                .await?;
                 {
                     let mut exports = self.semantic_exports.borrow_mut();
-                    let kept = SemanticExport { artifact: artifact.clone(), at: now_ms() as f64, epoch: status.epoch.unwrap() };
-                    if let Some(existing) = exports.iter_mut().find(|k| k.artifact["artifact"]["id"] == artifact["artifact"]["id"]) {
+                    let artifact_id = artifact["artifact"]["id"].clone();
+                    let kept = SemanticExport { artifact, at: now_ms() as f64, epoch: status.epoch.unwrap() };
+                    if let Some(existing) = exports.iter_mut().find(|k| k.artifact["artifact"]["id"] == artifact_id) {
                         *existing = kept;
                     } else {
                         exports.push_back(kept);
@@ -164,13 +179,13 @@ impl McpHost {
                         exports.pop_front();
                     }
                 }
-                Ok(success_text(id, &project(page_valid_semantic_project_snapshot(&artifact, &page_options(params)))?))
+                Ok(success_text(id, &project(page)?))
             }
             .await,
             "Semantic snapshot export is read-only; retry only after a fresh readable snapshot or restart paging from the first page.",
         )
     }
-    pub fn live_project_snapshot_diff(&self, id: &Value, params: &Value) -> Value {
+    pub async fn live_project_snapshot_diff(&self, id: &Value, params: &Value) -> Value {
         let bounded = |key| params[key].as_array().is_some_and(|a| !a.is_empty() && a.len() <= SEMANTIC_PROJECT_MAX_PAGES);
         if !has_only(params, &["beforePages", "afterPages", "limit", "cursor"])
             || !bounded("beforePages")
@@ -180,9 +195,11 @@ impl McpHost {
         {
             return error(id, -32602, "complete bounded beforePages and afterPages plus optional limit/cursor are required", None);
         }
+        let (params, response_id) = (params.clone(), id.clone());
         outcome(
             id,
-            (|| {
+            off_thread(move || {
+                let (params, id) = (&params, &response_id);
                 if js_json::byte_length(&json!({"beforePages":params["beforePages"],"afterPages":params["afterPages"]}))
                     > SEMANTIC_PROJECT_MAX_DIFF_INPUT_BYTES
                 {
@@ -192,11 +209,12 @@ impl McpHost {
                 let after = project(assemble_semantic_project_pages(params["afterPages"].as_array().unwrap()))?;
                 let diff = project(diff_valid_semantic_project_snapshots(&before, &after))?;
                 Ok(success_text(id, &project(page_audited_semantic_project_diff(&diff, &page_options(params)))?))
-            })(),
+            })
+            .await,
             "Semantic diff requires complete untampered page bundles with the same schema and privacy profile; no merge was attempted.",
         )
     }
-    pub fn als_read(&self, id: &Value, params: &Value) -> Value {
+    pub async fn als_read(&self, id: &Value, params: &Value) -> Value {
         if !has_only(params, &["path", "allowedRoot", "profile", "limit", "cursor", "includeNotes", "maxRecords"])
             || !optional_limit(params)
             || !optional_cursor(params)
@@ -205,9 +223,11 @@ impl McpHost {
         {
             return error(id, -32602, "path, allowedRoot, and optional profile/limit/cursor/includeNotes/maxRecords are required", None);
         }
+        let (params, response_id, version) = (params.clone(), id.clone(), self.server_version().to_owned());
         outcome(
             id,
-            (|| {
+            off_thread(move || {
+                let (params, id) = (&params, &response_id);
                 let (path, _) = file_authority(&params["path"], &params["allowedRoot"])?;
 let (source, model) = project(read_als_model(&path.to_string_lossy()))?;
 let artifact = project(create_offline_als_artifact(
@@ -215,7 +235,7 @@ let artifact = project(create_offline_als_artifact(
                     &model,
                     &OfflineAlsArtifactOptions {
                         profile: Some(profile(params.get("profile"), "collaboration")?),
-                        exporter_version: self.server_version().into(),
+                        exporter_version: version,
                         max_records: params["maxRecords"].as_f64(),
                     },
                 ))?;
@@ -252,17 +272,20 @@ if kept < notes.len() {
 result["midi"] = json!({"clips":clips,"truncated":truncated,"noteBudget":4096,"clipBudget":256});
 }
                 Ok(success_text(id, &result))
-            })(),
+            })
+            .await,
             "Offline .als reading requires one owner-authorized regular file under the allowed root; sections that cannot be reconstructed offline are marked unavailable.",
         )
     }
-    pub fn als_lint(&self, id: &Value, params: &Value) -> Value {
+    pub async fn als_lint(&self, id: &Value, params: &Value) -> Value {
         if !has_only(params, &["path", "allowedRoot"]) {
             return error(id, -32602, "path and allowedRoot are required", None);
         }
+        let (params, response_id) = (params.clone(), id.clone());
         outcome(
             id,
-            (|| {
+            off_thread(move || {
+                let (params, id) = (&params, &response_id);
                 let (path, root) = file_authority(&params["path"], &params["allowedRoot"])?;
                 let (_, model) = project(read_als_model(&path.to_string_lossy()))?;
                 let lint = project(lint_als_model(
@@ -286,11 +309,12 @@ result["midi"] = json!({"clips":clips,"truncated":truncated,"noteBudget":4096,"c
                     id,
                     &json!({"findings":findings,"truncated":lint["truncated"],"summary":{"total":findings.len(),"bySeverity":severity,"byCheck":check},"parseNotes":model.parse_notes}),
                 ))
-            })(),
+            })
+            .await,
             "Offline .als lint requires one owner-authorized regular file under the allowed root; findings are never fixes.",
         )
     }
-    pub fn als_diff(&self, id: &Value, params: &Value) -> Value {
+    pub async fn als_diff(&self, id: &Value, params: &Value) -> Value {
         if !has_only(params, &["before", "after", "limit", "cursor"])
             || !params["before"].is_object()
             || !params["after"].is_object()
@@ -299,7 +323,8 @@ result["midi"] = json!({"clips":clips,"truncated":truncated,"noteBudget":4096,"c
         {
             return error(id, -32602, "before and after sides plus optional limit/cursor are required", None);
         }
-        let side = |value: &Value, fallback: &str| -> Result<Value, LiveError> {
+        let version = self.server_version().to_owned();
+        let side = move |value: &Value, fallback: &str| -> Result<Value, LiveError> {
             if !has_only(value, &["als", "pages"]) {
                 return Err(LiveError::error("each diff side must be an object with exactly one of als or pages"));
             }
@@ -314,7 +339,7 @@ result["midi"] = json!({"clips":clips,"truncated":truncated,"noteBudget":4096,"c
                     &model,
                     &OfflineAlsArtifactOptions {
                         profile: Some(profile(args.get("profile"), fallback)?),
-                        exporter_version: self.server_version().into(),
+                        exporter_version: version.clone(),
                         max_records: None,
                     },
                 ));
@@ -325,9 +350,11 @@ result["midi"] = json!({"clips":clips,"truncated":truncated,"noteBudget":4096,"c
                 .ok_or_else(|| LiveError::error(format!("a pages side requires 1-{SEMANTIC_PROJECT_MAX_PAGES} complete pages")))?;
             project(assemble_semantic_project_pages(pages))
         };
+        let (params, response_id) = (params.clone(), id.clone());
         outcome(
             id,
-            (|| {
+            off_thread(move || {
+                let (params, id) = (&params, &response_id);
                 let before = side(&params["before"], "collaboration")?;
 let after = side(&params["after"], before["policy"]["profile"].as_str().unwrap())?;
 if before["policy"]["profile"] != after["policy"]["profile"] {
@@ -335,7 +362,8 @@ if before["policy"]["profile"] != after["policy"]["profile"] {
 }
                 let diff = project(diff_valid_semantic_project_snapshots(&before, &after))?;
 Ok(success_text(id, &project(page_audited_semantic_project_diff(&diff, &page_options(params)))?))
-            })(),
+            })
+            .await,
             "Offline .als diff requires owner-authorized files or complete untampered page bundles with one shared privacy profile; no merge was attempted.",
         )
     }
@@ -351,7 +379,8 @@ Ok(success_text(id, &project(page_audited_semantic_project_diff(&diff, &page_opt
                 let Some(path) = file_path(&snapshot)? else {
                     return Ok(success_text(id, &json!({"exists":false,"note":"the current set has never been saved to disk"})));
                 };
-                Ok(success_text(id, &serde_json::to_value(project(project_files::project_info(&path))?).unwrap()))
+                let info = off_thread(move || project(project_files::project_info(&path))).await?;
+                Ok(success_text(id, &serde_json::to_value(info).unwrap()))
             }
             .await,
             "Project info requires the current set path and host file access.",
@@ -370,7 +399,10 @@ Ok(success_text(id, &project(page_audited_semantic_project_diff(&diff, &page_opt
             let Some(path) = file_path(&snapshot)? else {
                 return Ok(transaction_error(id, "the current set has never been saved to disk; save it through Live's UI first (save is a negotiated API limitation)"));
             };
-            let manifest = project(project_files::project_info(&path))?;
+            let manifest = {
+                let path = path.clone();
+                off_thread(move || project(project_files::project_info(&path))).await?
+            };
             let fence = js_json::stringify(&json!({"path":path,"size":manifest.size,"mtimeMs":manifest.mtime_ms,"sha256":manifest.sha256}));
             let mut random = [0u8; 18];
             rand::rng().fill_bytes(&mut random);
@@ -411,16 +443,20 @@ Ok(success_text(id, &project(page_audited_semantic_project_diff(&diff, &page_opt
             let snapshot = self.views.view(None, LiveViewScope::Indices(vec![]), Some(&[LiveSnapshotPart::Set])).await?;
             let t = transaction.borrow().clone();
             if file_path(&snapshot)?.as_deref() != t["payload"]["path"].as_str() { return Ok(transaction_error(id, "the current set path changed since preview; preview again")); }
-            let path = t["payload"]["path"].as_str().unwrap();
-            let current = project(project_files::project_info(path))?;
+            let path = t["payload"]["path"].as_str().unwrap().to_owned();
+            let current = {
+                let path = path.clone();
+                off_thread(move || project(project_files::project_info(&path))).await?
+            };
             let fence = js_json::stringify(&json!({"path":current.path,"size":current.size,"mtimeMs":current.mtime_ms,"sha256":current.sha256}));
             if t["fence"] != fence { return Ok(transaction_error(id, "the current Set content changed since preview; preview again")); }
-            let result = project(project_files::project_backup(path, &project_files::ProjectBackupOptions {
+            let options = project_files::ProjectBackupOptions {
                 allowed_root: t["payload"]["allowedRoot"].as_str().map(str::to_owned),
                 expected_sha256: t["payload"]["sha256"].as_str().map(str::to_owned),
                 expected_size: t["payload"]["size"].as_u64(),
                 expected_mtime_ms: t["payload"]["mtimeMs"].as_f64(),
-            }))?;
+            };
+            let result = off_thread(move || project(project_files::project_backup(&path, &options))).await?;
             if !result.verified { return Err(LiveError::error("backup verification failed")); }
             {
                 let mut t = transaction.borrow_mut();
