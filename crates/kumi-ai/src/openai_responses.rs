@@ -12,6 +12,7 @@ use base64::{engine::general_purpose::STANDARD, Engine};
 use futures::{Stream, StreamExt};
 use kumi_common::js::json::stringify;
 use serde_json::{json, Map, Value};
+use std::sync::LazyLock;
 use std::{
     collections::{BTreeMap, HashMap, VecDeque},
     pin::Pin,
@@ -62,14 +63,14 @@ struct Capabilities {
     efforts: Option<Vec<&'static str>>,
 }
 fn capabilities(model: &str) -> Capabilities {
-    let gpt = regex::Regex::new(r"^gpt-(\d+)(?:\.(\d+))?(?:-(.+))?$").unwrap();
-    let gpt = gpt.captures(model);
+    static GPT: LazyLock<regex::Regex> = LazyLock::new(|| regex::Regex::new(r"^gpt-(\d+)(?:\.(\d+))?(?:-(.+))?$").unwrap());
+    static O: LazyLock<regex::Regex> = LazyLock::new(|| regex::Regex::new(r"^o(\d+)(?:-|$)").unwrap());
+    let gpt = GPT.captures(model);
     let major = gpt.as_ref().and_then(|m| m[1].parse::<u32>().ok()).unwrap_or(0);
     let minor = gpt.as_ref().and_then(|m| m.get(2)).and_then(|m| m.as_str().parse::<u32>().ok());
     let variant = gpt.as_ref().and_then(|m| m.get(3)).map(|m| m.as_str()).unwrap_or("");
     let chat = minor.is_none() && variant.starts_with("chat");
-    let o = regex::Regex::new(r"^o(\d+)(?:-|$)").unwrap();
-    let o = o.captures(model).and_then(|m| m[1].parse::<u32>().ok());
+    let o = O.captures(model).and_then(|m| m[1].parse::<u32>().ok());
     let gpt6 = major >= 6;
     Capabilities {
         reasoning: o.is_some() || major >= 5 && !chat,
@@ -772,9 +773,10 @@ fn output_chunk(value: &Value) -> bool {
 #[async_trait(?Send)]
 impl LanguageModel for ResponsesModel {
     async fn do_stream(&self, call: CallOptions) -> Result<StreamParts, LanguageModelError> {
-        let (body, warnings, opts) = self.arguments(&call)?;
-        let mut wire = body.clone();
-        wire["stream"] = json!(true);
+        let (mut body, warnings, opts) = self.arguments(&call)?;
+        // One copy of the request: what goes on the wire is what an error reports.
+        body["stream"] = json!(true);
+        let body = Rc::new(body);
         // A server on the producer's network may take no key.
         let mut headers = Headers::new();
         if !self.0.api_key.is_empty() {
@@ -791,7 +793,7 @@ impl LanguageModel for ResponsesModel {
         }
         headers.entry("user-agent".into()).or_default().push_str(" ai-sdk/provider-utils/5.0.49 runtime/node.js/24");
         let url = format!("{}/responses", self.0.base_url.trim_end_matches('/'));
-        let response = post_json(self.0.fetch.as_ref(), &url, headers, wire, call.abort_signal).await?;
+        let response = post_json(self.0.fetch.as_ref(), &url, headers, body.clone(), call.abort_signal).await?;
         let mut input: Pin<Box<dyn Stream<Item = Result<Value, LanguageModelError>>>> = Box::pin(json_stream(response.body.unwrap()));
         let mut initial = vec![];
         let mut accepted = false;
@@ -821,7 +823,14 @@ impl LanguageModel for ResponsesModel {
                             .and_then(|m| m["message"].as_str())
                             .unwrap_or("OpenAI stream failed before any output was generated"),
                         url,
-                        Some(body),
+                        // The request as the SDK reports it: without the stream flag it sets on the wire copy alone.
+                        Some({
+                            let mut reported = Value::clone(&body);
+                            if let Some(object) = reported.as_object_mut() {
+                                object.shift_remove("stream");
+                            }
+                            reported
+                        }),
                         Some(normalized.as_ref().and_then(|m| m["statusCode"].as_u64()).unwrap_or(500) as u16),
                     );
                     error.response_headers = Some(response.headers);

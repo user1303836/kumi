@@ -10,12 +10,13 @@ use kumi_agent::{
     },
 };
 use kumi_ai::timing;
-use kumi_common::{abort::Signal, js::json::stringify};
+use kumi_common::{abort::Signal, js::json::stringify, time::now_ms};
 use kumi_daw_ableton::{
     connection::{ConnectionOptions, LiveConnection},
     integration::Ableton,
     observation::{ObservationHost, ObservedChange, Observer},
     options::AbletonOptions,
+    project::{Baseline, ProjectStore},
     references::Shift,
     remember::Remember,
 };
@@ -47,6 +48,17 @@ struct Live {
     selected: Cell<usize>,
     calls: RefCell<Vec<(String, JsonObject)>>,
     listener: RefCell<Option<Rc<dyn Fn(JsonObject)>>>,
+    /// Where the Set is saved, when it is.
+    file: RefCell<Option<String>>,
+    /// Exports of the Set's semantic snapshot (each reads the Set whole).
+    exports: Cell<usize>,
+    /// The next export tells of a structure change while its pages are read.
+    export_changes_structure: Cell<bool>,
+    /// Exports never end: a Set too large to remember.
+    endless_export: Cell<bool>,
+    /// Every track's volume (automation moves it while the Set plays) and whether the first track is muted.
+    volume: Cell<f64>,
+    muted: Cell<bool>,
 }
 impl Live {
     fn new(events: bool) -> Rc<Self> {
@@ -62,6 +74,12 @@ impl Live {
             selected: Cell::new(1),
             calls: RefCell::new(vec![]),
             listener: RefCell::new(None),
+            file: RefCell::new(None),
+            exports: Cell::new(0),
+            export_changes_structure: Cell::new(false),
+            endless_export: Cell::new(false),
+            volume: Cell::new(0.85),
+            muted: Cell::new(false),
         })
     }
     fn device_rows(&self) -> Vec<Value> {
@@ -123,7 +141,14 @@ impl McpEndpoint for Live {
         Some(serde_json::from_value(json!({"name":"fake","version":"1.0.73"})).unwrap())
     }
     async fn list(&self, _: Option<&str>, _: Signal) -> Result<ListToolsResult, RuntimeError> {
-        let mut names = vec!["live_status", "live_discover", "live_song_state"];
+        let mut names = vec![
+            "live_status",
+            "live_discover",
+            "live_song_state",
+            "live_project_info",
+            "live_project_snapshot_export",
+            "live_project_snapshot_diff",
+        ];
         if self.events {
             names.push("live_subscribe");
         }
@@ -151,7 +176,7 @@ impl McpEndpoint for Live {
             ("live_discover", Some("set")) => page(
                 "set",
                 vec![
-                    json!({"ref":"7:set:0","objectIdentity":"song","name":"Set","tempo":120,"playing":false,"position":0,"loop":{"start":0,"length":16},"filePath":""}),
+                    json!({"ref":"7:set:0","objectIdentity":"song","name":"Set","tempo":120,"playing":false,"position":0,"loop":{"start":0,"length":16},"filePath":self.file.borrow().clone().unwrap_or_default()}),
                 ],
             ),
             ("live_discover", Some("track")) => page(
@@ -160,7 +185,9 @@ impl McpEndpoint for Live {
                     .borrow()
                     .iter()
                     .enumerate()
-                    .map(|(index, (name, _))| json!({"ref":format!("7:track:{index}"),"name":name,"kind":"regular","mediaKind":"midi"}))
+                    .map(|(index, (name, _))| {
+                        json!({"ref":format!("7:track:{index}"),"name":name,"kind":"regular","mediaKind":"midi","mixer":{"volume":self.volume.get(),"volumeDisplay":format!("{:.1} dB", self.volume.get() * 10. - 10.),"mute":index == 0 && self.muted.get(),"solo":false,"volumeRef":format!("7:parameter:mixer:{index}:volume")}})
+                    })
                     .collect(),
             ),
             ("live_discover", Some("device")) => {
@@ -172,6 +199,14 @@ impl McpEndpoint for Live {
             }
             ("live_discover", Some("selection")) => {
                 page("selection", vec![json!({"selectedTrackRef":format!("7:track:{}", self.selected.get())})])
+            }
+            ("live_project_snapshot_export", _) => {
+                self.exports.set(self.exports.get() + 1);
+                if self.export_changes_structure.replace(false) {
+                    self.structure_changed();
+                }
+                let page = if self.endless_export.get() { json!({"nextCursor":"more"}) } else { json!({}) };
+                reply(json!({"artifact":{"id":"a"},"page":page,"records":[]}))
             }
             other => panic!("not a call here: {other:?}"),
         })
@@ -210,6 +245,22 @@ impl ObservationHost for Live {
     }
 }
 
+/// A project store that counts the baselines kept in it.
+#[derive(Default)]
+struct Store {
+    saves: Cell<usize>,
+}
+#[async_trait(?Send)]
+impl ProjectStore for Store {
+    async fn load(&self, _: &str) -> Result<Option<Baseline>, RuntimeError> {
+        Ok(None)
+    }
+    async fn save(&self, _: &str, _: &Baseline) -> Result<(), RuntimeError> {
+        self.saves.set(self.saves.get() + 1);
+        Ok(())
+    }
+}
+
 struct Session {
     live: Rc<Live>,
     /// The session's clock, in seconds after noon.
@@ -219,6 +270,10 @@ struct Session {
     observer: Observer,
 }
 async fn session(events: bool) -> Session {
+    session_with(events, None).await
+}
+/// A session that remembers the Set in `store` (its exports and catch-up), when one is given.
+async fn session_with(events: bool, store: Option<Rc<dyn ProjectStore>>) -> Session {
     let live = Live::new(events);
     let mut options = ConnectionOptions::new(Rc::new(|_, _| {}));
     let endpoint = live.clone();
@@ -235,7 +290,7 @@ async fn session(events: bool) -> Session {
     options.reconnect_interval_ms = Some(3600000);
     let connection = LiveConnection::new(options);
     connection.start(Signal::new()).await.unwrap();
-    let remember = Remember::new(connection.clone(), None, None);
+    let remember = Remember::new(connection.clone(), store, None);
     let observer = Observer::new(connection.clone(), remember.clone());
     Session { live, clock, connection, remember, observer }
 }
@@ -544,6 +599,181 @@ async fn a_device_ref_from_an_earlier_turn_is_checked_as_that_turn_showed_it() {
             // A change still naming the Compressor's ref from the turn before is refused, not sent to Live.
             let refused = session.observer.refresh_devices(&["7:track:1".to_owned()], &["7:device:1:0".to_owned()], Signal::new()).await;
             assert!(refused.unwrap_err().starts_with("Compressor isn't on the track any more"));
+            session.close().await;
+        })
+        .await;
+}
+
+/// A session remembering a saved Set: its file in `folder`, its baselines in `store`.
+async fn remembering_session(events: bool, folder: &std::path::Path, store: Rc<Store>) -> Session {
+    let file = folder.join("Song.als");
+    std::fs::write(&file, b"set").unwrap();
+    let session = session_with(events, Some(store)).await;
+    *session.live.file.borrow_mut() = Some(file.to_string_lossy().into_owned());
+    session
+}
+/// Moves the Set file's modification time on, as Live saving it would.
+fn saved_in_live(folder: &std::path::Path, seconds_on: u64) {
+    let file = std::fs::File::options().write(true).open(folder.join("Song.als")).unwrap();
+    file.set_modified(std::time::SystemTime::now() + std::time::Duration::from_secs(seconds_on)).unwrap();
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn an_unchanged_set_isnt_exported_again_until_half_an_hour_passed() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let folder = tempfile::tempdir().unwrap();
+            let store = Rc::new(Store::default());
+            let session = remembering_session(true, folder.path(), store.clone()).await;
+            // A new Set: its catch-up exports it once.
+            session.turn().await;
+            session.remember.pending().await;
+            assert_eq!((session.live.exports.get(), store.saves.get()), (1, 1));
+            // Five minutes on with nothing changed: the export would read the same Set again, so there is none.
+            session.remember.last_saved.set(now_ms() - 6 * 60_000);
+            session.turn().await;
+            assert!(!session.remember.save_scheduled(), "nothing changed");
+            // A structure change Live told of: exported again.
+            session.live.structure_changed();
+            session.turn().await;
+            assert!(session.remember.save_scheduled(), "the structure changed");
+            session.remember.cancel_timer();
+            session.remember.save_now(None).await;
+            assert_eq!((session.live.exports.get(), store.saves.get()), (2, 2));
+            // The selected track's device renamed, which each turn reads again: exported again.
+            session.remember.last_saved.set(now_ms() - 6 * 60_000);
+            session.turn().await;
+            assert!(!session.remember.save_scheduled(), "nothing changed since that export");
+            session.live.rename(1, 0, "Glue");
+            session.turn().await;
+            assert!(session.remember.save_scheduled(), "a device was renamed");
+            session.remember.cancel_timer();
+            session.remember.save_now(None).await;
+            // The Set saved in Live: exported again.
+            session.remember.last_saved.set(now_ms() - 6 * 60_000);
+            session.turn().await;
+            assert!(!session.remember.save_scheduled(), "nothing changed since that export");
+            saved_in_live(folder.path(), 5);
+            session.turn().await;
+            assert!(session.remember.save_scheduled(), "the Set was saved");
+            session.remember.cancel_timer();
+            session.remember.save_now(None).await;
+            // Half an hour on with nothing changed that a look can see: exported regardless.
+            session.remember.last_saved.set(now_ms() - 31 * 60_000);
+            session.turn().await;
+            assert!(session.remember.save_scheduled(), "half an hour passed");
+            assert_eq!((session.live.exports.get(), store.saves.get()), (4, 4));
+            session.close().await;
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn without_lives_events_the_set_is_exported_every_five_minutes_as_before() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let folder = tempfile::tempdir().unwrap();
+            let store = Rc::new(Store::default());
+            let session = remembering_session(false, folder.path(), store.clone()).await;
+            session.turn().await;
+            session.remember.pending().await;
+            assert_eq!(store.saves.get(), 1);
+            // Nothing says what changed, so the Set is exported again after five minutes, as before.
+            session.remember.last_saved.set(now_ms() - 6 * 60_000);
+            session.turn().await;
+            assert!(session.remember.save_scheduled());
+            session.close().await;
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_change_live_tells_of_while_the_export_reads_is_exported_again_within_five_minutes() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let folder = tempfile::tempdir().unwrap();
+            let store = Rc::new(Store::default());
+            let session = remembering_session(true, folder.path(), store.clone()).await;
+            session.turn().await;
+            session.remember.pending().await;
+            // A clip added on another track while the pages were read: the export records what it began with.
+            session.live.export_changes_structure.set(true);
+            session.remember.last_saved.set(now_ms() - 6 * 60_000);
+            session.live.structure_changed();
+            session.turn().await;
+            session.remember.cancel_timer();
+            session.remember.save_now(None).await;
+            assert_eq!(store.saves.get(), 2);
+            session.remember.last_saved.set(now_ms() - 6 * 60_000);
+            session.turn().await;
+            assert!(session.remember.save_scheduled(), "the structure moved during the export");
+            session.close().await;
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn mixer_values_moving_with_automation_dont_export_the_set_but_a_mute_does() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let folder = tempfile::tempdir().unwrap();
+            let store = Rc::new(Store::default());
+            let session = remembering_session(true, folder.path(), store.clone()).await;
+            session.turn().await;
+            session.remember.pending().await;
+            session.remember.last_saved.set(now_ms() - 6 * 60_000);
+            session.live.volume.set(0.5);
+            session.turn().await;
+            assert!(!session.remember.save_scheduled(), "a volume moving is automation playing");
+            session.live.muted.set(true);
+            session.turn().await;
+            assert!(session.remember.save_scheduled(), "a track muted is an edit");
+            session.close().await;
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_set_too_large_to_remember_is_tried_again_after_five_then_ten_then_thirty_minutes() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let folder = tempfile::tempdir().unwrap();
+            let store = Rc::new(Store::default());
+            let session = remembering_session(true, folder.path(), store.clone()).await;
+            session.live.endless_export.set(true);
+            session.turn().await;
+            session.remember.pending().await;
+            // The catch-up's export gave up after 64 pages: nothing kept.
+            assert_eq!((session.live.exports.get(), store.saves.get()), (64, 0));
+            // One failure costs only the period: six minutes on it's tried again, and fails again.
+            session.remember.last_failed.set(now_ms() - 6 * 60_000);
+            session.turn().await;
+            assert!(session.remember.save_scheduled(), "the first failure is tried again after five minutes");
+            session.remember.cancel_timer();
+            session.remember.save_now(None).await;
+            assert_eq!((session.live.exports.get(), session.remember.failures.get()), (128, 2));
+            // Two in a row: ten minutes.
+            session.remember.last_failed.set(now_ms() - 6 * 60_000);
+            session.turn().await;
+            assert!(!session.remember.save_scheduled(), "two failures: not before ten minutes");
+            session.remember.last_failed.set(now_ms() - 11 * 60_000);
+            session.turn().await;
+            assert!(session.remember.save_scheduled());
+            session.remember.cancel_timer();
+            session.remember.save_now(None).await;
+            assert_eq!(session.remember.failures.get(), 3);
+            // Three or more: thirty.
+            session.remember.last_failed.set(now_ms() - 11 * 60_000);
+            session.turn().await;
+            assert!(!session.remember.save_scheduled(), "three failures: not before thirty minutes");
+            session.remember.last_failed.set(now_ms() - 31 * 60_000);
+            session.turn().await;
+            assert!(session.remember.save_scheduled(), "half an hour on, it's tried again");
+            session.remember.cancel_timer();
+            // An export that goes through again starts the count over.
+            session.live.endless_export.set(false);
+            session.remember.save_now(None).await;
+            assert_eq!((store.saves.get(), session.remember.failures.get()), (1, 0));
             session.close().await;
         })
         .await;

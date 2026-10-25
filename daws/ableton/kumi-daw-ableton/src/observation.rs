@@ -8,7 +8,7 @@ use super::{
     pins::pin_context,
     project,
     references::{Moved, Shift},
-    remember::{CurrentProject, Remember},
+    remember::{CurrentProject, ExportMark, Remember},
     set_model::{DeviceNode, SetModel},
     track_ids,
     views::{self, ViewHost},
@@ -565,6 +565,7 @@ impl Observer {
             } else {
                 self.model_stale();
             }
+            let rows = rows_fingerprint(model_rows.as_ref());
             // What the next turns may reuse: the devices as this turn has them, when it has them all.
             // Kept only while Live's events are heard, since nothing else says when to read them again.
             let whole = model_rows.and_then(|(tracks, devices)| Some((tracks, devices?))).filter(|_| !more_tracks && !more_devices && connection.hears_live());
@@ -693,9 +694,24 @@ impl Observer {
             *self.previous.borrow_mut() =
                 Some(Previous { key: key.clone(), identity: identity.clone(), path: path.clone(), project: project_ref.clone() });
 
+            let saved_at = path
+                .as_ref()
+                .and_then(|p| std::fs::metadata(p).ok())
+                .and_then(|m| m.modified().ok())
+                .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+                .map(|t| t.as_secs() as f64 * 1000. + t.subsec_nanos() as f64 / 1_000_000.);
+            // The Set as this look saw it: the export it may schedule (a new Set's catch-up, else every SAVE_EVERY_MS
+            // while something changed) reads the Set whole through Live, so an unchanged Set isn't read again for it.
+            self.remember.note_look(ExportMark {
+                structure,
+                attachments: connection.attachments.get(),
+                tracks: track_revision.clone(),
+                file_modified: saved_at,
+                rows,
+            });
             if new_set {
                 self.remember.catch_up(identity.clone(), name.clone(), after_reconnect);
-            } else if kumi_common::time::now_ms() - self.remember.last_saved.get() > 5 * 60_000 {
+            } else if self.remember.save_due(kumi_common::time::now_ms()) {
                 self.remember.schedule_save(1000);
             }
             connection.ensure_catalog(signal.clone()).await?;
@@ -819,13 +835,6 @@ impl Observer {
             }
             context.insert("coverage".into(),json!("Current open Set only. Bounded discovery; details and track counts require fresh paged reads. Names/paths are not durable identity."));
 
-            let saved_at = path
-                .as_ref()
-                .and_then(|p| std::fs::metadata(p).ok())
-                .and_then(|m| m.modified().ok())
-                .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-                .map(|t| t.as_secs() as f64 * 1000. + t.subsec_nanos() as f64 / 1_000_000.);
-
             Ok(Observation {
                 key,
                 revision: Some(connection.tools().unwrap().generation().to_string()),
@@ -878,6 +887,60 @@ async fn start_background(work: impl std::future::Future<Output = ()> + 'static)
 }
 fn object(value: Value) -> JsonObject {
     value.as_object().cloned().unwrap_or_default()
+}
+/// The track and device rows as a look read them, hashed: two looks hash alike when nothing a producer edits
+/// changed in them. A mixer's values (volume, pan, sends and their texts) are left out: automation moves them while
+/// the Set plays, and like a device's parameters they are what the thirty-minute export is for; its mute and solo and
+/// its refs and identities stay. Hashed as serialized, from the rows as they are: nothing is cloned.
+pub fn rows_fingerprint(rows: Option<&(Vec<JsonObject>, Option<Vec<JsonObject>>)>) -> u64 {
+    use std::hash::{Hash, Hasher};
+    struct Sink<'a>(&'a mut std::collections::hash_map::DefaultHasher);
+    impl std::io::Write for Sink<'_> {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0.write(bytes);
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    fn lasting_mixer_field(key: &str) -> bool {
+        key == "mute"
+            || key == "solo"
+            || key.ends_with("Ref")
+            || key.ends_with("Refs")
+            || key.ends_with("Identity")
+            || key.ends_with("Identities")
+    }
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    if let Some((tracks, devices)) = rows {
+        for row in tracks {
+            for (key, value) in row {
+                hasher.write(key.as_bytes());
+                hasher.write_u8(b':');
+                match value.as_object().filter(|_| key == "mixer") {
+                    Some(mixer) => {
+                        for (field, value) in mixer.iter().filter(|(field, _)| lasting_mixer_field(field)) {
+                            hasher.write(field.as_bytes());
+                            hasher.write_u8(b'=');
+                            let _ = serde_json::to_writer(Sink(&mut hasher), value);
+                        }
+                    }
+                    None => {
+                        let _ = serde_json::to_writer(Sink(&mut hasher), value);
+                    }
+                }
+                hasher.write_u8(b',');
+            }
+            hasher.write_u8(b'\n');
+        }
+        for row in devices.iter().flatten() {
+            let _ = serde_json::to_writer(Sink(&mut hasher), row);
+            hasher.write_u8(b'\n');
+        }
+        (tracks.len(), devices.as_ref().map(Vec::len)).hash(&mut hasher);
+    }
+    hasher.finish()
 }
 /// A read of devices: its rows, and whether it was cut short; none when Live answered with an error.
 fn device_page(read: &CallToolResult, epoch: f64) -> Result<Option<(Vec<JsonObject>, bool)>, ReadError> {

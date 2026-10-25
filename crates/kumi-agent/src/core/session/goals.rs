@@ -422,7 +422,13 @@ impl Session {
                         break;
                     }
                     let words = said.borrow().clone();
-                    let idea=regex::Regex::new(r"(?i-u:Tried:)[\t\n\x0b\x0c\r \u{00a0}\u{1680}\u{2000}-\u{200a}\u{2028}\u{2029}\u{202f}\u{205f}\u{3000}\u{feff}]*([^\r\n\u{2028}\u{2029}]+)").unwrap().captures(&words).map(|m|m[1].to_owned()).or_else(||trim(&words).split('\n').find(|s|!s.is_empty()).map(str::to_owned));
+                    static TRIED: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+                        regex::Regex::new(r"(?i-u:Tried:)[\t\n\x0b\x0c\r \u{00a0}\u{1680}\u{2000}-\u{200a}\u{2028}\u{2029}\u{202f}\u{205f}\u{3000}\u{feff}]*([^\r\n\u{2028}\u{2029}]+)").unwrap()
+                    });
+                    let idea = TRIED
+                        .captures(&words)
+                        .map(|m| m[1].to_owned())
+                        .or_else(|| trim(&words).split('\n').find(|s| !s.is_empty()).map(str::to_owned));
 
                     if let Some(idea) = idea {
                         let clean = idea.replace(['*', '_', '`'], "");

@@ -13,6 +13,7 @@ use base64::{engine::general_purpose::STANDARD, Engine};
 use futures::{Stream, StreamExt};
 use kumi_common::js::json::stringify;
 use serde_json::{json, Map, Value};
+use std::sync::LazyLock;
 use std::{
     collections::{HashMap, VecDeque},
     pin::Pin,
@@ -344,6 +345,9 @@ struct Capabilities {
     rejects_sampling: bool,
     rejects_forced: bool,
 }
+/// Claude Instant, 2 and 3: the models before extended output.
+static EARLY: LazyLock<regex::Regex> =
+    LazyLock::new(|| regex::Regex::new(r"claude-(?:instant(?:-|$)|v?2(?:$|[-.:])|3(?:$|[-.]))").unwrap());
 fn capabilities(model: &str) -> Capabilities {
     let has = |names: &[&str]| names.iter().any(|name| model.contains(name));
     let (max, structured, known, rejects_sampling) =
@@ -361,7 +365,7 @@ fn capabilities(model: &str) -> Capabilities {
             (32000., false, true, false)
         } else if model.contains("claude-3-haiku") {
             (4096., false, true, false)
-        } else if regex::Regex::new(r"claude-(?:instant(?:-|$)|v?2(?:$|[-.:])|3(?:$|[-.]))").unwrap().is_match(model) {
+        } else if EARLY.is_match(model) {
             (4096., false, false, false)
         } else if model.contains("claude-") {
             (128000., true, false, true)
@@ -457,7 +461,8 @@ impl AnthropicModel {
         }
         let mut tools = vec![];
         for tool in call.tools.as_deref().unwrap_or(&[]) {
-            let v = serde_json::to_value(tool).unwrap();
+            // Only the tool's provider options are read here: its schema isn't serialized to find them.
+            let v = json!({"providerOptions": tool.provider_options});
             let meta = metadata(&v);
             let mut wire = json!({"name":tool.name});
             field(&mut wire, "description", tool.description.as_ref().map(|v| json!(v)));
@@ -553,6 +558,7 @@ impl LanguageModel for AnthropicModel {
         }
         headers.entry("user-agent".into()).or_default().push_str(" ai-sdk/provider-utils/5.0.49 runtime/node.js/24");
         let url = format!("{}/messages", self.0.base_url.trim_end_matches('/'));
+        let body = Rc::new(body);
         let response = post_json(self.0.fetch.as_ref(), &url, headers, body.clone(), options.abort_signal).await?;
         let response_headers = response.headers;
         let documents = options
@@ -597,7 +603,7 @@ impl LanguageModel for AnthropicModel {
                 let mut api = ApiCallError::new(
                     error["message"].as_str().unwrap_or(""),
                     url,
-                    Some(body),
+                    Some(Value::clone(&body)),
                     Some(error.get("statusCode").and_then(Value::as_u64).unwrap_or(500) as u16),
                 );
                 api.response_headers = Some(response_headers);

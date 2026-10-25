@@ -281,7 +281,7 @@ async fn a_stopped_worker_takes_what_it_started_and_its_temporary_files_with_it_
             root.path().display()
         ),
     );
-    let pool = MeasurePool::with_worker(1, worker, Duration::from_secs(12));
+    let pool = MeasurePool::with_worker(1, WorkerProgram::new(worker, "library-measure"), Duration::from_secs(12));
     let job = MeasureJob { id: 0, path: "C:\\x.mp3".into(), relative: "x.mp3".into(), size: 1, mtime: 1, start: None, seconds: None };
     assert_eq!(pool.run(0, job).await.unwrap().error.as_deref(), Some("it took too long to read"));
     let child: u32 = std::fs::read_to_string(root.path().join("child")).expect("the child held the copy").trim().parse().unwrap();
