@@ -1,4 +1,4 @@
-//! The scan as a process of its own: a job kind of Kumi's library learner (`kumi-library-learner --music`), at its
+//! The scan as a process of its own: a job kind of Kumi's library learner (`kumi __library-learner --music`), at its
 //! lowest priority, pausing whenever the library learner does (while Kumi listens or renders) and while the computer
 //! runs on its battery. It's told what to learn, and when to pause, over JSON lines on stdin, and says how it's going
 //! on stdout.

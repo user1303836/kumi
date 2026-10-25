@@ -39,7 +39,7 @@ use kumi_types::errors::RuntimeError;
 use learn::{learn, Counts, LearnOptions, LearnPhase, PresetEntry, ProgressCallback, SetEntry, SoundEntry, LOG_VERSION};
 pub use learn::{library_logs, LearnProgress};
 use learner::{LearnerMessage, LearnerOptions, LearnerReply};
-use measure_worker::{measure_reference, worker_binary, MeasureJob};
+use measure_worker::{measure_reference, worker_program, MeasureJob};
 use plan::{plan_learning, remembered_file, remembered_folders, PlanOptions};
 use search::SoundIndex;
 use sources::{below, resolve, SourceOptions};
@@ -367,7 +367,8 @@ impl Library {
             });
             return;
         }
-        let spawned = Command::new(worker_binary("kumi-library-learner", "KUMI_LIBRARY_LEARNER_BIN"))
+        let spawned = worker_program("library-learner", "KUMI_LIBRARY_LEARNER_BIN")
+            .command()
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())

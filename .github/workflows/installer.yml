@@ -163,7 +163,7 @@ jobs:
         run: |
           want=arm64
           if [[ '${{ matrix.target }}' == x86_64-* ]]; then want=x86_64; fi
-          for name in kumi ableton-mcp-server ableton-mcp-analysis-worker daw-mcp-server kumi-harness kumi-library-measure kumi-library-learner; do
+          for name in kumi ableton-mcp-server ableton-mcp-analysis-worker daw-mcp-server kumi-harness; do
             archs="$(lipo -archs "target/${{ matrix.target }}/$PROFILE/$name")"
             echo "$name: $archs"
             test "$archs" = "$want"
