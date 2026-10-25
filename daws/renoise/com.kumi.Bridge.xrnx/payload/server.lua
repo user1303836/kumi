@@ -64,9 +64,11 @@ function M.new(ctx)
   return setmetatable({ ctx = ctx }, M)
 end
 
--- Whether the peer has closed its end.
+-- Whether the peer has closed its end. (Asked of every connection two or three times a tick: the pcall takes a function of
+-- the module's, not a closure made for it.)
+local function client_open(record) return record.client.is_open end
 local function is_gone(record)
-  local ok, open = pcall(function() return record.client.is_open end)
+  local ok, open = pcall(client_open, record)
   return not ok or not open
 end
 
@@ -462,13 +464,18 @@ function M:check_descriptors()
   if open > M.MAX_RETIRED_OPEN then self.ctx.on_too_many_open(open) end
 end
 
--- A peer that never closes its end of a retired connection can't make the list grow without end.
+-- A peer that never closes its end of a retired connection can't make the list grow without end. (Counted first: a tick
+-- with few retired builds no list.)
 function M:forget_oldest_retired()
+  local count = 0
+  for _, record in pairs(self.ctx.connections) do
+    if record.closing then count = count + 1 end
+  end
+  if count <= M.MAX_RETIRED then return end
   local retired = {}
   for key, record in pairs(self.ctx.connections) do
     if record.closing then retired[#retired + 1] = { key = key, at = record.retired_ms or 0 } end
   end
-  if #retired <= M.MAX_RETIRED then return end
   table.sort(retired, function(a, b) return a.at < b.at end)
   for i = 1, #retired - M.MAX_RETIRED do self.ctx.connections[retired[i].key] = nil end
 end

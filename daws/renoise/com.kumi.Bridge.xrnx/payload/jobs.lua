@@ -100,6 +100,8 @@ function M:run(budget)
   budget = budget or M.BUDGET_MS
   local started = ctx.now_ms()
   self.last_run_ms = started
+  -- (every tick runs the jobs: with none, nothing to make)
+  if self.list[1] == nil then return end
   local finished = {}
   for i, job in ipairs({ unpack(self.list) }) do
     if i == 1 or ctx.now_ms() - started < budget then
