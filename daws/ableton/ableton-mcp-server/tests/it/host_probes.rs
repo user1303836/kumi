@@ -194,48 +194,39 @@ async fn a_library_database_is_read_once_until_it_changes() {
     let changed = host.live_library_search_async(&json!(1), &args).await.unwrap();
     assert!(changed.to_string().contains("unreadable"), "{changed}");
 }
-#[tokio::test(flavor = "current_thread")]
-async fn a_library_search_queries_its_database_off_the_bridges_thread() {
-    use std::sync::{
-        atomic::{AtomicUsize, Ordering},
-        Arc,
-    };
+#[test]
+fn a_library_search_queries_its_database_off_the_bridges_thread() {
+    // The bridge's one thread and a blocking pool of one thread, which the test holds: a search whose query ran on the
+    // bridge's thread would be answered while the pool is held, and one whose query runs on the pool waits for it. (A
+    // ticker that had to run during a query couldn't tell the two apart: a query this small can end on the pool before
+    // the bridge's thread first looks at it, and the search then goes on without yielding, #550.)
     let root = tempfile::tempdir().unwrap();
     let root = fixture_paths::native_path(&root.path().canonicalize().unwrap());
     let (db, plugins) = (root.join("files.db"), root.join("plugins.db"));
     std::fs::write(&db, library_fixtures::files_db()).unwrap();
     std::fs::write(&plugins, library_fixtures::plugins_db()).unwrap();
-    let host = McpHost::default();
-    let ticks = Arc::new(AtomicUsize::new(0));
-    let ticking = tokio::spawn({
-        let ticks = ticks.clone();
-        async move {
-            loop {
-                ticks.fetch_add(1, Ordering::Relaxed);
-                tokio::task::yield_now().await;
-            }
-        }
-    });
-    for mode in ["files", "tags", "plugins"] {
-        let args = json!({"database":db,"pluginsDatabase":plugins,"allowlistRoot":root,"mode":mode,"limit":2});
-        // The first reads the database; the next have only their query left to run. A blocking thread can finish one
-        // this small before the search first waits for it, which then goes on without yielding, so it's asked up to
-        // 50 times: a query on the bridge's thread never lets the ticker run in any of them.
-        let page = host.live_library_search_async(&json!(1), &args).await.unwrap();
-        assert_ne!(page["result"]["isError"], true, "{page}");
-        let mut asked = 0;
-        loop {
-            let before = ticks.load(Ordering::Relaxed);
+    let runtime = tokio::runtime::Builder::new_current_thread().enable_all().max_blocking_threads(1).build().unwrap();
+    runtime.block_on(async {
+        let host = McpHost::default();
+        for mode in ["files", "tags", "plugins"] {
+            let args = json!({"database":db,"pluginsDatabase":plugins,"allowlistRoot":root,"mode":mode,"limit":2});
+            // The first reads the database (and decodes the files' index); the next has only its query left to run.
             let page = host.live_library_search_async(&json!(1), &args).await.unwrap();
             assert_ne!(page["result"]["isError"], true, "{page}");
-            asked += 1;
-            if ticks.load(Ordering::Relaxed) > before {
-                break;
-            }
-            assert!(asked < 50, "{mode}: the bridge's thread ran nothing else while any of {asked} queries ran");
+            let (release, held) = std::sync::mpsc::channel::<()>();
+            let holder = tokio::task::spawn_blocking(move || {
+                let _ = held.recv();
+            });
+            let id = json!(1);
+            let mut search = std::pin::pin!(host.live_library_search_async(&id, &args));
+            let early = tokio::time::timeout(std::time::Duration::from_millis(50), search.as_mut()).await;
+            assert!(early.is_err(), "{mode}: answered while the blocking pool was held, so its query ran on the bridge's thread");
+            release.send(()).unwrap();
+            let page = search.await.unwrap();
+            assert_ne!(page["result"]["isError"], true, "{page}");
+            holder.await.unwrap();
         }
-    }
-    ticking.abort();
+    });
 }
 #[tokio::test(flavor = "current_thread")]
 async fn library_host_matches_source_allowlists_wal_queries_and_coercion() {
