@@ -289,13 +289,46 @@ fn next_power_of_two(value: usize) -> usize {
     result
 }
 
+/// A transform size's Hann window and the twiddle factors of each of its stages, made once per thread and kept:
+/// a frame's transform is then the butterflies alone. The trigonometry was computed again for every butterfly of
+/// every frame (N/2 · log2 N sines and cosines, and N more for the window), which was most of a transform's time.
+/// The values are the ones the loop computed, from the same expressions, so a spectrum comes out the same bits.
+struct FftPlan {
+    window: Vec<f64>,
+    /// Per stage (width 2, 4, …, N): the cosine and sine of each of its half-width angles.
+    stages: Vec<(Vec<f64>, Vec<f64>)>,
+}
+fn fft_plan(fft_size: usize) -> std::rc::Rc<FftPlan> {
+    thread_local! {
+        static PLANS: std::cell::RefCell<Vec<(usize, std::rc::Rc<FftPlan>)>> = const { std::cell::RefCell::new(Vec::new()) };
+    }
+    PLANS.with(|plans| {
+        if let Some((_, plan)) = plans.borrow().iter().find(|(size, _)| *size == fft_size) {
+            return plan.clone();
+        }
+        let window = (0..fft_size).map(|i| 0.5 - 0.5 * ((2.0 * PI * i as f64) / (fft_size - 1) as f64).cos()).collect();
+        let mut stages = Vec::new();
+        let mut width = 2;
+        while width <= fft_size {
+            let phase = (-2.0 * PI) / width as f64;
+            let angles = (0..width / 2).map(|i| phase * i as f64);
+            stages.push((angles.clone().map(f64::cos).collect(), angles.map(f64::sin).collect()));
+            width *= 2;
+        }
+        let plan = std::rc::Rc::new(FftPlan { window, stages });
+        plans.borrow_mut().push((fft_size, plan.clone()));
+        plan
+    })
+}
+
 fn fft_magnitudes(samples: &[f64], start: usize, frame_size: usize) -> (Vec<f64>, usize) {
     let fft_size = next_power_of_two(frame_size.clamp(256, MAX_FFT_SIZE));
+    let plan = fft_plan(fft_size);
     let mut real = vec![0.0f64; fft_size];
     let mut imaginary = vec![0.0f64; fft_size];
     for (i, slot) in real.iter_mut().enumerate() {
         let sample = if start + i < samples.len() { samples[start + i] } else { 0.0 };
-        *slot = sample * (0.5 - 0.5 * ((2.0 * PI * i as f64) / (fft_size - 1) as f64).cos());
+        *slot = sample * plan.window[i];
     }
     let mut j = 0usize;
     for i in 1..fft_size {
@@ -311,15 +344,13 @@ fn fft_magnitudes(samples: &[f64], start: usize, frame_size: usize) -> (Vec<f64>
         }
     }
     let mut width = 2;
-    while width <= fft_size {
+    for (cosines, sines) in &plan.stages {
         let half = width / 2;
-        let phase = (-2.0 * PI) / width as f64;
         let mut offset = 0;
         while offset < fft_size {
             for i in 0..half {
-                let angle = phase * i as f64;
-                let cosine = angle.cos();
-                let sine = angle.sin();
+                let cosine = cosines[i];
+                let sine = sines[i];
                 let even = offset + i;
                 let odd = even + half;
                 let even_real = real[even];
