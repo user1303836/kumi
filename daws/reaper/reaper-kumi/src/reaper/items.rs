@@ -41,6 +41,7 @@ impl Reaper<'_> {
     // ----- items -----
 
     pub fn set_item_value(&self, item: Item, parm: &str, value: f64) -> bool {
+        super::wrote();
         let parm = ctext(parm);
         self.api.SetMediaItemInfo_Value().is_some_and(|f| unsafe { f(item.0, parm.as_ptr(), value) })
     }
@@ -49,6 +50,7 @@ impl Reaper<'_> {
     /// (lab 7.82: a block with only it makes no point, and REAPER's undo then takes the step before): the track's items are
     /// marked dirty, and REAPER keeps a point of it.
     pub fn create_midi_item(&self, track: Track, start: f64, end: f64) -> Option<Item> {
+        super::wrote();
         let in_beats = false;
         let item = unsafe { self.api.CreateNewMIDIItemInProj()?(track.0, start, end, &in_beats) };
         if item.is_null() {
@@ -62,20 +64,24 @@ impl Reaper<'_> {
 
     /// A new empty item (no take) at the end of the track's list.
     pub fn add_item(&self, track: Track) -> Option<Item> {
+        super::wrote();
         let item = unsafe { self.api.AddMediaItemToTrack()?(track.0) };
         (!item.is_null()).then_some(Item(item))
     }
 
     pub fn delete_item(&self, track: Track, item: Item) -> bool {
+        super::wrote();
         self.api.DeleteTrackMediaItem().is_some_and(|f| unsafe { f(track.0, item.0) })
     }
 
     pub fn move_item_to_track(&self, item: Item, track: Track) -> bool {
+        super::wrote();
         self.api.MoveMediaItemToTrack().is_some_and(|f| unsafe { f(item.0, track.0) })
     }
 
     /// Splits the item at `position` (seconds): the item keeps the left part, and the right part is a new item.
     pub fn split_item(&self, item: Item, position: f64) -> Option<Item> {
+        super::wrote();
         let right = unsafe { self.api.SplitMediaItem()?(item.0, position) };
         (!right.is_null()).then_some(Item(right))
     }
@@ -104,6 +110,7 @@ impl Reaper<'_> {
     }
 
     pub fn set_item_chunk(&self, item: Item, chunk: &str) -> bool {
+        super::wrote();
         let chunk = ctext(chunk);
         self.api.SetItemStateChunk().is_some_and(|f| unsafe { f(item.0, chunk.as_ptr(), false) })
     }
@@ -130,6 +137,7 @@ impl Reaper<'_> {
     }
 
     pub fn set_item_selected(&self, item: Item, selected: bool) {
+        super::wrote();
         if let Some(f) = self.api.SetMediaItemSelected() {
             unsafe { f(item.0, selected) }
         }
@@ -145,11 +153,13 @@ impl Reaper<'_> {
 
     /// A new empty take in the item (REAPER leaves the active take as it was, unless the item had none).
     pub fn add_take(&self, item: Item) -> Option<Take> {
+        super::wrote();
         let take = unsafe { self.api.AddTakeToMediaItem()?(item.0) };
         (!take.is_null()).then_some(Take(take))
     }
 
     pub fn set_active_take(&self, take: Take) -> bool {
+        super::wrote();
         match self.api.SetActiveTake() {
             Some(f) => {
                 unsafe { f(take.0) };
@@ -160,12 +170,14 @@ impl Reaper<'_> {
     }
 
     pub fn set_take_value(&self, take: Take, parm: &str, value: f64) -> bool {
+        super::wrote();
         let parm = ctext(parm);
         self.api.SetMediaItemTakeInfo_Value().is_some_and(|f| unsafe { f(take.0, parm.as_ptr(), value) })
     }
 
     /// A take's text attribute (`P_NAME`).
     pub fn set_take_string(&self, take: Take, parm: &str, value: &str) -> bool {
+        super::wrote();
         let (parm, value) = (ctext(parm), ctext(value));
         let Some(f) = self.api.GetSetMediaItemTakeInfo_String() else { return false };
         let mut buf = value.into_bytes_with_nul();
@@ -198,6 +210,7 @@ impl Reaper<'_> {
 
     /// Gives the take the media file at `path` as its source, in place (nothing is copied), and frees the source it had.
     pub fn set_take_file(&self, take: Take, path: &str) -> Option<Media> {
+        super::wrote();
         let (create, destroy, set) =
             (self.api.PCM_Source_CreateFromFile()?, self.api.PCM_Source_Destroy()?, self.api.GetSetMediaItemTakeInfo()?);
         let path = ctext(path);
@@ -256,6 +269,7 @@ impl Reaper<'_> {
     /// Adds a stretch marker (index -1) or moves one; REAPER keeps one between its neighbours. Its index, or -1 when none
     /// was made (one is at that position already).
     pub fn set_stretch_marker(&self, take: Take, index: i32, position: f64, source: Option<f64>) -> i32 {
+        super::wrote();
         let Some(f) = self.api.SetTakeStretchMarker() else { return -1 };
         match source {
             Some(source) => unsafe { f(take.0, index, position, &source) },
@@ -264,11 +278,13 @@ impl Reaper<'_> {
     }
 
     pub fn set_stretch_slope(&self, take: Take, index: i32, slope: f64) -> bool {
+        super::wrote();
         self.api.SetTakeStretchMarkerSlope().is_some_and(|f| unsafe { f(take.0, index, slope) })
     }
 
     /// Deletes `count` stretch markers from `index`; how many went.
     pub fn delete_stretch_markers(&self, take: Take, index: i32, count: i32) -> i32 {
+        super::wrote();
         self.api.DeleteTakeStretchMarkers().map_or(0, |f| unsafe { f(take.0, index, &count) })
     }
 
@@ -290,6 +306,7 @@ impl Reaper<'_> {
     /// Adds a take marker (index -1) or changes one; what isn't given stays. Its index after (REAPER keeps them in source
     /// order), or -1.
     pub fn set_take_marker(&self, take: Take, index: i32, name: &str, source: Option<f64>, color: Option<i32>) -> i32 {
+        super::wrote();
         let Some(f) = self.api.SetTakeMarker() else { return -1 };
         let name = ctext(name);
         let mut source = source;
@@ -300,6 +317,7 @@ impl Reaper<'_> {
     }
 
     pub fn delete_take_marker(&self, take: Take, index: i32) -> bool {
+        super::wrote();
         self.api.DeleteTakeMarker().is_some_and(|f| unsafe { f(take.0, index) })
     }
 }

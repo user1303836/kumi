@@ -72,6 +72,23 @@ impl CText {
     }
 }
 
+thread_local! {
+    /// How many writes this extension has made to REAPER (every setter, action and save through these wrappers, inside
+    /// an undo block or not): what a digest's kept pages are good for. A bare write outside a block moves neither
+    /// REAPER's state change count nor its undo history (7.82), so the count alone can't say the project is as it was.
+    static WRITES: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+/// One more write of this extension's.
+pub(crate) fn wrote() {
+    WRITES.with(|writes| writes.set(writes.get() + 1));
+}
+
+/// How many writes this extension has made to REAPER so far.
+pub fn writes() -> u64 {
+    WRITES.with(|writes| writes.get())
+}
+
 pub struct Reaper<'a> {
     api: &'a Api,
 }
@@ -241,6 +258,7 @@ impl<'a> Reaper<'a> {
 
     /// Saves a project that has a file (one without would open Save As).
     pub fn save(&self, proj: Project) -> bool {
+        wrote();
         match self.api.Main_SaveProject() {
             Some(f) => {
                 unsafe { f(proj.0, false) };
@@ -333,6 +351,7 @@ impl<'a> Reaper<'a> {
     /// Registers a script file as a main-section action (`commit`: written to REAPER's key map, so it stays across restarts):
     /// its command id.
     pub fn add_script(&self, path: &std::path::Path, commit: bool) -> Option<i32> {
+        wrote();
         let register = self.api.AddRemoveReaScript()?;
         let file = CString::new(path.to_string_lossy().into_owned()).ok()?;
         let id = unsafe { register(true, 0, file.as_ptr(), commit) };
@@ -341,6 +360,7 @@ impl<'a> Reaper<'a> {
 
     /// Takes a script's action away (from REAPER's key map too, with `commit`).
     pub fn remove_script(&self, path: &std::path::Path, commit: bool) -> bool {
+        wrote();
         let (Some(register), Ok(file)) = (self.api.AddRemoveReaScript(), CString::new(path.to_string_lossy().into_owned())) else {
             return false;
         };
@@ -363,6 +383,7 @@ impl<'a> Reaper<'a> {
     }
 
     pub fn run_action(&self, command: i32) -> bool {
+        wrote();
         match self.api.Main_OnCommandEx() {
             Some(f) => {
                 unsafe { f(command, 0, ptr::null_mut()) };

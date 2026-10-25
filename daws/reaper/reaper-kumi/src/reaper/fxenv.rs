@@ -313,12 +313,14 @@ impl Reaper<'_> {
     }
 
     pub fn set_env_chunk(&self, envelope: Envelope, chunk: &str) -> bool {
+        super::wrote();
         let chunk = ctext(chunk);
         self.api.SetEnvelopeStateChunk().is_some_and(|f| unsafe { f(envelope.0, chunk.as_ptr(), false) })
     }
 
     /// An envelope's yes/no attribute written: `ACTIVE`, `VISIBLE` or `ARM`.
     pub fn set_env_flag(&self, envelope: Envelope, key: &str, on: bool) -> bool {
+        super::wrote();
         let key = ctext(key);
         let Some(f) = self.api.GetSetEnvelopeInfo_String() else { return false };
         let mut buf = if on { *b"1\0" } else { *b"0\0" };
@@ -356,6 +358,7 @@ impl Reaper<'_> {
     }
 
     pub fn set_ai_value(&self, envelope: Envelope, item: i32, key: &str, value: f64) -> bool {
+        super::wrote();
         let key = ctext(key);
         match self.api.GetSetAutomationItemInfo() {
             Some(f) => {
@@ -385,6 +388,7 @@ impl Reaper<'_> {
     }
 
     pub fn set_automation_override(&self, mode: i32) -> bool {
+        super::wrote();
         match self.api.SetGlobalAutomationOverride() {
             Some(f) => {
                 unsafe { f(mode) };

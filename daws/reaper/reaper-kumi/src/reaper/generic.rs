@@ -570,6 +570,9 @@ impl Reaper<'_> {
         if let Some(why) = UNCALLABLE[index] {
             return Err(format!("{} can't be called by name: {why} (run-lua can call it)", name_of(index)));
         }
+        if !dry && !reads_only(index, args) {
+            super::wrote();
+        }
         let mut call = Call::new(args, handles, dry);
         let result = dispatch(self.api, index, &mut call)?;
         Ok((result, call.outs()))

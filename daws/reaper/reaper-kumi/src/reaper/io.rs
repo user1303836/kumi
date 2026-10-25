@@ -78,6 +78,7 @@ impl Reaper<'_> {
 
     /// Sets the bits of `mask` to those of `value`; what it was before.
     pub fn set_group_membership(&self, track: Track, role: &str, high: bool, mask: u32, value: u32) -> Option<u32> {
+        super::wrote();
         let role = ctext(role);
         let f = if high { self.api.GetSetTrackGroupMembershipHigh()? } else { self.api.GetSetTrackGroupMembership()? };
         Some(unsafe { f(track.0, role.as_ptr(), mask, value) })
@@ -92,6 +93,7 @@ impl Reaper<'_> {
     }
 
     pub fn set_project_info(&self, proj: Project, key: &str, value: f64) -> bool {
+        super::wrote();
         let key = ctext(key);
         match self.api.GetSetProjectInfo() {
             Some(f) => {
@@ -110,6 +112,7 @@ impl Reaper<'_> {
     }
 
     pub fn set_project_text(&self, proj: Project, key: &str, value: &str) -> bool {
+        super::wrote();
         let key = ctext(key);
         let Some(f) = self.api.GetSetProjectInfo_String() else { return false };
         let mut buf = ctext(value).into_bytes_with_nul();
@@ -133,6 +136,7 @@ impl Reaper<'_> {
     }
 
     pub fn set_project_notes(&self, proj: Project, notes: &str) -> bool {
+        super::wrote();
         let Some(f) = self.api.GetSetProjectNotes() else { return false };
         let mut buf = ctext(notes).into_bytes_with_nul();
         let size = buf.len() as c_int;
@@ -150,6 +154,7 @@ impl Reaper<'_> {
     }
 
     pub fn set_grid(&self, proj: Project, division: f64, mode: i32, amount: f64) -> bool {
+        super::wrote();
         let Some(f) = self.api.GetSetProjectGrid() else { return false };
         let (mut division, mut mode, mut amount) = (division, mode, amount);
         unsafe { f(proj.0, true, &mut division, &mut mode, &mut amount) };
@@ -174,12 +179,14 @@ impl Reaper<'_> {
 
     /// Sets one in memory (never in reaper.ini): 2 when it is a project setting, 1 a global one, 0 when REAPER refused.
     pub fn set_config_text(&self, name: &str, value: &str) -> i32 {
+        super::wrote();
         let (name, value) = (ctext(name), ctext(value));
         self.api.set_config_var_string().map_or(0, |f| unsafe { f(name.as_ptr(), value.as_ptr(), 0) })
     }
 
     /// The time selection (not the loop): start and end in seconds, equal when there is none.
     pub fn set_time_selection(&self, proj: Project, start: f64, end: f64) -> bool {
+        super::wrote();
         let Some(f) = self.api.GetSet_LoopTimeRange2() else { return false };
         let (mut start, mut end) = (start, end);
         unsafe { f(proj.0, true, false, &mut start, &mut end, false) };
@@ -188,6 +195,7 @@ impl Reaper<'_> {
 
     /// Takes a track out of the region render matrix of the region with this number.
     pub fn remove_from_region_render(&self, proj: Project, number: i32, track: Track) -> bool {
+        super::wrote();
         match self.api.SetRegionRenderMatrix() {
             Some(f) => {
                 unsafe { f(proj.0, number, track.0, -1) };
@@ -245,6 +253,7 @@ impl Reaper<'_> {
     /// `Main_SaveProjectEx`: options &1 the selected tracks as a track template (&2 with their items, &4 with their
     /// envelopes), &8 the project under this name from now on.
     pub fn save_project_as(&self, proj: Project, path: &str, options: i32) -> bool {
+        super::wrote();
         let path = ctext(path);
         match self.api.Main_SaveProjectEx() {
             Some(f) => {

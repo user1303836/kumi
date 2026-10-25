@@ -15,12 +15,14 @@ impl Reaper<'_> {
     // ----- tracks -----
 
     pub fn set_track_value(&self, track: Track, parm: &str, value: f64) -> bool {
+        super::wrote();
         let parm = ctext(parm);
         self.api.SetMediaTrackInfo_Value().is_some_and(|f| unsafe { f(track.0, parm.as_ptr(), value) })
     }
 
     /// A track's text attribute (`P_NAME`).
     pub fn set_track_string(&self, track: Track, parm: &str, value: &str) -> bool {
+        super::wrote();
         let (parm, value) = (ctext(parm), ctext(value));
         let Some(f) = self.api.GetSetMediaTrackInfo_String() else { return false };
         // The buffer is read, not written, when setting; REAPER wants it writable all the same.
@@ -30,6 +32,7 @@ impl Reaper<'_> {
 
     /// A new track at `index` (0-based; at the end when past the last), without the project's default FX and sends.
     pub fn insert_track(&self, proj: Project, index: i32) -> Option<Track> {
+        super::wrote();
         let at = index.clamp(0, self.track_count(proj));
         unsafe { self.api.InsertTrackAtIndex()?(at, false) };
         self.track_at(proj, at)
@@ -37,11 +40,13 @@ impl Reaper<'_> {
 
     /// Names a note of a track (`SetTrackMIDINoteNameEx`; channel -1 for all): what the MIDI editor shows for its row.
     pub fn set_note_name(&self, proj: Project, track: Track, pitch: i32, channel: i32, name: &str) -> bool {
+        super::wrote();
         let name = ctext(name);
         self.api.SetTrackMIDINoteNameEx().is_some_and(|f| unsafe { f(proj.0, track.0, pitch, channel, name.as_ptr()) })
     }
 
     pub fn delete_track(&self, track: Track) -> bool {
+        super::wrote();
         match self.api.DeleteTrack() {
             Some(f) => {
                 unsafe { f(track.0) };
@@ -74,6 +79,7 @@ impl Reaper<'_> {
     }
 
     pub fn set_track_chunk(&self, track: Track, chunk: &str) -> bool {
+        super::wrote();
         let chunk = ctext(chunk);
         self.api.SetTrackStateChunk().is_some_and(|f| unsafe { f(track.0, chunk.as_ptr(), false) })
     }
@@ -91,6 +97,7 @@ impl Reaper<'_> {
     }
 
     pub fn set_track_selected(&self, track: Track, selected: bool) {
+        super::wrote();
         if let Some(f) = self.api.SetTrackSelected() {
             unsafe { f(track.0, selected) }
         }
@@ -99,6 +106,7 @@ impl Reaper<'_> {
     /// Moves the selected tracks to just above the track at `before` (counted before the move). `folder` 0 leaves their
     /// folder depths as they are.
     pub fn reorder_selected(&self, before: i32, folder: i32) -> bool {
+        super::wrote();
         self.api.ReorderSelectedTracks().is_some_and(|f| unsafe { f(before, folder) })
     }
 
@@ -106,11 +114,13 @@ impl Reaper<'_> {
 
     /// A send from `track` to `dest`, or a hardware output when there is none: its index among the sends of its kind.
     pub fn create_send(&self, track: Track, dest: Option<Track>) -> Option<i32> {
+        super::wrote();
         let index = unsafe { self.api.CreateTrackSend()?(track.0, dest.map_or(ptr::null_mut(), |d| d.0)) };
         (index >= 0).then_some(index)
     }
 
     pub fn remove_send(&self, track: Track, category: i32, index: i32) -> bool {
+        super::wrote();
         self.api.RemoveTrackSend().is_some_and(|f| unsafe { f(track.0, category, index) })
     }
 
@@ -124,6 +134,7 @@ impl Reaper<'_> {
     }
 
     pub fn set_send_text(&self, track: Track, category: i32, index: i32, parm: &str, value: &str) -> bool {
+        super::wrote();
         let (parm, value) = (ctext(parm), ctext(value));
         let Some(f) = self.api.GetSetTrackSendInfo_String() else { return false };
         let mut buf = value.into_bytes_with_nul();
@@ -141,6 +152,7 @@ impl Reaper<'_> {
     }
 
     pub fn set_fx_pin(&self, fx: Fx, output: bool, pin: i32, mask: u64) -> bool {
+        super::wrote();
         let (low, high) = (mask as u32 as i32, (mask >> 32) as u32 as i32);
         match fx.owner {
             FxOwner::Track(track) => {
@@ -163,6 +175,7 @@ impl Reaper<'_> {
     }
 
     pub fn set_send_value(&self, track: Track, category: i32, index: i32, parm: &str, value: f64) -> bool {
+        super::wrote();
         let parm = ctext(parm);
         self.api.SetTrackSendInfo_Value().is_some_and(|f| unsafe { f(track.0, category, index, parm.as_ptr(), value) })
     }
@@ -239,6 +252,7 @@ impl Reaper<'_> {
 
     /// A marker or region made at `start` (seconds), and its GUID. `end` is the region's.
     pub fn add_marker(&self, proj: Project, region: bool, start: f64, end: f64, name: &str, color: i32) -> Option<String> {
+        super::wrote();
         let name = ctext(name);
         let marker = unsafe { self.api.AddRegionOrMarker()?(proj.0, region, start, end, name.as_ptr(), -1, color) };
         if marker.is_null() {
@@ -253,6 +267,7 @@ impl Reaper<'_> {
 
     /// A marker's number attribute: `D_STARTPOS`, `D_ENDPOS`, `I_NUMBER`, `I_CUSTOMCOLOR`.
     pub fn set_marker_value(&self, proj: Project, guid: &str, parm: &str, value: f64) -> bool {
+        super::wrote();
         let (Some(marker), Some(f)) = (self.marker_pointer(proj, guid), self.api.SetRegionOrMarkerInfo_Value()) else { return false };
         let parm = ctext(parm);
         // What it returns is not documented as a success flag: the change reads the marker again.
@@ -262,6 +277,7 @@ impl Reaper<'_> {
 
     /// Puts a track in the region render matrix of the region with this number.
     pub fn add_to_region_render(&self, proj: Project, number: i32, track: Track) -> bool {
+        super::wrote();
         match self.api.SetRegionRenderMatrix() {
             Some(f) => {
                 unsafe { f(proj.0, number, track.0, 1) };
@@ -272,12 +288,14 @@ impl Reaper<'_> {
     }
 
     pub fn set_marker_name(&self, proj: Project, guid: &str, name: &str) -> bool {
+        super::wrote();
         let (Some(marker), Some(f)) = (self.marker_pointer(proj, guid), self.api.GetSetRegionOrMarkerInfo_String()) else { return false };
         let mut buf = ctext(name).into_bytes_with_nul();
         unsafe { f(proj.0, marker, c"P_NAME".as_ptr(), buf.as_mut_ptr().cast::<c_char>(), true) }
     }
 
     pub fn delete_marker(&self, proj: Project, guid: &str) -> bool {
+        super::wrote();
         let (Some(marker), Some(value), Some(delete)) =
             (self.marker_pointer(proj, guid), self.api.GetRegionOrMarkerInfo_Value(), self.api.DeleteProjectMarkerByIndex())
         else {
@@ -291,6 +309,7 @@ impl Reaper<'_> {
 /// The timeline: tempo, time signature, loop, cursor.
 impl Reaper<'_> {
     pub fn set_current_bpm(&self, proj: Project, bpm: f64) -> bool {
+        super::wrote();
         match self.api.SetCurrentBPM() {
             Some(f) => {
                 unsafe { f(proj.0, bpm, false) };
@@ -304,14 +323,17 @@ impl Reaper<'_> {
     /// time signature alone; `bpm` 0 keeps the tempo in force.
     #[allow(clippy::too_many_arguments)]
     pub fn set_tempo_marker(&self, proj: Project, index: i32, time: f64, bpm: f64, num: i32, denom: i32, linear: bool) -> bool {
+        super::wrote();
         self.api.SetTempoTimeSigMarker().is_some_and(|f| unsafe { f(proj.0, index, time, -1, -1.0, bpm, num, denom, linear) })
     }
 
     pub fn delete_tempo_marker(&self, proj: Project, index: i32) -> bool {
+        super::wrote();
         self.api.DeleteTempoTimeSigMarker().is_some_and(|f| unsafe { f(proj.0, index) })
     }
 
     pub fn set_loop_points(&self, proj: Project, start: f64, end: f64) -> bool {
+        super::wrote();
         let Some(f) = self.api.GetSet_LoopTimeRange2() else { return false };
         let (mut start, mut end) = (start, end);
         unsafe { f(proj.0, true, true, &mut start, &mut end, false) };
@@ -319,6 +341,7 @@ impl Reaper<'_> {
     }
 
     pub fn set_repeat(&self, proj: Project, on: bool) -> bool {
+        super::wrote();
         match self.api.GetSetRepeatEx() {
             Some(f) => {
                 unsafe { f(proj.0, on as c_int) };
@@ -330,6 +353,7 @@ impl Reaper<'_> {
 
     /// The edit cursor, without moving the view; the play position follows it when `seek` is set.
     pub fn set_cursor(&self, proj: Project, time: f64, seek: bool) -> bool {
+        super::wrote();
         match self.api.SetEditCurPos2() {
             Some(f) => {
                 unsafe { f(proj.0, time, false, seek) };
@@ -364,6 +388,7 @@ impl Reaper<'_> {
 
     /// Replaces all the take's MIDI with these events, which must be in order.
     pub fn set_midi_events(&self, take: Take, events: &[crate::midi::Event]) -> bool {
+        super::wrote();
         let buf = crate::midi::encode(events);
         self.api.MIDI_SetAllEvts().is_some_and(|f| unsafe { f(take.0, buf.as_ptr().cast(), buf.len() as c_int) })
     }
@@ -374,17 +399,20 @@ impl Reaper<'_> {
     /// Adds the plug-in (or the FX chain file) `name` names, at `position` or at the end; the index of the first FX made,
     /// or -1 when REAPER has none by that name.
     pub fn add_fx_by_name(&self, track: Track, name: &str, position: Option<i32>) -> i32 {
+        super::wrote();
         let name = ctext(name);
         let instantiate = position.map_or(-1, |p| -1000 - p);
         self.api.TrackFX_AddByName().map_or(-1, |f| unsafe { f(track.0, name.as_ptr(), false, instantiate) })
     }
 
     pub fn delete_fx(&self, track: Track, index: i32) -> bool {
+        super::wrote();
         self.api.TrackFX_Delete().is_some_and(|f| unsafe { f(track.0, index) })
     }
 
     /// Moves an FX within its track's chain, so that it ends up at `to`.
     pub fn move_fx(&self, track: Track, from: i32, to: i32) -> bool {
+        super::wrote();
         match self.api.TrackFX_CopyToTrack() {
             Some(f) => {
                 unsafe { f(track.0, from, track.0, to, true) };
@@ -395,6 +423,7 @@ impl Reaper<'_> {
     }
 
     pub fn set_fx_enabled(&self, track: Track, index: i32, enabled: bool) -> bool {
+        super::wrote();
         match self.api.TrackFX_SetEnabled() {
             Some(f) => {
                 unsafe { f(track.0, index, enabled) };
@@ -405,6 +434,7 @@ impl Reaper<'_> {
     }
 
     pub fn set_fx_param_normalized(&self, track: Track, index: i32, param: i32, value: f64) -> bool {
+        super::wrote();
         self.api.TrackFX_SetParamNormalized().is_some_and(|f| unsafe { f(track.0, index, param, value) })
     }
 
