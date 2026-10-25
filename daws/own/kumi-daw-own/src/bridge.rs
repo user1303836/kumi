@@ -529,7 +529,6 @@ pub fn answer_of(result: &CallToolResult) -> Result<Value, Refused> {
     Ok(value)
 }
 
-/// Why the DAW may answer late, in words: REAPER's `busy` code.
 /// How long the FOCUS poll waits before asking again: `period` while something moves (the selection, the view, the
 /// transport, or the DAW playing) and for FOCUS_QUIET_POLLS after it last did; then twice that, and after
 /// FOCUS_QUIETER_POLLS four times, never past FOCUS_SLOWEST_MS. A producer who stops for a while costs the DAW a
@@ -550,6 +549,7 @@ const FOCUS_QUIET_POLLS: u32 = 20;
 const FOCUS_QUIETER_POLLS: u32 = 110;
 const FOCUS_SLOWEST_MS: u64 = 600;
 
+/// Why the DAW may answer late, in words: REAPER's `busy` code.
 fn busy_words(code: &str, profile: &DawProfile) -> String {
     match code {
         "modal" => "a dialog is open".into(),
@@ -845,6 +845,7 @@ impl<S: RefScheme + 'static> OwnIntegration<S> {
                     Some(Ok(focus)) if focus.is_object() => focus,
                     // The DAW went away (it quit, or its bridge did): the session says so, and FOCUS empties with it.
                     Some(Err(Refused { there: false, .. })) => {
+                        quiet = 0;
                         if connected.replace(false) {
                             on_connection(ConnectionState::Disconnected, Some(DisconnectCause::Live));
                         }
