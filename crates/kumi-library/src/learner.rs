@@ -15,6 +15,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
     cell::{Cell, RefCell},
+    future::Future,
     io,
     rc::Rc,
     sync::{
@@ -73,6 +74,32 @@ pub fn low_priority() {
 fn send(output: &mpsc::UnboundedSender<Value>, reply: LearnerReply) {
     let _ = output.send(serde_json::to_value(reply).unwrap());
 }
+/// The learner's progress writes to state.json, each after the one before: a write reads the file, keeps its `last`
+/// and writes it back whole, so one still going when another lands puts back what that one replaced (#552).
+#[derive(Default)]
+struct StateWrites(RefCell<Option<tokio::task::JoinHandle<()>>>);
+impl StateWrites {
+    /// `write`, once the writes asked before it are done.
+    fn then(&self, write: impl Future<Output = ()> + 'static) {
+        let before = self.0.borrow_mut().take();
+        let next = tokio::task::spawn_local(async move {
+            if let Some(before) = before {
+                let _ = before.await;
+            }
+            write.await;
+        });
+        *self.0.borrow_mut() = Some(next);
+    }
+    /// The run's own write, its summary or (stopped) its state with no run going, after every progress write asked so
+    /// far: none of them can put back what it replaces.
+    async fn last(&self, dir: &str, progress: &LearnProgress, stopped: bool) -> io::Result<()> {
+        let going = self.0.borrow_mut().take();
+        if let Some(going) = going {
+            let _ = going.await;
+        }
+        write_state(dir, progress, stopped).await
+    }
+}
 /// Must run in a LocalSet: pause callbacks share the learner's single event loop. `daws` are what the DAWs the app
 /// registers tell the library, as in the app.
 pub async fn main(daws: Daws) -> io::Result<()> {
@@ -130,7 +157,9 @@ pub async fn main(daws: Daws) -> io::Result<()> {
         if let Some(release) = release {
             let latest = Rc::new(RefCell::new(None::<LearnProgress>));
             let last = Rc::new(Cell::new(0));
-            let (report_latest, report_last, report_output, report_dir) = (latest.clone(), last.clone(), output.clone(), dir.clone());
+            let writes = Rc::new(StateWrites::default());
+            let (report_latest, report_last, report_output, report_dir, report_writes) =
+                (latest.clone(), last.clone(), output.clone(), dir.clone(), writes.clone());
             let plan = plan_learning(PlanOptions { daws, ..options.plan }).await;
             let sources = plan.sources.clone();
             let mut learning = LearnOptions::new(plan, stop.clone());
@@ -150,7 +179,7 @@ pub async fn main(daws: Daws) -> io::Result<()> {
                 if now_ms() - report_last.get() > 2000 || progress.phase == LearnPhase::Done {
                     report_last.set(now_ms());
                     let dir = report_dir.clone();
-                    tokio::task::spawn_local(async move {
+                    report_writes.then(async move {
                         let _ = write_state(&dir, &progress, false).await;
                     });
                 }
@@ -158,7 +187,7 @@ pub async fn main(daws: Daws) -> io::Result<()> {
             match learn(learning).await {
                 Ok(progress) => {
                     *latest.borrow_mut() = Some(progress.clone());
-                    let _ = write_state(&dir, &progress, false).await;
+                    let _ = writes.last(&dir, &progress, false).await;
                     send(&output, LearnerReply::Done { progress });
                     // Then the sounds' map, when it's due, while the library is still this learner's: it waits while
                     // the learner's paused (the DAW plays), and ends when it's stopped.
@@ -187,7 +216,7 @@ pub async fn main(daws: Daws) -> io::Result<()> {
             }
             let latest = latest.borrow().clone();
             if let Some(latest) = latest.filter(|p| p.phase != LearnPhase::Done) {
-                let _ = write_state(&dir, &latest, true).await;
+                let _ = writes.last(&dir, &latest, true).await;
             }
             release.release().await?;
         } else {
@@ -198,4 +227,55 @@ pub async fn main(daws: Daws) -> io::Result<()> {
     input.abort();
     write.await.map_err(io::Error::other)??;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        state::{read_state, Learning, LibraryState},
+        store::{read_json, write_json},
+    };
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_runs_summary_lands_after_a_slow_progress_write_still_going() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let folder = tempfile::tempdir().unwrap();
+                let dir = folder.path().to_string_lossy().into_owned();
+                let writes = StateWrites::default();
+                // A progress write on a slow disk, as write_state makes it: it reads state.json (no summary yet: the
+                // library's first run), takes a while, then writes it back whole, with a run going.
+                let (read, was_read) = tokio::sync::oneshot::channel();
+                let (wrote, was_written) = tokio::sync::oneshot::channel();
+                let file = folder.path().join("state.json");
+                writes.then(async move {
+                    let before = read_json::<LibraryState>(&file).await;
+                    let _ = read.send(());
+                    tokio::time::sleep(Duration::from_millis(200)).await;
+                    let going = Learning {
+                        pid: std::process::id() as i64,
+                        started_at: 1,
+                        phase: LearnPhase::Sounds,
+                        sounds: Default::default(),
+                        presets: Default::default(),
+                        sets: Default::default(),
+                        updated_at: now_ms(),
+                    };
+                    let state = LibraryState { version: 1, last: before.and_then(|state| state.last), learning: Some(going) };
+                    write_json(&file, &state).await.unwrap();
+                    let _ = wrote.send(());
+                });
+                was_read.await.unwrap();
+                // The run ends meanwhile, and its summary is written. The learner goes on (the sounds' map), and the
+                // progress write lands too, whenever it does.
+                let done = LearnProgress { phase: LearnPhase::Done, started_at: 1, finished_at: Some(2), ..Default::default() };
+                writes.last(&dir, &done, false).await.unwrap();
+                was_written.await.unwrap();
+                let state = read_state(&dir).await.unwrap();
+                assert_eq!(state.last.map(|last| last.finished_at), Some(2), "the run's summary is kept");
+                assert_eq!(state.learning, None, "and no run is going");
+            })
+            .await;
+    }
 }
