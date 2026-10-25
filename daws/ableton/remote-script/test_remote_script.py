@@ -7151,6 +7151,24 @@ class NoteModificationTests(unittest.TestCase):
         result = mapper.invoke("note.update", request); validate_operation_payload("note.update", "result", result)
         return result
 
+    def test_an_update_reads_where_its_clip_ends_once_however_many_notes_it_patches(self):
+        """Every patch is checked against where the clip's notes can end (its length, loop end and end marker:
+        three reads of Live). Nothing changes the clip while they're checked, so it's read once per update."""
+        clip = FakeNoteClip(8.0, [FakeMidiNote(index + 1, 60 + index, index * 1.0, 0.5) for index in range(6)])
+        mapper, reference = self.clip_mapper(clip)
+        request = {"ref": reference, "notes": [{"id": index + 1, "velocity": 90} for index in range(6)], "expectedClipAuthority": mapper._session_clip_authority(reference), "expectedNotesRevision": hashlib.sha256(mapper._bounded_canonical(mapper._read_notes(clip)).encode()).hexdigest()}
+        validate_operation_payload("note.update", "request", request)
+        ends = []; note_time_end = LiveObjectMapper._note_time_end
+        with patch.object(LiveObjectMapper, "_note_time_end", lambda self, clip: ends.append(clip) or note_time_end(self, clip)):
+            self.assertEqual(mapper.invoke("note.update", request), {"updated": 6})
+        self.assertEqual(len(ends), 1, "one read of the clip's end for six patches")
+        self.assertEqual([row["velocity"] for row in mapper._read_notes(clip)], [90] * 6)
+        # A patch that runs past that end is still refused, and nothing changes.
+        request["notes"] = [{"id": 1, "velocity": 80}, {"id": 2, "start": 7.75}]
+        request["expectedNotesRevision"] = hashlib.sha256(mapper._bounded_canonical(mapper._read_notes(clip)).encode()).hexdigest()
+        with self.assertRaisesRegex(ValueError, "note patch runs past the clip"): mapper.invoke("note.update", request)
+        self.assertEqual([row["velocity"] for row in mapper._read_notes(clip)], [90] * 6)
+
     def test_a_split_clips_notes_are_edited_in_its_own_time(self):
         # A split's right half (start marker 4, end marker 8, Live's length 4): its notes sit at 4 to 8.
         clip = FakeNoteClip(4.0, [FakeMidiNote(1, 60, 5.0, 1.0, 100.0)]); clip.name = "Verse B"; clip.looping = False; clip.start_marker = 4.0; clip.end_marker = 8.0
