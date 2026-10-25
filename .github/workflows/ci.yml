@@ -95,11 +95,12 @@ jobs:
           version: v0.18.0
       # Saved from main only. A pull request restores main's; caches saved from pull requests (about 300 MB a job)
       # pushed main's out of the repository's 10 GB. The app's and Kumi's crates' parts build the same crates from
-      # crates.io, so they share one cache (the first to finish on main saves it); the bridges build others.
+      # crates.io, so they share one cache (the first to finish on main saves it); the bridges build others. Each cache
+      # has a name of its own, not the job's: Extended's jobs restore them by name.
       - if: steps.part.outputs.picked != ''
         uses: Swatinem/rust-cache@63fed3e2fecf6f7b51dc6f043341b79ef82a9ae7 # v2.9.2
         with:
-          key: ${{ matrix.cache }}
+          shared-key: ${{ matrix.cache }}-rust-linux
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - if: steps.part.outputs.picked != ''
         uses: taiki-e/install-action@e407f7bafb71fd004bc5c2da3032e5470cbb6ef0 # v2
@@ -199,10 +200,11 @@ jobs:
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
         with:
           version: v0.18.0
-      # Saved from main only (see Rust / Linux).
+      # Saved from main only, by name (see Rust / Linux).
       - if: steps.part.outputs.picked != ''
         uses: Swatinem/rust-cache@63fed3e2fecf6f7b51dc6f043341b79ef82a9ae7 # v2.9.2
         with:
+          shared-key: rust-platforms
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - if: steps.part.outputs.picked != ''
         uses: taiki-e/install-action@e407f7bafb71fd004bc5c2da3032e5470cbb6ef0 # v2
@@ -280,12 +282,12 @@ jobs:
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
         with:
           version: v0.18.0
-      # Saved from main only (see Rust / Linux). Each part keeps its own: they build some crates from crates.io
+      # Saved from main only, by name (see Rust / Linux). Each part keeps its own: they build some crates from crates.io
       # differently (cargo unifies their features over the packages a build selects).
       - if: steps.part.outputs.picked != ''
         uses: Swatinem/rust-cache@63fed3e2fecf6f7b51dc6f043341b79ef82a9ae7 # v2.9.2
         with:
-          key: ${{ matrix.part }}
+          shared-key: ${{ matrix.part }}-rust-windows
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - if: steps.part.outputs.picked != ''
         uses: taiki-e/install-action@e407f7bafb71fd004bc5c2da3032e5470cbb6ef0 # v2
