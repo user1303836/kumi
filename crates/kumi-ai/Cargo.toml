@@ -39,3 +39,7 @@ kumi-net = { workspace = true, features = ["test-support"] }
 kumi-testkit.workspace = true
 tempfile.workspace = true
 tokio = { workspace = true, features = ["test-util"] }
+
+# build.rs compacts the bundled models catalog (key order kept, as the workspace's serde_json keeps it).
+[build-dependencies]
+serde_json.workspace = true
