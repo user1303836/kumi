@@ -1,4 +1,5 @@
 //! Native Responses transport for the OpenAI SDK surface used by Kumi.
+use super::types::ProviderMetadata;
 use super::{
     error::{ApiCallError, LanguageModelError},
     http::{post_json, Fetch, Headers},
@@ -934,6 +935,23 @@ impl State {
             Err(error) => self.error(LanguageModelError::other(format!("Invalid OpenAI stream part: {error}"))),
         }
     }
+
+    /// A text or reasoning delta straight to the queue, without building it as JSON first: there is one per token.
+    /// What isn't words is read the schema's way, for its error.
+    fn delta(&mut self, reasoning: bool, id: String, delta: &Value, provider_metadata: Option<ProviderMetadata>) {
+        match delta.as_str() {
+            Some(text) if reasoning => {
+                self.pending.push_back(StreamPart::ReasoningDelta { id, delta: text.to_owned(), provider_metadata });
+            }
+            Some(text) => self.pending.push_back(StreamPart::TextDelta { id, delta: text.to_owned(), provider_metadata }),
+            None => self.emit(json!({
+                "type": if reasoning { "reasoning-delta" } else { "text-delta" },
+                "id": id,
+                "delta": delta,
+                "providerMetadata": provider_metadata,
+            })),
+        }
+    }
     fn error(&mut self, error: LanguageModelError) {
         self.failed = true;
         self.finish = FinishReason { unified: FinishReasonUnified::Error, raw: None };
@@ -996,11 +1014,11 @@ impl State {
                 },_=>{},
             },
             Some("response.function_call_arguments.delta")=>{if let Some(call)=self.calls.get_mut(&index){if call.suppressed{call.deltas.push(string(&value,"delta"));}else{let id=call.id.clone();self.emit(json!({"type":"tool-input-delta","id":id,"delta":value["delta"]}));}}},
-            Some("response.output_text.delta")=>{self.emit(json!({"type":"text-delta","id":self.resolved(&value),"delta":value["delta"]}));if self.logprobs_enabled&&!value["logprobs"].is_null(){self.logprobs.push(value["logprobs"].clone());}},
+            Some("response.output_text.delta")=>{let id=self.resolved(&value);self.delta(false,id,&value["delta"],None);if self.logprobs_enabled&&!value["logprobs"].is_null(){self.logprobs.push(value["logprobs"].clone());}},
             Some("response.reasoning_summary_part.added")=>{
                 let id=self.resolved(&value);let Some(part)=value["summary_index"].as_f64().filter(|n|*n>=0.0&&n.fract()==0.0).map(|n|n as u64) else{return};if part>0{if let Some(reasoning)=self.reasoning.get_mut(&id){reasoning.parts.insert(part,0);let mut ends=vec![];for(index,status)in &mut reasoning.parts{if *status==1{*status=2;ends.push(*index);}}let encrypted=reasoning.encrypted.clone();for index in ends{self.emit(json!({"type":"reasoning-end","id":format!("{id}:{index}"),"providerMetadata":{"openai":{"itemId":id}}}));}self.emit(json!({"type":"reasoning-start","id":format!("{id}:{part}"),"providerMetadata":{"openai":{"itemId":id,"reasoningEncryptedContent":encrypted}}}));}}
             },
-            Some("response.reasoning_summary_text.delta")=>{let id=self.resolved(&value);self.emit(json!({"type":"reasoning-delta","id":format!("{id}:{}",value["summary_index"]),"delta":value["delta"],"providerMetadata":{"openai":{"itemId":id}}}));},
+            Some("response.reasoning_summary_text.delta")=>{let id=self.resolved(&value);let mut meta=ProviderMetadata::new();meta.insert("openai".into(),json!({"itemId":id}));self.delta(true,format!("{id}:{}",value["summary_index"]),&value["delta"],Some(meta));},
             Some("response.reasoning_summary_part.done")=>{let id=self.resolved(&value);let Some(part)=value["summary_index"].as_f64().filter(|n|*n>=0.0&&n.fract()==0.0).map(|n|n as u64) else{return};if let Some(reasoning)=self.reasoning.get_mut(&id){reasoning.parts.insert(part,if self.store{2}else{1});if self.store{self.emit(json!({"type":"reasoning-end","id":format!("{id}:{part}"),"providerMetadata":{"openai":{"itemId":id}}}));}}},
             Some("response.completed"|"response.incomplete")=>{if !self.failed{self.finish=finish(value["response"]["incomplete_details"]["reason"].as_str().map(str::to_string),self.has_function);}self.usage=nonnull(&value["response"],"usage");self.service=nonnull(&value["response"],"service_tier").or(self.service.take());self.context=nonnull(&value["response"]["reasoning"],"context").or(self.context.take());},
             Some("response.failed")=>{let reason=value["response"]["incomplete_details"]["reason"].as_str().map(str::to_string);self.finish=if reason.is_some(){finish(reason,self.has_function)}else{FinishReason{unified:FinishReasonUnified::Error,raw:Some("error".into())}};self.usage=nonnull(&value["response"],"usage");self.context=nonnull(&value["response"]["reasoning"],"context").or(self.context.take());if !self.failed&&!value["response"]["error"].is_null(){self.failed=true;let mut frame=select_fields(&value,&["type","sequence_number"]);frame["response"]=select_fields(&value["response"],&["error","incomplete_details","service_tier"]);if let Some(error)=stream_error(&frame){self.pending.push_back(StreamPart::Error{error:LanguageModelError::ProviderStream(error)});}}},

@@ -1,5 +1,6 @@
 //! Native Messages transport for the Anthropic SDK surface used by Kumi.
 
+use super::types::ProviderMetadata;
 use super::{
     error::{ApiCallError, LanguageModelError},
     http::{post_json, Fetch, Headers},
@@ -751,6 +752,23 @@ impl StreamState {
                 .push_back(StreamPart::Error { error: LanguageModelError::other(format!("Invalid Anthropic stream part: {error}")) }),
         }
     }
+
+    /// A text or reasoning delta straight to the queue, without building it as JSON first: there is one per token.
+    /// What isn't words is read the schema's way, for its error.
+    fn delta(&mut self, reasoning: bool, id: String, delta: &Value, provider_metadata: Option<ProviderMetadata>) {
+        match delta.as_str() {
+            Some(text) if reasoning => {
+                self.pending.push_back(StreamPart::ReasoningDelta { id, delta: text.to_owned(), provider_metadata });
+            }
+            Some(text) => self.pending.push_back(StreamPart::TextDelta { id, delta: text.to_owned(), provider_metadata }),
+            None => self.emit(json!({
+                "type": if reasoning { "reasoning-delta" } else { "text-delta" },
+                "id": id,
+                "delta": delta,
+                "providerMetadata": provider_metadata,
+            })),
+        }
+    }
     fn tool(&mut self, id: &str, name: &str, input: &str, caller: Option<Value>) {
         let mut value = json!({"type":"tool-call","toolCallId":id,"toolName":name,"input":input});
         if let Some(caller) = caller {
@@ -854,10 +872,10 @@ impl StreamState {
             "content_block_delta" => {
                 let delta = &value["delta"];
                 match delta["type"].as_str(){
-                    Some("text_delta")=>self.emit(json!({"type":"text-delta","id":index,"delta":delta["text"]})),
-                    Some("thinking_delta")=>self.emit(json!({"type":"reasoning-delta","id":index,"delta":delta["thinking"]})),
+                    Some("text_delta")=>self.delta(false,index.clone(),&delta["text"],None),
+                    Some("thinking_delta")=>self.delta(true,index.clone(),&delta["thinking"],None),
                     Some("signature_delta") if self.block_type=="thinking"=>self.emit(json!({"type":"reasoning-delta","id":index,"delta":"","providerMetadata":{"anthropic":{"signature":delta["signature"]}}})),
-                    Some("compaction_delta") if !delta["content"].is_null()=>self.emit(json!({"type":"text-delta","id":index,"delta":delta["content"]})),
+                    Some("compaction_delta") if !delta["content"].is_null()=>self.delta(false,index.clone(),&delta["content"],None),
                     Some("input_json_delta")=>{
                         let delta=string(delta,"partial_json");if delta.is_empty(){return;}
                         if let Some(block)=self.blocks.get_mut(&index).filter(|b|b.kind=="tool_use"){block.input+=&delta;let id=block.id.clone();self.emit(json!({"type":"tool-input-delta","id":id,"delta":delta}));}
