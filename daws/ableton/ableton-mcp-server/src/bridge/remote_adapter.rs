@@ -992,6 +992,9 @@ impl LiveAdapter for RemoteScriptLiveAdapter {
     fn status(&self) -> Result<LiveStatus, LiveError> {
         Ok(self.0.cached.borrow().clone())
     }
+    fn status_has_operation(&self, operation: &str) -> Result<bool, LiveError> {
+        Ok(self.0.cached.borrow().has_operation(operation))
+    }
     fn snapshot(&self) -> Result<LiveSnapshot, LiveError> {
         Err(LiveError::error("remote adapter is asynchronous; use snapshotAsync"))
     }

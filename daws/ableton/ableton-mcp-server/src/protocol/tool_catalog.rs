@@ -118,8 +118,15 @@ fn resolve_rule<'a, T>(rules: &'a [T], name: &str, fields: impl Fn(&T) -> (Optio
     }
     best
 }
+/// Where each tool sits in the catalog, by name: the host looks a tool up for every request.
+static TOOL_INDEX: LazyLock<HashMap<&'static str, usize>> =
+    LazyLock::new(|| TOOL_CATALOG.iter().enumerate().map(|(index, entry)| (entry.name.as_str(), index)).collect());
+/// The tool's place in `TOOL_CATALOG` (and in the rows `resolve_tool_visibility` gives).
+pub fn tool_catalog_index(name: &str) -> Option<usize> {
+    TOOL_INDEX.get(name).copied()
+}
 pub fn tool_catalog_entry(name: &str) -> Option<&'static ToolCatalogEntry> {
-    TOOL_CATALOG.iter().find(|e| e.name == name)
+    tool_catalog_index(name).map(|index| &TOOL_CATALOG[index])
 }
 
 pub fn live_mutation_available(status: &LiveStatus) -> bool {
@@ -308,17 +315,19 @@ pub fn tool_policy_from_env(env: &HashMap<String, String>) -> Result<ToolPolicyS
     parse_tool_policy_spec(Some(&Value::Object(value)))
 }
 pub fn tool_allowed_by_policy(entry: &ToolCatalogEntry, policy: &ToolPolicySpec) -> Result<bool, ToolPolicyError> {
+    allowed_in(entry, policy, TOOL_POLICY_PROFILES.get(&policy.profile))
+}
+/// `tool_allowed_by_policy` with the policy's profile already looked up (none when the policy names an inherited key).
+fn allowed_in(entry: &ToolCatalogEntry, policy: &ToolPolicySpec, profile: Option<&ToolPolicyProfile>) -> Result<bool, ToolPolicyError> {
     if policy.deny.iter().any(|p| tool_policy_matches(p, &entry.name)) {
         return Ok(false);
     }
-    let profile = TOOL_POLICY_PROFILES
-        .get(&policy.profile)
-        .ok_or_else(|| ToolPolicyError("Cannot read properties of undefined (reading 'includes')".into()))?;
+    let profile = profile.ok_or_else(|| ToolPolicyError("Cannot read properties of undefined (reading 'includes')".into()))?;
     let in_profile =
         profile.classes.contains(&entry.policy_class) || profile.include.iter().flatten().any(|p| tool_policy_matches(p, &entry.name));
     Ok(in_profile && (policy.allow.is_empty() || policy.allow.iter().any(|p| tool_policy_matches(p, &entry.name))))
 }
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ToolVisibilityRow {
     pub entry: &'static ToolCatalogEntry,
@@ -328,11 +337,12 @@ pub struct ToolVisibilityRow {
 }
 pub fn resolve_tool_visibility(status: &LiveStatus, policy: &ToolPolicySpec) -> Result<Vec<ToolVisibilityRow>, ToolPolicyError> {
     let offered = Offered::of(status);
+    let profile = TOOL_POLICY_PROFILES.get(&policy.profile);
     TOOL_CATALOG
         .iter()
         .map(|entry| {
             let executable = executable(entry, status, &offered);
-            let policy_allowed = tool_allowed_by_policy(entry, policy)?;
+            let policy_allowed = allowed_in(entry, policy, profile)?;
             Ok(ToolVisibilityRow { entry, executable, policy_allowed, visible: executable && policy_allowed })
         })
         .collect()

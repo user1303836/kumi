@@ -262,11 +262,20 @@ async fn routed_adapter_delegates_native_methods_and_tags_event_channels() {
             let closes = closed.clone();
             let adapter = routed_adapter(remote, channel.clone(), Some(Rc::new(move || closes.set(closes.get() + 1))));
             assert!(adapter.status().unwrap().extra["channels"]["extension"]["connected"] == true);
+            // The router merges the remote's status as `merged_status` does, with no copy of either channel's.
+            assert_eq!(
+                adapter.status().unwrap(),
+                merged_status(&simulator.status().unwrap(), channel.status().as_ref(), &channel.reason())
+            );
             // Simulator advertises all extension operations, so shared operations use its own contract.
             let status = adapter.status().unwrap();
             assert!(!route_to_extension("render.offline", &status, channel.status().as_ref()));
             assert_eq!(adapter.snapshot_async(None, None).await.unwrap(), simulator.snapshot_async(None, None).await.unwrap());
             let extension_only = routed_adapter(Rc::new(UnavailableLiveAdapter), channel.clone(), None);
+            assert_eq!(
+                extension_only.status().unwrap(),
+                merged_status(&UnavailableLiveAdapter.status().unwrap(), channel.status().as_ref(), &channel.reason())
+            );
             let rendered = extension_only
                 .invoke_async(
                     &LiveInvocation::new("render.offline", json!({"trackRef":"3:track:2","fromBeat":0,"toBeat":2,"expectedName":"Vox"})),
