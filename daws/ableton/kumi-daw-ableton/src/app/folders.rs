@@ -21,23 +21,24 @@ pub fn live_preferences_dir(env: &Env) -> String {
         join(&home, "Library/Preferences/Ableton")
     }
 }
+/// The User Library the newest Library.cfg names. A folder or file that can't be read is passed over for the next
+/// newest, as one that names none is.
 pub fn live_user_library(env: &Env) -> Option<String> {
     let mut configs = Vec::new();
     for entry in std::fs::read_dir(live_preferences_dir(env)).ok()? {
-        let entry = entry.ok()?;
+        let Ok(entry) = entry else { continue };
         if !entry.file_name().to_string_lossy().starts_with("Live ") {
             continue;
         }
         let file = entry.path().join(if cfg!(windows) { "Preferences/Library.cfg" } else { "Library.cfg" });
-        if file.exists() {
-            let mtime = std::fs::metadata(&file).ok()?.modified().ok()?;
+        if let Ok(mtime) = std::fs::metadata(&file).and_then(|metadata| metadata.modified()) {
             configs.push((file, mtime));
         }
     }
     configs.sort_by(|a, b| b.1.cmp(&a.1));
     static USER: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?s)<UserLibrary>(.*?)</UserLibrary>").unwrap());
     for (file, _) in configs {
-        let text = std::fs::read_to_string(file).ok()?;
+        let Ok(text) = std::fs::read_to_string(file) else { continue };
         let block = USER.captures(&text).and_then(|c| c.get(1)).map(|m| m.as_str()).unwrap_or("");
         let value = |field: &str| {
             Regex::new(&format!(r#"<{field} Value="([^"]*)""#))
@@ -119,4 +120,35 @@ pub fn read_bridge_server(config_path: &str) -> Result<BridgeServer, RuntimeErro
             });
     }
     Ok(server)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{Duration, UNIX_EPOCH};
+
+    #[test]
+    fn a_library_cfg_that_cant_be_read_is_passed_over_for_the_next_newest() {
+        let dir = tempfile::tempdir().unwrap();
+        let key = if cfg!(windows) { "APPDATA" } else { "HOME" };
+        let env = Env::from([(key.to_string(), dir.path().to_string_lossy().into_owned())]);
+        let config = |version: &str, text: &[u8], modified: u64| {
+            let folder = Path::new(&live_preferences_dir(&env)).join(format!("Live {version}"));
+            let file = folder.join(if cfg!(windows) { "Preferences/Library.cfg" } else { "Library.cfg" });
+            fs::create_dir_all(file.parent().unwrap()).unwrap();
+            fs::write(&file, text).unwrap();
+            let opened = fs::File::options().write(true).open(&file).unwrap();
+            opened.set_modified(UNIX_EPOCH + Duration::from_secs(modified)).unwrap();
+        };
+        let moved = dir.path().join("Big Drive");
+        let names = format!(
+            r#"<?xml version="1.0"?><Ableton><ContentLibrary><UserLibrary><LibraryProject Id="0"><ProjectName Value="User Library" /><ProjectPath Value="{}" /></LibraryProject></UserLibrary></ContentLibrary></Ableton>"#,
+            moved.to_string_lossy()
+        );
+        config("12.3.6", names.as_bytes(), 1_000_000);
+        // A newer Live's that isn't text (cut short, or in another encoding), and a folder without one.
+        config("12.4.15", b"<?xml version=\"1.0\"?>\xff\xfe", 2_000_000);
+        fs::create_dir_all(Path::new(&live_preferences_dir(&env)).join("Live Reports")).unwrap();
+        assert_eq!(live_user_library(&env), Some(moved.join("User Library").to_string_lossy().into()));
+    }
 }
