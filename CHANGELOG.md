@@ -3,6 +3,27 @@
 Kumi's releases. The Ableton bridge (`crates/ableton-mcp-server`) is versioned on its own;
 each Kumi release names the bridge it ships with.
 
+## 1.23.2 — 2026-10-25
+
+Ships with bridge 1.0.95, as 1.23.1 did. Ships with REAPER extension 0.1.4 and Renoise tool 1.0.3,
+which REAPER and Renoise load when they restart; `kumi update` puts them in.
+
+- Downloads are 4 to 8 MB smaller again: Live's bridge travels once, as its own package, and is
+  unpacked at install.
+
+Tested with Live 12.4 on macOS. On Windows, installing and updating are tested; using Kumi with Live
+there is still new.
+
+### REAPER extension 0.1.4
+
+- Kumi's looks at a REAPER project nobody touched cost REAPER nothing: what it read last time is
+  answered again while the project stays as it was.
+
+### Renoise tool 1.0.3
+
+- Sequence reads, auditions, scratch copies and renders no longer ask Renoise about every track of
+  every pattern each time they work out the song's timeline.
+
 ## 1.23.1 — 2026-10-25
 
 Ships with bridge 1.0.95, which Live loads when it restarts. After updating, Kumi offers to quit Live
