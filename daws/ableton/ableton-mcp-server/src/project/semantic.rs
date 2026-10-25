@@ -169,24 +169,7 @@ impl<'a> CanonicalArtifact<'a> {
             let start = result.json.len();
             if key == "records" {
                 let rows = value.as_array().expect("record array shape checked before canonical validation");
-                nodes += 1;
-                if nodes > 100_000_000 {
-                    return Err(fail("semantic artifact exceeds the canonical node bound"));
-                }
-                if rows.len() > 10_000_000 {
-                    return Err(fail("semantic artifact array exceeds the bound"));
-                }
-                result.records.reserve(rows.len());
-                result.json.push('[');
-                for (index, record) in rows.iter().enumerate() {
-                    if index > 0 {
-                        result.json.push(',');
-                    }
-                    let start = result.json.len();
-                    canonical_visit(record, 2, &mut nodes, &mut result.json)?;
-                    result.records.push(start..result.json.len());
-                }
-                result.json.push(']');
+                canonical_records(rows, &mut nodes, &mut result.json, &mut result.records)?;
             } else {
                 canonical_visit(value, 1, &mut nodes, &mut result.json)?;
             }
@@ -202,6 +185,40 @@ impl<'a> CanonicalArtifact<'a> {
     fn record(&self, index: usize) -> &str {
         &self.json[self.records[index].clone()]
     }
+}
+// An artifact's records array as its canonical text, each record at its depth in the artifact, with where each record's
+// text is in it.
+fn canonical_records(
+    rows: &[Value],
+    nodes: &mut usize,
+    out: &mut String,
+    places: &mut Vec<std::ops::Range<usize>>,
+) -> Result<(), ProjectError> {
+    *nodes += 1;
+    if *nodes > 100_000_000 {
+        return Err(fail("semantic artifact exceeds the canonical node bound"));
+    }
+    if rows.len() > 10_000_000 {
+        return Err(fail("semantic artifact array exceeds the bound"));
+    }
+    places.reserve(rows.len());
+    out.push('[');
+    for (index, record) in rows.iter().enumerate() {
+        if index > 0 {
+            out.push(',');
+        }
+        let start = out.len();
+        canonical_visit(record, 2, nodes, out)?;
+        places.push(start..out.len());
+    }
+    out.push(']');
+    Ok(())
+}
+// One of an artifact's own fields as its canonical text.
+fn canonical_field(value: &Value) -> Result<String, ProjectError> {
+    let mut out = String::new();
+    canonical_visit(value, 1, &mut 1, &mut out)?;
+    Ok(out)
 }
 fn digest_canonical_fields(fields: &[(&str, &str)]) -> String {
     let mut entries = fields.to_vec();
@@ -479,11 +496,24 @@ fn section_for_record(kind: &str) -> &'static str {
     }
 }
 fn create_record(kind: &str, order: usize, name: Option<String>, data: Value, matching: Value) -> Result<Value, ProjectError> {
-    let mut row = json!({"section":section_for_record(kind),"kind":kind,"order":order,"matching":matching,"data":data,"contentFingerprint":digest(&json!({"kind":kind,"name":name,"data":data}))?,"semanticFingerprint":digest(&matching)?,"nameFingerprint":digest(&json!([kind,name]))?});
-    if let Some(name) = name {
-        row["name"] = json!(name);
+    // The fingerprints hash the record's own values, which the row then takes as they are (in the fields' order).
+    let (kind_value, name_value) = (Value::from(kind), name.map_or(Value::Null, Value::String));
+    let content = digest_fields(&[("kind", &kind_value), ("name", &name_value), ("data", &data)])?;
+    let semantic = digest(&matching)?;
+    let names = digest_array(&[&kind_value, &name_value])?;
+    let mut row = Map::new();
+    row.insert("section".into(), section_for_record(kind).into());
+    row.insert("kind".into(), kind_value);
+    row.insert("order".into(), order.into());
+    row.insert("matching".into(), matching);
+    row.insert("data".into(), data);
+    row.insert("contentFingerprint".into(), content.into());
+    row.insert("semanticFingerprint".into(), semantic.into());
+    row.insert("nameFingerprint".into(), names.into());
+    if !name_value.is_null() {
+        row.insert("name".into(), name_value);
     }
-    Ok(row)
+    Ok(Value::Object(row))
 }
 struct Records {
     raw: Vec<Value>,
@@ -980,11 +1010,15 @@ pub fn create_semantic_project_snapshot(snapshot: &Value, options: &CreateSemant
         record["snapshotId"] = json!(format!("{base}-{count}"));
     }
     let records = rows.raw;
+    // Each record's canonical text, made once as the artifact's (and so as validation makes it): the manifest's digests,
+    // the semantic hash and the id all hash these bytes.
+    let (mut records_json, mut places) = (String::new(), vec![]);
+    canonical_records(&records, &mut 1, &mut records_json, &mut places)?;
     let mut manifest = json!({});
     for section in SECTION_ORDER {
-        let section_rows: Vec<_> = records.iter().filter(|r| r["section"] == section).collect();
+        let texts = records.iter().zip(&places).filter(|(r, _)| r["section"] == section).map(|(_, place)| &records_json[place.clone()]);
         let omitted = rows.observed[section] - rows.included[section];
-        manifest[section] = json!({"observed":rows.observed[section],"included":rows.included[section],"omitted":omitted,"complete":omitted==0,"digest":digest(&json!(section_rows))?});
+        manifest[section] = json!({"observed":rows.observed[section],"included":rows.included[section],"omitted":omitted,"complete":omitted==0,"digest":digest_canonical_array(texts)});
     }
     let policy = json!({"profile":profile,"names":if profile=="strict"{"typed-aliases"}else{"retained"},"paths":match profile{"strict"=>"typed-digests","collaboration"=>"basenames",_=>"project-relative-or-basename"}});
     let provenance_value = |kind: &str, value: &Value| -> Result<Option<String>, ProjectError> {
@@ -1024,15 +1058,32 @@ pub fn create_semantic_project_snapshot(snapshot: &Value, options: &CreateSemant
         provenance["ableton"] = ableton;
     }
     let safety = json!({"readOnly":true,"containsSessionReferences":false,"containsMutationAuthority":false,"crossRunIdentityClaimed":false,"mergeProposed":false});
-    let hash = digest(
-        &json!({"schema":SEMANTIC_PROJECT_SNAPSHOT_SCHEMA,"policy":policy,"set":set,"manifest":manifest,"safety":safety,"records":records}),
-    )?;
+    let schema = canonical_field(&json!(SEMANTIC_PROJECT_SNAPSHOT_SCHEMA))?;
+    let (policy_json, set_json, manifest_json, safety_json) =
+        (canonical_field(&policy)?, canonical_field(&set)?, canonical_field(&manifest)?, canonical_field(&safety)?);
+    let hash = digest_canonical_fields(&[
+        ("schema", &schema),
+        ("policy", &policy_json),
+        ("set", &set_json),
+        ("manifest", &manifest_json),
+        ("safety", &safety_json),
+        ("records", &records_json),
+    ]);
     let version = bounded_string(&json!(options.exporter_version));
-    let id = digest(
-        &json!({"schema":SEMANTIC_PROJECT_SNAPSHOT_SCHEMA,"exporterVersion":version,"semanticHash":hash,"policy":policy,"provenance":provenance,"set":set,"manifest":manifest,"safety":safety,"records":records}),
-    )?;
-    let artifact = json!({"schema":SEMANTIC_PROJECT_SNAPSHOT_SCHEMA,"artifact":{"id":id,"semanticHash":hash,"exporterVersion":version},"policy":policy,"provenance":provenance,"set":set,"manifest":manifest,"safety":safety,"records":records});
-    authority_audit(&artifact, 0)?;
+    let id = digest_canonical_fields(&[
+        ("schema", &schema),
+        ("exporterVersion", &canonical_field(&json!(version))?),
+        ("semanticHash", &canonical_field(&json!(hash))?),
+        ("policy", &policy_json),
+        ("provenance", &canonical_field(&provenance)?),
+        ("set", &set_json),
+        ("manifest", &manifest_json),
+        ("safety", &safety_json),
+        ("records", &records_json),
+    ]);
+    let mut artifact = json!({"schema":SEMANTIC_PROJECT_SNAPSHOT_SCHEMA,"artifact":{"id":id,"semanticHash":hash,"exporterVersion":version},"policy":policy,"provenance":provenance,"set":set,"manifest":manifest,"safety":safety});
+    artifact["records"] = Value::Array(records);
+    // Validation runs the authority audit (paths, authority, Live references), so it isn't run here first.
     validate_semantic_project_artifact(&artifact)?;
     Ok(artifact)
 }
