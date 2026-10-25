@@ -188,32 +188,57 @@ local function scan_pattern(song, p, tracks, into, over)
   return true
 end
 
--- Pattern p's mark for the cache: the count of its changed lines (`mark_of(p)`, by the bridge's line notifiers) and, for each
--- track read that is an alias, the pattern it shows with that one's count: an edit in the source tells the source's notifiers
--- only (measured). Nil when one is unknown.
-local function worked_out_mark(song, p, tracks, mark_of)
-  local mark = mark_of and mark_of(p) or nil
-  if not mark then return nil end
-  local pattern, parts = song:pattern(p), nil
+-- Which of pattern p's tracks read for commands (those with effect columns) are aliases, and of what pattern: `{ {t, q}, ... }`.
+-- Kept in `S.aliases[p]` while the pattern's own mark and the tracks' columns hold: a track made an alias or not counts for its
+-- pattern (bridge.lua `watch_alias`), so a held mark means the same aliases. Otherwise every timeline read, and every warm pass
+-- after it, looked at every track of every pattern (a `track`, a `pattern:track` and an `is_alias` each) to learn nothing new.
+local function alias_tracks(song, p, tracks, mark, columns)
+  local kept = S and S.aliases and S.aliases[p]
+  if kept and kept.mark == mark and kept.tracks == tracks and kept.columns == columns then return kept.list end
+  local pattern, list = song:pattern(p), {}
   for t = 1, tracks do
     if song:track(t).visible_effect_columns > 0 then
       local pattern_track = pattern:track(t)
-      if pattern_track.is_alias then
-        local q = pattern_track.alias_pattern_index
-        local source = mark_of(q)
-        if not source then return nil end
-        parts = parts or { mark }
-        parts[#parts + 1] = t .. ":" .. q .. "=" .. source
-      end
+      if pattern_track.is_alias then list[#list + 1] = { t, pattern_track.alias_pattern_index } end
     end
   end
-  return parts and table.concat(parts, "|") or mark
+  if S then
+    S.aliases = S.aliases or {}
+    S.aliases[p] = { mark = mark, tracks = tracks, columns = columns, list = list }
+  end
+  return list
 end
 
--- The same, once per pattern in one read of the song (`memo`: a pattern plays in many slots).
+-- The tracks' effect columns as one text (which tracks the commands are read from): part of what a kept alias list holds for.
+local function columns_text(song, tracks)
+  local parts = {}
+  for t = 1, tracks do parts[t] = song:track(t).visible_effect_columns > 0 and "1" or "0" end
+  return table.concat(parts)
+end
+
+-- Pattern p's mark for the cache: the count of its changed lines (`mark_of(p)`, by the bridge's line notifiers) and, for each
+-- track read that is an alias, the pattern it shows with that one's count: an edit in the source tells the source's notifiers
+-- only (measured). Nil when one is unknown. `columns` is `columns_text`'s, worked out once a read.
+local function worked_out_mark(song, p, tracks, mark_of, columns)
+  local mark = mark_of and mark_of(p) or nil
+  if not mark then return nil end
+  local aliases = alias_tracks(song, p, tracks, mark, columns or columns_text(song, tracks))
+  if #aliases == 0 then return mark end
+  local parts = { mark }
+  for _, alias in ipairs(aliases) do
+    local source = mark_of(alias[2])
+    if not source then return nil end
+    parts[#parts + 1] = alias[1] .. ":" .. alias[2] .. "=" .. source
+  end
+  return table.concat(parts, "|")
+end
+
+-- The same, once per pattern in one read of the song (`memo`: a pattern plays in many slots; `memo.columns` the tracks'
+-- columns, worked out once).
 local function cache_mark(song, p, tracks, mark_of, memo)
   if memo and memo[p] ~= nil then return memo[p] or nil end
-  local mark = worked_out_mark(song, p, tracks, mark_of)
+  if memo and not memo.columns then memo.columns = columns_text(song, tracks) end
+  local mark = worked_out_mark(song, p, tracks, mark_of, memo and memo.columns or nil)
   if memo then memo[p] = mark or false end
   return mark
 end
@@ -252,14 +277,14 @@ function M.warm(mark_of)
   local function over() return clock_ms() >= stop end
   local tracks = rows.track_count(song)
   local sequencer = song.sequencer
-  local seen = {}
+  local seen, memo = {}, {}
   for s = 1, #sequencer.pattern_sequence do
     local p = sequencer:pattern(s)
     if not seen[p] then
       seen[p] = true
-      local cached = cached_changes(song, p, tracks, mark_of)
+      local cached = cached_changes(song, p, tracks, mark_of, memo)
       if not cached or cached.next_t then
-        if pattern_changes(song, p, tracks, mark_of, over) == nil or over() then return end
+        if pattern_changes(song, p, tracks, mark_of, over, memo) == nil or over() then return end
       end
     end
   end
