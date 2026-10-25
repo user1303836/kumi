@@ -1,6 +1,6 @@
 use std::rc::Rc;
 
-use kumi::tui::markdown::{inline, render_markdown, MarkdownRow};
+use kumi::tui::markdown::{inline, render_markdown, render_markdown_with, MarkdownCache, MarkdownRow};
 use kumi::tui::style::{palette, Style};
 
 fn base() -> Rc<Style> {
@@ -108,4 +108,34 @@ fn lines_past_the_backtrack_limit_render_plain_instead_of_freezing() {
             assert_eq!(text, line);
         }
     }
+}
+
+fn rows_with_bands(rows: &[MarkdownRow]) -> Vec<(String, bool)> {
+    rows.iter().map(|row| (row.spans.iter().map(|span| span.text.as_str()).collect(), row.bg.is_some())).collect()
+}
+
+#[test]
+fn an_answer_that_streams_renders_as_the_whole_would_while_only_its_last_line_is_rendered_again() {
+    let whole = "# Mix notes\n\nSome **bold** words and `code`\n```\nlet gain = 0.5;\nlet pan = -0.2;\n```\n- item one\n- item two with a longer tail that wraps\n> a quote\nlast line";
+    let mut cache = MarkdownCache::default();
+    for end in 1..=whole.len() {
+        let streamed = render_markdown_with(&whole[..end], 24, &base(), &mut cache);
+        assert_eq!(rows_with_bands(&streamed), rows_with_bands(&render_markdown(&whole[..end], 24, &base())), "at {end} bytes");
+        // Everything up to the last newline is kept; only the line after it is rendered per call.
+        assert_eq!(cache.settled(), whole[..end].rfind('\n').map_or(0, |at| at + 1), "at {end} bytes");
+    }
+    // A text that changed before its end, or another width, starts over and still matches.
+    let changed = "# Remix notes\n\nSome **bold** words\nlast line";
+    assert_eq!(
+        rows_with_bands(&render_markdown_with(changed, 24, &base(), &mut cache)),
+        rows_with_bands(&render_markdown(changed, 24, &base()))
+    );
+    assert_eq!(
+        rows_with_bands(&render_markdown_with(whole, 40, &base(), &mut cache)),
+        rows_with_bands(&render_markdown(whole, 40, &base()))
+    );
+    // An open fence carries from the kept lines into the one still growing.
+    let open = "before\n```\ncode so far";
+    assert_eq!(rows_with_bands(&render_markdown_with(open, 24, &base(), &mut cache)), rows_with_bands(&render_markdown(open, 24, &base())));
+    assert!(render_markdown_with(open, 24, &base(), &mut cache).last().unwrap().bg.is_some());
 }

@@ -1,7 +1,7 @@
 //! Conversation rows and timed repeated-step folding.
 use super::{
     activity::{activity_of, blend_steps, Activity},
-    markdown::render_markdown,
+    markdown::{render_markdown_with, MarkdownCache},
     style::{palette, Rgb, Style},
     width::text_width,
     wrap::{wrap, Span},
@@ -351,6 +351,12 @@ fn step_rows(steps: &[Step], now: f64) -> Vec<Row> {
     rows
 }
 pub fn entry_rows(entry: &Entry, width: i32, now: f64) -> Vec<Row> {
+    entry_rows_with(entry, width, now, &mut MarkdownCache::default())
+}
+
+/// `entry_rows`, with an answer's Markdown kept in `markdown` between calls, so a streaming answer renders only its
+/// last line again.
+pub fn entry_rows_with(entry: &Entry, width: i32, now: f64, markdown: &mut MarkdownCache) -> Vec<Row> {
     let inner = width.max(1);
     match entry {
         Entry::User { text } => {
@@ -457,7 +463,7 @@ pub fn entry_rows(entry: &Entry, width: i32, now: f64) -> Vec<Row> {
         Entry::Assistant { text, steps, status, elapsed_ms, started_at } => {
             let mut rows = vec![];
             if !text.is_empty() {
-                for r in render_markdown(text.trim_end_matches('\n'), inner, &style(palette::TEXT)) {
+                for r in render_markdown_with(text.trim_end_matches('\n'), inner, &style(palette::TEXT), markdown) {
                     rows.push(Row { spans: r.spans, band: r.bg.map(|bg| Band { bg, width: inner + 2 }), ..Default::default() });
                 }
             }
@@ -766,6 +772,8 @@ pub struct EntryState {
     entry: RefCell<Entry>,
     revision: Cell<u64>,
     cache: RefCell<Option<Cache>>,
+    /// An answer's Markdown as rendered so far: a streaming answer renders only its last line again.
+    markdown: RefCell<MarkdownCache>,
 }
 impl Deref for EntryState {
     type Target = RefCell<Entry>;
@@ -787,7 +795,12 @@ impl Transcript {
         self.insert_before(entry, None)
     }
     pub fn insert_before(&mut self, entry: Entry, before: Option<&EntryRef>) -> EntryRef {
-        let entry = Rc::new(EntryState { entry: RefCell::new(entry), revision: Cell::new(0), cache: RefCell::new(None) });
+        let entry = Rc::new(EntryState {
+            entry: RefCell::new(entry),
+            revision: Cell::new(0),
+            cache: RefCell::new(None),
+            markdown: RefCell::new(MarkdownCache::default()),
+        });
         let index = before.and_then(|before| self.entries.iter().position(|e| Rc::ptr_eq(e, before))).unwrap_or(self.entries.len());
         self.entries.insert(index, entry.clone());
         entry
@@ -838,7 +851,8 @@ impl Transcript {
             let mut cached = entry.cache.borrow_mut();
             if cached.as_ref().is_none_or(|c| c.width != width || c.revision != revision || moving || c.moving) {
                 self.laid_out += 1;
-                *cached = Some(Cache { width, revision, rows: entry_rows(&entry.borrow(), width, now).into(), moving });
+                let rows = entry_rows_with(&entry.borrow(), width, now, &mut entry.markdown.borrow_mut());
+                *cached = Some(Cache { width, revision, rows: rows.into(), moving });
             }
             let rows = cached.as_ref().unwrap().rows.clone();
             let gap = total > 0;
