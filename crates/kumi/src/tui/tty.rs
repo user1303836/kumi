@@ -33,6 +33,10 @@ pub trait TtyOutput {
     fn is_tty(&self) -> bool;
     fn columns(&self) -> Option<i32>;
     fn rows(&self) -> Option<i32>;
+    /// Both at once: the terminal is asked once per frame, not twice.
+    fn size(&self) -> Option<(i32, i32)> {
+        Some((self.columns()?, self.rows()?))
+    }
     fn write(&self, data: &str);
     /// Node's `writeSync` on the output's fd, for exit and crash paths; `None` where there's no fd.
     fn write_sync(&self, data: &str) -> Option<std::io::Result<()>> {
@@ -116,8 +120,8 @@ impl Tty {
     }
 
     pub fn size(&self) -> Size {
-        let output = &self.inner.options.output;
-        Size { columns: output.columns().unwrap_or(80).max(1), rows: output.rows().unwrap_or(24).max(1) }
+        let (columns, rows) = self.inner.options.output.size().unwrap_or((80, 24));
+        Size { columns: columns.max(1), rows: rows.max(1) }
     }
 
     pub fn is_active(&self) -> bool {
@@ -628,11 +632,15 @@ impl TtyOutput for Stdout {
     }
 
     fn columns(&self) -> Option<i32> {
-        self.is_tty().then(|| crossterm::terminal::size().ok()).flatten().map(|(columns, _)| columns as i32)
+        self.size().map(|(columns, _)| columns)
     }
 
     fn rows(&self) -> Option<i32> {
-        self.is_tty().then(|| crossterm::terminal::size().ok()).flatten().map(|(_, rows)| rows as i32)
+        self.size().map(|(_, rows)| rows)
+    }
+
+    fn size(&self) -> Option<(i32, i32)> {
+        self.is_tty().then(|| crossterm::terminal::size().ok()).flatten().map(|(columns, rows)| (columns as i32, rows as i32))
     }
 
     fn write(&self, data: &str) {

@@ -9,6 +9,7 @@ use super::super::{
     width::{text_width, truncate},
     wrap::Span,
 };
+use super::input::Command;
 use super::*;
 use crate::text::library_line;
 use kumi_ai::failure::reset_words;
@@ -115,15 +116,16 @@ impl TuiApp {
             self.draw_attachments(&mut screen, 3, box_top - dock - 2 - chip, left - 6);
         }
         let no_panel = self.0.state.borrow().panel.is_none();
-        if waiting != 0 && no_panel && self.menu().is_empty() {
+        let menu = self.menu();
+        if waiting != 0 && no_panel && menu.is_empty() {
             self.draw_held(&mut screen, 3, box_top - dock - 1 - chip - files - waiting, left - 6, waiting);
         }
-        let mut cursor = Some(self.draw_composer(&mut screen, Rect::new(1, box_top, left - 2, box_height), &layout, visible));
+        let mut cursor = Some(self.draw_composer(&mut screen, Rect::new(1, box_top, left - 2, box_height), &layout, visible, &menu));
         let panel = self.0.state.borrow().panel.clone();
         if let Some(panel) = panel {
             cursor = self.draw_panel(&mut screen, &panel, box_top, left);
         } else {
-            self.draw_menu(&mut screen, box_top, left);
+            self.draw_menu(&mut screen, box_top, left, &menu);
         }
         if self.0.state.borrow().closing {
             cursor = None;
@@ -545,13 +547,12 @@ impl TuiApp {
             vec![(format!("{} isn't connected", crate::daw::words().app), st::DIM)]
         }
     }
-    fn draw_composer(&self, screen: &mut Screen, box_: Rect, layout: &EditorLayout, visible: i32) -> Cursor {
+    fn draw_composer(&self, screen: &mut Screen, box_: Rect, layout: &EditorLayout, visible: i32, menu: &[&'static Command]) -> Cursor {
         screen.fill(box_, &st::RAISED);
         let x = box_.x + 2;
         let width = (box_.width - 4).max(1);
         let first = (layout.cursor_row as i32 - visible + 1).min(layout.rows.len() as i32 - visible).max(0);
         let voice = self.0.voice.as_ref().and_then(|v| v.view(perf_now()));
-        let menu = self.menu();
         let busy = self.busy();
         let state = self.0.state.borrow();
         if state.editor.is_empty() {
@@ -620,8 +621,7 @@ impl TuiApp {
         }
         Cursor { x: x + layout.cursor_column, y: box_.y + 1 + layout.cursor_row as i32 - first }
     }
-    fn draw_menu(&self, screen: &mut Screen, box_top: i32, left: i32) {
-        let items = self.menu();
+    fn draw_menu(&self, screen: &mut Screen, box_top: i32, left: i32, items: &[&'static Command]) {
         if items.is_empty() {
             return;
         }
