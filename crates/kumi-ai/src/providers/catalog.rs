@@ -191,7 +191,10 @@ impl CatalogModel {
 /// The snapshot this Kumi carries.
 pub fn bundled() -> Arc<Catalog> {
     static BUNDLED: LazyLock<Arc<Catalog>> = LazyLock::new(|| {
-        Arc::new(Catalog::read(&serde_json::from_str(include_str!("../../data/models-catalog.json")).expect("the bundled catalog is JSON")))
+        // data/models-catalog.json, compacted by build.rs: the binary carries no indentation.
+        Arc::new(Catalog::read(
+            &serde_json::from_str(include_str!(concat!(env!("OUT_DIR"), "/models-catalog.min.json"))).expect("the bundled catalog is JSON"),
+        ))
     });
     BUNDLED.clone()
 }
