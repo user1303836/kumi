@@ -174,7 +174,12 @@ pub struct Diff {
 
 /// Whether a snapshot was cut short: the project had more pages or things than a digest reads, so it holds only some.
 pub fn cut(snapshot: &Snapshot) -> bool {
-    snapshot.bounded.contains_key("pages") || snapshot.bounded.contains_key("records")
+    cut_bounds(&snapshot.bounded)
+}
+
+/// Whether a snapshot's bounds say its read was cut short (more pages or records than a digest reads).
+pub fn cut_bounds(bounded: &Map<String, Value>) -> bool {
+    bounded.contains_key("pages") || bounded.contains_key("records")
 }
 
 impl Diff {

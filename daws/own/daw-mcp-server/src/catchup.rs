@@ -14,6 +14,8 @@ use crate::client::{BridgeClient, RequestError};
 use crate::host::{CallError, Following, Host, Pick};
 use crate::semantic::{self, Change, Detail, Diff, Record, Snapshot, SNAPSHOT_VERSION};
 use daw_bridge::Daw;
+use serde::de::DeserializeOwned;
+use serde::Deserialize;
 use serde_json::{json, Map, Value};
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
@@ -99,13 +101,48 @@ pub struct Store {
     root: PathBuf,
 }
 
-fn read_snapshot(file: &Path) -> Option<Snapshot> {
+/// What of a kept snapshot `save` and `baseline_save` read: its form, the file it's of and its bounds, not its records (a
+/// snapshot is parsed whole only to be compared).
+#[derive(Deserialize)]
+struct Head {
+    version: u32,
+    #[serde(default)]
+    path: String,
+    #[serde(default)]
+    bounded: Map<String, Value>,
+}
+
+/// A kept snapshot read from its file: whole, or its head.
+trait Kept: DeserializeOwned {
+    fn version(&self) -> u32;
+    fn path(&self) -> &str;
+}
+
+impl Kept for Snapshot {
+    fn version(&self) -> u32 {
+        self.version
+    }
+    fn path(&self) -> &str {
+        &self.path
+    }
+}
+
+impl Kept for Head {
+    fn version(&self) -> u32 {
+        self.version
+    }
+    fn path(&self) -> &str {
+        &self.path
+    }
+}
+
+fn read_snapshot<T: Kept>(file: &Path) -> Option<T> {
     let meta = std::fs::metadata(file).ok()?;
     if meta.len() as usize > MAX_SNAPSHOT_BYTES {
         return None;
     }
-    let snapshot: Snapshot = serde_json::from_slice(&std::fs::read(file).ok()?).ok()?;
-    (snapshot.version == SNAPSHOT_VERSION).then_some(snapshot)
+    let snapshot: T = serde_json::from_slice(&std::fs::read(file).ok()?).ok()?;
+    (snapshot.version() == SNAPSHOT_VERSION).then_some(snapshot)
 }
 
 fn private_dir(dir: &Path) -> std::io::Result<()> {
@@ -116,7 +153,9 @@ fn private_dir(dir: &Path) -> std::io::Result<()> {
     builder.create(dir)
 }
 
-/// Written whole or not at all, readable by the owner only.
+/// Written whole or not at all, readable by the owner only. Not flushed to the drive: a snapshot is a cache (lost to a power
+/// cut, catch-up starts afresh), and a flush on each save, every few seconds while the producer edits (macOS's F_FULLFSYNC
+/// waits for the drive's whole cache), would cost more than the save.
 fn write_private(dir: &Path, name: &str, text: &[u8]) -> std::io::Result<()> {
     use std::io::Write;
     private_dir(dir)?;
@@ -128,7 +167,6 @@ fn write_private(dir: &Path, name: &str, text: &[u8]) -> std::io::Result<()> {
     let written = (|| {
         let mut file = options.open(&temporary)?;
         file.write_all(text)?;
-        file.sync_all()?;
         std::fs::rename(&temporary, dir.join(name))
     })();
     if written.is_err() {
@@ -167,19 +205,29 @@ impl Store {
     /// The snapshot to compare the project with: a saved project's own file's, else its place's latest when the project
     /// moved there (a version first seen here has none); an unsaved one's by its identity.
     pub fn load(&self, key: &Key) -> Option<Snapshot> {
+        self.load_kept(key)
+    }
+
+    /// The head of the snapshot `load` gives.
+    fn load_head(&self, key: &Key) -> Option<Head> {
+        self.load_kept(key)
+    }
+
+    fn load_kept<T: Kept>(&self, key: &Key) -> Option<T> {
         match key {
             Key::Unsaved { identity } => read_snapshot(&self.unsaved_dir().join(format!("{}.json", file_key(identity)))),
             Key::Saved { place, path } => {
                 let dir = self.place_dir(place);
-                let last = read_snapshot(&dir.join("last-seen.json"));
-                if last.as_ref().is_some_and(|last| last.path == *path) {
+                let last: Option<T> = read_snapshot(&dir.join("last-seen.json"));
+                if last.as_ref().is_some_and(|last| last.path() == path) {
                     return last;
                 }
-                if let Some(own) = read_snapshot(&dir.join("sets").join(format!("{}.json", file_key(path)))).filter(|own| own.path == *path)
+                if let Some(own) =
+                    read_snapshot::<T>(&dir.join("sets").join(format!("{}.json", file_key(path)))).filter(|own| own.path() == path)
                 {
                     return Some(own);
                 }
-                last.filter(|last| moved_to(&last.path, path))
+                last.filter(|last| moved_to(last.path(), path))
             }
         }
     }
@@ -210,7 +258,7 @@ impl Store {
             Key::Saved { place, path } => {
                 let dir = self.place_dir(place);
                 let sets = dir.join("sets");
-                if let Some(before) = read_snapshot(&dir.join("last-seen.json")) {
+                if let Some(before) = read_snapshot::<Head>(&dir.join("last-seen.json")) {
                     if !moved_to(&before.path, path) {
                         private_dir(&sets).map_err(failed)?;
                         std::fs::rename(dir.join("last-seen.json"), sets.join(format!("{}.json", file_key(&before.path))))
@@ -381,10 +429,11 @@ where
     Err(CallError::Bridge { code: "changed".into(), message: "the project changed while Kumi read it: try again".into() })
 }
 
-/// Whether a snapshot read now is kept in place of the one kept before: a read cut short never replaces a whole one (what
-/// it didn't reach would read as added next time); with nothing whole kept, it's kept.
-fn replaces(kept: Option<&Snapshot>, now: &Snapshot) -> bool {
-    !semantic::cut(now) || kept.is_none_or(semantic::cut)
+/// Whether a snapshot read now is kept in place of the one kept before (`kept_cut`: whether that one was cut short; none
+/// when nothing is kept): a read cut short never replaces a whole one (what it didn't reach would read as added next time);
+/// with nothing whole kept, it's kept.
+fn replaces(kept_cut: Option<bool>, now: &Snapshot) -> bool {
+    !semantic::cut(now) || kept_cut.unwrap_or(true)
 }
 
 /// The project row a snapshot was read with.
@@ -393,10 +442,9 @@ fn project_row(snapshot: &Snapshot) -> Value {
 }
 
 /// A snapshot as kept: without the project row it was read with.
-fn kept(snapshot: &Snapshot) -> Snapshot {
-    let mut kept = snapshot.clone();
-    kept.bounded.shift_remove("\u{0}project");
-    kept
+fn kept(mut snapshot: Snapshot) -> Snapshot {
+    snapshot.bounded.shift_remove("\u{0}project");
+    snapshot
 }
 
 fn request_error(error: RequestError) -> CallError {
@@ -535,26 +583,30 @@ impl Host {
         }
     }
 
-    /// The snapshot to compare an open project with: its own, else (saved for the first time, or under another place)
-    /// the one it was last kept under, by its identity.
-    fn baseline_of(&self, key: &Key, identity: &str) -> Option<Snapshot> {
+    /// The snapshot to compare an open project with, and whether it's the one kept under its key: its own, else (saved
+    /// for the first time, or under another place) the one it was last kept under, by its identity.
+    fn baseline_of(&self, key: &Key, identity: &str) -> (Option<Snapshot>, bool) {
         let state = self.catchup();
         if let Some(found) = state.store.load(key) {
-            return Some(found);
+            return (Some(found), true);
         }
         let last = state.last_key.lock().unwrap_or_else(|e| e.into_inner()).get(identity).cloned();
-        last.filter(|last| last != key).and_then(|last| state.store.load(&last)).or_else(|| match key {
+        let found = last.filter(|last| last != key).and_then(|last| state.store.load(&last)).or_else(|| match key {
             Key::Saved { .. } if !identity.is_empty() => state.store.load_unsaved(identity),
             _ => None,
-        })
+        });
+        (found, false)
     }
 
-    fn keep(&self, key: &Key, snapshot: &Snapshot) -> Result<Saved, String> {
+    /// Keeps a snapshot read now as the project's, unless it's cut short and the one kept under its key isn't
+    /// (`kept_cut`: whether that one was cut short, none when nothing is kept there).
+    fn keep(&self, key: &Key, snapshot: Snapshot, kept_cut: Option<bool>) -> Result<Saved, String> {
         let state = self.catchup();
-        if !replaces(state.store.load(key).as_ref(), snapshot) {
+        if !replaces(kept_cut, &snapshot) {
             return Ok(Saved::Partial);
         }
-        let saved = state.store.save(key, &kept(snapshot))?;
+        let snapshot = kept(snapshot);
+        let saved = state.store.save(key, &snapshot)?;
         if saved == Saved::Kept {
             if let Key::Saved { .. } = key {
                 // An unsaved project saved now: its snapshot by identity is the place's from here.
@@ -586,7 +638,10 @@ impl Host {
                 answer["bounded"] = Value::Object(bounded);
             }
         }
-        match self.baseline_of(&key, &now.identity) {
+        // (what's kept under the project's key is read once: compared with, and told to `keep`)
+        let (before, own) = self.baseline_of(&key, &now.identity);
+        let kept_cut = before.as_ref().filter(|_| own).map(semantic::cut);
+        match before {
             None => answer["first"] = true.into(),
             Some(before) => {
                 let diff = semantic::diff(&before, &now, false, &HashMap::new());
@@ -601,11 +656,12 @@ impl Host {
                 }
             }
         }
-        match self.keep(&key, &now) {
+        let identity = now.identity.clone();
+        match self.keep(&key, now, kept_cut) {
             Ok(saved) => saved.tell(&mut answer),
             Err(why) => answer["saveError"] = why.into(),
         }
-        self.catchup().caught_up.lock().unwrap_or_else(|e| e.into_inner()).insert((key, now.identity.clone()));
+        self.catchup().caught_up.lock().unwrap_or_else(|e| e.into_inner()).insert((key, identity));
         answer["ms"] = (began.elapsed().as_millis() as u64).into();
         (answer, false)
     }
@@ -634,10 +690,11 @@ impl Host {
             }
             caught_up.insert((key.clone(), now.identity.clone()));
         }
-        match self.keep(&key, &now) {
+        let kept_cut = self.catchup().store.load_head(&key).map(|head| semantic::cut_bounds(&head.bounded));
+        let mut answer = json!({"place": place, "records": now.records.len(), "changed": now.changed});
+        match self.keep(&key, now, kept_cut) {
             Ok(saved) => {
-                let mut answer =
-                    json!({"place": place, "records": now.records.len(), "changed": now.changed, "ms": began.elapsed().as_millis() as u64});
+                answer["ms"] = (began.elapsed().as_millis() as u64).into();
                 saved.tell(&mut answer);
                 (answer, false)
             }
@@ -897,10 +954,10 @@ mod tests {
         let whole = snapshot("/a.rpp", "9:1", 120.);
         let mut cut_short = whole.clone();
         cut_short.bounded.insert("pages".into(), json!("more than 400 pages"));
-        assert!(!replaces(Some(&whole), &cut_short), "the whole one stays");
+        assert!(!replaces(Some(semantic::cut(&whole)), &cut_short), "the whole one stays");
         assert!(replaces(None, &cut_short), "nothing better kept");
-        assert!(replaces(Some(&cut_short), &cut_short));
-        assert!(replaces(Some(&cut_short), &whole));
+        assert!(replaces(Some(semantic::cut(&cut_short)), &cut_short));
+        assert!(replaces(Some(semantic::cut(&cut_short)), &whole));
         let mut answer = json!({});
         Saved::Partial.tell(&mut answer);
         assert_eq!(answer["saved"], false);
@@ -920,6 +977,87 @@ mod tests {
         assert!(store.load_unsaved("99:0").is_none(), "the oldest went");
         store.forget_unsaved(&format!("99:{}", MAX_UNSAVED + 2));
         assert!(store.load_unsaved(&format!("99:{}", MAX_UNSAVED + 2)).is_none());
+    }
+
+    // Second sweep OW2: what one catch_up and one baseline_save do with the snapshot files, as main did it (the kept file
+    // parsed up to three times, the new snapshot cloned, the write flushed) and as now. A timing, release-like:
+    // `--run-ignored only --no-capture -E 'test(/sweep2_ow2/)'`.
+    #[test]
+    #[ignore]
+    fn sweep2_ow2_snapshot_files_of_a_catch_up_and_a_baseline_save() {
+        use std::io::Write;
+        fn median(mut times: Vec<Duration>) -> Duration {
+            times.sort();
+            times[times.len() / 2]
+        }
+        for tracks in [1_000, 10_000] {
+            let home = tempfile::tempdir().unwrap();
+            let store = Store::new(home.path().to_path_buf());
+            let key = Key::Saved { place: "reaper-0123456789abcdef0123456789abcdef".into(), path: "/p/song.rpp".into() };
+            let mut now = snapshot("/p/song.rpp", "1:1", 120.0);
+            now.records = (0..tracks)
+                .map(|n| {
+                    serde_json::from_value(json!({"k": "track", "id": format!("{{{n:08X}-0000-0000-0000-000000000000}}"), "n": format!("Track {n}"),
+                        "o": n, "f": {"mixer": {"volume": -6.02, "pan": 0.0, "width": 1.0, "mute": false, "solo": false, "phase": false},
+                        "color": "#5a8fd0", "input": {"arm": false, "monitor": 1, "recInput": 4096},
+                        "sends": {"count": 2, "sendsHash": "9c1185a5c5e9fc54"}, "FX": {"count": 3},
+                        "items": {"count": 12, "itemsHash": "cbf29ce484222325"}, "automation": {"count": 1, "pointsHash": "af63bd4c8601b7df"}}}))
+                    .unwrap()
+                })
+                .collect();
+            now.bounded.insert("\u{0}project".into(), json!({"id": "0123456789abcdef0123456789abcdef", "path": "/p/song.rpp"}));
+            store.save(&key, &kept(now.clone())).unwrap();
+            let file = home.path().join("reaper-0123456789abcdef0123456789abcdef/last-seen.json");
+            let bytes = std::fs::metadata(&file).unwrap().len();
+            // (main's write: the same file, flushed before it's renamed into place)
+            let flushed = |text: &[u8]| {
+                let temporary = file.with_extension("tmp");
+                let mut out = std::fs::File::create(&temporary).unwrap();
+                out.write_all(text).unwrap();
+                out.sync_all().unwrap();
+                std::fs::rename(&temporary, &file).unwrap();
+            };
+            let (mut main_catch_up, mut main_save, mut catch_up, mut save) = (vec![], vec![], vec![], vec![]);
+            for _ in 0..7 {
+                let began = Instant::now();
+                let before = store.load(&key).unwrap();
+                let kept_before = store.load(&key);
+                let copy = kept(now.clone());
+                let last = read_snapshot::<Snapshot>(&file).unwrap();
+                flushed(&serde_json::to_vec(&copy).unwrap());
+                main_catch_up.push(began.elapsed());
+                assert!(replaces(kept_before.as_ref().map(semantic::cut), &now) && last.path == before.path);
+                let began = Instant::now();
+                let kept_before = store.load(&key);
+                let copy = kept(now.clone());
+                let last = read_snapshot::<Snapshot>(&file).unwrap();
+                flushed(&serde_json::to_vec(&copy).unwrap());
+                main_save.push(began.elapsed());
+                assert!(kept_before.is_some() && last.path == now.path);
+                // Now: the kept one parsed once to be compared, the file's head read to save; the snapshot moved, not cloned.
+                let fresh = now.clone();
+                let began = Instant::now();
+                let before = store.load(&key).unwrap();
+                let kept_cut = Some(semantic::cut(&before));
+                assert!(replaces(kept_cut, &fresh));
+                assert_eq!(store.save(&key, &kept(fresh)).unwrap(), Saved::Kept);
+                catch_up.push(began.elapsed());
+                let fresh = now.clone();
+                let began = Instant::now();
+                let kept_cut = store.load_head(&key).map(|head| semantic::cut_bounds(&head.bounded));
+                assert!(replaces(kept_cut, &fresh));
+                assert_eq!(store.save(&key, &kept(fresh)).unwrap(), Saved::Kept);
+                save.push(began.elapsed());
+            }
+            eprintln!(
+                "{tracks} tracks, a {:.0} KB snapshot: catch_up's files {:?} -> {:?}, baseline_save's {:?} -> {:?} (medians of 7)",
+                bytes as f64 / 1024.0,
+                median(main_catch_up),
+                median(catch_up),
+                median(main_save),
+                median(save)
+            );
+        }
     }
 
     #[tokio::test]
@@ -942,7 +1080,7 @@ mod tests {
         assert_eq!(snapshot.facts["tempo"], 90);
         assert_eq!(snapshot.bounded["item"], "too many");
         assert_eq!(snapshot.summaries["item"], "items");
-        assert_eq!(kept(&snapshot).bounded.len(), 1, "the project row isn't kept");
+        assert_eq!(kept(snapshot).bounded.len(), 1, "the project row isn't kept");
     }
 
     #[tokio::test]
