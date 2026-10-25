@@ -91,6 +91,7 @@ impl Reaper<'_> {
 
     /// Selects exactly this track (the master included).
     pub fn select_only(&self, track: Track) {
+        super::wrote();
         if let Some(f) = self.api.SetOnlyTrackSelected() {
             unsafe { f(track.0) }
         }

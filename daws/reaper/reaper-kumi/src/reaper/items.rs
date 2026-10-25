@@ -124,6 +124,7 @@ impl Reaper<'_> {
 
     /// Lays out the fixed lanes again after items changed lanes.
     pub fn update_item_lanes(&self, proj: Project) {
+        super::wrote();
         if let Some(f) = self.api.UpdateItemLanes() {
             unsafe { f(proj.0) };
         }

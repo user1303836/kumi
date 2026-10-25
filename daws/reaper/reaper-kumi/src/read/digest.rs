@@ -1555,6 +1555,28 @@ mod tests {
         reaper.set_project_text(proj, "TRACK_GROUP_NAME:1", "Drums");
         reaper.run_action(40001);
         assert_eq!(crate::reaper::writes() - before, 4);
+        // The FX, envelope and automation-item wrappers, a track selected, the lanes updated: writes too (review: the
+        // first sweep went by the wrappers' names and missed these).
+        let before = crate::reaper::writes();
+        let drums = reaper.track_at(proj, 0).unwrap();
+        let eq = Fx { owner: FxOwner::Track(drums), index: 0 };
+        reaper.fx_set_param(eq, 0, 0.5);
+        reaper.fx_set_config(eq, "renamed_name", "EQ");
+        reaper.fx_set_enabled(eq, false);
+        let envelope = reaper.track_envelope_by_chunk_name(drums, "<VOLENV2").unwrap();
+        reaper.env_insert_point(
+            envelope,
+            -1,
+            crate::reaper::EnvPoint { time: 1.0, value: 0.5, shape: 0, tension: 0.0, selected: false },
+            true,
+        );
+        reaper.select_only(track);
+        reaper.update_item_lanes(proj);
+        assert_eq!(crate::reaper::writes() - before, 6);
+        // A chunk of Lua run for Kumi is a write whatever it did (review): counted whether or not REAPER took it.
+        let before = crate::reaper::writes();
+        let _ = reaper.run_script(proj, "reaper.SetMediaTrackInfo_Value(reaper.GetTrack(0, 0), 'B_MUTE', 1)");
+        assert_eq!(crate::reaper::writes() - before, 1);
         // Reads count for nothing.
         let before = crate::reaper::writes();
         reaper.track_value(track, "D_VOL");

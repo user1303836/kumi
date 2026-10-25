@@ -240,6 +240,7 @@ impl Reaper<'_> {
 
     /// Opens a file in the active tab as REAPER's File > Open does; a `.RTrackTemplate` adds its tracks at the end.
     pub fn open_project(&self, path: &str) -> bool {
+        super::wrote();
         let path = ctext(path);
         match self.api.Main_openProject() {
             Some(f) => {
