@@ -444,6 +444,46 @@ mod tests {
         assert_eq!(leads(0., 16.).await, 0., "a tap or an offline render starts at the part");
     }
 
+    /// A judged listen measures its takes together, each as it measures alone, and keeps each by a link where the volume
+    /// allows one: the kept file is the capture itself under the judge's name, not a copy written again (a whole song's
+    /// is 138 MB). A name kept already is kept again whole, the capture with it.
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_judged_listen_measures_its_takes_together_and_keeps_them_linked() {
+        let host = Rc::new(Recording { lead: 0., dir: tempfile::tempdir().unwrap(), flag: ListenFlag::default() });
+        let listening = Listening::new(host.clone(), None, None, None, None, None);
+        let window = Window { from: 16., beats: 4. };
+        let heard = listening.judge_hear(Some("Bass"), Some("Kick"), window, "as it is", Signal::new()).await.unwrap().unwrap();
+        let capture = |name: &str| host.dir.path().join(format!("{name}.wav"));
+        let alone = |name: &str| {
+            let file = capture(name).to_string_lossy().into_owned();
+            async move {
+                let options = crate::measure::MeasureOptions { start: Some(0.), seconds: Some(2.), signal: None };
+                crate::measure::measure_file(&file, options).await.unwrap()
+            }
+        };
+        let (bass, kick) = (alone("Bass").await, alone("Kick").await);
+        let focus = heard.focus.as_ref().expect("the focus heard");
+        for (together, alone) in [(&heard.main, &bass), (focus, &kick)] {
+            assert_eq!(together.measures.integrated, alone.measures.integrated);
+            assert_eq!(together.measures.true_peak, alone.measures.true_peak);
+            assert_eq!(together.frames.level, alone.frames.level);
+        }
+        let kept = host.kept_folder();
+        assert_eq!(PathBuf::from(&heard.file), kept.join("Bass.wav"));
+        assert_eq!(heard.focus_file.as_ref().map(|(file, _)| file.clone()), Some(kept.join("Kick.wav")));
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            let inode = |file: &std::path::Path| std::fs::metadata(file).unwrap().ino();
+            assert_eq!(inode(&kept.join("Bass.wav")), inode(&capture("Bass")), "the capture itself, linked");
+            assert_eq!(inode(&kept.join("Kick.wav")), inode(&capture("Kick")));
+        }
+        let bytes = std::fs::read(capture("Bass")).unwrap();
+        assert_eq!(listening.keep_file(&capture("Bass")).await, kept.join("Bass.wav"));
+        assert_eq!(std::fs::read(kept.join("Bass.wav")).unwrap(), bytes, "kept again, whole");
+        assert_eq!(std::fs::read(capture("Bass")).unwrap(), bytes, "and the capture with it");
+    }
+
     #[tokio::test(flavor = "current_thread")]
     async fn what_a_daw_doesnt_do_is_said_plainly_never_in_lives_words() {
         let listening = listening(Some(120.), None);
