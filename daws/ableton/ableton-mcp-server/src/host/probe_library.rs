@@ -144,7 +144,15 @@ async fn library_index(reads: &LibraryReads, path: &Path, reader: Arc<SqliteRead
         return Ok(index);
     }
     let decoding = reader.clone();
-    let index = Arc::new(off_thread(move || index_library(&decoding)).await?);
+    // The schema is checked before a row is decoded: a database this build doesn't know is refused by its version,
+    // not by whatever its rows then fail on, and nothing is decoded for it.
+    let index = Arc::new(
+        off_thread(move || {
+            assert_supported_files_schema(&decoding)?;
+            index_library(&decoding)
+        })
+        .await?,
+    );
     let read = reads.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     if let Some(kept) = read.iter().find(|kept| kept.path == path && Arc::ptr_eq(&kept.reader, &reader)) {
         let _ = kept.index.set(index.clone());
@@ -289,3 +297,6 @@ impl McpHost {
         })
     }
 }
+
+#[cfg(test)]
+mod tests;
