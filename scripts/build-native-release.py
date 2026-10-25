@@ -23,8 +23,8 @@ ROOT = Path(__file__).resolve().parents[1]
 SCHEMA = "ableton-mcp-native-release/v1"
 BRIDGE_BINARIES = ("ableton-mcp-server", "ableton-mcp-analysis-worker")
 # daw-mcp-server is Kumi's host for the other DAWs: Kumi starts it from beside its own binary.
-# The library learner and the sound measurer are doors of kumi's own (`kumi __library-learner`, `kumi __library-measure`)
-# since 1.24: no programs of their own.
+# The library learner and the sound measurer are doors of kumi's own (`kumi __library-learner`, `kumi __library-measure`),
+# not programs of their own.
 BINARIES = ("kumi", *BRIDGE_BINARIES, "daw-mcp-server", "kumi-harness")
 # The other DAWs' bridges, by the DAW's id (scripts/daws.toml, which release.py and build-migration-release.py read
 # through here). Each is in daws/<id> in the bundle, where Kumi installs it from (daws/own/kumi-daw-own/src/provider.rs):

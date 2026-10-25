@@ -1,5 +1,5 @@
 //! The producer's music as the app holds it: whether Kumi learns it (their music folders), how the scan is going (a
-//! `kumi-library-learner --music` process, started again every half hour to find new songs), and pausing it while
+//! `kumi __library-learner --music` process, started again every half hour to find new songs), and pausing it while
 //! Kumi listens or renders, or when the producer asks.
 
 use super::{

@@ -61,8 +61,8 @@ impl MeasureJob {
 }
 /// The program a worker runs as: kumi itself, which does the job when its first argument names it (`kumi
 /// __library-measure`, `kumi __library-learner`), or the program `variable` names (a test's stand-in, an embedder's
-/// own), told the same way. The workers were programs of their own beside kumi until 1.24, each nine tenths kumi's
-/// code again.
+/// own), told the same way. The workers were programs of their own beside kumi (kumi-library-learner,
+/// kumi-library-measure), each nine tenths kumi's code again.
 #[derive(Clone, Debug)]
 pub struct WorkerProgram {
     program: PathBuf,

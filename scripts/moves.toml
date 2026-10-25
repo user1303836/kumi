@@ -2145,6 +2145,15 @@ to = "crates/kumi/src/bin/kumi-library-learner.rs"
 from = "crates/kumi-runtime/src/bin/kumi-library-measure.rs"
 to = "crates/kumi/src/bin/kumi-library-measure.rs"
 
+# The two became doors of kumi's own: their mains live on in workers.rs.
+[[move]]
+from = "crates/kumi/src/bin/kumi-library-learner.rs"
+to = "crates/kumi/src/workers.rs"
+
+[[move]]
+from = "crates/kumi/src/bin/kumi-library-measure.rs"
+to = "crates/kumi/src/workers.rs"
+
 [[move]]
 from = "crates/kumi-runtime/src/devices/amxd.rs"
 to = "daws/ableton/kumi-daw-ableton/src/devices/amxd.rs"

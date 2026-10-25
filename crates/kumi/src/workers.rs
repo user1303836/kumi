@@ -1,7 +1,7 @@
 //! The jobs kumi runs as a process of its own, told by a first argument no producer types: the library learner
 //! (`kumi __library-learner`, with `--music` for the producer's own music) and the sound measurer
-//! (`kumi __library-measure`). Until 1.24 they were programs of their own beside kumi, each nine tenths kumi's code
-//! again; as doors into the one program they cost a bundle nothing.
+//! (`kumi __library-measure`). They were programs of their own beside kumi (kumi-library-learner, kumi-library-measure),
+//! each nine tenths kumi's code again; as doors into the one program they cost a bundle nothing.
 
 /// Runs the job `argument` names, when it names one: the process's exit code.
 pub fn run(argument: &str) -> Option<i32> {
