@@ -2181,8 +2181,7 @@ impl Session {
             if let Some(daw) = self.0.options.profile.id.filter(|daw| *daw != DawId::Ableton) {
                 line["daw"] = json!(daw);
             }
-            // Written off the app's thread: the turn's end is when the screen draws its answer.
-            let _ = tokio::task::spawn_blocking(move || timing::append(std::path::Path::new(&file), &line));
+            timing::append(std::path::Path::new(&file), &line);
         }
         let current = self.0.state.borrow().active.as_ref().is_some_and(|a| a.id == op.id);
         if current {
