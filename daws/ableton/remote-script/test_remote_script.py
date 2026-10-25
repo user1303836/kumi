@@ -1963,6 +1963,59 @@ class ControlSurfaceTests(unittest.TestCase):
         # Without Live's application view (as in these fakes), the view fields are simply unknown.
         self.assertIsNone(mapper.discover("selection")["items"][0]["focusView"])
 
+    @staticmethod
+    def polled_selection_song():
+        """Three tracks and two returns; the selected track has a Drum Rack (16 pads, each a chain with a
+        device) and then the selected device. Devices name their track as Live's canonical_parent does."""
+        song = FakeSong(); song.tracks = [FakeTrack() for _ in range(3)]; song.return_tracks = [FakeTrack(), FakeTrack()]; song.master_track = FakeTrack()
+        track = song.tracks[1]; rack = FakeRackDevice(); rack.name = "Drum Rack"; rack.can_have_drum_pads = True
+        rack.drum_pads = [type("Pad", (), {"name": f"Pad {index}", "note": 36 + index, "chains": [type("Chain", (), {"name": f"Chain {index}", "devices": [FakeDevice()]})()]})() for index in range(16)]
+        rack.visible_drum_pads = rack.drum_pads; rack.chains = [pad.chains[0] for pad in rack.drum_pads]
+        device = FakeDevice(); device.name = "Glue"; track.devices = [rack, device]
+        for owner in song.tracks + song.return_tracks:
+            for item in owner.devices: item.canonical_parent = owner
+        track.view = type("TrackView", (), {"selected_device": device})()
+        song.view = type("View", (), {"selected_track": track, "selected_scene": song.scenes[0], "highlighted_clip_slot": None, "detail_clip": None, "selected_parameter": None, "selected_chain": None})()
+        return song, track, rack, device
+
+    def test_the_selection_poll_identifies_each_track_once_and_finds_its_device_where_it_was(self):
+        """Kumi polls the selection twice a second: the tracks were listed and identified two or three
+        times per poll, and the light walk to the selected device read the whole Drum Rack before it."""
+        song, track, rack, device = self.polled_selection_song(); mapper = LiveObjectMapper(song)
+        expected = mapper._selection_row_targeted()["deviceRef"]; self.assertTrue(expected.endswith(":device:1:1"), expected)
+        identify = LiveObjectMapper._capture_object_identity; walk = LiveObjectMapper._light_device_walk
+        identified = []; walked = []
+        def counted_identity(value): identified.append(value); return identify(value)
+        def counted_walk(self, owner, *args, **kwargs): walked.append(owner); return walk(self, owner, *args, **kwargs)
+        with patch.object(LiveObjectMapper, "_capture_object_identity", staticmethod(counted_identity)), patch.object(LiveObjectMapper, "_light_device_walk", counted_walk):
+            first = mapper.discover("selection")["items"][0]
+            # (The main track is also the focus fields' to compare the selected track with.)
+            others = [candidate for candidate in song.tracks + song.return_tracks if candidate is not track]
+            self.assertEqual([sum(1 for value in identified if value is candidate) for candidate in others], [1] * len(others), "every other track identified once")
+            self.assertTrue(walked, "the first poll walks to the device")
+            identified.clear(); walked.clear()
+            second = mapper.discover("selection")["items"][0]
+        self.assertEqual(walked, [], "the next poll finds the device where the last one did")
+        self.assertEqual(second, first); self.assertEqual(first["selectedDeviceRef"], expected)
+        self.assertIs(mapper.refs.get(expected), device)
+
+    def test_the_selection_poll_names_the_device_the_whole_selection_names_whatever_changes(self):
+        song, track, rack, device = self.polled_selection_song(); mapper = LiveObjectMapper(song)
+        def polled(): return mapper.discover("selection")["items"][0]["selectedDeviceRef"]
+        def check(label):
+            self.assertEqual(polled(), mapper._selection_row_targeted()["deviceRef"], label)
+            self.assertEqual(polled(), mapper._selection_row_targeted()["deviceRef"], f"{label}, polled again")
+        check("after the Drum Rack")
+        inserted = FakeDevice(); inserted.canonical_parent = track; track.devices.insert(1, inserted); check("a device put before it")
+        track.devices.remove(inserted); track.devices.append(inserted); check("that device moved after it")
+        nested = rack.drum_pads[3].chains[0].devices[0]; nested.canonical_parent = rack.drum_pads[3].chains[0]; rack.drum_pads[3].chains[0].canonical_parent = rack; rack.canonical_parent = track
+        track.view.selected_device = nested; check("a device in a pad's chain")
+        track.view.selected_device = device; check("back on the track")
+        other = song.tracks[2]; other.view = type("TrackView", (), {"selected_device": other.devices[0]})(); song.view.selected_track = other; check("another track's device")
+        song.view.selected_track = track; track.devices.remove(device); other_device = FakeDevice(); other_device.canonical_parent = track; track.devices.insert(1, other_device); track.view.selected_device = other_device; check("another device in its place")
+        mapper.refs.reset(); check("after the refs reset")
+        track.view.selected_device = None; self.assertIsNone(polled(), "nothing selected")
+
     def test_proxy_identity_selection_tracks_recording_and_ambiguity_fail_closed(self):
         copier = __import__("copy").copy; song = FakeSong(); destination = song.tracks[0]; destination._live_ptr = 201; destination.arm = True; mapper = LiveObjectMapper(song); snapshot = mapper.snapshot(); destination_ref = snapshot["tracks"][0]["ref"]; fresh = copier(destination); song.tracks = [fresh]
         args = {"action": "start", "expectedSessionRecord": False, "expectedArrangementRecord": False, "destinationTrackRef": destination_ref, "destinationTrackIdentity": "live:201", "outputSafety": {"safe": True, "provenance": "unit-test"}}
