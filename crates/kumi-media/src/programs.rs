@@ -857,10 +857,15 @@ async fn ffmpeg_release_build(options: &FfmpegOptions, platform: &str, arch: &st
     )))
 }
 
+/// A system ffmpeg found, by what finding it read (the PATH it ran from, and where Windows' installers put one): asking
+/// one its version starts a process, which a scan would do again for every song it decodes.
+static SYSTEM_FFMPEG: Mutex<Option<(String, String)>> = Mutex::new(None);
+
 /// ffmpeg: KUMI_FFMPEG, one on the PATH, where Homebrew and the usual installers put it, or the copy
 /// Kumi fetched; failing those, on Windows and Linux, a release build is fetched into `tools_dir`
 /// (checked against the SHA-256 GitHub lists for it). A Mac reads audio with afconvert; its ffmpeg
-/// (for a video's frames) comes from Homebrew. None when there's none.
+/// (for a video's frames) comes from Homebrew. None when there's none. A system ffmpeg found is
+/// asked its version once a process, while it's still where it was found.
 pub async fn find_ffmpeg(options: FfmpegOptions) -> Result<Option<String>, VideoFailure> {
     let env = options.env.clone().unwrap_or_else(process_env);
     if let Some(named) = env.get("KUMI_FFMPEG").filter(|value| !value.is_empty()) {
@@ -876,7 +881,24 @@ pub async fn find_ffmpeg(options: FfmpegOptions) -> Result<Option<String>, Video
         }
     }
     if options.platform.is_none() {
+        // One on the PATH runs from the process's own PATH, whatever `env` says; whether it's still there is a few looks at
+        // the disk.
+        let system = process_env();
+        let looked =
+            format!("{:?}|{:?}|{:?}", system.get("PATH").or_else(|| system.get("Path")), env.get("ProgramFiles"), env.get("LOCALAPPDATA"));
+        let found = SYSTEM_FFMPEG.lock().ok().and_then(|found| found.clone());
+        if let Some((_, path)) =
+            found.filter(|(key, path)| *key == looked && if path == "ffmpeg" { on_path(program, &system).is_some() } else { exists(path) })
+        {
+            return Ok(Some(path));
+        }
+        let keep = |path: &str| {
+            if let Ok(mut found) = SYSTEM_FFMPEG.lock() {
+                *found = Some((looked.clone(), path.to_string()));
+            }
+        };
         if runs("ffmpeg", "-version", options.signal.clone()).await {
+            keep("ffmpeg");
             return Ok(Some("ffmpeg".to_string()));
         }
         let candidates: Vec<String> = if platform_name == "win32" {
@@ -889,6 +911,7 @@ pub async fn find_ffmpeg(options: FfmpegOptions) -> Result<Option<String>, Video
         };
         for candidate in candidates {
             if !candidate.is_empty() && exists(&candidate) && runs(&candidate, "-version", options.signal.clone()).await {
+                keep(&candidate);
                 return Ok(Some(candidate));
             }
         }
@@ -1248,6 +1271,38 @@ async fn published_model(repo: &str, name: &str, options: &ProgramOptions) -> Re
     remove_file_force(&temporary).await;
     result?;
     Ok(path)
+}
+
+#[cfg(test)]
+mod ffmpeg_tests {
+    use super::*;
+
+    /// A system ffmpeg is asked its version once a process, not once a song: a scan decodes every song with it. Gone from
+    /// where it was found, it's looked for again.
+    #[cfg(unix)]
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_system_ffmpeg_is_asked_its_version_once_while_its_there() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let (programs, asked) = (dir.path().join("programs"), dir.path().join("asked"));
+        std::fs::create_dir(&programs).unwrap();
+        let ffmpeg = programs.join("ffmpeg");
+        std::fs::write(&ffmpeg, format!("#!/bin/sh\necho \"$1\" >> '{}'\n", asked.display())).unwrap();
+        std::fs::set_permissions(&ffmpeg, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::env::set_var("PATH", &programs);
+        let options = || FfmpegOptions {
+            env: Some(Env::new()),
+            tools_dir: Some(dir.path().join("tools").to_string_lossy().into_owned()),
+            installed_only: true,
+            ..Default::default()
+        };
+        for _ in 0..3 {
+            assert_eq!(find_ffmpeg(options()).await.unwrap().as_deref(), Some("ffmpeg"));
+        }
+        assert_eq!(std::fs::read_to_string(&asked).unwrap(), "-version\n", "asked once");
+        std::fs::remove_file(&ffmpeg).unwrap();
+        assert_ne!(find_ffmpeg(options()).await.unwrap().as_deref(), Some("ffmpeg"), "gone, so looked for again");
+    }
 }
 
 #[cfg(test)]

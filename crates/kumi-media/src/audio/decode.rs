@@ -126,9 +126,17 @@ pub async fn prepare_audio(path: impl AsRef<Path>, signal: Option<Signal>) -> Re
 /// As prepare_audio, converting no further than `until` seconds in, the farthest anything will read: a 2-hour mix
 /// isn't written out whole (2.5 GB of it) for its first twelve minutes, and the length it's read as is kept.
 pub async fn prepare_audio_to(path: impl AsRef<Path>, signal: Option<Signal>, until: Option<f64>) -> Result<PreparedAudio, AudioError> {
-    prepare(path.as_ref(), signal, until, None).await
+    prepare(path.as_ref(), signal, until, None, None).await
 }
-async fn prepare(path: &Path, signal: Option<Signal>, until: Option<f64>, from: Option<f64>) -> Result<PreparedAudio, AudioError> {
+/// `known`: the file's length in seconds when it's known already (a song's tags say it), read again from the file only
+/// when it isn't.
+async fn prepare(
+    path: &Path,
+    signal: Option<Signal>,
+    until: Option<f64>,
+    from: Option<f64>,
+    known: Option<f64>,
+) -> Result<PreparedAudio, AudioError> {
     let extension = extension(path);
     if !AUDIO_EXTENSIONS.contains(&extension.as_str()) {
         return Err(AudioError(format!(
@@ -158,7 +166,7 @@ async fn prepare(path: &Path, signal: Option<Signal>, until: Option<f64>, from: 
         length_known: false,
         folder: Some(folder),
     };
-    match convert(path, &prepared.path, signal, until, from).await {
+    match convert(path, &prepared.path, signal, until, from, known).await {
         Ok((length, start, whole)) => {
             (prepared.seconds, prepared.start, prepared.whole) = (length_past(until, length), start, whole);
             // A copy that stops at a reach tells the file's length only when it was read.
@@ -180,7 +188,18 @@ pub async fn prepare_audio_range(
     from: f64,
     seconds: f64,
 ) -> Result<PreparedAudio, AudioError> {
-    prepare(path.as_ref(), signal, Some(from.max(0.) + seconds.max(0.)), Some(from.max(0.)).filter(|from| *from > 0.)).await
+    prepare_audio_range_of(path, signal, from, seconds, None).await
+}
+/// As prepare_audio_range, for a file whose length (seconds) may be known already: a song's tags say it, and a scan
+/// starts no process to read it again.
+pub async fn prepare_audio_range_of(
+    path: impl AsRef<Path>,
+    signal: Option<Signal>,
+    from: f64,
+    seconds: f64,
+    length: Option<f64>,
+) -> Result<PreparedAudio, AudioError> {
+    prepare(path.as_ref(), signal, Some(from.max(0.) + seconds.max(0.)), Some(from.max(0.)).filter(|from| *from > 0.), length).await
 }
 fn extension(path: &Path) -> String {
     path.extension().map(|v| format!(".{}", v.to_string_lossy().to_lowercase())).unwrap_or_default()
@@ -205,14 +224,15 @@ pub async fn open_audio_to(path: impl AsRef<Path>, signal: Option<Signal>, until
     source.prepared = Some(prepared);
     Ok(source)
 }
-/// The copy converted, the file's length when it was read, where the copy begins in the file (`from`, when a converter
-/// could seek to it), and whether it holds the whole file whatever was asked (afconvert's).
+/// The copy converted, the file's length when it was read (or `known`), where the copy begins in the file (`from`, when a
+/// converter could seek to it), and whether it holds the whole file whatever was asked (afconvert's).
 async fn convert(
     input: &Path,
     output: &Path,
     signal: Option<Signal>,
     until: Option<f64>,
     from: Option<f64>,
+    known: Option<f64>,
 ) -> Result<(Option<f64>, f64, bool), AudioError> {
     let mac = cfg!(target_os = "macos");
     let ffmpeg = if mac {
@@ -228,9 +248,12 @@ async fn convert(
     let output_s = output.to_string_lossy();
     // How long it is (ffprobe, or what ffmpeg says of it, decoding nothing): to ask room for what will be written, and to
     // keep the file's length when the copy stops short of it. A reading can be wrong, so where ffmpeg stops isn't up to it.
-    // (A stretch's length is known: nothing to read first.)
+    // (A stretch's length is known: nothing to read first. Nor is a length known already read again.)
     let length = match until {
-        Some(_) if from.is_none() => crate::frames::duration_of(&ffmpeg, &input_s, signal.clone()).await,
+        Some(_) if from.is_none() => match known {
+            Some(known) => Some(known),
+            None => crate::frames::duration_of(&ffmpeg, &input_s, signal.clone()).await,
+        },
         _ => None,
     };
     // From a seek, ffmpeg's -t is the stretch's length.
@@ -250,7 +273,10 @@ async fn convert(
         // A Mac's afconvert copies the whole file, a stretch's too, whose length wasn't read: read it now, to ask room
         // for the copy.
         if command == "afconvert" && writes.is_none() && from.is_some() {
-            writes = crate::frames::duration_of(&ffmpeg, &input_s, signal.clone()).await;
+            writes = match known {
+                Some(known) => Some(known),
+                None => crate::frames::duration_of(&ffmpeg, &input_s, signal.clone()).await,
+            };
         }
         match writes {
             Some(seconds) => {
@@ -826,6 +852,41 @@ mod tests {
         std::fs::write(dir.path().join("probe"), "  Duration: 00:06:00.00, start: 0.000000, bitrate: 128 kb/s\n").unwrap();
         let (_, _, length) = read_mono(&sample, &signal, 0., 6.).await.unwrap();
         assert_eq!(length, Some(360.), "the length ffmpeg read");
+    }
+
+    /// A stretch from a file's start reads the file's length first, to ask room for the copy and keep the length past it;
+    /// a length known already (a song's tags say it) isn't read again, and no process starts for it.
+    #[cfg(unix)]
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_length_known_already_isnt_read_from_the_file_again() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let (copy, ran) = (dir.path().join("copy.wav"), dir.path().join("ran"));
+        write_test_wav(&copy, &[0.25; 8_000], 8_000);
+        let scripts = [
+            ("ffprobe", format!("#!/bin/sh\necho probe >> '{}'\necho 240.5\n", ran.display())),
+            (
+                "ffmpeg",
+                format!("#!/bin/sh\necho convert >> '{}'\nfor last; do :; done\n/bin/cp '{}' \"$last\"\n", ran.display(), copy.display()),
+            ),
+        ];
+        for (name, script) in scripts {
+            std::fs::write(dir.path().join(name), script).unwrap();
+            std::fs::set_permissions(dir.path().join(name), std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        if cfg!(target_os = "macos") {
+            std::env::set_var("PATH", dir.path());
+        } else {
+            std::env::set_var("KUMI_FFMPEG", dir.path().join("ffmpeg"));
+        }
+        let song = dir.path().join("Song.mp3");
+        std::fs::write(&song, b"an mp3").unwrap();
+        let runs = || std::fs::read_to_string(&ran).unwrap_or_default().lines().map(str::to_owned).collect::<Vec<_>>();
+        let read = prepare_audio_range(&song, None, 0., 30.).await.unwrap();
+        assert_eq!((runs(), read.seconds), (vec!["probe".to_string(), "convert".to_string()], Some(240.5)));
+        std::fs::remove_file(&ran).unwrap();
+        let known = prepare_audio_range_of(&song, None, 0., 30., Some(240.)).await.unwrap();
+        assert_eq!((runs(), known.seconds), (vec!["convert".to_string()], Some(240.)), "the length known: no probe");
     }
 
     #[test]
