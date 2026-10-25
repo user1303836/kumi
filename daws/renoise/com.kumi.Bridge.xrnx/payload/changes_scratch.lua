@@ -9,10 +9,9 @@ local refs = import("refs")
 local rows = import("rows")
 local base = import("changes_base")
 local scratch = import("scratch")
+local fnv = import("fnv")
 
-local bit = require("bit")
-local bxor, lshift, tobit, tohex = bit.bxor, bit.lshift, bit.tobit, bit.tohex
-local byte, format = string.byte, string.format
+local format = string.format
 
 local fail, bad, q = base.fail, base.bad, base.q
 
@@ -37,15 +36,9 @@ M.LINES_BUDGET = 100000
 -- device (path, on/off, each parameter that isn't automated, its preset data), its slot mutes, and in every pattern its lines
 -- (the shown columns) and automation. nil when its lines are past LINES_BUDGET.
 local function content_print(song, index, track)
-  local h = -2128831035
+  local h = fnv.OFFSET
   local function feed(value)
-    local text = tostring(value) or ""
-    for i = 1, #text do
-      h = bxor(h, byte(text, i))
-      h = tobit(lshift(h, 24) + lshift(h, 8) + h * 147)
-    end
-    h = bxor(h, 31)
-    h = tobit(lshift(h, 24) + lshift(h, 8) + h * 147)
+    h = fnv.mark(fnv.feed(h, tostring(value) or ""), 31)
   end
   local function value(parameter)
     -- (an automated parameter moves as the song plays: its automation is printed instead)
@@ -107,7 +100,7 @@ local function content_print(song, index, track)
       for _, point in ipairs(entry.points) do feed(format("%.5f %.5f", point.time, point.value)) end
     end
   end
-  return tohex(h)
+  return fnv.hex(h)
 end
 
 -- The copy the ref names: its place, the track, its scratch session and copy.

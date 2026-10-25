@@ -230,3 +230,90 @@ test("digest: a big song comes in pages inside the frame bound, read a slice at 
   ok(largest <= 256 * 1024, "inside the frame bound")
   ok(find(records, "pattern", 64).f.lines.T32:match("^16 notes"), find(records, "pattern", 64).f.lines.T32)
 end)
+
+test("digest: the fingerprint is the FNV-1a it always was, taken sixteen bytes at a time (perf N2)", function()
+  local fnv = T.load_payload_module("fnv")
+  local bit = require("bit")
+  -- (the standard 32-bit FNV-1a vectors)
+  eq(fnv.hex(fnv.feed(fnv.OFFSET, "")), "811c9dc5")
+  eq(fnv.hex(fnv.feed(fnv.OFFSET, "a")), "e40c292c")
+  eq(fnv.hex(fnv.feed(fnv.OFFSET, "foobar")), "bf9cf968")
+  -- (the step as it was made before: five calls into the bit library a byte, a signed sum)
+  local function before(h, text)
+    for i = 1, #text do
+      h = bit.bxor(h, text:byte(i))
+      h = bit.tobit(bit.lshift(h, 24) + bit.lshift(h, 8) + h * 147)
+    end
+    return h
+  end
+  local seed = 3
+  local function random_text(n)
+    local t = {}
+    for i = 1, n do
+      seed = (seed * 1103515245 + 12345) % 2147483648
+      t[i] = string.char(math.floor(seed / 65536) % 256)
+    end
+    return table.concat(t)
+  end
+  for n = 0, 70 do
+    local text = random_text(n)
+    eq(fnv.hex(fnv.feed(fnv.OFFSET, text)), bit.tohex(before(-2128831035, text)), n .. " bytes")
+  end
+  for _, n in ipairs({ 4095, 4096, 4097, 65537 }) do
+    local text = random_text(n)
+    eq(fnv.hex(fnv.feed(fnv.OFFSET, text)), bit.tohex(before(-2128831035, text)), n .. " bytes")
+  end
+  local biggest = string.rep(string.char(255), 100)
+  eq(fnv.hex(fnv.feed(fnv.OFFSET, biggest)), bit.tohex(before(-2128831035, biggest)), "every byte at its biggest")
+  -- (texts fed in turn, each ended with the digest's 31, as the digest and the scratch print do)
+  local h, was = fnv.OFFSET, -2128831035
+  for _, text in ipairs({ "1:48 0 255 255 255 0 0", "17.0000", "", "e1:12 255", random_text(40) }) do
+    h = fnv.mark(fnv.feed(h, text), 31)
+    was = before(before(was, text), string.char(31))
+  end
+  eq(fnv.hex(h), bit.tohex(was))
+end)
+
+test("digest: a pattern's lines print is what it was for the same lines (perf N2)", function()
+  local _, peer = setup()
+  mock.ops.set_note(2, 1, 3, 1, { note = 48, instrument = 0 })
+  mock.ops.set_note(2, 1, 5, 1, { note = 50, instrument = 1, volume = 64 })
+  local _, records = whole(peer)
+  -- (the lines summed up as before: each text fed a byte at a time through the bit library, ended with a 31)
+  local bit = require("bit")
+  local h = -2128831035
+  local function feed(text)
+    for i = 1, #text do
+      h = bit.bxor(h, text:byte(i))
+      h = bit.tobit(bit.lshift(h, 24) + bit.lshift(h, 8) + h * 147)
+    end
+    h = bit.bxor(h, 31)
+    h = bit.tobit(bit.lshift(h, 24) + bit.lshift(h, 8) + h * 147)
+  end
+  local pattern_track, track = mock.song:pattern(2):track(1), mock.song:track(1)
+  local notes, effects = 0, 0
+  for l = 1, 16 do
+    local line = pattern_track:line(l)
+    if not line.is_empty then
+      feed(string.format("%.4f", l))
+      for c = 1, track.visible_note_columns do
+        local column = line:note_column(c)
+        if not column.is_empty then
+          notes = notes + ((column.note_value < 120) and 1 or 0)
+          feed(string.format("%d:%d %d %d %d %d %d %d", c, column.note_value, column.instrument_value, column.volume_value,
+            column.panning_value, column.delay_value, column.effect_number_value, column.effect_amount_value))
+        end
+      end
+      for c = 1, track.visible_effect_columns do
+        local column = line:effect_column(c)
+        if not column.is_empty then
+          effects = effects + 1
+          feed(string.format("e%d:%d %d", c, column.number_value, column.amount_value))
+        end
+      end
+    end
+  end
+  local want = string.format("%d notes, %d effects #%s", notes, effects, bit.tohex(h))
+  ok(want:match("^2 notes, 0 effects #%x+$"), want)
+  eq(find(records, "pattern", 2).f.lines.Kick, want)
+end)
