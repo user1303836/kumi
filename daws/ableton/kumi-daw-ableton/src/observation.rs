@@ -888,21 +888,55 @@ async fn start_background(work: impl std::future::Future<Output = ()> + 'static)
 fn object(value: Value) -> JsonObject {
     value.as_object().cloned().unwrap_or_default()
 }
-/// The track and device rows as a look read them, hashed without what moves by itself (what plays or is fired,
-/// arming, monitoring, folds and visibility): two looks hash alike when nothing a producer edits changed in them.
-/// With `ExportMark`, what tells an export after the last one would read the same Set again.
+/// The track and device rows as a look read them, hashed: two looks hash alike when nothing a producer edits
+/// changed in them. A mixer's values (volume, pan, sends and their texts) are left out: automation moves them while
+/// the Set plays, and like a device's parameters they are what the thirty-minute export is for; its mute and solo and
+/// its refs and identities stay. Hashed as serialized, from the rows as they are: nothing is cloned.
 pub fn rows_fingerprint(rows: Option<&(Vec<JsonObject>, Option<Vec<JsonObject>>)>) -> u64 {
     use std::hash::{Hash, Hasher};
-    const MOVING: [&str; 6] = ["playingSlotIndex", "firedSlotIndex", "armed", "monitoringState", "foldState", "isVisible"];
+    struct Sink<'a>(&'a mut std::collections::hash_map::DefaultHasher);
+    impl std::io::Write for Sink<'_> {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0.write(bytes);
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    fn lasting_mixer_field(key: &str) -> bool {
+        key == "mute"
+            || key == "solo"
+            || key.ends_with("Ref")
+            || key.ends_with("Refs")
+            || key.ends_with("Identity")
+            || key.ends_with("Identities")
+    }
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     if let Some((tracks, devices)) = rows {
         for row in tracks {
-            let lasting: JsonObject =
-                row.iter().filter(|(key, _)| !MOVING.contains(&key.as_str())).map(|(k, v)| (k.clone(), v.clone())).collect();
-            stringify(&Value::Object(lasting)).hash(&mut hasher);
+            for (key, value) in row {
+                hasher.write(key.as_bytes());
+                hasher.write_u8(b':');
+                match value.as_object().filter(|_| key == "mixer") {
+                    Some(mixer) => {
+                        for (field, value) in mixer.iter().filter(|(field, _)| lasting_mixer_field(field)) {
+                            hasher.write(field.as_bytes());
+                            hasher.write_u8(b'=');
+                            let _ = serde_json::to_writer(Sink(&mut hasher), value);
+                        }
+                    }
+                    None => {
+                        let _ = serde_json::to_writer(Sink(&mut hasher), value);
+                    }
+                }
+                hasher.write_u8(b',');
+            }
+            hasher.write_u8(b'\n');
         }
         for row in devices.iter().flatten() {
-            stringify(&Value::Object(row.clone())).hash(&mut hasher);
+            let _ = serde_json::to_writer(Sink(&mut hasher), row);
+            hasher.write_u8(b'\n');
         }
         (tracks.len(), devices.as_ref().map(Vec::len)).hash(&mut hasher);
     }

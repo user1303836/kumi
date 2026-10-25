@@ -52,6 +52,13 @@ struct Live {
     file: RefCell<Option<String>>,
     /// Exports of the Set's semantic snapshot (each reads the Set whole).
     exports: Cell<usize>,
+    /// The next export tells of a structure change while its pages are read.
+    export_changes_structure: Cell<bool>,
+    /// Exports never end: a Set too large to remember.
+    endless_export: Cell<bool>,
+    /// Every track's volume (automation moves it while the Set plays) and whether the first track is muted.
+    volume: Cell<f64>,
+    muted: Cell<bool>,
 }
 impl Live {
     fn new(events: bool) -> Rc<Self> {
@@ -69,6 +76,10 @@ impl Live {
             listener: RefCell::new(None),
             file: RefCell::new(None),
             exports: Cell::new(0),
+            export_changes_structure: Cell::new(false),
+            endless_export: Cell::new(false),
+            volume: Cell::new(0.85),
+            muted: Cell::new(false),
         })
     }
     fn device_rows(&self) -> Vec<Value> {
@@ -174,7 +185,9 @@ impl McpEndpoint for Live {
                     .borrow()
                     .iter()
                     .enumerate()
-                    .map(|(index, (name, _))| json!({"ref":format!("7:track:{index}"),"name":name,"kind":"regular","mediaKind":"midi"}))
+                    .map(|(index, (name, _))| {
+                        json!({"ref":format!("7:track:{index}"),"name":name,"kind":"regular","mediaKind":"midi","mixer":{"volume":self.volume.get(),"volumeDisplay":format!("{:.1} dB", self.volume.get() * 10. - 10.),"mute":index == 0 && self.muted.get(),"solo":false,"volumeRef":format!("7:parameter:mixer:{index}:volume")}})
+                    })
                     .collect(),
             ),
             ("live_discover", Some("device")) => {
@@ -189,7 +202,11 @@ impl McpEndpoint for Live {
             }
             ("live_project_snapshot_export", _) => {
                 self.exports.set(self.exports.get() + 1);
-                reply(json!({"artifact":{"id":"a"},"page":{},"records":[]}))
+                if self.export_changes_structure.replace(false) {
+                    self.structure_changed();
+                }
+                let page = if self.endless_export.get() { json!({"nextCursor":"more"}) } else { json!({}) };
+                reply(json!({"artifact":{"id":"a"},"page":page,"records":[]}))
             }
             other => panic!("not a call here: {other:?}"),
         })
@@ -665,6 +682,75 @@ async fn without_lives_events_the_set_is_exported_every_five_minutes_as_before()
             session.remember.last_saved.set(now_ms() - 6 * 60_000);
             session.turn().await;
             assert!(session.remember.save_scheduled());
+            session.close().await;
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_change_live_tells_of_while_the_export_reads_is_exported_again_within_five_minutes() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let folder = tempfile::tempdir().unwrap();
+            let store = Rc::new(Store::default());
+            let session = remembering_session(true, folder.path(), store.clone()).await;
+            session.turn().await;
+            session.remember.pending().await;
+            // A clip added on another track while the pages were read: the export records what it began with.
+            session.live.export_changes_structure.set(true);
+            session.remember.last_saved.set(now_ms() - 6 * 60_000);
+            session.live.structure_changed();
+            session.turn().await;
+            session.remember.cancel_timer();
+            session.remember.save_now(None).await;
+            assert_eq!(store.saves.get(), 2);
+            session.remember.last_saved.set(now_ms() - 6 * 60_000);
+            session.turn().await;
+            assert!(session.remember.save_scheduled(), "the structure moved during the export");
+            session.close().await;
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn mixer_values_moving_with_automation_dont_export_the_set_but_a_mute_does() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let folder = tempfile::tempdir().unwrap();
+            let store = Rc::new(Store::default());
+            let session = remembering_session(true, folder.path(), store.clone()).await;
+            session.turn().await;
+            session.remember.pending().await;
+            session.remember.last_saved.set(now_ms() - 6 * 60_000);
+            session.live.volume.set(0.5);
+            session.turn().await;
+            assert!(!session.remember.save_scheduled(), "a volume moving is automation playing");
+            session.live.muted.set(true);
+            session.turn().await;
+            assert!(session.remember.save_scheduled(), "a track muted is an edit");
+            session.close().await;
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_set_too_large_to_remember_isnt_read_again_at_every_look() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let folder = tempfile::tempdir().unwrap();
+            let store = Rc::new(Store::default());
+            let session = remembering_session(true, folder.path(), store.clone()).await;
+            session.live.endless_export.set(true);
+            session.turn().await;
+            session.remember.pending().await;
+            // The catch-up's export gave up after 64 pages: nothing kept, and not tried again for half an hour.
+            assert_eq!((session.live.exports.get(), store.saves.get()), (64, 0));
+            session.remember.last_saved.set(now_ms() - 6 * 60_000);
+            session.turn().await;
+            assert!(!session.remember.save_scheduled(), "it failed a moment ago");
+            session.remember.last_failed.set(now_ms() - 31 * 60_000);
+            session.turn().await;
+            assert!(session.remember.save_scheduled(), "half an hour on, it's tried again");
             session.close().await;
         })
         .await;
