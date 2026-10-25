@@ -94,7 +94,7 @@ pub struct ReleaseManifest {
     pub kumi: String,
     pub bundle: String,
     pub sha256: String,
-    /// The same bundle xz-compressed, a third smaller, for a tar that reads xz (releases from 1.24 on).
+    /// The same bundle xz-compressed, a third smaller, for a tar that reads xz; the releases that make one name it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bundle_xz: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -156,9 +156,6 @@ pub async fn ask_release_at(base: &str, fetch: Option<Rc<dyn Fetch>>) -> AskedRe
     if !matches(&manifest.kumi, r"^[0-9]+\.[0-9]+\.[0-9]+(?:-[A-Za-z0-9_.]+)?$")
         || !matches(&manifest.bundle, r"^[A-Za-z0-9_.-]+\.tar\.gz$")
         || !matches(&manifest.sha256, r"^[0-9a-f]{64}$")
-        || manifest.bundle_xz.is_some() != manifest.sha256_xz.is_some()
-        || manifest.bundle_xz.as_deref().is_some_and(|name| !matches(name, r"^[A-Za-z0-9_.-]+\.tar\.xz$"))
-        || manifest.sha256_xz.as_deref().is_some_and(|sha256| !matches(sha256, r"^[0-9a-f]{64}$"))
         || manifest.runtime != "rust-native"
         || !matches(&manifest.target, r"^[A-Za-z0-9_]+-[A-Za-z0-9_.-]+$")
     {
@@ -562,11 +559,14 @@ impl Stopped {
         }
     }
 }
-/// The bundle an update takes, its checksum and how tar unpacks it: the xz one when this system's tar reads xz (macOS's
-/// bsdtar, GNU tar beside xz), else the gzipped one, which every tar reads. KUMI_BUNDLE_XZ=1|0 says, for tests.
+/// The bundle an update takes, its checksum and how tar unpacks it: the xz one when the release names one whole (a
+/// well-formed name and sum; anything else is passed over, as install.sh passes it over, never a reason to refuse the
+/// release) and this system's tar reads xz (macOS's bsdtar, GNU tar beside xz); else the gzipped one, which every tar
+/// reads. KUMI_BUNDLE_XZ=1|0 says, for tests.
 fn pick_bundle(manifest: &ReleaseManifest, env: &Env) -> (String, String, &'static str) {
+    let matches = |value: &str, pattern: &str| regex::Regex::new(pattern).unwrap().is_match(value);
     if let (Some(name), Some(sha256)) = (&manifest.bundle_xz, &manifest.sha256_xz) {
-        if tar_reads_xz(env) {
+        if matches(name, r"^[A-Za-z0-9_.-]+\.tar\.xz$") && matches(sha256, r"^[0-9a-f]{64}$") && tar_reads_xz(env) {
             return (name.clone(), sha256.clone(), "-xf");
         }
     }
