@@ -455,7 +455,7 @@ class RemoteScriptTests(unittest.TestCase):
             def disconnect(self): self.disconnected = True
         live = types.ModuleType("Live"); live.Base = types.SimpleNamespace(Timer=Timer)
         surface = object.__new__(package.AbletonMcpBridge)
-        surface._bridge, surface._disconnected, surface._willington, surface._timer, surface._scheduled = Bridge(), False, None, None, None
+        surface._bridge, surface._disconnected, surface._willington, surface._timer = Bridge(), False, None, None
         logged = []; surface.log_message = logged.append
         with patch.dict(sys.modules, {"Live": live}): surface._start_timer()
         return surface, made, logged
@@ -494,33 +494,22 @@ class RemoteScriptTests(unittest.TestCase):
         with patch.dict(sys.modules, {"Live": None}): surface._start_timer()
         self.assertEqual((surface._timer, surface._bridge.between_ticks), (None, False))
 
-    def test_scheduled_callback_does_not_touch_bridge_after_disconnect(self):
-        surface = object.__new__(__import__("AbletonMcpBridge").AbletonMcpBridge)
-        surface._disconnected = True
+    def test_each_display_tick_serves_the_bridge_once_and_nothing_is_scheduled(self):
+        """Live's _Framework delivers schedule_message's tasks from its own update_display, which this surface
+        overrides: a drain it scheduled never ran in Live (a lab Live: 0 drains in 111 display ticks), and with the
+        base's update_display called too it ran on every tick, serving the bridge twice. The tick serves it once."""
+        package = __import__("AbletonMcpBridge"); scheduled = []
 
         class Bridge:
-            def __init__(self):
-                self.calls = 0
+            def __init__(self, *args, **kwargs): self.served = 0
+            def update_display(self): self.served += 1
 
-            def update_display(self):
-                self.calls += 1
-
-        surface._bridge = Bridge()
-        surface._drain()
-        self.assertEqual(surface._bridge.calls, 0)
-
-    def test_a_tick_that_fails_still_schedules_the_next_drain(self):
-        surface = object.__new__(__import__("AbletonMcpBridge").AbletonMcpBridge)
-        surface._disconnected = False; surface._keep_willington = lambda: None
-        scheduled = []; surface.schedule_message = lambda delay, callback: scheduled.append(callback)
-
-        class Bridge:
-            def update_display(self):
-                raise RuntimeError("boom")
-
-        surface._bridge = Bridge()
-        with self.assertRaises(RuntimeError): surface._drain()
-        self.assertEqual(scheduled, [surface._drain])
+        with patch.object(package, "_read_config", return_value={}), patch.object(package, "_Bridge", Bridge), \
+                patch.object(package.AbletonMcpBridge, "schedule_message", lambda self, delay, callback: scheduled.append(callback), create=True):
+            surface = package.AbletonMcpBridge(FakeInstance())
+        surface._keep_willington = lambda: None
+        for _ in range(3): surface.update_display()
+        self.assertEqual((surface._bridge.served, scheduled), (3, []))
 
     def test_authentication_and_replay_protection(self):
         remote = AuthenticatedRemoteScript("0123456789abcdef0123456789abcdef", lambda method, request: fake_status_result())
