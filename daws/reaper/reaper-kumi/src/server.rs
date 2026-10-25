@@ -309,15 +309,21 @@ impl Server {
         self.port
     }
 
-    /// Writes the discovery file when it's missing or the project changed. Main thread, each tick.
-    pub fn publish(&mut self, snapshot: &Snapshot) {
+    /// Whether `publish` would write the discovery file now: it's missing, the project changed, or a failed write is
+    /// due again. Cheap, for a look under the snapshot's lock every tick.
+    pub fn needs_publish(&self, snapshot: &Snapshot) -> bool {
         if snapshot.daw_version.is_empty() {
-            return;
+            return false;
         }
         if self.discovery.as_ref().is_some_and(|(_, project)| *project == snapshot.project) {
-            return;
+            return false;
         }
-        if self.discovery_failure.as_ref().is_some_and(|(at, _)| at.elapsed() < DISCOVERY_RETRY) {
+        self.discovery_failure.as_ref().is_none_or(|(at, _)| at.elapsed() >= DISCOVERY_RETRY)
+    }
+
+    /// Writes the discovery file when it's missing or the project changed. Main thread, each tick.
+    pub fn publish(&mut self, snapshot: &Snapshot) {
+        if !self.needs_publish(snapshot) {
             return;
         }
         let discovery = Discovery {
@@ -528,7 +534,7 @@ impl Shared {
     fn focus(&self, id: u64) -> Frame {
         let (focus, polled) = {
             let snapshot = lock(&self.snapshot);
-            (snapshot.focus.clone(), snapshot.focus_at)
+            (Arc::clone(&snapshot.focus), snapshot.focus_at)
         };
         let busy = self.busy();
         if focus.is_null() {
@@ -537,7 +543,7 @@ impl Shared {
                 None => Frame::error(id, code::FAILED, "REAPER has no project open"),
             };
         }
-        let mut focus = focus;
+        let mut focus = (*focus).clone();
         focus["ageMs"] = polled.map(|at| at.elapsed().as_millis() as u64).into();
         if let Some(busy) = busy {
             focus["busy"] = busy.code().into();
@@ -915,7 +921,7 @@ mod tests {
                 last_tick: Some(Instant::now()),
                 busy: None,
                 status: json!({"tracks": 3}),
-                focus: Value::Null,
+                focus: Arc::new(Value::Null),
                 focus_at: None,
                 working: None,
                 listening: Default::default(),
@@ -1124,7 +1130,7 @@ mod tests {
         assert_eq!(none["error"]["code"], code::FAILED);
         {
             let mut snapshot = lab.snapshot.lock().unwrap();
-            snapshot.focus = json!({"epoch": "e-1", "view": "arrange", "changed": 4});
+            snapshot.focus = Arc::new(json!({"epoch": "e-1", "view": "arrange", "changed": 4}));
             snapshot.focus_at = Some(Instant::now() - Duration::from_millis(120));
         }
         let focus = request(&mut stream, &mut reader, 2, "focus")["result"].clone();

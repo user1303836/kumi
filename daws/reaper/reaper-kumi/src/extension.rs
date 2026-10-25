@@ -4,7 +4,7 @@
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::sync::mpsc::Receiver;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
@@ -25,6 +25,35 @@ const MODAL_AFTER: Duration = Duration::from_millis(300);
 const MODAL_CHECK_ENV: &str = "KUMI_REAPER_MODAL_CHECK";
 /// How often `focus` is polled when nothing has said it changed (Kumi asks about every 150 ms).
 const FOCUS_EVERY: Duration = Duration::from_millis(50);
+/// How often the tabs are enumerated and the project's id read again (a tab closed, an id that came with a template are
+/// noticed within this); a project that just came to the front is looked at at once. Every tick in tests, which set the
+/// real cadence themselves.
+const TABS_EVERY: Duration = if cfg!(test) { Duration::ZERO } else { Duration::from_millis(250) };
+/// How often the audio device is asked whether it is heard (three calls and a string read, for status's listening flags).
+const AUDIO_EVERY: Duration = if cfg!(test) { Duration::ZERO } else { Duration::from_secs(1) };
+
+#[cfg(test)]
+thread_local! {
+    /// A test's own cadences, in place of `TABS_EVERY` and `AUDIO_EVERY`.
+    static TEST_TABS_EVERY: Cell<Option<Duration>> = const { Cell::new(None) };
+    static TEST_AUDIO_EVERY: Cell<Option<Duration>> = const { Cell::new(None) };
+}
+
+fn tabs_every() -> Duration {
+    #[cfg(test)]
+    if let Some(every) = TEST_TABS_EVERY.with(|every| every.get()) {
+        return every;
+    }
+    TABS_EVERY
+}
+
+fn audio_every() -> Duration {
+    #[cfg(test)]
+    if let Some(every) = TEST_AUDIO_EVERY.with(|every| every.get()) {
+        return every;
+    }
+    AUDIO_EVERY
+}
 
 // Actions that close or replace the project, and so ask "Save changes?" in a dialog inside the request when it has any.
 const CLOSES_CURRENT_PROJECT: [i32; 2] = [40860, 40023];
@@ -82,8 +111,9 @@ pub struct Snapshot {
     pub busy: Option<Busy>,
     /// `status`'s fields read on the main thread: transport, track count, tick rates.
     pub status: Value,
-    /// What `focus` answers, polled each tick (Null until the first poll finds a project).
-    pub focus: Value,
+    /// What `focus` answers, polled each tick (Null until the first poll finds a project): shared with the main thread's
+    /// copy, not cloned into every tick's snapshot.
+    pub focus: Arc<Value>,
     /// When `focus` was polled.
     pub focus_at: Option<Instant>,
     /// The main thread is running a request it claimed, since then: it isn't ticking, and it isn't stuck (a plug-in
@@ -212,6 +242,20 @@ struct Rates {
     surface: u32,
     timer_hz: u32,
     surface_hz: u32,
+    /// What the ticks of the window so far cost: their time in all, and the longest.
+    spent: Duration,
+    longest: Duration,
+    /// What a tick cost over the last whole window, in microseconds: the average and the longest (`status.tickMicros`).
+    tick_avg_us: u64,
+    tick_max_us: u64,
+}
+
+impl Rates {
+    /// A tick took `took`: counted into the window's cost.
+    fn spent(&mut self, took: Duration) {
+        self.spent += took;
+        self.longest = self.longest.max(took);
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -241,8 +285,14 @@ pub struct Extension {
     in_tick: Cell<bool>,
     quit: Cell<Quit>,
     last_heartbeat: Cell<Option<Instant>>,
-    focus_value: RefCell<Value>,
+    focus_value: RefCell<Arc<Value>>,
     focus_at: Cell<Option<Instant>>,
+    /// When the tabs were last enumerated and the project's id read (`TABS_EVERY`).
+    tabs_at: Cell<Option<Instant>>,
+    /// Whether the audio device was heard when last asked, and when (`AUDIO_EVERY`).
+    audio: Cell<Option<(Instant, bool)>>,
+    /// `status`'s fields that are fixed for this REAPER: the SDK, the API functions found, what is missing.
+    status_static: Value,
     /// M5 listening (m5-reaper): renders, captures, previews, scratch copies.
     listening: crate::listening::Listening,
 }
@@ -250,6 +300,13 @@ pub struct Extension {
 impl Extension {
     pub fn new(api: Api, jobs: Receiver<Job>, out: Box<dyn Outbox>, snapshot: Arc<Mutex<Snapshot>>) -> Extension {
         let board = snapshot.lock().unwrap_or_else(|e| e.into_inner()).listening.clone();
+        // (fixed for this REAPER: read once, not rebuilt sixty times a second)
+        let mut status_static = json!({"sdk": api::SDK_VERSION, "api": {"resolved": api.resolved(), "total": api::FUNCTION_COUNT}});
+        let missing = Reaper::new(&api).missing_features();
+        if !missing.is_empty() {
+            status_static["missing"] =
+                missing.iter().map(|(feature, needs)| json!({"feature": feature, "needs": needs})).collect::<Vec<_>>().into();
+        }
         let extension = Extension {
             api,
             reads: Reads::default(),
@@ -269,11 +326,14 @@ impl Extension {
             in_tick: Cell::new(false),
             quit: Cell::new(Quit::No),
             last_heartbeat: Cell::new(None),
-            focus_value: RefCell::new(Value::Null),
+            focus_value: RefCell::new(Arc::new(Value::Null)),
             focus_at: Cell::new(None),
+            tabs_at: Cell::new(None),
+            audio: Cell::new(None),
+            status_static,
             listening: crate::listening::Listening::new(board),
         };
-        extension.refresh_snapshot(None);
+        extension.refresh_snapshot(None, None);
         extension
     }
 
@@ -351,6 +411,7 @@ impl Extension {
         }
         // Cleared on the way out whatever happens, so one panic caught above doesn't skip every later tick.
         let _in_tick = ClearOnDrop(&self.in_tick);
+        let started = Instant::now();
         self.count_tick(driver);
         // Only the timer quits: REAPER may unload the extension inside the action, and the control surface's Run()
         // would then be running inside the surface being deleted.
@@ -360,33 +421,38 @@ impl Extension {
             self.reaper().run_action(ACTION_QUIT);
             return;
         }
+        let reaper = self.reaper();
         // Nothing runs while a dialog has the main window, even in the moments before it counts as one.
         let blocked = self.window_blocked();
-        let busy = self.reaper().busy().or_else(|| self.in_dialog(blocked).then_some(Busy::Modal));
-        // The project first: a request waiting at a tab switch or a load is answered about the project REAPER has now,
-        // under the epoch that project has, and a cursor from the one before is refused.
-        self.poll_project(busy.is_none());
-        if busy.is_none() && !blocked {
-            self.run_jobs();
+        let busy = reaper.busy().or_else(|| self.in_dialog(blocked).then_some(Busy::Modal));
+        // The project in front, read once for the tick (two string reads; the tick asked for it five times over) and
+        // handed down. The project first: a request waiting at a tab switch or a load is answered about the project
+        // REAPER has now, under the epoch that project has, and a cursor from the one before is refused.
+        let mut project = reaper.current_project();
+        self.poll_project(busy.is_none(), project.as_ref());
+        if busy.is_none() && !blocked && self.run_jobs(project.as_ref()) {
+            // A job may have switched tabs or loaded a project: the rest of the tick is about the project in front now.
+            project = reaper.current_project();
         }
         // M5 listening (m5-reaper): a preview's end and a capture's drain each tick; a track's items, a planned render (held
         // inside REAPER's render until it ends) and the first scratch sweep only while REAPER is free.
-        self.listening.tick(&self.reaper(), &self.reads, busy.is_none() && !blocked, &self.snapshot, &*self.out);
+        self.listening.tick(&reaper, &self.reads, busy.is_none() && !blocked, &self.snapshot, &*self.out);
         if busy.is_none() {
-            self.poll_focus();
+            self.poll_focus(project.as_ref());
             // The producer's undo of Kumi's changes; a plan left open. An undo or redo may bring back scratch copies Kumi
             // dropped (they were bare edits inside the producer's points): they're swept again.
-            if self.changes.tick(&self.reaper(), &self.reads, &*self.out) {
-                self.listening.undo_moved(&self.reaper(), &*self.out);
+            if self.changes.tick(&reaper, &self.reads, project.as_ref(), &*self.out) {
+                self.listening.undo_moved(&reaper, &*self.out);
             }
         }
-        self.flush_events();
-        self.refresh_snapshot(busy);
+        self.flush_events(project.as_ref());
+        self.refresh_snapshot(busy, project.as_ref());
         let now = Instant::now();
         if self.last_heartbeat.get().is_none_or(|last| now.duration_since(last) >= HEARTBEAT) {
             self.last_heartbeat.set(Some(now));
             self.out.heartbeat();
         }
+        self.rates.borrow_mut().spent(started.elapsed());
     }
 
     // Whether the main window is disabled right now, as a dialog does.
@@ -409,14 +475,15 @@ impl Extension {
         since.elapsed() >= MODAL_AFTER
     }
 
-    fn run_jobs(&self) {
+    /// Runs the queued jobs within the tick's budget; whether any ran.
+    fn run_jobs(&self, project: Option<&ProjectInfo>) -> bool {
         let reaper = self.reaper();
         // Held by the first request, released on the way out even if something unwinds: an unbalanced hold leaves
         // REAPER's arrange view frozen.
         let mut refresh = RefreshHold { reaper: &reaper, held: false };
         let mark = || (reaper.current_project().map(|p| p.ptr.addr()), crate::projectconfig::loads());
-        let mut seen = mark();
-        queue::drain(&self.jobs, self.budget, |job| {
+        let mut seen = (project.map(|p| p.ptr.addr()), crate::projectconfig::loads());
+        let ran = queue::drain(&self.jobs, self.budget, |job| {
             refresh.hold();
             // The socket threads are told the main thread is working, not stalled, for as long as this takes; whatever
             // unwinds, they are told it stopped.
@@ -426,7 +493,7 @@ impl Extension {
             // again first, so this one is answered about the project REAPER has now, under its epoch.
             let now = mark();
             if now != seen {
-                self.poll_project(true);
+                self.poll_project(true, reaper.current_project().as_ref());
                 seen = now;
             }
             let answer = crate::guard("request", Err(("internal".into(), "the request failed inside the bridge".into())), || {
@@ -434,6 +501,7 @@ impl Extension {
             });
             job.answer(answer);
         });
+        ran > 0
     }
 
     fn handle(&self, method: &str, params: &Value) -> Answer {
@@ -548,22 +616,17 @@ impl Extension {
         Ok(json!({"quitting": true, "saved": dirty.iter().map(|p| p.path.clone()).collect::<Vec<_>>()}))
     }
 
-    // What `status` adds to the bridge's identity; the socket threads serve it from the snapshot.
+    // What `status` adds to the bridge's identity; the socket threads serve it from the snapshot. The fixed part is kept
+    // from the start; the rest is a few reads a tick.
     fn status(&self, project: Option<&ProjectInfo>) -> Value {
         let reaper = self.reaper();
         let rates = self.rates.borrow();
-        let mut status = json!({
-            "sdk": api::SDK_VERSION,
-            "api": {"resolved": self.api.resolved(), "total": api::FUNCTION_COUNT},
-            "ticksPerSecond": {"timer": rates.timer_hz, "surface": rates.surface_hz},
-        });
+        let mut status = self.status_static.clone();
+        status["ticksPerSecond"] = json!({"timer": rates.timer_hz, "surface": rates.surface_hz});
+        // What a tick costs REAPER's main thread (the last whole second's average and longest), for the perf work's proof.
+        status["tickMicros"] = json!({"average": rates.tick_avg_us, "max": rates.tick_max_us});
         // M5 listening (m5-reaper): what listening can do now.
-        status["listening"] = self.listening.flags(&reaper);
-        let missing = reaper.missing_features();
-        if !missing.is_empty() {
-            status["missing"] =
-                missing.iter().map(|(feature, needs)| json!({"feature": feature, "needs": needs})).collect::<Vec<_>>().into();
-        }
+        status["listening"] = self.listening.flags(&reaper, self.audio_heard(&reaper));
         if let Some(project) = project {
             status["transport"] = transport_json(reaper.play_state(project.ptr), reaper.tempo());
             status["tracks"] = reaper.track_count(project.ptr).into();
@@ -574,17 +637,25 @@ impl Extension {
         status
     }
 
-    // A tab switch, a project opened or closed, or saved under another name; and what a project's pointer can't show: a new
-    // project opened in the tab where another was. `settled` is false while REAPER loads or renders.
-    fn poll_project(&self, settled: bool) {
-        let reaper = self.reaper();
-        let info = reaper.current_project();
-        if settled {
-            let open: Vec<usize> = reaper.projects().iter().map(|p| p.ptr.addr()).collect();
-            self.reads.keep_tabs(&open);
+    // Whether the audio device is heard, asked again every `AUDIO_EVERY` (the device opens and closes around a render).
+    fn audio_heard(&self, reaper: &Reaper) -> bool {
+        if let Some((at, heard)) = self.audio.get() {
+            if at.elapsed() < audio_every() {
+                return heard;
+            }
         }
-        let (switched, replaced) = if settled { self.watch_project(&reaper, info.as_ref()) } else { (false, false) };
-        let current = info.as_ref().map(|p| (p.ptr.addr(), ProjectSummary { name: p.name.clone(), path: p.path.clone() }));
+        let heard = reaper.audio_heard();
+        self.audio.set(Some((Instant::now(), heard)));
+        heard
+    }
+
+    // A tab switch, a project opened or closed, or saved under another name; and what a project's pointer can't show: a new
+    // project opened in the tab where another was. `settled` is false while REAPER loads or renders; `info` is the project
+    // in front, as the tick read it.
+    fn poll_project(&self, settled: bool, info: Option<&ProjectInfo>) {
+        let reaper = self.reaper();
+        let (switched, replaced) = if settled { self.watch_project(&reaper, info) } else { (false, false) };
+        let current = info.map(|p| (p.ptr.addr(), ProjectSummary { name: p.name.clone(), path: p.path.clone() }));
         let mut sent = self.sent.borrow_mut();
         let changed = sent.project != current;
         let first = sent.project.is_none();
@@ -597,17 +668,25 @@ impl Extension {
             self.reads.bump_epoch();
             self.reads.forget_touched(&reaper);
             self.focus.reset();
-            if let Some(info) = info.as_ref().filter(|_| replaced) {
+            if let Some(info) = info.filter(|_| replaced) {
                 self.reads.project_replaced(info.ptr);
             }
             // M5 listening (m5-reaper): scratch copies an earlier session left in the project now in front are swept.
             self.listening.project_changed(&reaper, &*self.out);
         }
-        // Noticed on every settled tick, so an id that came with a template is seen while the project is unsaved.
-        if let Some(info) = info.as_ref().filter(|_| settled) {
-            self.reads.note_project(info.ptr);
-            self.reads.project_id(&reaper, info.ptr, info);
-            self.reads.keep_project_id(&reaper, info.ptr, info);
+        // The tabs open (closed ones are forgotten) and the project's own id (one that came with a template is seen while
+        // the project is unsaved; a saved project without one is given its path's): every `TABS_EVERY`, and at once for a
+        // project that just came to the front, was replaced, or was saved under a name.
+        let due = self.tabs_at.get().is_none_or(|at| at.elapsed() >= tabs_every());
+        if settled && (switched || replaced || changed || due) {
+            self.tabs_at.set(Some(Instant::now()));
+            let open: Vec<usize> = reaper.projects().iter().map(|p| p.ptr.addr()).collect();
+            self.reads.keep_tabs(&open);
+            if let Some(info) = info {
+                self.reads.note_project(info.ptr);
+                self.reads.project_id(&reaper, info.ptr, info);
+                self.reads.keep_project_id(&reaper, info.ptr, info);
+            }
         }
         if (changed && !first) || replaced {
             self.out.event("project", current.map(|(_, p)| p.to_json()).unwrap_or(Value::Null));
@@ -686,7 +765,7 @@ impl Extension {
 
     // `focus`, polled every FOCUS_EVERY, or at once when the surface said something it shows moved. The selection part
     // of it is read now when REAPER said the selection moved, and by its own throttle otherwise.
-    fn poll_focus(&self) {
+    fn poll_focus(&self, project: Option<&ProjectInfo>) {
         let (urgent, selection) = {
             let pending = self.pending.borrow();
             (pending.focus, pending.selection)
@@ -696,22 +775,22 @@ impl Extension {
             return;
         }
         let reaper = self.reaper();
-        let value = match reaper.current_project() {
+        let value = match project {
             Some(project) => self.focus.poll(&self.reads, &reaper, project.ptr, selection),
             None => Value::Null,
         };
-        *self.focus_value.borrow_mut() = value;
+        *self.focus_value.borrow_mut() = Arc::new(value);
         self.focus_at.set(Some(Instant::now()));
         self.pending.borrow_mut().focus = false;
     }
 
-    fn flush_events(&self) {
+    fn flush_events(&self, project: Option<&ProjectInfo>) {
         let pending = std::mem::take(&mut *self.pending.borrow_mut());
         if !pending.tracks && !pending.selection && pending.play.is_none() && !pending.tempo {
             return;
         }
         let reaper = self.reaper();
-        let Some(project) = reaper.current_project() else { return };
+        let Some(project) = project else { return };
         if pending.play.is_some() || pending.tempo {
             let play = pending.play.unwrap_or_else(|| reaper.play_state(project.ptr));
             let transport = transport_json(play, reaper.tempo());
@@ -731,19 +810,18 @@ impl Extension {
         }
     }
 
-    fn refresh_snapshot(&self, busy: Option<Busy>) {
+    fn refresh_snapshot(&self, busy: Option<Busy>, project: Option<&ProjectInfo>) {
         let reaper = self.reaper();
-        let project = reaper.current_project();
-        let status = self.status(project.as_ref());
+        let status = self.status(project);
         let mut snapshot = self.snapshot.lock().unwrap_or_else(|e| e.into_inner());
         if snapshot.daw_version.is_empty() {
             snapshot.daw_version = reaper.app_version();
             snapshot.resource = reaper.resource_path();
         }
-        snapshot.project = project.map(|p| ProjectSummary { name: p.name, path: p.path });
+        snapshot.project = project.map(|p| ProjectSummary { name: p.name.clone(), path: p.path.clone() });
         snapshot.busy = busy;
         snapshot.status = status;
-        snapshot.focus = self.focus_value.borrow().clone();
+        snapshot.focus = Arc::clone(&self.focus_value.borrow());
         snapshot.focus_at = self.focus_at.get();
         snapshot.last_tick = Some(Instant::now());
     }
@@ -762,6 +840,11 @@ impl Extension {
         self.snapshot.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
+    /// What the socket threads see, held while it is looked at: for a look every tick, which a copy would cost.
+    pub fn snapshot_ref(&self) -> MutexGuard<'_, Snapshot> {
+        self.snapshot.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
     fn count_tick(&self, driver: Driver) {
         let mut rates = self.rates.borrow_mut();
         let now = Instant::now();
@@ -769,8 +852,13 @@ impl Extension {
         if now.duration_since(start) >= Duration::from_secs(1) {
             rates.timer_hz = rates.timer;
             rates.surface_hz = rates.surface;
+            let ticks = (rates.timer + rates.surface).max(1) as u64;
+            rates.tick_avg_us = rates.spent.as_micros() as u64 / ticks;
+            rates.tick_max_us = rates.longest.as_micros() as u64;
             rates.timer = 0;
             rates.surface = 0;
+            rates.spent = Duration::ZERO;
+            rates.longest = Duration::ZERO;
             rates.window_start = Some(now);
         }
         match driver {
@@ -876,6 +964,103 @@ mod tests {
         assert!(missing[0].0.contains("markers"), "{missing:?}");
     }
 
+    /// The main thread's tick with the throttles at `every` (tests tick with none, so every look is made each tick).
+    fn tick_with_throttles(extension: &Extension, every: Duration) {
+        TEST_TABS_EVERY.with(|tabs| tabs.set(Some(every)));
+        TEST_AUDIO_EVERY.with(|audio| audio.set(Some(every)));
+        extension.tick(Driver::Timer);
+        TEST_TABS_EVERY.with(|tabs| tabs.set(None));
+        TEST_AUDIO_EVERY.with(|audio| audio.set(None));
+    }
+
+    // The optimization audit's R2 (2026-10-24): the tick runs about sixty times a second whenever REAPER is open, Kumi
+    // connected or not, and each asked REAPER for the project in front five times over, enumerated the tabs, read the
+    // project's id twice, counted the API table, asked the audio device and rebuilt a status JSON. Idle, it now reads the
+    // project once (two string reads), the state change count and the undo count for the watch, and the few status
+    // scalars; the tabs, the id and the audio device every so often.
+    #[test]
+    fn an_idle_tick_reads_the_project_once_and_asks_reaper_for_little() {
+        let (extension, _tx, _, _) = setup();
+        fake::lab_project();
+        // (settled: the watch has its first look, the focus is polled, the tabs and the id are looked at)
+        tick_with_throttles(&extension, Duration::from_secs(10));
+        let calls = || fake::with(|s| s.calls);
+        let before = calls();
+        tick_with_throttles(&extension, Duration::from_secs(10));
+        let idle = calls() - before;
+        // (EnumProjects for the render check and for the project in front; the project watch's state change count and
+        // undo count; the undo watch's position, two, and count; status's track count and state change count)
+        assert!(idle <= 9, "{idle} REAPER calls for an idle tick");
+        // The same tick with every look made: the tabs enumerated (two EnumProjects for the one tab; the id and the audio
+        // device are asked too, which the fake doesn't count).
+        let before = calls();
+        tick_with_throttles(&extension, Duration::ZERO);
+        let every_look = calls() - before;
+        assert!(every_look >= idle + 2, "{every_look} calls with every look made, {idle} idle");
+        // What the socket threads serve is whole all the same.
+        let snapshot = extension.snapshot();
+        assert_eq!(snapshot.status["tracks"], 4);
+        assert_eq!(snapshot.status["api"], json!({"resolved": fake::api().resolved(), "total": 877}));
+        assert_eq!(snapshot.status["listening"]["capture"], false, "no folder yet: nothing captures");
+        assert_eq!(snapshot.focus["view"], "arrange");
+    }
+
+    #[test]
+    fn the_projects_id_is_kept_every_so_often_and_at_once_when_the_project_changes() {
+        let (extension, _tx, _, _) = setup();
+        fake::lab_project();
+        let kept = || fake::with(|s| s.project_ext.get(&("kumi".into(), "project".into())).cloned());
+        assert_eq!(kept(), None);
+        // The first look writes a saved project's path id into it.
+        tick_with_throttles(&extension, Duration::from_secs(10));
+        assert_eq!(kept().as_deref(), Some(crate::read::path_id("/lab/Projects/Song.rpp").as_str()));
+        // Taken out again (as a project loaded from a file without one): not looked at inside the throttle, then it is.
+        fake::with(|s| s.project_ext.remove(&("kumi".into(), "project".into())));
+        tick_with_throttles(&extension, Duration::from_secs(10));
+        assert_eq!(kept(), None, "inside the throttle");
+        tick_with_throttles(&extension, Duration::ZERO);
+        assert!(kept().is_some(), "once it is due");
+        // A project saved under another name is looked at at once, throttle or not.
+        fake::with(|s| {
+            s.project_ext.remove(&("kumi".into(), "project".into()));
+            s.project = Some(("/lab/Projects/Song 2.rpp".into(), "Song 2.rpp".into()));
+        });
+        tick_with_throttles(&extension, Duration::from_secs(10));
+        tick_with_throttles(&extension, Duration::from_secs(10));
+        assert!(kept().is_some(), "a project saved under a name gets its id at once");
+    }
+
+    #[test]
+    fn the_audio_device_is_asked_every_so_often() {
+        let (extension, _tx, _, _) = setup();
+        fake::lab_project();
+        extension.set_listening_folder(std::env::temp_dir());
+        tick_with_throttles(&extension, Duration::from_secs(10));
+        let capture = |extension: &Extension| extension.snapshot().status["listening"]["capture"].clone();
+        assert_eq!(capture(&extension), true);
+        // The device closes (a render, a device change): said within the throttle, not at once.
+        fake::with(|s| s.listening.audio = false);
+        tick_with_throttles(&extension, Duration::from_secs(10));
+        assert_eq!(capture(&extension), true, "the last answer stands inside the throttle");
+        tick_with_throttles(&extension, Duration::ZERO);
+        assert_eq!(capture(&extension), false);
+    }
+
+    #[test]
+    fn status_says_what_a_tick_costs_over_the_last_second() {
+        let (extension, _tx, _, _) = setup();
+        fake::lab_project();
+        extension.tick(Driver::Timer);
+        assert_eq!(extension.snapshot().status["tickMicros"], json!({"average": 0, "max": 0}), "no whole second yet");
+        std::thread::sleep(Duration::from_millis(1050));
+        extension.tick(Driver::Timer);
+        extension.tick(Driver::Surface);
+        let cost = extension.snapshot().status["tickMicros"].clone();
+        let (average, max) = (cost["average"].as_u64().unwrap(), cost["max"].as_u64().unwrap());
+        assert!(average > 0 && max >= average, "{cost}");
+        assert!(max < 1_000_000, "{cost}: a tick of the fake is well under a second");
+    }
+
     #[test]
     fn unknown_methods_are_refused_by_name() {
         let (extension, tx, _, _) = setup();
@@ -934,7 +1119,7 @@ mod tests {
     }
 
     fn focus_of(extension: &Extension) -> Value {
-        extension.snapshot().focus
+        (*extension.snapshot().focus).clone()
     }
 
     #[test]

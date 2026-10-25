@@ -67,7 +67,7 @@ use serde_json::{json, Map, Value};
 use crate::extension::Outbox;
 use crate::queue::Answer;
 use crate::read::{bad, failed, Reads};
-use crate::reaper::{Project, Reaper};
+use crate::reaper::{Project, ProjectInfo, Reaper};
 use crate::refs::Ref;
 
 /// An error as the wire gives it: the code, and words for the model.
@@ -761,7 +761,7 @@ impl Changes {
     /// left open would swallow every edit the producer makes after it); and the producer's own undo and redo of Kumi's
     /// points are noticed.
     /// True when the producer's undo or redo moved the project in front since the last tick.
-    pub fn tick(&self, reaper: &Reaper, reads: &Reads, out: &dyn Outbox) -> bool {
+    pub fn tick(&self, reaper: &Reaper, reads: &Reads, project: Option<&ProjectInfo>, out: &dyn Outbox) -> bool {
         let stale = self.plan.borrow().as_ref().is_some_and(|plan| plan.active.elapsed() > PLAN_MAX || plan.epoch != reads.epoch());
         if stale {
             if let Some(plan) = self.plan.borrow_mut().take() {
@@ -770,7 +770,7 @@ impl Changes {
         }
         // (r-tracks, NIT-7) The FX Kumi looked at lately are looked at again for parameters that move by themselves.
         volatile::tick(reaper, reads);
-        let Some(info) = reaper.current_project() else { return false };
+        let Some(info) = project else { return false };
         // A plan's block is open: its points are not the producer's undo either.
         if self.plan.borrow().is_some() {
             return false;

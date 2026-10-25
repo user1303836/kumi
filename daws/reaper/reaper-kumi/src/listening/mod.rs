@@ -709,12 +709,11 @@ impl Listening {
     }
 
     /// What works now (`status.listening`).
-    pub fn flags(&self, reaper: &Reaper) -> Value {
+    pub fn flags(&self, reaper: &Reaper, audio: bool) -> Value {
         let api = reaper.api();
         let folder = self.folder.borrow().is_some();
         let render =
             folder && api.GetSetProjectInfo().is_some() && api.GetSetProjectInfo_String().is_some() && api.Main_OnCommandEx().is_some();
-        let audio = reaper.audio_heard();
         let mut flags = json!({
             "render": render,
             "capture": folder && audio && api.Audio_RegHardwareHook().is_some(),
