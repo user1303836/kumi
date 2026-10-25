@@ -2,6 +2,9 @@
 //! are this conversation's), what it takes by its place there (the DAW's rules), and a chunk that never ran here cleanly.
 use super::backend::Words;
 use regex::Regex;
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::rc::Rc;
 use std::sync::LazyLock;
 
 /// A finding: whether it stops the script being kept, and what it says.
@@ -42,11 +45,19 @@ pub fn lint(code: &str, words: &Words, ran: bool, this_project: bool) -> Vec<Fin
         });
     }
     for (pattern, says) in words.places {
-        if Regex::new(pattern).is_ok_and(|re| re.is_match(code)) {
+        if place_pattern(pattern).is_some_and(|re| re.is_match(code)) {
             out.push(Finding { blocks: false, says: (*says).to_string() });
         }
     }
     out
+}
+
+/// A DAW's place pattern, compiled once: every script the model writes is linted against each of them.
+fn place_pattern(pattern: &'static str) -> Option<Rc<Regex>> {
+    thread_local! {
+        static COMPILED: RefCell<HashMap<&'static str, Option<Rc<Regex>>>> = RefCell::new(HashMap::new());
+    }
+    COMPILED.with(|compiled| compiled.borrow_mut().entry(pattern).or_insert_with(|| Regex::new(pattern).ok().map(Rc::new)).clone())
 }
 
 #[cfg(test)]

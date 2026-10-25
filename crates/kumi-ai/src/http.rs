@@ -165,7 +165,7 @@ pub async fn post_json(
     fetch: &dyn Fetch,
     url: &str,
     headers: Headers,
-    body: Value,
+    body: Rc<Value>,
     signal: Option<Signal>,
 ) -> Result<Response, LanguageModelError> {
     let mut headers = headers;
@@ -183,7 +183,8 @@ pub async fn post_json(
                     if signal.as_ref().is_some_and(Signal::is_cancelled) || matches!(error, LanguageModelError::ApiCall(_)) {
                         return error;
                     }
-                    let mut wrapped = ApiCallError::new("Failed to process successful response", &url, Some(body.clone()), Some(status));
+                    let mut wrapped =
+                        ApiCallError::new("Failed to process successful response", &url, Some(Value::clone(&body)), Some(status));
                     // The connection failed mid-stream (a reset, a roam, a stalled read): the SDK's
                     // network errors are retryable, and the kernel retries only while nothing has
                     // reached the producer.
@@ -213,7 +214,7 @@ pub async fn post_json(
             .unwrap_or(&status_text)
             .to_string()
     };
-    let mut error = ApiCallError::new(message, url, Some(body), Some(status));
+    let mut error = ApiCallError::new(message, url, Some(Value::clone(&body)), Some(status));
     error.response_headers = Some(response_headers);
     error.response_body = Some(text);
     error.data = parsed;
@@ -252,7 +253,7 @@ mod transport_tests {
         for drop_connection in [true, false] {
             let fetch = HttpFetch::with_timeouts(std::time::Duration::from_secs(2), std::time::Duration::from_millis(300));
             let url = provider(drop_connection).await;
-            let mut response = post_json(&fetch, &url, Headers::new(), serde_json::json!({"stream":true}), None).await.unwrap();
+            let mut response = post_json(&fetch, &url, Headers::new(), Rc::new(serde_json::json!({"stream":true})), None).await.unwrap();
             let mut body = response.body.take().unwrap();
             let mut failure = None;
             while let Some(chunk) = body.next().await {

@@ -67,7 +67,8 @@ impl Fetch for StatusFetch {
 #[tokio::test]
 async fn json_posts_preserve_request_and_response_details_and_sdk_retry_policy() {
     for (status, retryable) in [(401, false), (429, true), (500, true)] {
-        let error = post_json(&StatusFetch(status), "http://fixture/api", Headers::new(), json!({"value":1.0}), None).await.err().unwrap();
+        let error =
+            post_json(&StatusFetch(status), "http://fixture/api", Headers::new(), json!({"value":1.0}).into(), None).await.err().unwrap();
         let api = error.api_call().unwrap();
         assert_eq!(api.message, "rate limited");
         assert_eq!(api.status_code, Some(status));
@@ -112,7 +113,7 @@ impl Fetch for InterruptedFetch {
 }
 #[tokio::test]
 async fn successful_response_read_errors_keep_the_sdk_request_status_and_headers() {
-    let response = post_json(&InterruptedFetch, "http://fixture/api", Headers::new(), json!({"request":true}), None).await.unwrap();
+    let response = post_json(&InterruptedFetch, "http://fixture/api", Headers::new(), json!({"request":true}).into(), None).await.unwrap();
     let error = response.text().await.unwrap_err();
     let error = error.api_call().unwrap();
     assert_eq!(error.message, "Failed to process successful response");
