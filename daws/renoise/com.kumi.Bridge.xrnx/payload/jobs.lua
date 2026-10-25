@@ -13,7 +13,8 @@ function M.new(ctx)
   return setmetatable({ ctx = ctx, list = {}, last_run_ms = 0 }, M)
 end
 
--- fn(job) does the work, calling job.slice() between steps, and returns the answer or raises {code, message}. `wrote` says
+-- fn(job) does the work, calling job.slice() between steps (it answers true when the job waited there, so an object held
+-- across the steps is looked up again), and returns the answer or raises {code, message}. `wrote` says
 -- what a job wrote before it was made (a change written in its request's callback that then waits for Renoise), as
 -- `job.wrote` does once a job writes.
 function M:add(record, request, fn, wrote)
@@ -32,10 +33,16 @@ function M:add(record, request, fn, wrote)
       error({ code = "changed", message = "tracks, patterns or lines were inserted or removed while this was being read: read again" }, 0)
     end
   end
+  -- True when the job waited here (and was checked as it resumed): what it held of the song is to be looked up again.
   function job.slice()
     -- (A job that yielded is checked as it resumes: the song may have changed while it waited.)
-    if ctx.now_ms() >= job.deadline then coroutine.yield() end
+    if ctx.now_ms() >= job.deadline then
+      coroutine.yield()
+      job.check()
+      return true
+    end
     job.check()
+    return false
   end
   -- The next step of work in a callback of its own (a restore's numbered steps), checked as it resumes. `gap_ms` is how
   -- long to wait first: Renoise has been seen to take callbacks 10 ms apart for one undo step.

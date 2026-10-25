@@ -1771,3 +1771,77 @@ test("reads: past 256 deleted objects their watchers are dropped without watchin
   ok(call(peer, "focus").result.changed > before, "a device made after another was deleted counts")
   H.no_dialogs()
 end)
+
+-- Perf (N5): a lines read looks the pattern (and its track) up once a slice, not once a line; a read that waits between
+-- slices looks them up again and reads the same rows.
+
+-- (a note every third line of the demo's 32-line pattern: eleven)
+local function notes_on(pattern, track)
+  for l = 1, 31, 3 do mock.ops.set_note(pattern, track, l, 1, { note = 48 + l % 12, instrument = 0 }) end
+end
+
+-- (the rows of a lines read, and of the focus body's tracks, without what names the epoch)
+local function rows_of(items)
+  local out = {}
+  for i, item in ipairs(items) do out[i] = { line = item.line, notes = item.notes, effects = item.effects, hidden = item.hidden } end
+  return json.encode(out)
+end
+
+test("reads: a lines read asks Renoise for the pattern once a slice, not once a line (perf N5)", function()
+  local _, peer = setup()
+  notes_on(1, 1)
+  local E = epoch_of(peer)
+  local real_pattern, asked = mock.song.pattern, 0
+  mock.song.pattern = function(self, p) asked = asked + 1 return real_pattern(self, p) end
+  local response = call(peer, "read", { kind = "line", parent = E .. ":pattern:1", track = 1, limit = 200 })
+  mock.song.pattern = real_pattern
+  ok(response.result, json.encode(response.error or {}))
+  eq(#response.result.items, 11)
+  ok(asked <= 4, "pattern lookups for 32 lines read in one slice: " .. asked)
+  -- (the focus body reads every track's lines the same way)
+  asked = 0
+  mock.song.pattern = function(self, p) asked = asked + 1 return real_pattern(self, p) end
+  local body = call(peer, "focus_body", { kind = "pattern" })
+  mock.song.pattern = real_pattern
+  ok(body.result, json.encode(body.error or {}))
+  ok(asked <= 6, "pattern lookups for a focus body read in one slice: " .. asked)
+  H.no_dialogs()
+end)
+
+test("reads: a lines read that waits between every line looks the pattern up again each time and reads the same rows (perf N5)", function()
+  local _, peer = setup()
+  notes_on(1, 1)
+  local E = epoch_of(peer)
+  local whole = call(peer, "read", { kind = "line", parent = E .. ":pattern:1", track = 1, limit = 200 })
+  ok(whole.result, json.encode(whole.error or {}))
+  local body = call(peer, "focus_body", { kind = "pattern" })
+  ok(body.result, json.encode(body.error or {}))
+  -- (a job whose budget is spent before every row: every slice waits a tick, and what it held is looked up again)
+  local _, slow = setup({ patch = function(env_)
+    local path = env_.bundle .. "payload/jobs.lua"
+    local f = assert(io.open(path, "rb"))
+    local text = f:read("*a")
+    f:close()
+    local patched, n = text:gsub("\nM%.BUDGET_MS = 8\n", "\nM.BUDGET_MS = -1\n")
+    assert(n == 1, "BUDGET_MS")
+    f = assert(io.open(path, "wb"))
+    f:write(patched)
+    f:close()
+  end })
+  notes_on(1, 1)
+  local E2 = epoch_of(slow)
+  local real_pattern, asked = mock.song.pattern, 0
+  mock.song.pattern = function(self, p) asked = asked + 1 return real_pattern(self, p) end
+  local sliced = call(slow, "read", { kind = "line", parent = E2 .. ":pattern:1", track = 1, limit = 200 }, 2000)
+  mock.song.pattern = real_pattern
+  ok(sliced.result, json.encode(sliced.error or {}))
+  eq(rows_of(sliced.result.items), rows_of(whole.result.items), "the same rows, slice by slice")
+  ok(asked >= 30, "looked up again after each wait: " .. asked)
+  local sliced_body = call(slow, "focus_body", { kind = "pattern" }, 2000)
+  ok(sliced_body.result, json.encode(sliced_body.error or {}))
+  eq(#sliced_body.result.tracks, #body.result.tracks)
+  for t, track in ipairs(body.result.tracks) do
+    eq(rows_of(sliced_body.result.tracks[t].lines), rows_of(track.lines), "track " .. t .. "'s lines, slice by slice")
+  end
+  H.no_dialogs()
+end)
