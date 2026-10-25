@@ -33,24 +33,15 @@ pub struct EqParam {
     pub kind: i32,
 }
 
+thread_local! {
+    /// What the last plug-in state and envelope chunk read needed (`grown` starts the next from twice it).
+    static FX_STATE: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static ENV_CHUNK: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 /// Reads a string through a getter that fills a buffer of a size, growing the buffer while what it wrote fills it.
-fn grown(mut fill: impl FnMut(*mut c_char, c_int) -> bool) -> Option<String> {
-    let mut size = 1usize << 16;
-    loop {
-        let mut buf = vec![0u8; size];
-        if !fill(buf.as_mut_ptr().cast(), size as c_int) {
-            return None;
-        }
-        let len = buf.iter().position(|&b| b == 0).unwrap_or(size);
-        if len + 1 < size {
-            buf.truncate(len);
-            return Some(String::from_utf8_lossy(&buf).into_owned());
-        }
-        if size >= MAX_STATE {
-            return None;
-        }
-        size *= 4;
-    }
+fn grown(last: &'static std::thread::LocalKey<std::cell::Cell<usize>>, fill: impl FnMut(*mut c_char, c_int) -> bool) -> Option<String> {
+    super::grown_text(last, 1 << 16, MAX_STATE, fill)
 }
 
 /// FX in any chain. `Fx::index` is REAPER's address: the place, 0x1000000 for a track's input chain, 0x2000000 for a
@@ -176,11 +167,11 @@ impl Reaper<'_> {
         match fx.owner {
             FxOwner::Track(t) => {
                 let f = self.api.TrackFX_GetNamedConfigParm()?;
-                grown(|buf, size| unsafe { f(t.0, fx.index, key.as_ptr(), buf, size) })
+                grown(&FX_STATE, |buf, size| unsafe { f(t.0, fx.index, key.as_ptr(), buf, size) })
             }
             FxOwner::Take(t) => {
                 let f = self.api.TakeFX_GetNamedConfigParm()?;
-                grown(|buf, size| unsafe { f(t.0, fx.index, key.as_ptr(), buf, size) })
+                grown(&FX_STATE, |buf, size| unsafe { f(t.0, fx.index, key.as_ptr(), buf, size) })
             }
         }
     }
@@ -325,7 +316,7 @@ impl Reaper<'_> {
 
     pub fn env_chunk(&self, envelope: Envelope) -> Option<String> {
         let f = self.api.GetEnvelopeStateChunk()?;
-        grown(|buf, size| unsafe { f(envelope.0, buf, size, false) })
+        grown(&ENV_CHUNK, |buf, size| unsafe { f(envelope.0, buf, size, false) })
     }
 
     pub fn set_env_chunk(&self, envelope: Envelope, chunk: &str) -> bool {

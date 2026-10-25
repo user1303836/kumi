@@ -11,6 +11,11 @@ use crate::api::{self, ProjectMarker};
 /// The most a track's chunk may grow to when it is read: the plug-in states in it are what take the room.
 const MAX_CHUNK: usize = 256 << 20;
 
+thread_local! {
+    /// What the last track chunk read needed (`grown_text` starts the next from twice it).
+    static TRACK_CHUNK: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 impl Reaper<'_> {
     // ----- tracks -----
 
@@ -59,23 +64,7 @@ impl Reaper<'_> {
     /// The track's whole state as REAPER writes it into a project file, plug-in states and GUIDs included.
     pub fn track_chunk(&self, track: Track) -> Option<String> {
         let f = self.api.GetTrackStateChunk()?;
-        let mut size = 1usize << 16;
-        loop {
-            let mut buf = vec![0u8; size];
-            let ok = unsafe { f(track.0, buf.as_mut_ptr().cast::<c_char>(), size as c_int, false) };
-            let len = buf.iter().position(|&b| b == 0).unwrap_or(size);
-            if !ok {
-                return None;
-            }
-            if len + 1 < size {
-                buf.truncate(len);
-                return Some(String::from_utf8_lossy(&buf).into_owned());
-            }
-            if size >= MAX_CHUNK {
-                return None;
-            }
-            size *= 4;
-        }
+        super::grown_text(&TRACK_CHUNK, 1 << 16, MAX_CHUNK, |buf, size| unsafe { f(track.0, buf, size, false) })
     }
 
     pub fn set_track_chunk(&self, track: Track, chunk: &str) -> bool {
