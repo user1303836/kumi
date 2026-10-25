@@ -16,28 +16,11 @@ const CANCELLED: u8 = 2;
 /// What the main thread answers: a result, or an error code and message.
 pub type Answer = Result<Value, (String, String)>;
 
-/// An answer as it crosses to the socket thread: the result as a tree, or already encoded as JSON (a digest's page, kept
-/// as it went out and sent again as it is).
-#[derive(Debug, PartialEq)]
-pub enum Reply {
-    Answer(Answer),
-    Encoded(Vec<u8>),
-}
-
-impl Reply {
-    fn outcome(self) -> Outcome {
-        match self {
-            Reply::Answer(answer) => Outcome::Answered(answer),
-            Reply::Encoded(result) => Outcome::Encoded(result),
-        }
-    }
-}
-
 pub struct Job {
     pub method: String,
     pub params: Value,
     state: Arc<AtomicU8>,
-    reply: SyncSender<Reply>,
+    reply: SyncSender<Answer>,
 }
 
 impl Job {
@@ -47,25 +30,19 @@ impl Job {
     }
 
     pub fn answer(self, answer: Answer) {
-        self.reply(Reply::Answer(answer));
-    }
-
-    pub fn reply(self, reply: Reply) {
-        let _ = self.reply.send(reply);
+        let _ = self.reply.send(answer);
     }
 }
 
 /// The socket side's handle on a queued job.
 pub struct Waiter {
     state: Arc<AtomicU8>,
-    reply: Receiver<Reply>,
+    reply: Receiver<Answer>,
 }
 
 #[derive(Debug, PartialEq)]
 pub enum Outcome {
     Answered(Answer),
-    /// Answered with the result already encoded as JSON.
-    Encoded(Vec<u8>),
     /// Never started: nothing changed.
     Cancelled,
     /// Started but not answered in time: it may have changed something.
@@ -102,10 +79,10 @@ impl Waiter {
                     return if closed { Outcome::Closed } else { Outcome::Cancelled };
                 }
                 // Claimed: the answer may have landed just now.
-                return self.reply.try_recv().map_or(Outcome::Uncertain, Reply::outcome);
+                return self.reply.try_recv().map_or(Outcome::Uncertain, Outcome::Answered);
             }
             match self.reply.recv_timeout(left.min(CLOSING_POLL)) {
-                Ok(reply) => return reply.outcome(),
+                Ok(answer) => return Outcome::Answered(answer),
                 Err(RecvTimeoutError::Disconnected) => return self.after_drop(),
                 Err(RecvTimeoutError::Timeout) => {}
             }
@@ -114,7 +91,7 @@ impl Waiter {
 
     fn after_drop(&self) -> Outcome {
         match self.reply.try_recv() {
-            Ok(reply) => reply.outcome(),
+            Ok(answer) => Outcome::Answered(answer),
             Err(_) if self.state.load(Ordering::Acquire) == CLAIMED => Outcome::Uncertain,
             Err(_) => Outcome::Closed,
         }
@@ -193,15 +170,6 @@ mod tests {
         tx.send(job).unwrap();
         assert_eq!(drain(&rx, NO_LINGER, |job| job.answer(Ok(json!({"ok": true})))), 1);
         assert_eq!(waiter.wait(Duration::from_secs(1), &OPEN), Outcome::Answered(Ok(json!({"ok": true}))));
-    }
-
-    #[test]
-    fn a_reply_the_main_thread_encoded_arrives_as_it_is() {
-        let (tx, rx) = channel();
-        let (job, waiter) = job("digest", json!({}));
-        tx.send(job).unwrap();
-        assert_eq!(drain(&rx, NO_LINGER, |job| job.reply(Reply::Encoded(b"{\"records\":[]}".to_vec()))), 1);
-        assert_eq!(waiter.wait(Duration::from_secs(1), &OPEN), Outcome::Encoded(b"{\"records\":[]}".to_vec()));
     }
 
     #[test]

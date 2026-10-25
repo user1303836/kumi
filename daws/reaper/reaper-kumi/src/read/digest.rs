@@ -10,19 +10,21 @@
 //! parameter values have budgets for the whole digest, carried in the cursor. `content: false` (watch_me's looks) leaves
 //! out items and envelope points.
 //!
-//! Kept: a page goes out encoded, each record written once, and a digest read whole while REAPER's count of the
-//! project's state changes stayed what it was is kept as its pages went out (bounded). A page of it asked again under the
-//! same count, in the same tab's epoch (watch_me's next look at a project nobody touched, a baseline taken again) goes out
-//! as it was, with no read of the project: an edit moves the count, a tab switch or another project in the tab the epoch.
+//! Kept across digests: the parameter values the fingerprints and `values` are made of, the bulk of a digest's REAPER
+//! calls, per FX, while the tab's epoch and REAPER's count of the project's state changes stay what they were (watch_me's
+//! next look at a project nobody touched): a parameter write moves the count, in REAPER or through its API, inside an
+//! undo block or not (7.82). Nothing else is kept: a bare API write outside an undo block (an extension's: a track's mute,
+//! name or volume set, an item or a marker moved, an envelope point) moves neither the count nor the undo history, so the
+//! rest is read every time. (What the producer does in REAPER, a mute or solo included, moves the count.)
 
 use std::cell::RefCell;
-use std::collections::{HashSet, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::time::{Duration, Instant};
 
 use serde_json::{json, Map, Value};
 
 use super::{active, bad, Reads};
-use crate::queue::Reply;
+use crate::queue::Answer;
 use crate::reaper::{Fx, FxOwner, Project, Reaper, Track, INPUT_FX};
 use crate::refs;
 use crate::rows;
@@ -44,10 +46,8 @@ const PAGE_TIME: Duration = Duration::from_millis(20);
 
 /// Tracks read part way (or read, for their later pages) kept at once: a few digests may go on side by side.
 const KEPT_WORK: usize = 4;
-/// A digest kept whole takes at most this much (its pages as they went out); a bigger one is read again each time.
-const CACHE_BYTES: usize = 4 * 1024 * 1024;
-/// Digests kept whole at once: one per shape asked (`values`, `content`) under the tab's epoch, at most.
-const MOST_CACHED: usize = 4;
+/// Parameter values kept across digests, at most (about 1.6 MB): past it, the rest is read each time.
+const PARAMS_KEPT: usize = 200_000;
 
 #[cfg(test)]
 thread_local! {
@@ -55,16 +55,16 @@ thread_local! {
     pub static TEST_LIMITS: std::cell::Cell<Option<(usize, usize, usize)>> = const { std::cell::Cell::new(None) };
     /// A test's page share of the main thread as a number of points and items read, in place of `PAGE_TIME`.
     pub static TEST_READS: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) };
-    /// A test's own bound on a kept digest, in place of `CACHE_BYTES`.
-    pub static TEST_CACHE_BYTES: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) };
+    /// A test's own bound on the parameter values kept, in place of `PARAMS_KEPT`.
+    pub static TEST_PARAMS_KEPT: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) };
 }
 
-fn cache_bytes() -> usize {
+fn params_kept() -> usize {
     #[cfg(test)]
-    if let Some(most) = TEST_CACHE_BYTES.with(|most| most.get()) {
+    if let Some(most) = TEST_PARAMS_KEPT.with(|most| most.get()) {
         return most;
     }
-    CACHE_BYTES
+    PARAMS_KEPT
 }
 
 /// A page's share of REAPER's main thread.
@@ -182,6 +182,15 @@ struct Budget {
     value_count: usize,
 }
 
+/// What a digest reads under: REAPER and the project in front, the tab's epoch and REAPER's count of the project's state
+/// changes, which the parameter values kept across digests are good for (none when REAPER has no count: nothing is kept).
+struct Under<'a, 'r> {
+    reaper: &'a Reaper<'r>,
+    proj: Project,
+    epoch: &'a str,
+    changed: Option<i32>,
+}
+
 /// The digest, the track, the project's change count and the budgets as the track began.
 type WorkKey = (u64, usize, Option<i32>, usize, usize, usize);
 
@@ -240,30 +249,20 @@ impl Work {
     }
 }
 
-/// What a kept digest is good for: the tab's epoch, the shape asked, and REAPER's count of the project's state changes.
-#[derive(Debug, Clone, PartialEq)]
-struct CacheKey {
-    epoch: String,
-    values: bool,
-    content: bool,
-    changed: i32,
+/// Parameter values as they were read under one epoch and state change count, by FX GUID (their first `PARAMS_PER_FX`,
+/// normalized): a parameter edit, in REAPER or through its API, moves the count (7.82), so what was read under it
+/// stands until it moves.
+#[derive(Default)]
+struct KeptParams {
+    under: Option<(String, i32)>,
+    by_fx: HashMap<String, Vec<f64>>,
+    total: usize,
 }
 
-/// A page as it went out: the cursor it was asked with (none for the first), its records encoded (the inside of the
-/// array) and the fields after them (`changed`, `nextCursor`, and on a first page `project`, `facts`, `summaries`,
-/// `bounded`), `project` named anew when the page goes out again (a save, or Save As, changes it and not the count).
-struct CachedPage {
-    cursor: Option<String>,
-    records: Vec<u8>,
-    rest: Map<String, Value>,
-}
-
-/// A digest's pages so far (by its serial, while it is read), or all of them (by its key, once read whole).
-struct CachedDigest {
-    serial: u64,
-    key: CacheKey,
-    pages: Vec<CachedPage>,
-    bytes: usize,
+impl KeptParams {
+    fn is_under(&self, under: &Under, changed: i32) -> bool {
+        self.under.as_ref().is_some_and(|(epoch, count)| epoch == under.epoch && *count == changed)
+    }
 }
 
 #[derive(Default)]
@@ -271,128 +270,13 @@ struct Kept {
     /// The serial the next digest takes.
     next: u64,
     works: VecDeque<Work>,
-    /// Digests being read, by serial: their pages so far, kept whole once the last goes out, unless the count moved under
-    /// them or they grew past `CACHE_BYTES`.
-    building: VecDeque<CachedDigest>,
-    /// Digests read whole under one count, oldest first.
-    cached: VecDeque<CachedDigest>,
+    params: KeptParams,
 }
 
 thread_local! {
-    /// The tracks read part way, or read for their later pages, and the digests kept (REAPER's main thread reads them all).
+    /// The tracks read part way, or read for their later pages, and the parameter values kept (REAPER's main thread reads
+    /// them all).
     static KEPT: RefCell<Kept> = RefCell::new(Kept::default());
-}
-
-/// A page of a digest kept whole under this key, as it went out, the project named anew on a first page.
-fn kept_page(key: &CacheKey, cursor: Option<&str>, epoch: &str, project: Option<&Value>) -> Option<Vec<u8>> {
-    KEPT.with(|kept| {
-        let kept = kept.borrow();
-        let digest = kept.cached.iter().find(|digest| digest.key == *key)?;
-        let page = digest.pages.iter().find(|page| page.cursor.as_deref() == cursor)?;
-        Some(encode_page(epoch, page, project))
-    })
-}
-
-/// Keeps a page of the digest being read (its first page begins it); the last makes it whole, kept in place of the one
-/// under the same epoch and shape. A page asked twice, a count that moved since the page before or a digest past
-/// `CACHE_BYTES` drops what was kept of it.
-fn keep_page(serial: u64, key: &CacheKey, page: CachedPage, last: bool) {
-    KEPT.with(|kept| {
-        let mut kept = kept.borrow_mut();
-        let at = match kept.building.iter().position(|digest| digest.serial == serial) {
-            Some(at) => at,
-            None if page.cursor.is_none() => {
-                kept.building.push_back(CachedDigest { serial, key: key.clone(), pages: vec![], bytes: 0 });
-                while kept.building.len() > KEPT_WORK {
-                    kept.building.pop_front();
-                }
-                kept.building.len() - 1
-            }
-            // (a digest dropped, or one that went on from a kept digest's page)
-            None => return,
-        };
-        // (the fields after the records are a few hundred bytes)
-        let size = page.records.len() + 1024;
-        let digest = &mut kept.building[at];
-        let repeated = digest.pages.iter().any(|kept| kept.cursor == page.cursor);
-        if digest.key != *key || repeated || digest.bytes + size > cache_bytes() {
-            kept.building.remove(at);
-            return;
-        }
-        digest.bytes += size;
-        digest.pages.push(page);
-        if last {
-            let Some(done) = kept.building.remove(at) else { return };
-            kept.cached.retain(|kept| kept.key.epoch == done.key.epoch && (kept.key.values, kept.key.content) != (done.key.values, done.key.content));
-            kept.cached.push_back(done);
-            while kept.cached.len() > MOST_CACHED {
-                kept.cached.pop_front();
-            }
-        }
-    })
-}
-
-/// The digest being read isn't kept: the count moved under it.
-fn drop_building(serial: u64) {
-    KEPT.with(|kept| kept.borrow_mut().building.retain(|digest| digest.serial != serial));
-}
-
-/// Forgets the digests kept and being kept: the epoch moved (a tab switch, another project in the tab).
-pub(super) fn forget() {
-    KEPT.with(|kept| {
-        let mut kept = kept.borrow_mut();
-        kept.building.clear();
-        kept.cached.clear();
-    });
-}
-
-/// The page as its bytes on the wire: what the answer as a tree would encode to, the project named anew when given.
-fn encode_page(epoch: &str, page: &CachedPage, project: Option<&Value>) -> Vec<u8> {
-    let mut out = Vec::with_capacity(page.records.len() + 1024);
-    out.extend_from_slice(b"{\"epoch\":");
-    write_text(&mut out, epoch);
-    out.extend_from_slice(b",\"records\":[");
-    out.extend_from_slice(&page.records);
-    out.push(b']');
-    for (name, value) in &page.rest {
-        out.push(b',');
-        write_text(&mut out, name);
-        out.push(b':');
-        write_value(&mut out, if name == "project" { project.unwrap_or(value) } else { value });
-    }
-    out.push(b'}');
-    out
-}
-
-// (A tree of values always encodes: a failure here would be the bridge's own, and a panic the request's guard answers as
-// internal, rather than a page cut short.)
-fn write_text(out: &mut Vec<u8>, text: &str) {
-    serde_json::to_writer(out, text).expect("text encodes");
-}
-
-fn write_value(out: &mut Vec<u8>, value: &Value) {
-    serde_json::to_writer(out, value).expect("a JSON tree encodes");
-}
-
-/// Appends a record to the page's records unless the page is full (its bytes, or its share of the main thread): a page
-/// always takes its first. A record's size counts the comma that joins it (or, for the first, the bracket that closes).
-fn append(records: &mut Vec<u8>, count: &mut usize, bytes: &mut usize, record: &Value, page_bytes: usize, clock: &Clock) -> bool {
-    if *count > 0 && clock.over() {
-        return false;
-    }
-    let at = records.len();
-    if *count > 0 {
-        records.push(b',');
-    }
-    write_value(records, record);
-    let size = records.len() - at + usize::from(*count == 0);
-    if *count > 0 && *bytes + size > page_bytes {
-        records.truncate(at);
-        return false;
-    }
-    *bytes += size;
-    *count += 1;
-    true
 }
 
 /// A new digest's serial.
@@ -402,6 +286,43 @@ fn serial() -> u64 {
         kept.next += 1;
         kept.next
     })
+}
+
+/// An FX's first `read` parameters' values as they were read under this epoch and count, if kept (a plug-in whose
+/// parameters changed in number is read again).
+fn kept_params(under: &Under, guid: &str, read: usize) -> Option<Vec<f64>> {
+    let changed = under.changed?;
+    KEPT.with(|kept| {
+        let kept = kept.borrow();
+        if !kept.params.is_under(under, changed) {
+            return None;
+        }
+        kept.params.by_fx.get(guid).filter(|values| values.len() == read).cloned()
+    })
+}
+
+/// Keeps an FX's parameter values as read under this epoch and count, up to `PARAMS_KEPT` of them in all: a count (or an
+/// epoch) that moved forgets what was kept under the last.
+fn keep_params(under: &Under, guid: &str, values: &[f64]) {
+    let Some(changed) = under.changed else { return };
+    KEPT.with(|kept| {
+        let mut kept = kept.borrow_mut();
+        if !kept.params.is_under(under, changed) {
+            kept.params = KeptParams { under: Some((under.epoch.to_string(), changed)), ..KeptParams::default() };
+        }
+        let params = &mut kept.params;
+        let before = params.by_fx.get(guid).map_or(0, Vec::len);
+        if params.total - before + values.len() > params_kept() {
+            return;
+        }
+        params.total = params.total - before + values.len();
+        params.by_fx.insert(guid.to_string(), values.to_vec());
+    })
+}
+
+/// Forgets the parameter values kept: the epoch moved (a tab switch, another project in the tab).
+pub(super) fn forget() {
+    KEPT.with(|kept| kept.borrow_mut().params = KeptParams::default());
 }
 
 /// The work kept for a track by its key, taken out (it's kept again if the page ends inside the track).
@@ -457,56 +378,17 @@ fn automated(reaper: &Reaper, track: Track) -> Automated {
 }
 
 impl Reads {
-    /// `digest`: one page of the project's records, as its bytes on the wire. A page of a digest kept whole (read while the
-    /// count stayed what it is now) goes out as it was, with no read of the project.
-    pub fn digest(&self, reaper: &Reaper, params: &Value) -> Reply {
-        match self.digest_page(reaper, params) {
-            Ok(page) => Reply::Encoded(page),
-            Err(error) => Reply::Answer(Err(error)),
-        }
-    }
-
-    fn digest_page(&self, reaper: &Reaper, params: &Value) -> Result<Vec<u8>, (String, String)> {
+    /// `digest`: one page of the project's records.
+    pub fn digest(&self, reaper: &Reaper, params: &Value) -> Answer {
         let (proj, info) = active(reaper)?;
         let values = params.get("values") == Some(&Value::Bool(true));
         let content = params.get("content") != Some(&Value::Bool(false));
         let epoch = self.epoch();
-        let given = match params.get("cursor") {
-            None | Some(Value::Null) => None,
-            Some(Value::String(text)) => {
-                let cursor = Cursor::parse(text).ok_or_else(|| bad("cursor: the nextCursor an earlier page gave, unchanged"))?;
-                if cursor.epoch != epoch {
-                    return Err((
-                        daw_bridge::wire::code::STALE.into(),
-                        "the project in the tab changed since the first page: read again".into(),
-                    ));
-                }
-                Some((text.as_str(), cursor))
-            }
-            Some(_) => return Err(bad("cursor must be a string")),
-        };
-        let cursor_text = given.as_ref().map(|(text, _)| *text);
-        let first = given.as_ref().is_none_or(|(_, cursor)| cursor.n == 0 && cursor.sub == 0);
-        let changed = reaper.state_change_count(proj);
-        // (named on every first page, kept or not: a save, or Save As, changes it and not the count)
-        let project = first.then(|| {
-            json!({
-                "id": self.project_id(reaper, proj, &info),
-                "identity": self.identity(proj),
-                "name": rows::clip(&info.name),
-                "path": rows::clip(&info.path),
-            })
-        });
-        let key = changed.map(|changed| CacheKey { epoch: epoch.clone(), values, content, changed });
-        if let Some(page) = key.as_ref().and_then(|key| kept_page(key, cursor_text, &epoch, project.as_ref())) {
-            return Ok(page);
-        }
         let (page_bytes, most_items, most_markers) = limits();
         let track_total = reaper.track_count(proj).max(0) as usize + 1;
         let marker_total = reaper.marker_count(proj).max(0) as usize;
-        let mut cursor = match given {
-            Some((_, cursor)) => cursor,
-            None => {
+        let mut cursor = match params.get("cursor") {
+            None | Some(Value::Null) => {
                 let items: usize = (1..track_total)
                     .filter_map(|n| reaper.track_at(proj, n as i32 - 1))
                     .map(|t| reaper.track_item_count(t).max(0) as usize)
@@ -523,11 +405,23 @@ impl Reads {
                     markers: marker_total <= most_markers,
                 }
             }
+            Some(Value::String(text)) => {
+                let cursor = Cursor::parse(text).ok_or_else(|| bad("cursor: the nextCursor an earlier page gave, unchanged"))?;
+                if cursor.epoch != epoch {
+                    return Err((
+                        daw_bridge::wire::code::STALE.into(),
+                        "the project in the tab changed since the first page: read again".into(),
+                    ));
+                }
+                cursor
+            }
+            Some(_) => return Err(bad("cursor must be a string")),
         };
+        let first = cursor.n == 0 && cursor.sub == 0;
         let mut clock = Clock { started: Instant::now(), reads: 0 };
-        // The page's records, encoded as they come (the inside of the array), their count and their bytes on the wire.
-        let mut records: Vec<u8> = vec![];
-        let mut count = 0;
+        let changed = reaper.state_change_count(proj);
+        let under = Under { reaper, proj, epoch: &epoch, changed };
+        let mut records: Vec<Value> = vec![];
         let mut bytes = 0;
         let mut next: Option<Cursor> = None;
         // Tracks, each with its FX and items.
@@ -550,7 +444,7 @@ impl Reads {
                 };
                 Work::new(key, budget)
             });
-            if !self.read_track(reaper, proj, track, cursor.n, &mut work, &mut clock) {
+            if !self.read_track(&under, track, cursor.n, &mut work, &mut clock) {
                 keep_work(work);
                 next = Some(cursor.clone());
                 break 'tracks;
@@ -558,10 +452,13 @@ impl Reads {
             let stream = work.records.as_deref().unwrap_or_default();
             let mut full = false;
             for record in stream.iter().skip(cursor.sub) {
-                if !append(&mut records, &mut count, &mut bytes, record, page_bytes, &clock) {
+                let size = super::json_len(record) + 1;
+                if !records.is_empty() && (bytes + size > page_bytes || clock.over()) {
                     full = true;
                     break;
                 }
+                bytes += size;
+                records.push(record.clone());
                 cursor.sub += 1;
             }
             if full {
@@ -591,26 +488,33 @@ impl Reads {
                             "lane": marker.lane,
                         },
                     });
-                    if !append(&mut records, &mut count, &mut bytes, &record, page_bytes, &clock) {
+                    let size = super::json_len(&record) + 1;
+                    if !records.is_empty() && (bytes + size > page_bytes || clock.over()) {
                         next = Some(cursor.clone());
                         break;
                     }
+                    bytes += size;
+                    records.push(record);
                 }
                 cursor.n += 1;
             }
         }
-        // The fields after the records, in the order they go out.
-        let mut rest = Map::new();
+        let mut answer = json!({"epoch": epoch, "records": records});
         // (every page says the change count, so a digest the producer edited in the middle of is read again)
-        let changed_now = reaper.state_change_count(proj);
-        rest.insert("changed".into(), changed_now.map_or(Value::Null, Value::from));
+        answer["changed"] = reaper.state_change_count(proj).map_or(Value::Null, Value::from);
         if let Some(next) = &next {
-            rest.insert("nextCursor".into(), next.text().into());
+            answer["nextCursor"] = next.text().into();
         }
-        if let Some(project) = project {
-            rest.insert("project".into(), project);
-            rest.insert("facts".into(), facts(reaper, proj, marker_total));
-            rest.insert("summaries".into(), json!({"FX": "FX", "item": "items", "marker": "markers", "region": "markers"}));
+        if first {
+            let identity = self.identity(proj);
+            answer["project"] = json!({
+                "id": self.project_id(reaper, proj, &info),
+                "identity": identity,
+                "name": rows::clip(&info.name),
+                "path": rows::clip(&info.path),
+            });
+            answer["facts"] = facts(reaper, proj, marker_total);
+            answer["summaries"] = json!({"FX": "FX", "item": "items", "marker": "markers", "region": "markers"});
             let mut bounded = Map::new();
             if !cursor.items && content {
                 bounded.insert("item".into(), format!("more than {most_items} items: each track's are summed up").into());
@@ -622,7 +526,7 @@ impl Reads {
             if !content {
                 bounded.insert("item".into(), "not read (a quick look)".into());
             }
-            rest.insert("bounded".into(), Value::Object(bounded));
+            answer["bounded"] = Value::Object(bounded);
         }
         if next.is_none() {
             let mut bounded = Map::new();
@@ -633,25 +537,19 @@ impl Reads {
                 bounded.insert("points".into(), format!("more than {POINTS_BUDGET} envelope points: the rest aren't compared").into());
             }
             if !bounded.is_empty() {
-                let into = rest.entry("bounded").or_insert_with(|| json!({}));
+                let into = answer.as_object_mut().unwrap().entry("bounded").or_insert_with(|| json!({}));
                 if let Some(into) = into.as_object_mut() {
                     into.extend(bounded);
                 }
             }
         }
-        let page = CachedPage { cursor: cursor_text.map(str::to_owned), records, rest };
-        let encoded = encode_page(&epoch, &page, None);
-        match key {
-            // Kept while the count stays what it was, from the digest's first page to this page's end.
-            Some(key) if changed_now == Some(key.changed) => keep_page(cursor.digest, &key, page, next.is_none()),
-            _ => drop_building(cursor.digest),
-        }
-        Ok(encoded)
+        Ok(answer)
     }
 
     /// Reads a track's records into `work` as far as the page's share of time goes: its envelopes' points, its items,
     /// then its own record, its FX (containers' children after them) and its items' records. True once they're read.
-    fn read_track(&self, reaper: &Reaper, proj: Project, track: Track, position: usize, work: &mut Work, clock: &mut Clock) -> bool {
+    fn read_track(&self, under: &Under, track: Track, position: usize, work: &mut Work, clock: &mut Clock) -> bool {
+        let reaper = under.reaper;
         if work.records.is_some() {
             return true;
         }
@@ -759,7 +657,7 @@ impl Reads {
             left
         });
         while let Some(place) = left.pop() {
-            let fx_guid = self.fx_record(reaper, proj, &place, automated, &mut work.budget, &mut work.fx_records);
+            let fx_guid = self.fx_record(under, &place, automated, &mut work.budget, &mut work.fx_records);
             if place.depth < 8 && reaper.fx_config(place.fx, "container_count").is_some() {
                 let children = reaper.fx_children(place.fx).into_iter().enumerate();
                 let children: Vec<FxPlace> =
@@ -846,15 +744,8 @@ impl Reads {
     }
 
     /// An FX's record (its container's children come after it, read one by one): its GUID.
-    fn fx_record(
-        &self,
-        reaper: &Reaper,
-        proj: Project,
-        place: &FxPlace,
-        automated: &Automated,
-        budget: &mut Budget,
-        records: &mut Vec<Value>,
-    ) -> String {
+    fn fx_record(&self, under: &Under, place: &FxPlace, automated: &Automated, budget: &mut Budget, records: &mut Vec<Value>) -> String {
+        let (reaper, proj) = (under.reaper, under.proj);
         let FxPlace { fx, position, parent, .. } = place;
         let fx = *fx;
         let fx_guid = reaper.fx_guid(fx);
@@ -869,10 +760,15 @@ impl Reads {
         let hashed = budget.params + read as usize <= PARAMS_BUDGET;
         let listed = budget.values && budget.value_count + read as usize <= VALUES_BUDGET;
         if hashed || listed {
-            for param in 0..read {
+            // The sweep that costs: kept while the count stays what it was, read again once it moved.
+            let normalized = kept_params(under, &fx_guid, read as usize).unwrap_or_else(|| {
+                let normalized: Vec<f64> = (0..read).map(|param| reaper.param_normalized(fx, param)).collect();
+                keep_params(under, &fx_guid, &normalized);
+                normalized
+            });
+            for (param, &normalized) in (0..).zip(&normalized) {
                 // (an automated parameter follows its envelope, which has its own fingerprint)
                 let skip = automated.params.contains(&(fx.index, param));
-                let normalized = reaper.param_normalized(fx, param);
                 if hashed && !skip {
                     print.number(normalized, 4);
                 }
@@ -1218,6 +1114,8 @@ mod tests {
         let before = calls();
         let (_, whole_records) = whole(&reads, false, true);
         let once = calls() - before;
+        // (read anew: the parameters kept from the digest before would make these pages cheaper than a first read's)
+        fake::with(|s| s.state_count += 1);
         // A page's share of the main thread (here 2 points, items or FX) holds inside the FX, a container's children too.
         TEST_READS.with(|reads| reads.set(Some(2)));
         let mut answer = page(&reads, json!({})).unwrap();
@@ -1246,6 +1144,8 @@ mod tests {
             s.tracks[0].fx[0].params[0].value = 0.5;
             s.tracks[1].items[1].position = 3.0;
             s.markers[0].name = "Drop 2".into();
+            // (a parameter edit moves REAPER's state change count, 7.82; the fake's value alone doesn't)
+            s.state_count += 1;
         });
         let (_, after) = whole(&reads, false, true);
         assert_eq!(before.len(), after.len());
@@ -1265,5 +1165,100 @@ mod tests {
             find(&after, "{FX-EQ}")["f"]["parameters"]["parametersHash"]
         );
         assert_eq!(find(&after, "{CCCC}")["n"], "Snare Top");
+    }
+
+    // The optimization audit's R1 (2026-10-24): watch_me looks at the project every second or so, and most looks find it
+    // as it was; the parameter sweeps are the bulk of a digest's REAPER calls, and a parameter edit moves REAPER's state
+    // change count (lab, 7.82). Under one count, they're read once.
+    #[test]
+    fn parameter_values_are_kept_while_the_state_count_stays_and_read_again_once_it_moved() {
+        big_project();
+        let reads = Reads::default();
+        // (pages cut by their bytes alone, not the clock: the same digest makes the same calls each time)
+        TEST_READS.with(|reads| reads.set(Some(usize::MAX)));
+        let calls = || fake::with(|s| s.calls);
+        let before = calls();
+        let (_, first) = whole(&reads, true, false);
+        let once = calls() - before;
+        let before = calls();
+        let (_, again) = whole(&reads, true, false);
+        let kept = calls() - before;
+        assert_eq!(again, first);
+        assert!(kept * 4 < once, "{kept} REAPER calls for the look again, {once} for the first: 64,000 parameters were kept");
+        // The producer moves a parameter: REAPER moves its count, and the parameters read anew.
+        fake::with(|s| {
+            s.state_count += 1;
+            s.tracks[3].fx[1].params[2].value = 0.9;
+        });
+        let before = calls();
+        let (_, after) = whole(&reads, true, false);
+        let moved = calls() - before;
+        assert!(moved * 2 > once, "{moved} REAPER calls once the count moved, {once} for the first");
+        let (was, is) = (find(&first, "{F0003-1}"), find(&after, "{F0003-1}"));
+        assert_eq!(is["v"][2], 0.9);
+        assert_ne!(was["f"]["parameters"]["parametersHash"], is["f"]["parameters"]["parametersHash"]);
+        assert_eq!(after.iter().filter(|record| !first.contains(record)).count(), 1, "one FX changed");
+        TEST_READS.with(|reads| reads.set(None));
+    }
+
+    // What REAPER moves neither its count nor its history for (lab, 7.82: a bare API write outside an undo block, an
+    // extension's, of a track's mute or name, an item's place or a marker) is read every time: only the parameters are kept,
+    // and a parameter write moves the count even bare.
+    #[test]
+    fn a_bare_write_that_moved_no_count_still_shows_the_next_time() {
+        fake::lab_project();
+        let reads = Reads::default();
+        let (_, before) = whole(&reads, true, true);
+        fake::with(|s| {
+            s.tracks[1].mute = true;
+            s.tracks[2].name = "Snare Top".into();
+            s.tracks[1].items[1].position = 3.0;
+            s.markers[0].name = "Drop 2".into();
+        });
+        let (_, after) = whole(&reads, true, true);
+        let moved: Vec<&str> =
+            before.iter().zip(&after).filter(|(old, new)| old != new).map(|(_, new)| new["id"].as_str().unwrap()).collect();
+        assert_eq!(moved, ["{BBBB}", "{ITEM-K2}", "{CCCC}", "{MARK-1}"]);
+        assert_eq!(find(&after, "{BBBB}")["f"]["mixer"]["mute"], true);
+    }
+
+    #[test]
+    fn kept_parameter_values_are_forgotten_with_the_epoch_and_bounded() {
+        big_project();
+        let reads = Reads::default();
+        TEST_READS.with(|reads| reads.set(Some(usize::MAX)));
+        let calls = || fake::with(|s| s.calls);
+        let before = calls();
+        whole(&reads, true, false);
+        let once = calls() - before;
+        // Another project in the tab: nothing kept is of it.
+        reads.bump_epoch();
+        let before = calls();
+        whole(&reads, true, false);
+        assert_eq!(calls() - before, once, "read as a first digest is");
+        // Kept up to a bound: past it, the rest is read each time.
+        TEST_PARAMS_KEPT.with(|most| most.set(Some(640)));
+        fake::with(|s| s.state_count += 1);
+        let before = calls();
+        whole(&reads, true, false);
+        let fresh = calls() - before;
+        let before = calls();
+        whole(&reads, true, false);
+        let kept = calls() - before;
+        TEST_PARAMS_KEPT.with(|most| most.set(None));
+        TEST_READS.with(|reads| reads.set(None));
+        assert_eq!(fresh - kept, 640, "ten FX of 64 parameters kept, the rest read again");
+    }
+
+    #[test]
+    fn a_plug_in_whose_parameters_changed_in_number_is_read_again() {
+        fake::lab_project();
+        let reads = Reads::default();
+        let (_, before) = whole(&reads, true, false);
+        assert_eq!(find(&before, "{FX-EQ}")["v"], json!([0.25, null, 1.0]));
+        fake::with(|s| s.tracks[0].fx[0].params.push(fake::FakeParam::new("Band 2 Gain", 0.75, "+3 dB")));
+        let (_, after) = whole(&reads, true, false);
+        assert_eq!(find(&after, "{FX-EQ}")["v"], json!([0.25, null, 1.0, 0.75]));
+        assert_eq!(find(&after, "{FX-EQ}")["f"]["parameters"]["count"], 4);
     }
 }

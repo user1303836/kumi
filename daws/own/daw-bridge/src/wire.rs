@@ -324,38 +324,12 @@ impl Frame {
     pub fn error(id: u64, code: &str, message: impl Into<String>) -> Frame {
         Frame::Response(Response { id, ok: false, result: None, error: Some(ErrorBody { code: code.into(), message: message.into() }) })
     }
-
-    /// The line `Frame::ok(id, result).encode()` gives, for a result already encoded as JSON (`result` is its text): an
-    /// answer a bridge kept encoded (a page served again) goes out without being built as a tree and encoded again. The
-    /// result is the bridge's own, nested within [`MAX_PAYLOAD_DEPTH`] as a page it encoded once was.
-    pub fn encode_ok(id: u64, result: &[u8]) -> Vec<u8> {
-        let mut line = Vec::with_capacity(result.len() + 64);
-        line.extend_from_slice(b"{\"type\":\"response\",\"id\":");
-        line.extend_from_slice(id.to_string().as_bytes());
-        line.extend_from_slice(b",\"ok\":true,\"result\":");
-        line.extend_from_slice(result);
-        line.extend_from_slice(b"}\n");
-        line
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
-
-    #[test]
-    fn a_result_already_encoded_goes_out_as_the_line_its_tree_would() {
-        let result = json!({"epoch": "3-1", "records": [{"k": "track", "n": "Drums \"A\" \u{1f3b5}"}], "changed": 11, "next": null});
-        let encoded = serde_json::to_vec(&result).unwrap();
-        assert_eq!(Frame::encode_ok(42, &encoded), Frame::ok(42, result).encode());
-        assert_eq!(Frame::encode_ok(1, b"{}"), b"{\"type\":\"response\",\"id\":1,\"ok\":true,\"result\":{}}\n");
-        let line = String::from_utf8(Frame::encode_ok(MAX_SAFE_INTEGER, b"[1,2]")).unwrap();
-        assert_eq!(
-            Frame::parse(line.trim_end()).unwrap(),
-            Frame::Response(Response { id: MAX_SAFE_INTEGER, ok: true, result: Some(json!([1, 2])), error: None })
-        );
-    }
 
     #[test]
     fn frames_round_trip_and_unknown_types_are_kept_apart() {

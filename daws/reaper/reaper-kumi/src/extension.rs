@@ -12,7 +12,7 @@ use serde_json::{json, Value};
 use crate::api::{self, Api};
 use crate::csurf::Call;
 use crate::focus::Focus;
-use crate::queue::{self, Answer, Budget, Job, Reply};
+use crate::queue::{self, Answer, Budget, Job};
 use crate::read::Reads;
 use crate::reaper::{Busy, PlayState, ProjectInfo, Reaper, ACTION_QUIT};
 
@@ -429,26 +429,20 @@ impl Extension {
                 self.poll_project(true);
                 seen = now;
             }
-            let failed = || Reply::Answer(Err(("internal".into(), "the request failed inside the bridge".into())));
-            let reply = crate::guard("request", failed(), || self.handle(&job.method, &job.params));
-            job.reply(reply);
+            let answer = crate::guard("request", Err(("internal".into(), "the request failed inside the bridge".into())), || {
+                self.handle(&job.method, &job.params)
+            });
+            job.answer(answer);
         });
     }
 
-    fn handle(&self, method: &str, params: &Value) -> Reply {
-        // (a digest's pages go out encoded: a page kept from an earlier digest is sent as it was)
-        if method == "digest" {
-            return self.reads.digest(&self.reaper(), params);
-        }
-        Reply::Answer(self.answer(method, params))
-    }
-
-    fn answer(&self, method: &str, params: &Value) -> Answer {
+    fn handle(&self, method: &str, params: &Value) -> Answer {
         match method {
             "action" => self.action(params),
             "quit" => self.quit(params),
             "read" => self.reads.read(&self.reaper(), params),
             "snapshot" => self.reads.snapshot(&self.reaper()),
+            "digest" => self.reads.digest(&self.reaper(), params),
             "focus_body" => self.reads.focus_body(&self.reaper(), params),
             "change_preview" => self.changes.preview(&self.reaper(), &self.reads, params),
             "change_apply" => self.changes.apply(&self.reaper(), &self.reads, params),

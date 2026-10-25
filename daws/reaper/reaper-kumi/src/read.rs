@@ -288,8 +288,7 @@ impl Reads {
         self.eras.borrow().iter().any(|(known, of)| known == epoch && *of == identity)
     }
 
-    /// Refs stop meaning what they meant: a tab switch, or a new project in the tab. The digests kept are of the project
-    /// the tab had.
+    /// Refs stop meaning what they meant: a tab switch, or a new project in the tab.
     pub fn bump_epoch(&self) {
         self.epoch.borrow_mut().bump();
         self.registry.borrow_mut().clear();
