@@ -1265,10 +1265,11 @@ mod tests {
         assert!(jobs.try_recv().is_err(), "once");
     }
 
-    // (the optimization audit's R9: this slept 4.4 s through the production stall of 1.5 s; the lab's stall is 300 ms here)
+    // (the optimization audit's R9: this slept 4.4 s through the production stall of 1.5 s; the lab's stall is 600 ms here,
+    // and every wait is scaled with it, so the margins a slow runner needs stay what they were: review)
     #[test]
     fn the_main_thread_running_a_slow_request_is_working_and_that_request_is_answered_while_others_are_told_busy() {
-        let stall = Duration::from_millis(300);
+        let stall = Duration::from_millis(600);
         let mut lab = Lab::start_with_stall(VECTOR_SECRET, ServerConnection::new, stall);
         let (mut stream, mut reader, _) = lab.authenticated();
         // (the lab ticked when it started: the request below is taken whatever the handshake took)
@@ -1284,7 +1285,7 @@ mod tests {
                 snapshot.working = Some(Instant::now());
                 snapshot.last_tick = Some(Instant::now() - Duration::from_secs(5));
             }
-            thread::sleep(Duration::from_millis(600));
+            thread::sleep(Duration::from_millis(1200));
             {
                 let mut snapshot = snapshot.lock().unwrap();
                 snapshot.working = None;
@@ -1295,12 +1296,12 @@ mod tests {
         let frame = Request { id: 1, method: "change_apply".into(), params: json!({}), deadline_ms: Some(unix_ms() + 15_000) };
         stream.write_all(&Frame::Request(frame).encode()).unwrap();
         // While it is young, status (on another connection) says it works and not that REAPER is stuck.
-        thread::sleep(Duration::from_millis(100));
+        thread::sleep(Duration::from_millis(150));
         let (mut other, mut other_reader, _) = lab.authenticated();
         let status = request(&mut other, &mut other_reader, 2, "status")["result"].clone();
         assert_eq!((&status["busy"], &status["working"]), (&json!(false), &json!(true)));
         // Past the stall limit, what else comes is answered busy at once, not after its deadline.
-        thread::sleep(Duration::from_millis(350));
+        thread::sleep(Duration::from_millis(750));
         let status = request(&mut other, &mut other_reader, 3, "status")["result"].clone();
         assert_eq!((&status["busy"], &status["working"]), (&json!("working"), &json!(true)));
         assert!(status["workingMs"].as_u64().unwrap() >= stall.as_millis() as u64, "{status}");
@@ -1607,12 +1608,13 @@ mod tests {
     #[test]
     fn a_heartbeat_counts_from_the_connection_not_from_the_server() {
         let mut lab = Lab::start(VECTOR_SECRET, ServerConnection::new);
-        thread::sleep(Duration::from_millis(300));
+        // (the sleep well past the bound tells the two clocks apart, and the bound leaves the handshake its room: review)
+        thread::sleep(Duration::from_millis(600));
         let (_stream, mut reader, _) = lab.authenticated();
         lab.hub.heartbeat();
         let beat: Value = serde_json::from_str(&read_line(&mut reader).unwrap()).unwrap();
         assert_eq!(beat["type"], "heartbeat");
-        assert!(beat["ms"].as_u64().unwrap() < 200, "{beat}");
+        assert!(beat["ms"].as_u64().unwrap() < 400, "{beat}");
     }
 
     /// The welcome and the connection's opening to events are one step: an event sent the moment the host has read
