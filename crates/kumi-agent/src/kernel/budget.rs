@@ -280,12 +280,14 @@ fn raw_images(message: &Message) -> usize {
 }
 
 thread_local! {
-    /// Where a message is written to be measured: one buffer, kept between measurements.
+    /// Where a value is written to be measured: one buffer, kept between measurements.
     static MEASURED: RefCell<String> = const { RefCell::new(String::new()) };
 }
 
-/// `stringify(value).len()`, without keeping the text.
-fn stringified_len(value: &Value) -> usize {
+/// `stringify(value).len()` without keeping the text: what measures a conversation message by message, before every
+/// model step and at every save, builds no string for it. (Kept here rather than in kumi-common, which Live's bridge
+/// links: a change there bumps the bridge.)
+pub(crate) fn json_bytes(value: &Value) -> usize {
     MEASURED.with(|buffer| {
         let mut buffer = buffer.borrow_mut();
         buffer.clear();
@@ -318,7 +320,7 @@ fn bytes_of(message: &Message) -> usize {
     } else {
         serde_json::to_value(message)
     };
-    stringified_len(&value.expect("message serializes")) + images * IMAGE_BYTES
+    json_bytes(&value.expect("message serializes")) + images * IMAGE_BYTES
 }
 
 fn image_count(output: &ToolResultOutput) -> usize {
@@ -412,7 +414,36 @@ fn previous_turn(messages: &[Message]) -> Option<usize> {
 }
 
 /// A copy of messages[0, end) with large tool results cut down and, if asked, observations removed; None when nothing changed.
+/// Whether `clear_until` would change this message: a tool result with words to cut or pictures to put away, or an
+/// observation not yet cleared. Decided without copying anything: past the clearing threshold, clearing is asked before
+/// every step, and most steps have nothing left to clear.
+fn would_clear(message: &Message, observations: bool, cleared_note: &str) -> bool {
+    match message {
+        Message::Tool { content, .. } => content.iter().any(|part| {
+            let ToolPart::ToolResult(result) = part else { return false };
+            match &result.output {
+                ToolResultOutput::Content { .. } => true,
+                ToolResultOutput::Text { value, .. } | ToolResultOutput::ErrorText { value, .. } => {
+                    !(value.ends_with(cleared_note) || value.len() <= SMALL)
+                }
+                _ => false,
+            }
+        }),
+        Message::User { content, .. } if observations => content.iter().any(|part| match part {
+            UserPart::Text(text) => text
+                .text
+                .find(OBSERVATION_MARKER)
+                .is_some_and(|at| !text.text[at + OBSERVATION_MARKER.len()..].starts_with(CLEARED_OBSERVATION)),
+            UserPart::File(_) => false,
+        }),
+        _ => false,
+    }
+}
+
 fn clear_until(messages: &[Message], end: usize, observations: bool, cleared_note: &str) -> Option<Vec<Message>> {
+    if !messages[..end.min(messages.len())].iter().any(|message| would_clear(message, observations, cleared_note)) {
+        return None;
+    }
     let mut changed = false;
     let cleared: Vec<Message> = messages
         .iter()
@@ -802,11 +833,20 @@ mod tests {
             ],
             provider_options: None,
         };
+        let drawn = Message::Assistant {
+            content: vec![AssistantPart::File(FilePart {
+                filename: None,
+                data: FileData::Data { data: DataContent::Bytes(vec![1; 3_000]) },
+                media_type: "image/png".into(),
+                provider_options: None,
+            })],
+            provider_options: None,
+        };
         let conversations: Vec<Vec<Message>> = vec![
             vec![],
             vec![Message::user_text("hi")],
             vec![Message::user_text("make it darker"), Message::assistant_text("Done: the filter sits at 1.5 kHz now, 3.0 dB down.")],
-            vec![Message::user_text("look"), image_result("c1", 20_000), picture, image_result("c2", 5)],
+            vec![Message::user_text("look"), image_result("c1", 20_000), picture, image_result("c2", 5), drawn],
         ];
         for messages in &conversations {
             assert_eq!(bytes(messages), measured_the_long_way(messages), "{} messages", messages.len());

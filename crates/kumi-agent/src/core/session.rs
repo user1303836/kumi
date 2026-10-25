@@ -254,7 +254,9 @@ struct Held {
 }
 #[derive(Clone)]
 struct Settled {
-    checkpoint: KernelCheckpoint,
+    /// Shared between the state's holders rather than copied each time it is read: a long conversation's settled
+    /// messages are hundreds of KB.
+    checkpoint: Rc<KernelCheckpoint>,
     key: String,
 }
 struct Chosen {
@@ -1580,7 +1582,7 @@ impl Session {
                 s.kernel.clone()
             };
             if let Some(h) = held.filter(|h| h.value.has_checkpoint()) {
-                self.0.state.borrow_mut().switched = Some(Settled { checkpoint: h.value.checkpoint()?, key: h.key });
+                self.0.state.borrow_mut().switched = Some(Settled { checkpoint: Rc::new(h.value.checkpoint()?), key: h.key });
             }
             self.drop_kernel().await?;
             self.assert_current(op)?;
@@ -1673,11 +1675,11 @@ impl Session {
                 from = resumed.as_ref().map(|kept| kept.checkpoint.clone());
             } else if from.is_some() {
             } else if let Some(switched) = switched.filter(|s| s.key == observation.key) {
-                from = Some(switched.checkpoint);
+                from = Some(KernelCheckpoint::clone(&switched.checkpoint));
             } else if let Some((checkpoint, _)) = carry {
                 from = Some(checkpoint);
             } else if let Some(settled) = settled.filter(|s| reason == Some("cancelled") && s.key == observation.key) {
-                from = Some(settled.checkpoint);
+                from = Some(KernelCheckpoint::clone(&settled.checkpoint));
             } else if let Some(w) = wanted_here {
                 let going = {
                     let s = self.0.state.borrow();
@@ -1685,7 +1687,7 @@ impl Session {
                 };
                 match going {
                     // It went on while no Set was open: it carries on now that its own is.
-                    Some(Some(settled)) => from = Some(settled.checkpoint),
+                    Some(Some(settled)) => from = Some(KernelCheckpoint::clone(&settled.checkpoint)),
                     _ => {
                         let saving = self.0.saving.borrow().clone();
                         let _ = saving.await;
@@ -1836,7 +1838,7 @@ impl Session {
         };
         let (place, id, copy) = {
             let mut s = self.0.state.borrow_mut();
-            s.settled = Some(Settled { checkpoint, key: held.key });
+            s.settled = Some(Settled { checkpoint: Rc::new(checkpoint), key: held.key });
             s.as_kept = true;
             (s.place.clone(), s.conversation_id.clone(), s.copied_from.is_some())
         };
@@ -1852,6 +1854,7 @@ impl Session {
         let Ok(checkpoint) = held.value.checkpoint() else {
             return;
         };
+        let checkpoint = Rc::new(checkpoint);
         let empty = checkpoint.messages.is_empty();
         let (place, id, conversation, name, from) = {
             let mut s = self.0.state.borrow_mut();
@@ -1872,7 +1875,7 @@ impl Session {
                 s.conversation_id.clone(),
                 SavedConversation {
                     saved_at: now(),
-                    checkpoint,
+                    checkpoint: KernelCheckpoint::clone(&checkpoint),
                     turns: Some(s.conversation_turns),
                     first: s.conversation_first.clone().filter(|s| !s.is_empty()),
                     changes: (!s.changes.is_empty())
@@ -2536,7 +2539,7 @@ impl SessionController for Session {
                     let checkpoint = held
                         .filter(|h| h.value.has_checkpoint())
                         .and_then(|h| h.value.checkpoint().ok())
-                        .or_else(|| settled.map(|s| s.checkpoint));
+                        .or_else(|| settled.map(|s| KernelCheckpoint::clone(&s.checkpoint)));
                     if let Some(checkpoint) = checkpoint {
                         this.0.state.borrow_mut().carry = Some((checkpoint, place));
                     }
@@ -2698,7 +2701,7 @@ impl SessionController for Session {
         let checkpoint = held
             .filter(|h| h.value.has_checkpoint())
             .and_then(|h| h.value.checkpoint().ok())
-            .or(settled.map(|s| s.checkpoint))
+            .or(settled.map(|s| KernelCheckpoint::clone(&s.checkpoint)))
             .filter(|checkpoint| !checkpoint.messages.is_empty());
         let Some(checkpoint) = checkpoint else { return Ok(None) };
         let saving = self.0.saving.borrow().clone();
@@ -2848,7 +2851,7 @@ impl SessionController for Session {
                 s.place.clone(),
                 s.conversation_id.clone(),
                 s.conversation_name.clone(),
-                s.settled.as_ref().map(|settled| settled.checkpoint.clone()),
+                s.settled.as_ref().map(|settled| KernelCheckpoint::clone(&settled.checkpoint)),
                 s.conversation_first.clone().filter(|first| !first.is_empty()),
                 s.conversation_turns,
                 s.changes.clone(),
@@ -2975,8 +2978,9 @@ impl SessionController for Session {
         {
             let mut s = self.0.state.borrow_mut();
             s.seen.insert(change.id.clone(), change.clone());
-            if s.seen.len() > 20_000 {
-                s.seen.shift_remove_index(0);
+            // Trimmed a thousand at a time: shifting the oldest out one by one is a walk of the whole map per event.
+            if s.seen.len() > 21_000 {
+                s.seen.drain(..1_000);
             }
             // Only the newest changes keep their pictures here; the conversation keeps its own (`changes`).
             if let Some((_, older)) = s.seen.iter_mut().rev().nth(500) {

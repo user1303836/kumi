@@ -20,7 +20,8 @@ struct Learner {
 }
 impl Learner {
     fn new() -> Self {
-        let mut child = Command::new(env!("CARGO_BIN_EXE_kumi-library-learner"))
+        let mut child = Command::new(env!("CARGO_BIN_EXE_kumi"))
+            .arg("__library-learner")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())

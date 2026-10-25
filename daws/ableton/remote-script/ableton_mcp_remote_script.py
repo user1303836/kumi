@@ -818,6 +818,16 @@ class _BoundedOutput(io.TextIOBase):
         return "".join(self._parts)
 
 
+class _Framed(dict):
+    """A signed response with its line on the wire already made (`AuthenticatedRemoteScript.signed_frame`)."""
+
+    __slots__ = ("wire",)
+
+    def __init__(self, payload: dict[str, Any], wire: bytes):
+        super().__init__(payload)
+        self.wire = wire
+
+
 class AuthenticatedRemoteScript:
     def __init__(self, secret: str, operation: Callable[[str, dict[str, Any]], Any], bridge_epoch: str | None = None, connection_challenge: str | None = None):
         if len(secret) < 32:
@@ -832,7 +842,9 @@ class AuthenticatedRemoteScript:
             raise ValueError("authenticated channel binding is too short")
 
     def sign(self, payload: dict[str, Any]) -> str:
-        encoded = self._bounded_canonical(payload).encode("utf-8")
+        return self._mac(self._bounded_canonical_bytes(payload))
+
+    def _mac(self, encoded: bytes) -> str:
         return base64.urlsafe_b64encode(hmac.new(self._secret, encoded, hashlib.sha256).digest()).decode("ascii").rstrip("=")
 
     @classmethod
@@ -853,11 +865,7 @@ class AuthenticatedRemoteScript:
             # Its values are a level down, where any value is too deep.
             if depth >= MAX_WIRE_DEPTH:
                 raise ValueError("wire payload is too deeply nested")
-            depth += 1; parts = []
-            for key, prefix in _wire_layout(value):
-                item = value[key]; text = _wire_scalar(item)
-                parts.append(prefix + (text if text is not None else cls._canonical(item, depth)))
-            return "{" + ",".join(parts) + "}"
+            return "{" + ",".join(cls._canonical_parts(value, depth + 1)) + "}"
         if kind is list:
             if len(value) > MAX_WIRE_ARRAY_LENGTH:
                 raise ValueError("wire array is too large")
@@ -878,6 +886,15 @@ class AuthenticatedRemoteScript:
                 raise ValueError("wire string is too large")
             return _encode_string(value)
         return cls._canonical_general(value, depth)
+
+    @classmethod
+    def _canonical_parts(cls, value: dict[Any, Any], depth: int) -> list[str]:
+        """An object's members as the canonical text has them, `"key":value` each, in the bridge's key order."""
+        parts = []
+        for key, prefix in _wire_layout(value):
+            item = value[key]; text = _wire_scalar(item)
+            parts.append(prefix + (text if text is not None else cls._canonical(item, depth)))
+        return parts
 
     @classmethod
     def _canonical_general(cls, value: Any, depth: int) -> str:
@@ -911,6 +928,30 @@ class AuthenticatedRemoteScript:
         if len(encoded.encode("utf-8")) > MAX_WIRE_BYTES:
             raise ValueError("wire payload is too large")
         return encoded
+
+    @classmethod
+    def _bounded_canonical_bytes(cls, value: Any) -> bytes:
+        """The canonical text encoded once: what a MAC is taken over (a big read's answer is megabytes, and Live's
+        thread waits while it's encoded, so it isn't encoded again to measure it)."""
+        encoded = cls._canonical(value).encode("utf-8")
+        if len(encoded) > MAX_WIRE_BYTES:
+            raise ValueError("wire payload is too large")
+        return encoded
+
+    def signed_frame(self, payload: dict[str, Any]) -> tuple[dict[str, Any], bytes]:
+        """`payload` signed, and its line on the wire: the canonical text that was signed, with the `mac` member put
+        in its place among the sorted keys, rather than the payload written out a second time. The bridge reads any
+        key order, and takes the MAC over the canonical text it makes from what it read, so the line it gets is what
+        it would have made itself."""
+        parts = self._canonical_parts(payload, 1)
+        encoded = ("{" + ",".join(parts) + "}").encode("utf-8")
+        if len(encoded) > MAX_WIRE_BYTES:
+            raise ValueError("wire payload is too large")
+        mac = self._mac(encoded)
+        keys = _wire_keys(payload)
+        at = next((index for index, key in enumerate(keys) if type(key) is not str or key > "mac"), len(keys))
+        parts.insert(at, '"mac":' + _encode_string(mac))
+        return {**payload, "mac": mac}, ("{" + ",".join(parts) + "}").encode("utf-8") + b"\n"
 
     def bound(self, payload: dict[str, Any], deadline_ms: int | None = None) -> dict[str, Any]:
         return {**payload, "bridgeEpoch": self.bridge_epoch, "connectionChallenge": self.connection_challenge, "deadlineMs": deadline_ms or int(time.time() * 1000) + 5000}
@@ -1003,8 +1044,8 @@ class AuthenticatedRemoteScript:
         response: dict[str, Any] = {"version": PROTOCOL, "id": request_id, "ok": ok, "bridgeEpoch": self.bridge_epoch, "connectionChallenge": self.connection_challenge}
         if result is not None: response["result"] = result
         if error is not None: response["error"] = error
-        response["mac"] = self.sign(response)
-        return response
+        signed, wire = self.signed_frame(response)
+        return _Framed(signed, wire)
 
     def _error(self, request_id: str, message: str) -> dict[str, Any]:
         return self._response(request_id if isinstance(request_id, str) and re.fullmatch(r"[A-Za-z0-9_-]{1,128}", request_id) else "invalid", False, error=message)
@@ -14058,6 +14099,9 @@ class AbletonMcpBridge:
 
     @staticmethod
     def _frame(payload: dict[str, Any]) -> bytes:
+        """A payload's line on the wire: the one made when it was signed, else written out here."""
+        wire = getattr(payload, "wire", None)
+        if wire is not None: return wire
         return json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8") + b"\n"
 
     def _accept_pending(self) -> None:
@@ -14086,8 +14130,7 @@ class AbletonMcpBridge:
                 subscription.refresh(deadline)
                 for event in subscription.drain():
                     frame: dict[str, Any] = {"version": PROTOCOL, "id": "event", "ok": True, "bridgeEpoch": connection.auth.bridge_epoch, "connectionChallenge": connection.auth.connection_challenge, "result": {"event": event}}
-                    frame["mac"] = connection.auth.sign(frame)
-                    connection.outbound += self._frame(frame)
+                    connection.outbound += connection.auth.signed_frame(frame)[1]
             inbound = connection.inbound
             while not connection.closing:
                 # Before it says who it is, a connection gets no more than a first request's worth read (once

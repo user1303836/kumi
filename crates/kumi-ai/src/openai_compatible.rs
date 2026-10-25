@@ -215,7 +215,7 @@ impl LanguageModel for CompatibleModel {
         }
         headers.entry("user-agent".into()).or_default().push_str(" ai-sdk/provider-utils/5.0.49 runtime/node.js/24");
         let url = format!("{}/chat/completions", self.0.base_url.trim_end_matches('/'));
-        let response = post_json(self.0.fetch.as_ref(), &url, headers, body, options.abort_signal.clone()).await?;
+        let response = post_json(self.0.fetch.as_ref(), &url, headers, Rc::new(body), options.abort_signal.clone()).await?;
         Ok(convert_stream(Box::pin(json_stream(response.body.unwrap())), key, warnings, options.include_raw_chunks == Some(true)))
     }
 }

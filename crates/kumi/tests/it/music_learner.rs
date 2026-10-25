@@ -23,7 +23,8 @@ fn song(path: &Path, seconds: f64) {
 async fn learn(home: &Path, music: &Path) -> Vec<ScanReply> {
     std::fs::create_dir_all(home).unwrap();
     std::fs::write(home.join("slots.json"), r#"{"embeddings":{"now":{"use":"off"}}}"#).unwrap();
-    let mut child = Command::new(env!("CARGO_BIN_EXE_kumi-library-learner"))
+    let mut child = Command::new(env!("CARGO_BIN_EXE_kumi"))
+        .arg("__library-learner")
         .arg("--music")
         .env("KUMI_HOME", home)
         .stdin(Stdio::piped())
