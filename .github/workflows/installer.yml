@@ -275,10 +275,13 @@ jobs:
           kumi --help | grep -q "kumi bridge"
           kumi doctor || true
           test ! -e "$KUMI_HOME/node"
-          "$KUMI_HOME/app/ableton-mcp-server" --version
-          printf '%s' '{"mode":"analyze","source":{"pcmBase64":"AAAAPwAAAL8AAAA/AAAAvw==","sampleRate":48000}}' | "$KUMI_HOME/app/ableton-mcp-analysis-worker" > worker.json
+          # The bridge is in its package under app/bridge, once: nothing of it beside kumi.
+          "$KUMI_HOME/app/bridge/package/ableton-mcp-server" --version
+          printf '%s' '{"mode":"analyze","source":{"pcmBase64":"AAAAPwAAAL8AAAA/AAAAvw==","sampleRate":48000}}' | "$KUMI_HOME/app/bridge/package/ableton-mcp-analysis-worker" > worker.json
           python3 -c 'import json; r=json.load(open("worker.json")); assert r["ok"] and r["result"]["sampleCount"] == 4 and r["result"]["peak"] == 0.5'
-          test -x "$KUMI_HOME/app/ableton-mcp-analysis-worker"
+          test -x "$KUMI_HOME/app/bridge/package/ableton-mcp-analysis-worker"
+          test ! -e "$KUMI_HOME/app/ableton-mcp-server"
+          test ! -e "$KUMI_HOME/app/remote-script"
           # PATH line added once, in the startup file bash reads, and not again on a second run (which repairs).
           marked() { grep -c "Added by the Kumi installer" "$HOME/.bashrc" "$HOME/.bash_profile" "$HOME/.bash_login" "$HOME/.profile" 2>/dev/null | awk -F: '{ n += $NF } END { print n + 0 }'; }
           test "$(marked)" = 1
@@ -477,14 +480,15 @@ jobs:
           & $kumi --help | Select-String 'kumi bridge' | Out-Null
           & $kumi doctor; $global:LASTEXITCODE = 0
           if (Test-Path (Join-Path $env:KUMI_HOME 'node')) { throw 'fresh native install brought Node' }
-          & (Join-Path $env:KUMI_HOME 'app\ableton-mcp-server.exe') --version
+          & (Join-Path $env:KUMI_HOME 'app\bridge\package\ableton-mcp-server.exe') --version
           if ($LASTEXITCODE -ne 0) { throw 'native bridge did not start' }
-          if (-not (Test-Path (Join-Path $env:KUMI_HOME 'app\ableton-mcp-analysis-worker.exe'))) { throw 'no native analysis worker' }
+          if (-not (Test-Path (Join-Path $env:KUMI_HOME 'app\bridge\package\ableton-mcp-analysis-worker.exe'))) { throw 'no native analysis worker' }
+          if (Test-Path (Join-Path $env:KUMI_HOME 'app\ableton-mcp-server.exe')) { throw 'the bridge is beside kumi as well as in its package' }
           # Write the worker's UTF-8 JSON wire bytes directly; PowerShell's text pipeline can recode stdin.
           $workerInput = [Text.Encoding]::UTF8.GetBytes('{"mode":"analyze","source":{"pcmBase64":"AAAAPwAAAL8AAAA/AAAAvw==","sampleRate":48000}}')
           Write-Host ('Worker stdin first 16 bytes: ' + [BitConverter]::ToString($workerInput[0..15]))
           $workerProcess = New-Object Diagnostics.Process
-          $workerProcess.StartInfo.FileName = Join-Path $env:KUMI_HOME 'app\ableton-mcp-analysis-worker.exe'
+          $workerProcess.StartInfo.FileName = Join-Path $env:KUMI_HOME 'app\bridge\package\ableton-mcp-analysis-worker.exe'
           $workerProcess.StartInfo.UseShellExecute = $false
           $workerProcess.StartInfo.RedirectStandardInput = $true
           $workerProcess.StartInfo.RedirectStandardOutput = $true

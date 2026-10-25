@@ -221,7 +221,14 @@ class NativeRelease(unittest.TestCase):
         with tarfile.open(archive) as tar:
             self.assertTrue(all(member.isfile() for member in tar.getmembers()))
             names = tar.getnames()
-            self.assertTrue(all(binary in names for binary in release.BINARIES))
+            self.assertTrue(all(binary in names for binary in release.BUNDLE_BINARIES))
+            # The bridge ships once, in its package under bridge/: not beside kumi as well.
+            for binary in release.BRIDGE_BINARIES:
+                self.assertNotIn(binary, names)
+                self.assertIn("bridge/package/" + binary, names)
+            self.assertFalse(any(name.startswith(("remote-script/", "live-extension/")) for name in names))
+            self.assertIn("bridge/package/remote-script/AbletonMcpBridge/ableton_mcp_remote_script.py", names)
+            self.assertIn("bridge/package/live-extension/dist/extension.js", names)
             self.assertIn("apps/kumi/bin/kumi.mjs", names)
             # Others' code Kumi carries is under their licenses, said beside Kumi's own.
             self.assertIn("THIRD_PARTY_NOTICES.md", names)
