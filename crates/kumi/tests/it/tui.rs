@@ -618,6 +618,34 @@ async fn the_scheduler_turns_many_requests_into_one_frame_and_animates_only_whil
     .await;
 }
 
+#[tokio::test(start_paused = true)]
+async fn an_animation_draws_at_its_own_pace_and_a_request_is_still_drawn_within_the_floor() {
+    local(async {
+        let draws = Rc::new(Cell::new(0));
+        let counter = Rc::clone(&draws);
+        let start = tokio::time::Instant::now();
+        let clock = Box::new(move || start.elapsed().as_secs_f64() * 1000.0);
+        let scheduler = FrameScheduler::with_clock(Rc::new(move || counter.set(counter.get() + 1)), 5.0, 50.0, clock);
+        scheduler.set_animating(true);
+        tokio::time::sleep(Duration::from_millis(1)).await;
+        assert_eq!(draws.get(), 1, "the first frame comes at once");
+        tokio::time::sleep(Duration::from_millis(120)).await;
+        assert!((3..=4).contains(&draws.get()), "a frame every 50 ms while animating, not every 5: got {}", draws.get());
+        // A key arrives between two animation frames: its frame comes within the floor, not at the next one.
+        let before = draws.get();
+        scheduler.request();
+        tokio::time::sleep(Duration::from_millis(6)).await;
+        assert_eq!(draws.get(), before + 1, "a request is drawn within 5 ms");
+        scheduler.set_animating(false);
+        tokio::time::sleep(Duration::from_millis(60)).await;
+        let settled = draws.get();
+        tokio::time::sleep(Duration::from_millis(60)).await;
+        assert_eq!(draws.get(), settled, "no frames once nothing moves");
+        scheduler.dispose();
+    })
+    .await;
+}
+
 /// A terminal input fed by the test: a PassThrough with `isTTY`, `isRaw` and `setRawMode`.
 struct FakeInput {
     raw: Cell<bool>,

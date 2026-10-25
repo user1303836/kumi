@@ -598,6 +598,7 @@ impl Harness {
         opts.color_depth = Some(ColorDepth::Truecolor);
         opts.icons = Some(IconStyle::Glyphs);
         opts.frame_ms = Some(1.0);
+        opts.animation_ms = Some(1.0);
         // Pictures as cells, whatever terminal runs the tests.
         opts.graphics = Some(kumi::tui::pictures::Graphics::Cells);
         opts.close_timeout_ms = Some(100);
