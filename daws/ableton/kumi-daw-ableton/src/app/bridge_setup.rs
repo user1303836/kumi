@@ -819,8 +819,8 @@ async fn wait_for_live(
 mod tests {
     use super::*;
 
-    /// An installed app keeps the bridge in bridge/package (the one copy a bundle carries since 1.24); an app from
-    /// before has it beside kumi. A session and setup start whichever the app has.
+    /// An installed app keeps the bridge in bridge/package (the one copy a bundle carries); an app from before the
+    /// move has it beside kumi. A session and setup start whichever the app has.
     #[test]
     fn the_bridge_is_found_in_its_package_first_then_beside_kumi() {
         let app = tempfile::tempdir().unwrap();

@@ -303,9 +303,9 @@ pub(crate) async fn installation_checks(env: &Env, io: &DawIo, platform: &str) -
     checks
 }
 
-/// Kumi's own copy of the bridge, the program a Live session starts (in the app's bridge/package since 1.24, beside
-/// kumi before): that it is where Kumi looks, and that it starts. For an installed app only: a checkout's build has
-/// its bridge beside it, or not built yet.
+/// Kumi's own copy of the bridge, the program a Live session starts (in the app's bridge/package; beside kumi in an
+/// app from before the bridge moved there): that it is where Kumi looks, and that it starts. For an installed app only:
+/// a checkout's build has its bridge beside it, or not built yet.
 async fn bundled_bridge_check(io: &DawIo) -> Option<Check> {
     if !Path::new(&join(&executable_dir(), "package.json")).exists() {
         return None;
