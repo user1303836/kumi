@@ -65,6 +65,8 @@ pub struct PreparedAudio {
     pub seconds: Option<f64>,
     /// Where the copy begins in the file, seconds: 0 unless only a stretch was converted (`prepare_audio_range`).
     pub start: f64,
+    /// The copy holds the whole file, whatever stretch was asked for: a Mac's afconvert can't stop at one.
+    whole: bool,
     folder: Option<PathBuf>,
 }
 impl PreparedAudio {
@@ -72,6 +74,29 @@ impl PreparedAudio {
         if let Some(folder) = &self.folder {
             let _ = tokio::fs::remove_dir_all(folder).await;
         }
+    }
+    /// A copy of the whole file again, for another stretch of it: the same copy, linked under a path of its own in a
+    /// folder of its own, rather than the file converted whole once more. None for any other copy, or when it can't be
+    /// linked.
+    pub async fn linked(&self) -> Option<PreparedAudio> {
+        if !self.whole {
+            return None;
+        }
+        let folder = std::env::temp_dir().join(format!("kumi-audio-{}", uuid::Uuid::new_v4()));
+        tokio::fs::create_dir(&folder).await.ok()?;
+        let path = folder.join("converted.wav");
+        if tokio::fs::hard_link(&self.path, &path).await.is_err() {
+            let _ = tokio::fs::remove_dir_all(&folder).await;
+            return None;
+        }
+        Some(PreparedAudio {
+            path,
+            format: self.format.clone(),
+            seconds: self.seconds,
+            start: self.start,
+            whole: true,
+            folder: Some(folder),
+        })
     }
 }
 impl Drop for PreparedAudio {
@@ -98,7 +123,7 @@ async fn prepare(path: &Path, signal: Option<Signal>, until: Option<f64>, from: 
         )));
     }
     if [".wav", ".wave", ".aif", ".aiff", ".aifc"].contains(&extension.as_str()) {
-        return Ok(PreparedAudio { path: path.into(), format: None, seconds: None, start: 0., folder: None });
+        return Ok(PreparedAudio { path: path.into(), format: None, seconds: None, start: 0., whole: false, folder: None });
     }
     let folder = std::env::temp_dir().join(format!("kumi-audio-{}", uuid::Uuid::new_v4()));
     tokio::fs::create_dir(&folder).await?;
@@ -107,10 +132,11 @@ async fn prepare(path: &Path, signal: Option<Signal>, until: Option<f64>, from: 
         format: Some(extension[1..].into()),
         seconds: None,
         start: 0.,
+        whole: false,
         folder: Some(folder),
     };
     match convert(path, &prepared.path, signal, until, from).await {
-        Ok((seconds, start)) => (prepared.seconds, prepared.start) = (seconds, start),
+        Ok((seconds, start, whole)) => (prepared.seconds, prepared.start, prepared.whole) = (seconds, start, whole),
         Err(error) => {
             prepared.cleanup().await;
             return Err(error);
@@ -152,15 +178,15 @@ pub async fn open_audio_to(path: impl AsRef<Path>, signal: Option<Signal>, until
     source.prepared = Some(prepared);
     Ok(source)
 }
-/// The copy converted, the file's length when the copy stops short of it (`until`), and where the copy begins in the
-/// file (`from`, when a converter could seek to it).
+/// The copy converted, the file's length when the copy stops short of it (`until`), where the copy begins in the file
+/// (`from`, when a converter could seek to it), and whether it holds the whole file whatever was asked (afconvert's).
 async fn convert(
     input: &Path,
     output: &Path,
     signal: Option<Signal>,
     until: Option<f64>,
     from: Option<f64>,
-) -> Result<(Option<f64>, f64), AudioError> {
+) -> Result<(Option<f64>, f64, bool), AudioError> {
     let mac = cfg!(target_os = "macos");
     let ffmpeg = if mac {
         "ffmpeg".into()
@@ -209,8 +235,8 @@ async fn convert(
             None => {}
         }
         match run(command, &args, RunOptions { signal: signal.clone(), timeout_ms: Some(120_000), max_buffer: Some(1024 * 1024) }).await {
-            Ok(_) if command == "afconvert" => return Ok((None, 0.)),
-            Ok(_) => return Ok((length_past(until, length), from.unwrap_or(0.))),
+            Ok(_) if command == "afconvert" => return Ok((None, 0., true)),
+            Ok(_) => return Ok((length_past(until, length), from.unwrap_or(0.), false)),
             Err(e) => {
                 if signal.as_ref().is_some_and(Signal::is_cancelled) {
                     return Err(e.into());
@@ -665,6 +691,37 @@ mod tests {
         assert_eq!(plan(false, None, None), [("ffmpeg".to_string(), None, None)]);
         assert!(AudioError::no_room("Only 5 MB is free.").is_no_room());
         assert!(!AudioError("That file is too short to be audio.".into()).is_no_room());
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_copy_of_the_whole_file_is_linked_for_another_stretch_and_no_other_copy_is() {
+        let folder = std::env::temp_dir().join(format!("kumi-audio-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&folder).unwrap();
+        let path = folder.join("converted.wav");
+        std::fs::write(&path, b"RIFF the whole mix").unwrap();
+        let whole = PreparedAudio { path, format: Some("mp3".into()), seconds: None, start: 0., whole: true, folder: Some(folder.clone()) };
+        let linked = whole.linked().await.expect("linked");
+        assert_ne!(linked.path, whole.path);
+        assert_eq!((linked.format.as_deref(), linked.seconds, linked.start), (Some("mp3"), None, 0.));
+        assert_eq!(std::fs::read(&linked.path).unwrap(), b"RIFF the whole mix");
+        // Each copy goes with its own folder, and the other's stays.
+        drop(whole);
+        assert!(!folder.exists());
+        let again = linked.linked().await.expect("linked again");
+        let gone = linked.folder.clone().unwrap();
+        drop(linked);
+        assert!(!gone.exists());
+        assert_eq!(std::fs::read(&again.path).unwrap(), b"RIFF the whole mix");
+        // A stretch's own copy isn't the whole file.
+        let stretch = PreparedAudio {
+            path: again.path.clone(),
+            format: Some("mp3".into()),
+            seconds: Some(600.),
+            start: 445.,
+            whole: false,
+            folder: None,
+        };
+        assert!(stretch.linked().await.is_none());
     }
 
     #[test]
