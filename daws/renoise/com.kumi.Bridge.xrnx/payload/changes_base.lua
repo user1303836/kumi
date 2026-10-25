@@ -63,14 +63,53 @@ function M.db_text(db)
   return "+" .. trimmed(rounded)
 end
 
--- A text's short print: two 32-bit sums of its bytes, as 16 hex digits (the fingerprints the changes keep).
-function M.hash(text)
+-- A text's two 32-bit sums (a from 5381, b from 0; each byte in turn: a × 33 + the byte, b × 65599 + the byte, modulo 2^32).
+-- Every print and hash the changes keep is made of them, and Kumi's host computes the same of preset data (presets.rs
+-- `print_of`), so the numbers are fixed. Renoise runs plain Lua 5.1, where a loop over a text's bytes is the slowest thing
+-- this tool does, and a device's preset data runs to megabytes with a plug-in's state in it: the bytes come sixteen to a
+-- call, and the first sum takes four at a time (a × 33^4 + c1 × 33^3 + c2 × 33^2 + c3 × 33 + c4 stays under 2^53, which a
+-- double holds exactly; the second sum's 65599^2 wouldn't). The same numbers as a byte at a time, in half the time (Lua
+-- 5.1.5: 36 ms a megabyte, then 20).
+local byte = string.byte
+local M32 = 4294967296
+function M.sums(text)
   local a, b = 5381, 0
-  for i = 1, #text do
-    local byte = text:byte(i)
-    a = (a * 33 + byte) % 4294967296
-    b = (b * 65599 + byte) % 4294967296
+  local n, i = #text, 1
+  while i + 15 <= n do
+    local c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11, c12, c13, c14, c15, c16 = byte(text, i, i + 15)
+    a = (a * 1185921 + c1 * 35937 + c2 * 1089 + c3 * 33 + c4) % M32
+    b = (b * 65599 + c1) % M32
+    b = (b * 65599 + c2) % M32
+    b = (b * 65599 + c3) % M32
+    b = (b * 65599 + c4) % M32
+    a = (a * 1185921 + c5 * 35937 + c6 * 1089 + c7 * 33 + c8) % M32
+    b = (b * 65599 + c5) % M32
+    b = (b * 65599 + c6) % M32
+    b = (b * 65599 + c7) % M32
+    b = (b * 65599 + c8) % M32
+    a = (a * 1185921 + c9 * 35937 + c10 * 1089 + c11 * 33 + c12) % M32
+    b = (b * 65599 + c9) % M32
+    b = (b * 65599 + c10) % M32
+    b = (b * 65599 + c11) % M32
+    b = (b * 65599 + c12) % M32
+    a = (a * 1185921 + c13 * 35937 + c14 * 1089 + c15 * 33 + c16) % M32
+    b = (b * 65599 + c13) % M32
+    b = (b * 65599 + c14) % M32
+    b = (b * 65599 + c15) % M32
+    b = (b * 65599 + c16) % M32
+    i = i + 16
   end
+  for j = i, n do
+    local c = byte(text, j)
+    a = (a * 33 + c) % M32
+    b = (b * 65599 + c) % M32
+  end
+  return a, b
+end
+
+-- A text's short print: its two sums as 16 hex digits (the fingerprints the changes keep).
+function M.hash(text)
+  local a, b = M.sums(text)
   return string.format("%08x%08x", a, b)
 end
 
