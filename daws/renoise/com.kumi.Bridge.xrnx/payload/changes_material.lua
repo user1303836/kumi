@@ -377,17 +377,42 @@ function M.write_automation(song, track, index, list, patterns)
   end
 end
 
--- A device told apart from another by what it is and how it is set: a state that two reads of a device that nobody touched
--- agree on (its parameters' values, not the preset text, which can be megabytes).
--- A text's print: two 32-bit sums of its bytes and its length. (Kumi's host computes the same: presets.rs `print_of`.)
+-- A text's print: its two sums (changes_base.lua `sums`) and its length. (Kumi's host computes the same: presets.rs
+-- `print_of`.)
+local format, sums = string.format, base.sums
+local function print_now(text)
+  local a, b = sums(text)
+  return format("%08x%08x:%d", a, b, #text)
+end
+-- (a text's print made now and kept nowhere: for a text derived from another, whose prints are kept under that one)
+M.print_now = print_now
+
+-- The prints of a text, kept by the text (`print` below, `shape` in changes_presets.lua, `content`; each made when it is
+-- first asked for). A change prints what it replaces and what it wrote several times over (its fence, its record, the
+-- journal's entry), every producer undo reads every journalled device's data again, and the journal polls its containers
+-- about once a second: Lua gives the same text the same string, so a print made once serves them all. A kept text stays
+-- in memory by its key, so past PRINTS_KEPT texts, or PRINTS_BYTES of them, the kept are let go together (and a text that
+-- big by itself isn't kept).
+M.PRINTS_KEPT, M.PRINTS_BYTES = 64, 32 * 1048576
+local kept_prints, kept_count, kept_bytes = {}, 0, 0
+function M.prints_of(text)
+  local kept = kept_prints[text]
+  if kept then return kept end
+  kept = {}
+  if #text > M.PRINTS_BYTES then return kept end
+  if kept_count >= M.PRINTS_KEPT or kept_bytes + #text > M.PRINTS_BYTES then kept_prints, kept_count, kept_bytes = {}, 0, 0 end
+  kept_prints[text], kept_count, kept_bytes = kept, kept_count + 1, kept_bytes + #text
+  return kept
+end
+
 function M.print_of(text)
-  local a, b = 5381, 0
-  for i = 1, #text do
-    local c = text:byte(i)
-    a = (a * 33 + c) % 4294967296
-    b = (b * 65599 + c) % 4294967296
+  local kept = M.prints_of(text)
+  local printed = kept.print
+  if printed == nil then
+    printed = print_now(text)
+    kept.print = printed
   end
-  return string.format("%08x%08x:%d", a, b, #text)
+  return printed
 end
 
 -- Preset data as it reads, values and all, with what moves by itself left out: the inner devices' SelectedPresetIsModified and
@@ -397,37 +422,42 @@ end
 -- a Splitter's or a Notepad's contents, and what a change's fence of them holds.
 M.VIEW_STATE = { "IsMaximized", "ShowDevices", "CurrentlyVisibleChain", "MonitorVisibleChain", "PluginEditorWindowPosition" }
 function M.content_of(xml)
-  local content = xml:gsub("<SelectedPresetIsModified>[^<]*</SelectedPresetIsModified>", "<SelectedPresetIsModified/>")
-  content = content:gsub("<IsSelected>[^<]*</IsSelected>", "<IsSelected/>")
-  for _, tag in ipairs(M.VIEW_STATE) do
-    content = content:gsub("<" .. tag .. ">[^<]*</" .. tag .. ">", "<" .. tag .. "/>")
+  local kept = M.prints_of(xml)
+  local printed = kept.content
+  if printed == nil then
+    local content = xml:gsub("<SelectedPresetIsModified>[^<]*</SelectedPresetIsModified>", "<SelectedPresetIsModified/>")
+    content = content:gsub("<IsSelected>[^<]*</IsSelected>", "<IsSelected/>")
+    for _, tag in ipairs(M.VIEW_STATE) do
+      content = content:gsub("<" .. tag .. ">[^<]*</" .. tag .. ">", "<" .. tag .. "/>")
+    end
+    printed = print_now(content)
+    kept.content = printed
   end
-  return M.print_of(content)
+  return printed
 end
 
 -- A device whose settings hold more than its parameters: a Doofer's or a Splitter's devices inside, a Notepad's text, a
 -- plug-in's state. Its whole content is fenced, not only its parameters (nil for any other device).
 local DEEP = { ["Audio/Effects/Native/Doofer"] = true, ["Audio/Effects/Native/Splitter"] = true, ["Audio/Effects/Native/Notepad"] = true }
-function M.content_fence(device)
+function M.is_deep(device)
   local path = device.device_path
-  if DEEP[path] or not path:find("^Audio/Effects/Native/") then return M.content_of(device.active_preset_data) end
+  return DEEP[path] == true or not path:find("^Audio/Effects/Native/")
+end
+-- (`data`: the device's preset data as the caller read it a moment ago, else it is read here)
+function M.content_fence(device, data)
+  if M.is_deep(device) then return M.content_of(data or device.active_preset_data) end
   return nil
 end
 
+-- A device told apart from another by what it is and how it is set: a state that two reads of a device that nobody touched
+-- agree on (its parameters' values, not the preset text, which can be megabytes).
 function M.device_state(device)
-  local a, b = 5381, 0
   local count = #device.parameters
-  for k = 1, count do
-    local text = string.format("%.9g|", device:parameter(k).value)
-    for i = 1, #text do
-      local byte = text:byte(i)
-      a = (a * 33 + byte) % 4294967296
-      b = (b * 65599 + byte) % 4294967296
-    end
-  end
+  local values = {}
+  for k = 1, count do values[k] = format("%.9g|", device:parameter(k).value) end
   return {
     path = device.device_path, display = device.display_name, active = device.is_active, parameters = count,
-    state = string.format("%08x%08x", a, b),
+    state = base.hash(table.concat(values)),
   }
 end
 
