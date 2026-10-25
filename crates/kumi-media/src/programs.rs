@@ -41,6 +41,9 @@ pub enum VideoFailure {
     Video(VideoError),
     #[error("{0}")]
     Other(String),
+    /// A program that ran past `run`'s timeout, and was stopped: it may finish another time (a busy computer, a slow disk).
+    #[error("{0}")]
+    TimedOut(String),
     #[error("This operation was aborted")]
     Aborted,
 }
@@ -69,6 +72,10 @@ impl VideoFailure {
 
     pub fn is_aborted(&self) -> bool {
         matches!(self, Self::Aborted)
+    }
+
+    pub fn is_timed_out(&self) -> bool {
+        matches!(self, Self::TimedOut(_))
     }
 }
 
@@ -260,7 +267,7 @@ pub async fn run<S: AsRef<OsStr>>(command: &str, args: &[S], options: RunOptions
             let _ = child.wait().await;
             // A program that stalls (ffmpeg on a stream that stopped coming, say) has often said nothing.
             let waited = format!("timed out after {} s", to_string(timeout.as_secs_f64()));
-            Err(VideoFailure::other(match &last {
+            Err(VideoFailure::TimedOut(match &last {
                 Some(last) => format!("{waited}: {last}"),
                 None => waited,
             }))

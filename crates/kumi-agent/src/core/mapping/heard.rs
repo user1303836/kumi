@@ -2,7 +2,9 @@
 //! loudness (K-weighted, over its loudest 400 ms: what decides velocity order) and its peak. Off Kumi's thread.
 use super::HeardSample;
 use kumi_common::abort::Signal;
+use kumi_listening::music::tags;
 use kumi_media::audio::{analyze::track_pitch, decode::read_mono, dsp::k_weighting};
+use std::path::PathBuf;
 
 /// How much of a sample is heard: enough for a note's pitch and its attack's loudness.
 const HEARD_SECONDS: f64 = 6.0;
@@ -12,11 +14,18 @@ const LOUDNESS_WINDOW: f64 = 0.4;
 /// A file heard, or why it couldn't be.
 pub async fn hear_file(path: &str, signal: &Signal) -> Result<HeardSample, String> {
     let (mono, rate, seconds) = read_mono(path, signal, 0., HEARD_SECONDS).await.map_err(|e| e.0)?;
-    tokio::task::spawn_blocking(move || heard_of(&mono, rate, seconds)).await.map_err(|_| "Kumi couldn't hear that file".to_string())
+    let file = PathBuf::from(path);
+    tokio::task::spawn_blocking(move || {
+        // A compressed sample whose length its converter couldn't say: what its tags say, when they do.
+        let seconds = seconds.or_else(|| tags::read(&file, file.parent().unwrap_or(&file)).seconds);
+        heard_of(&mono, rate, seconds)
+    })
+    .await
+    .map_err(|_| "Kumi couldn't hear that file".to_string())
 }
 
 /// What mono audio sounds like, for mapping.
-pub fn heard_of(mono: &[f32], rate: f64, seconds: f64) -> HeardSample {
+pub fn heard_of(mono: &[f32], rate: f64, seconds: Option<f64>) -> HeardSample {
     let peak = mono.iter().fold(0f32, |most, v| most.max(v.abs())) as f64;
     let [mut shelf, mut high] = k_weighting(rate);
     let weighted: Vec<f64> = mono.iter().map(|v| high.process(shelf.process(*v as f64))).collect();
@@ -52,10 +61,10 @@ mod tests {
 
     #[test]
     fn a_tone_is_heard_at_its_note_and_its_level() {
-        let heard = heard_of(&tone(261.63, 0.5, 1.5), 44_100., 1.5);
+        let heard = heard_of(&tone(261.63, 0.5, 1.5), 44_100., Some(1.5));
         assert!((heard.pitch.unwrap() - 60.).abs() < 0.2, "{heard:?}");
         assert!(heard.sure > 0.8);
-        let quieter = heard_of(&tone(261.63, 0.25, 1.5), 44_100., 1.5);
+        let quieter = heard_of(&tone(261.63, 0.25, 1.5), 44_100., Some(1.5));
         assert!((heard.level_db - quieter.level_db - 6.02).abs() < 0.2, "half the amplitude is 6 dB down");
     }
 
@@ -68,7 +77,7 @@ mod tests {
                 (state >> 16) as f32 / 32_768. - 1.
             })
             .collect();
-        let heard = heard_of(&noise, 44_100., 1.);
+        let heard = heard_of(&noise, 44_100., Some(1.));
         assert!(heard.pitch.is_none() || heard.sure < 0.5, "{heard:?}");
     }
 }
