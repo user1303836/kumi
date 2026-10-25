@@ -3,6 +3,41 @@
 Kumi's releases. The Ableton bridge (`crates/ableton-mcp-server`) is versioned on its own;
 each Kumi release names the bridge it ships with.
 
+## 1.23.3 — 2026-10-25
+
+Ships with bridge 1.0.96, which Live loads when it restarts. After updating, Kumi offers to quit Live
+(it asks to save first) and opens it again with the new bridge; or run `kumi bridge` with Live closed.
+Ships with REAPER extension 0.1.5 and Renoise tool 1.0.4, which REAPER and Renoise load when they
+restart; `kumi update` puts them in.
+
+- On the map, a point plays as the mouse rests on it: two seconds of it, with a fade. h turns that off
+  and on.
+- When one of Live's settings files can't be read, Kumi still finds a User Library you moved, instead
+  of saying Live's bridge isn't installed or setting it up in the default folder.
+- Kumi's music scan spends less time on each song's style.
+- Scrolling the right pane's tabs moves the tab on screen, also just after a job is run again.
+- The map answers faster on Kitty and Ghostty.
+- On a Mac without ffmpeg, Kumi hears a long mix without converting the whole file once per stretch.
+- A long song whose conversion takes over two minutes is heard on a later scan instead of being
+  skipped for good.
+- After the library learns, Kumi keeps the run's summary (what it found, when it finished, what
+  failed) every time; it was sometimes lost.
+
+Tested with Live 12.4 on macOS. On Windows, installing and updating are tested; using Kumi with Live
+there is still new.
+
+### Bridge 1.0.96
+
+- Changing a knob on a device with many parameters takes far less of Live's time: the Remote Script
+  checks the change against its device once, not once per parameter.
+- Kumi's export of a big Set for its memory takes about a fifth less of the bridge's time.
+- While Kumi exports, diffs or reads a big Set, Live's other answers (what you're looking at, the
+  transport) no longer wait for it.
+
+### REAPER extension 0.1.5
+
+- Kumi no longer tells you an item changed when you nudged its pitch up and back down to where it was.
+
 ## 1.23.2 — 2026-10-25
 
 Ships with bridge 1.0.95, as 1.23.1 did. Ships with REAPER extension 0.1.4 and Renoise tool 1.0.3,
