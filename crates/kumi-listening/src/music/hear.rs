@@ -221,10 +221,20 @@ async fn length(song: &Song, signal: &Signal) -> Result<f64, Heard> {
     Ok(seconds)
 }
 
-/// Each of a plan's stretches decoded, in order.
+/// Each of a plan's stretches decoded, in order. A copy of the whole file (a Mac's afconvert can't convert a stretch) is
+/// linked for the stretches after the first, each under a path of its own as a copy of its own was: a two-hour mix is
+/// converted once, not once a stretch.
 async fn decode(song: &Song, stretches: &[(f64, f64)], signal: &Signal) -> Result<Vec<PreparedAudio>, Heard> {
-    let mut decoded = Vec::with_capacity(stretches.len());
+    let mut decoded: Vec<PreparedAudio> = Vec::with_capacity(stretches.len());
     for (from, seconds) in stretches {
+        let linked = match decoded.first() {
+            Some(first) => first.linked().await,
+            None => None,
+        };
+        if let Some(linked) = linked {
+            decoded.push(linked);
+            continue;
+        }
         match prepare_audio_range(&song.path, Some(signal.clone()), *from, *seconds).await {
             Ok(prepared) => decoded.push(prepared),
             Err(error) => return Err(undecodable(song, &error, signal).await),
@@ -356,6 +366,51 @@ mod tests {
         let short = plan(40., Stage::Full);
         assert_eq!((short.windows.clone(), short.decoded), (vec![5., 15., 25.], vec![(0., 40.)]));
         assert_eq!(plan(40., Stage::Light).profile, (12., 28.));
+    }
+
+    /// On a Mac without ffmpeg, afconvert copies a song whole whatever stretch is asked for: a song heard in two
+    /// stretches is converted once, the second reading the same copy under a path of its own.
+    #[cfg(target_os = "macos")]
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_copy_of_the_whole_song_is_converted_once_for_all_its_stretches() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let (programs, converted, copy) = (dir.path().join("programs"), dir.path().join("converted"), dir.path().join("copy.wav"));
+        std::fs::create_dir(&programs).unwrap();
+        std::fs::write(&copy, b"RIFF the whole mix").unwrap();
+        // No ffmpeg (nor ffprobe), and an afconvert that says what it converted and writes the copy.
+        let afconvert = format!("#!/bin/sh\necho \"$5\" >> '{}'\n/bin/cp '{}' \"$6\"\n", converted.display(), copy.display());
+        for (name, script) in [("ffmpeg", "#!/bin/sh\nexit 1\n".to_string()), ("afconvert", afconvert)] {
+            std::fs::write(programs.join(name), script).unwrap();
+            std::fs::set_permissions(programs.join(name), std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        std::env::set_var("PATH", &programs);
+        let path = dir.path().join("Mix.mp3");
+        std::fs::write(&path, b"an mp3").unwrap();
+        let song = Song {
+            id: 1,
+            path: path.to_string_lossy().into_owned(),
+            folder: dir.path().to_string_lossy().into_owned(),
+            size: 6,
+            mtime: 1,
+            tags: crate::music::tags::Tags::default(),
+            duplicate_of: None,
+            gone: false,
+            stage: 0,
+            skipped: None,
+            profile: None,
+            heard_at: None,
+            used_at: None,
+            cluster: None,
+            cloud: false,
+        };
+        let stretches = [(0., 360.), (1_795., 10.)];
+        let decoded = decode(&song, &stretches, &Signal::new()).await.unwrap();
+        assert_eq!(std::fs::read_to_string(&converted).unwrap().lines().collect::<Vec<_>>(), [song.path.as_str()], "converted once");
+        assert_ne!(decoded[0].path, decoded[1].path, "a path of its own, as a copy of its own had");
+        assert_eq!(std::fs::read(&decoded[1].path).unwrap(), b"RIFF the whole mix");
+        let (prepared, at) = holding(&decoded, &stretches, 1_800.).unwrap();
+        assert_eq!((&prepared.path, at), (&decoded[1].path, 1_800.), "read where it lies in the whole copy");
     }
 
     #[test]
