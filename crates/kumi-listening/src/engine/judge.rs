@@ -1093,7 +1093,29 @@ impl Listening {
                     .map_err(|error| RuntimeError::plain(error.to_string()))
             }
         };
-        let mut heard_main = measure(main.file.clone(), main.start).await?;
+        // The mix, the mix as it comes into Main's chain and the focus are three files: measured together, each its own
+        // read, the first failure said as it would be one after another (the mix's, then the premix's, then the focus's).
+        // Each measure waits on the heap: three held at once would make a listen's future too big for a thread's stack.
+        let premix_render = match (track, &focus_name, before_master.as_ref()) {
+            (None, Some(_), Some(render)) => Some(render),
+            _ => None,
+        };
+        let focus_render = focus_name.as_ref().and_then(|name| files.get(name));
+        let measure_some = |render: Option<&Render>| {
+            let measuring = render.map(|render| measure(render.file.clone(), render.start));
+            async move {
+                match measuring {
+                    Some(measuring) => measuring.await.map(Some),
+                    None => Ok(None),
+                }
+            }
+        };
+        let (heard_main, heard_premix, heard_focus) = futures::join!(
+            Box::pin(measure(main.file.clone(), main.start)),
+            Box::pin(measure_some(premix_render)),
+            Box::pin(measure_some(focus_render))
+        );
+        let (mut heard_main, heard_premix, heard_focus) = (heard_main?, heard_premix?, heard_focus?);
         // Silence isn't a mix within tolerance: it reads nothing, and what that means is the caller's to say.
         let silent = heard_main.measures.integrated.is_none_or(|loudness| loudness < -70.).then(|| {
             let profile = self.host.profile();
@@ -1109,11 +1131,8 @@ impl Listening {
         });
         // On a run over the mix with a focus, the mix as it comes into Main's chain, when Kumi Ears heard it there: the
         // focus is heard before Main's chain too, so masking reads fairly whatever Main's chain holds.
-        let premix = match (track, &focus_name, before_master.as_ref()) {
-            (None, Some(_), Some(render)) => {
-                let heard = measure(render.file.clone(), render.start).await?;
-                Some((heard, (self.keep_file(&PathBuf::from(&render.file)).await, render.start)))
-            }
+        let premix = match (heard_premix, premix_render) {
+            (Some(heard), Some(render)) => Some((heard, (self.keep_file(&PathBuf::from(&render.file)).await, render.start))),
             _ => None,
         };
         // Without it, Main's chain as it is now (read from Live, so an undo or the producer's own move is in it): the
@@ -1122,16 +1141,15 @@ impl Listening {
             (None, Some(_), None) => Some(self.host.master_chain(signal.clone()).await),
             _ => None,
         };
-        let (heard_focus, focus_file, focus_gain) = match focus_name.clone().and_then(|name| files.get(&name).cloned()) {
-            Some(render) => {
+        let (heard_focus, focus_file, focus_gain) = match (heard_focus, focus_render) {
+            (Some(heard), Some(render)) => {
                 // Heard before its fader: as the mix hears it, at the fader's level (so turning it up reads as up), and
                 // with the level Main's Utilities add.
                 let fader = self.host.fader_of(focus_name.as_deref().unwrap_or(""), signal.clone()).await.unwrap_or(0.);
                 let gain = fader + main_chain.as_ref().map_or(0., |state| state.gain);
-                let heard = measure(render.file.clone(), render.start).await?.gained(gain);
-                (Some(heard), Some((self.keep_file(&PathBuf::from(&render.file)).await, render.start)), gain)
+                (Some(heard.gained(gain)), Some((self.keep_file(&PathBuf::from(&render.file)).await, render.start)), gain)
             }
-            None => (None, None, 0.),
+            _ => (None, None, 0.),
         };
         if silent.is_none() {
             heard_main.embedding =
@@ -1162,7 +1180,6 @@ impl Listening {
         }))
     }
 
-    /// Copies a capture into the judge's own folder, out of the listening folder's pruning.
     /// What judge/ holds that the run doesn't store goes: its span's takes and its excerpts stay, and a new run's
     /// takes replace an old run's.
     pub(crate) async fn prune_kept(&self) {
@@ -1176,12 +1193,20 @@ impl Listening {
         prune_unstored(&self.host.kept_folder(), &stored).await;
     }
 
+    /// Keeps a capture in the judge's own folder, out of the listening folder's pruning.
     pub(crate) async fn keep_file(&self, file: &std::path::Path) -> PathBuf {
         let folder = self.host.kept_folder();
         let _ = tokio::fs::create_dir_all(&folder).await;
         let kept = folder.join(file.file_name().map(|name| name.to_os_string()).unwrap_or_else(|| "take.wav".into()));
         if file.parent() == Some(folder.as_path()) {
             return file.to_path_buf();
+        }
+        // Linked where the volume allows it, so a capture (a whole song's is 138 MB) isn't written again: the listening
+        // folder's pruning takes its own name only. A name kept already goes first: a link to it would be refused, and
+        // a copy over it would write through every other name it has.
+        let _ = tokio::fs::remove_file(&kept).await;
+        if tokio::fs::hard_link(file, &kept).await.is_ok() {
+            return kept;
         }
         match tokio::fs::copy(file, &kept).await {
             Ok(_) => kept,
