@@ -613,6 +613,9 @@ class RemoteScriptTests(unittest.TestCase):
         self.assertTrue(line.endswith(b"\n"))
         parsed = json.loads(line.decode("utf-8"))
         self.assertEqual(parsed, dict(response))
+        # Canonical numbers: a whole-number float goes out as an integer (2.0 as 2), as the canonical text has it.
+        self.assertIs(type(parsed["result"]["a"][1]), int)
+        self.assertIs(type(parsed["result"]["z"]), float)
         unsigned = {key: value for key, value in parsed.items() if key != "mac"}
         self.assertEqual(parsed["mac"], remote.sign(unsigned))
         # The line is the canonical text with "mac" among the sorted keys: what the bridge makes from it to check the MAC.
