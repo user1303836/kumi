@@ -625,7 +625,6 @@ class AbletonMcpBridge(_ControlSurface):
         self._disconnected = False
         self._willington = None
         self._timer = None
-        self._schedule_next()
         self._start_timer()
 
     def _start_timer(self) -> None:
@@ -670,10 +669,6 @@ class AbletonMcpBridge(_ControlSurface):
             log = getattr(self, "log_message", None)
             if callable(log): log("Bridge timer stopped (" + type(error).__name__ + ": " + str(error) + "); display ticks serve the bridge\n" + traceback.format_exc(limit=3))
 
-    def _schedule_next(self) -> None:
-        scheduler = getattr(self, "schedule_message", None)
-        self._scheduled = scheduler(1, self._drain) if not self._disconnected and callable(scheduler) else None
-
     def _keep_willington(self) -> None:
         """Make the Willington provider, and make it again when its opt-in file changes (Kumi's /willington
         writes or removes it), looking at most once a second: the switch takes effect without Live restarting."""
@@ -696,25 +691,16 @@ class AbletonMcpBridge(_ControlSurface):
         self._willington_seen = switch
         self._willington = _WillingtonProvider(self._bridge.mapper, log)
 
-    def _drain(self) -> None:
-        if self._disconnected:
-            return
-        try:
-            self._keep_willington()
-            self._bridge.update_display()
-        finally:
-            # A tick that fails once doesn't end the drain: the next one is scheduled whatever happened.
-            self._schedule_next()
-
     def update_display(self) -> None:
+        # Each display tick serves the bridge once (Live's timer serves it between ticks). The base class's own
+        # update_display isn't called: _Framework delivers schedule_message's tasks from there, and this surface
+        # schedules none.
         self._keep_willington()
         self._bridge.update_display()
 
     def disconnect(self) -> None:
         self._disconnected = True
         self._stop_timer()
-        if self._scheduled is not None:
-            self._scheduled = None
         if self._willington is not None:
             try: self._willington.close()
             except Exception:
