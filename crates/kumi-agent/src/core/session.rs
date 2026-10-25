@@ -254,7 +254,8 @@ struct Held {
 }
 #[derive(Clone)]
 struct Settled {
-    /// Shared with the save in flight: a long conversation's settled messages are hundreds of KB.
+    /// Shared between the state's holders rather than copied each time it is read: a long conversation's settled
+    /// messages are hundreds of KB.
     checkpoint: Rc<KernelCheckpoint>,
     key: String,
 }

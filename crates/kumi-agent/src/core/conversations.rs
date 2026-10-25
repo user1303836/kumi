@@ -13,7 +13,7 @@ use crate::{
 };
 use async_trait::async_trait;
 use kumi_common::js::{
-    json::{stringify, write_into},
+    json::{byte_length, stringify},
     string::{head, trim, utf16_len},
 };
 use kumi_types::daw::DawId;
@@ -764,6 +764,15 @@ impl FileConversationStore {
             },
         );
         index.gone.remove(id);
+        // The place's Set name, as `index` keeps it: read again when its baseline was written since.
+        let modified = match self.folder(place) {
+            Ok(folder) => tokio::fs::metadata(folder.join("last-seen.json")).await.map(|m| stamp_of(&m)).unwrap_or(0),
+            Err(_) => 0,
+        };
+        if !index.places.get(place).is_some_and(|known| known.modified == modified) {
+            let name = self.set_name(place).await;
+            index.places.insert(place.to_owned(), PlaceName { name, modified });
+        }
         if index != before {
             let _ = write_privately(&self.directory, INDEX, &stringify(&serde_json::to_value(&index).unwrap_or_default())).await;
         }
@@ -838,26 +847,9 @@ fn without_pictures(message: &Value) -> Cow<'_, Value> {
         .collect();
     Cow::Owned(kept)
 }
-thread_local! {
-    /// Where a message is written to be measured: one buffer, kept between saves.
-    static MEASURED: RefCell<String> = const { RefCell::new(String::new()) };
-}
-/// `stringify(value).len()`, without keeping the text: every save measures the conversation message by message.
-fn stringified_len(value: &Value) -> usize {
-    MEASURED.with(|buffer| {
-        let mut buffer = buffer.borrow_mut();
-        buffer.clear();
-        write_into(value, &mut buffer);
-        let len = buffer.len();
-        if buffer.capacity() > 1 << 20 {
-            buffer.shrink_to(1 << 20);
-        }
-        len
-    })
-}
 // Disk checkpoints also contain older string-form messages; keep those forms intact.
 fn bounded_messages(all: &[Value]) -> Vec<Value> {
-    let sizes: Vec<_> = all.iter().map(|m| stringified_len(m) + 1).collect();
+    let sizes: Vec<_> = all.iter().map(|m| byte_length(m) + 1).collect();
     let mut total = sizes.iter().sum::<usize>() + 1;
     let mut start = 0;
     while start < all.len() && total > MAX_CONVERSATION_BYTES {

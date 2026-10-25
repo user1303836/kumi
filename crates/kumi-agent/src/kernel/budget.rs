@@ -8,10 +8,9 @@
 use kumi_types::daw::DawProfile;
 use std::borrow::Cow;
 
-use kumi_common::js::json::{stringify, write_into};
+use kumi_common::js::json::{byte_length, stringify};
 use kumi_common::js::string::{head, trim, utf16_len};
 use serde_json::Value;
-use std::cell::RefCell;
 
 use super::agent::CARRY_ON_NOTE;
 use crate::core::contracts::{TranscriptLine, TranscriptRole};
@@ -279,26 +278,6 @@ fn raw_images(message: &Message) -> usize {
     }
 }
 
-thread_local! {
-    /// Where a message is written to be measured: one buffer, kept between measurements.
-    static MEASURED: RefCell<String> = const { RefCell::new(String::new()) };
-}
-
-/// `stringify(value).len()`, without keeping the text.
-fn stringified_len(value: &Value) -> usize {
-    MEASURED.with(|buffer| {
-        let mut buffer = buffer.borrow_mut();
-        buffer.clear();
-        write_into(value, &mut buffer);
-        let len = buffer.len();
-        // A page of megabytes was measured once: the buffer doesn't stay that big.
-        if buffer.capacity() > 1 << 20 {
-            buffer.shrink_to(1 << 20);
-        }
-        len
-    })
-}
-
 /// Bytes as sent, with each image counted at what it costs a model rather than its size: the array's brackets and
 /// commas, and each message as `bytes_of` measures it. This runs before every step of a turn, over the whole
 /// conversation, so it builds no text and copies a message only to put its raw images away.
@@ -318,7 +297,7 @@ fn bytes_of(message: &Message) -> usize {
     } else {
         serde_json::to_value(message)
     };
-    stringified_len(&value.expect("message serializes")) + images * IMAGE_BYTES
+    byte_length(&value.expect("message serializes")) + images * IMAGE_BYTES
 }
 
 fn image_count(output: &ToolResultOutput) -> usize {
