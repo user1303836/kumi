@@ -110,15 +110,38 @@ impl BridgeSetupIo {
 fn error(e: impl std::fmt::Display) -> RuntimeError {
     RuntimeError::plain(e.to_string())
 }
-/// The folder of the bridge this Kumi brings: an installed app's (its package.json is beside the
-/// executable), or, for a checkout's build, the checkout's bridge crate, beside which is the live-extension it places.
+/// The folder of the bridge this Kumi brings: an installed app's `bridge/package` (its package.json is beside the
+/// executable; the bridge is in the package the lifecycle's artifact unpacks to, the one copy a bundle carries), or,
+/// for a checkout's build, the checkout's bridge crate, beside which is the live-extension it places.
 pub fn bundled_bridge_dir() -> String {
     let folder = executable_dir();
     if Path::new(&join(&folder, "package.json")).exists() {
-        folder
+        bridge_dir_in(&folder)
     } else {
         join(&repository_dir(), "daws/ableton/ableton-mcp-server")
     }
+}
+/// Where an app folder keeps the bridge it brings: its `bridge/package` when the bridge is there, the folder itself
+/// for an app from before the bridge moved there (a rolled-back one), or a folder named as the bridge's own.
+pub fn bridge_dir_in(folder: &str) -> String {
+    let packaged = join(folder, "bridge/package");
+    if Path::new(&join(&packaged, &executable_name("ableton-mcp-server"))).exists() {
+        packaged
+    } else {
+        folder.to_string()
+    }
+}
+/// The bridge binary this Kumi brings, when it is built: the one a Live session starts. In its bundled package, or
+/// beside the executable (a checkout's build, an app installed before the bridge moved into its package).
+pub fn bundled_bridge_binary() -> Option<String> {
+    bridge_binary_in(&executable_dir())
+}
+/// The bridge binary an app folder keeps, in its `bridge/package` first, then beside kumi; None when neither is there.
+pub fn bridge_binary_in(folder: &str) -> Option<String> {
+    [bridge_dir_in(folder), folder.to_string()]
+        .into_iter()
+        .map(|folder| join(&folder, &executable_name("ableton-mcp-server")))
+        .find(|file| Path::new(file).is_file())
 }
 /// The version of the bridge this Kumi brings: an installed app names it in its package.json; a
 /// checkout's build carries the bridge crate it was built with.
@@ -433,7 +456,7 @@ pub async fn install_quietly(mut io: BridgeSetupIo) -> Result<String, String> {
 pub async fn setup_bridge(io: BridgeSetupIo) -> Result<i32, RuntimeError> {
     let say = |line: &str| io.out.write(&format!("{line}\n"));
     let run = io.run.clone().unwrap_or_else(default_run);
-    let bridge_dir = io.bridge_dir.clone().unwrap_or_else(bundled_bridge_dir);
+    let bridge_dir = bridge_dir_in(&io.bridge_dir.clone().unwrap_or_else(bundled_bridge_dir));
     let mut scripts = remote_scripts_dir(&io.env);
     let Some(bundled) = (match &io.bridge_dir {
         Some(dir) => bridge_version(dir),
@@ -443,7 +466,7 @@ pub async fn setup_bridge(io: BridgeSetupIo) -> Result<i32, RuntimeError> {
         return Ok(1);
     };
     let native = join(&bridge_dir, &executable_name("ableton-mcp-server"));
-    let native = if Path::new(&native).exists() { native } else { join(&executable_dir(), &executable_name("ableton-mcp-server")) };
+    let native = if Path::new(&native).exists() { native } else { bundled_bridge_binary().unwrap_or(native) };
     if !Path::new(&native).exists() {
         say(&format!("The bridge isn't built yet. Run {}.", *KUMI_REPAIR));
         return Ok(1);
@@ -790,4 +813,27 @@ async fn wait_for_live(
         format!("Live didn't connect yet; Kumi will connect when it does. If it doesn't, run: {} doctor", *KUMI)
     });
     0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// An installed app keeps the bridge in bridge/package (the one copy a bundle carries); an app from before the
+    /// move has it beside kumi. A session and setup start whichever the app has.
+    #[test]
+    fn the_bridge_is_found_in_its_package_first_then_beside_kumi() {
+        let app = tempfile::tempdir().unwrap();
+        let folder = app.path().display().to_string();
+        let exe = executable_name("ableton-mcp-server");
+        assert_eq!(bridge_dir_in(&folder), folder);
+        assert_eq!(bridge_binary_in(&folder), None);
+        fs::write(join(&folder, &exe), b"beside kumi").unwrap();
+        assert_eq!(bridge_dir_in(&folder), folder, "a package without the bridge isn't one");
+        assert_eq!(bridge_binary_in(&folder), Some(join(&folder, &exe)));
+        fs::create_dir_all(join(&folder, "bridge/package")).unwrap();
+        fs::write(join(&folder, &format!("bridge/package/{exe}")), b"packaged").unwrap();
+        assert_eq!(bridge_dir_in(&folder), join(&folder, "bridge/package"));
+        assert_eq!(bridge_binary_in(&folder), Some(join(&folder, &format!("bridge/package/{exe}"))));
+    }
 }

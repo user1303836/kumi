@@ -135,13 +135,11 @@ pub(crate) async fn remove_bridge(io: &DawIo) -> Result<RemovedBridge, RuntimeEr
         return Ok(RemovedBridge::Kept);
     }
     let root = read_bridge_server(&config).ok().and_then(|server| server.package_root());
-    let lifecycle =
-        root.as_ref().map(|root| join(root, &executable_name("ableton-mcp-server"))).filter(|file| Path::new(file).is_file()).or_else(
-            || {
-                let file = join(&executable_dir(), &executable_name("ableton-mcp-server"));
-                Path::new(&file).is_file().then_some(file)
-            },
-        );
+    let lifecycle = root
+        .as_ref()
+        .map(|root| join(root, &executable_name("ableton-mcp-server")))
+        .filter(|file| Path::new(file).is_file())
+        .or_else(super::bridge_setup::bundled_bridge_binary);
     let Some((root, lifecycle)) = root.zip(lifecycle) else {
         say(format!("Kumi couldn't find the bridge's own uninstaller; remove {by_hand} by hand."));
         return Ok(RemovedBridge::Kept);

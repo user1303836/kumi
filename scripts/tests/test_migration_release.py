@@ -462,13 +462,15 @@ class MigrationRelease(unittest.TestCase):
             self.assertEqual(replies[0]["version"], int(re.search(r"^let version = (\d+)$", source.read_text(encoding="utf-8"), re.M)[1]))
             self.assertIsInstance(replies[1]["trusted"], bool)  # No prompt or Live operation; permission continuity needs a real terminal.
         suffix = ".exe" if os.name == "nt" else ""
-        self.assertIn(manifest["bridge"], self.launched(app / ("ableton-mcp-server" + suffix), env, "--version"))
+        bridge = app / "bridge" / "package"
+        self.assertIn(manifest["bridge"], self.launched(bridge / ("ableton-mcp-server" + suffix), env, "--version"))
+        self.assertFalse((app / ("ableton-mcp-server" + suffix)).exists(), "the bridge ships once, in its package")
         requests = [
             {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"release-probe","version":"1"}}},
             {"jsonrpc":"2.0","method":"notifications/initialized"},
             {"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"live_status","arguments":{}}},
         ]
-        replies = [json.loads(line) for line in self.launched(app / ("ableton-mcp-server" + suffix), env,
+        replies = [json.loads(line) for line in self.launched(bridge / ("ableton-mcp-server" + suffix), env,
                          input="".join(json.dumps(request) + "\n" for request in requests)).splitlines()]
         self.assertEqual(len(replies), 2)
         self.assertEqual(next(reply for reply in replies if reply["id"] == 1)["result"]["serverInfo"]["version"], manifest["bridge"])
@@ -476,7 +478,7 @@ class MigrationRelease(unittest.TestCase):
         self.assertFalse(status["connected"])
         self.assertEqual(status["adapter"], "unavailable")
         self.assertNotEqual(status.get("provenance"), "real-live")
-        reply = json.loads(self.launched(app / ("ableton-mcp-analysis-worker" + suffix), env,
+        reply = json.loads(self.launched(bridge / ("ableton-mcp-analysis-worker" + suffix), env,
                               input=json.dumps({"mode":"analyze","source":{"pcmBase64":"AAAAPwAAAL8AAAA/AAAAvw==","sampleRate":48000}})))
         self.assertTrue(reply["ok"])
         self.assertEqual(reply["result"]["sampleCount"], 4)

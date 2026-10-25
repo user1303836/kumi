@@ -27,6 +27,10 @@ BRIDGE_BINARIES = ("ableton-mcp-server", "ableton-mcp-analysis-worker")
 # The library learner and the sound measurer are doors of kumi's own (`kumi __library-learner`, `kumi __library-measure`),
 # not programs of their own.
 BINARIES = ("kumi", *BRIDGE_BINARIES, "daw-mcp-server", "kumi-harness")
+# What a bundle carries beside kumi. The bridge's own binaries, Remote Script and Live extension are in its package under
+# bridge/, the lifecycle's artifact unpacked, and Kumi runs the bridge from there: shipping them beside kumi too made the
+# download a fifth bigger.
+BUNDLE_BINARIES = tuple(name for name in BINARIES if name not in BRIDGE_BINARIES)
 # The other DAWs' bridges, by the DAW's id (scripts/daws.toml, which release.py and build-migration-release.py read
 # through here). Each is in daws/<id> in the bundle, where Kumi installs it from (daws/own/kumi-daw-own/src/provider.rs):
 # a library with its version, its crate's, in a file beside it, or a Renoise tool's folder.
@@ -698,11 +702,9 @@ def build_release(root: Path, binaries: Path, out: Path, target: str, source: di
             # An artifact consumer extracts package/ and verifies it against the exact tarball.
             return {"artifact": artifact_name, "sha256": artifact_hash, "manifest": manifest}
         bundle = stage / "bundle"
-        for name in BINARIES:
+        for name in BUNDLE_BINARIES:
             copy(binaries / f"{name}{extension}", bundle / f"{name}{extension}")
             (bundle / f"{name}{extension}").chmod(0o755)
-        for folder in ("remote-script", "live-extension"):
-            shutil.copytree(package / folder, bundle / folder)
         stage_hands(root, bundle, target)
         daws = stage_daws(root, bundle, target, extensions)
         version = tomllib.loads((root / "crates/kumi/Cargo.toml").read_text())["package"]["version"]

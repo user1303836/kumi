@@ -53,7 +53,7 @@ Why it's shaped this way (keep it so):
 - **Dependencies point down** (`LAYERS` in `scripts/dev.py`, checked by Required CI). Small acyclic crates mean a change rebuilds and tests only what depends on it; `dev.py affected` reads the graph and CI picks its jobs from it.
 - **The app reaches a DAW only through `kumi-daw`**, which each `kumi-daw-<daw>` implements; `crates/kumi/src/daw/registry.rs` is the table of DAWs. Outside its folder, a new DAW adds only its `DawId`, profile and place names in `kumi-types`, one table entry, and (own-bridge DAWs) its entry in `daw-bridge`'s DAW list, its module in `daw-mcp-server` and its entry in `scripts/daws.toml`, the list the release and packaging scripts read.
 - **Bridges are separate programs.** They run in or beside a DAW, work without Kumi (other MCP clients use them), use nothing of Kumi's but `kumi-common`, and have their own versions. Updating one means restarting the DAW.
-- **Frozen:** binary names, the installed bundle layout and the wire protocols. Installed copies update, roll back and talk across versions through them.
+- **Frozen:** what an installed app is read by (`kumi` at the app's root, `package.json`, `bridge/prepared.json` and the package it names) and the wire protocols. Installed copies update, roll back and talk across versions through them.
 
 Where new code goes:
 - A DAW feature: `daws/<daw>/kumi-daw-<daw>/`, plus its bridge if it needs new operations. Shared by own-bridge DAWs: `daws/own/kumi-daw-own/`.
