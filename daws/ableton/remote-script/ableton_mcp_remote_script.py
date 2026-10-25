@@ -3702,6 +3702,8 @@ class LiveObjectMapper:
         if len(before_by_id) != len(before_rows) or any(note_id is None for note_id in before_by_id): raise ValueError("complete stable note identity is unavailable")
         targets: list[tuple[Any, dict[str, Any]]] = []
         seen: set[int] = set()
+        # Where the clip's notes can end, read once: nothing changes the clip until every patch is checked.
+        clip_end = self._note_time_end(clip)
         for patch in patches:
             if not isinstance(patch, dict) or not isinstance(patch.get("id"), int) or isinstance(patch["id"], bool) or patch["id"] < 0:
                 raise ValueError("note patch id is invalid")
@@ -3728,7 +3730,7 @@ class LiveObjectMapper:
             target = by_id.get(patch["id"])
             if target is None:
                 raise ValueError("note id is not present in the clip")
-            prior = before_by_id.get(patch["id"]); final_start = float(patch.get("start", prior["start"] if prior else -1)); final_duration = float(patch.get("duration", prior["duration"] if prior else -1)); clip_end = self._note_time_end(clip)
+            prior = before_by_id.get(patch["id"]); final_start = float(patch.get("start", prior["start"] if prior else -1)); final_duration = float(patch.get("duration", prior["duration"] if prior else -1))
             if prior is None or clip_end is None or final_start + final_duration > clip_end: raise ValueError(f"note patch runs past the clip: {self._note_span(clip)}")
             seen.add(patch["id"])
             targets.append((target, patch))
