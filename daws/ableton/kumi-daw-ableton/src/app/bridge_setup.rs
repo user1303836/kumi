@@ -131,10 +131,14 @@ pub fn bridge_dir_in(folder: &str) -> String {
         folder.to_string()
     }
 }
-/// The bridge binary this Kumi brings, when it is built: in its bundled package, or beside the executable (a checkout's
-/// build, an app installed before the bridge moved into its package).
+/// The bridge binary this Kumi brings, when it is built: the one a Live session starts. In its bundled package, or
+/// beside the executable (a checkout's build, an app installed before the bridge moved into its package).
 pub fn bundled_bridge_binary() -> Option<String> {
-    [bundled_bridge_dir(), executable_dir()]
+    bridge_binary_in(&executable_dir())
+}
+/// The bridge binary an app folder keeps, in its `bridge/package` first, then beside kumi; None when neither is there.
+pub fn bridge_binary_in(folder: &str) -> Option<String> {
+    [bridge_dir_in(folder), folder.to_string()]
         .into_iter()
         .map(|folder| join(&folder, &executable_name("ableton-mcp-server")))
         .find(|file| Path::new(file).is_file())
@@ -809,4 +813,27 @@ async fn wait_for_live(
         format!("Live didn't connect yet; Kumi will connect when it does. If it doesn't, run: {} doctor", *KUMI)
     });
     0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// An installed app keeps the bridge in bridge/package (the one copy a bundle carries since 1.24); an app from
+    /// before has it beside kumi. A session and setup start whichever the app has.
+    #[test]
+    fn the_bridge_is_found_in_its_package_first_then_beside_kumi() {
+        let app = tempfile::tempdir().unwrap();
+        let folder = app.path().display().to_string();
+        let exe = executable_name("ableton-mcp-server");
+        assert_eq!(bridge_dir_in(&folder), folder);
+        assert_eq!(bridge_binary_in(&folder), None);
+        fs::write(join(&folder, &exe), b"beside kumi").unwrap();
+        assert_eq!(bridge_dir_in(&folder), folder, "a package without the bridge isn't one");
+        assert_eq!(bridge_binary_in(&folder), Some(join(&folder, &exe)));
+        fs::create_dir_all(join(&folder, "bridge/package")).unwrap();
+        fs::write(join(&folder, &format!("bridge/package/{exe}")), b"packaged").unwrap();
+        assert_eq!(bridge_dir_in(&folder), join(&folder, "bridge/package"));
+        assert_eq!(bridge_binary_in(&folder), Some(join(&folder, &format!("bridge/package/{exe}"))));
+    }
 }

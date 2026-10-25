@@ -273,7 +273,9 @@ jobs:
           kumi() { env -i HOME="$HOME" PATH=/usr/bin:/bin TERM=xterm KUMI_RELEASES="$KUMI_RELEASES" KUMI_REAPER_RESOURCE_DIR="$reaper" KUMI_RENOISE_PREFS_DIR="$renoise" "$KUMI_HOME/bin/kumi" "$@"; }
           kumi --version | grep -q "Kumi $(python3 -c 'import json; print(json.load(open("package.json"))["version"])')"
           kumi --help | grep -q "kumi bridge"
-          kumi doctor || true
+          kumi doctor 2>&1 | tee doctor.txt || true
+          # Doctor starts Kumi's own bridge from where a session looks for it (its package under app/bridge).
+          if [ "$(uname -s)" = Darwin ]; then grep -q "Kumi's bridge .* starts" doctor.txt; fi
           test ! -e "$KUMI_HOME/node"
           # The bridge is in its package under app/bridge, once: nothing of it beside kumi.
           "$KUMI_HOME/app/bridge/package/ableton-mcp-server" --version
@@ -478,7 +480,10 @@ jobs:
           # Kept as a REG_EXPAND_SZ, so %VAR% entries in it still expand.
           if ((Get-Item -LiteralPath 'HKCU:\Environment').GetValueKind('Path') -ne 'ExpandString') { throw 'PATH is no longer REG_EXPAND_SZ' }
           & $kumi --help | Select-String 'kumi bridge' | Out-Null
-          & $kumi doctor; $global:LASTEXITCODE = 0
+          $doctor = & $kumi doctor 2>&1 | Out-String; $global:LASTEXITCODE = 0
+          Write-Host $doctor
+          # Doctor starts Kumi's own bridge from where a session looks for it (its package under app\bridge).
+          if ($doctor -notmatch "Kumi's bridge .* starts") { throw 'doctor did not start the bundled bridge' }
           if (Test-Path (Join-Path $env:KUMI_HOME 'node')) { throw 'fresh native install brought Node' }
           & (Join-Path $env:KUMI_HOME 'app\bridge\package\ableton-mcp-server.exe') --version
           if ($LASTEXITCODE -ne 0) { throw 'native bridge did not start' }

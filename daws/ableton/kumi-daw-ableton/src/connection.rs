@@ -284,12 +284,17 @@ impl LiveConnection {
             .as_ref()
             .ok_or_else(|| RuntimeError::plain("Bridge configuration is required; choose explicit inference-only mode otherwise"))?;
         let dispatch = self.options.on_dispatch.clone().map(|f| Rc::new(move |name: &str| f(name.into())) as Rc<dyn Fn(&str)>);
+        // The bridge this Kumi brings: in the app's bridge/package, or beside kumi (a checkout's build, an app from
+        // before the bridge moved into its package). It runs in its own folder, where its worker and extension are.
+        let entry = crate::app::bridge_setup::bundled_bridge_binary().map(std::path::PathBuf::from);
         client::connect_mcp(client::Options {
             signal,
             bridge_config: Some(path.into()),
             allow_tools: BRIDGE_TOOLS.clone(),
             on_dispatch: dispatch,
             bridge: Some(client::BridgeDescriptor::ABLETON),
+            cwd: entry.as_ref().and_then(|entry| entry.parent().map(std::path::Path::to_path_buf)),
+            entry,
             ..Default::default()
         })
         .await

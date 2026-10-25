@@ -14,7 +14,7 @@ use kumi_daw::check::{access, major, newer, node_version, tilde};
 use kumi_daw::{
     check::{Bundled, Check, CheckStatus, Probe, Probes},
     io::DawIo,
-    process::default_run,
+    process::{default_run, executable_dir},
     provider::Installed as LiveInstalled,
 };
 use kumi_library::sources::{dirname, join};
@@ -299,7 +299,27 @@ pub(crate) async fn installation_checks(env: &Env, io: &DawIo, platform: &str) -
     checks.extend(live_checks(env, platform, &lives, live_running));
     checks.push(ports_check(&held, live_running));
     checks.extend(developer_mode(env, platform, io, live_running).await);
+    checks.extend(bundled_bridge_check(io).await);
     checks
+}
+
+/// Kumi's own copy of the bridge, the program a Live session starts (in the app's bridge/package since 1.24, beside
+/// kumi before): that it is where Kumi looks, and that it starts. For an installed app only: a checkout's build has
+/// its bridge beside it, or not built yet.
+async fn bundled_bridge_check(io: &DawIo) -> Option<Check> {
+    if !Path::new(&join(&executable_dir(), "package.json")).exists() {
+        return None;
+    }
+    let Some(binary) = super::bridge_setup::bundled_bridge_binary() else {
+        return Some(Check::fix("Kumi's copy of the bridge is missing", Some(format!("Run {}.", *KUMI_REPAIR))));
+    };
+    let ran = (io.run)(binary.clone(), vec!["--version".into()], None).await;
+    Some(if ran.code == 0 {
+        let version = ran.stdout.trim().trim_start_matches("ableton-mcp-server").trim();
+        Check::ok(format!("Kumi's bridge {version} starts ({})", tilde(&binary)))
+    } else {
+        Check::fix(format!("Kumi's copy of the bridge didn't start ({})", tilde(&binary)), Some(format!("Run {}.", *KUMI_REPAIR)))
+    })
 }
 
 /// The Lives installed here and, once one Kumi works with can take the bridge (setup's own verdict,
