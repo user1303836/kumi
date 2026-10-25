@@ -285,9 +285,10 @@ impl AllowedTools {
         if !options.host && (!self.is_valid() || invalidation != self.state.borrow().invalidation) {
             return Err(RuntimeError::plain("MCP catalog changed during the call; result discarded"));
         }
-        if stringify(&serde_json::to_value(&result).expect("tool result serializes")).len()
-            > if options.host { MAX_HOST_RESULT_BYTES } else { MAX_RESULT_BYTES }
-        {
+        // Only the model's tools have a cap of their own: a host call's result came in one message, which the transport
+        // held to MAX_BRIDGE_MESSAGE_BYTES before reading it, and measuring it again (a page of megabytes serialized
+        // whole) only cost time.
+        if !options.host && stringify(&serde_json::to_value(&result).expect("tool result serializes")).len() > MAX_RESULT_BYTES {
             return Ok(serde_json::from_value(json!({"isError":true,"content":[{"type":"text","text":"Result too large; narrow fields/parent/page instead of requesting a whole Set dump."}]})).expect("tool result"));
         }
         Ok(result)
