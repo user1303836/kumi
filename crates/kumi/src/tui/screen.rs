@@ -2,8 +2,10 @@
 
 use std::rc::Rc;
 
+use unicode_segmentation::UnicodeSegmentation;
+
 use super::style::{Style, StyleTable};
-use super::width::{cell_width, graphemes};
+use super::width::cell_width;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Rect {
@@ -93,7 +95,7 @@ impl Screen {
             return x;
         }
         let mut column = x;
-        for grapheme in graphemes(text) {
+        for grapheme in text.graphemes(true) {
             let mut character = grapheme;
             let mut cells = cell_width(grapheme);
             if has_control(grapheme) {

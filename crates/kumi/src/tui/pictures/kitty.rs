@@ -330,6 +330,13 @@ pub fn placeholder(row: usize, column: usize) -> String {
     cell
 }
 
+/// Whether a grapheme is a placeholder cell: U+10EEEE and nothing after it but row and column marks (combining marks,
+/// so it's one cluster, one cell wide).
+pub fn is_placeholder(grapheme: &str) -> bool {
+    let mut characters = grapheme.chars();
+    characters.next() == Some(PLACEHOLDER) && characters.all(|mark| DIACRITICS.binary_search(&mark).is_ok())
+}
+
 /// Uploads the image under `id` and places it virtually over `cols` × `rows` cells: RGBA, deflated, in chunks. Deflated
 /// fast: the frame waits for it, and a map's image is megabytes of mostly clear pixels.
 pub fn transmit(id: u32, raster: &Raster, cols: usize, rows: usize) -> String {

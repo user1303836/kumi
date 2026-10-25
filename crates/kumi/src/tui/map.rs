@@ -303,9 +303,11 @@ fn scene(layer: &Layer, view: &View, frame: &Frame, patch: f64, steps: Option<f6
 /// A picture drawn for the area, kept until what it shows changes.
 struct Picture {
     key: String,
-    /// Braille rows; none for an image (its placeholder rows come from its id).
+    /// Braille rows; for an image, the placeholder rows that show it under `id`.
     rows: Vec<Vec<Span>>,
     image: Option<Raster>,
+    /// The id an image's placeholder rows were made for.
+    id: Option<u32>,
     /// The points named beside them.
     named: Vec<u32>,
     dense: bool,
@@ -776,18 +778,24 @@ impl MapView {
                 let shrink = (MOST_PIXELS.0 / (cols as f64 * CELL_PIXELS.0)).min(MOST_PIXELS.1 / (rows as f64 * CELL_PIXELS.1)).min(1.);
                 let (width, height) = ((cols as f64 * CELL_PIXELS.0 * shrink) as u32, (rows as f64 * CELL_PIXELS.1 * shrink) as u32);
                 let image = Some(Raster::draw(&scene, width, height));
-                Picture { key: key.clone(), rows: vec![], image, named, dense, pixels: Some((width as f64, height as f64)) }
+                Picture { key: key.clone(), rows: vec![], image, id: None, named, dense, pixels: Some((width as f64, height as f64)) }
             } else {
-                Picture { key: key.clone(), rows: cells::braille(&scene, cols, rows), image: None, named, dense, pixels: None }
+                Picture { key: key.clone(), rows: cells::braille(&scene, cols, rows), image: None, id: None, named, dense, pixels: None }
             };
             self.picture = Some(picture);
         }
-        let picture = self.picture.as_ref().expect("drawn");
-        let drawn = match &picture.image {
-            Some(raster) => kitty::cells(upload(&key, raster, cols, rows), cols, rows),
-            None => picture.rows.clone(),
-        };
-        for (row, spans) in drawn.iter().enumerate() {
+        let picture = self.picture.as_mut().expect("drawn");
+        // An image's placeholder rows are made again only when it's up under another id (taken down unseen, say): a cell
+        // each, thousands a frame.
+        if let Some(raster) = &picture.image {
+            let id = upload(&key, raster, cols, rows);
+            if picture.id != Some(id) {
+                picture.rows = kitty::cells(id, cols, rows);
+                picture.id = Some(id);
+            }
+        }
+        let picture = &*picture;
+        for (row, spans) in picture.rows.iter().enumerate() {
             let mut x = area.x;
             for span in spans {
                 x = screen.put(x, area.y + row as i32, &span.text, &span.style);

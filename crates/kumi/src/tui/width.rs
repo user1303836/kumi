@@ -16,6 +16,8 @@ use unicode_segmentation::UnicodeSegmentation;
 
 use kumi_common::js;
 
+use super::pictures::kitty;
+
 pub fn graphemes(text: &str) -> Vec<&str> {
     text.graphemes(true).collect()
 }
@@ -43,6 +45,11 @@ pub fn cell_width(grapheme: &str) -> i32 {
             one.borrow_mut().insert(single, width as i8);
             width
         });
+    }
+    // A Kitty placeholder, one cell as `string_width` measures it: a map on Kitty or Ghostty puts thousands each frame,
+    // and their marks make each a cluster of three characters, not one the memo above holds.
+    if kitty::is_placeholder(grapheme) {
+        return 1;
     }
     string_width(grapheme).min(2)
 }
@@ -303,3 +310,26 @@ const WIDE: [(u32, u32); 126] = [
     (0x20000, 0x2FFFD),
     (0x30000, 0x3FFFD),
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_kitty_placeholder_is_the_one_cell_the_full_measure_says() {
+        // Every row and column mark: one cluster, which `string_width` measures as one cell too.
+        for mark in 0..kitty::DIACRITICS.len() {
+            for cell in [kitty::placeholder(mark, 0), kitty::placeholder(0, mark), kitty::placeholder(mark, mark)] {
+                assert!(kitty::is_placeholder(&cell), "{cell:?}");
+                assert_eq!(cell.graphemes(true).count(), 1, "{cell:?}");
+                assert_eq!((cell_width(&cell), string_width(&cell)), (1, 1), "{cell:?}");
+            }
+        }
+        // Anything else after U+10EEEE is measured in full: another cluster, a halfwidth mark, a mark not Kitty's.
+        for other in ["\u{10EEEE}a", "\u{10EEEE}\u{FF9E}", "\u{10EEEE}\u{0301}"] {
+            assert!(!kitty::is_placeholder(other), "{other:?}");
+            assert_eq!(cell_width(other), string_width(other).min(2), "{other:?}");
+        }
+        assert_eq!(cell_width("\u{10EEEE}\u{FF9E}"), 2);
+    }
+}
