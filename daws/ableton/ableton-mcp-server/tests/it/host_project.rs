@@ -13,6 +13,8 @@ struct Adapter {
     case: Value,
     calls: RefCell<Vec<Value>>,
     path: RefCell<Option<String>>,
+    /// The whole Set every snapshot gives, in place of the simulator's.
+    whole: RefCell<Option<LiveSnapshot>>,
 }
 impl LiveAdapter for Adapter {
     fn status(&self) -> Result<LiveStatus, LiveError> {
@@ -41,6 +43,9 @@ impl AsyncLiveAdapter for Adapter {
         self.calls.borrow_mut().push(json!({"context":null,"request":r}));
         if let Some(fail) = self.case["fail"].as_str() {
             return Err(LiveError::error(fail));
+        }
+        if let Some(whole) = self.whole.borrow().as_ref() {
+            return Ok(whole.clone());
         }
         let snapshot = self.sim.snapshot_async(c, r).await?;
         if let Some(path) = self.path.borrow().as_ref() {
@@ -85,6 +90,7 @@ fn adapter(case: Value) -> Rc<Adapter> {
         case,
         calls: RefCell::new(vec![]),
         path: RefCell::new(None),
+        whole: RefCell::new(None),
     })
 }
 fn fixture() -> Value {
@@ -265,6 +271,46 @@ async fn live_export_cache_and_guarded_backup_lifecycle() {
     std::fs::write(&path, base64::engine::general_purpose::STANDARD.decode(f["changedRaw"].as_str().unwrap()).unwrap()).unwrap();
     let changed = call(&host, "live_project_backup_apply", args).await;
     assert!(changed["result"]["content"][0]["text"]["reason"].as_str().unwrap().contains("content changed"));
+}
+#[tokio::test]
+async fn a_big_sets_export_keeps_the_runtime_responsive() {
+    // 600 copies of the simulator's first track: the export is a second or more of work in a debug build. The bridge
+    // serves every request on one thread, and those waiting behind the export (FOCUS's poll comes twice a second) waited
+    // for all of it; the ticker here is one of them.
+    let adapter = adapter(json!({}));
+    let mut whole = serde_json::to_value(adapter.sim.snapshot().unwrap()).unwrap();
+    let track = whole["tracks"][0].clone();
+    let tracks: Vec<_> = (0..600)
+        .map(|i| {
+            let mut copy = track.clone();
+            copy["ref"] = json!(format!("track:big-{i}"));
+            copy["name"] = json!(format!("Track {i}"));
+            copy
+        })
+        .collect();
+    whole["tracks"] = json!(tracks);
+    *adapter.whole.borrow_mut() = Some(serde_json::from_value(whole).unwrap());
+    let host = pinned_host(adapter.clone());
+    let ticks = RefCell::new(vec![]);
+    let ticker = async {
+        loop {
+            ticks.borrow_mut().push(std::time::Instant::now());
+            tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+        }
+    };
+    let started = std::time::Instant::now();
+    let first = tokio::select! {
+        first = call(&host, "live_project_snapshot_export", json!({"limit":200})) => first,
+        _ = ticker => unreachable!(),
+    };
+    let took = started.elapsed();
+    assert_eq!(first["result"]["isError"], false, "{first}");
+    assert!(first["result"]["content"][0]["text"]["page"]["total"].as_u64().unwrap() > 600);
+    let ticks = ticks.into_inner();
+    let longest = ticks.windows(2).map(|pair| pair[1] - pair[0]).max().unwrap_or(took);
+    let said = format!("{} ticks in the export's {took:?}, the longest wait {longest:?}", ticks.len());
+    println!("{said}");
+    assert!(ticks.len() >= 10 && longest * 2 < took, "{said}");
 }
 fn normalize_backup(value: &Value, root: &str, id: &str, key: &str) -> Value {
     if key == "mtimeMs" || key == "expiresAt" {
