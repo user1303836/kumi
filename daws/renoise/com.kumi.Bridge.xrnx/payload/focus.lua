@@ -295,7 +295,7 @@ local function pattern_body(job, params, epoch)
       local row = line_row(live_tracks[t]:line(i), i, shape[t][1], shape[t][2], hidden)
       if row then
         -- (each row encoded once, here where it is measured: `fit` sends the texts)
-        local entry, text = entries[t], json.encode(row)
+        local entry, text = entries[t], json.encode(row, { max_depth = json.ROW_DEPTH })
         entry.rows[#entry.rows + 1] = row
         entry.texts[#entry.rows] = text or false
         bytes = bytes + (text and #text or 0) + 1

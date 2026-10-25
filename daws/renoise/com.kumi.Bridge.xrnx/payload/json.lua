@@ -42,6 +42,10 @@ end
 -- The deepest a document nests, the outermost object or array counting as the first level: the same limit as
 -- crates/daw-bridge (MAX_JSON_DEPTH), so a line one side writes is never one the other refuses.
 M.MAX_DEPTH = 64
+-- The deepest a row encoded on its own (a page's item, a grid's row, a digest's record) may nest: its text goes into the
+-- document as it is, where its own levels aren't counted again, and the document around it is at most this many levels
+-- (the answer, items, a track's rows). A row deeper than this is sent as a table and counted with the rest.
+M.ROW_DEPTH = M.MAX_DEPTH - 8
 
 local REPLACEMENT = "\239\191\189"
 

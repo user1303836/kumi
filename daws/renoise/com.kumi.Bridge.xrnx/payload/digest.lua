@@ -349,15 +349,15 @@ function M.digest(job, params, epoch, extra)
   local function take(made, phase, index, before)
     local size, texts = 0, {}
     for k, record in ipairs(made) do
-      local text = json.encode(record)
-      texts[k] = text
-      size = size + #text + 1
+      local text = json.encode(record, { max_depth = json.ROW_DEPTH })
+      texts[k] = text or false
+      size = size + #(text or json.encode(record) or "") + 1
     end
     if #records > 0 and bytes + size > M.PAGE_BYTES then
       next_cursor = { epoch = epoch, phase = phase, index = index, lines = before.lines, values = before.values }
       return false
     end
-    for k = 1, #made do records[#records + 1] = json.raw(texts[k]) end
+    for k = 1, #made do records[#records + 1] = texts[k] and json.raw(texts[k]) or made[k] end
     bytes = bytes + size
     return true
   end

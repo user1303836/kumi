@@ -180,6 +180,14 @@ test("json: a list with a hole is refused, marked as a list or not", function()
   eq(enc(json.array()), "[]")
 end)
 
+test("json: a row encoded on its own stops ROW_DEPTH levels short of MAX_DEPTH, so a raw text never makes a frame too deep (perf N4)", function()
+  eq(json.ROW_DEPTH, json.MAX_DEPTH - 8)
+  local function nested(levels) local v = 1; for _ = 1, levels do v = { v } end; return v end
+  ok(json.encode(nested(json.ROW_DEPTH), { max_depth = json.ROW_DEPTH }) ~= nil, "a row at the row limit encodes")
+  eq(json.encode(nested(json.ROW_DEPTH + 1), { max_depth = json.ROW_DEPTH }), nil, "one deeper is refused, and goes as a table")
+  ok(json.encode(nested(json.ROW_DEPTH + 1)) ~= nil, "which the document's own encoder still takes within MAX_DEPTH")
+end)
+
 test("json: a raw text goes into a document as it is, and a document of raws is the bytes of the document of their values (perf N4)", function()
   eq(json.encode(json.array({ json.raw('{"x":1}') })), '[{"x":1}]')
   eq(json.encode({ r = json.raw("[1, 2]") }), '{"r":[1, 2]}', "verbatim, spaces and all")

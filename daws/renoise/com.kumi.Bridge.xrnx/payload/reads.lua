@@ -59,7 +59,7 @@ local function page(job, epoch, params, total, row_at, sparse, extra)
     local waited = job.slice()
     local row = row_at(i, waited)
     if row ~= nil then
-      local text = json.encode(row)
+      local text = json.encode(row, { max_depth = json.ROW_DEPTH })
       items[#items + 1] = text and json.raw(text) or row
       after[#items] = i + 1
     end
