@@ -615,7 +615,7 @@ impl Reads {
     /// `read {ref}`: the one object a ref names.
     fn read_one(&self, reaper: &Reaper, proj: Project, reference: &str, grid: Option<usize>) -> Answer {
         let row = match Ref::parse(reference).map_err(bad)? {
-            Ref::Track(id) => rows::track_row(reaper, self.track_by_id(reaper, proj, &id)?),
+            Ref::Track(id) => rows::track_row_detailed(reaper, self.track_by_id(reaper, proj, &id)?),
             Ref::Item(guid) => rows::item_row(reaper, proj, self.item_by_guid(reaper, proj, &guid)?),
             Ref::Take(guid) => take_row(reaper, self.take_by_guid(reaper, proj, &guid)?, None),
             Ref::Fx(guid) => {
@@ -2054,6 +2054,26 @@ mod tests {
         assert_eq!((&rows[0]["fxRef"], &rows[0]["param"]), (&json!("r:fx:{FX-BIG}"), &json!(7000)));
         let calls = fake::with(|s| s.calls);
         assert!(calls < 100, "{calls} calls to find one envelope");
+    }
+
+    // The optimization audit's R5: every track row read fifty group masks (25 roles, low and high masks), nearly always
+    // all zero, and the host never read them from a list. The one track asked about still has them.
+    #[test]
+    fn a_lists_rows_leave_the_groups_out_and_the_one_track_asked_about_has_them() {
+        let lab = Lab::new();
+        let guid = fake::with(|s| s.tracks[1].guid.clone());
+        fake::extra(|e| e.groups.insert((guid, "VOLUME_VCA_FOLLOW".into(), false), 1 | 4));
+        let calls = || fake::with(|s| s.calls);
+        let before = calls();
+        let rows = lab.rows(json!({"kind": "track"}));
+        let listed = calls() - before;
+        assert!(rows.iter().all(|row| row.get("groups").is_none()), "{rows:?}");
+        let kick = rows.iter().find(|row| row["name"] == "Kick").unwrap();
+        let before = calls();
+        let one = lab.rows(json!({"ref": kick["ref"]}));
+        let single = calls() - before;
+        assert_eq!(one[0]["groups"], json!([{"group": 1, "roles": ["vca-follow"]}, {"group": 3, "roles": ["vca-follow"]}]));
+        assert!(single >= listed / rows.len() as u64 + 50, "{single} calls for the one track, {listed} for {} rows", rows.len());
     }
 
     #[test]

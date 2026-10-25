@@ -2,18 +2,15 @@
 //! function this REAPER lacks reads as empty and writes as false, and the change that needed it is refused before it
 //! begins.
 
-use std::ffi::{c_char, c_int, CString};
+use std::ffi::{c_char, c_int};
 use std::ptr;
 
+use super::ctext;
 use super::{Item, Project, Reaper, Take, Track};
 use crate::api;
 
 /// The most an item's chunk may grow to when it is read: a MIDI take's events and the take FX's states take the room.
 const MAX_CHUNK: usize = 256 << 20;
-
-fn cstring(text: &str) -> CString {
-    CString::new(text.replace('\0', "")).unwrap_or_default()
-}
 
 /// A stretch marker as REAPER keeps it: where it sits in the item (seconds from the item's start), the source position it
 /// pins there (seconds), and the rate's slope to the next one.
@@ -44,7 +41,7 @@ impl Reaper<'_> {
     // ----- items -----
 
     pub fn set_item_value(&self, item: Item, parm: &str, value: f64) -> bool {
-        let parm = cstring(parm);
+        let parm = ctext(parm);
         self.api.SetMediaItemInfo_Value().is_some_and(|f| unsafe { f(item.0, parm.as_ptr(), value) })
     }
 
@@ -107,7 +104,7 @@ impl Reaper<'_> {
     }
 
     pub fn set_item_chunk(&self, item: Item, chunk: &str) -> bool {
-        let chunk = cstring(chunk);
+        let chunk = ctext(chunk);
         self.api.SetItemStateChunk().is_some_and(|f| unsafe { f(item.0, chunk.as_ptr(), false) })
     }
 
@@ -163,13 +160,13 @@ impl Reaper<'_> {
     }
 
     pub fn set_take_value(&self, take: Take, parm: &str, value: f64) -> bool {
-        let parm = cstring(parm);
+        let parm = ctext(parm);
         self.api.SetMediaItemTakeInfo_Value().is_some_and(|f| unsafe { f(take.0, parm.as_ptr(), value) })
     }
 
     /// A take's text attribute (`P_NAME`).
     pub fn set_take_string(&self, take: Take, parm: &str, value: &str) -> bool {
-        let (parm, value) = (cstring(parm), cstring(value));
+        let (parm, value) = (ctext(parm), ctext(value));
         let Some(f) = self.api.GetSetMediaItemTakeInfo_String() else { return false };
         let mut buf = value.into_bytes_with_nul();
         unsafe { f(take.0, parm.as_ptr(), buf.as_mut_ptr().cast::<c_char>(), true) }
@@ -179,7 +176,7 @@ impl Reaper<'_> {
     /// unreadable file reads as an empty source of length 0).
     pub fn media(&self, path: &str) -> Option<Media> {
         let (create, destroy) = (self.api.PCM_Source_CreateFromFile()?, self.api.PCM_Source_Destroy()?);
-        let path = cstring(path);
+        let path = ctext(path);
         let source = unsafe { create(path.as_ptr()) };
         if source.is_null() {
             return None;
@@ -203,7 +200,7 @@ impl Reaper<'_> {
     pub fn set_take_file(&self, take: Take, path: &str) -> Option<Media> {
         let (create, destroy, set) =
             (self.api.PCM_Source_CreateFromFile()?, self.api.PCM_Source_Destroy()?, self.api.GetSetMediaItemTakeInfo()?);
-        let path = cstring(path);
+        let path = ctext(path);
         let source = unsafe { create(path.as_ptr()) };
         if source.is_null() {
             return None;
@@ -294,7 +291,7 @@ impl Reaper<'_> {
     /// order), or -1.
     pub fn set_take_marker(&self, take: Take, index: i32, name: &str, source: Option<f64>, color: Option<i32>) -> i32 {
         let Some(f) = self.api.SetTakeMarker() else { return -1 };
-        let name = cstring(name);
+        let name = ctext(name);
         let mut source = source;
         let mut color = color;
         let source_ptr = source.as_mut().map_or(ptr::null_mut(), |s| s as *mut f64);

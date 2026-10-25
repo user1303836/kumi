@@ -1,7 +1,7 @@
 //! The REAPER calls the bridge makes, as safe functions over the API table. Main thread only (Api isn't Send).
 //! A function this REAPER lacks reads as empty or None rather than failing.
 
-use std::ffi::CString;
+use std::ffi::{c_char, CString};
 use std::ptr;
 
 use serde_json::{json, Value};
@@ -25,6 +25,52 @@ pub use audio::*;
 
 /// File: Quit REAPER.
 pub const ACTION_QUIT: i32 = 40004;
+
+/// A text as REAPER's C takes it, NUL-terminated: on the stack when short (nearly every key is a literal, "D_VOL" or
+/// "P_NAME"), on the heap past 63 bytes (a path, a chunk); an inner NUL is dropped. A track's row asks for some two
+/// hundred keys, a snapshot of 200 tracks for forty thousand: none of them is an allocation.
+pub(crate) struct CText {
+    short: [u8; CTEXT_SHORT],
+    /// The bytes of `short` in use, the NUL included.
+    len: usize,
+    long: Option<CString>,
+}
+
+const CTEXT_SHORT: usize = 64;
+
+pub(crate) fn ctext(text: &str) -> CText {
+    if text.len() < CTEXT_SHORT {
+        let mut short = [0u8; CTEXT_SHORT];
+        let mut len = 0;
+        for &byte in text.as_bytes() {
+            if byte != 0 {
+                short[len] = byte;
+                len += 1;
+            }
+        }
+        CText { short, len: len + 1, long: None }
+    } else {
+        let bytes: Vec<u8> = text.bytes().filter(|&byte| byte != 0).collect();
+        CText { short: [0; CTEXT_SHORT], len: 0, long: Some(CString::new(bytes).unwrap_or_default()) }
+    }
+}
+
+impl CText {
+    pub fn as_ptr(&self) -> *const c_char {
+        match &self.long {
+            Some(long) => long.as_ptr(),
+            None => self.short.as_ptr().cast(),
+        }
+    }
+
+    /// The text's bytes with the NUL, for a getter-setter that writes into the caller's buffer.
+    pub fn into_bytes_with_nul(self) -> Vec<u8> {
+        match self.long {
+            Some(long) => long.into_bytes_with_nul(),
+            None => self.short[..self.len].to_vec(),
+        }
+    }
+}
 
 pub struct Reaper<'a> {
     api: &'a Api,
@@ -378,5 +424,24 @@ mod tests {
         assert_eq!(reaper.current_project(), None);
         assert_eq!(reaper.busy(), None);
         assert!(!reaper.run_action(ACTION_QUIT));
+    }
+
+    #[test]
+    fn a_c_text_is_on_the_stack_when_short_on_the_heap_when_long_and_drops_an_inner_nul() {
+        let read = |text: &CText| unsafe { std::ffi::CStr::from_ptr(text.as_ptr()) }.to_str().unwrap().to_owned();
+        let short = ctext("D_VOL");
+        assert!(short.long.is_none());
+        assert_eq!(read(&short), "D_VOL");
+        assert_eq!(short.into_bytes_with_nul(), b"D_VOL\0");
+        let edge = ctext(&"k".repeat(63));
+        assert!(edge.long.is_none(), "63 bytes and the NUL fit");
+        assert_eq!(read(&edge).len(), 63);
+        let long = ctext(&"k".repeat(64));
+        assert!(long.long.is_some());
+        assert_eq!(read(&long).len(), 64);
+        assert_eq!(long.into_bytes_with_nul().len(), 65);
+        assert_eq!(read(&ctext("a\0b")), "ab");
+        assert_eq!(read(&ctext(&format!("{}\0{}", "x".repeat(40), "y".repeat(40)))), format!("{}{}", "x".repeat(40), "y".repeat(40)));
+        assert_eq!(read(&ctext("")), "");
     }
 }

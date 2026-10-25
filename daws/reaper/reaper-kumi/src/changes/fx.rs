@@ -58,11 +58,12 @@ fn chain_fence(chain: &[String]) -> Value {
 }
 
 /// What tells an FX apart from how Kumi left it: its name, whether it runs, its preset and its parameters' values, less the
-/// parameters that move by themselves (`volatile`, NIT-7: found without holding REAPER's main thread).
+/// parameters that move by themselves (`volatile`, NIT-7: found without holding REAPER's main thread). The parameters are
+/// read twice in all: the two reads that find what moves, the second of which the hash and the look kept are made from.
 pub(super) fn signature(ctx: &Ctx, fx: Fx) -> Value {
-    let volatile = super::volatile::moving(ctx, fx);
-    let signature = signature_without(ctx, fx, &volatile);
-    super::volatile::remember(ctx, fx, &signature);
+    let (volatile, values) = super::volatile::moving(ctx, fx);
+    let signature = signature_from(ctx, fx, &volatile, &values);
+    super::volatile::remember(ctx, fx, &signature, values);
     signature
 }
 
@@ -119,7 +120,13 @@ fn same_but_hash(a: &Value, b: &Value) -> bool {
     ["name", "enabled", "offline", "preset", "params"].iter().all(|key| a[key] == b[key])
 }
 
+/// The signature as the FX is now, its parameters read once for the hash.
 fn signature_without(ctx: &Ctx, fx: Fx, volatile: &[i32]) -> Value {
+    signature_from(ctx, fx, volatile, &super::volatile::values(ctx.reaper, fx))
+}
+
+/// The signature from parameter values already read.
+fn signature_from(ctx: &Ctx, fx: Fx, volatile: &[i32], values: &[f32]) -> Value {
     let reaper = ctx.reaper;
     json!({
         "name": reaper.fx_name(fx),
@@ -128,7 +135,7 @@ fn signature_without(ctx: &Ctx, fx: Fx, volatile: &[i32]) -> Value {
         "preset": reaper.fx_preset(fx),
         "params": reaper.fx_param_count(fx),
         "volatile": volatile,
-        "hash": super::volatile::hash(&super::volatile::values(reaper, fx), volatile),
+        "hash": super::volatile::hash(values, volatile),
     })
 }
 

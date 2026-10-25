@@ -1,30 +1,27 @@
 //! What the bridge writes to REAPER, and the undo history it names its writes in. Each call is REAPER's own, one for one;
 //! a function this REAPER lacks answers false or None, and the change that needed it is refused before it begins.
 
-use std::ffi::{c_char, c_int, CString};
+use std::ffi::{c_char, c_int};
 use std::ptr;
 
+use super::ctext;
 use super::{Fx, FxOwner, Project, Reaper, Take, Track};
 use crate::api::{self, ProjectMarker};
 
 /// The most a track's chunk may grow to when it is read: the plug-in states in it are what take the room.
 const MAX_CHUNK: usize = 256 << 20;
 
-fn cstring(text: &str) -> CString {
-    CString::new(text.replace('\0', "")).unwrap_or_default()
-}
-
 impl Reaper<'_> {
     // ----- tracks -----
 
     pub fn set_track_value(&self, track: Track, parm: &str, value: f64) -> bool {
-        let parm = cstring(parm);
+        let parm = ctext(parm);
         self.api.SetMediaTrackInfo_Value().is_some_and(|f| unsafe { f(track.0, parm.as_ptr(), value) })
     }
 
     /// A track's text attribute (`P_NAME`).
     pub fn set_track_string(&self, track: Track, parm: &str, value: &str) -> bool {
-        let (parm, value) = (cstring(parm), cstring(value));
+        let (parm, value) = (ctext(parm), ctext(value));
         let Some(f) = self.api.GetSetMediaTrackInfo_String() else { return false };
         // The buffer is read, not written, when setting; REAPER wants it writable all the same.
         let mut buf = value.into_bytes_with_nul();
@@ -40,7 +37,7 @@ impl Reaper<'_> {
 
     /// Names a note of a track (`SetTrackMIDINoteNameEx`; channel -1 for all): what the MIDI editor shows for its row.
     pub fn set_note_name(&self, proj: Project, track: Track, pitch: i32, channel: i32, name: &str) -> bool {
-        let name = cstring(name);
+        let name = ctext(name);
         self.api.SetTrackMIDINoteNameEx().is_some_and(|f| unsafe { f(proj.0, track.0, pitch, channel, name.as_ptr()) })
     }
 
@@ -77,7 +74,7 @@ impl Reaper<'_> {
     }
 
     pub fn set_track_chunk(&self, track: Track, chunk: &str) -> bool {
-        let chunk = cstring(chunk);
+        let chunk = ctext(chunk);
         self.api.SetTrackStateChunk().is_some_and(|f| unsafe { f(track.0, chunk.as_ptr(), false) })
     }
 
@@ -119,7 +116,7 @@ impl Reaper<'_> {
 
     /// A send's text attribute (`P_EXT:…`): None when it has none.
     pub fn send_text(&self, track: Track, category: i32, index: i32, parm: &str) -> Option<String> {
-        let parm = cstring(parm);
+        let parm = ctext(parm);
         let f = self.api.GetSetTrackSendInfo_String()?;
         // Asked for a read, REAPER writes the text without being told the buffer's size: the big buffer of its other such reads.
         let text = super::objects::big_string(|buf| unsafe { f(track.0, category, index, parm.as_ptr(), buf, false) })?;
@@ -127,7 +124,7 @@ impl Reaper<'_> {
     }
 
     pub fn set_send_text(&self, track: Track, category: i32, index: i32, parm: &str, value: &str) -> bool {
-        let (parm, value) = (cstring(parm), cstring(value));
+        let (parm, value) = (ctext(parm), ctext(value));
         let Some(f) = self.api.GetSetTrackSendInfo_String() else { return false };
         let mut buf = value.into_bytes_with_nul();
         unsafe { f(track.0, category, index, parm.as_ptr(), buf.as_mut_ptr().cast(), true) }
@@ -166,7 +163,7 @@ impl Reaper<'_> {
     }
 
     pub fn set_send_value(&self, track: Track, category: i32, index: i32, parm: &str, value: f64) -> bool {
-        let parm = cstring(parm);
+        let parm = ctext(parm);
         self.api.SetTrackSendInfo_Value().is_some_and(|f| unsafe { f(track.0, category, index, parm.as_ptr(), value) })
     }
 
@@ -197,7 +194,7 @@ impl Reaper<'_> {
     /// Ends the block as one undo point named `desc`. `flags` -1 covers every kind of change; 0 makes a point only if
     /// something REAPER itself marked changed.
     pub fn undo_end(&self, proj: Project, desc: &str, flags: i32) -> bool {
-        let desc = cstring(desc);
+        let desc = ctext(desc);
         match self.api.Undo_EndBlock2() {
             Some(f) => {
                 unsafe { f(proj.0, desc.as_ptr(), flags) };
@@ -235,14 +232,14 @@ impl Reaper<'_> {
 /// Markers and regions, which REAPER hands out by pointer and names by GUID.
 impl Reaper<'_> {
     fn marker_pointer(&self, proj: Project, guid: &str) -> Option<*mut ProjectMarker> {
-        let guid = cstring(guid);
+        let guid = ctext(guid);
         let marker = unsafe { self.api.GetRegionOrMarker()?(proj.0, -1, guid.as_ptr()) };
         (!marker.is_null()).then_some(marker)
     }
 
     /// A marker or region made at `start` (seconds), and its GUID. `end` is the region's.
     pub fn add_marker(&self, proj: Project, region: bool, start: f64, end: f64, name: &str, color: i32) -> Option<String> {
-        let name = cstring(name);
+        let name = ctext(name);
         let marker = unsafe { self.api.AddRegionOrMarker()?(proj.0, region, start, end, name.as_ptr(), -1, color) };
         if marker.is_null() {
             return None;
@@ -257,7 +254,7 @@ impl Reaper<'_> {
     /// A marker's number attribute: `D_STARTPOS`, `D_ENDPOS`, `I_NUMBER`, `I_CUSTOMCOLOR`.
     pub fn set_marker_value(&self, proj: Project, guid: &str, parm: &str, value: f64) -> bool {
         let (Some(marker), Some(f)) = (self.marker_pointer(proj, guid), self.api.SetRegionOrMarkerInfo_Value()) else { return false };
-        let parm = cstring(parm);
+        let parm = ctext(parm);
         // What it returns is not documented as a success flag: the change reads the marker again.
         unsafe { f(proj.0, marker, parm.as_ptr(), value) };
         true
@@ -276,7 +273,7 @@ impl Reaper<'_> {
 
     pub fn set_marker_name(&self, proj: Project, guid: &str, name: &str) -> bool {
         let (Some(marker), Some(f)) = (self.marker_pointer(proj, guid), self.api.GetSetRegionOrMarkerInfo_String()) else { return false };
-        let mut buf = cstring(name).into_bytes_with_nul();
+        let mut buf = ctext(name).into_bytes_with_nul();
         unsafe { f(proj.0, marker, c"P_NAME".as_ptr(), buf.as_mut_ptr().cast::<c_char>(), true) }
     }
 
@@ -377,7 +374,7 @@ impl Reaper<'_> {
     /// Adds the plug-in (or the FX chain file) `name` names, at `position` or at the end; the index of the first FX made,
     /// or -1 when REAPER has none by that name.
     pub fn add_fx_by_name(&self, track: Track, name: &str, position: Option<i32>) -> i32 {
-        let name = cstring(name);
+        let name = ctext(name);
         let instantiate = position.map_or(-1, |p| -1000 - p);
         self.api.TrackFX_AddByName().map_or(-1, |f| unsafe { f(track.0, name.as_ptr(), false, instantiate) })
     }

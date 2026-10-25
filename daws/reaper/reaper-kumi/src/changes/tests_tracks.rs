@@ -410,8 +410,11 @@ fn a_track_joins_a_group_as_vca_follower_and_its_undo_puts_back_exactly_those_bi
     assert_eq!((kick_roles("VOLUME_VCA_FOLLOW", false), kick_roles("MUTE_FOLLOW", false)), (1 | 4, 4));
     assert_eq!(made["undo"]["entry"], true);
     // The track rows say it.
+    // (a list's rows leave the groups out; the one track asked about has them)
     let rows = lab.call("read", json!({"kind": "track"})).unwrap();
-    let kick = rows["items"].as_array().unwrap().iter().find(|r| r["name"] == "Kick").cloned().unwrap();
+    let listed = rows["items"].as_array().unwrap().iter().find(|r| r["name"] == "Kick").cloned().unwrap();
+    assert!(listed.get("groups").is_none());
+    let kick = lab.call("read", json!({"ref": listed["ref"]})).unwrap()["items"][0].clone();
     assert_eq!(kick["groups"], json!([{"group": 1, "roles": ["vca-follow"]}, {"group": 3, "roles": ["vca-follow", "mute-follow"]}]));
     lab.undo("track-group", &preview, &made, "Kumi: undo (kg002)").unwrap();
     assert_eq!((kick_roles("VOLUME_VCA_FOLLOW", false), kick_roles("MUTE_FOLLOW", false)), (1, 0));

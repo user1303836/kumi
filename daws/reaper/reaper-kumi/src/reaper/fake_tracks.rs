@@ -232,6 +232,8 @@ unsafe extern "C" fn get_midi_output_name(dev: c_int, buf: *mut c_char, size: c_
 // ----- groups -----
 
 fn membership(track: *mut MediaTrack, role: *const c_char, high: bool, mask: c_uint, value: c_uint) -> c_uint {
+    // (one REAPER call, counted as a read's cost like the others)
+    counted(|_| ());
     let role = name_of(role);
     let Some(guid) = guid_of(track) else { return 0 };
     let before = extra(|e| {

@@ -208,6 +208,20 @@ fn add_project_settings(reaper: &Reaper, proj: Project, row: &mut Value) {
     }
 }
 
+/// A track's row as the single-track read gives it: the list's row, and the groups the track is in. Those are fifty REAPER
+/// calls (25 roles, low and high masks), nearly always for no group at all: read for the one track asked about, not for
+/// every row of a list or a snapshot.
+pub fn track_row_detailed(reaper: &Reaper, track: Track) -> Value {
+    let mut row = track_row(reaper, track);
+    if row["master"] != true {
+        let groups = track_groups(reaper, track);
+        if !groups.is_empty() {
+            row["groups"] = groups.into();
+        }
+    }
+    row
+}
+
 pub fn track_row(reaper: &Reaper, track: Track) -> Value {
     let id = track_id(reaper, track);
     let master = id == TrackId::Master;
@@ -370,10 +384,6 @@ fn add_track_state(reaper: &Reaper, track: Track, master: bool, row: &mut Value)
     let midi_out = value("I_MIDIHWOUT") as i64;
     if midi_out >= 0 {
         row["midiOut"] = json!({"device": (midi_out >> 5) & 31, "channel": midi_out & 31});
-    }
-    let groups = track_groups(reaper, track);
-    if !groups.is_empty() {
-        row["groups"] = groups.into();
     }
     // Fixed lanes (comping): how many, what each is called and which play.
     let free_mode = value("I_FREEMODE") as i64;

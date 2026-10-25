@@ -2,15 +2,12 @@
 //! MIDI devices, track groups, project information, notes and grid, config variables, the action list, track templates
 //! and saving. Each is REAPER's own call, one for one; a function this REAPER lacks answers None or false.
 
-use std::ffi::{c_char, c_int, CString};
+use std::ffi::{c_char, c_int};
 use std::ptr;
 
+use super::ctext;
 use super::{Item, Project, Reaper, Track};
 use crate::api;
-
-fn cstring(text: &str) -> CString {
-    CString::new(text.replace('\0', "")).unwrap_or_default()
-}
 
 /// The most of a project string REAPER is asked for (notes, names).
 const STRING_LIMIT: usize = 1 << 20;
@@ -64,7 +61,7 @@ impl Reaper<'_> {
 
     /// A send's, receive's (`category` below 0) or hardware output's (above 0) envelope, by its chunk name (`<VOLENV`…).
     pub fn send_envelope_in(&self, track: Track, category: i32, index: i32, chunk: &str) -> Option<super::Envelope> {
-        let parm = cstring(&format!("P_ENV:{chunk}"));
+        let parm = ctext(&format!("P_ENV:{chunk}"));
         let f = self.api.GetSetTrackSendInfo()?;
         let envelope = unsafe { f(track.0, category, index, parm.as_ptr(), ptr::null_mut()) };
         (!envelope.is_null()).then_some(super::Envelope(envelope.cast()))
@@ -74,14 +71,14 @@ impl Reaper<'_> {
 
     /// A track's membership of one group role (`VOLUME_LEAD`…) in groups 1-32 (`high` false) or 33-64, one bit a group.
     pub fn group_membership(&self, track: Track, role: &str, high: bool) -> Option<u32> {
-        let role = cstring(role);
+        let role = ctext(role);
         let f = if high { self.api.GetSetTrackGroupMembershipHigh()? } else { self.api.GetSetTrackGroupMembership()? };
         Some(unsafe { f(track.0, role.as_ptr(), 0, 0) })
     }
 
     /// Sets the bits of `mask` to those of `value`; what it was before.
     pub fn set_group_membership(&self, track: Track, role: &str, high: bool, mask: u32, value: u32) -> Option<u32> {
-        let role = cstring(role);
+        let role = ctext(role);
         let f = if high { self.api.GetSetTrackGroupMembershipHigh()? } else { self.api.GetSetTrackGroupMembership()? };
         Some(unsafe { f(track.0, role.as_ptr(), mask, value) })
     }
@@ -90,12 +87,12 @@ impl Reaper<'_> {
 
     /// A number of `GetSetProjectInfo` (`RULER_LANE_COUNT`, `RULER_LANE_HIDDEN:2`…).
     pub fn project_info(&self, proj: Project, key: &str) -> Option<f64> {
-        let key = cstring(key);
+        let key = ctext(key);
         self.api.GetSetProjectInfo().map(|f| unsafe { f(proj.0, key.as_ptr(), 0.0, false) })
     }
 
     pub fn set_project_info(&self, proj: Project, key: &str, value: f64) -> bool {
-        let key = cstring(key);
+        let key = ctext(key);
         match self.api.GetSetProjectInfo() {
             Some(f) => {
                 unsafe { f(proj.0, key.as_ptr(), value, true) };
@@ -107,15 +104,15 @@ impl Reaper<'_> {
 
     /// A string of `GetSetProjectInfo_String` (`TRACK_GROUP_NAME:3`, `RULER_LANE_NAME:0`…); None when REAPER has none.
     pub fn project_text(&self, proj: Project, key: &str) -> Option<String> {
-        let key = cstring(key);
+        let key = ctext(key);
         let f = self.api.GetSetProjectInfo_String()?;
         super::objects::big_string(|buf| unsafe { f(proj.0, key.as_ptr(), buf, false) })
     }
 
     pub fn set_project_text(&self, proj: Project, key: &str, value: &str) -> bool {
-        let key = cstring(key);
+        let key = ctext(key);
         let Some(f) = self.api.GetSetProjectInfo_String() else { return false };
-        let mut buf = cstring(value).into_bytes_with_nul();
+        let mut buf = ctext(value).into_bytes_with_nul();
         unsafe { f(proj.0, key.as_ptr(), buf.as_mut_ptr().cast::<c_char>(), true) }
     }
 
@@ -137,7 +134,7 @@ impl Reaper<'_> {
 
     pub fn set_project_notes(&self, proj: Project, notes: &str) -> bool {
         let Some(f) = self.api.GetSetProjectNotes() else { return false };
-        let mut buf = cstring(notes).into_bytes_with_nul();
+        let mut buf = ctext(notes).into_bytes_with_nul();
         let size = buf.len() as c_int;
         unsafe { f(proj.0, true, buf.as_mut_ptr().cast(), size) };
         true
@@ -162,7 +159,7 @@ impl Reaper<'_> {
     /// A configuration variable as text (`panmode`, `itemtimelock`, `defsavepath`…); for a project setting, the open
     /// project's.
     pub fn config_text(&self, name: &str) -> Option<String> {
-        let name = cstring(name);
+        let name = ctext(name);
         let f = self.api.get_config_var_string()?;
         let mut ok = false;
         let text = api::read_buffer(|buf, size| ok = unsafe { f(name.as_ptr(), buf, size) });
@@ -171,13 +168,13 @@ impl Reaper<'_> {
 
     /// Whether an API function is registered (`APIExists`): REAPER's own, or one an extension adds (SWS's `CF_…`).
     pub fn api_exists(&self, name: &str) -> bool {
-        let name = cstring(name);
+        let name = ctext(name);
         self.api.APIExists().is_some_and(|f| unsafe { f(name.as_ptr()) })
     }
 
     /// Sets one in memory (never in reaper.ini): 2 when it is a project setting, 1 a global one, 0 when REAPER refused.
     pub fn set_config_text(&self, name: &str, value: &str) -> i32 {
-        let (name, value) = (cstring(name), cstring(value));
+        let (name, value) = (ctext(name), ctext(value));
         self.api.set_config_var_string().map_or(0, |f| unsafe { f(name.as_ptr(), value.as_ptr(), 0) })
     }
 
@@ -235,7 +232,7 @@ impl Reaper<'_> {
 
     /// Opens a file in the active tab as REAPER's File > Open does; a `.RTrackTemplate` adds its tracks at the end.
     pub fn open_project(&self, path: &str) -> bool {
-        let path = cstring(path);
+        let path = ctext(path);
         match self.api.Main_openProject() {
             Some(f) => {
                 unsafe { f(path.as_ptr()) };
@@ -248,7 +245,7 @@ impl Reaper<'_> {
     /// `Main_SaveProjectEx`: options &1 the selected tracks as a track template (&2 with their items, &4 with their
     /// envelopes), &8 the project under this name from now on.
     pub fn save_project_as(&self, proj: Project, path: &str, options: i32) -> bool {
-        let path = cstring(path);
+        let path = ctext(path);
         match self.api.Main_SaveProjectEx() {
             Some(f) => {
                 unsafe { f(proj.0, path.as_ptr(), options) };

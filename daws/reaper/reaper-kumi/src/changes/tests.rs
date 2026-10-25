@@ -3401,6 +3401,34 @@ fn a_marker_made_again_is_made_once_keeps_its_lane_and_a_region_its_render_matri
 
 // ----- a plug-in with a meter among its parameters (N5) -----
 
+// The optimization audit's R3: a signature read every parameter four times (twice to see what moves by itself, once for
+// the hash, once for the look kept). The hash and the look are made from the second of the two reads now.
+#[test]
+fn a_signature_reads_each_parameter_twice_not_four_times() {
+    use crate::reaper::fake::{FakeFx, FakeParam};
+    use crate::reaper::{Fx, FxOwner};
+    let lab = Lab::new();
+    state(|s| {
+        let mut wide = FakeFx::new("{FX-WIDE}", "VST: Wide (Kumi)");
+        wide.params = (0..300).map(|p| FakeParam::new(&format!("P{p}"), 0.5, "50")).collect();
+        s.tracks[1].fx = vec![wide];
+    });
+    let api = fake::api();
+    let reaper = Reaper::new(&api);
+    let proj = reaper.current_project().unwrap().ptr;
+    let ctx = Ctx { reaper: &reaper, reads: &lab.reads, proj, unkept: std::cell::Cell::new(false) };
+    let fx = Fx { owner: FxOwner::Track(reaper.track_at(proj, 1).unwrap()), index: 0 };
+    // (the first signature of a plug-in also reads its parameters' names, once for the plug-in: the second is the measure)
+    super::fx::signature(&ctx, fx);
+    let before = state(|s| s.calls);
+    let signature = super::fx::signature(&ctx, fx);
+    let calls = state(|s| s.calls) - before;
+    assert!(signature["hash"].is_string());
+    assert!((600..700).contains(&calls), "{calls} REAPER calls for 300 parameters: two sweeps and the FX's own fields, not four");
+    // The look kept is the one hashed: the signature taken again as recorded is the recorded one.
+    assert_eq!(super::fx::signature_as(&ctx, fx, &signature), signature);
+}
+
 #[test]
 fn a_meter_shown_as_a_parameter_does_not_make_every_undo_of_an_fx_changed_but_a_tweak_still_does() {
     let lab = Lab::new();

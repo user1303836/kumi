@@ -1,9 +1,10 @@
 //! What the bridge reads of REAPER's objects: the project's timeline, tracks, items, takes, FX, sends, envelopes, MIDI and
 //! markers. Each call is REAPER's own, one for one; a function this REAPER lacks reads as empty.
 
-use std::ffi::{c_char, c_int, c_void, CString};
+use std::ffi::{c_char, c_int, c_void};
 use std::ptr;
 
+use super::ctext;
 use super::{Envelope, Fx, FxOwner, Item, Project, Reaper, Take, Track};
 use crate::api::{self, ProjectMarker};
 
@@ -23,10 +24,6 @@ pub const INPUT_FX: i32 = 0x100_0000;
 pub const CONTAINER_FX: i32 = 0x200_0000;
 /// `GetTrackColor`'s flag: the colour is set.
 const COLOR_SET: i32 = 0x100_0000;
-
-fn cstring(text: &str) -> CString {
-    CString::new(text.replace('\0', "")).unwrap_or_default()
-}
 
 /// Reads a string a getter writes into a big buffer: one it isn't told the size of (`…NeedBig`), which holds a text of any
 /// length REAPER gives (a name, a P_EXT value, razor edits), or one it is told `BIG` of.
@@ -224,7 +221,7 @@ impl Reaper<'_> {
 
     /// The marker or region with this GUID.
     pub fn marker_by_guid(&self, proj: Project, guid: &str) -> Option<Marker> {
-        let guid = cstring(guid);
+        let guid = ctext(guid);
         let marker = unsafe { self.api.GetRegionOrMarker()?(proj.0, -1, guid.as_ptr()) };
         self.marker_at(proj, marker)
     }
@@ -285,7 +282,7 @@ impl Reaper<'_> {
 
     /// A value the project carries for an extension (`kumi`/`project` is the Kumi project id).
     pub fn project_ext_state(&self, proj: Project, section: &str, key: &str) -> Option<String> {
-        let (section, key) = (cstring(section), cstring(key));
+        let (section, key) = (ctext(section), ctext(key));
         let f = self.api.GetProjExtState()?;
         let mut found = 0;
         let value = big_string(|buf| {
@@ -298,7 +295,7 @@ impl Reaper<'_> {
     /// Sets a value the project carries for an extension; false when this REAPER can't. It marks nothing changed and makes no
     /// undo point (7.82 lab): REAPER writes it into the file with the producer's next save.
     pub fn set_project_ext_state(&self, proj: Project, section: &str, key: &str, value: &str) -> bool {
-        let (section, key, value) = (cstring(section), cstring(key), cstring(value));
+        let (section, key, value) = (ctext(section), ctext(key), ctext(value));
         let Some(f) = self.api.SetProjExtState() else { return false };
         unsafe { f(proj.0, section.as_ptr(), key.as_ptr(), value.as_ptr()) };
         true
@@ -342,7 +339,7 @@ impl Reaper<'_> {
     }
 
     pub fn track_value(&self, track: Track, parm: &str) -> f64 {
-        let parm = cstring(parm);
+        let parm = ctext(parm);
         self.api.GetMediaTrackInfo_Value().map(|f| unsafe { f(track.0, parm.as_ptr()) }).unwrap_or(0.0)
     }
 
@@ -355,7 +352,7 @@ impl Reaper<'_> {
 
     /// A track's text attribute (`P_LANENAME:2`…), None when REAPER has none.
     pub fn track_string(&self, track: Track, parm: &str) -> Option<String> {
-        let parm = cstring(parm);
+        let parm = ctext(parm);
         let f = self.api.GetSetMediaTrackInfo_String()?;
         big_string(|buf| unsafe { f(track.0, parm.as_ptr(), buf, false) })
     }
@@ -414,7 +411,7 @@ impl Reaper<'_> {
     }
 
     pub fn item_value(&self, item: Item, parm: &str) -> f64 {
-        let parm = cstring(parm);
+        let parm = ctext(parm);
         self.api.GetMediaItemInfo_Value().map(|f| unsafe { f(item.0, parm.as_ptr()) }).unwrap_or(0.0)
     }
 
@@ -459,7 +456,7 @@ impl Reaper<'_> {
     /// REAPER has no lookup by GUID except for takes.
     pub fn take_by_guid(&self, proj: Project, guid: &str) -> Option<Take> {
         let (parse, find) = (self.api.stringToGuid()?, self.api.GetMediaItemTakeByGUID()?);
-        let text = cstring(guid);
+        let text = ctext(guid);
         let mut bytes = [0u8; 16];
         unsafe { parse(text.as_ptr(), bytes.as_mut_ptr().cast()) };
         let take = unsafe { find(proj.0, bytes.as_ptr().cast()) };
@@ -474,7 +471,7 @@ impl Reaper<'_> {
     }
 
     pub fn take_value(&self, take: Take, parm: &str) -> f64 {
-        let parm = cstring(parm);
+        let parm = ctext(parm);
         self.api.GetMediaItemTakeInfo_Value().map(|f| unsafe { f(take.0, parm.as_ptr()) }).unwrap_or(0.0)
     }
 
@@ -571,7 +568,7 @@ impl Reaper<'_> {
 
     /// A named configuration value (`parallel`, `container_count`, `fx_type`…); None when this FX has no such key.
     pub fn fx_config(&self, fx: Fx, key: &str) -> Option<String> {
-        let key = cstring(key);
+        let key = ctext(key);
         match fx.owner {
             FxOwner::Track(t) => {
                 let f = self.api.TrackFX_GetNamedConfigParm()?;
@@ -642,13 +639,13 @@ impl Reaper<'_> {
     }
 
     pub fn send_value(&self, track: Track, category: i32, index: i32, parm: &str) -> f64 {
-        let parm = cstring(parm);
+        let parm = ctext(parm);
         self.api.GetTrackSendInfo_Value().map(|f| unsafe { f(track.0, category, index, parm.as_ptr()) }).unwrap_or(0.0)
     }
 
     /// A send's own envelope of this kind (`<VOLENV`, `<PANENV`, `<MUTEENV`), if it has one.
     pub fn send_envelope(&self, track: Track, index: i32, chunk: &str) -> Option<Envelope> {
-        let parm = cstring(&format!("P_ENV:{chunk}"));
+        let parm = ctext(&format!("P_ENV:{chunk}"));
         let envelope = unsafe { self.api.GetSetTrackSendInfo()?(track.0, 0, index, parm.as_ptr(), ptr::null_mut()) };
         (!envelope.is_null()).then_some(Envelope(envelope.cast()))
     }
@@ -673,7 +670,7 @@ impl Reaper<'_> {
 
     /// A track's envelope by its chunk name (`<VOLENV2`, `<PANENV`…) or its GUID.
     pub fn track_envelope_by_chunk_name(&self, track: Track, name: &str) -> Option<Envelope> {
-        let name = cstring(name);
+        let name = ctext(name);
         let envelope = unsafe { self.api.GetTrackEnvelopeByChunkName()?(track.0, name.as_ptr()) };
         (!envelope.is_null()).then_some(Envelope(envelope))
     }
@@ -702,7 +699,7 @@ impl Reaper<'_> {
 
     /// An envelope's GUID, which stays with it through a save, an undo and the others being added or removed.
     pub fn envelope_guid(&self, envelope: Envelope) -> Option<String> {
-        let key = cstring("GUID");
+        let key = ctext("GUID");
         let f = self.api.GetSetEnvelopeInfo_String()?;
         big_string(|buf| unsafe { f(envelope.0, key.as_ptr(), buf, false) })
             .map(|guid| guid.trim().to_string())
@@ -737,7 +734,7 @@ impl Reaper<'_> {
 
     /// An envelope's yes/no attribute: `ACTIVE`, `ARM` or `VISIBLE`.
     pub fn envelope_flag(&self, envelope: Envelope, key: &str) -> bool {
-        let key = cstring(key);
+        let key = ctext(key);
         let f = self.api.GetSetEnvelopeInfo_String();
         f.and_then(|f| big_string(|buf| unsafe { f(envelope.0, key.as_ptr(), buf, false) })).is_some_and(|text| text.trim() == "1")
     }
