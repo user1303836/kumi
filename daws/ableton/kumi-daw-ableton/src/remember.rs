@@ -30,12 +30,39 @@ pub struct CurrentProject {
     pub unsaved: bool,
 }
 pub type Saving = Shared<LocalBoxFuture<'static, ()>>;
+/// How long after an export the next may come when the Set changed in a way a look can see, and after how long it
+/// comes whether or not one did (notes and parameters change with no word from Live).
+pub const SAVE_EVERY_MS: i64 = 5 * 60_000;
+pub const SAVE_AT_LEAST_EVERY_MS: i64 = 30 * 60_000;
+/// What a look saw of the Set without reading it whole. Two looks with the same mark found nothing changed in the
+/// Set's structure, its tracks' lasting fields, its devices or its file, so an export after the first would read the
+/// same again (`Remember::save_due`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct ExportMark {
+    /// Structure changes Live told of, and endpoints attached (events between two of them reach no one).
+    pub structure: u64,
+    pub attachments: u64,
+    /// The track page's revision: the tracks' identities, names and places.
+    pub tracks: Option<String>,
+    /// When the Set's file was last written, as `saved_at` has it.
+    pub file_modified: Option<f64>,
+    /// The track and device rows as read, hashed without what moves by itself (`observation::rows_fingerprint`).
+    pub rows: u64,
+}
 pub struct Remember {
     pub connection: Rc<LiveConnection>,
     pub store: Option<Rc<dyn ProjectStore>>,
     pub current: RefCell<Option<Rc<CurrentProject>>>,
     pub context: RefCell<Option<JsonObject>>,
     pub last_saved: Cell<i64>,
+    /// When an export last failed (ms), and how many failed in a row: a Set too large to remember, or one past its
+    /// bound, would otherwise be read again at every look. The wait grows with the run (`failed_hold_ms`), so a
+    /// failure that won't repeat (a disconnect mid-export, a store that couldn't be written) costs one period.
+    pub last_failed: Cell<i64>,
+    pub failures: Cell<u32>,
+    /// What the latest look saw (`ExportMark`), and what the last export was taken from.
+    looked: RefCell<Option<ExportMark>>,
+    exported: RefCell<Option<ExportMark>>,
     on_catch_up: Option<Rc<dyn Fn(CatchUp)>>,
     saving: RefCell<Saving>,
     timer: RefCell<Option<Signal>>,
@@ -52,6 +79,10 @@ impl Remember {
             current: RefCell::new(None),
             context: RefCell::new(None),
             last_saved: Cell::new(0),
+            last_failed: Cell::new(0),
+            failures: Cell::new(0),
+            looked: RefCell::new(None),
+            exported: RefCell::new(None),
             on_catch_up,
             saving: RefCell::new(async {}.boxed_local().shared()),
             timer: RefCell::new(None),
@@ -70,12 +101,67 @@ impl Remember {
             timer.cancel();
         }
     }
+    /// Whether a save waits on the timer.
+    pub fn save_scheduled(&self) -> bool {
+        self.timer.borrow().is_some()
+    }
+    /// What this look saw of the Set, for `save_due`, and the mark its export records.
+    pub fn note_look(&self, mark: ExportMark) {
+        *self.looked.borrow_mut() = Some(mark);
+    }
+    /// Whether a look should have the Set exported again: SAVE_EVERY_MS after the last export when the Set changed in
+    /// a way the look can see (its mark moved), or when Live's events aren't heard (then nothing says what changed);
+    /// SAVE_AT_LEAST_EVERY_MS after it in any case. Kumi's own changes schedule their own save (`History::keep_soon`).
+    pub fn save_due(&self, now_ms: i64) -> bool {
+        let since = now_ms - self.last_saved.get();
+        if since <= SAVE_EVERY_MS {
+            return false;
+        }
+        // The last export failed: a Set too large to remember would otherwise be read again at every look.
+        if self.last_failed.get() > self.last_saved.get() && now_ms - self.last_failed.get() <= self.failed_hold_ms() {
+            return false;
+        }
+        let (looked, exported) = (self.looked.borrow(), self.exported.borrow());
+        match (looked.as_ref(), exported.as_ref()) {
+            (Some(looked), Some(exported)) if self.connection.hears_live() => looked != exported || since > SAVE_AT_LEAST_EVERY_MS,
+            _ => true,
+        }
+    }
+    /// An export begins: the mark it will record, taken now (the latest look's, with Live's counters as they stand),
+    /// not when it ends: a change Live tells of while the pages are read isn't in them, and must move the next
+    /// look's mark. A change Kumi made after the look and before this is in the counters already.
+    fn export_started(&self) -> Option<ExportMark> {
+        self.looked.borrow().clone().map(|mark| ExportMark {
+            structure: self.connection.structure_events.get(),
+            attachments: self.connection.attachments.get(),
+            ..mark
+        })
+    }
+    /// The export that began with `mark` was kept.
+    fn export_kept(&self, mark: Option<ExportMark>) {
+        *self.exported.borrow_mut() = mark;
+        self.last_saved.set(kumi_common::time::now_ms());
+        self.failures.set(0);
+    }
+    /// How long after a failed export the next waits: five minutes after the first failure (one that won't repeat
+    /// costs nothing more than the period), ten after the second, thirty from the third on.
+    fn failed_hold_ms(&self) -> i64 {
+        match self.failures.get() {
+            0 | 1 => SAVE_EVERY_MS,
+            2 => 2 * SAVE_EVERY_MS,
+            _ => SAVE_AT_LEAST_EVERY_MS,
+        }
+    }
     fn enqueue(self: &Rc<Self>, work: impl FnOnce(Rc<Self>) -> LocalBoxFuture<'static, Result<(), RuntimeError>> + 'static) -> Saving {
         let before = self.pending();
         let this = self.clone();
         let pending = async move {
             before.await;
-            let _ = work(this).await;
+            // The queued work is an export (a save, a catch-up): one that fails is noted for `save_due`.
+            if work(this.clone()).await.is_err() {
+                this.last_failed.set(kumi_common::time::now_ms());
+                this.failures.set(this.failures.get().saturating_add(1));
+            }
         }
         .boxed_local()
         .shared();
@@ -140,6 +226,7 @@ impl Remember {
                 if !connection.has("live_project_snapshot_export") {
                     return Ok(());
                 }
+                let mark = this.export_started();
                 let pages = this.export_pages(signal.clone()).await?;
                 if !this.current().is_some_and(|current| Rc::ptr_eq(&current, &known)) || !this.still_open(&known.identity, signal).await {
                     return Ok(());
@@ -157,7 +244,7 @@ impl Remember {
                         },
                     )
                     .await?;
-                this.last_saved.set(kumi_common::time::now_ms());
+                this.export_kept(mark);
                 Ok(())
             }
             .boxed_local()
@@ -253,7 +340,7 @@ impl Remember {
         let _ = self.enqueue(move|this|async move{
    let connection=&this.connection;let signal=abort::any([connection.lifetime.clone(),abort::timeout(60_000)]);connection.ensure_catalog(signal.clone()).await.map_err(RuntimeError::from)?;
    if !["live_project_info","live_project_snapshot_export","live_project_snapshot_diff"].iter().all(|name|connection.has(name)){return Ok(())}if !this.current().is_some_and(|p|p.identity==identity){return Ok(())}
-   let pages=this.export_pages(signal.clone()).await?;
+   let mark=this.export_started();let pages=this.export_pages(signal.clone()).await?;
    if !this.still_open(&identity,signal.clone()).await{return Ok(())}
    // This Set's own baseline, or, when it moved here, the project's latest: a version first seen here starts fresh.
    let baseline=store.load_set(&project,&path).await?;
@@ -268,7 +355,7 @@ impl Remember {
      if let Some(callback)=&this.on_catch_up{let _=catch_unwind(AssertUnwindSafe(||callback(summary)));}
     }
    }
-   store.save(&project,&Baseline{version:1,path,name,saved_at:connection.now().timestamp_millis(),artifact_id:artifact_of(&pages)?,pages}).await?;this.last_saved.set(kumi_common::time::now_ms());Ok(())
+   store.save(&project,&Baseline{version:1,path,name,saved_at:connection.now().timestamp_millis(),artifact_id:artifact_of(&pages)?,pages}).await?;this.export_kept(mark);Ok(())
   }.boxed_local());
     }
 }
