@@ -2816,6 +2816,15 @@ class LiveObjectMapper:
         return next((item for item in self._light_walk(index) if item[3]["ref"] == device_ref), None) if index is not None else None
 
     def _device_on_path(self, device_ref: str) -> tuple[Any, str, int, str, int] | None:
+        """The device at a device ref's place now (see _walk_to_device), found once per shared read: a
+        parameter change's authority names every parameter of its device, each found through it."""
+        cache = self._read_cache; key = f"device-on-path:{device_ref}"
+        if cache is not None and key in cache: return cache[key]
+        found = self._walk_to_device(device_ref)
+        if cache is not None: cache[key] = found
+        return found
+
+    def _walk_to_device(self, device_ref: str) -> tuple[Any, str, int, str, int] | None:
         """The device at a device ref's place now, reading only its path: the track's devices, then a
         rack's chain and its devices for each rack it sits in. (device, path, place in its chain,
         parent ref, depth), refs registered as a walk registers them. A path through a Drum Rack
@@ -2879,7 +2888,7 @@ class LiveObjectMapper:
         device_ref, _, position = key.rpartition(":")
         if not position.isdigit(): return None
         found = self._device_on_path(device_ref)
-        parameters = self._items(getattr(found[0], "parameters", [])) if found is not None else []
+        parameters = self._device_controls(device_ref, found[0], "parameter") if found is not None else []
         return self._parameter_row(parameters[int(position)], int(position), device_ref) if int(position) < len(parameters) else None
 
     def _clip_row_at(self, reference: str, notes: bool) -> dict[str, Any] | None:
@@ -2942,8 +2951,17 @@ class LiveObjectMapper:
         found = self._device_on_path(device_ref)
         if found is None: return None
         if selector == "chain-selector": return self._read_attr(found[0], "chain_selector")
-        items = self._items(self._read_attr(found[0], "macros") or []) if selector == "macro" else self._items(getattr(found[0], "parameters", []))
+        items = self._device_controls(device_ref, found[0], selector)
         return items[int(position)] if position.isdigit() and int(position) < len(items) else None
+
+    def _device_controls(self, device_ref: str, device: Any, selector: str) -> list[Any]:
+        """A device's parameters (selector "parameter") or a rack's macros ("macro"), listed once per
+        shared read: an authority check finds each of a device's parameters by its place in the list."""
+        cache = self._read_cache; key = f"device-{selector}s:{device_ref}"
+        if cache is not None and key in cache: return cache[key]
+        items = self._items(self._read_attr(device, "macros") or []) if selector == "macro" else self._items(getattr(device, "parameters", []))
+        if cache is not None: cache[key] = items
+        return items
 
     def _track_authority_row(self, reference: str) -> dict[str, Any] | None:
         """A track as a change's authority binds it: its own state (identity, name, arm, monitoring,

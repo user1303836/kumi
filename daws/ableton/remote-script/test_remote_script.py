@@ -6329,6 +6329,40 @@ class RackMacroDrumPadTests(unittest.TestCase):
         device.parameters[3] = FakeParameter()
         self.assertNotEqual(_authority_state_digest(mapper, args, "device.parameter.set"), moved, "and a sibling replaced is")
 
+    def test_a_parameter_s_authority_finds_its_device_and_lists_its_parameters_once(self):
+        """Every sibling is found through its device: a walk to it and a copy of its whole parameter
+        list per sibling made a big plug-in's knob change cost P x P reads of Live, twice per change."""
+        class ListedDevice(FakeDevice):
+            listed = 0
+            @property
+            def parameters(self): type(self).listed += 1; return self._parameters
+            @parameters.setter
+            def parameters(self, value): self._parameters = value
+        class WalkedTrack(FakeTrack):
+            walked = 0
+            @property
+            def devices(self): type(self).walked += 1; return self._devices
+            @devices.setter
+            def devices(self, value): self._devices = value
+        song = FakeSong(); track = WalkedTrack(); device = ListedDevice(); device.parameters = [FakeParameter() for _ in range(40)]; track.devices = [FakeDevice(), device]; song.tracks = [track]
+        mapper = LiveObjectMapper(song)
+        parameter = mapper.snapshot()["tracks"][0]["devices"][1]["parameters"][7]
+        args = {"ref": parameter["ref"], "value": 0.75, "expectedRevision": parameter["revision"], **ControlSurfaceTests.parameter_authority(mapper, parameter["ref"])}
+        self.assertEqual(len(args["expectedSiblings"]), 40)
+        ListedDevice.listed = WalkedTrack.walked = 0
+        shared = _authority_state_digest(mapper, args, "device.parameter.set")
+        self.assertEqual((ListedDevice.listed, WalkedTrack.walked), (1, 1), "one walk to the device and one list of its parameters for 40 siblings")
+        self.assertIsNone(mapper._read_cache, "nothing is kept past the check")
+        ListedDevice.listed = WalkedTrack.walked = 0
+        alone = remote_module._reference_state_digest(mapper, args, "device.parameter.set")
+        self.assertGreater(ListedDevice.listed, 40, "outside a shared read each sibling still finds its own way")
+        self.assertEqual(shared, alone, "the same digest as finding each sibling on its own")
+        # What's at each place is read again on the next check: a sibling replaced, or the device moved, is seen.
+        device.parameters[3] = FakeParameter()
+        replaced = _authority_state_digest(mapper, args, "device.parameter.set"); self.assertNotEqual(replaced, shared, "a sibling replaced")
+        track.devices = [device, FakeDevice()]
+        self.assertNotEqual(_authority_state_digest(mapper, args, "device.parameter.set"), replaced, "and the device moved from its place")
+
     def test_a_drum_rack_with_sounds_on_its_pads_reads_and_edits_like_any_rack(self):
         """Live lists a Drum Rack's chains both on the rack and on their pads; that isn't a cycle."""
         class EnableableDevice(FakeDevice):
