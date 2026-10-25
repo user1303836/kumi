@@ -130,6 +130,41 @@ fn a_new_id_is_made_again_when_its_taken() {
     assert_eq!(fresh_id(|id| taken.contains(&id), || made.next().unwrap()), "mv66me0m5cc111");
 }
 
+/// A conversation's own fields of the wrong kind are read past, the rest of it kept, as Kumi 1.16.3 read it; a file
+/// without a conversation's makings is none.
+#[tokio::test(flavor = "current_thread")]
+async fn a_conversations_fields_of_the_wrong_kind_are_read_past_and_the_rest_kept() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = create_conversation_store(dir.path());
+    let kept = dir.path().join(A).join("conversations");
+    std::fs::create_dir_all(&kept).unwrap();
+    let load = |file: Value| {
+        std::fs::write(kept.join("aaaaaa000001.json"), file.to_string()).unwrap();
+        async { store.load(A, "aaaaaa000001").await.unwrap() }
+    };
+    let mut file = serde_json::to_value(said("make the bass wider", 7)).unwrap();
+    file["later"] = json!({"what": "a later Kumi's"});
+    for (key, wrong) in [("changes", json!("not a list")), ("first", json!(7)), ("turns", json!("two"))] {
+        file[key] = wrong;
+    }
+    let read = load(file.clone()).await.expect("a conversation");
+    assert_eq!((read.saved_at, read.checkpoint.messages.len()), (7, 2));
+    assert_eq!((read.changes, read.first, read.turns), (None, None, None));
+    for (key, right) in [("changes", json!([])), ("first", json!("make the bass wider")), ("turns", json!(1))] {
+        file[key] = right;
+    }
+    let read = load(file.clone()).await.expect("a conversation");
+    assert_eq!((read.changes, read.first.as_deref(), read.turns), (Some(vec![]), Some("make the bass wider"), Some(1)));
+    for broken in [
+        json!({"checkpoint": file["checkpoint"]}),
+        json!({"savedAt": 7, "checkpoint": {"version": 2, "messages": []}}),
+        json!({"savedAt": 7, "checkpoint": {"version": 1, "messages": {}}}),
+        json!([file]),
+    ] {
+        assert!(load(broken.clone()).await.is_none(), "{broken}");
+    }
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn a_new_id_is_none_kept_in_any_set() {
     let dir = tempfile::tempdir().unwrap();
