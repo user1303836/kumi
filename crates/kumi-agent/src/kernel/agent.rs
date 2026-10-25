@@ -215,7 +215,8 @@ struct Inner {
     tools_key: String,
     /// What the instructions and tools take, for a binding that sizes the conversation to its model.
     fixed: usize,
-    history: RefCell<Vec<Message>>,
+    /// The settled conversation, shared with the turn under way (its `earlier`) rather than copied into it.
+    history: RefCell<Rc<Vec<Message>>>,
     running: RefCell<Option<Rc<Running>>>,
     closing: RefCell<Option<Shared<LocalBoxFuture<'static, ()>>>>,
 }
@@ -315,7 +316,7 @@ pub fn create_agent_kernel(options: AgentKernelOptions) -> Result<AgentKernel, R
             lifetime,
             tools_key,
             fixed,
-            history: RefCell::new(history),
+            history: RefCell::new(Rc::new(history)),
             running: RefCell::new(None),
             closing: RefCell::new(None),
         }),
@@ -401,7 +402,7 @@ impl AgentKernel {
         *inner.binding.borrow_mut() = inner.primary.clone();
         // What the fallback reasoned stays with it.
         let history = without_reasoning(&inner.history.borrow());
-        *inner.history.borrow_mut() = history;
+        *inner.history.borrow_mut() = Rc::new(history);
         let name = provider_name(&inner.primary.id).to_string();
         let _ =
             emit(KernelEvent::ModelSwitch { model: inner.primary.id.clone(), reason: format!("{name} is answering again"), back: true });
@@ -432,7 +433,7 @@ impl AgentKernel {
         let context = inner.running.borrow().as_ref().and_then(|running| running.context.borrow().clone());
         let context: Vec<Message> = match context {
             Some(context) => context(),
-            None => inner.history.borrow().clone(),
+            None => inner.history.borrow().to_vec(),
         };
         let asked = [Message::user_text(format!("{ASIDE_NOTE}\n\n{words}"))];
         let fitted = fit_for(&inner.profile.get(), &context, &asked, &inner.budget_now());
@@ -504,7 +505,7 @@ impl AgentKernel {
         }
         Ok(Checkpoint {
             version: 1,
-            messages: self.inner.history.borrow().clone(),
+            messages: self.inner.history.borrow().to_vec(),
             origin: Some(self.inner.binding().id.clone()),
             tools: Some(self.inner.tools_key.clone()),
         })
@@ -620,7 +621,7 @@ struct Turn {
     messages: Rc<RefCell<Vec<Message>>>,
     /// What this turn sends as the earlier conversation, fitted to the budget. It becomes the
     /// history only when the turn settles; fitting is deterministic, so the next turn sends the same.
-    earlier: Rc<RefCell<Vec<Message>>>,
+    earlier: Rc<RefCell<Rc<Vec<Message>>>>,
     /// `earlier`'s bytes as the budget measured them, kept while it stays the same: fitting measures the
     /// conversation before every step, and the earlier part is the bulk of a long one.
     earlier_bytes: Cell<Option<usize>>,
@@ -682,14 +683,8 @@ async fn turn(inner: Rc<Inner>, first: Message, signal: Signal, emit: KernelEmit
                 return Ok(settled(StopReason::MaxSteps));
             }
             turn.fit_to_budget();
-            let request = (inner.binding().prepare)(ModelRequest {
-                instructions: inner.instructions.clone(),
-                messages: turn.conversation(),
-                tools: inner.specs.clone(),
-                session_id: inner.session_id.clone(),
-            });
             turn.early.borrow_mut().clear();
-            let result = match turn.stream(request).await {
+            let result = match turn.stream().await {
                 Ok(result) => result,
                 // An answer that broke off after its words began showing, with nothing that changes Live begun:
                 // once a turn, Kumi carries on from the steps it finished and the words shown, and says so.
@@ -843,8 +838,28 @@ impl Turn {
         [self.earlier.borrow().as_slice(), self.messages.borrow().as_slice()].concat()
     }
 
+    /// The step's request, as `binding` shapes it: made for each attempt, so the first (nearly every step's only one)
+    /// goes to the model as it was made, never copied.
+    fn request(&self, binding: &ModelBinding) -> CallOptions {
+        (binding.prepare)(ModelRequest {
+            instructions: self.inner.instructions.clone(),
+            messages: self.conversation(),
+            tools: self.inner.specs.clone(),
+            session_id: self.inner.session_id.clone(),
+        })
+    }
+
     fn settle_history(&self) {
-        *self.inner.history.borrow_mut() = [self.earlier.borrow().clone(), without_images(&self.messages.borrow())].concat();
+        self.settle(without_images(&self.messages.borrow()));
+    }
+
+    /// The history becomes what came before this turn, then `after`. It's the turn's last word: its own hold on what came
+    /// before is let go with the history's, so (nothing refitted) the history grows where it is instead of being copied.
+    fn settle(&self, after: Vec<Message>) {
+        let mut history = std::mem::take(&mut *self.earlier.borrow_mut());
+        *self.inner.history.borrow_mut() = Rc::default();
+        Rc::make_mut(&mut history).extend(after);
+        *self.inner.history.borrow_mut() = history;
     }
 
     fn fit_to_budget(&self) {
@@ -862,7 +877,7 @@ impl Turn {
             changed.then(|| (without_reasoning(&fitted.history), without_reasoning(&fitted.turn)))
         };
         if let Some((earlier, messages)) = refitted {
-            *self.earlier.borrow_mut() = earlier;
+            *self.earlier.borrow_mut() = Rc::new(earlier);
             *self.messages.borrow_mut() = messages;
         }
     }
@@ -931,7 +946,7 @@ impl Turn {
         *inner.binding.borrow_mut() = fallback.clone();
         let earlier = without_reasoning(&self.earlier.borrow());
         let messages = without_reasoning(&self.messages.borrow());
-        *self.earlier.borrow_mut() = earlier;
+        *self.earlier.borrow_mut() = Rc::new(earlier);
         self.earlier_bytes.set(None);
         *self.messages.borrow_mut() = messages;
         (self.deliver)(KernelEvent::ModelSwitch { model: fallback.id.clone(), reason: why, back: false });
@@ -944,12 +959,9 @@ impl Turn {
         let messages = self.messages.borrow();
         let finished = &messages[..settled_end(&messages)];
         if finished.iter().any(|message| matches!(message, Message::Tool { .. })) {
-            *self.inner.history.borrow_mut() = [
-                self.earlier.borrow().clone(),
-                without_images(finished),
-                vec![Message::assistant_text(stopped_note(&self.inner.profile.get()))],
-            ]
-            .concat();
+            let mut kept = without_images(finished);
+            kept.push(Message::assistant_text(stopped_note(&self.inner.profile.get())));
+            self.settle(kept);
         }
     }
 
@@ -957,7 +969,7 @@ impl Turn {
     /// begun): a busy provider up to MAX_RETRIES times, a plan's limit once it resets (unless the fallback takes
     /// over), and a lost connection for as long as the answer may run. A reply's first call whose tool can stream
     /// starts as it's written.
-    async fn stream(&self, request: CallOptions) -> Result<StepResult, StepError> {
+    async fn stream(&self) -> Result<StepResult, StepError> {
         let binding = self.inner.binding();
         let mut retries = 0;
         let mut offline = 0;
@@ -973,7 +985,7 @@ impl Turn {
                 (self.deliver)(KernelEvent::Text { text: text.to_string() });
             };
             let attempted: Result<StepResult, StepError> = async {
-                let mut call = request.clone();
+                let mut call = self.request(&binding);
                 call.abort_signal = Some(self.abort.signal());
                 kumi_ai::timing::effort(&call);
                 let timed = kumi_ai::timing::model_call(&binding.id);
