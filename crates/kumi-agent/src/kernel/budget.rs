@@ -412,7 +412,36 @@ fn previous_turn(messages: &[Message]) -> Option<usize> {
 }
 
 /// A copy of messages[0, end) with large tool results cut down and, if asked, observations removed; None when nothing changed.
+/// Whether `clear_until` would change this message: a tool result with words to cut or pictures to put away, or an
+/// observation not yet cleared. Decided without copying anything: past the clearing threshold, clearing is asked before
+/// every step, and most steps have nothing left to clear.
+fn would_clear(message: &Message, observations: bool, cleared_note: &str) -> bool {
+    match message {
+        Message::Tool { content, .. } => content.iter().any(|part| {
+            let ToolPart::ToolResult(result) = part else { return false };
+            match &result.output {
+                ToolResultOutput::Content { .. } => true,
+                ToolResultOutput::Text { value, .. } | ToolResultOutput::ErrorText { value, .. } => {
+                    !(value.ends_with(cleared_note) || value.len() <= SMALL)
+                }
+                _ => false,
+            }
+        }),
+        Message::User { content, .. } if observations => content.iter().any(|part| match part {
+            UserPart::Text(text) => text
+                .text
+                .find(OBSERVATION_MARKER)
+                .is_some_and(|at| !text.text[at + OBSERVATION_MARKER.len()..].starts_with(CLEARED_OBSERVATION)),
+            UserPart::File(_) => false,
+        }),
+        _ => false,
+    }
+}
+
 fn clear_until(messages: &[Message], end: usize, observations: bool, cleared_note: &str) -> Option<Vec<Message>> {
+    if !messages[..end.min(messages.len())].iter().any(|message| would_clear(message, observations, cleared_note)) {
+        return None;
+    }
     let mut changed = false;
     let cleared: Vec<Message> = messages
         .iter()

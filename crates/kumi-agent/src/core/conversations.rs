@@ -6,14 +6,14 @@
 
 use crate::{
     core::contracts::{
-        Claim, ConversationMatch, ConversationStore, ConversationSummary, CurrentConversation, FoundExchange, SavedConversation,
-        TranscriptRole,
+        Claim, ConversationMatch, ConversationStore, ConversationSummary, CurrentConversation, FoundExchange, KernelCheckpoint,
+        SavedConversation, TranscriptRole,
     },
     kernel::budget::transcript_of,
 };
 use async_trait::async_trait;
 use kumi_common::js::{
-    json::stringify,
+    json::{stringify, write_into},
     string::{head, trim, utf16_len},
 };
 use kumi_types::daw::DawId;
@@ -24,6 +24,7 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{
+    borrow::Cow,
     cell::{Cell, RefCell},
     collections::{BTreeMap, HashMap, HashSet},
     path::{Path, PathBuf},
@@ -487,31 +488,36 @@ impl FileConversationStore {
     async fn trim(&self, place: &str) -> Result<(), RuntimeError> {
         let current = self.current_id(place).await;
         let kept = self.kept(place)?;
-        let mut all = vec![];
-        for name in self.names(place).await {
-            let at = modified_ms(&kept.join(&name)).await;
-            all.push((name, at));
-        }
-        // Newest first, and the same order an earlier Kumi gave them, ties and all.
-        all.sort_by(|a, b| b.1.total_cmp(&a.1));
         let now = kumi_common::time::now_ms() as f64;
-        let beyond: Vec<_> = all.into_iter().skip(MAX_KEPT).collect();
-        let days = if beyond.is_empty() { KEEP_DAYS } else { self.days_kept().await };
-        for (name, at) in beyond {
-            let id = &name[..name.len() - 5];
-            if current.as_deref() == Some(id) || days == 0 || now - at < f64::from(days) * DAY_MS {
-                continue;
+        // Within the count every place keeps there is nothing beyond it to let go, so no file is looked at: this runs
+        // after every save.
+        let names = self.names(place).await;
+        if names.len() > MAX_KEPT {
+            let mut all = vec![];
+            for name in names {
+                let at = modified_ms(&kept.join(&name)).await;
+                all.push((name, at));
             }
-            if read_meta(&kept.join(format!("{id}.meta"))).await.pinned
-                || self.held.borrow().contains_key(&(place.to_owned(), id.to_owned()))
-                || self.open_elsewhere(place, id)
-            {
-                continue;
+            // Newest first, and the same order an earlier Kumi gave them, ties and all.
+            all.sort_by(|a, b| b.1.total_cmp(&a.1));
+            let beyond: Vec<_> = all.into_iter().skip(MAX_KEPT).collect();
+            let days = if beyond.is_empty() { KEEP_DAYS } else { self.days_kept().await };
+            for (name, at) in beyond {
+                let id = &name[..name.len() - 5];
+                if current.as_deref() == Some(id) || days == 0 || now - at < f64::from(days) * DAY_MS {
+                    continue;
+                }
+                if read_meta(&kept.join(format!("{id}.meta"))).await.pinned
+                    || self.held.borrow().contains_key(&(place.to_owned(), id.to_owned()))
+                    || self.open_elsewhere(place, id)
+                {
+                    continue;
+                }
+                remove(kept.join(&name)).await?;
+                remove(kept.join(format!("{id}.meta"))).await?;
+                // Only a place to lock: one that can't go (a folder there, say) stays.
+                let _ = tokio::fs::remove_file(kept.join(format!("{id}.lock"))).await;
             }
-            remove(kept.join(&name)).await?;
-            remove(kept.join(format!("{id}.meta"))).await?;
-            // Only a place to lock: one that can't go (a folder there, say) stays.
-            let _ = tokio::fs::remove_file(kept.join(format!("{id}.lock"))).await;
         }
         // A name or pin whose conversation went goes too: an earlier Kumi let it go, or moved it to its Set's place once
         // the Set was saved (then the name and pin go after it).
@@ -727,6 +733,41 @@ impl FileConversationStore {
         }
         index
     }
+    /// The index with this conversation as it was just saved: its entry from what was written (one stat of its file
+    /// and one of its meta), without reading every place's files again; `index` does that when the list is asked for.
+    async fn note_saved(&self, place: &str, id: &str, saved: &SavedConversation) {
+        let _one = self.looking.lock().await;
+        let (before, later) = self.read_index().await;
+        if later {
+            return;
+        }
+        let Ok(kept) = self.kept(place) else { return };
+        let Ok(metadata) = tokio::fs::metadata(kept.join(format!("{id}.json"))).await else { return };
+        let meta_file = kept.join(format!("{id}.meta"));
+        let meta_modified = tokio::fs::metadata(&meta_file).await.map(|m| stamp_of(&m)).unwrap_or(0);
+        let meta = read_meta(&meta_file).await;
+        let mut index = before.clone();
+        index.keep_days = self.keep_days.or(before.keep_days);
+        index.conversations.insert(
+            format!("{place}/{id}"),
+            Entry {
+                saved_at: saved.saved_at,
+                first: saved.first.clone().unwrap_or_default(),
+                turns: saved.turns.unwrap_or(0),
+                created: created_of(id, saved.saved_at),
+                name: meta.name,
+                pinned: meta.pinned,
+                forked_from: meta.forked_from,
+                imported: meta.imported,
+                set: meta.set,
+                stamp: Stamp { modified: stamp_of(&metadata), size: metadata.len(), meta: meta_modified, reads: READS },
+            },
+        );
+        index.gone.remove(id);
+        if index != before {
+            let _ = write_privately(&self.directory, INDEX, &stringify(&serde_json::to_value(&index).unwrap_or_default())).await;
+        }
+    }
     /// Every kept conversation, from the index, in the order an earlier Kumi listed a place's: newest first.
     async fn summaries(&self) -> Vec<ConversationSummary> {
         let index = self.index().await;
@@ -779,10 +820,10 @@ impl FileConversationStore {
 }
 /// A message as kept on disk: a picture the producer added is named, not kept, so one screenshot
 /// can't crowd out the conversation.
-fn without_pictures(message: &Value) -> Value {
-    let Some(parts) = message["content"].as_array().filter(|_| message["role"] == "user") else { return message.clone() };
+fn without_pictures(message: &Value) -> Cow<'_, Value> {
+    let Some(parts) = message["content"].as_array().filter(|_| message["role"] == "user") else { return Cow::Borrowed(message) };
     if !parts.iter().any(|part| part["type"] == "file") {
-        return message.clone();
+        return Cow::Borrowed(message);
     }
     let mut kept = message.clone();
     kept["content"] = parts
@@ -795,11 +836,28 @@ fn without_pictures(message: &Value) -> Value {
             json!({"type":"text","text":format!("[The producer showed {name} here; pictures aren't kept with saved conversations.]")})
         })
         .collect();
-    kept
+    Cow::Owned(kept)
+}
+thread_local! {
+    /// Where a message is written to be measured: one buffer, kept between saves.
+    static MEASURED: RefCell<String> = const { RefCell::new(String::new()) };
+}
+/// `stringify(value).len()`, without keeping the text: every save measures the conversation message by message.
+fn stringified_len(value: &Value) -> usize {
+    MEASURED.with(|buffer| {
+        let mut buffer = buffer.borrow_mut();
+        buffer.clear();
+        write_into(value, &mut buffer);
+        let len = buffer.len();
+        if buffer.capacity() > 1 << 20 {
+            buffer.shrink_to(1 << 20);
+        }
+        len
+    })
 }
 // Disk checkpoints also contain older string-form messages; keep those forms intact.
 fn bounded_messages(all: &[Value]) -> Vec<Value> {
-    let sizes: Vec<_> = all.iter().map(|m| stringify(m).len() + 1).collect();
+    let sizes: Vec<_> = all.iter().map(|m| stringified_len(m) + 1).collect();
     let mut total = sizes.iter().sum::<usize>() + 1;
     let mut start = 0;
     while start < all.len() && total > MAX_CONVERSATION_BYTES {
@@ -814,7 +872,8 @@ fn bounded_messages(all: &[Value]) -> Vec<Value> {
     let mut messages = all[start..].to_vec();
     if messages.is_empty() {
         if let Some(last) = all.iter().rposition(|m| m["role"] == "user") {
-            if stringify(&json!(&all[last..])).len() <= 4 * MAX_CONVERSATION_BYTES {
+            // The last exchange as an array: its messages' bytes, the commas between them and the brackets.
+            if sizes[last..].iter().sum::<usize>() + 1 <= 4 * MAX_CONVERSATION_BYTES {
                 messages = all[last..].to_vec();
             }
         }
@@ -855,14 +914,31 @@ impl ConversationStore for FileConversationStore {
         Ok(Self::read(&file).await)
     }
     async fn save(&self, place: &str, id: &str, conversation: &SavedConversation) -> Result<(), RuntimeError> {
-        let all: &Vec<Value> = &conversation.checkpoint.messages.iter().map(without_pictures).collect();
+        // Pictures are rare: the messages are copied only from the first that is kept without one.
+        let originals = &conversation.checkpoint.messages;
+        let mut rewritten: Option<Vec<Value>> = None;
+        for (index, message) in originals.iter().enumerate() {
+            match without_pictures(message) {
+                Cow::Owned(kept) => rewritten.get_or_insert_with(|| originals[..index].to_vec()).push(kept),
+                Cow::Borrowed(_) => {
+                    if let Some(all) = rewritten.as_mut() {
+                        all.push(message.clone());
+                    }
+                }
+            }
+        }
+        let all: &[Value] = rewritten.as_deref().unwrap_or(originals);
         let messages = bounded_messages(all);
         if messages.is_empty() {
             return Ok(());
         }
         let said: Vec<_> = transcript_of(all).into_iter().filter(|l| l.role == TranscriptRole::User).collect();
-        let mut checkpoint = conversation.checkpoint.clone();
-        checkpoint.messages = messages;
+        let checkpoint = KernelCheckpoint {
+            version: conversation.checkpoint.version,
+            messages,
+            origin: conversation.checkpoint.origin.clone(),
+            tools: conversation.checkpoint.tools.clone(),
+        };
         let saved = SavedConversation {
             saved_at: conversation.saved_at,
             checkpoint,
@@ -878,7 +954,7 @@ impl ConversationStore for FileConversationStore {
         write_privately(&self.kept(place)?, &format!("{id}.json"), &stringify(&serde_json::to_value(saved).map_err(error)?)).await?;
         write_privately(&self.folder(place)?, "current", id).await?;
         self.trim(place).await?;
-        self.index().await;
+        self.note_saved(place, id, &saved).await;
         Ok(())
     }
     async fn fresh(&self, place: &str) -> Result<(), RuntimeError> {
