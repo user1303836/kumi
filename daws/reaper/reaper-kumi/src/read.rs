@@ -292,6 +292,7 @@ impl Reads {
     pub fn bump_epoch(&self) {
         self.epoch.borrow_mut().bump();
         self.registry.borrow_mut().clear();
+        digest::forget();
     }
 
     /// What names the project open in this tab while it stays open in this REAPER: this process and the project's serial.

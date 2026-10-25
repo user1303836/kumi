@@ -9,9 +9,18 @@
 //! points is read over several pages, and read once for all its pages); parameters, envelope points and (with `values`)
 //! parameter values have budgets for the whole digest, carried in the cursor. `content: false` (watch_me's looks) leaves
 //! out items and envelope points.
+//!
+//! Kept across digests: the parameter values the fingerprints and `values` are made of, the bulk of a digest's REAPER
+//! calls, per FX, while the tab's epoch and REAPER's count of the project's state changes stay what they were (watch_me's
+//! next look at a project nobody touched): a parameter write moves the count, in REAPER or through its API, inside an
+//! undo block or not (7.82). Nothing else is kept: a bare API write outside an undo block (an extension's: a track's mute,
+//! name or volume set, an item or a marker moved, an envelope point) moves neither the count nor the undo history, so the
+//! rest is read every time. (What the producer does in REAPER, a mute or solo included, moves the count.) The kept values
+//! are read again after `KEPT_FOR` whatever the count says: a parameter moved by what makes no undo point (a control a
+//! plug-in's own hand moves, say) shows within it.
 
 use std::cell::RefCell;
-use std::collections::{HashSet, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::time::{Duration, Instant};
 
 use serde_json::{json, Map, Value};
@@ -39,6 +48,10 @@ const PAGE_TIME: Duration = Duration::from_millis(20);
 
 /// Tracks read part way (or read, for their later pages) kept at once: a few digests may go on side by side.
 const KEPT_WORK: usize = 4;
+/// Parameter values kept across digests, at most (about 1.6 MB): past it, the rest is read each time.
+const PARAMS_KEPT: usize = 200_000;
+/// How long parameter values are kept at most: read again after this, whatever the count says.
+const KEPT_FOR: Duration = Duration::from_secs(30);
 
 #[cfg(test)]
 thread_local! {
@@ -46,6 +59,26 @@ thread_local! {
     pub static TEST_LIMITS: std::cell::Cell<Option<(usize, usize, usize)>> = const { std::cell::Cell::new(None) };
     /// A test's page share of the main thread as a number of points and items read, in place of `PAGE_TIME`.
     pub static TEST_READS: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) };
+    /// A test's own bound on the parameter values kept, in place of `PARAMS_KEPT`.
+    pub static TEST_PARAMS_KEPT: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) };
+    /// A test's own time bound on the parameter values kept, in place of `KEPT_FOR`.
+    pub static TEST_KEPT_FOR: std::cell::Cell<Option<Duration>> = const { std::cell::Cell::new(None) };
+}
+
+fn params_kept() -> usize {
+    #[cfg(test)]
+    if let Some(most) = TEST_PARAMS_KEPT.with(|most| most.get()) {
+        return most;
+    }
+    PARAMS_KEPT
+}
+
+fn kept_for() -> Duration {
+    #[cfg(test)]
+    if let Some(bound) = TEST_KEPT_FOR.with(|bound| bound.get()) {
+        return bound;
+    }
+    KEPT_FOR
 }
 
 /// A page's share of REAPER's main thread.
@@ -163,6 +196,15 @@ struct Budget {
     value_count: usize,
 }
 
+/// What a digest reads under: REAPER and the project in front, the tab's epoch and REAPER's count of the project's state
+/// changes, which the parameter values kept across digests are good for (none when REAPER has no count: nothing is kept).
+struct Under<'a, 'r> {
+    reaper: &'a Reaper<'r>,
+    proj: Project,
+    epoch: &'a str,
+    changed: Option<i32>,
+}
+
 /// The digest, the track, the project's change count and the budgets as the track began.
 type WorkKey = (u64, usize, Option<i32>, usize, usize, usize);
 
@@ -221,15 +263,33 @@ impl Work {
     }
 }
 
+/// Parameter values as they were read under one epoch and state change count, by FX GUID (their first `PARAMS_PER_FX`,
+/// normalized): a parameter edit, in REAPER or through its API, moves the count (7.82), so what was read under it
+/// stands until it moves, or `KEPT_FOR` passes since the first was kept.
+#[derive(Default)]
+struct KeptParams {
+    under: Option<(String, i32, Instant)>,
+    by_fx: HashMap<String, Vec<f64>>,
+    total: usize,
+}
+
+impl KeptParams {
+    fn is_under(&self, under: &Under, changed: i32) -> bool {
+        self.under.as_ref().is_some_and(|(epoch, count, since)| epoch == under.epoch && *count == changed && since.elapsed() < kept_for())
+    }
+}
+
 #[derive(Default)]
 struct Kept {
     /// The serial the next digest takes.
     next: u64,
     works: VecDeque<Work>,
+    params: KeptParams,
 }
 
 thread_local! {
-    /// The tracks read part way, or read for their later pages (REAPER's main thread reads them all).
+    /// The tracks read part way, or read for their later pages, and the parameter values kept (REAPER's main thread reads
+    /// them all).
     static KEPT: RefCell<Kept> = RefCell::new(Kept::default());
 }
 
@@ -240,6 +300,43 @@ fn serial() -> u64 {
         kept.next += 1;
         kept.next
     })
+}
+
+/// An FX's first `read` parameters' values as they were read under this epoch and count, if kept (a plug-in whose
+/// parameters changed in number is read again).
+fn kept_params(under: &Under, guid: &str, read: usize) -> Option<Vec<f64>> {
+    let changed = under.changed?;
+    KEPT.with(|kept| {
+        let kept = kept.borrow();
+        if !kept.params.is_under(under, changed) {
+            return None;
+        }
+        kept.params.by_fx.get(guid).filter(|values| values.len() == read).cloned()
+    })
+}
+
+/// Keeps an FX's parameter values as read under this epoch and count, up to `PARAMS_KEPT` of them in all: a count (or an
+/// epoch) that moved, or `KEPT_FOR` gone by, forgets what was kept under the last.
+fn keep_params(under: &Under, guid: &str, values: &[f64]) {
+    let Some(changed) = under.changed else { return };
+    KEPT.with(|kept| {
+        let mut kept = kept.borrow_mut();
+        if !kept.params.is_under(under, changed) {
+            kept.params = KeptParams { under: Some((under.epoch.to_string(), changed, Instant::now())), ..KeptParams::default() };
+        }
+        let params = &mut kept.params;
+        let before = params.by_fx.get(guid).map_or(0, Vec::len);
+        if params.total - before + values.len() > params_kept() {
+            return;
+        }
+        params.total = params.total - before + values.len();
+        params.by_fx.insert(guid.to_string(), values.to_vec());
+    })
+}
+
+/// Forgets the parameter values kept: the epoch moved (a tab switch, another project in the tab).
+pub(super) fn forget() {
+    KEPT.with(|kept| kept.borrow_mut().params = KeptParams::default());
 }
 
 /// The work kept for a track by its key, taken out (it's kept again if the page ends inside the track).
@@ -337,6 +434,7 @@ impl Reads {
         let first = cursor.n == 0 && cursor.sub == 0;
         let mut clock = Clock { started: Instant::now(), reads: 0 };
         let changed = reaper.state_change_count(proj);
+        let under = Under { reaper, proj, epoch: &epoch, changed };
         let mut records: Vec<Value> = vec![];
         let mut bytes = 0;
         let mut next: Option<Cursor> = None;
@@ -360,7 +458,7 @@ impl Reads {
                 };
                 Work::new(key, budget)
             });
-            if !self.read_track(reaper, proj, track, cursor.n, &mut work, &mut clock) {
+            if !self.read_track(&under, track, cursor.n, &mut work, &mut clock) {
                 keep_work(work);
                 next = Some(cursor.clone());
                 break 'tracks;
@@ -464,7 +562,8 @@ impl Reads {
 
     /// Reads a track's records into `work` as far as the page's share of time goes: its envelopes' points, its items,
     /// then its own record, its FX (containers' children after them) and its items' records. True once they're read.
-    fn read_track(&self, reaper: &Reaper, proj: Project, track: Track, position: usize, work: &mut Work, clock: &mut Clock) -> bool {
+    fn read_track(&self, under: &Under, track: Track, position: usize, work: &mut Work, clock: &mut Clock) -> bool {
+        let reaper = under.reaper;
         if work.records.is_some() {
             return true;
         }
@@ -572,7 +671,7 @@ impl Reads {
             left
         });
         while let Some(place) = left.pop() {
-            let fx_guid = self.fx_record(reaper, proj, &place, automated, &mut work.budget, &mut work.fx_records);
+            let fx_guid = self.fx_record(under, &place, automated, &mut work.budget, &mut work.fx_records);
             if place.depth < 8 && reaper.fx_config(place.fx, "container_count").is_some() {
                 let children = reaper.fx_children(place.fx).into_iter().enumerate();
                 let children: Vec<FxPlace> =
@@ -659,15 +758,8 @@ impl Reads {
     }
 
     /// An FX's record (its container's children come after it, read one by one): its GUID.
-    fn fx_record(
-        &self,
-        reaper: &Reaper,
-        proj: Project,
-        place: &FxPlace,
-        automated: &Automated,
-        budget: &mut Budget,
-        records: &mut Vec<Value>,
-    ) -> String {
+    fn fx_record(&self, under: &Under, place: &FxPlace, automated: &Automated, budget: &mut Budget, records: &mut Vec<Value>) -> String {
+        let (reaper, proj) = (under.reaper, under.proj);
         let FxPlace { fx, position, parent, .. } = place;
         let fx = *fx;
         let fx_guid = reaper.fx_guid(fx);
@@ -682,10 +774,19 @@ impl Reads {
         let hashed = budget.params + read as usize <= PARAMS_BUDGET;
         let listed = budget.values && budget.value_count + read as usize <= VALUES_BUDGET;
         if hashed || listed {
-            for param in 0..read {
+            // The sweep that costs: kept while the count stays what it was, read again once it moved. (An FX REAPER gives
+            // no GUID for is read every time: one key for them all would hand one's values to another.)
+            let kept = if fx_guid.is_empty() { None } else { kept_params(under, &fx_guid, read as usize) };
+            let normalized = kept.unwrap_or_else(|| {
+                let normalized: Vec<f64> = (0..read).map(|param| reaper.param_normalized(fx, param)).collect();
+                if !fx_guid.is_empty() {
+                    keep_params(under, &fx_guid, &normalized);
+                }
+                normalized
+            });
+            for (param, &normalized) in (0..).zip(&normalized) {
                 // (an automated parameter follows its envelope, which has its own fingerprint)
                 let skip = automated.params.contains(&(fx.index, param));
-                let normalized = reaper.param_normalized(fx, param);
                 if hashed && !skip {
                     print.number(normalized, 4);
                 }
@@ -1031,6 +1132,8 @@ mod tests {
         let before = calls();
         let (_, whole_records) = whole(&reads, false, true);
         let once = calls() - before;
+        // (read anew: the parameters kept from the digest before would make these pages cheaper than a first read's)
+        fake::with(|s| s.state_count += 1);
         // A page's share of the main thread (here 2 points, items or FX) holds inside the FX, a container's children too.
         TEST_READS.with(|reads| reads.set(Some(2)));
         let mut answer = page(&reads, json!({})).unwrap();
@@ -1059,6 +1162,8 @@ mod tests {
             s.tracks[0].fx[0].params[0].value = 0.5;
             s.tracks[1].items[1].position = 3.0;
             s.markers[0].name = "Drop 2".into();
+            // (a parameter edit moves REAPER's state change count, 7.82; the fake's value alone doesn't)
+            s.state_count += 1;
         });
         let (_, after) = whole(&reads, false, true);
         assert_eq!(before.len(), after.len());
@@ -1078,5 +1183,150 @@ mod tests {
             find(&after, "{FX-EQ}")["f"]["parameters"]["parametersHash"]
         );
         assert_eq!(find(&after, "{CCCC}")["n"], "Snare Top");
+    }
+
+    // The optimization audit's R1 (2026-10-24): watch_me looks at the project every second or so, and most looks find it
+    // as it was; the parameter sweeps are the bulk of a digest's REAPER calls, and a parameter edit moves REAPER's state
+    // change count (lab, 7.82). Under one count, they're read once.
+    #[test]
+    fn parameter_values_are_kept_while_the_state_count_stays_and_read_again_once_it_moved() {
+        big_project();
+        let reads = Reads::default();
+        // (pages cut by their bytes alone, not the clock: the same digest makes the same calls each time)
+        TEST_READS.with(|reads| reads.set(Some(usize::MAX)));
+        let calls = || fake::with(|s| s.calls);
+        let before = calls();
+        let (_, first) = whole(&reads, true, false);
+        let once = calls() - before;
+        let before = calls();
+        let (_, again) = whole(&reads, true, false);
+        let kept = calls() - before;
+        assert_eq!(again, first);
+        assert!(kept * 4 < once, "{kept} REAPER calls for the look again, {once} for the first: 64,000 parameters were kept");
+        // The producer moves a parameter: REAPER moves its count, and the parameters read anew.
+        fake::with(|s| {
+            s.state_count += 1;
+            s.tracks[3].fx[1].params[2].value = 0.9;
+        });
+        let before = calls();
+        let (_, after) = whole(&reads, true, false);
+        let moved = calls() - before;
+        assert!(moved * 2 > once, "{moved} REAPER calls once the count moved, {once} for the first");
+        let (was, is) = (find(&first, "{F0003-1}"), find(&after, "{F0003-1}"));
+        assert_eq!(is["v"][2], 0.9);
+        assert_ne!(was["f"]["parameters"]["parametersHash"], is["f"]["parameters"]["parametersHash"]);
+        assert_eq!(after.iter().filter(|record| !first.contains(record)).count(), 1, "one FX changed");
+        TEST_READS.with(|reads| reads.set(None));
+    }
+
+    // What REAPER moves neither its count nor its history for (lab, 7.82: a bare API write outside an undo block, an
+    // extension's, of a track's mute or name, an item's place or a marker) is read every time: only the parameters are kept,
+    // and a parameter write moves the count even bare.
+    #[test]
+    fn a_bare_write_that_moved_no_count_still_shows_the_next_time() {
+        fake::lab_project();
+        let reads = Reads::default();
+        let (_, before) = whole(&reads, true, true);
+        fake::with(|s| {
+            s.tracks[1].mute = true;
+            s.tracks[2].name = "Snare Top".into();
+            s.tracks[1].items[1].position = 3.0;
+            s.markers[0].name = "Drop 2".into();
+        });
+        let (_, after) = whole(&reads, true, true);
+        let moved: Vec<&str> =
+            before.iter().zip(&after).filter(|(old, new)| old != new).map(|(_, new)| new["id"].as_str().unwrap()).collect();
+        assert_eq!(moved, ["{BBBB}", "{ITEM-K2}", "{CCCC}", "{MARK-1}"]);
+        assert_eq!(find(&after, "{BBBB}")["f"]["mixer"]["mute"], true);
+    }
+
+    #[test]
+    fn kept_parameter_values_are_forgotten_with_the_epoch_and_bounded() {
+        big_project();
+        let reads = Reads::default();
+        TEST_READS.with(|reads| reads.set(Some(usize::MAX)));
+        let calls = || fake::with(|s| s.calls);
+        let before = calls();
+        whole(&reads, true, false);
+        let once = calls() - before;
+        // Another project in the tab: nothing kept is of it.
+        reads.bump_epoch();
+        let before = calls();
+        whole(&reads, true, false);
+        assert_eq!(calls() - before, once, "read as a first digest is");
+        // Kept up to a bound: past it, the rest is read each time.
+        TEST_PARAMS_KEPT.with(|most| most.set(Some(640)));
+        fake::with(|s| s.state_count += 1);
+        let before = calls();
+        whole(&reads, true, false);
+        let fresh = calls() - before;
+        let before = calls();
+        whole(&reads, true, false);
+        let kept = calls() - before;
+        TEST_PARAMS_KEPT.with(|most| most.set(None));
+        TEST_READS.with(|reads| reads.set(None));
+        assert_eq!(fresh - kept, 640, "ten FX of 64 parameters kept, the rest read again");
+    }
+
+    // Review: a parameter moved by what makes no undo point (a MIDI-learned control, a plug-in's own hand) would stay as
+    // the last read had it until the count moved; after `KEPT_FOR` the values are read again whatever the count says.
+    #[test]
+    fn kept_parameter_values_are_read_again_after_a_while() {
+        fake::lab_project();
+        let reads = Reads::default();
+        TEST_READS.with(|reads| reads.set(Some(usize::MAX)));
+        let calls = || fake::with(|s| s.calls);
+        let before = calls();
+        let (_, first) = whole(&reads, true, false);
+        let once = calls() - before;
+        let before = calls();
+        whole(&reads, true, false);
+        assert!(calls() - before < once, "the EQ's parameters were kept");
+        // A control the plug-in's own hand moved, with the count where it was: seen once the bound passes.
+        fake::with(|s| s.tracks[0].fx[0].params[0].value = 0.75);
+        TEST_KEPT_FOR.with(|bound| bound.set(Some(Duration::ZERO)));
+        let before = calls();
+        let (_, later) = whole(&reads, true, false);
+        TEST_KEPT_FOR.with(|bound| bound.set(None));
+        TEST_READS.with(|reads| reads.set(None));
+        assert_eq!(calls() - before, once, "read whole again");
+        assert_eq!(find(&first, "{FX-EQ}")["v"][0], 0.25);
+        assert_eq!(find(&later, "{FX-EQ}")["v"][0], 0.75);
+    }
+
+    // Review: REAPER gives no GUID for an FX whose address holds none (or without `guidToString`); two such FX must never
+    // share one kept set of values.
+    #[test]
+    fn an_fx_without_a_guid_is_read_every_time() {
+        use crate::reaper::fake::{FakeFx, FakeParam};
+        fake::lab_project();
+        fake::with(|s| {
+            let mut a = FakeFx::new("", "VST: Nameless (Kumi)");
+            a.params = vec![FakeParam::new("Mix", 0.1, "10 %")];
+            let mut b = FakeFx::new("", "VST: Nameless (Kumi)");
+            b.params = vec![FakeParam::new("Mix", 0.9, "90 %")];
+            s.tracks[2].fx = vec![a, b];
+        });
+        let reads = Reads::default();
+        let values = |records: &[Value]| -> Vec<Value> {
+            records.iter().filter(|r| r["p"] == "{CCCC}" && r["k"] == "FX").map(|r| r["v"][0].clone()).collect()
+        };
+        let (_, first) = whole(&reads, true, false);
+        assert_eq!(values(&first), [json!(0.1), json!(0.9)]);
+        fake::with(|s| s.tracks[2].fx[1].params[0].value = 0.5);
+        let (_, again) = whole(&reads, true, false);
+        assert_eq!(values(&again), [json!(0.1), json!(0.5)], "each read anew, neither handed the other's values");
+    }
+
+    #[test]
+    fn a_plug_in_whose_parameters_changed_in_number_is_read_again() {
+        fake::lab_project();
+        let reads = Reads::default();
+        let (_, before) = whole(&reads, true, false);
+        assert_eq!(find(&before, "{FX-EQ}")["v"], json!([0.25, null, 1.0]));
+        fake::with(|s| s.tracks[0].fx[0].params.push(fake::FakeParam::new("Band 2 Gain", 0.75, "+3 dB")));
+        let (_, after) = whole(&reads, true, false);
+        assert_eq!(find(&after, "{FX-EQ}")["v"], json!([0.25, null, 1.0, 0.75]));
+        assert_eq!(find(&after, "{FX-EQ}")["f"]["parameters"]["count"], 4);
     }
 }
