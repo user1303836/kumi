@@ -950,6 +950,13 @@ impl Endpoint {
                     listener();
                 }
             }
+            // The bridge's queue of notifications filled and it dropped some (Live's bridge says how many): a
+            // tools/list_changed may have been among them, so the catalog is out of date as well.
+            method if method.strip_suffix("_overflow") == Some(self.bridge.events) => {
+                for listener in self.catalog_listeners.snapshot() {
+                    listener();
+                }
+            }
             // The DAW's events: a method the SDK has no schema for, so it comes through the fallback handler.
             method if method == self.bridge.events => {
                 if let Some(params) = notification.params.take() {
@@ -1151,5 +1158,29 @@ impl McpEndpoint for Endpoint {
 
     async fn close(&self) -> Result<(), RuntimeError> {
         Endpoint::close(self).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_change_of_tools_or_notifications_the_bridge_dropped_mark_the_catalog_out_of_date() {
+        let endpoint = Endpoint::new(1000, None, BridgeDescriptor::ABLETON);
+        let heard = Rc::new(Cell::new(0));
+        let count = heard.clone();
+        let _unlisten = endpoint.on_catalog_changed(Rc::new(move || count.set(count.get() + 1)));
+        let notify = |method: &str, params: &str| {
+            let line = format!(r#"{{"jsonrpc":"2.0","method":"{method}","params":{params}}}"#);
+            endpoint.on_message(deserialize_message(&line).unwrap());
+        };
+        notify("notifications/live_event", r#"{"type":"changed"}"#);
+        assert_eq!(heard.get(), 0, "an event of Live's isn't a change of tools");
+        notify("notifications/tools/list_changed", "{}");
+        assert_eq!(heard.get(), 1);
+        // A full queue: what it dropped may have held a tools/list_changed.
+        notify("notifications/live_event_overflow", r#"{"epoch":7,"dropped":3,"resnapshot":true}"#);
+        assert_eq!(heard.get(), 2);
     }
 }

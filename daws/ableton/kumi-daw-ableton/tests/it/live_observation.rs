@@ -193,6 +193,14 @@ struct Replies {
     sets: Cell<usize>,
     /// Each call, as (tool, args).
     calls: RefCell<Vec<(String, JsonObject)>>,
+    /// How many times the tools were listed, and who hears that they changed.
+    lists: Cell<usize>,
+    catalog_changed: RefCell<Vec<Rc<dyn Fn()>>>,
+}
+impl Replies {
+    fn new(replies: std::collections::HashMap<String, Value>) -> Self {
+        Self { replies, sets: Cell::new(1), calls: RefCell::new(vec![]), lists: Cell::new(0), catalog_changed: RefCell::new(vec![]) }
+    }
 }
 #[async_trait(?Send)]
 impl McpEndpoint for Replies {
@@ -204,6 +212,7 @@ impl McpEndpoint for Replies {
     }
     async fn list(&self, _: Option<&str>, signal: Signal) -> Result<ListToolsResult, RuntimeError> {
         signal.check()?;
+        self.lists.set(self.lists.get() + 1);
         let names = ["live_status", "live_discover", "live_song_state"];
         Ok(serde_json::from_value(
             json!({"tools":names.iter().map(|name|json!({"name":name,"inputSchema":{"type":"object"}})).collect::<Vec<_>>()}),
@@ -225,7 +234,8 @@ impl McpEndpoint for Replies {
         }
         Ok(serde_json::from_value(reply).unwrap())
     }
-    fn on_catalog_changed(&self, _: Rc<dyn Fn()>) -> Box<dyn Fn()> {
+    fn on_catalog_changed(&self, callback: Rc<dyn Fn()>) -> Box<dyn Fn()> {
+        self.catalog_changed.borrow_mut().push(callback);
         Box::new(|| {})
     }
     fn on_disconnect(&self, _: Rc<dyn Fn()>) -> Box<dyn Fn()> {
@@ -268,7 +278,7 @@ async fn a_turn_that_fails_part_way_leaves_the_set_model_marked_out_of_date() {
                     (key, fixture["values"][id.as_u64().unwrap() as usize]["reply"].clone())
                 })
                 .collect();
-            let endpoint = Rc::new(Replies { replies, sets: Cell::new(1), calls: RefCell::new(vec![]) });
+            let endpoint = Rc::new(Replies::new(replies));
             let mut options = ConnectionOptions::new(Rc::new(|_, _| {}));
             let out = endpoint.clone();
             options.connect = Some(Rc::new(move |_| {
@@ -313,7 +323,7 @@ async fn once_live_reports_track_ids_the_next_look_reads_them_with_the_tracks() 
             // Live says Main's id when asked: it reports track ids.
             let main = json!({"epoch":7,"kind":"main-track","revision":"r","truncated":false,"items":[{"ref":"7:main_track:0","kumiTrack":"01JMAIN0000000000000000000"}]});
             replies.insert("live_discover:main-track".into(), json!({"content":[{"type":"text","text":stringify(&main)}],"structuredContent":main}));
-            let endpoint = Rc::new(Replies { replies, sets: Cell::new(1), calls: RefCell::new(vec![]) });
+            let endpoint = Rc::new(Replies::new(replies));
             let mut options = ConnectionOptions::new(Rc::new(|_, _| {}));
             let out = endpoint.clone();
             options.connect = Some(Rc::new(move |_| {
@@ -341,6 +351,50 @@ async fn once_live_reports_track_ids_the_next_look_reads_them_with_the_tracks() 
             let tracks = endpoint.calls.borrow().iter().find(|(name, args)| name == "live_discover" && args.get("kind") == Some(&json!("track"))).cloned();
             let fields = tracks.expect("the look read the tracks").1["fields"].clone();
             assert!(fields.as_array().unwrap().contains(&json!("kumiTrack")), "{fields}");
+            remember.cancel_timer();
+            connection.close().await.unwrap();
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_turn_lists_the_bridges_tools_again_only_once_they_changed() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let fixture: Value = serde_json::from_str(&kumi_testkit::oracle("kumi-daw-ableton/observation-oracle.json")).unwrap();
+            let case = fixture["cases"].as_array().unwrap().iter().find(|case| case["label"] == "time-signature").unwrap();
+            let replies = case["calls"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .zip(case["responses"].as_array().unwrap())
+                .map(|(call, id)| {
+                    let key = format!("{}:{}", call["name"].as_str().unwrap(), call["args"]["kind"].as_str().unwrap_or(""));
+                    (key, fixture["values"][id.as_u64().unwrap() as usize]["reply"].clone())
+                })
+                .collect();
+            let endpoint = Rc::new(Replies::new(replies));
+            let mut options = ConnectionOptions::new(Rc::new(|_, _| {}));
+            let out = endpoint.clone();
+            options.connect = Some(Rc::new(move |_| {
+                let endpoint: Rc<dyn McpEndpoint> = out.clone();
+                async move { Ok(endpoint) }.boxed_local()
+            }));
+            options.reconnect_interval_ms = Some(3600000);
+            let connection = LiveConnection::new(options);
+            connection.start(Signal::new()).await.unwrap();
+            let remember = Remember::new(connection.clone(), None, None);
+            let observer = Observer::new(connection.clone(), remember.clone());
+            observer.observe(endpoint.as_ref(), Signal::new(), None).await.unwrap();
+            observer.observe(endpoint.as_ref(), Signal::new(), None).await.unwrap();
+            assert_eq!(endpoint.lists.get(), 1, "two turns, one listing");
+            // The bridge says its tools changed (notifications/tools/list_changed): the next turn lists them again.
+            let heard = endpoint.catalog_changed.borrow().clone();
+            for listener in heard {
+                listener();
+            }
+            observer.observe(endpoint.as_ref(), Signal::new(), None).await.unwrap();
+            assert_eq!(endpoint.lists.get(), 2, "listed again once they changed");
             remember.cancel_timer();
             connection.close().await.unwrap();
         })
