@@ -337,15 +337,20 @@ function M.digest(job, params, epoch, extra)
   local records, bytes, next_cursor = {}, 0, nil
   local parents = rows.group_parents(song)
   local labels = track_labels(song, count)
-  -- Adds what one item gave; false (and the cursor to go on from) when the page is full.
+  -- Adds what one item gave; false (and the cursor to go on from) when the page is full. (Each record is encoded once, here
+  -- where it is measured, and goes into the page as that text: the frame encodes no record again.)
   local function take(made, phase, index, before)
-    local size = 0
-    for _, record in ipairs(made) do size = size + #json.encode(record) + 1 end
+    local size, texts = 0, {}
+    for k, record in ipairs(made) do
+      local text = json.encode(record, { max_depth = json.ROW_DEPTH })
+      texts[k] = text or false
+      size = size + #(text or json.encode(record) or "") + 1
+    end
     if #records > 0 and bytes + size > M.PAGE_BYTES then
       next_cursor = { epoch = epoch, phase = phase, index = index, lines = before.lines, values = before.values }
       return false
     end
-    for _, record in ipairs(made) do records[#records + 1] = record end
+    for k = 1, #made do records[#records + 1] = texts[k] and json.raw(texts[k]) or made[k] end
     bytes = bytes + size
     return true
   end
