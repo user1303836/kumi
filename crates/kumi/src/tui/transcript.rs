@@ -852,6 +852,10 @@ impl Transcript {
             if cached.as_ref().is_none_or(|c| c.width != width || c.revision != revision || moving || c.moving) {
                 self.laid_out += 1;
                 let rows = entry_rows_with(&entry.borrow(), width, now, &mut entry.markdown.borrow_mut());
+                // The kept lines serve while the answer streams; a settled answer's rows are the cache above.
+                if !matches!(&*entry.borrow(), Entry::Assistant { status: AnswerStatus::Running, .. }) {
+                    *entry.markdown.borrow_mut() = MarkdownCache::default();
+                }
                 *cached = Some(Cache { width, revision, rows: rows.into(), moving });
             }
             let rows = cached.as_ref().unwrap().rows.clone();

@@ -147,7 +147,11 @@ fn hash_of(text: &str) -> u64 {
 /// `render_markdown`, keeping the lines rendered so far in `cache` for the next, longer text.
 pub fn render_markdown_with(text: &str, width: i32, base: &Rc<Style>, cache: &mut MarkdownCache) -> Vec<MarkdownRow> {
     let settled = text.rfind('\n').map_or(0, |at| at + 1);
-    let kept = cache.width == width && cache.settled > 0 && cache.settled <= settled && hash_of(&text[..cache.settled]) == cache.hash;
+    // A changed text may end a character where the kept text ended a line: `get` says so instead of slicing.
+    let kept = cache.width == width
+        && cache.settled > 0
+        && cache.settled <= settled
+        && text.get(..cache.settled).is_some_and(|before| hash_of(before) == cache.hash);
     if !kept {
         *cache = MarkdownCache { width, ..MarkdownCache::default() };
     }

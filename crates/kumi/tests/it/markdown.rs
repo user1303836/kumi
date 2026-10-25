@@ -124,11 +124,19 @@ fn an_answer_that_streams_renders_as_the_whole_would_while_only_its_last_line_is
         // Everything up to the last newline is kept; only the line after it is rendered per call.
         assert_eq!(cache.settled(), whole[..end].rfind('\n').map_or(0, |at| at + 1), "at {end} bytes");
     }
-    // A text that changed before its end, or another width, starts over and still matches.
+    // A text that changed before its end, or another width, starts over and still matches; so does one whose
+    // characters no longer end where the kept text's lines did.
     let changed = "# Remix notes\n\nSome **bold** words\nlast line";
     assert_eq!(
         rows_with_bands(&render_markdown_with(changed, 24, &base(), &mut cache)),
         rows_with_bands(&render_markdown(changed, 24, &base()))
+    );
+    let mut shifted = MarkdownCache::default();
+    render_markdown_with("ab\ncd", 24, &base(), &mut shifted);
+    let other = "a€\nmore\nx";
+    assert_eq!(
+        rows_with_bands(&render_markdown_with(other, 24, &base(), &mut shifted)),
+        rows_with_bands(&render_markdown(other, 24, &base()))
     );
     assert_eq!(
         rows_with_bands(&render_markdown_with(whole, 40, &base(), &mut cache)),
