@@ -1271,27 +1271,35 @@ mod tests {
         assert!(jobs.try_recv().is_err(), "once");
     }
 
-    // (the optimization audit's R9: this slept 4.4 s through the production stall of 1.5 s; the lab's stall is 600 ms here,
-    // and every wait is scaled with it, so the margins a slow runner needs stay what they were: review)
+    // (the optimization audit's R9: this slept 4.4 s through the production stall of 1.5 s; the lab's stall is 600 ms here.
+    // Its fake main thread then held the request for a fixed 1.2 s, which a slow runner's checks outlasted (#548): it holds
+    // until the test lets it go, and the checks wait only for what they test, the claim and the stall.)
     #[test]
     fn the_main_thread_running_a_slow_request_is_working_and_that_request_is_answered_while_others_are_told_busy() {
         let stall = Duration::from_millis(600);
         let mut lab = Lab::start_with_stall(VECTOR_SECRET, ServerConnection::new, stall);
         let (mut stream, mut reader, _) = lab.authenticated();
-        // (the lab ticked when it started: the request below is taken whatever the handshake took)
+        // Status comes on another connection, made now: a check while the request is young needs no handshake.
+        let (mut other, mut other_reader, _) = lab.authenticated();
+        // (the lab ticked when it started: the request below is taken whatever the handshakes took)
         lab.snapshot.lock().unwrap().last_tick = Some(Instant::now());
         let jobs = std::mem::replace(&mut lab.jobs, mpsc::channel().1);
         let snapshot = lab.snapshot.clone();
+        let (claimed, on_claim) = mpsc::channel();
+        let (release, on_release) = mpsc::channel::<()>();
         let main = thread::spawn(move || {
             let job = jobs.recv_timeout(Duration::from_secs(5)).unwrap();
             assert!(job.claim());
             // A plug-in loads, or the request opened a licence prompt: the main thread doesn't tick, and says it is working.
+            let since = Instant::now();
             {
                 let mut snapshot = snapshot.lock().unwrap();
-                snapshot.working = Some(Instant::now());
-                snapshot.last_tick = Some(Instant::now() - Duration::from_secs(5));
+                snapshot.working = Some(since);
+                snapshot.last_tick = Some(since - Duration::from_secs(5));
             }
-            thread::sleep(Duration::from_millis(1200));
+            claimed.send(since).unwrap();
+            // Until the test has seen what it checks, however slow the runner.
+            on_release.recv_timeout(Duration::from_secs(30)).unwrap();
             {
                 let mut snapshot = snapshot.lock().unwrap();
                 snapshot.working = None;
@@ -1301,13 +1309,12 @@ mod tests {
         });
         let frame = Request { id: 1, method: "change_apply".into(), params: json!({}), deadline_ms: Some(unix_ms() + 15_000) };
         stream.write_all(&Frame::Request(frame).encode()).unwrap();
-        // While it is young, status (on another connection) says it works and not that REAPER is stuck.
-        thread::sleep(Duration::from_millis(150));
-        let (mut other, mut other_reader, _) = lab.authenticated();
+        // While it is young, status says it works and not that REAPER is stuck.
+        let since = on_claim.recv_timeout(Duration::from_secs(5)).unwrap();
         let status = request(&mut other, &mut other_reader, 2, "status")["result"].clone();
-        assert_eq!((&status["busy"], &status["working"]), (&json!(false), &json!(true)));
+        assert_eq!((&status["busy"], &status["working"]), (&json!(false), &json!(true)), "{:?} after the claim", since.elapsed());
         // Past the stall limit, what else comes is answered busy at once, not after its deadline.
-        thread::sleep(Duration::from_millis(750));
+        thread::sleep((since + stall + Duration::from_millis(100)).saturating_duration_since(Instant::now()));
         let status = request(&mut other, &mut other_reader, 3, "status")["result"].clone();
         assert_eq!((&status["busy"], &status["working"]), (&json!("working"), &json!(true)));
         assert!(status["workingMs"].as_u64().unwrap() >= stall.as_millis() as u64, "{status}");
@@ -1319,6 +1326,7 @@ mod tests {
         assert!(refused["error"]["message"].as_str().unwrap().contains("long request"), "{refused}");
         assert!(started.elapsed() < Duration::from_millis(500), "waited {:?}", started.elapsed());
         // The request that runs is answered when it ends.
+        release.send(()).unwrap();
         let response = read_frame(&mut reader);
         assert_eq!(response["result"], json!({"added": true}), "{response}");
         main.join().unwrap();
