@@ -530,6 +530,26 @@ pub fn answer_of(result: &CallToolResult) -> Result<Value, Refused> {
 }
 
 /// Why the DAW may answer late, in words: REAPER's `busy` code.
+/// How long the FOCUS poll waits before asking again: `period` while something moves (the selection, the view, the
+/// transport, or the DAW playing) and for FOCUS_QUIET_POLLS after it last did; then twice that, and after
+/// FOCUS_QUIETER_POLLS four times, never past FOCUS_SLOWEST_MS. A producer who stops for a while costs the DAW a
+/// read every half second or so instead of seven a second; their next click is seen within that, and the poll is
+/// back to `period` at once.
+pub fn focus_pause(period: u64, quiet: u32, playing: bool) -> u64 {
+    if playing || quiet < FOCUS_QUIET_POLLS {
+        period
+    } else if quiet < FOCUS_QUIETER_POLLS {
+        (period * 2).min(FOCUS_SLOWEST_MS.max(period))
+    } else {
+        (period * 4).min(FOCUS_SLOWEST_MS.max(period))
+    }
+}
+/// Polls that found nothing moved before the FOCUS poll slows down, and slows down more (about 3 s and 30 s at
+/// FOCUS_MS), and the slowest it goes.
+const FOCUS_QUIET_POLLS: u32 = 20;
+const FOCUS_QUIETER_POLLS: u32 = 110;
+const FOCUS_SLOWEST_MS: u64 = 600;
+
 fn busy_words(code: &str, profile: &DawProfile) -> String {
     match code {
         "modal" => "a dialog is open".into(),
@@ -796,6 +816,8 @@ impl<S: RefScheme + 'static> OwnIntegration<S> {
         let period = self.options.context.focus_interval_ms.unwrap_or(drawn).max(50);
         tokio::task::spawn_local(async move {
             let (mut last, mut last_transport, mut last_epoch): (Option<Value>, Option<Value>, Option<String>) = (None, None, None);
+            // Polls in a row that found nothing moved, and whether the last answer had the DAW playing.
+            let (mut quiet, mut was_playing) = (0u32, false);
             let lose_focus = |last: &mut Option<Value>| {
                 if last.take().is_some() {
                     if let Some(on_focus) = &on_focus {
@@ -813,7 +835,7 @@ impl<S: RefScheme + 'static> OwnIntegration<S> {
                 }
             };
             while !closed.get() {
-                tokio::time::sleep(std::time::Duration::from_millis(period)).await;
+                tokio::time::sleep(std::time::Duration::from_millis(focus_pause(period, quiet, was_playing))).await;
                 let Some(host) = endpoint.borrow().clone() else { continue };
                 let read = host.call("focus", JsonObject::new(), abort::timeout(2_000)).await.ok().map(|result| answer_of(&result));
                 if closed.get() {
@@ -836,6 +858,7 @@ impl<S: RefScheme + 'static> OwnIntegration<S> {
                         continue;
                     }
                     _ => {
+                        quiet = 0;
                         lose_focus(&mut last);
                         continue;
                     }
@@ -872,6 +895,11 @@ impl<S: RefScheme + 'static> OwnIntegration<S> {
                 last_epoch = epoch;
                 *selected.borrow_mut() = focus.pointer("/selection/trackRef").and_then(Value::as_str).map(str::to_owned);
                 let seen = json!({"view": focus.get("view"), "selection": focus.get("selection"), "epoch": focus.get("epoch"), "busy": focus.get("busy")});
+                let transport = focus.get("transport").cloned();
+                let playing = transport.as_ref().and_then(|t| t.get("playing")) == Some(&Value::Bool(true));
+                let moved = last.as_ref() != Some(&seen) || transport != last_transport || playing;
+                quiet = if moved { 0 } else { quiet.saturating_add(1) };
+                was_playing = playing;
                 if last.as_ref() != Some(&seen) {
                     if let Some(on_focus) = &on_focus {
                         let mut filled = (daw.fill_focus)(&focus);
@@ -880,8 +908,6 @@ impl<S: RefScheme + 'static> OwnIntegration<S> {
                     }
                     last = Some(seen);
                 }
-                let transport = focus.get("transport").cloned();
-                let playing = transport.as_ref().and_then(|t| t.get("playing")) == Some(&Value::Bool(true));
                 {
                     let mut heard = heard.borrow_mut();
                     if heard.back().is_none_or(|(_, was)| *was != playing) {
@@ -1993,5 +2019,24 @@ impl<S: RefScheme + 'static> KernelTool for ReadTool<S> {
     }
     fn reach(&self) -> Reach {
         Reach::DawRead
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_focus_poll_slows_down_while_nothing_moves_and_never_while_the_daw_plays() {
+        assert_eq!(focus_pause(150, 0, false), 150);
+        assert_eq!(focus_pause(150, 19, false), 150);
+        assert_eq!(focus_pause(150, 20, false), 300);
+        assert_eq!(focus_pause(150, 109, false), 300);
+        assert_eq!(focus_pause(150, 110, false), 600);
+        assert_eq!(focus_pause(150, u32::MAX, false), 600);
+        assert_eq!(focus_pause(150, 500, true), 150, "a playing transport moves every poll");
+        // A pane that isn't drawn already polls each second: it stays there.
+        assert_eq!(focus_pause(1000, 500, false), 1000);
+        assert_eq!(focus_pause(50, 500, false), 200);
     }
 }
