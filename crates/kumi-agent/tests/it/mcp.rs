@@ -472,4 +472,27 @@ fn the_bridges_read_buffer_looks_at_each_byte_once_however_the_message_is_cut_in
     assert_eq!(serde_json::to_value(buffer.read_message().unwrap().unwrap()).unwrap()["id"], 3);
     assert!(start.elapsed() < Duration::from_millis(600), "{:?}", start.elapsed());
     assert!(LinearReadBuffer::new(10).append(&[0; 11]).unwrap_err().to_string().contains("exceeded maximum size of 10 bytes"));
+    // A burst of small messages in one chunk (Live's events) is read in place, each in its own time, not by copying
+    // the rest of the chunk down after every one.
+    let mut buffer = LinearReadBuffer::new(128 * 1024 * 1024);
+    let event =
+        format!("{{\"jsonrpc\":\"2.0\",\"method\":\"notifications/live_event\",\"params\":{{\"detail\":\"{}\"}}}}\n", "e".repeat(100));
+    let burst: Vec<u8> = event.repeat(2000).into_bytes();
+    let start = Instant::now();
+    for half in burst.chunks(burst.len() / 2 + 1) {
+        buffer.append(half).unwrap();
+    }
+    let mut read = 0;
+    while let Some(message) = buffer.read_message().unwrap() {
+        assert_eq!(serde_json::to_value(message).unwrap()["method"], "notifications/live_event");
+        read += 1;
+    }
+    assert_eq!(read, 2000);
+    assert!(start.elapsed() < Duration::from_millis(600), "{:?}", start.elapsed());
+    // What is left over waits for the rest of its line, wherever the chunks were cut.
+    buffer.append(b"{\"jsonrpc\":\"2.0\",\"id\":9,\"res").unwrap();
+    assert!(buffer.read_message().unwrap().is_none());
+    buffer.append(b"ult\":{}}\n").unwrap();
+    assert_eq!(serde_json::to_value(buffer.read_message().unwrap().unwrap()).unwrap()["id"], 9);
+    assert!(buffer.read_message().unwrap().is_none());
 }

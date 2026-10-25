@@ -38,9 +38,22 @@ use kumi_types::version::KUMI_VERSION;
 /// The most one message from the bridge may hold: a big Set's reads come in pages well under it.
 pub const MAX_BRIDGE_MESSAGE_BYTES: usize = 64 * 1024 * 1024;
 
-/// The SDK's `deserializeMessage`: `JSONRPCMessageSchema.parse(JSON.parse(line))`.
+/// The SDK's `deserializeMessage`: `JSONRPCMessageSchema.parse(JSON.parse(line))`. The schema tries a request, a
+/// notification, a result and an error in turn, and the one a line is shows in its keys, so the line is parsed once
+/// and read as that one; a line that isn't what its keys say is read the schema's way, for its error.
 pub fn deserialize_message(line: &str) -> Result<JsonRpcMessage, RuntimeError> {
-    serde_json::from_str(line).map_err(|error| RuntimeError::plain(error.to_string()))
+    let value: Value = serde_json::from_str(line).map_err(|error| RuntimeError::plain(error.to_string()))?;
+    let keys = value.as_object().map(|object| (object.contains_key("method"), object.contains_key("id"), object.contains_key("result")));
+    let read = match keys {
+        Some((true, true, _)) => serde_json::from_value(value).map(JsonRpcMessage::Request),
+        Some((true, false, _)) => serde_json::from_value(value).map(JsonRpcMessage::Notification),
+        Some((false, _, true)) => serde_json::from_value(value).map(JsonRpcMessage::Response),
+        _ => serde_json::from_value(value).map(JsonRpcMessage::Error),
+    };
+    match read {
+        Ok(message) => Ok(message),
+        Err(_) => serde_json::from_str(line).map_err(|error| RuntimeError::plain(error.to_string())),
+    }
 }
 
 /// The bridge's messages, read in linear time: the SDK's own buffer joins everything so far with each
@@ -48,6 +61,9 @@ pub fn deserialize_message(line: &str) -> Result<JsonRpcMessage, RuntimeError> {
 /// is refused (and the link closes, as the SDK's does).
 pub struct LinearReadBuffer {
     pieces: Vec<Vec<u8>>,
+    /// Where the first piece's unread bytes begin: a chunk that holds several messages is read in place, not
+    /// copied down after each.
+    start: usize,
     size: usize,
     /// How many pieces were searched for a line end and had none: the SDK asks after every chunk.
     scanned: usize,
@@ -56,7 +72,7 @@ pub struct LinearReadBuffer {
 
 impl LinearReadBuffer {
     pub fn new(limit: usize) -> Self {
-        Self { pieces: Vec::new(), size: 0, scanned: 0, limit }
+        Self { pieces: Vec::new(), start: 0, size: 0, scanned: 0, limit }
     }
 
     pub fn append(&mut self, chunk: &[u8]) -> Result<(), RuntimeError> {
@@ -72,15 +88,21 @@ impl LinearReadBuffer {
     /// The next message, or None until a whole line is in; a line that isn't a message is an error (and consumed).
     pub fn read_message(&mut self) -> Result<Option<JsonRpcMessage>, RuntimeError> {
         for index in self.scanned..self.pieces.len() {
-            let Some(at) = memchr::memchr(b'\n', &self.pieces[index]) else { continue };
-            let mut head: Vec<u8> = Vec::with_capacity(self.pieces[..index].iter().map(Vec::len).sum::<usize>() + at);
-            for piece in &self.pieces[..index] {
-                head.extend_from_slice(piece);
+            let from = if index == 0 { self.start } else { 0 };
+            let Some(at) = memchr::memchr(b'\n', &self.pieces[index][from..]) else { continue };
+            let at = from + at;
+            let mut head: Vec<u8> = Vec::with_capacity(self.size - (self.pieces[index].len() - at));
+            for (earlier, piece) in self.pieces[..index].iter().enumerate() {
+                head.extend_from_slice(if earlier == 0 { &piece[self.start..] } else { piece });
             }
-            head.extend_from_slice(&self.pieces[index][..at]);
-            let rest = self.pieces[index][at + 1..].to_vec();
-            let tail = self.pieces.split_off(index + 1);
-            self.pieces = if rest.is_empty() { tail } else { std::iter::once(rest).chain(tail).collect() };
+            head.extend_from_slice(&self.pieces[index][from..at]);
+            // The pieces before the line's end are read whole; its own piece is read on from after the newline.
+            self.pieces.drain(..index);
+            self.start = at + 1;
+            if self.start >= self.pieces[0].len() {
+                self.pieces.remove(0);
+                self.start = 0;
+            }
             self.size -= head.len() + 1;
             self.scanned = 0;
             let text = String::from_utf8_lossy(&head);
@@ -93,6 +115,7 @@ impl LinearReadBuffer {
 
     pub fn clear(&mut self) {
         self.pieces = Vec::new();
+        self.start = 0;
         self.size = 0;
         self.scanned = 0;
     }
@@ -340,14 +363,6 @@ fn line(message: &Value) -> String {
     let mut text = stringify(message);
     text.push('\n');
     text
-}
-
-/// A `_meta`-checked payload back as the plain object it came from.
-fn payload_object(payload: &Payload) -> JsonObject {
-    match serde_json::to_value(payload) {
-        Ok(Value::Object(object)) => object,
-        _ => JsonObject::new(),
-    }
 }
 
 /// `RequestIdSchema` / `ProgressTokenSchema`: a string or a safe integer.
@@ -750,8 +765,8 @@ impl Endpoint {
                 "clientInfo": { "name": "kumi", "version": KUMI_VERSION },
             });
             let result = self.request("initialize", Some(params), connect_timeout, signal).await?;
-            let result: InitializeResult = serde_json::from_value(Value::Object(payload_object(&result)))
-                .map_err(|error| RequestFailure::Invalid(error.to_string()))?;
+            let result: InitializeResult =
+                serde_json::from_value(Value::Object(result.into_object())).map_err(|error| RequestFailure::Invalid(error.to_string()))?;
             if !SUPPORTED_PROTOCOL_VERSIONS.contains(&result.protocol_version.as_str()) {
                 return Err(RequestFailure::Plain(format!("Server's protocol version is not supported: {}", result.protocol_version)));
             }
@@ -851,12 +866,16 @@ impl Endpoint {
 
     fn on_message(&self, message: JsonRpcMessage) {
         match message {
-            JsonRpcMessage::Response(response) => {
-                let id = response.id.clone();
-                self.on_response(Some(&id), Ok(response.result.clone()), || {
+            // The result goes to its request as it is: a big Set's page is never copied here.
+            JsonRpcMessage::Response(response) => match self.take_pending(Some(&response.id)) {
+                Some(handler) => {
+                    let _ = handler.send(Ok(response.result));
+                }
+                None => self.on_error(&format!(
+                    "Received a response for an unknown message ID: {}",
                     stringify(&serde_json::to_value(&response).unwrap_or(Value::Null))
-                });
-            }
+                )),
+            },
             JsonRpcMessage::Error(error) => {
                 let id = error.id.clone();
                 let failure = McpError::new(error.error.code, &error.error.message, error.error.data.clone());
@@ -867,11 +886,15 @@ impl Endpoint {
         }
     }
 
+    /// The request an answer is for, taken from those in flight: answers are matched by `Number(response.id)`.
+    fn take_pending(&self, id: Option<&RequestId>) -> Option<oneshot::Sender<Result<Payload, McpError>>> {
+        let key = id.map(RequestId::to_js_number).filter(|number| number.fract() == 0.0 && number.abs() <= 9_007_199_254_740_991.0);
+        key.and_then(|key| self.pending.borrow_mut().remove(&(key as i64)))
+    }
+
     /// Answers are matched by `Number(response.id)`; one for no request in flight is reported, not fatal.
     fn on_response(&self, id: Option<&RequestId>, result: Result<Payload, McpError>, text: impl FnOnce() -> String) {
-        let key = id.map(RequestId::to_js_number).filter(|number| number.fract() == 0.0 && number.abs() <= 9_007_199_254_740_991.0);
-        let handler = key.and_then(|key| self.pending.borrow_mut().remove(&(key as i64)));
-        match handler {
+        match self.take_pending(id) {
             Some(handler) => {
                 let _ = handler.send(result);
             }
@@ -895,7 +918,7 @@ impl Endpoint {
         }
     }
 
-    fn on_notification(&self, notification: JsonRpcNotification) {
+    fn on_notification(&self, mut notification: JsonRpcNotification) {
         match notification.method.as_str() {
             // CancelledNotificationSchema: params required; requestId (an id) and reason (a string) optional.
             // A falsy requestId is ignored, and Kumi has no server-sent request in flight to abort.
@@ -929,8 +952,8 @@ impl Endpoint {
             }
             // The DAW's events: a method the SDK has no schema for, so it comes through the fallback handler.
             method if method == self.bridge.events => {
-                if let Some(params) = &notification.params {
-                    let event = payload_object(params);
+                if let Some(params) = notification.params.take() {
+                    let event = params.into_object();
                     for listener in self.live_event_listeners.snapshot() {
                         // A listener failure must not affect the link.
                         let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| listener(event.clone())));
@@ -1057,7 +1080,7 @@ impl McpEndpoint for Endpoint {
         };
         let listed = async {
             let result = self.request("tools/list", Some(params), self.timeout, &signal).await?;
-            serde_json::from_value::<ListToolsResult>(Value::Object(payload_object(&result)))
+            serde_json::from_value::<ListToolsResult>(Value::Object(result.into_object()))
                 .map_err(|error| RequestFailure::Invalid(error.to_string()))
         }
         .await;
@@ -1072,7 +1095,7 @@ impl McpEndpoint for Endpoint {
         let called = async {
             let params = json!({ "name": name, "arguments": args });
             let result = self.request("tools/call", Some(params), self.timeout, &signal).await?;
-            serde_json::from_value::<CallToolResult>(Value::Object(payload_object(&result)))
+            CallToolResult::from_object(result.into_object())
                 .map(|mut result| {
                     // The SDK's CallToolResultSchema emits known keys in schema order.
                     // Direct test/custom endpoints retain their own object insertion order.
