@@ -8,7 +8,7 @@ Kumi 及其桥接如何送到用户手中，这能证明什么、不能证明什
 
 | 内容 | 位置 | 获取方式 |
 | --- | --- | --- |
-| Kumi | `user1303836/kumi` 的 GitHub Releases：原生 `kumi-<target>.tar.gz`、兼容包 `kumi.tar.gz`、`kumi-release.json`、`SHA256SUMS`，以及安装程序 `install.sh` 和 `install.ps1`，由 Installer 工作流附加到每个 `vX.Y.Z` 标签上 | `install.sh` 或 `install.ps1`，之后用 `kumi update` |
+| Kumi | `user1303836/kumi` 的 GitHub Releases：原生 `kumi-<target>.tar.gz`（另附 `.tar.xz`，小三分之一，供能读取 xz 的 tar 使用）、兼容包 `kumi.tar.gz`、`kumi-release.json`、`SHA256SUMS`，以及安装程序 `install.sh` 和 `install.ps1`，由 Installer 工作流附加到每个 `vX.Y.Z` 标签上 | `install.sh` 或 `install.ps1`，之后用 `kumi update` |
 | 桥接（`@ableton-mcp/mcp-server`） | 包含在每个 Kumi 发行包中：既有原生桥接 tarball，也有已解包的桥接包 | `kumi bridge`，它通过桥接的生命周期进行安装（[安装桥接](DELIVERY.md)） |
 | REAPER 的扩展和 Renoise 的工具 | 包含在每个 Kumi 发行包的 `daws/` 中，与 `daw-mcp-server` 一起 | `kumi --daw reaper bridge`、`kumi --daw renoise bridge` 和 `kumi update`（[安装桥接](DELIVERY.md#reaper-的扩展和-renoise-的工具)） |
 | 单独的桥接 | 没有自己的发布版本。用 `python3 scripts/build-native-release.py --bridge-only` 构建（[构建选项](DEVELOPER_GUIDE.md#发布)） | 生命周期 CLI（[安装桥接](DELIVERY.md#独立桥接)） |

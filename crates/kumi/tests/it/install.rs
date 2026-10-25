@@ -189,6 +189,85 @@ async fn an_update_unpacks_in_a_home_named_in_letters_a_code_page_lacks() {
     assert_eq!(cwd.as_deref(), Some(home.to_str().unwrap()));
     assert!(args.iter().all(|arg| arg.is_ascii() && !Path::new(arg).is_absolute()), "{args:?}");
 }
+/// A tar that reads xz takes the smaller bundle a release names beside the gzipped one; the download, the checksum and
+/// the unpacking follow it.
+#[cfg(not(windows))]
+#[tokio::test]
+async fn an_update_takes_the_xz_bundle_where_tar_reads_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut env = env(dir.path());
+    env.insert("KUMI_BUNDLE_XZ".into(), "1".into());
+    let home = Path::new(&env["KUMI_HOME"]);
+    put(home.join("app/package.json"), json!({"version":KUMI_VERSION}).to_string());
+    put(home.join("app").join(executable_name("kumi")), "earlier");
+    let gz = fake_release(dir.path(), "99.0.0");
+    // The same bundle xz-compressed, from the staged folder, as the release script writes it.
+    let xz = std::process::Command::new(system::system_program_default(SystemProgram::Tar))
+        .args(["-cJf", "-", "-C", dir.path().join("stage-99.0.0").to_str().unwrap(), "."])
+        .output()
+        .unwrap();
+    if !xz.status.success() {
+        eprintln!("this tar doesn't write xz (no xz beside it): nothing to check here");
+        return;
+    }
+    let xz = xz.stdout;
+    let mut good = manifest("99.0.0");
+    good["sha256"] = json!(hex::encode(Sha256::digest(&gz)));
+    good["bundle_xz"] = json!(format!("kumi-{}.tar.xz", native_target()));
+    good["sha256_xz"] = json!(hex::encode(Sha256::digest(&xz)));
+    let (mut updated, out) = io(&env);
+    let serve = Rc::new(Serve { manifest: good, bytes: xz, status: 200, offline: false, calls: RefCell::new(vec![]) });
+    updated.fetcher = Some(serve.clone());
+    let calls = Rc::new(RefCell::new(vec![]));
+    let seen = calls.clone();
+    updated.run = Some(Rc::new(move |command, args, cwd| {
+        seen.borrow_mut().push((command.clone(), args.clone()));
+        async move { run_program(&command, &args, cwd.as_deref()).await }.boxed_local()
+    }));
+    assert_eq!(update_installed(updated).await.unwrap(), 0, "{}", out.0.borrow());
+    assert_eq!(version_of(home.join("app")), "99.0.0");
+    assert!(serve.calls.borrow().iter().any(|url| url.ends_with(".tar.xz")), "{:?}", serve.calls.borrow());
+    let tar = system::system_program_default(SystemProgram::Tar);
+    let (_, args) = calls.borrow().iter().find(|(command, _)| command == &tar).cloned().unwrap();
+    assert_eq!(args[0], "-xf");
+    assert!(args[1].ends_with(".tar.xz"), "{args:?}");
+    assert!(!home.join("downloads").join(format!("kumi-{}.tar.xz", native_target())).exists());
+}
+/// A release whose xz pair is half there or misnamed isn't refused: the gzipped bundle is taken, as every tar reads it.
+#[tokio::test]
+async fn a_release_naming_a_broken_xz_pair_is_installed_from_its_gzipped_bundle() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut env = env(dir.path());
+    env.insert("KUMI_BUNDLE_XZ".into(), "1".into());
+    let home = Path::new(&env["KUMI_HOME"]);
+    put(home.join("app/package.json"), json!({"version":KUMI_VERSION}).to_string());
+    put(home.join("app").join(executable_name("kumi")), "earlier");
+    let bytes = fake_release(dir.path(), "99.0.0");
+    for (name, sha256) in [
+        (Some("kumi-x.tar.xz"), None),
+        (None, Some("a".repeat(64))),
+        (Some("../kumi.tar.xz"), Some("a".repeat(64))),
+        (Some("kumi-x.tar.xz"), Some("not a sum".to_string())),
+    ] {
+        let mut good = manifest("99.0.0");
+        good["sha256"] = json!(hex::encode(Sha256::digest(&bytes)));
+        if let Some(name) = name {
+            good["bundle_xz"] = json!(name);
+        }
+        if let Some(sha256) = sha256 {
+            good["sha256_xz"] = json!(sha256);
+        }
+        put(home.join("app/package.json"), json!({"version":KUMI_VERSION}).to_string());
+        let (mut updated, out) = io(&env);
+        let serve = Rc::new(Serve { manifest: good, bytes: bytes.clone(), status: 200, offline: false, calls: RefCell::new(vec![]) });
+        updated.fetcher = Some(serve.clone());
+        assert_eq!(update_installed(updated).await.unwrap(), 0, "{}", out.0.borrow());
+        assert!(serve.calls.borrow().iter().any(|url| url.ends_with(".tar.gz")), "{:?}", serve.calls.borrow());
+        assert!(!serve.calls.borrow().iter().any(|url| url.ends_with(".tar.xz")), "{:?}", serve.calls.borrow());
+        // Back to the old Kumi for the next case.
+        let _ = fs::remove_dir_all(home.join("app.previous"));
+    }
+}
 #[tokio::test]
 async fn checked_executable_update_swap_and_rollback() {
     let dir = tempfile::tempdir().unwrap();
