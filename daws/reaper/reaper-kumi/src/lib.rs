@@ -96,7 +96,15 @@ impl Loaded {
         }
         self.ensure_server();
         if let Some(server) = self.server.borrow_mut().as_mut() {
-            server.publish(&self.extension.snapshot());
+            // Looked at under its lock, and copied only when the discovery file is to be written (the project changed):
+            // a copy of it every tick was most of the tick's allocations, and the file isn't written under the lock.
+            let due = {
+                let snapshot = self.extension.snapshot_ref();
+                server.needs_publish(&snapshot).then(|| snapshot.clone())
+            };
+            if let Some(snapshot) = due {
+                server.publish(&snapshot);
+            }
         }
     }
 

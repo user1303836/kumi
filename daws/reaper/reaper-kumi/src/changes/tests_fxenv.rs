@@ -54,7 +54,8 @@ impl Lab {
 
     fn tick(&self) {
         let api = fake::api();
-        self.changes.tick(&Reaper::new(&api), &self.reads, &self.events);
+        let reaper = Reaper::new(&api);
+        self.changes.tick(&reaper, &self.reads, reaper.current_project().as_ref(), &self.events);
     }
 
     fn desc(&self) -> String {

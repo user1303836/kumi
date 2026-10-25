@@ -59,7 +59,8 @@ impl Lab {
 
     fn tick(&self) {
         let api = fake::api();
-        self.changes.tick(&Reaper::new(&api), &self.reads, &self.events);
+        let reaper = Reaper::new(&api);
+        self.changes.tick(&reaper, &self.reads, reaper.current_project().as_ref(), &self.events);
     }
 
     /// A change as Kumi's host makes it: preview, then apply with the preview's fence and a description.
