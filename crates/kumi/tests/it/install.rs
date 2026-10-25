@@ -247,7 +247,7 @@ async fn a_release_naming_a_broken_xz_pair_is_installed_from_its_gzipped_bundle(
         (Some("kumi-x.tar.xz"), None),
         (None, Some("a".repeat(64))),
         (Some("../kumi.tar.xz"), Some("a".repeat(64))),
-        (Some("kumi-x.tar.xz"), Some("not a sum")),
+        (Some("kumi-x.tar.xz"), Some("not a sum".to_string())),
     ] {
         let mut good = manifest("99.0.0");
         good["sha256"] = json!(hex::encode(Sha256::digest(&bytes)));
