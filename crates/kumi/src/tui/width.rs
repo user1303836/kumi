@@ -7,6 +7,8 @@
 //! takes the East Asian Width of its first visible character (Wide and Fullwidth two, Ambiguous
 //! one), plus that of any Halfwidth and Fullwidth Forms after it.
 
+use std::cell::RefCell;
+use std::collections::HashMap;
 use std::sync::LazyLock;
 
 use regex::Regex;
@@ -18,11 +20,29 @@ pub fn graphemes(text: &str) -> Vec<&str> {
     text.graphemes(true).collect()
 }
 
+thread_local! {
+    /// The width of each character seen on its own, as `string_width` measured it: a screen is a few hundred distinct
+    /// glyphs (a CJK session's letters, the rules and dots of every frame), each measured through the Unicode
+    /// property patterns once instead of on every put.
+    static ONE: RefCell<HashMap<char, i8>> = RefCell::new(HashMap::new());
+}
+
 /// 0 for marks that attach to the previous character, 2 for wide CJK and emoji, else 1.
 pub fn cell_width(grapheme: &str) -> i32 {
     let bytes = grapheme.as_bytes();
     if bytes.len() == 1 && (0x20..0x7f).contains(&bytes[0]) {
         return 1;
+    }
+    let mut characters = grapheme.chars();
+    if let (Some(single), None) = (characters.next(), characters.next()) {
+        return ONE.with(|one| {
+            if let Some(&width) = one.borrow().get(&single) {
+                return i32::from(width);
+            }
+            let width = string_width(grapheme).min(2);
+            one.borrow_mut().insert(single, width as i8);
+            width
+        });
     }
     string_width(grapheme).min(2)
 }
