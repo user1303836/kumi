@@ -51,7 +51,7 @@ local instrument_list_count, recount, retire -- (n-instruments)
 -- layout counts the tracks inserted or removed: those move refs, and the tool carries them to where they went (refs.carry)
 -- for a request that says which layout its refs were made in.
 local function epoch()
-  return string.format("%x", b.epoch_n)
+  return wire.hex(b.epoch_n)
 end
 
 -- The epoch moves when refs stop meaning what they meant. `tracks_kept`: the journal's places (tracks) still hold. `broken`: the
@@ -119,7 +119,7 @@ end
 
 -- Whether a ref of `kind` made in epoch `from` (hex) names the same thing in epoch `to` (default: now).
 local function survives(from, kind, to)
-  local a, c = tonumber(from, 16), to and tonumber(to, 16) or b.epoch_n
+  local a, c = wire.from_hex(from), to and wire.from_hex(to) or b.epoch_n
   local before, after = b.snap[a], b.snap[c]
   local depends = DEPENDS[kind]
   if not before or not after or not depends then return false end

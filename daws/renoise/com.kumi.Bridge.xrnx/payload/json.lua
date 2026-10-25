@@ -121,12 +121,13 @@ M.encode_string = encode_string
 local MAX_EXACT = 2 ^ 53
 
 -- Integers print as integers; other numbers in the fewest digits (at most 17) that read back
--- exactly. NaN and infinities are null.
+-- exactly. NaN and infinities are null. (An integer by %.0f, not %d: a Lua 5.1 built with a 32-bit
+-- long, as on Windows, formats %d through one, which can't hold 2^31 or more.)
 local function encode_number(v)
   if v ~= v or v == huge or v == -huge then return "null" end
   if v == floor(v) and v >= -MAX_EXACT and v <= MAX_EXACT then
     if v == 0 then return "0" end
-    return format("%d", v)
+    return format("%.0f", v)
   end
   local s = format("%.15g", v)
   if tonumber(s) ~= v then

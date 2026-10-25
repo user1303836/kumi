@@ -112,3 +112,16 @@ test("wire: a credit frame after auth becomes a credit action; a bad one closes 
   actions = conn:on_bytes('{"type":"credit","bytes":0}\n', 0, function() error("no") end)
   ok(actions[#actions].close, "a credit of nothing is not a frame")
 end)
+
+test("wire: an epoch past 2^32 goes to hex and back on a 32-bit long too (Windows)", function()
+  local wire32 = T.load_with_32_bit_long("wire")
+  for _, n in ipairs({ 0, 255, 2 ^ 31, 2 ^ 32 - 1, 2 ^ 32, 0x123456789ab, 2 ^ 44 - 1, 2 ^ 44 + 5, 2 ^ 52 + 1, 2 ^ 53 }) do
+    local text = wire32.hex(n)
+    eq(text, string.format("%x", n), "the text as on 64 bits")
+    eq(wire32.from_hex(text), n, "read back: " .. text)
+  end
+  -- Anything else reads as tonumber reads it.
+  for _, text in ipairs({ "", "zz", "ff", "12345678z" }) do
+    eq(wire32.from_hex(text), wire.from_hex(text), text)
+  end
+end)
