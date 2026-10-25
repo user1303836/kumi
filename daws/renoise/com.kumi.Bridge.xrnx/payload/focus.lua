@@ -279,11 +279,16 @@ local function pattern_body(job, params, epoch)
   end
   local hidden = params.hidden == true
   local cut = false
+  -- (the pattern's tracks looked up once a slice: a line is the one call to Renoise a row makes, until the job waits)
+  local live_tracks
   for i = from, to do
-    job.slice()
-    local live_pattern = the_song():pattern(pattern_at)
+    if job.slice() or not live_tracks then
+      local live_pattern = the_song():pattern(pattern_at)
+      live_tracks = {}
+      for t = 1, tracks do live_tracks[t] = live_pattern:track(t) end
+    end
     for t = 1, tracks do
-      local row = line_row(live_pattern:track(t):line(i), i, shape[t][1], shape[t][2], hidden)
+      local row = line_row(live_tracks[t]:line(i), i, shape[t][1], shape[t][2], hidden)
       if row then
         local read = entries[t].rows
         read[#read + 1] = row
@@ -389,9 +394,11 @@ local function phrase_body(job, params, epoch)
   local from, to = window_of(params, selected and song.selected_phrase_line_index or 17, lines)
   local note_columns, effect_columns = phrase.visible_note_columns, phrase.visible_effect_columns
   local read = {}
+  -- (the phrase looked up once a slice: a line is the one call to Renoise a row makes, until the job waits)
+  local live
   for i = from, to do
-    job.slice()
-    local row = line_row(the_song():instrument(instrument_at):phrase(phrase_at):line(i), i, note_columns, effect_columns, params.hidden == true)
+    if job.slice() or not live then live = the_song():instrument(instrument_at):phrase(phrase_at) end
+    local row = line_row(live:line(i), i, note_columns, effect_columns, params.hidden == true)
     if row then read[#read + 1] = row end
   end
   -- The same grid as a pattern's, of one track.

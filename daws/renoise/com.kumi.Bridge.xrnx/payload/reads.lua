@@ -54,8 +54,8 @@ local function page(job, epoch, params, total, row_at, sparse, extra)
   local items, after = {}, {}
   local i = from
   while i <= total and #items < limit do
-    job.slice()
-    local row = row_at(i)
+    local waited = job.slice()
+    local row = row_at(i, waited)
     if row ~= nil then
       items[#items + 1] = row
       after[#items] = i + 1
@@ -65,8 +65,7 @@ local function page(job, epoch, params, total, row_at, sparse, extra)
   -- Where rows are few among empty places (lines), the next page starts at the next row, and there is none if no row is left.
   if sparse then
     while i <= total do
-      job.slice()
-      if row_at(i) ~= nil then break end
+      if row_at(i, job.slice()) ~= nil then break end
       i = i + 1
     end
   end
@@ -465,8 +464,11 @@ function M.read(job, params, epoch)
     if at[1] > #song.instruments or at[2] > #song:instrument(at[1]).phrases then fail("bad-params", "no such phrase") end
     local phrase = song:instrument(at[1]):phrase(at[2])
     local note_columns, effect_columns = phrase.visible_note_columns, phrase.visible_effect_columns
-    return page(job, epoch, params, phrase.number_of_lines, function(i)
-      return line_row(the_song():instrument(at[1]):phrase(at[2]):line(i), i - 1, note_columns, effect_columns, params.hidden == true)
+    -- (the phrase looked up once a slice: a line is the one call to Renoise a row makes, until the job waits)
+    local live
+    return page(job, epoch, params, phrase.number_of_lines, function(i, waited)
+      if waited or not live then live = the_song():instrument(at[1]):phrase(at[2]) end
+      return line_row(live:line(i), i - 1, note_columns, effect_columns, params.hidden == true)
     end, true, { lines = phrase.number_of_lines, lpb = phrase.lpb })
   elseif kind == "line" then
     local pattern_at = need_parent(params, "pattern", 1, epoch)[1]
@@ -479,9 +481,12 @@ function M.read(job, params, epoch)
     local alias = song:pattern(pattern_at):track(track_at).alias_pattern_index
     local extra = alias > 0 and { aliasOf = alias - 1, aliasRef = refs.make(epoch, "pattern", alias) } or {}
     extra.mutedColumns = rows.column_state(track)
-    -- (each line by Renoise's number, from 0)
-    return page(job, epoch, params, total, function(i)
-      return line_row(the_song():pattern(pattern_at):track(track_at):line(i), i - 1, note_columns, effect_columns, params.hidden == true)
+    -- (each line by Renoise's number, from 0; the pattern track looked up once a slice: a line is the one call to Renoise
+    -- a row makes, until the job waits)
+    local live
+    return page(job, epoch, params, total, function(i, waited)
+      if waited or not live then live = the_song():pattern(pattern_at):track(track_at) end
+      return line_row(live:line(i), i - 1, note_columns, effect_columns, params.hidden == true)
     end, true, extra)
   elseif kind == "automation" then
     -- M4 (n-song): the automation of one pattern's track, an envelope a row
