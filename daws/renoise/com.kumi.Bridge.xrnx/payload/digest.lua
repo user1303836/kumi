@@ -15,10 +15,9 @@ local import = ...
 local json = import("json")
 local refs = import("refs")
 local rows = import("rows")
+local fnv = import("fnv")
 
-local bit = require("bit")
-local bxor, lshift, tobit, tohex = bit.bxor, bit.lshift, bit.tobit, bit.tohex
-local byte, format = string.byte, string.format
+local format = string.format
 
 local M = {}
 
@@ -30,19 +29,13 @@ local function fail(code, message)
   error({ code = code, message = message }, 0)
 end
 
--- 32-bit FNV-1a: a fingerprint only this tool compares with itself.
+-- 32-bit FNV-1a (fnv.lua): a fingerprint only this tool compares with itself, each text fed ending in a 31.
 local function new_print()
-  return { h = -2128831035 }
+  return { h = fnv.OFFSET }
 end
 
 local function feed(print, text)
-  local h = print.h
-  for i = 1, #text do
-    h = bxor(h, byte(text, i))
-    h = tobit(lshift(h, 24) + lshift(h, 8) + h * 147)
-  end
-  h = bxor(h, 31)
-  print.h = tobit(lshift(h, 24) + lshift(h, 8) + h * 147)
+  print.h = fnv.mark(fnv.feed(print.h, text), 31)
 end
 
 local function feed_number(print, value)
@@ -50,7 +43,7 @@ local function feed_number(print, value)
 end
 
 local function hex(print)
-  return tohex(print.h)
+  return fnv.hex(print.h)
 end
 
 local function round(value, places)
