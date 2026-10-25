@@ -37,4 +37,4 @@
 
  Kick 09  kick one-shot · 0.5 s  Samples / Kicks
 
- up and down choose · space plays · enter asks Kumi · / filters · tab songs · esc closes
+ up and down choose · space plays · / filters · tab songs · esc closes

@@ -796,7 +796,7 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
                 })
             },
         });
-        // h on the map: whether its points play as the mouse rests on them, kept in settings.json (only when they don't).
+        // h on the map: whether its points play as the mouse comes to them, kept in settings.json (only when they don't).
         options.map_hover = Some(MapHover {
             load: {
                 let settings_file = settings_file.clone();

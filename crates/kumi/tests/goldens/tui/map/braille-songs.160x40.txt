@@ -37,4 +37,4 @@
 
  ● Artist 0 – Song 08  c1 · dark rainy  /Music/Artist 0
  Near  Artist 0 – Song 04 · Artist 0 – Song 01 · Artist 0 – Song 07 · Artist 0 – Song 06
- arrows move · shift+arrows pan · + − zoom · / filters · space plays · h hover plays · enter asks Kumi · tab sounds · esc closes
+ arrows move · shift+arrows pan · + − zoom · / filters · space plays · h hover plays · tab sounds · esc closes
