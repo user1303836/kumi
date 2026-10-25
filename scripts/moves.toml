@@ -92,6 +92,15 @@ to = "daws/own/daw-mcp-server/src/renoise/simulator/takes.rs"
 from = "daws/own/daw-mcp-server/src/simulator/reaper.rs"
 to = "daws/own/daw-mcp-server/src/reaper/simulator.rs"
 
+# The two became doors of kumi's own: their mains live on in workers.rs.
+[[move]]
+from = "crates/kumi/src/bin/kumi-library-learner.rs"
+to = "crates/kumi/src/workers.rs"
+
+[[move]]
+from = "crates/kumi/src/bin/kumi-library-measure.rs"
+to = "crates/kumi/src/workers.rs"
+
 [[rust]]
 from = "daw_mcp_server::renoise_devices"
 to = "daw_mcp_server::renoise::devices"
@@ -2144,15 +2153,6 @@ to = "crates/kumi/src/bin/kumi-library-learner.rs"
 [[move]]
 from = "crates/kumi-runtime/src/bin/kumi-library-measure.rs"
 to = "crates/kumi/src/bin/kumi-library-measure.rs"
-
-# The two became doors of kumi's own: their mains live on in workers.rs.
-[[move]]
-from = "crates/kumi/src/bin/kumi-library-learner.rs"
-to = "crates/kumi/src/workers.rs"
-
-[[move]]
-from = "crates/kumi/src/bin/kumi-library-measure.rs"
-to = "crates/kumi/src/workers.rs"
 
 [[move]]
 from = "crates/kumi-runtime/src/devices/amxd.rs"
