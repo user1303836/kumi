@@ -174,9 +174,9 @@ pub struct Meta {
 
 /// A request's `params` or a response's `result`: an object (never an array) whose `_meta` must be
 /// well formed; every other key is kept.
-#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize)]
 pub struct Payload {
-    #[serde(default, rename = "_meta", deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "_meta", skip_serializing_if = "Option::is_none")]
     pub meta: Option<Meta>,
     #[serde(flatten)]
     pub rest: JsonObject,
@@ -186,6 +186,32 @@ impl Payload {
     /// A payload of these keys, with no `_meta`.
     pub fn from_object(rest: JsonObject) -> Self {
         Self { meta: None, rest }
+    }
+
+    /// The object it came from, `_meta` first when it has one: the keys move, nothing is serialized again.
+    pub fn into_object(self) -> JsonObject {
+        match self.meta {
+            None => self.rest,
+            Some(meta) => {
+                let mut object = JsonObject::with_capacity(self.rest.len() + 1);
+                object.insert("_meta".into(), serde_json::to_value(meta).unwrap_or(Value::Null));
+                object.extend(self.rest);
+                object
+            }
+        }
+    }
+}
+
+/// Read as an object whose `_meta` is taken out and checked: one pass over a page of megabytes, where a flattened
+/// struct would gather every key into a buffer first.
+impl<'de> Deserialize<'de> for Payload {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut rest = JsonObject::deserialize(deserializer)?;
+        let meta = match rest.shift_remove("_meta") {
+            Some(value) => Some(serde_json::from_value::<Meta>(value).map_err(de::Error::custom)?),
+            None => None,
+        };
+        Ok(Payload { meta, rest })
     }
 }
 
@@ -596,33 +622,22 @@ pub struct CallToolResult {
     pub rest: JsonObject,
     pub field_order: Vec<String>,
 }
+impl CallToolResult {
+    /// A result from the object a payload came as: the known keys taken out and checked (`_meta`, `content`,
+    /// `structuredContent`, `isError`; an absent `content` is empty, a present null is refused), the rest kept in their
+    /// order. The keys move: a page of megabytes is neither copied nor gathered into a buffer first.
+    pub fn from_object(mut object: JsonObject) -> Result<Self, serde_json::Error> {
+        let field_order = object.keys().cloned().collect();
+        let meta = object.shift_remove("_meta").map(serde_json::from_value::<Meta>).transpose()?;
+        let content = object.shift_remove("content").map(serde_json::from_value::<Vec<ContentBlock>>).transpose()?.unwrap_or_default();
+        let structured_content = object.shift_remove("structuredContent").map(serde_json::from_value::<JsonObject>).transpose()?;
+        let is_error = object.shift_remove("isError").map(serde_json::from_value::<bool>).transpose()?;
+        Ok(Self { meta, content, structured_content, is_error, rest: object, field_order })
+    }
+}
 impl<'de> Deserialize<'de> for CallToolResult {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        #[derive(Deserialize)]
-        #[serde(rename_all = "camelCase")]
-        struct Fields {
-            #[serde(default, rename = "_meta", deserialize_with = "present")]
-            meta: Option<Meta>,
-            #[serde(default)]
-            content: Vec<ContentBlock>,
-            #[serde(default, deserialize_with = "present")]
-            structured_content: Option<JsonObject>,
-            #[serde(default, deserialize_with = "present")]
-            is_error: Option<bool>,
-            #[serde(flatten)]
-            rest: JsonObject,
-        }
-        let value = JsonObject::deserialize(deserializer)?;
-        let field_order = value.keys().cloned().collect();
-        let fields: Fields = serde_json::from_value(Value::Object(value)).map_err(serde::de::Error::custom)?;
-        Ok(Self {
-            meta: fields.meta,
-            content: fields.content,
-            structured_content: fields.structured_content,
-            is_error: fields.is_error,
-            rest: fields.rest,
-            field_order,
-        })
+        Self::from_object(JsonObject::deserialize(deserializer)?).map_err(serde::de::Error::custom)
     }
 }
 impl Serialize for CallToolResult {
