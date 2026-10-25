@@ -939,7 +939,9 @@ impl TuiApp {
         if matches!(kind, "state" | "job") {
             self.maybe_carry_on();
         }
-        self.0.scheduler.request();
+        // What the session sends (words as they stream, state, the DAW's events) is drawn at the animation's pace;
+        // only the producer's own input is drawn within the 16 ms floor.
+        self.0.scheduler.request_animation();
     }
     fn clean_line(&self, text: &str, max: usize) -> String {
         head(&sanitize_text(text, &self.0.state.borrow().secrets).replace('\n', " "), max)
