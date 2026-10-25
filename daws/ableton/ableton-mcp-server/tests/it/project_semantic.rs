@@ -88,11 +88,15 @@ fn source_validation_and_page_oracle() {
         };
         equal(&out, &row["result"], "pages");
         if let Some(pages) = out["ok"].as_array() {
-            equal(&assemble_semantic_project_pages(pages).unwrap(), artifact, "assembled");
+            equal(&assemble_semantic_project_pages(pages.clone()).unwrap(), artifact, "assembled");
         }
     }
     for row in f["pageMutations"].as_array().unwrap() {
-        equal(&result(assemble_semantic_project_pages(row["pages"].as_array().unwrap())), &row["result"], row["label"].as_str().unwrap());
+        equal(
+            &result(assemble_semantic_project_pages(row["pages"].as_array().unwrap().clone())),
+            &row["result"],
+            row["label"].as_str().unwrap(),
+        );
     }
     for row in f["cursors"].as_array().unwrap() {
         let cursor = row["cursor"].as_str().unwrap();
