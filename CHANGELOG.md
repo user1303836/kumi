@@ -3,6 +3,67 @@
 Kumi's releases. The Ableton bridge (`crates/ableton-mcp-server`) is versioned on its own;
 each Kumi release names the bridge it ships with.
 
+## 1.23.1 — 2026-10-25
+
+Ships with bridge 1.0.95, which Live loads when it restarts. After updating, Kumi offers to quit Live
+(it asks to save first) and opens it again with the new bridge; or run `kumi bridge` with Live closed.
+Ships with REAPER extension 0.1.3 and Renoise tool 1.0.2, which REAPER and Renoise load when they
+restart; `kumi update` puts them in.
+
+- Kumi uses less CPU while it works or a job runs: the screen redraws 20 times a second instead of 60.
+- Kumi spends less time between the steps of a long conversation: the conversation's size is measured
+  once per step instead of several times.
+- Kumi handles what the DAW sends faster, large reads of a big Set most of all.
+- Long answers stream without slowing the screen down: each frame renders only the line still being
+  written, not the whole answer.
+- Kumi's download is smaller: the library's learner and sound measurer are part of kumi itself instead
+  of two more programs beside it.
+- Kumi saves a long conversation faster at the end of each turn, without re-reading what it just
+  wrote.
+- Kumi asks REAPER and Renoise for the focus less often while nothing moves.
+- Kumi's screen costs less to draw, most of all for Japanese and Chinese text.
+- Kumi no longer re-reads an unchanged Set whole every five minutes to keep its snapshot; a changed
+  Set is still kept within five minutes, any Set within thirty.
+- Kumi downloads and updates are about a third smaller on macOS and Linux: the bundle also comes
+  xz-compressed, and the installer and `kumi update` take it where the system's tar reads xz.
+- Kumi's download and updates are about a tenth smaller: Live's bridge is in the bundle once, in its
+  package.
+
+Tested with Live 12.4 on macOS. On Windows, installing and updating are tested; using Kumi with Live
+there is still new.
+
+### Bridge 1.0.95
+
+- Live library searches no longer re-read the whole library database on every search and page; the
+  first search after Live updates it still does.
+- Live's Remote Script writes each answer to Kumi once instead of twice, so big reads take less of
+  Live's time.
+
+### REAPER extension 0.1.3
+
+- Kumi's watch and catch-up no longer read every plug-in parameter again when nothing changed in the
+  project.
+- Kumi's reads of REAPER's tracks and plug-ins make fewer calls and allocations; a track's group
+  memberships are read once per change of the project, not on every look.
+- Kumi's REAPER extension asks REAPER and the window system for less while it follows what the
+  producer is looking at.
+- Kumi's REAPER extension asks REAPER for less while idle: the project in front once a tick, the tabs
+  and the audio device every so often.
+
+### Renoise tool 1.0.2
+
+- Doofer, Splitter, Notepad and preset changes, and the tool's watch for your undo of them, no longer
+  re-hash a plug-in's whole state in Lua several times over, so Renoise stays responsive with heavy
+  plug-ins inside containers.
+- The tool does less work on every edit you make and every idle tick: notifiers look at Kumi's journal
+  before asking Renoise anything, and the tick reuses what it built.
+- Reading a pattern's lines, and the tracker grid Kumi looks at, asks Renoise for the pattern once per
+  slice instead of once per line.
+- Catch-up's reads of a song's patterns and the checks on a kept scratch track take about half the
+  time in the tool.
+- Pages of lines, the tracker grid Kumi looks at and catch-up's digest pages are encoded once, not
+  twice or three times, so they reach Kumi sooner.
+
 ## 1.23.0 — 2026-10-24
 
 Ships with bridge 1.0.94, as 1.22.0 did.
