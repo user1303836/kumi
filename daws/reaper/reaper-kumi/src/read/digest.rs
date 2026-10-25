@@ -18,6 +18,11 @@
 //! rest is read every time. (What the producer does in REAPER, a mute or solo included, moves the count.) The kept values
 //! are read again after `KEPT_FOR` whatever the count says: a parameter moved by what makes no undo point (a control a
 //! plug-in's own hand moves, say) shows within it.
+//!
+//! Kept too: the pages of the last complete digest of each kind (`values`, `content`), as they were answered, while the
+//! epoch, the count and this extension's own count of writes (`reaper::writes`: its listening's scratch work writes
+//! outside undo blocks, and a plan's changes write before its block ends) stay what they were when it was read, and for
+//! `KEPT_FOR` at most. watch_me's next look at a project nobody touched is then no REAPER calls but the count's.
 
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -50,8 +55,10 @@ const PAGE_TIME: Duration = Duration::from_millis(20);
 const KEPT_WORK: usize = 4;
 /// Parameter values kept across digests, at most (about 1.6 MB): past it, the rest is read each time.
 const PARAMS_KEPT: usize = 200_000;
-/// How long parameter values are kept at most: read again after this, whatever the count says.
+/// How long parameter values and pages are kept at most: read again after this, whatever the count says.
 const KEPT_FOR: Duration = Duration::from_secs(30);
+/// Pages kept of one digest, at most (as JSON): past it, the digest is read every time.
+const PAGES_KEPT: usize = 4 * 1024 * 1024;
 
 #[cfg(test)]
 thread_local! {
@@ -63,6 +70,16 @@ thread_local! {
     pub static TEST_PARAMS_KEPT: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) };
     /// A test's own time bound on the parameter values kept, in place of `KEPT_FOR`.
     pub static TEST_KEPT_FOR: std::cell::Cell<Option<Duration>> = const { std::cell::Cell::new(None) };
+    /// A test's own bound on the pages kept, in place of `PAGES_KEPT`.
+    pub static TEST_PAGES_KEPT: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) };
+}
+
+fn pages_kept() -> usize {
+    #[cfg(test)]
+    if let Some(most) = TEST_PAGES_KEPT.with(|most| most.get()) {
+        return most;
+    }
+    PAGES_KEPT
 }
 
 fn params_kept() -> usize {
@@ -279,12 +296,36 @@ impl KeptParams {
     }
 }
 
+/// What a digest was read under: the tab's epoch, REAPER's count of the project's state changes and this extension's
+/// count of its own writes. While all three stay, the project is as it was.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Standing {
+    epoch: String,
+    changed: i32,
+    writes: u64,
+}
+
+/// The pages of one digest as they were answered, by the cursor each was asked with (None for the first), while it is
+/// read and once complete: a complete one is answered again, page for page, while what it was read under stands and
+/// `KEPT_FOR` hasn't passed.
+struct KeptPages {
+    standing: Standing,
+    /// The digest's serial: a page of another digest of the same kind isn't one of these.
+    digest: u64,
+    since: Instant,
+    pages: HashMap<Option<String>, Value>,
+    bytes: usize,
+    complete: bool,
+}
+
 #[derive(Default)]
 struct Kept {
     /// The serial the next digest takes.
     next: u64,
     works: VecDeque<Work>,
     params: KeptParams,
+    /// The last digest of each kind (`values`, `content`).
+    pages: HashMap<(bool, bool), KeptPages>,
 }
 
 thread_local! {
@@ -334,9 +375,52 @@ fn keep_params(under: &Under, guid: &str, values: &[f64]) {
     })
 }
 
-/// Forgets the parameter values kept: the epoch moved (a tab switch, another project in the tab).
+/// Forgets the parameter values and the pages kept: the epoch moved (a tab switch, another project in the tab).
 pub(super) fn forget() {
-    KEPT.with(|kept| kept.borrow_mut().params = KeptParams::default());
+    KEPT.with(|kept| {
+        let mut kept = kept.borrow_mut();
+        kept.params = KeptParams::default();
+        kept.pages.clear();
+    });
+}
+
+/// A page of the complete digest of this kind kept, answered as it was, when what it was read under stands and the bound
+/// hasn't passed: for the first page (no cursor) or a page its own cursors lead to.
+fn kept_page(kind: (bool, bool), standing: &Standing, cursor: Option<&str>) -> Option<Value> {
+    KEPT.with(|kept| {
+        let kept = kept.borrow();
+        let pages = kept.pages.get(&kind)?;
+        if !pages.complete || pages.standing != *standing || pages.since.elapsed() >= kept_for() {
+            return None;
+        }
+        pages.pages.get(&cursor.map(str::to_owned)).cloned()
+    })
+}
+
+/// Keeps a page of the digest being read: the first page begins a new keeping of its kind (the one before, complete or
+/// not, goes); a later page of the same digest under the same standing joins it; `last` completes it. A page of another
+/// digest, under another standing (the project moved between pages), or past `PAGES_KEPT` of them ends the keeping.
+fn keep_page(kind: (bool, bool), standing: &Standing, digest: u64, cursor: Option<String>, answer: &Value, bytes: usize, last: bool) {
+    KEPT.with(|kept| {
+        let mut kept = kept.borrow_mut();
+        if cursor.is_none() {
+            let fresh =
+                KeptPages { standing: standing.clone(), digest, since: Instant::now(), pages: HashMap::new(), bytes: 0, complete: false };
+            kept.pages.insert(kind, fresh);
+        }
+        let Some(pages) = kept.pages.get_mut(&kind) else { return };
+        if pages.complete || pages.digest != digest || pages.standing != *standing {
+            kept.pages.remove(&kind);
+            return;
+        }
+        pages.bytes += bytes;
+        if pages.bytes > pages_kept() {
+            kept.pages.remove(&kind);
+            return;
+        }
+        pages.pages.insert(cursor, answer.clone());
+        pages.complete = last;
+    })
 }
 
 /// The work kept for a track by its key, taken out (it's kept again if the page ends inside the track).
@@ -398,6 +482,18 @@ impl Reads {
         let values = params.get("values") == Some(&Value::Bool(true));
         let content = params.get("content") != Some(&Value::Bool(false));
         let epoch = self.epoch();
+        let cursor_text = match params.get("cursor") {
+            None | Some(Value::Null) => None,
+            Some(Value::String(text)) => Some(text.clone()),
+            Some(_) => return Err(bad("cursor must be a string")),
+        };
+        let kind = (values, content);
+        let changed = reaper.state_change_count(proj);
+        // Read under what: nothing moved since the last complete digest of this kind, and its page is answered again.
+        let standing = changed.map(|changed| Standing { epoch: epoch.clone(), changed, writes: crate::reaper::writes() });
+        if let Some(page) = standing.as_ref().and_then(|standing| kept_page(kind, standing, cursor_text.as_deref())) {
+            return Ok(page);
+        }
         let (page_bytes, most_items, most_markers) = limits();
         let track_total = reaper.track_count(proj).max(0) as usize + 1;
         let marker_total = reaper.marker_count(proj).max(0) as usize;
@@ -433,7 +529,6 @@ impl Reads {
         };
         let first = cursor.n == 0 && cursor.sub == 0;
         let mut clock = Clock { started: Instant::now(), reads: 0 };
-        let changed = reaper.state_change_count(proj);
         let under = Under { reaper, proj, epoch: &epoch, changed };
         let mut records: Vec<Value> = vec![];
         let mut bytes = 0;
@@ -463,23 +558,31 @@ impl Reads {
                 next = Some(cursor.clone());
                 break 'tracks;
             }
-            let stream = work.records.as_deref().unwrap_or_default();
+            // How many of the track's records this page has room for; then they move into it (a track read whole into one
+            // page, the usual case, has nothing cloned), or, for a track that goes on into the next page, are copied out
+            // and the rest stay with its work.
+            let stream = work.records.take().unwrap_or_default();
+            let mut fit = 0;
             let mut full = false;
             for record in stream.iter().skip(cursor.sub) {
                 let size = super::json_len(record) + 1;
-                if !records.is_empty() && (bytes + size > page_bytes || clock.over()) {
+                // (a page's first record always goes in)
+                if (!records.is_empty() || fit > 0) && (bytes + size > page_bytes || clock.over()) {
                     full = true;
                     break;
                 }
                 bytes += size;
-                records.push(record.clone());
-                cursor.sub += 1;
+                fit += 1;
             }
             if full {
+                records.extend(stream.iter().skip(cursor.sub).take(fit).cloned());
+                cursor.sub += fit;
+                work.records = Some(stream);
                 keep_work(work);
                 next = Some(cursor.clone());
                 break 'tracks;
             }
+            records.extend(stream.into_iter().skip(cursor.sub));
             cursor.n += 1;
             cursor.sub = 0;
             (cursor.params, cursor.points, cursor.values) = (work.budget.params, work.budget.points, work.budget.value_count);
@@ -556,6 +659,9 @@ impl Reads {
                     into.extend(bounded);
                 }
             }
+        }
+        if let Some(standing) = &standing {
+            keep_page(kind, standing, cursor.digest, cursor_text, &answer, bytes, next.is_none());
         }
         Ok(answer)
     }
@@ -988,6 +1094,9 @@ mod tests {
         fake::lab_project();
         let reads = Reads::default();
         let (_, whole_records) = whole(&reads, true, true);
+        // (the project as it was, the pages kept would be answered again as they were: a count moved reads anew)
+        let moved = || fake::with(|s| s.state_count += 1);
+        moved();
         TEST_LIMITS.with(|limits| limits.set(Some((400, MOST_ITEMS, MOST_MARKERS))));
         let (first, paged) = whole(&reads, true, true);
         TEST_LIMITS.with(|limits| limits.set(None));
@@ -995,6 +1104,7 @@ mod tests {
         assert_eq!(paged, whole_records);
         let cursor = page(&reads, json!({})).unwrap()["nextCursor"].clone();
         assert!(cursor.is_null(), "the lab project fits one page");
+        moved();
         TEST_LIMITS.with(|limits| limits.set(Some((400, MOST_ITEMS, MOST_MARKERS))));
         let cursor = page(&reads, json!({})).unwrap()["nextCursor"].as_str().unwrap().to_string();
         reads.bump_epoch();
@@ -1088,6 +1198,9 @@ mod tests {
         let before = calls();
         let (_, whole_records) = whole(&reads, false, true);
         let once = calls() - before;
+        // (the project as it was, the pages kept would be answered again as they were: a count moved reads anew)
+        let moved = || fake::with(|s| s.state_count += 1);
+        moved();
         // Pages of 2 KB: Drums's records take dozens of pages, and its items and points are read once for them all.
         TEST_LIMITS.with(|limits| limits.set(Some((2048, MOST_ITEMS, MOST_MARKERS))));
         let before = calls();
@@ -1098,6 +1211,7 @@ mod tests {
         assert_eq!(paged, whole_records);
         assert!(paged_calls < once * 2, "{paged_calls} REAPER calls in pages, {once} in one go");
         // A page's share of the main thread (here 100 points or items) holds inside the track too.
+        moved();
         TEST_READS.with(|reads| reads.set(Some(100)));
         let mut answer = page(&reads, json!({})).unwrap();
         let (mut pages, mut most, mut records) = (1, 0, answer["records"].as_array().unwrap().clone());
@@ -1219,11 +1333,12 @@ mod tests {
         TEST_READS.with(|reads| reads.set(None));
     }
 
-    // What REAPER moves neither its count nor its history for (lab, 7.82: a bare API write outside an undo block, an
-    // extension's, of a track's mute or name, an item's place or a marker) is read every time: only the parameters are kept,
-    // and a parameter write moves the count even bare.
+    // What REAPER moves neither its count nor its history for (lab, 7.82: a bare API write outside an undo block, another
+    // extension's, of a track's mute or name, an item's place or a marker) stays out of the pages kept until the bound
+    // passes, as it did out of the parameter values kept; this extension's own writes are counted and show at once
+    // (`a_complete_digests_pages_are_answered_again_while_nothing_moved`).
     #[test]
-    fn a_bare_write_that_moved_no_count_still_shows_the_next_time() {
+    fn a_bare_write_of_anothers_that_moved_no_count_shows_once_the_bound_passed() {
         fake::lab_project();
         let reads = Reads::default();
         let (_, before) = whole(&reads, true, true);
@@ -1233,7 +1348,11 @@ mod tests {
             s.tracks[1].items[1].position = 3.0;
             s.markers[0].name = "Drop 2".into();
         });
+        let (_, kept) = whole(&reads, true, true);
+        assert_eq!(kept, before, "the pages kept stand: nothing says the project moved");
+        TEST_KEPT_FOR.with(|bound| bound.set(Some(Duration::ZERO)));
         let (_, after) = whole(&reads, true, true);
+        TEST_KEPT_FOR.with(|bound| bound.set(None));
         let moved: Vec<&str> =
             before.iter().zip(&after).filter(|(old, new)| old != new).map(|(_, new)| new["id"].as_str().unwrap()).collect();
         assert_eq!(moved, ["{BBBB}", "{ITEM-K2}", "{CCCC}", "{MARK-1}"]);
@@ -1245,6 +1364,8 @@ mod tests {
         big_project();
         let reads = Reads::default();
         TEST_READS.with(|reads| reads.set(Some(usize::MAX)));
+        // (the parameter values kept on their own: no pages kept here)
+        TEST_PAGES_KEPT.with(|most| most.set(Some(0)));
         let calls = || fake::with(|s| s.calls);
         let before = calls();
         whole(&reads, true, false);
@@ -1264,6 +1385,7 @@ mod tests {
         whole(&reads, true, false);
         let kept = calls() - before;
         TEST_PARAMS_KEPT.with(|most| most.set(None));
+        TEST_PAGES_KEPT.with(|most| most.set(None));
         TEST_READS.with(|reads| reads.set(None));
         assert_eq!(fresh - kept, 640, "ten FX of 64 parameters kept, the rest read again");
     }
@@ -1313,9 +1435,154 @@ mod tests {
         };
         let (_, first) = whole(&reads, true, false);
         assert_eq!(values(&first), [json!(0.1), json!(0.9)]);
-        fake::with(|s| s.tracks[2].fx[1].params[0].value = 0.5);
+        // (a parameter write moves REAPER's count, bare or not: 7.82)
+        fake::with(|s| {
+            s.tracks[2].fx[1].params[0].value = 0.5;
+            s.state_count += 1;
+        });
         let (_, again) = whole(&reads, true, false);
         assert_eq!(values(&again), [json!(0.1), json!(0.5)], "each read anew, neither handed the other's values");
+    }
+
+    // The optimization audit's R7 and R1's plan (2026-10-24): watch_me looks at the project every second or so, and nearly
+    // every look finds it as it was; with the parameter values kept (#511) a look still read every track, FX and send.
+    // The pages of a complete digest are kept and answered again, with no REAPER call but the count's, while the epoch,
+    // the count and this extension's own writes stay.
+    #[test]
+    fn a_complete_digests_pages_are_answered_again_while_nothing_moved() {
+        big_project();
+        let reads = Reads::default();
+        TEST_READS.with(|reads| reads.set(Some(usize::MAX)));
+        let calls = || fake::with(|s| s.calls);
+        let before = calls();
+        let (first, records) = whole(&reads, true, false);
+        let once = calls() - before;
+        let pages = first["pages"].as_u64().unwrap();
+        assert!(pages >= 3, "{pages} pages");
+        let before = calls();
+        let (again, again_records) = whole(&reads, true, false);
+        let kept = calls() - before;
+        assert_eq!(again, first);
+        assert_eq!(again_records, records);
+        // (the project in front and the count, per page)
+        assert!(kept <= 3 * pages, "{kept} REAPER calls for {pages} pages answered again, {once} for the read");
+        // The producer edits a track (an undo point: the count moves): the digest is read anew, and kept anew.
+        fake::with(|s| {
+            s.state_count += 1;
+            s.tracks[3].name = "Snare Top".into();
+        });
+        let before = calls();
+        let (_, after) = whole(&reads, true, false);
+        assert!(calls() - before > once / 2, "read anew");
+        assert_eq!(find(&after, "{T0003}")["n"], "Snare Top");
+        let before = calls();
+        whole(&reads, true, false);
+        assert!(calls() - before <= 3 * pages, "kept anew");
+        // This extension writes something itself, outside an undo block (its listening's scratch work): REAPER's count
+        // stays, the pages don't.
+        let api = fake::api();
+        let reaper = Reaper::new(&api);
+        let track = reaper.track_at(Project::first(), 4).unwrap();
+        assert!(reaper.set_track_value(track, "B_MUTE", 1.0));
+        let before = calls();
+        let (_, written) = whole(&reads, true, false);
+        assert!(calls() - before > 3 * pages, "read anew after a write of our own (the parameter values kept still)");
+        assert_eq!(find(&written, "{T0004}")["f"]["mixer"]["mute"], true);
+        TEST_READS.with(|reads| reads.set(None));
+    }
+
+    #[test]
+    fn kept_pages_are_of_one_kind_complete_bounded_forgotten_with_the_epoch_and_read_again_after_a_while() {
+        fake::lab_project();
+        let reads = Reads::default();
+        let calls = || fake::with(|s| s.calls);
+        let cost = |values: bool, content: bool| {
+            let before = calls();
+            let (first, records) = whole(&reads, values, content);
+            (calls() - before, first, records)
+        };
+        let (once, _, records) = cost(true, false);
+        let (kept, _, again) = cost(true, false);
+        assert_eq!(again, records);
+        assert!(kept * 10 < once, "{kept} calls kept, {once} read");
+        // Another kind of digest (catch-up's, with content) is read for itself, and kept for itself.
+        let (content_once, _, _) = cost(false, true);
+        assert!(content_once * 10 > once, "{content_once} calls: read, not the other kind's pages");
+        let (content_kept, _, _) = cost(false, true);
+        assert!(content_kept * 10 < content_once);
+        let (still_kept, _, _) = cost(true, false);
+        assert!(still_kept * 10 < once, "the first kind's pages are still kept");
+        // After the bound, read again whatever the count says.
+        TEST_KEPT_FOR.with(|bound| bound.set(Some(Duration::ZERO)));
+        let (later, _, _) = cost(true, false);
+        TEST_KEPT_FOR.with(|bound| bound.set(None));
+        assert!(later * 10 > once, "{later} calls after the bound");
+        // Another project in the tab: nothing kept is of it.
+        let (_, _, _) = cost(true, false);
+        reads.bump_epoch();
+        let (fresh, _, _) = cost(true, false);
+        assert!(fresh * 10 > once, "{fresh} calls after the epoch moved");
+        // Only a complete digest is answered again: a first page alone isn't one.
+        TEST_LIMITS.with(|limits| limits.set(Some((400, MOST_ITEMS, MOST_MARKERS))));
+        fake::with(|s| s.state_count += 1);
+        let first = page(&reads, json!({"values": true, "content": false})).unwrap();
+        assert!(first["nextCursor"].is_string(), "more than one page");
+        let before = calls();
+        let first_again = page(&reads, json!({"values": true, "content": false})).unwrap();
+        assert!(calls() - before > 3, "read again: the digest before wasn't walked to its end");
+        assert_ne!(first_again["nextCursor"], first["nextCursor"], "a digest of its own");
+        TEST_LIMITS.with(|limits| limits.set(None));
+        // Kept up to a bound of bytes: past it, the digest is read every time.
+        TEST_PAGES_KEPT.with(|most| most.set(Some(100)));
+        fake::with(|s| s.state_count += 1);
+        cost(true, false);
+        let (unkept, _, _) = cost(true, false);
+        TEST_PAGES_KEPT.with(|most| most.set(None));
+        assert!(unkept * 10 > once, "{unkept} calls: too big to keep");
+    }
+
+    // The extension's writes are counted through every wrapper, inside an undo block or not, and through the generic call.
+    #[test]
+    fn every_write_of_the_extensions_own_is_counted() {
+        fake::lab_project();
+        let api = fake::api();
+        let reaper = Reaper::new(&api);
+        let proj = Project::first();
+        let track = reaper.track_at(proj, 1).unwrap();
+        let before = crate::reaper::writes();
+        reaper.set_track_value(track, "D_VOL", 0.5);
+        reaper.set_track_string(track, "P_NAME", "Kick 2");
+        reaper.set_project_text(proj, "TRACK_GROUP_NAME:1", "Drums");
+        reaper.run_action(40001);
+        assert_eq!(crate::reaper::writes() - before, 4);
+        // The FX, envelope and automation-item wrappers, a track selected, the lanes updated: writes too (review: the
+        // first sweep went by the wrappers' names and missed these).
+        let before = crate::reaper::writes();
+        let drums = reaper.track_at(proj, 0).unwrap();
+        let eq = Fx { owner: FxOwner::Track(drums), index: 0 };
+        reaper.fx_set_param(eq, 0, 0.5);
+        reaper.fx_set_config(eq, "renamed_name", "EQ");
+        reaper.fx_set_enabled(eq, false);
+        let envelope = reaper.track_envelope_by_chunk_name(drums, "<VOLENV2").unwrap();
+        reaper.env_insert_point(
+            envelope,
+            -1,
+            crate::reaper::EnvPoint { time: 1.0, value: 0.5, shape: 0, tension: 0.0, selected: false },
+            true,
+        );
+        reaper.select_only(track);
+        reaper.update_item_lanes(proj);
+        assert_eq!(crate::reaper::writes() - before, 6);
+        // A chunk of Lua run for Kumi is a write whatever it did (review): counted whether or not REAPER took it.
+        let before = crate::reaper::writes();
+        let _ = reaper.run_script(proj, "reaper.SetMediaTrackInfo_Value(reaper.GetTrack(0, 0), 'B_MUTE', 1)");
+        assert_eq!(crate::reaper::writes() - before, 1);
+        // Reads count for nothing.
+        let before = crate::reaper::writes();
+        reaper.track_value(track, "D_VOL");
+        reaper.track_name(track);
+        reaper.state_change_count(proj);
+        assert_eq!(crate::reaper::writes(), before);
     }
 
     #[test]
@@ -1324,7 +1591,11 @@ mod tests {
         let reads = Reads::default();
         let (_, before) = whole(&reads, true, false);
         assert_eq!(find(&before, "{FX-EQ}")["v"], json!([0.25, null, 1.0]));
-        fake::with(|s| s.tracks[0].fx[0].params.push(fake::FakeParam::new("Band 2 Gain", 0.75, "+3 dB")));
+        // (a preset loaded, which is how a plug-in comes to more parameters, moves REAPER's count: 7.82)
+        fake::with(|s| {
+            s.tracks[0].fx[0].params.push(fake::FakeParam::new("Band 2 Gain", 0.75, "+3 dB"));
+            s.state_count += 1;
+        });
         let (_, after) = whole(&reads, true, false);
         assert_eq!(find(&after, "{FX-EQ}")["v"], json!([0.25, null, 1.0, 0.75]));
         assert_eq!(find(&after, "{FX-EQ}")["f"]["parameters"]["count"], 4);

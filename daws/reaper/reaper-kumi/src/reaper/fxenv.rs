@@ -59,6 +59,7 @@ impl Reaper<'_> {
     /// Adds the plug-in or FX chain file `name` to a chain at `place` (REAPER's `-1000 - place`; for a track's input chain
     /// the place without its flag), or at the end; what REAPER answers (the place in the chain it went to, or -1).
     pub fn fx_add(&self, owner: FxOwner, name: &str, input: bool, place: Option<i32>) -> i32 {
+        super::wrote();
         let name = ctext(name);
         let instantiate = place.map_or(-1, |p| -1000 - p);
         match owner {
@@ -68,6 +69,7 @@ impl Reaper<'_> {
     }
 
     pub fn fx_delete(&self, fx: Fx) -> bool {
+        super::wrote();
         match fx.owner {
             FxOwner::Track(t) => self.api.TrackFX_Delete().is_some_and(|f| unsafe { f(t.0, fx.index) }),
             FxOwner::Take(t) => self.api.TakeFX_Delete().is_some_and(|f| unsafe { f(t.0, fx.index) }),
@@ -76,6 +78,7 @@ impl Reaper<'_> {
 
     /// Copies (or moves) an FX to `to`'s chain at the address `index` (REAPER's: the place it ends up at).
     pub fn fx_copy(&self, from: Fx, to: FxOwner, index: i32, is_move: bool) -> bool {
+        super::wrote();
         unsafe {
             match (from.owner, to) {
                 (FxOwner::Track(s), FxOwner::Track(d)) => self.api.TrackFX_CopyToTrack().map(|f| f(s.0, from.index, d.0, index, is_move)),
@@ -88,6 +91,7 @@ impl Reaper<'_> {
     }
 
     pub fn fx_set_enabled(&self, fx: Fx, enabled: bool) -> bool {
+        super::wrote();
         unsafe {
             match fx.owner {
                 FxOwner::Track(t) => self.api.TrackFX_SetEnabled().map(|f| f(t.0, fx.index, enabled)),
@@ -98,6 +102,7 @@ impl Reaper<'_> {
     }
 
     pub fn fx_set_offline(&self, fx: Fx, offline: bool) -> bool {
+        super::wrote();
         unsafe {
             match fx.owner {
                 FxOwner::Track(t) => self.api.TrackFX_SetOffline().map(|f| f(t.0, fx.index, offline)),
@@ -109,6 +114,7 @@ impl Reaper<'_> {
 
     /// A parameter on its 0 to 1 scale.
     pub fn fx_set_param(&self, fx: Fx, param: i32, normalized: f64) -> bool {
+        super::wrote();
         match fx.owner {
             FxOwner::Track(t) => self.api.TrackFX_SetParamNormalized().is_some_and(|f| unsafe { f(t.0, fx.index, param, normalized) }),
             FxOwner::Take(t) => self.api.TakeFX_SetParamNormalized().is_some_and(|f| unsafe { f(t.0, fx.index, param, normalized) }),
@@ -142,6 +148,7 @@ impl Reaper<'_> {
     }
 
     pub fn fx_set_param_raw(&self, fx: Fx, param: i32, value: f64) -> bool {
+        super::wrote();
         match fx.owner {
             FxOwner::Track(t) => self.api.TrackFX_SetParam().is_some_and(|f| unsafe { f(t.0, fx.index, param, value) }),
             FxOwner::Take(t) => self.api.TakeFX_SetParam().is_some_and(|f| unsafe { f(t.0, fx.index, param, value) }),
@@ -151,6 +158,7 @@ impl Reaper<'_> {
     /// A named configuration value written. What REAPER answers is not always whether it took (ReaEQ's `BANDTYPEn` answers
     /// false and takes): the change reads it back.
     pub fn fx_set_config(&self, fx: Fx, key: &str, value: &str) -> bool {
+        super::wrote();
         let (key, value) = (ctext(key), ctext(value));
         match fx.owner {
             FxOwner::Track(t) => {
@@ -198,6 +206,7 @@ impl Reaper<'_> {
     }
 
     pub fn fx_set_preset(&self, fx: Fx, name: &str) -> bool {
+        super::wrote();
         let name = ctext(name);
         match fx.owner {
             FxOwner::Track(t) => self.api.TrackFX_SetPreset().is_some_and(|f| unsafe { f(t.0, fx.index, name.as_ptr()) }),
@@ -207,6 +216,7 @@ impl Reaper<'_> {
 
     /// A preset by its place; -2 is the plug-in's factory state, -1 its default user preset.
     pub fn fx_set_preset_index(&self, fx: Fx, index: i32) -> bool {
+        super::wrote();
         match fx.owner {
             FxOwner::Track(t) => self.api.TrackFX_SetPresetByIndex().is_some_and(|f| unsafe { f(t.0, fx.index, index) }),
             FxOwner::Take(t) => self.api.TakeFX_SetPresetByIndex().is_some_and(|f| unsafe { f(t.0, fx.index, index) }),
@@ -215,6 +225,7 @@ impl Reaper<'_> {
 
     /// The next (1) or previous (-1) preset.
     pub fn fx_step_preset(&self, fx: Fx, step: i32) -> bool {
+        super::wrote();
         match fx.owner {
             FxOwner::Track(t) => self.api.TrackFX_NavigatePresets().is_some_and(|f| unsafe { f(t.0, fx.index, step) }),
             FxOwner::Take(t) => self.api.TakeFX_NavigatePresets().is_some_and(|f| unsafe { f(t.0, fx.index, step) }),
@@ -257,6 +268,7 @@ impl Reaper<'_> {
 
     /// Adds a point; with `no_sort` the envelope is sorted later, once, by the caller.
     pub fn env_insert_point(&self, envelope: Envelope, item: i32, point: EnvPoint, no_sort: bool) -> bool {
+        super::wrote();
         let mut no_sort = no_sort;
         self.api.InsertEnvelopePointEx().is_some_and(|f| unsafe {
             f(envelope.0, item, point.time, point.value, point.shape, point.tension, point.selected, &mut no_sort)
@@ -264,6 +276,7 @@ impl Reaper<'_> {
     }
 
     pub fn env_set_point(&self, envelope: Envelope, item: i32, index: i32, point: EnvPoint, no_sort: bool) -> bool {
+        super::wrote();
         let EnvPoint { mut time, mut value, mut shape, mut tension, mut selected } = point;
         let mut no_sort = no_sort;
         self.api.SetEnvelopePointEx().is_some_and(|f| unsafe {
@@ -272,17 +285,20 @@ impl Reaper<'_> {
     }
 
     pub fn env_delete_point(&self, envelope: Envelope, item: i32, index: i32) -> bool {
+        super::wrote();
         self.api.DeleteEnvelopePointEx().is_some_and(|f| unsafe { f(envelope.0, item, index) })
     }
 
     /// Deletes the points from `start` to just before `end`.
     pub fn env_delete_range(&self, envelope: Envelope, item: i32, start: f64, end: f64) -> bool {
+        super::wrote();
         self.api.DeleteEnvelopePointRangeEx().is_some_and(|f| unsafe { f(envelope.0, item, start, end) })
     }
 
     /// Sorts the points by time. REAPER counts this as an envelope edit, so a block around it makes an undo point that
     /// holds the envelope (what `GetFXEnvelope(…, create)` and a chunk write alone don't).
     pub fn env_sort(&self, envelope: Envelope, item: i32) -> bool {
+        super::wrote();
         self.api.Envelope_SortPointsEx().is_some_and(|f| unsafe { f(envelope.0, item) })
     }
 
@@ -313,12 +329,14 @@ impl Reaper<'_> {
     }
 
     pub fn set_env_chunk(&self, envelope: Envelope, chunk: &str) -> bool {
+        super::wrote();
         let chunk = ctext(chunk);
         self.api.SetEnvelopeStateChunk().is_some_and(|f| unsafe { f(envelope.0, chunk.as_ptr(), false) })
     }
 
     /// An envelope's yes/no attribute written: `ACTIVE`, `VISIBLE` or `ARM`.
     pub fn set_env_flag(&self, envelope: Envelope, key: &str, on: bool) -> bool {
+        super::wrote();
         let key = ctext(key);
         let Some(f) = self.api.GetSetEnvelopeInfo_String() else { return false };
         let mut buf = if on { *b"1\0" } else { *b"0\0" };
@@ -356,6 +374,7 @@ impl Reaper<'_> {
     }
 
     pub fn set_ai_value(&self, envelope: Envelope, item: i32, key: &str, value: f64) -> bool {
+        super::wrote();
         let key = ctext(key);
         match self.api.GetSetAutomationItemInfo() {
             Some(f) => {
@@ -376,6 +395,7 @@ impl Reaper<'_> {
     /// A new automation item: of a new pool (`pool` -1: it takes the envelope's points in its range) or another instance of
     /// a pool. Its index, or -1.
     pub fn ai_insert(&self, envelope: Envelope, pool: i32, position: f64, length: f64) -> i32 {
+        super::wrote();
         self.api.InsertAutomationItem().map_or(-1, |f| unsafe { f(envelope.0, pool, position, length) })
     }
 
@@ -385,6 +405,7 @@ impl Reaper<'_> {
     }
 
     pub fn set_automation_override(&self, mode: i32) -> bool {
+        super::wrote();
         match self.api.SetGlobalAutomationOverride() {
             Some(f) => {
                 unsafe { f(mode) };

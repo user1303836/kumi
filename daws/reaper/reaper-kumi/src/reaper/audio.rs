@@ -50,6 +50,7 @@ impl Reaper<'_> {
     }
 
     pub fn set_project_number(&self, proj: Project, key: &str, value: f64) -> bool {
+        super::wrote();
         let key = ctext(key);
         match self.api.GetSetProjectInfo() {
             Some(f) => {
@@ -88,6 +89,7 @@ impl Reaper<'_> {
     }
 
     pub fn set_project_config_int(&self, proj: Project, name: &str, value: i32) -> bool {
+        super::wrote();
         match self.project_config(proj, name) {
             Some((address, 4)) => {
                 unsafe { address.cast::<i32>().write_unaligned(value) };

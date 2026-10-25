@@ -570,6 +570,9 @@ impl Reaper<'_> {
         if let Some(why) = UNCALLABLE[index] {
             return Err(format!("{} can't be called by name: {why} (run-lua can call it)", name_of(index)));
         }
+        if !dry && !reads_only(index, args) {
+            super::wrote();
+        }
         let mut call = Call::new(args, handles, dry);
         let result = dispatch(self.api, index, &mut call)?;
         Ok((result, call.outs()))
@@ -577,8 +580,10 @@ impl Reaper<'_> {
 
     /// Runs a ReaScript (Lua) once, now, on the main thread: the text is written to a new file of its own (an unguessable
     /// name in the bridge's owner-only folder, made new, never through a file or link already there), registered as an
-    /// action for as long as it runs (in memory only: REAPER's key map file isn't written), run, and taken away.
+    /// action for as long as it runs (in memory only: REAPER's key map file isn't written), run, and taken away. It counts
+    /// as a write of this extension's whatever the chunk did: what it did is unknowable.
     pub fn run_script(&self, proj: Project, text: &str) -> Result<(), String> {
+        super::wrote();
         let (Some(register), Some(run)) = (self.api.AddRemoveReaScript(), self.api.Main_OnCommandEx()) else {
             return Err("this REAPER can't run scripts".into());
         };

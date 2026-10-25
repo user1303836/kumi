@@ -295,6 +295,7 @@ impl Reaper<'_> {
     /// Sets a value the project carries for an extension; false when this REAPER can't. It marks nothing changed and makes no
     /// undo point (7.82 lab): REAPER writes it into the file with the producer's next save.
     pub fn set_project_ext_state(&self, proj: Project, section: &str, key: &str, value: &str) -> bool {
+        super::wrote();
         let (section, key, value) = (ctext(section), ctext(key), ctext(value));
         let Some(f) = self.api.SetProjExtState() else { return false };
         unsafe { f(proj.0, section.as_ptr(), key.as_ptr(), value.as_ptr()) };
