@@ -250,8 +250,10 @@ local function configure()
   return true
 end
 
+-- (asked every tick: the pcall takes a function of the module's, not a closure made for it)
+local function server_is_running() return st.server ~= nil and st.server.is_running end
 local function server_running()
-  local ok, running = pcall(function() return st.server ~= nil and st.server.is_running end)
+  local ok, running = pcall(server_is_running)
   return ok and running
 end
 
@@ -974,8 +976,10 @@ local undo_watch_fn
 local function watch_undo(observable)
   if not observers or not observable then return end
   undo_watch_fn = undo_watch_fn or guard("undo watch", function()
+    -- (the journal first: it is empty until Kumi makes a change, and asking Renoise for the song costs more than looking)
+    if not changes.journal_active(b.journal) then return end
     local song = renoise.song()
-    if song and changes.journal_active(b.journal) and song:is_undo_redoing() then b.undone = true end
+    if song and song:is_undo_redoing() then b.undone = true end
   end)
   local ok, has = pcall(function() return observable:has_notifier(undo_watch_fn) end)
   if not ok or has then return end
@@ -1219,7 +1223,16 @@ local place_env = {
   end,
 }
 
+-- The env a change runs in: built once (its functions reach the bridge's state through upvalues, and no change writes to
+-- it), the journal taken afresh each time (it is made when the payload starts). The tick asked for one twenty times a
+-- second, each a table of some thirty closures to collect.
+local change_env_kept
 local function change_env()
+  local kept = change_env_kept
+  if kept then
+    kept.journal = b.journal
+    return kept
+  end
   local env = {
     epoch = epoch, layout = function() b.layout_told = true return b.layout end, journal = b.journal, watch_params = watch_params,
     watch_param = watch_param, busy = busy, now_ms = function() return M.now_ms() end, shifted = shifted, place_shifted = place_shifted,
@@ -1251,6 +1264,7 @@ local function change_env()
     end,
   }
   for name, fn in pairs(place_env) do env[name] = fn end
+  change_env_kept = env
   return env
 end
 
@@ -1404,8 +1418,16 @@ local function quiet(fn)
   if not ok then error(err, 0) end
 end
 
+-- (the change env with listening's additions, a table of its own built once, the journal taken afresh each time)
+local listen_env_kept
 local function listen_env()
-  local env = change_env()
+  local env = listen_env_kept
+  if env then
+    env.journal = b.journal
+    return env
+  end
+  env = {}
+  for name, value in pairs(change_env()) do env[name] = value end
   env.document = function() return b.document end
   env.cfg = function() return b.cfg end
   env.quiet = quiet
@@ -1414,6 +1436,7 @@ local function listen_env()
   env.unix_ms = unix_ms
   -- (a render stops playback: an audition playing ends first)
   env.before_render = function() audition.halt(env, "a render") end
+  listen_env_kept = env
   return env
 end
 
@@ -1652,10 +1675,12 @@ function M.start(h, reloading)
     alias = function(token)
       if token.touches then token.touches = token.touches + 1 end
     end,
-    -- (asked of every notifier once Kumi has made a change: was the producer's undo or redo what moved it?)
+    -- (asked of every notifier once Kumi has made a change: was the producer's undo or redo what moved it? The journal
+    -- first: it is empty until then, and asking Renoise for the song costs more than looking)
     undoing = function()
+      if not changes.journal_active(b.journal) then return false end
       local song = renoise.song()
-      return song ~= nil and changes.journal_active(b.journal) and song:is_undo_redoing()
+      return song ~= nil and song:is_undo_redoing()
     end,
   })
   jobs = jobs_module.new({
@@ -1709,6 +1734,14 @@ function M.stop(_, reloading)
   log.flush()
 end
 
+-- (M5 m5-renoise: a render that ended with no callback, an audition's end; one function of the module's, not a closure a tick)
+local function tick_listening()
+  local env = listen_env()
+  listening.check(env)
+  audition.tick(env)
+  sweep_scratch()
+end
+
 function M.tick()
   b.alive_ms = M.now_ms()
   unix_ms()
@@ -1731,13 +1764,7 @@ function M.tick()
   -- One failing step mustn't skip the others: connections still need their tick.
   local ok, err = xpcall(flush_events, debug.traceback)
   if not ok then M.log_error("events", err) end
-  -- (M5 m5-renoise: a render that ended with no callback, an audition's end)
-  ok, err = xpcall(function()
-    local env = listen_env()
-    listening.check(env)
-    audition.tick(env)
-    sweep_scratch()
-  end, debug.traceback)
+  ok, err = xpcall(tick_listening, debug.traceback)
   if not ok then M.log_error("listening", err) end
   jobs:run()
   conns:tick()

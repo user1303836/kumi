@@ -178,9 +178,10 @@ function M:attached()
   return #self.entries > 0
 end
 
--- The marks since the last call.
+-- The marks since the last call. (With none, the empty table itself, which the caller only reads: most ticks mark nothing.)
 function M:take_dirty()
   local dirty = self.dirty
+  if next(dirty) == nil then return dirty end
   self.dirty = {}
   return dirty
 end

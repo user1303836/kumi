@@ -542,9 +542,10 @@ function M.redone_entry(journal, desc)
   return nil
 end
 
--- The events to tell Kumi of, once.
+-- The events to tell Kumi of, once. (With none, the empty list itself, which the caller only reads: most ticks have none.)
 function M.journal_take(journal)
   local events = journal.events
+  if events[1] == nil then return events end
   journal.events = {}
   return events
 end

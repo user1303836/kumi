@@ -318,7 +318,7 @@ end
 -- welcome's fields besides type, session and maxFrameBytes; it's called only once the host has
 -- proved it knows the secret.
 function Connection:on_bytes(bytes, now_ms, identity)
-  local actions = self:on_tick(now_ms)
+  local actions = self:on_tick(now_ms, {})
   if self.state == "closed" or bytes == "" then return actions end
   if not self.first_byte_seen then
     self.first_byte_seen = true
@@ -373,12 +373,15 @@ function Connection:on_bytes(bytes, now_ms, identity)
   return actions
 end
 
--- The handshake's deadline, for the timer (a peer that sends nothing); on_bytes checks it too.
-function Connection:on_tick(now_ms)
+-- The handshake's deadline, for the timer (a peer that sends nothing); on_bytes checks it too, with the list it then adds
+-- its own actions to (`actions`). A tick with nothing to do and no list of its own answers the one empty list, which the
+-- server only reads: twenty ticks a second made a table each.
+local NO_ACTIONS = {}
+function Connection:on_tick(now_ms, actions)
   if (self.state == "hello" or self.state == "auth") and now_ms - self.accepted_ms >= M.HANDSHAKE_TIMEOUT_MS then
-    return self:refuse({}, "timeout")
+    return self:refuse(actions or {}, "timeout")
   end
-  return {}
+  return actions or NO_ACTIONS
 end
 
 -- An event line, numbered from 1 on this connection; nil before auth.

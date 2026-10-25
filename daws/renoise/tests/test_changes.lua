@@ -2786,3 +2786,63 @@ test("changes: a pattern whose lines the tool couldn't count when a record kept 
   eq(touched[3], true, "can't tell: as touched")
   eq(touched[4], nil, "counted, and untouched")
 end)
+
+-- Perf (N7): a notifier asks whether the move was Renoise's undo only once Kumi has a change in the journal; before that it
+-- looks at the journal and asks Renoise for nothing.
+
+test("changes: a notifier asks Renoise for the song only once Kumi has a change in the journal (perf N7)", function()
+  local _, peer = setup()
+  local real_song, asked = renoise.song, 0
+  local function counting() asked = asked + 1 return real_song() end
+  -- (the journal is empty: a track's name moves, its notifier fires, and the song isn't asked for)
+  renoise.song = counting
+  mock.data.tracks[1].name = "Kick 2"
+  mock.fire(mock.song:track(1).name_observable)
+  renoise.song = real_song
+  eq(asked, 0, "renoise.song() calls from a notifier with an empty journal")
+  -- (a change of Kumi's in the journal: the notifier now asks whether Renoise's undo or redo moved it)
+  local epoch = place(peer)
+  local ref = track_ref(epoch, 2)
+  local previewed, _, layout = preview(peer, "track-volume", { ref = ref, volumeDb = -6 })
+  local done = apply(peer, "track-volume", { ref = ref, volumeDb = -6 }, "Kumi: Hat volume \226\136\1466 dB (kn7a)", previewed.fence, epoch, layout)
+  ok(done.result, json.encode(done.error or {}))
+  asked = 0
+  renoise.song = counting
+  mock.data.tracks[1].name = "Kick 3"
+  mock.fire(mock.song:track(1).name_observable)
+  renoise.song = real_song
+  ok(asked >= 1, "asked once a change is journalled")
+  H.no_dialogs()
+end)
+
+-- Perf (N6): the env a change or the listening runs in is built once; the tick (twenty a second) takes the kept one.
+
+test("changes: the tick takes the env it built once, and a change still runs in it (perf N6)", function()
+  KUMI_ENVS = 0
+  local _, peer = setup({ patch = function(env_)
+    local path = env_.bundle .. "payload/bridge.lua"
+    local f = assert(io.open(path, "rb"))
+    local text = f:read("*a")
+    f:close()
+    local counted, n = text:gsub("\n  change_env_kept = env\n", "\n  change_env_kept = env\n  KUMI_ENVS = (KUMI_ENVS or 0) + 1\n")
+    assert(n == 1, "change_env_kept")
+    counted, n = counted:gsub("\n  listen_env_kept = env\n", "\n  listen_env_kept = env\n  KUMI_ENVS = (KUMI_ENVS or 0) + 1\n")
+    assert(n == 1, "listen_env_kept")
+    f = assert(io.open(path, "wb"))
+    f:write(counted)
+    f:close()
+  end })
+  ok(KUMI_ENVS >= 1 and KUMI_ENVS <= 2, "the envs built as the tool started: " .. KUMI_ENVS)
+  local before = KUMI_ENVS
+  H.tick(100) -- (five seconds of ticks)
+  eq(KUMI_ENVS - before, 0, "envs built by a hundred ticks")
+  local epoch = place(peer)
+  local ref = track_ref(epoch, 2)
+  local previewed, _, layout = preview(peer, "track-volume", { ref = ref, volumeDb = -6 })
+  local done = apply(peer, "track-volume", { ref = ref, volumeDb = -6 }, "Kumi: Hat volume \226\136\1466 dB (kn6a)", previewed.fence, epoch, layout)
+  ok(done.result, json.encode(done.error or {}))
+  ok(math.abs(post_volume(2) - 10 ^ (-6 / 20)) < 1e-6, "written through the kept env")
+  ok(KUMI_ENVS <= 2, "still the two envs: " .. KUMI_ENVS)
+  KUMI_ENVS = nil
+  H.no_dialogs()
+end)
