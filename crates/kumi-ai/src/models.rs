@@ -285,7 +285,9 @@ pub async fn fetch_unpinned(url: &str, to: &Path, signal: &Signal) -> Result<(),
         if let Some(size) = response.content_length() {
             fits(size)?;
         }
-        let mut file = std::fs::File::create(&partial).map_err(|error| error.to_string())?;
+        // Written through the runtime's files, not the app's thread: a model is hundreds of MB, and the screen keeps
+        // drawing the download's progress meanwhile.
+        let mut file = tokio::fs::File::create(&partial).await.map_err(|error| error.to_string())?;
         let mut written: u64 = 0;
         loop {
             let chunk = tokio::select! {
@@ -295,16 +297,17 @@ pub async fn fetch_unpinned(url: &str, to: &Path, signal: &Signal) -> Result<(),
             let Some(chunk) = chunk else { break };
             written += chunk.len() as u64;
             fits(written)?;
-            std::io::Write::write_all(&mut file, &chunk).map_err(|error| error.to_string())?;
+            tokio::io::AsyncWriteExt::write_all(&mut file, &chunk).await.map_err(|error| error.to_string())?;
         }
+        tokio::io::AsyncWriteExt::flush(&mut file).await.map_err(|error| error.to_string())?;
         Ok(())
     }
     .await;
     if let Err(why) = fetched {
-        let _ = std::fs::remove_file(&partial);
+        let _ = tokio::fs::remove_file(&partial).await;
         return Err(format!("Kumi couldn't fetch {url}: {why}"));
     }
-    std::fs::rename(&partial, to).map_err(|error| format!("Kumi couldn't keep {url}: {error}"))
+    tokio::fs::rename(&partial, to).await.map_err(|error| format!("Kumi couldn't keep {url}: {error}"))
 }
 
 /// A download streamed to `path`, stopped past `most` bytes: its SHA-256 (hex). A stalled connection gives up rather
@@ -323,7 +326,7 @@ async fn download_at_most(url: &str, path: &Path, most: Option<u64>, signal: &Si
     if !response.status().is_success() {
         return Err(format!("{} answered {}", url, response.status()));
     }
-    let mut file = std::fs::File::create(path).map_err(|error| error.to_string())?;
+    let mut file = tokio::fs::File::create(path).await.map_err(|error| error.to_string())?;
     let mut hash = Sha256::new();
     let mut written: u64 = 0;
     loop {
@@ -338,8 +341,9 @@ async fn download_at_most(url: &str, path: &Path, most: Option<u64>, signal: &Si
             return Err("it's larger than the file it should be".into());
         }
         hash.update(&chunk);
-        std::io::Write::write_all(&mut file, &chunk).map_err(|error| error.to_string())?;
+        tokio::io::AsyncWriteExt::write_all(&mut file, &chunk).await.map_err(|error| error.to_string())?;
     }
+    tokio::io::AsyncWriteExt::flush(&mut file).await.map_err(|error| error.to_string())?;
     Ok(hex::encode(hash.finalize()))
 }
 
