@@ -436,6 +436,10 @@ class MigrationRelease(unittest.TestCase):
         self.assertEqual(release.native.digest(archive), target["sha256"])
         with tarfile.open(archive) as bundle:
             bundle.extractall(app, filter="data")
+        # As the installers and `kumi update` do: Live's bridge package is unpacked from the lifecycle's tarball beside it.
+        prepared = json.loads((app / "bridge/prepared.json").read_text(encoding="utf-8"))
+        with tarfile.open(app / "bridge" / prepared["artifact"]) as bridge:
+            bridge.extractall(app / "bridge", filter="data")
         markers = self.existing_data(home)
         env = self.production_environment(home, home / "Remote Scripts")
         output = self.launched(app / self.binary, env, "--version")

@@ -116,6 +116,7 @@ fn error(e: impl std::fmt::Display) -> RuntimeError {
 pub fn bundled_bridge_dir() -> String {
     let folder = executable_dir();
     if Path::new(&join(&folder, "package.json")).exists() {
+        let _ = unpack_prepared_bridge(&join(&folder, "bridge"));
         bridge_dir_in(&folder)
     } else {
         join(&repository_dir(), "daws/ableton/ableton-mcp-server")
@@ -131,10 +132,83 @@ pub fn bridge_dir_in(folder: &str) -> String {
         folder.to_string()
     }
 }
+/// Live's bridge package, unpacked beside the lifecycle's tarball it came in (`bridge/<artifact>.tar.gz`, named by
+/// `bridge/prepared.json`) when it isn't there. A bundle carries the bridge once, as that tarball: the installers unpack
+/// it at install, and Kumi here on the first use after an update (`kumi update` runs in the earlier Kumi, which leaves
+/// the new bundle as it came) or of a bundle unpacked by hand. Nothing happens when the package is there, or the folder
+/// names no tarball. Err: what tar said.
+pub fn unpack_prepared_bridge(bridge_dir: &str) -> Result<(), String> {
+    let package = join(bridge_dir, "package");
+    let binary = executable_name("ableton-mcp-server");
+    if Path::new(&join(&package, &binary)).exists() {
+        return Ok(());
+    }
+    let manifest: Option<Value> = fs::read(join(bridge_dir, "prepared.json")).ok().and_then(|bytes| serde_json::from_slice(&bytes).ok());
+    let Some(artifact) = manifest.as_ref().and_then(|manifest| manifest.get("artifact")?.as_str()).map(str::to_string) else {
+        return Ok(());
+    };
+    if Path::new(&artifact).file_name().and_then(|name| name.to_str()) != Some(artifact.as_str())
+        || !Path::new(&join(bridge_dir, &artifact)).exists()
+    {
+        return Ok(());
+    }
+    // Unpacked into a folder of this process's own, then renamed into place: a Kumi stopped halfway leaves no
+    // half-package to run from, and two Kumis starting together don't unpack over each other (the second finds the
+    // first's).
+    clear_stale_staging(bridge_dir);
+    let staging_name = format!(".package-{}", std::process::id());
+    let staging = join(bridge_dir, &staging_name);
+    let _ = fs::remove_dir_all(&staging);
+    fs::create_dir_all(&staging).map_err(|error| error.to_string())?;
+    let unpacked = unpack_into(bridge_dir, &artifact, &staging_name).and_then(|()| {
+        let unpacked = join(&staging, "package");
+        match fs::rename(&unpacked, &package) {
+            Ok(()) => Ok(()),
+            // Another Kumi got there first.
+            Err(_) if Path::new(&join(&package, &binary)).exists() => Ok(()),
+            // A half-package from before this Kumi: replaced whole.
+            Err(_) if Path::new(&package).exists() => {
+                fs::remove_dir_all(&package).and_then(|()| fs::rename(&unpacked, &package)).map_err(|error| error.to_string())
+            }
+            Err(error) => Err(error.to_string()),
+        }
+    });
+    let _ = fs::remove_dir_all(&staging);
+    unpacked
+}
+/// tar run in `bridge_dir`, given the tarball's plain name and `into`, a folder name in it: tar.exe reads its arguments
+/// in Windows' code page, which can't spell every folder name.
+fn unpack_into(bridge_dir: &str, artifact: &str, into: &str) -> Result<(), String> {
+    let ran = std::process::Command::new(system::system_program_default(SystemProgram::Tar))
+        .args(["-xzf", artifact, "-C", into])
+        .current_dir(bridge_dir)
+        .stdin(std::process::Stdio::null())
+        .output()
+        .map_err(|error| error.to_string())?;
+    if ran.status.success() {
+        return Ok(());
+    }
+    let said = String::from_utf8_lossy(if ran.stderr.is_empty() { &ran.stdout } else { &ran.stderr });
+    Err(said.trim().lines().next_back().unwrap_or("tar failed").to_string())
+}
+/// The staging folders (`.package-<pid>`) of Kumis stopped halfway through an unpack: cleared once older than an hour.
+/// A live one is seconds old.
+fn clear_stale_staging(bridge_dir: &str) {
+    let Ok(entries) = fs::read_dir(bridge_dir) else { return };
+    for entry in entries.flatten() {
+        let age = entry.metadata().and_then(|meta| meta.modified()).ok().and_then(|at| at.elapsed().ok());
+        if entry.file_name().to_string_lossy().starts_with(".package-") && age.is_some_and(|age| age > Duration::from_secs(3600)) {
+            let _ = fs::remove_dir_all(entry.path());
+        }
+    }
+}
 /// The bridge binary this Kumi brings, when it is built: the one a Live session starts. In its bundled package, or
-/// beside the executable (a checkout's build, an app installed before the bridge moved into its package).
+/// beside the executable (a checkout's build, an app installed before the bridge moved into its package). An installed
+/// app's package is unpacked first when it isn't yet (a checkout's build has no `bridge/` to unpack: nothing happens).
 pub fn bundled_bridge_binary() -> Option<String> {
-    bridge_binary_in(&executable_dir())
+    let folder = executable_dir();
+    let _ = unpack_prepared_bridge(&join(&folder, "bridge"));
+    bridge_binary_in(&folder)
 }
 /// The bridge binary an app folder keeps, in its `bridge/package` first, then beside kumi; None when neither is there.
 pub fn bridge_binary_in(folder: &str) -> Option<String> {
@@ -163,6 +237,7 @@ struct Prepared {
     root: String,
 }
 fn prepared_bridge(dir: &str) -> Option<Prepared> {
+    let _ = unpack_prepared_bridge(dir);
     let manifest: Value = serde_json::from_slice(&fs::read(join(dir, "prepared.json")).ok()?).ok()?;
     let artifact = manifest.get("artifact")?.as_str()?;
     let sha256 = manifest.get("sha256")?.as_str()?;
@@ -835,5 +910,69 @@ mod tests {
         fs::write(join(&folder, &format!("bridge/package/{exe}")), b"packaged").unwrap();
         assert_eq!(bridge_dir_in(&folder), join(&folder, "bridge/package"));
         assert_eq!(bridge_binary_in(&folder), Some(join(&folder, &format!("bridge/package/{exe}"))));
+    }
+
+    /// A bundle carries the bridge as the lifecycle's tarball; Kumi unpacks the package beside it when nothing did.
+    #[test]
+    fn the_bridge_package_is_unpacked_from_its_tarball_when_it_isnt_there() {
+        let app = tempfile::tempdir().unwrap();
+        let root = app.path().display().to_string();
+        let bridge = join(&root, "bridge");
+        let staged = app.path().join("staged/package");
+        fs::create_dir_all(&staged).unwrap();
+        let exe = executable_name("ableton-mcp-server");
+        fs::write(staged.join(&exe), b"the bridge").unwrap();
+        fs::write(staged.join("package.json"), b"{}").unwrap();
+        fs::create_dir_all(&bridge).unwrap();
+        let artifact = "ableton-mcp-server-1.0.0-test.tar.gz";
+        let made = std::process::Command::new(system::system_program_default(SystemProgram::Tar))
+            .args(["-czf", &join(&bridge, artifact), "-C", app.path().join("staged").to_str().unwrap(), "package"])
+            .status()
+            .unwrap();
+        assert!(made.success());
+        // Nothing to unpack from yet: the folder names no tarball.
+        assert_eq!(unpack_prepared_bridge(&bridge), Ok(()));
+        assert!(!Path::new(&join(&bridge, "package")).exists());
+        fs::write(join(&bridge, "prepared.json"), format!(r#"{{"artifact":"{artifact}","sha256":"x","version":"1.0.0"}}"#)).unwrap();
+        // A staging folder of a Kumi stopped long ago is cleared with the unpack (its mtime: Unix lets a test set one).
+        let stale = join(&bridge, ".package-1");
+        fs::create_dir_all(&stale).unwrap();
+        #[cfg(unix)]
+        fs::File::open(&stale).unwrap().set_modified(std::time::SystemTime::now() - Duration::from_secs(2 * 3600)).unwrap();
+        assert_eq!(unpack_prepared_bridge(&bridge), Ok(()));
+        assert_eq!(fs::read(join(&join(&bridge, "package"), &exe)).unwrap(), b"the bridge");
+        assert_eq!(bridge_dir_in(&root), join(&bridge, "package"));
+        assert!(Path::new(&join(&bridge, artifact)).exists(), "the tarball stays for the lifecycle to verify");
+        let staging_left = || {
+            fs::read_dir(&bridge).unwrap().flatten().filter(|entry| entry.file_name().to_string_lossy().starts_with(".package-")).count()
+        };
+        #[cfg(unix)]
+        assert_eq!(staging_left(), 0, "the unpack's own staging folder and the stale one are gone");
+        #[cfg(not(unix))]
+        assert_eq!(staging_left(), 1, "the unpack's own staging folder is gone; the fresh-looking one stays");
+        // Unpacked already: nothing is done again.
+        fs::write(join(&join(&bridge, "package"), &exe), b"changed since").unwrap();
+        assert_eq!(unpack_prepared_bridge(&bridge), Ok(()));
+        assert_eq!(fs::read(join(&join(&bridge, "package"), &exe)).unwrap(), b"changed since");
+        // A half-package, without the bridge in it: replaced whole.
+        fs::remove_file(join(&join(&bridge, "package"), &exe)).unwrap();
+        fs::write(join(&join(&bridge, "package"), "half"), b"").unwrap();
+        assert_eq!(unpack_prepared_bridge(&bridge), Ok(()));
+        assert_eq!(fs::read(join(&join(&bridge, "package"), &exe)).unwrap(), b"the bridge");
+        assert!(!Path::new(&join(&join(&bridge, "package"), "half")).exists());
+        // A tarball named with a path isn't followed.
+        let elsewhere = join(&root, "elsewhere");
+        fs::create_dir_all(&elsewhere).unwrap();
+        fs::write(join(&elsewhere, "prepared.json"), format!(r#"{{"artifact":"../bridge/{artifact}"}}"#)).unwrap();
+        assert_eq!(unpack_prepared_bridge(&elsewhere), Ok(()));
+        assert!(!Path::new(&join(&elsewhere, "package")).exists());
+        // A broken tarball: what tar said, and no package.
+        let broken = join(&root, "broken");
+        fs::create_dir_all(&broken).unwrap();
+        fs::write(join(&broken, "bridge.tar.gz"), b"not a tarball").unwrap();
+        fs::write(join(&broken, "prepared.json"), r#"{"artifact":"bridge.tar.gz"}"#).unwrap();
+        assert!(unpack_prepared_bridge(&broken).is_err());
+        assert!(!Path::new(&join(&broken, "package")).exists());
+        assert_eq!(fs::read_dir(&broken).unwrap().count(), 2, "nothing of the failed unpack is left beside the tarball");
     }
 }

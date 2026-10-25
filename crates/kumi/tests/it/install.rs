@@ -133,10 +133,14 @@ fn fake_release_with(dir: &Path, version: &str, bridge: Option<&str>) -> Vec<u8>
 }
 /// The same, with more files in it (`daws/…`).
 fn fake_release_carrying(dir: &Path, version: &str, bridge: Option<&str>, files: &[(&str, &str)]) -> Vec<u8> {
+    let bytes: Vec<(&str, Vec<u8>)> = files.iter().map(|(path, text)| (*path, text.as_bytes().to_vec())).collect();
+    fake_release_carrying_bytes(dir, version, bridge, &bytes)
+}
+fn fake_release_carrying_bytes(dir: &Path, version: &str, bridge: Option<&str>, files: &[(&str, Vec<u8>)]) -> Vec<u8> {
     let stage = dir.join(format!("stage-{version}"));
     fs::create_dir_all(&stage).unwrap();
-    for (path, text) in files {
-        put(stage.join(path), text);
+    for (path, bytes) in files {
+        put(stage.join(path), bytes);
     }
     let code = dir.join("main.rs");
     put(&code, format!("fn main() {{ println!(\"Kumi {version}\"); }}"));
@@ -267,6 +271,45 @@ async fn a_release_naming_a_broken_xz_pair_is_installed_from_its_gzipped_bundle(
         // Back to the old Kumi for the next case.
         let _ = fs::remove_dir_all(home.join("app.previous"));
     }
+}
+/// A bundle carries Live's bridge as the lifecycle's tarball under bridge/: an update unpacks its package beside it,
+/// where a session starts the bridge from, and leaves the tarball for the lifecycle to verify.
+#[tokio::test]
+async fn an_update_unpacks_the_bridges_package_from_its_tarball() {
+    let dir = tempfile::tempdir().unwrap();
+    let env = env(dir.path());
+    let home = Path::new(&env["KUMI_HOME"]);
+    put(home.join("app/package.json"), json!({"version":KUMI_VERSION}).to_string());
+    put(home.join("app").join(executable_name("kumi")), "earlier");
+    // The lifecycle's tarball: package/ with the bridge in it, as the release script writes it.
+    let staged = dir.path().join("bridge-stage/package");
+    put(staged.join(executable_name("ableton-mcp-server")), "the bridge");
+    put(staged.join("package.json"), "{}");
+    let artifact = "ableton-mcp-server-1.0.0-test.tar.gz";
+    let made = std::process::Command::new(system::system_program_default(SystemProgram::Tar))
+        .args(["-czf", dir.path().join(artifact).to_str().unwrap(), "-C", dir.path().join("bridge-stage").to_str().unwrap(), "package"])
+        .status()
+        .unwrap();
+    assert!(made.success());
+    let tarball = fs::read(dir.path().join(artifact)).unwrap();
+    let prepared = json!({"artifact": artifact, "sha256": hex::encode(Sha256::digest(&tarball)), "version": "1.0.0"}).to_string();
+    let carried = format!("bridge/{artifact}");
+    let bytes = fake_release_carrying_bytes(
+        dir.path(),
+        "99.0.0",
+        Some("1.0.0"),
+        &[(carried.as_str(), tarball), ("bridge/prepared.json", prepared.into_bytes())],
+    );
+    let mut good = manifest("99.0.0");
+    good["sha256"] = json!(hex::encode(Sha256::digest(&bytes)));
+    let (mut updated, out) = io(&env);
+    updated.fetcher = Some(Rc::new(Serve { manifest: good, bytes, status: 200, offline: false, calls: RefCell::new(vec![]) }));
+    updated.run = Some(Rc::new(|command, args, cwd| async move { run_program(&command, &args, cwd.as_deref()).await }.boxed_local()));
+    assert_eq!(update_installed(updated).await.unwrap(), 0, "{}", out.0.borrow());
+    assert_eq!(version_of(home.join("app")), "99.0.0");
+    let packaged = home.join("app/bridge/package").join(executable_name("ableton-mcp-server"));
+    assert_eq!(fs::read(&packaged).unwrap(), b"the bridge", "the package is unpacked beside the tarball");
+    assert!(home.join("app/bridge").join(artifact).exists(), "the tarball stays for the lifecycle to verify");
 }
 #[tokio::test]
 async fn checked_executable_update_swap_and_rollback() {

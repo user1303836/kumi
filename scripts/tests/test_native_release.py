@@ -231,13 +231,10 @@ class NativeRelease(unittest.TestCase):
             self.assertTrue(all(member.isfile() for member in tar.getmembers()))
             names = tar.getnames()
             self.assertTrue(all(binary in names for binary in release.BUNDLE_BINARIES))
-            # The bridge ships once, in its package under bridge/: not beside kumi as well.
+            # The bridge ships once, as the lifecycle's tarball under bridge/: not unpacked there, nor beside kumi.
             for binary in release.BRIDGE_BINARIES:
                 self.assertNotIn(binary, names)
-                self.assertIn("bridge/package/" + binary, names)
-            self.assertFalse(any(name.startswith(("remote-script/", "live-extension/")) for name in names))
-            self.assertIn("bridge/package/remote-script/AbletonMcpBridge/ableton_mcp_remote_script.py", names)
-            self.assertIn("bridge/package/live-extension/dist/extension.js", names)
+            self.assertFalse(any(name.startswith(("remote-script/", "live-extension/", "bridge/package/")) for name in names))
             self.assertIn("apps/kumi/bin/kumi.mjs", names)
             # Others' code Kumi carries is under their licenses, said beside Kumi's own.
             self.assertIn("THIRD_PARTY_NOTICES.md", names)
@@ -254,14 +251,20 @@ class NativeRelease(unittest.TestCase):
             prepared = json.load(tar.extractfile("bridge/prepared.json"))
             artifact = tar.extractfile("bridge/" + prepared["artifact"]).read()
             self.assertEqual(hashlib.sha256(artifact).hexdigest(), prepared["sha256"])
-            manifest = json.load(tar.extractfile("bridge/package/release-manifest.json"))
+            self.assertEqual(sorted(name for name in names if name.startswith("bridge/")), sorted(["bridge/prepared.json", "bridge/" + prepared["artifact"]]))
+            import io
+            with tarfile.open(fileobj=io.BytesIO(artifact)) as bridge:
+                packaged = {member.name: bridge.extractfile(member).read() for member in bridge.getmembers()}
+            self.assertIn("package/remote-script/AbletonMcpBridge/ableton_mcp_remote_script.py", packaged)
+            self.assertIn("package/live-extension/dist/extension.js", packaged)
+            manifest = json.loads(packaged["package/release-manifest.json"])
             self.assertEqual(manifest["schema"], "ableton-mcp-native-release/v1")
             self.assertEqual(manifest["source"], self.source)
             self.assertEqual(manifest["build"]["builder"], self.builder)
             self.assertEqual(manifest["build"]["runtime"], "rust-native")
             self.assertEqual(manifest["roles"]["ableton-mcp-server"], "native-runtime")
             self.assertEqual(manifest["roles"]["ableton-mcp-analysis-worker"], "native-runtime")
-            package = json.load(tar.extractfile("bridge/package/package.json"))
+            package = json.loads(packaged["package/package.json"])
             self.assertEqual(package["bin"], {binary: binary for binary in release.BRIDGE_BINARIES})
             self.assertNotIn("compiled-runtime", manifest["roles"].values())
             self.assertEqual(manifest["files"]["LICENSE.md"], release.MIT_SHA256)
@@ -273,8 +276,7 @@ class NativeRelease(unittest.TestCase):
             self.assertEqual(manifest["distribution"], {"channel": "local-native-tarball", "published": False,
                 "signed": False, "notarized": False, "integrityIsIdentityProof": False})
             for name, digest in manifest["files"].items():
-                self.assertEqual(hashlib.sha256(tar.extractfile("bridge/package/" + name).read()).hexdigest(), digest)
-            import io
+                self.assertEqual(hashlib.sha256(packaged["package/" + name]).hexdigest(), digest)
             with tarfile.open(fileobj=io.BytesIO(artifact)) as bridge:
                 expected = {"package/" + name for name in manifest["files"]} | {"package/release-manifest.json"}
                 self.assertEqual(set(bridge.getnames()), expected)
@@ -282,8 +284,6 @@ class NativeRelease(unittest.TestCase):
                 for binary in release.BRIDGE_BINARIES:
                     if EXEC_BITS:
                         self.assertEqual(bridge.getmember("package/" + binary).mode, 0o755)
-                for member in bridge.getmembers():
-                    self.assertEqual(bridge.extractfile(member).read(), tar.extractfile("bridge/" + member.name).read())
         self.assertTrue(gzip.decompress(artifact).endswith(b"\0" * 1024))
 
     def test_archive_is_reproducible_and_failed_rebuild_preserves_previous_bundle(self):

@@ -292,6 +292,14 @@
       if ($LASTEXITCODE -ne 0) { Fail "couldn't unpack Kumi." }
       $exe = Join-Path $freshApp 'kumi.exe'
       if (-not (Test-Path -LiteralPath $exe)) { Fail 'the download had no kumi.exe in it. Please report this at github.com/user1303836/kumi/issues.' }
+      # Live's bridge comes as the lifecycle's own tarball under app\bridge; its package is unpacked beside it, where
+      # Kumi runs it from and the lifecycle copies it into Live. (A release from before carries the package itself.)
+      $bridgeFolder = Join-Path $freshApp 'bridge'
+      foreach ($bridgeArchive in @(Get-ChildItem -LiteralPath $bridgeFolder -Filter '*.tar.gz' -ErrorAction SilentlyContinue)) {
+        Push-Location -LiteralPath $bridgeFolder
+        try { & $tar -xzf $bridgeArchive.Name -C . } finally { Pop-Location }
+        if ($LASTEXITCODE -ne 0) { Fail "couldn't unpack Live's bridge." }
+      }
       $hadHome = $env:KUMI_HOME
       $env:KUMI_INSTALLED = '1'; $env:KUMI_HOME = $KumiHome
       # What it says on its error output is kept for when it doesn't start (Windows PowerShell would stop at its first line).

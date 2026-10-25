@@ -17,7 +17,7 @@ fn error(e: impl std::fmt::Display) -> RuntimeError {
 use crate::ears::device::EARS_NAME;
 use kumi_daw::{
     io::{kumi_home, step, DawIo, Kept},
-    process::{executable_dir, executable_name},
+    process::executable_name,
     provider::{BridgeRollbackStep, RemovedBridge},
 };
 use kumi_library::sources::{basename, dirname, join, resolve};
@@ -48,6 +48,12 @@ pub(crate) async fn live_open(io: &DawIo) -> bool {
 /// After an update: going back (`back_to`, the earlier Kumi), a bridge in Live as new as the earlier Kumi's stays, as a
 /// newer one serves it too and Live may have it loaded; otherwise the bridge as after any update.
 pub(crate) async fn after_update(io: &DawIo, home: &str, app: &str, back_to: Option<&str>) -> i32 {
+    // The bundle carries the bridge as the lifecycle's tarball: its package is unpacked beside it, where a session
+    // starts the bridge from. (An app from before has the package already.)
+    if let Err(why) = super::bridge_setup::unpack_prepared_bridge(&join(app, "bridge")) {
+        io.out.write(&format!("Kumi couldn't unpack Live's bridge in {app}: {why}. Run kumi doctor.\n"));
+        return 1;
+    }
     if let Some(kumi) = back_to {
         let installed = find_bridge_config(&io.env).and_then(|config| read_bridge_server(&config).ok()?.version);
         if let Some(installed) = installed.filter(|installed| bridge_version(app).is_none_or(|bundled| !newer_version(&bundled, installed)))
