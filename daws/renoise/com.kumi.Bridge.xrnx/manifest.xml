@@ -2,7 +2,7 @@
 <RenoiseScriptingTool doc_version="0">
   <ApiVersion>6.2</ApiVersion>
   <Id>com.kumi.Bridge</Id>
-  <Version>1.0002</Version>
+  <Version>1.0003</Version>
   <Author>Kumi [https://github.com/user1303836/kumi/issues]</Author>
   <Name>Kumi Bridge</Name>
   <Category>Integration</Category>
