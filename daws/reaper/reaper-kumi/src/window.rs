@@ -32,7 +32,10 @@ pub fn front_title() -> Option<String> {
 /// Tests ask the fake REAPER.
 #[cfg(test)]
 pub fn front_title() -> Option<String> {
-    crate::reaper::fake::with(|s| s.front_title.clone())
+    crate::reaper::fake::with(|s| {
+        s.front_title_asked += 1;
+        s.front_title.clone()
+    })
 }
 
 /// What this platform asks, for the log.

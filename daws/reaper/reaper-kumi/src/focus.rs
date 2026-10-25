@@ -21,6 +21,23 @@ const MAX_SELECTION_INTERVAL: Duration = Duration::from_millis(500);
 const SELECTION_DUTY: u32 = 30;
 /// Items looked at to tell a MIDI track from an audio one.
 const TYPE_SAMPLE: i32 = 5;
+/// How long what `GetTouchedOrFocusedFX` named stays resolved (the FX's GUID and name, the parameter's name) while the
+/// hit, the FX and REAPER's state change count stay: read again after this whatever they say.
+const NAMED_FOR: Duration = Duration::from_secs(1);
+
+#[cfg(test)]
+thread_local! {
+    /// A test's own bound in place of `NAMED_FOR`.
+    pub static TEST_NAMED_FOR: Cell<Option<Duration>> = const { Cell::new(None) };
+}
+
+fn named_for() -> Duration {
+    #[cfg(test)]
+    if let Some(bound) = TEST_NAMED_FOR.with(|bound| bound.get()) {
+        return bound;
+    }
+    NAMED_FOR
+}
 
 /// What the selection holds, with what FOCUS's header shows of it: `focus`'s `selection`, and the snapshot's.
 pub fn selection(reads: &Reads, reaper: &Reaper, proj: Project) -> Value {
@@ -102,15 +119,39 @@ pub(crate) fn fx_of_hit(reaper: &Reaper, proj: Project, hit: &FxHit) -> Option<F
     Some(Fx { owner, index: hit.fx })
 }
 
-/// The FX with the focus (`GetTouchedOrFocusedFX` mode 1): its ref and name, and its take's ref when it is a take's (the
-/// chain FOCUS's tree shows then).
-fn focused_fx(reads: &Reads, reaper: &Reaper, proj: Project) -> Option<(String, String, Option<String>)> {
+/// What a hit of `GetTouchedOrFocusedFX` names, resolved once: the FX's GUID, and its name (the focused FX) or the
+/// parameter's (the touched parameter), with the take's ref when the FX is a take's. Good while the hit, the FX it
+/// resolves to (REAPER's own pointers, asked each poll) and REAPER's state change count stay (a rename, an FX moved or
+/// deleted, a track reordered are undo points and move the count), and for `NAMED_FOR` at most: a bare API rename of
+/// another extension's moves nothing, and shows within it. The poll ran twenty times a second and read these afresh
+/// each time: three string reads and a GUID per hit, all the same as the time before.
+struct Named {
+    hit: FxHit,
+    fx: Fx,
+    changed: Option<i32>,
+    at: Instant,
+    guid: String,
+    name: String,
+    chain: Option<String>,
+}
+
+/// What a hit names when resolved: its GUID, its name and its chain's ref.
+type Resolved = (String, String, Option<String>);
+
+/// The FX with the focus (`GetTouchedOrFocusedFX` mode 1), as the hit names it: nothing when the window is open but
+/// something else has the focus (parm 1).
+fn focused_hit(reads: &Reads, reaper: &Reaper, proj: Project) -> Option<(FxHit, Fx)> {
     let hit = reads.touched_fx(reaper, 1)?;
     // Parm 1 says the window is still open but something else has the focus.
     if hit.param & 1 != 0 {
         return None;
     }
     let fx = fx_of_hit(reaper, proj, &hit)?;
+    Some((hit, fx))
+}
+
+/// The focused FX's GUID, name and chain, read from REAPER.
+fn resolve_focused(reads: &Reads, reaper: &Reaper, proj: Project, fx: Fx) -> Option<Resolved> {
     let guid = reaper.fx_guid(fx);
     if guid.is_empty() {
         return None;
@@ -120,57 +161,65 @@ fn focused_fx(reads: &Reads, reaper: &Reaper, proj: Project) -> Option<(String, 
         FxOwner::Take(take) => Some(refs::take_ref(&reaper.take_guid(take))),
         FxOwner::Track(_) => None,
     };
-    Some((refs::fx_ref(&guid), rows::clip(&reaper.fx_name(fx)), chain))
+    Some((guid, rows::clip(&reaper.fx_name(fx)), chain))
 }
 
-/// The track a floating routing and I/O window is about, when that window has the keyboard focus: REAPER titles it
-/// `Routing for track 2: Lead` (View > Routing and I/O for a track). None when it isn't the window in front, or the
-/// platform can't say. (REAPER in another language titles it in that language, and then the view stays `arrange`.)
-fn routing_window(reaper: &Reaper, proj: Project) -> Option<Option<String>> {
-    let title = crate::window::front_title()?;
+/// The touched parameter's FX GUID and the parameter's name, read from REAPER; nothing for a parameter the FX hasn't.
+fn resolve_touched(reads: &Reads, reaper: &Reaper, proj: Project, hit: &FxHit, fx: Fx) -> Option<Resolved> {
+    let guid = reaper.fx_guid(fx);
+    if guid.is_empty() || hit.param < 0 || hit.param >= reaper.fx_param_count(fx) {
+        return None;
+    }
+    reads.registry().note_fx(proj, &guid, fx);
+    Some((guid, rows::clip(&reaper.param_name(fx, hit.param)), None))
+}
+
+/// The track a floating routing and I/O window is about, when that window (titled `title`) has the keyboard focus:
+/// REAPER titles it `Routing for track 2: Lead` (View > Routing and I/O for a track). None when it isn't the window in
+/// front. (REAPER in another language titles it in that language, and then the view stays `arrange`.)
+fn routing_window(reaper: &Reaper, proj: Project, title: &str) -> Option<Option<String>> {
     let rest = title.strip_prefix("Routing for track ")?;
     let number: String = rest.chars().take_while(char::is_ascii_digit).collect();
     let track = number.parse::<i32>().ok().filter(|&n| n >= 1).and_then(|n| reaper.track_at(proj, n - 1));
     Some(track.map(|track| refs::track_ref(&rows::track_id(reaper, track))))
 }
 
-/// Whether REAPER's mixer window has the keyboard focus: undocked, REAPER titles it "Mixer". A mixer docked in the main
-/// window has no window of its own to tell by, and the view stays `arrange` then.
-fn mixer_window() -> bool {
-    crate::window::front_title().is_some_and(|title| title == "Mixer" || title.starts_with("Mixer "))
+/// Whether the window with the keyboard focus (titled `title`) is REAPER's mixer: undocked, REAPER titles it "Mixer". A
+/// mixer docked in the main window has no window of its own to tell by, and the view stays `arrange` then.
+fn mixer_window(title: &str) -> bool {
+    title == "Mixer" || title.starts_with("Mixer ")
 }
 
-/// The parameter touched last, named for the header: `{name, value, formatted, fxRef}`.
-fn touched_param(reads: &Reads, reaper: &Reaper, proj: Project) -> Option<Value> {
-    let hit = reads.touched_fx(reaper, 0)?;
-    let fx = fx_of_hit(reaper, proj, &hit)?;
-    let guid = reaper.fx_guid(fx);
-    if guid.is_empty() || hit.param < 0 || hit.param >= reaper.fx_param_count(fx) {
-        return None;
-    }
-    reads.registry().note_fx(proj, &guid, fx);
-    Some(json!({
-        "name": rows::clip(&reaper.param_name(fx, hit.param)),
+/// The touched parameter's header: `{name, value, formatted, fxRef}`, the value and its text read now.
+fn param_json(reaper: &Reaper, hit: &FxHit, fx: Fx, named: &Resolved) -> Value {
+    json!({
+        "name": named.1,
         "value": reaper.param_normalized(fx, hit.param),
         "formatted": rows::clip(&reaper.param_formatted(fx, hit.param)),
-        "fxRef": refs::fx_ref(&guid),
-    }))
+        "fxRef": refs::fx_ref(&named.0),
+    })
 }
 
-/// `fxRef`, `fxName` and `param`. The focused FX is named only when `focused` holds (the FX window is the view).
-fn add_fx(reads: &Reads, reaper: &Reaper, proj: Project, selection: &mut Value, focused: bool) {
+fn add_focused(selection: &mut Value, named: Option<&Resolved>) {
     selection["fxRef"] = Value::Null;
-    if focused {
-        if let Some((reference, name, chain)) = focused_fx(reads, reaper, proj) {
-            selection["fxRef"] = reference.into();
-            selection["fxName"] = name.into();
-            if let Some(chain) = chain {
-                selection["fxChainRef"] = chain.into();
-            }
+    if let Some((guid, name, chain)) = named {
+        selection["fxRef"] = refs::fx_ref(guid).into();
+        selection["fxName"] = name.clone().into();
+        if let Some(chain) = chain {
+            selection["fxChainRef"] = chain.clone().into();
         }
     }
-    if let Some(param) = touched_param(reads, reaper, proj) {
-        selection["param"] = param;
+}
+
+/// `fxRef`, `fxName` and `param`, read from REAPER (the snapshot's selection: once a look, not kept). The focused FX is
+/// named only when `focused` holds (the FX window is the view).
+fn add_fx(reads: &Reads, reaper: &Reaper, proj: Project, selection: &mut Value, focused: bool) {
+    let named = focused.then(|| focused_hit(reads, reaper, proj)).flatten().and_then(|(_, fx)| resolve_focused(reads, reaper, proj, fx));
+    add_focused(selection, named.as_ref());
+    if let Some((hit, fx)) = reads.touched_fx(reaper, 0).and_then(|hit| fx_of_hit(reaper, proj, &hit).map(|fx| (hit, fx))) {
+        if let Some(named) = resolve_touched(reads, reaper, proj, &hit, fx) {
+            selection["param"] = param_json(reaper, &hit, fx, &named);
+        }
     }
 }
 
@@ -189,33 +238,79 @@ fn add_midi_take(reads: &Reads, reaper: &Reaper, proj: Project, selection: &mut 
 pub struct Focus {
     objects: RefCell<Option<(Instant, Value)>>,
     interval: Cell<Duration>,
+    /// What the focused FX's hit and the touched parameter's hit last resolved to.
+    focused: RefCell<Option<Named>>,
+    touched: RefCell<Option<Named>>,
 }
 
 impl Default for Focus {
     fn default() -> Self {
-        Focus { objects: RefCell::new(None), interval: Cell::new(MIN_SELECTION_INTERVAL) }
+        Focus {
+            objects: RefCell::new(None),
+            interval: Cell::new(MIN_SELECTION_INTERVAL),
+            focused: RefCell::new(None),
+            touched: RefCell::new(None),
+        }
     }
 }
 
 impl Focus {
-    /// Forgets the cached selection (a tab switch).
+    /// Forgets the cached selection and what the hits resolved to (a tab switch).
     pub fn reset(&self) {
         *self.objects.borrow_mut() = None;
+        *self.focused.borrow_mut() = None;
+        *self.touched.borrow_mut() = None;
+    }
+
+    /// What a hit names, from `slot` while the hit, the FX and the count stay and `NAMED_FOR` hasn't passed, else from
+    /// `resolve` (kept for the next poll).
+    fn named(
+        slot: &RefCell<Option<Named>>,
+        hit: FxHit,
+        fx: Fx,
+        changed: Option<i32>,
+        resolve: impl FnOnce() -> Option<Resolved>,
+    ) -> Option<Resolved> {
+        if let Some(named) = slot.borrow().as_ref() {
+            if named.hit == hit && named.fx == fx && named.changed == changed && named.at.elapsed() < named_for() {
+                return Some((named.guid.clone(), named.name.clone(), named.chain.clone()));
+            }
+        }
+        let resolved = resolve();
+        *slot.borrow_mut() = resolved.as_ref().map(|(guid, name, chain)| Named {
+            hit,
+            fx,
+            changed,
+            at: Instant::now(),
+            guid: guid.clone(),
+            name: name.clone(),
+            chain: chain.clone(),
+        });
+        resolved
     }
 
     /// `{epoch, view, selection, transport, changed}`. `force` reads the selection now, whatever its throttle says.
     pub fn poll(&self, reads: &Reads, reaper: &Reaper, proj: Project, force: bool) -> Value {
+        let changed = reaper.state_change_count(proj);
         let midi = reaper.focused_midi_take();
         let midi_focused = midi.is_some() || reaper.midi_editor_focused();
-        let focused_fx = if midi_focused { None } else { focused_fx(reads, reaper, proj) };
-        let routing = if midi_focused || focused_fx.is_some() { None } else { routing_window(reaper, proj) };
+        let focused_fx = if midi_focused {
+            None
+        } else {
+            focused_hit(reads, reaper, proj)
+                .and_then(|(hit, fx)| Self::named(&self.focused, hit, fx, changed, || resolve_focused(reads, reaper, proj, fx)))
+        };
+        // The window with the keyboard focus is asked for once a poll, and not at all when an FX window or a MIDI editor
+        // has it (on macOS the title is four messages to AppKit and a copy).
+        let title = if midi_focused || focused_fx.is_some() { None } else { crate::window::front_title() };
+        let routing = title.as_deref().and_then(|title| routing_window(reaper, proj, title));
         let view = if midi_focused {
             "midi"
         } else if focused_fx.is_some() {
             "fx"
         } else if routing.is_some() {
             "routing"
-        } else if mixer_window() {
+        } else if title.as_deref().is_some_and(mixer_window) {
             "mixer"
         } else {
             "arrange"
@@ -230,17 +325,13 @@ impl Focus {
         }
         let mut selection = self.objects.borrow().as_ref().map(|(_, v)| v.clone()).unwrap_or_else(|| json!({}));
         add_cursor(reaper, proj, &mut selection);
-        // The FX window is named when it is the view; the touched parameter is always.
-        selection["fxRef"] = Value::Null;
-        if let Some((reference, name, chain)) = focused_fx {
-            selection["fxRef"] = reference.into();
-            selection["fxName"] = name.into();
-            if let Some(chain) = chain {
-                selection["fxChainRef"] = chain.into();
+        // The FX window is named when it is the view; the touched parameter is always, its value and text read now, its
+        // name and FX as they were resolved.
+        add_focused(&mut selection, focused_fx.as_ref());
+        if let Some((hit, fx)) = reads.touched_fx(reaper, 0).and_then(|hit| fx_of_hit(reaper, proj, &hit).map(|fx| (hit, fx))) {
+            if let Some(named) = Self::named(&self.touched, hit, fx, changed, || resolve_touched(reads, reaper, proj, &hit, fx)) {
+                selection["param"] = param_json(reaper, &hit, fx, &named);
             }
-        }
-        if let Some(param) = touched_param(reads, reaper, proj) {
-            selection["param"] = param;
         }
         // The routing window's own track, which is not always the selected one.
         selection["routingTrackRef"] = routing.flatten().into();
@@ -252,7 +343,7 @@ impl Focus {
             "view": view,
             "selection": selection,
             "transport": rows::transport(reaper, proj),
-            "changed": reaper.state_change_count(proj).unwrap_or(0),
+            "changed": changed.unwrap_or(0),
         })
     }
 }
@@ -396,6 +487,99 @@ mod tests {
             s.midi_editor = Some((1, 0, 0));
         });
         assert_eq!(Focus::default().poll(&reads, &reaper, proj, true)["view"], "midi");
+    }
+
+    // The optimization audit's R8 (2026-10-24): the poll ran twenty times a second and read the focused FX's GUID, name
+    // and take, and the touched parameter's FX GUID, count and name, afresh each time, though they can't change while the
+    // hit, the FX and REAPER's state change count stay. Resolved once now; the parameter's value and text are read every
+    // poll.
+    #[test]
+    fn what_the_hits_name_is_resolved_once_while_the_hit_the_fx_and_the_count_stay() {
+        let (reads, proj) = project();
+        let api = fake::api();
+        let reaper = Reaper::new(&api);
+        fake::with(|s| {
+            s.tracks[0].fx[0].params = vec![crate::reaper::fake::FakeParam::new("Gain", 0.75, "-3.0 dB")];
+            s.touched_fx = Some((0, -1, -1, 0, 0));
+            s.focused_fx = Some((0, -1, -1, 0, 0));
+        });
+        let focus = Focus::default();
+        let calls = || fake::with(|s| s.calls);
+        let before = calls();
+        let first = focus.poll(&reads, &reaper, proj, true);
+        let fresh = calls() - before;
+        assert_eq!(first["view"], "fx");
+        assert_eq!(first["selection"]["fxName"], "VST3: ReaEQ (Cockos)");
+        assert_eq!(first["selection"]["param"], json!({"name": "Gain", "value": 0.75, "formatted": "-3.0 dB", "fxRef": "r:fx:{FX-1}"}));
+        // The same hits again: the GUID, the names and the chain stand; the parameter's value and text are read now.
+        fake::with(|s| {
+            s.tracks[0].fx[0].params[0].value = 0.5;
+            s.tracks[0].fx[0].params[0].shown = "-6.0 dB".into();
+        });
+        let before = calls();
+        let again = focus.poll(&reads, &reaper, proj, true);
+        let kept = calls() - before;
+        // (the two hits' GUIDs and names and the parameter count: five calls and three string reads a poll, twenty polls a second)
+        assert_eq!(fresh - kept, 5, "{kept} REAPER calls with the hits resolved, {fresh} fresh");
+        assert_eq!(again["selection"]["param"], json!({"name": "Gain", "value": 0.5, "formatted": "-6.0 dB", "fxRef": "r:fx:{FX-1}"}));
+        assert_eq!((&again["selection"]["fxRef"], &again["selection"]["fxName"]), (&json!("r:fx:{FX-1}"), &json!("VST3: ReaEQ (Cockos)")));
+        // The producer renames the FX (an undo point: the count moves): the name shows at once.
+        fake::with(|s| s.tracks[0].fx[0].name = "VST3: ReaEQ (Cockos) warm".into());
+        fake::producer_edit("Rename FX");
+        assert_eq!(focus.poll(&reads, &reaper, proj, true)["selection"]["fxName"], "VST3: ReaEQ (Cockos) warm");
+        // A bare rename (a script's: no undo point, the count where it was) shows once the bound passes.
+        fake::with(|s| s.tracks[0].fx[0].name = "VST3: ReaEQ (Cockos) bare".into());
+        assert_eq!(focus.poll(&reads, &reaper, proj, true)["selection"]["fxName"], "VST3: ReaEQ (Cockos) warm", "kept");
+        TEST_NAMED_FOR.with(|bound| bound.set(Some(Duration::ZERO)));
+        assert_eq!(focus.poll(&reads, &reaper, proj, true)["selection"]["fxName"], "VST3: ReaEQ (Cockos) bare");
+        TEST_NAMED_FOR.with(|bound| bound.set(None));
+        // Another parameter touched, or another FX focused: resolved anew.
+        fake::with(|s| {
+            s.tracks[0].fx[0].params.push(crate::reaper::fake::FakeParam::new("Freq", 0.25, "250 Hz"));
+            s.touched_fx = Some((0, -1, -1, 0, 1));
+            s.tracks[1].items[1].takes[0].fx.push(FakeFx::new("{T-FX}", "VST: ReaDelay (Cockos)"));
+            s.focused_fx = Some((1, 1, 0, 0, 0));
+        });
+        let moved = focus.poll(&reads, &reaper, proj, true);
+        assert_eq!(moved["selection"]["param"]["name"], "Freq");
+        assert_eq!((&moved["selection"]["fxRef"], &moved["selection"]["fxChainRef"]), (&json!("r:fx:{T-FX}"), &json!("r:take:{TAKE-2}")));
+        // A tab switch forgets what was resolved.
+        focus.reset();
+        assert!(focus.focused.borrow().is_none() && focus.touched.borrow().is_none());
+    }
+
+    #[test]
+    fn the_front_window_is_asked_once_a_poll_and_not_when_an_fx_window_or_midi_editor_has_the_focus() {
+        let (reads, proj) = project();
+        let api = fake::api();
+        let reaper = Reaper::new(&api);
+        let focus = Focus::default();
+        let asked = || fake::with(|s| s.front_title_asked);
+        fake::with(|s| s.front_title = Some("[unsaved project] - REAPER v7.82".into()));
+        let before = asked();
+        assert_eq!(focus.poll(&reads, &reaper, proj, true)["view"], "arrange");
+        assert_eq!(asked() - before, 1, "once, for the routing window and the mixer both");
+        fake::with(|s| s.front_title = Some("Mixer".into()));
+        let before = asked();
+        assert_eq!(focus.poll(&reads, &reaper, proj, true)["view"], "mixer");
+        assert_eq!(asked() - before, 1);
+        fake::with(|s| s.front_title = Some("Routing for track 1".into()));
+        let before = asked();
+        let value = focus.poll(&reads, &reaper, proj, true);
+        assert_eq!((&value["view"], &value["selection"]["routingTrackRef"]), (&json!("routing"), &json!("r:track:{AAAA}")));
+        assert_eq!(asked() - before, 1);
+        // An FX window or a MIDI editor with the focus is the view: the window title isn't asked for.
+        fake::with(|s| s.focused_fx = Some((0, -1, -1, 0, 0)));
+        let before = asked();
+        assert_eq!(focus.poll(&reads, &reaper, proj, true)["view"], "fx");
+        assert_eq!(asked() - before, 0);
+        fake::with(|s| {
+            s.focused_fx = None;
+            s.midi_editor = Some((1, 0, 0));
+        });
+        let before = asked();
+        assert_eq!(focus.poll(&reads, &reaper, proj, true)["view"], "midi");
+        assert_eq!(asked() - before, 0);
     }
 
     #[test]
