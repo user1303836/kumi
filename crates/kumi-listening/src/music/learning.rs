@@ -10,7 +10,7 @@ use super::{
 };
 use indexmap::IndexMap;
 use kumi_common::{abort::Signal, time::now_ms};
-use kumi_library::{daws::Daws, measure_worker::worker_binary};
+use kumi_library::{daws::Daws, measure_worker::worker_program};
 use serde::{Deserialize, Serialize};
 use std::{
     cell::{Cell, RefCell},
@@ -563,7 +563,8 @@ impl Music {
             });
             return;
         }
-        let spawned = Command::new(worker_binary("kumi-library-learner", "KUMI_LIBRARY_LEARNER_BIN"))
+        let spawned = worker_program("library-learner", "KUMI_LIBRARY_LEARNER_BIN")
+            .command()
             .arg("--music")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())

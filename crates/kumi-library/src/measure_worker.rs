@@ -59,13 +59,33 @@ impl MeasureJob {
         }
     }
 }
-/// Workers are installed beside the main binary; the override also supports embedders.
-pub fn worker_binary(name: &str, variable: &str) -> PathBuf {
-    if let Some(path) = std::env::var_os(variable) {
-        return path.into();
+/// The program a worker runs as: kumi itself, which does the job when its first argument names it (`kumi
+/// __library-measure`, `kumi __library-learner`), or the program `variable` names (a test's stand-in, an embedder's
+/// own), told the same way. The workers were programs of their own beside kumi until 1.24, each nine tenths kumi's
+/// code again.
+#[derive(Clone, Debug)]
+pub struct WorkerProgram {
+    program: PathBuf,
+    role: &'static str,
+}
+impl WorkerProgram {
+    pub fn new(program: PathBuf, role: &'static str) -> Self {
+        Self { program, role }
     }
-    let filename = format!("{name}{}", std::env::consts::EXE_SUFFIX);
-    std::env::current_exe()
+    /// The command that starts it: the program, told its job.
+    pub fn command(&self) -> Command {
+        let mut command = Command::new(&self.program);
+        command.arg(format!("__{}", self.role));
+        command
+    }
+}
+/// `role`'s worker: the program `variable` names, else this kumi (beside a test binary, in Cargo's layout).
+pub fn worker_program(role: &'static str, variable: &str) -> WorkerProgram {
+    if let Some(path) = std::env::var_os(variable) {
+        return WorkerProgram::new(path.into(), role);
+    }
+    let filename = format!("kumi{}", std::env::consts::EXE_SUFFIX);
+    let program = std::env::current_exe()
         .ok()
         .and_then(|exe| {
             exe.parent().map(|folder| {
@@ -74,7 +94,8 @@ pub fn worker_binary(name: &str, variable: &str) -> PathBuf {
                 folder.join(&filename)
             })
         })
-        .unwrap_or_else(|| filename.into())
+        .unwrap_or_else(|| filename.into());
+    WorkerProgram::new(program, role)
 }
 /// A Job Object holding a worker, and so what it starts: ended together.
 #[cfg(windows)]
@@ -189,10 +210,10 @@ struct Worker {
     stopped: bool,
 }
 impl Worker {
-    fn spawn(binary: &std::path::Path) -> io::Result<Self> {
+    fn spawn(worker: &WorkerProgram) -> io::Result<Self> {
         let temp = std::env::temp_dir().join(format!("kumi-measure-{}-{}", std::process::id(), uuid::Uuid::new_v4()));
         std::fs::create_dir(&temp)?;
-        let mut command = Command::new(binary);
+        let mut command = worker.command();
         command.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::inherit()).kill_on_drop(true);
         command.env("TMPDIR", &temp).env("TMP", &temp).env("TEMP", &temp);
         // A group of its own, so what it starts (ffmpeg, afconvert) ends with it.
@@ -315,18 +336,18 @@ fn sweep_left_folders() {
 pub struct MeasurePool {
     slots: Vec<Mutex<Option<Worker>>>,
     timeout: Duration,
-    binary: PathBuf,
+    worker: WorkerProgram,
     next: Cell<u64>,
 }
 impl MeasurePool {
     pub fn new(size: usize) -> Self {
-        Self::with_worker(size, worker_binary("kumi-library-measure", "KUMI_LIBRARY_MEASURE_BIN"), Duration::from_millis(90000))
+        Self::with_worker(size, worker_program("library-measure", "KUMI_LIBRARY_MEASURE_BIN"), Duration::from_millis(90000))
     }
-    pub fn with_worker(size: usize, binary: PathBuf, timeout: Duration) -> Self {
+    pub fn with_worker(size: usize, worker: WorkerProgram, timeout: Duration) -> Self {
         if size > 0 {
             sweep_left_folders();
         }
-        Self { slots: (0..size).map(|_| Mutex::new(None)).collect(), timeout, binary, next: Cell::new(0) }
+        Self { slots: (0..size).map(|_| Mutex::new(None)).collect(), timeout, worker, next: Cell::new(0) }
     }
     /// A file measured, or what's wrong with it. Err when no worker could start (the binary missing for a moment
     /// during an update, an antivirus holding it): that says nothing about the file, so it isn't recorded.
@@ -338,7 +359,7 @@ impl MeasurePool {
         self.next.set(job.id.wrapping_add(1));
         let mut held = self.slots[slot % self.slots.len()].lock().await;
         if held.is_none() {
-            *held = Some(Worker::spawn(&self.binary)?);
+            *held = Some(Worker::spawn(&self.worker)?);
         }
         let worker = held.as_mut().unwrap();
         let result = tokio::time::timeout(self.timeout, worker.run(&job)).await;
@@ -383,8 +404,8 @@ pub async fn measure_reference(
     signal: kumi_common::abort::Signal,
 ) -> Result<SoundEntry, kumi_types::errors::RuntimeError> {
     use kumi_types::errors::RuntimeError;
-    let mut worker = Worker::spawn(&worker_binary("kumi-library-measure", "KUMI_LIBRARY_MEASURE_BIN"))
-        .map_err(|e| RuntimeError::plain(e.to_string()))?;
+    let mut worker =
+        Worker::spawn(&worker_program("library-measure", "KUMI_LIBRARY_MEASURE_BIN")).map_err(|e| RuntimeError::plain(e.to_string()))?;
     let result = tokio::select! {biased;_=signal.cancelled()=>Err(RuntimeError::Aborted),result=worker.run(&job)=>result.map_err(|e|RuntimeError::plain(e.to_string()))};
     worker.stop().await;
     result
