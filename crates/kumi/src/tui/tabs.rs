@@ -151,8 +151,8 @@ impl TabPanel {
 
     /// Rows down (positive) or up; held within the tab's rows.
     pub fn scroll_by(&self, rows: i32) {
+        let active = self.active_id();
         let mut state = self.inner.state.borrow_mut();
-        let active = state.active.clone();
         let most = (state.totals.get(&active).copied().unwrap_or(0) - state.last_height).max(0);
         let scroll = (state.scrolls.get(&active).copied().unwrap_or(0) + rows).clamp(0, most.max(0));
         state.scrolls.insert(active, scroll);
@@ -160,8 +160,9 @@ impl TabPanel {
 
     /// The keyboard comes in at the first row showing, or leaves.
     pub fn enter(&self) {
+        let active = self.active_id();
         let mut state = self.inner.state.borrow_mut();
-        let scroll = state.scrolls.get(&state.active).copied().unwrap_or(0);
+        let scroll = state.scrolls.get(&active).copied().unwrap_or(0);
         state.cursor = Some((scroll + if scroll > 0 { 1 } else { 0 }).min((state.last_rows.len() as i32 - 1).max(0)));
     }
 
@@ -172,6 +173,7 @@ impl TabPanel {
     /// Keys while the keyboard is in the panel: ↑↓ and pages move; Enter opens a row that opens (a job, a change's
     /// picture) or does the row's action; another key is the row's own, if it has it (`keys`). True when used.
     pub fn key(&self, name: &str) -> bool {
+        let active = self.active_id();
         let action = {
             let mut state = self.inner.state.borrow_mut();
             let Some(cursor) = state.cursor else { return false };
@@ -180,7 +182,7 @@ impl TabPanel {
                 let cursor = (cursor + by).clamp(0, (count - 1).max(0));
                 state.cursor = Some(cursor);
                 // Kept in view, clear of the "n more" rows at the ends.
-                let active = state.active.clone();
+                let active = active.clone();
                 let scroll = state.scrolls.get(&active).copied().unwrap_or(0);
                 let height = state.last_height;
                 if cursor < scroll + if scroll > 0 { 1 } else { 0 } {
@@ -350,5 +352,58 @@ impl TabPanel {
         if last > 0 {
             screen.put(area.x, y, &format!("↓ {} more", things(&hidden_below)), &faint);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::cell::Cell;
+
+    /// Twenty rows named by the tab's id ("a0" to "a19"), on the strip while `shown` says.
+    struct Rows {
+        id: &'static str,
+        shown: Rc<Cell<bool>>,
+    }
+
+    impl Tab for Rows {
+        fn id(&self) -> &str {
+            self.id
+        }
+        fn title(&self) -> &str {
+            self.id
+        }
+        fn rows(&self, _: i32) -> Rc<[TabRow]> {
+            (0..20)
+                .map(|n| TabRow { spans: vec![Span::styled(format!("{}{n}", self.id), Style::default())], ..Default::default() })
+                .collect()
+        }
+        fn shown(&self) -> bool {
+            self.shown.get()
+        }
+    }
+
+    #[test]
+    fn the_wheel_and_the_keyboard_move_the_tab_showing_while_the_chosen_one_is_off_the_strip() {
+        let jobs = Rc::new(Cell::new(true));
+        let tabs: Vec<Rc<dyn Tab>> =
+            vec![Rc::new(Rows { id: "a", shown: Rc::new(Cell::new(true)) }), Rc::new(Rows { id: "b", shown: jobs.clone() })];
+        let panel = TabPanel::new(tabs, Some("b"), None);
+        let draw = |panel: &TabPanel| {
+            let mut screen = Screen::new(20, 7);
+            panel.draw(&mut screen, Rect::new(0, 0, 20, 7), &mut vec![]);
+            screen.lines()
+        };
+        // The chosen tab leaves the strip (JOBS between its last job and the next): the first tab shows in its place.
+        jobs.set(false);
+        assert!(draw(&panel)[1].starts_with("a0"));
+        panel.scroll_by(3);
+        let lines = draw(&panel);
+        assert!(lines[1].starts_with("↑ 4 more") && lines[2].starts_with("a4"), "{lines:?}");
+        panel.enter();
+        assert_eq!(panel.cursor(), Some(4), "the keyboard comes in at the first row showing");
+        assert!(panel.key("pagedown"));
+        let lines = draw(&panel);
+        assert!(lines.iter().any(|line| line.starts_with("a10")), "the keyboard's row in view: {lines:?}");
     }
 }
