@@ -326,6 +326,9 @@ pub struct Settings {
     pub fast: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub panel_tab: Option<String>,
+    /// false: the map's points don't play as the mouse rests on them (h on the map).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub map_hover: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub update_check: Option<bool>,
     /// false: no "What's new" as Kumi first starts after an update (`/changelog` still shows it).
@@ -456,6 +459,7 @@ pub fn read_settings(file: &str) -> Settings {
         effort,
         fast: (value["fast"] == true).then_some(true),
         panel_tab: value["panelTab"].as_str().filter(|s| TAB.is_match(s)).map(str::to_string),
+        map_hover: (value["mapHover"] == false).then_some(false),
         update_check: (value["updateCheck"] == false).then_some(false),
         whats_new: (value["whatsNew"] == false).then_some(false),
         instant_phrases: (value["instantPhrases"] == false).then_some(false),
@@ -479,11 +483,12 @@ pub fn read_settings(file: &str) -> Settings {
     }
 }
 /// The settings this Kumi reads: any other key in the file is a newer Kumi's, kept as it is when this one writes.
-const KNOWN_SETTINGS: [&str; 21] = [
+const KNOWN_SETTINGS: [&str; 22] = [
     "model",
     "effort",
     "fast",
     "panelTab",
+    "mapHover",
     "updateCheck",
     "whatsNew",
     "instantPhrases",
@@ -556,6 +561,9 @@ pub fn write_settings(file: &str, next: &Value) -> Result<(), RuntimeError> {
     let kept = |key: &str| next.get(key).or_else(|| before.get(key));
     if let Some(value) = kept("panelTab").filter(|v| truthy(v)) {
         settings.insert("panelTab".into(), value.clone());
+    }
+    if kept("mapHover") == Some(&Value::Bool(false)) {
+        settings.insert("mapHover".into(), json!(false));
     }
     if kept("updateCheck") == Some(&Value::Bool(false)) {
         settings.insert("updateCheck".into(), json!(false));

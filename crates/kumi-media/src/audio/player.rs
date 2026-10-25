@@ -1,7 +1,8 @@
 //! Kumi's player: a song or a sound of the producer's, heard through the computer's output. One sound at a time, from a
 //! position for a length; a new one takes over from the one playing, and a stop ends it, each with a fade a few
-//! milliseconds long so nothing clicks. The file is read as Kumi reads any (WAV and AIFF in place, other formats
-//! converted, only the stretch played), resampled to the output's rate and handed to it whole.
+//! milliseconds long so nothing clicks (a play can ask for a longer fade out: a preview cut short). The file is read
+//! as Kumi reads any (WAV and AIFF in place, other formats converted, only the stretch played), resampled to the
+//! output's rate and handed to it whole.
 //!
 //! The output is the computer's default one, through cpal: Core Audio on a Mac, WASAPI on Windows. It opens, plays and
 //! closes on a thread of its own, never on Kumi's, and rests (its stream paused, holding neither the device nor the
@@ -128,6 +129,12 @@ impl Player {
     /// another play or a stop comes while the file is still being read, this one stops reading it and plays nothing:
     /// Overtaken, which isn't an error.
     pub async fn play(&self, path: impl AsRef<Path>, from: f64, seconds: f64) -> Result<Played, PlayerError> {
+        self.play_fading(path, from, seconds, FADE).await
+    }
+
+    /// `play`, the sound faded out over its last `fade_out` seconds (a few milliseconds at least): a preview cut short
+    /// ends gently.
+    pub async fn play_fading(&self, path: impl AsRef<Path>, from: f64, seconds: f64, fade_out: f64) -> Result<Played, PlayerError> {
         let turn = self.turn.get() + 1;
         self.turn.set(turn);
         let signal = Signal::new();
@@ -142,8 +149,9 @@ impl Player {
             Err(_) if overtaken() => return Ok(Played::Overtaken),
             clip => clip?,
         };
-        let samples =
-            tokio::task::spawn_blocking(move || shaped(clip, format)).await.map_err(|error| PlayerError::Output(error.to_string()))?;
+        let samples = tokio::task::spawn_blocking(move || shaped(clip, format, fade_out))
+            .await
+            .map_err(|error| PlayerError::Output(error.to_string()))?;
         if overtaken() {
             return Ok(Played::Overtaken);
         }
@@ -238,15 +246,17 @@ pub async fn stretch(path: &Path, from: f64, seconds: f64, signal: &Signal) -> R
 }
 
 /// A clip as an output plays it: at its rate, in its first two channels (one channel heard in both; two each in its
-/// own, or mixed into one), faded in and out. An interface's other outputs stay silent.
-fn shaped((channels, rate): (Vec<Vec<f32>>, f64), format: Format) -> Vec<f32> {
+/// own, or mixed into one), faded in, and out over `fade_out` seconds (FADE at least). An interface's other outputs
+/// stay silent.
+fn shaped((channels, rate): (Vec<Vec<f32>>, f64), format: Format, fade_out: f64) -> Vec<f32> {
     let resampled: Vec<Vec<f32>> = channels.iter().map(|channel| resample(channel, rate, format.rate as f64)).collect();
     let frames = resampled.iter().map(Vec::len).min().unwrap_or(0);
     let wide = format.channels.max(1) as usize;
-    let fade = ((format.rate as f64 * FADE).round() as usize).max(1);
+    let frames_of = |seconds: f64| ((format.rate as f64 * seconds).round() as usize).max(1);
+    let (fade_in, fade_out) = (frames_of(FADE), frames_of(fade_out.max(FADE)));
     let mut samples = Vec::with_capacity(frames * wide);
     for frame in 0..frames {
-        let gain = ((frame + 1).min(frames - frame) as f32 / fade as f32).min(1.);
+        let gain = ((frame + 1) as f32 / fade_in as f32).min((frames - frame) as f32 / fade_out as f32).min(1.);
         for channel in 0..wide {
             let value = match (resampled.as_slice(), channel) {
                 ([mono], 0 | 1) => mono[frame],
@@ -602,17 +612,22 @@ mod tests {
     #[test]
     fn a_clip_is_shaped_to_the_outputs_channels_and_faded_at_its_ends() {
         let mono = (vec![vec![1.; 1_000]], 48_000.);
-        let stereo = shaped(mono.clone(), Format { rate: 48_000, channels: 2 });
+        let stereo = shaped(mono.clone(), Format { rate: 48_000, channels: 2 }, FADE);
         assert_eq!(stereo.len(), 2_000, "one channel heard in both");
         assert!(stereo[0] < 0.01 && stereo[1_999] < 0.01, "faded in and out");
         assert_eq!((stereo[1_000], stereo[1_001]), (1., 1.));
         let two = (vec![vec![0.5; 1_000], vec![-0.5; 1_000]], 48_000.);
-        let one = shaped(two.clone(), Format { rate: 48_000, channels: 1 });
+        let one = shaped(two.clone(), Format { rate: 48_000, channels: 1 }, FADE);
         assert!(one.iter().all(|value| value.abs() < 1e-6), "two mixed into one");
-        let four = shaped(two, Format { rate: 48_000, channels: 4 });
+        let four = shaped(two, Format { rate: 48_000, channels: 4 }, FADE);
         assert_eq!(&four[2_000..2_004], [0.5, -0.5, 0., 0.], "left and right in the first two");
-        let four = shaped(mono, Format { rate: 48_000, channels: 4 });
+        let four = shaped(mono, Format { rate: 48_000, channels: 4 }, FADE);
         assert_eq!(&four[2_000..2_004], [1., 1., 0., 0.], "one channel in the first two, as two are");
+        // A longer fade out, asked for: the gain slopes down over the last half second, after the quick fade in.
+        let long = shaped((vec![vec![1.; 48_000]], 48_000.), Format { rate: 48_000, channels: 1 }, 0.5);
+        assert!(long[0] < 0.01 && long[300] > 0.99 && long[24_000] > 0.99);
+        assert!((long[36_000] - 0.5).abs() < 0.01, "halfway down in the fade's middle: {}", long[36_000]);
+        assert!(long[47_999] < 0.01);
     }
 
     /// An output that plays nothing.

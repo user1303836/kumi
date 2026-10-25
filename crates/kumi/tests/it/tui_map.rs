@@ -8,14 +8,18 @@ mod support;
 use crate::map_server::{ask, get, post};
 use futures::FutureExt;
 use kumi::map::{songs_layer, sounds_layer, LoadMap, MapData};
+use kumi::tui::app::MapHover;
 use kumi::tui::map::MapView;
 use kumi::tui::pictures::{kitty::DIACRITICS, Graphics};
 use kumi::tui::screen::Screen;
 use kumi::tui::style::palette;
 use kumi_library::{map::MapSound, SoundClass, SoundKind};
 use kumi_listening::music::store::{MapSong, MapStyle};
-use kumi_media::audio::player::{Format, Output, Player, PlayerError};
-use std::{cell::RefCell, rc::Rc};
+use kumi_media::audio::player::{Format, Opener, Output, Player, PlayerError};
+use std::{
+    cell::{Cell, RefCell},
+    rc::Rc,
+};
 use support::*;
 macro_rules! case {
     ($name:ident,$body:expr) => {
@@ -374,23 +378,57 @@ impl Output for Kept {
     }
 }
 
-case!(space_plays_the_point_chosen_and_again_stops_it, async {
-    let dir = tempfile::tempdir().unwrap();
-    let mut data = fixture(2, 1);
+/// The map's sounds as real files, half a second of a tone each.
+fn sounding(dir: &std::path::Path, mut data: MapData) -> MapData {
     for point in data.sounds.points.iter_mut() {
-        let file = dir.path().join(format!("{}.wav", point.name));
+        let file = dir.join(format!("{}.wav", point.name));
         let samples: Vec<f32> = (0..24_000).map(|n| (n as f32 * 0.05).sin() * 0.2).collect();
         std::fs::write(&file, kumi_media::audio::decode::float_wav(&[samples], 48_000)).unwrap();
         point.path = file.to_str().unwrap().to_string();
     }
+    data
+}
+
+/// The map's sounds as real files `seconds` long, each played whole: longer than a hover's preview.
+fn sounding_for(dir: &std::path::Path, mut data: MapData, seconds: f32) -> MapData {
+    for point in data.sounds.points.iter_mut() {
+        let file = dir.join(format!("{}.wav", point.name));
+        let samples: Vec<f32> = (0..(48_000. * seconds) as usize).map(|n| (n as f32 * 0.05).sin() * 0.2).collect();
+        std::fs::write(&file, kumi_media::audio::decode::float_wav(&[samples], 48_000)).unwrap();
+        (point.path, point.seconds) = (file.to_str().unwrap().to_string(), seconds);
+    }
+    data
+}
+
+/// How a player opens a Kept output.
+fn kept(started: &Rc<RefCell<Vec<usize>>>, playing: &Rc<RefCell<bool>>) -> Opener {
+    let (started, playing) = (started.clone(), playing.clone());
+    Box::new(move || Ok(Box::new(Kept { started: started.clone(), playing: playing.clone() }) as Box<dyn Output>))
+}
+
+/// An SGR mouse report: the mouse moved, no button held, to this cell (0-based).
+fn moved(x: usize, y: usize) -> String {
+    format!("\x1b[<35;{};{}M", x + 1, y + 1)
+}
+
+/// Waits until the output has been given `count` sounds: a play shows on the screen as it's asked, a moment before the
+/// file is read and handed over.
+async fn given(started: &Rc<RefCell<Vec<usize>>>, count: usize) {
+    for _ in 0..300 {
+        if started.borrow().len() >= count {
+            return;
+        }
+        delay(10).await;
+    }
+    panic!("the output was given {} sounds, not {count}", started.borrow().len());
+}
+
+case!(space_plays_the_point_chosen_and_again_stops_it, async {
+    let dir = tempfile::tempdir().unwrap();
     let (started, playing) = (Rc::new(RefCell::new(vec![])), Rc::new(RefCell::new(false)));
-    let opener = {
-        let (started, playing) = (started.clone(), playing.clone());
-        Box::new(move || Ok(Box::new(Kept { started: started.clone(), playing: playing.clone() }) as Box<dyn Output>))
-    };
     let h = Harness::with(160, 40, Rc::new(Control::default()), |o| {
-        o.map = Some(loader(data));
-        o.player = Some(Rc::new(Player::with_opener(opener)));
+        o.map = Some(loader(sounding(dir.path(), fixture(2, 1))));
+        o.player = Some(Rc::new(Player::with_opener(kept(&started, &playing))));
     });
     h.start().await;
     h.connect();
@@ -407,15 +445,119 @@ case!(space_plays_the_point_chosen_and_again_stops_it, async {
     h.close().await;
 });
 
+case!(a_point_plays_as_the_mouse_rests_on_it_and_stops_as_the_mouse_leaves, async {
+    let dir = tempfile::tempdir().unwrap();
+    let (started, playing) = (Rc::new(RefCell::new(vec![])), Rc::new(RefCell::new(false)));
+    let remembered = Rc::new(Cell::new(None));
+    let h = Harness::with(160, 40, Rc::new(Control::default()), |o| {
+        o.map = Some(loader(sounding(dir.path(), fixture(2, 1))));
+        o.player = Some(Rc::new(Player::with_opener(kept(&started, &playing))));
+        let saved = remembered.clone();
+        o.map_hover = Some(MapHover { load: Rc::new(|| true), save: Rc::new(move |on| saved.set(Some(on))) });
+    });
+    h.start().await;
+    h.connect();
+    h.type_text("/map\r").await;
+    h.wait_for("Sounds 12").await;
+    assert!(h.output.text.borrow().contains("\x1b[?1003h"), "the mouse's moves are asked for while the map is open");
+    h.has("h hover plays");
+    // The mouse comes to rest on the point chosen: a moment later it plays (half a second of it, its length), and shows
+    // so (▶ in the point's row, or beside the point when its neighbour is the one under the mouse).
+    let (row, column) = marker(&h.screen());
+    h.type_text(&moved(column, row)).await;
+    given(&started, 1).await;
+    h.wait_for("▶ ").await;
+    assert!(started.borrow()[0] <= 48_000, "{}", started.borrow()[0]);
+    // Off it: what the hover started stops.
+    h.type_text(&moved(1, 2)).await;
+    h.wait_until_hidden("▶ ").await;
+    assert!(!*playing.borrow(), "stopped");
+    // A sweep across the point, off it again before it has rested: nothing plays. (Both moves in one write: they're read
+    // and handled back to back, however slow the computer.)
+    h.type_text(&format!("{}{}", moved(column, row), moved(1, 2))).await;
+    delay(300).await;
+    assert_eq!(started.borrow().len(), 1, "a sweep plays nothing");
+    // h: hover plays off, remembered, and the mouse resting on a point plays nothing; h again turns them on.
+    h.type_text("h").await;
+    h.wait_for("h hover quiet").await;
+    assert_eq!(remembered.get(), Some(false));
+    h.type_text(&moved(column, row)).await;
+    delay(300).await;
+    assert_eq!(started.borrow().len(), 1, "quiet");
+    h.type_text("h").await;
+    h.wait_for("h hover plays").await;
+    assert_eq!(remembered.get(), Some(true));
+    // Closed: the mouse's moves aren't asked for any more.
+    h.type_text("\x1b").await;
+    h.wait_until_hidden("Sounds 12").await;
+    let written = h.output.text.borrow().clone();
+    assert!(written.rfind("\x1b[?1003l") > written.rfind("\x1b[?1003h"), "no more moves once the map closed");
+    h.close().await;
+});
+
+case!(space_over_a_hovers_preview_plays_the_point_whole, async {
+    let dir = tempfile::tempdir().unwrap();
+    let (started, playing) = (Rc::new(RefCell::new(vec![])), Rc::new(RefCell::new(false)));
+    let h = Harness::with(160, 40, Rc::new(Control::default()), |o| {
+        o.map = Some(loader(sounding_for(dir.path(), fixture(2, 1), 3.)));
+        o.player = Some(Rc::new(Player::with_opener(kept(&started, &playing))));
+        o.map_hover = Some(MapHover { load: Rc::new(|| true), save: Rc::new(|_| {}) });
+    });
+    h.start().await;
+    h.connect();
+    h.type_text("/map\r").await;
+    h.wait_for("Sounds 12").await;
+    // Three seconds long: the mouse resting on the point chosen hears two of them (both channels at 48 kHz).
+    let (row, column) = marker(&h.screen());
+    h.type_text(&moved(column, row)).await;
+    given(&started, 1).await;
+    let (preview, whole) = (2 * 48_000 * 2, 3 * 48_000 * 2);
+    assert!(started.borrow()[0] <= preview, "{}", started.borrow()[0]);
+    // Space over the preview: the whole of it, not a stop.
+    h.type_text(" ").await;
+    given(&started, 2).await;
+    assert!(started.borrow()[1] > preview && started.borrow()[1] <= whole, "{}", started.borrow()[1]);
+    assert!(*playing.borrow());
+    // Off the point and back: Space's play goes on, and no preview takes it over.
+    h.type_text(&moved(1, 2)).await;
+    h.type_text(&moved(column, row)).await;
+    delay(300).await;
+    assert_eq!(started.borrow().len(), 2, "no preview took over");
+    assert!(*playing.borrow(), "Space's play goes on");
+    // Space again stops it. Then Space as the mouse comes to rest on the point: Space's play, whole, and the hover that
+    // was about to start doesn't take it over.
+    h.type_text(" ").await;
+    h.wait_until_hidden("▶ playing").await;
+    h.type_text(&moved(1, 2)).await;
+    h.type_text(&format!("{} ", moved(column, row))).await;
+    given(&started, 3).await;
+    delay(300).await;
+    assert_eq!(started.borrow().len(), 3, "the hover about to start didn't");
+    assert!(started.borrow()[2] > preview, "{}", started.borrow()[2]);
+    h.close().await;
+});
+
+case!(hover_plays_stay_off_when_that_was_remembered, async {
+    let h = Harness::with(160, 40, Rc::new(Control::default()), |o| {
+        o.map = Some(loader(fixture(2, 1)));
+        o.map_hover = Some(MapHover { load: Rc::new(|| false), save: Rc::new(|_| {}) });
+    });
+    h.start().await;
+    h.connect();
+    h.type_text("/map\r").await;
+    h.wait_for("h hover quiet").await;
+    h.close().await;
+});
+
 #[test]
 fn the_map_drawn_for_a_look() {
     // Zoomed out, 12,000 sounds are density; zoomed in, points.
     let data = fixture(2_000, 120);
     let mut shots: Vec<(String, Vec<u8>)> = vec![];
     for (name, zoom) in [("map", 0), ("map-zoomed", 4)] {
-        let mut image = MapView::new(Graphics::Kitty);
+        let mut image = MapView::new(Graphics::Kitty, true);
         image.loaded(data.clone());
-        let mut cells = MapView::new(Graphics::Cells);
+        let mut cells = MapView::new(Graphics::Cells, true);
         cells.loaded(data.clone());
         for _ in 0..zoom {
             image.on_text("+");
@@ -460,7 +602,7 @@ fn how_long_a_key_takes_at_300_000_points() {
     let data = fixture(50_000, 1);
     eprintln!("300,000 sounds laid out for the map in {:?}", started.elapsed());
     for graphics in [Graphics::Kitty, Graphics::Cells] {
-        let mut view = MapView::new(graphics);
+        let mut view = MapView::new(graphics, true);
         view.loaded(data.clone());
         let mut shown = String::new();
         // The frame, and how much of it was the image going up.

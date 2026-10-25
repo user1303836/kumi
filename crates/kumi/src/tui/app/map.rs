@@ -1,5 +1,6 @@
 //! /map: the producer's sounds and songs as two maps, full screen in place of the conversation until it closes (the
-//! view is tui/map.rs). Space plays a point through Kumi's player; an action puts what it asks in the input box.
+//! view is tui/map.rs). Space plays a point through Kumi's player, and so does the mouse resting on one (the terminal
+//! reports the mouse's moves while the map is open); an action puts what it asks in the input box.
 //! /map open serves the same maps to the browser (map_server.rs), whose actions land in the input box too.
 use super::super::{
     keys::{MouseAction, MouseButton, WheelDirection},
@@ -11,6 +12,9 @@ use super::*;
 use crate::map_server::Served;
 use kumi_media::audio::player::Played;
 use std::{path::PathBuf, sync::Arc};
+
+/// How long the mouse rests on a point before it plays: a sweep across points plays none of them.
+const HOVER_REST: Duration = Duration::from_millis(120);
 
 impl TuiApp {
     pub(super) fn map_open(&self) -> bool {
@@ -42,7 +46,10 @@ impl TuiApp {
         if let Some(voice) = self.0.voice.as_ref().filter(|voice| voice.active()) {
             voice.cancel();
         }
-        self.0.state.borrow_mut().map = Some(MapView::new(self.0.graphics));
+        let hover = self.0.options.map_hover.as_ref().is_none_or(|hover| (hover.load)());
+        self.0.state.borrow_mut().map = Some(MapView::new(self.0.graphics, hover));
+        // The mouse's moves, reported while the map is open: a point plays as the mouse rests on it.
+        self.0.tty.report_moves(true);
         self.0.scheduler.request();
         let data = load().await;
         if let Some(view) = self.0.state.borrow_mut().map.as_mut() {
@@ -210,6 +217,7 @@ impl TuiApp {
 
     /// Keys, typing and the mouse go to the map while it's open; ctrl+c closes it.
     pub(super) fn map_input(&self, event: InputEvent) {
+        let moved = matches!(event, InputEvent::Mouse { action: MouseAction::Move, .. });
         let asked = {
             let mut state = self.0.state.borrow_mut();
             let Some(view) = state.map.as_mut() else { return };
@@ -224,12 +232,17 @@ impl TuiApp {
                 InputEvent::Key { name, mods, .. } => view.on_key(&name, mods.shift),
                 InputEvent::Text { text } | InputEvent::Paste { text } => view.on_text(&text),
                 InputEvent::Mouse { action: MouseAction::Press, button: MouseButton::Left, x, y, .. } => view.on_click(x, y),
+                InputEvent::Mouse { action: MouseAction::Move, x, y, .. } => view.on_move(x, y),
                 InputEvent::Mouse { action: MouseAction::Wheel, direction, x, y, .. } => {
                     view.on_wheel(direction == Some(WheelDirection::Up), x, y)
                 }
                 _ => Asked::Nothing,
             }
         };
+        // The mouse crossing the map changes nothing on screen until it comes to a point or leaves one.
+        if moved && asked == Asked::Nothing {
+            return;
+        }
         match asked {
             Asked::Nothing => {}
             Asked::Close => self.close_map(),
@@ -237,35 +250,97 @@ impl TuiApp {
                 self.close_map();
                 self.put_in_box(&words);
             }
-            Asked::Play { path, from, seconds, name } => self.map_play(path, from, seconds, name),
+            Asked::Play { path, from, seconds, name } => {
+                // Space's play: a hover about to start doesn't, so it can't take Space's play over.
+                self.0.state.borrow_mut().map_hover += 1;
+                self.map_play(path, from, seconds, 0., name);
+            }
             Asked::Stop => {
                 self.0.state.borrow_mut().map_play += 1;
                 if let Some(player) = &self.0.options.player {
                     player.stop();
                 }
             }
+            Asked::Hover { path, from, seconds, fade, name } => self.map_hover(path, from, seconds, fade, name),
+            Asked::Leave => self.map_leave(),
+            Asked::HoverPlays(on) => {
+                if let Some(hover) = &self.0.options.map_hover {
+                    (hover.save)(on);
+                }
+                if !on {
+                    self.map_leave();
+                }
+            }
         }
         self.0.scheduler.request();
     }
 
-    /// The map closes, its image comes down, and what it played stops. A job's answer that waited for the producer may
-    /// start now.
+    /// The mouse rests on a point: it plays once it has rested HOVER_REST, unless the mouse left it, or the map closed,
+    /// meanwhile.
+    fn map_hover(&self, path: String, from: f64, seconds: f64, fade: f64, name: String) {
+        let number = {
+            let mut state = self.0.state.borrow_mut();
+            state.map_hover += 1;
+            state.map_hover
+        };
+        let app = self.clone();
+        tokio::task::spawn_local(async move {
+            tokio::time::sleep(HOVER_REST).await;
+            {
+                let mut state = app.0.state.borrow_mut();
+                if state.map_hover != number {
+                    return;
+                }
+                let Some(view) = state.map.as_mut() else { return };
+                if !view.hover_plays() {
+                    return;
+                }
+            }
+            app.map_play(path, from, seconds, fade, name);
+            app.0.scheduler.request();
+        });
+    }
+
+    /// The mouse left the point it was on (or hover plays were turned off): a play about to start doesn't, and a
+    /// hover's play stops. Space's plays on.
+    fn map_leave(&self) {
+        let stop = {
+            let mut state = self.0.state.borrow_mut();
+            state.map_hover += 1;
+            let stop = state.map.as_mut().is_some_and(|view| view.hover_ends());
+            if stop {
+                state.map_play += 1;
+            }
+            stop
+        };
+        if stop {
+            if let Some(player) = &self.0.options.player {
+                player.stop();
+            }
+        }
+    }
+
+    /// The map closes, its image comes down, what it played stops and the mouse's moves stop being reported. A job's
+    /// answer that waited for the producer may start now.
     fn close_map(&self) {
         let mut state = self.0.state.borrow_mut();
         state.map = None;
         state.map_image = None;
         state.map_play += 1;
+        state.map_hover += 1;
         state.images.forget("map");
         drop(state);
+        self.0.tty.report_moves(false);
         if let Some(player) = &self.0.options.player {
             player.stop();
         }
         self.maybe_carry_on();
     }
 
-    /// A point played: shown as playing until it ends, or why it didn't play. Only the latest play (no other, no stop
-    /// and no closing since) says so: one taken over says nothing.
-    fn map_play(&self, path: String, from: f64, seconds: f64, name: String) {
+    /// A point played (faded out over `fade` seconds: a hover's preview, cut short): shown as playing until it ends, or
+    /// why it didn't play. Only the latest play (no other, no stop and no closing since) says so: one taken over says
+    /// nothing.
+    fn map_play(&self, path: String, from: f64, seconds: f64, fade: f64, name: String) {
         let Some(player) = self.0.options.player.clone() else {
             if let Some(view) = self.0.state.borrow_mut().map.as_mut() {
                 view.played(Some(format!("This Kumi can't play {name}.")));
@@ -280,7 +355,7 @@ impl TuiApp {
         let latest = move |app: &TuiApp| app.0.state.borrow().map_play == number;
         let app = self.clone();
         tokio::task::spawn_local(async move {
-            let said = match player.play(&path, from, seconds).await {
+            let said = match player.play_fading(&path, from, seconds, fade).await {
                 Ok(Played::Overtaken) => return,
                 Ok(Played::Began) => {
                     tokio::time::sleep(Duration::from_secs_f64(seconds)).await;
