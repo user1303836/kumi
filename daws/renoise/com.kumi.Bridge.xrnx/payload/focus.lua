@@ -298,7 +298,7 @@ local function pattern_body(job, params, epoch)
         local entry, text = entries[t], json.encode(row, { max_depth = json.ROW_DEPTH })
         entry.rows[#entry.rows + 1] = row
         entry.texts[#entry.rows] = text or false
-        bytes = bytes + (text and #text or 0) + 1
+        bytes = bytes + #(text or json.encode(row) or "") + 1
       end
     end
     if bytes > M.BODY_BYTES and i < to then
