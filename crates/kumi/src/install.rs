@@ -94,6 +94,11 @@ pub struct ReleaseManifest {
     pub kumi: String,
     pub bundle: String,
     pub sha256: String,
+    /// The same bundle xz-compressed, a third smaller, for a tar that reads xz; the releases that make one name it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bundle_xz: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sha256_xz: Option<String>,
     pub runtime: String,
     pub target: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -554,6 +559,31 @@ impl Stopped {
         }
     }
 }
+/// The bundle an update takes, its checksum and how tar unpacks it: the xz one when the release names one whole (a
+/// well-formed name and sum; anything else is passed over, as install.sh passes it over, never a reason to refuse the
+/// release) and this system's tar reads xz (macOS's bsdtar, GNU tar beside xz); else the gzipped one, which every tar
+/// reads. KUMI_BUNDLE_XZ=1|0 says, for tests.
+fn pick_bundle(manifest: &ReleaseManifest, env: &Env) -> (String, String, &'static str) {
+    let matches = |value: &str, pattern: &str| regex::Regex::new(pattern).unwrap().is_match(value);
+    if let (Some(name), Some(sha256)) = (&manifest.bundle_xz, &manifest.sha256_xz) {
+        if matches(name, r"^[A-Za-z0-9_.-]+\.tar\.xz$") && matches(sha256, r"^[0-9a-f]{64}$") && tar_reads_xz(env) {
+            return (name.clone(), sha256.clone(), "-xf");
+        }
+    }
+    (manifest.bundle.clone(), manifest.sha256.clone(), "-xzf")
+}
+fn tar_reads_xz(env: &Env) -> bool {
+    match env.get("KUMI_BUNDLE_XZ").map(String::as_str) {
+        Some("1") => return true,
+        Some("0") => return false,
+        _ => {}
+    }
+    match system::platform() {
+        "darwin" => true,
+        "linux" => env.get("PATH").is_some_and(|path| std::env::split_paths(path).any(|folder| folder.join("xz").is_file())),
+        _ => false,
+    }
+}
 /// Downloads `url` into `file` as it arrives, and gives what it got's SHA-256: the bundle is never held whole, nor
 /// read back to check it.
 async fn download(url: &str, file: &str, fetch: Rc<dyn Fetch>, cancel: Option<abort::Signal>) -> Result<String, Stopped> {
@@ -699,7 +729,8 @@ pub async fn update_installed(io: InstalledIo) -> Result<i32, RuntimeError> {
         say(Stopped::Disk(error).said(&home));
         return Ok(1);
     }
-    let bundle = join(&downloads, &manifest.bundle);
+    let (asset, sha256, unpack) = pick_bundle(&manifest, &io.env);
+    let bundle = join(&downloads, &asset);
     let fresh = join(&home, "app.new");
     let cleanup = Cleanup(vec![fresh.clone(), bundle.clone()]);
     let result: Result<i32, RuntimeError> = async {
@@ -707,7 +738,7 @@ pub async fn update_installed(io: InstalledIo) -> Result<i32, RuntimeError> {
             io.out.clone(),
             &io.env,
             &format!("Downloading Kumi {}…", manifest.kumi),
-            download(&format!("{base}/{}", manifest.bundle), &bundle, fetch, io.cancel.clone()),
+            download(&format!("{base}/{asset}"), &bundle, fetch, io.cancel.clone()),
             true,
         )
         .await;
@@ -718,7 +749,7 @@ pub async fn update_installed(io: InstalledIo) -> Result<i32, RuntimeError> {
                 return Ok(1);
             }
         };
-        if downloaded != manifest.sha256 {
+        if downloaded != sha256 {
             say("The download didn't match its checksum, so nothing was changed. Try again in a moment.".into());
             return Ok(1);
         }
@@ -737,7 +768,7 @@ pub async fn update_installed(io: InstalledIo) -> Result<i32, RuntimeError> {
                 };
                 let unpacked = run(
                     system::system_program_default(SystemProgram::Tar),
-                    vec!["-xzf".into(), inside(&bundle), "-C".into(), inside(&fresh)],
+                    vec![unpack.into(), inside(&bundle), "-C".into(), inside(&fresh)],
                     Some(home.clone()),
                 )
                 .await;
@@ -1464,7 +1495,9 @@ fn kumis_entry(part: &str, name: &str, path: &Path, alone: bool) -> bool {
                 name == "kumi.tar.gz"
                     || name
                         .strip_prefix("kumi-")
-                        .and_then(|rest| rest.strip_suffix(".tar.gz").or_else(|| rest.strip_suffix(".zip")))
+                        .and_then(|rest| {
+                            rest.strip_suffix(".tar.gz").or_else(|| rest.strip_suffix(".tar.xz")).or_else(|| rest.strip_suffix(".zip"))
+                        })
                         .is_some_and(|target| {
                             let parts: Vec<&str> = target.split('-').collect();
                             parts.len() >= 3

@@ -425,25 +425,35 @@ test("devices m4: a host-made Doofer edit is written whole if its shape holds, a
   ok(device_data(3, 2).preset_data:find("<Name>Macro 1</Name>", 1, true))
 end)
 
-test("devices m4: the journal's poll of a Doofer it keeps prints its text once while the text stays the same (#361 N-S16)", function()
+-- (the tool's byte-by-byte prints counted in KUMI_PRINTS: a line added to changes_material's `print_now`, which every print,
+-- shape and content made goes through, and nothing kept does)
+local function counting_prints(env_)
+  local path = env_.bundle .. "payload/changes_material.lua"
+  local f = assert(io.open(path, "rb"))
+  local text = f:read("*a")
+  f:close()
+  local counted, n = text:gsub("local function print_now%(text%)\n", "local function print_now(text)\n  KUMI_PRINTS = (KUMI_PRINTS or 0) + 1\n")
+  assert(n == 1)
+  f = assert(io.open(path, "wb"))
+  f:write(counted)
+  f:close()
+end
+
+local function setup_counting_prints()
   KUMI_PRINTS = 0
   local env = H.setup({ song = {
     name = "Lab", file_name = "/s/lab.xrns", bpm = 120, lpb = 4, mixer_device = true,
     tracks = { { name = "Kick" }, { name = "Bass", devices = { eq5(), gainer() } }, { name = "Pad", devices = { doofer() } } },
     send_tracks = 1, patterns = 2, pattern_lines = 16, instruments = 1,
-  }, patch = function(env_)
-    local path = env_.bundle .. "payload/changes_presets.lua"
-    local f = assert(io.open(path, "rb"))
-    local text = f:read("*a")
-    f:close()
-    local counted, n = text:gsub("  seen = { shape = M%.shape_of%(xml%)", "  KUMI_PRINTS = (KUMI_PRINTS or 0) + 1\n  seen = { shape = M.shape_of(xml)")
-    assert(n == 1)
-    f = assert(io.open(path, "wb"))
-    f:write(counted)
-    f:close()
-  end })
+  }, patch = counting_prints })
   local peer = H.connect(env)
   H.frames(peer)
+  mock.data.undo.stack, mock.data.undo.redo = {}, {}
+  return env, peer
+end
+
+test("devices m4: the journal's poll of a Doofer it keeps prints its text once while the text stays the same (#361 N-S16)", function()
+  local _, peer = setup_counting_prints()
   local epoch, layout = place(peer)
   local read = call(peer, "preset_read", { ref = epoch .. ":device:3.2", epoch = epoch, layout = layout }).result
   local edited = read.presetData:gsub("<Name>Macro 1</Name>", "<Name>Drive</Name>", 1)
@@ -1993,4 +2003,114 @@ test("devices m4: a Doofer's shape leaves out what Renoise's view shows of it, a
   eq(presets.shape_of(viewed), "4d722c4cf7fe3489:67")
   local folded = viewed:gsub("<IsMaximized>true", "<IsMaximized>false"):gsub("<ShowDevices>false", "<ShowDevices>true")
   eq(presets.shape_of(folded), presets.shape_of(viewed))
+end)
+
+test("devices m4: a text's print and hash are the host's numbers, made sixteen bytes at a time as they were one at a time (perf N1)", function()
+  local material = T.load_payload_module("changes_material")
+  local base = T.load_payload_module("changes_base")
+  eq(material.print_of("abc"), "0b885c8b3025f862:3") -- (as presets/tests.rs has them)
+  eq(material.print_of(""), "0000150500000000:0")
+  eq(base.hash("abc"), "0b885c8b3025f862")
+  -- (the print as it was made before: a byte at a time; the hash is its first 16 digits)
+  local function one_at_a_time(text)
+    local a, b = 5381, 0
+    for i = 1, #text do
+      local c = text:byte(i)
+      a = (a * 33 + c) % 4294967296
+      b = (b * 65599 + c) % 4294967296
+    end
+    return string.format("%08x%08x:%d", a, b, #text)
+  end
+  local seed = 1
+  local function random_text(n)
+    local t = {}
+    for i = 1, n do
+      seed = (seed * 1103515245 + 12345) % 2147483648
+      t[i] = string.char(math.floor(seed / 65536) % 256)
+    end
+    return table.concat(t)
+  end
+  for n = 0, 70 do
+    local text = random_text(n)
+    eq(material.print_now(text), one_at_a_time(text), n .. " bytes")
+    eq(base.hash(text), one_at_a_time(text):sub(1, 16), n .. " bytes hashed")
+  end
+  for _, n in ipairs({ 4095, 4096, 4097, 65537 }) do
+    local text = random_text(n)
+    eq(material.print_now(text), one_at_a_time(text), n .. " bytes")
+    eq(base.hash(text), one_at_a_time(text):sub(1, 16), n .. " bytes hashed")
+  end
+  local biggest = string.rep(string.char(255), 1000)
+  eq(material.print_now(biggest), one_at_a_time(biggest), "every byte at its biggest")
+  -- (a device's state: its parameters' values hashed in turn, as before)
+  setup()
+  local device = mock.song:track(2):device(2)
+  local values = {}
+  for k = 1, #device.parameters do values[k] = string.format("%.9g|", device:parameter(k).value) end
+  ok(#values >= 2, "a device with parameters")
+  eq(material.device_state(device).state, one_at_a_time(table.concat(values)):sub(1, 16))
+end)
+
+test("devices m4: a text's prints are made once and kept by the text, within bounds (perf N1)", function()
+  local material = T.load_payload_module("changes_material")
+  local presets = T.load_payload_module("changes_presets")
+  local count, bytes = material.PRINTS_KEPT, material.PRINTS_BYTES
+  -- (the kept prints are the module's, shared by every test here: let the earlier ones go to start from one known text)
+  local function only(text_)
+    material.PRINTS_KEPT = 1
+    material.prints_of(text_)
+  end
+  local text = "<a><Value>1</Value><IsSelected>true</IsSelected><b>" .. string.rep("x", 100) .. "</b></a>"
+  only("first")
+  material.PRINTS_KEPT = 4
+  local kept = material.prints_of(text)
+  ok(kept == material.prints_of(text), "the same record for the same text")
+  ok(kept.print == nil and kept.shape == nil and kept.content == nil, "nothing made before it is asked for")
+  eq(material.print_of(text), kept.print)
+  eq(presets.shape_of(text), kept.shape)
+  eq(material.content_of(text), kept.content)
+  ok(kept.print ~= kept.content and kept.content ~= kept.shape, "a print, a content and a shape")
+  -- (past PRINTS_KEPT texts, the ones asked for least recently go first: "first", then the fillers; the text, asked for
+  -- again just before, stays with its prints, and a filler that went gets a new, empty record)
+  local filler = material.prints_of("filler 1")
+  material.prints_of("filler 2")
+  material.prints_of("filler 3")
+  ok(material.prints_of(text) == kept, "kept while there is room")
+  material.prints_of("one more")
+  ok(material.prints_of(text) == kept and kept.print ~= nil, "the text asked for lately stays, prints and all")
+  local again = material.prints_of("filler 1")
+  ok(again ~= filler and again.print == nil, "the one asked for longest ago went")
+  -- (a text bigger than PRINTS_BYTES by itself isn't kept; past PRINTS_BYTES of kept texts the least recently asked for go
+  -- until the new one fits, and the rest stay)
+  only("first")
+  material.PRINTS_KEPT, material.PRINTS_BYTES = 1000, 1000
+  local big = string.rep("b", 1001)
+  ok(material.prints_of(big) ~= material.prints_of(big), "not kept")
+  local a, b, c = string.rep("a", 400), string.rep("b", 400), string.rep("c", 400)
+  local kept_a, kept_b = material.prints_of(a), material.prints_of(b)
+  ok(material.prints_of(a) == kept_a, "asked for again: the most recent")
+  material.prints_of(c)
+  ok(material.prints_of(a) == kept_a, "the one asked for lately stays")
+  ok(material.prints_of(b) ~= kept_b, "the one asked for longest ago went for room")
+  material.PRINTS_KEPT, material.PRINTS_BYTES = count, bytes
+end)
+
+test("devices m4: a container change prints each text once, and Renoise's undo of it prints nothing printed before (perf N1)", function()
+  local _, peer = setup_counting_prints()
+  local epoch, layout = place(peer)
+  local read = call(peer, "preset_read", { ref = epoch .. ":device:3.2", epoch = epoch, layout = layout }).result
+  local edited = read.presetData:gsub("<Name>Macro 1</Name>", "<Name>Drive</Name>", 1)
+  local input = { ref = epoch .. ":device:3.2", presetData = edited, shape = read.shape, display = { title = "Doofer on Pad: macro 1 named “Drive”" } }
+  local before = KUMI_PRINTS
+  local done = call(peer, "change_apply", { kind = "doofer-macro", input = input, fence = { id = read.id }, desc = "Kumi: macro (kp17)", epoch = epoch, layout = layout })
+  ok(done.result, json.encode(done.error or {}))
+  -- (the content of what it replaced, whose shape the read made already; the shape and the content of what it wrote)
+  ok(KUMI_PRINTS - before <= 3, "three prints for the change, not six: " .. (KUMI_PRINTS - before))
+  -- (Renoise's undo puts the text the change replaced back: its prints are kept, so the journal's check and its polls make none)
+  before = KUMI_PRINTS
+  mock.song:undo()
+  H.tick(4)
+  for _ = 1, 3 do mock.advance(1100) end
+  eq(KUMI_PRINTS - before, 0, "prints made on Renoise's undo")
+  KUMI_PRINTS = nil
 end)

@@ -33,16 +33,22 @@ M.print_of = material_.print_of
 -- time), plug-in state chunks (which follow the plug-in's parameters), and the inner devices' SelectedPresetIsModified and
 -- IsSelected (Renoise 3.5.4 turns the first true when it writes a container's data again, and the second follows the
 -- producer's clicks: lab, 2026-10-20). Two reads of a device nobody edited give the same shape. (presets.rs `shape_of` is
--- the same.)
+-- the same.) Kept by the text, with its other prints (changes_material.lua `prints_of`).
 function M.shape_of(xml)
-  local shape = xml:gsub("<Value>[^<]*</Value>", "<Value/>"):gsub("<ParameterChunk>.-</ParameterChunk>", "<ParameterChunk/>")
-  shape = shape:gsub("<SelectedPresetIsModified>[^<]*</SelectedPresetIsModified>", "<SelectedPresetIsModified/>")
-  shape = shape:gsub("<IsSelected>[^<]*</IsSelected>", "<IsSelected/>")
-  -- (and what Renoise's view shows of it: no change to what it holds)
-  for _, tag in ipairs(material_.VIEW_STATE) do
-    shape = shape:gsub("<" .. tag .. ">[^<]*</" .. tag .. ">", "<" .. tag .. "/>")
+  local kept = material_.prints_of(xml)
+  local printed = kept.shape
+  if printed == nil then
+    local shape = xml:gsub("<Value>[^<]*</Value>", "<Value/>"):gsub("<ParameterChunk>.-</ParameterChunk>", "<ParameterChunk/>")
+    shape = shape:gsub("<SelectedPresetIsModified>[^<]*</SelectedPresetIsModified>", "<SelectedPresetIsModified/>")
+    shape = shape:gsub("<IsSelected>[^<]*</IsSelected>", "<IsSelected/>")
+    -- (and what Renoise's view shows of it: no change to what it holds)
+    for _, tag in ipairs(material_.VIEW_STATE) do
+      shape = shape:gsub("<" .. tag .. ">[^<]*</" .. tag .. ">", "<" .. tag .. "/>")
+    end
+    printed = material_.print_now(shape)
+    kept.shape = printed
   end
-  return M.print_of(shape)
+  return printed
 end
 
 -- Preset data as it reads, values and all, but what moves by itself (changes_material.lua).
@@ -110,13 +116,14 @@ end
 M.container_trouble = container_trouble
 
 -- Preset data that may go to this device: the same device type (another crashes Renoise), not a newer document, the same
--- plug-in, nothing a container crashes on, within the bound. Refused before anything is written.
-local function check_preset_data(device, xml, label)
+-- plug-in, nothing a container crashes on, within the bound. Refused before anything is written. (`data`: the device's
+-- preset data as the caller read it a moment ago, else it is read here: Renoise writes the whole device out on each read.)
+local function check_preset_data(device, xml, label, data)
   if type(xml) ~= "string" or xml == "" then bad("presetData (the device's preset data, XML as Renoise gives it) or path (an .xrdp preset file)") end
   if #xml > M.MAX_PRESET_BYTES then
     bad(string.format("presetData is %.1f MB, more than Kumi writes (%d MB)", #xml / 1048576, M.MAX_PRESET_BYTES / 1048576))
   end
-  local now, given = preset_kind(device.active_preset_data), preset_kind(xml)
+  local now, given = preset_kind(data or device.active_preset_data), preset_kind(xml)
   if not given.slot or not given.version then
     bad("presetData isn't a device preset (<FilterDevicePreset doc_version=…><DeviceSlot type=…>)")
   end
@@ -229,7 +236,7 @@ local function preset_preview(song, env, input)
   local label = label_of(t, track, device)
   return {
     target = target_of(t, d), prior = { preset = device.active_preset, print = M.print_of(xml) },
-    fence = { id = identity(track, device), state = material_.device_state(device).state, preset = device.active_preset, content = content_fence(device) },
+    fence = { id = identity(track, device), state = material_.device_state(device).state, preset = device.active_preset, content = content_fence(device, xml) },
     display = {
       title = string.format("%s: preset %s", label, q(name)),
       before = { preset = preset_name(device, device.active_preset) }, after = { preset = name },
@@ -243,11 +250,11 @@ local function preset_apply(song, env, input, fence, desc)
   if not ok then base.gone_is_changed(t) end
   local label = label_of(t, track, device)
   if fence.id ~= identity(track, device) then fail("changed", base.moved_text(label)) end
-  if material_.device_state(device).state ~= fence.state or device.active_preset ~= fence.preset or content_fence(device) ~= fence.content then
+  local xml = device.active_preset_data
+  if material_.device_state(device).state ~= fence.state or device.active_preset ~= fence.preset or content_fence(device, xml) ~= fence.content then
     fail("changed", label .. "'s settings changed since the preview")
   end
   local n, name = preset_number(device, input.preset)
-  local xml = device.active_preset_data
   if #xml > M.MAX_PRESET_BYTES then
     fail("failed", string.format("%s holds %.1f MB of settings, more than Kumi keeps to put back, so it won't replace them", label, #xml / 1048576))
   end
@@ -259,8 +266,9 @@ local function preset_apply(song, env, input, fence, desc)
     fail("failed", "Renoise didn't take the preset " .. q(name))
   end
   local back = device.active_preset_data
+  local printed = M.print_of(back)
   return {
-    applied = { preset = n, state = material_.device_state(device).state, print = M.print_of(back), content = content_fence(device) },
+    applied = { preset = n, state = material_.device_state(device).state, print = printed, content = content_fence(device, back) },
     material = (function()
       local kept = keep(env, t, d, track, device)
       kept.presetData = xml
@@ -269,7 +277,7 @@ local function preset_apply(song, env, input, fence, desc)
     target = target_of(t, d),
     display = { title = string.format("%s: preset %s", label, q(name)), before = { preset = preset_name(device, fence.preset) }, after = { preset = name } },
     undo = { desc = desc, entry = true },
-    prior = { print = M.print_of(xml) }, journal_applied = { print = M.print_of(back) }, place = { track = t, device = d },
+    prior = { print = M.print_of(xml) }, journal_applied = { print = printed }, place = { track = t, device = d },
   }
 end
 
@@ -288,7 +296,7 @@ local function settings_restore(kind, song, env, restore, desc, what)
     fail("changed", string.format("%s's settings changed in Renoise since Kumi %s (automation and meta devices move them too)", label, what))
   end
   -- (a Doofer's or Splitter's devices inside, a Notepad's text, a plug-in's state: what its parameters don't show)
-  if not restore.discard and applied.content ~= nil and content_fence(device) ~= applied.content then
+  if not restore.discard and applied.content ~= nil and content_fence(device, now) ~= applied.content then
     fail("changed", string.format("%s changed in Renoise since Kumi %s (what's inside it, its text or its state)", label, what))
   end
   song:describe_undo(desc)
@@ -303,7 +311,7 @@ local function settings_restore(kind, song, env, restore, desc, what)
     local wanted = material_.device_state(device).state
     local chosen = pcall(function() device.active_preset = preset end)
     -- (a container's preset brings its own inside, a plug-in's its own state: unless that is what was kept, the kept data stays)
-    local deep = applied.content ~= nil or content_fence(device) ~= nil
+    local deep = applied.content ~= nil or material_.is_deep(device)
     if not chosen or material_.device_state(device).state ~= wanted or (deep and M.content_of(device.active_preset_data) ~= M.content_of(material.presetData)) then
       pcall(function() device.active_preset_data = material.presetData end)
     end
@@ -337,11 +345,11 @@ end
 local function data_preview(song, env, input)
   local t, d, track, device = device_by_ref(song, env, input.ref, "device-preset-data")
   local label = label_of(t, track, device)
-  check_preset_data(device, input.presetData, label)
   local xml = device.active_preset_data
+  check_preset_data(device, input.presetData, label, xml)
   return {
     target = target_of(t, d), prior = { preset = device.active_preset, print = M.print_of(xml) },
-    fence = { id = identity(track, device), state = material_.device_state(device).state, content = content_fence(device) },
+    fence = { id = identity(track, device), state = material_.device_state(device).state, content = content_fence(device, xml) },
     display = {
       title = data_title(input, label), unchanged = xml == input.presetData or nil,
       note = "Kumi keeps the settings it replaces to put back.",
@@ -354,9 +362,9 @@ local function data_apply(song, env, input, fence, desc)
   if not ok then base.gone_is_changed(t) end
   local label = label_of(t, track, device)
   if fence.id ~= identity(track, device) then fail("changed", base.moved_text(label)) end
-  if material_.device_state(device).state ~= fence.state or content_fence(device) ~= fence.content then fail("changed", label .. "'s settings changed since the preview") end
-  check_preset_data(device, input.presetData, label)
   local xml = device.active_preset_data
+  if material_.device_state(device).state ~= fence.state or content_fence(device, xml) ~= fence.content then fail("changed", label .. "'s settings changed since the preview") end
+  check_preset_data(device, input.presetData, label, xml)
   if #xml > M.MAX_PRESET_BYTES then
     fail("failed", string.format("%s holds %.1f MB of settings, more than Kumi keeps to put back, so it won't replace them", label, #xml / 1048576))
   end
@@ -366,12 +374,13 @@ local function data_apply(song, env, input, fence, desc)
   -- (Renoise raises before it writes anything: text that isn't XML, an empty one, a newer version)
   if not written then fail("failed", "Renoise refused the preset data: " .. tostring(err):gsub("^[^%s:]*%.lua:%d+: ", "")) end
   local back = device.active_preset_data
+  local printed = M.print_of(back)
   local kept = keep(env, t, d, track, device)
   kept.presetData = xml
   return {
-    applied = { state = material_.device_state(device).state, print = M.print_of(back), content = content_fence(device) }, material = kept, target = target_of(t, d),
+    applied = { state = material_.device_state(device).state, print = printed, content = content_fence(device, back) }, material = kept, target = target_of(t, d),
     display = { title = data_title(input, label) }, undo = { desc = desc, entry = true },
-    prior = { print = M.print_of(xml) }, journal_applied = { print = M.print_of(back) }, place = { track = t, device = d },
+    prior = { print = M.print_of(xml) }, journal_applied = { print = printed }, place = { track = t, device = d },
   }
 end
 
@@ -532,26 +541,15 @@ local function display_from(given, fallback)
   return { title = fallback }
 end
 
--- A container's prints, from a few texts seen last: the journal polls each journalled container about once a second and on
--- every undo, and a text read again unchanged is the same Lua string, so its two byte-by-byte prints are made once.
-local PRINTS_KEPT = 16
-local prints_seen, prints_count = {}, 0
-local function read_prints(xml)
-  local seen = prints_seen[xml]
-  if seen then return { shape = seen.shape, content = seen.content } end
-  if prints_count >= PRINTS_KEPT then prints_seen, prints_count = {}, 0 end
-  seen = { shape = M.shape_of(xml), content = M.content_of(xml) }
-  prints_seen[xml], prints_count = seen, prints_count + 1
-  return { shape = seen.shape, content = seen.content }
-end
-
 for _, spec in ipairs(XML_KINDS) do
   local kind = spec.kind
-  local function write_checked(song, env, t, d, track, device, xml, shape, desc)
+  -- (`was`: the device's preset data as the caller read it a moment ago, else it is read here)
+  local function write_checked(song, env, t, d, track, device, xml, shape, desc, was)
     local label = label_of(t, track, device)
     if not takes(spec, device) then bad(string.format("%s isn't a device %s changes", q(label), kind)) end
-    check_preset_data(device, xml, label)
-    if type(shape) ~= "string" or M.shape_of(device.active_preset_data) ~= shape then
+    was = was or device.active_preset_data
+    check_preset_data(device, xml, label, was)
+    if type(shape) ~= "string" or M.shape_of(was) ~= shape then
       fail("changed", string.format("%s changed in Renoise since Kumi read it: read it again", q(label)))
     end
     song:describe_undo(desc)
@@ -572,11 +570,12 @@ for _, spec in ipairs(XML_KINDS) do
       if fence.id ~= nil and fence.id ~= identity(track, device) then fail("changed", base.moved_text(label)) end
       local was = device.active_preset_data
       local before = M.shape_of(was)
-      local back = write_checked(song, env, t, d, track, device, input.presetData, input.shape, desc)
+      local back = write_checked(song, env, t, d, track, device, input.presetData, input.shape, desc, was)
+      local shape, content = M.shape_of(back), M.content_of(back)
       return {
-        applied = { shape = M.shape_of(back), edit = input.edit }, material = keep(env, t, d, track, device), target = target_of(t, d),
+        applied = { shape = shape, edit = input.edit }, material = keep(env, t, d, track, device), target = target_of(t, d),
         display = display_from(input.display, "Changed " .. q(label)), undo = { desc = desc, entry = true },
-        prior = { shape = before, content = M.content_of(was) }, journal_applied = { shape = M.shape_of(back), content = M.content_of(back) },
+        prior = { shape = before, content = M.content_of(was) }, journal_applied = { shape = shape, content = content },
         place = { track = t, device = d },
       }
     end,
@@ -592,7 +591,12 @@ for _, spec in ipairs(XML_KINDS) do
       }
     end,
     reread = reread,
-    read = function(device) return read_prints(device.active_preset_data) end,
+    -- (the journal polls each container it keeps about once a second and on every undo: a text read again unchanged is the
+    -- same string, whose prints changes_material keeps, so a poll costs Renoise's read of the data and two lookups)
+    read = function(device)
+      local xml = device.active_preset_data
+      return { shape = M.shape_of(xml), content = M.content_of(xml) }
+    end,
     -- (by content where both say it: a value inside changes it, which no shape tells)
     same = function(a, b)
       if a.content and b.content then return a.content == b.content end
@@ -979,11 +983,12 @@ base.register({
       error(err, 0)
     end
     local label = label_of(t, track, container)
-    if M.shape_of(container.active_preset_data) ~= applied.shape then
+    local data = container.active_preset_data
+    if M.shape_of(data) ~= applied.shape then
       fail("changed", string.format("the devices or macros inside %s changed in Renoise since Kumi made it, so it can't take it apart", q(label)))
     end
     -- (the devices go back as they were kept: a knob turned inside since, a macro or a plug-in's state, would be lost)
-    if not restore.discard and applied.content ~= nil and M.content_of(container.active_preset_data) ~= applied.content then
+    if not restore.discard and applied.content ~= nil and M.content_of(data) ~= applied.content then
       fail("changed", string.format("settings inside %s changed in Renoise since Kumi made it (a knob, a macro or a plug-in's state): taking it apart would put the old ones back, so Kumi left it", q(label)))
     end
     for k = 1, #container.parameters do

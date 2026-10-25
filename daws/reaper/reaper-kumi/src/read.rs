@@ -292,6 +292,7 @@ impl Reads {
     pub fn bump_epoch(&self) {
         self.epoch.borrow_mut().bump();
         self.registry.borrow_mut().clear();
+        digest::forget();
         rows::forget_groups();
     }
 

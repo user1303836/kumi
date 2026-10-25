@@ -116,8 +116,9 @@ class InstallScript(unittest.TestCase):
         self.directory.cleanup()
 
     # ── Releases ───────────────────────────────────────────────────────────
-    def release(self, version, kumi=None, sha=None):
-        """A folder holding Kumi `version` for this computer, as a release does; served from self.url."""
+    def release(self, version, kumi=None, sha=None, xz=False):
+        """A folder holding Kumi `version` for this computer, as a release does; served from self.url. `xz`: the release
+        names an xz bundle beside the gzipped one, as releases from 1.24 do."""
         folder = self.root / "releases" / version
         folder.mkdir(parents=True)
         stage = self.root / "stage" / version
@@ -132,6 +133,13 @@ class InstallScript(unittest.TestCase):
                 archive.add(path, arcname=path.name)
         digest = hashlib.sha256((folder / bundle).read_bytes()).hexdigest()
         manifest = {"kumi": version, "bundle": bundle, "sha256": sha or digest, "runtime": "rust-native", "target": self.target}
+        if xz:
+            bundle_xz = f"kumi-{self.target}.tar.xz"
+            with tarfile.open(folder / bundle_xz, "w:xz") as archive:
+                for path in sorted(stage.iterdir()):
+                    archive.add(path, arcname=path.name)
+            manifest["bundle_xz"] = bundle_xz
+            manifest["sha256_xz"] = hashlib.sha256((folder / bundle_xz).read_bytes()).hexdigest()
         (folder / f"kumi-release-{self.target}.json").write_text(json.dumps(manifest, indent=2))
         (folder / "kumi-release.json").write_text(json.dumps({"kumi": version, "targets": {self.target: manifest}}))
         return folder
@@ -241,6 +249,21 @@ exit $status
         run = self.install(self.home())
         self.assertEqual(run.returncode, 1, run.stdout + run.stderr)
         self.assertIn("had a problem (HTTP 503). Try again in a few minutes.", run.stderr)
+
+    def test_a_tar_that_reads_xz_takes_the_smaller_bundle(self):
+        # macOS's tar reads xz on its own; Linux's GNU tar with xz beside it. Both run these tests.
+        home = self.home()
+        self.serve(self.release("1.0.0", xz=True))
+        run = self.install(home)
+        self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
+        self.assertEqual(self.version(home / ".kumi/app"), "1.0.0")
+        bundles = [path for path in self.server.asked if path.endswith((".tar.gz", ".tar.xz"))]
+        self.assertEqual(bundles, [f"/kumi-{self.target}.tar.xz"])
+        # A release from before names no xz bundle: the gzipped one, as ever.
+        self.serve(self.release("2.0.0"))
+        self.assertEqual(self.install(home).returncode, 0)
+        self.assertEqual(self.version(home / ".kumi/app"), "2.0.0")
+        self.assertEqual([path for path in self.server.asked if path.endswith((".tar.gz", ".tar.xz"))], [f"/kumi-{self.target}.tar.gz"])
 
     def test_a_bad_checksum_leaves_the_kumi_that_was_there(self):
         home = self.home()

@@ -2,7 +2,10 @@
 //! secret, prints the welcome and status, runs actions, prints the events that follow, and can quit REAPER.
 //!
 //! cargo run -p reaper-kumi --example lab_client -- <kumi home> [--action <id or name>]... [--watch <seconds>]
-//!     [--call <method> <json params>]... [--quit [--save]]
+//!     [--call <method> <json params>]... [--digest <json params>]... [--quit [--save]]
+//!
+//! `--digest` reads a whole digest, page after page, and prints what it came to and how long it took (its pages aren't
+//! printed: they're big).
 
 use std::io::{BufRead, BufReader, Write};
 use std::net::TcpStream;
@@ -20,12 +23,15 @@ use serde_json::{json, Value};
 
 fn main() {
     let mut args = std::env::args().skip(1);
-    let home = PathBuf::from(args.next().expect("usage: lab_client <kumi home> [--action N]... [--watch S] [--quit [--save]]"));
-    let (mut actions, mut calls, mut watch, mut quit, mut save) = (vec![], vec![], 0.0, false, false);
+    let home = PathBuf::from(
+        args.next().expect("usage: lab_client <kumi home> [--action N]... [--call M P]... [--digest P]... [--watch S] [--quit [--save]]"),
+    );
+    let (mut actions, mut calls, mut digests, mut watch, mut quit, mut save) = (vec![], vec![], vec![], 0.0, false, false);
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--action" => actions.push(args.next().expect("--action <id or name>")),
             "--call" => calls.push((args.next().expect("--call <method> <json>"), args.next().expect("--call <method> <json>"))),
+            "--digest" => digests.push(args.next().expect("--digest <json params>")),
             "--watch" => watch = args.next().and_then(|s| s.parse().ok()).expect("--watch <seconds>"),
             "--quit" => quit = true,
             "--save" => save = true,
@@ -64,6 +70,9 @@ fn main() {
     for (method, params) in calls {
         client.call(&method, serde_json::from_str(&params).expect("the params as JSON"));
     }
+    for params in digests {
+        client.digest(serde_json::from_str(&params).expect("the digest's params as JSON"));
+    }
     client.watch(Duration::from_secs_f64(watch));
     if quit {
         client.call("quit", json!({"save": save}));
@@ -79,6 +88,13 @@ struct Client {
 
 impl Client {
     fn call(&mut self, method: &str, params: Value) -> Value {
+        let (frame, line, took) = self.exchange(method, params);
+        println!("{method} in {} ms {line}", took.as_millis());
+        frame
+    }
+
+    /// The response to a request, its line and how long it took; what arrives meanwhile is printed.
+    fn exchange(&mut self, method: &str, params: Value) -> (Value, String, Duration) {
         let id = self.next_id;
         self.next_id += 1;
         let sent = Instant::now();
@@ -87,11 +103,52 @@ impl Client {
             let line = self.lines.recv_timeout(Duration::from_secs(15)).expect("a response");
             let frame: Value = serde_json::from_str(&line).unwrap();
             if frame["type"] == "response" && frame["id"] == id {
-                println!("{method} in {} ms {line}", sent.elapsed().as_millis());
-                return frame;
+                return (frame, line, sent.elapsed());
             }
             print_frame(&frame, &line);
         }
+    }
+
+    /// Reads a whole digest, page after page, and prints what it came to: pages, records (and a fingerprint of them, to
+    /// tell two digests apart), bytes on the wire, the project's change count, and the time, with each page's.
+    fn digest(&mut self, params: Value) {
+        let began = Instant::now();
+        let (mut pages, mut records, mut bytes, mut times) = (0, 0, 0, vec![]);
+        let mut print: u64 = 0xcbf2_9ce4_8422_2325;
+        let mut cursor: Option<String> = None;
+        let mut first: Option<Value> = None;
+        loop {
+            let mut asked = params.clone();
+            if let Some(cursor) = &cursor {
+                asked["cursor"] = cursor.clone().into();
+            }
+            let (frame, line, took) = self.exchange("digest", asked);
+            if frame["ok"] != true {
+                println!("digest {params} failed after {pages} pages: {line}");
+                return;
+            }
+            let result = &frame["result"];
+            pages += 1;
+            for record in result["records"].as_array().into_iter().flatten() {
+                records += 1;
+                for byte in record.to_string().bytes() {
+                    print = (print ^ byte as u64).wrapping_mul(0x0100_0000_01b3);
+                }
+            }
+            bytes += line.len();
+            times.push(took.as_millis());
+            first.get_or_insert_with(|| json!({"project": result["project"], "changed": result["changed"], "bounded": result["bounded"]}));
+            cursor = result["nextCursor"].as_str().map(str::to_owned);
+            if cursor.is_none() || pages >= 1000 {
+                break;
+            }
+        }
+        println!(
+            "digest {params}: {pages} pages, {records} records (print {print:016x}), {bytes} bytes in {} ms (pages {} ms) {}",
+            began.elapsed().as_millis(),
+            times.iter().map(|ms| ms.to_string()).collect::<Vec<_>>().join(" "),
+            first.unwrap_or(Value::Null)
+        );
     }
 
     // Prints what arrives until `time` passes or the bridge closes.
