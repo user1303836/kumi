@@ -143,7 +143,11 @@ impl Print {
         self
     }
     fn number(&mut self, value: f64, places: i32) -> &mut Self {
-        self.text(&format!("{:.*}", places as usize, if value.is_finite() { value } else { 0.0 }))
+        let text = format!("{:.*}", places as usize, if value.is_finite() { value } else { 0.0 });
+        // What reads as zero is zero, from either side: −0, or the −3.5e-18 a pitch nudged up three cents and down three
+        // is left at (REAPER's own nudges, lab 7.82; down and up leaves +3.5e-18).
+        let zero = text.strip_prefix('-').filter(|digits| digits.bytes().all(|b| b == b'0' || b == b'.'));
+        self.text(zero.unwrap_or(&text))
     }
     fn hex(&self) -> String {
         format!("{:016x}", self.0)
@@ -993,6 +997,28 @@ mod tests {
 
     fn find<'a>(records: &'a [Value], id: &str) -> &'a Value {
         records.iter().find(|r| r["id"] == id).unwrap_or_else(|| panic!("{id} in {records:?}"))
+    }
+
+    #[test]
+    fn a_value_that_reads_as_zero_prints_as_zero_from_either_side() {
+        fake::lab_project();
+        let reads = Reads::default();
+        // The second kick's take pitched (the count moves, so the digest is read again): its content's fingerprint.
+        let pitched = |cents: f64| {
+            fake::with(|s| {
+                s.tracks[1].items[1].takes[0].extra.insert("D_PITCH".into(), cents);
+                s.state_count += 1;
+            });
+            let (_, records) = whole(&reads, false, true);
+            find(&records, "{ITEM-K2}")["f"]["content"]["contentHash"].clone()
+        };
+        let zero = pitched(0.0);
+        // Up three cents and down three, and down and up, with REAPER's own nudges (lab 7.82); and −0.
+        for cents in [-3.4694469519536142e-18, 3.4694469519536142e-18, -0.0] {
+            assert_eq!(pitched(cents), zero, "{cents:e}");
+        }
+        // A pitch that reads otherwise still tells.
+        assert_ne!(pitched(-0.000001), zero);
     }
 
     #[test]
