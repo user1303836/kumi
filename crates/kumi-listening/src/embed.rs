@@ -7,6 +7,7 @@ use kumi_ai::models::{self, pinned, Tensor};
 use kumi_common::abort::Signal;
 use kumi_media::audio::{decode::open_audio_to, dsp::fft};
 use std::path::{Path, PathBuf};
+use std::sync::LazyLock;
 
 pub use kumi_ai::models::Say;
 // Kumi's resampler lives in its audio layer, where the player resamples to the output's rate with it too.
@@ -51,6 +52,23 @@ pub fn slaney_mels(bins: usize, mels: usize, low: f64, high: f64, rate: f64) -> 
         .collect()
 }
 
+/// CLAP's periodic Hann window, made once.
+static CLAP_HANN: LazyLock<Vec<f64>> =
+    LazyLock::new(|| (0..CLAP_FFT).map(|n| 0.5 - 0.5 * (2. * std::f64::consts::PI * n as f64 / CLAP_FFT as f64).cos()).collect());
+
+/// CLAP's mel bank, made once and kept sparse: each band's first bin, and its weights from there to its last bin that
+/// isn't zero (a band covers 2 to 31 of the 513 bins).
+static CLAP_BANK: LazyLock<Vec<(usize, Vec<f64>)>> = LazyLock::new(|| {
+    let rows = slaney_mels(CLAP_FFT / 2 + 1, CLAP_MELS, 50., 14_000., CLAP_RATE);
+    (0..CLAP_MELS)
+        .map(|mel| {
+            let first = rows.iter().position(|row| row[mel] != 0.).unwrap_or(0);
+            let last = rows.iter().rposition(|row| row[mel] != 0.).unwrap_or(first);
+            (first, rows[first..=last].iter().map(|row| row[mel]).collect())
+        })
+        .collect()
+});
+
 /// CLAP's input for a window at 48 kHz (`CLAP_FRAMES` × `CLAP_MELS`, frame by frame), as its feature extractor makes
 /// it: a short window repeated to fill 10 s, then padded with silence; frames centred (the ends mirrored), a periodic
 /// Hann window, power, Slaney mels, then dB.
@@ -67,9 +85,9 @@ pub fn clap_features(window: &[f32]) -> Vec<f32> {
     padded.extend((1..=half).rev().map(|k| audio[k]));
     padded.extend_from_slice(&audio);
     padded.extend((1..=half).map(|k| audio[CLAP_SAMPLES - 1 - k]));
-    let hann: Vec<f64> = (0..CLAP_FFT).map(|n| 0.5 - 0.5 * (2. * std::f64::consts::PI * n as f64 / CLAP_FFT as f64).cos()).collect();
-    let filters = slaney_mels(CLAP_FFT / 2 + 1, CLAP_MELS, 50., 14_000., CLAP_RATE);
+    let (hann, bank) = (&*CLAP_HANN, &*CLAP_BANK);
     let (mut re, mut im) = (vec![0.; CLAP_FFT], vec![0.; CLAP_FFT]);
+    let mut power = vec![0.; CLAP_FFT / 2 + 1];
     let mut features = Vec::with_capacity(CLAP_FRAMES * CLAP_MELS);
     for frame in 0..CLAP_FRAMES {
         let start = frame * CLAP_HOP;
@@ -78,9 +96,19 @@ pub fn clap_features(window: &[f32]) -> Vec<f32> {
             im[n] = 0.;
         }
         fft(&mut re, &mut im);
-        let power: Vec<f64> = (0..=CLAP_FFT / 2).map(|bin| re[bin] * re[bin] + im[bin] * im[bin]).collect();
-        for mel in 0..CLAP_MELS {
-            let energy: f64 = power.iter().zip(&filters).map(|(power, row)| power * row[mel]).sum();
+        for (bin, power) in power.iter_mut().enumerate() {
+            *power = re[bin] * re[bin] + im[bin] * im[bin];
+        }
+        // A band sums its own bins in order: the rest of the bank's bins added nothing (0 × a power is 0), so the sum is
+        // the same to the bit. Unless a power isn't finite: ∞ × 0 is NaN, which every band's sum then takes, as it did.
+        let finite = power.iter().all(|power| power.is_finite());
+        for (first, weights) in bank {
+            let energy: f64 = if finite {
+                power[*first..].iter().zip(weights).map(|(power, weight)| power * weight).sum()
+            } else {
+                let weight = |bin: usize| bin.checked_sub(*first).and_then(|at| weights.get(at)).copied().unwrap_or(0.);
+                power.iter().enumerate().map(|(bin, power)| power * weight(bin)).sum()
+            };
             features.push((10. * energy.max(1e-10).log10()) as f32);
         }
     }
@@ -441,4 +469,64 @@ pub async fn tells_tones_apart(model: &Path, say: Say<'_>, signal: &Signal) -> R
         return Err(format!("it heard a plain and a bright tone as the same (distance {apart:.4})"));
     }
     Ok(format!("it told a plain tone from a bright one (distance {apart:.2})"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The log-mel as it was made before the bank was kept sparse: every band against all 513 bins.
+    fn with_the_whole_bank(window: &[f32]) -> Vec<f32> {
+        let mut audio: Vec<f64> = window.iter().take(CLAP_SAMPLES).map(|sample| *sample as f64).collect();
+        if !audio.is_empty() && audio.len() < CLAP_SAMPLES {
+            let repeats = CLAP_SAMPLES / audio.len();
+            audio = audio.repeat(repeats);
+        }
+        audio.resize(CLAP_SAMPLES, 0.);
+        let half = CLAP_FFT / 2;
+        let mut padded = Vec::with_capacity(CLAP_SAMPLES + CLAP_FFT);
+        padded.extend((1..=half).rev().map(|k| audio[k]));
+        padded.extend_from_slice(&audio);
+        padded.extend((1..=half).map(|k| audio[CLAP_SAMPLES - 1 - k]));
+        let hann: Vec<f64> = (0..CLAP_FFT).map(|n| 0.5 - 0.5 * (2. * std::f64::consts::PI * n as f64 / CLAP_FFT as f64).cos()).collect();
+        let filters = slaney_mels(CLAP_FFT / 2 + 1, CLAP_MELS, 50., 14_000., CLAP_RATE);
+        let (mut re, mut im) = (vec![0.; CLAP_FFT], vec![0.; CLAP_FFT]);
+        let mut features = Vec::with_capacity(CLAP_FRAMES * CLAP_MELS);
+        for frame in 0..CLAP_FRAMES {
+            let start = frame * CLAP_HOP;
+            for n in 0..CLAP_FFT {
+                re[n] = padded[start + n] * hann[n];
+                im[n] = 0.;
+            }
+            fft(&mut re, &mut im);
+            let power: Vec<f64> = (0..=CLAP_FFT / 2).map(|bin| re[bin] * re[bin] + im[bin] * im[bin]).collect();
+            for mel in 0..CLAP_MELS {
+                let energy: f64 = power.iter().zip(&filters).map(|(power, row)| power * row[mel]).sum();
+                features.push((10. * energy.max(1e-10).log10()) as f32);
+            }
+        }
+        features
+    }
+
+    #[test]
+    fn the_sparse_bank_makes_the_whole_banks_log_mel_to_the_bit() {
+        // Noise at many levels, then a stretch of silence, an infinite sample and a NaN (the frames holding those take
+        // every bin): 2.5 s, repeated to fill the 10 s.
+        let mut seed = 7u32;
+        let mut window: Vec<f32> = (0..120_000)
+            .map(|n| {
+                seed = seed.wrapping_mul(1_103_515_245).wrapping_add(12_345);
+                ((seed >> 8) as f32 / 8_388_608. - 1.) * 10f32.powf(-(n % 7_000) as f32 / 1_000.)
+            })
+            .collect();
+        window[40_000..48_000].fill(0.);
+        (window[60_000], window[90_000]) = (f32::INFINITY, f32::NAN);
+        let (sparse, whole) = (clap_features(&window), with_the_whole_bank(&window));
+        assert_eq!(sparse.len(), CLAP_FRAMES * CLAP_MELS);
+        for (at, (sparse, whole)) in sparse.iter().zip(&whole).enumerate() {
+            assert_eq!(sparse.to_bits(), whole.to_bits(), "frame {}, band {}: {sparse} against {whole}", at / CLAP_MELS, at % CLAP_MELS);
+        }
+        // Some frames were silent, some not finite, most neither.
+        assert!(whole.iter().any(|value| *value < -99.9) && whole.iter().any(|value| *value > -99.9));
+    }
 }
