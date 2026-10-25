@@ -828,7 +828,7 @@ jobs:
             echo "$TAG is already published, so its assets stay as they are."
             exit 0
           fi
-          gh release upload "$TAG" release/*.tar.gz release/*.json release/SHA256SUMS release/install.sh release/install.ps1 --repo "$GITHUB_REPOSITORY" --clobber
+          gh release upload "$TAG" release/*.tar.gz release/*.tar.xz release/*.json release/SHA256SUMS release/install.sh release/install.ps1 --repo "$GITHUB_REPOSITORY" --clobber
       # scripts/release.py writes the notes into the draft, marked as its own, when it pushes the tag. Such a draft is
       # published now, every install and migration having passed. Any other draft (notes to come, or written by hand)
       # stays a draft for whoever finishes it.

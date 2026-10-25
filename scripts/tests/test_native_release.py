@@ -216,6 +216,15 @@ class NativeRelease(unittest.TestCase):
         result = self.build(out)
         archive = out / result["bundle"]
         self.assertEqual(release.digest(archive), result["sha256"])
+        # The same bundle xz-compressed beside it, named and summed in the manifest and SHA256SUMS.
+        xz = out / result["bundle_xz"]
+        self.assertEqual(result["bundle_xz"], result["bundle"].replace(".tar.gz", ".tar.xz"))
+        self.assertEqual(release.digest(xz), result["sha256_xz"])
+        with tarfile.open(archive) as gzipped, tarfile.open(xz, "r:xz") as xzipped:
+            self.assertEqual(xzipped.getnames(), gzipped.getnames())
+            self.assertTrue(all(member.isfile() for member in xzipped.getmembers()))
+        self.assertEqual((out / "SHA256SUMS").read_text().splitlines(),
+                         [f"{result['sha256']}  {result['bundle']}", f"{result['sha256_xz']}  {result['bundle_xz']}"])
         self.assertEqual(result["runtime"], "rust-native")
         self.assertNotIn("node", result)
         with tarfile.open(archive) as tar:

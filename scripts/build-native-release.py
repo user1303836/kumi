@@ -6,6 +6,7 @@ import datetime
 import gzip
 import hashlib
 import json
+import lzma
 import os
 from pathlib import Path
 import platform
@@ -285,20 +286,30 @@ def stage_bridge(root: Path, package: Path, binary: Path, target: str, source: d
     json_write(package / "release-manifest.json", manifest)
     return manifest
 
-def archive(folder: Path, destination: Path, prefix: str, timestamp: int) -> str:
+def write_tar(fileobj, folder: Path, prefix: str, timestamp: int) -> None:
     """Regular USTAR entries only: no links, directory entries, PAX headers or host metadata."""
-    files = inventory(folder)
+    with tarfile.open(fileobj=fileobj, mode="w|", format=tarfile.USTAR_FORMAT) as tar:
+        for name in inventory(folder):
+            path = folder / name
+            entry = tarfile.TarInfo(f"{prefix}/{name}" if prefix else name)
+            entry.size = path.stat().st_size
+            entry.mode = 0o755 if path.stat().st_mode & 0o111 else 0o644
+            entry.mtime = timestamp
+            with path.open("rb") as content:
+                tar.addfile(entry, content)
+
+def archive(folder: Path, destination: Path, prefix: str, timestamp: int) -> str:
+    """The folder as a gzipped tar, which every tar reads; its SHA-256."""
     with destination.open("wb") as output:
         with gzip.GzipFile(filename="", mode="wb", fileobj=output, mtime=0) as compressed:
-            with tarfile.open(fileobj=compressed, mode="w|", format=tarfile.USTAR_FORMAT) as tar:
-                for name in files:
-                    path = folder / name
-                    entry = tarfile.TarInfo(f"{prefix}/{name}" if prefix else name)
-                    entry.size = path.stat().st_size
-                    entry.mode = 0o755 if path.stat().st_mode & 0o111 else 0o644
-                    entry.mtime = timestamp
-                    with path.open("rb") as content:
-                        tar.addfile(entry, content)
+            write_tar(compressed, folder, prefix, timestamp)
+    return digest(destination)
+
+def archive_xz(folder: Path, destination: Path, prefix: str, timestamp: int) -> str:
+    """The same entries xz-compressed: a bundle of binaries comes out a third smaller than gzipped. A tar that reads
+    xz (macOS's bsdtar, GNU tar beside xz) takes this one; every other, and Windows, the gzipped one."""
+    with lzma.open(destination, "wb", format=lzma.FORMAT_XZ, check=lzma.CHECK_CRC64, preset=9) as compressed:
+        write_tar(compressed, folder, prefix, timestamp)
     return digest(destination)
 
 def stage_hands(root: Path, bundle: Path, target: str) -> None:
@@ -711,10 +722,14 @@ def build_release(root: Path, binaries: Path, out: Path, target: str, source: di
         bundle_name = f"kumi-{target}.tar.gz"
         archive_path = stage / bundle_name
         bundle_hash = archive(bundle, archive_path, "", timestamp)
-        release = {"kumi": version, "bundle": bundle_name, "sha256": bundle_hash, "runtime": "rust-native", "target": target, "bridge": metadata["bridge"], **daws}
+        xz_name = f"kumi-{target}.tar.xz"
+        xz_hash = archive_xz(bundle, stage / xz_name, "", timestamp)
+        release = {"kumi": version, "bundle": bundle_name, "sha256": bundle_hash, "bundle_xz": xz_name, "sha256_xz": xz_hash,
+                   "runtime": "rust-native", "target": target, "bridge": metadata["bridge"], **daws}
         os.replace(archive_path, out / bundle_name)
+        os.replace(stage / xz_name, out / xz_name)
         json_write(out / "kumi-release.json", release)
-        (out / "SHA256SUMS").write_text(f"{bundle_hash}  {bundle_name}\n", encoding="ascii")
+        (out / "SHA256SUMS").write_text(f"{bundle_hash}  {bundle_name}\n{xz_hash}  {xz_name}\n", encoding="ascii")
         return release
 
 def main() -> None:

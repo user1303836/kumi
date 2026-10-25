@@ -344,7 +344,7 @@ python3 scripts/release.py --go     # the release
   (`--summary` opens them with a sentence).
 - **The tag's Installer run** builds native bundles for Intel and ARM on macOS,
   Linux and Windows, tests installs and migration, attaches the per-target
-  bundles/manifests plus the compatibility `kumi.tar.gz`, `kumi-release.json`,
+  bundles (each as `.tar.gz` and `.tar.xz`) and manifests plus the compatibility `kumi.tar.gz`, `kumi-release.json`,
   `SHA256SUMS` and the installers, and publishes the release when `release.py`
   wrote its notes (they end with `<!-- kumi:release-notes -->`) and both
   installers are attached. Only then do the installers, `kumi update` and the

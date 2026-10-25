@@ -34,6 +34,9 @@ def build(inputs: list[Path], out: Path, node: str, timestamp: int = 0, release_
             raise ValueError("unsafe bundle name")
         if native.digest(path.parent / bundle) != value.get("sha256"):
             raise ValueError("native archive checksum mismatch")
+        xz = value.get("bundle_xz")
+        if xz is not None and (not re.fullmatch(r"[A-Za-z0-9_.-]+\.tar\.xz", xz) or native.digest(path.parent / xz) != value.get("sha256_xz")):
+            raise ValueError("native xz archive checksum mismatch")
         if not re.fullmatch(r"\d+\.\d+\.\d+(?:-[\w.]+)?", value.get("kumi", "")):
             raise ValueError("invalid Kumi version")
         releases[target] = (value, path.parent / bundle)
@@ -59,11 +62,14 @@ def build(inputs: list[Path], out: Path, node: str, timestamp: int = 0, release_
         native.json_write(payload / "native-targets.json", {"releases": base, "targets": targets})
         for target, (release, archive) in releases.items():
             shutil.copyfile(archive, stage / release["bundle"])
+            if release.get("bundle_xz"):
+                shutil.copyfile(archive.parent / release["bundle_xz"], stage / release["bundle_xz"])
             native.json_write(stage / f"kumi-release-{target}.json", release)
         digest = native.archive(payload, stage / "kumi.tar.gz", "", timestamp)
         manifest = {"kumi": version, "bundle": "kumi.tar.gz", "sha256": digest, "node": node, "bridge": bridge, "targets": targets}
         native.json_write(stage / "kumi-release.json", manifest)
         hashes = {"kumi.tar.gz": digest, **{value["bundle"]: value["sha256"] for value in targets.values()}}
+        hashes.update({value["bundle_xz"]: value["sha256_xz"] for value in targets.values() if value.get("bundle_xz")})
         (stage / "SHA256SUMS").write_text("".join(f"{digest}  {name}\n" for name, digest in sorted(hashes.items())), encoding="ascii")
         for path in stage.iterdir():
             if path.is_file():

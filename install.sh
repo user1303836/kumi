@@ -291,6 +291,15 @@ main() {
   printf '%s\n' "$kumi_version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9_.]+)?$' || fail "the release version didn't make sense."
   printf '%s\n' "$bundle" | grep -Eq '^[A-Za-z0-9_.-]+\.tar\.gz$' || fail "the release archive name didn't make sense."
   printf '%s\n' "$bundle_sha" | grep -Eq '^[0-9a-f]{64}$' || fail "the release checksum didn't make sense."
+  # The same bundle xz-compressed, a third smaller, for a tar that reads xz: bsdtar with liblzma (macOS's), or GNU tar
+  # with xz beside it. Every other tar, and a release from before 1.24, gets the gzipped one.
+  archive="$work/kumi.tar.gz"; unpack="-xzf"
+  bundle_xz="$(field bundle_xz)"; bundle_xz_sha="$(field sha256_xz)"
+  if printf '%s\n' "$bundle_xz" | grep -Eq '^[A-Za-z0-9_.-]+\.tar\.xz$' && printf '%s\n' "$bundle_xz_sha" | grep -Eq '^[0-9a-f]{64}$'; then
+    if tar --version 2>/dev/null | grep -q liblzma || command -v xz >/dev/null 2>&1; then
+      bundle="$bundle_xz"; bundle_sha="$bundle_xz_sha"; archive="$work/kumi.tar.xz"; unpack="-xf"
+    fi
+  fi
   # The header, in place of the line above: the wordmark, and the version at the right of the 60 columns
   # after the 2-column margin, as in Kumi's own setup.
   if [ -n "$tty" ]; then printf '\r\033[K'; fi
@@ -300,16 +309,16 @@ main() {
   # ── Kumi ───────────────────────────────────────────────────────────────
   begin "Download"
   # Curl's bar takes the line below the step's, and goes once it's done.
-  if [ -n "$bar" ]; then printf '\n'; open=""; blank=""; fetch "$base/$bundle" "$work/kumi.tar.gz" bar; else fetch "$base/$bundle" "$work/kumi.tar.gz"; fi
+  if [ -n "$bar" ]; then printf '\n'; open=""; blank=""; fetch "$base/$bundle" "$archive" bar; else fetch "$base/$bundle" "$archive"; fi
   if ! fetched; then unfetched "$base/$bundle"; fail "$message" "$said"; fi
   if [ -n "$bar" ]; then printf '\033[2A\r\033[J'; begin "Download"; fi
-  if [ "$(sha "$work/kumi.tar.gz")" != "$bundle_sha" ]; then
-    if html "$work/kumi.tar.gz"; then fail "$captive"; fi
+  if [ "$(sha "$archive")" != "$bundle_sha" ]; then
+    if html "$archive"; then fail "$captive"; fi
     fail "Kumi's download didn't match its checksum, so it wasn't used. Try again."
   fi
   finish "checked against its checksum"
   begin "Install"
-  if ! { mkdir -p "$work/app" && tar -xzf "$work/kumi.tar.gz" -C "$work/app"; }; then fail "couldn't unpack Kumi."; fi
+  if ! { mkdir -p "$work/app" && tar $unpack "$archive" -C "$work/app"; }; then fail "couldn't unpack Kumi."; fi
   KUMI_INSTALLED=1 KUMI_HOME="$KUMI_HOME" "$work/app/kumi" --version >/dev/null 2>"$work/start.err"; started=$?
   if [ "$started" -ne 0 ]; then
     said="$(sed '/^[[:space:]]*$/d' "$work/start.err" | tail -n 1 | cut -c1-300)"
