@@ -9,11 +9,11 @@ use crate::{
         Claim, ConversationMatch, ConversationStore, ConversationSummary, CurrentConversation, FoundExchange, KernelCheckpoint,
         SavedConversation, TranscriptRole,
     },
-    kernel::budget::transcript_of,
+    kernel::budget::{json_bytes, transcript_of},
 };
 use async_trait::async_trait;
 use kumi_common::js::{
-    json::{byte_length, stringify},
+    json::stringify,
     string::{head, trim, utf16_len},
 };
 use kumi_types::daw::DawId;
@@ -849,7 +849,7 @@ fn without_pictures(message: &Value) -> Cow<'_, Value> {
 }
 // Disk checkpoints also contain older string-form messages; keep those forms intact.
 fn bounded_messages(all: &[Value]) -> Vec<Value> {
-    let sizes: Vec<_> = all.iter().map(|m| byte_length(m) + 1).collect();
+    let sizes: Vec<_> = all.iter().map(|m| json_bytes(m) + 1).collect();
     let mut total = sizes.iter().sum::<usize>() + 1;
     let mut start = 0;
     while start < all.len() && total > MAX_CONVERSATION_BYTES {

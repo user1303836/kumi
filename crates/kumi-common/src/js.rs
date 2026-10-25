@@ -4,7 +4,6 @@
 
 pub mod json {
     use serde_json::Value;
-    use std::cell::RefCell;
 
     /// `JSON.stringify(value)`: no spaces, JavaScript's number formatting and key order.
     pub fn stringify(value: &Value) -> String {
@@ -44,25 +43,9 @@ pub mod json {
         text
     }
 
-    thread_local! {
-        /// Where a value is written to be measured: one buffer, kept between measurements.
-        static MEASURED: RefCell<String> = const { RefCell::new(String::new()) };
-    }
-
-    /// `Buffer.byteLength(JSON.stringify(value))`, without keeping the text: what measures a conversation message by
-    /// message, before every model step and at every save, builds no string for it.
+    /// `Buffer.byteLength(JSON.stringify(value))`.
     pub fn byte_length(value: &Value) -> usize {
-        MEASURED.with(|buffer| {
-            let mut buffer = buffer.borrow_mut();
-            buffer.clear();
-            write(value, &mut buffer, None, 0);
-            let len = buffer.len();
-            // A page of megabytes was measured once: the buffer doesn't stay that big.
-            if buffer.capacity() > 1 << 20 {
-                buffer.shrink_to(1 << 20);
-            }
-            len
-        })
+        stringify(value).len()
     }
 
     fn write(value: &Value, out: &mut String, indent: Option<&str>, depth: usize) {
