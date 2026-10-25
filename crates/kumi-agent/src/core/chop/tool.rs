@@ -65,6 +65,8 @@ impl<B: ChopBackend + 'static> Chop<B> {
 
     async fn hear(&self, recording: &Recording, song: &Song, input: &JsonObject, signal: &Signal) -> Result<Heard, String> {
         let (mono, rate, seconds) = read_mono(&recording.file, signal, 0., MOST_SECONDS).await.map_err(|e| e.0)?;
+        // A compressed recording whose length its converter couldn't say: as long as the DAW counts it.
+        let seconds = seconds.unwrap_or(recording.frames as f64 / recording.rate);
         if seconds > MOST_SECONDS {
             return Err(format!("that recording is {:.0} seconds: Kumi chops at most {MOST_SECONDS:.0}", seconds));
         }

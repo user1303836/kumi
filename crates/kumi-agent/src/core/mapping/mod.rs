@@ -26,7 +26,8 @@ pub struct HeardSample {
     /// Loudness of its loudest 400 ms (K-weighted, dB).
     pub level_db: f64,
     pub peak_db: f64,
-    pub seconds: f64,
+    /// How long its file is, when that's known (its decoded length, else its tags').
+    pub seconds: Option<f64>,
 }
 
 /// One sample to map: its id (a file's path, or the DAW's ref), its name, what the name says and what was heard; for a sample

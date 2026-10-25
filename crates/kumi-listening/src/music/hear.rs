@@ -80,8 +80,8 @@ pub enum Heard {
     /// Why it isn't heard, kept with the song.
     Skipped(String),
     /// It can't be heard now, for a reason that may pass: its file isn't there (gone since the walk, which the next
-    /// walk sees, or on a drive that isn't there now: `away`, its music folder gone too). Nothing is kept of it; a
-    /// later run hears it.
+    /// walk sees, or on a drive that isn't there now: `away`, its music folder gone too), or converting it ran out of
+    /// time. Nothing is kept of it; a later run hears it.
     Later { why: String, away: bool },
     /// Hearing can't go on, for no reason of this song's (no room to convert it, no converter, or stopped): the scan
     /// stops.
@@ -193,6 +193,10 @@ async fn undecodable(song: &Song, error: &AudioError, signal: &Signal) -> Heard 
     }
     if error.is_no_room() {
         return Heard::Stop(error.to_string());
+    }
+    // A conversion that ran out of time may finish another time (a busy computer, a slow disk).
+    if error.is_timed_out() {
+        return Heard::Later { why: error.to_string(), away: false };
     }
     if cfg!(target_os = "macos") || read_in_place(&song.path) {
         return Heard::Skipped(WONT_DECODE.into());
@@ -411,6 +415,29 @@ mod tests {
         assert_eq!(std::fs::read(&decoded[1].path).unwrap(), b"RIFF the whole mix");
         let (prepared, at) = holding(&decoded, &stretches, 1_800.).unwrap();
         assert_eq!((&prepared.path, at), (&decoded[1].path, 1_800.), "read where it lies in the whole copy");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_conversion_that_ran_out_of_time_is_heard_later_not_kept_as_one_that_wont_decode() {
+        let song = Song {
+            id: 1,
+            path: "/Music/A/B/01 Mix.mp3".into(),
+            folder: "/Music".into(),
+            size: 288_000_000,
+            mtime: 1,
+            tags: crate::music::tags::Tags::default(),
+            duplicate_of: None,
+            gone: false,
+            stage: 0,
+            skipped: None,
+            profile: None,
+            heard_at: None,
+            used_at: None,
+            cluster: None,
+            cloud: false,
+        };
+        let heard = undecodable(&song, &AudioError::timed_out(240.), &Signal::new()).await;
+        assert!(matches!(&heard, Heard::Later { away: false, why } if why.contains("took over 4 minutes")), "{heard:?}");
     }
 
     #[test]

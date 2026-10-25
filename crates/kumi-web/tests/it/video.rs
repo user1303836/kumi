@@ -893,8 +893,10 @@ async fn a_program_that_stalls_is_said_to_have_timed_out() {
         run(&silent, &["-i", "https://example.com/video.mp4"], RunOptions { timeout_ms: Some(500), ..Default::default() }),
         run(&said, &["-i", "https://example.com/video.mp4"], RunOptions { timeout_ms: Some(2_000), ..Default::default() }),
     );
-    assert_eq!(silent.unwrap_err().to_string(), "timed out after 0.5 s");
-    assert_eq!(said.unwrap_err().to_string(), "timed out after 2 s: Reconnecting");
+    let (silent, said) = (silent.unwrap_err(), said.unwrap_err());
+    assert_eq!(silent.to_string(), "timed out after 0.5 s");
+    assert_eq!(said.to_string(), "timed out after 2 s: Reconnecting");
+    assert!(silent.is_timed_out() && said.is_timed_out(), "told from a program that failed");
 }
 
 /// A program that writes its runs to `runs` beside it, then does `then`.

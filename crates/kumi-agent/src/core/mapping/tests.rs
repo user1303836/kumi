@@ -1,7 +1,7 @@
 use super::*;
 
 fn heard(pitch: Option<f64>, level_db: f64) -> Option<HeardSample> {
-    Some(HeardSample { pitch, sure: if pitch.is_some() { 0.9 } else { 0. }, level_db, peak_db: level_db + 6., seconds: 2. })
+    Some(HeardSample { pitch, sure: if pitch.is_some() { 0.9 } else { 0. }, level_db, peak_db: level_db + 6., seconds: Some(2.) })
 }
 
 fn asked() -> Asked {
