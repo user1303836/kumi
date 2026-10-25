@@ -606,6 +606,23 @@ class RemoteScriptTests(unittest.TestCase):
         self.assertEqual(response["error"], "malformed request")
         self.assertNotIn("Traceback", response["error"])
 
+    def test_a_response_line_is_the_signed_canonical_text_with_its_mac_in_place(self):
+        remote = AuthenticatedRemoteScript("0123456789abcdef0123456789abcdef", lambda method, request: method)
+        response = remote._response("r-1", True, result={"z": 1.5, "a": [1, 2.0, "é"], "m": {"q": None}})
+        line = AbletonMcpBridge._frame(response)
+        self.assertTrue(line.endswith(b"\n"))
+        parsed = json.loads(line.decode("utf-8"))
+        self.assertEqual(parsed, dict(response))
+        unsigned = {key: value for key, value in parsed.items() if key != "mac"}
+        self.assertEqual(parsed["mac"], remote.sign(unsigned))
+        # The line is the canonical text with "mac" among the sorted keys: what the bridge makes from it to check the MAC.
+        self.assertEqual(line[:-1].decode("utf-8"), AuthenticatedRemoteScript._canonical(parsed))
+        # An event's line comes the same way; a payload that wasn't signed is written out as before.
+        signed, wire = remote.signed_frame({"version": PROTOCOL, "id": "event", "ok": True, "result": {"event": {"type": "transport"}}})
+        self.assertEqual(json.loads(wire.decode("utf-8")), signed)
+        self.assertEqual(signed["mac"], remote.sign({key: value for key, value in signed.items() if key != "mac"}))
+        self.assertEqual(AbletonMcpBridge._frame({"b": 1, "a": 2}), b'{"b":1,"a":2}\n')
+
     def test_wire_signing_rejects_oversized_and_deep_values(self):
         remote = AuthenticatedRemoteScript("0123456789abcdef0123456789abcdef", lambda method, request: method)
         oversized = {"version": PROTOCOL, "id": "large", "method": "invoke", "operation": "browser.search", "args": {"query": "x" * (remote_module.MAX_WIRE_STRING_LENGTH + 1)}, "nonce": "large-wire-value-0001", "sequence": 1}
