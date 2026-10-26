@@ -153,9 +153,11 @@ fn private_dir(dir: &Path) -> std::io::Result<()> {
     builder.create(dir)
 }
 
-/// Written whole or not at all, readable by the owner only. Not flushed to the drive: a snapshot is a cache (lost to a power
-/// cut, catch-up starts afresh), and a flush on each save, every few seconds while the producer edits (macOS's F_FULLFSYNC
-/// waits for the drive's whole cache), would cost more than the save.
+/// Written aside and renamed into place, readable by the owner only: a reader (another host, this one after a crash) finds
+/// the old file or the new one whole. Not flushed to the drive, though: after a power cut the file can be empty or cut
+/// short, which reads as no snapshot (catch-up starts afresh, the next save writes it anew). A snapshot is a cache, and a
+/// flush on each save, every few seconds while the producer edits (macOS's F_FULLFSYNC waits for the drive's whole cache),
+/// would cost more than the save.
 fn write_private(dir: &Path, name: &str, text: &[u8]) -> std::io::Result<()> {
     use std::io::Write;
     private_dir(dir)?;
@@ -947,6 +949,34 @@ mod tests {
         assert_eq!(answer["saved"], false);
         let why = answer["why"].as_str().unwrap();
         assert!(why.starts_with("the project's snapshot is 8.5 MiB, over the 8 MiB Kumi keeps"), "{why}");
+    }
+
+    // Review of #576 (second sweep OW2): not flushed, a kept snapshot can be left empty or cut short by a power cut. Either
+    // reads as none, whole or by its head (catch_up answers `first`, baseline_save keeps the snapshot read now), and the
+    // next save writes it anew.
+    #[test]
+    fn a_kept_snapshot_left_empty_or_cut_short_reads_as_none_and_is_written_anew() {
+        let home = tempfile::tempdir().unwrap();
+        let store = Store::new(home.path().to_path_buf());
+        let place = "reaper-0123456789abcdef0123456789abcdef";
+        let saved = Key::Saved { place: place.into(), path: "/p/song.rpp".into() };
+        let unsaved = Key::Unsaved { identity: "7:1".into() };
+        for (key, path, file) in [
+            (&saved, "/p/song.rpp", home.path().join(place).join("last-seen.json")),
+            (&unsaved, "", home.path().join("unsaved").join(format!("{}.json", file_key("7:1")))),
+        ] {
+            let whole = snapshot(path, "7:1", 120.0);
+            assert_eq!(store.save(key, &whole).unwrap(), Saved::Kept);
+            let text = std::fs::read(&file).unwrap();
+            for broken in [&text[..0], &text[..text.len() / 2]] {
+                std::fs::write(&file, broken).unwrap();
+                assert!(store.load(key).is_none(), "{key:?}: {} of {} bytes", broken.len(), text.len());
+                assert!(store.load_head(key).is_none(), "{key:?}: {} of {} bytes", broken.len(), text.len());
+                assert!(replaces(store.load_head(key).map(|head| semantic::cut_bounds(&head.bounded)), &whole));
+                assert_eq!(store.save(key, &whole).unwrap(), Saved::Kept);
+                assert_eq!(store.load(key).unwrap().facts["tempo"], 120.0, "{key:?}: written anew");
+            }
+        }
     }
 
     #[test]
