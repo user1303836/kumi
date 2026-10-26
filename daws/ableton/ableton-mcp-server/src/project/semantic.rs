@@ -45,7 +45,8 @@ fn canonical_quote(s: &str, out: &mut String) {
         out.push('"');
     }
 }
-fn canonical_visit(value: &Value, depth: usize, nodes: &mut usize, out: &mut String) -> Result<(), ProjectError> {
+// One more node at `depth`, within the bounds.
+fn canonical_enter(depth: usize, nodes: &mut usize) -> Result<(), ProjectError> {
     *nodes += 1;
     if *nodes > 100_000_000 {
         return Err(fail("semantic artifact exceeds the canonical node bound"));
@@ -53,6 +54,10 @@ fn canonical_visit(value: &Value, depth: usize, nodes: &mut usize, out: &mut Str
     if depth > 24 {
         return Err(fail("semantic artifact exceeds the canonical depth bound"));
     }
+    Ok(())
+}
+fn canonical_visit(value: &Value, depth: usize, nodes: &mut usize, out: &mut String) -> Result<(), ProjectError> {
+    canonical_enter(depth, nodes)?;
     match value {
         Value::Null => out.push_str("null"),
         Value::Bool(v) => out.push_str(if *v { "true" } else { "false" }),
@@ -76,24 +81,35 @@ fn canonical_visit(value: &Value, depth: usize, nodes: &mut usize, out: &mut Str
             }
             out.push(']');
         }
-        Value::Object(object) => {
-            if object.len() > 64 || object.keys().any(|key| utf16_len(key) > 128) {
-                return Err(fail("semantic artifact object exceeds field or key bounds"));
-            }
-            let mut entries: Vec<_> = object.iter().collect();
-            entries.sort_by(|a, b| compare_semantic_strings(a.0, b.0));
-            out.push('{');
-            for (i, (key, value)) in entries.into_iter().enumerate() {
-                if i > 0 {
-                    out.push(',');
-                }
-                canonical_quote(key, out);
-                out.push(':');
-                canonical_visit(value, depth + 1, nodes, out)?;
-            }
-            out.push('}');
-        }
+        Value::Object(object) => canonical_object(object, depth, nodes, out, |_, _| {})?,
     }
+    Ok(())
+}
+// An object's canonical text (the object itself entered at `depth`), telling `field` where each of its values' text is.
+fn canonical_object(
+    object: &Map<String, Value>,
+    depth: usize,
+    nodes: &mut usize,
+    out: &mut String,
+    mut field: impl FnMut(&str, std::ops::Range<usize>),
+) -> Result<(), ProjectError> {
+    if object.len() > 64 || object.keys().any(|key| utf16_len(key) > 128) {
+        return Err(fail("semantic artifact object exceeds field or key bounds"));
+    }
+    let mut entries: Vec<_> = object.iter().collect();
+    entries.sort_by(|a, b| compare_semantic_strings(a.0, b.0));
+    out.push('{');
+    for (i, (key, value)) in entries.into_iter().enumerate() {
+        if i > 0 {
+            out.push(',');
+        }
+        canonical_quote(key, out);
+        out.push(':');
+        let start = out.len();
+        canonical_visit(value, depth + 1, nodes, out)?;
+        field(key, start..out.len());
+    }
+    out.push('}');
     Ok(())
 }
 pub fn canonical_semantic_json(value: &Value) -> Result<String, ProjectError> {
@@ -148,7 +164,14 @@ fn digest_array(values: &[&Value]) -> Result<String, ProjectError> {
 struct CanonicalArtifact<'a> {
     json: String,
     fields: Vec<(&'a str, std::ops::Range<usize>)>,
-    records: Vec<std::ops::Range<usize>>,
+    records: Vec<RecordText>,
+}
+// The fields a record's fingerprints hash.
+const FINGERPRINTED: [&str; 4] = ["kind", "name", "data", "matching"];
+// Where a record's canonical text is, and within it the text of each of its FINGERPRINTED fields it has.
+struct RecordText {
+    whole: std::ops::Range<usize>,
+    fields: [Option<std::ops::Range<usize>>; 4],
 }
 impl<'a> CanonicalArtifact<'a> {
     fn new(artifact: &'a Value) -> Result<Self, ProjectError> {
@@ -183,21 +206,19 @@ impl<'a> CanonicalArtifact<'a> {
         &self.json[range.clone()]
     }
     fn record(&self, index: usize) -> &str {
-        &self.json[self.records[index].clone()]
+        &self.json[self.records[index].whole.clone()]
+    }
+    // One of a record's FINGERPRINTED fields as its canonical text: `null` where the record hasn't it, as `record[key]`
+    // reads it.
+    fn record_field(&self, index: usize, key: &str) -> &str {
+        let at = FINGERPRINTED.iter().position(|name| *name == key).expect("a fingerprinted field");
+        self.records[index].fields[at].clone().map_or("null", |range| &self.json[range])
     }
 }
 // An artifact's records array as its canonical text, each record at its depth in the artifact, with where each record's
-// text is in it.
-fn canonical_records(
-    rows: &[Value],
-    nodes: &mut usize,
-    out: &mut String,
-    places: &mut Vec<std::ops::Range<usize>>,
-) -> Result<(), ProjectError> {
-    *nodes += 1;
-    if *nodes > 100_000_000 {
-        return Err(fail("semantic artifact exceeds the canonical node bound"));
-    }
+// text (and its fingerprinted fields') is in it.
+fn canonical_records(rows: &[Value], nodes: &mut usize, out: &mut String, places: &mut Vec<RecordText>) -> Result<(), ProjectError> {
+    canonical_enter(1, nodes)?;
     if rows.len() > 10_000_000 {
         return Err(fail("semantic artifact array exceeds the bound"));
     }
@@ -208,8 +229,18 @@ fn canonical_records(
             out.push(',');
         }
         let start = out.len();
-        canonical_visit(record, 2, nodes, out)?;
-        places.push(start..out.len());
+        let mut fields = [None, None, None, None];
+        if let Value::Object(object) = record {
+            canonical_enter(2, nodes)?;
+            canonical_object(object, 2, nodes, out, |key, range| {
+                if let Some(at) = FINGERPRINTED.iter().position(|name| *name == key) {
+                    fields[at] = Some(range);
+                }
+            })?;
+        } else {
+            canonical_visit(record, 2, nodes, out)?;
+        }
+        places.push(RecordText { whole: start..out.len(), fields });
     }
     out.push(']');
     Ok(())
@@ -1016,7 +1047,8 @@ pub fn create_semantic_project_snapshot(snapshot: &Value, options: &CreateSemant
     canonical_records(&records, &mut 1, &mut records_json, &mut places)?;
     let mut manifest = json!({});
     for section in SECTION_ORDER {
-        let texts = records.iter().zip(&places).filter(|(r, _)| r["section"] == section).map(|(_, place)| &records_json[place.clone()]);
+        let texts =
+            records.iter().zip(&places).filter(|(r, _)| r["section"] == section).map(|(_, place)| &records_json[place.whole.clone()]);
         let omitted = rows.observed[section] - rows.included[section];
         manifest[section] = json!({"observed":rows.observed[section],"included":rows.included[section],"omitted":omitted,"complete":omitted==0,"digest":digest_canonical_array(texts)});
     }
@@ -1294,18 +1326,27 @@ pub(crate) fn page_valid_semantic_project_snapshot(artifact: &Value, options: &S
     authority_audit(&page, 0)?;
     Ok(page)
 }
-pub fn assemble_semantic_project_pages(pages: &[Value]) -> Result<Value, ProjectError> {
-    if pages.is_empty()
-        || pages.len() > SEMANTIC_PROJECT_MAX_PAGES
-        || canonical_semantic_json(&json!(pages))?.len() > SEMANTIC_PROJECT_MAX_BUNDLE_BYTES
-    {
+/// The artifact a complete bundle of pages holds, checked page by page and then whole. The pages' records move into it.
+pub fn assemble_semantic_project_pages(mut pages: Vec<Value>) -> Result<Value, ProjectError> {
+    if pages.is_empty() || pages.len() > SEMANTIC_PROJECT_MAX_PAGES {
+        return Err(fail("semantic snapshot page bundle is empty or exceeds bounds"));
+    }
+    // The bundle's canonical length from its pages', each at its depth in the bundle and its nodes counted after the
+    // bundle's own: the same length and errors as the bundle's canonical JSON, without copying the pages into one array.
+    let (mut nodes, mut text) = (1, String::new());
+    let mut lengths = Vec::with_capacity(pages.len());
+    for page in &pages {
+        text.clear();
+        canonical_visit(page, 1, &mut nodes, &mut text)?;
+        lengths.push(text.len());
+    }
+    if lengths.iter().sum::<usize>() + pages.len() + 1 > SEMANTIC_PROJECT_MAX_BUNDLE_BYTES {
         return Err(fail("semantic snapshot page bundle is empty or exceeds bounds"));
     }
     let first = &pages[0];
     let expected_header = canonical_semantic_json(&header(first))?;
     let mut offset = 0usize;
-    let mut records = vec![];
-    for page in pages {
+    for (page, length) in pages.iter().zip(lengths) {
         validation::only(page, &["schema", "artifact", "policy", "provenance", "set", "manifest", "safety", "page", "records"], "page")?;
         let coordinates = &page["page"];
         validation::only(coordinates, &["offset", "returned", "total", "complete", "nextCursor"], "page coordinates")?;
@@ -1322,7 +1363,7 @@ pub fn assemble_semantic_project_pages(pages: &[Value]) -> Result<Value, Project
         } else {
             Some(json!(encode_cursor_number(&first["artifact"]["id"], &first["policy"]["profile"], page_offset + rows.len() as f64)?))
         };
-        if canonical_semantic_json(page)?.len() > SEMANTIC_PROJECT_MAX_PAGE_BYTES
+        if length > SEMANTIC_PROJECT_MAX_PAGE_BYTES
             || canonical_semantic_json(&header(page))? != expected_header
             || page_offset != offset as f64
             || coordinates["returned"].as_f64() != Some(rows.len() as f64)
@@ -1332,17 +1373,20 @@ pub fn assemble_semantic_project_pages(pages: &[Value]) -> Result<Value, Project
         {
             return Err(fail("semantic snapshot pages are inconsistent, overlapping, reordered, tampered, or non-contiguous"));
         }
-        records.extend_from_slice(rows);
         offset += rows.len();
     }
     if !truthy(&pages.last().unwrap()["page"]["complete"])
         || first["page"]["total"].as_f64() != Some(offset as f64)
-        || records.len() > SEMANTIC_PROJECT_MAX_RECORDS
+        || offset > SEMANTIC_PROJECT_MAX_RECORDS
     {
         return Err(fail("semantic snapshot page bundle is incomplete"));
     }
     let mut artifact = header(first);
-    artifact["records"] = json!(records);
+    let mut records = Vec::with_capacity(offset);
+    for page in &mut pages {
+        records.append(page["records"].as_array_mut().unwrap());
+    }
+    artifact["records"] = Value::Array(records);
     validate_semantic_project_artifact(&artifact)?;
     Ok(artifact)
 }

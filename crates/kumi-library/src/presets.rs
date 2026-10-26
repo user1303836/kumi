@@ -55,13 +55,10 @@ pub enum PresetCategory {
 /// The DAWs a preset of this format is offered in (its format, as the library keeps it): the DAWs whose profiles name it
 /// (REAPER takes a VST3 preset's path, as Live does), and Live for a format no DAW names (its own files, plug-ins'
 /// presets).
-pub fn preset_daws(format: &str) -> Vec<DawId> {
-    let named: Vec<DawId> = DawId::ALL.into_iter().filter(|daw| daw.profile().vocab.preset_formats.contains(&format)).collect();
-    if named.is_empty() {
-        vec![DawId::Ableton]
-    } else {
-        named
-    }
+pub fn preset_daws(format: &str) -> impl Iterator<Item = DawId> + '_ {
+    let names = move |daw: &DawId| daw.profile().vocab.preset_formats.contains(&format);
+    let named = DawId::ALL.iter().any(names);
+    DawId::ALL.into_iter().filter(move |daw| if named { names(daw) } else { *daw == DawId::Ableton })
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct PresetFacts {

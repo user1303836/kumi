@@ -629,6 +629,8 @@ pub async fn run(
 /// is where Kumi keeps the programs it fetches (its own ffmpeg, read or fetched there as the app does).
 pub async fn main(daws: Daws, tools: Option<String>) -> io::Result<()> {
     kumi_library::learner::low_priority();
+    // Its models (CLAP for every song) run as the background work it is: their threads don't spin between steps.
+    kumi_ai::models::in_background();
     let control = Control::new(true);
     let (jobs, mut incoming) = mpsc::unbounded_channel();
     let (output, mut outgoing) = mpsc::unbounded_channel::<ScanReply>();

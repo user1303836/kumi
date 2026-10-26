@@ -450,7 +450,7 @@ pub fn validate_semantic_project_artifact(artifact: &Value) -> Result<(), Projec
     let records = array(&artifact["records"]);
     static ID: LazyLock<Regex> = LazyLock::new(|| regex(r"^semantic-[a-z-]+-[a-f0-9]{20}-[1-9][0-9]*$"));
     static ALIAS: LazyLock<Regex> = LazyLock::new(|| regex(r"^[a-z-]+-[a-f0-9]{20}$"));
-    for record in records {
+    for (index, record) in records.iter().enumerate() {
         let required_keys =
             ["section", "kind", "snapshotId", "order", "contentFingerprint", "semanticFingerprint", "nameFingerprint", "matching", "data"];
         let mut allowed = required_keys.to_vec();
@@ -479,10 +479,13 @@ pub fn validate_semantic_project_artifact(artifact: &Value) -> Result<(), Projec
             return Err(fail("semantic snapshot IDs must be unique"));
         }
         nested(record)?;
+        // Hashed from the record's text in the artifact's canonical JSON: the same bytes as each field's own, and the
+        // artifact's (each field deeper in it, every node counted) already held the bounds that one would check.
+        let field = |key| canonical.record_field(index, key);
         if record["contentFingerprint"]
-            != digest_fields(&[("kind", &record["kind"]), ("name", &record["name"]), ("data", &record["data"])])?
-            || record["semanticFingerprint"] != digest(&record["matching"])?
-            || record["nameFingerprint"] != digest_array(&[&record["kind"], &record["name"]])?
+            != digest_canonical_fields(&[("kind", field("kind")), ("name", field("name")), ("data", field("data"))])
+            || record["semanticFingerprint"] != canonical_digest(field("matching"))
+            || record["nameFingerprint"] != digest_canonical_array([field("kind"), field("name")].into_iter())
         {
             return Err(fail("semantic snapshot record fingerprint is invalid"));
         }

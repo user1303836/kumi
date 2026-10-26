@@ -5,6 +5,7 @@
 //! and reads only what was added since.
 
 use std::collections::HashMap;
+use std::fmt;
 use std::io::{self, SeekFrom};
 use std::marker::PhantomData;
 use std::path::{Path, PathBuf};
@@ -15,7 +16,7 @@ use base64::engine::DecodePaddingMode;
 use base64::Engine;
 use indexmap::IndexMap;
 use kumi_common::js::json::{stringify, stringify_pretty};
-use serde::de::DeserializeOwned;
+use serde::de::{DeserializeOwned, DeserializeSeed, Deserializer, MapAccess, SeqAccess, Visitor};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
@@ -246,14 +247,124 @@ impl<T: LogEntry> Log<T> {
     }
 }
 
-/// JavaScript's truthiness, for a line's `gone`.
-fn truthy(value: &Value) -> bool {
-    match value {
-        Value::Null => false,
-        Value::Bool(flag) => *flag,
-        Value::Number(number) => number.as_f64().is_some_and(|number| number != 0.0 && !number.is_nan()),
-        Value::String(text) => !text.is_empty(),
-        Value::Array(_) | Value::Object(_) => true,
+/// What a line says of its file, as a JSON value of it says: its `path` when that's text, and whether its `gone` is
+/// truthy (JavaScript's truthiness; a key said twice, its last). Read through without keeping the rest, which is
+/// checked as a value's would be (a number out of range is no line): the line is then read once, as its entry.
+#[derive(Default)]
+struct Line {
+    path: Option<String>,
+    gone: bool,
+}
+
+impl<'de> Deserialize<'de> for Line {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Line, D::Error> {
+        struct Keys;
+        impl<'de> Visitor<'de> for Keys {
+            type Value = Line;
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("an object")
+            }
+            fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Line, A::Error> {
+                let mut line = Line::default();
+                while let Some(key) = map.next_key::<Key>()? {
+                    let seen = map.next_value_seed(Through { text: key == Key::Path })?;
+                    match key {
+                        Key::Path => line.path = seen.text,
+                        Key::Gone => line.gone = seen.truthy,
+                        Key::Other => {}
+                    }
+                }
+                Ok(line)
+            }
+        }
+        deserializer.deserialize_map(Keys)
+    }
+}
+
+/// A line's key, as far as reading a line goes.
+#[derive(PartialEq)]
+enum Key {
+    Path,
+    Gone,
+    Other,
+}
+
+impl<'de> Deserialize<'de> for Key {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Key, D::Error> {
+        struct Name;
+        impl Visitor<'_> for Name {
+            type Value = Key;
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("a key")
+            }
+            fn visit_str<E>(self, key: &str) -> Result<Key, E> {
+                Ok(match key {
+                    "path" => Key::Path,
+                    "gone" => Key::Gone,
+                    _ => Key::Other,
+                })
+            }
+        }
+        deserializer.deserialize_str(Name)
+    }
+}
+
+/// A value read through, as a JSON value would be read: its truthiness, and its text when that's asked for and it's a
+/// string. Nothing else is kept.
+struct Through {
+    text: bool,
+}
+
+struct Seen {
+    truthy: bool,
+    text: Option<String>,
+}
+
+impl Seen {
+    fn of(truthy: bool) -> Seen {
+        Seen { truthy, text: None }
+    }
+}
+
+impl<'de> DeserializeSeed<'de> for Through {
+    type Value = Seen;
+    fn deserialize<D: Deserializer<'de>>(self, deserializer: D) -> Result<Seen, D::Error> {
+        deserializer.deserialize_any(self)
+    }
+}
+
+impl<'de> Visitor<'de> for Through {
+    type Value = Seen;
+    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        formatter.write_str("a value")
+    }
+    fn visit_bool<E>(self, flag: bool) -> Result<Seen, E> {
+        Ok(Seen::of(flag))
+    }
+    fn visit_i64<E>(self, number: i64) -> Result<Seen, E> {
+        Ok(Seen::of(number != 0))
+    }
+    fn visit_u64<E>(self, number: u64) -> Result<Seen, E> {
+        Ok(Seen::of(number != 0))
+    }
+    fn visit_f64<E>(self, number: f64) -> Result<Seen, E> {
+        Ok(Seen::of(number != 0.0 && !number.is_nan()))
+    }
+    fn visit_str<E>(self, text: &str) -> Result<Seen, E> {
+        Ok(Seen { truthy: !text.is_empty(), text: self.text.then(|| text.to_owned()) })
+    }
+    fn visit_unit<E>(self) -> Result<Seen, E> {
+        Ok(Seen::of(false))
+    }
+    fn visit_seq<A: SeqAccess<'de>>(self, mut items: A) -> Result<Seen, A::Error> {
+        while items.next_element_seed(Through { text: false })?.is_some() {}
+        Ok(Seen::of(true))
+    }
+    fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Seen, A::Error> {
+        while map.next_key_seed(Through { text: false })?.is_some() {
+            map.next_value_seed(Through { text: false })?;
+        }
+        Ok(Seen::of(true))
     }
 }
 
@@ -267,13 +378,14 @@ fn apply_lines<T: LogEntry>(text: &str, entries: &mut IndexMap<String, T>) {
         if line.is_empty() {
             continue;
         }
-        let Ok(value) = serde_json::from_str::<Value>(line) else { continue };
-        let Some(path) = value.get("path").and_then(Value::as_str).map(str::to_string) else { continue };
-        let entry = if value.get("gone").is_some_and(truthy) {
+        let Ok(Line { path: Some(path), gone }) = serde_json::from_str::<Line>(line) else { continue };
+        let entry = if gone {
             None
         } else {
-            // TS: kept a line as parsed; one that isn't an entry of this kind is left out here.
-            let Ok(entry) = serde_json::from_value::<T>(value) else { continue };
+            // TS: kept a line as parsed; one that isn't an entry of this kind is left out here. One that reads only as
+            // a value (a key said twice) is read that way, as every line once was.
+            let read = serde_json::from_str::<T>(line).or_else(|_| serde_json::from_value::<T>(serde_json::from_str(line)?));
+            let Ok(entry) = read else { continue };
             Some(entry)
         };
         last.insert(path, (number, entry));
@@ -506,7 +618,18 @@ mod tests {
         assert!(reader.entries.is_empty());
     }
 
-    /// What applying a log's lines one at a time leaves.
+    /// JavaScript's truthiness, for a line's `gone`.
+    fn truthy(value: &Value) -> bool {
+        match value {
+            Value::Null => false,
+            Value::Bool(flag) => *flag,
+            Value::Number(number) => number.as_f64().is_some_and(|number| number != 0.0 && !number.is_nan()),
+            Value::String(text) => !text.is_empty(),
+            Value::Array(_) | Value::Object(_) => true,
+        }
+    }
+
+    /// What applying a log's lines one at a time leaves, each read as a JSON value first (as every line once was).
     fn apply_one_by_one(text: &str, entries: &mut IndexMap<String, Sound>) {
         for line in text.split('\n') {
             let Ok(value) = serde_json::from_str::<Value>(line) else { continue };
@@ -529,12 +652,30 @@ mod tests {
             let mut text = String::new();
             for number in 0..random.random_range(0..120) {
                 let path = format!("/s/{}.wav", random.random_range(0..paths));
-                let line = match random.random_range(0..10) {
+                let line = match random.random_range(0..20) {
                     0..=4 => stringify(&serde_json::to_value(sound(&path, &format!("c{number}"))).unwrap()),
                     5..=7 => stringify(&serde_json::to_value(Entry::gone(&path)).unwrap()),
                     // Not a sound: left out, so it neither replaces nor removes.
                     8 => format!("{{\"path\":\"{path}\",\"size\":\"big\"}}"),
-                    _ => format!("{{\"path\":\"{path}\",\"size\":1"),
+                    9 => format!("{{\"path\":\"{path}\",\"size\":1"),
+                    // Gone as JavaScript reads it: any truthy value; with a falsy one, a sound's line like any other.
+                    10 => format!("{{\"path\":\"{path}\",\"gone\":{}}}", ["1", "\"yes\"", "[]", "{}", "-2.5"][random.random_range(0..5)]),
+                    11 => format!(
+                        "{{\"path\":\"{path}\",\"size\":10,\"mtime\":20,\"gone\":{}}}",
+                        ["0", "\"\"", "null", "false", "-0.0"][random.random_range(0..5)]
+                    ),
+                    // A key said twice says its last.
+                    12 => format!("{{\"path\":\"{path}\",\"size\":10,\"mtime\":20,\"class\":\"a\",\"class\":\"c{number}\"}}"),
+                    13 => format!("{{\"path\":\"/s/0.wav\",\"path\":\"{path}\",\"size\":10,\"mtime\":20,\"gone\":true,\"gone\":false}}"),
+                    // A key written with escapes is the same key.
+                    14 => format!("{{\"p\\u0061th\":\"{path}\",\"g\\u006fne\":true}}"),
+                    // No path, a path that isn't text, or not an object: left out.
+                    15 => format!("{{\"size\":10,\"mtime\":20,\"class\":\"c{number}\"}}"),
+                    16 => "{\"path\":7,\"size\":10,\"mtime\":20}".to_string(),
+                    17 => ["[1,2]", "\"/s/1.wav\"", "5", "null", "{}"][random.random_range(0..5)].to_string(),
+                    // What no JSON value holds, anywhere in the line: a number out of range, half a surrogate pair.
+                    18 => format!("{{\"path\":\"{path}\",\"size\":10,\"mtime\":20,\"peak\":[1e400]}}"),
+                    _ => format!("{{\"path\":\"{path}\",\"size\":10,\"mtime\":20,\"about\":\"\\ud800\"}}"),
                 };
                 text.push_str(&line);
                 text.push('\n');
