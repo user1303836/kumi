@@ -8,6 +8,7 @@ use super::{
 };
 use async_trait::async_trait;
 use futures::{future::try_join_all, future::LocalBoxFuture};
+use indexmap::IndexMap;
 use kumi_common::{
     abort::{Signal, SignalExt},
     js::{
@@ -22,7 +23,7 @@ use kumi_types::{
     errors::RuntimeError,
 };
 use serde_json::{json, Value};
-use std::rc::Rc;
+use std::{cell::RefCell, rc::Rc, time::SystemTime};
 
 pub const LISTEN_TOOL: &str = "listen";
 kumi_types::daw_text!(
@@ -48,6 +49,21 @@ struct ListenTool {
     options: ListeningOptions,
     profile: DawProfile,
     description: String,
+    /// The references heard this session, the latest 32: one compared with again isn't heard again while its file is
+    /// as it was.
+    references: RefCell<IndexMap<HeardReference, Analysis>>,
+}
+/// A reference as it was heard: its file (and the file's size and time, so a changed one is heard anew), from where,
+/// for how long and as what.
+#[derive(PartialEq, Eq, Hash)]
+struct HeardReference {
+    path: String,
+    size: u64,
+    modified: SystemTime,
+    start: Option<u64>,
+    seconds: Option<u64>,
+    focus: Option<String>,
+    transcribe: bool,
 }
 pub fn listening_tools(options: ListeningOptions) -> Vec<Rc<dyn KernelTool>> {
     listening_tools_for(DawProfile::ABLETON, options)
@@ -55,7 +71,7 @@ pub fn listening_tools(options: ListeningOptions) -> Vec<Rc<dyn KernelTool>> {
 
 /// `listening_tools`, saying the DAW's words.
 pub fn listening_tools_for(profile: DawProfile, options: ListeningOptions) -> Vec<Rc<dyn KernelTool>> {
-    vec![Rc::new(ListenTool { options, profile, description: description(&profile) })]
+    vec![Rc::new(ListenTool { options, profile, description: description(&profile), references: RefCell::default() })]
 }
 
 /// What the listen schema's descriptions say in Live's words, and how many times.
@@ -173,6 +189,33 @@ impl ListenTool {
             }
         }
         Ok(audio_path(named))
+    }
+    /// A reference heard, or the same one from this session's memory when its file hasn't changed since.
+    async fn reference(&self, path: &str, options: AnalyzeOptions) -> Result<Analysis, AudioError> {
+        // Its size and time before it's heard: a file changing meanwhile is heard again next time.
+        let key = tokio::fs::metadata(path).await.ok().and_then(|info| {
+            Some(HeardReference {
+                path: path.into(),
+                size: info.len(),
+                modified: info.modified().ok()?,
+                start: options.start.map(f64::to_bits),
+                seconds: options.seconds.map(f64::to_bits),
+                focus: options.focus.clone(),
+                transcribe: options.transcribe,
+            })
+        });
+        if let Some(known) = key.as_ref().and_then(|key| self.references.borrow().get(key).cloned()) {
+            return Ok(known);
+        }
+        let heard = hear(path, options).await?;
+        if let Some(key) = key {
+            let mut references = self.references.borrow_mut();
+            references.insert(key, heard.clone());
+            if references.len() > 32 {
+                references.shift_remove_index(0);
+            }
+        }
+        Ok(heard)
     }
     fn event(&self, analysis: &Analysis, compared: Option<HeardComparison>) {
         (self.options.on_event)(HeardEvent {
@@ -293,7 +336,63 @@ impl KernelTool for ListenTool {
             seconds: if from_set { seconds } else { number("seconds") },
             signal: Some(signal.clone()),
         };
-        let result:Result<ToolResult,ListenError>=async{let path=self.locate(&file,signal.clone()).await?;let mine=hear(&path,common.clone()).await?;let Some(compare_to)=text("compare_to")else{self.event(&mine,None);let mut heard=trim_sound(&self.profile,&mine,tempo);if let Some(note)=&note{heard["heardShort"]=json!(note);}return Ok(ToolResult::text(stringify(&heard)));};let path=self.locate(compare_to,signal.clone()).await?;let reference=hear(&path,AnalyzeOptions{start:number("compare_from_seconds"),transcribe:false,focus:Some(mine.analyzed.focus.clone()),..common}).await?;let comparison=compare(&mine,&reference);self.event(&mine,Some(HeardComparison{reference:reference.file.clone(),summary:summary(&reference),differences:comparison.balance.iter().map(|b|b.difference).collect(),headlines:comparison.headlines.clone()}));let mut mine_value=json!({"loudness":mine.loudness,"tempo":mine.tempo,"key":mine.key});if let Some(notes)=&mine.notes{mine_value["notes"]=Value::Object(transcription_for(&self.profile,notes,tempo));}if let Some(note)=&note{mine_value["heardShort"]=json!(note);}Ok(ToolResult::text(stringify(&json!({"comparison":comparison,"mine":mine_value,"reference":{"loudness":reference.loudness,"tempo":reference.tempo,"key":reference.key}}))))}.await;
+        let result: Result<ToolResult, ListenError> = async {
+            let path = self.locate(&file, signal.clone()).await?;
+            let Some(compare_to) = text("compare_to") else {
+                let mine = hear(&path, common.clone()).await?;
+                self.event(&mine, None);
+                let mut heard = trim_sound(&self.profile, &mine, tempo);
+                if let Some(note) = &note {
+                    heard["heardShort"] = json!(note);
+                }
+                return Ok(ToolResult::text(stringify(&heard)));
+            };
+            // The reference is heard from where it's asked, for as long as file is and as what file is heard as. Asked
+            // for that (focus), the two are heard at once; otherwise file's length chooses it, so file is heard first.
+            let against = |focus: String| AnalyzeOptions {
+                start: number("compare_from_seconds"),
+                transcribe: false,
+                focus: Some(focus),
+                ..common.clone()
+            };
+            let (mine, reference) = match common.focus.clone() {
+                Some(focus) => {
+                    let reference = async {
+                        let path = self.locate(compare_to, signal.clone()).await?;
+                        Ok::<_, ListenError>(self.reference(&path, against(focus)).await?)
+                    };
+                    // Both heard to the end, file's failing first: neither is left converting or holding its copy.
+                    let (mine, reference) = futures::future::join(hear(&path, common.clone()), reference).await;
+                    (mine?, reference?)
+                }
+                None => {
+                    let mine = hear(&path, common.clone()).await?;
+                    let path = self.locate(compare_to, signal.clone()).await?;
+                    let reference = self.reference(&path, against(mine.analyzed.focus.clone())).await?;
+                    (mine, reference)
+                }
+            };
+            let comparison = compare(&mine, &reference);
+            self.event(
+                &mine,
+                Some(HeardComparison {
+                    reference: reference.file.clone(),
+                    summary: summary(&reference),
+                    differences: comparison.balance.iter().map(|b| b.difference).collect(),
+                    headlines: comparison.headlines.clone(),
+                }),
+            );
+            let mut mine_value = json!({"loudness":mine.loudness,"tempo":mine.tempo,"key":mine.key});
+            if let Some(notes) = &mine.notes {
+                mine_value["notes"] = Value::Object(transcription_for(&self.profile, notes, tempo));
+            }
+            if let Some(note) = &note {
+                mine_value["heardShort"] = json!(note);
+            }
+            let reference_value = json!({"loudness":reference.loudness,"tempo":reference.tempo,"key":reference.key});
+            Ok(ToolResult::text(stringify(&json!({"comparison":comparison,"mine":mine_value,"reference":reference_value}))))
+        }
+        .await;
         match result {
             Ok(result) => Ok(result),
             Err(error) => {
