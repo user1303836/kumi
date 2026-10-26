@@ -41,7 +41,7 @@ pub use learn::{library_logs, LearnProgress};
 use learner::{LearnerMessage, LearnerOptions, LearnerReply};
 use measure_worker::{measure_reference, worker_program, MeasureJob};
 use plan::{plan_learning, remembered_file, remembered_folders, PlanOptions};
-use search::SoundIndex;
+use search::{search_presets, PresetHit, PresetQuery, SearchResult, SoundIndex};
 use sources::{below, resolve, SourceOptions};
 pub use sources::{library_sources, Source};
 use state::{acquire_lock, write_state};
@@ -60,11 +60,11 @@ pub use taste::TasteLine;
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
     process::Command,
-    sync::{mpsc, watch, Mutex},
+    sync::{mpsc, watch, Mutex, MutexGuard},
     task::JoinHandle,
 };
 pub use tools::LibraryToolsOptions;
-use tools::{LearningState, LibraryAccess};
+use tools::{offered_in, LearningState, LibraryAccess};
 pub use tools::{FIND_PRESETS_TOOL, FIND_SOUNDS_TOOL, MY_SETS_TOOL};
 #[derive(Clone)]
 pub struct LibraryWebOptions {
@@ -529,11 +529,21 @@ impl Library {
                 .cloned()
                 .collect::<Vec<_>>();
             drop(reader);
-            let index = Rc::new(SoundIndex::build(entries, &current).await);
+            // The index before, unless something still holds it: what it prepared for a sound as it was is kept.
+            let before = self.held.borrow_mut().take().and_then(|held| Rc::try_unwrap(held.index).ok());
+            let index = Rc::new(SoundIndex::build_after(entries, &current, before).await);
             *self.held.borrow_mut() = Some(HeldIndex { index, key, at: now_ms() });
             self.stale.set(false);
         }
         Ok(self.held.borrow().as_ref().unwrap().index.clone())
+    }
+    /// The presets' log, read as far as it goes now (their count kept for the status).
+    async fn presets_now(&self) -> Result<MutexGuard<'_, LogReader<PresetEntry>>, RuntimeError> {
+        let mut reader = self.presets.lock().await;
+        reader.refresh().await.map_err(io_error)?;
+        let (sounds, _, sets) = self.counts.get();
+        self.counts.set((sounds, reader.entries.len(), sets));
+        Ok(reader)
     }
     async fn read_taste(&self) -> (Option<Taste>, HashSet<String>) {
         let taste = read_json::<Taste>(&Path::new(&self.dir).join("taste.json")).await;
@@ -623,11 +633,7 @@ impl LibraryAccess for Library {
         self.sound_index().await
     }
     async fn presets(&self) -> Result<Vec<PresetEntry>, RuntimeError> {
-        let mut reader = self.presets.lock().await;
-        reader.refresh().await.map_err(io_error)?;
-        let (sounds, _, sets) = self.counts.get();
-        self.counts.set((sounds, reader.entries.len(), sets));
-        Ok(reader.entries.values().cloned().collect())
+        Ok(self.presets_now().await?.entries.values().cloned().collect())
     }
     async fn sets(&self) -> Result<Vec<SetEntry>, RuntimeError> {
         let mut reader = self.sets.lock().await;
@@ -679,6 +685,11 @@ impl LibraryAccess for Library {
     }
     async fn folders_in(&self, daw: Option<DawId>) -> Vec<String> {
         self.sources().await.into_iter().filter(|s| s.offered_in(daw)).map(|s| s.path).collect()
+    }
+    async fn find_presets(&self, daw: DawId, query: &PresetQuery) -> Result<SearchResult<PresetHit>, RuntimeError> {
+        // Searched in the log's own entries: only the hits are copied.
+        let reader = self.presets_now().await?;
+        Ok(search_presets(reader.entries.values().filter(|entry| offered_in(entry, daw)), query))
     }
     async fn measure(&self, path: String, options: features::MeasureOptions) -> Result<SoundEntry, RuntimeError> {
         let relative = path.split(['\\', '/']).next_back().unwrap_or("").to_owned();
