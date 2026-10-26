@@ -12,6 +12,64 @@ fn rows(snapshot: &LiveSnapshot, kind: &str) -> Vec<Value> {
         snapshot.scenes.iter().flatten().map(|r| serde_json::to_value(r).unwrap()).collect()
     }
 }
+/// A track or scene of the snapshot, typed: lookups compare its ref, identity and name as its JSON row has them, and only
+/// a row a lookup finds is made JSON. `rows` made every track's (its clips and devices with it) for each lookup.
+enum Structure<'a> {
+    Track(&'a Track),
+    Scene(&'a Scene),
+}
+impl<'a> Structure<'a> {
+    /// The tracks (`kind` "track") or else the scenes, in the snapshot's order, as `rows` lists them.
+    fn of(snapshot: &'a LiveSnapshot, kind: &str) -> Vec<Self> {
+        if kind == "track" {
+            snapshot.tracks.iter().flatten().map(Structure::Track).collect()
+        } else {
+            snapshot.scenes.iter().flatten().map(Structure::Scene).collect()
+        }
+    }
+    fn reference(&self) -> &'a str {
+        match self {
+            Structure::Track(track) => &track.ref_.0,
+            Structure::Scene(scene) => &scene.ref_.0,
+        }
+    }
+    fn name(&self) -> &'a str {
+        match self {
+            Structure::Track(track) => &track.name,
+            Structure::Scene(scene) => &scene.name,
+        }
+    }
+    fn identity(&self) -> Option<&'a str> {
+        match self {
+            Structure::Track(track) => track.object_identity.as_deref(),
+            Structure::Scene(scene) => scene.object_identity.as_deref(),
+        }
+    }
+    /// Whether the row's `ref` equals `value`, as `row["ref"] == value` compares them.
+    fn same_ref(&self, value: &Value) -> bool {
+        value.as_str() == Some(self.reference())
+    }
+    /// Whether the row's `objectIdentity` equals `value` (a row without one reads as null).
+    fn same_identity(&self, value: &Value) -> bool {
+        match self.identity() {
+            Some(identity) => value.as_str() == Some(identity),
+            None => value.is_null(),
+        }
+    }
+    fn same_name(&self, value: &Value) -> bool {
+        value.as_str() == Some(self.name())
+    }
+    /// Whether this is the item a transaction made: its ref, identity and name.
+    fn is(&self, item: &Value) -> bool {
+        self.same_ref(&item["ref"]) && self.same_identity(&item["objectIdentity"]) && self.same_name(&item["name"])
+    }
+    fn row(&self) -> Value {
+        match self {
+            Structure::Track(track) => serde_json::to_value(track).unwrap(),
+            Structure::Scene(scene) => serde_json::to_value(scene).unwrap(),
+        }
+    }
+}
 fn validate_items(params: &Value) -> Option<(Vec<Value>, Vec<Value>)> {
     if !has_only(params, &["tracks", "scenes"]) {
         return None;
@@ -104,7 +162,9 @@ fn device_shape(row: &Value) -> Result<String, LiveError> {
 /// its fingerprint can differ without anyone touching it (#203). A rename, a clip or a device added or
 /// taken away still keeps it from cleanup. A scene isn't set up late: its fingerprint must match.
 fn untouched_since_made(snapshot: &LiveSnapshot, item: &Value) -> bool {
-    let Some(row) = rows(snapshot, "track").into_iter().find(|r| item["kind"] == "track" && r["ref"] == item["ref"]) else {
+    let Some(row) =
+        Structure::of(snapshot, "track").into_iter().find(|r| item["kind"] == "track" && r.same_ref(&item["ref"])).map(|r| r.row())
+    else {
         return false;
     };
     if row["objectIdentity"] != item["objectIdentity"] || item.get("name").is_some_and(|name| row["name"] != *name) {
@@ -142,9 +202,9 @@ fn left_in_live(snapshot: &LiveSnapshot, created: &[Value]) -> String {
     let left: Vec<String> = created
         .iter()
         .filter_map(|item| {
-            rows(snapshot, item["kind"].as_str().unwrap_or("")).into_iter().find(|row| row["objectIdentity"] == item["objectIdentity"])
+            Structure::of(snapshot, item["kind"].as_str().unwrap_or("")).into_iter().find(|row| row.same_identity(&item["objectIdentity"]))
         })
-        .map(|row| format!("{} {}", row["ref"].as_str().unwrap_or("?"), js_json::stringify(&row["name"])))
+        .map(|row| format!("{} {}", row.reference(), js_json::stringify(&json!(row.name()))))
         .collect();
     if left.is_empty() {
         "nothing".into()
@@ -174,14 +234,13 @@ impl McpHost {
             _ => return None,
         }))
     }
+    /// What the Set's tracks and scenes are: each one's ref, identity, name (and a track's kind), as their JSON rows have
+    /// them, read off the typed rows (which aren't made JSON for it).
     pub(super) fn structure_revision(&self, snapshot: &LiveSnapshot) -> String {
-        let tracks: Vec<_> = rows(snapshot, "track")
-            .iter()
-            .enumerate()
-            .map(|(i, r)| json!([r["ref"], r["objectIdentity"], r["name"], r["kind"], i]))
-            .collect();
+        let tracks: Vec<_> =
+            snapshot.tracks.iter().flatten().enumerate().map(|(i, r)| json!([r.ref_, r.object_identity, r.name, r.kind, i])).collect();
         let scenes: Vec<_> =
-            rows(snapshot, "scene").iter().enumerate().map(|(i, r)| json!([r["ref"], r["objectIdentity"], r["name"], i])).collect();
+            snapshot.scenes.iter().flatten().enumerate().map(|(i, r)| json!([r.ref_, r.object_identity, r.name, i])).collect();
         hex::encode(Sha256::digest(js_json::stringify(&json!({"tracks":tracks,"scenes":scenes})).as_bytes()))
     }
     pub(super) async fn structure_view(&self, context: Option<&LiveOperationContext>) -> Result<LiveSnapshot, LiveError> {
@@ -220,7 +279,7 @@ impl McpHost {
                 tokio::time::sleep(std::time::Duration::from_millis(SETTLE_MS)).await;
             }
             let observed = self.structure_owned_view(Some(context), std::slice::from_ref(owned)).await?;
-            let row = rows(&observed, kind).into_iter().find(|r| r["ref"] == owned["ref"]);
+            let row = Structure::of(&observed, kind).into_iter().find(|r| r.same_ref(&owned["ref"])).map(|r| r.row());
             let Some(row) = row.filter(|row| row["objectIdentity"] == owned["objectIdentity"] && row["name"] == *name) else {
                 return Err(LiveError::error("created Session structure changed after atomic creation"));
             };
@@ -240,15 +299,17 @@ impl McpHost {
         Ok(previous.unwrap())
     }
     pub(super) fn session_structure_owned_row(&self, snapshot: &LiveSnapshot, item: &Value) -> Result<Option<Value>, LiveError> {
-        let matches: Vec<_> =
-            rows(snapshot, item["kind"].as_str().unwrap()).into_iter().filter(|r| r["objectIdentity"] == item["objectIdentity"]).collect();
+        let matches: Vec<_> = Structure::of(snapshot, item["kind"].as_str().unwrap())
+            .into_iter()
+            .filter(|r| r.same_identity(&item["objectIdentity"]))
+            .collect();
         if matches.len() > 1 {
             return Err(LiveError::error("transaction-owned Session structure identity is ambiguous"));
         }
-        if matches.first().is_some_and(|r| r["ref"] != item["ref"]) {
+        if matches.first().is_some_and(|r| !r.same_ref(&item["ref"])) {
             return Err(LiveError::error("transaction-owned Session structure shifted from its exact reference"));
         }
-        Ok(matches.into_iter().next())
+        Ok(matches.first().map(Structure::row))
     }
     pub(super) fn session_structure_created_fingerprint(
         &self,
@@ -291,8 +352,8 @@ impl McpHost {
     ) -> Result<Value, LiveError> {
         let (tracks, scenes) = proposed;
         let regular: Vec<_> =
-            rows(snapshot, "track").into_iter().filter(|r| !matches!(r["kind"].as_str(), Some("return" | "main" | "master"))).collect();
-        let prior_scenes = rows(snapshot, "scene");
+            snapshot.tracks.iter().flatten().filter(|r| !matches!(json!(r.kind).as_str(), Some("return" | "main" | "master"))).collect();
+        let prior_scenes: Vec<_> = snapshot.scenes.iter().flatten().collect();
         for (i, item) in tracks.iter().enumerate() {
             if item["index"].as_f64().unwrap() > (regular.len() + i) as f64 {
                 return Ok(error(id, -32602, "track index exceeds the current regular-track collection", None));
@@ -304,9 +365,8 @@ impl McpHost {
             }
         }
         let prior_tracks: Vec<_> =
-            regular.iter().enumerate().map(|(i, r)| json!({"ref":r["ref"],"name":r["name"],"kind":r["kind"],"index":i})).collect();
-        let prior_scenes: Vec<_> =
-            prior_scenes.iter().enumerate().map(|(i, r)| json!({"ref":r["ref"],"name":r["name"],"index":i})).collect();
+            regular.iter().enumerate().map(|(i, r)| json!({"ref":r.ref_,"name":r.name,"kind":r.kind,"index":i})).collect();
+        let prior_scenes: Vec<_> = prior_scenes.iter().enumerate().map(|(i, r)| json!({"ref":r.ref_,"name":r.name,"index":i})).collect();
         let proposed: Vec<_> = tracks.into_iter().chain(scenes).collect();
         let t = json!({"id":tempo::transaction_id("structure"),"epoch":status.epoch,"revision":self.structure_revision(snapshot),"proposed":proposed,"priorTracks":prior_tracks,"priorScenes":prior_scenes,"expiresAt":kumi_common::time::now_ms_f64()+TRANSACTION_TTL_MS,"state":"previewed"});
         self.session_structure_transactions.insert(t["id"].as_str().unwrap(), t.clone())?;
@@ -366,9 +426,7 @@ impl McpHost {
     }
     fn confirm_structure_created(&self, snapshot: &LiveSnapshot, created: &[Value]) -> Result<bool, LiveError> {
         for item in created {
-            if !rows(snapshot, item["kind"].as_str().unwrap())
-                .iter()
-                .any(|r| r["ref"] == item["ref"] && r["objectIdentity"] == item["objectIdentity"] && r["name"] == item["name"])
+            if !Structure::of(snapshot, item["kind"].as_str().unwrap()).iter().any(|r| r.is(item))
                 || self.session_structure_created_fingerprint(snapshot, item["kind"].as_str().unwrap(), &item["ref"])?
                     != item["fingerprint"]
             {
@@ -543,11 +601,7 @@ impl McpHost {
             }
             let current = self.adapter.snapshot()?;
             let created = t["created"].as_array().unwrap();
-            if !created.iter().all(|i| {
-                rows(&current, i["kind"].as_str().unwrap())
-                    .iter()
-                    .any(|r| r["ref"] == i["ref"] && r["objectIdentity"] == i["objectIdentity"] && r["name"] == i["name"])
-            }) {
+            if !created.iter().all(|i| Structure::of(&current, i["kind"].as_str().unwrap()).iter().any(|r| r.is(i))) {
                 return Ok(transaction_error(id, "Session structure changed after apply; undo refused"));
             }
             for item in created.iter().rev() {

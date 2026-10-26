@@ -38,7 +38,7 @@ impl McpHost {
     }
     async fn settings_set(&self, context: Option<&LiveOperationContext>) -> Result<Value, LiveError> {
         let snapshot = self.views.view(context, LiveViewScope::Indices(vec![]), Some(&[LiveSnapshotPart::Set])).await?;
-        Ok(serde_json::to_value(snapshot).unwrap()["set"].clone())
+        Ok(serde_json::to_value(&snapshot.set).unwrap())
     }
     pub async fn live_song_settings_preview_async(&self, id: &Value, p: &Value) -> Value {
         if !has_only(p, FIELDS) {

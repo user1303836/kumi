@@ -125,8 +125,8 @@ impl McpHost {
                 return Ok(transaction_error(id, "one or more requested clip fields are unavailable on this exact clip"));
             }
             if !p["grooveRef"].is_null() {
-                let s = serde_json::to_value(&snapshot).unwrap();
-                if !s["groovePool"]["grooves"].as_array().into_iter().flatten().any(|g| g["ref"] == p["grooveRef"]) {
+                let pool = serde_json::to_value(&snapshot.groove_pool).unwrap();
+                if !pool["grooves"].as_array().into_iter().flatten().any(|g| g["ref"] == p["grooveRef"]) {
                     return Ok(transaction_error(id, "groove reference is unknown"));
                 }
             }

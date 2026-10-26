@@ -34,36 +34,34 @@ pub(super) fn authority_fields(value: &Value, keys: &[&str]) -> Result<Value, Li
     Ok(fields(value, keys))
 }
 impl McpHost {
+    /// The device `reference` names, with its track, its owner (track or chain) and its siblings, as the snapshot's JSON
+    /// has them. Found on the typed snapshot, so only the track and device found are made JSON: a whole view's
+    /// conversion copied every clip, note and parameter in it, and a preview or apply looks devices up several times.
     pub(super) fn device_row(&self, snapshot: &LiveSnapshot, reference: &str) -> Result<DeviceRow, LiveError> {
-        fn siblings(values: &Value) -> Result<Option<Vec<Value>>, LiveError> {
-            let Some(values) = values.as_array() else { return Ok(None) };
-            values
+        fn siblings(devices: &[Device]) -> Result<Vec<Value>, LiveError> {
+            devices
                 .iter()
-                .map(|value| {
-                    if !value.is_object() || !value["ref"].is_string() || !value["objectIdentity"].is_string() {
-                        return Err(LiveError::error("device sibling identity is unavailable"));
-                    }
-                    Ok(fields(value, &["ref", "objectIdentity"]))
+                .map(|device| match &device.object_identity {
+                    Some(identity) => Ok(json!({"ref": device.ref_, "objectIdentity": identity})),
+                    None => Err(LiveError::error("device sibling identity is unavailable")),
                 })
-                .collect::<Result<Vec<_>, _>>()
-                .map(Some)
+                .collect()
         }
-        // The reference is passed separately to keep recursion scoped to the selected tree. Only the row found is
-        // copied: a big rack's devices are megabytes (#174).
-        fn walk(
-            values: &Value,
+        // The reference is passed separately to keep recursion scoped to the selected tree.
+        fn walk<'a>(
+            devices: &'a [Device],
             owner_ref: &str,
             owner_identity: &str,
             reference: &str,
-        ) -> Result<Option<(Value, String, String, Vec<Value>)>, LiveError> {
-            let Some(siblings) = siblings(values)? else { return Ok(None) };
-            for value in rows(values) {
-                if value["ref"] == reference {
-                    return Ok(Some((value.clone(), owner_ref.into(), owner_identity.into(), siblings)));
+        ) -> Result<Option<(&'a Device, String, String, Vec<Value>)>, LiveError> {
+            let siblings = siblings(devices)?;
+            for device in devices {
+                if device.ref_.0 == reference {
+                    return Ok(Some((device, owner_ref.into(), owner_identity.into(), siblings)));
                 }
-                for chain in rows(&value["chains"]).chain(rows(&value["drumPads"]).flat_map(|pad| rows(&pad["chains"]))) {
-                    if let (Some(reference_), Some(identity)) = (chain["ref"].as_str(), chain["objectIdentity"].as_str()) {
-                        if let Some(found) = walk(&chain["devices"], reference_, identity, reference)? {
+                for chain in device.chains.iter().flatten().chain(device.drum_pads.iter().flatten().flat_map(|pad| &pad.chains)) {
+                    if let Some(identity) = &chain.object_identity {
+                        if let Some(found) = walk(&chain.devices, &chain.ref_.0, identity, reference)? {
                             return Ok(Some(found));
                         }
                     }
@@ -71,11 +69,11 @@ impl McpHost {
             }
             Ok(None)
         }
-        let snapshot = serde_json::to_value(snapshot).unwrap();
-        for track in rows(&snapshot["tracks"]) {
-            if let (Some(owner), Some(identity)) = (track["ref"].as_str(), track["objectIdentity"].as_str()) {
-                if let Some((device, owner_ref, owner_identity, siblings)) = walk(&track["devices"], owner, identity, reference)? {
-                    return Ok(DeviceRow { track: track.clone(), device, owner_ref, owner_identity, siblings });
+        for track in snapshot.tracks.iter().flatten() {
+            if let Some(identity) = &track.object_identity {
+                if let Some((device, owner_ref, owner_identity, siblings)) = walk(&track.devices, &track.ref_.0, identity, reference)? {
+                    let (track, device) = (serde_json::to_value(track).unwrap(), serde_json::to_value(device).unwrap());
+                    return Ok(DeviceRow { track, device, owner_ref, owner_identity, siblings });
                 }
             }
         }
@@ -111,20 +109,16 @@ impl McpHost {
         }
         Ok(None)
     }
-    pub(super) fn parameter_target(
-        &self,
-        snapshot: &LiveSnapshot,
-        device: &str,
-        parameter: &str,
-    ) -> Result<(Value, Value, Value), LiveError> {
-        let snapshot = serde_json::to_value(snapshot).unwrap();
-        let target = batch::parameter_target(&snapshot, device, parameter)
+    /// The device, parameter and track ref of a parameter change's target, from the snapshot's JSON (made once by the
+    /// caller for this and `parameter_authority`: each made its own, of the whole Set on the sync paths).
+    pub(super) fn parameter_target(&self, snapshot: &Value, device: &str, parameter: &str) -> Result<(Value, Value, Value), LiveError> {
+        let target = batch::parameter_target(snapshot, device, parameter)
             .map_err(|_| LiveError::error("device and parameter references are not authoritative children"))?;
         Ok((target.device.clone(), target.parameter.clone(), target.track["ref"].clone()))
     }
-    pub(super) fn parameter_authority(&self, snapshot: &LiveSnapshot, reference: &str) -> Result<Value, LiveError> {
+    pub(super) fn parameter_authority(&self, snapshot: &Value, reference: &str) -> Result<Value, LiveError> {
         let error = || LiveError::error("parameter lacks complete exact hierarchy authority");
-        let targets = self.realtime_parameter_targets(&serde_json::to_value(snapshot).unwrap(), &[reference.to_string()])?;
+        let targets = self.realtime_parameter_targets(snapshot, &[reference.to_string()])?;
         let authority = targets.first().and_then(|t| t.get("authority")).cloned().ok_or_else(error)?;
         if authority["ref"] != reference
             || ["parameterIdentity", "ownerRef", "ownerIdentity", "trackRef", "trackIdentity"]
@@ -235,7 +229,7 @@ impl McpHost {
                 .collect());
         }
         let references = std::iter::once(json!(device)).chain(items.iter().map(|i| i["ref"].clone())).collect::<Vec<_>>();
-        let snapshot = self.views.view_for(Some(context), &references, None, &[]).await?;
+        let snapshot = serde_json::to_value(self.views.view_for(Some(context), &references, None, &[]).await?).unwrap();
         items
             .iter()
             .map(|item| {
@@ -392,7 +386,7 @@ impl McpHost {
         }
         let result = (|| {
             let status = self.require_connected(Some("device.parameter.write"))?;
-            let snapshot = self.adapter.snapshot()?;
+            let snapshot = serde_json::to_value(self.adapter.snapshot()?).unwrap();
             let (device, parameter, track_ref) =
                 self.parameter_target(&snapshot, params["deviceRef"].as_str().unwrap(), params["parameterRef"].as_str().unwrap())?;
             let authority = self.parameter_authority(&snapshot, parameter["ref"].as_str().unwrap_or(""))?;
@@ -547,7 +541,7 @@ impl McpHost {
             if json!(status.epoch) != transaction["epoch"] {
                 return Ok(transaction_error(id, "Live connection epoch changed; preview again"));
             }
-            let snapshot = self.adapter.snapshot()?;
+            let snapshot = serde_json::to_value(self.adapter.snapshot()?).unwrap();
             let (_, target, _) = self.parameter_target(&snapshot, device, reference)?;
             if revision(&target) != number(&transaction["priorRevision"])
                 || !numeric_same(&target["value"], &transaction["priorValue"])
@@ -559,7 +553,7 @@ impl McpHost {
                 "device.parameter.set",
                 parameter_mutation_args(&transaction, number(&transaction["proposedValue"]), number(&transaction["priorRevision"])),
             ))?;
-            let snapshot = self.adapter.snapshot()?;
+            let snapshot = serde_json::to_value(self.adapter.snapshot()?).unwrap();
             let (_, verified, _) = self.parameter_target(&snapshot, device, reference)?;
             if !same_live_value(verified.get("value"), transaction.get("proposedValue"))
                 || revision(&verified) <= number(&transaction["priorRevision"])
@@ -766,7 +760,7 @@ impl McpHost {
             if json!(status.epoch) != transaction["epoch"] {
                 return Ok(transaction_error(id, "Live connection epoch changed; undo refused"));
             }
-            let snapshot = self.adapter.snapshot()?;
+            let snapshot = serde_json::to_value(self.adapter.snapshot()?).unwrap();
             let (_, current, _) = self.parameter_target(&snapshot, device, reference)?;
             if !same_live_value(current.get("value"), transaction.get("proposedValue"))
                 || revision(&current) != number(&transaction["appliedRevision"])
@@ -778,7 +772,7 @@ impl McpHost {
                 "device.parameter.set",
                 parameter_mutation_args(&transaction, number(&transaction["priorValue"]), number(&transaction["appliedRevision"])),
             ))?;
-            let snapshot = self.adapter.snapshot()?;
+            let snapshot = serde_json::to_value(self.adapter.snapshot()?).unwrap();
             let (_, restored, _) = self.parameter_target(&snapshot, device, reference)?;
             if !numeric_same(&restored["value"], &transaction["priorValue"])
                 || revision(&restored) <= number(&transaction["appliedRevision"])
