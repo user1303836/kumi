@@ -4,7 +4,7 @@
 //! /map open serves the same maps to the browser (map_server.rs), whose actions land in the input box too.
 use super::super::{
     keys::{MouseAction, MouseButton, WheelDirection},
-    map::{Asked, MapView},
+    map::{ready, Asked, MapView},
     pictures::{kitty, Raster},
     render::Cursor,
 };
@@ -47,13 +47,21 @@ impl TuiApp {
             voice.cancel();
         }
         let hover = self.0.options.map_hover.as_ref().is_none_or(|hover| (hover.load)());
-        self.0.state.borrow_mut().map = Some(MapView::new(self.0.graphics, hover));
+        self.0.state.borrow_mut().map = Some(MapView::new(self.0.graphics, hover).gliding(self.0.options.map_glides));
         // The mouse's moves, reported while the map is open: a point plays as the mouse rests on it.
         self.0.tty.report_moves(true);
         self.0.scheduler.request();
+        // Made ready to draw (turned, fitted, its points' room worked out) off Kumi's thread: a big map takes a moment.
         let data = load().await;
+        let Ok(made) = tokio::task::spawn_blocking(move || ready(data)).await else {
+            if self.map_open() {
+                self.close_map();
+                self.notice("Kumi couldn't draw your map: /map tries again.", NoticeTone::Warn);
+            }
+            return;
+        };
         if let Some(view) = self.0.state.borrow_mut().map.as_mut() {
-            view.loaded(data);
+            view.loaded(made);
         }
         self.0.scheduler.request();
     }
@@ -212,7 +220,12 @@ impl TuiApp {
             }
             images.id(key, |id| kitty::transmit(id, raster, cols, rows))
         };
-        view.draw(screen, &mut upload)
+        let cursor = view.draw(screen, &mut upload);
+        // A zoom or a move gliding: the next step soon.
+        if view.moving() {
+            self.0.scheduler.request();
+        }
+        cursor
     }
 
     /// Keys, typing and the mouse go to the map while it's open; ctrl+c closes it.

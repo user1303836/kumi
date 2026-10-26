@@ -107,3 +107,24 @@ async fn measured_sounds_in_the_librarys_folders_are_placed_by_path() {
     log.append(&[sound(&samples, 32)]).await.unwrap();
     assert_eq!(lay_out_sounds(dir.path(), &[source], &how(), go()).await.unwrap(), Some(33));
 }
+
+#[tokio::test]
+async fn a_map_the_layout_shaped_otherwise_is_made_again_and_shows_until_then() {
+    let dir = tempfile::tempdir().unwrap();
+    let samples = dir.path().join("Samples");
+    std::fs::create_dir_all(&samples).unwrap();
+    let source = Source { path: samples.to_string_lossy().into_owned(), label: "Samples".into(), kind: SourceKind::Folder };
+    let log = Log::<SoundEntry>::new(dir.path().join("sounds.jsonl"), "sounds", LOG_VERSION);
+    log.append(&(0..12).map(|n| sound(&samples, n)).collect::<Vec<_>>()).await.unwrap();
+    assert_eq!(lay_out_sounds(dir.path(), &[source.clone()], &how(), go()).await.unwrap(), Some(12));
+    assert_eq!(read_sounds_map(dir.path()).unwrap().shape, kumi_layout::SHAPE);
+    // A map from before maps kept their shape (none in the file): still read and drawn, and made again at the next turn.
+    let file = dir.path().join("sounds-map.json");
+    let text = std::fs::read_to_string(&file).unwrap().replace(&format!(",\"shape\":{}", kumi_layout::SHAPE), "");
+    std::fs::write(&file, text).unwrap();
+    let old = read_sounds_map(dir.path()).unwrap();
+    assert_eq!((old.shape, old.points.len()), (0, 12));
+    assert_eq!(lay_out_sounds(dir.path(), &[source.clone()], &how(), go()).await.unwrap(), Some(12));
+    assert_eq!(read_sounds_map(dir.path()).unwrap().shape, kumi_layout::SHAPE);
+    assert_eq!(lay_out_sounds(dir.path(), &[source], &how(), go()).await.unwrap(), None, "then not again");
+}

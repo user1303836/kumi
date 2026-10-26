@@ -87,6 +87,8 @@ pub struct TuiOptions {
     pub frame_ms: Option<f64>,
     /// How often a frame is drawn while something animates (the scheduler's ANIMATION_MS unless set).
     pub animation_ms: Option<f64>,
+    /// Whether the map's zooms and moves glide (where it's drawn in cells).
+    pub map_glides: bool,
     pub history: Option<Rc<RefCell<InputHistory>>>,
     pub open_browser: Option<Rc<dyn Fn(&str)>>,
     pub icons: Option<IconStyle>,
@@ -176,6 +178,7 @@ impl TuiOptions {
             color_depth: None,
             frame_ms: None,
             animation_ms: None,
+            map_glides: true,
             history: None,
             open_browser: None,
             icons: None,

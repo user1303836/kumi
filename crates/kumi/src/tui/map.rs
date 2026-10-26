@@ -5,8 +5,13 @@
 //! map it draws density, busier places brighter; points, then their names, show as it zooms in. The points are an
 //! image where the terminal shows images and braille elsewhere, with the point chosen and the names as text over
 //! them; a console that shows neither lists the groups with their counts and examples instead.
+//!
+//! Each map is turned so its long side runs across the screen and fitted to it. Its points grow as it zooms in (a
+//! typical sound a little bigger than the rest), a soft light shows where they gather, and where the map is drawn in
+//! cells a zoom or a move glides.
 
 use std::rc::Rc;
+use std::time::{Duration, Instant};
 
 use super::pictures::{cells, kitty, scene::Shape, Graphics, Raster, Scene};
 use super::render::Cursor;
@@ -33,6 +38,23 @@ const NAME_CELLS: i32 = 18;
 /// An image's pixels in a cell, and the most it has.
 const CELL_PIXELS: (f64, f64) = (8., 16.);
 const MOST_PIXELS: (f64, f64) = (1600., 800.);
+/// Points grow as the map zooms in: this part of the room they have on screen, up to this radius (in dots).
+const GROW: f64 = 0.4;
+const MOST_RADIUS: f64 = 5.;
+/// The most of the way to its nearest a point's radius takes: two near points' discs touch, not run together.
+const TOUCHING: f64 = 0.45;
+/// How typical a point is: how many others have it among their nearest this many on the map.
+const NEAREST: usize = 8;
+/// A map fitted to the screen: past this share of its points' distances from its middle, a stray's distance beyond it
+/// grows as a log, this part of that distance at a time; and a map at most this many times as wide as it's tall.
+const STRAYS: f64 = 0.985;
+const STRAY_EASE: f64 = 0.12;
+const WIDEST: f64 = 4.;
+/// The light where points gather: at most this share of their colour, none under the last.
+const LIGHT: f64 = 0.26;
+const FAINTEST: f64 = 0.03;
+/// How long a zoom or a move glides.
+const GLIDE: Duration = Duration::from_millis(150);
 /// How near a click or the mouse comes to a point to be on it, in dots.
 const REACH: f64 = 8.;
 /// A point plays as the mouse rests on it: this much of it (seconds), faded out over this long when that cuts it short.
@@ -82,13 +104,16 @@ struct View {
     /// The map's point in the middle of the area, and how far in it is (1: all of it).
     centre: (f64, f64),
     zoom: f64,
+    /// How wide the map is against its height: its x runs from 0 to this, its y from 0 to 1.
+    aspect: f64,
     /// Where the list is, on a console that lists the groups.
     row: usize,
 }
 
 impl View {
-    fn new(layer: &Layer) -> View {
-        let mut view = View { filter: String::new(), shown: vec![], chosen: None, near: vec![], centre: (0.5, 0.5), zoom: 1., row: 0 };
+    fn new(layer: &Layer, aspect: f64) -> View {
+        let mut view =
+            View { filter: String::new(), shown: vec![], chosen: None, near: vec![], centre: (aspect / 2., 0.5), zoom: 1., aspect, row: 0 };
         view.filter_by(layer, "");
         view
     }
@@ -134,13 +159,14 @@ impl View {
     }
 
     fn clamp(&mut self) {
+        let middle = (self.aspect / 2., 0.5);
         if self.zoom <= 1. {
-            (self.zoom, self.centre) = (1., (0.5, 0.5));
+            (self.zoom, self.centre) = (1., middle);
         } else if !(self.centre.0.is_finite() && self.centre.1.is_finite()) {
             // Worked out against an area that has nothing in it: the middle.
-            self.centre = (0.5, 0.5);
+            self.centre = middle;
         } else {
-            self.centre = (self.centre.0.clamp(0., 1.), self.centre.1.clamp(0., 1.));
+            self.centre = (self.centre.0.clamp(0., self.aspect), self.centre.1.clamp(0., 1.));
         }
     }
 
@@ -165,8 +191,13 @@ struct Frame {
 
 impl Frame {
     fn new(area: Rect, view: &View) -> Frame {
+        Frame::showing(area, view.aspect, view.zoom, view.centre)
+    }
+
+    /// The area showing a map `aspect` wide (and 1 tall), `zoom` far in, about `centre`.
+    fn showing(area: Rect, aspect: f64, zoom: f64, centre: (f64, f64)) -> Frame {
         let (width, height) = (area.width as f64 * 2., area.height as f64 * 4.);
-        Frame { width, height, scale: width.min(height) * FILL * view.zoom, centre: view.centre }
+        Frame { width, height, scale: (width / aspect).min(height) * FILL * zoom, centre }
     }
 
     /// Where a point of the map falls, in dots from the area's top left.
@@ -186,6 +217,164 @@ impl Frame {
 
 fn spot(point: &Point) -> (f64, f64) {
     (point.x as f64, point.y as f64)
+}
+
+/// A map as it's drawn: how wide it is against its height, how far each point is from its nearest on it, and how
+/// typical each is (how many others have it among their NEAREST nearest there, against the median: 0.7 to 1.7).
+#[derive(Clone, Debug, Default)]
+struct Fit {
+    aspect: f64,
+    apart: Vec<f32>,
+    typical: Vec<f32>,
+}
+
+/// Both maps made ready to draw: worked out once as /map opens, off Kumi's thread.
+pub struct Ready {
+    data: MapData,
+    fits: [Fit; 2],
+}
+
+/// The maps made ready to draw: each turned so its long side runs across (its places' main direction), strays brought
+/// in, and fitted to its own box in place of a square (x from 0 to its aspect, y from 0 to 1), with how far each point
+/// is from its nearest there and how typical it is.
+pub fn ready(mut data: MapData) -> Ready {
+    let fits = [fitted(&mut data.sounds), fitted(&mut data.songs)];
+    Ready { data, fits }
+}
+
+/// One map turned, its strays brought in and fitted to its box (its points' places changed in place).
+fn fitted(layer: &mut Layer) -> Fit {
+    let points = &mut layer.points;
+    let count = points.len();
+    if count == 0 {
+        return Fit { aspect: 1., ..Fit::default() };
+    }
+    let sum = points.iter().fold((0., 0.), |sum, point| (sum.0 + point.x as f64, sum.1 + point.y as f64));
+    let mean = (sum.0 / count as f64, sum.1 / count as f64);
+    let (mut xx, mut xy, mut yy) = (0., 0., 0.);
+    for point in points.iter() {
+        let (dx, dy) = (point.x as f64 - mean.0, point.y as f64 - mean.1);
+        (xx, xy, yy) = (xx + dx * dx, xy + dx * dy, yy + dy * dy);
+    }
+    // Turned back by its main direction's angle.
+    let angle = 0.5 * (2. * xy).atan2(xx - yy);
+    let (cos, sin) = (angle.cos(), angle.sin());
+    let mut places: Vec<(f64, f64)> = points
+        .iter()
+        .map(|point| {
+            let (dx, dy) = (point.x as f64 - mean.0, point.y as f64 - mean.1);
+            (dx * cos + dy * sin, dy * cos - dx * sin)
+        })
+        .collect();
+    let far: Vec<f64> = places.iter().map(|(x, y)| x.hypot(*y)).collect();
+    let mut sorted = far.clone();
+    sorted.sort_by(f64::total_cmp);
+    let edge = sorted[((count - 1) as f64 * STRAYS) as usize];
+    let ease = STRAY_EASE * edge;
+    if ease > 0. {
+        for (place, far) in places.iter_mut().zip(&far) {
+            if *far > edge {
+                let kept = (edge + ease * ((far - edge) / ease).ln_1p()) / far;
+                *place = (place.0 * kept, place.1 * kept);
+            }
+        }
+    }
+    let (mut low, mut high) = ((f64::MAX, f64::MAX), (f64::MIN, f64::MIN));
+    for (x, y) in &places {
+        (low, high) = ((low.0.min(*x), low.1.min(*y)), (high.0.max(*x), high.1.max(*y)));
+    }
+    let (wide, tall) = (high.0 - low.0, high.1 - low.1);
+    let span = tall.max(wide / WIDEST);
+    for (point, (x, y)) in points.iter_mut().zip(&places) {
+        // A map flatter than WIDEST allows sits in the middle of the height.
+        (point.x, point.y) =
+            if span > 0. { (((x - low.0) / span) as f32, ((y - low.1) / span + (1. - tall / span) / 2.) as f32) } else { (0.5, 0.5) };
+    }
+    let aspect = if span > 0. { (wide / span).max(1e-3) } else { 1. };
+    let (apart, named) = nearest_named(points, aspect);
+    let mut sorted = named.clone();
+    sorted.sort_unstable();
+    let median = sorted[count / 2] as f64;
+    let typical = named.iter().map(|named| ((*named as f64 + 1.) / (median + 1.)).sqrt().clamp(0.7, 1.7) as f32).collect();
+    Fit { aspect, apart, typical }
+}
+
+/// Each point's distance to its nearest other on a map `aspect` wide, and how many others have it among their NEAREST
+/// nearest: a grid of about two points a cell, searched ring by ring out from each point's cell.
+fn nearest_named(points: &[Point], aspect: f64) -> (Vec<f32>, Vec<u32>) {
+    let count = points.len();
+    let across = ((count as f64 / 2. * aspect).sqrt().ceil() as usize).clamp(1, 4096);
+    let down = ((count as f64 / 2. / aspect).sqrt().ceil() as usize).clamp(1, 4096);
+    let (cell_width, cell_height) = (aspect / across as f64, 1. / down as f64);
+    let cell =
+        |point: &Point| (((point.x as f64 / cell_width) as usize).min(across - 1), ((point.y as f64 / cell_height) as usize).min(down - 1));
+    // The points cell by cell: each cell's start in `order`, then its points.
+    let mut starts = vec![0usize; across * down + 1];
+    for point in points {
+        let (x, y) = cell(point);
+        starts[y * across + x + 1] += 1;
+    }
+    for at in 1..starts.len() {
+        starts[at] += starts[at - 1];
+    }
+    let (mut next, mut order) = (starts.clone(), vec![0u32; count]);
+    for (at, point) in points.iter().enumerate() {
+        let (x, y) = cell(point);
+        order[next[y * across + x]] = at as u32;
+        next[y * across + x] += 1;
+    }
+    let (step, wanted) = (cell_width.min(cell_height), NEAREST.min(count - 1));
+    let (mut apart, mut named) = (vec![0f32; count], vec![0u32; count]);
+    let mut best: Vec<(f64, u32)> = Vec::with_capacity(NEAREST + 1);
+    for (at, point) in points.iter().enumerate() {
+        let (cx, cy) = cell(point);
+        let (cx, cy) = (cx as isize, cy as isize);
+        best.clear();
+        for ring in 0..across.max(down) as isize {
+            for y in (cy - ring).max(0)..=(cy + ring).min(down as isize - 1) {
+                for x in (cx - ring).max(0)..=(cx + ring).min(across as isize - 1) {
+                    // The ring's edge only: what's inside it was searched.
+                    if (x - cx).abs() != ring && (y - cy).abs() != ring {
+                        continue;
+                    }
+                    let c = y as usize * across + x as usize;
+                    for other in &order[starts[c]..starts[c + 1]] {
+                        if *other as usize == at {
+                            continue;
+                        }
+                        let there = &points[*other as usize];
+                        let d = (there.x as f64 - point.x as f64).powi(2) + (there.y as f64 - point.y as f64).powi(2);
+                        if best.len() < NEAREST || d < best[NEAREST - 1].0 {
+                            let place = best.partition_point(|(seen, _)| *seen <= d);
+                            best.insert(place, (d, *other));
+                            best.truncate(NEAREST);
+                        }
+                    }
+                }
+            }
+            // Past this ring every point is at least `ring` cells away.
+            if best.len() == wanted && (wanted < NEAREST || best[wanted - 1].0.sqrt() <= ring as f64 * step) {
+                break;
+            }
+        }
+        apart[at] = best.first().map_or(0., |(d, _)| d.sqrt() as f32);
+        for (_, other) in &best {
+            named[*other as usize] += 1;
+        }
+    }
+    (apart, named)
+}
+
+/// How typical point `at` is (1 when the map has no word on it).
+fn typical(fit: &Fit, at: u32) -> f64 {
+    fit.typical.get(at as usize).map_or(1., |typical| *typical as f64)
+}
+
+/// How big point `at` draws, in dots, when the points in view draw `radius` (before how typical each is) at `scale`
+/// dots a map unit: by how typical it is, but under half the way to its nearest, so two never run into one blob.
+fn radius_of(fit: &Fit, at: u32, radius: f64, scale: f64) -> f64 {
+    let room = fit.apart.get(at as usize).map_or(f64::INFINITY, |apart| (*apart as f64 * scale * TOUCHING).max(0.5));
+    (radius * typical(fit, at)).min(room)
 }
 
 /// The kept point nearest `to` (other than `besides`).
@@ -241,15 +430,41 @@ fn mix(under: Rgb, over: Rgb, share: f64) -> Rgb {
     std::array::from_fn(|c| (under[c] as f64 + (over[c] as f64 - under[c] as f64) * share).round() as u8)
 }
 
-/// The points in view as shapes in the area: a dot each where few are in view (bigger where they're named); where many
+/// The kept points in the frame, by their place in the layer.
+fn in_view(layer: &Layer, shown: &[u32], frame: &Frame) -> Vec<u32> {
+    shown.iter().copied().filter(|at| frame.shows(frame.dot(spot(&layer.points[*at as usize])))).collect()
+}
+
+/// How big the points in view draw, in dots (each then by how typical it is): GROW of the room they have on screen, the
+/// geometric mean of the median distance from each to its nearest on the map and of the room each would have spread
+/// evenly, from half a dot up to MOST_RADIUS.
+fn grown(fit: &Fit, in_view: &[u32], frame: &Frame) -> f64 {
+    let mut apart: Vec<f32> = in_view.iter().filter_map(|at| fit.apart.get(*at as usize).copied()).collect();
+    if apart.is_empty() {
+        return 0.5;
+    }
+    let middle = apart.len() / 2;
+    let median = *apart.select_nth_unstable_by(middle, f32::total_cmp).1 as f64 * frame.scale;
+    let even = (frame.width * frame.height / in_view.len() as f64).sqrt();
+    (GROW * (median * even).sqrt()).clamp(0.5, MOST_RADIUS)
+}
+
+/// What `scene` drew: its shapes, the points it named, whether it drew density, and how big its points are (in dots,
+/// before each one's typical share).
+struct Drawn {
+    scene: Scene,
+    named: Vec<u32>,
+    dense: bool,
+    radius: f64,
+}
+
+/// The points in view as shapes in the area: a dot each where few are in view, as big as they have room for; where many
 /// are, a dot for each patch of them (`patch` dots across), brighter the busier it is and in its commonest group's
-/// colour. With the points it named, if any, and whether it drew density.
-fn scene(layer: &Layer, view: &View, frame: &Frame, patch: f64, steps: Option<f64>) -> (Scene, Vec<u32>, bool) {
-    let in_view: Vec<u32> = view.shown.iter().copied().filter(|at| frame.shows(frame.dot(spot(&layer.points[*at as usize])))).collect();
+/// colour.
+fn scene(layer: &Layer, fit: &Fit, in_view: &[u32], frame: &Frame, patch: f64, steps: Option<f64>) -> Drawn {
     let thousandths = |dots: f64| dots / frame.height * 1000.;
     if in_view.len() <= DENSE {
-        let named = in_view.len() <= NAMED;
-        let radius = thousandths(if named { 0.9 } else { 0.6 });
+        let radius = grown(fit, in_view, frame);
         let shapes = in_view
             .iter()
             .map(|at| {
@@ -258,18 +473,19 @@ fn scene(layer: &Layer, view: &View, frame: &Frame, patch: f64, steps: Option<f6
                 Shape::Dot {
                     x: x / frame.width,
                     y: 1. - y / frame.height,
-                    radius,
+                    radius: thousandths(radius_of(fit, *at, radius, frame.scale)),
                     color: layer.groups[point.group as usize].color,
                     alpha: 0.9,
                 }
             })
             .collect();
-        return (Scene { shapes, lines: false }, if named { in_view } else { vec![] }, false);
+        let named = if in_view.len() <= NAMED { in_view.to_vec() } else { vec![] };
+        return Drawn { scene: Scene { shapes, lines: false }, named, dense: false, radius };
     }
     let (columns, rows) = ((frame.width / patch).ceil() as usize, (frame.height / patch).ceil() as usize);
     // Each patch's count, and its commonest group (a running vote: the group most of its points are in, when one is).
     let mut patches = vec![(0u32, 0u16, 0u32); columns * rows];
-    for at in &in_view {
+    for at in in_view {
         let point = &layer.points[*at as usize];
         let (x, y) = frame.dot(spot(point));
         let kept = &mut patches[((y / patch) as usize).min(rows - 1) * columns + ((x / patch) as usize).min(columns - 1)];
@@ -297,7 +513,65 @@ fn scene(layer: &Layer, view: &View, frame: &Frame, patch: f64, steps: Option<f6
             Shape::Dot { x: x / frame.width, y: 1. - y / frame.height, radius, color, alpha: 1. }
         })
         .collect();
-    (Scene { shapes, lines: false }, vec![], true)
+    Drawn { scene: Scene { shapes, lines: false }, named: vec![], dense: true, radius: 0.5 }
+}
+
+/// The soft light where points gather, a cell of the area at a time: each cell's points in view in their colours,
+/// blurred about as far across as down on screen (a cell is twice as tall as it's wide), at up to LIGHT of their colour
+/// where they're busiest; none where it's fainter than FAINTEST.
+fn light(layer: &Layer, in_view: &[u32], frame: &Frame, cols: usize, rows: usize) -> Vec<Option<(Rgb, f64)>> {
+    if cols == 0 || rows == 0 {
+        return vec![];
+    }
+    let mut sums = vec![[0f64; 4]; cols * rows];
+    for at in in_view {
+        let point = &layer.points[*at as usize];
+        let (x, y) = frame.dot(spot(point));
+        let color = layer.groups[point.group as usize].color;
+        let sum = &mut sums[((y / 4.) as usize).min(rows - 1) * cols + ((x / 2.) as usize).min(cols - 1)];
+        *sum = [sum[0] + color[0] as f64, sum[1] + color[1] as f64, sum[2] + color[2] as f64, sum[3] + 1.];
+    }
+    let sums = blur(&blur(&sums, cols, rows, (1, 0), 1.8, 5), cols, rows, (0, 1), 0.9, 3);
+    let busiest = sums.iter().map(|sum| sum[3]).fold(0., f64::max);
+    sums.iter()
+        .map(|sum| {
+            let share = LIGHT * (sum[3] / busiest).powf(0.75);
+            (busiest > 0. && share >= FAINTEST).then(|| ([0, 1, 2].map(|c| (sum[c] / sum[3]).round().clamp(0., 255.) as u8), share))
+        })
+        .collect()
+}
+
+/// Cells' sums blurred one way (`way`: a cell across, or one down), a Gaussian `sigma` cells wide out to `reach` cells.
+fn blur(sums: &[[f64; 4]], cols: usize, rows: usize, way: (isize, isize), sigma: f64, reach: isize) -> Vec<[f64; 4]> {
+    let weights: Vec<f64> = (-reach..=reach).map(|k| (-((k * k) as f64) / (2. * sigma * sigma)).exp()).collect();
+    let mut out = vec![[0f64; 4]; sums.len()];
+    for row in 0..rows as isize {
+        for col in 0..cols as isize {
+            let mut sum = [0f64; 4];
+            for (k, weight) in (-reach..=reach).zip(&weights) {
+                let (c, r) = (col + k * way.0, row + k * way.1);
+                if c >= 0 && r >= 0 && c < cols as isize && r < rows as isize {
+                    let from = sums[r as usize * cols + c as usize];
+                    (0..4).for_each(|i| sum[i] += from[i] * weight);
+                }
+            }
+            out[row as usize * cols + col as usize] = sum;
+        }
+    }
+    out
+}
+
+/// Where a glide shows a map `t` of the way (0 to 1, eased out) from one zoom and centre to another: the zoom on a log
+/// scale, the centre along the path that keeps the zoom's anchor still on screen.
+fn between(from: (f64, (f64, f64)), to: (f64, (f64, f64)), t: f64) -> (f64, (f64, f64)) {
+    if t >= 1. {
+        return to;
+    }
+    let eased = 1. - (1. - t.max(0.)).powi(3);
+    let zoom = (from.0.ln() + (to.0.ln() - from.0.ln()) * eased).exp();
+    let along = if (to.0 - from.0).abs() < 1e-12 { eased } else { (1. / from.0 - 1. / zoom) / (1. / from.0 - 1. / to.0) };
+    let ((fx, fy), (tx, ty)) = (from.1, to.1);
+    (zoom, (fx + (tx - fx) * along, fy + (ty - fy) * along))
 }
 
 /// A picture drawn for the area, kept until what it shows changes.
@@ -313,11 +587,24 @@ struct Picture {
     dense: bool,
     /// An image's size in pixels.
     pixels: Option<(f64, f64)>,
+    /// How big its points are, in dots (before each one's typical share).
+    radius: f64,
+}
+
+/// A zoom or a move gliding on a map (by its tab), from the zoom and centre it was shown at, since `started`.
+#[derive(Clone, Copy, Debug)]
+struct Glide {
+    tab: usize,
+    zoom: f64,
+    centre: (f64, f64),
+    started: Instant,
 }
 
 pub struct MapView {
     graphics: Graphics,
     data: Option<Rc<MapData>>,
+    /// Each map as it's drawn (how wide it is, how far apart its points sit and how typical each is), by tab.
+    fits: Vec<Fit>,
     tab: usize,
     views: Vec<View>,
     /// The filter being typed.
@@ -332,6 +619,9 @@ pub struct MapView {
     hover: bool,
     hovered: Option<(usize, u32)>,
     from_hover: bool,
+    /// Whether zooms and moves glide (where the map is drawn in cells), and the one gliding.
+    gliding: bool,
+    glide: Option<Glide>,
     /// Bumped whenever what the picture shows changes: pan, zoom, filter, a new map.
     version: u64,
     picture: Option<Picture>,
@@ -345,6 +635,7 @@ impl MapView {
         MapView {
             graphics,
             data: None,
+            fits: vec![],
             tab: 0,
             views: vec![],
             prompt: None,
@@ -354,19 +645,52 @@ impl MapView {
             hover,
             hovered: None,
             from_hover: false,
+            gliding: false,
+            glide: None,
             version: 0,
             picture: None,
             area: Rect::default(),
         }
     }
 
-    /// The map's data, read: each map zoomed out with the point nearest its middle chosen. The songs' map comes first
-    /// when there are no sounds on one yet.
-    pub fn loaded(&mut self, data: MapData) {
-        self.views = vec![View::new(&data.sounds), View::new(&data.songs)];
+    /// The same map with its zooms and moves gliding where it's drawn in cells (an image would go up again each step).
+    pub fn gliding(mut self, on: bool) -> MapView {
+        self.gliding = on && self.graphics == Graphics::Cells;
+        self
+    }
+
+    /// The map's data, read and made ready to draw: each map zoomed out with the point nearest its middle chosen. The
+    /// songs' map comes first when there are no sounds on one yet.
+    pub fn loaded(&mut self, ready: Ready) {
+        let Ready { data, fits } = ready;
+        self.views = vec![View::new(&data.sounds, fits[0].aspect), View::new(&data.songs, fits[1].aspect)];
+        self.fits = fits.into();
         self.tab = usize::from(data.sounds.points.is_empty() && !data.songs.points.is_empty());
         self.data = Some(Rc::new(data));
         self.version += 1;
+    }
+
+    /// The zoom and centre the map on show is drawn at now: its view's, or partway along a glide to it.
+    fn shown(&self) -> (f64, (f64, f64)) {
+        let Some(view) = self.views.get(self.tab) else { return (1., (0.5, 0.5)) };
+        let to = (view.zoom, view.centre);
+        match self.glide.filter(|glide| glide.tab == self.tab) {
+            Some(glide) => between((glide.zoom, glide.centre), to, glide.started.elapsed().as_secs_f64() / GLIDE.as_secs_f64()),
+            None => to,
+        }
+    }
+
+    /// The view moved from where it was drawn (`was`): it glides there, when moves glide.
+    fn glide_from(&mut self, was: (f64, (f64, f64))) {
+        let Some(view) = self.views.get(self.tab) else { return };
+        if self.gliding && was != (view.zoom, view.centre) {
+            self.glide = Some(Glide { tab: self.tab, zoom: was.0, centre: was.1, started: Instant::now() });
+        }
+    }
+
+    /// Whether the map is still gliding: it's drawn again soon.
+    pub fn moving(&self) -> bool {
+        self.glide.is_some_and(|glide| glide.tab == self.tab && glide.started.elapsed() < GLIDE)
     }
 
     fn layer(&self) -> Option<&Layer> {
@@ -569,12 +893,13 @@ impl MapView {
         if self.graphics == Graphics::Words || !inside(area, x, y) {
             return None;
         }
-        let (layer, view) = (self.layer()?, self.views.get(self.tab)?);
+        let (layer, view, fit) = (self.layer()?, self.views.get(self.tab)?, self.fits.get(self.tab)?);
         let frame = Frame::new(area, view);
         let dot = (((x - area.x) * 2 + 1) as f64, ((y - area.y) * 4 + 2) as f64);
+        let radius = self.picture.as_ref().map_or(0., |picture| picture.radius);
         nearest(layer, &view.shown, frame.at(dot), None).filter(|at| {
             let (px, py) = frame.dot(spot(&layer.points[*at as usize]));
-            (px - dot.0).hypot(py - dot.1) <= REACH
+            (px - dot.0).hypot(py - dot.1) <= REACH.max(radius_of(fit, *at, radius, frame.scale) + 1.)
         })
     }
 
@@ -618,6 +943,7 @@ impl MapView {
     fn follow(&mut self) {
         let Some(data) = self.data.clone() else { return };
         let layer = if self.tab == 0 { &data.sounds } else { &data.songs };
+        let was = self.shown();
         let (area, view) = (self.area, &mut self.views[self.tab]);
         let Some(at) = view.chosen.filter(|_| area.width > 0 && area.height > 0) else { return };
         let frame = Frame::new(area, view);
@@ -630,26 +956,30 @@ impl MapView {
         view.clamp();
         if view.centre != before {
             self.version += 1;
+            self.glide_from(was);
         }
     }
 
     /// Shift and an arrow: a quarter of the view that way (nothing before the map has been drawn at a size that shows it).
     fn pan(&mut self, (ux, uy): (f64, f64)) {
-        let area = self.area;
+        let (area, was) = (self.area, self.shown());
         let Some(view) = self.views.get_mut(self.tab).filter(|_| area.width > 0 && area.height > 0) else { return };
         let frame = Frame::new(area, view);
         view.centre = (view.centre.0 + ux * frame.width / frame.scale / 4., view.centre.1 + uy * frame.height / frame.scale / 4.);
         view.clamp();
         self.version += 1;
+        self.glide_from(was);
     }
 
     fn zoom_by(&mut self, by: f64, anchor: Option<(f64, f64)>) {
         let Some(data) = self.data.clone() else { return };
         let layer = if self.tab == 0 { &data.sounds } else { &data.songs };
+        let was = self.shown();
         let view = &mut self.views[self.tab];
         let anchor = anchor.or_else(|| view.chosen.map(|at| spot(&layer.points[at as usize]))).unwrap_or(view.centre);
         view.zoom_by(by, anchor);
         self.version += 1;
+        self.glide_from(was);
     }
 
     /// Up or down a console's list of groups.
@@ -686,6 +1016,9 @@ impl MapView {
     /// the keys. `upload` puts an image up under a key (once) and says the id it shows under. The cursor, while the
     /// filter is typed.
     pub fn draw(&mut self, screen: &mut Screen, upload: &mut dyn FnMut(&str, &Raster, usize, usize) -> u32) -> Option<Cursor> {
+        if self.glide.is_some_and(|glide| glide.started.elapsed() >= GLIDE) {
+            self.glide = None;
+        }
         let (columns, rows) = (screen.width, screen.height);
         if columns < 40 || rows < 12 {
             screen.put(1, 0, &truncate("Make this window bigger for the map (esc closes it)", columns - 2), &Style::fg(palette::DIM));
@@ -766,21 +1099,41 @@ impl MapView {
     }
 
     fn draw_map(&mut self, screen: &mut Screen, layer: &Layer, upload: &mut dyn FnMut(&str, &Raster, usize, usize) -> u32) {
-        let (area, view) = (self.area, &self.views[self.tab]);
+        // Where a zoom or a move glides, each step is a picture of its own.
+        let (zoom, centre) = self.shown();
+        let (area, view, fit) = (self.area, &self.views[self.tab], &self.fits[self.tab]);
         let (cols, rows) = (area.width as usize, area.height as usize);
-        let key = format!("map {} {} {cols}x{rows}", self.tab, self.version);
-        let frame = Frame::new(area, view);
+        let key = format!("map {} {} {cols}x{rows} {zoom} {} {}", self.tab, self.version, centre.0, centre.1);
+        let frame = Frame::showing(area, view.aspect, zoom, centre);
         if self.picture.as_ref().is_none_or(|picture| picture.key != key) {
             let image = self.graphics == Graphics::Kitty;
+            let in_view = in_view(layer, &view.shown, &frame);
             // A patch of density a braille dot across (four pixels of an image); in braille its brightness in steps.
-            let (scene, named, dense) = scene(layer, view, &frame, 1., (!image).then_some(6.));
+            let drawn = scene(layer, fit, &in_view, &frame, 1., (!image).then_some(6.));
+            let light = light(layer, &in_view, &frame, cols, rows);
+            let Drawn { scene, named, dense, radius } = drawn;
             let picture = if image {
                 let shrink = (MOST_PIXELS.0 / (cols as f64 * CELL_PIXELS.0)).min(MOST_PIXELS.1 / (rows as f64 * CELL_PIXELS.1)).min(1.);
                 let (width, height) = ((cols as f64 * CELL_PIXELS.0 * shrink) as u32, (rows as f64 * CELL_PIXELS.1 * shrink) as u32);
-                let image = Some(Raster::draw(&scene, width, height));
-                Picture { key: key.clone(), rows: vec![], image, id: None, named, dense, pixels: Some((width as f64, height as f64)) }
+                // The light under the points, smooth from cell to cell.
+                let mut raster = Raster::new(width.max(1), height.max(1));
+                raster.glow(&light, cols, rows);
+                raster.paint(&scene);
+                let pixels = Some((raster.width as f64, raster.height as f64));
+                Picture { key: key.clone(), rows: vec![], image: Some(raster), id: None, named, dense, pixels, radius }
             } else {
-                Picture { key: key.clone(), rows: cells::braille(&scene, cols, rows), image: None, id: None, named, dense, pixels: None }
+                // The light behind each cell's dots, fading as the points grow: big ones are their own light, and a cell's
+                // light round each is a box.
+                let mut cells = cells::braille(&scene, cols, rows);
+                let fade = (1.5 - radius / 2.).clamp(0., 1.);
+                for (spans, lights) in cells.iter_mut().zip(light.chunks(cols)) {
+                    for (span, light) in spans.iter_mut().zip(lights) {
+                        if let Some((color, share)) = light.filter(|(_, share)| share * fade >= FAINTEST) {
+                            span.style = Rc::new(Style { bg: Some(mix(palette::GROUND, color, share * fade)), ..*span.style });
+                        }
+                    }
+                }
+                Picture { key: key.clone(), rows: cells, image: None, id: None, named, dense, pixels: None, radius }
             };
             self.picture = Some(picture);
         }
@@ -802,7 +1155,10 @@ impl MapView {
             }
         }
         // Names beside their points where there's room, the chosen one's first; then the chosen point itself.
-        let view = &self.views[self.tab];
+        let (view, fit) = (&self.views[self.tab], &self.fits[self.tab]);
+        // A name starts a cell clear of its point: past the half of it right of its cell (a disc about the cell's right
+        // dot reaches half a cell further).
+        let gap = |at: u32| ((1. + radius_of(fit, at, picture.radius, frame.scale)) / 2.).floor() as i32 + 2;
         // The cell each dot is drawn in: an image's pixel, or braille's dot (rounded as braille rounds it).
         let cell = |at: u32| {
             let (x, y) = frame.dot(spot(&layer.points[at as usize]));
@@ -831,16 +1187,17 @@ impl MapView {
         if !picture.dense {
             for at in order.take(if picture.named.is_empty() { 1 } else { usize::MAX }) {
                 let (x, y) = cell(at);
-                let name = truncate(&layer.points[at as usize].name, NAME_CELLS.min(area.x + area.width - x - 2));
+                let gap = gap(at);
+                let name = truncate(&layer.points[at as usize].name, NAME_CELLS.min(area.x + area.width - x - gap));
                 let width = text_width(&name);
-                // The cell between the point and its name too: a name never runs into another point.
-                let free: Option<Vec<usize>> = (x + 1..x + 2 + width).map(|column| index(column, y).filter(|at| !taken[*at])).collect();
+                // The cells between the point and its name too: a name never runs into another point.
+                let free: Option<Vec<usize>> = (x + 1..x + gap + width).map(|column| index(column, y).filter(|at| !taken[*at])).collect();
                 let Some(free) = free.filter(|_| width >= 3) else { continue };
                 for at in free {
                     taken[at] = true;
                 }
                 let color = if Some(at) == chosen { palette::BRIGHT } else { palette::DIM };
-                screen.put(x + 2, y, &name, &Style { bg: Some(palette::GROUND), ..Style::fg(color) });
+                screen.put(x + gap, y, &name, &Style { bg: Some(palette::GROUND), ..Style::fg(color) });
             }
         }
         if let Some(at) = chosen {
@@ -858,9 +1215,10 @@ impl MapView {
                 screen.put(x, y, "○", &Style { bold: true, ..Style::fg(color) });
             }
             let playing = if self.from_hover && self.playing == Some((self.tab, at)) { "▶ " } else { "" };
-            let name = truncate(&format!("{playing}{}", point.name), (NAME_CELLS + 2).min(area.x + area.width - x - 2));
+            let gap = gap(at);
+            let name = truncate(&format!("{playing}{}", point.name), (NAME_CELLS + 2).min(area.x + area.width - x - gap));
             if text_width(&name) >= 3 {
-                screen.put(x + 2, y, &name, &Style { bg: Some(palette::GROUND), ..Style::fg(palette::BRIGHT) });
+                screen.put(x + gap, y, &name, &Style { bg: Some(palette::GROUND), ..Style::fg(palette::BRIGHT) });
             }
         }
     }
@@ -1057,9 +1415,10 @@ mod tests {
             (0..4000).map(|n| (0.1 + (n % 40) as f32 / 4000., 0.1 + (n / 40) as f32 / 4000., 0)).collect();
         points.extend([(0.9, 0.9, 1), (0.901, 0.9, 1), (0.9, 0.901, 1), (0.901, 0.901, 1)]);
         let layer = layer(&points);
-        let view = View::new(&layer);
+        let view = View::new(&layer, 1.);
         let frame = Frame::new(Rect::new(0, 0, 80, 30), &view);
-        let (drawn, named, dense) = scene(&layer, &view, &frame, 1., None);
+        let Drawn { scene: drawn, named, dense, .. } =
+            scene(&layer, &Fit::default(), &in_view(&layer, &view.shown, &frame), &frame, 1., None);
         assert!(dense && named.is_empty());
         assert!(drawn.shapes.len() < 100, "a dot a patch, not a point: {}", drawn.shapes.len());
         let brightness = |shape: &Shape| match shape {
@@ -1073,7 +1432,9 @@ mod tests {
         // Zoomed in on the quiet corner: points, named.
         let mut near = view.clone();
         near.zoom_by(64., (0.9, 0.9));
-        let (drawn, named, dense) = scene(&layer, &near, &Frame::new(Rect::new(0, 0, 80, 30), &near), 1., None);
+        let frame = Frame::new(Rect::new(0, 0, 80, 30), &near);
+        let Drawn { scene: drawn, named, dense, .. } =
+            scene(&layer, &Fit::default(), &in_view(&layer, &near.shown, &frame), &frame, 1., None);
         assert!(!dense);
         assert_eq!((drawn.shapes.len(), named.len()), (4, 4));
     }
@@ -1083,7 +1444,7 @@ mod tests {
         let mut layer = layer(&[(0.1, 0.1, 0), (0.5, 0.5, 1), (0.9, 0.9, 1)]);
         layer.places.push("Splice / Pads".into());
         layer.points[2].place = 1;
-        let mut view = View::new(&layer);
+        let mut view = View::new(&layer, 1.);
         assert_eq!(view.chosen, Some(1), "the one nearest the middle");
         view.filter_by(&layer, "PAD splice");
         assert_eq!(view.shown, [2]);
@@ -1099,7 +1460,7 @@ mod tests {
     fn panned_before_the_map_has_room_to_show_nothing_moves_and_it_shows_once_it_has() {
         let data = MapData { sounds: layer(&[(0.5, 0.5, 0), (0.6, 0.55, 1)]), songs: layer(&[]) };
         let mut map = MapView::new(Graphics::Cells, true);
-        map.loaded(data);
+        map.loaded(ready(data));
         // A window too small for the map: it says so and draws none of it, so it has no area yet.
         let mut screen = Screen::new(30, 10);
         assert!(map.draw(&mut screen, &mut |_, _, _, _| 0).is_none());
@@ -1114,13 +1475,13 @@ mod tests {
         // A centre that's no number goes back to the middle.
         map.views[0].centre = (f64::NAN, 0.5);
         map.views[0].clamp();
-        assert_eq!(map.views[0].centre, (0.5, 0.5));
+        assert_eq!(map.views[0].centre, (map.views[0].aspect / 2., 0.5));
     }
 
     #[test]
     fn zooming_keeps_its_anchor_where_it_was_and_zoomed_out_the_whole_map_shows() {
         let layer = layer(&[(0.2, 0.3, 0)]);
-        let mut view = View::new(&layer);
+        let mut view = View::new(&layer, 1.);
         let area = Rect::new(0, 0, 100, 40);
         let before = Frame::new(area, &view).dot((0.2, 0.3));
         view.zoom_by(4., (0.2, 0.3));
@@ -1144,7 +1505,7 @@ mod tests {
         let mut sounds = layer(&[(0.5, 0.5, 0), (0.9, 0.9, 1)]);
         sounds.points[1].seconds = 30.;
         let mut map = MapView::new(Graphics::Cells, true);
-        map.loaded(MapData { sounds, songs: layer(&[]) });
+        map.loaded(ready(MapData { sounds, songs: layer(&[]) }));
         map.draw(&mut Screen::new(100, 30), &mut |_, _, _, _| 0);
         let (x, y) = cell_of(&map, 0);
         let hover = map.on_move(x, y);
@@ -1181,7 +1542,7 @@ mod tests {
         let mut sounds = layer(&[(0.5, 0.5, 0), (0.9, 0.9, 1)]);
         sounds.points[0].seconds = 30.;
         let mut map = MapView::new(Graphics::Cells, true);
-        map.loaded(MapData { sounds, songs: layer(&[]) });
+        map.loaded(ready(MapData { sounds, songs: layer(&[]) }));
         map.draw(&mut Screen::new(100, 30), &mut |_, _, _, _| 0);
         // The mouse rests on the point chosen and its preview plays: Space plays it whole, and again stops it.
         let chosen = map.views[0].chosen.unwrap();
@@ -1218,7 +1579,7 @@ mod tests {
     fn over_density_the_mouse_hears_nothing() {
         let points: Vec<(f32, f32, u16)> = (0..4000).map(|n| (0.1 + (n % 40) as f32 / 4000., 0.1 + (n / 40) as f32 / 4000., 0)).collect();
         let mut map = MapView::new(Graphics::Cells, true);
-        map.loaded(MapData { sounds: layer(&points), songs: layer(&[]) });
+        map.loaded(ready(MapData { sounds: layer(&points), songs: layer(&[]) }));
         map.draw(&mut Screen::new(100, 30), &mut |_, _, _, _| 0);
         let chosen = map.views[0].chosen.unwrap();
         let (x, y) = cell_of(&map, chosen);
@@ -1230,5 +1591,107 @@ mod tests {
         map.draw(&mut Screen::new(100, 30), &mut |_, _, _, _| 0);
         let (x, y) = cell_of(&map, chosen);
         assert!(matches!(map.on_move(x, y), Asked::Hover { .. }));
+    }
+
+    #[test]
+    fn a_map_is_turned_to_run_across_and_fitted_to_its_box_with_its_strays_brought_in() {
+        // Points along a rising diagonal: turned to run across, as wide as a map may be against its height.
+        let mut points: Vec<(f32, f32, u16)> = (0..200).map(|n| (0.2 + n as f32 * 0.003, 0.2 + n as f32 * 0.002, 0)).collect();
+        let mut line = layer(&points);
+        let fit = fitted(&mut line);
+        assert!((fit.aspect - WIDEST).abs() < 1e-6, "the long side runs across: {}", fit.aspect);
+        let (xs, ys): (Vec<f32>, Vec<f32>) = line.points.iter().map(|point| (point.x, point.y)).unzip();
+        assert!(xs.iter().all(|x| (0. ..=fit.aspect as f32 + 1e-4).contains(x)) && ys.iter().all(|y| (*y - 0.5).abs() < 1e-4));
+        assert!(xs.iter().any(|x| *x < 1e-4) && xs.iter().any(|x| (*x - fit.aspect as f32).abs() < 1e-3), "it fills its box across");
+        // One stray far off it: brought in, nearer the line's middle than it was against the line's length.
+        points.push((0.95, 0.05, 1));
+        let mut layer = layer(&points);
+        let fit = fitted(&mut layer);
+        assert!(layer.points.iter().all(|point| (0. ..=fit.aspect as f32 + 1e-4).contains(&point.x) && (0. ..=1.).contains(&point.y)));
+        let middle = (layer.points[100].x, layer.points[100].y);
+        let stray = (layer.points[200].x - middle.0).hypot(layer.points[200].y - middle.1);
+        let length = (layer.points[199].x - layer.points[0].x).hypot(layer.points[199].y - layer.points[0].y);
+        let (was, was_length) = ((0.95f32 - 0.5).hypot(0.05 - 0.4), (0.597f32).hypot(0.398));
+        assert!(stray / length < was / was_length, "{stray} of {length}, against {was} of {was_length}");
+    }
+
+    #[test]
+    fn points_grow_as_the_map_zooms_in_and_a_stray_draws_smaller_than_a_typical_one() {
+        // A grid of points, and one far from the rest.
+        let mut points: Vec<(f32, f32, u16)> = (0..900).map(|n| (0.2 + (n % 30) as f32 * 0.02, 0.2 + (n / 30) as f32 * 0.02, 0)).collect();
+        points.push((0.97, 0.97, 1));
+        let mut layer = layer(&points);
+        let fit = fitted(&mut layer);
+        let area = Rect::new(0, 0, 120, 40);
+        let mut view = View::new(&layer, fit.aspect);
+        let mut radii = vec![];
+        for _ in 0..8 {
+            let frame = Frame::new(area, &view);
+            radii.push(grown(&fit, &in_view(&layer, &view.shown, &frame), &frame));
+            view.zoom_by(2., spot(&layer.points[465]));
+        }
+        assert!(radii.windows(2).all(|pair| pair[1] >= pair[0]) && radii[0] < radii[3], "{radii:?}");
+        assert_eq!(*radii.last().unwrap(), MOST_RADIUS, "{radii:?}");
+        assert!(radii.iter().all(|radius| (0.5..=MOST_RADIUS).contains(radius)));
+        // The stray: few have it among their nearest.
+        assert!(typical(&fit, 900) < typical(&fit, 465), "{} against {}", typical(&fit, 900), typical(&fit, 465));
+        assert!((0.7..=1.7).contains(&typical(&fit, 465)));
+    }
+
+    #[test]
+    fn the_light_shows_where_points_gather_and_none_far_from_them() {
+        let points: Vec<(f32, f32, u16)> = (0..400).map(|n| (0.1 + (n % 20) as f32 * 0.005, 0.8 + (n / 20) as f32 * 0.005, 1)).collect();
+        let layer = layer(&points);
+        let view = View::new(&layer, 1.);
+        let frame = Frame::new(Rect::new(0, 0, 60, 20), &view);
+        let lit = light(&layer, &in_view(&layer, &view.shown, &frame), &frame, 60, 20);
+        let at = |x: f64, y: f64| lit[((y / 4.) as usize).min(19) * 60 + ((x / 2.) as usize).min(59)];
+        let (x, y) = frame.dot((0.15, 0.85));
+        let (color, share) = at(x, y).expect("lit where they gather");
+        assert!(color[2] > color[0] && share > FAINTEST && share <= LIGHT, "in the pads' blue: {color:?} at {share}");
+        let (x, y) = frame.dot((0.9, 0.1));
+        assert!(at(x, y).is_none(), "none far from them");
+    }
+
+    #[test]
+    fn a_glide_eases_to_where_the_map_goes_keeping_the_zooms_anchor_still() {
+        let area = Rect::new(0, 0, 100, 30);
+        let (from, anchor) = ((2., (0.4, 0.6)), (0.45, 0.62));
+        let mut view = View::new(&layer(&[]), 1.);
+        (view.zoom, view.centre) = (from.0, from.1);
+        let before = Frame::new(area, &view).dot(anchor);
+        view.zoom_by(8., anchor);
+        let to = (view.zoom, view.centre);
+        assert_eq!(between(from, to, 0.), from);
+        assert_eq!(between(from, to, 1.), to);
+        let mut zooms = vec![];
+        for t in [0.1, 0.3, 0.5, 0.8] {
+            let (zoom, centre) = between(from, to, t);
+            let now = Frame::showing(area, 1., zoom, centre).dot(anchor);
+            assert!((now.0 - before.0).abs() < 1e-6 && (now.1 - before.1).abs() < 1e-6, "{t}: {now:?} against {before:?}");
+            zooms.push(zoom);
+        }
+        assert!(zooms.windows(2).all(|pair| pair[0] < pair[1]) && zooms[0] > from.0 && zooms[3] < to.0, "{zooms:?}");
+        // A move alone: the centre eases along, the zoom stays.
+        let (zoom, centre) = between((4., (0.2, 0.5)), (4., (0.6, 0.5)), 0.5);
+        assert!(zoom == 4. && centre.0 > 0.4 && centre.0 < 0.6, "{centre:?}");
+    }
+
+    #[test]
+    fn a_zoom_glides_where_the_map_is_drawn_in_cells_and_not_where_its_an_image() {
+        let sounds = layer(&[(0.3, 0.4, 0), (0.6, 0.55, 1), (0.5, 0.7, 0)]);
+        let mut cells = MapView::new(Graphics::Cells, true).gliding(true);
+        cells.loaded(ready(MapData { sounds: sounds.clone(), songs: layer(&[]) }));
+        cells.draw(&mut Screen::new(100, 30), &mut |_, _, _, _| 0);
+        assert!(!cells.moving());
+        cells.on_text("+");
+        assert!(cells.moving(), "gliding to the new zoom");
+        let shown = cells.shown();
+        assert!(shown.0 < cells.views[0].zoom, "drawn short of it as it starts: {shown:?}");
+        let mut image = MapView::new(Graphics::Kitty, true).gliding(true);
+        image.loaded(ready(MapData { sounds, songs: layer(&[]) }));
+        image.draw(&mut Screen::new(100, 30), &mut |_, _, _, _| 1);
+        image.on_text("+");
+        assert!(!image.moving() && image.shown().0 == image.views[0].zoom, "an image goes straight there");
     }
 }

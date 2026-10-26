@@ -21,25 +21,62 @@ impl Raster {
     /// The scene at `width` × `height`.
     pub fn draw(scene: &Scene, width: u32, height: u32) -> Raster {
         let mut raster = Raster::new(width.max(1), height.max(1));
+        raster.paint(scene);
+        raster
+    }
+
+    /// The scene drawn over what's there.
+    pub fn paint(&mut self, scene: &Scene) {
         for shape in &scene.shapes {
             // A dot is laid straight on, around itself only: a map draws thousands.
             if let Shape::Dot { x, y, radius, color, alpha } = shape {
-                raster.dot((*x, *y), radius / 1000. * raster.height as f64, *color, *alpha);
+                self.dot((*x, *y), radius / 1000. * self.height as f64, *color, *alpha);
                 continue;
             }
             // Each other shape's cover is worked out whole, then laid on once: joins in a line aren't laid twice.
-            let mut cover = vec![0f32; (raster.width * raster.height) as usize];
+            let mut cover = vec![0f32; (self.width * self.height) as usize];
             match shape {
-                Shape::Line { points, width, .. } => raster.line(&mut cover, points, (width / 1000. * raster.height as f64).max(1.)),
-                Shape::Rect { x0, y0, x1, y1, .. } => raster.rect(&mut cover, *x0, *y0, *x1, *y1),
+                Shape::Line { points, width, .. } => self.line(&mut cover, points, (width / 1000. * self.height as f64).max(1.)),
+                Shape::Rect { x0, y0, x1, y1, .. } => self.rect(&mut cover, *x0, *y0, *x1, *y1),
                 Shape::Dot { .. } => {}
             }
             let (color, alpha) = match shape {
                 Shape::Line { color, alpha, .. } | Shape::Rect { color, alpha, .. } | Shape::Dot { color, alpha, .. } => (*color, *alpha),
             };
-            raster.lay(&cover, color, alpha);
+            self.lay(&cover, color, alpha);
         }
-        raster
+    }
+
+    /// A soft light under what's drawn next: each of `cols` × `rows` cells' colour at its share (0 to 1), blended
+    /// smoothly from one cell's middle to the next.
+    pub fn glow(&mut self, cells: &[Option<([u8; 3], f64)>], cols: usize, rows: usize) {
+        if cols == 0 || rows == 0 || cells.len() < cols * rows {
+            return;
+        }
+        // A cell's light with its colour weighted by its share (so faint cells pull the colour less), and the share.
+        let light = |col: isize, row: isize| -> [f64; 4] {
+            let (col, row) = (col.clamp(0, cols as isize - 1) as usize, row.clamp(0, rows as isize - 1) as usize);
+            match cells[row * cols + col] {
+                Some((color, share)) => [color[0] as f64 * share, color[1] as f64 * share, color[2] as f64 * share, share],
+                None => [0.; 4],
+            }
+        };
+        let (cell_width, cell_height) = (self.width as f64 / cols as f64, self.height as f64 / rows as f64);
+        for py in 0..self.height {
+            let down = (py as f64 + 0.5) / cell_height - 0.5;
+            let (row, ty) = (down.floor() as isize, down - down.floor());
+            for px in 0..self.width {
+                let across = (px as f64 + 0.5) / cell_width - 0.5;
+                let (col, tx) = (across.floor() as isize, across - across.floor());
+                let [a, b, c, d] = [light(col, row), light(col + 1, row), light(col, row + 1), light(col + 1, row + 1)];
+                let mixed: [f64; 4] =
+                    std::array::from_fn(|i| (a[i] * (1. - tx) + b[i] * tx) * (1. - ty) + (c[i] * (1. - tx) + d[i] * tx) * ty);
+                if mixed[3] > 0.004 {
+                    let color = [0, 1, 2].map(|i| (mixed[i] / mixed[3]).round().clamp(0., 255.) as u8);
+                    self.blend((py * self.width + px) as usize, color, mixed[3]);
+                }
+            }
+        }
     }
 
     /// The pixel at (x, y), x from the left, y from the top.
@@ -211,6 +248,19 @@ mod tests {
         assert_eq!(raster.at(14, 5)[3], 0, "four along: clear");
         assert_eq!(raster.at(40, 20), [0, 0, 255, 255], "a dot in the corner is drawn as far as it shows");
         assert!(raster.rgba.chunks(4).all(|pixel| pixel[1] == 0), "one off the picture draws nothing");
+    }
+
+    #[test]
+    fn a_glow_fades_smoothly_from_a_lit_cell_to_one_that_isnt_and_lies_under_what_is_drawn_next() {
+        // Two cells across, 40 pixels each: the left one lit red at half, the right one not.
+        let mut raster = Raster::new(80, 10);
+        raster.glow(&[Some(([200, 0, 0], 0.5)), None], 2, 1);
+        assert_eq!(raster.at(10, 5), [200, 0, 0, 128], "the left cell's middle, and left of it");
+        let fading: Vec<u8> = [30, 40, 50].iter().map(|x| raster.at(*x, 5)[3]).collect();
+        assert!(fading[0] > fading[1] && fading[1] > fading[2] && fading[2] > 0, "{fading:?}");
+        assert_eq!(raster.at(70, 5)[3], 0, "the right cell's middle: none");
+        raster.paint(&Scene { shapes: vec![Shape::Dot { x: 0.125, y: 0.5, radius: 300., color: [0, 0, 255], alpha: 1. }], lines: false });
+        assert_eq!(raster.at(10, 5), [0, 0, 255, 255], "a dot over it");
     }
 
     #[test]
