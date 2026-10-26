@@ -86,7 +86,8 @@ impl TuiApp {
         if !wanted(self) {
             return;
         }
-        let page = Arc::new(crate::map::Page::new(data));
+        let page = crate::map::Page::new(data);
+        let page = Arc::new(if self.0.options.controller.has_palette() { page.with_palette() } else { page });
         let app = Rc::downgrade(&self.0);
         let served = Served {
             points: Box::new({
@@ -100,12 +101,29 @@ impl TuiApp {
                 let page = page.clone();
                 move |id| page.point(id).map(|(_, point)| (PathBuf::from(&point.path), point.from as f64, point.seconds as f64))
             }),
-            action: Box::new(move |action, id| match (page.asked(action, id), app.upgrade()) {
-                (Some(words), Some(app)) => {
-                    TuiApp(app).from_map_page(&words);
-                    true
+            action: Box::new({
+                let (page, app) = (page.clone(), app.clone());
+                move |action, id| match (page.asked(action, id), app.upgrade()) {
+                    (Some(words), Some(app)) => {
+                        TuiApp(app).from_map_page(&words);
+                        true
+                    }
+                    _ => false,
                 }
-                _ => false,
+            }),
+            // Points picked on the page, into the session's palette: what happened, said on the page and here.
+            palette: Box::new(move |ids| {
+                let (files, app) = (page.gathered(&ids), app.upgrade());
+                async move {
+                    let app = TuiApp(app?);
+                    let said = match app.palette_gather(files).await? {
+                        Ok(said) => said,
+                        Err(error) => error,
+                    };
+                    app.notice(&said, NoticeTone::Info);
+                    Some(said)
+                }
+                .boxed_local()
             }),
         };
         let opened = crate::map_server::open(served).await;

@@ -410,6 +410,7 @@ impl TuiApp {
                         "/slots" => self.0.options.slots.is_some(),
                         "/music" => self.0.options.music.is_some(),
                         "/map" => self.0.options.map.is_some(),
+                        "/palette" => c.has_palette(),
                         _ => true,
                     }
             })
@@ -728,6 +729,11 @@ impl TuiApp {
         if let Some(load) = self.0.options.map.clone().filter(|_| command == "/map" || command.starts_with("/map ")) {
             self.clear_editor();
             self.map_command(load, &command["/map".len()..]).await;
+            return Ok(());
+        }
+        if controller.has_palette() && (command == "/palette" || command.starts_with("/palette ")) {
+            self.clear_editor();
+            self.palette_command(&command["/palette".len()..]).await;
             return Ok(());
         }
         if command == "/status" {
@@ -1310,6 +1316,7 @@ pub(super) const COMMANDS: &[Command] = &[
     Command { name: "/fast", about: "The model's faster tier, when its provider offers one" },
     Command { name: "/willington", about: "Willington's bindings in Live: macro mapping, zones" },
     Command { name: "/slots", about: "Which model does each listening job: /slots listening gemini, /slots back <job>" },
+    Command { name: "/palette", about: "The sounds you gathered (Enter on /map): list, new, use, rename, forget; strict or loose" },
     Command { name: "/music", about: "Your own music, which Kumi learns your taste from: folders, songs, pause, forget" },
     Command { name: "/map", about: "Your sounds and songs as a map: hear a point, find more like it; /map open in the browser" },
     Command { name: "/login", about: "Sign in to a provider" },

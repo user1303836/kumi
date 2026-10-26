@@ -81,7 +81,8 @@ aside h3:first-child { margin-top: 0; }
 <script>
 "use strict";
 /* The map Kumi lays out from the producer's sounds and songs, served by Kumi itself: the points come from "points",
-   a point plays from "audio/<id>", and an action goes to "action", which puts its words in Kumi's input box. */
+   a point plays from "audio/<id>", an action goes to "action", which puts its words in Kumi's input box, and points
+   picked go to "palette", into the session's palette. */
 const canvas = document.getElementById("canvas");
 const context = canvas.getContext("2d");
 const tip = document.getElementById("tip");
@@ -374,6 +375,28 @@ function picked() {
   count.className = "muted";
   count.textContent = state.picked.length.toLocaleString() + (state.picked.length === 1 ? " point" : " points") + (state.picked.length > 100 ? "; the first 100:" : ":");
   box.appendChild(count);
+  /* Into the session's palette: what happened shows under it. */
+  if (state.data.palette) {
+    const add = document.createElement("button");
+    add.textContent = "Add to palette";
+    const said = document.createElement("div");
+    said.className = "muted";
+    add.addEventListener("click", async () => {
+      add.disabled = true;
+      said.textContent = "Adding…";
+      try {
+        const answer = await fetch("palette", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ids: state.picked.slice(0, 10000).map(idOf) }),
+        });
+        said.textContent = answer.ok ? (await answer.json()).said : "Kumi couldn't add them: is it still running?";
+      } catch (error) {
+        said.textContent = "Kumi couldn't add them: is it still running?";
+      }
+      add.disabled = false;
+    });
+    box.append(add, said);
+  }
   for (const at of state.picked.slice(0, 100)) {
     const button = document.createElement("button");
     button.className = "picked";

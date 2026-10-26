@@ -7,6 +7,7 @@
 //! - what a point plays, `/<token>/audio/<id>`: by the point's id only, never a path, as a WAV of the stretch the
 //!   terminal's map plays (so every browser plays it, an AIFF sample too), with Range requests;
 //! - one POST, `/<token>/action`: what the producer chose, which becomes a message in the input box;
+//! - one POST, `/<token>/palette`: points picked, into the session's palette, answered with what happened in words;
 //! - a link that works once, `/once/<nonce>`, which goes on to the page: what the browser is started with, so no
 //!   command line (which on Linux every account can read) carries the token. Spent, it finds nothing.
 
@@ -28,6 +29,8 @@ use tokio::{
 
 /// The page: its script and style inline.
 pub const PAGE: &str = include_str!("map_page.html");
+/// The most points the page puts into the palette at once.
+const MOST_PICKED: usize = 10_000;
 
 /// What the map's server serves.
 pub struct Served {
@@ -37,6 +40,9 @@ pub struct Served {
     pub audio: Box<dyn Fn(&str) -> Option<(PathBuf, f64, f64)>>,
     /// What the producer chose on the page (an action, and the point's id): true once it's in the input box.
     pub action: Box<dyn Fn(&str, &str) -> bool>,
+    /// Points picked on the page (their ids) into the session's palette: what happened, in words; None when there's no
+    /// palette to put them in.
+    pub palette: Box<dyn Fn(Vec<String>) -> LocalBoxFuture<'static, Option<String>>>,
 }
 
 /// The server, while it runs: closed by `close`, or when it's dropped (Kumi quitting).
@@ -283,7 +289,23 @@ async fn answer(mut stream: TcpStream, serving: &Serving, token: &str, port: u16
                 _ => say(&mut stream, 400, "That isn't something the map does.").await,
             }
         }
-        (_, "" | "points" | "action") => say(&mut stream, 405, "Not that way.").await,
+        ("POST", "palette") => {
+            let ids: Option<Vec<String>> = serde_json::from_slice::<Value>(&request.body).ok().and_then(|value| {
+                value.get("ids")?.as_array()?.iter().map(|id| id.as_str().filter(|id| is_id(id)).map(str::to_string)).collect()
+            });
+            let said = match ids.filter(|ids| !ids.is_empty() && ids.len() <= MOST_PICKED) {
+                Some(ids) => (served.palette)(ids).await,
+                None => None,
+            };
+            match said {
+                Some(said) => {
+                    let body = serde_json::json!({ "said": said }).to_string();
+                    let _ = reply(&mut stream, 200, "application/json", body.as_bytes(), &[]).await;
+                }
+                None => say(&mut stream, 400, "That isn't something the map does.").await,
+            }
+        }
+        (_, "" | "points" | "action" | "palette") => say(&mut stream, 405, "Not that way.").await,
         _ => say(&mut stream, 404, "There's nothing here.").await,
     }
 }

@@ -296,6 +296,18 @@ pub fn asked(kind: Kind, point: &Point, action: Action) -> String {
     }
 }
 
+/// A point as a palette gathers it: its file, its name, a sound or a song, and its class or style (none for "other").
+pub fn gathered(layer: &Layer, at: u32) -> kumi_agent::core::palette::Gathered {
+    let point = &layer.points[at as usize];
+    let group = &layer.groups[point.group as usize];
+    kumi_agent::core::palette::Gathered {
+        path: point.path.clone(),
+        name: point.name.clone(),
+        song: layer.kind == Kind::Songs,
+        class: (group.name != "other").then(|| group.name.clone()),
+    }
+}
+
 /// What the browser's page calls an action.
 fn action_called(action: Action) -> &'static str {
     match action {
@@ -310,12 +322,16 @@ fn action_called(action: Action) -> &'static str {
 pub struct Page {
     data: MapData,
     songs: HashMap<i64, usize>,
+    /// Whether picked points can go into the session's palette.
+    palette: bool,
 }
 
 #[derive(serde::Serialize)]
 struct PageMap<'a> {
     layers: [PageLayer<'a>; 2],
     actions: Vec<PageAction>,
+    /// Whether picked points can go into the session's palette.
+    palette: bool,
 }
 
 #[derive(serde::Serialize)]
@@ -391,7 +407,12 @@ fn page_layer<'a>(layer: &'a Layer, title: &'static str) -> PageLayer<'a> {
 impl Page {
     pub fn new(data: MapData) -> Page {
         let songs = data.songs.points.iter().enumerate().map(|(at, point)| (point.id, at)).collect();
-        Page { data, songs }
+        Page { data, songs, palette: false }
+    }
+
+    /// The same page, its picked points able to go into the session's palette.
+    pub fn with_palette(self) -> Page {
+        Page { palette: true, ..self }
     }
 
     /// What the page draws (JSON): each map's groups in their colours, the folders and tags its points name by number,
@@ -400,19 +421,39 @@ impl Page {
         let map = PageMap {
             layers: [page_layer(&self.data.sounds, "Sounds"), page_layer(&self.data.songs, "Songs")],
             actions: ACTIONS.iter().map(|(action, label)| PageAction { action: action_called(*action), label }).collect(),
+            palette: self.palette,
         };
         serde_json::to_string(&map).unwrap_or_default()
     }
 
     /// A point by the id the page asks for it by.
     pub fn point(&self, id: &str) -> Option<(Kind, &Point)> {
+        let (kind, at) = self.place(id)?;
+        Some((kind, &self.layer(kind).points[at]))
+    }
+
+    /// Where a point is, by the id the page asks for it by: its map, and its place in that map's points.
+    fn place(&self, id: &str) -> Option<(Kind, usize)> {
         let (kind, number) = id.split_once(':')?;
         let number: i64 = number.parse().ok()?;
         match kind {
-            "sounds" => self.data.sounds.points.get(usize::try_from(number).ok()?).map(|point| (Kind::Sounds, point)),
-            "songs" => self.songs.get(&number).map(|at| (Kind::Songs, &self.data.songs.points[*at])),
+            "sounds" => usize::try_from(number).ok().filter(|at| *at < self.data.sounds.points.len()).map(|at| (Kind::Sounds, at)),
+            "songs" => self.songs.get(&number).map(|at| (Kind::Songs, *at)),
             _ => None,
         }
+    }
+
+    fn layer(&self, kind: Kind) -> &Layer {
+        if kind == Kind::Sounds {
+            &self.data.sounds
+        } else {
+            &self.data.songs
+        }
+    }
+
+    /// Points picked on the page (by the ids the page asks for them by) as a palette gathers them: those it has.
+    pub fn gathered(&self, ids: &[String]) -> Vec<kumi_agent::core::palette::Gathered> {
+        ids.iter().filter_map(|id| self.place(id)).map(|(kind, at)| gathered(self.layer(kind), at as u32)).collect()
     }
 
     /// What an action chosen on the page asks Kumi, for the input box: none for an action or a point it doesn't have.

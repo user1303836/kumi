@@ -11,6 +11,7 @@ mod jobs;
 mod live;
 mod map;
 mod music;
+mod palette;
 mod panels;
 mod records;
 mod setup;
@@ -461,6 +462,8 @@ struct State {
     carry: Vec<u32>,
     /// Each job's record last written to the terminal's status (OSC 7501 `id=job-N`).
     job_status_sent: std::collections::BTreeMap<u32, super::alerts::StatusReport>,
+    /// The session's palette as it last stood: PALETTE, and its sounds marked on the map.
+    palette: Option<kumi_agent::core::palette::PaletteView>,
 }
 impl State {
     fn new(options: &TuiOptions) -> Self {
@@ -578,6 +581,7 @@ impl State {
             jobs: std::collections::BTreeMap::new(),
             carry: vec![],
             job_status_sent: std::collections::BTreeMap::new(),
+            palette: None,
         }
     }
 }
@@ -738,6 +742,9 @@ impl TuiApp {
             }
             if options.controller.has_jobs() {
                 tabs.push(Rc::new(jobs::JobsTab { app: weak.clone() }));
+            }
+            if options.controller.has_palette() {
+                tabs.push(Rc::new(palette::PaletteTab { app: weak.clone() }));
             }
             tabs.extend(options.tabs.clone());
             let active = options.panel_tab.as_ref().and_then(|p| (p.load)());
