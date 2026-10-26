@@ -41,8 +41,9 @@ impl TuiApp {
         {
             let mut state = self.0.state.borrow_mut();
             let paths = palette.as_ref().map(|palette| palette.files.iter().map(|file| file.path.clone()).collect()).unwrap_or_default();
+            let reached = palette.as_ref().map(|palette| palette.reached.iter().cloned().collect()).unwrap_or_default();
             if let Some(map) = state.map.as_mut() {
-                map.in_palette(paths);
+                map.in_palette(paths, reached);
             }
             state.palette = palette;
         }

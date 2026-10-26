@@ -415,8 +415,10 @@ struct Inner {
     taste: Option<Rc<TasteLog>>,
     /// The settings searches hear, kept in Kumi's database (only when it's open).
     search_memory: Option<Rc<SearchMemory>>,
-    /// The producer's palettes, in Kumi's database (only when it's open), and the one this session works with.
+    /// The producer's palettes, in Kumi's database (only when it's open), and the one this session works with; the
+    /// palette tool, with them.
     palettes: Option<Rc<crate::core::palette::Palettes>>,
+    palette_tool: Option<Rc<dyn KernelTool>>,
     timings: Option<String>,
     shelf: Vec<Rc<dyn KernelTool>>,
     /// The taste tool, when Kumi knows where the producer's music is.
@@ -767,7 +769,10 @@ pub fn create_session(options: SessionOptions) -> Result<Session, RuntimeError> 
             let emit = emit.clone();
             Rc::new(crate::core::palette::Palettes::new(
                 store,
-                options.library.clone().map(crate::core::palette::library_refind),
+                options
+                    .library
+                    .clone()
+                    .map(|library| Rc::new(crate::core::palette::LibrarySounds(library)) as Rc<dyn crate::core::palette::PaletteLibrary>),
                 Rc::new(move |palette| emit(SessionEvent::Palette { palette })),
             ))
         });
@@ -796,6 +801,7 @@ pub fn create_session(options: SessionOptions) -> Result<Session, RuntimeError> 
             gaps,
             taste,
             search_memory,
+            palette_tool: palettes.clone().map(crate::core::palette_tool::PaletteTool::new),
             palettes,
             timings,
             shelf,
@@ -1492,6 +1498,7 @@ impl Session {
             tools.extend(self.0.browsing.iter().map(|tool| self.with_background(tool.clone())));
             tools.extend(self.0.shelf.iter().map(|tool| self.with_background(tool.clone())));
             tools.extend(self.0.recipes.clone());
+            tools.extend(self.0.palette_tool.clone());
             tools.extend(self.0.recall.iter().map(|tool| self.with_background(tool.clone())));
             if let Some(learned) = &self.0.learned {
                 tools.extend(learned.tools.clone());
