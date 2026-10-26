@@ -40,6 +40,8 @@ pub fn library_refind(library: Rc<Library>) -> Refind {
 pub const LOOSE: u32 = 5;
 /// The most a palette reaches: each sound's nearest past this are hardly like it.
 pub const FARTHEST: u32 = 50;
+/// The most files gathered at once (on the map, or the browser's): a palette is what to work with, not the library.
+pub const MOST_GATHERED: usize = 10_000;
 
 /// What the map or the browser's map gathers: a file, what it's called, a sound or a song, and its class or style.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -360,14 +362,11 @@ fn view_of(palette: &Palette, items: &[Item]) -> PaletteView {
     }
 }
 
-/// A gathered file as a palette keeps it: by its path, size and modification time (0 where it can't be read).
+/// A gathered file as a palette keeps it: by its path, size and modification time as the library names them (0 where it
+/// can't be read), so a sound the library found again is the same file when it's gathered again.
 fn item_of(file: Gathered, now: i64) -> Item {
     let (size, mtime) = std::fs::metadata(&file.path)
-        .map(|meta| {
-            let mtime =
-                meta.modified().ok().and_then(|at| at.duration_since(std::time::UNIX_EPOCH).ok()).map_or(0, |at| at.as_millis() as i64);
-            (meta.len() as i64, mtime)
-        })
+        .map(|meta| (meta.len() as i64, meta.modified().map_or(0, kumi_library::learn::mtime)))
         .unwrap_or((0, 0));
     Item {
         path: file.path,

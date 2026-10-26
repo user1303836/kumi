@@ -4,7 +4,10 @@
 use super::super::width::{text_width, truncate};
 use super::drawing::{sp, st};
 use super::*;
-use kumi_agent::core::palette::{Gathered, PaletteFile, PaletteView};
+use kumi_agent::core::{
+    mapping::MOST_SAMPLES,
+    palette::{Gathered, PaletteFile, PaletteView},
+};
 use kumi_listening::music::tool::tilde;
 
 /// How much of a palette's file Space plays in PALETTE, at most (seconds).
@@ -44,7 +47,7 @@ impl TuiApp {
             if let Some(map) = state.map.as_mut() {
                 map.in_palette(paths);
             }
-            state.palette = palette;
+            (state.palette, state.palette_rows) = (palette, None);
         }
         self.0.scheduler.request();
     }
@@ -69,16 +72,29 @@ impl TuiApp {
     }
 
     /// A row a file (its name, and its class or a song's style at the right), then a row that asks Kumi to load the
-    /// palette's sounds as a kit.
+    /// palette's sounds as a kit: made once for the palette as it stands (and the width), not each frame.
     fn palette_rows(&self, width: i32) -> Rc<[TabRow]> {
+        if let Some((made, rows)) = &self.0.state.borrow().palette_rows {
+            if *made == width {
+                return rows.clone();
+            }
+        }
+        let rows = self.make_palette_rows(width);
+        self.0.state.borrow_mut().palette_rows = Some((width, rows.clone()));
+        rows
+    }
+
+    fn make_palette_rows(&self, width: i32) -> Rc<[TabRow]> {
         let Some(palette) = self.0.state.borrow().palette.clone() else { return Rc::default() };
         let mut rows: Vec<TabRow> = palette.files.iter().map(|file| self.palette_row(file, width)).collect();
         let sounds: Vec<&PaletteFile> = palette.files.iter().filter(|file| !file.song).collect();
         if !sounds.is_empty() {
+            // A kit takes as many as map_samples lays out at once.
+            let first = if sounds.len() > MOST_SAMPLES { format!("the first {MOST_SAMPLES} of ") } else { String::new() };
             let words = format!(
-                "Load these sounds from my palette {} as a kit: {}",
+                "Load {first}these sounds from my palette {} as a kit: {}",
                 palette.name,
-                sounds.iter().map(|file| tilde(&file.path)).collect::<Vec<_>>().join(", ")
+                sounds.iter().take(MOST_SAMPLES).map(|file| tilde(&file.path)).collect::<Vec<_>>().join(", ")
             );
             let app = Rc::downgrade(&self.0);
             let action: Rc<dyn Fn()> = Rc::new(move || {
