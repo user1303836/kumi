@@ -42,6 +42,7 @@ async fn the_server_answers_only_its_own_page_by_its_token_and_plays_points_by_i
     let tone: Vec<f32> = (0..8_000).map(|t| (t as f32 * 0.35).sin() * 0.5).collect();
     std::fs::write(&song, kumi_media::audio::decode::float_wav(&[tone], 8_000)).unwrap();
     let asked: Rc<RefCell<Vec<(String, String)>>> = Rc::default();
+    let gathered: Rc<RefCell<Vec<Vec<String>>>> = Rc::default();
     let served = Served {
         points: Box::new(|| Box::pin(async { r#"{"layers":[],"actions":[]}"#.to_string() })),
         audio: Box::new({
@@ -56,6 +57,13 @@ async fn the_server_answers_only_its_own_page_by_its_token_and_plays_points_by_i
                     asked.borrow_mut().push((action.to_string(), id.to_string()));
                 }
                 known
+            }
+        }),
+        palette: Box::new({
+            let gathered = gathered.clone();
+            move |ids| {
+                gathered.borrow_mut().push(ids.clone());
+                Box::pin(async move { Some(format!("Added {} sounds to Drums.", ids.len())) })
             }
         }),
     };
@@ -118,6 +126,19 @@ async fn the_server_answers_only_its_own_page_by_its_token_and_plays_points_by_i
             assert_eq!(ask(port, &post(&action, &host, &format!("http://{host}"), "not json")).await.0, 400);
             assert_eq!(ask(port, &get(&action, &host, "")).await.0, 405);
             assert_eq!(*asked.borrow(), [("more".to_string(), "songs:1".to_string())]);
+
+            // Points picked go into the palette, answered with what happened; ids only, never a path.
+            let palette = format!("{home}palette");
+            let (status, _, said) = ask(port, &post(&palette, &host, &format!("http://{host}"), r#"{"ids":["sounds:0","songs:1"]}"#)).await;
+            assert_eq!((status, String::from_utf8(said).unwrap().as_str()), (200, r#"{"said":"Added 2 sounds to Drums."}"#));
+            for wrong in
+                [r#"{"ids":[]}"#.to_string(), r#"{"ids":"sounds:0"}"#.to_string(), format!(r#"{{"ids":["sounds:0","{song_path}"]}}"#)]
+            {
+                assert_eq!(ask(port, &post(&palette, &host, &format!("http://{host}"), &wrong)).await.0, 400, "{wrong}");
+            }
+            assert_eq!(ask(port, &post(&palette, &host, "http://evil.example", r#"{"ids":["sounds:0"]}"#)).await.0, 403);
+            assert_eq!(ask(port, &get(&palette, &host, "")).await.0, 405);
+            assert_eq!(*gathered.borrow(), [vec!["sounds:0".to_string(), "songs:1".to_string()]]);
 
             // Closed: nothing answers there.
             server.close();
@@ -219,6 +240,21 @@ fn the_page_gets_both_maps_and_names_points_and_actions_by_id() {
     assert_eq!(page.asked("more", "songs:40").as_deref(), Some(asked(Kind::Songs, &data.songs.points[0], Action::More).as_str()));
     assert_eq!(page.asked("grow", "sounds:0").unwrap(), "Make a sound like this one, with a match run aimed at it: /Samples/One 1.wav");
     assert!(page.asked("delete", "songs:40").is_none() && page.asked("more", "songs:41").is_none());
+    // Picked points as the palette gathers them (those it has), and whether the page offers the palette.
+    let gathered = page.gathered(&["sounds:0".into(), "songs:40".into(), "songs:8".into(), "sounds:1".into()]);
+    let gathered: Vec<(&str, &str, bool, Option<&str>)> =
+        gathered.iter().map(|file| (file.path.as_str(), file.name.as_str(), file.song, file.class.as_deref())).collect();
+    assert_eq!(
+        gathered,
+        [
+            ("/Samples/One 1.wav", "One 1", false, Some("kick")),
+            ("/Music/Song 40.flac", "Artist – Song 40", true, Some("c1 · dark rainy")),
+            ("/Samples/One 2.wav", "One 2", false, None),
+        ]
+    );
+    assert_eq!(map["palette"], json!(false));
+    let offered: Value = serde_json::from_str(&Page::new(data.clone()).with_palette().points()).unwrap();
+    assert_eq!(offered["palette"], json!(true));
 }
 
 /// A server with nothing much to serve, for what's asked of it below.
@@ -227,6 +263,7 @@ fn plain() -> Served {
         points: Box::new(|| Box::pin(async { r#"{"layers":[],"actions":[]}"#.to_string() })),
         audio: Box::new(|_| None),
         action: Box::new(|_, _| false),
+        palette: Box::new(|_| Box::pin(async { None })),
     }
 }
 

@@ -110,6 +110,8 @@ pub struct Control {
     pub own_refused: Cell<bool>,
     /// What /export and /share get as the conversation going on now.
     pub export: RefCell<Option<ConversationToExport>>,
+    /// The session's palette (with "palette" set, the session keeps palettes).
+    pub palette: RefCell<Option<kumi_agent::core::palette::PaletteView>>,
 }
 impl Default for Control {
     fn default() -> Self {
@@ -135,6 +137,7 @@ impl Default for Control {
             own: RefCell::default(),
             own_refused: Cell::default(),
             export: RefCell::default(),
+            palette: RefCell::default(),
         }
     }
 }
@@ -378,6 +381,56 @@ impl SessionController for Control {
     }
     async fn daw_recording(&self) -> Result<Option<bool>, RuntimeError> {
         Ok(self.get::<bool>("recording"))
+    }
+    fn has_palette(&self) -> bool {
+        self.enabled("palette")
+    }
+    async fn palette(&self) -> Result<Option<kumi_agent::core::palette::PaletteView>, RuntimeError> {
+        Ok(self.palette.borrow().clone())
+    }
+    async fn palette_gather(&self, files: Vec<kumi_agent::core::palette::Gathered>) -> Result<String, RuntimeError> {
+        use kumi_agent::core::palette::{PaletteFile, PaletteView};
+        self.call(format!("palette-gather:{}", files.iter().map(|file| file.name.as_str()).collect::<Vec<_>>().join(",")));
+        let view = {
+            let mut palette = self.palette.borrow_mut();
+            let view = palette.get_or_insert_with(|| PaletteView {
+                id: "p1".into(),
+                name: "Palette 1".into(),
+                reach: 0,
+                files: vec![],
+                excluded: vec![],
+            });
+            for file in &files {
+                if !view.files.iter().any(|kept| kept.path == file.path) {
+                    view.files.push(PaletteFile {
+                        path: file.path.clone(),
+                        size: 1,
+                        mtime: 1,
+                        name: file.name.clone(),
+                        song: file.song,
+                        class: file.class.clone(),
+                    });
+                }
+            }
+            view.clone()
+        };
+        self.emit(SessionEvent::Palette { palette: Some(view.clone()) });
+        Ok(format!("Added {} to {}.", files.len(), view.name))
+    }
+    async fn palette_remove(&self, path: &str, _size: i64, _mtime: i64) -> Result<bool, RuntimeError> {
+        self.call(format!("palette-remove:{path}"));
+        let view = {
+            let mut palette = self.palette.borrow_mut();
+            let Some(view) = palette.as_mut() else { return Ok(false) };
+            view.files.retain(|file| file.path != path);
+            view.clone()
+        };
+        self.emit(SessionEvent::Palette { palette: Some(view) });
+        Ok(true)
+    }
+    async fn palette_command(&self, words: &str) -> Result<String, RuntimeError> {
+        self.call(format!("palette:{words}"));
+        Ok(self.get::<String>("palette-said").unwrap_or_else(|| format!("Did {words}.")))
     }
     fn has_jobs(&self) -> bool {
         self.enabled("jobs")

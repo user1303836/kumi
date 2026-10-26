@@ -21,6 +21,7 @@ pub mod loop_run;
 pub mod mapping;
 pub mod match_run;
 pub mod memory;
+pub mod palette;
 pub mod phrases;
 pub mod plan;
 pub mod plan_stream;

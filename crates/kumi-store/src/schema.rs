@@ -143,7 +143,35 @@ ALTER TABLE heard_settings ADD COLUMN remembered TEXT;
 CREATE INDEX heard_settings_best ON heard_settings (daw, device, best, at);
 ";
 
-const MIGRATIONS: &[&str] = &[V1, V2, V3, V4, V5];
+/// Palettes (`palettes`): the sounds and songs the producer gathered to work with, by name, shared by every session. An
+/// item is a file by its path, size and modification time; a sound a palette never brings in is a row of it too
+/// (`excluded`). How far it reaches past its own sounds is `reach`: 0 keeps to them, k brings each one's k nearest.
+const V6: &str = "
+CREATE TABLE palettes (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL COLLATE NOCASE,
+  reach INTEGER NOT NULL DEFAULT 0 CHECK (reach >= 0),
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+) STRICT;
+CREATE UNIQUE INDEX palettes_by_name ON palettes (name);
+
+CREATE TABLE palette_items (
+  id TEXT PRIMARY KEY,
+  palette TEXT NOT NULL,
+  path TEXT NOT NULL,
+  size INTEGER NOT NULL,
+  mtime INTEGER NOT NULL,
+  name TEXT NOT NULL,
+  kind TEXT NOT NULL CHECK (kind IN ('sound', 'song')),
+  class TEXT,
+  excluded INTEGER NOT NULL DEFAULT 0 CHECK (excluded IN (0, 1)),
+  added_at INTEGER NOT NULL
+) STRICT;
+CREATE UNIQUE INDEX palette_items_by_file ON palette_items (palette, path, size, mtime);
+";
+
+const MIGRATIONS: &[&str] = &[V1, V2, V3, V4, V5, V6];
 /// The schema version this build writes.
 pub const SCHEMA_VERSION: usize = MIGRATIONS.len();
 
@@ -234,6 +262,37 @@ mod tests {
             })
             .unwrap();
         assert_eq!(kept, (1.5, 1, None, None));
+    }
+
+    #[test]
+    fn a_database_from_before_palettes_keeps_its_rows_and_gets_the_tables() {
+        let mut connection = Connection::open_in_memory().unwrap();
+        for migration in [V1, V2, V3, V4, V5] {
+            connection.execute_batch(migration).unwrap();
+        }
+        connection.pragma_update(None, "user_version", 5).unwrap();
+        connection
+            .execute(
+                "INSERT INTO notes (id, scope_kind, label, text, created_at, updated_at) VALUES ('n1', 'global', 'p1', 'Likes dry drums', 1, 1)",
+                [],
+            )
+            .unwrap();
+        migrate(&mut connection).unwrap();
+        assert_eq!(connection.query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0)).unwrap(), SCHEMA_VERSION as i64);
+        assert_eq!(connection.query_row("SELECT text FROM notes", [], |row| row.get::<_, String>(0)).unwrap(), "Likes dry drums");
+        assert_eq!(connection.query_row("SELECT count(*) FROM palettes", [], |row| row.get::<_, i64>(0)).unwrap(), 0);
+        // A song or a sound, nothing else; a file once in a palette.
+        connection.execute("INSERT INTO palettes (id, name, created_at, updated_at) VALUES ('p', 'Drums', 1, 1)", []).unwrap();
+        let file = |id: &str, kind: &str| {
+            connection.execute(
+                "INSERT INTO palette_items (id, palette, path, size, mtime, name, kind, added_at) VALUES (?1, 'p', '/k.wav', 1, 2, 'k', ?2, 3)",
+                [id, kind],
+            )
+        };
+        assert!(file("a", "preset").is_err());
+        assert!(file("a", "sound").is_ok());
+        assert!(file("b", "sound").is_err(), "the same file again");
+        assert!(connection.execute("INSERT INTO palettes (id, name, created_at, updated_at) VALUES ('q', 'DRUMS', 1, 1)", []).is_err());
     }
 
     #[test]

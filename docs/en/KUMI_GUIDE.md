@@ -970,11 +970,12 @@ a reference, sounds or values, it goes by those instead.
 - **On a map.** `/map` draws your songs by style, and your library's sounds by
   class, songs that sound alike side by side. Move around with the arrows, and
   hear a point with Space or by moving the mouse onto it
-  ([the keys](KUMI_TUI.md)).
+  ([the keys](KUMI_TUI.md)). Pick sounds there (drag a box, or `x`) and Enter
+  puts them into your palette, kept between sessions (`/palette`).
 - **In your browser.** `/map open` shows the same map in your browser: a name
   when you point at a point, the wheel to zoom, Shift and drag (or Lasso) to pick
   points, a filter, and a click to hear one. Its actions put their message in
-  Kumi's input box. The page comes from your computer only
+  Kumi's input box, and Add to palette puts the points picked into your palette. The page comes from your computer only
   (127.0.0.1, at a link with a random key) and plays a point by its place on the
   map, never by a file's path. `/map close` closes it, and so does quitting
   Kumi; over SSH, Kumi says how to reach it.

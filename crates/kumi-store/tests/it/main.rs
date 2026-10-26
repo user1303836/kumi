@@ -2,4 +2,5 @@
 mod heard_settings;
 mod history;
 mod observations;
+mod palettes;
 mod store;

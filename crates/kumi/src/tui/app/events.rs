@@ -343,6 +343,11 @@ impl TuiApp {
                 }
             }
             "carry-on" => self.carry_on_event(n("job") as u32, get("title")),
+            "palette" => {
+                if let SessionEvent::Palette { palette } = event {
+                    self.palette_event(palette);
+                }
+            }
             "error" => {
                 {
                     let mut state = self.0.state.borrow_mut();
