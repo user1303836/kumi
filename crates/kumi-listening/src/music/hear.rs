@@ -11,7 +11,7 @@ use crate::{
 };
 use async_trait::async_trait;
 use kumi_common::abort::Signal;
-use kumi_media::audio::decode::{open_audio_to, prepare_audio_range, AudioError, PreparedAudio};
+use kumi_media::audio::decode::{open_audio_to, prepare_audio_range_of, AudioError, PreparedAudio};
 use std::path::{Path, PathBuf};
 
 /// A song shorter than this isn't a finished track (the reference tool's limit)...
@@ -227,7 +227,7 @@ async fn length(song: &Song, signal: &Signal) -> Result<f64, Heard> {
 
 /// Each of a plan's stretches decoded, in order. A copy of the whole file (a Mac's afconvert can't convert a stretch) is
 /// linked for the stretches after the first, each under a path of its own as a copy of its own was: a two-hour mix is
-/// converted once, not once a stretch.
+/// converted once, not once a stretch. The length its tags say isn't read from the file again.
 async fn decode(song: &Song, stretches: &[(f64, f64)], signal: &Signal) -> Result<Vec<PreparedAudio>, Heard> {
     let mut decoded: Vec<PreparedAudio> = Vec::with_capacity(stretches.len());
     for (from, seconds) in stretches {
@@ -239,7 +239,8 @@ async fn decode(song: &Song, stretches: &[(f64, f64)], signal: &Signal) -> Resul
             decoded.push(linked);
             continue;
         }
-        match prepare_audio_range(&song.path, Some(signal.clone()), *from, *seconds).await {
+        let length = song.tags.seconds.filter(|seconds| *seconds > 0.);
+        match prepare_audio_range_of(&song.path, Some(signal.clone()), *from, *seconds, length).await {
             Ok(prepared) => decoded.push(prepared),
             Err(error) => return Err(undecodable(song, &error, signal).await),
         }

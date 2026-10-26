@@ -3,7 +3,10 @@ use super::{
     classify::{SoundClass, SoundKind},
     features::MeasureOptions,
     learn::{PresetEntry, SetEntry, SoundEntry},
-    search::{describe_track, search_presets, search_sets, LikeSound, PresetQuery, SetQuery, SoundHit, SoundIndex, SoundQuery},
+    search::{
+        describe_track, search_presets, search_sets, LikeSound, PresetHit, PresetQuery, SearchResult, SetQuery, SoundHit, SoundIndex,
+        SoundQuery,
+    },
     sources::basename,
     store::unpack_vector,
 };
@@ -53,6 +56,14 @@ pub trait LibraryAccess {
     async fn folders_in(&self, _daw: Option<DawId>) -> Vec<String> {
         self.folders().await
     }
+    /// The presets offered in `daw` that `query` finds, searched where they're kept (here, a copy of them all).
+    async fn find_presets(&self, daw: DawId, query: &PresetQuery) -> Result<SearchResult<PresetHit>, RuntimeError> {
+        Ok(search_presets(self.presets().await?.iter().filter(|entry| offered_in(entry, daw)), query))
+    }
+}
+/// Whether a learned preset is offered in `daw`: only that DAW's own, never another's, nor a JSFX that couldn't be read.
+pub fn offered_in(entry: &PresetEntry, daw: DawId) -> bool {
+    preset_daws(&entry.format).any(|offered| offered == daw) && !(entry.format == "jsfx" && entry.error.is_some())
 }
 pub type ResolveSound = Rc<dyn Fn(String, Signal) -> LocalBoxFuture<'static, Result<Option<String>, RuntimeError>>>;
 pub type OnEvent = Rc<dyn Fn(ToolEvent)>;
@@ -422,26 +433,22 @@ impl LibraryTool {
         tell(&self.options.on_event, "searching your presets".into());
         // Only the DAW's own presets (Live's when none is known): another DAW's never come.
         let daw = self.profile.id.unwrap_or(DawId::Ableton);
-        let entries: Vec<_> = self
+        let result = self
             .library
-            .presets()
-            .await?
-            .into_iter()
-            .filter(|e| preset_daws(&e.format).contains(&daw) && !(e.format == "jsfx" && e.error.is_some()))
-            .collect();
-        let result = search_presets(
-            &entries,
-            &PresetQuery {
-                words: strings(input.get("words")),
-                device: input.get("device").and_then(Value::as_str).map(str::to_owned),
-                category: input
-                    .get("kind")
-                    .and_then(Value::as_str)
-                    .filter(|s| self.profile.vocab.preset_kinds.contains(s))
-                    .map(str::to_owned),
-                limit: limit_of(input.get("limit"), 20, 50),
-            },
-        );
+            .find_presets(
+                daw,
+                &PresetQuery {
+                    words: strings(input.get("words")),
+                    device: input.get("device").and_then(Value::as_str).map(str::to_owned),
+                    category: input
+                        .get("kind")
+                        .and_then(Value::as_str)
+                        .filter(|s| self.profile.vocab.preset_kinds.contains(s))
+                        .map(str::to_owned),
+                    limit: limit_of(input.get("limit"), 20, 50),
+                },
+            )
+            .await?;
         let mut response = json!({"matched":result.matched,"presets":result.hits.into_iter().map(|hit|{let e=hit.entry;let mut row=json!({"name":e.name,"in":([e.source.as_str(),e.folder.as_str()].into_iter().filter(|s|!s.is_empty()).collect::<Vec<_>>().join(" / ")),"path":e.path});if let Some(device)=e.device.filter(|s|!s.is_empty()){row["device"]=json!(device);}if let Some(kind)=e.category{row["kind"]=json!(kind);}if let Some(add)=e.load.filter(|s|!s.is_empty()){row["add"]=json!(add);}if let Some(browser)=e.browser.filter(|s|!s.is_empty()){row["browser"]=json!(browser);}if let Some(inside)=e.inside.filter(|i|!i.is_empty()){row[if e.category==Some(PresetCategory::FxPresets){"presets"}else{"inside"}]=json!(inside);}if let Some(about)=e.about.filter(|s|!s.is_empty()){row["about"]=json!(about);}if !hit.why.is_empty(){row["why"]=json!(hit.why.join("; "));}row}).collect::<Vec<_>>()});
         merge(&mut response, learning_note(LearningState { todo: Some(0), ..self.library.learning() }));
         Ok(ToolResult::text(stringify(&response)))

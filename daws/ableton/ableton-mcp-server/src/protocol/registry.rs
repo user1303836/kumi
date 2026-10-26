@@ -240,11 +240,12 @@ static REGISTRY_HASH: LazyLock<String> =
     LazyLock::new(|| live_registry_hash_of(load_live_registry()).unwrap_or_else(|error| panic!("{error}")));
 static REGISTRY_OPERATIONS: LazyLock<Vec<String>> =
     LazyLock::new(|| load_live_registry().operations.iter().map(|operation| operation.id.clone()).collect());
-static REGISTRY_OPERATION_IDS: LazyLock<std::collections::HashSet<&'static str>> =
-    LazyLock::new(|| REGISTRY_OPERATIONS.iter().map(String::as_str).collect());
-/// Whether `id` is one of the embedded registry's operations (a set lookup, not a search of the list).
+/// The embedded registry's operations by id: every request and answer on the wire looks its operation up here.
+static REGISTRY_INDEX: LazyLock<HashMap<&'static str, &'static LiveRegistryOperation>> =
+    LazyLock::new(|| load_live_registry().operations.iter().map(|operation| (operation.id.as_str(), operation)).collect());
+/// Whether `id` is one of the embedded registry's operations (a lookup, not a search of the list).
 pub fn is_live_registry_operation(id: &str) -> bool {
-    REGISTRY_OPERATION_IDS.contains(id)
+    REGISTRY_INDEX.contains_key(id)
 }
 
 /// The registry, parsed and validated once.
@@ -493,15 +494,37 @@ fn pattern_matches(pattern: &str, value: &str) -> Result<bool, RegistryError> {
     Ok(cache[pattern].is_match(value))
 }
 
+/// Where a value sits in what is validated (`clip.notes.read.result.notes[3].pitch`). It's written out only for an
+/// error's text: a big answer has a node for every clip, parameter and note.
+enum Path<'a> {
+    Root(&'a str),
+    Index(&'a Path<'a>, usize),
+    Key(&'a Path<'a>, &'a str),
+}
+
+impl std::fmt::Display for Path<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Path::Root(root) => f.write_str(root),
+            Path::Index(parent, index) => write!(f, "{parent}[{index}]"),
+            Path::Key(parent, key) => write!(f, "{parent}.{key}"),
+        }
+    }
+}
+
 /// Validate production wire values against the exact canonical registry subset.
 pub fn validate_registry_value(schema: &Map<String, Value>, value: &Value, path: &str) -> Result<(), RegistryError> {
+    validate_at(schema, value, &Path::Root(path))
+}
+
+fn validate_at(schema: &Map<String, Value>, value: &Value, path: &Path) -> Result<(), RegistryError> {
     let fail = |text: String| Err(RegistryError(text));
-    let declared: Vec<&Value> = match schema.get("type") {
-        Some(Value::Array(items)) => items.iter().collect(),
-        Some(single) => vec![single],
-        None => vec![&Value::Null],
+    let declared = match schema.get("type") {
+        Some(Value::Array(items)) => items.iter().any(|kind| kind.as_str().is_some_and(|kind| matches_type(value, kind))),
+        Some(single) => single.as_str().is_some_and(|kind| matches_type(value, kind)),
+        None => false,
     };
-    if !declared.iter().any(|kind| kind.as_str().map(|kind| matches_type(value, kind)).unwrap_or(false)) {
+    if !declared {
         return fail(format!("{path} does not match registry type"));
     }
     if let Some(constant) = schema.get("const") {
@@ -560,9 +583,10 @@ pub fn validate_registry_value(schema: &Map<String, Value>, value: &Value, path:
                 return fail(format!("{path} contains duplicate registry items"));
             }
         }
-        let item_schema = schema.get("items").and_then(Value::as_object).cloned().unwrap_or_default();
+        let empty = Map::new();
+        let item_schema = schema.get("items").and_then(Value::as_object).unwrap_or(&empty);
         for (index, item) in items.iter().enumerate() {
-            validate_registry_value(&item_schema, item, &format!("{path}[{index}]"))?;
+            validate_at(item_schema, item, &Path::Index(path, index))?;
         }
     }
     if let Value::Object(object) = value {
@@ -591,7 +615,7 @@ pub fn validate_registry_value(schema: &Map<String, Value>, value: &Value, path:
             Some(Value::Object(additional)) => {
                 for (key, child) in object {
                     if !properties.contains_key(key) {
-                        validate_registry_value(additional, child, &format!("{path}.{key}"))?;
+                        validate_at(additional, child, &Path::Key(path, key))?;
                     }
                 }
             }
@@ -599,7 +623,7 @@ pub fn validate_registry_value(schema: &Map<String, Value>, value: &Value, path:
         }
         for (key, child) in properties {
             if let (Some(value), Some(child)) = (object.get(key), child.as_object()) {
-                validate_registry_value(child, value, &format!("{path}.{key}"))?;
+                validate_at(child, value, &Path::Key(path, key))?;
             }
         }
     }
@@ -608,23 +632,31 @@ pub fn validate_registry_value(schema: &Map<String, Value>, value: &Value, path:
 
 /// `validateLiveOperationRequest` against a given registry.
 pub fn validate_live_operation_request_in(registry: &LiveRegistry, operation_id: &str, value: &Value) -> Result<(), RegistryError> {
-    let operation =
-        registry.operation(operation_id).ok_or_else(|| RegistryError(format!("operation is not in canonical registry: {operation_id}")))?;
-    validate_registry_value(&operation.request, value, &format!("{operation_id}.request"))?;
-    one_form(operation_id, value, &format!("{operation_id}.request"), &["ref", "key", "value"])
+    validate_request(registry.operation(operation_id), operation_id, value)
 }
 
 /// `validateLiveOperationResult` against a given registry.
 pub fn validate_live_operation_result_in(registry: &LiveRegistry, operation_id: &str, value: &Value) -> Result<(), RegistryError> {
-    let operation =
-        registry.operation(operation_id).ok_or_else(|| RegistryError(format!("operation is not in canonical registry: {operation_id}")))?;
-    validate_registry_value(&operation.result, value, &format!("{operation_id}.result"))?;
-    one_form(operation_id, value, &format!("{operation_id}.result"), &["ref", "key", "value", "prior"])
+    validate_result(registry.operation(operation_id), operation_id, value)
+}
+
+fn validate_request(operation: Option<&LiveRegistryOperation>, operation_id: &str, value: &Value) -> Result<(), RegistryError> {
+    let operation = operation.ok_or_else(|| RegistryError(format!("operation is not in canonical registry: {operation_id}")))?;
+    let path = Path::Key(&Path::Root(operation_id), "request");
+    validate_at(&operation.request, value, &path)?;
+    one_form(operation_id, value, &path, &["ref", "key", "value"])
+}
+
+fn validate_result(operation: Option<&LiveRegistryOperation>, operation_id: &str, value: &Value) -> Result<(), RegistryError> {
+    let operation = operation.ok_or_else(|| RegistryError(format!("operation is not in canonical registry: {operation_id}")))?;
+    let path = Path::Key(&Path::Root(operation_id), "result");
+    validate_at(&operation.result, value, &path)?;
+    one_form(operation_id, value, &path, &["ref", "key", "value", "prior"])
 }
 
 /// What the registry's dialect can't say, having no `oneOf`: data.set takes one key (`single`, all of them) or
 /// `entries` alone, never both and never neither.
-fn one_form(operation_id: &str, value: &Value, path: &str, single: &[&str]) -> Result<(), RegistryError> {
+fn one_form(operation_id: &str, value: &Value, path: &Path, single: &[&str]) -> Result<(), RegistryError> {
     if operation_id != "data.set" {
         return Ok(());
     }
@@ -638,10 +670,10 @@ fn one_form(operation_id: &str, value: &Value, path: &str, single: &[&str]) -> R
 
 /// A request's arguments against the embedded registry.
 pub fn validate_live_operation_request(operation_id: &str, value: &Value) -> Result<(), RegistryError> {
-    validate_live_operation_request_in(load_live_registry(), operation_id, value)
+    validate_request(REGISTRY_INDEX.get(operation_id).copied(), operation_id, value)
 }
 
 /// An operation's result against the embedded registry.
 pub fn validate_live_operation_result(operation_id: &str, value: &Value) -> Result<(), RegistryError> {
-    validate_live_operation_result_in(load_live_registry(), operation_id, value)
+    validate_result(REGISTRY_INDEX.get(operation_id).copied(), operation_id, value)
 }

@@ -272,25 +272,29 @@ async fn live_export_cache_and_guarded_backup_lifecycle() {
     let changed = call(&host, "live_project_backup_apply", args).await;
     assert!(changed["result"]["content"][0]["text"]["reason"].as_str().unwrap().contains("content changed"));
 }
-#[tokio::test]
-async fn a_big_sets_export_keeps_the_runtime_responsive() {
-    // 600 copies of the simulator's first track: the export is a second or more of work in a debug build. The bridge
-    // serves every request on one thread, and those waiting behind the export (FOCUS's poll comes twice a second) waited
-    // for all of it; the ticker here is one of them.
+/// A host whose Set is `tracks` copies of the simulator's first track.
+fn big_set(tracks: usize) -> (Rc<Adapter>, McpHost) {
     let adapter = adapter(json!({}));
     let mut whole = serde_json::to_value(adapter.sim.snapshot().unwrap()).unwrap();
     let track = whole["tracks"][0].clone();
-    let tracks: Vec<_> = (0..600)
+    whole["tracks"] = json!((0..tracks)
         .map(|i| {
             let mut copy = track.clone();
             copy["ref"] = json!(format!("track:big-{i}"));
             copy["name"] = json!(format!("Track {i}"));
             copy
         })
-        .collect();
-    whole["tracks"] = json!(tracks);
+        .collect::<Vec<_>>());
     *adapter.whole.borrow_mut() = Some(serde_json::from_value(whole).unwrap());
     let host = pinned_host(adapter.clone());
+    (adapter, host)
+}
+#[tokio::test]
+async fn a_big_sets_export_keeps_the_runtime_responsive() {
+    // 600 copies of the simulator's first track: the export is a second or more of work in a debug build. The bridge
+    // serves every request on one thread, and those waiting behind the export (FOCUS's poll comes twice a second) waited
+    // for all of it; the ticker here is one of them.
+    let (_adapter, host) = big_set(600);
     let ticks = RefCell::new(vec![]);
     let ticker = async {
         loop {
@@ -311,6 +315,47 @@ async fn a_big_sets_export_keeps_the_runtime_responsive() {
     let said = format!("{} ticks in the export's {took:?}, the longest wait {longest:?}", ticks.len());
     println!("{said}");
     assert!(ticks.len() >= 10 && longest * 2 < took, "{said}");
+}
+/// `tool`'s answer and how long the host took to give it (its text parsed after the clock stops).
+async fn timed(host: &McpHost, tool: &str, args: Value) -> (Value, std::time::Duration) {
+    let call = ToolCall { id: json!(1), name: tool.into(), arguments: Some(args), asynchronous: true };
+    let started = std::time::Instant::now();
+    let answer = host.dispatch_project_tool(&call, None).await.unwrap().unwrap();
+    let took = started.elapsed();
+    let answer = parsed(answer);
+    assert_eq!(answer["result"]["isError"], false, "{tool}: {answer}");
+    (answer["result"]["content"][0]["text"].clone(), took)
+}
+#[tokio::test]
+#[ignore = "a timing: --run-ignored only --no-capture, best measured with the bridge built optimized"]
+async fn a_big_sets_export_pages_and_diff_take() {
+    // Kumi reads an export page by page (its memory's catch-up), then diffs two such bundles (watch, remember).
+    let (_adapter, host) = big_set(1500);
+    let (first, _) = timed(&host, "live_project_snapshot_export", json!({"limit":200})).await;
+    let mut pages = vec![first];
+    let mut paging = std::time::Duration::ZERO;
+    while let Some(cursor) = pages.last().unwrap()["page"]["nextCursor"].as_str().map(str::to_owned) {
+        let (page, took) = timed(&host, "live_project_snapshot_export", json!({"limit":200,"cursor":cursor})).await;
+        paging += took;
+        pages.push(page);
+    }
+    let records: usize = pages.iter().map(|page| page["records"].as_array().unwrap().len()).sum();
+    let bytes: usize = pages.iter().map(|page| serde_json::to_string(page).unwrap().len()).sum();
+    let runs = 3;
+    let mut diffing = std::time::Duration::ZERO;
+    for _ in 0..runs {
+        let (diff, took) = timed(&host, "live_project_snapshot_diff", json!({"beforePages":pages,"afterPages":pages})).await;
+        assert!(diff.is_object());
+        diffing += took;
+    }
+    println!(
+        "{records} records in {} pages ({bytes} bytes): the {} pages after the first {:.1} ms ({:.2} ms each), a diff of two such bundles {:.1} ms",
+        pages.len(),
+        pages.len() - 1,
+        paging.as_secs_f64() * 1000.,
+        paging.as_secs_f64() * 1000. / (pages.len() - 1) as f64,
+        diffing.as_secs_f64() * 1000. / runs as f64
+    );
 }
 fn normalize_backup(value: &Value, root: &str, id: &str, key: &str) -> Value {
     if key == "mtimeMs" || key == "expiresAt" {

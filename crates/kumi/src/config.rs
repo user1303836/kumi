@@ -326,7 +326,7 @@ pub struct Settings {
     pub fast: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub panel_tab: Option<String>,
-    /// false: the map's points don't play as the mouse rests on them (h on the map).
+    /// false: the map's points don't play as the mouse comes to them (h on the map).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub map_hover: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]

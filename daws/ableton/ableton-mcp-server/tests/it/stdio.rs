@@ -19,7 +19,7 @@ where
     F: Fn(String, Option<RecordContext>) -> Fut + 'static,
     Fut: Future<Output = HandlerOutcome> + 'static,
 {
-    Rc::new(move |record, context| f(record, context).boxed_local())
+    Rc::new(move |record, _, context| f(record, context).boxed_local())
 }
 
 async fn local<T>(future: impl Future<Output = T>) -> T {
@@ -625,6 +625,59 @@ async fn stdio_refuses_an_in_flight_bound_outside_1_to_64() {
             .unwrap_err();
             assert_eq!(failure.0, "maxInFlight must be an integer from 1 to 64");
         }
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn stdio_hands_the_handler_each_record_with_the_json_it_parsed_and_none_for_one_that_isnt_json() {
+    local(async {
+        let (input, reader) = Pipe::new();
+        let (output, writer) = WriterHandle::new();
+        let seen: Rc<RefCell<Vec<(String, Option<Value>, bool)>>> = Rc::new(RefCell::new(Vec::new()));
+        let kept = seen.clone();
+        let done = spawn_local(serve_stdio(
+            reader,
+            writer,
+            Rc::new(move |record: String, parsed: Option<Value>, context: Option<RecordContext>| {
+                kept.borrow_mut().push((record, parsed, context.is_some()));
+                async { HandlerOutcome::Ok(None) }.boxed_local()
+            }),
+            StdioOptions::default(),
+        ));
+        input.end_with("{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"work\"}\n{\"jsonrpc\":\"2.0\",\"method\":\"note\"}\nnot json\n");
+        done.await.unwrap().unwrap();
+        let mut seen = seen.borrow().clone();
+        seen.sort_by(|left, right| left.0.cmp(&right.0));
+        assert_eq!(
+            seen,
+            vec![
+                ("not json".to_string(), None, false),
+                (
+                    "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"work\"}".to_string(),
+                    Some(json!({"jsonrpc":"2.0","id":1,"method":"work"})),
+                    true
+                ),
+                ("{\"jsonrpc\":\"2.0\",\"method\":\"note\"}".to_string(), Some(json!({"jsonrpc":"2.0","method":"note"})), false),
+            ]
+        );
+        assert_eq!(output.received(), Vec::<String>::new());
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn a_record_that_isnt_json_is_answered_with_a_parse_error_and_noted() {
+    local(async {
+        let (input, reader) = Pipe::new();
+        let (output, writer) = WriterHandle::new();
+        let (diagnostics, log) = WriterHandle::new();
+        let done = spawn_local(ableton_mcp_server::serve::serve(reader, writer, log, None, Default::default()));
+        input.end_with("not json\n");
+        done.await.unwrap().unwrap();
+        let frames: Vec<Value> = output.received().iter().map(|line| parse(line)).collect();
+        assert_eq!(frames, vec![json!({"jsonrpc":"2.0","id":null,"error":{"code":-32700,"message":"Parse error"}})]);
+        assert_eq!(diagnostics.received(), ["mcp-host: malformed input"]);
     })
     .await;
 }

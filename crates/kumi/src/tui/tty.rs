@@ -65,7 +65,7 @@ pub trait TtyOutput {
 const ENTER: &str = "\u{1b}[?1049h\u{1b}[?7l\u{1b}[?25l\u{1b}[?2004h\u{1b}[?1004h\u{1b}[>3u";
 const MOUSE_ON: &str = "\u{1b}[?1000h\u{1b}[?1002h\u{1b}[?1006h";
 // Any-event mouse reporting (1003): the mouse's moves with no button held, as well as its clicks and drags. On only
-// while something listens for them (the map, which plays the point the mouse rests on): otherwise they'd stream in
+// while something listens for them (the map, which plays the point the mouse comes to): otherwise they'd stream in
 // whenever the mouse crossed the window.
 const MOUSE_MOVES_ON: &str = "\u{1b}[?1003h";
 const MOUSE_MOVES_OFF: &str = "\u{1b}[?1003l";
@@ -187,7 +187,7 @@ impl Tty {
     }
 
     /// Whether the terminal reports the mouse's moves (no button held) as well as its clicks: asked while the map is
-    /// open, which plays the point the mouse rests on, and taken back as it closes, so they don't stream in meanwhile.
+    /// open, which plays the point the mouse comes to, and taken back as it closes, so they don't stream in meanwhile.
     /// Nothing where mouse reporting is off.
     pub fn report_moves(&self, on: bool) {
         let inner = &self.inner;

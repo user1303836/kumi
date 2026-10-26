@@ -1,7 +1,7 @@
 //! /map: the producer's sounds and songs as two maps, full screen in place of the conversation until it closes. Arrows
 //! go to the nearest point that way, shift and the arrows pan, + and − zoom (about the point chosen), a click picks a
-//! point, / filters, space plays, a point plays as the mouse rests on it (h turns that off and on), enter offers what
-//! to ask Kumi, tab switches maps and esc closes. Zoomed out on a big
+//! point, / filters, space plays, a point plays as the mouse comes to it (h turns that off and on), tab switches maps
+//! and esc closes. Zoomed out on a big
 //! map it draws density, busier places brighter; points, then their names, show as it zooms in. The points are an
 //! image where the terminal shows images and braille elsewhere, with the point chosen and the names as text over
 //! them; a console that shows neither lists the groups with their counts and examples instead.
@@ -19,7 +19,7 @@ use super::screen::{Rect, Screen};
 use super::style::{palette, Rgb, Style};
 use super::width::{text_width, truncate};
 use super::wrap::Span;
-use crate::map::{asked, Action, Kind, Layer, MapData, Point, ACTIONS};
+use crate::map::{Kind, Layer, MapData, Point};
 use kumi_listening::music::tool::grouped;
 
 /// How far in the map zooms at most, and how much each + or − zooms.
@@ -57,7 +57,7 @@ const FAINTEST: f64 = 0.03;
 const GLIDE: Duration = Duration::from_millis(150);
 /// How near a click or the mouse comes to a point to be on it, in dots.
 const REACH: f64 = 8.;
-/// A point plays as the mouse rests on it: this much of it (seconds), faded out over this long when that cuts it short.
+/// A point plays as the mouse comes to it: this much of it (seconds), faded out over this long when that cuts it short.
 const PREVIEW: f64 = 2.;
 const PREVIEW_FADE: f64 = 0.2;
 
@@ -73,8 +73,7 @@ pub enum Asked {
         name: String,
     },
     Stop,
-    /// The mouse came to rest on a point (hover plays on): play this stretch of it, faded out over `fade` seconds,
-    /// once it has rested a moment.
+    /// The mouse came to a point (hover plays on): play this stretch of it at once, faded out over `fade` seconds.
     Hover {
         path: String,
         from: f64,
@@ -83,12 +82,10 @@ pub enum Asked {
         name: String,
     },
     /// The mouse left the point it was on (or came to the one Space plays, or Tab or the filter took that point away): a
-    /// hover's play stops, and one about to start doesn't.
+    /// hover's play stops.
     Leave,
-    /// Whether points play as the mouse rests on them, changed with h: to remember.
+    /// Whether points play as the mouse comes to them, changed with h: to remember.
     HoverPlays(bool),
-    /// These words in the input box, the map closed.
-    Put(String),
     Close,
 }
 
@@ -609,12 +606,10 @@ pub struct MapView {
     views: Vec<View>,
     /// The filter being typed.
     prompt: Option<String>,
-    /// The actions offered for the point chosen, and which is chosen.
-    menu: Option<usize>,
     /// What plays (the point, on its map), and words for the point's row (a sound that wouldn't play).
     playing: Option<(usize, u32)>,
     said: Option<String>,
-    /// Points play as the mouse rests on them (h turns it off and on); the point the mouse rests on (on its map); and
+    /// Points play as the mouse comes to them (h turns it off and on); the point the mouse is on (on its map); and
     /// whether what plays began that way (a hover's play stops as the mouse leaves; Space's plays on).
     hover: bool,
     hovered: Option<(usize, u32)>,
@@ -630,7 +625,7 @@ pub struct MapView {
 }
 
 impl MapView {
-    /// The map, before its data is read; `hover`: whether points play as the mouse rests on them.
+    /// The map, before its data is read; `hover`: whether points play as the mouse comes to them.
     pub fn new(graphics: Graphics, hover: bool) -> MapView {
         MapView {
             graphics,
@@ -639,7 +634,6 @@ impl MapView {
             tab: 0,
             views: vec![],
             prompt: None,
-            menu: None,
             playing: None,
             said: None,
             hover,
@@ -697,7 +691,7 @@ impl MapView {
         self.data.as_ref().map(|data| if self.tab == 0 { &data.sounds } else { &data.songs })
     }
 
-    /// The point Space plays and Enter asks about: the one chosen, or in a list the chosen group's first example.
+    /// The point Space plays: the one chosen, or in a list the chosen group's first example.
     fn current(&self) -> Option<u32> {
         let (layer, view) = (self.layer()?, self.views.get(self.tab)?);
         if self.graphics == Graphics::Words {
@@ -710,16 +704,6 @@ impl MapView {
     pub fn played(&mut self, said: Option<String>) {
         (self.playing, self.from_hover) = (None, false);
         self.said = said;
-    }
-
-    /// A hover's play begins (the mouse rested on its point long enough): the point the mouse is on plays, and shows so.
-    /// False when the mouse is on no point any more: nothing plays.
-    pub fn hover_plays(&mut self) -> bool {
-        if self.hovered.is_none() {
-            return false;
-        }
-        (self.playing, self.from_hover, self.said) = (self.hovered, true, None);
-        true
     }
 
     /// The mouse left the point it was on, or hover plays were turned off: whether a hover's play was on, which stops.
@@ -742,22 +726,12 @@ impl MapView {
                 "enter" => {
                     let filter = self.prompt.take().unwrap_or_default();
                     self.refilter(&filter);
-                    // The point the mouse rests on, filtered out: its ring goes, and its hover ends.
+                    // The point the mouse is on, filtered out: its ring goes, and its hover ends.
                     if self.hovered.is_some_and(|(tab, at)| !self.views[tab].shown.contains(&at)) {
                         self.hovered = None;
                         return Asked::Leave;
                     }
                 }
-                _ => {}
-            }
-            return Asked::Nothing;
-        }
-        if let Some(chosen) = self.menu {
-            match name {
-                "escape" => self.menu = None,
-                "left" | "up" => self.menu = Some((chosen + ACTIONS.len() - 1) % ACTIONS.len()),
-                "right" | "down" | "tab" => self.menu = Some((chosen + 1) % ACTIONS.len()),
-                "enter" => return self.act(ACTIONS[chosen].0),
                 _ => {}
             }
             return Asked::Nothing;
@@ -771,14 +745,10 @@ impl MapView {
             "space" => return self.play(),
             "tab" if self.data.is_some() => {
                 self.tab = 1 - self.tab;
-                // A hover on the map left behind ends: one about to play doesn't, and one playing stops.
+                // A hover on the map left behind ends: what it plays stops.
                 let hovering = self.hovered.is_some() || self.from_hover;
                 (self.said, self.hovered, self.version) = (None, None, self.version + 1);
                 return if hovering { Asked::Leave } else { Asked::Nothing };
-            }
-            "enter" if self.current().is_some() => {
-                self.menu = Some(0);
-                return Asked::Nothing;
             }
             _ => return Asked::Nothing,
         };
@@ -793,7 +763,7 @@ impl MapView {
     }
 
     /// Typed characters, one at a time (they can come together): space plays, + and − zoom, / starts a filter (and
-    /// what follows is its words), h turns hover plays off and on, 1 to 3 choose an action, q closes.
+    /// what follows is its words), h turns hover plays off and on, q closes.
     pub fn on_text(&mut self, text: &str) -> Asked {
         for character in text.chars() {
             let asked = self.on_character(character);
@@ -809,12 +779,6 @@ impl MapView {
             // A pasted line break, or a tab, is a space in the filter's words.
             prompt.push(if character.is_control() { ' ' } else { character });
             return Asked::Nothing;
-        }
-        if self.menu.is_some() {
-            return match character.to_digit(10).map(|number| number as usize) {
-                Some(number) if (1..=ACTIONS.len()).contains(&number) => self.act(ACTIONS[number - 1].0),
-                _ => Asked::Nothing,
-            };
         }
         match character {
             ' ' => return self.play(),
@@ -837,7 +801,7 @@ impl MapView {
     /// A click picks the point nearest it (or the group of a list's row).
     pub fn on_click(&mut self, x: i32, y: i32) -> Asked {
         let area = self.area;
-        if self.menu.is_some() || self.prompt.is_some() || !inside(area, x, y) {
+        if self.prompt.is_some() || !inside(area, x, y) {
             return Asked::Nothing;
         }
         let Some(data) = self.data.clone() else { return Asked::Nothing };
@@ -853,38 +817,37 @@ impl MapView {
         let picked = self.under(x, y);
         if picked.is_some() {
             self.views[self.tab].choose(layer, picked);
-            self.menu = None;
         }
         Asked::Nothing
     }
 
-    /// The mouse moved: come to rest on a point (within reach, where points are drawn as points, not density), it
-    /// plays once it has rested a moment; off it, a hover's play stops. Nothing while hover plays are off, in the
-    /// actions or the filter, over density, or on a console's list.
+    /// The mouse moved: come to a point (within reach, where points are drawn as points, not density), it plays at
+    /// once, and shows so; off it, a hover's play stops. Nothing while hover plays are off, in the filter, over density,
+    /// or on a console's list.
     pub fn on_move(&mut self, x: i32, y: i32) -> Asked {
         let points = self.picture.as_ref().is_some_and(|picture| !picture.dense);
-        let over = (self.hover && points && self.menu.is_none() && self.prompt.is_none()).then(|| self.under(x, y)).flatten();
+        let over = (self.hover && points && self.prompt.is_none()).then(|| self.under(x, y)).flatten();
         let now = over.map(|at| (self.tab, at));
         if now == self.hovered {
             return Asked::Nothing;
         }
         self.hovered = now;
-        match over.zip(self.layer()) {
-            // The point Space plays: it plays on, whole, and no hover of it starts (nor one about to).
-            Some(_) if self.playing == now && !self.from_hover => Asked::Leave,
-            Some((at, layer)) => {
-                let point = &layer.points[at as usize];
-                let cut = point.seconds as f64 > PREVIEW;
-                Asked::Hover {
-                    path: point.path.clone(),
-                    from: point.from as f64,
-                    seconds: if cut { PREVIEW } else { point.seconds as f64 },
-                    fade: if cut { PREVIEW_FADE } else { 0. },
-                    name: point.name.clone(),
-                }
-            }
-            None => Asked::Leave,
+        let Some((at, layer)) = over.zip(self.layer()) else { return Asked::Leave };
+        // The point Space plays: it plays on, whole, and no hover of it starts.
+        if self.playing == now && !self.from_hover {
+            return Asked::Leave;
         }
+        let point = &layer.points[at as usize];
+        let cut = point.seconds as f64 > PREVIEW;
+        let asked = Asked::Hover {
+            path: point.path.clone(),
+            from: point.from as f64,
+            seconds: if cut { PREVIEW } else { point.seconds as f64 },
+            fade: if cut { PREVIEW_FADE } else { 0. },
+            name: point.name.clone(),
+        };
+        (self.playing, self.from_hover, self.said) = (now, true, None);
+        asked
     }
 
     /// The point within reach of a cell of the map's area: none outside it, or on a console's list.
@@ -1002,14 +965,6 @@ impl MapView {
             Asked::Play { path: point.path.clone(), from: point.from as f64, seconds: point.seconds as f64, name: point.name.clone() };
         (self.playing, self.from_hover, self.said) = (Some((self.tab, at)), false, None);
         asked
-    }
-
-    fn act(&mut self, action: Action) -> Asked {
-        self.menu = None;
-        match (self.current(), self.layer()) {
-            (Some(at), Some(layer)) => Asked::Put(asked(layer.kind, &layer.points[at as usize], action)),
-            _ => Asked::Nothing,
-        }
     }
 
     /// The whole screen: the maps' names, the legend, the map (or its list), the point chosen and what it's near, and
@@ -1205,7 +1160,7 @@ impl MapView {
             let color = layer.groups[layer.points[at as usize].group as usize].color;
             screen.put(x, y, "◉", &Style { bold: true, bg: Some(palette::SELECTED), ..Style::fg(color) });
         }
-        // The point the mouse rests on: ringed, its name beside it (over whatever was there), ▶ while it plays.
+        // The point the mouse is on: ringed, its name beside it (over whatever was there), ▶ while it plays.
         let hovered = self.hovered.filter(|(tab, _)| *tab == self.tab).map(|(_, at)| at);
         if let Some(at) = hovered.filter(|at| !picture.dense && frame.shows(frame.dot(spot(&layer.points[*at as usize])))) {
             let (x, y) = cell(at);
@@ -1256,7 +1211,7 @@ impl MapView {
         }
     }
 
-    /// The point chosen (its name, what it is, its folder), and under it what it's near or what to ask Kumi.
+    /// The point chosen (its name, what it is, its folder), and under it what it's near.
     fn draw_point(&self, screen: &mut Screen, layer: &Layer) {
         let (y, width) = (screen.height - 3, screen.width - 2);
         let Some(at) = self.current() else { return };
@@ -1280,17 +1235,7 @@ impl MapView {
             screen.put(x + 2, y, &truncate(said, width - x - 2), &Style::fg(palette::WARN));
         }
         let y = y + 1;
-        if let Some(chosen) = self.menu {
-            let mut x = screen.put(1, y, "Ask Kumi:", &Style::fg(palette::FAINT)) + 1;
-            for (number, (_, words)) in ACTIONS.iter().enumerate() {
-                let style = if number == chosen {
-                    Style { bold: true, bg: Some(palette::SELECTED), ..Style::fg(palette::BRIGHT) }
-                } else {
-                    Style::fg(palette::TEXT)
-                };
-                x = screen.put(x + 1, y, &format!(" {} {words} ", number + 1), &style);
-            }
-        } else if self.graphics != Graphics::Words {
+        if self.graphics != Graphics::Words {
             let view = &self.views[self.tab];
             let names: Vec<&str> = view.near.iter().map(|at| layer.points[*at as usize].name.as_str()).collect();
             if !names.is_empty() {
@@ -1310,15 +1255,11 @@ impl MapView {
             return Some(Cursor { x: end, y });
         }
         let other = if self.tab == 0 { "songs" } else { "sounds" };
-        let keys = if self.menu.is_some() {
-            "← → or 1–3 choose · enter puts it in the box to send · esc goes back".to_string()
-        } else if self.graphics == Graphics::Words {
-            format!("up and down choose · space plays · enter asks Kumi · / filters · tab {other} · esc closes")
+        let keys = if self.graphics == Graphics::Words {
+            format!("up and down choose · space plays · / filters · tab {other} · esc closes")
         } else {
             let hover = if self.hover { "plays" } else { "quiet" };
-            format!(
-                "arrows move · shift+arrows pan · + − zoom · / filters · space plays · h hover {hover} · enter asks Kumi · tab {other} · esc closes"
-            )
+            format!("arrows move · shift+arrows pan · + − zoom · / filters · space plays · h hover {hover} · tab {other} · esc closes")
         };
         screen.put(1, y, &truncate(&keys, screen.width - 2), &Style::fg(palette::FAINT));
         None
@@ -1501,7 +1442,7 @@ mod tests {
     }
 
     #[test]
-    fn the_mouse_resting_on_a_point_hears_it_and_leaving_stops_what_that_started() {
+    fn the_mouse_coming_to_a_point_hears_it_at_once_and_leaving_stops_what_that_started() {
         let mut sounds = layer(&[(0.5, 0.5, 0), (0.9, 0.9, 1)]);
         sounds.points[1].seconds = 30.;
         let mut map = MapView::new(Graphics::Cells, true);
@@ -1510,9 +1451,8 @@ mod tests {
         let (x, y) = cell_of(&map, 0);
         let hover = map.on_move(x, y);
         assert!(matches!(&hover, Asked::Hover { seconds, fade, name, .. } if *seconds == 1. && *fade == 0. && name == "p0"), "{hover:?}");
+        assert_eq!((map.playing, map.from_hover), (Some((0, 0)), true), "at once, with no rest first");
         assert_eq!(map.on_move(x + 1, y), Asked::Nothing, "still on it");
-        map.hover_plays();
-        assert_eq!(map.playing, Some((0, 0)));
         let mut screen = Screen::new(100, 30);
         map.draw(&mut screen, &mut |_, _, _, _| 0);
         assert!(screen.lines().iter().any(|line| line.contains("▶ p0")), "{}", screen.lines().join("\n"));
@@ -1527,7 +1467,7 @@ mod tests {
         assert!(matches!(map.on_text(" "), Asked::Play { .. }));
         assert_eq!(map.on_move(map.area.x, map.area.y), Asked::Leave);
         assert!(!map.hover_ends() && map.playing.is_some());
-        // h: hover plays off, the keys say so, and the mouse resting on a point asks nothing; on again.
+        // h: hover plays off, the keys say so, and the mouse on a point asks nothing; on again.
         assert_eq!(map.on_text("h"), Asked::HoverPlays(false));
         assert_eq!(map.on_move(x, y), Asked::Nothing);
         let mut screen = Screen::new(100, 30);
@@ -1544,11 +1484,10 @@ mod tests {
         let mut map = MapView::new(Graphics::Cells, true);
         map.loaded(ready(MapData { sounds, songs: layer(&[]) }));
         map.draw(&mut Screen::new(100, 30), &mut |_, _, _, _| 0);
-        // The mouse rests on the point chosen and its preview plays: Space plays it whole, and again stops it.
+        // The mouse comes to the point chosen and its preview plays: Space plays it whole, and again stops it.
         let chosen = map.views[0].chosen.unwrap();
         let (x, y) = cell_of(&map, chosen);
         assert!(matches!(map.on_move(x, y), Asked::Hover { .. }));
-        assert!(map.hover_plays());
         assert!(matches!(map.on_text(" "), Asked::Play { .. }), "Space plays it whole, not a stop");
         assert_eq!((map.playing, map.from_hover), (Some((0, chosen)), false));
         assert_eq!(map.on_text(" "), Asked::Stop);
@@ -1558,18 +1497,17 @@ mod tests {
         assert!(!map.hover_ends());
         assert_eq!(map.on_move(x, y), Asked::Leave, "Space's point plays on, whole");
         assert_eq!((map.playing, map.from_hover), (Some((0, chosen)), false));
-        // Tab while the mouse rests on a point: its hover ends (none about to play, nothing to play when it would).
+        // Tab while the mouse is on a point: what its hover plays stops.
         map.played(None);
         assert_eq!(map.on_move(map.area.x, map.area.y), Asked::Leave);
         assert!(matches!(map.on_move(x, y), Asked::Hover { .. }));
         assert_eq!(map.on_key("tab", false), Asked::Leave);
-        assert!(!map.hover_plays(), "a hover waiting as Tab came plays nothing");
+        assert!(map.hover_ends() && map.playing.is_none());
         assert_eq!(map.on_key("tab", false), Asked::Nothing, "no hover on, nothing to end");
         // A preview playing as the filter hides its point: it ends, and the point's ring goes.
         map.draw(&mut Screen::new(100, 30), &mut |_, _, _, _| 0);
         let (x, y) = cell_of(&map, chosen);
         assert!(matches!(map.on_move(x, y), Asked::Hover { .. }));
-        assert!(map.hover_plays());
         map.on_text("/p1");
         assert_eq!(map.on_key("enter", false), Asked::Leave);
         assert!(map.hover_ends() && map.hovered.is_none());

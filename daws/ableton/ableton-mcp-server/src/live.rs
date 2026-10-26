@@ -2677,6 +2677,8 @@ struct ViewAssembly {
     /// against these, not against every clip kept so far.
     clip_refs: HashSet<Option<String>>,
     held_refs: HashSet<LiveRef>,
+    /// Whether the assembled read keeps the Arrangement's clips (it does when it was asked for the Arrangement).
+    keeps_clips: bool,
 }
 
 enum FillResult {
@@ -2686,26 +2688,32 @@ enum FillResult {
 }
 
 impl ViewAssembly {
-    fn new(first: &LiveSnapshot) -> Self {
+    /// The assembly takes the first page's rows, which `assembled` gives back: its tracks, and its Arrangement clips when
+    /// they're kept.
+    fn new(first: &mut LiveSnapshot, wanted: Option<&[LiveSnapshotPart]>) -> Self {
         let mut assembly = Self {
-            tracks: first.tracks().to_vec(),
+            tracks: first.tracks.take().unwrap_or_default(),
             clips: Vec::new(),
             held: Vec::new(),
             clip_refs: HashSet::new(),
             held_refs: HashSet::new(),
+            keeps_clips: wanted.is_none_or(|parts| parts.contains(&LiveSnapshotPart::Arrangement)),
         };
         assembly.keep(first);
         assembly
     }
-    fn keep(&mut self, snapshot: &LiveSnapshot) {
-        for clip in snapshot.arrangement.as_ref().and_then(|a| a.clips.as_ref()).into_iter().flatten() {
-            if self.clip_refs.insert(clip.get("ref").map(Value::to_string)) {
-                self.clips.push(clip.clone());
+    /// Moves a page's Arrangement clips in, each one once.
+    fn keep(&mut self, snapshot: &mut LiveSnapshot) {
+        if self.keeps_clips {
+            for clip in snapshot.arrangement.as_mut().and_then(|a| a.clips.as_mut()).map(std::mem::take).into_iter().flatten() {
+                if self.clip_refs.insert(clip.get("ref").map(Value::to_string)) {
+                    self.clips.push(clip);
+                }
             }
         }
-        for item in snapshot.arrangement_clips.iter().flatten() {
+        for item in snapshot.arrangement_clips.as_mut().map(std::mem::take).into_iter().flatten() {
             if self.held_refs.insert(item.clip.ref_.clone()) {
-                self.held.push(item.clone());
+                self.held.push(item);
             }
         }
     }
@@ -2755,7 +2763,7 @@ impl LiveViews {
             return self.read(&*adapter, context, LiveSnapshotRequest { parts: wanted, ..Default::default() }).await;
         }
         for _ in 0..3 {
-            let first = self
+            let mut first = self
                 .read(&*adapter, context, LiveSnapshotRequest { focus: Some(focus.clone()), parts: wanted.clone(), ..Default::default() })
                 .await?;
             let honoured = first.window.as_ref().and_then(|window| window.focus.as_ref());
@@ -2765,7 +2773,7 @@ impl LiveViews {
             {
                 return Ok(first);
             }
-            let mut assembly = ViewAssembly::new(&first);
+            let mut assembly = ViewAssembly::new(&mut first, wanted.as_deref());
             match self.fill(&*adapter, context, &first, &mut assembly, &focus, &Self::page_parts(wanted.as_deref())).await? {
                 FillResult::Retry => continue,
                 FillResult::Complete => return Ok(assembly.assembled(first, wanted.as_deref(), Some(&focus))),
@@ -2823,7 +2831,7 @@ impl LiveViews {
             return self.read(&*adapter, context, LiveSnapshotRequest { parts: wanted, ..Default::default() }).await;
         }
         for _ in 0..3 {
-            let first = self
+            let mut first = self
                 .read(
                     &*adapter,
                     context,
@@ -2836,7 +2844,7 @@ impl LiveViews {
             if first.track_count.is_some_and(|count| count != first.tracks().len()) {
                 continue;
             }
-            let mut assembly = ViewAssembly::new(&first);
+            let mut assembly = ViewAssembly::new(&mut first, wanted.as_deref());
             let indices = (0..assembly.tracks.len()).collect::<Vec<_>>();
             match self.fill(&*adapter, context, &first, &mut assembly, &indices, &Self::page_parts(wanted.as_deref())).await? {
                 FillResult::Retry => continue,
@@ -2914,7 +2922,7 @@ impl LiveViews {
             while count < WHOLE_SET_PAGE_TRACKS && pending.get(at + count) == Some(&(from + count)) {
                 count += 1;
             }
-            let page = self
+            let mut page = self
                 .read(
                     adapter,
                     context,
@@ -2940,16 +2948,16 @@ impl LiveViews {
             {
                 return Ok(FillResult::Retry);
             }
-            for (offset, row) in page.tracks().iter().enumerate() {
+            for (offset, row) in page.tracks.take().unwrap_or_default().into_iter().enumerate() {
                 let Some(listed) = assembly.tracks.get_mut(from + offset) else {
                     return Ok(FillResult::Retry);
                 };
                 if row.is_light() || listed.ref_ != row.ref_ || listed.object_identity != row.object_identity {
                     return Ok(FillResult::Retry);
                 }
-                *listed = row.clone();
+                *listed = row;
             }
-            assembly.keep(&page);
+            assembly.keep(&mut page);
             at += delivered;
         }
         Ok(FillResult::Complete)

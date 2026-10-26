@@ -1,6 +1,7 @@
 //! /map in the app: the producer's sounds and songs drawn full screen (braille, an image under the names where the
 //! terminal shows images, a list on a console that shows neither), moved around with the keys, a point played through
-//! Kumi's player, and an action that puts what it asks in the input box. Screens are kept as text in
+//! Kumi's player (with Space, or as the mouse comes to it), and the browser's map, whose actions put what they ask in
+//! the input box. Screens are kept as text in
 //! tests/goldens/tui/map; `KUMI_BLESS=1` writes them again. `KUMI_MAP_SHOTS=<folder>` saves the map as a PNG and as
 //! braille text there, to look at.
 #[path = "../support/tui_app.rs"]
@@ -237,32 +238,21 @@ case!(a_console_without_pictures_lists_the_groups_with_counts_and_examples, asyn
     h.close().await;
 });
 
-case!(enter_offers_what_to_ask_and_an_action_fills_the_input_box_without_sending, async {
+case!(enter_on_the_map_asks_kumi_nothing, async {
     let h = Harness::with(160, 40, Rc::new(Control::default()), |o| o.map = Some(loader(fixture(12, 8))));
     h.start().await;
     h.connect();
     h.type_text("/map\r").await;
     h.wait_for("Sounds 72").await;
-    h.type_text("\r").await;
-    h.wait_for("Ask Kumi:").await;
-    h.has("1 Find more like this");
-    h.type_text("1").await;
-    h.wait_for("Find sounds like this one: /Samples/").await;
-    assert!(!h.screen().iter().any(|line| line.contains("Sounds 72")), "the map closed");
-    assert!(!h.calls().iter().any(|call| call.starts_with("submit")), "nothing sent: {:?}", h.calls());
-    // On the songs' map, the song by name; esc in the actions only closes them.
-    h.type_text("\x15/map\r").await;
-    h.wait_for("Sounds 72").await;
+    // Enter and a number, as the map's actions once took them: the map stays open, with nothing to ask or put in the box.
+    h.type_text("\r1").await;
     h.type_text("\t").await;
-    h.type_text("\r").await;
-    h.wait_for("Ask Kumi:").await;
+    h.wait_for("c1 · dark rainy").await;
+    assert!(!h.screen().iter().any(|line| line.contains("Ask Kumi") || line.contains("enter asks")), "{}", h.screen().join("\n"));
     h.type_text("\x1b").await;
-    h.wait_until_hidden("Ask Kumi:").await;
-    h.has("Songs 24");
-    h.type_text("\r").await;
-    h.type_text("\x1b[C").await;
-    h.type_text("\r").await;
-    h.wait_for("Use “Artist").await;
+    h.wait_until_hidden("Songs 24").await;
+    assert!(!h.screen().iter().any(|line| line.contains("/Samples/") || line.contains("/Music/")), "nothing in the box");
+    assert!(!h.calls().iter().any(|call| call.starts_with("submit")), "nothing sent: {:?}", h.calls());
     h.close().await;
 });
 
@@ -445,7 +435,7 @@ case!(space_plays_the_point_chosen_and_again_stops_it, async {
     h.close().await;
 });
 
-case!(a_point_plays_as_the_mouse_rests_on_it_and_stops_as_the_mouse_leaves, async {
+case!(a_point_plays_as_the_mouse_comes_to_it_and_stops_as_the_mouse_leaves, async {
     let dir = tempfile::tempdir().unwrap();
     let (started, playing) = (Rc::new(RefCell::new(vec![])), Rc::new(RefCell::new(false)));
     let remembered = Rc::new(Cell::new(None));
@@ -461,8 +451,8 @@ case!(a_point_plays_as_the_mouse_rests_on_it_and_stops_as_the_mouse_leaves, asyn
     h.wait_for("Sounds 12").await;
     assert!(h.output.text.borrow().contains("\x1b[?1003h"), "the mouse's moves are asked for while the map is open");
     h.has("h hover plays");
-    // The mouse comes to rest on the point chosen: a moment later it plays (half a second of it, its length), and shows
-    // so (▶ in the point's row, or beside the point when its neighbour is the one under the mouse).
+    // The mouse comes to the point chosen: it plays at once (half a second of it, its length), and shows so (▶ in the
+    // point's row, or beside the point when its neighbour is the one under the mouse).
     let (row, column) = marker(&h.screen());
     h.type_text(&moved(column, row)).await;
     given(&started, 1).await;
@@ -472,12 +462,13 @@ case!(a_point_plays_as_the_mouse_rests_on_it_and_stops_as_the_mouse_leaves, asyn
     h.type_text(&moved(1, 2)).await;
     h.wait_until_hidden("▶ ").await;
     assert!(!*playing.borrow(), "stopped");
-    // A sweep across the point, off it again before it has rested: nothing plays. (Both moves in one write: they're read
-    // and handled back to back, however slow the computer.)
+    // Across the point and off it in one go: its play ends before it begins, and nothing plays once the mouse has left.
+    // (Both moves in one write: they're read and handled back to back, however slow the computer.)
     h.type_text(&format!("{}{}", moved(column, row), moved(1, 2))).await;
     delay(300).await;
-    assert_eq!(started.borrow().len(), 1, "a sweep plays nothing");
-    // h: hover plays off, remembered, and the mouse resting on a point plays nothing; h again turns them on.
+    assert_eq!(started.borrow().len(), 1, "nothing plays after the mouse has left");
+    assert!(!*playing.borrow());
+    // h: hover plays off, remembered, and the mouse on a point plays nothing; h again turns them on.
     h.type_text("h").await;
     h.wait_for("h hover quiet").await;
     assert_eq!(remembered.get(), Some(false));
@@ -507,7 +498,7 @@ case!(space_over_a_hovers_preview_plays_the_point_whole, async {
     h.connect();
     h.type_text("/map\r").await;
     h.wait_for("Sounds 12").await;
-    // Three seconds long: the mouse resting on the point chosen hears two of them (both channels at 48 kHz).
+    // Three seconds long: the mouse on the point chosen hears two of them (both channels at 48 kHz).
     let (row, column) = marker(&h.screen());
     h.type_text(&moved(column, row)).await;
     given(&started, 1).await;
@@ -524,15 +515,15 @@ case!(space_over_a_hovers_preview_plays_the_point_whole, async {
     delay(300).await;
     assert_eq!(started.borrow().len(), 2, "no preview took over");
     assert!(*playing.borrow(), "Space's play goes on");
-    // Space again stops it. Then Space as the mouse comes to rest on the point: Space's play, whole, and the hover that
-    // was about to start doesn't take it over.
+    // Space again stops it. Then Space as the mouse comes to the point, in one go: Space's play, whole, and the preview
+    // the mouse asked for first never starts.
     h.type_text(" ").await;
     h.wait_until_hidden("▶ playing").await;
     h.type_text(&moved(1, 2)).await;
     h.type_text(&format!("{} ", moved(column, row))).await;
     given(&started, 3).await;
     delay(300).await;
-    assert_eq!(started.borrow().len(), 3, "the hover about to start didn't");
+    assert_eq!(started.borrow().len(), 3, "the preview Space overtook didn't start");
     assert!(started.borrow()[2] > preview, "{}", started.borrow()[2]);
     h.close().await;
 });

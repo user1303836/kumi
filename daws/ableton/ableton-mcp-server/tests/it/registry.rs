@@ -147,6 +147,44 @@ fn canonical_registry_includes_strict_snapshot_and_playback_contracts() {
     );
 }
 
+// A refusal names the value it refuses by its path: an item by its index and a property by its key, at every level.
+#[test]
+fn a_refusal_names_the_path_to_the_value_it_refuses() {
+    let note = json!({ "pitch": 36, "start": 0, "duration": 0.25, "velocity": 100, "channel": 1 });
+    let note_authority = json!({ "expectedObjectIdentity": "live:clip:0", "expectedTrackRef": "1:track:0", "expectedTrackIdentity": "live:track:0", "expectedSlotRef": "1:clip_slot:0:0", "expectedSlotIdentity": "live:slot:0", "expectedSceneRef": "1:scene:0", "expectedSceneIdentity": "live:scene:0" });
+    let add = |notes: Value| {
+        validate_live_operation_request(
+            "note.add-batch",
+            &json!({ "ref": "1:clip:0:0", "notes": notes, "expectedClipAuthority": note_authority, "expectedNotesRevision": "a".repeat(64) }),
+        )
+        .unwrap_err()
+        .0
+    };
+    assert_eq!(
+        add(json!([note, with(&note, json!({ "pitch": 300 }))])),
+        "note.add-batch.request.notes[1].pitch is outside registry numeric bounds"
+    );
+    assert_eq!(add(json!([without(&note, "velocity")])), "note.add-batch.request.notes[0].velocity is required by registry");
+    assert_eq!(
+        add(json!([note, note, with(&note, json!({ "accent": 1 }))])),
+        "note.add-batch.request.notes[2].accent is not allowed by registry"
+    );
+    let playback = playback();
+    let target = with(&playback["playingTargets"][0], json!({ "clipSlotRef": "" }));
+    assert_eq!(
+        validate_live_operation_result("session.playback", &with(&playback, json!({ "playingTargets": [target] }))).unwrap_err().0,
+        "session.playback.result.playingTargets[0].clipSlotRef is shorter than registry minimum"
+    );
+    assert_eq!(
+        validate_live_operation_request("data.set", &json!({ "ref": "1:track:0" })).unwrap_err().0,
+        "data.set.request takes one key (ref, key, value) or entries alone"
+    );
+    assert_eq!(
+        validate_live_operation_request("track.unknown", &json!({})).unwrap_err().0,
+        "operation is not in canonical registry: track.unknown"
+    );
+}
+
 #[test]
 fn transport_actions_fence_on_the_playback_revision_and_explicit_deletions_carry_their_own_authority() {
     // Real Live's playback revision is "<epoch>:playback:<n>:<digest>", as transport.set carries it.

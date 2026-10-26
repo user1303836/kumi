@@ -491,6 +491,16 @@ static SESSIONS: Mutex<Vec<(PathBuf, ort::session::Session, std::time::Instant)>
 const IDLE: std::time::Duration = std::time::Duration::from_secs(180);
 /// Whether a thread is letting idle models go.
 static REAPING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// Whether this process's model runs are background work (the music scan's, beside a DAW that may be playing): ONNX
+/// Runtime's threads then wait for a run's next step asleep instead of spinning. CLAP gives the same numbers that way,
+/// a little sooner, for two fifths less CPU.
+static BACKGROUND: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// The models this process runs from now on are background work (see BACKGROUND). Called before its first run: a model
+/// keeps how it was loaded.
+pub fn in_background() {
+    BACKGROUND.store(true, std::sync::atomic::Ordering::SeqCst);
+}
 
 /// Lets go of models that haven't run for a while, every half minute, until none are loaded.
 fn reap() {
@@ -531,9 +541,14 @@ fn run_now(model: &Path, inputs: Vec<(String, Input)>, outputs: &[String]) -> Re
     let index = match sessions.iter().position(|(path, _, _)| path == model) {
         Some(index) => index,
         None => {
-            let session = ort::session::Session::builder()
-                .and_then(|mut builder| builder.commit_from_file(model))
-                .map_err(|error| format!("Kumi couldn't load {}: {error}", model.display()))?;
+            let load = || -> Result<ort::session::Session, String> {
+                let mut builder = ort::session::Session::builder().map_err(|error| error.to_string())?;
+                if BACKGROUND.load(std::sync::atomic::Ordering::SeqCst) {
+                    builder = builder.with_intra_op_spinning(false).map_err(|error| error.to_string())?;
+                }
+                builder.commit_from_file(model).map_err(|error| error.to_string())
+            };
+            let session = load().map_err(|error| format!("Kumi couldn't load {}: {error}", model.display()))?;
             sessions.push((model.to_path_buf(), session, std::time::Instant::now()));
             if !REAPING.swap(true, std::sync::atomic::Ordering::SeqCst) {
                 std::thread::spawn(reap);

@@ -661,3 +661,36 @@ test("reads: the tidy's note count by track says which tracks play each instrume
   eq(notes.result.tracks["2"]["0"], nil)
   eq(call(peer, "read", { kind = "tidy-notes" }).result.tracks, nil, "only when asked")
 end)
+
+-- Second sweep RN3: a tidy page (up to 120,000 reads of samples, or 300,000 of pattern lines) runs in its job's slices, so the
+-- timers and sockets go on between them; the answers are the ones read at once.
+test("reads: the tidy's pages are read in the timers' slices, sample by sample and track by track, with the same answers (second sweep RN3)", function()
+  local specs = {}
+  for i = 1, 6 do
+    specs[i] = { name = "Kit " .. i, sample_specs = {} }
+    for s = 1, 4 do specs[i].sample_specs[s] = { name = "Hit " .. s, frames = 1000 } end
+  end
+  local env, peer = setup(nil, { instruments = 6, instrument_specs = specs })
+  mock.ops.set_note(1, 1, 1, 1, { note = 48, instrument = 0 })
+  mock.ops.set_note(2, 2, 3, 1, { note = 50, instrument = 1 })
+  local function sorted(value) return json.encode(value, { sort_keys = true }) end
+  for id, params in ipairs({ { kind = "tidy" }, { kind = "tidy-notes", byTrack = true } }) do
+    local at_once = call(peer, "read", params)
+    ok(at_once.result, json.encode(at_once.error or {}))
+    mock.clock_step_ms = 1 -- every look at the clock costs a millisecond: a slice is a few samples or tracks
+    H.send(peer, { type = "request", id = 100 + id, method = "read", params = params })
+    local answer, ticks = nil, 0
+    while not answer and ticks < 400 do
+      for _, f in ipairs(H.frames(peer)) do if f.type == "response" and f.id == 100 + id then answer = f end end
+      if not answer then
+        mock.advance(10)
+        ticks = ticks + 1
+      end
+    end
+    mock.clock_step_ms = 0
+    ok(answer and answer.result, params.kind .. ": " .. json.encode(answer and answer.error or {}))
+    ok(ticks > 1, params.kind .. " read in " .. ticks .. " ticks")
+    eq(sorted(answer.result), sorted(at_once.result), params.kind .. ": the answer read at once")
+  end
+  H.no_dialogs()
+end)

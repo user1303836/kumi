@@ -437,6 +437,7 @@ struct Meter {
     clicks: usize,
     spikes: usize,
     // The low end's rising zero crossings (seconds), for a low sound's pitch as it moves: two one-poles at 300 Hz.
+    pole: f64,
     low_pass: [f64; 2],
     low_last: f64,
     crossings: Vec<f64>,
@@ -541,6 +542,7 @@ impl Meter {
             milli_peak: 0.,
             clicks: 0,
             spikes: 0,
+            pole: 1. - (-2. * std::f64::consts::PI * 300. / rate).exp(),
             low_pass: [0.; 2],
             low_last: 0.,
             crossings: vec![],
@@ -597,9 +599,8 @@ impl Meter {
             self.in_milli += 1;
             self.jumps.push((mid - self.previous).abs() as f32);
             self.previous = mid;
-            let pole = 1. - (-2. * std::f64::consts::PI * 300. / self.rate).exp();
-            self.low_pass[0] += pole * (mid - self.low_pass[0]);
-            self.low_pass[1] += pole * (self.low_pass[0] - self.low_pass[1]);
+            self.low_pass[0] += self.pole * (mid - self.low_pass[0]);
+            self.low_pass[1] += self.pole * (self.low_pass[0] - self.low_pass[1]);
             let low = self.low_pass[1];
             if self.low_last < 0. && low >= 0. && self.crossings.len() < 2_000_000 {
                 // Where between this sample and the last it crossed.
@@ -613,10 +614,13 @@ impl Meter {
                 // A click: out of near silence (the 3 ms before under −60 dB), one jump far bigger than the rest of
                 // the millisecond's (a waveform cut, not a transient's burst of them).
                 let silent_before = self.envelope.len() >= 3 && self.envelope[self.envelope.len() - 3..].iter().all(|level| *level < 1e-3);
-                let mut jumps = std::mem::take(&mut self.jumps);
+                let jumps = &mut self.jumps;
                 let biggest = jumps.iter().copied().fold(0f32, f32::max) as f64;
-                jumps.sort_by(f32::total_cmp);
-                let typical = jumps.get(jumps.len() * 3 / 4).copied().unwrap_or(0.) as f64;
+                // The jump three quarters of the way up: the one sorting them all would put there.
+                let place = jumps.len() * 3 / 4;
+                let typical = if place < jumps.len() { *jumps.select_nth_unstable_by(place, f32::total_cmp).1 as f64 } else { 0. };
+                // Emptied in place: the next millisecond's jumps fill the same room.
+                jumps.clear();
                 if silent_before && biggest >= 0.05 && biggest >= typical * 6. {
                     self.clicks += 1;
                 }

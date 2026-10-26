@@ -50,7 +50,7 @@ where
     F: Fn(String, Option<RecordContext>) -> Fut + 'static,
     Fut: Future<Output = HandlerOutcome> + 'static,
 {
-    Rc::new(move |record, context| f(record, context).boxed_local())
+    Rc::new(move |record, _, context| f(record, context).boxed_local())
 }
 
 async fn local<T>(future: impl Future<Output = T>) -> T {

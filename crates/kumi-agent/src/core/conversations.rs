@@ -422,18 +422,22 @@ impl FileConversationStore {
         {
             return None;
         }
-        let mut kept = json!({"savedAt":value["savedAt"],"checkpoint":value["checkpoint"]});
-        for key in ["changes", "first", "turns"] {
+        // What's kept is taken out of what was read, not copied from it: the messages are most of a file of up to 256 KB.
+        let Value::Object(mut read) = value else { return None };
+        let mut kept = serde_json::Map::new();
+        for key in ["savedAt", "checkpoint", "changes", "first", "turns"] {
+            let Some(field) = read.remove(key) else { continue };
             let allowed = match key {
-                "changes" => value[key].is_array(),
-                "first" => value[key].is_string(),
-                _ => value[key].is_number(),
+                "changes" => field.is_array(),
+                "first" => field.is_string(),
+                "turns" => field.is_number(),
+                _ => true,
             };
             if allowed {
-                kept[key] = value[key].clone()
+                kept.insert(key.into(), field);
             }
         }
-        serde_json::from_value(kept).ok()
+        serde_json::from_value(Value::Object(kept)).ok()
     }
     async fn current_id(&self, place: &str) -> Option<String> {
         let folder = self.folder(place).ok()?;

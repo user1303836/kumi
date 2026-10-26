@@ -37,4 +37,4 @@
                                                 ⠘⢿⣿⣿⠟
  ● Artist 2 – Song 07  c3 · Techno  /Music/Artist 2
  Near  Artist 2 – Song 02 · Artist 2 – Song 01 · Artist 2 – Song 08 · Artist 2 – Song 03
- arrows move · shift+arrows pan · + − zoom · / filters · space plays · h hover plays · enter asks Kumi · tab sounds · esc closes
+ arrows move · shift+arrows pan · + − zoom · / filters · space plays · h hover plays · tab sounds · esc closes

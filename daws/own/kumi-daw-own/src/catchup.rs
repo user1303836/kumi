@@ -248,7 +248,7 @@ impl Remembered {
             return;
         }
         let began = Instant::now();
-        let answer = host.call("baseline_save", JsonObject::new(), signal).await.ok().map(|result| answer_of(&result));
+        let answer = host.call("baseline_save", JsonObject::new(), signal).await.ok().map(answer_of);
         if !matches!(answer, Some(Ok(_))) {
             // An error (a full disk where the host keeps the snapshots, a digest past its time) or no answer: asked again
             // later, and later each time, never every second (each try reads the whole project).
@@ -289,7 +289,7 @@ impl Remembered {
         }
         let after_reconnect = self.away.replace(false);
         let quiet = self.quiet.replace(false);
-        let answer = host.call("catch_up", JsonObject::new(), signal).await.ok().map(|result| answer_of(&result));
+        let answer = host.call("catch_up", JsonObject::new(), signal).await.ok().map(answer_of);
         self.running.set(false);
         let answer = match answer {
             Some(Ok(answer)) => answer,
@@ -633,14 +633,11 @@ impl KernelTool for WatchTool {
         let start = input.get("action").and_then(Value::as_str) == Some("start");
         let bounded = abort::any([signal.clone(), abort::timeout(CALL_MS * 2)]);
         let tool = if start { "watch_start" } else { "watch_stop" };
-        let answer =
-            match stopped_or(endpoint.call(tool, JsonObject::new(), bounded.clone()).await.map(|result| answer_of(&result)), &bounded) {
-                Ok(answer) => answer,
-                Err(error) if error.is_aborted() && signal.is_cancelled() => return Err(error),
-                Err(_) => {
-                    return Ok(ToolResult::error(format!("Kumi couldn't compare the {} just now; try again.", self.words.words.project)))
-                }
-            };
+        let answer = match stopped_or(endpoint.call(tool, JsonObject::new(), bounded.clone()).await.map(answer_of), &bounded) {
+            Ok(answer) => answer,
+            Err(error) if error.is_aborted() && signal.is_cancelled() => return Err(error),
+            Err(_) => return Ok(ToolResult::error(format!("Kumi couldn't compare the {} just now; try again.", self.words.words.project))),
+        };
         let answer = match answer {
             Ok(answer) => answer,
             Err(refused) => {

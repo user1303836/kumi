@@ -312,7 +312,7 @@ impl<S: RefScheme> Link<S> {
         };
         let args = args.as_object().cloned().unwrap_or_default();
         let bounded = abort::any([signal, self.lifetime.clone(), abort::timeout(CALL_MS)]);
-        stopped_or(endpoint.call(tool, args, bounded.clone()).await.map(|result| answer_of(&result)), &bounded)
+        stopped_or(endpoint.call(tool, args, bounded.clone()).await.map(answer_of), &bounded)
     }
 
     fn words(&self) -> &'static DawProfile {
