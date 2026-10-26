@@ -3,6 +3,66 @@
 Kumi's releases. The Ableton bridge (`crates/ableton-mcp-server`) is versioned on its own;
 each Kumi release names the bridge it ships with.
 
+## 1.24.0 — 2026-10-25
+
+Ships with bridge 1.0.97, which Live loads when it restarts. After updating, Kumi offers to quit Live
+(it asks to save first) and opens it again with the new bridge; or run `kumi bridge` with Live closed.
+Ships with REAPER extension 0.1.6 and Renoise tool 1.0.5, which REAPER and Renoise load when they
+restart; `kumi update` puts them in.
+
+- On the map, pick sounds (drag a box, Ctrl and a click, or x; a picks everything the filter keeps, g
+  adds each one's nearest) and press Enter to put them in your palette.
+- The map takes the shape of your sounds: groups part into landmasses with arms and bays, and the map
+  fills the width of your screen. Your sounds and songs are laid out again once, in the background.
+- Kumi knows your palette: ask for sounds and it uses the palette's, or with /palette loose, their
+  nearest in your library too, the ones your own projects use first. It says when it uses one of those
+  and offers to add it to the palette.
+- Palettes keep the sounds you gather between sessions: /palette lists, makes, chooses, renames and
+  forgets them, and PALETTE in the right pane plays them, takes one out, or asks Kumi to load them as
+  a kit.
+- On the map, points grow as you zoom in, typical sounds a little bigger, with a soft glow where they
+  gather; in braille, zooming and moving glide.
+- In the map in your browser, Add to palette puts the points you picked into your palette.
+- On the map, the sounds a loose palette brings in are marked faintly.
+- On the map, a point plays as soon as the mouse reaches it, with no pause first.
+- Enter on the map no longer offers to ask Kumi about the point.
+- A judged listen keeps its captures without writing them out again on Windows and Linux (a whole
+  song's capture is 138 MB).
+- The music scan starts fewer programs for each song it hears in a compressed format.
+- Comparing with a reference again is quicker: Kumi doesn't hear an unchanged reference twice.
+- The music scan takes less of the computer's CPU while it hears your songs.
+- Catch-up and the snapshots Kumi keeps of your REAPER or Renoise project while you work read and
+  write less: the snapshot is read once instead of three times, and each save no longer forces the
+  disk to flush.
+
+Tested with Live 12.4 on macOS. On Windows, installing and updating are tested; using Kumi with Live
+there is still new.
+
+### Bridge 1.0.97
+
+- Kumi's memory catches up on a big Set faster: it reads a big export's pages about six times faster
+  and compares two exports in about two thirds of the time.
+- While Kumi shows what you're looking at in Live, it costs Live less time, most of all in a big Set
+  or with a Drum Rack on the selected track.
+- Kumi's export of a big Set for its memory takes less of the bridge's time when its clips hold many
+  notes.
+- Kumi's edits in a big Set (clips, devices, parameters, structure, auditions, captures) take less of
+  the bridge's time to check before and after they change Live.
+
+### REAPER extension 0.1.6
+
+- Kumi's catch-up and watch_me read REAPER a little faster: fewer REAPER calls for markers and
+  regions, and no allocation per number in the project's fingerprints.
+- Kumi's changes on tracks and items with big states (plug-ins with large presets, long MIDI) ask
+  REAPER for each track's or item's state once instead of up to six times.
+
+### Renoise tool 1.0.5
+
+- Changing a big plug-in instrument's program or plug-in, and undoing it, is quicker: Kumi sums up the
+  plug-in's state once instead of up to six times.
+- Renoise stays responsive while Kumi reads the song for a sample-map tidy or a layer invert: each
+  page of reads is spread over Renoise's timer instead of freezing it for a third of a second.
+
 ## 1.23.3 — 2026-10-25
 
 Ships with bridge 1.0.96, which Live loads when it restarts. After updating, Kumi offers to quit Live
