@@ -22,8 +22,10 @@ use crate::framing::{FrameError, FrameEvent, NdjsonFramer};
 /// (a `throw`), which is answered with `-32603 Internal error`.
 pub type HandlerOutcome = Result<Option<String>, String>;
 
-/// `RecordHandler`: the context comes with a request (a record with an id), not with a notification.
-pub type RecordHandler = Rc<dyn Fn(String, Option<RecordContext>) -> LocalBoxFuture<'static, HandlerOutcome>>;
+/// `RecordHandler`: a record's text, its JSON when it parses (the transport parses each record once, to find
+/// its id or the request it cancels), and the context, which comes with a request (a record with an id), not
+/// with a notification.
+pub type RecordHandler = Rc<dyn Fn(String, Option<Value>, Option<RecordContext>) -> LocalBoxFuture<'static, HandlerOutcome>>;
 
 /// A JSON-RPC request id the transport tracks: a string of 1 to 128 UTF-16 units or a safe integer.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -318,7 +320,7 @@ impl Server {
         }
         let Some(id) = parsed.as_ref().and_then(request_id) else {
             let handled: Result<(), ()> = async {
-                let result = (self.handler)(value, None).await.map_err(|_| ())?;
+                let result = (self.handler)(value, parsed, None).await.map_err(|_| ())?;
                 if let Some(result) = result {
                     self.write(result, None).map_err(|_| ())?.await.map_err(|_| ())?;
                 }
@@ -374,7 +376,7 @@ impl Server {
             self.state.borrow_mut().controllers.insert(key.clone(), controller.clone());
             let request = id.clone();
             spawn_local(async move {
-                let result = server.run_request(value, request, &controller).await;
+                let result = server.run_request(value, parsed, request, &controller).await;
                 server.delivered(sequence, key, result, Some(controller)).await
             })
         };
@@ -384,14 +386,14 @@ impl Server {
 
     /// The handler stage of a request: bounded by `maxInFlight`, silent once cancelled, and a
     /// `-32603` answer when the handler throws.
-    async fn run_request(self: &Rc<Self>, value: String, id: RequestId, controller: &Controller) -> Option<String> {
+    async fn run_request(self: &Rc<Self>, value: String, parsed: Option<Value>, id: RequestId, controller: &Controller) -> Option<String> {
         self.acquire().await;
         let signal = controller.signal.clone();
         let result = if signal.is_cancelled() {
             None
         } else {
             let context = RecordContext { request_id: id.clone(), signal: signal.clone() };
-            match (self.handler)(value, Some(context)).await {
+            match (self.handler)(value, parsed, Some(context)).await {
                 Ok(result) if !signal.is_cancelled() => result,
                 Err(_) if !signal.is_cancelled() => Some(error_frame(id.to_value(), -32603, "Internal error")),
                 _ => None,
