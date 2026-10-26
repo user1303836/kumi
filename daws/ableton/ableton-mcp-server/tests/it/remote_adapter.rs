@@ -338,6 +338,11 @@ async fn authenticated_hello_and_registry_negotiation() {
             .await;
             let adapter = peer.connect().await;
             assert!(adapter.status().unwrap().connected);
+            // The adapter answers from the status it keeps, as a copy of it would.
+            for (operation, negotiated) in [("locator.add", true), ("discover", true), ("track.create", false)] {
+                assert_eq!(adapter.status_has_operation(operation).unwrap(), negotiated, "{operation}");
+                assert_eq!(adapter.status().unwrap().has_operation(operation), negotiated, "{operation}");
+            }
             adapter.close().await.unwrap();
         })
         .await;
