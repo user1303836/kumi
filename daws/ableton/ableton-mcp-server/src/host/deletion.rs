@@ -14,27 +14,25 @@ fn device_fence(reference: &Value, row: &device_parameter::DeviceRow) -> String 
 }
 /// Whether a device that is `identity` is still in `snapshot`'s tracks, in chains and drum pads too. Live's device
 /// refs are positional: the next device takes a deleted one's ref, so only its identity says it's still there.
+/// Read off the typed snapshot, which isn't made JSON for it.
 fn device_remains(snapshot: &LiveSnapshot, identity: &Value) -> bool {
-    fn walk(devices: &Value, identity: &Value, depth: usize) -> bool {
+    fn walk(devices: &[Device], identity: &Value, depth: usize) -> bool {
         depth < 64
-            && devices.as_array().into_iter().flatten().any(|device| {
-                device["objectIdentity"] == *identity
-                    || device["chains"]
-                        .as_array()
-                        .into_iter()
-                        .flatten()
-                        .chain(
-                            device["drumPads"]
-                                .as_array()
-                                .into_iter()
-                                .flatten()
-                                .flat_map(|pad| pad["chains"].as_array().into_iter().flatten()),
-                        )
-                        .any(|chain| walk(&chain["devices"], identity, depth + 1))
+            && devices.iter().any(|device| {
+                // As `device["objectIdentity"] == identity` compares them: a device without one reads as null.
+                let same = match &device.object_identity {
+                    Some(own) => identity.as_str() == Some(own),
+                    None => identity.is_null(),
+                };
+                same || device
+                    .chains
+                    .iter()
+                    .flatten()
+                    .chain(device.drum_pads.iter().flatten().flat_map(|pad| &pad.chains))
+                    .any(|chain| walk(&chain.devices, identity, depth + 1))
             })
     }
-    let snapshot = serde_json::to_value(snapshot).unwrap();
-    snapshot["tracks"].as_array().into_iter().flatten().any(|track| walk(&track["devices"], identity, 0))
+    snapshot.tracks.iter().flatten().any(|track| walk(&track.devices, identity, 0))
 }
 impl McpHost {
     pub async fn dispatch_deletion_tool(&self, call: &ToolCall, signal: Option<&Signal>) -> Option<Result<Option<Value>, LiveError>> {

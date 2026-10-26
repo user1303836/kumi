@@ -98,8 +98,8 @@ pub use protocol::{HostRequest, RequestDecision, ToolCall};
 use retention::{BoundedTransactionMap, TransactionRetention};
 use serde_json::{json, Value};
 use std::{
-    cell::{Cell, RefCell},
-    collections::{HashSet, VecDeque},
+    cell::{Cell, OnceCell, RefCell},
+    collections::{HashMap, HashSet, VecDeque},
     rc::Rc,
     sync::LazyLock,
 };
@@ -108,8 +108,16 @@ pub const SERVER_VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const TRANSACTION_TTL_MS: f64 = 600_000.0;
 pub const MAX_TRACKED_REQUEST_IDS: usize = 4096;
 static DATA: LazyLock<Value> = LazyLock::new(|| serde_json::from_str(include_str!("host/data.json")).expect("embedded host tables"));
+/// The tables' lists of names as sets: a request looks its tool up in two to four of them.
+static NAME_TABLES: LazyLock<HashMap<&'static str, HashSet<&'static str>>> = LazyLock::new(|| {
+    DATA.as_object()
+        .expect("embedded host tables")
+        .iter()
+        .filter_map(|(table, names)| Some((table.as_str(), names.as_array()?.iter().filter_map(Value::as_str).collect())))
+        .collect()
+});
 fn table_has(table: &str, name: &str) -> bool {
-    DATA[table].as_array().unwrap().iter().any(|item| item == name)
+    NAME_TABLES[table].contains(name)
 }
 fn policy_error(error: tool_catalog::ToolPolicyError) -> LiveError {
     LiveError::type_error(error.to_string())
@@ -151,6 +159,7 @@ pub struct McpHost {
     seen_ids: RefCell<HashSet<String>>,
     id_order: RefCell<VecDeque<String>>,
     tool_policy: Rc<RefCell<ToolPolicySpec>>,
+    tool_gate: RefCell<Option<Rc<ToolGate>>>,
     tool_list_fingerprint: RefCell<Option<String>>,
     events: Rc<events::EventState>,
     retention: Rc<TransactionRetention>,
@@ -243,6 +252,7 @@ impl McpHost {
             seen_ids: RefCell::new(HashSet::new()),
             id_order: RefCell::new(VecDeque::new()),
             tool_policy: policy,
+            tool_gate: RefCell::new(None),
             tool_list_fingerprint: RefCell::new(None),
             events: Rc::new(events::EventState::default()),
             transactions: map(),
@@ -310,32 +320,42 @@ impl McpHost {
     pub fn deadline(&self, base: f64) -> f64 {
         kumi_common::time::now_ms_f64() + (base + 20.0 * self.views.track_count.get() as f64).min(60_000.0)
     }
-    pub fn tool_visibility_rows(&self) -> Result<Vec<ToolVisibilityRow>, LiveError> {
-        let mut rows =
-            tool_catalog::resolve_tool_visibility(&self.safe_adapter_status(), &self.tool_policy.borrow()).map_err(policy_error)?;
-        if self.protocol_era.get() == Some(ProtocolEra::Modern) {
-            for row in &mut rows {
-                if is_modern_unavailable_tool(&row.entry.name) {
-                    row.executable = false;
-                    row.visible = false;
-                }
+    /// The tool gate for the adapter's status, the policy and the protocol era now: the kept one while all three are
+    /// what it was resolved from (the status compared whole, as the adapter reports it), else a new one.
+    fn tool_gate(&self) -> Rc<ToolGate> {
+        let read = self.adapter.status().ok();
+        let era = self.protocol_era.get();
+        if let Some(gate) = self.tool_gate.borrow().as_ref() {
+            if gate.era == era && gate.read == read && gate.policy == *self.tool_policy.borrow() {
+                return gate.clone();
             }
         }
-        Ok(rows)
+        let gate = Rc::new(ToolGate {
+            status: checked_status(read.clone()),
+            read,
+            policy: self.tool_policy.borrow().clone(),
+            era,
+            rows: OnceCell::new(),
+            fingerprint: OnceCell::new(),
+        });
+        *self.tool_gate.borrow_mut() = Some(gate.clone());
+        gate
+    }
+    pub fn tool_visibility_rows(&self) -> Result<Vec<ToolVisibilityRow>, LiveError> {
+        Ok(self.tool_gate().rows()?.to_vec())
     }
     pub fn tool_callable(&self, name: &str) -> Result<bool, LiveError> {
-        Ok(self.tool_visibility_rows()?.iter().any(|row| row.entry.name == name && row.visible))
+        Ok(self.tool_gate().row(name)?.is_some_and(|row| row.visible))
     }
     pub fn policy_allows_tool(&self, name: Option<&str>) -> Result<bool, LiveError> {
         let Some(name) = name else { return Ok(true) };
-        Ok(self.tool_visibility_rows()?.iter().any(|row| row.entry.name == name && row.policy_allowed))
+        Ok(self.tool_gate().row(name)?.is_some_and(|row| row.policy_allowed))
     }
     pub fn tool_gate_error(&self, id: &Value, name: &str) -> Result<Value, LiveError> {
         if tool_catalog::tool_catalog_entry(name).is_none() {
             return Ok(error(id, -32601, "Tool not found", None));
         }
-        let rows = self.tool_visibility_rows()?;
-        let denied = rows.iter().find(|row| row.entry.name == name).is_some_and(|row| row.executable && !row.policy_allowed);
+        let denied = self.tool_gate().row(name)?.is_some_and(|row| row.executable && !row.policy_allowed);
         Ok(reason_error(id,if denied {"tool-denied-by-deployment-policy"}else{"tool-unavailable-in-current-live-shape"},"Consult the capabilities resource for the executable tools and effective deployment policy; hidden tools are never dispatched."))
     }
     pub fn transaction_owner_tool(transaction_id: &str, kind: Option<&str>) -> Option<&'static str> {
@@ -356,8 +376,63 @@ impl McpHost {
         self.live_status(id)
     }
 }
+/// Which tools Live's status and the deployment policy let through, resolved once for each status the adapter reports:
+/// every request asks, and the status seldom changes. The gate is kept with the status it was resolved from and is used
+/// again only while the adapter reports that same status, so a change no listener heard of is never missed.
+struct ToolGate {
+    /// What the adapter reported (nothing when it failed), before `checked_status` judged it.
+    read: Option<LiveStatus>,
+    status: LiveStatus,
+    policy: ToolPolicySpec,
+    era: Option<ProtocolEra>,
+    rows: OnceCell<Result<Vec<ToolVisibilityRow>, tool_catalog::ToolPolicyError>>,
+    fingerprint: OnceCell<String>,
+}
+impl ToolGate {
+    /// Every catalog tool's row, in the catalog's order.
+    fn rows(&self) -> Result<&[ToolVisibilityRow], LiveError> {
+        let rows = self.rows.get_or_init(|| {
+            let mut rows = tool_catalog::resolve_tool_visibility(&self.status, &self.policy)?;
+            if self.era == Some(ProtocolEra::Modern) {
+                for row in &mut rows {
+                    if is_modern_unavailable_tool(&row.entry.name) {
+                        row.executable = false;
+                        row.visible = false;
+                    }
+                }
+            }
+            Ok(rows)
+        });
+        rows.as_deref().map_err(|error| policy_error(error.clone()))
+    }
+    /// The row of the tool called `name`, if the catalog has one.
+    fn row(&self, name: &str) -> Result<Option<&ToolVisibilityRow>, LiveError> {
+        let rows = self.rows()?;
+        Ok(tool_catalog::tool_catalog_index(name).and_then(|index| rows.get(index)))
+    }
+    /// What `tools/list_changed` follows: the parts of Live's status and the policy a tool listing is made of.
+    fn fingerprint(&self) -> Result<String, LiveError> {
+        use sha2::Digest;
+        if let Some(fingerprint) = self.fingerprint.get() {
+            return Ok(fingerprint.clone());
+        }
+        let status = &self.status;
+        let fingerprint = hex::encode(sha2::Sha256::digest(
+            canonical_mutation_identity(&json!({
+                "connected":status.connected,"epoch":status.epoch,"adapter":status.adapter,
+                "operations":status.operations.as_deref().unwrap_or_default(),"capabilities":status.capabilities,"policy":self.policy
+            }))?
+            .as_bytes(),
+        ));
+        Ok(self.fingerprint.get_or_init(|| fingerprint).clone())
+    }
+}
 fn safe_adapter_status(adapter: &dyn AsyncLiveAdapter) -> LiveStatus {
-    if let Ok(status) = adapter.status() {
+    checked_status(adapter.status().ok())
+}
+/// The status the adapter reported, when the host can trust it; Live's unavailable status otherwise.
+fn checked_status(read: Option<LiveStatus>) -> LiveStatus {
+    if let Some(status) = read {
         let capabilities: HashSet<_> = status.capabilities.iter().collect();
         let operations_valid = status.operations.as_ref().is_none_or(|operations| {
             let unique: HashSet<_> = operations.iter().collect();

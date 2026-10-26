@@ -155,7 +155,7 @@ impl ExtensionChannel {
         }))
     }
     pub fn status(&self) -> Option<LiveStatus> {
-        if self.0.writer.borrow().is_some() && !self.0.cancel.borrow().is_cancelled() {
+        if self.live() {
             self.0.cached.borrow().clone()
         } else {
             None
@@ -163,6 +163,19 @@ impl ExtensionChannel {
     }
     pub fn reason(&self) -> String {
         self.0.reason.borrow().clone()
+    }
+    /// `f(status(), reason())`, with no copy of either.
+    pub fn with_status<R>(&self, f: impl FnOnce(Option<&LiveStatus>, &str) -> R) -> R {
+        let cached = self.0.cached.borrow();
+        f(cached.as_ref().filter(|_| self.live()), &self.0.reason.borrow())
+    }
+    /// `status().is_some_and(|status| status.has_operation(operation))`, with no copy of the status.
+    pub fn has_operation(&self, operation: &str) -> bool {
+        self.live() && self.0.cached.borrow().as_ref().is_some_and(|status| status.has_operation(operation))
+    }
+    /// Whether the extension's connection is open: its status counts only then.
+    fn live(&self) -> bool {
+        self.0.writer.borrow().is_some() && !self.0.cancel.borrow().is_cancelled()
     }
     pub fn endpoint(&self) -> Option<ExtensionEndpoint> {
         self.0.endpoint.borrow().clone()

@@ -5,10 +5,11 @@ use ableton_mcp_server::{
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::{cell::RefCell, rc::Rc};
-struct StatusAdapter(Result<LiveStatus, LiveError>);
+/// An adapter that reports the status it holds, which a test may change without telling anyone.
+struct StatusAdapter(RefCell<Result<LiveStatus, LiveError>>);
 impl LiveAdapter for StatusAdapter {
     fn status(&self) -> Result<LiveStatus, LiveError> {
-        self.0.clone()
+        self.0.borrow().clone()
     }
     fn snapshot(&self) -> Result<LiveSnapshot, LiveError> {
         UnavailableLiveAdapter.snapshot()
@@ -71,7 +72,7 @@ async fn host_lifecycle_resources_status_and_gates_match_source() {
         };
         let host = Rc::new(
             McpHost::new(
-                Rc::new(StatusAdapter(status)),
+                Rc::new(StatusAdapter(RefCell::new(status))),
                 McpHostOptions {
                     tool_policy: case.get("policy").cloned(),
                     server_version: Some(ORACLE_VERSION.into()),
@@ -113,6 +114,63 @@ async fn host_lifecycle_resources_status_and_gates_match_source() {
         }
     }
 }
+// The tools a request may call follow Live's status as the adapter reports it now, even a change no listener was told
+// of, and the policy as it was last set.
+#[test]
+fn the_tools_a_request_may_call_follow_a_status_change_no_listener_heard_of() {
+    let connected = DeterministicLiveSimulator::new().status().unwrap();
+    let mut away = connected.clone();
+    away.connected = false;
+    let adapter = Rc::new(StatusAdapter(RefCell::new(Ok(connected.clone()))));
+    let host = McpHost::new(adapter.clone(), McpHostOptions::default()).unwrap();
+    assert!(host.tool_callable("live_discover").unwrap());
+    *adapter.0.borrow_mut() = Ok(away);
+    assert!(!host.tool_callable("live_discover").unwrap());
+    assert!(host.tool_callable("server_status").unwrap());
+    *adapter.0.borrow_mut() = Err(LiveError::error("broken adapter"));
+    assert!(!host.tool_callable("live_discover").unwrap());
+    *adapter.0.borrow_mut() = Ok(connected);
+    assert!(host.tool_callable("live_discover").unwrap());
+    host.set_tool_policy(&json!({"profile":"full","deny":["live_discover"]})).unwrap();
+    assert!(!host.tool_callable("live_discover").unwrap());
+    assert!(!host.policy_allows_tool(Some("live_discover")).unwrap());
+    assert!(host.policy_allows_tool(Some("live_snapshot")).unwrap());
+    assert!(!host.tool_callable("no_such_tool").unwrap());
+}
+
+// A status change no listener was told of is announced by the next request that reads the status.
+#[tokio::test]
+async fn a_status_change_no_listener_heard_of_is_announced_at_the_next_request() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let connected = DeterministicLiveSimulator::new().status().unwrap();
+            let adapter = Rc::new(StatusAdapter(RefCell::new(Ok(connected.clone()))));
+            let host = Rc::new(McpHost::new(adapter.clone(), McpHostOptions::default()).unwrap());
+            initialize(&host);
+            let lines = Rc::new(RefCell::new(Vec::new()));
+            let output = lines.clone();
+            host.set_event_emitter(Rc::new(move |line| {
+                output.borrow_mut().push(line);
+                Box::pin(async { Ok(()) })
+            }))
+            .unwrap();
+            let call = |id: i64| json!({"jsonrpc":"2.0","id":id,"method":"tools/call","params":{"name":"live_status","arguments":{}}});
+            host.begin_request(&call(1), true).unwrap();
+            host.begin_request(&call(2), true).unwrap();
+            tokio::task::yield_now().await;
+            assert!(lines.borrow().is_empty(), "the same status announces nothing");
+            let mut moved = connected.clone();
+            moved.epoch = Some(connected.epoch.unwrap() + 1);
+            *adapter.0.borrow_mut() = Ok(moved);
+            host.begin_request(&call(3), true).unwrap();
+            host.begin_request(&call(4), true).unwrap();
+            tokio::task::yield_now().await;
+            let announced: Vec<Value> = lines.borrow().iter().map(|line| serde_json::from_str(line).unwrap()).collect();
+            assert_eq!(announced, vec![json!({"jsonrpc":"2.0","method":"notifications/tools/list_changed"})]);
+        })
+        .await;
+}
+
 #[test]
 fn modern_ids_are_in_flight_only_and_legacy_ids_use_bounded_history() {
     let host = McpHost::default();

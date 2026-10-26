@@ -170,12 +170,21 @@ impl McpHost {
         context: Option<&LiveOperationContext>,
         reference: &str,
     ) -> Result<NoteClip, LiveError> {
-        let value = serde_json::to_value(snapshot).unwrap();
-        if let Some(row) = value["arrangement"]["clips"].as_array().into_iter().flatten().find(|clip| clip["ref"] == reference) {
-            let track =
-                value["tracks"].as_array().into_iter().flatten().find(|track| track["ref"] == row["trackRef"]).cloned().unwrap_or_default();
-            if row["isAudio"] == true || row["kind"] == "audio" {
-                return Err(audio_clip(&row["name"]));
+        // Looked for on the typed snapshot: a Session clip's edit made the whole view JSON to find it isn't in the
+        // Arrangement.
+        let arranged = snapshot.arrangement.iter().flat_map(|arrangement| arrangement.clips.iter().flatten());
+        if let Some(clip) = arranged.into_iter().find(|clip| clip.get("ref").and_then(Value::as_str) == Some(reference)) {
+            let row = |key: &str| clip.get(key).unwrap_or(&Value::Null);
+            let owner = row("trackRef").as_str();
+            let track = snapshot
+                .tracks
+                .iter()
+                .flatten()
+                .find(|track| Some(track.ref_.0.as_str()) == owner)
+                .map(|track| serde_json::to_value(track).unwrap())
+                .unwrap_or_default();
+            if row("isAudio") == true || row("kind") == "audio" {
+                return Err(audio_clip(row("name")));
             }
             let fields = ["ref", "objectIdentity", "kind", "name", "length", "loopEnd", "endMarker", "notes", "notesRevision"];
             let clip = match track["ref"].as_str() {
@@ -197,7 +206,7 @@ impl McpHost {
                     notes_revision: clip["notesRevision"].as_str().unwrap().into(),
                     authority: json!({"expectedObjectIdentity":clip["objectIdentity"],"expectedTrackRef":track["ref"],"expectedTrackIdentity":track["objectIdentity"]}),
                     end: own_time_end(&clip).unwrap(),
-                    name: clip["name"].as_str().or(row["name"].as_str()).unwrap_or_default().into(),
+                    name: clip["name"].as_str().or(row("name").as_str()).unwrap_or_default().into(),
                     arrangement: true,
                 });
             }

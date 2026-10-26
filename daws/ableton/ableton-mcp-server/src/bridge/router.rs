@@ -8,27 +8,32 @@ use std::rc::Rc;
 /// Operations the extension deliberately replaces. Empty until both channels' semantics agree.
 pub const EXTENSION_FIRST: &[&str] = &[];
 pub fn route_to_extension(operation: &str, remote: &LiveStatus, extension: Option<&LiveStatus>) -> bool {
-    extension.is_some_and(|extension| extension.has_operation(operation))
-        && (!remote.has_operation(operation) || EXTENSION_FIRST.contains(&operation))
+    routes_to_extension(operation, remote.has_operation(operation), extension.is_some_and(|extension| extension.has_operation(operation)))
+}
+/// `route_to_extension` from whether each channel has negotiated the operation.
+fn routes_to_extension(operation: &str, remote_has: bool, extension_has: bool) -> bool {
+    extension_has && (!remote_has || EXTENSION_FIRST.contains(&operation))
 }
 pub fn merged_status(remote: &LiveStatus, extension: Option<&LiveStatus>, reason: &str) -> LiveStatus {
-    let mut status = remote.clone();
-    let Some(extension) = extension.filter(|_| remote.connected) else {
+    merge(remote.clone(), extension, reason)
+}
+/// `merged_status` of a remote status the caller owns: it becomes the merged one, with no copy of it.
+fn merge(mut status: LiveStatus, extension: Option<&LiveStatus>, reason: &str) -> LiveStatus {
+    let Some(extension) = extension.filter(|_| status.connected) else {
         status.extra.insert("channels".into(), json!({"extension":{"connected":false,"reason":reason}}));
         return status;
     };
-    let own = remote.operations.as_deref().unwrap_or_default();
+    let mut operations = status.operations.take().unwrap_or_default();
     let added: Vec<_> = extension
         .operations
         .as_deref()
         .unwrap_or_default()
         .iter()
-        .filter(|op| op.as_str() != "status" && !own.contains(op))
+        .filter(|op| op.as_str() != "status" && !operations.contains(op))
         .cloned()
         .collect();
-    status.operations = Some(own.iter().chain(&added).cloned().collect());
     let mut capabilities = vec![];
-    for cap in remote.capabilities.iter().copied().chain(live_capabilities_for_operations(&added)) {
+    for cap in status.capabilities.iter().copied().chain(live_capabilities_for_operations(&added)) {
         if !capabilities.contains(&cap) {
             capabilities.push(cap);
         }
@@ -40,6 +45,8 @@ pub fn merged_status(remote: &LiveStatus, extension: Option<&LiveStatus>, reason
     {
         channel["version"] = version.into();
     }
+    operations.extend(added);
+    status.operations = Some(operations);
     status.extra.insert("channels".into(), json!({"extension":channel}));
     status
 }
@@ -72,7 +79,8 @@ pub fn routed_adapter(remote: Rc<dyn AsyncLiveAdapter>, extension: ExtensionChan
 }
 impl LiveAdapter for RoutedLiveAdapter {
     fn status(&self) -> Result<LiveStatus, LiveError> {
-        Ok(merged_status(&self.0.remote.status()?, self.0.extension.status().as_ref(), &self.0.extension.reason()))
+        let remote = self.0.remote.status()?;
+        Ok(self.0.extension.with_status(|extension, reason| merge(remote, extension, reason)))
     }
     fn snapshot(&self) -> Result<LiveSnapshot, LiveError> {
         self.0.remote.snapshot()
@@ -128,7 +136,8 @@ impl AsyncLiveAdapter for RoutedLiveAdapter {
         invocation: &LiveInvocation,
         context: Option<&LiveOperationContext>,
     ) -> Result<serde_json::Value, LiveError> {
-        if route_to_extension(&invocation.operation, &self.0.remote.status()?, self.0.extension.status().as_ref()) {
+        let remote_has = self.0.remote.status_has_operation(&invocation.operation)?;
+        if routes_to_extension(&invocation.operation, remote_has, self.0.extension.has_operation(&invocation.operation)) {
             self.0.extension.invoke(&invocation.operation, &invocation.args, context).await
         } else {
             self.0.remote.invoke_async(invocation, context).await

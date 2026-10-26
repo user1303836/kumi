@@ -54,8 +54,8 @@ fn unsafe_monitoring(tracks: &[Value]) -> bool {
         }
     })
 }
-fn json_rows(value: &Value) -> Vec<Value> {
-    value.as_array().cloned().unwrap_or_default()
+fn json_rows(value: &Value) -> &[Value] {
+    value.as_array().map(Vec::as_slice).unwrap_or_default()
 }
 fn fields(row: &Value, names: &[&str]) -> Value {
     let mut result = json!({});
@@ -97,8 +97,9 @@ impl McpHost {
         })
     }
 
-    fn audition_authority_revision(&self, snapshot: &LiveSnapshot, scene_ref: &str, eligible: &[String]) -> Result<String, LiveError> {
-        let snapshot = serde_json::to_value(snapshot).unwrap();
+    /// The audition's authority over the Set's JSON (made once by the caller for this and `audition_snapshot`: each made
+    /// its own of the whole Set).
+    fn audition_authority_revision(&self, snapshot: &Value, scene_ref: &str, eligible: &[String]) -> Result<String, LiveError> {
         let scenes = json_rows(&snapshot["scenes"]);
         let scene = scenes.iter().find(|s| s["ref"] == scene_ref).ok_or_else(|| LiveError::error("audition scene is not authoritative"))?;
         let tracks = json_rows(&snapshot["tracks"]);
@@ -148,8 +149,7 @@ impl McpHost {
 "targets":targets});
         Ok(hex::encode(Sha256::digest(canonical_mutation_identity(&value)?.as_bytes())))
     }
-    fn audition_snapshot(&self, snapshot: &LiveSnapshot, scene_ref: &str) -> Result<AuditionState, LiveError> {
-        let snapshot = serde_json::to_value(snapshot).unwrap();
+    fn audition_snapshot(&self, snapshot: &Value, scene_ref: &str) -> Result<AuditionState, LiveError> {
         let scenes = json_rows(&snapshot["scenes"]);
         let scene = scenes
             .iter()
@@ -163,7 +163,7 @@ impl McpHost {
             return Err(LiveError::error("authoritative Session playback is unavailable"));
         }
         let mut eligible = vec![];
-        for track in &tracks {
+        for track in tracks {
             for slot in json_rows(&track["clipSlots"]) {
                 if slot["sceneIndex"].as_f64() == scene["index"].as_f64()
                     && slot["ref"].is_string()
@@ -182,7 +182,15 @@ impl McpHost {
         let revision = js_json::stringify(&json!({"playback":playback,
 "tracks":track_states,
 "scenes":scenes}));
-        Ok(AuditionState { set: snapshot["set"].clone(), scene, tracks, playback: playback.clone(), playback_revision: revision, eligible })
+        Ok(AuditionState {
+            set: snapshot["set"].clone(),
+            scene,
+            // What `unsafe_monitoring` reads of each track (not its clips and devices).
+            tracks: tracks.iter().map(|t| fields(t, &["kind", "armed", "monitoringState"])).collect(),
+            playback: playback.clone(),
+            playback_revision: revision,
+            eligible,
+        })
     }
     fn validate_audition_safety(
         &self,
@@ -240,7 +248,7 @@ impl McpHost {
             if !status.connected || !status.capabilities.iter().any(|c| c.as_str() == "session.read") {
                 return Err(LiveError::error("session read capability is unavailable"));
             }
-            let snapshot = self.views.whole_set(None, Some(TRACK_CONTENT_PARTS)).await?;
+            let snapshot = serde_json::to_value(self.views.whole_set(None, Some(TRACK_CONTENT_PARTS)).await?).unwrap();
             let state = self.audition_snapshot(&snapshot, params["sceneRef"].as_str().unwrap())?;
             self.validate_audition_safety(&status, &state, &params["outputSafety"], &params["setName"])?;
             if state.eligible.is_empty() {
@@ -409,7 +417,7 @@ impl McpHost {
             );
             let before = self.views.whole_set(Some(&context), Some(TRACK_CONTENT_PARTS)).await;
             tokio::task::yield_now().await;
-            let before = before?;
+            let before = serde_json::to_value(before?).unwrap();
             let state = self.audition_snapshot(&before, t["sceneRef"].as_str().unwrap())?;
             let active = active_targets(&state.playback);
             let eligible = t["eligibleTargetKeys"].as_array().unwrap();
@@ -607,7 +615,7 @@ impl McpHost {
             );
             let snapshot = self.views.whole_set(Some(&context), Some(TRACK_CONTENT_PARTS)).await;
             tokio::task::yield_now().await;
-            let snapshot = snapshot?;
+            let snapshot = serde_json::to_value(snapshot?).unwrap();
             let before = self.audition_snapshot(&snapshot, t["sceneRef"].as_str().unwrap())?;
             let eligible = t["eligibleTargetKeys"].as_array().unwrap();
             let keys: Vec<_> = eligible.iter().map(|v| v.as_str().unwrap().to_owned()).collect();

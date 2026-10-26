@@ -19,35 +19,31 @@ pub(super) struct ChainRow {
 fn array(value: &Value) -> &[Value] {
     value.as_array().map(Vec::as_slice).unwrap_or(&[])
 }
-fn nullable_array<'a>(value: &'a Value, name: &str) -> Result<&'a [Value], LiveError> {
-    if value.is_null() {
-        return Ok(&[]);
-    }
-    value.as_array().map(Vec::as_slice).ok_or_else(|| LiveError::type_error(format!("({name} ?? []).filter is not a function")))
-}
-fn find_chain(devices: &Value, reference: &str) -> Result<Option<(Value, Value)>, LiveError> {
-    for device in nullable_array(devices, "track.devices")?.iter().filter(|v| v.is_object()) {
-        let chains: Vec<_> = nullable_array(&device["chains"], "device.chains")?.iter().filter(|v| v.is_object()).collect();
-        if let Some(chain) = chains.iter().find(|v| v["ref"] == reference) {
-            return Ok(Some((device.clone(), (*chain).clone())));
+/// The chain `reference` names under `devices` (a rack's chain, or a Drum Rack pad's), with the device it's on: found on
+/// the typed snapshot, whose devices and chains are always lists, so nothing is made JSON until it's found.
+fn find_chain<'a>(devices: &'a [Device], reference: &str) -> Option<(&'a Device, &'a DeviceChain)> {
+    for device in devices {
+        let chains = device.chains.as_deref().unwrap_or_default();
+        if let Some(chain) = chains.iter().find(|chain| chain.ref_.0 == reference) {
+            return Some((device, chain));
         }
         for chain in chains {
-            if let Some(row) = find_chain(&chain["devices"], reference)? {
-                return Ok(Some(row));
+            if let Some(row) = find_chain(&chain.devices, reference) {
+                return Some(row);
             }
         }
-        for pad in nullable_array(&device["drumPads"], "device.drumPads")?.iter().filter(|v| v.is_object()) {
-            for chain in nullable_array(&pad["chains"], "pad.chains")?.iter().filter(|v| v.is_object()) {
-                if chain["ref"] == reference {
-                    return Ok(Some((device.clone(), chain.clone())));
+        for pad in device.drum_pads.iter().flatten() {
+            for chain in &pad.chains {
+                if chain.ref_.0 == reference {
+                    return Some((device, chain));
                 }
-                if let Some(row) = find_chain(&chain["devices"], reference)? {
-                    return Ok(Some(row));
+                if let Some(row) = find_chain(&chain.devices, reference) {
+                    return Some(row);
                 }
             }
         }
     }
-    Ok(None)
+    None
 }
 fn name(value: &Value) -> Result<String, LiveError> {
     Ok(slice(&if value.is_null() { String::new() } else { js_string(value)? }, 0, Some(64)))
@@ -72,23 +68,21 @@ fn track_fence(track: &Value, authority: &Value) -> String {
     js_json::stringify(&result)
 }
 impl McpHost {
+    /// The chain `reference` names, with its device and track, as the snapshot's JSON has them: only those three are made
+    /// JSON (each lookup made the whole view's).
     pub(super) fn chain_row(&self, snapshot: &LiveSnapshot, reference: &str) -> Result<ChainRow, LiveError> {
-        let snapshot = serde_json::to_value(snapshot).unwrap();
-        for track in array(&snapshot["tracks"]) {
-            if let Some((device, chain)) = find_chain(&track["devices"], reference)? {
-                return Ok(ChainRow { track: track.clone(), device, chain });
+        for track in snapshot.tracks.iter().flatten() {
+            if let Some((device, chain)) = find_chain(&track.devices, reference) {
+                let (track, device, chain) =
+                    (serde_json::to_value(track).unwrap(), serde_json::to_value(device).unwrap(), serde_json::to_value(chain).unwrap());
+                return Ok(ChainRow { track, device, chain });
             }
         }
         Err(LiveError::error("chain reference is not authoritative"))
     }
+    /// `chain_row`: a typed snapshot's lists can't be malformed, so there's no track to pass over for that.
     pub(super) fn chain_on_track(&self, snapshot: &LiveSnapshot, reference: &str) -> Result<ChainRow, LiveError> {
-        let snapshot = serde_json::to_value(snapshot).unwrap();
-        for track in array(&snapshot["tracks"]) {
-            if let Ok(Some((device, chain))) = find_chain(&track["devices"], reference) {
-                return Ok(ChainRow { track: track.clone(), device, chain });
-            }
-        }
-        Err(LiveError::error("chain reference is not authoritative"))
+        self.chain_row(snapshot, reference)
     }
     pub(super) fn track_device_authority(&self, track: &Value) -> Result<Value, LiveError> {
         if !is_non_empty_string(&track["objectIdentity"], 256) || !track["devices"].is_array() {

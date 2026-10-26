@@ -35,19 +35,27 @@ fn clips(snapshot: &LiveSnapshot) -> Vec<Value> {
 fn clip_remains(snapshot: &LiveSnapshot, identity: &str) -> bool {
     owned_clip_ref(snapshot, identity).is_some()
 }
-/// Where the clip that is `identity` is now: its ref, wherever it is in `snapshot`.
+/// Where the clip that is `identity` is now: its ref, wherever it is in `snapshot` (a Session slot, a take lane, then the
+/// Arrangement), read off the typed snapshot without making it JSON.
 fn owned_clip_ref(snapshot: &LiveSnapshot, identity: &str) -> Option<String> {
-    let s = serde_json::to_value(snapshot).unwrap();
-    rows(&s["tracks"])
+    let session = snapshot
+        .tracks
         .iter()
-        .flat_map(|track| rows(&track["clips"]).iter().chain(rows(&track["takeLanes"]).iter().flat_map(|lane| rows(&lane["clips"]))))
-        .chain(rows(&s["arrangement"]["clips"]))
-        .find(|clip| clip["objectIdentity"] == identity)
-        .and_then(|clip| clip["ref"].as_str().map(str::to_owned))
+        .flatten()
+        .flat_map(|track| track.clips.iter().chain(track.take_lanes.iter().flatten().flat_map(|lane| &lane.clips)));
+    if let Some(clip) = session.into_iter().find(|clip| clip.object_identity.as_deref() == Some(identity)) {
+        return Some(clip.ref_.0.clone());
+    }
+    snapshot
+        .arrangement
+        .iter()
+        .flat_map(|arrangement| arrangement.clips.iter().flatten())
+        .find(|clip| clip.get("objectIdentity").and_then(Value::as_str) == Some(identity))
+        .and_then(|clip| clip.get("ref").and_then(Value::as_str).map(str::to_owned))
 }
 impl McpHost {
-    pub(super) fn capture_authority_revision(&self, snapshot: &LiveSnapshot) -> Result<String, LiveError> {
-        let s = serde_json::to_value(snapshot).unwrap();
+    /// Over the Set's JSON `s` (the caller makes it once for this and `capture_fence`: each made its own of the whole Set).
+    pub(super) fn capture_authority_revision(&self, s: &Value) -> Result<String, LiveError> {
         let tracks: Vec<_> = rows(&s["tracks"])
             .iter()
             .map(|track| {
@@ -67,8 +75,8 @@ impl McpHost {
         let authority = json!({"tracks":tracks,"scenes":scenes,"playbackRevision":s["playback"]["revision"]});
         Ok(hex::encode(Sha256::digest(canonical_mutation_identity(&authority)?)))
     }
-    pub(super) fn capture_fence(&self, snapshot: &LiveSnapshot) -> Result<String, LiveError> {
-        let s = serde_json::to_value(snapshot).unwrap();
+    /// Over `snapshot` and its JSON `s`.
+    pub(super) fn capture_fence(&self, snapshot: &LiveSnapshot, s: &Value) -> Result<String, LiveError> {
         let tracks: Vec<_> = rows(&s["tracks"])
             .iter()
             .map(|track| {
@@ -183,6 +191,7 @@ impl McpHost {
                     Some(TRACK_CONTENT_PARTS),
                 )
                 .await?;
+            let set = serde_json::to_value(&snapshot).unwrap();
             let t = json!({
             "id":tempo::transaction_id(if kind=="capture-midi"{
             "capturemidi"}
@@ -191,9 +200,9 @@ impl McpHost {
             ),
             "epoch":status.epoch,
             "kind":kind,
-            "fence":self.capture_fence(&snapshot)?,
+            "fence":self.capture_fence(&snapshot, &set)?,
             "payload":{
-            "expectedStateRevision":self.capture_authority_revision(&snapshot)?}
+            "expectedStateRevision":self.capture_authority_revision(&set)?}
             ,
             "expiresAt":kumi_common::time::now_ms_f64()+TRANSACTION_TTL_MS,
             "state":"previewed"}
@@ -277,7 +286,7 @@ impl McpHost {
             let context = self.transaction_context(params, signal, reads::AUDITION_DEADLINE_MS);
             if !reconciliation {
                 let before = self.views.whole_set(Some(&context), Some(TRACK_CONTENT_PARTS)).await?;
-                if self.capture_fence(&before)? != t["fence"] {
+                if self.capture_fence(&before, &serde_json::to_value(&before).unwrap())? != t["fence"] {
                     let mut row = record.borrow_mut();
                     row["state"] = json!("previewed");
                     row.as_object_mut().unwrap().remove("applyKey");
