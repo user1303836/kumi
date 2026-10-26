@@ -26,13 +26,14 @@
 
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::fmt::Write as _;
 use std::time::{Duration, Instant};
 
 use serde_json::{json, Map, Value};
 
 use super::{active, bad, Reads};
 use crate::queue::Answer;
-use crate::reaper::{Fx, FxOwner, Project, Reaper, Track, INPUT_FX};
+use crate::reaper::{Fx, FxOwner, Marker, Project, Reaper, Track, INPUT_FX};
 use crate::refs;
 use crate::rows;
 
@@ -131,6 +132,12 @@ fn limits() -> (usize, usize, usize) {
 /// FNV-1a over what's fed: a fingerprint only this bridge compares with itself.
 struct Print(u64);
 
+thread_local! {
+    /// The text `Print::number` writes a number into, one buffer for them all (REAPER's main thread prints): a digest
+    /// prints hundreds of thousands of numbers.
+    static NUMBER: RefCell<String> = const { RefCell::new(String::new()) };
+}
+
 impl Print {
     fn new() -> Self {
         Print(0xcbf2_9ce4_8422_2325)
@@ -143,11 +150,15 @@ impl Print {
         self
     }
     fn number(&mut self, value: f64, places: i32) -> &mut Self {
-        let text = format!("{:.*}", places as usize, if value.is_finite() { value } else { 0.0 });
-        // What reads as zero is zero, from either side: −0, or the −3.5e-18 a pitch nudged up three cents and down three
-        // is left at (REAPER's own nudges, lab 7.82; down and up leaves +3.5e-18).
-        let zero = text.strip_prefix('-').filter(|digits| digits.bytes().all(|b| b == b'0' || b == b'.'));
-        self.text(zero.unwrap_or(&text))
+        NUMBER.with_borrow_mut(|text| {
+            text.clear();
+            let _ = write!(text, "{:.*}", places as usize, if value.is_finite() { value } else { 0.0 });
+            // What reads as zero is zero, from either side: −0, or the −3.5e-18 a pitch nudged up three cents and down
+            // three is left at (REAPER's own nudges, lab 7.82; down and up leaves +3.5e-18).
+            let zero = text.strip_prefix('-').filter(|digits| digits.bytes().all(|b| b == b'0' || b == b'.'));
+            self.text(zero.unwrap_or(text));
+        });
+        self
     }
     fn hex(&self) -> String {
         format!("{:016x}", self.0)
@@ -322,11 +333,19 @@ struct KeptPages {
     complete: bool,
 }
 
+/// The markers and regions a digest's first page read, by their index, kept for the pages that list them.
+struct KeptMarkers {
+    /// The digest, and the project's change count they were read under.
+    key: (u64, Option<i32>),
+    markers: Vec<Option<Marker>>,
+}
+
 #[derive(Default)]
 struct Kept {
     /// The serial the next digest takes.
     next: u64,
     works: VecDeque<Work>,
+    markers: VecDeque<KeptMarkers>,
     params: KeptParams,
     /// The last digest of each kind (`values`, `content`).
     pages: HashMap<(bool, bool), KeptPages>,
@@ -446,6 +465,26 @@ fn keep_work(work: Work) {
     })
 }
 
+/// Keeps the markers and regions a digest read, for its next page.
+fn keep_markers(key: (u64, Option<i32>), markers: Vec<Option<Marker>>) {
+    KEPT.with(|kept| {
+        let mut kept = kept.borrow_mut();
+        kept.markers.push_back(KeptMarkers { key, markers });
+        while kept.markers.len() > KEPT_WORK {
+            kept.markers.pop_front();
+        }
+    })
+}
+
+/// The markers and regions kept for this digest, taken out, if they were read under this change count.
+fn take_markers(key: (u64, Option<i32>)) -> Option<Vec<Option<Marker>>> {
+    KEPT.with(|kept| {
+        let mut kept = kept.borrow_mut();
+        let at = kept.markers.iter().position(|kept| kept.key.0 == key.0)?;
+        kept.markers.remove(at).filter(|kept| kept.key == key).map(|kept| kept.markers)
+    })
+}
+
 /// The parameters a track's envelopes automate, by FX (as `TrackFX_` addresses it), and its automated faders.
 struct Automated {
     params: HashSet<(i32, i32)>,
@@ -532,6 +571,13 @@ impl Reads {
             Some(_) => return Err(bad("cursor must be a string")),
         };
         let first = cursor.n == 0 && cursor.sub == 0;
+        // The markers and regions, read once a digest: its first page fingerprints them in the facts, and the pages that
+        // list them take what it read while the change count stays (it moved: they're read again).
+        let markers = if first {
+            Some((0..marker_total.min(MOST_MARKERS * 10)).map(|index| reaper.marker(proj, index as i32)).collect::<Vec<_>>())
+        } else {
+            take_markers((cursor.digest, changed))
+        };
         let mut clock = Clock { started: Instant::now(), reads: 0 };
         let under = Under { reaper, proj, epoch: &epoch, changed };
         let mut records: Vec<Value> = vec![];
@@ -595,7 +641,15 @@ impl Reads {
         if next.is_none() && cursor.markers {
             while cursor.n - track_total < marker_total {
                 let index = cursor.n - track_total;
-                if let Some(marker) = reaper.marker(proj, index as i32) {
+                let read;
+                let marker = match markers.as_ref().and_then(|markers| markers.get(index)) {
+                    Some(marker) => marker.as_ref(),
+                    None => {
+                        read = reaper.marker(proj, index as i32);
+                        read.as_ref()
+                    }
+                };
+                if let Some(marker) = marker {
                     let record = json!({
                         "k": if marker.is_region { "region" } else { "marker" },
                         "id": marker.guid,
@@ -634,7 +688,7 @@ impl Reads {
                 "name": rows::clip(&info.name),
                 "path": rows::clip(&info.path),
             });
-            answer["facts"] = facts(reaper, proj, marker_total);
+            answer["facts"] = facts(reaper, proj, marker_total, markers.as_deref().unwrap_or_default());
             answer["summaries"] = json!({"FX": "FX", "item": "items", "marker": "markers", "region": "markers"});
             let mut bounded = Map::new();
             if !cursor.items && content {
@@ -666,6 +720,10 @@ impl Reads {
         }
         if let Some(standing) = &standing {
             keep_page(kind, standing, cursor.digest, cursor_text, &answer, bytes, next.is_none());
+        }
+        // (for the pages still to come that list them)
+        if let Some(markers) = markers.filter(|_| next.is_some() && cursor.markers) {
+            keep_markers((cursor.digest, changed), markers);
         }
         Ok(answer)
     }
@@ -942,8 +1000,9 @@ impl Reads {
     }
 }
 
-/// The project's own values: its tempo and time signature at the start, the tempo map, and (summed up) its markers.
-fn facts(reaper: &Reaper, proj: Project, marker_total: usize) -> Value {
+/// The project's own values: its tempo and time signature at the start, the tempo map, and (summed up) its markers, as
+/// the digest read them.
+fn facts(reaper: &Reaper, proj: Project, marker_total: usize, markers: &[Option<Marker>]) -> Value {
     let start = reaper.time_signature_at(proj, 0.0);
     let mut tempo_map = Print::new();
     let tempo_count = reaper.tempo_marker_count(proj).max(0);
@@ -953,17 +1012,15 @@ fn facts(reaper: &Reaper, proj: Project, marker_total: usize) -> Value {
             tempo_map.text(if marker.linear { "l" } else { "" });
         }
     }
-    let mut markers = Print::new();
-    for index in 0..marker_total.min(MOST_MARKERS * 10) as i32 {
-        if let Some(marker) = reaper.marker(proj, index) {
-            markers.text(&marker.guid).text(&marker.name).number(marker.start, 6).number(marker.end, 6).number(marker.color as f64, 0);
-        }
+    let mut print = Print::new();
+    for marker in markers.iter().flatten() {
+        print.text(&marker.guid).text(&marker.name).number(marker.start, 6).number(marker.end, 6).number(marker.color as f64, 0);
     }
     json!({
         "tempo": start.map(|s| json!(round(s.bpm, 3))).unwrap_or(Value::Null),
         "timeSignature": start.map(|s| json!([s.num, s.denom])).unwrap_or(Value::Null),
         "tempoMap": {"markers": tempo_count, "tempoMapHash": tempo_map.hex()},
-        "markers": {"count": marker_total, "markersHash": markers.hex()},
+        "markers": {"count": marker_total, "markersHash": print.hex()},
     })
 }
 
@@ -1014,11 +1071,25 @@ mod tests {
         };
         let zero = pitched(0.0);
         // Up three cents and down three, and down and up, with REAPER's own nudges (lab 7.82); and −0.
-        for cents in [-3.4694469519536142e-18, 3.4694469519536142e-18, -0.0] {
+        for cents in [-3.469_446_951_953_614e-18, 3.469_446_951_953_614e-18, -0.0] {
             assert_eq!(pitched(cents), zero, "{cents:e}");
         }
         // A pitch that reads otherwise still tells.
         assert_ne!(pitched(-0.000001), zero);
+    }
+
+    // Second sweep RP2: a number's text is written into one buffer, and what's hashed is what it was: the fingerprints the
+    // host keeps in its baselines still match (this is the hash these numbers had as `format!` printed each).
+    #[test]
+    fn numbers_hash_as_their_text_did() {
+        let mut print = Print::new();
+        let values = [0.0, -0.0, 1.0, 0.5, -3.469_446_951_953_614e-18, 3.469_446_951_953_614e-18, 123.456789, -2.5, 4e-7, 1e300];
+        for value in values.into_iter().chain([f64::NAN, f64::INFINITY, -1e-7, 48000.0]) {
+            for places in [0, 4, 6] {
+                print.number(value, places);
+            }
+        }
+        assert_eq!(print.hex(), "ab5d778a1d18ca69");
     }
 
     #[test]
@@ -1152,6 +1223,49 @@ mod tests {
         // Summed up all the same: a change to them still shows on their track, and in the project's markers.
         assert!(find(&records, "{BBBB}")["f"]["items"]["itemsHash"].is_string());
         assert_eq!(first["facts"]["markers"]["count"], 2);
+    }
+
+    // Second sweep RP3: a digest reads each marker and region once, for the facts' fingerprint and for its record,
+    // whether the records come in the first page or in later ones.
+    #[test]
+    fn a_digest_reads_each_marker_once_for_its_fingerprint_and_its_record() {
+        use crate::reaper::fake::FakeMarker;
+        let digest = |markers: usize, page_bytes: usize| {
+            fake::lab_project();
+            fake::with(|s| {
+                s.markers = (0..markers)
+                    .map(|n| FakeMarker {
+                        guid: format!("{{M{n:04}}}"),
+                        is_region: n % 2 == 1,
+                        start: n as f64,
+                        end: n as f64 + 0.5,
+                        name: format!("Line {n}"),
+                        number: n as i32 + 1,
+                        color: 0,
+                    })
+                    .collect()
+            });
+            forget();
+            TEST_LIMITS.with(|limits| limits.set(Some((page_bytes, MOST_ITEMS, MOST_MARKERS))));
+            let before = fake::with(|s| s.calls);
+            let (first, records) = whole(&Reads::default(), false, true);
+            TEST_LIMITS.with(|limits| limits.set(None));
+            (fake::with(|s| s.calls) - before, first, records)
+        };
+        let (_, one_page, all) = digest(400, PAGE_BYTES);
+        let listed = |records: &[Value]| records.iter().filter(|r| ["marker", "region"].contains(&r["k"].as_str().unwrap())).count();
+        assert_eq!((one_page["pages"].as_u64(), listed(&all)), (Some(1), 400));
+        // (in pages of 2 KB, the first page ends among the tracks: the markers' records come in later ones)
+        for (page_bytes, in_first) in [(PAGE_BYTES, 400), (2048, 0)] {
+            let (none, _, _) = digest(0, page_bytes);
+            let (calls, first, records) = digest(400, page_bytes);
+            assert_eq!(listed(first["records"].as_array().unwrap()), in_first);
+            assert_eq!(records, all, "the same records in pages of {page_bytes}");
+            assert_eq!(first["facts"]["markers"], one_page["facts"]["markers"]);
+            // A marker's read is 8 REAPER calls, a region's 9: the marker, its values, its GUID and its name.
+            let pages = first["pages"].as_u64().unwrap();
+            assert!(calls - none < 400 * 9 * 3 / 2, "{} REAPER calls for 400 markers and regions in {pages} pages", calls - none);
+        }
     }
 
     /// 200 tracks of 5 FX of 64 parameters each and 20 items each (4,000 items: listed one by one).
