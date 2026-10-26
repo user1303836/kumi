@@ -4,6 +4,7 @@ use super::{
     classify::{parse_key, ClassFrom, SoundClass, SoundKind, CLASSES},
     features::{VECTOR_GROUPS, VECTOR_LENGTH},
     learn::{extension, PresetEntry, SetEntry, SoundEntry},
+    presets::PresetCategory,
     sets::{SetSummary, SetTrack},
     sources::{basename, below, Source},
     store::unpack_vector,
@@ -230,6 +231,8 @@ fn relative_key(key: &str) -> Option<String> {
     }
 }
 struct Prepared {
+    /// The source it's under: which of the index's `roots`.
+    root: usize,
     name: String,
     lower: String,
     where_: String,
@@ -237,7 +240,7 @@ struct Prepared {
     folders: Vec<String>,
     vector: Vec<f32>,
 }
-fn prepared(entry: &SoundEntry, source: &Source) -> Prepared {
+fn prepared(entry: &SoundEntry, source: &Source, root: usize) -> Prepared {
     let relative = below(&entry.path, &source.path).unwrap_or(&entry.path);
     let mut folders: Vec<_> = relative.split(['\\', '/']).map(str::to_owned).collect();
     folders.pop();
@@ -246,6 +249,7 @@ fn prepared(entry: &SoundEntry, source: &Source) -> Prepared {
     let name = name.strip_suffix(&ext).unwrap_or(&name).to_owned();
     let all = std::iter::once(source.label.clone()).chain(folders).collect::<Vec<_>>();
     Prepared {
+        root,
         lower: name.to_lowercase(),
         name,
         where_: all.join(" / "),
@@ -256,6 +260,8 @@ fn prepared(entry: &SoundEntry, source: &Source) -> Prepared {
 }
 pub struct SoundIndex {
     pub entries: Vec<SoundEntry>,
+    /// The sources its sounds are under, the longest path first.
+    roots: Vec<Source>,
     prepared: Vec<Prepared>,
     vectors: Vec<f32>,
     has_vector: Vec<bool>,
@@ -276,19 +282,20 @@ impl SoundIndex {
         let rows: Vec<_> = entries
             .into_iter()
             .filter_map(|entry| {
-                roots.iter().find(|root| below(&entry.path, &root.path).is_some()).map(|source| {
-                    let prepared = prepared(&entry, source);
+                roots.iter().position(|root| below(&entry.path, &root.path).is_some()).map(|at| {
+                    let prepared = prepared(&entry, roots[at], at);
                     (entry, prepared)
                 })
             })
             .collect();
-        Self::from_rows(rows)
+        Self::from_rows(rows, roots.into_iter().cloned().collect())
     }
-    fn from_rows(rows: Vec<(SoundEntry, Prepared)>) -> Self {
+    fn from_rows(rows: Vec<(SoundEntry, Prepared)>, roots: Vec<Source>) -> Self {
         let count = rows.len();
         let (entries, prepared): (Vec<_>, Vec<_>) = rows.into_iter().unzip();
         let mut index = Self {
             entries,
+            roots,
             prepared,
             vectors: vec![0.; count * VECTOR_LENGTH],
             has_vector: vec![false; count],
@@ -337,13 +344,33 @@ impl SoundIndex {
         index
     }
     pub async fn build(entries: impl IntoIterator<Item = SoundEntry>, sources: &[Source]) -> Self {
-        let mut roots: Vec<_> = sources.iter().collect();
+        Self::build_after(entries, sources, None).await
+    }
+    /// `build`, taking from `before` what it prepared for each sound that's as it was there (the same file, numbers and
+    /// source): made again after a learn added a few sounds, the index prepares only those.
+    pub async fn build_after(entries: impl IntoIterator<Item = SoundEntry>, sources: &[Source], before: Option<SoundIndex>) -> Self {
+        let mut roots = sources.to_vec();
         roots.sort_by_key(|s| std::cmp::Reverse(s.path.encode_utf16().count()));
+        let (before_entries, mut before_prepared, before_roots) =
+            before.map(|index| (index.entries, index.prepared.into_iter().map(Some).collect::<Vec<_>>(), index.roots)).unwrap_or_default();
+        let before_rows: HashMap<&str, usize> = before_entries.iter().enumerate().map(|(row, entry)| (entry.path.as_str(), row)).collect();
         let mut rows = vec![];
         let mut count = 0;
         for entry in entries {
-            if let Some(root) = roots.iter().find(|s| below(&entry.path, &s.path).is_some()) {
-                rows.push((prepared(&entry, root), entry, root.path.clone()));
+            if let Some(at) = roots.iter().position(|s| below(&entry.path, &s.path).is_some()) {
+                let kept = before_rows
+                    .get(entry.path.as_str())
+                    .copied()
+                    .filter(|row| {
+                        before_entries[*row].vector == entry.vector
+                            && before_prepared[*row].as_ref().is_some_and(|made| before_roots[made.root] == roots[at])
+                    })
+                    .and_then(|row| before_prepared[row].take());
+                let made = match kept {
+                    Some(made) => Prepared { root: at, ..made },
+                    None => prepared(&entry, &roots[at], at),
+                };
+                rows.push((made, entry));
             }
             count += 1;
             if count % 2000 == 0 {
@@ -360,20 +387,20 @@ impl SoundIndex {
                 .await
                 .unwrap_or_default();
         // If a longer source vanished while yielding, the constructor uses the next containing source.
-        Self::from_rows(
-            rows.into_iter()
-                .filter_map(|(made, entry, root)| {
-                    if present.contains(root.as_str()) {
-                        Some((entry, made))
-                    } else {
-                        roots.iter().find(|s| present.contains(s.path.as_str()) && below(&entry.path, &s.path).is_some()).map(|s| {
-                            let made = prepared(&entry, s);
-                            (entry, made)
-                        })
-                    }
-                })
-                .collect(),
-        )
+        let rows = rows
+            .into_iter()
+            .filter_map(|(made, entry)| {
+                if present.contains(roots[made.root].path.as_str()) {
+                    Some((entry, made))
+                } else {
+                    roots.iter().position(|s| present.contains(s.path.as_str()) && below(&entry.path, &s.path).is_some()).map(|at| {
+                        let made = prepared(&entry, &roots[at], at);
+                        (entry, made)
+                    })
+                }
+            })
+            .collect();
+        Self::from_rows(rows, roots)
     }
     pub fn size(&self) -> usize {
         self.entries.len()
@@ -403,6 +430,8 @@ impl SoundIndex {
         let describing: Vec<_> = words.iter().filter_map(|word| descriptor(word)).collect();
         let naming: Vec<_> = words.into_iter().filter(|word| !is_descriptor(word)).collect();
         let classes: Vec<_> = naming.iter().map(|word| class_for_word(word)).collect();
+        // A folder named for a word, or for more than one of it ("kick" in Kicks).
+        let plurals: Vec<_> = naming.iter().map(|word| format!("{word}s")).collect();
         let key = query.key.as_ref().filter(|s| !s.is_empty()).map(|s| parse_key(s).unwrap_or_else(|| s.clone()));
         let relative = key.as_deref().and_then(relative_key);
         let folders = query.folders.as_ref();
@@ -435,7 +464,9 @@ impl SoundIndex {
                     score += 6.;
                 } else if entry.key.is_some() && entry.key == relative {
                     score += 3.;
-                } else if entry.key.is_none() && entry.note.as_ref().is_some_and(|note| key.starts_with(&format!("{} ", note_root(note)))) {
+                } else if entry.key.is_none()
+                    && entry.note.as_ref().is_some_and(|note| key.strip_prefix(note_root(note)).is_some_and(|rest| rest.starts_with(' ')))
+                {
                     score += 4.;
                 } else {
                     continue;
@@ -443,7 +474,7 @@ impl SoundIndex {
             }
             let made = &self.prepared[row];
             let mut missing = false;
-            for (word, class) in naming.iter().zip(&classes) {
+            for ((word, class), plural) in naming.iter().zip(&classes).zip(&plurals) {
                 let in_name = if made.lower.starts_with(word) {
                     10.
                 } else if made.lower.contains(word) {
@@ -457,7 +488,7 @@ impl SoundIndex {
                     break;
                 }
                 score += in_name
-                    + if made.folders.iter().any(|folder| folder == word || folder == &format!("{word}s")) { 3. } else { 0. }
+                    + if made.folders.iter().any(|folder| folder == word || folder == plural) { 3. } else { 0. }
                     + if as_class { 8. } else { 0. };
             }
             if missing {
@@ -680,11 +711,11 @@ impl SoundIndex {
 pub fn search_presets<'a>(entries: impl IntoIterator<Item = &'a PresetEntry>, query: &PresetQuery) -> SearchResult<PresetHit> {
     let words = words(&query.words);
     let device = query.device.as_ref().map(|d| trim(d).to_lowercase()).filter(|d| !d.is_empty());
+    // The kind asked for, as a preset's is kept (none: a kind no preset has).
+    let category = query.category.as_ref().filter(|c| !c.is_empty()).map(|c| serde_json::from_value::<PresetCategory>(json!(c)).ok());
     let mut found = vec![];
     for entry in entries {
-        if query.category.as_ref().is_some_and(|category| {
-            !category.is_empty() && entry.category.map(|c| serde_json::to_value(c).unwrap()) != Some(json!(category))
-        }) {
+        if category.is_some_and(|wanted| wanted.is_none() || entry.category != wanted) {
             continue;
         }
         let device_name = entry.device.as_deref().unwrap_or("").to_lowercase();
@@ -704,7 +735,7 @@ pub fn search_presets<'a>(entries: impl IntoIterator<Item = &'a PresetEntry>, qu
         )
         .to_lowercase();
         // Another DAW's preset is found by what it holds too: a REAPER bank's preset names, the FX in a chain.
-        if super::presets::preset_daws(&entry.format) != vec![kumi_types::daw::DawId::Ableton] {
+        if !super::presets::preset_daws(&entry.format).eq([kumi_types::daw::DawId::Ableton]) {
             for inside in entry.inside.iter().flatten() {
                 hay.push(' ');
                 hay.push_str(&inside.to_lowercase());
@@ -742,14 +773,12 @@ pub fn search_presets<'a>(entries: impl IntoIterator<Item = &'a PresetEntry>, qu
                 format!("a rack with {}", query.device.as_deref().unwrap())
             });
         }
-        found.push(PresetHit { entry: entry.clone(), score, why });
+        found.push((entry, score, why));
     }
-    SearchResult {
-        matched: found.len(),
-        hits: top_by(found, query.limit, |a, b| {
-            compare(b.score, a.score).then_with(|| locale_compare_numeric_base(&a.entry.name, &b.entry.name))
-        }),
-    }
+    let matched = found.len();
+    // Only the hits kept are copied.
+    let kept = top_by(found, query.limit, |a, b| compare(b.1, a.1).then_with(|| locale_compare_numeric_base(&a.0.name, &b.0.name)));
+    SearchResult { matched, hits: kept.into_iter().map(|(entry, score, why)| PresetHit { entry: entry.clone(), score, why }).collect() }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -867,4 +896,74 @@ pub fn describe_track(track: &SetTrack) -> Value {
         row["frozen"] = json!(true);
     }
     row
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        sources::SourceKind,
+        store::{pack_vector, Entry},
+    };
+
+    fn sound(path: &str, number: f32) -> SoundEntry {
+        let numbers: Vec<f32> = (0..VECTOR_LENGTH).map(|dimension| number + dimension as f32).collect();
+        SoundEntry {
+            file: Entry { path: path.into(), size: 1, mtime: 1, gone: None },
+            vector: Some(pack_vector(&numbers)),
+            ..Default::default()
+        }
+    }
+
+    /// Every row as the index keeps it (its entry, source, what was prepared, its standardized numbers), and the rest.
+    fn rows(index: &SoundIndex) -> Vec<String> {
+        let row = |row: usize| {
+            let made = &index.prepared[row];
+            let (name, lower, place, hay, folders, vector) =
+                (&made.name, &made.lower, &made.where_, &made.hay, &made.folders, &made.vector);
+            let standardized = &index.vectors[row * VECTOR_LENGTH..(row + 1) * VECTOR_LENGTH];
+            format!(
+                "{:?} {:?} {name} {lower} {place} {hay} {folders:?} {vector:?} {standardized:?}",
+                index.entries[row], index.roots[made.root]
+            )
+        };
+        let all = format!("{:?} {:?} {:?} {:?} {:?}", index.roots, index.has_vector, index.weights, index.mean, index.scale);
+        (0..index.size()).map(row).chain([all]).collect()
+    }
+
+    #[tokio::test]
+    async fn an_index_made_again_from_the_one_before_is_the_index_made_afresh_preparing_only_what_changed() {
+        let root = tempfile::tempdir().unwrap();
+        let (samples, pack) = (root.path().join("Samples"), root.path().join("Samples").join("Pack"));
+        std::fs::create_dir_all(&pack).unwrap();
+        let (samples, pack) = (samples.to_string_lossy().into_owned(), pack.to_string_lossy().into_owned());
+        let source = |path: &str, label: &str| Source { path: path.into(), label: label.into(), kind: SourceKind::Folder };
+        let sources = vec![source(&samples, "Samples"), source(&pack, "Pack")];
+        let first: Vec<SoundEntry> =
+            (0..40).map(|i| sound(&format!("{}/Kicks/Kick {i}.wav", if i % 2 == 0 { &samples } else { &pack }), i as f32)).collect();
+        let mut second = first.clone();
+        // Measured again with other numbers, gone, and new; the rest as they were.
+        second[2].vector = Some(pack_vector(&[9.; VECTOR_LENGTH]));
+        second.remove(4);
+        second.push(sound(&format!("{samples}/Snares/Snare.wav"), 3.));
+        let before = SoundIndex::build(first.clone(), &sources).await;
+        let buffers: HashMap<String, usize> =
+            before.entries.iter().zip(&before.prepared).map(|(entry, made)| (entry.path.clone(), made.name.as_ptr() as usize)).collect();
+        let again = SoundIndex::build_after(second.clone(), &sources, Some(before)).await;
+        assert_eq!(rows(&again), rows(&SoundIndex::build(second.clone(), &sources).await));
+        for (entry, made) in again.entries.iter().zip(&again.prepared) {
+            let kept = buffers.get(&entry.path) == Some(&(made.name.as_ptr() as usize));
+            assert_eq!(kept, entry.path != first[2].path && !entry.path.ends_with("Snare.wav"), "{}", entry.path);
+        }
+        // A source called something else now: what's under it is prepared again.
+        let renamed = vec![source(&samples, "Samples"), source(&pack, "Pack 2")];
+        let again = SoundIndex::build_after(second.clone(), &renamed, Some(again)).await;
+        assert_eq!(rows(&again), rows(&SoundIndex::build(second.clone(), &renamed).await));
+        assert!(again.prepared.iter().any(|made| made.where_.starts_with("Pack 2 / ")));
+        // One gone from the disk: what was under it is under the source around it.
+        std::fs::remove_dir_all(&pack).unwrap();
+        let again = SoundIndex::build_after(second.clone(), &renamed, Some(again)).await;
+        assert_eq!(rows(&again), rows(&SoundIndex::build(second, &renamed).await));
+        assert!(again.prepared.iter().all(|made| made.where_.starts_with("Samples")));
+    }
 }
