@@ -14,12 +14,15 @@ pub const SOUNDS_MAP: &str = "sounds-map.json";
 /// The form of the file this build reads and writes.
 pub const SOUNDS_MAP_VERSION: u32 = 1;
 
-/// sounds-map.json: `{"version": 1, "made": <ms>, "points": [["<path>", x, y], …]}`.
+/// sounds-map.json: `{"version": 1, "made": <ms>, "shape": 2, "points": [["<path>", x, y], …]}`.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct SoundsMap {
     pub version: u32,
     /// When the layout made it, in ms since 1970.
     pub made: i64,
+    /// The shape the layout gave it (`kumi_layout::SHAPE`; 0 before maps kept it).
+    #[serde(default)]
+    pub shape: u32,
     /// Each sound's path, and where it sits (x and y in [0, 1]).
     pub points: Vec<(String, f64, f64)>,
 }

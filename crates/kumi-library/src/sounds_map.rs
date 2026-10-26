@@ -1,9 +1,9 @@
 //! The sounds' map, made again after learning: every measured sound's place, laid out (`kumi_layout`) from its numbers
 //! as the search compares them (standardized, each group weighted), so sounds that sound alike sit together. Written to
-//! sounds-map.json (`map`), the sounds in order by path so the same sounds make the same map: when there's none, or the
-//! sounds measured and the ones on it differ by a tenth since it was made. The sounds of every folder the library
-//! learns from count, there now or not (a drive unplugged a while isn't a library changed): what draws the map hides the
-//! ones that aren't there.
+//! sounds-map.json (`map`), the sounds in order by path so the same sounds make the same map: when there's none, the
+//! sounds measured and the ones on it differ by a tenth since it was made, or the layout gives maps another shape now.
+//! The sounds of every folder the library learns from count, there now or not (a drive unplugged a while isn't a library
+//! changed): what draws the map hides the ones that aren't there.
 
 use crate::{
     features::VECTOR_LENGTH,
@@ -14,7 +14,7 @@ use crate::{
     store::{write_compact_json, LogReader},
 };
 use kumi_common::time::now_ms;
-use kumi_layout::{layout_until, Layout};
+use kumi_layout::{layout_until, Layout, SHAPE};
 use std::{collections::HashSet, io, path::Path, sync::Arc};
 
 /// Whether the map is due with these sounds measured (their paths), `mapped` on it as it was made: there's none, or the
@@ -45,7 +45,8 @@ pub async fn lay_out_sounds(
         let mapped = read_sounds_map(&dir);
         let on_map: Option<Vec<&str>> = mapped.as_ref().map(|map| map.points.iter().map(|(path, ..)| path.as_str()).collect());
         let paths: Vec<&str> = measured.iter().map(|(path, _)| *path).collect();
-        if !due(on_map.as_deref(), &paths) {
+        let reshaped = mapped.as_ref().is_some_and(|map| map.shape != SHAPE && !paths.is_empty());
+        if !reshaped && !due(on_map.as_deref(), &paths) {
             return None;
         }
         let read = |at: usize, buffer: &mut [f32]| buffer.copy_from_slice(measured[at].1);
@@ -53,7 +54,7 @@ pub async fn lay_out_sounds(
         // Five decimals: a hundred-thousandth of the map is finer than any screen draws it.
         let short = |value: f32| (value as f64 * 1e5).round() / 1e5;
         let points = measured.iter().zip(places).map(|((path, _), [x, y])| (path.to_string(), short(x), short(y))).collect();
-        Some(SoundsMap { version: SOUNDS_MAP_VERSION, made: now_ms(), points })
+        Some(SoundsMap { version: SOUNDS_MAP_VERSION, made: now_ms(), shape: SHAPE, points })
     })
     .await
     .map_err(io::Error::other)?;

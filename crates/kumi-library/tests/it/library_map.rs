@@ -50,6 +50,7 @@ fn a_sound_on_the_map_carries_its_name_place_and_class() {
     let map = SoundsMap {
         version: 1,
         made: 1,
+        shape: 2,
         points: vec![(path("Pads/Air.wav"), 0.1, 0.2), (path("Gone.wav"), 0.5, 0.5), (path("Drums/Kicks/Kick 808.wav"), 0.9, 0.8)],
     };
     let sounds = sounds_on_map(&map, &index);

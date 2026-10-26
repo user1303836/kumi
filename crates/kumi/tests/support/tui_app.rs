@@ -653,6 +653,8 @@ impl Harness {
         opts.icons = Some(IconStyle::Glyphs);
         opts.frame_ms = Some(1.0);
         opts.animation_ms = Some(1.0);
+        // The map's screens kept still, each as it lands (tui/map.rs tests its glides).
+        opts.map_glides = false;
         // Pictures as cells, whatever terminal runs the tests.
         opts.graphics = Some(kumi::tui::pictures::Graphics::Cells);
         opts.close_timeout_ms = Some(100);

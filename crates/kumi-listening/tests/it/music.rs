@@ -492,6 +492,28 @@ fn the_map_and_clusters_are_due_when_their_songs_changed_not_only_their_count() 
 }
 
 #[test]
+fn a_map_the_layout_shaped_otherwise_is_due_and_shows_until_it_is_made_again() {
+    let dir = tempfile::tempdir().unwrap();
+    let kumi = dir.path().join("kumi");
+    let mut store = MusicStore::open(&database(&kumi)).unwrap();
+    let ids = heard_rows(&mut store, 12);
+    let mut writer = VectorWriter::open(&kumi, "model").unwrap();
+    for (n, id) in ids.iter().enumerate() {
+        writer.put(&store, *id, &pointing(n % 3)).unwrap();
+    }
+    writer.settle(&store).unwrap();
+    map::lay_out(&mut store, &kumi, "model", &kumi_layout::Layout { threads: 1, ..Default::default() }).unwrap();
+    assert_eq!((map::mapped(&store, "model").unwrap(), map::made(&store).unwrap().unwrap().shape), (Some(12), kumi_layout::SHAPE));
+    // Made before maps kept their shape: the scan sees no map of this model, so it makes one; the places show till then.
+    let made = map::made(&store).unwrap().unwrap();
+    store.set_meta("map", &serde_json::json!({ "model": made.model, "songs": made.songs, "made": made.made }).to_string()).unwrap();
+    assert_eq!(map::made(&store).unwrap().unwrap().shape, 0);
+    assert_eq!(map::mapped(&store, "model").unwrap(), None);
+    assert!(map::due(None, 12, false));
+    assert_eq!(store.map().unwrap().0.len(), 12, "its places still show");
+}
+
+#[test]
 fn a_lossless_copy_that_wont_decode_hands_over_to_one_that_plays() {
     let dir = tempfile::tempdir().unwrap();
     let mut store = MusicStore::open(&dir.path().join("music.db")).unwrap();

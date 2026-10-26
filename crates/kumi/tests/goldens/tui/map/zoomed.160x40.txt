@@ -10,18 +10,9 @@
 
 
 
-
-
-                                                                             ◉ Snare 09
-                                           ⠠ Snare 07
-
-
-
-
-
-
-
-                                                                                                        ⠐ Snare 05
+                                                                                                      ⣰⣾⣿⣿⣶⡀
+                                                                                                      ⣿⣿◉⣿⣿⡇ Bass 08
+                                                                                                      ⠘⠻⠿⠿⠛
 
 
 
@@ -35,6 +26,15 @@
 
 
 
- ● Snare 09  snare one-shot · 0.5 s  Samples / Snares
- Near  Snare 05 · Snare 07 · Snare 01 · Snare 10
+
+
+
+
+
+
+
+
+
+ ● Bass 08  bass one-shot · 0.4 s  Samples / Basss
+ Near  Pad 11 · Bass 05 · Bass 09 · Bass 03
  arrows move · shift+arrows pan · + − zoom · / filters · space plays · h hover plays · tab songs · esc closes
