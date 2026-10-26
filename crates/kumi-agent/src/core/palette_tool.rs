@@ -1,6 +1,6 @@
 //! The palette tool, the same in every DAW: the session's palette (core/palette.rs) for the model. It lists and searches
 //! the palette's sounds, says what a loose palette brings in (each sound's nearest in the producer's library, the ones
-//! their own Sets use first), and adds, takes out or excludes sounds by their paths. It works away from the DAW.
+//! their own projects use first), and adds, takes out or excludes sounds by their paths. It works away from the DAW.
 
 use crate::core::palette::{PaletteFile, Palettes};
 use async_trait::async_trait;
@@ -19,7 +19,7 @@ const LISTED: usize = 50;
 const DESCRIPTION: &str = concat!(
     "The producer's palette: the sounds they gathered to work with, which the turn's brief names. ",
     "list: its sounds (and those it excludes); search: its sounds with every one of words in their name, class or folder; ",
-    "neighbours: what a loose palette brings in, each of its sounds' nearest in their library (or path's), the ones their own Sets use first; ",
+    "neighbours: what a loose palette brings in, each of its sounds' nearest in their library (or path's), the ones their own projects use first; ",
     "add and remove: sounds by their paths, only when the producer asks or agrees; exclude: sounds it must never bring in."
 );
 
@@ -96,7 +96,7 @@ impl PaletteTool {
                     "palette": view.name,
                     "mode": view.mode(),
                     "sounds": found.iter().take(limit).map(|sound| {
-                        let mut each = json!({"name": sound.name, "path": sound.path, "near": sound.near, "usedInSets": sound.used});
+                        let mut each = json!({"name": sound.name, "path": sound.path, "near": sound.near, "usedInProjects": sound.used});
                         if let Some(class) = &sound.class {
                             each["class"] = json!(class);
                         }

@@ -35,7 +35,7 @@ fn sound(folder: &std::path::Path, name: &str, bytes: usize) -> Gathered {
     Gathered { path: path.to_string_lossy().into(), name: name.into(), song: false, class: Some("kick".into()) }
 }
 
-/// A library for palettes: where moved sounds went, its sounds, and how many Sets use each.
+/// A library for palettes: where moved sounds went, its sounds, and how many projects use each.
 #[derive(Default)]
 struct Library {
     asked: RefCell<Vec<(String, i64)>>,
@@ -199,7 +199,7 @@ case!(a_sound_that_moved_is_found_again_by_its_name_and_size, async {
 case!(a_loose_palette_brings_each_sounds_nearest_taste_first_and_none_it_has_or_excludes, async {
     let dir = tempfile::tempdir().unwrap();
     let (index, sounds) = library(dir.path(), 8, 6);
-    // Kick 4 is the farthest of the three nearest Kick 0 and Kick 1 have, and two of the producer's Sets use it.
+    // Kick 4 is the farthest of the three nearest Kick 0 and Kick 1 have, and two of the producer's projects use it.
     let used = HashMap::from([(sounds[4].path.clone(), 2)]);
     let library = Rc::new(Library { index: Some(index), used, ..Default::default() });
     let (palettes, told) = palettes(dir.path(), Some(library));
@@ -208,7 +208,11 @@ case!(a_loose_palette_brings_each_sounds_nearest_taste_first_and_none_it_has_or_
     palettes.command("loose 3").await.unwrap();
     let reached = palettes.reached().await.unwrap();
     let names: Vec<&str> = reached.iter().map(|sound| sound.name.as_str()).collect();
-    assert_eq!(names, ["Kick 4", "Kick 2", "Kick 3"], "the one the producer's Sets use first, then by how many call it near and how near");
+    assert_eq!(
+        names,
+        ["Kick 4", "Kick 2", "Kick 3"],
+        "the one the producer's projects use first, then by how many call it near and how near"
+    );
     assert_eq!(reached[0].used, 2);
     assert_eq!(reached[1].near, ["Kick 0", "Kick 1"]);
     // The app hears what it brings in, to mark on the map.

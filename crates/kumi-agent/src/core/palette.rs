@@ -5,7 +5,7 @@
 //!
 //! Kumi reads the palette each turn (`brief`) and works with it through the palette tool. A strict palette keeps Kumi to
 //! its own sounds; a loose one (reach k) brings each sound's k nearest in the library, by the numbers the search
-//! compares, ranked by the producer's taste: the sounds their own Sets use first.
+//! compares, ranked by the producer's taste: the sounds their own projects use first.
 
 use crate::core::store_client::StoreClient;
 use async_trait::async_trait;
@@ -21,14 +21,14 @@ use std::{
 };
 
 /// What a palette works with in the producer's library: sounds that moved found again, the library's sounds (their
-/// numbers, for a loose palette's nearest), and how many of the producer's own Sets use each sound, for taste.
+/// numbers, for a loose palette's nearest), and how many of the producer's own projects use each sound, for taste.
 #[async_trait(?Send)]
 pub trait PaletteLibrary {
     /// Sounds that moved, by their file's name and size: each one's path and modification time now, or None.
     async fn refind(&self, wanted: Vec<(String, i64)>) -> Vec<Option<(String, i64)>>;
     /// The library's sounds as the search compares them: None when they can't be read.
     async fn index(&self) -> Option<Rc<SoundIndex>>;
-    /// How many of the producer's Sets use each sound, by its path.
+    /// How many of the producer's projects use each sound, by its path.
     async fn used(&self) -> HashMap<String, usize>;
 }
 
@@ -156,7 +156,7 @@ pub struct Reached {
     pub class: Option<String>,
     /// The palette's sounds it's among the nearest of, by name.
     pub near: Vec<String>,
-    /// How many of the producer's Sets use it.
+    /// How many of the producer's projects use it.
     pub used: usize,
     /// How far it is from the nearest of them, in the numbers the search compares.
     pub apart: f32,
@@ -367,7 +367,7 @@ impl Palettes {
     }
 
     /// What the session's palette brings in when it's loose: each of its sounds' `reach` nearest in the library (none of
-    /// its own or those it excludes), the ones the producer's own Sets use first, then those near more of its sounds,
+    /// its own or those it excludes), the ones the producer's own projects use first, then those near more of its sounds,
     /// then the nearest. Worked out again only when the palette changed.
     pub async fn reached(&self) -> Result<Rc<Vec<Reached>>, RuntimeError> {
         let Some(view) = self.view().await? else { return Ok(Rc::default()) };
@@ -413,7 +413,7 @@ impl Palettes {
                 .to_string(),
             reach => format!(
                 "It's loose: these, and each one's {reach} nearest in their library (palette neighbours, the ones their own \
-                 Sets use first). When you use one of those, say which, and offer to add it to the palette."
+                 projects use first). When you use one of those, say which, and offer to add it to the palette."
             ),
         };
         let excluded = match view.excluded.len() {
@@ -526,7 +526,7 @@ impl Palettes {
 }
 
 /// Each of `palette`'s sounds' `reach` nearest in `index` (none of the palette's own, none it excludes), ranked by taste
-/// (how many of the producer's Sets use each), then by how many of the palette's sounds call it near, then by how near.
+/// (how many of the producer's projects use each), then by how many of the palette's sounds call it near, then by how near.
 /// Read on Kumi's thread a sound at a time, the thread's other work going on between them.
 async fn reach_of(palette: &PaletteView, index: &SoundIndex, used: &HashMap<String, usize>) -> Vec<Reached> {
     let reach = palette.reach as usize;
