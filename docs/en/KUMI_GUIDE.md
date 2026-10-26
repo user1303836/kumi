@@ -971,7 +971,9 @@ a reference, sounds or values, it goes by those instead.
   class, songs that sound alike side by side. Move around with the arrows, and
   hear a point with Space or by moving the mouse onto it
   ([the keys](KUMI_TUI.md)). Pick sounds there (drag a box, or `x`) and Enter
-  puts them into your palette, kept between sessions (`/palette`).
+  puts them into your palette, kept between sessions (`/palette`). Kumi reads
+  your palette with each request, so you can ask for "a darker kick from my
+  palette".
 - **In your browser.** `/map open` shows the same map in your browser: a name
   when you point at a point, the wheel to zoom, Shift and drag (or Lasso) to pick
   points, a filter, and a click to hear one. Its actions put their message in
