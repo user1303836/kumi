@@ -44,13 +44,20 @@ impl TuiApp {
             voice.cancel();
         }
         let hover = self.0.options.map_hover.as_ref().is_none_or(|hover| (hover.load)());
-        self.0.state.borrow_mut().map = Some(MapView::new(self.0.graphics, hover));
+        let gathers = self.0.options.controller.has_palette();
+        self.0.state.borrow_mut().map = Some(MapView::new(self.0.graphics, hover).gathering(gathers));
         // The mouse's moves, reported while the map is open: a point plays as the mouse comes to it.
         self.0.tty.report_moves(true);
         self.0.scheduler.request();
         let data = load().await;
-        if let Some(view) = self.0.state.borrow_mut().map.as_mut() {
-            view.loaded(data);
+        {
+            let mut state = self.0.state.borrow_mut();
+            let palette: std::collections::HashSet<String> =
+                state.palette.as_ref().map(|palette| palette.files.iter().map(|file| file.path.clone()).collect()).unwrap_or_default();
+            if let Some(view) = state.map.as_mut() {
+                view.loaded(data);
+                view.in_palette(palette);
+            }
         }
         self.0.scheduler.request();
     }
@@ -246,7 +253,11 @@ impl TuiApp {
                 }
                 InputEvent::Key { name, mods, .. } => view.on_key(&name, mods.shift),
                 InputEvent::Text { text } | InputEvent::Paste { text } => view.on_text(&text),
-                InputEvent::Mouse { action: MouseAction::Press, button: MouseButton::Left, x, y, .. } => view.on_click(x, y),
+                InputEvent::Mouse { action: MouseAction::Press, button: MouseButton::Left, x, y, mods, .. } => {
+                    view.on_click(x, y, mods.ctrl)
+                }
+                InputEvent::Mouse { action: MouseAction::Drag, button: MouseButton::Left, x, y, .. } => view.on_drag(x, y),
+                InputEvent::Mouse { action: MouseAction::Release, x, y, .. } => view.on_release(x, y),
                 InputEvent::Mouse { action: MouseAction::Move, x, y, .. } => view.on_move(x, y),
                 InputEvent::Mouse { action: MouseAction::Wheel, direction, x, y, .. } => {
                     view.on_wheel(direction == Some(WheelDirection::Up), x, y)
@@ -277,6 +288,20 @@ impl TuiApp {
                 if !on {
                     self.map_leave();
                 }
+            }
+            Asked::Gather(files) => {
+                // Into the session's palette: what happened is said under the map.
+                let app = self.clone();
+                tokio::task::spawn_local(async move {
+                    let said = match app.palette_gather(files).await {
+                        Some(Ok(said)) | Some(Err(said)) => said,
+                        None => return,
+                    };
+                    if let Some(view) = app.0.state.borrow_mut().map.as_mut() {
+                        view.told(said);
+                    }
+                    app.0.scheduler.request();
+                });
             }
         }
         self.0.scheduler.request();

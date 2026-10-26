@@ -38,7 +38,14 @@ impl Tab for PaletteTab {
 impl TuiApp {
     /// The session's palette changed (or there's none now): PALETTE and the map show it as it is.
     pub(super) fn palette_event(&self, palette: Option<PaletteView>) {
-        self.0.state.borrow_mut().palette = palette;
+        {
+            let mut state = self.0.state.borrow_mut();
+            let paths = palette.as_ref().map(|palette| palette.files.iter().map(|file| file.path.clone()).collect()).unwrap_or_default();
+            if let Some(map) = state.map.as_mut() {
+                map.in_palette(paths);
+            }
+            state.palette = palette;
+        }
         self.0.scheduler.request();
     }
 
