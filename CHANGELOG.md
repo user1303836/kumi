@@ -10,30 +10,30 @@ Ships with bridge 1.0.97, which Live loads when it restarts. After updating, Kum
 Ships with REAPER extension 0.1.6 and Renoise tool 1.0.5, which REAPER and Renoise load when they
 restart; `kumi update` puts them in.
 
-- A judged listen keeps its captures without writing them out again on Windows and Linux (a whole
-  song's capture is 138 MB)
-- The music scan starts fewer programs for each song it hears in a compressed format
-- Comparing with a reference again is quicker: Kumi doesn't hear an unchanged reference twice.
-- The music scan takes less of the computer's CPU while it hears your songs
-- Catch-up and the snapshots Kumi keeps of your REAPER or Renoise project while you work read and
-  write less: the snapshot is read once instead of three times, and each save no longer forces the
-  disk to flush.
-- On the map, a point plays as soon as the mouse reaches it, with no pause first.
-- Enter on the map no longer offers to ask Kumi about the point.
 - On the map, pick sounds (drag a box, Ctrl and a click, or x; a picks everything the filter keeps, g
   adds each one's nearest) and press Enter to put them in your palette.
-- Palettes keep the sounds you gather between sessions: /palette lists, makes, chooses, renames and
-  forgets them, and PALETTE in the right pane plays them, takes one out, or asks Kumi to load them as
-  a kit.
-- In the map in your browser, Add to palette puts the points you picked into your palette.
 - The map takes the shape of your sounds: groups part into landmasses with arms and bays, and the map
   fills the width of your screen. Your sounds and songs are laid out again once, in the background.
-- On the map, points grow as you zoom in, typical sounds a little bigger, with a soft glow where they
-  gather; in braille, zooming and moving glide.
 - Kumi knows your palette: ask for sounds and it uses the palette's, or with /palette loose, their
   nearest in your library too, the ones your own projects use first. It says when it uses one of those
   and offers to add it to the palette.
+- Palettes keep the sounds you gather between sessions: /palette lists, makes, chooses, renames and
+  forgets them, and PALETTE in the right pane plays them, takes one out, or asks Kumi to load them as
+  a kit.
+- On the map, points grow as you zoom in, typical sounds a little bigger, with a soft glow where they
+  gather; in braille, zooming and moving glide.
+- In the map in your browser, Add to palette puts the points you picked into your palette.
 - On the map, the sounds a loose palette brings in are marked faintly.
+- On the map, a point plays as soon as the mouse reaches it, with no pause first.
+- Enter on the map no longer offers to ask Kumi about the point.
+- A judged listen keeps its captures without writing them out again on Windows and Linux (a whole
+  song's capture is 138 MB).
+- The music scan starts fewer programs for each song it hears in a compressed format.
+- Comparing with a reference again is quicker: Kumi doesn't hear an unchanged reference twice.
+- The music scan takes less of the computer's CPU while it hears your songs.
+- Catch-up and the snapshots Kumi keeps of your REAPER or Renoise project while you work read and
+  write less: the snapshot is read once instead of three times, and each save no longer forces the
+  disk to flush.
 
 Tested with Live 12.4 on macOS. On Windows, installing and updating are tested; using Kumi with Live
 there is still new.
