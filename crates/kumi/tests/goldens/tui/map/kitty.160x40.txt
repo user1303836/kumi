@@ -37,4 +37,4 @@
  ▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒
  ● Snare 02  snare one-shot · 0.5 s  Samples / Snares
  Near  Snare 11 · Snare 01 · Snare 07 · Snare 05
- arrows move · shift+arrows pan · + − zoom · / filters · space plays · h hover plays · enter asks Kumi · tab songs · esc closes
+ arrows move · shift+arrows pan · + − zoom · / filters · space plays · h hover plays · tab songs · esc closes
