@@ -29,8 +29,6 @@ use tokio::{
 
 /// The page: its script and style inline.
 pub const PAGE: &str = include_str!("map_page.html");
-/// The most points the page puts into the palette at once.
-const MOST_PICKED: usize = 10_000;
 
 /// What the map's server serves.
 pub struct Served {
@@ -293,7 +291,7 @@ async fn answer(mut stream: TcpStream, serving: &Serving, token: &str, port: u16
             let ids: Option<Vec<String>> = serde_json::from_slice::<Value>(&request.body).ok().and_then(|value| {
                 value.get("ids")?.as_array()?.iter().map(|id| id.as_str().filter(|id| is_id(id)).map(str::to_string)).collect()
             });
-            let said = match ids.filter(|ids| !ids.is_empty() && ids.len() <= MOST_PICKED) {
+            let said = match ids.filter(|ids| !ids.is_empty() && ids.len() <= kumi_agent::core::palette::MOST_GATHERED) {
                 Some(ids) => (served.palette)(ids).await,
                 None => None,
             };

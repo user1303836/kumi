@@ -387,9 +387,10 @@ function picked() {
       try {
         const answer = await fetch("palette", {
           method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ ids: state.picked.slice(0, 10000).map(idOf) }),
+          body: JSON.stringify({ ids: state.picked.slice(0, 10000).map(idOf) }), /* the most Kumi gathers at once */
         });
-        said.textContent = answer.ok ? (await answer.json()).said : "Kumi couldn't add them: is it still running?";
+        const left = state.picked.length > 10000 ? " The first 10,000 of " + state.picked.length.toLocaleString() + " picked went in." : "";
+        said.textContent = answer.ok ? (await answer.json()).said + left : "Kumi couldn't add them: is it still running?";
       } catch (error) {
         said.textContent = "Kumi couldn't add them: is it still running?";
       }

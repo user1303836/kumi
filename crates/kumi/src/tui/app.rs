@@ -459,8 +459,10 @@ struct State {
     carry: Vec<u32>,
     /// Each job's record last written to the terminal's status (OSC 7501 `id=job-N`).
     job_status_sent: std::collections::BTreeMap<u32, super::alerts::StatusReport>,
-    /// The session's palette as it last stood: PALETTE, and its sounds marked on the map.
+    /// The session's palette as it last stood: PALETTE, and its sounds marked on the map; and PALETTE's rows for it, at
+    /// the width they were made for, until it changes.
     palette: Option<kumi_agent::core::palette::PaletteView>,
+    palette_rows: Option<(i32, Rc<[TabRow]>)>,
 }
 impl State {
     fn new(options: &TuiOptions) -> Self {
@@ -578,6 +580,7 @@ impl State {
             carry: vec![],
             job_status_sent: std::collections::BTreeMap::new(),
             palette: None,
+            palette_rows: None,
         }
     }
 }

@@ -155,6 +155,31 @@ case!(palette_words_list_make_choose_rename_forget_and_set_how_far_it_reaches, a
     assert!(palettes.command("what").await.unwrap().starts_with("/palette lists your palettes"));
 });
 
+case!(a_files_time_is_named_as_the_library_names_it_so_a_sound_found_again_isnt_kept_twice, async {
+    let dir = tempfile::tempdir().unwrap();
+    let moved_to = dir.path().join("Moved").join("Kick 1.wav");
+    let to = moved_to.to_string_lossy().to_string();
+    // The library's name for the file's time: rounded to the millisecond (truncated would be ...000).
+    let at = std::time::UNIX_EPOCH + std::time::Duration::new(1_700_000_000, 600_000);
+    let rounded = 1_700_000_000_001;
+    let refind: Refind = Rc::new(move |wanted: Vec<(String, i64)>| {
+        let to = to.clone();
+        async move { wanted.iter().map(|(name, _)| (name == "Kick 1.wav").then(|| (to.clone(), rounded))).collect() }.boxed_local()
+    });
+    let (palettes, _) = palettes(dir.path(), Some(refind));
+    let kick = sound(dir.path(), "Kick 1", 10);
+    std::fs::File::options().write(true).open(&kick.path).unwrap().set_modified(at).unwrap();
+    palettes.gather(vec![kick.clone()]).await.unwrap();
+    assert_eq!(palettes.view().await.unwrap().unwrap().files[0].mtime, rounded, "as kumi-library's learn::mtime names it");
+    // Moved, and found again by the library (its time as the library names it); picked again where it is now: once.
+    std::fs::create_dir_all(moved_to.parent().unwrap()).unwrap();
+    std::fs::rename(&kick.path, &moved_to).unwrap();
+    assert_eq!(palettes.view().await.unwrap().unwrap().files[0].path, moved_to.to_string_lossy());
+    let again = Gathered { path: moved_to.to_string_lossy().into(), ..kick };
+    assert_eq!(palettes.gather(vec![again]).await.unwrap().words(), "Palette 1 has that sound already.");
+    assert_eq!(palettes.view().await.unwrap().unwrap().files.len(), 1);
+});
+
 case!(a_sound_that_moved_is_found_again_by_its_name_and_size, async {
     let dir = tempfile::tempdir().unwrap();
     let moved_to = dir.path().join("Moved").join("Kick 1.wav");

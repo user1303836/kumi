@@ -16,7 +16,7 @@ use super::style::{palette, Rgb, Style};
 use super::width::{text_width, truncate};
 use super::wrap::Span;
 use crate::map::{gathered, Kind, Layer, MapData, Point};
-use kumi_agent::core::palette::Gathered;
+use kumi_agent::core::palette::{Gathered, MOST_GATHERED};
 use kumi_listening::music::tool::grouped;
 
 /// How far in the map zooms at most, and how much each + or − zooms.
@@ -26,8 +26,10 @@ const STEP: f64 = 1.5;
 const DENSE: usize = 3000;
 /// Names show beside the points when this many are in view, or fewer.
 const NAMED: usize = 30;
-/// The nearest points named under the map.
+/// The nearest points named under the map, and what g brings of each point picked.
 const NEIGHBOURS: usize = 4;
+/// Each point's nearest on the map kept for g: the first NEIGHBOURS of them the filter keeps.
+const NEAREST_KEPT: usize = 8;
 /// How much of the area the whole map fills, zoomed out: a margin round it.
 const FILL: f64 = 0.94;
 /// The widest name beside a point, in cells.
@@ -249,6 +251,81 @@ fn neighbours(layer: &Layer, shown: &[u32], of: u32) -> Vec<u32> {
     near.into_iter().map(|(_, at)| at).collect()
 }
 
+/// Each point's NEAREST_KEPT nearest others on the map, nearest first (u32::MAX where there are fewer): a grid of about
+/// two points a cell over the points' box, searched ring by ring out from each point's cell.
+fn nearest_lists(points: &[Point]) -> Vec<u32> {
+    let count = points.len();
+    let mut out = vec![u32::MAX; count * NEAREST_KEPT];
+    if count < 2 {
+        return out;
+    }
+    let (mut low, mut high) = ((f64::MAX, f64::MAX), (f64::MIN, f64::MIN));
+    for point in points {
+        let (x, y) = spot(point);
+        (low, high) = ((low.0.min(x), low.1.min(y)), (high.0.max(x), high.1.max(y)));
+    }
+    let (wide, tall) = ((high.0 - low.0).max(1e-9), (high.1 - low.1).max(1e-9));
+    let across = ((count as f64 / 2. * wide / tall).sqrt().ceil() as usize).clamp(1, 4096);
+    let down = ((count as f64 / 2. * tall / wide).sqrt().ceil() as usize).clamp(1, 4096);
+    let (cell_width, cell_height) = (wide / across as f64, tall / down as f64);
+    let cell = |point: &Point| {
+        let (x, y) = spot(point);
+        ((((x - low.0) / cell_width) as usize).min(across - 1), (((y - low.1) / cell_height) as usize).min(down - 1))
+    };
+    let mut starts = vec![0usize; across * down + 1];
+    for point in points {
+        let (x, y) = cell(point);
+        starts[y * across + x + 1] += 1;
+    }
+    for at in 1..starts.len() {
+        starts[at] += starts[at - 1];
+    }
+    let (mut next, mut order) = (starts.clone(), vec![0u32; count]);
+    for (at, point) in points.iter().enumerate() {
+        let (x, y) = cell(point);
+        order[next[y * across + x]] = at as u32;
+        next[y * across + x] += 1;
+    }
+    let (step, wanted) = (cell_width.min(cell_height), NEAREST_KEPT.min(count - 1));
+    let mut best: Vec<(f64, u32)> = Vec::with_capacity(NEAREST_KEPT + 1);
+    for (at, point) in points.iter().enumerate() {
+        let ((cx, cy), (px, py)) = (cell(point), spot(point));
+        let (cx, cy) = (cx as isize, cy as isize);
+        best.clear();
+        for ring in 0..across.max(down) as isize {
+            for y in (cy - ring).max(0)..=(cy + ring).min(down as isize - 1) {
+                for x in (cx - ring).max(0)..=(cx + ring).min(across as isize - 1) {
+                    // The ring's edge only: what's inside it was searched.
+                    if (x - cx).abs() != ring && (y - cy).abs() != ring {
+                        continue;
+                    }
+                    let c = y as usize * across + x as usize;
+                    for other in &order[starts[c]..starts[c + 1]] {
+                        if *other as usize == at {
+                            continue;
+                        }
+                        let (qx, qy) = spot(&points[*other as usize]);
+                        let d = (qx - px).powi(2) + (qy - py).powi(2);
+                        if best.len() < NEAREST_KEPT || d < best[NEAREST_KEPT - 1].0 {
+                            let place = best.partition_point(|(seen, _)| *seen <= d);
+                            best.insert(place, (d, *other));
+                            best.truncate(NEAREST_KEPT);
+                        }
+                    }
+                }
+            }
+            // Past this ring every point is at least `ring` cells away.
+            if best.len() == wanted && (wanted < NEAREST_KEPT || best[wanted - 1].0.sqrt() <= ring as f64 * step) {
+                break;
+            }
+        }
+        for (slot, (_, other)) in out[at * NEAREST_KEPT..].iter_mut().zip(&best) {
+            *slot = *other;
+        }
+    }
+    out
+}
+
 fn mix(under: Rgb, over: Rgb, share: f64) -> Rgb {
     std::array::from_fn(|c| (under[c] as f64 + (over[c] as f64 - under[c] as f64) * share).round() as u8)
 }
@@ -360,8 +437,12 @@ pub struct MapView {
     /// corner, once it has.
     pressed: Option<(i32, i32, bool)>,
     boxed: Option<((i32, i32), (i32, i32))>,
-    /// What putting points into the palette did, said under the map until the next key.
+    /// What putting points into the palette did, said under the map until the next key; and how many were picked when
+    /// Enter put in only the first MOST_GATHERED.
     told: Option<String>,
+    capped: Option<usize>,
+    /// Each point's NEAREST_KEPT nearest on each map (u32::MAX for none), worked out the first time g wants them.
+    nearest: [Option<Rc<Vec<u32>>>; 2],
 }
 
 impl MapView {
@@ -389,6 +470,8 @@ impl MapView {
             pressed: None,
             boxed: None,
             told: None,
+            capped: None,
+            nearest: [None, None],
         }
     }
 
@@ -417,9 +500,13 @@ impl MapView {
         self.halo = [on(&data.sounds, &self.reached), on(&data.songs, &self.reached)];
     }
 
-    /// What putting points into the palette did, said under the map.
+    /// What putting points into the palette did, said under the map (with how many were left out, when Enter put in only
+    /// the first MOST_GATHERED).
     pub fn told(&mut self, words: String) {
-        self.told = Some(words);
+        self.told = Some(match self.capped.take() {
+            Some(picked) => format!("{words} The first {} of {} picked went in.", grouped(MOST_GATHERED), grouped(picked)),
+            None => words,
+        });
     }
 
     /// Enter: the points picked (or, with none, the one chosen) into the session's palette, and the picks let go.
@@ -435,7 +522,9 @@ impl MapView {
             return Asked::Nothing;
         }
         self.version += 1;
-        Asked::Gather(points.into_iter().map(|at| gathered(layer, at)).collect())
+        // A palette is what to work with: as the browser's map, at most MOST_GATHERED at once, and told so.
+        self.capped = (points.len() > MOST_GATHERED).then_some(points.len());
+        Asked::Gather(points.into_iter().take(MOST_GATHERED).map(|at| gathered(layer, at)).collect())
     }
 
     /// A point picked, or let go if it was.
@@ -454,12 +543,21 @@ impl MapView {
         self.version += 1;
     }
 
-    /// Each point picked brings its nearest on the map (those the filter keeps).
+    /// Each point picked brings its NEIGHBOURS nearest on the map that the filter keeps (of its NEAREST_KEPT nearest,
+    /// worked out once a map, so a big pick grows in a moment).
     fn grow(&mut self) {
         let Some(data) = self.data.clone() else { return };
         let layer = if self.tab == 0 { &data.sounds } else { &data.songs };
+        let nearest = self.nearest[self.tab].get_or_insert_with(|| Rc::new(nearest_lists(&layer.points))).clone();
         let view = &mut self.views[self.tab];
-        let near: Vec<u32> = view.picked.iter().flat_map(|at| neighbours(layer, &view.shown, *at)).collect();
+        let near: Vec<u32> = view
+            .picked
+            .iter()
+            .flat_map(|at| {
+                let row = &nearest[*at as usize * NEAREST_KEPT..(*at as usize + 1) * NEAREST_KEPT];
+                row.iter().copied().filter(|other| *other != u32::MAX && view.shown.binary_search(other).is_ok()).take(NEIGHBOURS)
+            })
+            .collect();
         view.picked.extend(near);
         self.version += 1;
     }
@@ -1443,6 +1541,32 @@ mod tests {
         plain.draw(&mut screen, &mut |_, _, _, _| 0);
         assert_eq!(plain.on_key("enter", false), Asked::Nothing);
         assert!(!screen.lines()[29].contains("palette"), "{}", screen.lines()[29]);
+    }
+
+    #[test]
+    fn enter_puts_in_at_most_what_the_palette_takes_at_once_and_says_how_many_were_picked() {
+        let points: Vec<(f32, f32, u16)> = (0..MOST_GATHERED + 5).map(|n| ((n % 100) as f32 / 100., (n / 100) as f32 / 101., 0)).collect();
+        let mut map = gathering(&points);
+        map.on_text("a");
+        let Asked::Gather(files) = map.on_key("enter", false) else { panic!("a gathering") };
+        assert_eq!(files.len(), MOST_GATHERED);
+        map.told("Added 10,000 sounds to Palette 1.".into());
+        assert_eq!(map.told.as_deref(), Some("Added 10,000 sounds to Palette 1. The first 10,000 of 10,005 picked went in."));
+        // g on all of them is a lookup, not a search each.
+        map.on_text("a");
+        let started = std::time::Instant::now();
+        map.on_text("g");
+        assert!(started.elapsed() < std::time::Duration::from_secs(5), "{:?}", started.elapsed());
+    }
+
+    #[test]
+    fn each_points_nearest_on_the_map_are_found_by_its_grid() {
+        let points = [(0.1f32, 0.1f32), (0.12, 0.1), (0.5, 0.5), (0.9, 0.9), (0.13, 0.11)];
+        let layer = layer(&points.map(|(x, y)| (x, y, 0)));
+        let nearest = nearest_lists(&layer.points);
+        assert_eq!(&nearest[..4], [1, 4, 2, 3], "p0's, nearest first");
+        assert_eq!(nearest[3 * NEAREST_KEPT], 2, "p3's nearest is the middle one");
+        assert!(nearest[..NEAREST_KEPT].iter().skip(4).all(|at| *at == u32::MAX), "four others, no more");
     }
 
     #[test]
