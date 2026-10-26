@@ -12,6 +12,11 @@ use crate::api;
 /// The most of a project string REAPER is asked for (notes, names).
 const STRING_LIMIT: usize = 1 << 20;
 
+thread_local! {
+    /// What the last track undo chunk read needed (`grown_text` starts the next from twice it).
+    static UNDO_CHUNK: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 impl Reaper<'_> {
     // ----- the audio device and MIDI devices -----
 
@@ -268,22 +273,6 @@ impl Reaper<'_> {
     /// A track's state as REAPER keeps it for undo (lighter than the file's: no plug-in states).
     pub fn track_undo_chunk(&self, track: Track) -> Option<String> {
         let f = self.api.GetTrackStateChunk()?;
-        let mut size = 1usize << 14;
-        loop {
-            let mut buf = vec![0u8; size];
-            let ok = unsafe { f(track.0, buf.as_mut_ptr().cast::<c_char>(), size as c_int, true) };
-            if !ok {
-                return None;
-            }
-            let len = buf.iter().position(|&b| b == 0).unwrap_or(size);
-            if len + 1 < size {
-                buf.truncate(len);
-                return Some(String::from_utf8_lossy(&buf).into_owned());
-            }
-            if size >= 256 << 20 {
-                return None;
-            }
-            size *= 4;
-        }
+        super::grown_text(&UNDO_CHUNK, 1 << 14, 256 << 20, |buf, size| unsafe { f(track.0, buf, size, true) })
     }
 }

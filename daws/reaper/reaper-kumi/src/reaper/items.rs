@@ -12,6 +12,11 @@ use crate::api;
 /// The most an item's chunk may grow to when it is read: a MIDI take's events and the take FX's states take the room.
 const MAX_CHUNK: usize = 256 << 20;
 
+thread_local! {
+    /// What the last item chunk read needed (`grown_text` starts the next from twice it).
+    static ITEM_CHUNK: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 /// A stretch marker as REAPER keeps it: where it sits in the item (seconds from the item's start), the source position it
 /// pins there (seconds), and the rate's slope to the next one.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -90,23 +95,7 @@ impl Reaper<'_> {
     /// take FX, markers and GUIDs.
     pub fn item_chunk(&self, item: Item) -> Option<String> {
         let f = self.api.GetItemStateChunk()?;
-        let mut size = 1usize << 16;
-        loop {
-            let mut buf = vec![0u8; size];
-            let ok = unsafe { f(item.0, buf.as_mut_ptr().cast::<c_char>(), size as c_int, false) };
-            let len = buf.iter().position(|&b| b == 0).unwrap_or(size);
-            if !ok {
-                return None;
-            }
-            if len + 1 < size {
-                buf.truncate(len);
-                return Some(String::from_utf8_lossy(&buf).into_owned());
-            }
-            if size >= MAX_CHUNK {
-                return None;
-            }
-            size *= 4;
-        }
+        super::grown_text(&ITEM_CHUNK, 1 << 16, MAX_CHUNK, |buf, size| unsafe { f(item.0, buf, size, false) })
     }
 
     pub fn set_item_chunk(&self, item: Item, chunk: &str) -> bool {

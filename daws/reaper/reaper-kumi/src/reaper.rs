@@ -1,8 +1,10 @@
 //! The REAPER calls the bridge makes, as safe functions over the API table. Main thread only (Api isn't Send).
 //! A function this REAPER lacks reads as empty or None rather than failing.
 
-use std::ffi::{c_char, CString};
+use std::cell::Cell;
+use std::ffi::{c_char, c_int, CString};
 use std::ptr;
+use std::thread::LocalKey;
 
 use serde_json::{json, Value};
 
@@ -69,6 +71,37 @@ impl CText {
             Some(long) => long.into_bytes_with_nul(),
             None => self.short[..self.len].to_vec(),
         }
+    }
+}
+
+/// Reads a text a getter writes into a buffer it's told the size of, the buffer grown ×4 while the text fills it, up to
+/// `most` (None past it, or when the getter fails). REAPER makes the whole text on every call (a track's state with its
+/// plug-ins' states, an item's with a MIDI take's every event), so a reader starts from twice what its last text needed
+/// (`last`; `least` at the least): the same object read again (a change's fence, what it applied, its undo) or one like
+/// it is one call, where a buffer grown from `least` each time took up to seven. (A buffer bigger than its text costs what's
+/// written of it: zeroed pages come from the system as they're first touched.)
+fn grown_text(
+    last: &'static LocalKey<Cell<usize>>,
+    least: usize,
+    most: usize,
+    mut fill: impl FnMut(*mut c_char, c_int) -> bool,
+) -> Option<String> {
+    let mut size = last.get().saturating_mul(2).clamp(least, most);
+    loop {
+        let mut buf = vec![0u8; size];
+        if !fill(buf.as_mut_ptr().cast(), size as c_int) {
+            return None;
+        }
+        let len = buf.iter().position(|&b| b == 0).unwrap_or(size);
+        if len + 1 < size {
+            last.set(len);
+            buf.truncate(len);
+            return Some(String::from_utf8_lossy(&buf).into_owned());
+        }
+        if size >= most {
+            return None;
+        }
+        size = size.saturating_mul(4).min(most);
     }
 }
 
@@ -445,6 +478,42 @@ mod tests {
         assert_eq!(reaper.current_project(), None);
         assert_eq!(reaper.busy(), None);
         assert!(!reaper.run_action(ACTION_QUIT));
+    }
+
+    // Second sweep RP1: a chunk reader starts from twice what its last text needed, so the same object read again is one
+    // call to REAPER (which makes the whole text each call), where a buffer grown from 64 KiB each time took several.
+    #[test]
+    fn a_chunk_read_again_is_one_call_and_a_bigger_one_grows_from_the_last() {
+        thread_local! {
+            static LAST: Cell<usize> = const { Cell::new(0) };
+        }
+        let calls = Cell::new(0);
+        // (REAPER's getters write what fits and a NUL)
+        let read = |len: usize, least: usize, most: usize| {
+            let text = "x".repeat(len);
+            let before = calls.get();
+            let got = grown_text(&LAST, least, most, |buf, size| {
+                calls.set(calls.get() + 1);
+                let n = len.min(size as usize - 1);
+                unsafe {
+                    ptr::copy_nonoverlapping(text.as_ptr(), buf.cast::<u8>(), n);
+                    *buf.add(n) = 0;
+                }
+                true
+            });
+            assert!(got.is_none() || got.as_deref() == Some(text.as_str()));
+            (got.is_some(), calls.get() - before)
+        };
+        let chunk = |len| read(len, 1 << 16, 256 << 20);
+        // A 1.1 MB track chunk: 64 KiB, 256 KiB and 1 MiB too small, 4 MiB holds it. Read again: once.
+        assert_eq!(chunk(1_100_000), (true, 4));
+        assert_eq!(chunk(1_100_000), (true, 1));
+        assert_eq!(chunk(2_000_000), (true, 1), "one a little bigger fits twice the last");
+        assert_eq!(chunk(10), (true, 1));
+        assert_eq!(chunk(1_100_000), (true, 4), "after a small one, from 64 KiB again");
+        // Past the most it reads, none (and what the last one needed stays).
+        assert_eq!(read(5_000, 16, 1024), (false, 1), "twice the last is past the most: only the most is tried");
+        assert_eq!(LAST.get(), 1_100_000);
     }
 
     #[test]
