@@ -16,6 +16,7 @@ use kumi_agent::core::{
     jobs::{JobKind, JobState, JobStatus, WhenDone},
     loop_run::{LoopState, LoopStatus, LoopStop},
     match_run::{MatchState, MatchStatus, MatchStop},
+    palette::{PaletteFile, PaletteView},
 };
 use kumi_listening::{
     checklist::{Change as RowChange, Row},
@@ -749,6 +750,24 @@ fn events() -> Vec<SessionEvent> {
             .map(|state| SessionEvent::Job(job(3, JobKind::Worker, state, WhenDone::Tell))),
     );
     events.push(SessionEvent::CarryOn { job: 1, title: "Read the Operator manual".into() });
+    let file = |path: &str, name: &str, class: &str| PaletteFile {
+        path: path.into(),
+        size: 48_204,
+        mtime: AT - 86_400_000,
+        name: name.into(),
+        song: false,
+        class: Some(class.into()),
+    };
+    events.push(SessionEvent::Palette {
+        palette: Some(PaletteView {
+            id: "01JB9Z6P1Q2R3S4T5V6W7X8Y9Z".into(),
+            name: "Drums".into(),
+            reach: 5,
+            files: vec![file("/Samples/Kicks/Kick 808.wav", "Kick 808", "kick"), file("/Samples/Hats/Hat 12.wav", "Hat 12", "hat")],
+            excluded: vec![file("/Samples/Kicks/Kick Boom.wav", "Kick Boom", "kick")],
+        }),
+    });
+    events.push(SessionEvent::Palette { palette: None });
     events.extend(
         [
             KernelEvent::Text { text: "Shortened the kick's decay.".into() },
@@ -834,6 +853,7 @@ fn variant(event: &SessionEvent) -> &'static str {
         SessionEvent::Watching { .. } => "Watching",
         SessionEvent::Job(_) => "Job",
         SessionEvent::CarryOn { .. } => "CarryOn",
+        SessionEvent::Palette { .. } => "Palette",
         SessionEvent::Kernel(event) => match event {
             KernelEvent::Text { .. } => "Kernel::Text",
             KernelEvent::ToolInput { .. } => "Kernel::ToolInput",
@@ -850,7 +870,7 @@ fn variant(event: &SessionEvent) -> &'static str {
     }
 }
 
-const VARIANTS: [&str; 43] = [
+const VARIANTS: [&str; 44] = [
     "Focus",
     "Pointed",
     "Change",
@@ -885,6 +905,7 @@ const VARIANTS: [&str; 43] = [
     "Watching",
     "Job",
     "CarryOn",
+    "Palette",
     "Kernel::Text",
     "Kernel::ToolInput",
     "Kernel::ToolStart",

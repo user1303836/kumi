@@ -10,6 +10,7 @@
 //! typical sound a little bigger than the rest), a soft light shows where they gather, and where the map is drawn in
 //! cells a zoom or a move glides.
 
+use std::collections::{BTreeSet, HashSet};
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
@@ -19,7 +20,8 @@ use super::screen::{Rect, Screen};
 use super::style::{palette, Rgb, Style};
 use super::width::{text_width, truncate};
 use super::wrap::Span;
-use crate::map::{Kind, Layer, MapData, Point};
+use crate::map::{gathered, Kind, Layer, MapData, Point};
+use kumi_agent::core::palette::{Gathered, MOST_GATHERED};
 use kumi_listening::music::tool::grouped;
 
 /// How far in the map zooms at most, and how much each + or − zooms.
@@ -29,8 +31,10 @@ const STEP: f64 = 1.5;
 const DENSE: usize = 3000;
 /// Names show beside the points when this many are in view, or fewer.
 const NAMED: usize = 30;
-/// The nearest points named under the map.
+/// The nearest points named under the map, and what g brings of each point picked.
 const NEIGHBOURS: usize = 4;
+/// Each point's nearest on the map kept for g: the first NEIGHBOURS of them the filter keeps.
+const NEAREST_KEPT: usize = 8;
 /// How much of the area the whole map fills, zoomed out: a margin round it.
 const FILL: f64 = 0.94;
 /// The widest name beside a point, in cells.
@@ -86,6 +90,8 @@ pub enum Asked {
     Leave,
     /// Whether points play as the mouse comes to them, changed with h: to remember.
     HoverPlays(bool),
+    /// These points into the session's palette (Enter: the ones picked, or the one chosen).
+    Gather(Vec<Gathered>),
     Close,
 }
 
@@ -98,6 +104,8 @@ struct View {
     chosen: Option<u32>,
     /// The chosen point's nearest, by their place in the layer.
     near: Vec<u32>,
+    /// The points picked (a box dragged, x, ctrl and a click, a, g), by their place in the layer.
+    picked: BTreeSet<u32>,
     /// The map's point in the middle of the area, and how far in it is (1: all of it).
     centre: (f64, f64),
     zoom: f64,
@@ -109,8 +117,17 @@ struct View {
 
 impl View {
     fn new(layer: &Layer, aspect: f64) -> View {
-        let mut view =
-            View { filter: String::new(), shown: vec![], chosen: None, near: vec![], centre: (aspect / 2., 0.5), zoom: 1., aspect, row: 0 };
+        let mut view = View {
+            filter: String::new(),
+            shown: vec![],
+            chosen: None,
+            near: vec![],
+            picked: BTreeSet::new(),
+            centre: (aspect / 2., 0.5),
+            zoom: 1.,
+            aspect,
+            row: 0,
+        };
         view.filter_by(layer, "");
         view
     }
@@ -423,6 +440,81 @@ fn neighbours(layer: &Layer, shown: &[u32], of: u32) -> Vec<u32> {
     near.into_iter().map(|(_, at)| at).collect()
 }
 
+/// Each point's NEAREST_KEPT nearest others on the map, nearest first (u32::MAX where there are fewer): a grid of about
+/// two points a cell over the points' box, searched ring by ring out from each point's cell.
+fn nearest_lists(points: &[Point]) -> Vec<u32> {
+    let count = points.len();
+    let mut out = vec![u32::MAX; count * NEAREST_KEPT];
+    if count < 2 {
+        return out;
+    }
+    let (mut low, mut high) = ((f64::MAX, f64::MAX), (f64::MIN, f64::MIN));
+    for point in points {
+        let (x, y) = spot(point);
+        (low, high) = ((low.0.min(x), low.1.min(y)), (high.0.max(x), high.1.max(y)));
+    }
+    let (wide, tall) = ((high.0 - low.0).max(1e-9), (high.1 - low.1).max(1e-9));
+    let across = ((count as f64 / 2. * wide / tall).sqrt().ceil() as usize).clamp(1, 4096);
+    let down = ((count as f64 / 2. * tall / wide).sqrt().ceil() as usize).clamp(1, 4096);
+    let (cell_width, cell_height) = (wide / across as f64, tall / down as f64);
+    let cell = |point: &Point| {
+        let (x, y) = spot(point);
+        ((((x - low.0) / cell_width) as usize).min(across - 1), (((y - low.1) / cell_height) as usize).min(down - 1))
+    };
+    let mut starts = vec![0usize; across * down + 1];
+    for point in points {
+        let (x, y) = cell(point);
+        starts[y * across + x + 1] += 1;
+    }
+    for at in 1..starts.len() {
+        starts[at] += starts[at - 1];
+    }
+    let (mut next, mut order) = (starts.clone(), vec![0u32; count]);
+    for (at, point) in points.iter().enumerate() {
+        let (x, y) = cell(point);
+        order[next[y * across + x]] = at as u32;
+        next[y * across + x] += 1;
+    }
+    let (step, wanted) = (cell_width.min(cell_height), NEAREST_KEPT.min(count - 1));
+    let mut best: Vec<(f64, u32)> = Vec::with_capacity(NEAREST_KEPT + 1);
+    for (at, point) in points.iter().enumerate() {
+        let ((cx, cy), (px, py)) = (cell(point), spot(point));
+        let (cx, cy) = (cx as isize, cy as isize);
+        best.clear();
+        for ring in 0..across.max(down) as isize {
+            for y in (cy - ring).max(0)..=(cy + ring).min(down as isize - 1) {
+                for x in (cx - ring).max(0)..=(cx + ring).min(across as isize - 1) {
+                    // The ring's edge only: what's inside it was searched.
+                    if (x - cx).abs() != ring && (y - cy).abs() != ring {
+                        continue;
+                    }
+                    let c = y as usize * across + x as usize;
+                    for other in &order[starts[c]..starts[c + 1]] {
+                        if *other as usize == at {
+                            continue;
+                        }
+                        let (qx, qy) = spot(&points[*other as usize]);
+                        let d = (qx - px).powi(2) + (qy - py).powi(2);
+                        if best.len() < NEAREST_KEPT || d < best[NEAREST_KEPT - 1].0 {
+                            let place = best.partition_point(|(seen, _)| *seen <= d);
+                            best.insert(place, (d, *other));
+                            best.truncate(NEAREST_KEPT);
+                        }
+                    }
+                }
+            }
+            // Past this ring every point is at least `ring` cells away.
+            if best.len() == wanted && (wanted < NEAREST_KEPT || best[wanted - 1].0.sqrt() <= ring as f64 * step) {
+                break;
+            }
+        }
+        for (slot, (_, other)) in out[at * NEAREST_KEPT..].iter_mut().zip(&best) {
+            *slot = *other;
+        }
+    }
+    out
+}
+
 fn mix(under: Rgb, over: Rgb, share: f64) -> Rgb {
     std::array::from_fn(|c| (under[c] as f64 + (over[c] as f64 - under[c] as f64) * share).round() as u8)
 }
@@ -622,6 +714,22 @@ pub struct MapView {
     picture: Option<Picture>,
     /// Where the map was drawn last: a click is read against it.
     area: Rect,
+    /// Whether Enter puts points into the session's palette (the session keeps palettes), and the palette's files (their
+    /// paths), marked on the map.
+    gathers: bool,
+    palette: HashSet<String>,
+    /// The palette's points on each map, by their place in its layer.
+    marked: [Vec<u32>; 2],
+    /// Where the left button went down (and whether with ctrl), while that may become a box dragged; the box, corner to
+    /// corner, once it has.
+    pressed: Option<(i32, i32, bool)>,
+    boxed: Option<((i32, i32), (i32, i32))>,
+    /// What putting points into the palette did, said under the map until the next key; and how many were picked when
+    /// Enter put in only the first MOST_GATHERED.
+    told: Option<String>,
+    capped: Option<usize>,
+    /// Each point's NEAREST_KEPT nearest on each map (u32::MAX for none), worked out the first time g wants them.
+    nearest: [Option<Rc<Vec<u32>>>; 2],
 }
 
 impl MapView {
@@ -644,7 +752,135 @@ impl MapView {
             version: 0,
             picture: None,
             area: Rect::default(),
+            gathers: false,
+            palette: HashSet::new(),
+            marked: [vec![], vec![]],
+            pressed: None,
+            boxed: None,
+            told: None,
+            capped: None,
+            nearest: [None, None],
         }
+    }
+
+    /// The same map, Enter putting points into the session's palette.
+    pub fn gathering(mut self, on: bool) -> MapView {
+        self.gathers = on;
+        self
+    }
+
+    /// The session's palette's files (by their paths), marked on the map.
+    pub fn in_palette(&mut self, paths: HashSet<String>) {
+        self.palette = paths;
+        self.mark_palette();
+    }
+
+    /// Which points are the palette's, on each map: worked out once, not each frame.
+    fn mark_palette(&mut self) {
+        let Some(data) = self.data.clone() else { return };
+        self.marked = [&data.sounds, &data.songs].map(|layer| {
+            let paths = &self.palette;
+            if paths.is_empty() {
+                return vec![];
+            }
+            (0..layer.points.len() as u32).filter(|at| paths.contains(&layer.points[*at as usize].path)).collect()
+        });
+    }
+
+    /// What putting points into the palette did, said under the map (with how many were left out, when Enter put in only
+    /// the first MOST_GATHERED).
+    pub fn told(&mut self, words: String) {
+        self.told = Some(match self.capped.take() {
+            Some(picked) => format!("{words} The first {} of {} picked went in.", grouped(MOST_GATHERED), grouped(picked)),
+            None => words,
+        });
+    }
+
+    /// Enter: the points picked (or, with none, the one chosen) into the session's palette, and the picks let go.
+    fn gather(&mut self) -> Asked {
+        if !self.gathers {
+            return Asked::Nothing;
+        }
+        let Some(data) = self.data.clone() else { return Asked::Nothing };
+        let layer = if self.tab == 0 { &data.sounds } else { &data.songs };
+        let picked = std::mem::take(&mut self.views[self.tab].picked);
+        let points: Vec<u32> = if picked.is_empty() { self.current().into_iter().collect() } else { picked.into_iter().collect() };
+        if points.is_empty() {
+            return Asked::Nothing;
+        }
+        self.version += 1;
+        // A palette is what to work with: as the browser's map, at most MOST_GATHERED at once, and told so.
+        self.capped = (points.len() > MOST_GATHERED).then_some(points.len());
+        Asked::Gather(points.into_iter().take(MOST_GATHERED).map(|at| gathered(layer, at)).collect())
+    }
+
+    /// A point picked, or let go if it was.
+    fn toggle(&mut self, at: u32) {
+        let picked = &mut self.views[self.tab].picked;
+        if !picked.remove(&at) {
+            picked.insert(at);
+        }
+        self.version += 1;
+    }
+
+    /// Every point the filter keeps, picked.
+    fn pick_all(&mut self) {
+        let view = &mut self.views[self.tab];
+        view.picked.extend(view.shown.iter().copied());
+        self.version += 1;
+    }
+
+    /// Each point picked brings its NEIGHBOURS nearest on the map that the filter keeps (of its NEAREST_KEPT nearest,
+    /// worked out once a map, so a big pick grows in a moment).
+    fn grow(&mut self) {
+        let Some(data) = self.data.clone() else { return };
+        let layer = if self.tab == 0 { &data.sounds } else { &data.songs };
+        let nearest = self.nearest[self.tab].get_or_insert_with(|| Rc::new(nearest_lists(&layer.points))).clone();
+        let view = &mut self.views[self.tab];
+        let near: Vec<u32> = view
+            .picked
+            .iter()
+            .flat_map(|at| {
+                let row = &nearest[*at as usize * NEAREST_KEPT..(*at as usize + 1) * NEAREST_KEPT];
+                row.iter().copied().filter(|other| *other != u32::MAX && view.shown.binary_search(other).is_ok()).take(NEIGHBOURS)
+            })
+            .collect();
+        view.picked.extend(near);
+        self.version += 1;
+    }
+
+    /// The left button held and moved: once off the cell it went down on, a box is dragged from there.
+    pub fn on_drag(&mut self, x: i32, y: i32) -> Asked {
+        let Some((from_x, from_y, _)) = self.pressed.filter(|_| self.graphics != Graphics::Words) else { return Asked::Nothing };
+        if self.boxed.is_some() || (x, y) != (from_x, from_y) {
+            let area = self.area;
+            let clamped = (x.clamp(area.x, area.x + area.width - 1), y.clamp(area.y, area.y + area.height - 1));
+            self.boxed = Some(((from_x, from_y), clamped));
+        }
+        Asked::Nothing
+    }
+
+    /// The left button let go: a box dragged picks what's in it (in place of what was picked; with ctrl, as well).
+    pub fn on_release(&mut self, _x: i32, _y: i32) -> Asked {
+        let (pressed, boxed) = (self.pressed.take(), self.boxed.take());
+        let (Some((_, _, ctrl)), Some(((x0, y0), (x1, y1)))) = (pressed, boxed) else { return Asked::Nothing };
+        let Some(data) = self.data.clone() else { return Asked::Nothing };
+        let layer = if self.tab == 0 { &data.sounds } else { &data.songs };
+        let (area, view) = (self.area, &mut self.views[self.tab]);
+        let frame = Frame::new(area, view);
+        // The box's corners on the map: from the first cell's top left to the last one's bottom right.
+        let corner = |x: i32, y: i32| frame.at((((x - area.x) * 2) as f64, ((y - area.y) * 4) as f64));
+        let (a, b) = (corner(x0.min(x1), y0.min(y1)), corner(x0.max(x1) + 1, y0.max(y1) + 1));
+        let (left, right, low, high) = (a.0.min(b.0), a.0.max(b.0), a.1.min(b.1), a.1.max(b.1));
+        if !ctrl {
+            view.picked.clear();
+        }
+        view.picked.extend(view.shown.iter().copied().filter(|at| {
+            let (x, y) = spot(&layer.points[*at as usize]);
+            x >= left && x <= right && y >= low && y <= high
+        }));
+        self.version += 1;
+        Asked::Nothing
     }
 
     /// The same map with its zooms and moves gliding where it's drawn in cells (an image would go up again each step).
@@ -662,6 +898,7 @@ impl MapView {
         self.tab = usize::from(data.sounds.points.is_empty() && !data.songs.points.is_empty());
         self.data = Some(Rc::new(data));
         self.version += 1;
+        self.mark_palette();
     }
 
     /// The zoom and centre the map on show is drawn at now: its view's, or partway along a glide to it.
@@ -717,6 +954,7 @@ impl MapView {
     }
 
     pub fn on_key(&mut self, name: &str, shift: bool) -> Asked {
+        self.told = None;
         if let Some(prompt) = self.prompt.as_mut() {
             match name {
                 "escape" => self.prompt = None,
@@ -741,7 +979,18 @@ impl MapView {
             "down" => (0., -1.),
             "left" => (-1., 0.),
             "right" => (1., 0.),
+            // Esc lets a box being dragged go, then the points picked, then closes the map.
+            "escape" if self.pressed.is_some() || self.boxed.is_some() => {
+                (self.pressed, self.boxed) = (None, None);
+                return Asked::Nothing;
+            }
+            "escape" if self.views.get(self.tab).is_some_and(|view| !view.picked.is_empty()) => {
+                self.views[self.tab].picked.clear();
+                self.version += 1;
+                return Asked::Nothing;
+            }
             "escape" => return Asked::Close,
+            "enter" => return self.gather(),
             "space" => return self.play(),
             "tab" if self.data.is_some() => {
                 self.tab = 1 - self.tab;
@@ -765,6 +1014,7 @@ impl MapView {
     /// Typed characters, one at a time (they can come together): space plays, + and − zoom, / starts a filter (and
     /// what follows is its words), h turns hover plays off and on, q closes.
     pub fn on_text(&mut self, text: &str) -> Asked {
+        self.told = None;
         for character in text.chars() {
             let asked = self.on_character(character);
             if asked != Asked::Nothing {
@@ -785,6 +1035,14 @@ impl MapView {
             '+' | '=' => self.zoom_by(STEP, None),
             '-' | '_' => self.zoom_by(1. / STEP, None),
             '/' if self.data.is_some() => self.prompt = Some(String::new()),
+            // Picking: the point chosen picked or let go, every point the filter keeps, each picked one's nearest.
+            'x' if self.data.is_some() && self.graphics != Graphics::Words => {
+                if let Some(at) = self.views[self.tab].chosen {
+                    self.toggle(at);
+                }
+            }
+            'a' if self.data.is_some() && self.graphics != Graphics::Words => self.pick_all(),
+            'g' if self.data.is_some() && self.graphics != Graphics::Words => self.grow(),
             'h' if self.data.is_some() => {
                 self.hover = !self.hover;
                 if !self.hover {
@@ -798,8 +1056,10 @@ impl MapView {
         Asked::Nothing
     }
 
-    /// A click picks the point nearest it (or the group of a list's row).
-    pub fn on_click(&mut self, x: i32, y: i32) -> Asked {
+    /// A click chooses the point nearest it (or the group of a list's row); with ctrl it picks it, or lets it go. The
+    /// button held and moved from there drags a box (`on_drag`).
+    pub fn on_click(&mut self, x: i32, y: i32, ctrl: bool) -> Asked {
+        self.told = None;
         let area = self.area;
         if self.prompt.is_some() || !inside(area, x, y) {
             return Asked::Nothing;
@@ -815,9 +1075,13 @@ impl MapView {
             return Asked::Nothing;
         }
         let picked = self.under(x, y);
+        if let Some(at) = picked.filter(|_| ctrl) {
+            self.toggle(at);
+        }
         if picked.is_some() {
             self.views[self.tab].choose(layer, picked);
         }
+        self.pressed = Some((x, y, ctrl));
         Asked::Nothing
     }
 
@@ -1024,6 +1288,13 @@ impl MapView {
             if !view.filter.is_empty() {
                 right = format!("/ {}: {} shown", truncate(&view.filter, 24), grouped(view.shown.len()));
             }
+            if !view.picked.is_empty() {
+                right = [format!("{} picked", grouped(view.picked.len())), right]
+                    .into_iter()
+                    .filter(|part| !part.is_empty())
+                    .collect::<Vec<_>>()
+                    .join("  ");
+            }
             if view.zoom > 1. && self.graphics != Graphics::Words {
                 right = [right, format!("×{}", (view.zoom * 10.).round() / 10.)]
                     .into_iter()
@@ -1155,6 +1426,16 @@ impl MapView {
                 screen.put(x + gap, y, &name, &Style { bg: Some(palette::GROUND), ..Style::fg(color) });
             }
         }
+        // The palette's points (•), and the points picked (●) over them.
+        let shown = |at: &u32| frame.shows(frame.dot(spot(&layer.points[*at as usize])));
+        for at in self.marked[self.tab].iter().filter(|at| !view.picked.contains(at)).filter(|at| shown(at)) {
+            let (x, y) = cell(*at);
+            screen.put(x, y, "•", &Style { bold: true, ..Style::fg(palette::ACCENT) });
+        }
+        for at in view.picked.iter().filter(|at| shown(at)) {
+            let (x, y) = cell(*at);
+            screen.put(x, y, "●", &Style { bold: true, ..Style::fg(palette::BRIGHT) });
+        }
         if let Some(at) = chosen {
             let (x, y) = cell(at);
             let color = layer.groups[layer.points[at as usize].group as usize].color;
@@ -1174,6 +1455,22 @@ impl MapView {
             let name = truncate(&format!("{playing}{}", point.name), (NAME_CELLS + 2).min(area.x + area.width - x - gap));
             if text_width(&name) >= 3 {
                 screen.put(x + gap, y, &name, &Style { bg: Some(palette::GROUND), ..Style::fg(palette::BRIGHT) });
+            }
+        }
+        // The box being dragged, its edge on the cells it spans.
+        if let Some(((x0, y0), (x1, y1))) = self.boxed {
+            let (left, right, top, bottom) = (x0.min(x1), x0.max(x1), y0.min(y1), y0.max(y1));
+            let style = Style::fg(palette::ACCENT);
+            for x in left..=right {
+                screen.put(x, top, "─", &style);
+                screen.put(x, bottom, "─", &style);
+            }
+            for y in top..=bottom {
+                screen.put(left, y, "│", &style);
+                screen.put(right, y, "│", &style);
+            }
+            for (x, y, corner) in [(left, top, "┌"), (right, top, "┐"), (left, bottom, "└"), (right, bottom, "┘")] {
+                screen.put(x, y, corner, &style);
             }
         }
     }
@@ -1235,7 +1532,9 @@ impl MapView {
             screen.put(x + 2, y, &truncate(said, width - x - 2), &Style::fg(palette::WARN));
         }
         let y = y + 1;
-        if self.graphics != Graphics::Words {
+        if let Some(told) = &self.told {
+            screen.put(1, y, &truncate(told, width), &Style::fg(palette::ACCENT));
+        } else if self.graphics != Graphics::Words {
             let view = &self.views[self.tab];
             let names: Vec<&str> = view.near.iter().map(|at| layer.points[*at as usize].name.as_str()).collect();
             if !names.is_empty() {
@@ -1255,11 +1554,21 @@ impl MapView {
             return Some(Cursor { x: end, y });
         }
         let other = if self.tab == 0 { "songs" } else { "sounds" };
+        let picked = self.views.get(self.tab).map_or(0, |view| view.picked.len());
         let keys = if self.graphics == Graphics::Words {
-            format!("up and down choose · space plays · / filters · tab {other} · esc closes")
+            let gathers = if self.gathers { "enter adds to the palette · " } else { "" };
+            format!("up and down choose · space plays · {gathers}/ filters · tab {other} · esc closes")
+        } else if picked > 0 && self.gathers {
+            format!(
+                "enter adds {} to the palette · drag picks (ctrl adds) · x picks · a all · g grows · esc lets go",
+                if picked == 1 { "1 point".into() } else { format!("{} points", grouped(picked)) }
+            )
         } else {
             let hover = if self.hover { "plays" } else { "quiet" };
-            format!("arrows move · shift+arrows pan · + − zoom · / filters · space plays · h hover {hover} · tab {other} · esc closes")
+            let gathers = if self.gathers { "drag or x picks · enter adds to the palette · " } else { "" };
+            format!(
+                "arrows move · shift+arrows pan · + − zoom · {gathers}/ filters · space plays · h hover {hover} · tab {other} · esc closes"
+            )
         };
         screen.put(1, y, &truncate(&keys, screen.width - 2), &Style::fg(palette::FAINT));
         None
@@ -1631,5 +1940,150 @@ mod tests {
         image.draw(&mut Screen::new(100, 30), &mut |_, _, _, _| 1);
         image.on_text("+");
         assert!(!image.moving() && image.shown().0 == image.views[0].zoom, "an image goes straight there");
+    }
+
+    /// A map of `points` that puts points into the palette, drawn once (100 × 30).
+    fn gathering(points: &[(f32, f32, u16)]) -> MapView {
+        let mut map = MapView::new(Graphics::Cells, true).gathering(true);
+        map.loaded(ready(MapData { sounds: layer(points), songs: layer(&[]) }));
+        map.draw(&mut Screen::new(100, 30), &mut |_, _, _, _| 0);
+        map
+    }
+
+    fn names(asked: &Asked) -> Vec<String> {
+        match asked {
+            Asked::Gather(files) => files.iter().map(|file| file.name.clone()).collect(),
+            other => panic!("not a gathering: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn x_a_and_g_pick_points_enter_puts_them_into_the_palette_and_esc_lets_them_go_first() {
+        // A row of points across the middle.
+        let points: Vec<(f32, f32, u16)> = (0..9).map(|n| (0.1 + n as f32 * 0.1, 0.5, (n % 2) as u16)).collect();
+        let mut map = gathering(&points);
+        // Nothing picked: Enter puts the point chosen in (p4, the middle one).
+        assert_eq!(names(&map.on_key("enter", false)), ["p4"]);
+        // x picks the point chosen, and again lets it go; the header counts them.
+        map.on_text("x");
+        let mut screen = Screen::new(100, 30);
+        map.draw(&mut screen, &mut |_, _, _, _| 0);
+        assert!(screen.lines()[0].contains("1 picked"), "{}", screen.lines()[0]);
+        assert!(screen.lines()[29].starts_with(" enter adds 1 point to the palette"), "{}", screen.lines()[29]);
+        map.on_text("x");
+        assert!(map.views[0].picked.is_empty());
+        // g: each picked one brings its nearest (four on the map).
+        map.on_text("x");
+        map.on_text("g");
+        assert_eq!(map.views[0].picked, BTreeSet::from([2, 3, 4, 5, 6]));
+        // Enter puts the picked ones in, in their order, and lets them go.
+        assert_eq!(names(&map.on_key("enter", false)), ["p2", "p3", "p4", "p5", "p6"]);
+        assert!(map.views[0].picked.is_empty());
+        // a picks all the filter keeps: Esc lets them go, and only then closes the map.
+        map.on_text("/p1");
+        map.on_key("enter", false);
+        map.on_text("a");
+        assert_eq!(map.views[0].picked, BTreeSet::from([1]));
+        assert_eq!(map.on_key("escape", false), Asked::Nothing);
+        assert!(map.views[0].picked.is_empty());
+        assert_eq!(map.on_key("escape", false), Asked::Close);
+        // A map whose session keeps no palettes: Enter does nothing, and the keys don't offer it.
+        let mut plain = MapView::new(Graphics::Cells, true);
+        plain.loaded(ready(MapData { sounds: layer(&points), songs: layer(&[]) }));
+        let mut screen = Screen::new(100, 30);
+        plain.draw(&mut screen, &mut |_, _, _, _| 0);
+        assert_eq!(plain.on_key("enter", false), Asked::Nothing);
+        assert!(!screen.lines()[29].contains("palette"), "{}", screen.lines()[29]);
+    }
+
+    #[test]
+    fn enter_puts_in_at_most_what_the_palette_takes_at_once_and_says_how_many_were_picked() {
+        let points: Vec<(f32, f32, u16)> = (0..MOST_GATHERED + 5).map(|n| ((n % 100) as f32 / 100., (n / 100) as f32 / 101., 0)).collect();
+        let mut map = gathering(&points);
+        map.on_text("a");
+        let Asked::Gather(files) = map.on_key("enter", false) else { panic!("a gathering") };
+        assert_eq!(files.len(), MOST_GATHERED);
+        map.told("Added 10,000 sounds to Palette 1.".into());
+        assert_eq!(map.told.as_deref(), Some("Added 10,000 sounds to Palette 1. The first 10,000 of 10,005 picked went in."));
+        // g on all of them is a lookup, not a search each.
+        map.on_text("a");
+        let started = std::time::Instant::now();
+        map.on_text("g");
+        assert!(started.elapsed() < std::time::Duration::from_secs(5), "{:?}", started.elapsed());
+    }
+
+    #[test]
+    fn each_points_nearest_on_the_map_are_found_by_its_grid() {
+        let points = [(0.1f32, 0.1f32), (0.12, 0.1), (0.5, 0.5), (0.9, 0.9), (0.13, 0.11)];
+        let layer = layer(&points.map(|(x, y)| (x, y, 0)));
+        let nearest = nearest_lists(&layer.points);
+        assert_eq!(&nearest[..4], [1, 4, 2, 3], "p0's, nearest first");
+        assert_eq!(nearest[3 * NEAREST_KEPT], 2, "p3's nearest is the middle one");
+        assert!(nearest[..NEAREST_KEPT].iter().skip(4).all(|at| *at == u32::MAX), "four others, no more");
+    }
+
+    #[test]
+    fn a_box_dragged_picks_whats_in_it_ctrl_adds_and_a_ctrl_click_picks_one() {
+        let points = [(0.2, 0.2, 0), (0.25, 0.25, 0), (0.8, 0.8, 1), (0.82, 0.78, 1), (0.5, 0.5, 0)];
+        let mut map = gathering(&points);
+        let (a, b, c) = (cell_of(&map, 0), cell_of(&map, 1), cell_of(&map, 3));
+        // From just past the first point to just past the second: both, drawn as a box while it's dragged.
+        map.on_click(a.0 - 1, a.1 + 1, false);
+        map.on_drag(b.0 + 1, b.1 - 1);
+        let mut screen = Screen::new(100, 30);
+        map.draw(&mut screen, &mut |_, _, _, _| 0);
+        assert!(screen.lines().iter().any(|line| line.contains('┌')) && screen.lines().iter().any(|line| line.contains('┘')));
+        map.on_release(b.0 + 1, b.1 - 1);
+        assert_eq!(map.views[0].picked, BTreeSet::from([0, 1]));
+        // Another box in place of it; with ctrl as well as it.
+        map.on_click(c.0 - 2, c.1 - 2, false);
+        map.on_drag(c.0 + 2, c.1 + 2);
+        map.on_release(c.0 + 2, c.1 + 2);
+        assert_eq!(map.views[0].picked, BTreeSet::from([2, 3]));
+        map.on_click(a.0 - 1, a.1 + 1, true);
+        map.on_drag(b.0 + 1, b.1 - 1);
+        map.on_release(b.0 + 1, b.1 - 1);
+        assert_eq!(map.views[0].picked, BTreeSet::from([0, 1, 2, 3]));
+        // A click without moving picks nothing; with ctrl it picks the point (or lets it go).
+        let middle = cell_of(&map, 4);
+        map.on_click(middle.0, middle.1, false);
+        map.on_release(middle.0, middle.1);
+        assert_eq!(map.views[0].picked.len(), 4);
+        map.on_click(middle.0, middle.1, true);
+        map.on_release(middle.0, middle.1);
+        assert!(map.views[0].picked.contains(&4));
+        map.on_click(middle.0, middle.1, true);
+        map.on_release(middle.0, middle.1);
+        assert!(!map.views[0].picked.contains(&4));
+        // Esc lets a box being dragged go, nothing picked by it.
+        map.on_click(a.0 - 1, a.1 + 1, false);
+        map.on_drag(c.0 + 2, c.1 + 2);
+        assert_eq!(map.on_key("escape", false), Asked::Nothing);
+        map.on_release(c.0 + 2, c.1 + 2);
+        assert_eq!(map.views[0].picked.len(), 4);
+    }
+
+    #[test]
+    fn the_palettes_points_and_the_picked_ones_are_marked_and_what_gathering_did_is_said() {
+        let mut map = gathering(&[(0.3, 0.3, 0), (0.7, 0.7, 1), (0.5, 0.5, 0)]);
+        map.in_palette(HashSet::from(["/s/p0.wav".to_string()]));
+        map.views[0].picked.insert(1);
+        map.version += 1;
+        map.told("Added 2 sounds to Drums.".into());
+        let mut screen = Screen::new(100, 30);
+        map.draw(&mut screen, &mut |_, _, _, _| 0);
+        // Each mark on its point's cell: as braille rounds a dot, that's the cell `cell_of` works out or one beside it.
+        let (in_palette, picked) = (cell_of(&map, 0), cell_of(&map, 1));
+        let lines = screen.lines();
+        let marked = |(x, y): (i32, i32), mark: char| {
+            (y - 1..=y + 1).any(|row| (x - 1..=x + 1).any(|column| lines[row as usize].chars().nth(column as usize) == Some(mark)))
+        };
+        assert!(marked(in_palette, '•') && marked(picked, '●'), "{}", lines.join("\n"));
+        assert!(screen.lines()[28].contains("Added 2 sounds to Drums."), "{}", screen.lines()[28]);
+        // The next key: said no more.
+        map.on_text("+");
+        let mut screen = Screen::new(100, 30);
+        map.draw(&mut screen, &mut |_, _, _, _| 0);
+        assert!(!screen.lines()[28].contains("Added"));
     }
 }

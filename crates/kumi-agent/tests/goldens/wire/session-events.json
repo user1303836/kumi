@@ -1878,6 +1878,45 @@
     "title": "Read the Operator manual"
   },
   {
+    "type": "palette",
+    "palette": {
+      "id": "01JB9Z6P1Q2R3S4T5V6W7X8Y9Z",
+      "name": "Drums",
+      "reach": 5,
+      "files": [
+        {
+          "path": "/Samples/Kicks/Kick 808.wav",
+          "size": 48204,
+          "mtime": 1759913600000,
+          "name": "Kick 808",
+          "song": false,
+          "class": "kick"
+        },
+        {
+          "path": "/Samples/Hats/Hat 12.wav",
+          "size": 48204,
+          "mtime": 1759913600000,
+          "name": "Hat 12",
+          "song": false,
+          "class": "hat"
+        }
+      ],
+      "excluded": [
+        {
+          "path": "/Samples/Kicks/Kick Boom.wav",
+          "size": 48204,
+          "mtime": 1759913600000,
+          "name": "Kick Boom",
+          "song": false,
+          "class": "kick"
+        }
+      ]
+    }
+  },
+  {
+    "type": "palette"
+  },
+  {
     "type": "text",
     "text": "Shortened the kick's decay."
   },

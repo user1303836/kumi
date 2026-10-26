@@ -271,7 +271,9 @@ fn backup_set(path: &str) -> bool {
     static RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)\.backup-|\[[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{6}\]\.als$").unwrap());
     RE.is_match(path)
 }
-fn mtime(time: SystemTime) -> i64 {
+/// A file's modification time as the library names it (in ms since 1970, rounded): what anything that names a file by
+/// its time beside the library's (a palette) takes too.
+pub fn mtime(time: SystemTime) -> i64 {
     let ms = match time.duration_since(UNIX_EPOCH) {
         Ok(d) => d.as_secs_f64() * 1000.,
         Err(e) => -e.duration().as_secs_f64() * 1000.,

@@ -256,6 +256,42 @@ case!(enter_on_the_map_asks_kumi_nothing, async {
     h.close().await;
 });
 
+case!(enter_puts_the_point_chosen_into_the_palette_and_x_then_enter_the_points_picked, async {
+    let control = Rc::new(Control::default());
+    control.set("palette", serde_json::json!(true));
+    let h = Harness::with(160, 40, control, |o| o.map = Some(loader(fixture(12, 8))));
+    h.start().await;
+    h.connect();
+    h.type_text("/map\r").await;
+    h.wait_for("Sounds 72").await;
+    h.wait_for("enter adds to the palette").await;
+    let first = chosen(&h);
+    let name = first.split("  ").next().unwrap().trim_start_matches(" ● ").to_string();
+    // Enter: the point chosen goes in, and what happened is said under the map.
+    h.type_text("\r").await;
+    h.wait_for_call(&format!("palette-gather:{name}")).await;
+    h.wait_for("Added 1 to Palette 1.").await;
+    // x picks the chosen one and another (an arrow on): Enter puts both in, and the next key says no more.
+    h.type_text("x").await;
+    h.type_text("\x1b[C").await;
+    h.type_text("x").await;
+    h.wait_for("2 picked").await;
+    h.wait_for("enter adds 2 points to the palette").await;
+    h.type_text("\r").await;
+    h.wait_for("Added 2 to Palette 1.").await;
+    assert!(h.calls().iter().any(|call| call.starts_with("palette-gather:") && call.matches(',').count() == 1), "{:?}", h.calls());
+    h.type_text("+").await;
+    h.wait_until_hidden("Added 2 to Palette 1.").await;
+    // The palette's sounds are marked on the map.
+    assert!(h.screen().iter().any(|line| line.contains('•')), "{}", h.screen().join("\n"));
+    h.type_text("\x1b").await;
+    h.wait_until_hidden("Sounds 72").await;
+    // PALETTE has them.
+    let lines = h.screen();
+    assert!(lines.iter().any(|line| line.contains("PALETTE")), "{}", lines.join("\n"));
+    h.close().await;
+});
+
 /// The port and the token's path of the browser's map, from the link Kumi opened.
 fn served_at(url: &str) -> (u16, String) {
     let url: url::Url = url.parse().unwrap();

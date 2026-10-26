@@ -17,6 +17,7 @@ mod local_servers;
 mod match_run;
 mod mcp;
 mod memory;
+mod palette;
 mod pin_wire;
 mod providers;
 mod recall;
