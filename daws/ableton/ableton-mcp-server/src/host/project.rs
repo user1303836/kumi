@@ -29,6 +29,10 @@ async fn off_thread<T: Send + 'static>(work: impl FnOnce() -> Result<T, LiveErro
         Err(error) => Err(LiveError::error(format!("the bridge stopped before the work finished ({error})"))),
     }
 }
+/// The length of `{"beforePages":…,"afterPages":…}`'s JSON, from each bundle's own: both aren't copied into one object.
+fn diff_input_length(params: &Value) -> usize {
+    r#"{"beforePages":,"afterPages":}"#.len() + js_json::byte_length(&params["beforePages"]) + js_json::byte_length(&params["afterPages"])
+}
 fn optional_limit(params: &Value) -> bool {
     params.get("limit").is_none_or(|v| is_integer_in_range(v, 1., 200.))
 }
@@ -128,19 +132,19 @@ impl McpHost {
                 let wanted = params["profile"].as_str().unwrap_or("collaboration");
                 if let Some(cursor) = params["cursor"].as_str() {
                     let artifact_id = semantic_cursor_artifact_id(cursor).unwrap_or_default();
-                    let kept = self
-                        .semantic_exports
-                        .borrow()
-                        .iter()
-                        .find(|k| {
-                            k.artifact["artifact"]["id"] == artifact_id
-                                && Some(k.epoch) == status.epoch
-                                && k.artifact["policy"]["profile"] == wanted
-                                && now_ms() as f64 - k.at < 300_000.
-                        })
-                        .map(|k| k.artifact.clone());
-                    if let Some(artifact) = kept {
-                        return Ok(success_text(id, &project(page_valid_semantic_project_snapshot(&artifact, &page_options(params)))?));
+                    // Paged where it's kept: a page is up to 200 records, the artifact up to 12,000.
+                    let exports = self.semantic_exports.borrow();
+                    let kept = exports.iter().find(|k| {
+                        k.artifact["artifact"]["id"] == artifact_id
+                            && Some(k.epoch) == status.epoch
+                            && k.artifact["policy"]["profile"] == wanted
+                            && now_ms() as f64 - k.at < 300_000.
+                    });
+                    if let Some(kept) = kept {
+                        return Ok(success_text(
+                            id,
+                            &project(page_valid_semantic_project_snapshot(&kept.artifact, &page_options(params)))?,
+                        ));
                     }
                 }
                 let snapshot = self.views.whole_set(None, None).await?;
@@ -195,20 +199,18 @@ impl McpHost {
         {
             return error(id, -32602, "complete bounded beforePages and afterPages plus optional limit/cursor are required", None);
         }
-        let (params, response_id) = (params.clone(), id.clone());
+        let (mut params, response_id) = (params.clone(), id.clone());
         outcome(
             id,
             off_thread(move || {
-                let (params, id) = (&params, &response_id);
-                if js_json::byte_length(&json!({"beforePages":params["beforePages"],"afterPages":params["afterPages"]}))
-                    > SEMANTIC_PROJECT_MAX_DIFF_INPUT_BYTES
-                {
+                if diff_input_length(&params) > SEMANTIC_PROJECT_MAX_DIFF_INPUT_BYTES {
                     return Err(LiveError::error("combined semantic snapshot bundles exceed the bounded diff input size"));
                 }
-                let before = project(assemble_semantic_project_pages(params["beforePages"].as_array().unwrap()))?;
-                let after = project(assemble_semantic_project_pages(params["afterPages"].as_array().unwrap()))?;
+                let mut pages = |key: &str| std::mem::take(params[key].as_array_mut().unwrap());
+                let before = project(assemble_semantic_project_pages(pages("beforePages")))?;
+                let after = project(assemble_semantic_project_pages(pages("afterPages")))?;
                 let diff = project(diff_valid_semantic_project_snapshots(&before, &after))?;
-                Ok(success_text(id, &project(page_audited_semantic_project_diff(&diff, &page_options(params)))?))
+                Ok(success_text(&response_id, &project(page_audited_semantic_project_diff(&diff, &page_options(&params)))?))
             })
             .await,
             "Semantic diff requires complete untampered page bundles with the same schema and privacy profile; no merge was attempted.",
@@ -324,7 +326,7 @@ result["midi"] = json!({"clips":clips,"truncated":truncated,"noteBudget":4096,"c
             return error(id, -32602, "before and after sides plus optional limit/cursor are required", None);
         }
         let version = self.server_version().to_owned();
-        let side = move |value: &Value, fallback: &str| -> Result<Value, LiveError> {
+        let side = move |value: &mut Value, fallback: &str| -> Result<Value, LiveError> {
             if !has_only(value, &["als", "pages"]) {
                 return Err(LiveError::error("each diff side must be an object with exactly one of als or pages"));
             }
@@ -344,24 +346,24 @@ result["midi"] = json!({"clips":clips,"truncated":truncated,"noteBudget":4096,"c
                     },
                 ));
             }
-            let pages = value["pages"]
-                .as_array()
+            let pages = value
+                .get_mut("pages")
+                .and_then(Value::as_array_mut)
                 .filter(|p| !p.is_empty() && p.len() <= SEMANTIC_PROJECT_MAX_PAGES)
                 .ok_or_else(|| LiveError::error(format!("a pages side requires 1-{SEMANTIC_PROJECT_MAX_PAGES} complete pages")))?;
-            project(assemble_semantic_project_pages(pages))
+            project(assemble_semantic_project_pages(std::mem::take(pages)))
         };
-        let (params, response_id) = (params.clone(), id.clone());
+        let (mut params, response_id) = (params.clone(), id.clone());
         outcome(
             id,
             off_thread(move || {
-                let (params, id) = (&params, &response_id);
-                let before = side(&params["before"], "collaboration")?;
-let after = side(&params["after"], before["policy"]["profile"].as_str().unwrap())?;
+                let before = side(&mut params["before"], "collaboration")?;
+let after = side(&mut params["after"], before["policy"]["profile"].as_str().unwrap())?;
 if before["policy"]["profile"] != after["policy"]["profile"] {
                     return Err(LiveError::error("semantic diff sides must share one privacy profile"));
 }
                 let diff = project(diff_valid_semantic_project_snapshots(&before, &after))?;
-Ok(success_text(id, &project(page_audited_semantic_project_diff(&diff, &page_options(params)))?))
+Ok(success_text(&response_id, &project(page_audited_semantic_project_diff(&diff, &page_options(&params)))?))
             })
             .await,
             "Offline .als diff requires owner-authorized files or complete untampered page bundles with one shared privacy profile; no merge was attempted.",
@@ -478,6 +480,16 @@ Ok(success_text(id, &project(page_audited_semantic_project_diff(&diff, &page_opt
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn a_diffs_input_is_as_long_as_its_two_bundles_in_one_object() {
+        let params = json!({
+            "limit": 5,
+            "afterPages": [{"text": "é \"🎹\"\n\u{1}", "numbers": [0, -0.0, 2.5, 1e21, -7, 1e-7]}, {}],
+            "beforePages": [[], {"nested": {"deeper": [null, true, false]}}],
+        });
+        let joined = json!({"beforePages": params["beforePages"], "afterPages": params["afterPages"]});
+        assert_eq!(diff_input_length(&params), js_json::byte_length(&joined));
+    }
     #[tokio::test]
     async fn expired_and_wrong_kind_backup_transactions_match_source_traces() {
         let fixture: Value = serde_json::from_slice(&kumi_testkit::oracle_bytes("ableton-mcp-server/host_project_oracle.json")).unwrap();
