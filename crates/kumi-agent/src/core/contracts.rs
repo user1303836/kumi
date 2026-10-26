@@ -1000,6 +1000,11 @@ pub enum SessionEvent {
         job: u32,
         title: String,
     },
+    /// The session's palette as it is now, after a change (None: it has none).
+    Palette {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        palette: Option<crate::core::palette::PaletteView>,
+    },
     #[serde(untagged)]
     Kernel(KernelEvent),
     #[serde(untagged)]
@@ -1707,6 +1712,29 @@ pub trait SessionController {
     fn carry_on(&self, job: u32) -> bool {
         let _ = job;
         false
+    }
+    fn has_palette(&self) -> bool {
+        false
+    }
+    /// The session's palette, with its files: None before one is made or chosen.
+    async fn palette(&self) -> Result<Option<crate::core::palette::PaletteView>, RuntimeError> {
+        Ok(None)
+    }
+    /// Sounds or songs gathered (on the map, in the browser's map) into the session's palette, a new one when it has none
+    /// yet: what happened, in words.
+    async fn palette_gather(&self, files: Vec<crate::core::palette::Gathered>) -> Result<String, RuntimeError> {
+        let _ = files;
+        Err(absent())
+    }
+    /// A file out of the session's palette (by its path, size and modification time): whether it had it.
+    async fn palette_remove(&self, path: &str, size: i64, mtime: i64) -> Result<bool, RuntimeError> {
+        let _ = (path, size, mtime);
+        Ok(false)
+    }
+    /// /palette and its words (list, new, use, rename, forget, strict, loose): its answer, in words.
+    async fn palette_command(&self, words: &str) -> Result<String, RuntimeError> {
+        let _ = words;
+        Err(absent())
     }
     fn has_device_tree(&self) -> bool {
         false

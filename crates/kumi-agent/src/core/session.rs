@@ -415,6 +415,8 @@ struct Inner {
     taste: Option<Rc<TasteLog>>,
     /// The settings searches hear, kept in Kumi's database (only when it's open).
     search_memory: Option<Rc<SearchMemory>>,
+    /// The producer's palettes, in Kumi's database (only when it's open), and the one this session works with.
+    palettes: Option<Rc<crate::core::palette::Palettes>>,
     timings: Option<String>,
     shelf: Vec<Rc<dyn KernelTool>>,
     /// The taste tool, when Kumi knows where the producer's music is.
@@ -761,6 +763,14 @@ pub fn create_session(options: SessionOptions) -> Result<Session, RuntimeError> 
             }));
             registry
         });
+        let palettes = options.store.clone().map(|store| {
+            let emit = emit.clone();
+            Rc::new(crate::core::palette::Palettes::new(
+                store,
+                options.library.clone().map(crate::core::palette::library_refind),
+                Rc::new(move |palette| emit(SessionEvent::Palette { palette })),
+            ))
+        });
         let unlisten_music = options.music.as_ref().map(|music| {
             let emit = emit.clone();
             music.on_status(Rc::new(move |status| emit(SessionEvent::Music(MusicEvent { status }))))
@@ -786,6 +796,7 @@ pub fn create_session(options: SessionOptions) -> Result<Session, RuntimeError> 
             gaps,
             taste,
             search_memory,
+            palettes,
             timings,
             shelf,
             music_tools,
@@ -3417,6 +3428,29 @@ impl SessionController for Session {
             Some(i) => i.recording(abort::timeout(5_000)).await,
             None => Ok(None),
         }
+    }
+    fn has_palette(&self) -> bool {
+        self.0.palettes.is_some()
+    }
+    async fn palette(&self) -> Result<Option<crate::core::palette::PaletteView>, RuntimeError> {
+        match &self.0.palettes {
+            Some(palettes) => palettes.view().await,
+            None => Ok(None),
+        }
+    }
+    async fn palette_gather(&self, files: Vec<crate::core::palette::Gathered>) -> Result<String, RuntimeError> {
+        let palettes = self.0.palettes.clone().ok_or_else(|| RuntimeError::plain("Kumi keeps no palettes here."))?;
+        Ok(palettes.gather(files).await?.words())
+    }
+    async fn palette_remove(&self, path: &str, size: i64, mtime: i64) -> Result<bool, RuntimeError> {
+        match self.0.palettes.clone() {
+            Some(palettes) => palettes.remove(path, size, mtime).await,
+            None => Ok(false),
+        }
+    }
+    async fn palette_command(&self, words: &str) -> Result<String, RuntimeError> {
+        let palettes = self.0.palettes.clone().ok_or_else(|| RuntimeError::plain("Kumi keeps no palettes here."))?;
+        palettes.command(words).await
     }
     fn has_jobs(&self) -> bool {
         self.0.jobs.is_some()
