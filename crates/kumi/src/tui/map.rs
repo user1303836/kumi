@@ -1622,14 +1622,14 @@ mod tests {
         let (in_palette, picked, reached) = (cell_of(&map, 0), cell_of(&map, 1), cell_of(&map, 2));
         let at = |(x, y): (i32, i32)| screen.lines()[y as usize].chars().nth(x as usize).unwrap();
         assert_eq!((at(in_palette), at(picked)), ('•', '●'));
-        // The chosen point (p2, the middle one) is drawn over its halo; let it go and the halo shows.
+        assert!(screen.lines()[28].contains("Added 2 sounds to Drums."), "{}", screen.lines()[28]);
+        // The chosen point (p2, the middle one) is drawn over its halo; with none chosen, the halo shows.
         assert_eq!(at(reached), '◉');
         map.views[0].chosen = None;
-        let mut screen = Screen::new(100, 30);
-        map.draw(&mut screen, &mut |_, _, _, _| 0);
-        assert_eq!(screen.lines()[reached.1 as usize].chars().nth(reached.0 as usize), Some('·'));
+        let mut halo = Screen::new(100, 30);
+        map.draw(&mut halo, &mut |_, _, _, _| 0);
+        assert_eq!(halo.lines()[reached.1 as usize].chars().nth(reached.0 as usize), Some('·'));
         map.views[0].chosen = Some(2);
-        assert!(screen.lines()[28].contains("Added 2 sounds to Drums."), "{}", screen.lines()[28]);
         // The next key: said no more.
         map.on_text("+");
         let mut screen = Screen::new(100, 30);

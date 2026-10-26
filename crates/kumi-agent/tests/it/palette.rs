@@ -158,15 +158,11 @@ case!(palette_words_list_make_choose_rename_forget_and_set_how_far_it_reaches, a
 case!(a_files_time_is_named_as_the_library_names_it_so_a_sound_found_again_isnt_kept_twice, async {
     let dir = tempfile::tempdir().unwrap();
     let moved_to = dir.path().join("Moved").join("Kick 1.wav");
-    let to = moved_to.to_string_lossy().to_string();
     // The library's name for the file's time: rounded to the millisecond (truncated would be ...000).
     let at = std::time::UNIX_EPOCH + std::time::Duration::new(1_700_000_000, 600_000);
     let rounded = 1_700_000_000_001;
-    let refind: Refind = Rc::new(move |wanted: Vec<(String, i64)>| {
-        let to = to.clone();
-        async move { wanted.iter().map(|(name, _)| (name == "Kick 1.wav").then(|| (to.clone(), rounded))).collect() }.boxed_local()
-    });
-    let (palettes, _) = palettes(dir.path(), Some(refind));
+    let library = Rc::new(Library { moved: Some((moved_to.to_string_lossy().to_string(), rounded)), ..Default::default() });
+    let (palettes, _) = palettes(dir.path(), Some(library));
     let kick = sound(dir.path(), "Kick 1", 10);
     std::fs::File::options().write(true).open(&kick.path).unwrap().set_modified(at).unwrap();
     palettes.gather(vec![kick.clone()]).await.unwrap();
