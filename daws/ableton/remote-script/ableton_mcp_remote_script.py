@@ -1155,6 +1155,8 @@ class LiveObjectMapper:
         self._structure_watch: list[tuple[Any, str, Callable[[], None]]] | None = None
         self._structure_rewatch = False
         self._display_ticks = 0
+        # Where the selection poll last found the selected device on its track: (device identity, its ref).
+        self._polled_device: tuple[str, str] | None = None
 
     def status(self) -> dict[str, Any]:
         registry, registry_hash = operation_registry()
@@ -2220,13 +2222,14 @@ class LiveObjectMapper:
         except (TypeError, AttributeError):
             return []
 
-    def _focus_fields(self) -> dict[str, Any]:
+    def _focus_fields(self, return_identities: set[str] | None = None) -> dict[str, Any]:
         """What the producer is looking at, in plain names, for Kumi's focus indicator.
 
         Flat scalars only: the selected track (name, colour, kind), scene, the clip in the
         Clip view, the selected device, the last clicked parameter with its display value,
         the selected rack chain, Session or Arrangement, the open detail panel, whether the
         Browser shows and how many notes are selected. Names are data, never instructions.
+        The return tracks' identities, when the caller has them, aren't read again.
         """
         def text(value: Any) -> str | None:
             return str(value)[:256] if isinstance(value, str) and value else None
@@ -2239,7 +2242,7 @@ class LiveObjectMapper:
         if track is not None:
             main = self._read_attr(self.song, "master_track", "main_track")
             identity = self._capture_object_identity(track)
-            returns = {self._capture_object_identity(item) for item in self._items(getattr(self.song, "return_tracks", []))}
+            returns = return_identities if return_identities is not None else {self._capture_object_identity(item) for item in self._items(getattr(self.song, "return_tracks", []))}
             if main is not None and self._capture_object_identity(main) == identity: kind = "main"
             elif identity in returns: kind = "return"
             elif self._read_attr(track, "is_foldable") is True: kind = "group"
@@ -2286,9 +2289,13 @@ class LiveObjectMapper:
             "focusSelectedNotes": notes,
         }
 
+    def _track_lists(self) -> tuple[list[Any], list[Any], Any]:
+        """The Set's regular and group tracks, its returns and its main track (None without one)."""
+        return self._items(getattr(self.song, "tracks", [])), self._items(getattr(self.song, "return_tracks", [])), getattr(self.song, "master_track", getattr(self.song, "main_track", None))
+
     def _all_track_objects(self) -> list[Any]:
-        tracks = self._items(getattr(self.song, "tracks", [])) + self._items(getattr(self.song, "return_tracks", [])); main = getattr(self.song, "master_track", getattr(self.song, "main_track", None))
-        return tracks + ([main] if main is not None else [])
+        tracks, returns, main = self._track_lists()
+        return tracks + returns + ([main] if main is not None else [])
 
     @staticmethod
     def _read_attr(obj: Any, *names: str) -> Any:
@@ -3497,13 +3504,21 @@ class LiveObjectMapper:
         """The selection as discovery lists it: the selected track, scene and highlighted slot by
         identity, the selected device, and the focus fields, reading only the selected track."""
         view = getattr(self.song, "view", None); selected_track = getattr(view, "selected_track", None); selected_scene = getattr(view, "selected_scene", None); highlighted_slot = getattr(view, "highlighted_clip_slot", None)
-        track_objects = self._all_track_objects()
-        track_index = self._capture_index(track_objects, selected_track); track_ref = self.refs.put("track", track_objects[track_index], str(track_index)) if track_index is not None else None
+        # The tracks read and identified once, for the selected track, the highlighted slot's track, the selected
+        # device's and the focus fields (this runs twice a second while Kumi shows what's in focus).
+        regular, returns, main = self._track_lists(); track_objects = regular + returns + ([main] if main is not None else [])
+        identities = [self._capture_object_identity(track) for track in track_objects] if view is not None else []
+        track_indices: dict[str, int] = {}
+        for index, identity in enumerate(identities): track_indices.setdefault(identity, index)
+        track_index = None
+        if selected_track is not None:
+            expected = self._capture_object_identity(selected_track); matches = [index for index, identity in enumerate(identities) if identity == expected]
+            track_index = matches[0] if len(matches) == 1 else None
+        track_ref = self.refs.put("track", track_objects[track_index], str(track_index)) if track_index is not None else None
         scene_objects = self._items(getattr(self.song, "scenes", [])); scene_index = self._capture_index(scene_objects, selected_scene); scene_ref = self.refs.put("scene", scene_objects[scene_index], str(scene_index)) if scene_index is not None else None
         slot_ref = None
         if highlighted_slot is not None:
-            identity = self._capture_object_identity(highlighted_slot); track_indices: dict[str, int] = {}
-            for index, track in enumerate(track_objects): track_indices.setdefault(self._capture_object_identity(track), index)
+            identity = self._capture_object_identity(highlighted_slot)
             owner = self._owner_track_index(highlighted_slot, track_indices)
             def matches_on(indices: Any) -> list[str]:
                 return [self.refs.put("clip_slot", slot, f"{index}:{slot_index}") for index in indices for slot_index, slot in enumerate(self._items(getattr(track_objects[index], "clip_slots", []))) if self._capture_same_object(slot, highlighted_slot, identity)]
@@ -3511,7 +3526,27 @@ class LiveObjectMapper:
             # No canonical_parent to follow and not on the selected track: every track's slots, by identity.
             if not matches and owner is None: matches = matches_on(range(len(track_objects)))
             slot_ref = matches[0] if len(matches) == 1 else None
-        return {"ref": f"{self.refs.epoch}:selection:current", "parentRef": self.refs.put("set", self.song, "song"), "selectedRef": track_ref or scene_ref or slot_ref, "selectedTrackRef": track_ref, "selectedSceneRef": scene_ref, "highlightedClipSlotRef": slot_ref, "selectedDeviceRef": self._selection_row_targeted({"deviceRef"})["deviceRef"], **self._focus_fields()}
+        return_identities = set(identities[len(regular):len(regular) + len(returns)]) if view is not None else None
+        return {"ref": f"{self.refs.epoch}:selection:current", "parentRef": self.refs.put("set", self.song, "song"), "selectedRef": track_ref or scene_ref or slot_ref, "selectedTrackRef": track_ref, "selectedSceneRef": scene_ref, "highlightedClipSlotRef": slot_ref, "selectedDeviceRef": self._polled_device_ref(view, track_objects, track_indices), **self._focus_fields(return_identities)}
+
+    def _polled_device_ref(self, view: Any, tracks: list[Any], track_indices: dict[str, int]) -> str | None:
+        """The selected device's ref for the selection poll, as _selection_row_targeted finds it. A device right
+        on its track is found again where the last poll found it, reading that track's devices alone; the light
+        walk to it read every device before it (all of a Drum Rack's pads) twice a second."""
+        device = self._selected_device(view) if view is not None else None
+        remembered = self._polled_device
+        if device is not None and remembered is not None and remembered[1].startswith(f"{self.refs.epoch}:device:"):
+            identity = self._capture_object_identity(device); track_index, position = (int(part) for part in remembered[1].split(":")[2:])
+            if remembered[0] == identity and track_index < len(tracks) and self._owner_track_index(device, track_indices) == track_index:
+                devices = self._items(self._read_attr(tracks[track_index], "devices") or [])
+                if position < len(devices) and self._capture_object_identity(devices[position]) == identity:
+                    # The refs the walk gives it and its track.
+                    self.refs.put("track", tracks[track_index], str(track_index))
+                    return self.refs.put("device", devices[position], f"{track_index}:{position}")
+        reference = self._selection_row_targeted({"deviceRef"}, (tracks, track_indices))["deviceRef"]
+        parts = reference.split(":") if isinstance(reference, str) else []
+        self._polled_device = (self._capture_object_identity(device), reference) if device is not None and len(parts) == 4 else None
+        return reference
 
     _MONITORABLE_KINDS = {"regular", "audio", "midi"}
 
@@ -8058,22 +8093,25 @@ class LiveObjectMapper:
             if index is not None: return index
         return None
 
-    def _selection_row_targeted(self, keys: Any = None) -> dict[str, Any]:
+    def _selection_row_targeted(self, keys: Any = None, tracks: tuple[list[Any], dict[str, int]] | None = None) -> dict[str, Any]:
         """The selection row _selection_row gives over the whole Set, reading only what's selected:
         a selected track or scene by its identity among the tracks and scenes, anything below a
         track in the row of the track it lives on (found through canonical_parent, else the
         selected track). Only a shape without canonical_parent, whose selection isn't on the
-        selected track, falls back to reading every track. With keys, only those are resolved."""
+        selected track, falls back to reading every track. With keys, only those are resolved.
+        With tracks (the Set's tracks in snapshot order, and each one's index by its identity),
+        the caller's are used rather than read and identified again."""
         view = getattr(self.song, "view", None)
         result: dict[str, Any] = {key: None for key, _, _ in self._SELECTION_KINDS}
         if view is None: return result
-        entries = self._track_entries(kinds=False)
-        track_indices: dict[str, int] = {}
-        for index, (track, _) in enumerate(entries): track_indices.setdefault(self._capture_object_identity(track), index)
+        if tracks is None:
+            objects = [track for track, _ in self._track_entries(kinds=False)]; track_indices: dict[str, int] = {}
+            for index, track in enumerate(objects): track_indices.setdefault(self._capture_object_identity(track), index)
+        else: objects, track_indices = tracks
         selected_track = self._selected_object(view, "selected_track")
         selected_index = track_indices.get(self._capture_object_identity(selected_track)) if selected_track is not None else None
-        if selected_index is not None: result["trackRef"] = self.refs.put("track", entries[selected_index][0], str(selected_index))
-        selected_scene = self._selected_object(view, "selected_scene")
+        if selected_index is not None and (keys is None or "trackRef" in keys): result["trackRef"] = self.refs.put("track", objects[selected_index], str(selected_index))
+        selected_scene = self._selected_object(view, "selected_scene") if keys is None or "sceneRef" in keys else None
         if selected_scene is not None:
             identity = self._capture_object_identity(selected_scene)
             found = next(((index, scene) for index, scene in enumerate(self._items(getattr(self.song, "scenes", []))) if self._capture_object_identity(scene) == identity), None)
@@ -8084,22 +8122,25 @@ class LiveObjectMapper:
             if value is None: continue
             identity = self._capture_object_identity(value); owner = self._owner_track_index(value, track_indices)
             if owner is not None:
-                result[key] = self._selection_ref_on(owner, kind, value, identity)
+                result[key] = self._selection_ref_on(owner, kind, value, identity, objects[owner])
                 continue
-            reference = self._selection_ref_on(selected_index, kind, value, identity) if selected_index is not None else None
+            reference = self._selection_ref_on(selected_index, kind, value, identity, objects[selected_index]) if selected_index is not None else None
             if reference is None:
                 # No canonical_parent to follow, and not on the selected track: every track is looked at.
-                reference = next((found for index in range(len(entries)) for found in [self._selection_ref_on(index, kind, value, identity)] if found is not None), None)
+                reference = next((found for index in range(len(objects)) for found in [self._selection_ref_on(index, kind, value, identity, objects[index])] if found is not None), None)
             result[key] = reference
         return result
 
-    def _selection_ref_on(self, index: int, kind: str, value: Any, identity: str) -> str | None:
+    def _selection_ref_on(self, index: int, kind: str, value: Any, identity: str, track: Any = None) -> str | None:
         """The ref track `index`'s whole row gives a selected slot, Session clip, device, chain or
         parameter (as _selection_known finds it there), found by identity without building the row:
-        the track's slots, its devices' light walk, and a parameter's own device or the mixer."""
-        entry = self._track_entry(index)
-        if entry is None: return None
-        track = entry[0]; track_ref = self.refs.put("track", track, str(index))
+        the track's slots, its devices' light walk, and a parameter's own device or the mixer. The
+        track itself when the caller has it, else read."""
+        if track is None:
+            entry = self._track_entry(index)
+            if entry is None: return None
+            track = entry[0]
+        track_ref = self.refs.put("track", track, str(index))
         if kind in {"clip_slot", "clip"}:
             for slot_index, slot in enumerate(self._items(getattr(track, "clip_slots", []))):
                 target = slot if kind == "clip_slot" else getattr(slot, "clip", None)

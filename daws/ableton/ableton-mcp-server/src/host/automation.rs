@@ -93,7 +93,7 @@ impl McpHost {
         hash(&json!({
         "clip":self.clip_authority(snapshot,
         clip_ref)?,
-        "parameter":self.parameter_authority(snapshot,
+        "parameter":self.parameter_authority(&serde_json::to_value(snapshot).unwrap(),
         parameter_ref)?}
         ))
     }

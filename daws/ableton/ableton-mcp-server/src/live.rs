@@ -2466,6 +2466,10 @@ pub type StatusListener = Rc<dyn Fn(Option<&LiveStatus>)>;
 
 pub trait LiveAdapter {
     fn status(&self) -> Result<LiveStatus, LiveError>;
+    /// `status()?.has_operation(operation)`, which an adapter that keeps its status answers without a copy of it.
+    fn status_has_operation(&self, operation: &str) -> Result<bool, LiveError> {
+        Ok(self.status()?.has_operation(operation))
+    }
     fn snapshot(&self) -> Result<LiveSnapshot, LiveError>;
     /// The object at `object_ref` as JSON, or none (`undefined`) when nothing is there.
     fn get(&self, object_ref: &LiveRef) -> Result<Option<Value>, LiveError>;

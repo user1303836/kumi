@@ -1,7 +1,6 @@
 use super::*;
 use futures::future::LocalBoxFuture;
 use kumi_common::js::{json as js_json, number as js_number};
-use sha2::{Digest, Sha256};
 
 pub const MAX_QUEUED_EVENTS: usize = 65_536;
 pub type EventEmitter = Rc<dyn Fn(String) -> LocalBoxFuture<'static, Result<(), LiveError>>>;
@@ -85,14 +84,7 @@ impl McpHost {
             *self.tool_list_fingerprint.borrow_mut() = None;
             return Ok(());
         }
-        let status = self.safe_adapter_status();
-        let fingerprint = hex::encode(Sha256::digest(
-            canonical_mutation_identity(&json!({
-                "connected":status.connected,"epoch":status.epoch,"adapter":status.adapter,
-                "operations":status.operations.unwrap_or_default(),"capabilities":status.capabilities,"policy":*self.tool_policy.borrow()
-            }))?
-            .as_bytes(),
-        ));
+        let fingerprint = self.tool_gate().fingerprint()?;
         let prior = self.tool_list_fingerprint.replace(Some(fingerprint.clone()));
         if prior.is_none_or(|prior| prior == fingerprint) {
             return Ok(());

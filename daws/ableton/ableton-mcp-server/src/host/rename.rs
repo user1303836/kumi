@@ -30,11 +30,11 @@ impl McpHost {
             _ => return None,
         })
     }
+    /// The take lane `reference` names and its track, as the snapshot's JSON has them: only those two are made JSON.
     pub(super) fn take_lane_row(&self, snapshot: &LiveSnapshot, reference: &str) -> Result<(Value, Value), LiveError> {
-        let snapshot = serde_json::to_value(snapshot).unwrap();
-        for track in snapshot["tracks"].as_array().into_iter().flatten() {
-            if let Some(lane) = track["takeLanes"].as_array().into_iter().flatten().find(|r| r["ref"] == reference) {
-                return Ok((track.clone(), lane.clone()));
+        for track in snapshot.tracks.iter().flatten() {
+            if let Some(lane) = track.take_lanes.iter().flatten().find(|lane| lane.ref_.0 == reference) {
+                return Ok((serde_json::to_value(track).unwrap(), serde_json::to_value(lane).unwrap()));
             }
         }
         Err(LiveError::error("take-lane reference is unknown"))
