@@ -16,48 +16,98 @@
   English · <a href="README.zh-CN.md">简体中文</a> · <a href="README.ja.md">日本語</a>
 </p>
 
-**A studio producer agent for Ableton Live, REAPER and Renoise that learns how you work.** Kumi will literally do anything in your set that Ableton exposes via Extensions/LOM... and even some things it doesn't intentionally expose via the API. From the tedious jobs to the ones you never have time for: rebuilding a sound from a YouTube tutorial, matching your mix to a reference, writing a Max for Live device you describe, or reworking the rack you point at. Every change shows up in HISTORY, most with their own undo, and a whole plan is one undo in Live (Cmd-Z, or Ctrl-Z on Windows). Kumi remembers the techniques you keep, so it fits you better with every session. In REAPER and Renoise it works through an extension and a tool of its own, in each DAW's words.
+**Kumi is a general-purpose AI agent that works alongside you in your DAW.** Kumi currently supports Ableton Live, REAPER and Renoise, with the same abilities in each: it reads your project, changes almost anything in it, listens to the result and learns your sounds, your taste and your habits. You ask in plain words, in a chat that runs in your terminal. Kumi plans the change, makes it and lists each step in its history with an undo. The longer you use Kumi, the more familiar Kumi is with how you work, your preferences, and your patterns as a producer.
 
 https://github.com/user-attachments/assets/f53fe0be-c9a9-476e-a1d5-efe3dc429526
 
 ## Quickstart
 
-Needs Ableton Live 12 on macOS 13+ or Windows 10/11, or REAPER 7+ or Renoise 3.5+ on macOS, Windows or Linux.
+Get started with one command in Terminal on a Mac or PowerShell on Windows.
 
-**macOS or Linux** (Terminal):
+On a Mac or Linux:
 
 ```sh
 curl -fsSL https://github.com/user1303836/kumi/releases/latest/download/install.sh | sh
 ```
 
-**Windows** (PowerShell):
+On Windows:
 
 ```powershell
 irm https://github.com/user1303836/kumi/releases/latest/download/install.ps1 | iex
 ```
 
-Kumi opens once it's installed and walks you through signing in and connecting to Live. After that, just run `kumi`. For REAPER or Renoise, run `kumi --daw reaper` or `kumi --daw renoise`: Kumi puts its extension or tool in and opens the DAW ([details](docs/en/KUMI_GUIDE.md#connect-to-reaper-or-renoise)). Something off? `kumi doctor` says what to fix.
+Follow Kumi's guided setup.
 
-[Guide](docs/en/KUMI_GUIDE.md) · [Commands, keys and screens](docs/en/KUMI_TUI.md) · [How Kumi changes your Set](docs/en/KUMI_CHANGES.md) · [Changelog](CHANGELOG.md)
+Next time, open a terminal and type `kumi`.
 
-## What it does
+> [!NOTE]
+> Kumi runs in a terminal window, but you don't need to know any commands. After the install line, it's a chat.
 
-- **Changes almost anything in the Set:** tempo, scale and groove; the mixer, routing and sidechains; tracks, scenes and clips; notes and MIDI transforms; devices, racks and their parameters.
-- **Listens:** loudness, tonal balance, width, tempo and key of a mix, a sample or its own bounce, and how your mix compares with a reference.
-- **Judges its own changes:** brings each change back to the level it belongs at (with the last Live Limiter, else a Utility it adds), hears before and after, and keeps a change only if its target improved and nothing else got worse. `/loop` works in rounds until a goal is met; `/goal` keeps at one across turns.
-- **Measures a style:** a file, a folder, a YouTube or Spotify link, or words like "Burial" or "dub techno" become example tracks and a measured profile with the style's range, kept for next time.
-- **Learns your taste** from your own music, on your computer, and leans on it when you leave the style open ("make me a beat"). `/music` shows and manages it.
-- **Matches a reference:** builds several takes on a sound, scores each against the reference and refines the best. `/loop` keeps at it until it gets there.
-- **Watches tutorials** from YouTube or a file, then builds what they show on a new track.
-- **Plays, records and resamples**, to let you hear what it built or to check its work.
-- **Takes full control of Live:** deletes what you ask for, writes MIDI straight into the Arrangement, renders offline, runs Python inside Live for what its other tools can't reach, and answers for what you right-click in Live ("Ask Kumi about this"). Big Sets of hundreds of tracks stay quick.
-- **Makes Max for Live devices** you describe in plain words (MIDI effects, audio effects and instruments) and puts them on your tracks.
-- **Looks things up:** searches the web and reads pages, PDFs, manuals and code on GitHub, so it can build an effect like one it has read about.
-- **Shows where you are:** FOCUS follows what you touch in Live, as a device tree, a piano roll or a Session or Arrangement strip. Click a device to point at it: "this Saturator's too harsh".
-- **Remembers:** notes about you and each Set, techniques it learns from what you keep, and recipes you can replay. Every save is shown, and one click forgets it.
-- **Keeps your conversations** for each Set, each with an id that takes it up again from anywhere (`kumi -r`), and says what changed while it was closed. `/share` turns one into a web page to send, with keys and paths taken out.
-- **Works in REAPER and Renoise too:** tracks, items and takes, FX and their parameters, envelopes and routing in REAPER; patterns and their lines, the sequence, instruments, samples, phrases and DSP chains in Renoise. Each change has its undo, Kumi listens and judges there too, and FOCUS follows the DAW's own views ([what it does in each DAW](docs/en/DAWS.md), [what it changes](docs/en/KUMI_CHANGES.md#reaper-and-renoise)).
-- **Works with your model:** sign in with ChatGPT, or use an OpenAI, Anthropic or OpenCode API key.
+## What can I ask it?
+
+- **Build a sound from a tutorial.** Paste a YouTube link: Kumi watches it and builds what it shows on a new track.
+- **Fix the mix.** Ask “is the bass muddy?” and Kumi listens, finds what's clashing and fixes it, listening again after each change.
+- **Match a reference.** Give it a track you love: Kumi tries a few takes, scores each against it and refines the best.
+- **Make a device.** Describe a Max for Live effect or instrument and Kumi builds it and puts it on your track.
+- **Find your sounds.** “A dusty snare like this one”, “my usual vocal chain”: Kumi knows your samples, presets and projects.
+- **Map your sounds.** `/map` lays out your samples and songs so similar ones sit together; point at one to hear it. Gather the ones you like into a palette, and Kumi picks from it when you ask for “a darker kick from my palette”, or loads the whole palette as a kit.
+- **Do the chores.** Renaming, colouring, routing, sidechains, grouping, freezing, bouncing and exporting.
+
+It works the same way in all three DAWs, each in its own words: [what works where](docs/en/DAWS.md).
+
+## Questions
+
+<details>
+<summary><b>Do I need to know how to code?</b></summary>
+
+No. You work with Kumi in plain words, typed or spoken. When a job needs code (Python in Live, Lua in REAPER and Renoise), Kumi writes and runs it itself.
+
+</details>
+
+<details>
+<summary><b>Will it mess up my project?</b></summary>
+
+Every change is listed in Kumi's history (“Tempo 120 → 124 BPM”), most with their own undo. In Live, each request is also one step in Live's own undo, and Kumi copies the last saved version of your Set before a large or destructive change.
+
+</details>
+
+<details>
+<summary><b>Which DAWs and computers?</b></summary>
+
+- Ableton Live 12 on macOS 13+ or Windows 10/11
+- REAPER 7+ on macOS, Windows or Linux
+- Renoise 3.5+ on macOS, Windows or Linux
+
+With more than one installed, setup asks which you work in; `/daw` switches later.
+
+</details>
+
+<details>
+<summary><b>Which AI does it use, and what does it cost?</b></summary>
+
+Kumi is free and open source (MIT). You choose the model:
+
+- **ChatGPT plan:** sign in with your account; Kumi works within your plan's usage limits.
+- **API key:** Anthropic, OpenAI, Google Gemini, OpenRouter and [20 more](docs/en/KUMI_GUIDE.md#sign-in-and-choose-a-model), billed by the provider.
+- **Local:** Ollama, LM Studio or any OpenAI-compatible server such as llama.cpp or vLLM, on hardware that can run a tool-calling model with a long context (Kumi asks for about 57k tokens).
+
+</details>
+
+<details>
+<summary><b>Does my audio leave my computer?</b></summary>
+
+Audio is analysed locally; the model gets the measurements. Your library and music collection are indexed locally too. With a Gemini or OpenAI API key, a listening model also hears mono excerpts (10 seconds at most) of the changes it judges; `/slots listening off` turns it off. [Privacy](docs/en/KUMI_GUIDE.md#privacy-what-leaves-your-computer) covers the rest.
+
+</details>
+
+<details>
+<summary><b>Something isn't working</b></summary>
+
+`kumi doctor` checks the install, sign-in, bridge and DAW connection, and says what to fix. `kumi report` writes a file to attach to an [issue](https://github.com/user1303836/kumi/issues).
+
+</details>
+
+[Guide](docs/en/KUMI_GUIDE.md) · [Commands, keys and screens](docs/en/KUMI_TUI.md) · [How Kumi changes your project](docs/en/KUMI_CHANGES.md) · [Changelog](CHANGELOG.md)
 
 ## Status
 
@@ -67,35 +117,7 @@ Kumi opens once it's installed and walks you through signing in and connecting t
 
 ## Development
 
-Build this checkout with Rust and Cargo:
-
-```sh
-cargo build --release --locked --workspace --bins
-cargo run --release -p kumi --                     # add bridge, doctor, or other arguments after --
-npm ci --prefix crates/kumi-agent/tests/support  # once: the official SDKs some tests run
-sh scripts/test-isolated.sh                        # no Live or sign-in needed
-```
-
-Existing `npm run setup` and `npm run kumi -- ...` commands remain available. With Cargo installed,
-these build and run this checkout. Without Cargo, they install and launch the matching published
-native release, keeping the same settings, sign-ins, conversations and library in `~/.kumi`.
-After that handoff, `kumi` runs the native application directly.
-
-| Folder | What's in it |
-| --- | --- |
-| `crates/kumi` | The native terminal app and `kumi` command |
-| `crates/kumi-agent` | The agent: its loop, sessions, memory, HISTORY and the MCP client |
-| `crates/kumi-ai`, `kumi-media`, `kumi-web`, `kumi-library`, `kumi-listening` | Model providers, audio analysis and voice, the web and video, the producer's library, and listening |
-| `daws/<daw>/kumi-daw-<daw>` | The integrations with Live, REAPER and Renoise |
-| `daws/ableton/ableton-mcp-server` | The native bridge, also usable by other MCP clients ([bridge guide](daws/ableton/ableton-mcp-server/README.md)) |
-| `daws/ableton/remote-script` | The bridge's Remote Script, which runs inside Live |
-| `daws/ableton/live-extension` | Kumi's Live extension (Live 12.4 and later) |
-| `daws/ableton/protocol` | The list of operations the bridge and the Remote Script share |
-| `daws/own/daw-mcp-server` | Kumi's host for REAPER and Renoise, which Kumi starts; also usable by other MCP clients |
-| `daws/reaper/reaper-kumi` | Kumi's REAPER extension |
-| `daws/renoise` | Kumi's Renoise tool |
-
-The [developer guide](docs/en/DEVELOPER_GUIDE.md) covers building, testing and releasing.
+To build Kumi from source, see [DEVELOPMENT.md](DEVELOPMENT.md) and the [developer guide](docs/en/DEVELOPER_GUIDE.md).
 
 ## License
 

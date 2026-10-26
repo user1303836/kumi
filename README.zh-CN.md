@@ -16,48 +16,98 @@
   <a href="README.md">English</a> · 简体中文 · <a href="README.ja.md">日本語</a>
 </p>
 
-**为 Ableton Live、REAPER 和 Renoise 打造、会学习你工作方式的录音室制作人代理。** 用平常的话告诉 Kumi 你想要什么，它就直接在你的工程里动手，从繁琐的杂活，到你一直没时间做的事：照着 YouTube 教程重建一个声音、让你的混音贴近参考曲、编写你描述的 Max for Live 设备，或者改造你指着的那个机架。每项修改都会出现在 HISTORY 中，大多数都有各自的撤销；整个计划在 Live 中只算一次撤销（Cmd-Z，Windows 上为 Ctrl-Z）。Kumi 会记住你保留下来的技巧，所以每次使用都更贴合你。在 REAPER 和 Renoise 中，它通过 Kumi 自己的扩展和工具工作，用的是各个 DAW 自己的说法。
+**Kumi 是一个通用 AI 代理，在你的 DAW 里与你并肩工作。** 它目前支持 Ableton Live、REAPER 和 Renoise，在每个 DAW 中的能力都一样：读取你的工程，几乎可以修改其中的任何东西，聆听结果，并学习你的声音、口味和习惯。你在终端里运行的聊天中用平常的话提出要求；Kumi 规划修改、执行修改，并把每一步连同撤销一起记在它的历史记录里。你用 Kumi 越久，它就越熟悉你的工作方式、你的偏好，以及你作为制作人的习惯。
 
 https://github.com/user-attachments/assets/f53fe0be-c9a9-476e-a1d5-efe3dc429526
 
 ## 快速开始
 
-需要 Ableton Live 12，运行在 macOS 13 或更高版本，或 Windows 10、11 上；或者 REAPER 7 及更高版本、Renoise 3.5 及更高版本，运行在 macOS、Windows 或 Linux 上。
+在 Mac 的终端或 Windows 的 PowerShell 中，一条命令即可开始。
 
-**macOS 或 Linux**（终端）：
+Mac 或 Linux：
 
 ```sh
 curl -fsSL https://github.com/user1303836/kumi/releases/latest/download/install.sh | sh
 ```
 
-**Windows**（PowerShell）：
+Windows：
 
 ```powershell
 irm https://github.com/user1303836/kumi/releases/latest/download/install.ps1 | iex
 ```
 
-安装完成后 Kumi 会自动启动，引导你登录并连接 Live。之后只需运行 `kumi`。使用 REAPER 或 Renoise 时，运行 `kumi --daw reaper` 或 `kumi --daw renoise`：Kumi 会装入它的扩展或工具，并打开这个 DAW（[详情](docs/zh-CN/KUMI_GUIDE.md#连接-reaper-或-renoise)）。遇到问题？`kumi doctor` 会告诉你该怎么修。
+按照 Kumi 的引导完成设置。
+
+之后，打开终端并输入 `kumi` 即可。
+
+> [!NOTE]
+> Kumi 在终端窗口中运行，但你不需要会任何命令。运行完安装的那一行，剩下的就是聊天。
+
+## 你可以让 Kumi 做什么
+
+- **照着教程做出声音。** 粘贴一个 YouTube 链接：Kumi 会观看视频，并在新轨道上搭建出其中展示的内容。
+- **修正混音。** 问一句“贝斯是不是太浑？”，Kumi 会聆听、找出打架的部分并修正，每次修改后都重新聆听。
+- **匹配参考曲。** 给它一首你喜欢的曲子：Kumi 会尝试几个版本，逐一与它对比打分，再精修最好的那个。
+- **制作设备。** 描述一个 Max for Live 效果器或乐器，Kumi 就会把它做出来并放到你的轨道上。
+- **找到你的声音。** “像这个一样带点颗粒感的军鼓”“我常用的人声效果链”：Kumi 了解你的采样、预设和工程。
+- **把声音画成地图。** `/map` 把你的采样和歌曲排列出来，相似的彼此相邻；指向一个点就能试听。把喜欢的声音收进调色板，当你说“从我的调色板里找一个更暗的底鼓”时，Kumi 就从中挑选，也可以把整个调色板作为一套鼓组载入。
+- **处理杂活。** 重命名、上色、路由、侧链、编组、冻结、并轨和导出。
+
+它在三个 DAW 中的工作方式相同，各用该 DAW 自己的说法：[在每个 DAW 中能做什么](docs/zh-CN/DAWS.md)。
+
+## 常见问题
+
+<details>
+<summary><b>需要会写代码吗？</b></summary>
+
+不需要。你用平常的话与 Kumi 交流，打字或说话都可以。需要代码的工作（Live 中的 Python，REAPER 和 Renoise 中的 Lua），Kumi 会自己编写并运行。
+
+</details>
+
+<details>
+<summary><b>它会弄坏我的工程吗？</b></summary>
+
+每项修改都会列在 Kumi 的历史记录中（“Tempo 120 → 124 BPM”），大多数都有各自的撤销。在 Live 中，每个请求也只算 Live 自身撤销中的一步；在大规模或带有删除的修改之前，Kumi 会复制一份你最后保存的 Set。
+
+</details>
+
+<details>
+<summary><b>支持哪些 DAW 和电脑？</b></summary>
+
+- Ableton Live 12，运行在 macOS 13 或更高版本，或 Windows 10、11 上
+- REAPER 7 及更高版本，运行在 macOS、Windows 或 Linux 上
+- Renoise 3.5 及更高版本，运行在 macOS、Windows 或 Linux 上
+
+装了不止一个时，设置会问你用哪一个；之后可以用 `/daw` 切换。
+
+</details>
+
+<details>
+<summary><b>它用什么 AI？要花多少钱？</b></summary>
+
+Kumi 是免费的开源软件（MIT）。模型由你选择：
+
+- **ChatGPT 套餐：** 用你的账户登录；Kumi 在你套餐的用量限制内工作。
+- **API 密钥：** Anthropic、OpenAI、Google Gemini、OpenRouter 以及[另外 20 家提供方](docs/zh-CN/KUMI_GUIDE.md#登录并选择模型)，由提供方计费。
+- **本地：** Ollama、LM Studio，或 llama.cpp、vLLM 等兼容 OpenAI 的服务器；所用硬件要能以较长的上下文（Kumi 会请求约 57k token）运行支持工具调用的模型。
+
+</details>
+
+<details>
+<summary><b>我的音频会离开我的电脑吗？</b></summary>
+
+音频在本地分析，模型拿到的是测量结果。你的素材库和音乐收藏也在本地学习。有 Gemini 或 OpenAI 的 API 密钥时，聆听模型还会听到它所判定修改的单声道片段（最长 10 秒）；`/slots listening off` 可以关闭它。其余内容见[隐私](docs/zh-CN/KUMI_GUIDE.md#隐私哪些内容会离开你的电脑)。
+
+</details>
+
+<details>
+<summary><b>遇到问题时</b></summary>
+
+`kumi doctor` 会检查安装、登录、桥接以及与 DAW 的连接，并告诉你该怎么修。`kumi report` 会生成一个文件，可以附在 [issue](https://github.com/user1303836/kumi/issues) 中。
+
+</details>
 
 [指南](docs/zh-CN/KUMI_GUIDE.md) · [命令、按键与界面](docs/zh-CN/KUMI_TUI.md) · [Kumi 如何修改你的工程](docs/zh-CN/KUMI_CHANGES.md) · [更新日志（英文）](CHANGELOG.md)
-
-## 它能做什么
-
-- **修改工程里几乎任何东西：** 速度、音阶与律动；调音台、路由与侧链；轨道、场景与片段；音符与 MIDI 变换；设备、机架及其参数。
-- **聆听：** 混音、采样或它自己并轨出的音频的响度、音色平衡、声像宽度、速度与调性，以及你的混音与参考曲的差别。
-- **判定自己的修改：** 每次修改后把电平拉回应在的位置（用最后一个 Live 的 Limiter，没有就用它加上的 Utility），再听修改前后，只有目标项变好、且其他方面没有变差时才保留修改。`/loop` 按轮次工作直到达成目标，`/goal` 跨多个回合坚持一个目标。
-- **测量一种风格：** 文件、文件夹、YouTube 或 Spotify 链接，或者“Burial”“dub techno”这样的词，都会变成示例曲目和一份带有该风格范围的测量轮廓，并保存下来供下次使用。
-- **学习你的口味：** 在你的电脑上从你自己的音乐中学习，并在请求没有指定风格时（“给我做个 beat”）以此为依据。`/music` 可以查看和管理。
-- **匹配参考曲：** 为一个声音做出几个不同的版本，逐一与参考曲对比打分，再精修最好的那个。`/loop` 会一直做下去，直到达到目标。
-- **观看教程：** 观看 YouTube 或本地文件中的教程，然后在新轨道上搭建出教程里展示的内容。
-- **播放、录音与重采样**，让你听到它做出来的东西，或检查它自己的工作。
-- **全面掌控 Live：** 按你的要求删除内容，把 MIDI 直接写进编曲视图，离线渲染，在 Live 内运行 Python 来处理其他工具够不着的地方，并回答你在 Live 中右键点击的对象（“Ask Kumi about this”）。几百条轨道的大工程也一样快。
-- **制作 Max for Live 设备：** 按你用平常的话给出的描述制作设备（MIDI 效果器、音频效果器和乐器），并放到你的轨道上。
-- **查找资料：** 搜索网络，阅读网页、PDF、说明书和 GitHub 上的代码，从而能照着读到的资料做出类似的效果器。
-- **显示你在哪里：** FOCUS 跟随你在 Live 中触碰的对象，显示为设备树、钢琴卷帘，或 Session、Arrangement 视图的条带。点击某个设备即可指向它：“这个 Saturator 太刺耳了”。
-- **记住：** 关于你和每个工程的笔记、从你保留的内容中学到的技巧，以及可重放的配方。每次保存都会显示，点一下就能让它忘掉。
-- **保存对话：** 为每个工程保存对话，并告诉你它关闭期间发生了哪些变化。`/share` 可把对话存为网页发给别人，密钥和路径会被去除。
-- **也能在 REAPER 和 Renoise 中工作：** 在 REAPER 中是轨道、对象（item）与 take、FX 及其参数、包络和路由；在 Renoise 中是模式及其行、序列、乐器、采样、乐句和 DSP 链。每项修改都有撤销，它在那里也会聆听和判定，FOCUS 跟随该 DAW 自己的视图（[在每个 DAW 中能做什么](docs/zh-CN/DAWS.md)、[能修改什么](docs/zh-CN/KUMI_CHANGES.md#reaper-与-renoise)）。
-- **用你的模型：** 使用 ChatGPT 登录，或使用 OpenAI、Anthropic、OpenCode 的 API 密钥。
 
 ## 当前状态
 
@@ -68,34 +118,7 @@ REAPER 7.82 和 Renoise 3.5.4 已在 macOS 上验证。在 Windows 和 Linux 上
 
 ## 开发
 
-使用 Rust 和 Cargo 构建当前检出的代码：
-
-```sh
-cargo build --release --locked --workspace --bins
-cargo run --release -p kumi --                     # 在 -- 后添加 bridge、doctor 等参数
-npm ci --prefix crates/kumi-agent/tests/support  # 只需一次：部分测试运行的官方 SDK
-sh scripts/test-isolated.sh                        # 无需 Live 或登录
-```
-
-原有的 `npm run setup` 和 `npm run kumi -- ...` 仍可使用。有 Cargo 时，它们构建并运行当前检出的代码。
-没有 Cargo 时，它们安装并运行对应版本的已发布原生应用。`~/.kumi` 中的设置、登录信息、对话和素材库
-保持原样。迁移后，运行 `kumi` 即可直接启动原生应用。
-
-| 文件夹 | 内容 |
-| --- | --- |
-| `crates/kumi` | 终端应用和 `kumi` 命令 |
-| `crates/kumi-agent` | Kumi 的代理：循环、会话、记忆、HISTORY 和 MCP 客户端 |
-| `crates/kumi-ai`、`kumi-media`、`kumi-web`、`kumi-library`、`kumi-listening` | 模型提供方、音频分析与语音输入、网络与视频、制作人的素材库，以及聆听 |
-| `daws/<daw>/kumi-daw-<daw>` | 与 Live、REAPER 和 Renoise 的集成 |
-| `daws/ableton/ableton-mcp-server` | 桥接：由 Kumi 启动的本地 MCP 服务器，也可单独与其他 MCP 客户端配合使用（[桥接指南（英文）](daws/ableton/ableton-mcp-server/README.md)） |
-| `daws/ableton/remote-script` | 桥接的 Remote Script，运行在 Live 内部 |
-| `daws/ableton/live-extension` | Kumi 的 Live 扩展（Live 12.4 及更高版本） |
-| `daws/ableton/protocol` | 桥接与 Remote Script 共用的操作列表 |
-| `daws/own/daw-mcp-server` | Kumi 为 REAPER 和 Renoise 准备的宿主程序，由 Kumi 启动；其他 MCP 客户端也能使用 |
-| `daws/reaper/reaper-kumi` | Kumi 的 REAPER 扩展 |
-| `daws/renoise` | Kumi 的 Renoise 工具 |
-
-[开发者指南](docs/zh-CN/DEVELOPER_GUIDE.md)介绍构建、测试与发布。
+要从源代码构建 Kumi，请参阅 [DEVELOPMENT.md](DEVELOPMENT.md)（英文）和[开发者指南](docs/zh-CN/DEVELOPER_GUIDE.md)。
 
 ## 许可证
 
