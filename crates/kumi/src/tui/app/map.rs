@@ -62,9 +62,10 @@ impl TuiApp {
             let mut state = self.0.state.borrow_mut();
             let palette: std::collections::HashSet<String> =
                 state.palette.as_ref().map(|palette| palette.files.iter().map(|file| file.path.clone()).collect()).unwrap_or_default();
+            let reached = state.palette.as_ref().map(|palette| palette.reached.iter().cloned().collect()).unwrap_or_default();
             if let Some(view) = state.map.as_mut() {
                 view.loaded(made);
-                view.in_palette(palette);
+                view.in_palette(palette, reached);
             }
         }
         self.0.scheduler.request();

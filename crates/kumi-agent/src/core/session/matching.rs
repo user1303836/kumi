@@ -241,7 +241,13 @@ impl Session {
         let note = if run.is_none() && explicit.is_none() && wants_loop(&text) { format!("{note}{LOOP_HINT}") } else { note };
         // A conversation carried on in another Set says so once, with the first request there.
         let moved = self.0.state.borrow_mut().next_note.take().unwrap_or_default();
-        let note = format!("{note}{moved}");
+        // The session's palette, each turn: what's in it, and how far Kumi may look past it.
+        let palette = match self.0.palettes.clone() {
+            Some(palettes) => palettes.brief().await,
+            None => String::new(),
+        };
+        self.assert_current(&op)?;
+        let note = format!("{note}{moved}{palette}");
         {
             let mut s = self.0.state.borrow_mut();
             if run.is_none() {

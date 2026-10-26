@@ -399,6 +399,7 @@ impl SessionController for Control {
                 reach: 0,
                 files: vec![],
                 excluded: vec![],
+                reached: vec![],
             });
             for file in &files {
                 if !view.files.iter().any(|kept| kept.path == file.path) {

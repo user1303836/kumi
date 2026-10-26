@@ -718,8 +718,11 @@ pub struct MapView {
     /// paths), marked on the map.
     gathers: bool,
     palette: HashSet<String>,
-    /// The palette's points on each map, by their place in its layer.
+    /// What a loose palette brings in (their paths), its halo on the map.
+    reached: HashSet<String>,
+    /// The palette's points on each map, and those it brings in, by their place in its layer.
     marked: [Vec<u32>; 2],
+    halo: [Vec<u32>; 2],
     /// Where the left button went down (and whether with ctrl), while that may become a box dragged; the box, corner to
     /// corner, once it has.
     pressed: Option<(i32, i32, bool)>,
@@ -754,7 +757,9 @@ impl MapView {
             area: Rect::default(),
             gathers: false,
             palette: HashSet::new(),
+            reached: HashSet::new(),
             marked: [vec![], vec![]],
+            halo: [vec![], vec![]],
             pressed: None,
             boxed: None,
             told: None,
@@ -769,22 +774,23 @@ impl MapView {
         self
     }
 
-    /// The session's palette's files (by their paths), marked on the map.
-    pub fn in_palette(&mut self, paths: HashSet<String>) {
-        self.palette = paths;
+    /// The session's palette's files, and what a loose one brings in (by their paths), marked on the map.
+    pub fn in_palette(&mut self, paths: HashSet<String>, reached: HashSet<String>) {
+        (self.palette, self.reached) = (paths, reached);
         self.mark_palette();
     }
 
-    /// Which points are the palette's, on each map: worked out once, not each frame.
+    /// Which points are the palette's, and which it brings in, on each map: worked out once, not each frame.
     fn mark_palette(&mut self) {
         let Some(data) = self.data.clone() else { return };
-        self.marked = [&data.sounds, &data.songs].map(|layer| {
-            let paths = &self.palette;
+        let on = |layer: &Layer, paths: &HashSet<String>| -> Vec<u32> {
             if paths.is_empty() {
                 return vec![];
             }
             (0..layer.points.len() as u32).filter(|at| paths.contains(&layer.points[*at as usize].path)).collect()
-        });
+        };
+        self.marked = [on(&data.sounds, &self.palette), on(&data.songs, &self.palette)];
+        self.halo = [on(&data.sounds, &self.reached), on(&data.songs, &self.reached)];
     }
 
     /// What putting points into the palette did, said under the map (with how many were left out, when Enter put in only
@@ -1426,8 +1432,12 @@ impl MapView {
                 screen.put(x + gap, y, &name, &Style { bg: Some(palette::GROUND), ..Style::fg(color) });
             }
         }
-        // The palette's points (•), and the points picked (●) over them.
+        // What a loose palette brings in (·), the palette's points (•), and the points picked (●) over them.
         let shown = |at: &u32| frame.shows(frame.dot(spot(&layer.points[*at as usize])));
+        for at in self.halo[self.tab].iter().filter(|at| !view.picked.contains(at)).filter(|at| shown(at)) {
+            let (x, y) = cell(*at);
+            screen.put(x, y, "·", &Style::fg(palette::ACCENT));
+        }
         for at in self.marked[self.tab].iter().filter(|at| !view.picked.contains(at)).filter(|at| shown(at)) {
             let (x, y) = cell(*at);
             screen.put(x, y, "•", &Style { bold: true, ..Style::fg(palette::ACCENT) });
@@ -2066,20 +2076,29 @@ mod tests {
     #[test]
     fn the_palettes_points_and_the_picked_ones_are_marked_and_what_gathering_did_is_said() {
         let mut map = gathering(&[(0.3, 0.3, 0), (0.7, 0.7, 1), (0.5, 0.5, 0)]);
-        map.in_palette(HashSet::from(["/s/p0.wav".to_string()]));
+        map.in_palette(HashSet::from(["/s/p0.wav".to_string()]), HashSet::from(["/s/p2.wav".to_string()]));
         map.views[0].picked.insert(1);
         map.version += 1;
         map.told("Added 2 sounds to Drums.".into());
         let mut screen = Screen::new(100, 30);
         map.draw(&mut screen, &mut |_, _, _, _| 0);
         // Each mark on its point's cell: as braille rounds a dot, that's the cell `cell_of` works out or one beside it.
-        let (in_palette, picked) = (cell_of(&map, 0), cell_of(&map, 1));
-        let lines = screen.lines();
-        let marked = |(x, y): (i32, i32), mark: char| {
-            (y - 1..=y + 1).any(|row| (x - 1..=x + 1).any(|column| lines[row as usize].chars().nth(column as usize) == Some(mark)))
+        let (in_palette, picked, reached) = (cell_of(&map, 0), cell_of(&map, 1), cell_of(&map, 2));
+        let marked = |lines: &[String], (x, y): (i32, i32), mark: char| {
+            (y - 1..=y + 1).any(|row| {
+                (x - 1..=x + 1).any(|column| lines.get(row as usize).and_then(|line| line.chars().nth(column as usize)) == Some(mark))
+            })
         };
-        assert!(marked(in_palette, '•') && marked(picked, '●'), "{}", lines.join("\n"));
+        let lines = screen.lines();
+        assert!(marked(&lines, in_palette, '•') && marked(&lines, picked, '●'), "{}", lines.join("\n"));
         assert!(screen.lines()[28].contains("Added 2 sounds to Drums."), "{}", screen.lines()[28]);
+        // The chosen point (p2, the middle one) is drawn over its halo; with none chosen, the halo shows.
+        assert!(marked(&lines, reached, '◉'), "{}", lines.join("\n"));
+        map.views[0].chosen = None;
+        let mut halo = Screen::new(100, 30);
+        map.draw(&mut halo, &mut |_, _, _, _| 0);
+        assert!(marked(&halo.lines(), reached, '·'), "{}", halo.lines().join("\n"));
+        map.views[0].chosen = Some(2);
         // The next key: said no more.
         map.on_text("+");
         let mut screen = Screen::new(100, 30);

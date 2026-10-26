@@ -22,6 +22,7 @@ pub mod mapping;
 pub mod match_run;
 pub mod memory;
 pub mod palette;
+pub mod palette_tool;
 pub mod phrases;
 pub mod plan;
 pub mod plan_stream;

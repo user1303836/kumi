@@ -2,38 +2,60 @@
 //! asking Kumi), kept by name in Kumi's database and shared by every session. A session works with one at a time, its
 //! palette: the first thing gathered makes one when there's none, and /palette names, lists and chooses them. The words
 //! /palette answers with are made here, the same in every app.
+//!
+//! Kumi reads the palette each turn (`brief`) and works with it through the palette tool. A strict palette keeps Kumi to
+//! its own sounds; a loose one (reach k) brings each sound's k nearest in the library, by the numbers the search
+//! compares, ranked by the producer's taste: the sounds their own projects use first.
 
 use crate::core::store_client::StoreClient;
-use futures::{future::LocalBoxFuture, FutureExt};
+use async_trait::async_trait;
 use kumi_common::time::now_ms;
-use kumi_library::Library;
+use kumi_library::{search::SoundIndex, Library};
 use kumi_store::palettes::{self, Item, ItemKind, Palette};
 use kumi_types::errors::RuntimeError;
 use serde::{Deserialize, Serialize};
-use std::{cell::RefCell, rc::Rc};
+use std::{
+    cell::RefCell,
+    collections::{BTreeMap, HashMap, HashSet},
+    rc::Rc,
+};
 
-/// Where sounds that moved are now, by their file's name and size: each one's path and modification time, or None.
-pub type Refind = Rc<dyn Fn(Vec<(String, i64)>) -> LocalBoxFuture<'static, Vec<Option<(String, i64)>>>>;
+/// What a palette works with in the producer's library: sounds that moved found again, the library's sounds (their
+/// numbers, for a loose palette's nearest), and how many of the producer's own projects use each sound, for taste.
+#[async_trait(?Send)]
+pub trait PaletteLibrary {
+    /// Sounds that moved, by their file's name and size: each one's path and modification time now, or None.
+    async fn refind(&self, wanted: Vec<(String, i64)>) -> Vec<Option<(String, i64)>>;
+    /// The library's sounds as the search compares them: None when they can't be read.
+    async fn index(&self) -> Option<Rc<SoundIndex>>;
+    /// How many of the producer's projects use each sound, by its path.
+    async fn used(&self) -> HashMap<String, usize>;
+}
 
-/// Sounds that moved, found again in the library: a file of the same name and size that's still there.
-pub fn library_refind(library: Rc<Library>) -> Refind {
-    Rc::new(move |wanted: Vec<(String, i64)>| {
-        let library = library.clone();
-        async move {
-            let Ok(index) = library.sound_index().await else { return vec![None; wanted.len()] };
-            wanted
-                .iter()
-                .map(|(name, size)| {
-                    index
-                        .entries
-                        .iter()
-                        .find(|entry| entry.gone != Some(true) && entry.size as i64 == *size && file_name(&entry.path) == name)
-                        .map(|entry| (entry.path.clone(), entry.mtime))
-                })
-                .collect()
-        }
-        .boxed_local()
-    })
+/// The producer's library, for palettes.
+pub struct LibrarySounds(pub Rc<Library>);
+
+#[async_trait(?Send)]
+impl PaletteLibrary for LibrarySounds {
+    async fn refind(&self, wanted: Vec<(String, i64)>) -> Vec<Option<(String, i64)>> {
+        let Some(index) = self.index().await else { return vec![None; wanted.len()] };
+        wanted
+            .iter()
+            .map(|(name, size)| {
+                index
+                    .entries
+                    .iter()
+                    .find(|entry| entry.gone != Some(true) && entry.size as i64 == *size && file_name(&entry.path) == name)
+                    .map(|entry| (entry.path.clone(), entry.mtime))
+            })
+            .collect()
+    }
+    async fn index(&self) -> Option<Rc<SoundIndex>> {
+        self.0.sound_index().await.ok()
+    }
+    async fn used(&self) -> HashMap<String, usize> {
+        self.0.samples_in_sets().await
+    }
 }
 
 /// How far a loose palette reaches when /palette loose names no number: each sound brings its five nearest.
@@ -88,6 +110,9 @@ pub struct PaletteView {
     pub files: Vec<PaletteFile>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub excluded: Vec<PaletteFile>,
+    /// What a loose palette brings in, by path (the app marks them on the map): none when it's strict.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub reached: Vec<String>,
 }
 
 impl PaletteView {
@@ -122,11 +147,29 @@ impl Gathering {
     }
 }
 
+/// A sound a loose palette brings in: one of its sounds' nearest that isn't its own.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Reached {
+    pub path: String,
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub class: Option<String>,
+    /// The palette's sounds it's among the nearest of, by name.
+    pub near: Vec<String>,
+    /// How many of the producer's projects use it.
+    pub used: usize,
+    /// How far it is from the nearest of them, in the numbers the search compares.
+    pub apart: f32,
+}
+
 /// A session's palettes: kumi.db's, and which one this session works with.
 pub struct Palettes {
     store: StoreClient,
-    /// Where a sound that moved is found again (by its name and size).
-    refind: Option<Refind>,
+    /// The producer's library: where a sound that moved is found again (by its name and size), and what a loose
+    /// palette brings in.
+    library: Option<Rc<dyn PaletteLibrary>>,
+    /// What the palette brought in last, and what it was worked out for (its files, its excluded sounds, its reach).
+    reached: RefCell<Option<(String, Rc<Vec<Reached>>)>>,
     current: RefCell<Option<String>>,
     /// Told the palette as it is after each change (None: there's none now).
     on_change: Rc<dyn Fn(Option<PaletteView>)>,
@@ -137,8 +180,8 @@ fn failed(error: kumi_store::StoreError) -> RuntimeError {
 }
 
 impl Palettes {
-    pub fn new(store: StoreClient, refind: Option<Refind>, on_change: Rc<dyn Fn(Option<PaletteView>)>) -> Palettes {
-        Palettes { store, refind, current: RefCell::new(None), on_change }
+    pub fn new(store: StoreClient, library: Option<Rc<dyn PaletteLibrary>>, on_change: Rc<dyn Fn(Option<PaletteView>)>) -> Palettes {
+        Palettes { store, library, reached: RefCell::new(None), current: RefCell::new(None), on_change }
     }
 
     /// The session's palette, with its files: None before one is made or chosen.
@@ -172,8 +215,8 @@ impl Palettes {
         };
         let mut items = items;
         let missing: Vec<usize> = (0..items.len()).filter(|at| gone[*at] && items[*at].kind == ItemKind::Sound).collect();
-        let Some(refind) = self.refind.as_ref().filter(|_| !missing.is_empty()) else { return items };
-        let found = refind(missing.iter().map(|at| (file_name(&items[*at].path).to_string(), items[*at].size)).collect()).await;
+        let Some(library) = self.library.as_ref().filter(|_| !missing.is_empty()) else { return items };
+        let found = library.refind(missing.iter().map(|at| (file_name(&items[*at].path).to_string(), items[*at].size)).collect()).await;
         for (at, now) in missing.into_iter().zip(found) {
             let Some((path, mtime)) = now else { continue };
             let item = &items[at];
@@ -323,11 +366,213 @@ impl Palettes {
         self.store.read(move |connection| palettes::named(connection, &wanted)).await.map_err(failed)
     }
 
-    /// The app hears the palette as it is now.
+    /// What the session's palette brings in when it's loose: each of its sounds' `reach` nearest in the library (none of
+    /// its own or those it excludes), the ones the producer's own projects use first, then those near more of its sounds,
+    /// then the nearest. Worked out again only when the palette changed.
+    pub async fn reached(&self) -> Result<Rc<Vec<Reached>>, RuntimeError> {
+        let Some(view) = self.view().await? else { return Ok(Rc::default()) };
+        self.reached_for(&view).await
+    }
+
+    async fn reached_for(&self, view: &PaletteView) -> Result<Rc<Vec<Reached>>, RuntimeError> {
+        let Some(library) = self.library.clone().filter(|_| view.reach > 0) else { return Ok(Rc::default()) };
+        let key = format!(
+            "{} {} {:?} {:?}",
+            view.id,
+            view.reach,
+            view.files.iter().map(|file| &file.path).collect::<Vec<_>>(),
+            view.excluded.iter().map(|file| &file.path).collect::<Vec<_>>()
+        );
+        if let Some((kept, reached)) = self.reached.borrow().as_ref() {
+            if *kept == key {
+                return Ok(reached.clone());
+            }
+        }
+        let Some(index) = library.index().await else { return Ok(Rc::default()) };
+        let used = library.used().await;
+        let reached = Rc::new(reach_of(view, &index, &used).await);
+        *self.reached.borrow_mut() = Some((key, reached.clone()));
+        Ok(reached)
+    }
+
+    /// What Kumi's turn is told of the session's palette (nothing without one, or with nothing in it): its name, its
+    /// sounds by class, and how far Kumi may look past them.
+    pub async fn brief(&self) -> String {
+        let Some(view) = self.view().await.ok().flatten().filter(|view| !view.files.is_empty()) else { return String::new() };
+        let mut classes: BTreeMap<&str, usize> = BTreeMap::new();
+        for file in &view.files {
+            *classes.entry(file.class.as_deref().unwrap_or(if file.song { "song" } else { "other" })).or_insert(0) += 1;
+        }
+        let mut classes: Vec<(&str, usize)> = classes.into_iter().collect();
+        classes.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(b.0)));
+        let classes: Vec<String> = classes.into_iter().map(|(class, count)| format!("{count} {class}")).collect();
+        let count = view.files.len();
+        let mode = match view.reach {
+            0 => "It's strict: when they ask for sounds, use these (palette lists and searches them), and look further only \
+                  when they ask you to."
+                .to_string(),
+            reach => format!(
+                "It's loose: these, and each one's {reach} nearest in their library (palette neighbours, the ones their own \
+                 projects use first). When you use one of those, say which, and offer to add it to the palette."
+            ),
+        };
+        let excluded = match view.excluded.len() {
+            0 => String::new(),
+            1 => " Never use the sound it excludes.".into(),
+            n => format!(" Never use the {n} sounds it excludes."),
+        };
+        format!(
+            "\n\n[Kumi] The producer's palette, {}: {} ({}). {mode}{excluded}",
+            view.name.replace('<', "‹").replace('>', "›"),
+            counted(count),
+            classes.join(", ")
+        )
+    }
+
+    /// Sounds into the session's palette by their paths (from the palette tool): named and classed as the library has
+    /// them, else by their file's name. What happened, as gathering says it.
+    pub async fn add_paths(&self, paths: &[String]) -> Result<Gathering, RuntimeError> {
+        let index = match &self.library {
+            Some(library) => library.index().await,
+            None => None,
+        };
+        let gathered = paths
+            .iter()
+            .map(|path| {
+                let row =
+                    index.as_ref().and_then(|index| index.entries.iter().position(|entry| entry.path == *path).map(|row| (index, row)));
+                Gathered {
+                    path: path.clone(),
+                    name: row.map_or_else(|| file_stem(path).to_string(), |(index, row)| index.name(row).to_string()),
+                    song: false,
+                    class: row.and_then(|(index, row)| index.entries[row].r#class).map(|class| class.as_str().to_string()),
+                }
+            })
+            .collect();
+        self.gather(gathered).await
+    }
+
+    /// Sounds out of the session's palette by their paths: how many it had.
+    pub async fn remove_paths(&self, paths: &[String]) -> Result<usize, RuntimeError> {
+        let Some(view) = self.view().await? else { return Ok(0) };
+        let id = view.id.clone();
+        let keys: Vec<(String, i64, i64)> =
+            view.files.iter().filter(|file| paths.contains(&file.path)).map(|file| (file.path.clone(), file.size, file.mtime)).collect();
+        let removed = self
+            .store
+            .write(move |connection| {
+                let mut removed = 0;
+                for (path, size, mtime) in &keys {
+                    removed += usize::from(palettes::remove(connection, &id, (path, *size, *mtime), now_ms())?);
+                }
+                Ok(removed)
+            })
+            .await
+            .map_err(failed)?;
+        if removed > 0 {
+            self.changed().await;
+        }
+        Ok(removed)
+    }
+
+    /// Sounds the session's palette never brings in, by their paths (one of its own stops being one): how many.
+    pub async fn exclude_paths(&self, paths: &[String]) -> Result<usize, RuntimeError> {
+        let Some(view) = self.view().await? else { return Ok(0) };
+        let now = now_ms();
+        let items: Vec<Item> = tokio::task::spawn_blocking({
+            let paths = paths.to_vec();
+            move || {
+                paths
+                    .into_iter()
+                    .map(|path| item_of(Gathered { name: file_stem(&path).to_string(), path, song: false, class: None }, now))
+                    .collect()
+            }
+        })
+        .await
+        .map_err(|error| RuntimeError::plain(error.to_string()))?;
+        // One of its own files: the same file, by the size and time the palette has for it.
+        let items: Vec<Item> = items
+            .into_iter()
+            .map(|mut item| {
+                if let Some(own) = view.files.iter().find(|file| file.path == item.path) {
+                    (item.size, item.mtime, item.name, item.class) = (own.size, own.mtime, own.name.clone(), own.class.clone());
+                }
+                item
+            })
+            .collect();
+        let (id, count) = (view.id.clone(), items.len());
+        self.store
+            .write(move |connection| {
+                for item in &items {
+                    palettes::exclude(connection, &id, item, true, now)?;
+                }
+                Ok(())
+            })
+            .await
+            .map_err(failed)?;
+        self.changed().await;
+        Ok(count)
+    }
+
+    /// The app hears the palette as it is now, with what it brings in.
     async fn changed(&self) {
-        let view = self.view().await.ok().flatten();
+        let mut view = self.view().await.ok().flatten();
+        if let Some(view) = view.as_mut() {
+            view.reached =
+                self.reached_for(view).await.map(|reached| reached.iter().map(|sound| sound.path.clone()).collect()).unwrap_or_default();
+        }
         (self.on_change)(view);
     }
+}
+
+/// Each of `palette`'s sounds' `reach` nearest in `index` (none of the palette's own, none it excludes), ranked by taste
+/// (how many of the producer's projects use each), then by how many of the palette's sounds call it near, then by how near.
+/// Read on Kumi's thread a sound at a time, the thread's other work going on between them.
+async fn reach_of(palette: &PaletteView, index: &SoundIndex, used: &HashMap<String, usize>) -> Vec<Reached> {
+    let reach = palette.reach as usize;
+    if reach == 0 {
+        return vec![];
+    }
+    let own: HashSet<&str> = palette.files.iter().chain(&palette.excluded).map(|file| file.path.as_str()).collect();
+    let measured: Vec<(usize, &[f32])> = index.compared().collect();
+    let place: HashMap<&str, usize> = measured.iter().enumerate().map(|(at, (row, _))| (index.entries[*row].path.as_str(), at)).collect();
+    let mut found: HashMap<usize, Reached> = HashMap::new();
+    for file in palette.files.iter().filter(|file| !file.song) {
+        let Some(at) = place.get(file.path.as_str()).copied() else { continue };
+        let here = measured[at].1;
+        let mut nearest: Vec<(f32, usize)> = Vec::with_capacity(reach + 1);
+        for (other, (row, there)) in measured.iter().enumerate() {
+            if other == at || own.contains(index.entries[*row].path.as_str()) || index.entries[*row].gone == Some(true) {
+                continue;
+            }
+            let apart: f32 = here.iter().zip(*there).map(|(a, b)| (a - b) * (a - b)).sum();
+            if nearest.len() < reach || apart < nearest[nearest.len() - 1].0 {
+                let place = nearest.partition_point(|(seen, _)| *seen <= apart);
+                nearest.insert(place, (apart, other));
+                nearest.truncate(reach);
+            }
+        }
+        for (apart, other) in nearest {
+            let row = measured[other].0;
+            let entry = &index.entries[row];
+            let reached = found.entry(other).or_insert_with(|| Reached {
+                path: entry.path.clone(),
+                name: index.name(row).to_string(),
+                class: entry.r#class.map(|class| class.as_str().to_string()),
+                near: vec![],
+                used: used.get(&entry.path).copied().unwrap_or(0),
+                apart: f32::INFINITY,
+            });
+            reached.near.push(file.name.clone());
+            reached.apart = reached.apart.min(apart.sqrt());
+        }
+        tokio::task::yield_now().await;
+    }
+    let mut reached: Vec<Reached> = found.into_values().collect();
+    reached.sort_by(|a, b| {
+        b.used.cmp(&a.used).then(b.near.len().cmp(&a.near.len())).then(a.apart.total_cmp(&b.apart)).then(a.path.cmp(&b.path))
+    });
+    reached
 }
 
 const USAGE: &str = "/palette lists your palettes; /palette new <name>, use <name>, rename <name> or forget <name>; /palette strict keeps Kumi to its own sounds, /palette loose [k] lets each bring its k nearest.";
@@ -340,6 +585,12 @@ fn missing(name: &str) -> String {
 /// A path's file name, whichever way its folders are written.
 fn file_name(path: &str) -> &str {
     path.rsplit(['/', '\\']).next().unwrap_or(path)
+}
+
+/// A path's file name without its extension: what a sound is called when nothing names it.
+fn file_stem(path: &str) -> &str {
+    let name = file_name(path);
+    name.rsplit_once('.').map_or(name, |(stem, _)| stem)
 }
 
 /// "1 sound", "12 sounds".
@@ -359,6 +610,7 @@ fn view_of(palette: &Palette, items: &[Item]) -> PaletteView {
         reach: palette.reach,
         files: files.into_iter().map(PaletteFile::from).collect(),
         excluded: excluded.into_iter().map(PaletteFile::from).collect(),
+        reached: vec![],
     }
 }
 

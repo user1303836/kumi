@@ -563,6 +563,19 @@ impl Library {
         let (taste, forgotten) = self.read_taste().await;
         Ok(taste.map(|taste| taste::taste_instructions_for(profile, &taste, &forgotten)).unwrap_or_default())
     }
+    /// How many of the producer's Sets (those the library learned) use each sample, by its path: a sound's taste.
+    pub async fn samples_in_sets(&self) -> HashMap<String, usize> {
+        let sets = LibraryAccess::sets(self).await.unwrap_or_default();
+        let mut used: HashMap<String, usize> = HashMap::new();
+        for set in sets.iter().filter_map(|entry| entry.set.as_ref()) {
+            let samples: HashSet<&String> =
+                set.tracks.iter().chain(&set.returns).chain(set.main.iter()).flat_map(|track| &track.samples).collect();
+            for sample in samples {
+                *used.entry(sample.clone()).or_insert(0) += 1;
+            }
+        }
+        used
+    }
     pub async fn taste(&self) -> Result<Vec<TasteLine>, RuntimeError> {
         let (taste, forgotten) = self.read_taste().await;
         Ok(taste.map(|t| t.lines.into_iter().filter(|l| !forgotten.contains(&l.id)).collect()).unwrap_or_default())

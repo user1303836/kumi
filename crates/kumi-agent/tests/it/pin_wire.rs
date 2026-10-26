@@ -765,6 +765,7 @@ fn events() -> Vec<SessionEvent> {
             reach: 5,
             files: vec![file("/Samples/Kicks/Kick 808.wav", "Kick 808", "kick"), file("/Samples/Hats/Hat 12.wav", "Hat 12", "hat")],
             excluded: vec![file("/Samples/Kicks/Kick Boom.wav", "Kick Boom", "kick")],
+            reached: vec!["/Samples/Kicks/Kick 909.wav".into()],
         }),
     });
     events.push(SessionEvent::Palette { palette: None });

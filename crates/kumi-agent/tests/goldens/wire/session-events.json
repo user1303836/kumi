@@ -1910,6 +1910,9 @@
           "song": false,
           "class": "kick"
         }
+      ],
+      "reached": [
+        "/Samples/Kicks/Kick 909.wav"
       ]
     }
   },
