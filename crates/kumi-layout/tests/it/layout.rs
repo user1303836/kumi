@@ -128,6 +128,38 @@ fn past_the_landmarks_every_other_point_sits_among_its_nearest() {
     assert_eq!(layout(count, 40, &point, &Layout { threads: 1, ..how.clone() }), places, "the same with one thread");
 }
 
+/// How far apart the groups' middles sit on the map, against how far each group's points sit from its middle.
+fn parted(places: &[[f32; 2]], groups: usize) -> f64 {
+    let middles: Vec<[f64; 2]> = (0..groups)
+        .map(|group| {
+            let mine: Vec<&[f32; 2]> = places.iter().skip(group).step_by(groups).collect();
+            let sum = mine.iter().fold([0f64; 2], |sum, place| [sum[0] + place[0] as f64, sum[1] + place[1] as f64]);
+            [sum[0] / mine.len() as f64, sum[1] / mine.len() as f64]
+        })
+        .collect();
+    let apart = |a: [f64; 2], b: [f64; 2]| ((a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2)).sqrt();
+    let between = (0..groups).flat_map(|a| (a + 1..groups).map(move |b| (a, b))).map(|(a, b)| apart(middles[a], middles[b])).sum::<f64>()
+        / (groups * (groups - 1) / 2) as f64;
+    let within = places.iter().enumerate().map(|(at, place)| apart([place[0] as f64, place[1] as f64], middles[at % groups])).sum::<f64>()
+        / places.len() as f64;
+    between / within
+}
+
+#[test]
+fn the_maps_shape_parts_groups_further_than_plain_t_sne_without_drawing_them_to_points() {
+    // The same six groups (sharing no neighbours) laid out as Kumi's map is and as plain t-SNE would (no pull after the
+    // first rounds, t-SNE's tail, no floor): Kumi's keeps each group tighter against the room between them, and with no
+    // floor the pull draws each to a point.
+    let (groups, count) = (6, 360);
+    let read = |at: usize, buffer: &mut [f32]| grouped(at, 40, groups, 0.25, buffer);
+    let shaped = parted(&layout(count, 40, &read, &how(2)), groups);
+    let plain = parted(&layout(count, 40, &read, &Layout { pull: 1., tail: 1., floor: 0., ..how(2) }), groups);
+    assert!(shaped > plain * 1.5, "Kumi's {shaped:.2}, plain t-SNE's {plain:.2}");
+    assert!(shaped < plain * 20., "Kumi's {shaped:.2} against plain t-SNE's {plain:.2}: groups drawn to points");
+    let floorless = parted(&layout(count, 40, &read, &Layout { floor: 0., ..how(2) }), groups);
+    assert!(floorless > plain * 100., "with no floor {floorless:.2}, plain t-SNE's {plain:.2}");
+}
+
 #[test]
 fn a_few_points_still_have_places() {
     let read = |at: usize, buffer: &mut [f32]| grouped(at, 8, 2, 0.1, buffer);

@@ -31,8 +31,9 @@ pub fn half_blocks(scene: &Scene, cols: usize, rows: usize, ground: Rgb) -> Vec<
         .collect()
 }
 
-/// The scene's lines and dots in braille, `cols` wide and `rows` tall: a cell takes the colour of the last line
-/// through it (what's there now over what came before), or the colour most of its dots have.
+/// The scene's lines and dots in braille, `cols` wide and `rows` tall, a dot a disc of braille's dots as wide as it is
+/// (one under a dot's width): a cell takes the colour of the last line through it (what's there now over what came
+/// before), or the colour most of its dots have.
 pub fn braille(scene: &Scene, cols: usize, rows: usize) -> Vec<Vec<Span>> {
     let (width, height) = (cols * 2, rows * 4);
     let mut dots = vec![0u8; cols * rows];
@@ -45,13 +46,22 @@ pub fn braille(scene: &Scene, cols: usize, rows: usize) -> Vec<Vec<Span>> {
             .then(|| (y as usize / 4 * cols + x as usize / 2, DOT[x as usize % 2][y as usize % 4]))
     };
     for shape in &scene.shapes {
-        if let Shape::Dot { x, y, color, .. } = shape {
+        if let Shape::Dot { x, y, radius, color, .. } = shape {
             let (x, y) = at((*x, *y));
-            if let Some((cell, dot)) = cell_of(x, y) {
-                dots[cell] |= dot;
-                match counted[cell].iter_mut().find(|(seen, _)| seen == color) {
-                    Some((_, count)) => *count += 1,
-                    None => counted[cell].push((*color, 1)),
+            // Its radius in braille's dots (a scene gives it in thousandths of the picture's height), about the dot it's on.
+            let reach = radius / 1000. * height as f64;
+            let most = reach.floor().max(0.) as i64;
+            for dy in -most..=most {
+                for dx in -most..=most {
+                    if (dx * dx + dy * dy) as f64 > reach * reach && (dx, dy) != (0, 0) {
+                        continue;
+                    }
+                    let Some((cell, dot)) = cell_of(x + dx, y + dy) else { continue };
+                    dots[cell] |= dot;
+                    match counted[cell].iter_mut().find(|(seen, _)| seen == color) {
+                        Some((_, count)) => *count += 1,
+                        None => counted[cell].push((*color, 1)),
+                    }
                 }
             }
             continue;
@@ -162,6 +172,18 @@ mod tests {
         assert_eq!(rows[0][0].style.fg, Some(red), "two red to one blue");
         assert_eq!(rows[0][1].style.fg, Some(red), "as many of each: the one that came last");
         assert_eq!(text(&braille(&Scene { shapes: vec![dot(2., 2., red)], lines: false }, 2, 1)), ["  "], "off the picture: nothing");
+    }
+
+    #[test]
+    fn a_dot_a_few_of_brailles_dots_wide_is_a_disc_of_them_about_it() {
+        // 8 × 8 dots (4 × 2 cells); a dot of radius 2 dots (250 thousandths of 8) at the dot (2, 3) from the top left.
+        let scene =
+            Scene { shapes: vec![Shape::Dot { x: 2. / 7., y: 1. - 3. / 7., radius: 250., color: [9, 9, 9], alpha: 1. }], lines: false };
+        let rows = braille(&scene, 4, 2);
+        let lit: u32 =
+            rows.iter().flatten().flat_map(|span| span.text.chars()).map(|c| (c as u32).saturating_sub(0x2800).count_ones()).sum();
+        assert_eq!(lit, 13, "the dot, four a dot away, four diagonally, four two away: {:?}", text(&rows));
+        assert_eq!(text(&rows), ["\u{28e0}\u{28e6}\u{2840} ", "\u{2808}\u{280b}  "]);
     }
 
     #[test]

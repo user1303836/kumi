@@ -4,7 +4,7 @@
 //! /map open serves the same maps to the browser (map_server.rs), whose actions put what they ask in the input box.
 use super::super::{
     keys::{MouseAction, MouseButton, WheelDirection},
-    map::{Asked, MapView},
+    map::{ready, Asked, MapView},
     pictures::{kitty, Raster},
     render::Cursor,
 };
@@ -45,17 +45,25 @@ impl TuiApp {
         }
         let hover = self.0.options.map_hover.as_ref().is_none_or(|hover| (hover.load)());
         let gathers = self.0.options.controller.has_palette();
-        self.0.state.borrow_mut().map = Some(MapView::new(self.0.graphics, hover).gathering(gathers));
+        self.0.state.borrow_mut().map = Some(MapView::new(self.0.graphics, hover).gliding(self.0.options.map_glides).gathering(gathers));
         // The mouse's moves, reported while the map is open: a point plays as the mouse comes to it.
         self.0.tty.report_moves(true);
         self.0.scheduler.request();
+        // Made ready to draw (turned, fitted, its points' room worked out) off Kumi's thread: a big map takes a moment.
         let data = load().await;
+        let Ok(made) = tokio::task::spawn_blocking(move || ready(data)).await else {
+            if self.map_open() {
+                self.close_map();
+                self.notice("Kumi couldn't draw your map: /map tries again.", NoticeTone::Warn);
+            }
+            return;
+        };
         {
             let mut state = self.0.state.borrow_mut();
             let palette: std::collections::HashSet<String> =
                 state.palette.as_ref().map(|palette| palette.files.iter().map(|file| file.path.clone()).collect()).unwrap_or_default();
             if let Some(view) = state.map.as_mut() {
-                view.loaded(data);
+                view.loaded(made);
                 view.in_palette(palette);
             }
         }
@@ -234,7 +242,12 @@ impl TuiApp {
             }
             images.id(key, |id| kitty::transmit(id, raster, cols, rows))
         };
-        view.draw(screen, &mut upload)
+        let cursor = view.draw(screen, &mut upload);
+        // A zoom or a move gliding: the next step soon.
+        if view.moving() {
+            self.0.scheduler.request();
+        }
+        cursor
     }
 
     /// Keys, typing and the mouse go to the map while it's open; ctrl+c closes it.

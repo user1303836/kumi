@@ -5,8 +5,18 @@
 //! random, and adds up in a fixed order however many threads share the work. Points are first brought down to their
 //! 50 main directions. Past 50,000 points, t-SNE lays out 50,000 landmarks spread over them, and every other point sits
 //! at the distance-weighted mean of its 5 nearest landmarks. Places are in [0, 1] on both axes.
+//!
+//! The map's shape: neighbours keep pulling three times as hard after the first rounds, which draws groups out into
+//! arms and bays as UMAP does (Böhm, Berens and Kobak, "Attraction-Repulsion Spectrum in Neighbor Embeddings", JMLR
+//! 2022), and the kernel's tail is a little heavier than t-SNE's, so groups part into masses with room between them
+//! (Kobak et al., "Heavy-tailed kernels reveal a finer cluster structure in t-SNE visualisations", 2019). That pull
+//! would draw a group that shares no neighbours with the rest down to a point, so neighbours nearer than a floor stop
+//! pulling, as UMAP's min_dist does: such a group packs into an island instead.
 
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+
+/// The shape `Layout::default()` gives a map: a map made with another is made again.
+pub const SHAPE: u32 = 2;
 
 /// How a map is made: the map's own, or smaller for tests.
 #[derive(Debug, Clone)]
@@ -20,11 +30,17 @@ pub struct Layout {
     pub landmarks: usize,
     /// Threads sharing the work (the map is the same whatever the number).
     pub threads: usize,
+    /// How much harder neighbours pull after the first rounds (1: plain t-SNE).
+    pub pull: f64,
+    /// The kernel's tail (1: t-SNE's, 1 / (1 + d²)); under 1 it's heavier, (1 + d² / tail)^−tail.
+    pub tail: f64,
+    /// Neighbours nearer than this stop pulling, in the layout's own units (t-SNE's kernel halves at 1); 0: none.
+    pub floor: f64,
 }
 
 impl Default for Layout {
     fn default() -> Layout {
-        Layout { perplexity: 30., rounds: 750, landmarks: 50_000, threads: threads() }
+        Layout { perplexity: 30., rounds: 750, landmarks: 50_000, threads: threads(), pull: 3., tail: 0.8, floor: 0.6 }
     }
 }
 
@@ -578,12 +594,13 @@ fn tsne(points: &[f32], k: usize, how: &Layout, threads: usize, going: &Going) -
     // Steps as big as the points are many (Belkina et al., 2019), with each place's own gains.
     let rate = (n as f64 / EXAGGERATION / 4.).max(50.);
     let exaggerated = EXAGGERATED.min(how.rounds / 3);
+    let floor = how.floor * how.floor;
     let (mut moves, mut gains) = (vec![[0f64; 2]; n], vec![[1f64; 2]; n]);
     for round in 0..how.rounds {
         if !going.on() {
             return None;
         }
-        let (exaggeration, momentum) = if round < exaggerated { (EXAGGERATION, 0.5) } else { (1., 0.8) };
+        let (exaggeration, momentum) = if round < exaggerated { (EXAGGERATION.max(how.pull), 0.5) } else { (how.pull, 0.8) };
         let tree = Tree::of(&places);
         // Each point's pull from its neighbours and push from the rest, and its part of the push's sum.
         let forces = fill_rows(
@@ -597,11 +614,13 @@ fn tsne(points: &[f32], k: usize, how: &Layout, threads: usize, going: &Going) -
                 for (other, weight) in &pulls.entries[pulls.starts[at]..pulls.starts[at + 1]] {
                     let there = places[*other as usize];
                     let (dx, dy) = (here[0] - there[0], here[1] - there[1]);
-                    let weight = *weight as f64 / (1. + dx * dx + dy * dy);
+                    let apart = dx * dx + dy * dy;
+                    let near = if floor > 0. { (apart / floor).min(1.) } else { 1. };
+                    let weight = *weight as f64 / (1. + apart / how.tail) * near;
                     pull[0] += weight * dx;
                     pull[1] += weight * dy;
                 }
-                let (push, sum) = tree.push(&places, at);
+                let (push, sum) = tree.push(&places, at, how.tail);
                 force.copy_from_slice(&[pull[0], pull[1], push[0], push[1], sum]);
             },
         );
@@ -711,8 +730,9 @@ impl Tree {
         at as u32
     }
 
-    /// How the other points push the one `at`: the push (unnormalized) and its part of the sum that normalizes it.
-    fn push(&self, places: &[[f64; 2]], at: usize) -> ([f64; 2], f64) {
+    /// How the other points push the one `at`, with the kernel's `tail`: the push (unnormalized) and its part of the sum
+    /// that normalizes it.
+    fn push(&self, places: &[[f64; 2]], at: usize, tail: f64) -> ([f64; 2], f64) {
         let here = places[at];
         let (mut push, mut sum) = ([0f64; 2], 0f64);
         let mut stack: Vec<u32> = vec![0];
@@ -726,21 +746,21 @@ impl Tree {
                     }
                     let there = places[*point as usize];
                     let (dx, dy) = (here[0] - there[0], here[1] - there[1]);
-                    let weight = 1. / (1. + dx * dx + dy * dy);
+                    let (weight, force) = kernel(dx * dx + dy * dy, tail);
                     sum += weight;
-                    push[0] += weight * weight * dx;
-                    push[1] += weight * weight * dy;
+                    push[0] += force * dx;
+                    push[1] += force * dy;
                 }
                 continue;
             }
             let (dx, dy) = (here[0] - cell.mass[0], here[1] - cell.mass[1]);
             let apart = dx * dx + dy * dy;
             if cell.width * cell.width < THETA * THETA * apart {
-                let weight = 1. / (1. + apart);
+                let (weight, force) = kernel(apart, tail);
                 let count = cell.count as f64;
                 sum += count * weight;
-                push[0] += count * weight * weight * dx;
-                push[1] += count * weight * weight * dy;
+                push[0] += count * force * dx;
+                push[1] += count * force * dy;
                 continue;
             }
             for quarter in cell.quarters.iter().rev() {
@@ -751,6 +771,18 @@ impl Tree {
         }
         (push, sum)
     }
+}
+
+/// The kernel at a squared distance, with its `tail`: its weight, (1 + d² / tail)^−tail, and that weight over
+/// 1 + d² / tail, as the push takes it (t-SNE's 1 / (1 + d²) and its square when the tail is 1).
+fn kernel(apart: f64, tail: f64) -> (f64, f64) {
+    let base = 1. + apart / tail;
+    if tail == 1. {
+        let weight = 1. / base;
+        return (weight, weight * weight);
+    }
+    let weight = base.powf(-tail);
+    (weight, weight / base)
 }
 
 /// Places in [0, 1] on both axes, the map's shape kept and centred.

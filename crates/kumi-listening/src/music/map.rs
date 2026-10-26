@@ -1,23 +1,27 @@
 //! Where each heard song sits on the map: the style vectors of the songs the style model heard, laid out together
 //! (`kumi_layout`, so songs that sound alike sit together), kept in music.db as each song's `x` and `y` (from 0 to 1),
-//! with what the map was made from in `meta` ("map"). Made again when the songs heard grow by a tenth, and at the end
-//! of a scan when the songs on it changed at all (more or fewer, or others: a folder moved, a file changed).
+//! with what the map was made from in `meta` ("map"). Made again when the songs heard grow by a tenth, at the end of a
+//! scan when the songs on it changed at all (more or fewer, or others: a folder moved, a file changed), and when the
+//! layout gives maps another shape now.
 
 use super::{
     store::{MusicError, MusicStore, LIVE},
     vectors::{VectorReader, DIMS},
 };
 use kumi_common::time::now_ms;
-use kumi_layout::{layout_until, Layout};
+use kumi_layout::{layout_until, Layout, SHAPE};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
-/// What the map was made from: the style model, how many songs, and when.
+/// What the map was made from: the style model, how many songs, when, and the shape the layout gave it
+/// (`kumi_layout::SHAPE`; 0 before maps kept it).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Made {
     pub model: String,
     pub songs: usize,
     pub made: i64,
+    #[serde(default)]
+    pub shape: u32,
 }
 
 /// The map as it was last made: None before the first.
@@ -25,9 +29,10 @@ pub fn made(store: &MusicStore) -> Result<Option<Made>, MusicError> {
     Ok(store.meta("map")?.and_then(|text| serde_json::from_str(&text).ok()))
 }
 
-/// How many songs the map holds, when `model` made it.
+/// How many songs the map holds, when `model` made it in the layout's shape now (one in another is made again; its
+/// places show until then).
 pub fn mapped(store: &MusicStore, model: &str) -> Result<Option<usize>, MusicError> {
-    Ok(made(store)?.filter(|made| made.model == model).map(|made| made.songs))
+    Ok(made(store)?.filter(|made| made.model == model && made.shape == SHAPE).map(|made| made.songs))
 }
 
 /// Whether the map is due with `heard` songs heard, `mapped` of them on the map the style model made last: there's
@@ -93,7 +98,7 @@ pub fn lay_out_until(
     };
     let Some(places) = layout_until(ids.len(), DIMS, &read, how, go_on) else { return Ok(None) };
     store.set_places(&ids.iter().copied().zip(places).collect::<Vec<_>>())?;
-    let made = Made { model: model.to_string(), songs: ids.len(), made: now_ms() };
+    let made = Made { model: model.to_string(), songs: ids.len(), made: now_ms(), shape: SHAPE };
     store.set_meta("map", &serde_json::to_string(&made).map_err(|error| MusicError(error.to_string()))?)?;
     Ok(Some(ids.len()))
 }

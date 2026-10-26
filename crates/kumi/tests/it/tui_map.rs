@@ -10,8 +10,8 @@ use crate::map_server::{ask, get, post};
 use futures::FutureExt;
 use kumi::map::{songs_layer, sounds_layer, LoadMap, MapData};
 use kumi::tui::app::MapHover;
-use kumi::tui::map::MapView;
-use kumi::tui::pictures::{kitty::DIACRITICS, Graphics};
+use kumi::tui::map::{ready, MapView};
+use kumi::tui::pictures::{kitty::DIACRITICS, Graphics, Raster};
 use kumi::tui::screen::Screen;
 use kumi::tui::style::palette;
 use kumi_library::{map::MapSound, SoundClass, SoundKind};
@@ -581,11 +581,11 @@ fn the_map_drawn_for_a_look() {
     // Zoomed out, 12,000 sounds are density; zoomed in, points.
     let data = fixture(2_000, 120);
     let mut shots: Vec<(String, Vec<u8>)> = vec![];
-    for (name, zoom) in [("map", 0), ("map-zoomed", 4)] {
+    for (name, zoom) in [("map", 0), ("map-zoomed", 4), ("map-closer", 7)] {
         let mut image = MapView::new(Graphics::Kitty, true);
-        image.loaded(data.clone());
+        image.loaded(ready(data.clone()));
         let mut cells = MapView::new(Graphics::Cells, true);
-        cells.loaded(data.clone());
+        cells.loaded(ready(data.clone()));
         for _ in 0..zoom {
             image.on_text("+");
             cells.on_text("+");
@@ -610,6 +610,7 @@ fn the_map_drawn_for_a_look() {
         assert!(braille(&lines));
         shots.push((format!("{name}-kitty.png"), png.expect("an image")));
         shots.push((format!("{name}-braille.txt"), (lines.join("\n") + "\n").into_bytes()));
+        shots.push((format!("{name}-braille.png"), braille_png(&screen)));
     }
     if let Some(folder) = std::env::var_os("KUMI_MAP_SHOTS") {
         for (name, bytes) in shots {
@@ -618,10 +619,47 @@ fn the_map_drawn_for_a_look() {
     }
 }
 
+/// Braille as a terminal shows it: each cell 8 × 16 pixels on its background, its braille's dots 3 pixels square in its
+/// colour, and any other character a bar in its colour (where words sit).
+fn braille_png(screen: &Screen) -> Vec<u8> {
+    let mut raster = Raster::new(screen.width as u32 * 8, screen.height as u32 * 16);
+    let width = raster.width;
+    let mut fill = |x: u32, y: u32, w: u32, h: u32, color: [u8; 3]| {
+        for py in y..y + h {
+            for px in x..x + w {
+                let at = ((py * width + px) * 4) as usize;
+                raster.rgba[at..at + 4].copy_from_slice(&[color[0], color[1], color[2], 255]);
+            }
+        }
+    };
+    const DOTS: [(u32, (u32, u32)); 8] =
+        [(0x01, (0, 0)), (0x02, (0, 1)), (0x04, (0, 2)), (0x40, (0, 3)), (0x08, (1, 0)), (0x10, (1, 1)), (0x20, (1, 2)), (0x80, (1, 3))];
+    for y in 0..screen.height {
+        for x in 0..screen.width {
+            let cell = screen.at(x, y);
+            let (px, py) = (x as u32 * 8, y as u32 * 16);
+            fill(px, py, 8, 16, cell.style.bg.unwrap_or(palette::GROUND));
+            let fg = cell.style.fg.unwrap_or(palette::TEXT);
+            match cell.char.chars().next().unwrap_or(' ') {
+                ' ' => {}
+                c if ('\u{2800}'..='\u{28ff}').contains(&c) => {
+                    for (bit, (dx, dy)) in DOTS {
+                        if (c as u32 - 0x2800) & bit != 0 {
+                            fill(px + dx * 4 + 1, py + dy * 4 + 1, 3, 3, fg);
+                        }
+                    }
+                }
+                _ => fill(px + 1, py + 6, 6, 4, fg),
+            }
+        }
+    }
+    raster.png()
+}
+
 #[test]
 fn an_images_placeholders_carry_the_id_it_is_up_under_frame_after_frame() {
     let mut view = MapView::new(Graphics::Kitty, true);
-    view.loaded(fixture(200, 12));
+    view.loaded(ready(fixture(200, 12)));
     let mut screen = Screen::new(80, 24);
     // The same id while the image stays up; another once it was taken down unseen and put up again.
     for id in [1, 1, 7, 7] {
@@ -648,7 +686,7 @@ fn how_long_a_key_takes_at_300_000_points() {
     eprintln!("300,000 sounds laid out for the map in {:?}", started.elapsed());
     for graphics in [Graphics::Kitty, Graphics::Cells] {
         let mut view = MapView::new(graphics, true);
-        view.loaded(data.clone());
+        view.loaded(ready(data.clone()));
         let mut shown = String::new();
         // The frame, and how much of it was the image going up.
         let mut frame = |view: &mut MapView| {
