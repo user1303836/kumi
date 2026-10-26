@@ -1,6 +1,7 @@
 //! The session's palette in the app: the PALETTE tab (on the strip once the session has one), /palette, and files the
 //! map or the browser's map gathers into it. The session keeps the palette (kumi-agent's core palette); the app shows it
 //! as the session last told it.
+use super::super::width::{text_width, truncate};
 use super::drawing::{sp, st};
 use super::*;
 use kumi_agent::core::palette::{Gathered, PaletteFile, PaletteView};
