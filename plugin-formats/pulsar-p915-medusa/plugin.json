@@ -1,0 +1,51 @@
+{
+  "plugin": "pulsar-p915-medusa",
+  "name": "P915 Medusa",
+  "vendor": "Pulsar Modular",
+  "kind": "effect",
+  "ids": {
+    "vst3": [
+      {
+        "id": "ABCDEF019182FAEB50756C7350686563",
+        "name": "P915 Medusa",
+        "parameters": 2142,
+        "status": "verified"
+      }
+    ]
+  },
+  "presets": {
+    "extensions": [
+      ".P915preset",
+      ".vstpreset"
+    ],
+    "windows": [
+      {
+        "path": "%PUBLIC%/Documents/Pulsar Modular/P915 Medusa/Presets",
+        "holds": "native presets",
+        "status": "verified"
+      }
+    ],
+    "mac": [
+      {
+        "path": "/Users/Shared/Pulsar Modular/P915 Medusa/Presets",
+        "holds": "native presets; path not tested on this Windows installation",
+        "status": "guessed"
+      }
+    ]
+  },
+  "formats": [
+    "format-1"
+  ],
+  "notes": [
+    "VST3 only. The processor class ID was enumerated from the installed VST3 factory.",
+    "Kumi writes from a plug-in-generated initial VST3 state, retaining controller state and unknown data. No factory presets, sample libraries, or waveforms are bundled."
+  ],
+  "family": "pulsar-modular",
+  "roles": [
+    "filter",
+    "eq"
+  ],
+  "binaries": [
+    "P915 Medusa.vst3"
+  ]
+}

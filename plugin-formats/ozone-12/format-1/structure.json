@@ -4,6 +4,14 @@
   "about": "An Ozone preset is XML. Its root names the era and plug-in that wrote it (Ozone9Maximizer, Ozone10, OzoneMS); each module is an element with Enabled, holding Param elements (ElementID, ParamID, Value) and base64 ExtraBytes for what isn't a number. The saved state is different: a 16-byte header and zlib-compressed JSON in which every value is typed. Its DSP State/DSP Elements carries each module's settings under the same ElementIDs and ParamIDs a preset uses, with more besides.",
   "paths": "exact",
   "files": {
+    "vstpreset": {
+      "extension": ".vstpreset",
+      "layers": [
+        "standard VST3 preset container with the exact class ID of the suite or standalone module",
+        "Comp chunk: the state format below; Cont chunk: empty for the verified 12.1.0 VST3 builds"
+      ],
+      "constants": {"version": 1}
+    },
     "preset": {
       "extension": ".xml",
       "layers": [

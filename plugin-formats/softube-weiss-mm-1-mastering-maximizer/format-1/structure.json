@@ -1,0 +1,157 @@
+{
+  "plugin": "softube-weiss-mm-1-mastering-maximizer",
+  "format": "format-1",
+  "about": "UTF-8 JSON AssetType SoftubePresetFile, FileFormatVersion 1. PresetList entries identify the plugin and contain ParameterData Type Full, Parameters tuples [id, normalized value, optional name]. SharedData is retained unchanged.",
+  "paths": "exact",
+  "files": {
+    "preset": {
+      "extension": ".softubepreset",
+      "layers": [
+        "JSON SoftubePresetFile version 1",
+        "PresetList entries and SharedData"
+      ],
+      "constants": {
+        "FileFormatVersion": 1,
+        "nativePluginId": "vxek"
+      }
+    }
+  },
+  "survey": {
+    "files": 1,
+    "presets": 5,
+    "versions": [
+      "2.4.44"
+    ],
+    "source": "Installed bundle inspected for parameter names, IDs and numeric ranges only."
+  },
+  "fields": {
+    "presets[]/parameters/0": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0,
+        1
+      ],
+      "status": "verified",
+      "seen": [
+        0.5,
+        0.7575
+      ],
+      "about": "Amount"
+    },
+    "presets[]/parameters/1": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0,
+        1
+      ],
+      "status": "verified",
+      "seen": [
+        0.7475,
+        1.0
+      ],
+      "about": "Parallel Mix"
+    },
+    "presets[]/parameters/2": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0,
+        1
+      ],
+      "status": "verified",
+      "seen": [
+        0.5,
+        0.605
+      ],
+      "about": "Limiter Gain"
+    },
+    "presets[]/parameters/3": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0,
+        1
+      ],
+      "status": "verified",
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "about": "Bypass"
+    },
+    "presets[]/parameters/4": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0,
+        1
+      ],
+      "status": "verified",
+      "seen": [
+        0.0,
+        0.75
+      ],
+      "about": "Style"
+    },
+    "presets[]/parameters/5": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0,
+        1
+      ],
+      "status": "verified",
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "about": "Out Trim"
+    }
+  },
+  "parameters": {
+    "Amount": {
+      "field": "presets[]/parameters/0",
+      "status": "verified",
+      "note": "Parameter ID and name are stored together in the native JSON tuple."
+    },
+    "Parallel Mix": {
+      "field": "presets[]/parameters/1",
+      "status": "verified",
+      "note": "Parameter ID and name are stored together in the native JSON tuple."
+    },
+    "Limiter Gain": {
+      "field": "presets[]/parameters/2",
+      "status": "verified",
+      "note": "Parameter ID and name are stored together in the native JSON tuple."
+    },
+    "Bypass": {
+      "field": "presets[]/parameters/3",
+      "status": "verified",
+      "note": "Parameter ID and name are stored together in the native JSON tuple."
+    },
+    "Style": {
+      "field": "presets[]/parameters/4",
+      "status": "verified",
+      "note": "Parameter ID and name are stored together in the native JSON tuple."
+    },
+    "Out Trim": {
+      "field": "presets[]/parameters/5",
+      "status": "verified",
+      "note": "Parameter ID and name are stored together in the native JSON tuple."
+    }
+  }
+}

@@ -1,0 +1,38 @@
+{
+  "plugin": "zynaptiq-orange-vocoder",
+  "name": "ORANGE VOCODER",
+  "vendor": "Zynaptiq",
+  "kind": "effect",
+  "ids": {
+    "vst3": []
+  },
+  "presets": {
+    "extensions": [
+      ".preset",
+      ".vstpreset"
+    ],
+    "windows": [
+      {
+        "path": "C:/Program Files/Zynaptiq/ORANGE VOCODER/ORANGE VOCODER data/Presets",
+        "holds": "installed native presets",
+        "status": "verified"
+      }
+    ]
+  },
+  "formats": [
+    "format-1"
+  ],
+  "notes": [
+    "Only VST3 integration is supported. Native presets hold physical parameter values, not normalized VST3 values.",
+    "Unknown custom properties, DSP state and UI fields are preserved.",
+    "Installed VST3 could not be initialized by the verification host. Native XML parsing is available; component creation and loading are not verified for this product/version. No class ID is guessed."
+  ],
+  "family": "zynaptiq",
+  "roles": [
+    "vocoder"
+  ],
+  "binaries": [
+    "ORANGE VOCODER SC VST3.vst3",
+    "ORANGE VOCODER VST3.vst3"
+  ]
+}

@@ -1,0 +1,64 @@
+{
+  "plugin": "valhalla-freq-echo",
+  "format": "format-1",
+  "about": "Normalized Valhalla sound controls in XML root attributes.",
+  "paths": "exact",
+  "files": {
+    "preset": {
+      "extension": ".vpreset",
+      "layers": [
+        "native XML"
+      ],
+      "constants": {
+        "root": "MYPLUGINSETTINGS"
+      }
+    },
+    "state": {
+      "layers": [
+        "VST3 Comp chunk",
+        "optional VstW compatibility bank",
+        "VC2! + little-endian XML byte length + XML + NUL + preserved opaque JUCE private data"
+      ],
+      "constants": {
+        "xml_magic": "VC2!",
+        "root": "MYPLUGINSETTINGS"
+      }
+    }
+  },
+  "fields": {
+    "": {"type":"map","in":["state","preset"],"status":"verified"},
+    "root": {"type":"text","in":["state","preset"],"status":"verified"},
+    "parameters": {"type":"map","in":["state","preset"],"status":"verified"},
+    "parameters/wetDryMix": {"type":"float","in":["state","preset"],"status":"verified","default":0.5,"about":"Native stored value. Host parameter: wetDry.","range":[0,1],"unit":"normalized"},
+    "parameters/shift": {"type":"float","in":["state","preset"],"status":"verified","default":0.5000749826431274,"about":"Native stored value. Host parameter: shift.","range":[0,1],"unit":"normalized"},
+    "parameters/delay": {"type":"float","in":["state","preset"],"status":"verified","default":0.000990009866654873,"about":"Native stored value. Host parameter: delay.","range":[0,1],"unit":"normalized"},
+    "parameters/sync": {"type":"float","in":["state","preset"],"status":"verified","default":0.0,"about":"Native stored value. Host parameter: sync.","range":[0,1],"unit":"normalized"},
+    "parameters/feedback": {"type":"float","in":["state","preset"],"status":"verified","default":0.5,"about":"Native stored value. Host parameter: feedback.","range":[0,1],"unit":"normalized"},
+    "parameters/lowCut": {"type":"float","in":["state","preset"],"status":"verified","default":0.06040268391370773,"about":"Native stored value. Host parameter: lowCut.","range":[0,1],"unit":"normalized"},
+    "parameters/highCut": {"type":"float","in":["state","preset"],"status":"verified","default":0.3311036825180054,"about":"Native stored value. Host parameter: highCut.","range":[0,1],"unit":"normalized"},
+    "parameters/stereo": {"type":"float","in":["state","preset"],"status":"verified","default":1.0,"about":"Native stored value. Host parameter: stereo.","range":[0,1],"unit":"normalized"},
+    "state": {"type":"map","in":["state","preset"],"status":"verified"},
+    "state/@pluginVersion": {"type":"text","in":["state","preset"],"status":"verified"},
+    "state/@wetDryMix": {"type":"text","in":["state","preset"],"status":"verified"},
+    "state/@shift": {"type":"text","in":["state","preset"],"status":"verified"},
+    "state/@delay": {"type":"text","in":["state","preset"],"status":"verified"},
+    "state/@sync": {"type":"text","in":["state","preset"],"status":"verified"},
+    "state/@feedback": {"type":"text","in":["state","preset"],"status":"verified"},
+    "state/@lowCut": {"type":"text","in":["state","preset"],"status":"verified"},
+    "state/@highCut": {"type":"text","in":["state","preset"],"status":"verified"},
+    "state/@stereo": {"type":"text","in":["state","preset"],"status":"verified"},
+    "state/@uiWidth": {"type":"text","in":["state","preset"],"status":"verified"},
+    "state/@uiHeight": {"type":"text","in":["state","preset"],"status":"verified"},
+    "name": {"type":"text","in":["state","preset"],"status":"verified"}
+  },
+  "parameters": {
+    "wetDry [VST3 48]": {"field":"parameters/wetDryMix","status":"guessed","note":"VST3 parameter ID 48. Matched by stored name or JUCE ID hash; jointly probed host changes corroborate the field mapping."},
+    "shift [VST3 49]": {"field":"parameters/shift","status":"guessed","note":"VST3 parameter ID 49. Matched by stored name or JUCE ID hash; jointly probed host changes corroborate the field mapping."},
+    "delay [VST3 50]": {"field":"parameters/delay","status":"guessed","note":"VST3 parameter ID 50. Matched by stored name or JUCE ID hash; jointly probed host changes corroborate the field mapping."},
+    "sync [VST3 51]": {"field":"parameters/sync","status":"guessed","note":"VST3 parameter ID 51. Matched by stored name or JUCE ID hash; jointly probed host changes corroborate the field mapping."},
+    "feedback [VST3 52]": {"field":"parameters/feedback","status":"verified","note":"VST3 parameter ID 52. Isolated file edit and host readback verified."},
+    "lowCut [VST3 53]": {"field":"parameters/lowCut","status":"guessed","note":"VST3 parameter ID 53. Matched by stored name or JUCE ID hash; jointly probed host changes corroborate the field mapping."},
+    "highCut [VST3 54]": {"field":"parameters/highCut","status":"guessed","note":"VST3 parameter ID 54. Matched by stored name or JUCE ID hash; jointly probed host changes corroborate the field mapping."},
+    "stereo [VST3 55]": {"field":"parameters/stereo","status":"guessed","note":"VST3 parameter ID 55. Matched by stored name or JUCE ID hash; jointly probed host changes corroborate the field mapping."}
+  }
+}

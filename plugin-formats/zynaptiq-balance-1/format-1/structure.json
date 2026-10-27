@@ -1,0 +1,1303 @@
+{
+  "plugin": "zynaptiq-balance-1",
+  "format": "format-1",
+  "about": "Zynaptiq Preset XML version 3 or 4. inputParams count and pN attributes hold scalar values. VST3 component state (verified on PUNCH 1 and UNMIX DRUMS) uses a u32 little-endian XML length including a terminating NUL, then the XML and NUL.",
+  "paths": "exact",
+  "files": {
+    "preset": {
+      "extension": ".preset",
+      "layers": [
+        "UTF-8 XML Preset; inputParams attributes p0 through p<count-1>; preserve all other elements"
+      ],
+      "constants": {}
+    },
+    "state": {
+      "layers": [
+        "u32 LE byte count including NUL; XML Preset; NUL"
+      ],
+      "constants": {}
+    }
+  },
+  "survey": {
+    "files": 48,
+    "parameterCounts": [
+      70
+    ],
+    "presetVersions": [
+      "4"
+    ],
+    "source": "Installed native preset files and shipped parameter-name metadata; no factory preset bodies copied."
+  },
+  "fields": {
+    "@progName": {
+      "type": "text",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "status": "verified"
+    },
+    "inputParams/@p0": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "about": "bypass"
+    },
+    "inputParams/@p1": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "verified",
+      "about": "doublePrecision"
+    },
+    "inputParams/@p2": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "about": "inputGain"
+    },
+    "inputParams/@p3": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.4,
+        1.0
+      ],
+      "status": "verified",
+      "about": "eqAmount"
+    },
+    "inputParams/@p4": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        1.0,
+        1.0
+      ],
+      "status": "verified",
+      "about": "learn"
+    },
+    "inputParams/@p5": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "about": "reset"
+    },
+    "inputParams/@p6": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        6.0
+      ],
+      "status": "verified",
+      "about": "slope"
+    },
+    "inputParams/@p7": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -12.0,
+        6.0
+      ],
+      "status": "verified",
+      "about": "weighting"
+    },
+    "inputParams/@p8": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -12.0,
+        6.0
+      ],
+      "status": "verified",
+      "about": "bassRolloff"
+    },
+    "inputParams/@p9": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        8.0
+      ],
+      "status": "verified",
+      "about": "bassFrequ"
+    },
+    "inputParams/@p10": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -2.5,
+        8.5
+      ],
+      "status": "verified",
+      "about": "hiShelf"
+    },
+    "inputParams/@p11": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        1.0,
+        15.0
+      ],
+      "status": "verified",
+      "about": "targetAirFrequ"
+    },
+    "inputParams/@p12": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        250.0
+      ],
+      "status": "verified",
+      "about": "lowcut"
+    },
+    "inputParams/@p13": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        10.0,
+        23.0
+      ],
+      "status": "verified",
+      "about": "hiCut"
+    },
+    "inputParams/@p14": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -6.0,
+        3.0
+      ],
+      "status": "verified",
+      "about": "outputGain"
+    },
+    "inputParams/@p15": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        42.0,
+        42.0
+      ],
+      "status": "verified",
+      "about": "kReserved1"
+    },
+    "inputParams/@p16": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        42.0,
+        42.0
+      ],
+      "status": "verified",
+      "about": "kReserved2"
+    },
+    "inputParams/@p17": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        42.0,
+        42.0
+      ],
+      "status": "verified",
+      "about": "kReserved3"
+    },
+    "inputParams/@p18": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        42.0,
+        42.0
+      ],
+      "status": "verified",
+      "about": "kReserved4"
+    },
+    "inputParams/@p19": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        42.0,
+        42.0
+      ],
+      "status": "verified",
+      "about": "kReserved5"
+    },
+    "inputParams/@p20": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        42.0,
+        42.0
+      ],
+      "status": "verified",
+      "about": "kReserved6"
+    },
+    "inputParams/@p21": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        42.0,
+        42.0
+      ],
+      "status": "verified",
+      "about": "kReserved7"
+    },
+    "inputParams/@p22": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        1.0,
+        1.0
+      ],
+      "status": "verified",
+      "about": "ch01bypass"
+    },
+    "inputParams/@p23": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "about": "ch01mute"
+    },
+    "inputParams/@p24": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "about": "ch01solo"
+    },
+    "inputParams/@p25": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        1.0,
+        1.0
+      ],
+      "status": "verified",
+      "about": "ch02bypass"
+    },
+    "inputParams/@p26": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "about": "ch02mute"
+    },
+    "inputParams/@p27": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "about": "ch02solo"
+    },
+    "inputParams/@p28": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        1.0,
+        1.0
+      ],
+      "status": "verified",
+      "about": "ch03bypass"
+    },
+    "inputParams/@p29": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "about": "ch03mute"
+    },
+    "inputParams/@p30": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "about": "ch03solo"
+    },
+    "inputParams/@p31": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        1.0,
+        1.0
+      ],
+      "status": "verified",
+      "about": "ch04bypass"
+    },
+    "inputParams/@p32": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "about": "ch04mute"
+    },
+    "inputParams/@p33": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "about": "ch04solo"
+    },
+    "inputParams/@p34": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        1.0,
+        1.0
+      ],
+      "status": "verified",
+      "about": "ch05bypass"
+    },
+    "inputParams/@p35": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "about": "ch05mute"
+    },
+    "inputParams/@p36": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "about": "ch05solo"
+    },
+    "inputParams/@p37": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        1.0,
+        1.0
+      ],
+      "status": "verified",
+      "about": "ch06bypass"
+    },
+    "inputParams/@p38": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "about": "ch06mute"
+    },
+    "inputParams/@p39": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "about": "ch06solo"
+    },
+    "inputParams/@p40": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        1.0,
+        1.0
+      ],
+      "status": "verified",
+      "about": "ch07bypass"
+    },
+    "inputParams/@p41": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "about": "ch07mute"
+    },
+    "inputParams/@p42": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "about": "ch07solo"
+    },
+    "inputParams/@p43": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        1.0,
+        1.0
+      ],
+      "status": "verified",
+      "about": "ch08bypass"
+    },
+    "inputParams/@p44": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "about": "ch08mute"
+    },
+    "inputParams/@p45": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "about": "ch08solo"
+    },
+    "inputParams/@p46": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        1.0,
+        1.0
+      ],
+      "status": "verified",
+      "about": "ch09bypass"
+    },
+    "inputParams/@p47": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "about": "ch09mute"
+    },
+    "inputParams/@p48": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "about": "ch09solo"
+    },
+    "inputParams/@p49": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        1.0,
+        1.0
+      ],
+      "status": "verified",
+      "about": "ch10bypass"
+    },
+    "inputParams/@p50": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "about": "ch10mute"
+    },
+    "inputParams/@p51": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "about": "ch10solo"
+    },
+    "inputParams/@p52": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        1.0,
+        1.0
+      ],
+      "status": "verified",
+      "about": "ch11bypass"
+    },
+    "inputParams/@p53": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "about": "ch11mute"
+    },
+    "inputParams/@p54": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "about": "ch11solo"
+    },
+    "inputParams/@p55": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        1.0,
+        1.0
+      ],
+      "status": "verified",
+      "about": "ch12bypass"
+    },
+    "inputParams/@p56": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "about": "ch12mute"
+    },
+    "inputParams/@p57": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "about": "ch12solo"
+    },
+    "inputParams/@p58": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        1.0,
+        1.0
+      ],
+      "status": "verified",
+      "about": "ch13bypass"
+    },
+    "inputParams/@p59": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "about": "ch13mute"
+    },
+    "inputParams/@p60": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "about": "ch13solo"
+    },
+    "inputParams/@p61": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        1.0,
+        1.0
+      ],
+      "status": "verified",
+      "about": "ch14bypass"
+    },
+    "inputParams/@p62": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "about": "ch14mute"
+    },
+    "inputParams/@p63": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "about": "ch14solo"
+    },
+    "inputParams/@p64": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        1.0,
+        1.0
+      ],
+      "status": "verified",
+      "about": "ch15bypass"
+    },
+    "inputParams/@p65": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "about": "ch15mute"
+    },
+    "inputParams/@p66": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "about": "ch15solo"
+    },
+    "inputParams/@p67": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        1.0,
+        1.0
+      ],
+      "status": "verified",
+      "about": "ch16bypass"
+    },
+    "inputParams/@p68": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "about": "ch16mute"
+    },
+    "inputParams/@p69": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "about": "ch16solo"
+    }
+  },
+  "parameters": {
+    "bypass": {
+      "field": "inputParams/@p0",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "doublePrecision": {
+      "field": "inputParams/@p1",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "inputGain": {
+      "field": "inputParams/@p2",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "eqAmount": {
+      "field": "inputParams/@p3",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "learn": {
+      "field": "inputParams/@p4",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "reset": {
+      "field": "inputParams/@p5",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "slope": {
+      "field": "inputParams/@p6",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "weighting": {
+      "field": "inputParams/@p7",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "bassRolloff": {
+      "field": "inputParams/@p8",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "bassFrequ": {
+      "field": "inputParams/@p9",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "hiShelf": {
+      "field": "inputParams/@p10",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "targetAirFrequ": {
+      "field": "inputParams/@p11",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "lowcut": {
+      "field": "inputParams/@p12",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "hiCut": {
+      "field": "inputParams/@p13",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "outputGain": {
+      "field": "inputParams/@p14",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "kReserved1": {
+      "field": "inputParams/@p15",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "kReserved2": {
+      "field": "inputParams/@p16",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "kReserved3": {
+      "field": "inputParams/@p17",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "kReserved4": {
+      "field": "inputParams/@p18",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "kReserved5": {
+      "field": "inputParams/@p19",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "kReserved6": {
+      "field": "inputParams/@p20",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "kReserved7": {
+      "field": "inputParams/@p21",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "ch01bypass": {
+      "field": "inputParams/@p22",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "ch01mute": {
+      "field": "inputParams/@p23",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "ch01solo": {
+      "field": "inputParams/@p24",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "ch02bypass": {
+      "field": "inputParams/@p25",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "ch02mute": {
+      "field": "inputParams/@p26",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "ch02solo": {
+      "field": "inputParams/@p27",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "ch03bypass": {
+      "field": "inputParams/@p28",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "ch03mute": {
+      "field": "inputParams/@p29",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "ch03solo": {
+      "field": "inputParams/@p30",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "ch04bypass": {
+      "field": "inputParams/@p31",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "ch04mute": {
+      "field": "inputParams/@p32",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "ch04solo": {
+      "field": "inputParams/@p33",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "ch05bypass": {
+      "field": "inputParams/@p34",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "ch05mute": {
+      "field": "inputParams/@p35",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "ch05solo": {
+      "field": "inputParams/@p36",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "ch06bypass": {
+      "field": "inputParams/@p37",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "ch06mute": {
+      "field": "inputParams/@p38",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "ch06solo": {
+      "field": "inputParams/@p39",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "ch07bypass": {
+      "field": "inputParams/@p40",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "ch07mute": {
+      "field": "inputParams/@p41",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "ch07solo": {
+      "field": "inputParams/@p42",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "ch08bypass": {
+      "field": "inputParams/@p43",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "ch08mute": {
+      "field": "inputParams/@p44",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "ch08solo": {
+      "field": "inputParams/@p45",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "ch09bypass": {
+      "field": "inputParams/@p46",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "ch09mute": {
+      "field": "inputParams/@p47",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "ch09solo": {
+      "field": "inputParams/@p48",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "ch10bypass": {
+      "field": "inputParams/@p49",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "ch10mute": {
+      "field": "inputParams/@p50",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "ch10solo": {
+      "field": "inputParams/@p51",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "ch11bypass": {
+      "field": "inputParams/@p52",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "ch11mute": {
+      "field": "inputParams/@p53",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "ch11solo": {
+      "field": "inputParams/@p54",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "ch12bypass": {
+      "field": "inputParams/@p55",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "ch12mute": {
+      "field": "inputParams/@p56",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "ch12solo": {
+      "field": "inputParams/@p57",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "ch13bypass": {
+      "field": "inputParams/@p58",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "ch13mute": {
+      "field": "inputParams/@p59",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "ch13solo": {
+      "field": "inputParams/@p60",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "ch14bypass": {
+      "field": "inputParams/@p61",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "ch14mute": {
+      "field": "inputParams/@p62",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "ch14solo": {
+      "field": "inputParams/@p63",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "ch15bypass": {
+      "field": "inputParams/@p64",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "ch15mute": {
+      "field": "inputParams/@p65",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "ch15solo": {
+      "field": "inputParams/@p66",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "ch16bypass": {
+      "field": "inputParams/@p67",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "ch16mute": {
+      "field": "inputParams/@p68",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "ch16solo": {
+      "field": "inputParams/@p69",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    }
+  }
+}

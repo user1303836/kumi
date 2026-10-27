@@ -1,0 +1,997 @@
+{
+  "plugin": "softube-weiss-compressor-limiter",
+  "format": "format-1",
+  "about": "UTF-8 JSON AssetType SoftubePresetFile, FileFormatVersion 1. PresetList entries identify the plugin and contain ParameterData Type Full, Parameters tuples [id, normalized value, optional name]. SharedData is retained unchanged.",
+  "paths": "exact",
+  "files": {
+    "preset": {
+      "extension": ".softubepreset",
+      "layers": [
+        "JSON SoftubePresetFile version 1",
+        "PresetList entries and SharedData"
+      ],
+      "constants": {
+        "FileFormatVersion": 1,
+        "nativePluginId": "gaeu"
+      }
+    }
+  },
+  "survey": {
+    "files": 1,
+    "presets": 15,
+    "versions": [
+      "2.4.62"
+    ],
+    "source": "Installed bundle inspected for parameter names, IDs and numeric ranges only."
+  },
+  "fields": {
+    "presets[]/parameters/0": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0,
+        1
+      ],
+      "status": "verified",
+      "seen": [
+        0.5,
+        0.5
+      ],
+      "about": "Input Gain"
+    },
+    "presets[]/parameters/1": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0,
+        1
+      ],
+      "status": "verified",
+      "seen": [
+        0.5,
+        0.5
+      ],
+      "about": "Output Gain"
+    },
+    "presets[]/parameters/2": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0,
+        1
+      ],
+      "status": "verified",
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "about": "Limiter Gain"
+    },
+    "presets[]/parameters/3": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0,
+        1
+      ],
+      "status": "verified",
+      "seen": [
+        1.0,
+        1.0
+      ],
+      "about": "Safety Limiter"
+    },
+    "presets[]/parameters/4": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0,
+        1
+      ],
+      "status": "verified",
+      "seen": [
+        0.2,
+        0.2
+      ],
+      "about": "Safety Limiter Mode"
+    },
+    "presets[]/parameters/5": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0,
+        1
+      ],
+      "status": "verified",
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "about": "Bypass"
+    },
+    "presets[]/parameters/6": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0,
+        1
+      ],
+      "status": "verified",
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "about": "Monitor"
+    },
+    "presets[]/parameters/7": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0,
+        1
+      ],
+      "status": "verified",
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "about": "Channel"
+    },
+    "presets[]/parameters/8": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0,
+        1
+      ],
+      "status": "verified",
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "about": "Auto Make-Up"
+    },
+    "presets[]/parameters/9": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0,
+        1
+      ],
+      "status": "verified",
+      "seen": [
+        0.4375,
+        0.75
+      ],
+      "about": "Preview"
+    },
+    "presets[]/parameters/10": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0,
+        1
+      ],
+      "status": "verified",
+      "seen": [
+        0.0,
+        0.735849
+      ],
+      "about": "RMS"
+    },
+    "presets[]/parameters/11": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0,
+        1
+      ],
+      "status": "verified",
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "about": "Filter Type 1"
+    },
+    "presets[]/parameters/12": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0,
+        1
+      ],
+      "status": "verified",
+      "seen": [
+        0.106383,
+        0.595745
+      ],
+      "about": "Bandwidth 1"
+    },
+    "presets[]/parameters/13": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0,
+        1
+      ],
+      "status": "verified",
+      "seen": [
+        0.104762,
+        0.657143
+      ],
+      "about": "Center Frequency 1"
+    },
+    "presets[]/parameters/14": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0,
+        1
+      ],
+      "status": "verified",
+      "seen": [
+        0.0,
+        0.837209
+      ],
+      "about": "Attack 1"
+    },
+    "presets[]/parameters/15": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0,
+        1
+      ],
+      "status": "verified",
+      "seen": [
+        0.264151,
+        0.396226
+      ],
+      "about": "Release Delay 1"
+    },
+    "presets[]/parameters/16": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0,
+        1
+      ],
+      "status": "verified",
+      "seen": [
+        0.509434,
+        0.735849
+      ],
+      "about": "Release Fast 1"
+    },
+    "presets[]/parameters/17": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0,
+        1
+      ],
+      "status": "verified",
+      "seen": [
+        0.622642,
+        0.811321
+      ],
+      "about": "Average 1"
+    },
+    "presets[]/parameters/18": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0,
+        1
+      ],
+      "status": "verified",
+      "seen": [
+        0.698113,
+        0.943396
+      ],
+      "about": "Release Slow 1"
+    },
+    "presets[]/parameters/19": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0,
+        1
+      ],
+      "status": "verified",
+      "seen": [
+        0.0,
+        0.7
+      ],
+      "about": "Soft Knee 1"
+    },
+    "presets[]/parameters/20": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0,
+        1
+      ],
+      "status": "verified",
+      "seen": [
+        0.166667,
+        1.0
+      ],
+      "about": "Threshold 1"
+    },
+    "presets[]/parameters/21": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0,
+        1
+      ],
+      "status": "verified",
+      "seen": [
+        0.471154,
+        0.951923
+      ],
+      "about": "Ratio 1"
+    },
+    "presets[]/parameters/22": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0,
+        1
+      ],
+      "status": "verified",
+      "seen": [
+        0.5,
+        0.515873
+      ],
+      "about": "Gain Make-Up 1"
+    },
+    "presets[]/parameters/23": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0,
+        1
+      ],
+      "status": "verified",
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "about": "Filter Type 2"
+    },
+    "presets[]/parameters/24": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0,
+        1
+      ],
+      "status": "verified",
+      "seen": [
+        0.234043,
+        0.553191
+      ],
+      "about": "Bandwidth 2"
+    },
+    "presets[]/parameters/25": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0,
+        1
+      ],
+      "status": "verified",
+      "seen": [
+        0.380952,
+        0.657143
+      ],
+      "about": "Center Frequency 2"
+    },
+    "presets[]/parameters/26": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0,
+        1
+      ],
+      "status": "verified",
+      "seen": [
+        0.674419,
+        0.813953
+      ],
+      "about": "Attack 2"
+    },
+    "presets[]/parameters/27": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0,
+        1
+      ],
+      "status": "verified",
+      "seen": [
+        0.0,
+        0.264151
+      ],
+      "about": "Release Delay 2"
+    },
+    "presets[]/parameters/28": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0,
+        1
+      ],
+      "status": "verified",
+      "seen": [
+        0.641509,
+        0.716981
+      ],
+      "about": "Release Fast 2"
+    },
+    "presets[]/parameters/29": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0,
+        1
+      ],
+      "status": "verified",
+      "seen": [
+        0.584906,
+        0.811321
+      ],
+      "about": "Average 2"
+    },
+    "presets[]/parameters/30": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0,
+        1
+      ],
+      "status": "verified",
+      "seen": [
+        0.698113,
+        0.735849
+      ],
+      "about": "Release Slow 2"
+    },
+    "presets[]/parameters/31": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0,
+        1
+      ],
+      "status": "verified",
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "about": "Soft Knee 2"
+    },
+    "presets[]/parameters/32": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0,
+        1
+      ],
+      "status": "verified",
+      "seen": [
+        0.983333,
+        1.0
+      ],
+      "about": "Threshold 2"
+    },
+    "presets[]/parameters/33": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0,
+        1
+      ],
+      "status": "verified",
+      "seen": [
+        0.475962,
+        0.75
+      ],
+      "about": "Ratio 2"
+    },
+    "presets[]/parameters/34": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0,
+        1
+      ],
+      "status": "verified",
+      "seen": [
+        0.5,
+        0.5
+      ],
+      "about": "Gain Make-Up 2"
+    },
+    "presets[]/parameters/35": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0,
+        1
+      ],
+      "status": "verified",
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "about": "MS Mode"
+    },
+    "presets[]/parameters/36": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0,
+        1
+      ],
+      "status": "verified",
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "about": "Sidechain Link"
+    },
+    "presets[]/parameters/37": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0,
+        1
+      ],
+      "status": "verified",
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "about": "Sidechain"
+    },
+    "presets[]/parameters/38": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0,
+        1
+      ],
+      "status": "verified",
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "about": "Parallel Compression"
+    },
+    "presets[]/parameters/39": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0,
+        1
+      ],
+      "status": "verified",
+      "seen": [
+        0.1,
+        1.0
+      ],
+      "about": "Parallel Mix"
+    },
+    "presets[]/parameters/40": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0,
+        1
+      ],
+      "status": "verified",
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "about": "Dither"
+    },
+    "presets[]/parameters/41": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0,
+        1
+      ],
+      "status": "verified",
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "about": "Ganged"
+    },
+    "presets[]/parameters/42": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0,
+        1
+      ],
+      "status": "verified",
+      "seen": [
+        0.333333,
+        0.333333
+      ],
+      "about": "Knee Range"
+    },
+    "presets[]/parameters/43": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0,
+        1
+      ],
+      "status": "verified",
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "about": "Frequency Zoom"
+    },
+    "presets[]/parameters/44": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0,
+        1
+      ],
+      "status": "verified",
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "about": "Auto Release 1"
+    },
+    "presets[]/parameters/45": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0,
+        1
+      ],
+      "status": "verified",
+      "seen": [
+        0.0,
+        0.6525
+      ],
+      "about": "Auto Release 2"
+    }
+  },
+  "parameters": {
+    "Input Gain": {
+      "field": "presets[]/parameters/0",
+      "status": "verified",
+      "note": "Parameter ID and name are stored together in the native JSON tuple."
+    },
+    "Output Gain": {
+      "field": "presets[]/parameters/1",
+      "status": "verified",
+      "note": "Parameter ID and name are stored together in the native JSON tuple."
+    },
+    "Limiter Gain": {
+      "field": "presets[]/parameters/2",
+      "status": "verified",
+      "note": "Parameter ID and name are stored together in the native JSON tuple."
+    },
+    "Safety Limiter": {
+      "field": "presets[]/parameters/3",
+      "status": "verified",
+      "note": "Parameter ID and name are stored together in the native JSON tuple."
+    },
+    "Safety Limiter Mode": {
+      "field": "presets[]/parameters/4",
+      "status": "verified",
+      "note": "Parameter ID and name are stored together in the native JSON tuple."
+    },
+    "Bypass": {
+      "field": "presets[]/parameters/5",
+      "status": "verified",
+      "note": "Parameter ID and name are stored together in the native JSON tuple."
+    },
+    "Monitor": {
+      "field": "presets[]/parameters/6",
+      "status": "verified",
+      "note": "Parameter ID and name are stored together in the native JSON tuple."
+    },
+    "Channel": {
+      "field": "presets[]/parameters/7",
+      "status": "verified",
+      "note": "Parameter ID and name are stored together in the native JSON tuple."
+    },
+    "Auto Make-Up": {
+      "field": "presets[]/parameters/8",
+      "status": "verified",
+      "note": "Parameter ID and name are stored together in the native JSON tuple."
+    },
+    "Preview": {
+      "field": "presets[]/parameters/9",
+      "status": "verified",
+      "note": "Parameter ID and name are stored together in the native JSON tuple."
+    },
+    "RMS": {
+      "field": "presets[]/parameters/10",
+      "status": "verified",
+      "note": "Parameter ID and name are stored together in the native JSON tuple."
+    },
+    "Filter Type 1": {
+      "field": "presets[]/parameters/11",
+      "status": "verified",
+      "note": "Parameter ID and name are stored together in the native JSON tuple."
+    },
+    "Bandwidth 1": {
+      "field": "presets[]/parameters/12",
+      "status": "verified",
+      "note": "Parameter ID and name are stored together in the native JSON tuple."
+    },
+    "Center Frequency 1": {
+      "field": "presets[]/parameters/13",
+      "status": "verified",
+      "note": "Parameter ID and name are stored together in the native JSON tuple."
+    },
+    "Attack 1": {
+      "field": "presets[]/parameters/14",
+      "status": "verified",
+      "note": "Parameter ID and name are stored together in the native JSON tuple."
+    },
+    "Release Delay 1": {
+      "field": "presets[]/parameters/15",
+      "status": "verified",
+      "note": "Parameter ID and name are stored together in the native JSON tuple."
+    },
+    "Release Fast 1": {
+      "field": "presets[]/parameters/16",
+      "status": "verified",
+      "note": "Parameter ID and name are stored together in the native JSON tuple."
+    },
+    "Average 1": {
+      "field": "presets[]/parameters/17",
+      "status": "verified",
+      "note": "Parameter ID and name are stored together in the native JSON tuple."
+    },
+    "Release Slow 1": {
+      "field": "presets[]/parameters/18",
+      "status": "verified",
+      "note": "Parameter ID and name are stored together in the native JSON tuple."
+    },
+    "Soft Knee 1": {
+      "field": "presets[]/parameters/19",
+      "status": "verified",
+      "note": "Parameter ID and name are stored together in the native JSON tuple."
+    },
+    "Threshold 1": {
+      "field": "presets[]/parameters/20",
+      "status": "verified",
+      "note": "Parameter ID and name are stored together in the native JSON tuple."
+    },
+    "Ratio 1": {
+      "field": "presets[]/parameters/21",
+      "status": "verified",
+      "note": "Parameter ID and name are stored together in the native JSON tuple."
+    },
+    "Gain Make-Up 1": {
+      "field": "presets[]/parameters/22",
+      "status": "verified",
+      "note": "Parameter ID and name are stored together in the native JSON tuple."
+    },
+    "Filter Type 2": {
+      "field": "presets[]/parameters/23",
+      "status": "verified",
+      "note": "Parameter ID and name are stored together in the native JSON tuple."
+    },
+    "Bandwidth 2": {
+      "field": "presets[]/parameters/24",
+      "status": "verified",
+      "note": "Parameter ID and name are stored together in the native JSON tuple."
+    },
+    "Center Frequency 2": {
+      "field": "presets[]/parameters/25",
+      "status": "verified",
+      "note": "Parameter ID and name are stored together in the native JSON tuple."
+    },
+    "Attack 2": {
+      "field": "presets[]/parameters/26",
+      "status": "verified",
+      "note": "Parameter ID and name are stored together in the native JSON tuple."
+    },
+    "Release Delay 2": {
+      "field": "presets[]/parameters/27",
+      "status": "verified",
+      "note": "Parameter ID and name are stored together in the native JSON tuple."
+    },
+    "Release Fast 2": {
+      "field": "presets[]/parameters/28",
+      "status": "verified",
+      "note": "Parameter ID and name are stored together in the native JSON tuple."
+    },
+    "Average 2": {
+      "field": "presets[]/parameters/29",
+      "status": "verified",
+      "note": "Parameter ID and name are stored together in the native JSON tuple."
+    },
+    "Release Slow 2": {
+      "field": "presets[]/parameters/30",
+      "status": "verified",
+      "note": "Parameter ID and name are stored together in the native JSON tuple."
+    },
+    "Soft Knee 2": {
+      "field": "presets[]/parameters/31",
+      "status": "verified",
+      "note": "Parameter ID and name are stored together in the native JSON tuple."
+    },
+    "Threshold 2": {
+      "field": "presets[]/parameters/32",
+      "status": "verified",
+      "note": "Parameter ID and name are stored together in the native JSON tuple."
+    },
+    "Ratio 2": {
+      "field": "presets[]/parameters/33",
+      "status": "verified",
+      "note": "Parameter ID and name are stored together in the native JSON tuple."
+    },
+    "Gain Make-Up 2": {
+      "field": "presets[]/parameters/34",
+      "status": "verified",
+      "note": "Parameter ID and name are stored together in the native JSON tuple."
+    },
+    "MS Mode": {
+      "field": "presets[]/parameters/35",
+      "status": "verified",
+      "note": "Parameter ID and name are stored together in the native JSON tuple."
+    },
+    "Sidechain Link": {
+      "field": "presets[]/parameters/36",
+      "status": "verified",
+      "note": "Parameter ID and name are stored together in the native JSON tuple."
+    },
+    "Sidechain": {
+      "field": "presets[]/parameters/37",
+      "status": "verified",
+      "note": "Parameter ID and name are stored together in the native JSON tuple."
+    },
+    "Parallel Compression": {
+      "field": "presets[]/parameters/38",
+      "status": "verified",
+      "note": "Parameter ID and name are stored together in the native JSON tuple."
+    },
+    "Parallel Mix": {
+      "field": "presets[]/parameters/39",
+      "status": "verified",
+      "note": "Parameter ID and name are stored together in the native JSON tuple."
+    },
+    "Dither": {
+      "field": "presets[]/parameters/40",
+      "status": "verified",
+      "note": "Parameter ID and name are stored together in the native JSON tuple."
+    },
+    "Ganged": {
+      "field": "presets[]/parameters/41",
+      "status": "verified",
+      "note": "Parameter ID and name are stored together in the native JSON tuple."
+    },
+    "Knee Range": {
+      "field": "presets[]/parameters/42",
+      "status": "verified",
+      "note": "Parameter ID and name are stored together in the native JSON tuple."
+    },
+    "Frequency Zoom": {
+      "field": "presets[]/parameters/43",
+      "status": "verified",
+      "note": "Parameter ID and name are stored together in the native JSON tuple."
+    },
+    "Auto Release 1": {
+      "field": "presets[]/parameters/44",
+      "status": "verified",
+      "note": "Parameter ID and name are stored together in the native JSON tuple."
+    },
+    "Auto Release 2": {
+      "field": "presets[]/parameters/45",
+      "status": "verified",
+      "note": "Parameter ID and name are stored together in the native JSON tuple."
+    }
+  }
+}

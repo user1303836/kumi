@@ -1,0 +1,26 @@
+{
+  "plugin": "superior-drummer-3",
+  "format": "format-1",
+  "reads": [
+    {
+      "version": "3.4.1",
+      "files": [
+        "preset",
+        "state"
+      ],
+      "checked": "2026-10-27",
+      "how": "Captured initialized VST3 state and parsed native sampler text expanded by the plugin. Host read/set/read roundtrip preserves the blank state byte-for-byte."
+    }
+  ],
+  "writes": [
+    {
+      "version": "3.4.1",
+      "files": [
+        "preset",
+        "state"
+      ],
+      "checked": "2026-10-27",
+      "how": "Kumi Rust codec constructed a native sampler preset, inserted it into captured empty VST3 component state, and reloaded it through the installed Windows x64 plugin public VST3 API. The requested mastervol 0.25 survived two plugin saves, and opaque trailing bytes were preserved. Initialized state can be canonicalized by the plugin (three curve blocks added linear 1 on a further roundtrip), so full state byte equality is not claimed. Sample libraries remain external."
+    }
+  ]
+}

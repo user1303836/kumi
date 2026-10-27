@@ -1,0 +1,39 @@
+{
+  "plugin": "zynaptiq-wide-1",
+  "name": "WIDE 1",
+  "vendor": "Zynaptiq",
+  "kind": "effect",
+  "ids": {
+    "vst3": []
+  },
+  "presets": {
+    "extensions": [
+      ".preset",
+      ".vstpreset"
+    ],
+    "windows": [
+      {
+        "path": "C:/Program Files/Zynaptiq/WIDE 1/WIDE 1 data/Presets",
+        "holds": "installed native presets",
+        "status": "verified"
+      }
+    ]
+  },
+  "formats": [
+    "format-1"
+  ],
+  "notes": [
+    "Only VST3 integration is supported. Native presets hold physical parameter values, not normalized VST3 values.",
+    "Unknown custom properties, DSP state and UI fields are preserved.",
+    "Installed VST3 could not be initialized by the verification host. Native XML parsing is available; component creation and loading are not verified for this product/version. No class ID is guessed."
+  ],
+  "family": "zynaptiq",
+  "roles": [
+    "stereo-width",
+    "mastering"
+  ],
+  "binaries": [
+    "WIDE 1 Mono To Stereo VST3.vst3",
+    "WIDE 1 VST3.vst3"
+  ]
+}

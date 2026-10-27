@@ -1,0 +1,529 @@
+{
+  "plugin": "zynaptiq-wormhole",
+  "format": "format-1",
+  "about": "Zynaptiq Preset XML version 3 or 4. inputParams count and pN attributes hold scalar values. VST3 component state (verified on PUNCH 1 and UNMIX DRUMS) uses a u32 little-endian XML length including a terminating NUL, then the XML and NUL.",
+  "paths": "exact",
+  "files": {
+    "preset": {
+      "extension": ".preset",
+      "layers": [
+        "UTF-8 XML Preset; inputParams attributes p0 through p<count-1>; preserve all other elements"
+      ],
+      "constants": {}
+    },
+    "state": {
+      "layers": [
+        "u32 LE byte count including NUL; XML Preset; NUL"
+      ],
+      "constants": {}
+    }
+  },
+  "survey": {
+    "files": 209,
+    "parameterCounts": [
+      27
+    ],
+    "presetVersions": [
+      "4"
+    ],
+    "source": "Installed native preset files and shipped parameter-name metadata; no factory preset bodies copied."
+  },
+  "fields": {
+    "@progName": {
+      "type": "text",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "status": "verified"
+    },
+    "inputParams/@p0": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "about": "bypass"
+    },
+    "inputParams/@p1": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.03,
+        1.0
+      ],
+      "status": "verified",
+      "about": "mix"
+    },
+    "inputParams/@p2": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "verified",
+      "about": "warpMix"
+    },
+    "inputParams/@p3": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.11,
+        1.0
+      ],
+      "status": "verified",
+      "about": "warpDepth"
+    },
+    "inputParams/@p4": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -0.35403919219970703,
+        1.0
+      ],
+      "status": "verified",
+      "about": "warpPoles"
+    },
+    "inputParams/@p5": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -1.0,
+        1.0
+      ],
+      "status": "verified",
+      "about": "warpTilt"
+    },
+    "inputParams/@p6": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.1,
+        1.0
+      ],
+      "status": "verified",
+      "about": "warpTiltFilter"
+    },
+    "inputParams/@p7": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "verified",
+      "about": "tiltPrePost"
+    },
+    "inputParams/@p8": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "verified",
+      "about": "revMix"
+    },
+    "inputParams/@p9": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "verified",
+      "about": "revSize"
+    },
+    "inputParams/@p10": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "verified",
+      "about": "revDamp"
+    },
+    "inputParams/@p11": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "verified",
+      "about": "shiftMix"
+    },
+    "inputParams/@p12": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -48.0,
+        48.0
+      ],
+      "status": "verified",
+      "about": "pitchShift"
+    },
+    "inputParams/@p13": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -4000.0,
+        4000.0
+      ],
+      "status": "verified",
+      "about": "frqShift"
+    },
+    "inputParams/@p14": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -4000.0,
+        4000.0
+      ],
+      "status": "verified",
+      "about": "frqShiftLinear"
+    },
+    "inputParams/@p15": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "verified",
+      "about": "frqShiftMode"
+    },
+    "inputParams/@p16": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "verified",
+      "about": "swapWarpShift"
+    },
+    "inputParams/@p17": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "verified",
+      "about": "warpOn"
+    },
+    "inputParams/@p18": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "verified",
+      "about": "shiftOn"
+    },
+    "inputParams/@p19": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "verified",
+      "about": "reverbOn"
+    },
+    "inputParams/@p20": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -2.5,
+        24.0
+      ],
+      "status": "verified",
+      "about": "wetGain"
+    },
+    "inputParams/@p21": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        3.0
+      ],
+      "status": "verified",
+      "about": "pitchMode"
+    },
+    "inputParams/@p22": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        2.0
+      ],
+      "status": "verified",
+      "about": "blendMode"
+    },
+    "inputParams/@p23": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -413.0,
+        500.0
+      ],
+      "status": "verified",
+      "about": "delayTime"
+    },
+    "inputParams/@p24": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "verified",
+      "about": "delayChannelInvert"
+    },
+    "inputParams/@p25": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "verified",
+      "about": "fsDecayTime"
+    },
+    "inputParams/@p26": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        2.0
+      ],
+      "status": "verified",
+      "about": "revRouting"
+    }
+  },
+  "parameters": {
+    "bypass": {
+      "field": "inputParams/@p0",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "mix": {
+      "field": "inputParams/@p1",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "warpMix": {
+      "field": "inputParams/@p2",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "warpDepth": {
+      "field": "inputParams/@p3",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "warpPoles": {
+      "field": "inputParams/@p4",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "warpTilt": {
+      "field": "inputParams/@p5",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "warpTiltFilter": {
+      "field": "inputParams/@p6",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "tiltPrePost": {
+      "field": "inputParams/@p7",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "revMix": {
+      "field": "inputParams/@p8",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "revSize": {
+      "field": "inputParams/@p9",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "revDamp": {
+      "field": "inputParams/@p10",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "shiftMix": {
+      "field": "inputParams/@p11",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "pitchShift": {
+      "field": "inputParams/@p12",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "frqShift": {
+      "field": "inputParams/@p13",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "frqShiftLinear": {
+      "field": "inputParams/@p14",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "frqShiftMode": {
+      "field": "inputParams/@p15",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "swapWarpShift": {
+      "field": "inputParams/@p16",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "warpOn": {
+      "field": "inputParams/@p17",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "shiftOn": {
+      "field": "inputParams/@p18",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "reverbOn": {
+      "field": "inputParams/@p19",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "wetGain": {
+      "field": "inputParams/@p20",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "pitchMode": {
+      "field": "inputParams/@p21",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "blendMode": {
+      "field": "inputParams/@p22",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "delayTime": {
+      "field": "inputParams/@p23",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "delayChannelInvert": {
+      "field": "inputParams/@p24",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "fsDecayTime": {
+      "field": "inputParams/@p25",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "revRouting": {
+      "field": "inputParams/@p26",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    }
+  }
+}

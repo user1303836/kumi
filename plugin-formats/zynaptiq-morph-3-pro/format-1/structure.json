@@ -1,0 +1,1375 @@
+{
+  "plugin": "zynaptiq-morph-3-pro",
+  "format": "format-1",
+  "about": "Zynaptiq Preset XML version 3 or 4. inputParams count and pN attributes hold scalar values. VST3 component state (verified on PUNCH 1 and UNMIX DRUMS) uses a u32 little-endian XML length including a terminating NUL, then the XML and NUL.",
+  "paths": "exact",
+  "files": {
+    "preset": {
+      "extension": ".preset",
+      "layers": [
+        "UTF-8 XML Preset; inputParams attributes p0 through p<count-1>; preserve all other elements"
+      ],
+      "constants": {}
+    },
+    "state": {
+      "layers": [
+        "u32 LE byte count including NUL; XML Preset; NUL"
+      ],
+      "constants": {}
+    }
+  },
+  "survey": {
+    "files": 11,
+    "parameterCounts": [
+      74
+    ],
+    "presetVersions": [
+      "4"
+    ],
+    "source": "Installed native preset files and shipped parameter-name metadata; no factory preset bodies copied."
+  },
+  "fields": {
+    "@progName": {
+      "type": "text",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "status": "verified"
+    },
+    "inputParams/@p0": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "about": "pluginActive"
+    },
+    "inputParams/@p1": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "about": "pluginDoublePrecision"
+    },
+    "inputParams/@p2": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "about": "pluginAlign"
+    },
+    "inputParams/@p3": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        6.0
+      ],
+      "status": "verified",
+      "about": "mainInGain"
+    },
+    "inputParams/@p4": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "about": "auxInGain"
+    },
+    "inputParams/@p5": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "about": "outputGain"
+    },
+    "inputParams/@p6": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "verified",
+      "about": "limiterOn"
+    },
+    "inputParams/@p7": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        1.0,
+        1.0
+      ],
+      "status": "verified",
+      "about": "morphBypass"
+    },
+    "inputParams/@p8": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        2.0,
+        2.0
+      ],
+      "status": "verified",
+      "about": "morphBSource"
+    },
+    "inputParams/@p9": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        10.0
+      ],
+      "status": "verified",
+      "about": "morphAlgorithm"
+    },
+    "inputParams/@p10": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -0.4066666666666666,
+        0.21333333333333337
+      ],
+      "status": "verified",
+      "about": "morphIndex"
+    },
+    "inputParams/@p11": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        1.0,
+        1.0
+      ],
+      "status": "verified",
+      "about": "morphXFade"
+    },
+    "inputParams/@p12": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        1.0,
+        1.0
+      ],
+      "status": "verified",
+      "about": "morphAmpSense"
+    },
+    "inputParams/@p13": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.020000000000000018,
+        1.0
+      ],
+      "status": "verified",
+      "about": "morphComplexity"
+    },
+    "inputParams/@p14": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -0.76,
+        0.8999999999999999
+      ],
+      "status": "verified",
+      "about": "morphCrest"
+    },
+    "inputParams/@p15": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -0.33999999999999997,
+        0.5800000000000001
+      ],
+      "status": "verified",
+      "about": "morphOsmosis"
+    },
+    "inputParams/@p16": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -1.0,
+        -0.96
+      ],
+      "status": "verified",
+      "about": "morphOsmosisRelease"
+    },
+    "inputParams/@p17": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "verified",
+      "about": "transientBypassOn"
+    },
+    "inputParams/@p18": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "verified",
+      "about": "transientMode"
+    },
+    "inputParams/@p19": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        18.0,
+        85.0
+      ],
+      "status": "verified",
+      "about": "transientBypassAmount"
+    },
+    "inputParams/@p20": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.26,
+        1.0
+      ],
+      "status": "verified",
+      "about": "transientSize"
+    },
+    "inputParams/@p21": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "verified",
+      "about": "transientsBypassFmtShift"
+    },
+    "inputParams/@p22": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "verified",
+      "about": "formantShiftEnable"
+    },
+    "inputParams/@p23": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -0.375,
+        0.20833333333333326
+      ],
+      "status": "verified",
+      "about": "formantShift"
+    },
+    "inputParams/@p24": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "about": "formantShiftLegacyOn"
+    },
+    "inputParams/@p25": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        1.0,
+        1.0
+      ],
+      "status": "verified",
+      "about": "modelerOnOff"
+    },
+    "inputParams/@p26": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        3.0
+      ],
+      "status": "verified",
+      "about": "modelerMode"
+    },
+    "inputParams/@p27": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -0.19999998807907104,
+        1.0
+      ],
+      "status": "verified",
+      "about": "modelerSliceLength"
+    },
+    "inputParams/@p28": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -0.6126732673267326,
+        0.56
+      ],
+      "status": "verified",
+      "about": "modelerInertia"
+    },
+    "inputParams/@p29": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -1.0,
+        0.5827586206896551
+      ],
+      "status": "verified",
+      "about": "modelerMinSlice"
+    },
+    "inputParams/@p30": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.05714285714285716,
+        1.0
+      ],
+      "status": "verified",
+      "about": "modelerMaxSlice"
+    },
+    "inputParams/@p31": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -96.0,
+        -35.0
+      ],
+      "status": "verified",
+      "about": "modelerFileGate"
+    },
+    "inputParams/@p32": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "verified",
+      "about": "modelerSkipSilence"
+    },
+    "inputParams/@p33": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -1.0,
+        1.0
+      ],
+      "status": "verified",
+      "about": "modelerSliceFade"
+    },
+    "inputParams/@p34": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "verified",
+      "about": "modelerSpectralRange"
+    },
+    "inputParams/@p35": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        2.0,
+        3.0
+      ],
+      "status": "verified",
+      "about": "modelerSliceSorting"
+    },
+    "inputParams/@p36": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        2.0,
+        2.0
+      ],
+      "status": "verified",
+      "about": "modelerInputAnalysis"
+    },
+    "inputParams/@p37": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -3.0,
+        0.0
+      ],
+      "status": "verified",
+      "about": "mixerMorphMix"
+    },
+    "inputParams/@p38": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "about": "mixerMorphMute"
+    },
+    "inputParams/@p39": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "about": "mixerMorphSolo"
+    },
+    "inputParams/@p40": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.3400000000000001
+      ],
+      "status": "verified",
+      "about": "mixerMorphFilter"
+    },
+    "inputParams/@p41": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -60.0,
+        -8.0
+      ],
+      "status": "verified",
+      "about": "mixerMainInMix"
+    },
+    "inputParams/@p42": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "about": "mixerMainInMute"
+    },
+    "inputParams/@p43": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "about": "mixerMainInSolo"
+    },
+    "inputParams/@p44": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.6399999999999999
+      ],
+      "status": "verified",
+      "about": "mixerMainInFilter"
+    },
+    "inputParams/@p45": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -60.0,
+        -60.0
+      ],
+      "status": "verified",
+      "about": "mixerAuxInMix"
+    },
+    "inputParams/@p46": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "about": "mixerAuxInMute"
+    },
+    "inputParams/@p47": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "about": "mixerAuxInSolo"
+    },
+    "inputParams/@p48": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "about": "mixerAuxInFilter"
+    },
+    "inputParams/@p49": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -60.0,
+        -8.0
+      ],
+      "status": "verified",
+      "about": "mixerModelerMix"
+    },
+    "inputParams/@p50": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "about": "mixerModelerMute"
+    },
+    "inputParams/@p51": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "about": "mixerModelerSolo"
+    },
+    "inputParams/@p52": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.78
+      ],
+      "status": "verified",
+      "about": "mixerModelerFilter"
+    },
+    "inputParams/@p53": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -1.0,
+        -0.45999999999999996
+      ],
+      "status": "verified",
+      "about": "reverbMix"
+    },
+    "inputParams/@p54": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.72
+      ],
+      "status": "verified",
+      "about": "reverbRoomSize"
+    },
+    "inputParams/@p55": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.3999999999999999
+      ],
+      "status": "verified",
+      "about": "reverbDamp"
+    },
+    "inputParams/@p56": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        1.0,
+        1.0
+      ],
+      "status": "verified",
+      "about": "mappingZone1OnOff"
+    },
+    "inputParams/@p57": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "about": "mappingZone1Mute"
+    },
+    "inputParams/@p58": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        20.0
+      ],
+      "status": "verified",
+      "about": "mappingZone1InputPosition"
+    },
+    "inputParams/@p59": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        20.0,
+        100.0000001
+      ],
+      "status": "verified",
+      "about": "mappingZone1InputWidth"
+    },
+    "inputParams/@p60": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        51.034481048583984
+      ],
+      "status": "verified",
+      "about": "mappingZone1FileFrom"
+    },
+    "inputParams/@p61": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        100.0
+      ],
+      "status": "verified",
+      "about": "mappingZone1FileTo"
+    },
+    "inputParams/@p62": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "verified",
+      "about": "mappingZone2OnOff"
+    },
+    "inputParams/@p63": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "about": "mappingZone2Mute"
+    },
+    "inputParams/@p64": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        20.0,
+        20.0
+      ],
+      "status": "verified",
+      "about": "mappingZone2InputPosition"
+    },
+    "inputParams/@p65": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        20.0,
+        20.0
+      ],
+      "status": "verified",
+      "about": "mappingZone2InputWidth"
+    },
+    "inputParams/@p66": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        20.0,
+        50.17241287231445
+      ],
+      "status": "verified",
+      "about": "mappingZone2FileFrom"
+    },
+    "inputParams/@p67": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        40.0,
+        60.000003814697266
+      ],
+      "status": "verified",
+      "about": "mappingZone2FileTo"
+    },
+    "inputParams/@p68": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "about": "mappingZone3OnOff"
+    },
+    "inputParams/@p69": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "about": "mappingZone3Mute"
+    },
+    "inputParams/@p70": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        60.0,
+        60.0
+      ],
+      "status": "verified",
+      "about": "mappingZone3InputPosition"
+    },
+    "inputParams/@p71": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        20.0,
+        20.0
+      ],
+      "status": "verified",
+      "about": "mappingZone3InputWidth"
+    },
+    "inputParams/@p72": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        60.0,
+        60.0
+      ],
+      "status": "verified",
+      "about": "mappingZone3FileFrom"
+    },
+    "inputParams/@p73": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        80.0,
+        80.0
+      ],
+      "status": "verified",
+      "about": "mappingZone3FileTo"
+    }
+  },
+  "parameters": {
+    "pluginActive": {
+      "field": "inputParams/@p0",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "pluginDoublePrecision": {
+      "field": "inputParams/@p1",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "pluginAlign": {
+      "field": "inputParams/@p2",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "mainInGain": {
+      "field": "inputParams/@p3",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "auxInGain": {
+      "field": "inputParams/@p4",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "outputGain": {
+      "field": "inputParams/@p5",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "limiterOn": {
+      "field": "inputParams/@p6",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "morphBypass": {
+      "field": "inputParams/@p7",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "morphBSource": {
+      "field": "inputParams/@p8",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "morphAlgorithm": {
+      "field": "inputParams/@p9",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "morphIndex": {
+      "field": "inputParams/@p10",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "morphXFade": {
+      "field": "inputParams/@p11",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "morphAmpSense": {
+      "field": "inputParams/@p12",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "morphComplexity": {
+      "field": "inputParams/@p13",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "morphCrest": {
+      "field": "inputParams/@p14",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "morphOsmosis": {
+      "field": "inputParams/@p15",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "morphOsmosisRelease": {
+      "field": "inputParams/@p16",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "transientBypassOn": {
+      "field": "inputParams/@p17",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "transientMode": {
+      "field": "inputParams/@p18",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "transientBypassAmount": {
+      "field": "inputParams/@p19",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "transientSize": {
+      "field": "inputParams/@p20",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "transientsBypassFmtShift": {
+      "field": "inputParams/@p21",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "formantShiftEnable": {
+      "field": "inputParams/@p22",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "formantShift": {
+      "field": "inputParams/@p23",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "formantShiftLegacyOn": {
+      "field": "inputParams/@p24",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "modelerOnOff": {
+      "field": "inputParams/@p25",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "modelerMode": {
+      "field": "inputParams/@p26",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "modelerSliceLength": {
+      "field": "inputParams/@p27",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "modelerInertia": {
+      "field": "inputParams/@p28",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "modelerMinSlice": {
+      "field": "inputParams/@p29",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "modelerMaxSlice": {
+      "field": "inputParams/@p30",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "modelerFileGate": {
+      "field": "inputParams/@p31",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "modelerSkipSilence": {
+      "field": "inputParams/@p32",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "modelerSliceFade": {
+      "field": "inputParams/@p33",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "modelerSpectralRange": {
+      "field": "inputParams/@p34",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "modelerSliceSorting": {
+      "field": "inputParams/@p35",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "modelerInputAnalysis": {
+      "field": "inputParams/@p36",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "mixerMorphMix": {
+      "field": "inputParams/@p37",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "mixerMorphMute": {
+      "field": "inputParams/@p38",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "mixerMorphSolo": {
+      "field": "inputParams/@p39",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "mixerMorphFilter": {
+      "field": "inputParams/@p40",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "mixerMainInMix": {
+      "field": "inputParams/@p41",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "mixerMainInMute": {
+      "field": "inputParams/@p42",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "mixerMainInSolo": {
+      "field": "inputParams/@p43",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "mixerMainInFilter": {
+      "field": "inputParams/@p44",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "mixerAuxInMix": {
+      "field": "inputParams/@p45",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "mixerAuxInMute": {
+      "field": "inputParams/@p46",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "mixerAuxInSolo": {
+      "field": "inputParams/@p47",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "mixerAuxInFilter": {
+      "field": "inputParams/@p48",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "mixerModelerMix": {
+      "field": "inputParams/@p49",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "mixerModelerMute": {
+      "field": "inputParams/@p50",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "mixerModelerSolo": {
+      "field": "inputParams/@p51",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "mixerModelerFilter": {
+      "field": "inputParams/@p52",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "reverbMix": {
+      "field": "inputParams/@p53",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "reverbRoomSize": {
+      "field": "inputParams/@p54",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "reverbDamp": {
+      "field": "inputParams/@p55",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "mappingZone1OnOff": {
+      "field": "inputParams/@p56",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "mappingZone1Mute": {
+      "field": "inputParams/@p57",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "mappingZone1InputPosition": {
+      "field": "inputParams/@p58",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "mappingZone1InputWidth": {
+      "field": "inputParams/@p59",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "mappingZone1FileFrom": {
+      "field": "inputParams/@p60",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "mappingZone1FileTo": {
+      "field": "inputParams/@p61",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "mappingZone2OnOff": {
+      "field": "inputParams/@p62",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "mappingZone2Mute": {
+      "field": "inputParams/@p63",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "mappingZone2InputPosition": {
+      "field": "inputParams/@p64",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "mappingZone2InputWidth": {
+      "field": "inputParams/@p65",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "mappingZone2FileFrom": {
+      "field": "inputParams/@p66",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "mappingZone2FileTo": {
+      "field": "inputParams/@p67",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "mappingZone3OnOff": {
+      "field": "inputParams/@p68",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "mappingZone3Mute": {
+      "field": "inputParams/@p69",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "mappingZone3InputPosition": {
+      "field": "inputParams/@p70",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "mappingZone3InputWidth": {
+      "field": "inputParams/@p71",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "mappingZone3FileFrom": {
+      "field": "inputParams/@p72",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "mappingZone3FileTo": {
+      "field": "inputParams/@p73",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    }
+  }
+}

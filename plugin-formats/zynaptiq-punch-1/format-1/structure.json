@@ -1,0 +1,1472 @@
+{
+  "plugin": "zynaptiq-punch-1",
+  "format": "format-1",
+  "about": "Zynaptiq Preset XML version 3 or 4. inputParams count and pN attributes hold scalar values. VST3 component state (verified on PUNCH 1 and UNMIX DRUMS) uses a u32 little-endian XML length including a terminating NUL, then the XML and NUL.",
+  "paths": "exact",
+  "files": {
+    "preset": {
+      "extension": ".preset",
+      "layers": [
+        "UTF-8 XML Preset; inputParams attributes p0 through p<count-1>; preserve all other elements"
+      ],
+      "constants": {}
+    },
+    "state": {
+      "layers": [
+        "u32 LE byte count including NUL; XML Preset; NUL"
+      ],
+      "constants": {}
+    }
+  },
+  "survey": {
+    "files": 27,
+    "parameterCounts": [
+      76
+    ],
+    "presetVersions": [
+      "4"
+    ],
+    "source": "Installed native preset files and shipped parameter-name metadata; no factory preset bodies copied."
+  },
+  "fields": {
+    "@progName": {
+      "type": "text",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "status": "verified"
+    },
+    "inputParams/@p0": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "default": 0.0,
+      "about": "Bypass"
+    },
+    "inputParams/@p1": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "default": 0.0,
+      "about": "DOUBLE PRECISION"
+    },
+    "inputParams/@p2": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "verified",
+      "default": 0.24,
+      "about": "PUNCH"
+    },
+    "inputParams/@p3": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.1875,
+        1.0
+      ],
+      "status": "verified",
+      "default": 0.359375,
+      "about": "RELEASE"
+    },
+    "inputParams/@p4": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -12.0,
+        1.5
+      ],
+      "status": "verified",
+      "default": -2.25,
+      "about": "GAIN"
+    },
+    "inputParams/@p5": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "verified",
+      "default": 0.0,
+      "about": "OUTPUT MODE"
+    },
+    "inputParams/@p6": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "verified",
+      "default": 0.0,
+      "about": "BIAS MODE"
+    },
+    "inputParams/@p7": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        7.0
+      ],
+      "status": "verified",
+      "default": 1.0,
+      "about": "BIAS CURVE PRESET"
+    },
+    "inputParams/@p8": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -1.0,
+        1.0
+      ],
+      "status": "verified",
+      "default": -0.0,
+      "about": "BIAS 1"
+    },
+    "inputParams/@p9": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -1.0,
+        0.4099999999999999
+      ],
+      "status": "verified",
+      "default": 0.0,
+      "about": "BIAS 2"
+    },
+    "inputParams/@p10": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -1.0,
+        0.29000000000000004
+      ],
+      "status": "verified",
+      "default": -0.0,
+      "about": "BIAS 3"
+    },
+    "inputParams/@p11": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -1.0,
+        0.56
+      ],
+      "status": "verified",
+      "default": -0.0,
+      "about": "BIAS 4"
+    },
+    "inputParams/@p12": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -1.0,
+        1.0
+      ],
+      "status": "verified",
+      "default": 0.0,
+      "about": "BIAS 5"
+    },
+    "inputParams/@p13": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "verified",
+      "default": 0.0,
+      "about": "BIAS 6"
+    },
+    "inputParams/@p14": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -0.22999999999999998,
+        1.0
+      ],
+      "status": "verified",
+      "default": 0.0,
+      "about": "BIAS 7"
+    },
+    "inputParams/@p15": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -1.0,
+        1.0
+      ],
+      "status": "verified",
+      "default": 0.0,
+      "about": "BIAS 8"
+    },
+    "inputParams/@p16": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "default": 0.0,
+      "about": "BIAS BAND SOLO"
+    },
+    "inputParams/@p17": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -1.0,
+        -1.0
+      ],
+      "status": "verified",
+      "default": -1.0,
+      "about": "SOLOED BIAS BAND"
+    },
+    "inputParams/@p18": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "verified",
+      "default": 0.3400000000000001,
+      "about": "BIAS"
+    },
+    "inputParams/@p19": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "verified",
+      "default": 0.0,
+      "about": "PUNCH TYPE"
+    },
+    "inputParams/@p20": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "default": 0.0,
+      "about": "SUB BASS GAIN"
+    },
+    "inputParams/@p21": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "default": 0.0,
+      "about": "AIR BAND GAIN"
+    },
+    "inputParams/@p22": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "default": 0.0,
+      "about": "COMPENSATION GAIN"
+    },
+    "inputParams/@p23": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "default": 0.0,
+      "about": "COMP GAIN ON"
+    },
+    "inputParams/@p24": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "default": 0.0,
+      "about": ""
+    },
+    "inputParams/@p25": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "default": 0.0,
+      "about": ""
+    },
+    "inputParams/@p26": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "default": 0.0,
+      "about": ""
+    },
+    "inputParams/@p27": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "default": 0.0,
+      "about": ""
+    },
+    "inputParams/@p28": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        1.0,
+        1.0
+      ],
+      "status": "verified",
+      "default": 1.0,
+      "about": "CHANNEL 01 FX ON"
+    },
+    "inputParams/@p29": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "default": 0.0,
+      "about": "CHANNEL 01 MUTE"
+    },
+    "inputParams/@p30": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "default": 0.0,
+      "about": "CHANNEL 01 SOLO"
+    },
+    "inputParams/@p31": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        1.0,
+        1.0
+      ],
+      "status": "verified",
+      "default": 1.0,
+      "about": "CHANNEL 02 FX ON"
+    },
+    "inputParams/@p32": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "default": 0.0,
+      "about": "CHANNEL 02 MUTE"
+    },
+    "inputParams/@p33": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "default": 0.0,
+      "about": "CHANNEL 02 SOLO"
+    },
+    "inputParams/@p34": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        1.0,
+        1.0
+      ],
+      "status": "verified",
+      "default": 1.0,
+      "about": "CHANNEL 03 FX ON"
+    },
+    "inputParams/@p35": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "default": 0.0,
+      "about": "CHANNEL 03 MUTE"
+    },
+    "inputParams/@p36": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "default": 0.0,
+      "about": "CHANNEL 03 SOLO"
+    },
+    "inputParams/@p37": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        1.0,
+        1.0
+      ],
+      "status": "verified",
+      "default": 1.0,
+      "about": "CHANNEL 04 FX ON"
+    },
+    "inputParams/@p38": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "default": 0.0,
+      "about": "CHANNEL 04 MUTE"
+    },
+    "inputParams/@p39": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "default": 0.0,
+      "about": "CHANNEL 04 SOLO"
+    },
+    "inputParams/@p40": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        1.0,
+        1.0
+      ],
+      "status": "verified",
+      "default": 1.0,
+      "about": "CHANNEL 05 FX ON"
+    },
+    "inputParams/@p41": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "default": 0.0,
+      "about": "CHANNEL 05 MUTE"
+    },
+    "inputParams/@p42": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "default": 0.0,
+      "about": "CHANNEL 05 SOLO"
+    },
+    "inputParams/@p43": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        1.0,
+        1.0
+      ],
+      "status": "verified",
+      "default": 1.0,
+      "about": "CHANNEL 06 FX ON"
+    },
+    "inputParams/@p44": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "default": 0.0,
+      "about": "CHANNEL 06 MUTE"
+    },
+    "inputParams/@p45": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "default": 0.0,
+      "about": "CHANNEL 06 SOLO"
+    },
+    "inputParams/@p46": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        1.0,
+        1.0
+      ],
+      "status": "verified",
+      "default": 1.0,
+      "about": "CHANNEL 07 FX ON"
+    },
+    "inputParams/@p47": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "default": 0.0,
+      "about": "CHANNEL 07 MUTE"
+    },
+    "inputParams/@p48": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "default": 0.0,
+      "about": "CHANNEL 07 SOLO"
+    },
+    "inputParams/@p49": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        1.0,
+        1.0
+      ],
+      "status": "verified",
+      "default": 1.0,
+      "about": "CHANNEL 08 FX ON"
+    },
+    "inputParams/@p50": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "default": 0.0,
+      "about": "CHANNEL 08 MUTE"
+    },
+    "inputParams/@p51": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "default": 0.0,
+      "about": "CHANNEL 08 SOLO"
+    },
+    "inputParams/@p52": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        1.0,
+        1.0
+      ],
+      "status": "verified",
+      "default": 1.0,
+      "about": "CHANNEL 09 FX ON"
+    },
+    "inputParams/@p53": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "default": 0.0,
+      "about": "CHANNEL 09 MUTE"
+    },
+    "inputParams/@p54": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "default": 0.0,
+      "about": "CHANNEL 09 SOLO"
+    },
+    "inputParams/@p55": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        1.0,
+        1.0
+      ],
+      "status": "verified",
+      "default": 1.0,
+      "about": "CHANNEL 10 FX ON"
+    },
+    "inputParams/@p56": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "default": 0.0,
+      "about": "CHANNEL 10 MUTE"
+    },
+    "inputParams/@p57": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "default": 0.0,
+      "about": "CHANNEL 10 SOLO"
+    },
+    "inputParams/@p58": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        1.0,
+        1.0
+      ],
+      "status": "verified",
+      "default": 1.0,
+      "about": "CHANNEL 11 FX ON"
+    },
+    "inputParams/@p59": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "default": 0.0,
+      "about": "CHANNEL 11 MUTE"
+    },
+    "inputParams/@p60": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "default": 0.0,
+      "about": "CHANNEL 11 SOLO"
+    },
+    "inputParams/@p61": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        1.0,
+        1.0
+      ],
+      "status": "verified",
+      "default": 1.0,
+      "about": "CHANNEL 12 FX ON"
+    },
+    "inputParams/@p62": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "default": 0.0,
+      "about": "CHANNEL 12 MUTE"
+    },
+    "inputParams/@p63": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "default": 0.0,
+      "about": "CHANNEL 12 SOLO"
+    },
+    "inputParams/@p64": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        1.0,
+        1.0
+      ],
+      "status": "verified",
+      "default": 1.0,
+      "about": "CHANNEL 13 FX ON"
+    },
+    "inputParams/@p65": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "default": 0.0,
+      "about": "CHANNEL 13 MUTE"
+    },
+    "inputParams/@p66": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "default": 0.0,
+      "about": "CHANNEL 13 SOLO"
+    },
+    "inputParams/@p67": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        1.0,
+        1.0
+      ],
+      "status": "verified",
+      "default": 1.0,
+      "about": "CHANNEL 14 FX ON"
+    },
+    "inputParams/@p68": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "default": 0.0,
+      "about": "CHANNEL 14 MUTE"
+    },
+    "inputParams/@p69": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "default": 0.0,
+      "about": "CHANNEL 14 SOLO"
+    },
+    "inputParams/@p70": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        1.0,
+        1.0
+      ],
+      "status": "verified",
+      "default": 1.0,
+      "about": "CHANNEL 15 FX ON"
+    },
+    "inputParams/@p71": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "default": 0.0,
+      "about": "CHANNEL 15 MUTE"
+    },
+    "inputParams/@p72": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "default": 0.0,
+      "about": "CHANNEL 15 SOLO"
+    },
+    "inputParams/@p73": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        1.0,
+        1.0
+      ],
+      "status": "verified",
+      "default": 1.0,
+      "about": "CHANNEL 16 FX ON"
+    },
+    "inputParams/@p74": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "default": 0.0,
+      "about": "CHANNEL 16 MUTE"
+    },
+    "inputParams/@p75": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "default": 0.0,
+      "about": "CHANNEL 16 SOLO"
+    }
+  },
+  "parameters": {
+    "Bypass": {
+      "field": "inputParams/@p0",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "DOUBLE PRECISION": {
+      "field": "inputParams/@p1",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "PUNCH": {
+      "field": "inputParams/@p2",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "RELEASE": {
+      "field": "inputParams/@p3",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "GAIN": {
+      "field": "inputParams/@p4",
+      "status": "verified",
+      "note": "VST3 parameter name and index checked by loading edited component state and reading the plugin output."
+    },
+    "OUTPUT MODE": {
+      "field": "inputParams/@p5",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "BIAS MODE": {
+      "field": "inputParams/@p6",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "BIAS CURVE PRESET": {
+      "field": "inputParams/@p7",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "BIAS 1": {
+      "field": "inputParams/@p8",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "BIAS 2": {
+      "field": "inputParams/@p9",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "BIAS 3": {
+      "field": "inputParams/@p10",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "BIAS 4": {
+      "field": "inputParams/@p11",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "BIAS 5": {
+      "field": "inputParams/@p12",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "BIAS 6": {
+      "field": "inputParams/@p13",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "BIAS 7": {
+      "field": "inputParams/@p14",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "BIAS 8": {
+      "field": "inputParams/@p15",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "BIAS BAND SOLO": {
+      "field": "inputParams/@p16",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "SOLOED BIAS BAND": {
+      "field": "inputParams/@p17",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "BIAS": {
+      "field": "inputParams/@p18",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "PUNCH TYPE": {
+      "field": "inputParams/@p19",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "SUB BASS GAIN": {
+      "field": "inputParams/@p20",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "AIR BAND GAIN": {
+      "field": "inputParams/@p21",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "COMPENSATION GAIN": {
+      "field": "inputParams/@p22",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "COMP GAIN ON": {
+      "field": "inputParams/@p23",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "": {
+      "field": "inputParams/@p27",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "CHANNEL 01 FX ON": {
+      "field": "inputParams/@p28",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "CHANNEL 01 MUTE": {
+      "field": "inputParams/@p29",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "CHANNEL 01 SOLO": {
+      "field": "inputParams/@p30",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "CHANNEL 02 FX ON": {
+      "field": "inputParams/@p31",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "CHANNEL 02 MUTE": {
+      "field": "inputParams/@p32",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "CHANNEL 02 SOLO": {
+      "field": "inputParams/@p33",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "CHANNEL 03 FX ON": {
+      "field": "inputParams/@p34",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "CHANNEL 03 MUTE": {
+      "field": "inputParams/@p35",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "CHANNEL 03 SOLO": {
+      "field": "inputParams/@p36",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "CHANNEL 04 FX ON": {
+      "field": "inputParams/@p37",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "CHANNEL 04 MUTE": {
+      "field": "inputParams/@p38",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "CHANNEL 04 SOLO": {
+      "field": "inputParams/@p39",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "CHANNEL 05 FX ON": {
+      "field": "inputParams/@p40",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "CHANNEL 05 MUTE": {
+      "field": "inputParams/@p41",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "CHANNEL 05 SOLO": {
+      "field": "inputParams/@p42",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "CHANNEL 06 FX ON": {
+      "field": "inputParams/@p43",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "CHANNEL 06 MUTE": {
+      "field": "inputParams/@p44",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "CHANNEL 06 SOLO": {
+      "field": "inputParams/@p45",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "CHANNEL 07 FX ON": {
+      "field": "inputParams/@p46",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "CHANNEL 07 MUTE": {
+      "field": "inputParams/@p47",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "CHANNEL 07 SOLO": {
+      "field": "inputParams/@p48",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "CHANNEL 08 FX ON": {
+      "field": "inputParams/@p49",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "CHANNEL 08 MUTE": {
+      "field": "inputParams/@p50",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "CHANNEL 08 SOLO": {
+      "field": "inputParams/@p51",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "CHANNEL 09 FX ON": {
+      "field": "inputParams/@p52",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "CHANNEL 09 MUTE": {
+      "field": "inputParams/@p53",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "CHANNEL 09 SOLO": {
+      "field": "inputParams/@p54",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "CHANNEL 10 FX ON": {
+      "field": "inputParams/@p55",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "CHANNEL 10 MUTE": {
+      "field": "inputParams/@p56",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "CHANNEL 10 SOLO": {
+      "field": "inputParams/@p57",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "CHANNEL 11 FX ON": {
+      "field": "inputParams/@p58",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "CHANNEL 11 MUTE": {
+      "field": "inputParams/@p59",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "CHANNEL 11 SOLO": {
+      "field": "inputParams/@p60",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "CHANNEL 12 FX ON": {
+      "field": "inputParams/@p61",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "CHANNEL 12 MUTE": {
+      "field": "inputParams/@p62",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "CHANNEL 12 SOLO": {
+      "field": "inputParams/@p63",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "CHANNEL 13 FX ON": {
+      "field": "inputParams/@p64",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "CHANNEL 13 MUTE": {
+      "field": "inputParams/@p65",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "CHANNEL 13 SOLO": {
+      "field": "inputParams/@p66",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "CHANNEL 14 FX ON": {
+      "field": "inputParams/@p67",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "CHANNEL 14 MUTE": {
+      "field": "inputParams/@p68",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "CHANNEL 14 SOLO": {
+      "field": "inputParams/@p69",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "CHANNEL 15 FX ON": {
+      "field": "inputParams/@p70",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "CHANNEL 15 MUTE": {
+      "field": "inputParams/@p71",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "CHANNEL 15 SOLO": {
+      "field": "inputParams/@p72",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "CHANNEL 16 FX ON": {
+      "field": "inputParams/@p73",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "CHANNEL 16 MUTE": {
+      "field": "inputParams/@p74",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "CHANNEL 16 SOLO": {
+      "field": "inputParams/@p75",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    }
+  }
+}

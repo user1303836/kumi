@@ -77,6 +77,12 @@ pub struct PluginInfo {
     pub presets: PresetPlaces,
     /// Its format folders, oldest first ("format-1").
     pub formats: Vec<String>,
+    #[serde(default)]
+    pub family: String,
+    #[serde(default)]
+    pub roles: Vec<String>,
+    #[serde(default)]
+    pub binaries: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub notes: Vec<String>,
 }
@@ -312,8 +318,200 @@ macro_rules! folder {
 }
 
 /// The folders Kumi ships with, as text: plug-in, plugin.json, structure.json, verified.json.
-pub const BUILTIN_FILES: [(&str, &str, &str, &str); 3] =
-    [folder!("serum-2", "format-1"), folder!("vital", "format-1"), folder!("ozone-12", "format-1")];
+pub const BUILTIN_FILES: &[(&str, &str, &str, &str)] = &[
+    folder!("serum-2", "format-1"),
+    folder!("vital", "format-1"),
+    folder!("ozone-12", "format-1"),
+    folder!("minimal-cluster-delay", "format-1"),
+    folder!("minimal-current", "format-1"),
+    folder!("minimal-eprom-memory-rites", "format-1"),
+    folder!("minimal-evoke", "format-1"),
+    folder!("minimal-flex-chorus", "format-1"),
+    folder!("minimal-formant", "format-1"),
+    folder!("minimal-fuse-compressor", "format-1"),
+    folder!("minimal-hybrid-filter", "format-1"),
+    folder!("minimal-lucid", "format-1"),
+    folder!("minimal-morph-eq", "format-1"),
+    folder!("pulsar-p11-abyss", "format-1"),
+    folder!("pulsar-p19-igloo", "format-1"),
+    folder!("pulsar-p42-climax", "format-1"),
+    folder!("pulsar-p422-fairuz", "format-1"),
+    folder!("pulsar-p44-magnum", "format-1"),
+    folder!("pulsar-p440-sweet-spot", "format-1"),
+    folder!("pulsar-p450-mdn-eq", "format-1"),
+    folder!("pulsar-p455-mdn-sidecar", "format-1"),
+    folder!("pulsar-p565-siren", "format-1"),
+    folder!("pulsar-p821-mdn-tape", "format-1"),
+    folder!("pulsar-p915-medusa", "format-1"),
+    folder!("pulsar-p930-lunar-lander", "format-1"),
+    folder!("minimal-poly-flanger", "format-1"),
+    folder!("pulsar-q-sahara", "format-1"),
+    folder!("minimal-rift", "format-1"),
+    folder!("minimal-ripple-phaser", "format-1"),
+    folder!("minimal-squash", "format-1"),
+    folder!("minimal-swarm-reverb", "format-1"),
+    folder!("valhalla-delay", "format-1"),
+    folder!("valhalla-freq-echo", "format-1"),
+    folder!("valhalla-future-verb", "format-1"),
+    folder!("valhalla-plate", "format-1"),
+    folder!("valhalla-room", "format-1"),
+    folder!("valhalla-shimmer", "format-1"),
+    folder!("valhalla-space-modulator", "format-1"),
+    folder!("valhalla-supermassive", "format-1"),
+    folder!("valhalla-uber-mod", "format-1"),
+    folder!("valhalla-vintage-verb", "format-1"),
+    folder!("minimal-wave-shifter", "format-1"),
+    (
+        "zynaptiq-adaptiverb",
+        include_str!(concat!(env!("KUMI_WORKSPACE"), "/plugin-formats/zynaptiq-adaptiverb/plugin.json")),
+        include_str!(concat!(env!("KUMI_WORKSPACE"), "/plugin-formats/zynaptiq-adaptiverb/format-1/structure.json")),
+        include_str!(concat!(env!("KUMI_WORKSPACE"), "/plugin-formats/zynaptiq-adaptiverb/format-1/verified.json")),
+    ),
+    (
+        "zynaptiq-balance-1",
+        include_str!(concat!(env!("KUMI_WORKSPACE"), "/plugin-formats/zynaptiq-balance-1/plugin.json")),
+        include_str!(concat!(env!("KUMI_WORKSPACE"), "/plugin-formats/zynaptiq-balance-1/format-1/structure.json")),
+        include_str!(concat!(env!("KUMI_WORKSPACE"), "/plugin-formats/zynaptiq-balance-1/format-1/verified.json")),
+    ),
+    (
+        "zynaptiq-intensity-2",
+        include_str!(concat!(env!("KUMI_WORKSPACE"), "/plugin-formats/zynaptiq-intensity-2/plugin.json")),
+        include_str!(concat!(env!("KUMI_WORKSPACE"), "/plugin-formats/zynaptiq-intensity-2/format-1/structure.json")),
+        include_str!(concat!(env!("KUMI_WORKSPACE"), "/plugin-formats/zynaptiq-intensity-2/format-1/verified.json")),
+    ),
+    (
+        "zynaptiq-loud-1",
+        include_str!(concat!(env!("KUMI_WORKSPACE"), "/plugin-formats/zynaptiq-loud-1/plugin.json")),
+        include_str!(concat!(env!("KUMI_WORKSPACE"), "/plugin-formats/zynaptiq-loud-1/format-1/structure.json")),
+        include_str!(concat!(env!("KUMI_WORKSPACE"), "/plugin-formats/zynaptiq-loud-1/format-1/verified.json")),
+    ),
+    (
+        "zynaptiq-morph-3-pro",
+        include_str!(concat!(env!("KUMI_WORKSPACE"), "/plugin-formats/zynaptiq-morph-3-pro/plugin.json")),
+        include_str!(concat!(env!("KUMI_WORKSPACE"), "/plugin-formats/zynaptiq-morph-3-pro/format-1/structure.json")),
+        include_str!(concat!(env!("KUMI_WORKSPACE"), "/plugin-formats/zynaptiq-morph-3-pro/format-1/verified.json")),
+    ),
+    (
+        "zynaptiq-orange-vocoder",
+        include_str!(concat!(env!("KUMI_WORKSPACE"), "/plugin-formats/zynaptiq-orange-vocoder/plugin.json")),
+        include_str!(concat!(env!("KUMI_WORKSPACE"), "/plugin-formats/zynaptiq-orange-vocoder/format-1/structure.json")),
+        include_str!(concat!(env!("KUMI_WORKSPACE"), "/plugin-formats/zynaptiq-orange-vocoder/format-1/verified.json")),
+    ),
+    (
+        "zynaptiq-orange-vocoder-nano",
+        include_str!(concat!(env!("KUMI_WORKSPACE"), "/plugin-formats/zynaptiq-orange-vocoder-nano/plugin.json")),
+        include_str!(concat!(env!("KUMI_WORKSPACE"), "/plugin-formats/zynaptiq-orange-vocoder-nano/format-1/structure.json")),
+        include_str!(concat!(env!("KUMI_WORKSPACE"), "/plugin-formats/zynaptiq-orange-vocoder-nano/format-1/verified.json")),
+    ),
+    (
+        "zynaptiq-pitchmap",
+        include_str!(concat!(env!("KUMI_WORKSPACE"), "/plugin-formats/zynaptiq-pitchmap/plugin.json")),
+        include_str!(concat!(env!("KUMI_WORKSPACE"), "/plugin-formats/zynaptiq-pitchmap/format-1/structure.json")),
+        include_str!(concat!(env!("KUMI_WORKSPACE"), "/plugin-formats/zynaptiq-pitchmap/format-1/verified.json")),
+    ),
+    (
+        "zynaptiq-pitchmap-colors",
+        include_str!(concat!(env!("KUMI_WORKSPACE"), "/plugin-formats/zynaptiq-pitchmap-colors/plugin.json")),
+        include_str!(concat!(env!("KUMI_WORKSPACE"), "/plugin-formats/zynaptiq-pitchmap-colors/format-1/structure.json")),
+        include_str!(concat!(env!("KUMI_WORKSPACE"), "/plugin-formats/zynaptiq-pitchmap-colors/format-1/verified.json")),
+    ),
+    (
+        "zynaptiq-pitchshift-pro-1",
+        include_str!(concat!(env!("KUMI_WORKSPACE"), "/plugin-formats/zynaptiq-pitchshift-pro-1/plugin.json")),
+        include_str!(concat!(env!("KUMI_WORKSPACE"), "/plugin-formats/zynaptiq-pitchshift-pro-1/format-1/structure.json")),
+        include_str!(concat!(env!("KUMI_WORKSPACE"), "/plugin-formats/zynaptiq-pitchshift-pro-1/format-1/verified.json")),
+    ),
+    (
+        "zynaptiq-punch-1",
+        include_str!(concat!(env!("KUMI_WORKSPACE"), "/plugin-formats/zynaptiq-punch-1/plugin.json")),
+        include_str!(concat!(env!("KUMI_WORKSPACE"), "/plugin-formats/zynaptiq-punch-1/format-1/structure.json")),
+        include_str!(concat!(env!("KUMI_WORKSPACE"), "/plugin-formats/zynaptiq-punch-1/format-1/verified.json")),
+    ),
+    (
+        "zynaptiq-subspace",
+        include_str!(concat!(env!("KUMI_WORKSPACE"), "/plugin-formats/zynaptiq-subspace/plugin.json")),
+        include_str!(concat!(env!("KUMI_WORKSPACE"), "/plugin-formats/zynaptiq-subspace/format-1/structure.json")),
+        include_str!(concat!(env!("KUMI_WORKSPACE"), "/plugin-formats/zynaptiq-subspace/format-1/verified.json")),
+    ),
+    (
+        "zynaptiq-unchirp",
+        include_str!(concat!(env!("KUMI_WORKSPACE"), "/plugin-formats/zynaptiq-unchirp/plugin.json")),
+        include_str!(concat!(env!("KUMI_WORKSPACE"), "/plugin-formats/zynaptiq-unchirp/format-1/structure.json")),
+        include_str!(concat!(env!("KUMI_WORKSPACE"), "/plugin-formats/zynaptiq-unchirp/format-1/verified.json")),
+    ),
+    (
+        "zynaptiq-unfilter",
+        include_str!(concat!(env!("KUMI_WORKSPACE"), "/plugin-formats/zynaptiq-unfilter/plugin.json")),
+        include_str!(concat!(env!("KUMI_WORKSPACE"), "/plugin-formats/zynaptiq-unfilter/format-1/structure.json")),
+        include_str!(concat!(env!("KUMI_WORKSPACE"), "/plugin-formats/zynaptiq-unfilter/format-1/verified.json")),
+    ),
+    (
+        "zynaptiq-unmix-drums",
+        include_str!(concat!(env!("KUMI_WORKSPACE"), "/plugin-formats/zynaptiq-unmix-drums/plugin.json")),
+        include_str!(concat!(env!("KUMI_WORKSPACE"), "/plugin-formats/zynaptiq-unmix-drums/format-1/structure.json")),
+        include_str!(concat!(env!("KUMI_WORKSPACE"), "/plugin-formats/zynaptiq-unmix-drums/format-1/verified.json")),
+    ),
+    (
+        "zynaptiq-unveil",
+        include_str!(concat!(env!("KUMI_WORKSPACE"), "/plugin-formats/zynaptiq-unveil/plugin.json")),
+        include_str!(concat!(env!("KUMI_WORKSPACE"), "/plugin-formats/zynaptiq-unveil/format-1/structure.json")),
+        include_str!(concat!(env!("KUMI_WORKSPACE"), "/plugin-formats/zynaptiq-unveil/format-1/verified.json")),
+    ),
+    (
+        "zynaptiq-wide-1",
+        include_str!(concat!(env!("KUMI_WORKSPACE"), "/plugin-formats/zynaptiq-wide-1/plugin.json")),
+        include_str!(concat!(env!("KUMI_WORKSPACE"), "/plugin-formats/zynaptiq-wide-1/format-1/structure.json")),
+        include_str!(concat!(env!("KUMI_WORKSPACE"), "/plugin-formats/zynaptiq-wide-1/format-1/verified.json")),
+    ),
+    (
+        "zynaptiq-wormhole",
+        include_str!(concat!(env!("KUMI_WORKSPACE"), "/plugin-formats/zynaptiq-wormhole/plugin.json")),
+        include_str!(concat!(env!("KUMI_WORKSPACE"), "/plugin-formats/zynaptiq-wormhole/format-1/structure.json")),
+        include_str!(concat!(env!("KUMI_WORKSPACE"), "/plugin-formats/zynaptiq-wormhole/format-1/verified.json")),
+    ),
+    (
+        "softube-tape",
+        include_str!(concat!(env!("KUMI_WORKSPACE"), "/plugin-formats/softube-tape/plugin.json")),
+        include_str!(concat!(env!("KUMI_WORKSPACE"), "/plugin-formats/softube-tape/format-1/structure.json")),
+        include_str!(concat!(env!("KUMI_WORKSPACE"), "/plugin-formats/softube-tape/format-1/verified.json")),
+    ),
+    (
+        "softube-tape-multi-track",
+        include_str!(concat!(env!("KUMI_WORKSPACE"), "/plugin-formats/softube-tape-multi-track/plugin.json")),
+        include_str!(concat!(env!("KUMI_WORKSPACE"), "/plugin-formats/softube-tape-multi-track/format-1/structure.json")),
+        include_str!(concat!(env!("KUMI_WORKSPACE"), "/plugin-formats/softube-tape-multi-track/format-1/verified.json")),
+    ),
+    (
+        "softube-weiss-compressor-limiter",
+        include_str!(concat!(env!("KUMI_WORKSPACE"), "/plugin-formats/softube-weiss-compressor-limiter/plugin.json")),
+        include_str!(concat!(env!("KUMI_WORKSPACE"), "/plugin-formats/softube-weiss-compressor-limiter/format-1/structure.json")),
+        include_str!(concat!(env!("KUMI_WORKSPACE"), "/plugin-formats/softube-weiss-compressor-limiter/format-1/verified.json")),
+    ),
+    (
+        "softube-weiss-ds1-mk3",
+        include_str!(concat!(env!("KUMI_WORKSPACE"), "/plugin-formats/softube-weiss-ds1-mk3/plugin.json")),
+        include_str!(concat!(env!("KUMI_WORKSPACE"), "/plugin-formats/softube-weiss-ds1-mk3/format-1/structure.json")),
+        include_str!(concat!(env!("KUMI_WORKSPACE"), "/plugin-formats/softube-weiss-ds1-mk3/format-1/verified.json")),
+    ),
+    (
+        "softube-weiss-deess",
+        include_str!(concat!(env!("KUMI_WORKSPACE"), "/plugin-formats/softube-weiss-deess/plugin.json")),
+        include_str!(concat!(env!("KUMI_WORKSPACE"), "/plugin-formats/softube-weiss-deess/format-1/structure.json")),
+        include_str!(concat!(env!("KUMI_WORKSPACE"), "/plugin-formats/softube-weiss-deess/format-1/verified.json")),
+    ),
+    (
+        "softube-weiss-mm-1-mastering-maximizer",
+        include_str!(concat!(env!("KUMI_WORKSPACE"), "/plugin-formats/softube-weiss-mm-1-mastering-maximizer/plugin.json")),
+        include_str!(concat!(env!("KUMI_WORKSPACE"), "/plugin-formats/softube-weiss-mm-1-mastering-maximizer/format-1/structure.json")),
+        include_str!(concat!(env!("KUMI_WORKSPACE"), "/plugin-formats/softube-weiss-mm-1-mastering-maximizer/format-1/verified.json")),
+    ),
+    (
+        "superior-drummer-3",
+        include_str!(concat!(env!("KUMI_WORKSPACE"), "/plugin-formats/superior-drummer-3/plugin.json")),
+        include_str!(concat!(env!("KUMI_WORKSPACE"), "/plugin-formats/superior-drummer-3/format-1/structure.json")),
+        include_str!(concat!(env!("KUMI_WORKSPACE"), "/plugin-formats/superior-drummer-3/format-1/verified.json")),
+    ),
+];
 
 static BUILTIN: LazyLock<Vec<PluginFormat>> = LazyLock::new(|| {
     BUILTIN_FILES

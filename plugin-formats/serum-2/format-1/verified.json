@@ -87,5 +87,18 @@
       "how": "a preset and the states saved in the machine's Sets by this version: each decodes, its hash matches, it re-encodes byte for byte and round-trips"
     }
   ],
-  "writes": []
+  "writes": [
+    {
+      "version": "2.1.5",
+      "files": [
+        "preset",
+        "processor",
+        "controller",
+        "state",
+        "vstpreset"
+      ],
+      "checked": "2026-10-27",
+      "how": "Kumi Rust writer created a new named patch from init, enabled oscillator B, set its level to 0.45 and coarse pitch to +12 semitones, and added Distortion. Both VST3 state halves were loaded into a fresh installed 2.1.5 instance using standard host APIs. Parameter readback confirmed enabled B, level sqrt(0.45) on its normalized host curve and +12 semitones; saved processor state retained the Distortion slot. This verifies serialization and these controls, not every DSP parameter."
+    }
+  ]
 }

@@ -1,0 +1,101 @@
+{
+  "plugin": "pulsar-p44-magnum",
+  "format": "format-1",
+  "about": "Pulsar Modular XML PARAM id/value records in physical units; omitted values mean zero.",
+  "paths": "exact",
+  "files": {
+    "preset": {
+      "extension": ".P44Preset",
+      "layers": [
+        "VC2! + little-endian XML byte length + XML + NUL"
+      ],
+      "constants": {
+        "root": "P44"
+      }
+    },
+    "state": {
+      "layers": [
+        "VST3 Comp chunk",
+        "optional VstW compatibility bank",
+        "VC2! + little-endian XML byte length + XML + NUL + preserved opaque JUCE private data"
+      ],
+      "constants": {
+        "xml_magic": "VC2!",
+        "root": "P44"
+      }
+    }
+  },
+  "fields": {
+    "": {"type":"map","in":["state","preset"],"status":"verified"},
+    "root": {"type":"text","in":["state","preset"],"status":"verified"},
+    "parameters": {"type":"map","in":["state","preset"],"status":"verified"},
+    "parameters/pm_p44_bypass_btn": {"type":"float","in":["state","preset"],"status":"verified","default":0.0,"about":"Physical stored value. Seen bounds are observed with host controls at 0 and 1; linked modes can change the mapping. Host parameter: Bypass.","seen":[0.0,1.0]},
+    "parameters/pm_p44_clipper_btn": {"type":"float","in":["state","preset"],"status":"verified","default":0.0,"about":"Physical stored value. Seen bounds are observed with host controls at 0 and 1; linked modes can change the mapping. Host parameter: Clip SW.","seen":[0.0,1.0]},
+    "parameters/pm_p44_clipper_sldr": {"type":"float","in":["state","preset"],"status":"verified","default":0.0,"about":"Physical stored value. Seen bounds are observed with host controls at 0 and 1; linked modes can change the mapping. Host parameter: Clip.","seen":[-18.0,0.0]},
+    "parameters/pm_p44_clipperoutgain_sldr": {"type":"float","in":["state","preset"],"status":"verified","default":0.0,"about":"Physical stored value. Seen bounds are observed with host controls at 0 and 1; linked modes can change the mapping. Host parameter: Clip Out.","seen":[-18.0,9.0]},
+    "parameters/pm_p44_delta_Btn": {"type":"float","in":["state","preset"],"status":"verified","default":0.0,"about":"Physical stored value. Seen bounds are observed with host controls at 0 and 1; linked modes can change the mapping. Host parameter: Delta.","seen":[0.0,1.0]},
+    "parameters/pm_p44_dualmono_btn": {"type":"float","in":["state","preset"],"status":"verified","default":0.0,"about":"Physical stored value. Seen bounds are observed with host controls at 0 and 1; linked modes can change the mapping. Host parameter: Dual Mono.","seen":[0.0,1.0]},
+    "parameters/pm_p44_gainin_sldr": {"type":"float","in":["state","preset"],"status":"verified","default":0.0,"about":"Physical stored value. Seen bounds are observed with host controls at 0 and 1; linked modes can change the mapping. Host parameter: IN Drive.","seen":[-6.0,24.0]},
+    "parameters/pm_p44_infodump_btn": {"type":"float","in":["state","preset"],"status":"verified","default":0.0,"about":"Physical stored value. Seen bounds are observed with host controls at 0 and 1; linked modes can change the mapping. Host parameter: InfoDump.","seen":[0.0,1.0]},
+    "parameters/pm_p44_mainout_sldr": {"type":"float","in":["state","preset"],"status":"verified","default":0.0,"about":"Physical stored value. Seen bounds are observed with host controls at 0 and 1; linked modes can change the mapping. Host parameter: Main Out.","seen":[-24.0,6.0]},
+    "parameters/pm_p44_mix_sldr": {"type":"float","in":["state","preset"],"status":"verified","default":0.0,"about":"Physical stored value. Seen bounds are observed with host controls at 0 and 1; linked modes can change the mapping. Host parameter: Mix.","seen":[0.0,1.0]},
+    "parameters/pm_p44_mod_sldr": {"type":"float","in":["state","preset"],"status":"verified","default":0.0,"about":"Physical stored value. Seen bounds are observed with host controls at 0 and 1; linked modes can change the mapping. Host parameter: MOD.","seen":[0.0,1.0]},
+    "parameters/pm_p44_o2_btn": {"type":"float","in":["state","preset"],"status":"verified","default":0.0,"about":"Physical stored value. Seen bounds are observed with host controls at 0 and 1; linked modes can change the mapping. Host parameter: O2 SW.","seen":[0.0,1.0]},
+    "parameters/pm_p44_o2_sldr": {"type":"float","in":["state","preset"],"status":"verified","default":0.0,"about":"Physical stored value. Seen bounds are observed with host controls at 0 and 1; linked modes can change the mapping. Host parameter: O2.","seen":[0.0,100.0]},
+    "parameters/pm_p44_oomph_btn": {"type":"float","in":["state","preset"],"status":"verified","default":0.0,"about":"Physical stored value. Seen bounds are observed with host controls at 0 and 1; linked modes can change the mapping. Host parameter: Oomph SW.","seen":[0.0,1.0]},
+    "parameters/pm_p44_oomph_sldr": {"type":"float","in":["state","preset"],"status":"verified","default":10.0,"about":"Physical stored value. Seen bounds are observed with host controls at 0 and 1; linked modes can change the mapping. Host parameter: Oomph.","seen":[10.0,45.0]},
+    "parameters/pm_p44_oomphsmoothing_sldr": {"type":"float","in":["state","preset"],"status":"verified","default":0.0,"about":"Physical stored value. Seen bounds are observed with host controls at 0 and 1; linked modes can change the mapping. Host parameter: Oomph Attn.","seen":[0.0,100.0]},
+    "parameters/pm_p44_os_btn": {"type":"float","in":["state","preset"],"status":"verified","default":0.0,"about":"Physical stored value. Seen bounds are observed with host controls at 0 and 1; linked modes can change the mapping. Host parameter: OS SW.","seen":[0.0,1.0]},
+    "parameters/pm_p44_ostype_btn": {"type":"float","in":["state","preset"],"status":"verified","default":0.0,"about":"Physical stored value. Seen bounds are observed with host controls at 0 and 1; linked modes can change the mapping. Host parameter: OS Type.","seen":[0.0,2.0]},
+    "parameters/pm_p44_phase_btn": {"type":"float","in":["state","preset"],"status":"verified","default":0.0,"about":"Physical stored value. Seen bounds are observed with host controls at 0 and 1; linked modes can change the mapping. Host parameter: Polarity Flip.","seen":[0.0,1.0]},
+    "parameters/pm_p44_poomph_btn": {"type":"float","in":["state","preset"],"status":"verified","default":0.0,"about":"Physical stored value. Seen bounds are observed with host controls at 0 and 1; linked modes can change the mapping. Host parameter: Poomph SW.","seen":[0.0,1.0]},
+    "parameters/pm_p44_poomph_sldr": {"type":"float","in":["state","preset"],"status":"verified","default":45.0,"about":"Physical stored value. Seen bounds are observed with host controls at 0 and 1; linked modes can change the mapping. Host parameter: Poomph.","seen":[45.0,82.0]},
+    "parameters/pm_p44_poomphsmoothing_sldr": {"type":"float","in":["state","preset"],"status":"verified","default":0.0,"about":"Physical stored value. Seen bounds are observed with host controls at 0 and 1; linked modes can change the mapping. Host parameter: Poomph Attn.","seen":[0.0,100.0]},
+    "parameters/pm_p44_routswitch_btn": {"type":"float","in":["state","preset"],"status":"verified","default":0.0,"about":"Physical stored value. Seen bounds are observed with host controls at 0 and 1; linked modes can change the mapping. Host parameter: Route SW.","seen":[0.0,1.0]},
+    "parameters/pm_p44_satpos_btn": {"type":"float","in":["state","preset"],"status":"verified","default":0.0,"about":"Physical stored value. Seen bounds are observed with host controls at 0 and 1; linked modes can change the mapping. Host parameter: Sat. @ .","seen":[0.0,1.0]},
+    "parameters/pm_p44_saturation_sldr": {"type":"float","in":["state","preset"],"status":"verified","default":0.0,"about":"Physical stored value. Seen bounds are observed with host controls at 0 and 1; linked modes can change the mapping. Host parameter: Sat.","seen":[0.0,1.5]},
+    "parameters/pm_p44_sweet_btn": {"type":"float","in":["state","preset"],"status":"verified","default":0.0,"about":"Physical stored value. Seen bounds are observed with host controls at 0 and 1; linked modes can change the mapping. Host parameter: Sweet SW.","seen":[0.0,1.0]},
+    "parameters/pm_p44_sweet_sldr": {"type":"float","in":["state","preset"],"status":"verified","default":0.0,"about":"Physical stored value. Seen bounds are observed with host controls at 0 and 1; linked modes can change the mapping. Host parameter: Sweet.","seen":[0.0,100.0]},
+    "parameters/pm_p44_clip_knee_sldr": {"type":"float","in":["state","preset"],"status":"verified","default":0.0,"about":"Physical stored value. Seen bounds are observed with host controls at 0 and 1; linked modes can change the mapping. Host parameter: Clip Knee.","seen":[0.0,8.5]},
+    "parameters/pm_p44_sweetfine_sldr": {"type":"float","in":["state","preset"],"status":"verified","default":0.0,"about":"Physical stored value. Seen bounds are observed with host controls at 0 and 1; linked modes can change the mapping. Host parameter: Sweet FT.","seen":[-5.0,5.0]},
+    "state": {"type":"map","in":["state","preset"],"status":"verified"},
+    "state/PARAM": {"type":"list","in":["state","preset"],"status":"verified"},
+    "state/PARAM[]": {"type":"map","in":["state","preset"],"status":"verified"},
+    "state/PARAM[]/@id": {"type":"text","in":["state","preset"],"status":"verified"},
+    "state/PARAM[]/@value": {"type":"text","in":["state","preset"],"status":"verified"},
+    "state/EXTRA": {"type":"map","in":["state","preset"],"status":"verified"},
+    "state/EXTRA/@id": {"type":"text","in":["state","preset"],"status":"verified"},
+    "state/EXTRA/@value": {"type":"text","in":["state","preset"],"status":"verified"}
+  },
+  "parameters": {
+    "Bypass [VST3 593945014]": {"field":"parameters/pm_p44_bypass_btn","status":"guessed","note":"VST3 parameter ID 593945014. Matched by stored name or JUCE ID hash; jointly probed host changes corroborate the field mapping."},
+    "Clip SW [VST3 1231386073]": {"field":"parameters/pm_p44_clipper_btn","status":"guessed","note":"VST3 parameter ID 1231386073. Matched by stored name or JUCE ID hash; jointly probed host changes corroborate the field mapping."},
+    "Clip [VST3 1666244810]": {"field":"parameters/pm_p44_clipper_sldr","status":"guessed","note":"VST3 parameter ID 1666244810. Matched by stored name or JUCE ID hash; jointly probed host changes corroborate the field mapping."},
+    "Clip Out [VST3 1396515349]": {"field":"parameters/pm_p44_clipperoutgain_sldr","status":"guessed","note":"VST3 parameter ID 1396515349. Matched by stored name or JUCE ID hash; jointly probed host changes corroborate the field mapping."},
+    "Delta [VST3 366030820]": {"field":"parameters/pm_p44_delta_Btn","status":"guessed","note":"VST3 parameter ID 366030820. Matched by stored name or JUCE ID hash; jointly probed host changes corroborate the field mapping."},
+    "Dual Mono [VST3 118435437]": {"field":"parameters/pm_p44_dualmono_btn","status":"guessed","note":"VST3 parameter ID 118435437. Matched by stored name or JUCE ID hash; jointly probed host changes corroborate the field mapping."},
+    "IN Drive [VST3 1780188689]": {"field":"parameters/pm_p44_gainin_sldr","status":"guessed","note":"VST3 parameter ID 1780188689. Matched by stored name or JUCE ID hash; jointly probed host changes corroborate the field mapping."},
+    "InfoDump [VST3 844568368]": {"field":"parameters/pm_p44_infodump_btn","status":"guessed","note":"VST3 parameter ID 844568368. Matched by stored name or JUCE ID hash; jointly probed host changes corroborate the field mapping."},
+    "Main Out [VST3 198247074]": {"field":"parameters/pm_p44_mainout_sldr","status":"guessed","note":"VST3 parameter ID 198247074. Matched by stored name or JUCE ID hash; jointly probed host changes corroborate the field mapping."},
+    "Mix [VST3 2114856987]": {"field":"parameters/pm_p44_mix_sldr","status":"verified","note":"VST3 parameter ID 2114856987. Isolated file edit and host readback verified."},
+    "MOD [VST3 424845109]": {"field":"parameters/pm_p44_mod_sldr","status":"guessed","note":"VST3 parameter ID 424845109. Matched by stored name or JUCE ID hash; jointly probed host changes corroborate the field mapping."},
+    "O2 SW [VST3 1516301681]": {"field":"parameters/pm_p44_o2_btn","status":"guessed","note":"VST3 parameter ID 1516301681. Matched by stored name or JUCE ID hash; jointly probed host changes corroborate the field mapping."},
+    "O2 [VST3 1908694066]": {"field":"parameters/pm_p44_o2_sldr","status":"guessed","note":"VST3 parameter ID 1908694066. Matched by stored name or JUCE ID hash; jointly probed host changes corroborate the field mapping."},
+    "Oomph SW [VST3 839101201]": {"field":"parameters/pm_p44_oomph_btn","status":"guessed","note":"VST3 parameter ID 839101201. Matched by stored name or JUCE ID hash; jointly probed host changes corroborate the field mapping."},
+    "Oomph [VST3 242832018]": {"field":"parameters/pm_p44_oomph_sldr","status":"guessed","note":"VST3 parameter ID 242832018. Matched by stored name or JUCE ID hash; jointly probed host changes corroborate the field mapping."},
+    "Oomph Attn [VST3 1020021510]": {"field":"parameters/pm_p44_oomphsmoothing_sldr","status":"guessed","note":"VST3 parameter ID 1020021510. Matched by stored name or JUCE ID hash; jointly probed host changes corroborate the field mapping."},
+    "OS SW [VST3 1576330546]": {"field":"parameters/pm_p44_os_btn","status":"guessed","note":"VST3 parameter ID 1576330546. Matched by stored name or JUCE ID hash; jointly probed host changes corroborate the field mapping."},
+    "OS Type [VST3 549287148]": {"field":"parameters/pm_p44_ostype_btn","status":"guessed","note":"VST3 parameter ID 549287148. Matched by stored name or JUCE ID hash; jointly probed host changes corroborate the field mapping."},
+    "Polarity Flip [VST3 2034850887]": {"field":"parameters/pm_p44_phase_btn","status":"guessed","note":"VST3 parameter ID 2034850887. Matched by stored name or JUCE ID hash; jointly probed host changes corroborate the field mapping."},
+    "Poomph SW [VST3 1106168099]": {"field":"parameters/pm_p44_poomph_btn","status":"guessed","note":"VST3 parameter ID 1106168099. Matched by stored name or JUCE ID hash; jointly probed host changes corroborate the field mapping."},
+    "Poomph [VST3 2079454912]": {"field":"parameters/pm_p44_poomph_sldr","status":"guessed","note":"VST3 parameter ID 2079454912. Matched by stored name or JUCE ID hash; jointly probed host changes corroborate the field mapping."},
+    "Poomph Attn [VST3 1744730776]": {"field":"parameters/pm_p44_poomphsmoothing_sldr","status":"guessed","note":"VST3 parameter ID 1744730776. Matched by stored name or JUCE ID hash; jointly probed host changes corroborate the field mapping."},
+    "Route SW [VST3 1747342366]": {"field":"parameters/pm_p44_routswitch_btn","status":"guessed","note":"VST3 parameter ID 1747342366. Matched by stored name or JUCE ID hash; jointly probed host changes corroborate the field mapping."},
+    "Sat. @  [VST3 671860348]": {"field":"parameters/pm_p44_satpos_btn","status":"guessed","note":"VST3 parameter ID 671860348. Matched by stored name or JUCE ID hash; jointly probed host changes corroborate the field mapping."},
+    "Sat [VST3 262935651]": {"field":"parameters/pm_p44_saturation_sldr","status":"guessed","note":"VST3 parameter ID 262935651. Matched by stored name or JUCE ID hash; jointly probed host changes corroborate the field mapping."},
+    "Sweet SW [VST3 147898172]": {"field":"parameters/pm_p44_sweet_btn","status":"guessed","note":"VST3 parameter ID 147898172. Matched by stored name or JUCE ID hash; jointly probed host changes corroborate the field mapping."},
+    "Sweet [VST3 290374599]": {"field":"parameters/pm_p44_sweet_sldr","status":"guessed","note":"VST3 parameter ID 290374599. Matched by stored name or JUCE ID hash; jointly probed host changes corroborate the field mapping."},
+    "Clip Knee [VST3 413293221]": {"field":"parameters/pm_p44_clip_knee_sldr","status":"guessed","note":"VST3 parameter ID 413293221. Matched by stored name or JUCE ID hash; jointly probed host changes corroborate the field mapping."},
+    "Sweet FT [VST3 1793608141]": {"field":"parameters/pm_p44_sweetfine_sldr","status":"guessed","note":"VST3 parameter ID 1793608141. Matched by stored name or JUCE ID hash; jointly probed host changes corroborate the field mapping."}
+  }
+}

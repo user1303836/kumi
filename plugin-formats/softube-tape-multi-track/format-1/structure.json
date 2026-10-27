@@ -1,0 +1,304 @@
+{
+  "plugin": "softube-tape-multi-track",
+  "format": "format-1",
+  "about": "UTF-8 JSON AssetType SoftubePresetFile, FileFormatVersion 1. PresetList entries identify the plugin and contain ParameterData Type Full, Parameters tuples [id, normalized value, optional name]. SharedData is retained unchanged.",
+  "paths": "exact",
+  "files": {
+    "preset": {
+      "extension": ".softubepreset",
+      "layers": [
+        "JSON SoftubePresetFile version 1",
+        "PresetList entries and SharedData"
+      ],
+      "constants": {
+        "FileFormatVersion": 1,
+        "nativePluginId": "wpkf"
+      }
+    }
+  },
+  "survey": {
+    "files": 1,
+    "presets": 28,
+    "versions": [
+      "9.9.9"
+    ],
+    "source": "Installed bundle inspected for parameter names, IDs and numeric ranges only."
+  },
+  "fields": {
+    "presets[]/parameters/0": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0,
+        1
+      ],
+      "status": "verified",
+      "seen": [
+        0.255,
+        0.94
+      ],
+      "about": "Color Amount"
+    },
+    "presets[]/parameters/1": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0,
+        1
+      ],
+      "status": "verified",
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "about": "Color Type"
+    },
+    "presets[]/parameters/2": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0,
+        1
+      ],
+      "status": "verified",
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "about": "Tape Speed"
+    },
+    "presets[]/parameters/3": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0,
+        1
+      ],
+      "status": "verified",
+      "seen": [
+        0.545,
+        1.0
+      ],
+      "about": "Dry/Wet"
+    },
+    "presets[]/parameters/4": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0,
+        1
+      ],
+      "status": "verified",
+      "seen": [
+        0.0,
+        0.62
+      ],
+      "about": "Speed Stability"
+    },
+    "presets[]/parameters/5": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0,
+        1
+      ],
+      "status": "verified",
+      "seen": [
+        0.0,
+        0.695
+      ],
+      "about": "High Freq Trim"
+    },
+    "presets[]/parameters/6": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0,
+        1
+      ],
+      "status": "verified",
+      "seen": [
+        0.0,
+        0.65
+      ],
+      "about": "Crosstalk"
+    },
+    "presets[]/parameters/7": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0,
+        1
+      ],
+      "status": "verified",
+      "seen": [
+        0.393893,
+        1.0
+      ],
+      "about": "Input"
+    },
+    "presets[]/parameters/8": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0,
+        1
+      ],
+      "status": "verified",
+      "seen": [
+        0.364886,
+        0.798473
+      ],
+      "about": "Output"
+    },
+    "presets[]/parameters/9": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0,
+        1
+      ],
+      "status": "verified",
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "about": "Noise"
+    },
+    "presets[]/parameters/10": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0,
+        1
+      ],
+      "status": "verified",
+      "seen": [
+        1.0,
+        1.0
+      ],
+      "about": "Playback"
+    },
+    "presets[]/parameters/11": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0,
+        1
+      ],
+      "status": "verified",
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "about": "View"
+    },
+    "presets[]/parameters/12": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0,
+        1
+      ],
+      "status": "verified",
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "about": "Internal Change Counter"
+    }
+  },
+  "parameters": {
+    "Color Amount": {
+      "field": "presets[]/parameters/0",
+      "status": "verified",
+      "note": "Parameter ID and name are stored together in the native JSON tuple."
+    },
+    "Color Type": {
+      "field": "presets[]/parameters/1",
+      "status": "verified",
+      "note": "Parameter ID and name are stored together in the native JSON tuple."
+    },
+    "Tape Speed": {
+      "field": "presets[]/parameters/2",
+      "status": "verified",
+      "note": "Parameter ID and name are stored together in the native JSON tuple."
+    },
+    "Dry/Wet": {
+      "field": "presets[]/parameters/3",
+      "status": "verified",
+      "note": "Parameter ID and name are stored together in the native JSON tuple."
+    },
+    "Speed Stability": {
+      "field": "presets[]/parameters/4",
+      "status": "verified",
+      "note": "Parameter ID and name are stored together in the native JSON tuple."
+    },
+    "High Freq Trim": {
+      "field": "presets[]/parameters/5",
+      "status": "verified",
+      "note": "Parameter ID and name are stored together in the native JSON tuple."
+    },
+    "Crosstalk": {
+      "field": "presets[]/parameters/6",
+      "status": "verified",
+      "note": "Parameter ID and name are stored together in the native JSON tuple."
+    },
+    "Input": {
+      "field": "presets[]/parameters/7",
+      "status": "verified",
+      "note": "Parameter ID and name are stored together in the native JSON tuple."
+    },
+    "Output": {
+      "field": "presets[]/parameters/8",
+      "status": "verified",
+      "note": "Parameter ID and name are stored together in the native JSON tuple."
+    },
+    "Noise": {
+      "field": "presets[]/parameters/9",
+      "status": "verified",
+      "note": "Parameter ID and name are stored together in the native JSON tuple."
+    },
+    "Playback": {
+      "field": "presets[]/parameters/10",
+      "status": "verified",
+      "note": "Parameter ID and name are stored together in the native JSON tuple."
+    },
+    "View": {
+      "field": "presets[]/parameters/11",
+      "status": "verified",
+      "note": "Parameter ID and name are stored together in the native JSON tuple."
+    },
+    "Internal Change Counter": {
+      "field": "presets[]/parameters/12",
+      "status": "verified",
+      "note": "Parameter ID and name are stored together in the native JSON tuple."
+    }
+  }
+}

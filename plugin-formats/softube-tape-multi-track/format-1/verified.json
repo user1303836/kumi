@@ -1,0 +1,15 @@
+{
+  "plugin": "softube-tape-multi-track",
+  "format": "format-1",
+  "reads": [
+    {
+      "version": "9.9.9",
+      "files": [
+        "preset"
+      ],
+      "checked": "2026-10-27",
+      "how": "Parsed installed native JSON bundle and checked full parameter tuple schema. No host reload verification."
+    }
+  ],
+  "writes": []
+}

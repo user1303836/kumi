@@ -1,0 +1,32 @@
+{
+  "plugin": "pulsar-p11-abyss",
+  "format": "format-1",
+  "reads": [
+    {
+      "version": "2.2.3",
+      "files": [
+        "state"
+      ],
+      "checked": "2026-10-27",
+      "how": "Captured and parsed the installed VST3 initial state and its native XML."
+    }
+  ],
+  "writes": [
+    {
+      "version": "2.2.3",
+      "files": [
+        "state"
+      ],
+      "checked": "2026-10-27",
+      "how": "Initialized the installed 2.2.3 VST3 in an isolated host, enumerated its factory and parameters, captured component state, queried controller state, and restored the component. Changed mix to 0.2599999904632568 in the serialized XML, loaded it into a fresh instance and read back normalized 0.25308874249458313 for VST3 parameter 108124. Unknown state and private tails are retained. Verification covers serialization and the named control, not every audible DSP behavior. The same edit was emitted by Kumi's Rust codec into a VST3 preset, loaded through the component state API into a fresh instance, and matched the same parameter readback."
+    }
+  ],
+  "checks": [
+    {
+      "path": "parameters/mix",
+      "value": 0.2599999904632568,
+      "host_parameter_id": 108124,
+      "host_normalized": 0.25308874249458313
+    }
+  ]
+}

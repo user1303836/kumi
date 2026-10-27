@@ -1,0 +1,3769 @@
+{
+  "plugin": "zynaptiq-orange-vocoder",
+  "format": "format-1",
+  "about": "Zynaptiq Preset XML version 3 or 4. inputParams count and pN attributes hold scalar values. VST3 component state (verified on PUNCH 1 and UNMIX DRUMS) uses a u32 little-endian XML length including a terminating NUL, then the XML and NUL.",
+  "paths": "exact",
+  "files": {
+    "preset": {
+      "extension": ".preset",
+      "layers": [
+        "UTF-8 XML Preset; inputParams attributes p0 through p<count-1>; preserve all other elements"
+      ],
+      "constants": {}
+    },
+    "state": {
+      "layers": [
+        "u32 LE byte count including NUL; XML Preset; NUL"
+      ],
+      "constants": {}
+    }
+  },
+  "survey": {
+    "files": 144,
+    "parameterCounts": [
+      207
+    ],
+    "presetVersions": [
+      "4"
+    ],
+    "source": "Installed native preset files and shipped parameter-name metadata; no factory preset bodies copied."
+  },
+  "fields": {
+    "@progName": {
+      "type": "text",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "status": "verified"
+    },
+    "inputParams/@p0": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "about": "bypass"
+    },
+    "inputParams/@p1": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -6.0,
+        0.0
+      ],
+      "status": "verified",
+      "about": "gain"
+    },
+    "inputParams/@p2": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        440.0,
+        440.0
+      ],
+      "status": "verified",
+      "about": "tuning"
+    },
+    "inputParams/@p3": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "verified",
+      "about": "kybdSoloMode"
+    },
+    "inputParams/@p4": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        10.0,
+        2000.0000000000005
+      ],
+      "status": "verified",
+      "about": "glideTime"
+    },
+    "inputParams/@p5": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        12.0,
+        12.0
+      ],
+      "status": "verified",
+      "about": "bendRange"
+    },
+    "inputParams/@p6": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "verified",
+      "about": "useSynth"
+    },
+    "inputParams/@p7": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "verified",
+      "about": "kVocoderOnOff"
+    },
+    "inputParams/@p8": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "verified",
+      "about": "kPitchQOnOff"
+    },
+    "inputParams/@p9": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "verified",
+      "about": "voiceMix"
+    },
+    "inputParams/@p10": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "about": "voiceMute"
+    },
+    "inputParams/@p11": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "about": "voiceSolo"
+    },
+    "inputParams/@p12": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "verified",
+      "about": "vocoderMix"
+    },
+    "inputParams/@p13": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "about": "vocoderMute"
+    },
+    "inputParams/@p14": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "about": "vocoderSolo"
+    },
+    "inputParams/@p15": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "verified",
+      "about": "carrierMix"
+    },
+    "inputParams/@p16": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "about": "carrierMute"
+    },
+    "inputParams/@p17": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "about": "carrierSolo"
+    },
+    "inputParams/@p18": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "verified",
+      "about": "reverbOn"
+    },
+    "inputParams/@p19": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.83
+      ],
+      "status": "verified",
+      "about": "reverbMix"
+    },
+    "inputParams/@p20": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.08,
+        1.0
+      ],
+      "status": "verified",
+      "about": "reverbSize"
+    },
+    "inputParams/@p21": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.11,
+        0.91
+      ],
+      "status": "verified",
+      "about": "reverbDamping"
+    },
+    "inputParams/@p22": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "verified",
+      "about": "chorusOn"
+    },
+    "inputParams/@p23": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.8
+      ],
+      "status": "verified",
+      "about": "ChorusAmount"
+    },
+    "inputParams/@p24": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.64,
+        16.0
+      ],
+      "status": "verified",
+      "about": "ChorusRate"
+    },
+    "inputParams/@p25": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "verified",
+      "about": "kFreezeOnOff"
+    },
+    "inputParams/@p26": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "verified",
+      "about": "freezeA"
+    },
+    "inputParams/@p27": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        4.0
+      ],
+      "status": "verified",
+      "about": "voicePitchMode"
+    },
+    "inputParams/@p28": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        216.43848543661517
+      ],
+      "status": "verified",
+      "about": "kPitchQAttack"
+    },
+    "inputParams/@p29": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        2243.840175609053
+      ],
+      "status": "verified",
+      "about": "kPitchQRelease"
+    },
+    "inputParams/@p30": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "about": "kPitchQVelAmount"
+    },
+    "inputParams/@p31": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "about": "flipInputs"
+    },
+    "inputParams/@p32": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        1.0,
+        1.0
+      ],
+      "status": "verified",
+      "about": "kVocoderStereo"
+    },
+    "inputParams/@p33": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        23.0
+      ],
+      "status": "verified",
+      "about": "algoSelect"
+    },
+    "inputParams/@p34": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -9.5,
+        12.0
+      ],
+      "status": "verified",
+      "about": "formantShift"
+    },
+    "inputParams/@p35": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.45
+      ],
+      "status": "verified",
+      "about": "hfPassThrough"
+    },
+    "inputParams/@p36": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.45
+      ],
+      "status": "verified",
+      "about": "unvoicedBypass"
+    },
+    "inputParams/@p37": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        6.0
+      ],
+      "status": "verified",
+      "about": "kVocoderDrive"
+    },
+    "inputParams/@p38": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "verified",
+      "about": "ExpansionKnob"
+    },
+    "inputParams/@p39": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "verified",
+      "about": "fbReverbRelease"
+    },
+    "inputParams/@p40": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -1.0,
+        1.0
+      ],
+      "status": "verified",
+      "about": "fbReverbTone"
+    },
+    "inputParams/@p41": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "verified",
+      "about": "expanderPrePostFbReverb"
+    },
+    "inputParams/@p42": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -18.0,
+        0.0
+      ],
+      "status": "verified",
+      "about": "b1Gain"
+    },
+    "inputParams/@p43": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -18.0,
+        0.5
+      ],
+      "status": "verified",
+      "about": "b2Gain"
+    },
+    "inputParams/@p44": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -13.5,
+        2.0
+      ],
+      "status": "verified",
+      "about": "b3Gain"
+    },
+    "inputParams/@p45": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -12.5,
+        3.3157894736842106
+      ],
+      "status": "verified",
+      "about": "b4Gain"
+    },
+    "inputParams/@p46": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -13.5,
+        2.0
+      ],
+      "status": "verified",
+      "about": "b5Gain"
+    },
+    "inputParams/@p47": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -16.0,
+        3.5
+      ],
+      "status": "verified",
+      "about": "b6Gain"
+    },
+    "inputParams/@p48": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -4.736842105263159,
+        5.5
+      ],
+      "status": "verified",
+      "about": "b7Gain"
+    },
+    "inputParams/@p49": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -6.5,
+        9.94736842105263
+      ],
+      "status": "verified",
+      "about": "b8Gain"
+    },
+    "inputParams/@p50": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -18.0,
+        8.5
+      ],
+      "status": "verified",
+      "about": "b9Gain"
+    },
+    "inputParams/@p51": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -18.0,
+        12.0
+      ],
+      "status": "verified",
+      "about": "b10Gain"
+    },
+    "inputParams/@p52": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        32.0,
+        64.0
+      ],
+      "status": "verified",
+      "about": "maxVoices"
+    },
+    "inputParams/@p53": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.5,
+        0.62
+      ],
+      "status": "verified",
+      "about": "kNoiseShapingAmount"
+    },
+    "inputParams/@p54": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1000.0
+      ],
+      "status": "verified",
+      "about": "kAntiAliasingOffset"
+    },
+    "inputParams/@p55": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "verified",
+      "about": "kHighQualityAntiAliasing"
+    },
+    "inputParams/@p56": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "verified",
+      "about": "SynthMacroKnob"
+    },
+    "inputParams/@p57": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        8.0
+      ],
+      "status": "verified",
+      "about": "unison_setting"
+    },
+    "inputParams/@p58": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.64
+      ],
+      "status": "verified",
+      "about": "detuneAmt"
+    },
+    "inputParams/@p59": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        12.0
+      ],
+      "status": "verified",
+      "about": "clusterSpread"
+    },
+    "inputParams/@p60": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -0.8200000000000001,
+        1.0
+      ],
+      "status": "verified",
+      "about": "oscphase"
+    },
+    "inputParams/@p61": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        3.0
+      ],
+      "status": "verified",
+      "about": "unisonSync"
+    },
+    "inputParams/@p62": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -1.0,
+        1.0
+      ],
+      "status": "verified",
+      "about": "PanWidth"
+    },
+    "inputParams/@p63": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        4.0
+      ],
+      "status": "verified",
+      "about": "synthOctaveOffset"
+    },
+    "inputParams/@p64": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -24.0,
+        0.05000000000000071
+      ],
+      "status": "verified",
+      "about": "osc1Pitch"
+    },
+    "inputParams/@p65": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        18.0
+      ],
+      "status": "verified",
+      "about": "osc1Shape"
+    },
+    "inputParams/@p66": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -24.0,
+        24.03
+      ],
+      "status": "verified",
+      "about": "osc2Pitch"
+    },
+    "inputParams/@p67": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        18.0
+      ],
+      "status": "verified",
+      "about": "osc2Shape"
+    },
+    "inputParams/@p68": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "verified",
+      "about": "oscSync"
+    },
+    "inputParams/@p69": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        2.0
+      ],
+      "status": "verified",
+      "about": "oscRingMod"
+    },
+    "inputParams/@p70": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -1.0,
+        1.0
+      ],
+      "status": "verified",
+      "about": "oscBalance"
+    },
+    "inputParams/@p71": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        7.0
+      ],
+      "status": "verified",
+      "about": "Distortion.Type"
+    },
+    "inputParams/@p72": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        4.0
+      ],
+      "status": "verified",
+      "about": "filterDistortion"
+    },
+    "inputParams/@p73": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        3.0
+      ],
+      "status": "verified",
+      "about": "FilterType"
+    },
+    "inputParams/@p74": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        90.07285999134183,
+        22050.000000000004
+      ],
+      "status": "verified",
+      "about": "filterCutOffFrq"
+    },
+    "inputParams/@p75": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.9
+      ],
+      "status": "verified",
+      "about": "filterResonance"
+    },
+    "inputParams/@p76": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -1.0,
+        1.0
+      ],
+      "status": "verified",
+      "about": "FilterKeytrack"
+    },
+    "inputParams/@p77": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.6169499998446554,
+        2.0
+      ],
+      "status": "verified",
+      "about": "ampLevel"
+    },
+    "inputParams/@p78": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.45
+      ],
+      "status": "verified",
+      "about": "ampVelocity"
+    },
+    "inputParams/@p79": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        1.0,
+        2.0
+      ],
+      "status": "verified",
+      "about": "amp_VelocityCurve"
+    },
+    "inputParams/@p80": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "verified",
+      "about": "ADSR.Shape"
+    },
+    "inputParams/@p81": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        2477.220711134165
+      ],
+      "status": "verified",
+      "about": "ampAttack"
+    },
+    "inputParams/@p82": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1876.0
+      ],
+      "status": "verified",
+      "about": "ampDecay"
+    },
+    "inputParams/@p83": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.31,
+        1.0
+      ],
+      "status": "verified",
+      "about": "ampSustain"
+    },
+    "inputParams/@p84": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        5000.000000000001
+      ],
+      "status": "verified",
+      "about": "ampRelease"
+    },
+    "inputParams/@p85": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "about": "pitch1_VelocityAmt"
+    },
+    "inputParams/@p86": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        1.0,
+        1.0
+      ],
+      "status": "verified",
+      "about": "pitch1_VelocityCurve"
+    },
+    "inputParams/@p87": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "about": "pitch2_VelocityAmt"
+    },
+    "inputParams/@p88": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        1.0,
+        1.0
+      ],
+      "status": "verified",
+      "about": "pitch2_VelocityCurve"
+    },
+    "inputParams/@p89": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        6.0
+      ],
+      "status": "verified",
+      "about": "pitchMod_1_Source"
+    },
+    "inputParams/@p90": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "about": "pitchMod_1_VelocityAmt"
+    },
+    "inputParams/@p91": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        1.0,
+        1.0
+      ],
+      "status": "verified",
+      "about": "pitchMod_1_VelocityCurve"
+    },
+    "inputParams/@p92": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "verified",
+      "about": "LFO1.Mono.Range"
+    },
+    "inputParams/@p93": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.009999999776482582,
+        8.0
+      ],
+      "status": "verified",
+      "about": "LFO1.Mono.Rate"
+    },
+    "inputParams/@p94": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "about": "kMod1LFOMonoPhaseReset"
+    },
+    "inputParams/@p95": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        24.0
+      ],
+      "status": "verified",
+      "about": "LFO1.Mono.Amount"
+    },
+    "inputParams/@p96": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        100.0,
+        640.0
+      ],
+      "status": "verified",
+      "about": "LFO1.MonoAudio.Rate"
+    },
+    "inputParams/@p97": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "verified",
+      "about": "LFO1.Poly.Range"
+    },
+    "inputParams/@p98": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.009999999776482582,
+        10.89093248106556
+      ],
+      "status": "verified",
+      "about": "LFO1.Poly.Rate"
+    },
+    "inputParams/@p99": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1500.0
+      ],
+      "status": "verified",
+      "about": "LFO1.Poly.Fade"
+    },
+    "inputParams/@p100": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -0.1,
+        1.0
+      ],
+      "status": "verified",
+      "about": "LFO1.Poly.Amount"
+    },
+    "inputParams/@p101": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        50.0,
+        100.0
+      ],
+      "status": "verified",
+      "about": "LFO1.PolyAudio.Rate"
+    },
+    "inputParams/@p102": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "verified",
+      "about": "LFO1.FM.Ratio.Mode"
+    },
+    "inputParams/@p103": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.17447636641080053,
+        1.25
+      ],
+      "status": "verified",
+      "about": "LFO1.FM.RatioDecimal"
+    },
+    "inputParams/@p104": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        29.0
+      ],
+      "status": "verified",
+      "about": "LFO1.FM.RatioRational"
+    },
+    "inputParams/@p105": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        3.4
+      ],
+      "status": "verified",
+      "about": "LFO1.FM.Index"
+    },
+    "inputParams/@p106": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "about": "kMod1FMVelAmount"
+    },
+    "inputParams/@p107": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        1.0,
+        1.0
+      ],
+      "status": "verified",
+      "about": "kMod1FMVelCurve"
+    },
+    "inputParams/@p108": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "verified",
+      "about": "AD1.Curve"
+    },
+    "inputParams/@p109": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        250.0
+      ],
+      "status": "verified",
+      "about": "AD1.Attack"
+    },
+    "inputParams/@p110": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        800.0
+      ],
+      "status": "verified",
+      "about": "AD1.Decay"
+    },
+    "inputParams/@p111": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -13.0,
+        35.0
+      ],
+      "status": "verified",
+      "about": "AD1.Amount"
+    },
+    "inputParams/@p112": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        250.0
+      ],
+      "status": "verified",
+      "about": "ENVF1.Attack"
+    },
+    "inputParams/@p113": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1607.68456654595
+      ],
+      "status": "verified",
+      "about": "ENVF1.Decay"
+    },
+    "inputParams/@p114": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        60.0
+      ],
+      "status": "verified",
+      "about": "ENVF1.Amount"
+    },
+    "inputParams/@p115": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        250.0
+      ],
+      "status": "verified",
+      "about": "ZEROX1.Attack"
+    },
+    "inputParams/@p116": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.5,
+        500.0
+      ],
+      "status": "verified",
+      "about": "ZEROX1.Decay"
+    },
+    "inputParams/@p117": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        60.0
+      ],
+      "status": "verified",
+      "about": "PTRCK1.Amount"
+    },
+    "inputParams/@p118": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        6.0
+      ],
+      "status": "verified",
+      "about": "pitchMod_2_Source"
+    },
+    "inputParams/@p119": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "about": "pitchMod_2_VelocityAmt"
+    },
+    "inputParams/@p120": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        1.0,
+        1.0
+      ],
+      "status": "verified",
+      "about": "pitchMod_2_VelocityCurve"
+    },
+    "inputParams/@p121": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "verified",
+      "about": "LFO2.Mono.Range"
+    },
+    "inputParams/@p122": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.009999999776482582,
+        12.0
+      ],
+      "status": "verified",
+      "about": "LFO2.Mono.Rate"
+    },
+    "inputParams/@p123": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "about": "kMod2LFOMonoPhaseReset"
+    },
+    "inputParams/@p124": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        23.0
+      ],
+      "status": "verified",
+      "about": "LFO2.Mono.Amount"
+    },
+    "inputParams/@p125": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        100.0,
+        1000.0
+      ],
+      "status": "verified",
+      "about": "LFO2.MonoAudio.Rate"
+    },
+    "inputParams/@p126": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "verified",
+      "about": "LFO2.Poly.Range"
+    },
+    "inputParams/@p127": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.06188442535561121,
+        12.0
+      ],
+      "status": "verified",
+      "about": "LFO2.Poly.Rate"
+    },
+    "inputParams/@p128": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        2500.0
+      ],
+      "status": "verified",
+      "about": "LFO2.Poly.Fade"
+    },
+    "inputParams/@p129": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -0.15,
+        50.39999999999998
+      ],
+      "status": "verified",
+      "about": "LFO2.Poly.Amount"
+    },
+    "inputParams/@p130": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        50.0,
+        1000.0
+      ],
+      "status": "verified",
+      "about": "LFO2.PolyAudio.Rate"
+    },
+    "inputParams/@p131": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "verified",
+      "about": "LFO2.FM.Ratio.Mode"
+    },
+    "inputParams/@p132": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.25,
+        2.049999952316284
+      ],
+      "status": "verified",
+      "about": "LFO2.FM.RatioDecimal"
+    },
+    "inputParams/@p133": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        1.0,
+        29.0
+      ],
+      "status": "verified",
+      "about": "LFO2.FM.RatioRational"
+    },
+    "inputParams/@p134": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        5.36
+      ],
+      "status": "verified",
+      "about": "LFO2.FM.Index"
+    },
+    "inputParams/@p135": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "about": "kMod2FMVelAmount"
+    },
+    "inputParams/@p136": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        1.0,
+        1.0
+      ],
+      "status": "verified",
+      "about": "kMod2FMVelCurve"
+    },
+    "inputParams/@p137": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        1.0,
+        1.0
+      ],
+      "status": "verified",
+      "about": "AD2.Curve"
+    },
+    "inputParams/@p138": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        250.0
+      ],
+      "status": "verified",
+      "about": "AD2.Attack"
+    },
+    "inputParams/@p139": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1607.68456654595
+      ],
+      "status": "verified",
+      "about": "AD2.Decay"
+    },
+    "inputParams/@p140": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -12.0,
+        24.0
+      ],
+      "status": "verified",
+      "about": "AD2.Amount"
+    },
+    "inputParams/@p141": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.5,
+        1461.3894495774427
+      ],
+      "status": "verified",
+      "about": "ENVF2.Attack"
+    },
+    "inputParams/@p142": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.5,
+        1992.8899306800674
+      ],
+      "status": "verified",
+      "about": "ENVF2.Decay"
+    },
+    "inputParams/@p143": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        72.0
+      ],
+      "status": "verified",
+      "about": "ENVF2.Amount"
+    },
+    "inputParams/@p144": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.5,
+        714.1862148543502
+      ],
+      "status": "verified",
+      "about": "ZEROX2.Attack"
+    },
+    "inputParams/@p145": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.5,
+        2593.3456096742475
+      ],
+      "status": "verified",
+      "about": "ZEROX2.Decay"
+    },
+    "inputParams/@p146": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        60.0
+      ],
+      "status": "verified",
+      "about": "PTRCK2.Amount"
+    },
+    "inputParams/@p147": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.05999999865889549
+      ],
+      "status": "verified",
+      "about": "cutoff_VelocityAmt"
+    },
+    "inputParams/@p148": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        1.0,
+        2.0
+      ],
+      "status": "verified",
+      "about": "cutoff_VelocityCurve"
+    },
+    "inputParams/@p149": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        5.0
+      ],
+      "status": "verified",
+      "about": "filterMod_1_Source"
+    },
+    "inputParams/@p150": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.43
+      ],
+      "status": "verified",
+      "about": "filterMod_1_VelocityAmt"
+    },
+    "inputParams/@p151": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        1.0,
+        2.0
+      ],
+      "status": "verified",
+      "about": "filterMod_1_VelocityCurve"
+    },
+    "inputParams/@p152": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.02,
+        4.0
+      ],
+      "status": "verified",
+      "about": "LFO3.Mono.Rate"
+    },
+    "inputParams/@p153": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "about": "kMod3LFOMonoPhaseReset"
+    },
+    "inputParams/@p154": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        60.0
+      ],
+      "status": "verified",
+      "about": "LFO3.Mono.Amount"
+    },
+    "inputParams/@p155": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.07377689517328914,
+        8.0
+      ],
+      "status": "verified",
+      "about": "LFO3.Poly.Rate"
+    },
+    "inputParams/@p156": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1500.0
+      ],
+      "status": "verified",
+      "about": "LFO3.Poly.Fade"
+    },
+    "inputParams/@p157": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -11.0,
+        60.0
+      ],
+      "status": "verified",
+      "about": "LFO3.Poly.Amount"
+    },
+    "inputParams/@p158": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "verified",
+      "about": "AD3.Curve"
+    },
+    "inputParams/@p159": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        5000.000000000001
+      ],
+      "status": "verified",
+      "about": "AD3.Attack"
+    },
+    "inputParams/@p160": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        5000.000000000001
+      ],
+      "status": "verified",
+      "about": "AD3.Decay"
+    },
+    "inputParams/@p161": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -108.0,
+        74.0
+      ],
+      "status": "verified",
+      "about": "AD3.Amount"
+    },
+    "inputParams/@p162": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        576.9999015205051
+      ],
+      "status": "verified",
+      "about": "ENVF3.Attack"
+    },
+    "inputParams/@p163": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.5,
+        1819.857575750355
+      ],
+      "status": "verified",
+      "about": "ENVF3.Decay"
+    },
+    "inputParams/@p164": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -108.0,
+        49.0
+      ],
+      "status": "verified",
+      "about": "ENVF3.Amount"
+    },
+    "inputParams/@p165": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.5,
+        250.0
+      ],
+      "status": "verified",
+      "about": "ZEROX3.Attack"
+    },
+    "inputParams/@p166": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.5,
+        1006.6439760627848
+      ],
+      "status": "verified",
+      "about": "ZEROX3.Decay"
+    },
+    "inputParams/@p167": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        74.0
+      ],
+      "status": "verified",
+      "about": "PTRCK3.Amount"
+    },
+    "inputParams/@p168": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        1.0,
+        5.0
+      ],
+      "status": "verified",
+      "about": "filterMod_2_Source"
+    },
+    "inputParams/@p169": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "about": "filterMod_2_VelocityAmt"
+    },
+    "inputParams/@p170": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        1.0,
+        1.0
+      ],
+      "status": "verified",
+      "about": "filterMod_2_VelocityCurve"
+    },
+    "inputParams/@p171": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.07377689517328914,
+        6.0
+      ],
+      "status": "verified",
+      "about": "LFO4.Mono.Rate"
+    },
+    "inputParams/@p172": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "about": "kMod4LFOMonoPhaseReset"
+    },
+    "inputParams/@p173": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -60.0,
+        36.0
+      ],
+      "status": "verified",
+      "about": "LFO4.Mono.Amount"
+    },
+    "inputParams/@p174": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.5379179774241302,
+        12.0
+      ],
+      "status": "verified",
+      "about": "LFO4.Poly.Rate"
+    },
+    "inputParams/@p175": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1250.0
+      ],
+      "status": "verified",
+      "about": "LFO4.Poly.Fade"
+    },
+    "inputParams/@p176": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -48.0,
+        36.0
+      ],
+      "status": "verified",
+      "about": "LFO4.Poly.Amount"
+    },
+    "inputParams/@p177": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "verified",
+      "about": "AD4.Curve"
+    },
+    "inputParams/@p178": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        5000.000000000001
+      ],
+      "status": "verified",
+      "about": "AD4.Attack"
+    },
+    "inputParams/@p179": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        5000.000000000001
+      ],
+      "status": "verified",
+      "about": "AD4.Decay"
+    },
+    "inputParams/@p180": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -108.0,
+        36.0
+      ],
+      "status": "verified",
+      "about": "AD4.Amount"
+    },
+    "inputParams/@p181": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1043.2083565214684
+      ],
+      "status": "verified",
+      "about": "ENVF4.Attack"
+    },
+    "inputParams/@p182": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        250.0
+      ],
+      "status": "verified",
+      "about": "ENVF4.Decay"
+    },
+    "inputParams/@p183": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -108.0,
+        36.0
+      ],
+      "status": "verified",
+      "about": "ENVF4.Amount"
+    },
+    "inputParams/@p184": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        250.0
+      ],
+      "status": "verified",
+      "about": "ZEROX4.Attack"
+    },
+    "inputParams/@p185": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.5,
+        500.0
+      ],
+      "status": "verified",
+      "about": "ZEROX4.Decay"
+    },
+    "inputParams/@p186": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -60.0,
+        0.0
+      ],
+      "status": "verified",
+      "about": "PTRCK4.Amount"
+    },
+    "inputParams/@p187": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "about": "blend_VelocityAmt"
+    },
+    "inputParams/@p188": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        1.0,
+        1.0
+      ],
+      "status": "verified",
+      "about": "blend_VelocityCurve"
+    },
+    "inputParams/@p189": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "about": "distortion_VelocityAmt"
+    },
+    "inputParams/@p190": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        1.0,
+        1.0
+      ],
+      "status": "verified",
+      "about": "distortion_VelocityCurve"
+    },
+    "inputParams/@p191": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        59.0
+      ],
+      "status": "verified",
+      "about": "macro1Destination"
+    },
+    "inputParams/@p192": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -0.5,
+        1.0
+      ],
+      "status": "verified",
+      "about": "macro1Amt"
+    },
+    "inputParams/@p193": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        61.0
+      ],
+      "status": "verified",
+      "about": "macro2Destination"
+    },
+    "inputParams/@p194": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -0.5666666666666667,
+        1.0
+      ],
+      "status": "verified",
+      "about": "macro2Amt"
+    },
+    "inputParams/@p195": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        59.0
+      ],
+      "status": "verified",
+      "about": "macro3Destination"
+    },
+    "inputParams/@p196": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -0.8000000000000002,
+        1.0
+      ],
+      "status": "verified",
+      "about": "macro3Amt"
+    },
+    "inputParams/@p197": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        59.0
+      ],
+      "status": "verified",
+      "about": "macro4Destination"
+    },
+    "inputParams/@p198": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -0.6799999999999999,
+        0.3400000000000001
+      ],
+      "status": "verified",
+      "about": "macro4Amt"
+    },
+    "inputParams/@p199": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "about": "synthGateMode"
+    },
+    "inputParams/@p200": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "verified",
+      "about": "dcBlocker"
+    },
+    "inputParams/@p201": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "verified",
+      "about": "keyboardMode"
+    },
+    "inputParams/@p202": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "about": "vocoderCompOn"
+    },
+    "inputParams/@p203": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        2.0
+      ],
+      "status": "verified",
+      "about": "vocoderCompPreset"
+    },
+    "inputParams/@p204": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.25,
+        8.0
+      ],
+      "status": "verified",
+      "about": "kPitchQMorphRate"
+    },
+    "inputParams/@p205": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        5.0
+      ],
+      "status": "verified",
+      "about": "kInputLevel"
+    },
+    "inputParams/@p206": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "about": "kAuxInputLevel"
+    }
+  },
+  "parameters": {
+    "bypass": {
+      "field": "inputParams/@p0",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "gain": {
+      "field": "inputParams/@p1",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "tuning": {
+      "field": "inputParams/@p2",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "kybdSoloMode": {
+      "field": "inputParams/@p3",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "glideTime": {
+      "field": "inputParams/@p4",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "bendRange": {
+      "field": "inputParams/@p5",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "useSynth": {
+      "field": "inputParams/@p6",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "kVocoderOnOff": {
+      "field": "inputParams/@p7",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "kPitchQOnOff": {
+      "field": "inputParams/@p8",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "voiceMix": {
+      "field": "inputParams/@p9",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "voiceMute": {
+      "field": "inputParams/@p10",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "voiceSolo": {
+      "field": "inputParams/@p11",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "vocoderMix": {
+      "field": "inputParams/@p12",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "vocoderMute": {
+      "field": "inputParams/@p13",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "vocoderSolo": {
+      "field": "inputParams/@p14",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "carrierMix": {
+      "field": "inputParams/@p15",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "carrierMute": {
+      "field": "inputParams/@p16",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "carrierSolo": {
+      "field": "inputParams/@p17",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "reverbOn": {
+      "field": "inputParams/@p18",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "reverbMix": {
+      "field": "inputParams/@p19",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "reverbSize": {
+      "field": "inputParams/@p20",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "reverbDamping": {
+      "field": "inputParams/@p21",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "chorusOn": {
+      "field": "inputParams/@p22",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "ChorusAmount": {
+      "field": "inputParams/@p23",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "ChorusRate": {
+      "field": "inputParams/@p24",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "kFreezeOnOff": {
+      "field": "inputParams/@p25",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "freezeA": {
+      "field": "inputParams/@p26",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "voicePitchMode": {
+      "field": "inputParams/@p27",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "kPitchQAttack": {
+      "field": "inputParams/@p28",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "kPitchQRelease": {
+      "field": "inputParams/@p29",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "kPitchQVelAmount": {
+      "field": "inputParams/@p30",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "flipInputs": {
+      "field": "inputParams/@p31",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "kVocoderStereo": {
+      "field": "inputParams/@p32",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "algoSelect": {
+      "field": "inputParams/@p33",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "formantShift": {
+      "field": "inputParams/@p34",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "hfPassThrough": {
+      "field": "inputParams/@p35",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "unvoicedBypass": {
+      "field": "inputParams/@p36",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "kVocoderDrive": {
+      "field": "inputParams/@p37",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "ExpansionKnob": {
+      "field": "inputParams/@p38",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "fbReverbRelease": {
+      "field": "inputParams/@p39",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "fbReverbTone": {
+      "field": "inputParams/@p40",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "expanderPrePostFbReverb": {
+      "field": "inputParams/@p41",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "b1Gain": {
+      "field": "inputParams/@p42",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "b2Gain": {
+      "field": "inputParams/@p43",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "b3Gain": {
+      "field": "inputParams/@p44",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "b4Gain": {
+      "field": "inputParams/@p45",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "b5Gain": {
+      "field": "inputParams/@p46",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "b6Gain": {
+      "field": "inputParams/@p47",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "b7Gain": {
+      "field": "inputParams/@p48",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "b8Gain": {
+      "field": "inputParams/@p49",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "b9Gain": {
+      "field": "inputParams/@p50",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "b10Gain": {
+      "field": "inputParams/@p51",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "maxVoices": {
+      "field": "inputParams/@p52",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "kNoiseShapingAmount": {
+      "field": "inputParams/@p53",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "kAntiAliasingOffset": {
+      "field": "inputParams/@p54",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "kHighQualityAntiAliasing": {
+      "field": "inputParams/@p55",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "SynthMacroKnob": {
+      "field": "inputParams/@p56",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "unison_setting": {
+      "field": "inputParams/@p57",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "detuneAmt": {
+      "field": "inputParams/@p58",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "clusterSpread": {
+      "field": "inputParams/@p59",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "oscphase": {
+      "field": "inputParams/@p60",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "unisonSync": {
+      "field": "inputParams/@p61",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "PanWidth": {
+      "field": "inputParams/@p62",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "synthOctaveOffset": {
+      "field": "inputParams/@p63",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "osc1Pitch": {
+      "field": "inputParams/@p64",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "osc1Shape": {
+      "field": "inputParams/@p65",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "osc2Pitch": {
+      "field": "inputParams/@p66",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "osc2Shape": {
+      "field": "inputParams/@p67",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "oscSync": {
+      "field": "inputParams/@p68",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "oscRingMod": {
+      "field": "inputParams/@p69",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "oscBalance": {
+      "field": "inputParams/@p70",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "Distortion.Type": {
+      "field": "inputParams/@p71",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "filterDistortion": {
+      "field": "inputParams/@p72",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "FilterType": {
+      "field": "inputParams/@p73",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "filterCutOffFrq": {
+      "field": "inputParams/@p74",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "filterResonance": {
+      "field": "inputParams/@p75",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "FilterKeytrack": {
+      "field": "inputParams/@p76",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "ampLevel": {
+      "field": "inputParams/@p77",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "ampVelocity": {
+      "field": "inputParams/@p78",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "amp_VelocityCurve": {
+      "field": "inputParams/@p79",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "ADSR.Shape": {
+      "field": "inputParams/@p80",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "ampAttack": {
+      "field": "inputParams/@p81",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "ampDecay": {
+      "field": "inputParams/@p82",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "ampSustain": {
+      "field": "inputParams/@p83",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "ampRelease": {
+      "field": "inputParams/@p84",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "pitch1_VelocityAmt": {
+      "field": "inputParams/@p85",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "pitch1_VelocityCurve": {
+      "field": "inputParams/@p86",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "pitch2_VelocityAmt": {
+      "field": "inputParams/@p87",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "pitch2_VelocityCurve": {
+      "field": "inputParams/@p88",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "pitchMod_1_Source": {
+      "field": "inputParams/@p89",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "pitchMod_1_VelocityAmt": {
+      "field": "inputParams/@p90",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "pitchMod_1_VelocityCurve": {
+      "field": "inputParams/@p91",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "LFO1.Mono.Range": {
+      "field": "inputParams/@p92",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "LFO1.Mono.Rate": {
+      "field": "inputParams/@p93",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "kMod1LFOMonoPhaseReset": {
+      "field": "inputParams/@p94",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "LFO1.Mono.Amount": {
+      "field": "inputParams/@p95",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "LFO1.MonoAudio.Rate": {
+      "field": "inputParams/@p96",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "LFO1.Poly.Range": {
+      "field": "inputParams/@p97",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "LFO1.Poly.Rate": {
+      "field": "inputParams/@p98",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "LFO1.Poly.Fade": {
+      "field": "inputParams/@p99",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "LFO1.Poly.Amount": {
+      "field": "inputParams/@p100",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "LFO1.PolyAudio.Rate": {
+      "field": "inputParams/@p101",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "LFO1.FM.Ratio.Mode": {
+      "field": "inputParams/@p102",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "LFO1.FM.RatioDecimal": {
+      "field": "inputParams/@p103",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "LFO1.FM.RatioRational": {
+      "field": "inputParams/@p104",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "LFO1.FM.Index": {
+      "field": "inputParams/@p105",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "kMod1FMVelAmount": {
+      "field": "inputParams/@p106",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "kMod1FMVelCurve": {
+      "field": "inputParams/@p107",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "AD1.Curve": {
+      "field": "inputParams/@p108",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "AD1.Attack": {
+      "field": "inputParams/@p109",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "AD1.Decay": {
+      "field": "inputParams/@p110",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "AD1.Amount": {
+      "field": "inputParams/@p111",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "ENVF1.Attack": {
+      "field": "inputParams/@p112",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "ENVF1.Decay": {
+      "field": "inputParams/@p113",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "ENVF1.Amount": {
+      "field": "inputParams/@p114",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "ZEROX1.Attack": {
+      "field": "inputParams/@p115",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "ZEROX1.Decay": {
+      "field": "inputParams/@p116",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "PTRCK1.Amount": {
+      "field": "inputParams/@p117",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "pitchMod_2_Source": {
+      "field": "inputParams/@p118",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "pitchMod_2_VelocityAmt": {
+      "field": "inputParams/@p119",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "pitchMod_2_VelocityCurve": {
+      "field": "inputParams/@p120",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "LFO2.Mono.Range": {
+      "field": "inputParams/@p121",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "LFO2.Mono.Rate": {
+      "field": "inputParams/@p122",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "kMod2LFOMonoPhaseReset": {
+      "field": "inputParams/@p123",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "LFO2.Mono.Amount": {
+      "field": "inputParams/@p124",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "LFO2.MonoAudio.Rate": {
+      "field": "inputParams/@p125",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "LFO2.Poly.Range": {
+      "field": "inputParams/@p126",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "LFO2.Poly.Rate": {
+      "field": "inputParams/@p127",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "LFO2.Poly.Fade": {
+      "field": "inputParams/@p128",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "LFO2.Poly.Amount": {
+      "field": "inputParams/@p129",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "LFO2.PolyAudio.Rate": {
+      "field": "inputParams/@p130",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "LFO2.FM.Ratio.Mode": {
+      "field": "inputParams/@p131",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "LFO2.FM.RatioDecimal": {
+      "field": "inputParams/@p132",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "LFO2.FM.RatioRational": {
+      "field": "inputParams/@p133",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "LFO2.FM.Index": {
+      "field": "inputParams/@p134",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "kMod2FMVelAmount": {
+      "field": "inputParams/@p135",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "kMod2FMVelCurve": {
+      "field": "inputParams/@p136",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "AD2.Curve": {
+      "field": "inputParams/@p137",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "AD2.Attack": {
+      "field": "inputParams/@p138",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "AD2.Decay": {
+      "field": "inputParams/@p139",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "AD2.Amount": {
+      "field": "inputParams/@p140",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "ENVF2.Attack": {
+      "field": "inputParams/@p141",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "ENVF2.Decay": {
+      "field": "inputParams/@p142",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "ENVF2.Amount": {
+      "field": "inputParams/@p143",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "ZEROX2.Attack": {
+      "field": "inputParams/@p144",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "ZEROX2.Decay": {
+      "field": "inputParams/@p145",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "PTRCK2.Amount": {
+      "field": "inputParams/@p146",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "cutoff_VelocityAmt": {
+      "field": "inputParams/@p147",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "cutoff_VelocityCurve": {
+      "field": "inputParams/@p148",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "filterMod_1_Source": {
+      "field": "inputParams/@p149",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "filterMod_1_VelocityAmt": {
+      "field": "inputParams/@p150",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "filterMod_1_VelocityCurve": {
+      "field": "inputParams/@p151",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "LFO3.Mono.Rate": {
+      "field": "inputParams/@p152",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "kMod3LFOMonoPhaseReset": {
+      "field": "inputParams/@p153",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "LFO3.Mono.Amount": {
+      "field": "inputParams/@p154",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "LFO3.Poly.Rate": {
+      "field": "inputParams/@p155",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "LFO3.Poly.Fade": {
+      "field": "inputParams/@p156",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "LFO3.Poly.Amount": {
+      "field": "inputParams/@p157",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "AD3.Curve": {
+      "field": "inputParams/@p158",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "AD3.Attack": {
+      "field": "inputParams/@p159",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "AD3.Decay": {
+      "field": "inputParams/@p160",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "AD3.Amount": {
+      "field": "inputParams/@p161",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "ENVF3.Attack": {
+      "field": "inputParams/@p162",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "ENVF3.Decay": {
+      "field": "inputParams/@p163",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "ENVF3.Amount": {
+      "field": "inputParams/@p164",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "ZEROX3.Attack": {
+      "field": "inputParams/@p165",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "ZEROX3.Decay": {
+      "field": "inputParams/@p166",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "PTRCK3.Amount": {
+      "field": "inputParams/@p167",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "filterMod_2_Source": {
+      "field": "inputParams/@p168",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "filterMod_2_VelocityAmt": {
+      "field": "inputParams/@p169",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "filterMod_2_VelocityCurve": {
+      "field": "inputParams/@p170",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "LFO4.Mono.Rate": {
+      "field": "inputParams/@p171",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "kMod4LFOMonoPhaseReset": {
+      "field": "inputParams/@p172",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "LFO4.Mono.Amount": {
+      "field": "inputParams/@p173",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "LFO4.Poly.Rate": {
+      "field": "inputParams/@p174",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "LFO4.Poly.Fade": {
+      "field": "inputParams/@p175",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "LFO4.Poly.Amount": {
+      "field": "inputParams/@p176",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "AD4.Curve": {
+      "field": "inputParams/@p177",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "AD4.Attack": {
+      "field": "inputParams/@p178",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "AD4.Decay": {
+      "field": "inputParams/@p179",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "AD4.Amount": {
+      "field": "inputParams/@p180",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "ENVF4.Attack": {
+      "field": "inputParams/@p181",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "ENVF4.Decay": {
+      "field": "inputParams/@p182",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "ENVF4.Amount": {
+      "field": "inputParams/@p183",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "ZEROX4.Attack": {
+      "field": "inputParams/@p184",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "ZEROX4.Decay": {
+      "field": "inputParams/@p185",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "PTRCK4.Amount": {
+      "field": "inputParams/@p186",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "blend_VelocityAmt": {
+      "field": "inputParams/@p187",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "blend_VelocityCurve": {
+      "field": "inputParams/@p188",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "distortion_VelocityAmt": {
+      "field": "inputParams/@p189",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "distortion_VelocityCurve": {
+      "field": "inputParams/@p190",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "macro1Destination": {
+      "field": "inputParams/@p191",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "macro1Amt": {
+      "field": "inputParams/@p192",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "macro2Destination": {
+      "field": "inputParams/@p193",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "macro2Amt": {
+      "field": "inputParams/@p194",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "macro3Destination": {
+      "field": "inputParams/@p195",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "macro3Amt": {
+      "field": "inputParams/@p196",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "macro4Destination": {
+      "field": "inputParams/@p197",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "macro4Amt": {
+      "field": "inputParams/@p198",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "synthGateMode": {
+      "field": "inputParams/@p199",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "dcBlocker": {
+      "field": "inputParams/@p200",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "keyboardMode": {
+      "field": "inputParams/@p201",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "vocoderCompOn": {
+      "field": "inputParams/@p202",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "vocoderCompPreset": {
+      "field": "inputParams/@p203",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "kPitchQMorphRate": {
+      "field": "inputParams/@p204",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "kInputLevel": {
+      "field": "inputParams/@p205",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    },
+    "kAuxInputLevel": {
+      "field": "inputParams/@p206",
+      "status": "guessed",
+      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+    }
+  }
+}

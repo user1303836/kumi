@@ -59,7 +59,15 @@ fn fits(plugin: &str, tree: &Node) {
 
 #[test]
 fn the_shipped_formats_parse_and_agree_with_the_readers() {
-    assert_eq!(builtins().len(), 3);
+    let shipped: std::collections::BTreeSet<_> = std::fs::read_dir(kumi_testkit::workspace_path("plugin-formats"))
+        .unwrap()
+        .map(Result::unwrap)
+        .filter(|entry| entry.path().join("plugin.json").is_file())
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        .collect();
+    let registered: std::collections::BTreeSet<_> = builtins().iter().map(|format| format.info.plugin.clone()).collect();
+    assert_eq!(registered.len(), builtins().len(), "duplicate registered plug-in");
+    assert_eq!(registered, shipped, "every shipped plug-in format must be registered");
     for format in builtins() {
         let plugin = &format.info.plugin;
         assert_eq!(&format.structure.plugin, plugin);

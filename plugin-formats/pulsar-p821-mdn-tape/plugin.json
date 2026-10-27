@@ -1,0 +1,51 @@
+{
+  "plugin": "pulsar-p821-mdn-tape",
+  "name": "P821 MDN Tape",
+  "vendor": "Pulsar Modular",
+  "kind": "effect",
+  "ids": {
+    "vst3": [
+      {
+        "id": "ABCDEF019182FAEB50756C735A6F6561",
+        "name": "P821 MDN Tape",
+        "parameters": 35,
+        "status": "verified"
+      }
+    ]
+  },
+  "presets": {
+    "extensions": [
+      ".P821Preset",
+      ".vstpreset"
+    ],
+    "windows": [
+      {
+        "path": "%PUBLIC%/Documents/Pulsar Modular/P821 MDN Tape/Presets",
+        "holds": "native presets",
+        "status": "verified"
+      }
+    ],
+    "mac": [
+      {
+        "path": "/Users/Shared/Pulsar Modular/P821 MDN Tape/Presets",
+        "holds": "native presets; path not tested on this Windows installation",
+        "status": "guessed"
+      }
+    ]
+  },
+  "formats": [
+    "format-1"
+  ],
+  "notes": [
+    "VST3 only. The processor class ID was enumerated from the installed VST3 factory.",
+    "Kumi writes from a plug-in-generated initial VST3 state, retaining controller state and unknown data. No factory presets, sample libraries, or waveforms are bundled."
+  ],
+  "family": "pulsar-modular",
+  "roles": [
+    "tape",
+    "saturation"
+  ],
+  "binaries": [
+    "P821 MDN Tape.vst3"
+  ]
+}

@@ -1,0 +1,93 @@
+{
+  "plugin": "valhalla-vintage-verb",
+  "format": "format-1",
+  "about": "Normalized Valhalla sound controls in XML root attributes.",
+  "paths": "exact",
+  "files": {
+    "preset": {
+      "extension": ".vpreset",
+      "layers": [
+        "native XML"
+      ],
+      "constants": {
+        "root": "ValhallaVintageVerb"
+      }
+    },
+    "state": {
+      "layers": [
+        "VST3 Comp chunk",
+        "optional VstW compatibility bank",
+        "VC2! + little-endian XML byte length + XML + NUL + preserved opaque JUCE private data"
+      ],
+      "constants": {
+        "xml_magic": "VC2!",
+        "root": "ValhallaVintageVerb"
+      }
+    }
+  },
+  "fields": {
+    "": {"type":"map","in":["state","preset"],"status":"verified"},
+    "root": {"type":"text","in":["state","preset"],"status":"verified"},
+    "parameters": {"type":"map","in":["state","preset"],"status":"verified"},
+    "parameters/Mix": {"type":"float","in":["state","preset"],"status":"verified","default":1.0,"about":"Native stored value. Host parameter: Mix.","range":[0,1],"unit":"normalized"},
+    "parameters/PreDelay": {"type":"float","in":["state","preset"],"status":"verified","default":0.25,"about":"Native stored value. Host parameter: PreDelay.","range":[0,1],"unit":"normalized"},
+    "parameters/Decay": {"type":"float","in":["state","preset"],"status":"verified","default":0.4204803109169006,"about":"Native stored value. Host parameter: Decay.","range":[0,1],"unit":"normalized"},
+    "parameters/Size": {"type":"float","in":["state","preset"],"status":"verified","default":1.0,"about":"Native stored value. Host parameter: Size.","range":[0,1],"unit":"normalized"},
+    "parameters/Attack": {"type":"float","in":["state","preset"],"status":"verified","default":0.5,"about":"Native stored value. Host parameter: Attack.","range":[0,1],"unit":"normalized"},
+    "parameters/BassMult": {"type":"float","in":["state","preset"],"status":"verified","default":0.6230387687683105,"about":"Native stored value. Host parameter: BassMult.","range":[0,1],"unit":"normalized"},
+    "parameters/BassXover": {"type":"float","in":["state","preset"],"status":"verified","default":0.3810649514198303,"about":"Native stored value. Host parameter: BassXover.","range":[0,1],"unit":"normalized"},
+    "parameters/HighShelf": {"type":"float","in":["state","preset"],"status":"verified","default":0.0,"about":"Native stored value. Host parameter: HighShelf.","range":[0,1],"unit":"normalized"},
+    "parameters/HighFreq": {"type":"float","in":["state","preset"],"status":"verified","default":0.5,"about":"Native stored value. Host parameter: HighFreq.","range":[0,1],"unit":"normalized"},
+    "parameters/EarlyDiffusion": {"type":"float","in":["state","preset"],"status":"verified","default":1.0,"about":"Native stored value. Host parameter: EarlyDiffusion.","range":[0,1],"unit":"normalized"},
+    "parameters/LateDiffusion": {"type":"float","in":["state","preset"],"status":"verified","default":1.0,"about":"Native stored value. Host parameter: LateDiffusion.","range":[0,1],"unit":"normalized"},
+    "parameters/ModRate": {"type":"float","in":["state","preset"],"status":"verified","default":0.2454545646905899,"about":"Native stored value. Host parameter: ModRate.","range":[0,1],"unit":"normalized"},
+    "parameters/ModDepth": {"type":"float","in":["state","preset"],"status":"verified","default":0.3799999952316284,"about":"Native stored value. Host parameter: ModDepth.","range":[0,1],"unit":"normalized"},
+    "parameters/HighCut": {"type":"float","in":["state","preset"],"status":"verified","default":0.5905388593673706,"about":"Native stored value. Host parameter: HighCut.","range":[0,1],"unit":"normalized"},
+    "parameters/LowCut": {"type":"float","in":["state","preset"],"status":"verified","default":0.0,"about":"Native stored value. Host parameter: LowCut.","range":[0,1],"unit":"normalized"},
+    "parameters/ColorMode": {"type":"float","in":["state","preset"],"status":"verified","default":0.3333333432674408,"about":"Native stored value. Host parameter: ColorMode.","range":[0,1],"unit":"normalized"},
+    "parameters/ReverbMode": {"type":"float","in":["state","preset"],"status":"verified","default":0.0416666679084301,"about":"Native stored value. Host parameter: ReverbMode.","range":[0,1],"unit":"normalized"},
+    "state": {"type":"map","in":["state","preset"],"status":"verified"},
+    "state/@pluginVersion": {"type":"text","in":["state","preset"],"status":"verified"},
+    "state/@presetName": {"type":"text","in":["state","preset"],"status":"verified"},
+    "state/@Mix": {"type":"text","in":["state","preset"],"status":"verified"},
+    "state/@PreDelay": {"type":"text","in":["state","preset"],"status":"verified"},
+    "state/@Decay": {"type":"text","in":["state","preset"],"status":"verified"},
+    "state/@Size": {"type":"text","in":["state","preset"],"status":"verified"},
+    "state/@Attack": {"type":"text","in":["state","preset"],"status":"verified"},
+    "state/@BassMult": {"type":"text","in":["state","preset"],"status":"verified"},
+    "state/@BassXover": {"type":"text","in":["state","preset"],"status":"verified"},
+    "state/@HighShelf": {"type":"text","in":["state","preset"],"status":"verified"},
+    "state/@HighFreq": {"type":"text","in":["state","preset"],"status":"verified"},
+    "state/@EarlyDiffusion": {"type":"text","in":["state","preset"],"status":"verified"},
+    "state/@LateDiffusion": {"type":"text","in":["state","preset"],"status":"verified"},
+    "state/@ModRate": {"type":"text","in":["state","preset"],"status":"verified"},
+    "state/@ModDepth": {"type":"text","in":["state","preset"],"status":"verified"},
+    "state/@HighCut": {"type":"text","in":["state","preset"],"status":"verified"},
+    "state/@LowCut": {"type":"text","in":["state","preset"],"status":"verified"},
+    "state/@ColorMode": {"type":"text","in":["state","preset"],"status":"verified"},
+    "state/@ReverbMode": {"type":"text","in":["state","preset"],"status":"verified"},
+    "state/@mixLock": {"type":"text","in":["state","preset"],"status":"verified"},
+    "state/@uiWidth": {"type":"text","in":["state","preset"],"status":"verified"},
+    "state/@uiHeight": {"type":"text","in":["state","preset"],"status":"verified"},
+    "name": {"type":"text","in":["state","preset"],"status":"verified"}
+  },
+  "parameters": {
+    "Mix [VST3 48]": {"field":"parameters/Mix","status":"verified","note":"VST3 parameter ID 48. Isolated file edit and host readback verified."},
+    "PreDelay [VST3 49]": {"field":"parameters/PreDelay","status":"guessed","note":"VST3 parameter ID 49. Matched by stored name or JUCE ID hash; jointly probed host changes corroborate the field mapping."},
+    "Decay [VST3 50]": {"field":"parameters/Decay","status":"guessed","note":"VST3 parameter ID 50. Matched by stored name or JUCE ID hash; jointly probed host changes corroborate the field mapping."},
+    "Size [VST3 51]": {"field":"parameters/Size","status":"guessed","note":"VST3 parameter ID 51. Matched by stored name or JUCE ID hash; jointly probed host changes corroborate the field mapping."},
+    "Attack [VST3 52]": {"field":"parameters/Attack","status":"guessed","note":"VST3 parameter ID 52. Matched by stored name or JUCE ID hash; jointly probed host changes corroborate the field mapping."},
+    "BassMult [VST3 53]": {"field":"parameters/BassMult","status":"guessed","note":"VST3 parameter ID 53. Matched by stored name or JUCE ID hash; jointly probed host changes corroborate the field mapping."},
+    "BassXover [VST3 54]": {"field":"parameters/BassXover","status":"guessed","note":"VST3 parameter ID 54. Matched by stored name or JUCE ID hash; jointly probed host changes corroborate the field mapping."},
+    "HighShelf [VST3 55]": {"field":"parameters/HighShelf","status":"guessed","note":"VST3 parameter ID 55. Matched by stored name or JUCE ID hash; jointly probed host changes corroborate the field mapping."},
+    "HighFreq [VST3 56]": {"field":"parameters/HighFreq","status":"guessed","note":"VST3 parameter ID 56. Matched by stored name or JUCE ID hash; jointly probed host changes corroborate the field mapping."},
+    "EarlyDiffusion [VST3 57]": {"field":"parameters/EarlyDiffusion","status":"guessed","note":"VST3 parameter ID 57. Matched by stored name or JUCE ID hash; jointly probed host changes corroborate the field mapping."},
+    "LateDiffusion [VST3 1567]": {"field":"parameters/LateDiffusion","status":"guessed","note":"VST3 parameter ID 1567. Matched by stored name or JUCE ID hash; jointly probed host changes corroborate the field mapping."},
+    "ModRate [VST3 1568]": {"field":"parameters/ModRate","status":"guessed","note":"VST3 parameter ID 1568. Matched by stored name or JUCE ID hash; jointly probed host changes corroborate the field mapping."},
+    "ModDepth [VST3 1569]": {"field":"parameters/ModDepth","status":"guessed","note":"VST3 parameter ID 1569. Matched by stored name or JUCE ID hash; jointly probed host changes corroborate the field mapping."},
+    "HighCut [VST3 1570]": {"field":"parameters/HighCut","status":"guessed","note":"VST3 parameter ID 1570. Matched by stored name or JUCE ID hash; jointly probed host changes corroborate the field mapping."},
+    "LowCut [VST3 1571]": {"field":"parameters/LowCut","status":"guessed","note":"VST3 parameter ID 1571. Matched by stored name or JUCE ID hash; jointly probed host changes corroborate the field mapping."},
+    "ColorMode [VST3 1572]": {"field":"parameters/ColorMode","status":"guessed","note":"VST3 parameter ID 1572. Matched by stored name or JUCE ID hash; jointly probed host changes corroborate the field mapping."},
+    "ReverbMode [VST3 1573]": {"field":"parameters/ReverbMode","status":"guessed","note":"VST3 parameter ID 1573. Matched by stored name or JUCE ID hash; jointly probed host changes corroborate the field mapping."}
+  }
+}

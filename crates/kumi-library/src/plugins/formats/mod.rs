@@ -4,18 +4,26 @@
 //! parameters that move it, each marked verified or guessed) and `verified.json` (the plug-in versions
 //! checked against it). The readers here unwrap the bytes; `structure` reads those files.
 //!
-//! What's here learns from files and from how the plug-ins behave, never from their code. Vital's format
-//! is read from its published source, without copying it.
+//! Format evidence comes from saved files, initialized states and local plug-in/host investigation.
+//! Manufacturer code and factory content are not bundled; Vital's published source is read without copying it.
 
 pub mod cbor;
+pub mod juce_xml;
+pub mod minimal_audio;
 pub mod ozone12;
+pub mod pulsar_modular;
 pub mod serum2;
+pub mod serum2_edit;
+pub mod softube;
 pub mod structure;
+pub mod superior_drummer;
 pub mod survey;
 pub mod tree;
+pub mod valhalla;
 pub mod vital;
 pub mod vstpreset;
 pub mod xml;
+pub mod zynaptiq;
 
 /// Bytes a reader can't make sense of, and why.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]

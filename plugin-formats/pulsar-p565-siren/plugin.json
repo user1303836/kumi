@@ -1,0 +1,50 @@
+{
+  "plugin": "pulsar-p565-siren",
+  "name": "P565 Siren",
+  "vendor": "Pulsar Modular",
+  "kind": "effect",
+  "ids": {
+    "vst3": [
+      {
+        "id": "ABCDEF019182FAEB50756C734E6A6665",
+        "name": "P565 Siren",
+        "parameters": 64,
+        "status": "verified"
+      }
+    ]
+  },
+  "presets": {
+    "extensions": [
+      ".P565Preset",
+      ".vstpreset"
+    ],
+    "windows": [
+      {
+        "path": "%PUBLIC%/Documents/Pulsar Modular/P565 Siren/Presets",
+        "holds": "native presets",
+        "status": "verified"
+      }
+    ],
+    "mac": [
+      {
+        "path": "/Users/Shared/Pulsar Modular/P565 Siren/Presets",
+        "holds": "native presets; path not tested on this Windows installation",
+        "status": "guessed"
+      }
+    ]
+  },
+  "formats": [
+    "format-1"
+  ],
+  "notes": [
+    "VST3 only. The processor class ID was enumerated from the installed VST3 factory.",
+    "Kumi writes from a plug-in-generated initial VST3 state, retaining controller state and unknown data. No factory presets, sample libraries, or waveforms are bundled."
+  ],
+  "family": "pulsar-modular",
+  "roles": [
+    "filter"
+  ],
+  "binaries": [
+    "P565 Siren.vst3"
+  ]
+}

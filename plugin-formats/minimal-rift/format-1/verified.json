@@ -1,0 +1,32 @@
+{
+  "plugin": "minimal-rift",
+  "format": "format-1",
+  "reads": [
+    {
+      "version": "2.6.0",
+      "files": [
+        "state"
+      ],
+      "checked": "2026-10-27",
+      "how": "Captured and parsed the installed VST3 initial state and its native XML."
+    }
+  ],
+  "writes": [
+    {
+      "version": "2.6.0",
+      "files": [
+        "state"
+      ],
+      "checked": "2026-10-27",
+      "how": "Initialized the installed 2.6.0 VST3 in an isolated host, enumerated its factory and parameters, captured component state, queried controller state, and restored the component. Changed MKURiftOutputNode_Main_WetDry to 0.25 in the serialized XML, loaded it into a fresh instance and read back normalized 0.25 for VST3 parameter 1482039691. Unknown state and private tails are retained. Verification covers serialization and the named control, not every audible DSP behavior. The same edit was emitted by Kumi's Rust codec into a VST3 preset, loaded through the component state API into a fresh instance, and matched the same parameter readback."
+    }
+  ],
+  "checks": [
+    {
+      "path": "parameters/MKURiftOutputNode_Main_WetDry",
+      "value": 0.25,
+      "host_parameter_id": 1482039691,
+      "host_normalized": 0.25
+    }
+  ]
+}

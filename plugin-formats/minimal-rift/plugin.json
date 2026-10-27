@@ -1,0 +1,51 @@
+{
+  "plugin": "minimal-rift",
+  "name": "Rift",
+  "vendor": "Minimal Audio",
+  "kind": "effect",
+  "ids": {
+    "vst3": [
+      {
+        "id": "ABCDEF019182FAEB4D696E6952494654",
+        "name": "Rift",
+        "parameters": 2122,
+        "status": "verified"
+      }
+    ]
+  },
+  "presets": {
+    "extensions": [
+      ".xml",
+      ".vstpreset"
+    ],
+    "windows": [
+      {
+        "path": "%PROGRAMDATA%/Minimal/Rift",
+        "holds": "native presets",
+        "status": "verified"
+      }
+    ],
+    "mac": [
+      {
+        "path": "/Library/Application Support/Minimal/Rift",
+        "holds": "native presets; path not tested on this Windows installation",
+        "status": "guessed"
+      }
+    ]
+  },
+  "formats": [
+    "format-1"
+  ],
+  "notes": [
+    "VST3 only. The processor class ID was enumerated from the installed VST3 factory.",
+    "Kumi writes from a plug-in-generated initial VST3 state, retaining controller state and unknown data. No factory presets, sample libraries, or waveforms are bundled.",
+    "Full preset state is supported. Partial effect-node subpresets require their enclosing product state; mapped_value is authoritative on restore, not unmapped_value."
+  ],
+  "family": "minimal-audio",
+  "roles": [
+    "distortion"
+  ],
+  "binaries": [
+    "Rift.vst3"
+  ]
+}

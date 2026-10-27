@@ -1,0 +1,44 @@
+{
+  "plugin": "softube-tape",
+  "name": "Tape",
+  "vendor": "Softube",
+  "kind": "effect",
+  "ids": {
+    "vst3": [
+      {
+        "id": "ABE43297EAF446BF91665857CC8E5C16",
+        "name": "Tape",
+        "status": "verified"
+      }
+    ]
+  },
+  "presets": {
+    "extensions": [
+      ".softubepreset",
+      ".softubebundle",
+      ".vstpreset"
+    ],
+    "windows": [
+      {
+        "path": "C:/ProgramData/Softube/Presets",
+        "holds": "installed native preset bundles",
+        "status": "verified"
+      }
+    ]
+  },
+  "formats": [
+    "format-1"
+  ],
+  "notes": [
+    "VST3 only. Native JSON presets carry normalized parameters. SharedData and unknown fields are preserved.",
+    "VST3 class identity comes from the installed host scan when available. The isolated verification host did not finish loading this binary; VST3 component serialization is not yet verified."
+  ],
+  "family": "softube",
+  "roles": [
+    "tape",
+    "saturation"
+  ],
+  "binaries": [
+    "Tape.vst3"
+  ]
+}

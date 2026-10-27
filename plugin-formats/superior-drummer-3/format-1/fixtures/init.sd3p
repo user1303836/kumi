@@ -1,0 +1,7 @@
+PlugVersion 3.4.1
+SAMPLER {
+HQ {
+mastervol 1
+mastervol2 1
+}
+}

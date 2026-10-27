@@ -1,0 +1,109 @@
+{
+  "plugin": "valhalla-room",
+  "format": "format-1",
+  "about": "Normalized Valhalla sound controls in XML root attributes.",
+  "paths": "exact",
+  "files": {
+    "preset": {
+      "extension": ".vpreset",
+      "layers": [
+        "native XML"
+      ],
+      "constants": {
+        "root": "ValhallaRoom"
+      }
+    },
+    "state": {
+      "layers": [
+        "VST3 Comp chunk",
+        "optional VstW compatibility bank",
+        "VC2! + little-endian XML byte length + XML + NUL + preserved opaque JUCE private data"
+      ],
+      "constants": {
+        "xml_magic": "VC2!",
+        "root": "ValhallaRoom"
+      }
+    }
+  },
+  "fields": {
+    "": {"type":"map","in":["state","preset"],"status":"verified"},
+    "root": {"type":"text","in":["state","preset"],"status":"verified"},
+    "parameters": {"type":"map","in":["state","preset"],"status":"verified"},
+    "parameters/mix": {"type":"float","in":["state","preset"],"status":"verified","default":1.0,"about":"Native stored value. Host parameter: mix.","range":[0,1],"unit":"normalized"},
+    "parameters/predelay": {"type":"float","in":["state","preset"],"status":"verified","default":0.01999999955296516,"about":"Native stored value. Host parameter: predelay.","range":[0,1],"unit":"normalized"},
+    "parameters/decay": {"type":"float","in":["state","preset"],"status":"verified","default":0.01901901885867119,"about":"Native stored value. Host parameter: decay.","range":[0,1],"unit":"normalized"},
+    "parameters/HiCut": {"type":"float","in":["state","preset"],"status":"verified","default":0.5302013158798218,"about":"Native stored value. Host parameter: HiCut.","range":[0,1],"unit":"normalized"},
+    "parameters/earlyLateMix": {"type":"float","in":["state","preset"],"status":"verified","default":0.5,"about":"Native stored value. Host parameter: earlyLateMix.","range":[0,1],"unit":"normalized"},
+    "parameters/lateSize": {"type":"float","in":["state","preset"],"status":"verified","default":0.5,"about":"Native stored value. Host parameter: lateSize.","range":[0,1],"unit":"normalized"},
+    "parameters/lateCross": {"type":"float","in":["state","preset"],"status":"verified","default":1.0,"about":"Native stored value. Host parameter: lateCross.","range":[0,1],"unit":"normalized"},
+    "parameters/lateModRate": {"type":"float","in":["state","preset"],"status":"verified","default":0.09090909361839294,"about":"Native stored value. Host parameter: lateModRate.","range":[0,1],"unit":"normalized"},
+    "parameters/lateModDepth": {"type":"float","in":["state","preset"],"status":"verified","default":0.5,"about":"Native stored value. Host parameter: lateModDepth.","range":[0,1],"unit":"normalized"},
+    "parameters/RTBassMultiply": {"type":"float","in":["state","preset"],"status":"verified","default":0.3333333432674408,"about":"Native stored value. Host parameter: RTBassMultiply.","range":[0,1],"unit":"normalized"},
+    "parameters/RTXover": {"type":"float","in":["state","preset"],"status":"verified","default":0.09090909361839294,"about":"Native stored value. Host parameter: RTXover.","range":[0,1],"unit":"normalized"},
+    "parameters/RTHighMultiply": {"type":"float","in":["state","preset"],"status":"verified","default":0.444444477558136,"about":"Native stored value. Host parameter: RTHighMultiply.","range":[0,1],"unit":"normalized"},
+    "parameters/RTHighXover": {"type":"float","in":["state","preset"],"status":"verified","default":0.5302013158798218,"about":"Native stored value. Host parameter: RTHighXover.","range":[0,1],"unit":"normalized"},
+    "parameters/earlySize": {"type":"float","in":["state","preset"],"status":"verified","default":0.02902902849018574,"about":"Native stored value. Host parameter: earlySize.","range":[0,1],"unit":"normalized"},
+    "parameters/earlyCross": {"type":"float","in":["state","preset"],"status":"verified","default":0.1000000014901161,"about":"Native stored value. Host parameter: earlyCross.","range":[0,1],"unit":"normalized"},
+    "parameters/earlyModRate": {"type":"float","in":["state","preset"],"status":"verified","default":0.09090909361839294,"about":"Native stored value. Host parameter: earlyModRate.","range":[0,1],"unit":"normalized"},
+    "parameters/earlyModDepth": {"type":"float","in":["state","preset"],"status":"verified","default":0.0,"about":"Native stored value. Host parameter: earlyModDepth.","range":[0,1],"unit":"normalized"},
+    "parameters/earlySend": {"type":"float","in":["state","preset"],"status":"verified","default":0.0,"about":"Native stored value. Host parameter: earlySend.","range":[0,1],"unit":"normalized"},
+    "parameters/diffusion": {"type":"float","in":["state","preset"],"status":"verified","default":1.0,"about":"Native stored value. Host parameter: diffusion.","range":[0,1],"unit":"normalized"},
+    "parameters/type": {"type":"float","in":["state","preset"],"status":"verified","default":0.0833333358168602,"about":"Native stored value. Host parameter: type.","range":[0,1],"unit":"normalized"},
+    "parameters/space": {"type":"float","in":["state","preset"],"status":"verified","default":0.0,"about":"Native stored value. Host parameter: space.","range":[0,1],"unit":"normalized"},
+    "parameters/LoCut": {"type":"float","in":["state","preset"],"status":"verified","default":0.0,"about":"Native stored value. Host parameter: LoCut.","range":[0,1],"unit":"normalized"},
+    "state": {"type":"map","in":["state","preset"],"status":"verified"},
+    "state/@pluginVersion": {"type":"text","in":["state","preset"],"status":"verified"},
+    "state/@presetName": {"type":"text","in":["state","preset"],"status":"verified"},
+    "state/@mix": {"type":"text","in":["state","preset"],"status":"verified"},
+    "state/@predelay": {"type":"text","in":["state","preset"],"status":"verified"},
+    "state/@decay": {"type":"text","in":["state","preset"],"status":"verified"},
+    "state/@HiCut": {"type":"text","in":["state","preset"],"status":"verified"},
+    "state/@earlyLateMix": {"type":"text","in":["state","preset"],"status":"verified"},
+    "state/@lateSize": {"type":"text","in":["state","preset"],"status":"verified"},
+    "state/@lateCross": {"type":"text","in":["state","preset"],"status":"verified"},
+    "state/@lateModRate": {"type":"text","in":["state","preset"],"status":"verified"},
+    "state/@lateModDepth": {"type":"text","in":["state","preset"],"status":"verified"},
+    "state/@RTBassMultiply": {"type":"text","in":["state","preset"],"status":"verified"},
+    "state/@RTXover": {"type":"text","in":["state","preset"],"status":"verified"},
+    "state/@RTHighMultiply": {"type":"text","in":["state","preset"],"status":"verified"},
+    "state/@RTHighXover": {"type":"text","in":["state","preset"],"status":"verified"},
+    "state/@earlySize": {"type":"text","in":["state","preset"],"status":"verified"},
+    "state/@earlyCross": {"type":"text","in":["state","preset"],"status":"verified"},
+    "state/@earlyModRate": {"type":"text","in":["state","preset"],"status":"verified"},
+    "state/@earlyModDepth": {"type":"text","in":["state","preset"],"status":"verified"},
+    "state/@earlySend": {"type":"text","in":["state","preset"],"status":"verified"},
+    "state/@diffusion": {"type":"text","in":["state","preset"],"status":"verified"},
+    "state/@type": {"type":"text","in":["state","preset"],"status":"verified"},
+    "state/@space": {"type":"text","in":["state","preset"],"status":"verified"},
+    "state/@LoCut": {"type":"text","in":["state","preset"],"status":"verified"},
+    "state/@mixLock": {"type":"text","in":["state","preset"],"status":"verified"},
+    "state/@uiWidth": {"type":"text","in":["state","preset"],"status":"verified"},
+    "state/@uiHeight": {"type":"text","in":["state","preset"],"status":"verified"},
+    "state/@earlyLateTabState": {"type":"text","in":["state","preset"],"status":"verified"},
+    "name": {"type":"text","in":["state","preset"],"status":"verified"}
+  },
+  "parameters": {
+    "mix [VST3 48]": {"field":"parameters/mix","status":"verified","note":"VST3 parameter ID 48. Isolated file edit and host readback verified."},
+    "predelay [VST3 49]": {"field":"parameters/predelay","status":"guessed","note":"VST3 parameter ID 49. Matched by stored name or JUCE ID hash; jointly probed host changes corroborate the field mapping."},
+    "decay [VST3 50]": {"field":"parameters/decay","status":"guessed","note":"VST3 parameter ID 50. Matched by stored name or JUCE ID hash; jointly probed host changes corroborate the field mapping."},
+    "HiCut [VST3 51]": {"field":"parameters/HiCut","status":"guessed","note":"VST3 parameter ID 51. Matched by stored name or JUCE ID hash; jointly probed host changes corroborate the field mapping."},
+    "earlyLateMix [VST3 52]": {"field":"parameters/earlyLateMix","status":"guessed","note":"VST3 parameter ID 52. Matched by stored name or JUCE ID hash; jointly probed host changes corroborate the field mapping."},
+    "lateSize [VST3 53]": {"field":"parameters/lateSize","status":"guessed","note":"VST3 parameter ID 53. Matched by stored name or JUCE ID hash; jointly probed host changes corroborate the field mapping."},
+    "lateCross [VST3 54]": {"field":"parameters/lateCross","status":"guessed","note":"VST3 parameter ID 54. Matched by stored name or JUCE ID hash; jointly probed host changes corroborate the field mapping."},
+    "lateModRate [VST3 55]": {"field":"parameters/lateModRate","status":"guessed","note":"VST3 parameter ID 55. Matched by stored name or JUCE ID hash; jointly probed host changes corroborate the field mapping."},
+    "lateModDepth [VST3 56]": {"field":"parameters/lateModDepth","status":"guessed","note":"VST3 parameter ID 56. Matched by stored name or JUCE ID hash; jointly probed host changes corroborate the field mapping."},
+    "RTBassMultiply [VST3 57]": {"field":"parameters/RTBassMultiply","status":"guessed","note":"VST3 parameter ID 57. Matched by stored name or JUCE ID hash; jointly probed host changes corroborate the field mapping."},
+    "RTXover [VST3 1567]": {"field":"parameters/RTXover","status":"guessed","note":"VST3 parameter ID 1567. Matched by stored name or JUCE ID hash; jointly probed host changes corroborate the field mapping."},
+    "RTHighMultiply [VST3 1568]": {"field":"parameters/RTHighMultiply","status":"guessed","note":"VST3 parameter ID 1568. Matched by stored name or JUCE ID hash; jointly probed host changes corroborate the field mapping."},
+    "RTHighXover [VST3 1569]": {"field":"parameters/RTHighXover","status":"guessed","note":"VST3 parameter ID 1569. Matched by stored name or JUCE ID hash; jointly probed host changes corroborate the field mapping."},
+    "earlySize [VST3 1570]": {"field":"parameters/earlySize","status":"guessed","note":"VST3 parameter ID 1570. Matched by stored name or JUCE ID hash; jointly probed host changes corroborate the field mapping."},
+    "earlyCross [VST3 1571]": {"field":"parameters/earlyCross","status":"guessed","note":"VST3 parameter ID 1571. Matched by stored name or JUCE ID hash; jointly probed host changes corroborate the field mapping."},
+    "earlyModRate [VST3 1572]": {"field":"parameters/earlyModRate","status":"guessed","note":"VST3 parameter ID 1572. Matched by stored name or JUCE ID hash; jointly probed host changes corroborate the field mapping."},
+    "earlyModDepth [VST3 1573]": {"field":"parameters/earlyModDepth","status":"guessed","note":"VST3 parameter ID 1573. Matched by stored name or JUCE ID hash; jointly probed host changes corroborate the field mapping."},
+    "earlySend [VST3 1574]": {"field":"parameters/earlySend","status":"guessed","note":"VST3 parameter ID 1574. Matched by stored name or JUCE ID hash; jointly probed host changes corroborate the field mapping."},
+    "diffusion [VST3 1575]": {"field":"parameters/diffusion","status":"guessed","note":"VST3 parameter ID 1575. Matched by stored name or JUCE ID hash; jointly probed host changes corroborate the field mapping."},
+    "type [VST3 1576]": {"field":"parameters/type","status":"guessed","note":"VST3 parameter ID 1576. Matched by stored name or JUCE ID hash; jointly probed host changes corroborate the field mapping."},
+    "space [VST3 1598]": {"field":"parameters/space","status":"guessed","note":"VST3 parameter ID 1598. Matched by stored name or JUCE ID hash; jointly probed host changes corroborate the field mapping."},
+    "LoCut [VST3 1599]": {"field":"parameters/LoCut","status":"guessed","note":"VST3 parameter ID 1599. Matched by stored name or JUCE ID hash; jointly probed host changes corroborate the field mapping."}
+  }
+}

@@ -1,0 +1,43 @@
+{
+  "plugin": "zynaptiq-unmix-drums",
+  "name": "UNMIX DRUMS",
+  "vendor": "Zynaptiq",
+  "kind": "effect",
+  "ids": {
+    "vst3": [
+      {
+        "id": "A2FF974AA7EE4D90B1087E5DB73047CD",
+        "name": "UNMIX DRUMS",
+        "parameters": 2115,
+        "status": "verified"
+      }
+    ]
+  },
+  "presets": {
+    "extensions": [
+      ".preset",
+      ".vstpreset"
+    ],
+    "windows": [
+      {
+        "path": "C:/Program Files/Zynaptiq/UNMIX DRUMS/UNMIX DRUMS data/Presets",
+        "holds": "installed native presets",
+        "status": "verified"
+      }
+    ]
+  },
+  "formats": [
+    "format-1"
+  ],
+  "notes": [
+    "Only VST3 integration is supported. Native presets hold physical parameter values, not normalized VST3 values.",
+    "Unknown custom properties, DSP state and UI fields are preserved."
+  ],
+  "family": "zynaptiq",
+  "roles": [
+    "source-separation"
+  ],
+  "binaries": [
+    "UNMIX DRUMS VST3.vst3"
+  ]
+}
