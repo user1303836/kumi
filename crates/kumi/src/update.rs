@@ -195,14 +195,18 @@ pub async fn run_update(io: UpdateIo) -> i32 {
             say(open);
         }
     }
-    // Each DAW's bridge, brought up to date where it can be, or how to.
+    // Each DAW's bridge, brought up to date where it can be, or how to; in no DAW at all, how to set Kumi up.
     let mut code = 0;
     let daw = io.daw(run.clone());
+    let none = crate::install::no_daw_yet(&io.env);
     for provider in crate::daw::providers() {
         let done = provider.after_checkout_update(&daw, &repo).await;
         if code == 0 {
             code = done;
         }
+    }
+    if let Some(words) = none {
+        say(words);
     }
     code
 }

@@ -280,6 +280,27 @@ async fn prepared_bridge_is_copied_without_build_tools_and_checksum_mismatch_ref
     assert!(w.out.0.borrow().contains("Kumi's copy of the bridge is damaged"));
     assert_eq!(w.calls.borrow().len(), before);
 }
+/// An update's last step: the update said which bridge Live has and which Kumi brings, and the producer may be about to
+/// work in another DAW, so it neither says the versions again nor tells them to open Live. By hand, it does both.
+#[tokio::test(flavor = "current_thread")]
+async fn an_updates_bridge_step_neither_repeats_the_versions_nor_says_to_open_live() {
+    let w = World::new(Some("1.0.33"));
+    let mut io = w.io();
+    io.env.insert("KUMI_BRIDGE_AFTER".into(), "1".into());
+    assert_eq!(setup_bridge(io).await.unwrap(), 0);
+    let said = w.out.0.borrow().clone();
+    assert!(said.starts_with("Updating it takes a minute.\n"), "{said}");
+    assert!(
+        said.contains("Done: the Ableton bridge 1.0.34 is installed") && said.contains("\nLive loads it the next time it opens.\n"),
+        "{said}"
+    );
+    assert!(!said.contains("1.0.33") && !said.contains("Now open Live"), "{said}");
+    let w = World::new(Some("1.0.33"));
+    assert_eq!(setup_bridge(w.io()).await.unwrap(), 0);
+    let said = w.out.0.borrow().clone();
+    assert!(said.starts_with("Kumi's bridge is 1.0.34; the one Live uses is 1.0.33. Updating it takes a minute.\n"), "{said}");
+    assert!(said.contains("\n\nNow open Live. Kumi connects on its own.\n") && !said.contains("next time it opens"), "{said}");
+}
 #[tokio::test(flavor = "current_thread")]
 async fn upgrade_keeps_state_and_explains_plan_or_apply_refusal() {
     let w = World::new(Some("1.0.33"));

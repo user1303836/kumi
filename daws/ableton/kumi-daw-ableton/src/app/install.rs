@@ -66,12 +66,9 @@ pub(crate) async fn after_update(io: &DawIo, home: &str, app: &str, back_to: Opt
 }
 pub(crate) async fn bridge_after(io: &DawIo, home: &str, app: &str) -> i32 {
     let say = |text: String| io.out.write(&format!("{text}\n"));
-    let Some(config) = find_bridge_config(&io.env) else {
-        if let Some(words) = no_bridge_yet(system::platform()) {
-            say(words);
-        }
-        return 0;
-    };
+    // Kumi was never put in Live: the producer may work in another DAW, so nothing is said of Live (the app says how to
+    // set Kumi up when it's in no DAW at all).
+    let Some(config) = find_bridge_config(&io.env) else { return 0 };
     let server = read_bridge_server(&config).ok();
     let runtime_migration = server.as_ref().is_some_and(|s| !s.native());
     let installed = server.and_then(|s| s.version);
@@ -96,11 +93,6 @@ pub(crate) async fn bridge_after(io: &DawIo, home: &str, app: &str) -> i32 {
         return (update.0)(app.into()).await;
     }
     bridge_command(app, home).status().await.ok().and_then(|s| s.code()).unwrap_or(1)
-}
-/// With no bridge in Live yet, an update ends by saying how to connect it, where Live runs: on Linux there's no Live,
-/// so nothing is said.
-pub fn no_bridge_yet(platform: &str) -> Option<String> {
-    super::live_app::runs_on(platform).then(|| format!("The bridge isn't in Live yet. {}.", *CONNECT_LIVE))
 }
 /// `kumi bridge` as an update's last step, Live just found closed: it asks nothing more (its lifecycle looks for
 /// Live again before changing anything) and doesn't wait for a Live nobody has opened.
@@ -434,10 +426,8 @@ pub(crate) async fn after_checkout_update(io: &DawIo, repo: &str) -> i32 {
     let bundled = kumi_daw::process::read_cargo_version(&join(repo, "daws/ableton/ableton-mcp-server/Cargo.toml"));
     let bundled = bundled.as_deref();
     let bridge = older_bridge(&io.env, bundled);
+    // Never put in Live: nothing to say of it, as after an installed Kumi's update.
     if find_bridge_config(&io.env).is_none() {
-        if let Some(words) = super::install::no_bridge_yet(kumi_types::system::platform()) {
-            say(words);
-        }
         return 0;
     }
     let Some(bridge) = bridge else {
