@@ -519,8 +519,8 @@ impl DawProvider for Own {
                     self.name(),
                     self.kept_words(&put)
                 )),
-                // The bridge in place is the one this Kumi brings.
-                Ok(_) => {}
+                // The bridge in place is the one this Kumi brings: said, as Live's is.
+                Ok(_) => io.out.write(&format!("{} in {} is up to date.\n", self.bridge, self.name())),
                 Err(why) => io.out.write(&format!(
                     "{} wasn't brought up to date: {why}. Run {} --daw {} bridge to try again.\n",
                     self.bridge,
@@ -582,7 +582,7 @@ impl DawProvider for Own {
                     self.name(),
                     self.kept_words(&put)
                 )),
-                Ok(_) => {}
+                Ok(_) => io.out.write(&format!("{} in {} is up to date.\n", self.bridge, self.name())),
                 Err(why) => io.out.write(&failed(why)),
             }
             0

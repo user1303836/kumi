@@ -660,7 +660,10 @@ impl TuiApp {
                 let _ = controller.cancel().await;
             }
             if !controller.stop_live().await? {
-                self.notice("Kumi couldn't stop Live just now; press space in Live to stop it.", NoticeTone::Warn);
+                self.notice(
+                    &format!("Kumi couldn't stop {0} just now; press space in {0} to stop it.", crate::daw::words().app),
+                    NoticeTone::Warn,
+                );
             }
             return Ok(());
         }

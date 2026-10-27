@@ -31,7 +31,7 @@ use kumi_net::{
     proxy,
 };
 use kumi_types::{
-    command::{KUMI, REINSTALL},
+    command::{KUMI, KUMI_START, REINSTALL},
     disk::{free_bytes, size, MB},
     errors::RuntimeError,
     system::{self, Env, SystemProgram},
@@ -355,17 +355,28 @@ pub(crate) async fn ask(io: &InstalledIo, question: &str, ahead: Option<&str>) -
     }
 }
 /// Each DAW's bridge after Kumi changed (`back_to`: to the earlier Kumi it names): brought up to date where it can be,
-/// or how to. The exit code is the first one that isn't 0.
+/// or how to. A DAW Kumi was never put in isn't spoken of; in none at all, how to set Kumi up. The exit code is the first
+/// one that isn't 0.
 async fn bridges_after(io: &InstalledIo, home: &str, app: &str, back_to: Option<&str>) -> i32 {
     let mut code = 0;
     let daw = io.daw();
+    let none = no_daw_yet(&io.env);
     for provider in crate::daw::providers() {
         let done = provider.after_update(&daw, home, app, back_to).await;
         if code == 0 {
             code = done;
         }
     }
+    if let Some(words) = none {
+        io.out.write(&format!("{words}\n"));
+    }
     code
+}
+/// After an update, with Kumi in no DAW yet: how to set it up in the producer's, whichever that is. None once it's in
+/// any.
+pub fn no_daw_yet(env: &Env) -> Option<String> {
+    (!crate::daw::providers().into_iter().any(|provider| provider.bridge_installed(env)))
+        .then(|| format!("Kumi isn't in a DAW yet: run {}, and it sets itself up for the one you work in.", *KUMI_START))
 }
 /// What a swap does to Kumi's folders. The tests stand in for Windows holding one.
 trait Folders {
