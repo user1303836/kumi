@@ -539,9 +539,12 @@ impl McpHost {
             {
                 return Ok(transaction_error(id, "automation target changed after apply; undo refused"));
             }
+            // An insert of either kind into an envelope that wasn't there made the envelope: its undo deletes it, as taking
+            // the inserted points out would leave it there, empty, where the prior had none.
+            let made_envelope = (action == "insert" || action == "insert-step") && prior["exists"] != true;
             if reconciliation && !steps.is_empty() {
                 let prior_points = point_array(&prior["points"]);
-                if action == "insert" || (action == "insert-step" && prior["exists"] == true) {
+                if (action == "insert" || action == "insert-step") && !made_envelope {
                     let (from, to) = inserted_range(payload);
                     let intermediate: Vec<_> = prior_points
                         .into_iter()
@@ -553,7 +556,7 @@ impl McpHost {
                     {
                         return Err(LiveError::error("automation undo partial state conflicts with exact prior content"));
                     }
-                } else if action == "insert-step" {
+                } else if made_envelope {
                     if !clip_properties::scalar_same(tuning::field(&current, "exists")?, prior.get("exists")) {
                         return Err(LiveError::error("automation envelope removal has conflicting content"));
                     }
@@ -569,7 +572,7 @@ impl McpHost {
             }
             let has = |op: &str| steps.iter().any(|step| step.borrow()["operation"] == op);
 
-            if action == "insert-step" && prior["exists"] != true {
+            if made_envelope {
                 if !has("automation.envelope.delete") {
                     let args = self.automation_guarded(adapter.as_ref(), &context, payload, json!({})).await?;
                     self.invoke_undo_recovery(&record, adapter.as_ref(), "automation.envelope.delete", &args, &context).await?;
