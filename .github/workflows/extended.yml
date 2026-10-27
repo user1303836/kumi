@@ -38,8 +38,9 @@ jobs:
         include:
           - { os: ubuntu-24.04, label: Linux, cache: kumi-rust-linux, parts: "[1, 2, 3]" }
           - { os: macos-15, label: macOS, cache: rust-platforms, parts: "[1, 2]" }
-          # (Windows runs the slowest, its install lifecycles most)
-          - { os: windows-2025, label: Windows, cache: app-rust-windows, linker: rust-lld, parts: "[1, 2, 3, 4]" }
+          # Windows builds and runs the slowest (its install lifecycles most): a share costs about a minute now, so six
+          # keep each to about five minutes after its 8-minute build.
+          - { os: windows-2025, label: Windows, cache: app-rust-windows, linker: rust-lld, parts: "[1, 2, 3, 4, 5, 6]" }
     uses: ./.github/workflows/extended-system.yml
     with:
       os: ${{ matrix.os }}
