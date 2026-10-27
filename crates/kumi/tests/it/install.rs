@@ -21,7 +21,12 @@ use kumi_types::{
 };
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-use std::{cell::RefCell, fs, path::Path, rc::Rc};
+use std::{
+    cell::RefCell,
+    fs,
+    path::{Path, PathBuf},
+    rc::Rc,
+};
 #[derive(Default)]
 struct Out(RefCell<String>);
 impl TtyOutput for Out {
@@ -124,6 +129,41 @@ async fn release_check_distinguishes_newer_and_unreachable() {
     let offline = Serve { offline: true, ..Rc::try_unwrap(Serve::new(Value::Null)).ok().unwrap() };
     assert!(check_release(&env, Some(Rc::new(offline))).await.unwrap_err().message().contains("couldn't reach GitHub"));
 }
+/// A `kumi` whose `--version` says the version in the package.json beside it, as a fake release carries one. Built once,
+/// by the first test that needs it while the others wait (nextest runs each test in a process of its own): four tests
+/// each building theirs at once on Windows stalled together to their 30 s limit.
+fn stand_in_kumi() -> PathBuf {
+    const CODE: &str = r#"fn main() {
+    let package = std::env::current_exe().ok().and_then(|exe| std::fs::read_to_string(exe.with_file_name("package.json")).ok());
+    let version = package.as_deref().and_then(|text| text.split("\"version\":\"").nth(1)?.split('"').next()).unwrap_or_default();
+    println!("Kumi {version}");
+}
+"#;
+    let folder = Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!("stand-in-kumi-{}", &hex::encode(Sha256::digest(CODE))[..12]));
+    let kumi = folder.join(executable_name("kumi"));
+    if kumi.is_file() {
+        return kumi;
+    }
+    fs::create_dir_all(&folder).unwrap();
+    let building = fs::File::create(folder.join("building")).unwrap();
+    building.lock().unwrap();
+    if !kumi.is_file() {
+        let code = folder.join("main.rs");
+        fs::write(&code, CODE).unwrap();
+        let built = folder.join(format!("{}-{}", std::process::id(), executable_name("kumi")));
+        let mut rustc = std::process::Command::new("rustc");
+        rustc.arg(&code).arg("-o").arg(&built).args(["-C", "debuginfo=0"]);
+        // No PDB (rustc asks MSVC's linker for one whatever -C strip says): it's written through a server every link on
+        // the machine shares.
+        if cfg!(target_env = "msvc") {
+            rustc.args(["-C", "link-arg=/DEBUG:NONE"]);
+        }
+        let made = rustc.output().unwrap();
+        assert!(made.status.success(), "{}", String::from_utf8_lossy(&made.stderr));
+        fs::rename(&built, &kumi).unwrap();
+    }
+    kumi
+}
 fn fake_release(dir: &Path, version: &str) -> Vec<u8> {
     fake_release_with(dir, version, None)
 }
@@ -142,17 +182,7 @@ fn fake_release_carrying_bytes(dir: &Path, version: &str, bridge: Option<&str>, 
     for (path, bytes) in files {
         put(stage.join(path), bytes);
     }
-    let code = dir.join("main.rs");
-    put(&code, format!("fn main() {{ println!(\"Kumi {version}\"); }}"));
-    let built = std::process::Command::new("rustc")
-        .arg(&code)
-        .arg("-o")
-        .arg(stage.join(executable_name("kumi")))
-        .arg("-C")
-        .arg("debuginfo=0")
-        .output()
-        .unwrap();
-    assert!(built.status.success(), "{}", String::from_utf8_lossy(&built.stderr));
+    fs::copy(stand_in_kumi(), stage.join(executable_name("kumi"))).unwrap();
     put(stage.join("package.json"), json!({"version":version,"bridge":bridge}).to_string());
     put(
         stage.join("CHANGELOG.md"),
