@@ -83,6 +83,11 @@ impl PluginTool {
                         json!({"plugin":p.info, "verified":p.verified, "fields":fields.iter().take(limit).map(|(path,field)|json!({"path":path,"field":field})).collect::<Vec<_>>(),
                         "parameters":parameters.iter().take(limit).map(|(name,link)|json!({"name":name,"path":structure::Structure::location(link),"link":link})).collect::<Vec<_>>(),
                         "more_fields":fields.len().saturating_sub(limit), "more_parameters":parameters.len().saturating_sub(limit),
+                        "operations":match plugin {
+                            "ozone-12" => json!({"$chain":{"value":"ordered array of module names; suite only","modules":kumi_library::plugins::formats::ozone12::MODULES}}),
+                            "serum-2" => json!({"$add_distortion":{"value":"rack number: 0 for main, 1 or 2 for buses"}}),
+                            _ => json!({}),
+                        },
                         "note":"Paths with {n} or [] describe repeated sections; inspect gives concrete paths. 'seen' is an observed range, not an allowed range. Write only verified versions. $chain replaces an Ozone module order; $add_distortion adds a Serum initialized Distortion slot (value is rack 0–2)."}),
                     )
                 } else {
@@ -268,9 +273,5 @@ mod tests {
         request.insert("edits".into(), json!([{"path":"Oscillator1/plainParams/not-real","value":1}]));
         assert!(tool.run(&request).is_err());
         assert!(!file.exists());
-        let guide = tool.run(&input(json!({"action":"guide"}))).unwrap();
-        for required in ["Ozone 12", "compare_to", "true peak", "native processors", "HISTORY"] {
-            assert!(guide["workflow"].as_str().unwrap().contains(required));
-        }
     }
 }

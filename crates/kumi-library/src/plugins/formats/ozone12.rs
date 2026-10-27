@@ -393,17 +393,23 @@ impl OzoneState {
         Ok(())
     }
 
-    /// Package a state for the exact VST3 variant. Module state cannot be relabelled as a different plug-in.
-    pub fn to_vstpreset(&self, class_id: &str) -> Result<VstPreset, FormatError> {
+    /// Check the exact VST3 variant without applying write-only schema restrictions to readable older state.
+    pub fn validate_class(&self, class_id: &str) -> Result<(), FormatError> {
         let variant = variant(class_id).ok_or_else(|| FormatError::new("Unknown Ozone 12 VST3 class ID"))?;
         let name =
             typed(&self.json["Context State"]).and_then(|context| context.get("Plugin Name")).and_then(typed).and_then(Value::as_str);
         if name != Some(variant.state_name) {
             return Err(FormatError::new(format!("Ozone state belongs to {name:?}, not {}", variant.name)));
         }
+        Ok(())
+    }
+
+    /// Package a state for the exact VST3 variant. Module state cannot be relabelled as a different plug-in.
+    pub fn to_vstpreset(&self, class_id: &str) -> Result<VstPreset, FormatError> {
+        self.validate_class(class_id)?;
         Ok(VstPreset {
             version: 1,
-            class_id: variant.class_id.into(),
+            class_id: class_id.to_ascii_uppercase(),
             chunks: vec![("Comp".into(), self.write()?), ("Cont".into(), Vec::new())],
         })
     }

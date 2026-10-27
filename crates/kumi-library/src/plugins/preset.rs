@@ -125,7 +125,11 @@ pub fn edit(plugin: &str, input: &[u8], options: &WriteOptions, edits: &[Edit]) 
                         .collect::<Result<Vec<_>, _>>()?;
                     preset.set_chain(&modules)?;
                 } else {
-                    let path = change.path.strip_prefix("parameters/").unwrap_or(&change.path);
+                    let path = change
+                        .path
+                        .strip_prefix("DSP State/DSP Elements/")
+                        .or_else(|| change.path.strip_prefix("parameters/"))
+                        .unwrap_or(&change.path);
                     let (element, parameter) = path.split_once('/').ok_or_else(|| error("Ozone edits use ElementID/ParamID"))?;
                     preset.set_value(element, parameter, change.value.clone())?;
                 }
@@ -268,7 +272,7 @@ pub fn inspect(plugin: &str, input: &[u8], requested_class: Option<&str>) -> Res
         "ozone-12" => {
             if source.is_some() {
                 let preset = ozone12::OzoneState::read(state)?;
-                preset.to_vstpreset(class.as_deref().ok_or_else(|| error("missing Ozone VST3 processor identity"))?)?;
+                preset.validate_class(class.as_deref().ok_or_else(|| error("missing Ozone VST3 processor identity"))?)?;
                 let mut parameters = serde_json::Map::new();
                 if let Some(elements) = preset.elements() {
                     for (element, data) in elements {

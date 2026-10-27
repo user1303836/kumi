@@ -41,6 +41,9 @@ pub fn prepare(input: &Path, library: &Path, name: &str) -> Result<PreparedPrese
         return Err("VST3 preset exceeds 64 MiB".into());
     }
     let preset = VstPreset::read(&bytes).map_err(|e| e.to_string())?;
+    if preset.version != 1 {
+        return Err("Unsupported VST3 preset container version".into());
+    }
     if preset.component().is_none_or(|c| c.is_empty()) {
         return Err("VST3 preset has no processor state".into());
     }

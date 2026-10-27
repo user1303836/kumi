@@ -191,9 +191,30 @@ fn ozone_suite_and_every_module_keep_their_own_processor_identity() {
     let inspected = preset::inspect("ozone-12", &edited.write(), None).unwrap();
     assert_eq!(inspected["data"]["parameters"]["Maximizer"]["Gain"], 3.0);
     assert_eq!(inspected["data"]["chain"], json!(["Equalizer", "Stereo Imager", "Maximizer"]));
+    let catalog_path = "DSP State/DSP Elements/Maximizer/Gain";
+    assert!(structure::builtin("ozone-12").unwrap().structure.field(catalog_path).is_some());
+    let edited = preset::edit("ozone-12", &edited.write(), &opts, &[change(catalog_path, json!(4.5))]).unwrap();
+    let inspected = preset::inspect("ozone-12", &edited.write(), None).unwrap();
+    assert_eq!(inspected["data"]["parameters"]["Maximizer"]["Gain"], 4.5);
     let mut mismatched = edited;
     mismatched.class_id = ozone12::VARIANTS[1].class_id.into();
     assert!(preset::inspect("ozone-12", &mismatched.write(), None).is_err());
+}
+
+#[test]
+fn ozone_read_only_inspection_does_not_require_a_writable_state_version() {
+    let opts = options("ozone-12");
+    let mut old = preset::create("ozone-12", &opts, &[change("Maximizer/Gain", json!(2.5))]).unwrap();
+    let component = &mut old.chunks.iter_mut().find(|(id, _)| id == "Comp").unwrap().1;
+    // The parser understands this component's contents, but writing its older
+    // serialization envelope is deliberately outside the verified write gate.
+    component[4..8].copy_from_slice(&3u32.to_le_bytes());
+    let inspected = preset::inspect("ozone-12", &old.write(), None).unwrap();
+    assert_eq!(inspected["data"]["parameters"]["Maximizer"]["Gain"], 2.5);
+    assert!(preset::edit("ozone-12", &old.write(), &opts, &[change("Maximizer/Gain", json!(3.0))]).is_err());
+    // Read-only inspection must still reject a different processor identity.
+    old.class_id = ozone12::VARIANTS[1].class_id.into();
+    assert!(preset::inspect("ozone-12", &old.write(), None).is_err());
 }
 
 #[test]
