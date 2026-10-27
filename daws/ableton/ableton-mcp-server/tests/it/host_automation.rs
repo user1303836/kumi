@@ -514,6 +514,8 @@ async fn undoing_an_insert_into_an_envelope_that_was_not_there_deletes_the_envel
 async fn automation_apply_and_exact_key_undo_match_source() {
     let fixture = fixture();
     let workflows = fixture["workflows"].as_array().unwrap();
+    // The reads and sends each insert-absent and step-absent workflow made from its undo on, by scenario.
+    let mut undoes = HashMap::new();
     for row in workflows {
         let kind = row["kind"].as_str().unwrap();
         let scenario = row["scenario"].as_str().unwrap();
@@ -579,21 +581,25 @@ async fn automation_apply_and_exact_key_undo_match_source() {
             perform(&host, "undo", "new-undo-key", txid, &mut results, &mut states, &record, false).await;
         }
         let label = format!("{kind} {scenario}");
+        if kind == "insert-absent" || kind == "step-absent" {
+            let calls = &adapter.calls.borrow()[applied.2..];
+            undoes.insert(
+                (kind, scenario),
+                calls.iter().map(|call| json!([call["method"], call["invocation"]["operation"]])).collect::<Vec<_>>(),
+            );
+        }
         if kind == "insert-absent" {
             // #325: the source undid an insert into an envelope that wasn't there by deleting the points it put in. That
             // left the envelope there, empty, where the prior had none, so the undo failed its own exact-prior check
             // ("automation undo did not restore the exact prior envelope"). The port deletes the envelope, as the source
             // undid an insert-step into a missing envelope. So up to the undo these match the source's insert, and from
-            // the undo on its insert-step: the same answers, states, Live calls and envelope left (or not) at the end.
+            // the undo on its insert-step: the same answers, states, Live calls (checked below, once every workflow has
+            // run) and envelope left (or not) at the end.
             let step = workflows.iter().find(|w| w["kind"] == "step-absent" && w["scenario"] == scenario).unwrap();
             let (answers, held, sent) = applied;
-            let undo_calls = |calls: &[Value]| -> Vec<Value> {
-                calls.iter().map(|call| json!([call["method"], call["invocation"]["operation"]])).collect()
-            };
             let states_of = |rows: &[Value]| -> Vec<Value> { rows.iter().map(|row| json!([row["state"], row["undoKey"]])).collect() };
             let envelope = |state: &Value| state["tracks"][0]["clips"][0]["envelopes"].get(PREF).is_some();
             let calls = adapter.calls.borrow();
-            let steps = step["calls"].as_array().unwrap();
             same(&json!(results[..answers]), &json!(row["results"].as_array().unwrap()[..answers]), &format!("{label} results"));
             same(&json!(results[answers..]), &json!(step["results"].as_array().unwrap()[answers..]), &format!("{label} undo results"));
             same(&json!(states[..held]), &json!(row["states"].as_array().unwrap()[..held]), &format!("{label} states"));
@@ -603,9 +609,6 @@ async fn automation_apply_and_exact_key_undo_match_source() {
                 &format!("{label} undo states"),
             );
             same(&json!(calls[..sent]), &json!(row["calls"].as_array().unwrap()[..sent]), &format!("{label} calls"));
-            // Each one's undo makes its last calls: as many, and the same reads and sends in the same order.
-            let undone = calls.len() - sent;
-            same(&json!(undo_calls(&calls[sent..])), &json!(undo_calls(&steps[steps.len() - undone..])), &format!("{label} undo calls"));
             assert_eq!(envelope(&adapter.sim.state.borrow()), envelope(&step["state"]), "{label} envelope");
             continue;
         }
@@ -613,6 +616,13 @@ async fn automation_apply_and_exact_key_undo_match_source() {
         same(&json!(states), &row["states"], &format!("{label} states"));
         same(&json!(*adapter.calls.borrow()), &row["calls"], &format!("{label} calls"));
         same(&adapter.sim.state.borrow(), &row["state"], &format!("{label} state"));
+    }
+    // From the undo on, an insert-absent workflow makes the Live calls its step-absent one made: every one, in order.
+    // The step-absent ones matched the source's whole calls above.
+    for ((kind, scenario), calls) in &undoes {
+        if *kind == "insert-absent" {
+            same(&json!(calls), &json!(undoes[&("step-absent", *scenario)]), &format!("{kind} {scenario} undo calls"));
+        }
     }
 }
 
