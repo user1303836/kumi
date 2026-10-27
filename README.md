@@ -43,6 +43,8 @@ Next time, open a terminal and type `kumi`.
 > [!NOTE]
 > Kumi runs in a terminal window, but you don't need to know any commands. After the install line, it's a chat.
 
+- Drag across TUI text to highlight it, then press Ctrl-C or right-click to copy; Esc clears the selection.
+
 ## What can I ask it?
 
 - **Build a sound from a tutorial.** Paste a YouTube link: Kumi watches it and builds what it shows on a new track.

@@ -40,6 +40,50 @@ case!(startup_restore, async {
         .ends_with(&format!("{}Kumi closed. Each Set's conversation continues next time.\n", kumi::tui::tty::RESTORE)));
     h.close().await;
 });
+case!(drag_select_and_copy_the_displayed_text_while_streaming, async {
+    use std::cell::RefCell;
+    let copied = Rc::new(RefCell::new(Vec::<String>::new()));
+    let copy = copied.clone();
+    let h = Harness::with(120, 36, Rc::new(Control::default()), move |o| {
+        o.copy = Some(Rc::new(move |text| copy.borrow_mut().push(text.into())));
+    });
+    h.start().await;
+    h.connect();
+    h.type_text("keep my draft").await;
+    h.emit(json!({"type":"state","state":"running"}));
+    h.emit(json!({"type":"text","text":"Select these words"}));
+    let lines = h.screen();
+    let y = lines.iter().position(|line| line.contains("Select these words")).unwrap();
+    let x = lines[y].find("Select these words").unwrap();
+    h.type_text(&format!("\x1b[<0;{};{}M\x1b[<32;{};{}M\x1b[<0;{};{}m", x + 1, y + 1, x + 6, y + 1, x + 6, y + 1)).await;
+    h.emit(json!({"type":"text","text":"\nAnother streamed line"}));
+    assert!(!has(&h.screen(), "Another streamed line"));
+    h.type_text("\x03").await;
+    assert_eq!(&*copied.borrow(), &["Select"]);
+    h.has("keep my draft");
+    h.has("Another streamed line");
+    assert!(!h.calls().contains(&"cancel".into()));
+    assert!(!h.calls().contains(&"close".into()));
+    h.close().await;
+});
+case!(escape_and_resize_clear_a_text_selection_without_cancelling, async {
+    let h = Harness::new(120, 36);
+    h.start().await;
+    h.connect();
+    h.emit(json!({"type":"state","state":"running"}));
+    h.emit(json!({"type":"text","text":"Selection survives a redraw"}));
+    let lines = h.screen();
+    let y = lines.iter().position(|line| line.contains("Selection survives")).unwrap();
+    h.type_text(&format!("\x1b[<0;3;{}M\x1b[<32;8;{}M\x1b[<0;8;{}m", y + 1, y + 1, y + 1)).await;
+    h.type_text("\x1b").await;
+    assert!(!h.calls().contains(&"cancel".into()));
+    h.type_text(&format!("\x1b[<0;3;{}M\x1b[<32;8;{}M", y + 1, y + 1)).await;
+    h.resize(90, 28);
+    h.has("Selection survives a redraw");
+    h.type_text("\x1b").await;
+    h.wait_for_call("cancel").await;
+    h.close().await;
+});
 case!(started_by_the_installer_the_farewell_says_how_to_start_kumi_next_time, async {
     let next = "Next time: open a new terminal window and type kumi";
     let h = Harness::with(120, 36, Rc::new(Control::default()), |o| o.next_time = Some(next.into()));
