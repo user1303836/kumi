@@ -1041,7 +1041,8 @@ pub struct PathLines {
 /// One of Kumi's blocks left in a startup file, and why.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LeftAlone {
-    /// Its lines, with their line numbers (from 1), as they are in the file.
+    /// Kumi's lines in it, with their line numbers (from 1), as they are in the file: the PATH line alone when its
+    /// marker ends a line of the producer's code.
     pub lines: Vec<(usize, String)>,
     /// Why it stays, as said after its lines: "it sits inside an if, for or function there".
     pub why: String,
@@ -1130,14 +1131,16 @@ fn take_out_blocks(text: &str, fish: bool, ours: impl Fn(&str) -> bool) -> (Stri
         let below = lines[index + block..].iter().find(|line| code(line)).copied();
         let indented = line.starts_with([' ', '\t']) || (block == 2 && next.is_some_and(|next| next.starts_with([' ', '\t'])));
         let joined = above.and_then(runs_on).or_else(|| next.filter(|_| block == 2).and_then(runs_on));
-        let why = if code(&line) {
-            Some("its marker shares a line with other code there".to_string())
+        // A marker ending a line of the producer's code is the only part of that line that's Kumi's.
+        let shared = code(&line);
+        let why = if shared {
+            Some(format!("its marker shares line {} with code of yours, and only the marker at that line's end can go with it", index + 1))
         } else if indented || above.is_some_and(|above| opens_a_body(above, fish)) || below.is_some_and(closes_a_body) {
             Some("it sits inside an if, for or function there".to_string())
         } else {
             joined.map(|op| format!("it's joined to the code beside it there by {op}"))
         };
-        let numbered = (index..index + block).map(|at| (at + 1, lines[at].trim_end_matches('\r').to_string()));
+        let numbered = (index + usize::from(shared)..index + block).map(|at| (at + 1, lines[at].trim_end_matches('\r').to_string()));
         if let Some(why) = why {
             left.push(LeftAlone { lines: numbered.collect(), why });
             kept.extend(&lines[index..index + block]);
@@ -2425,13 +2428,13 @@ mod path_line_tests {
         assert_eq!(after, "alias ll='ls -l'\n");
         assert_eq!(removed, numbered(&[(3, "# Added by the Kumi installer (mine)"), (4, LINE)]));
         assert!(left.is_empty());
-        // The marker's words at the end of the producer's own line: that line and Kumi's under it stay, named.
-        let their_line = format!("export EDITOR=vim {PATH_MARKER}");
-        let shared = format!("{their_line}\n{LINE}\n");
+        // The marker's words at the end of the producer's own line: that line and Kumi's under it stay, and only Kumi's
+        // line is named to take out, with the marker as the only part of the producer's line that can go with it.
+        let shared = format!("export EDITOR=vim {PATH_MARKER}\n{LINE}\n");
         let (after, removed, left) = take_out(&shared);
         assert_eq!((after.as_str(), removed), (shared.as_str(), vec![]));
-        let why = "its marker shares a line with other code there".to_string();
-        assert_eq!(left, vec![LeftAlone { lines: numbered(&[(1, their_line.as_str()), (2, LINE)]), why }]);
+        let why = "its marker shares line 1 with code of yours, and only the marker at that line's end can go with it".to_string();
+        assert_eq!(left, vec![LeftAlone { lines: numbered(&[(2, LINE)]), why }]);
         // With no PATH line of Kumi's under them, they're only the producer's.
         let theirs = format!("echo '{PATH_MARKER}'\nexport EDITOR=vim\n");
         assert_eq!(take_out(&theirs), (theirs.clone(), vec![], vec![]));
