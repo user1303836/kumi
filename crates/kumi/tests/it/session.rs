@@ -1,4 +1,6 @@
 //! Session behavior.
+#[path = "../support/library.rs"]
+mod fixture;
 use async_trait::async_trait;
 use futures::{future::LocalBoxFuture, FutureExt};
 use kumi_agent::{
@@ -3133,6 +3135,74 @@ local_test!(taste_is_offered_in_every_session_and_the_system_text_says_so_once_s
         "{instructions}"
     );
     h.session.close().await.unwrap();
+});
+// A REAPER session's palette works with the sounds REAPER is offered, never Live's packs; and a learn that finishes
+// brings what it learned into a loose palette, which the app hears (the map marks it).
+local_test!(a_reaper_sessions_loose_palette_reaches_reapers_sounds_and_brings_in_what_a_learn_finds, {
+    use kumi_agent::core::{palette::Gathered, store_client::StoreClient};
+    use kumi_library::{create_library, sources::SourceOptions, LearnNowOptions, LibraryOptions};
+    let dir = tempfile::tempdir().unwrap();
+    let music = dir.path().join("home/Music/Ableton");
+    let (samples, pack) = (music.join("User Library/Samples"), music.join("Factory Packs/Drum Essentials/Samples"));
+    let kick = fixture::wav(&[fixture::kick(50., 0.3)], 44100);
+    fixture::put(&samples.join("Kick.wav"), &kick);
+    fixture::put(&samples.join("Snare.wav"), fixture::wav(&[fixture::snare(0.3)], 44100));
+    fixture::put(&samples.join("Hat.wav"), fixture::wav(&[fixture::hat(0.3, 5)], 44100));
+    // Live's pack has the same kick: nearer than anything, and not REAPER's.
+    fixture::put(&pack.join("Pack Kick.wav"), &kick);
+    let library = create_library(LibraryOptions {
+        daws: kumi::daw::registry::libraries(),
+        dir: dir.path().join("library").to_string_lossy().into(),
+        find_sets: Some(false),
+        fork: Some(false),
+        delay_ms: Some(3_600_000),
+        sources: Some(SourceOptions {
+            home: Some(dir.path().join("home").to_string_lossy().into()),
+            platform: Some("darwin".into()),
+            ..Default::default()
+        }),
+        ..Default::default()
+    });
+    library.learn_now(LearnNowOptions::new(Signal::new())).await.unwrap();
+    let store = StoreClient::new(kumi_store::Store::open(dir.path().join("kumi.db")).unwrap());
+    let h = harness(None, |o| {
+        o.profile = kumi_types::daw::DawProfile::REAPER;
+        o.store = Some(store);
+        o.library = Some(library.clone());
+    });
+    // The library's own name for a file of REAPER's (its folders written its way).
+    let path = |name: &'static str| {
+        let library = library.clone();
+        async move {
+            let index = library.sound_index_in(Some(kumi_types::daw::DawId::Reaper)).await.unwrap();
+            let path = index.entries.iter().find(|entry| std::path::Path::new(&entry.path).file_name().unwrap() == name);
+            path.map(|entry| entry.path.clone()).unwrap()
+        }
+    };
+    let heard = || {
+        h.events.borrow().iter().rev().find_map(|event| match event {
+            SessionEvent::Palette { palette } => palette.as_ref().map(|palette| palette.reached.clone()),
+            _ => None,
+        })
+    };
+    let kick_path = path("Kick.wav").await;
+    h.session.palette_gather(vec![Gathered { path: kick_path, name: "Kick".into(), song: false, class: None }]).await.unwrap();
+    h.session.palette_command("loose 1").await.unwrap();
+    let reached = heard().unwrap();
+    assert!(reached.len() == 1 && !reached[0].contains("Factory Packs"), "{reached:?}: REAPER's sounds, not Live's pack's");
+    // A copy of the kick in the User Library, learned: nearer than anything REAPER has, brought in once the learn's done.
+    fixture::put(&samples.join("Kick Copy.wav"), &kick);
+    library.learn_now(LearnNowOptions::new(Signal::new())).await.unwrap();
+    let copy = path("Kick Copy.wav").await;
+    for _ in 0..200 {
+        if heard() == Some(vec![copy.clone()]) {
+            break;
+        }
+        delay(25).await;
+    }
+    assert_eq!(heard(), Some(vec![copy]));
+    h.session.close().await.unwrap();
+    library.close().await;
 });
 local_test!(library_tools_preferences_status_and_forgetting_follow_session_lifecycle, {
     use kumi_library::{create_library, sources::SourceOptions, LibraryOptions};

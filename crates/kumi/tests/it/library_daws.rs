@@ -434,6 +434,68 @@ async fn a_daws_library_inside_a_producers_folder_leaves_its_other_sounds_to_tha
         .await;
 }
 
+/// A palette in REAPER (or Renoise) works with the sounds offered there, as find_sounds does: never Live's packs, and no
+/// taste from Live Sets. A sound that moved is found again among every DAW's, as a palette is every session's.
+#[tokio::test(flavor = "current_thread")]
+async fn a_palette_in_reaper_reaches_reapers_sounds_and_finds_a_moved_sound_among_every_daws() {
+    use kumi_agent::core::palette::{LibrarySounds, PaletteLibrary};
+    use kumi_library::{
+        sets::{SetSummary, SetTrack},
+        store::Entry,
+    };
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let home = Home::new(true);
+            let music = home.home.path().join("Music/Ableton");
+            let bytes = wav(&[fixture::kick(50., 0.2)], 44100);
+            put(&music.join("User Library/Samples/Kick.wav"), &bytes);
+            put(&music.join("Factory Packs/Drum Essentials/Samples/Pack Kick.wav"), &bytes);
+            learn(LearnOptions { daws: kumi::daw::registry::libraries(), ..LearnOptions::new(home.plan(), Signal::new()) }).await.unwrap();
+            // Each as the library names it.
+            let logs = library_logs(home.dir.path().to_str().unwrap());
+            let learned: Vec<String> = logs.sounds.load().await.into_keys().collect();
+            let named = |name: &str| learned.iter().find(|path| Path::new(path).file_name().unwrap() == name).unwrap().clone();
+            let (kick, packed) = (named("Kick.wav"), named("Pack Kick.wav"));
+            // A Live Set that uses the kick.
+            let set = SetSummary {
+                name: "Song".into(),
+                tracks: vec![SetTrack { samples: vec![kick.clone()], ..Default::default() }],
+                ..Default::default()
+            };
+            let file = Entry { path: music.join("Song.als").to_string_lossy().into(), size: 1, mtime: 1, gone: None };
+            logs.sets.append(&[SetEntry { file, set: Some(set), error: None }]).await.unwrap();
+            let library = create_library(LibraryOptions {
+                daws: kumi::daw::registry::libraries(),
+                dir: home.dir.path().to_string_lossy().into(),
+                sources: Some(home.options()),
+                fork: Some(false),
+                delay_ms: Some(3_600_000),
+                ..Default::default()
+            });
+            let (reaper, live) =
+                (LibrarySounds(library.clone(), Some(DawId::Reaper)), LibrarySounds(library.clone(), Some(DawId::Ableton)));
+            let paths = |index: Rc<SoundIndex>| {
+                let mut paths: Vec<String> = index.entries.iter().map(|entry| entry.path.clone()).collect();
+                paths.sort();
+                paths
+            };
+            let mut both = vec![kick.clone(), packed.clone()];
+            both.sort();
+            assert_eq!(paths(reaper.index().await.unwrap()), [kick.clone()], "REAPER's sounds, not Live's pack's");
+            assert_eq!(paths(live.index().await.unwrap()), both);
+            // The producer's taste is their Live Sets': in Live, not in REAPER.
+            assert_eq!(live.used().await, HashMap::from([(kick.clone(), 1)]));
+            assert_eq!(reaper.used().await, HashMap::new());
+            // Moved, by its name and size: found among every DAW's sounds, Live's pack's too.
+            let size = bytes.len() as i64;
+            let wanted = vec![("Pack Kick.wav".to_string(), size), ("Kick.wav".to_string(), size), ("Pack Kick.wav".to_string(), size + 1)];
+            let found: Vec<Option<String>> = reaper.refind(wanted).await.into_iter().map(|found| found.map(|(path, _)| path)).collect();
+            assert_eq!(found, [Some(packed), Some(kick), None]);
+            library.close().await;
+        })
+        .await;
+}
+
 /// Every step find_presets names for loading a DAW's presets is one of that DAW's change steps.
 #[test]
 fn find_presets_names_only_steps_the_daw_has_and_lives_text_stays() {

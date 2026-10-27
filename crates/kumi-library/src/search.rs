@@ -702,9 +702,11 @@ pub struct PresetHit {
 impl SoundIndex {
     /// Each measured sound's row and its numbers as the search compares them: standardized, each group weighted.
     pub fn compared(&self) -> impl Iterator<Item = (usize, &[f32])> + '_ {
-        (0..self.entries.len())
-            .filter(|row| self.has_vector[*row])
-            .map(|row| (row, &self.vectors[row * VECTOR_LENGTH..(row + 1) * VECTOR_LENGTH]))
+        (0..self.entries.len()).filter_map(|row| self.compared_at(row).map(|numbers| (row, numbers)))
+    }
+    /// The numbers the search compares for the sound in this row: None when it isn't measured.
+    pub fn compared_at(&self, row: usize) -> Option<&[f32]> {
+        self.has_vector.get(row).is_some_and(|has| *has).then(|| &self.vectors[row * VECTOR_LENGTH..(row + 1) * VECTOR_LENGTH])
     }
 }
 
