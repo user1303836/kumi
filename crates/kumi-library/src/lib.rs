@@ -131,6 +131,8 @@ pub struct Library {
     /// Held while the sound index is checked and built: a search that comes during a build waits for it and takes
     /// its index, rather than building its own (#258).
     building: Mutex<()>,
+    /// How many sound indexes have been built (`sound_indexes_built`).
+    built: Cell<u64>,
     source_cache: RefCell<Option<(i64, Vec<Source>)>>,
     remembered: RefCell<Option<Vec<String>>>,
 }
@@ -159,6 +161,7 @@ pub fn create_library(options: LibraryOptions) -> Rc<Library> {
         held: RefCell::new(None),
         stale: Cell::new(false),
         building: Mutex::new(()),
+        built: Cell::new(0),
         source_cache: RefCell::new(None),
         remembered: RefCell::new(None),
     });
@@ -534,8 +537,15 @@ impl Library {
             let index = Rc::new(SoundIndex::build_after(entries, &current, before).await);
             *self.held.borrow_mut() = Some(HeldIndex { index, key, at: now_ms() });
             self.stale.set(false);
+            self.built.set(self.built.get() + 1);
         }
         Ok(self.held.borrow().as_ref().unwrap().index.clone())
+    }
+    /// How many sound indexes this library has built, read without building: the same count, the same index
+    /// `sound_index_in` last handed out (sounds learned since show once something asks for the index again). Work kept
+    /// over an index (a palette's nearest) checks this before asking.
+    pub fn sound_indexes_built(&self) -> u64 {
+        self.built.get()
     }
     /// The presets' log, read as far as it goes now (their count kept for the status).
     async fn presets_now(&self) -> Result<MutexGuard<'_, LogReader<PresetEntry>>, RuntimeError> {

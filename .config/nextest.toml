@@ -122,7 +122,9 @@ default-filter = 'all()'
 slow-timeout = { period = "60s", terminate-after = 4 }
 fail-fast = false
 
-# The benchmark at a big library's size (music_scale: 300,000 songs) holds work to a time bound, so it runs alone.
+# The benchmark at a big library's size (music_scale: 300,000 songs) holds work to a time bound, so it runs alone, ended
+# at its own bound of ten minutes rather than the four that mean a hang elsewhere (it takes 10 to 17 s on CI's runners).
 [[profile.extended.overrides]]
 filter = 'binary_id(kumi-listening::it) & test(/^music_scale::/)'
 threads-required = "num-cpus"
+slow-timeout = { period = "60s", terminate-after = 10 }

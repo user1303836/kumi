@@ -17,7 +17,11 @@ use kumi_library::{
 };
 use kumi_store::Store;
 use serde_json::{json, Value};
-use std::{cell::RefCell, collections::HashMap, rc::Rc};
+use std::{
+    cell::{Cell, RefCell},
+    collections::HashMap,
+    rc::Rc,
+};
 
 macro_rules! case {
     ($name:ident, $body:expr) => {
@@ -35,13 +39,25 @@ fn sound(folder: &std::path::Path, name: &str, bytes: usize) -> Gathered {
     Gathered { path: path.to_string_lossy().into(), name: name.into(), song: false, class: Some("kick".into()) }
 }
 
-/// A library for palettes: where moved sounds went, its sounds, and how many projects use each.
+/// A library for palettes: where moved sounds went, its sounds (and how many indexes it built, and how often it was
+/// asked for one), and how many projects use each. `hold` keeps the next ask for the index waiting until it's let go.
 #[derive(Default)]
 struct Library {
     asked: RefCell<Vec<(String, i64)>>,
     moved: Option<(String, i64)>,
     index: RefCell<Option<Rc<SoundIndex>>>,
+    built: Cell<u64>,
+    looked: Cell<usize>,
+    hold: RefCell<Option<Rc<tokio::sync::Notify>>>,
     used: HashMap<String, usize>,
+}
+
+impl Library {
+    /// Another index, as the library builds one.
+    fn learned(&self, index: Rc<SoundIndex>) {
+        *self.index.borrow_mut() = Some(index);
+        self.built.set(self.built.get() + 1);
+    }
 }
 
 #[async_trait(?Send)]
@@ -51,7 +67,15 @@ impl PaletteLibrary for Library {
         wanted.iter().map(|(name, size)| self.moved.clone().filter(|(to, _)| to.ends_with(name.as_str()) && *size == 10)).collect()
     }
     async fn index(&self) -> Option<Rc<SoundIndex>> {
+        self.looked.set(self.looked.get() + 1);
+        let hold = self.hold.borrow_mut().take();
+        if let Some(hold) = hold {
+            hold.notified().await;
+        }
         self.index.borrow().clone()
+    }
+    fn indexes_built(&self) -> u64 {
+        self.built.get()
     }
     async fn used(&self) -> HashMap<String, usize> {
         self.used.clone()
@@ -77,8 +101,9 @@ fn library(folder: &std::path::Path, kicks: usize, pads: usize) -> (Rc<SoundInde
             let name = format!("{kind} {n}");
             let path = folder.join(format!("{name}.wav"));
             std::fs::write(&path, [0u8; 10]).unwrap();
-            let numbers: Vec<f32> =
-                (0..40).map(|d| if (d % 2 == 0) == (kind == "Kick") { 5. } else { 0. } + d as f32 * 0.001 * n as f32).collect();
+            let numbers: Vec<f32> = (0..kumi_library::features::VECTOR_LENGTH)
+                .map(|d| if (d % 2 == 0) == (kind == "Kick") { 5. } else { 0. } + d as f32 * 0.001 * n as f32)
+                .collect();
             let path = path.to_string_lossy().to_string();
             entries.push(SoundEntry {
                 file: Entry { path: path.clone(), size: 10, mtime: 1, gone: None },
@@ -241,9 +266,55 @@ case!(a_loose_palette_brings_in_sounds_the_library_learned_since_it_last_changed
     palettes.gather(vec![sounds[7].clone()]).await.unwrap();
     palettes.command("loose 2").await.unwrap();
     assert_eq!(reached_names(&palettes).await, ["Kick 5", "Kick 6"]);
+    // Asked again with nothing built since: what it brought, without asking the library (once, for loose 2).
+    assert_eq!(reached_names(&palettes).await, ["Kick 5", "Kick 6"]);
+    assert_eq!(library.looked.get(), 1);
     // The library learns two more kicks, Kick 8 as near Kick 7 as Kick 6 is: brought in, the palette as it was.
-    *library.index.borrow_mut() = Some(learned);
+    library.learned(learned);
     assert_eq!(reached_names(&palettes).await, ["Kick 6", "Kick 8"]);
+    assert_eq!(library.looked.get(), 2);
+});
+
+case!(changes_that_overlap_reach_the_app_one_after_another_the_last_one_last, async {
+    let dir = tempfile::tempdir().unwrap();
+    let (index, sounds) = library(dir.path(), 8, 6);
+    let library = Rc::new(Library { index: RefCell::new(Some(index)), ..Default::default() });
+    let (palettes, told) = palettes(dir.path(), Some(library.clone()));
+    let palettes = Rc::new(palettes);
+    palettes.gather(vec![sounds[0].clone(), sounds[1].clone()]).await.unwrap();
+    palettes.command("loose 2").await.unwrap();
+    // A gathers Kick 7, and its ask for the index waits; meanwhile B excludes Kick 2, one of Kick 0's nearest.
+    let hold = Rc::new(tokio::sync::Notify::new());
+    *library.hold.borrow_mut() = Some(hold.clone());
+    let a = tokio::task::spawn_local({
+        let (palettes, kick) = (palettes.clone(), sounds[7].clone());
+        async move { palettes.gather(vec![kick]).await.unwrap() }
+    });
+    while library.hold.borrow().is_some() {
+        tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+    }
+    let heard = told.borrow().len();
+    let b = tokio::task::spawn_local({
+        let (palettes, path) = (palettes.clone(), sounds[2].path.clone());
+        async move { palettes.exclude_paths(&[path]).await.unwrap() }
+    });
+    // Time for B to be heard before A, were changes not taken one at a time.
+    for _ in 0..200 {
+        if told.borrow().len() > heard {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+    }
+    hold.notify_one();
+    a.await.unwrap();
+    b.await.unwrap();
+    // The last the app heard is the palette as both left it: Kick 7 in, Kick 2 excluded and not brought in.
+    let last = told.borrow().last().cloned().flatten().unwrap();
+    assert!(last.files.iter().any(|file| file.path == sounds[7].path), "{last:?}");
+    assert_eq!(last.excluded.iter().map(|file| file.path.as_str()).collect::<Vec<_>>(), [sounds[2].path.as_str()]);
+    let reached: Vec<String> = palettes.reached().await.unwrap().iter().map(|sound| sound.path.clone()).collect();
+    assert!(!reached.contains(&sounds[2].path));
+    assert_eq!(last.reached, reached);
 });
 
 case!(kumis_turn_is_told_of_the_palette_strict_or_loose, async {

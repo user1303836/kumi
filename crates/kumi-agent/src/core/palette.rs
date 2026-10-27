@@ -28,6 +28,9 @@ pub trait PaletteLibrary {
     async fn refind(&self, wanted: Vec<(String, i64)>) -> Vec<Option<(String, i64)>>;
     /// The library's sounds as the search compares them: None when they can't be read.
     async fn index(&self) -> Option<Rc<SoundIndex>>;
+    /// How many indexes the library has built, read without building: while it stays the same, `index` would hand
+    /// out the one it did, so what a palette worked out over it holds without asking.
+    fn indexes_built(&self) -> u64;
     /// How many of the producer's projects use each sound, by its path.
     async fn used(&self) -> HashMap<String, usize>;
 }
@@ -53,6 +56,9 @@ impl PaletteLibrary for LibrarySounds {
     }
     async fn index(&self) -> Option<Rc<SoundIndex>> {
         self.0.sound_index_in(self.1).await.ok()
+    }
+    fn indexes_built(&self) -> u64 {
+        self.0.sound_indexes_built()
     }
     async fn used(&self) -> HashMap<String, usize> {
         self.0.samples_in_sets().await
@@ -170,7 +176,9 @@ pub struct Palettes {
     /// palette brings in.
     library: Option<Rc<dyn PaletteLibrary>>,
     /// What the palette brought in last, what it was worked out for, and its sounds' nearest, kept for the next change.
-    reached: RefCell<Option<Reaching>>,
+    /// One look at a time, held while the app is told of a change: a later change starts from what an earlier one kept,
+    /// and the app hears them in order.
+    reached: tokio::sync::Mutex<Option<Reaching>>,
     current: RefCell<Option<String>>,
     /// Told the palette as it is after each change (None: there's none now).
     on_change: Rc<dyn Fn(Option<PaletteView>)>,
@@ -182,7 +190,7 @@ fn failed(error: kumi_store::StoreError) -> RuntimeError {
 
 impl Palettes {
     pub fn new(store: StoreClient, library: Option<Rc<dyn PaletteLibrary>>, on_change: Rc<dyn Fn(Option<PaletteView>)>) -> Palettes {
-        Palettes { store, library, reached: RefCell::new(None), current: RefCell::new(None), on_change }
+        Palettes { store, library, reached: tokio::sync::Mutex::new(None), current: RefCell::new(None), on_change }
     }
 
     /// The session's palette, with its files: None before one is made or chosen.
@@ -372,13 +380,14 @@ impl Palettes {
     /// then the nearest. Worked out again only when the palette or the library's sounds changed, and then only as far as
     /// the change needs.
     pub async fn reached(&self) -> Result<Rc<Vec<Reached>>, RuntimeError> {
+        let mut kept = self.reached.lock().await;
         let Some(view) = self.view().await? else { return Ok(Rc::default()) };
-        self.reached_for(&view).await
+        self.reached_for(&view, &mut kept).await
     }
 
-    async fn reached_for(&self, view: &PaletteView) -> Result<Rc<Vec<Reached>>, RuntimeError> {
+    /// `reached`, for `view`, with what was kept (its lock held).
+    async fn reached_for(&self, view: &PaletteView, kept: &mut Option<Reaching>) -> Result<Rc<Vec<Reached>>, RuntimeError> {
         let Some(library) = self.library.clone().filter(|_| view.reach > 0) else { return Ok(Rc::default()) };
-        let Some(index) = library.index().await else { return Ok(Rc::default()) };
         let key = format!(
             "{} {} {:?} {:?}",
             view.id,
@@ -386,16 +395,22 @@ impl Palettes {
             view.files.iter().map(|file| &file.path).collect::<Vec<_>>(),
             view.excluded.iter().map(|file| &file.path).collect::<Vec<_>>()
         );
-        // The palette as it was, among the library's sounds as they were: the sounds it learns make another index.
-        if let Some(kept) = self.reached.borrow().as_ref().filter(|kept| kept.key == key && kept.nearest.among(&index)) {
+        // The palette as it was, with no index built since: what it brought then, without asking the library.
+        let built = library.indexes_built();
+        if let Some(kept) = kept.as_ref().filter(|kept| kept.key == key && kept.built == built) {
             return Ok(kept.reached.clone());
         }
+        // An index that can't be read keeps what this palette brought last.
+        let Some(index) = library.index().await else {
+            return Ok(kept.as_ref().filter(|kept| kept.key == key).map(|kept| kept.reached.clone()).unwrap_or_default());
+        };
+        // Asking may have built one: the count after it is the one this index goes with.
+        let built = library.indexes_built();
         let used = library.used().await;
-        // Taken while it's brought up to date (a look meanwhile works one out afresh), and kept for the next change.
-        let mut kept = self.reached.take().unwrap_or_default();
-        let reached = Rc::new(kept.nearest.reach(view, &index, &used).await);
-        (kept.key, kept.reached) = (key, reached.clone());
-        *self.reached.borrow_mut() = Some(kept);
+        // Brought up to date in place: a look stopped partway leaves what it did, which the next one carries on from.
+        let reaching = kept.get_or_insert_with(Reaching::default);
+        let reached = Rc::new(reaching.nearest.reach(view, &index, &used).await);
+        (reaching.key, reaching.built, reaching.reached) = (key, built, reached.clone());
         Ok(reached)
     }
 
@@ -518,22 +533,28 @@ impl Palettes {
         Ok(count)
     }
 
-    /// The app hears the palette as it is now, with what it brings in.
+    /// The app hears the palette as it is now, with what it brings in: one change after another (the lock held from
+    /// reading the palette to telling the app), so the last it hears is the palette as the last change left it.
     async fn changed(&self) {
+        let mut kept = self.reached.lock().await;
         let mut view = self.view().await.ok().flatten();
         if let Some(view) = view.as_mut() {
-            view.reached =
-                self.reached_for(view).await.map(|reached| reached.iter().map(|sound| sound.path.clone()).collect()).unwrap_or_default();
+            view.reached = self
+                .reached_for(view, &mut kept)
+                .await
+                .map(|reached| reached.iter().map(|sound| sound.path.clone()).collect())
+                .unwrap_or_default();
         }
         (self.on_change)(view);
     }
 }
 
-/// What a loose palette brought in, what it was worked out for (its files, its excluded sounds, its reach), and its sounds'
-/// nearest then.
+/// What a loose palette brought in, what it was worked out for (its files, its excluded sounds, its reach, and how many
+/// indexes the library had built), and its sounds' nearest then.
 #[derive(Default)]
 struct Reaching {
     key: String,
+    built: u64,
     reached: Rc<Vec<Reached>>,
     nearest: Nearest,
 }
@@ -543,12 +564,14 @@ type Near = (f32, usize);
 
 /// Each of a loose palette's sounds' nearest in the library, kept from one change to the next. A change looks through the
 /// library again only for the sounds new to the palette, and for one left with fewer than the palette brings when it
-/// takes their nearest in; another index (sounds learned since) for every one.
+/// takes their nearest in; an index with other sounds (sounds learned since) for every one.
 #[derive(Default)]
 struct Nearest {
     /// The library's sounds they're among, held weakly: the library makes its next index from this one when nothing else
     /// holds it.
     index: Weak<SoundIndex>,
+    /// What they depend on in that index (`print`): another index with the same keeps them.
+    print: u64,
     /// The sounds the palette had or excluded, by their places.
     own: HashSet<usize>,
     /// By a palette sound's place: the nearest it can bring in (none the palette has or excludes, none gone), nearest
@@ -571,8 +594,14 @@ impl Nearest {
         if reach == 0 {
             return vec![];
         }
+        // Another index: the same sounds again (the library builds one after each pass, and for sounds it hides here) keep
+        // what's kept; other sounds, or other numbers for them, start afresh.
         if !self.among(index) {
-            *self = Nearest { index: Rc::downgrade(index), ..Nearest::default() };
+            let print = print(index);
+            if print != self.print {
+                *self = Nearest { print, ..Nearest::default() };
+            }
+            self.index = Rc::downgrade(index);
         }
         let measured: Vec<(usize, &[f32])> = index.compared().collect();
         let place: HashMap<&str, usize> =
@@ -583,25 +612,23 @@ impl Nearest {
             palette.files.iter().filter(|file| !file.song).filter_map(|file| place.get(file.path.as_str()).map(|at| (file, *at))).collect();
         // As many again to spare: the palette taking in one of a sound's nearest seldom leaves it too few.
         let keep = 2 * reach;
-        // Taken in since (gathered or excluded): no longer brought. Let go (taken out): brought again.
-        let taken: HashSet<usize> = own.difference(&self.own).copied().collect();
+        // Let go since (taken out): brought again.
         let freed: Vec<usize> = self.own.difference(&own).copied().filter(|at| index.entries[measured[*at].0].gone != Some(true)).collect();
         let wanted: HashSet<usize> = sounds.iter().map(|(_, at)| *at).collect();
         self.lists.retain(|at, _| wanted.contains(at));
         let mut again = vec![];
         for (&at, (list, whole)) in self.lists.iter_mut() {
-            list.retain(|(_, other)| !taken.contains(other));
-            // One let go goes among them where it's nearer than the last of them (anywhere, when they're all there is).
-            for &other in &freed {
-                let near = (apart(measured[at].1, measured[other].1), other);
-                if *whole || list.last().is_some_and(|last| before(near, *last)) {
-                    let place = list.partition_point(|seen| before(*seen, near));
-                    list.insert(place, near);
-                }
-            }
+            // None the palette has or excludes now (taken in since), and no more than it brings now.
+            list.retain(|(_, other)| !own.contains(other));
             if list.len() > keep {
                 list.truncate(keep);
                 *whole = false;
+            }
+            // Each one let go, once (a look stopped partway may have put it in already).
+            for &other in &freed {
+                if !list.iter().any(|(_, there)| *there == other) {
+                    offer(list, whole, (apart(measured[at].1, measured[other].1), other), keep);
+                }
             }
             if list.len() < reach && !*whole {
                 again.push(at);
@@ -651,19 +678,39 @@ fn look(index: &SoundIndex, measured: &[(usize, &[f32])], at: usize, own: &HashS
         if own.contains(&other) || index.entries[*row].gone == Some(true) {
             continue;
         }
-        let near = (apart(here, there), other);
-        if nearest.len() < keep || before(near, nearest[nearest.len() - 1]) {
-            let place = nearest.partition_point(|seen| before(*seen, near));
-            nearest.insert(place, near);
-            if nearest.len() > keep {
-                nearest.truncate(keep);
-                whole = false;
-            }
-        } else {
-            whole = false;
-        }
+        offer(&mut nearest, &mut whole, (apart(here, there), other), keep);
     }
     (nearest, whole)
+}
+
+/// One more sound offered to a sound's nearest, which hold the nearest of what it can bring in (`whole`: every one):
+/// it goes where it belongs, unless it's past the last of nearest that aren't whole; over `keep`, the last goes. A look
+/// and a change's update both go through here, so what an update keeps is what a look would find.
+fn offer(nearest: &mut Vec<Near>, whole: &mut bool, near: Near, keep: usize) {
+    if !*whole && !nearest.last().is_some_and(|last| before(near, *last)) {
+        return;
+    }
+    let place = nearest.partition_point(|seen| before(*seen, near));
+    nearest.insert(place, near);
+    if nearest.len() > keep {
+        nearest.pop();
+        *whole = false;
+    }
+}
+
+/// What a sound's nearest depend on in `index`: each measured sound's path, whether it's gone, and its numbers, in their
+/// order. Two indexes with the same give every sound the same nearest.
+fn print(index: &SoundIndex) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    for (row, numbers) in index.compared() {
+        index.entries[row].path.hash(&mut hasher);
+        (index.entries[row].gone == Some(true)).hash(&mut hasher);
+        for number in numbers {
+            hasher.write_u32(number.to_bits());
+        }
+    }
+    hasher.finish()
 }
 
 /// How far apart two sounds are (squared), in the numbers the search compares.
@@ -746,8 +793,9 @@ mod tests {
     fn library(kicks: usize, pads: usize) -> Rc<SoundIndex> {
         let entries = [("Kick", kicks), ("Pad", pads)].into_iter().flat_map(|(kind, count)| {
             (0..count).map(move |n| {
-                let numbers: Vec<f32> =
-                    (0..40).map(|d| if (d % 2 == 0) == (kind == "Kick") { 5. } else { 0. } + d as f32 * 0.001 * n as f32).collect();
+                let numbers: Vec<f32> = (0..kumi_library::features::VECTOR_LENGTH)
+                    .map(|d| if (d % 2 == 0) == (kind == "Kick") { 5. } else { 0. } + d as f32 * 0.001 * n as f32)
+                    .collect();
                 let file = Entry { path: format!("/Samples/{kind} {n}.wav"), size: 10, mtime: 1, gone: None };
                 SoundEntry { file, vector: Some(pack_vector(&numbers)), ..Default::default() }
             })
@@ -808,6 +856,13 @@ mod tests {
         // Reaching further, within what each keeps to spare, and nearer.
         step(&mut nearest, &index, palette(3, &more, &["Kick 2"]), &[]).await;
         step(&mut nearest, &index, palette(1, &more, &["Kick 2"]), &[]).await;
+        // The same sounds in another index, as the library builds after each pass (the one before let go first, as the
+        // library lets it go): every one's nearest kept.
+        drop(index);
+        let index = library(12, 6);
+        assert!(!nearest.among(&index));
+        step(&mut nearest, &index, palette(2, &more, &["Kick 2"]), &[]).await;
+        assert!(nearest.among(&index));
         // Sounds learned since (another index): every one looked for again.
         let learned = library(14, 6);
         let reached = nearest.reach(&palette(2, &more, &["Kick 2"]), &learned, &HashMap::new()).await;
