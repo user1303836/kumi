@@ -155,7 +155,7 @@ impl Going<'_> {
 
 /// A point that isn't a landmark: at its nearest landmarks' places, each counting for one over its distance.
 fn among(point: &[f32], landmarks: &[f32], k: usize, places: &[[f64; 2]]) -> [f64; 2] {
-    let nearest = nearest_to(point, landmarks, k, PLACED_BY, None);
+    let nearest = nearest(point, landmarks.chunks(k).enumerate(), PLACED_BY);
     if let Some((_, at)) = nearest.first().filter(|(distance, _)| *distance <= 0.) {
         return places[*at as usize];
     }
@@ -396,9 +396,8 @@ fn spread(reduced: &[f32], k: usize, most: usize) -> Vec<usize> {
 }
 
 /// A squared distance, added up in eight lanes (so it's quick) in a fixed order (so it's the same everywhere): what
-/// `distance_within` gives when it isn't cut short.
-#[cfg(test)]
-fn distance(a: &[f32], b: &[f32]) -> f32 {
+/// `distance_within` gives when it isn't cut short, and what `nearest` orders points by.
+pub fn distance(a: &[f32], b: &[f32]) -> f32 {
     let mut lanes = [0f32; 8];
     let (a8, b8) = (a.chunks_exact(8), b.chunks_exact(8));
     let (a_rest, b_rest) = (a8.remainder(), b8.remainder());
@@ -442,14 +441,15 @@ fn distance_within(a: &[f32], b: &[f32], limit: f32) -> Option<f32> {
     Some(sum)
 }
 
-/// The `most` points of `points` (rows of `k`) nearest `point`: squared distances and indexes, nearest first, ties by
-/// index; `skip` leaves one out (the point itself).
-fn nearest_to(point: &[f32], points: &[f32], k: usize, most: usize, skip: Option<usize>) -> Vec<(f32, u32)> {
+/// The `most` of `points` (each its index and numbers, those to leave out already left out) nearest `point`: squared
+/// distances and indexes, nearest first, ties by index. A point is passed over as soon as it's sure to be farther than
+/// the last of the `most` so far (`distance_within`).
+pub fn nearest<'a>(point: &[f32], points: impl IntoIterator<Item = (usize, &'a [f32])>, most: usize) -> Vec<(f32, u32)> {
     let mut best: Vec<(f32, u32)> = Vec::with_capacity(most + 1);
-    for (at, row) in points.chunks(k).enumerate() {
-        if skip == Some(at) {
-            continue;
-        }
+    if most == 0 {
+        return best;
+    }
+    for (at, row) in points {
         let farthest = if best.len() == most { best[most - 1].0 } else { f32::INFINITY };
         let Some(apart) = distance_within(point, row, farthest) else { continue };
         let candidate = (apart, at as u32);
@@ -463,7 +463,9 @@ fn nearest_to(point: &[f32], points: &[f32], k: usize, most: usize, skip: Option
     best
 }
 
-fn closer(a: (f32, u32), b: (f32, u32)) -> bool {
+/// Whether one of a point's nearest comes before another (each a squared distance and an index): nearer, or as near and
+/// earlier.
+pub fn closer(a: (f32, u32), b: (f32, u32)) -> bool {
     a.0 < b.0 || (a.0 == b.0 && a.1 < b.1)
 }
 
@@ -489,7 +491,7 @@ fn pulls(points: &[f32], k: usize, perplexity: f64, threads: usize, going: &Goin
             if !going.on() {
                 return;
             }
-            let nearest = nearest_to(&points[at * k..(at + 1) * k], points, k, near, Some(at));
+            let nearest = nearest(&points[at * k..(at + 1) * k], points.chunks(k).enumerate().filter(|(other, _)| *other != at), near);
             let distances: Vec<f64> = nearest.iter().map(|(distance, _)| *distance as f64).collect();
             for (slot, ((_, other), weight)) in row.iter_mut().zip(nearest.iter().zip(calibrated(&distances, perplexity))) {
                 *slot = (*other, weight as f32);
@@ -922,6 +924,63 @@ mod tests {
                 assert_eq!(distance_within(a, b, whole), Some(whole), "a tie isn't cut short");
             }
         }
+    }
+
+    #[test]
+    fn the_nearest_are_every_points_nearest_first_ties_by_index_whatever_is_left_out() {
+        // 300 points of 13 numbers, every third a copy of the one before it (ties), against each one's own order.
+        let mut seed = 11u32;
+        let mut next = || {
+            seed = seed.wrapping_mul(1_103_515_245).wrapping_add(12_345);
+            (seed >> 8) as f32 / (1 << 24) as f32 - 0.5
+        };
+        let mut points: Vec<Vec<f32>> = vec![];
+        for at in 0..300 {
+            let point = if at % 3 == 2 { points[at - 1].clone() } else { (0..13).map(|_| next()).collect() };
+            points.push(point);
+        }
+        for (at, point) in points.iter().enumerate().step_by(7) {
+            let kept = |other: usize| other != at && other % 5 != 0;
+            let mut every: Vec<(f32, u32)> =
+                (0..points.len()).filter(|other| kept(*other)).map(|other| (distance(point, &points[other]), other as u32)).collect();
+            every.sort_by(|a, b| if closer(*a, *b) { std::cmp::Ordering::Less } else { std::cmp::Ordering::Greater });
+            for most in [0, 1, 6, 50, 1_000] {
+                let found = nearest(point, points.iter().map(Vec::as_slice).enumerate().filter(|(other, _)| kept(*other)), most);
+                assert_eq!(found, every[..most.min(every.len())], "point {at}, {most} nearest");
+            }
+        }
+    }
+
+    #[test]
+    fn the_main_directions_of_a_sample_past_a_chunk_add_up_every_chunk() {
+        // 10,000 points of 40 numbers (three chunks), a little noise in each: each chunk's points vary along a number of
+        // their own, the last chunk's the most, and each chunk sits a little further along another. Every chunk's sums
+        // count (only the first's would make number 3 the widest), the same however many threads add them up.
+        let dims = 40;
+        let point = |at: usize, buffer: &mut [f32]| {
+            for (d, value) in buffer.iter_mut().enumerate() {
+                *value = 0.01 * unit_noise((at * dims + d) as u64 + 1) as f32;
+            }
+            let chunk = at / SPREAD_CHUNK;
+            buffer[3 + 4 * chunk] += unit_noise(at as u64) as f32 * [1., 2., 6.][chunk];
+            buffer[30] += 0.1 * chunk as f32;
+        };
+        let sample: Vec<usize> = (0..10_000).collect();
+        let axes = Axes::of(&sample, dims, &point, 1);
+        let mut buffer = vec![0f32; dims];
+        let mut mean = vec![0f64; dims];
+        for at in &sample {
+            point(*at, &mut buffer);
+            mean.iter_mut().zip(&buffer).for_each(|(mean, value)| *mean += *value as f64 / sample.len() as f64);
+        }
+        for (found, wanted) in axes.mean.iter().zip(&mean) {
+            assert!((found - wanted).abs() < 1e-9, "mean {found} against {wanted}");
+        }
+        // The widest direction is the last chunk's number, then the middle one's.
+        assert!((axes.axes[3 + 8].abs() - 1.).abs() < 1e-3, "{:?}", &axes.axes[..dims]);
+        assert!((axes.axes[dims + 3 + 4].abs() - 1.).abs() < 1e-3, "{:?}", &axes.axes[dims..2 * dims]);
+        let shared = Axes::of(&sample, dims, &point, 3);
+        assert_eq!((shared.mean, shared.axes), (axes.mean, axes.axes), "the same with three threads");
     }
 
     #[test]

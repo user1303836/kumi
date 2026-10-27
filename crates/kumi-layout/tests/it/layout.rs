@@ -128,6 +128,26 @@ fn past_the_landmarks_every_other_point_sits_among_its_nearest() {
     assert_eq!(layout(count, 40, &point, &Layout { threads: 1, ..how.clone() }), places, "the same with one thread");
 }
 
+#[test]
+fn sixteen_thousand_points_past_their_landmarks_sit_among_them_within_their_share_of_the_maps_budget() {
+    // The same at a library's size: 16,000 points past 1,000 landmarks, in a couple of seconds. The map's budget on the
+    // producer's computer is a quarter of an hour for 300,000 songs (3 ms a point): this size keeps to its share of it.
+    let (groups, count) = (8, 16_000);
+    let point = |at: usize, buffer: &mut [f32]| grouped(at / 2, 40, groups, 0.25, buffer);
+    let how = Layout { landmarks: 1_000, rounds: 300, ..how(2) };
+    let started = std::time::Instant::now();
+    let places = layout(count, 40, &point, &how);
+    let took = started.elapsed();
+    eprintln!("{count} points past {} landmarks: {took:?}", how.landmarks);
+    assert!(took < std::time::Duration::from_millis(3 * count as u64), "{count} points in {took:?}");
+    assert!(places.iter().all(|place| place.iter().all(|value| (0. ..=1.).contains(value))));
+    for twin in 0..count / 2 {
+        assert_eq!(places[2 * twin], places[2 * twin + 1], "twins {} and {}", 2 * twin, 2 * twin + 1);
+    }
+    let firsts: Vec<[f32; 2]> = places.iter().step_by(2).copied().collect();
+    assert!(kept_together(&firsts, groups) >= firsts.len() * 97 / 100);
+}
+
 /// How far apart the groups' middles sit on the map, against how far each group's points sit from its middle.
 fn parted(places: &[[f32; 2]], groups: usize) -> f64 {
     let middles: Vec<[f64; 2]> = (0..groups)
