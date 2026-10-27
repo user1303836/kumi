@@ -54,6 +54,31 @@ fn yes() -> kumi_daw::provider::BridgeCommand {
     kumi_daw::provider::BridgeCommand { yes: true, ..Default::default() }
 }
 
+/// `kumi update` where Kumi is up to date already: what its bridges' step says.
+async fn update_said(env: &Env) -> String {
+    let out = Rc::new(Out::default());
+    let mut io = kumi::install::InstalledIo::new(out.clone(), env.clone());
+    io.version = Some(kumi_types::version::KUMI_VERSION.into());
+    assert_eq!(kumi::install::update_installed(io).await.unwrap(), 0, "{}", out.0.borrow());
+    let said = out.0.borrow().clone();
+    said
+}
+
+/// A Renoise producer's update never speaks of Live, whatever system it's on: before Kumi is in any DAW it says how to
+/// set Kumi up in theirs, and once Kumi's tool is in Renoise, nothing about setting up.
+#[tokio::test(flavor = "current_thread")]
+async fn a_renoise_producers_update_never_speaks_of_live() {
+    let (_dir, env) = renoise_home();
+    let said = update_said(&env).await;
+    assert!(said.contains(&kumi::install::no_daw_yet(&env).expect("Kumi is in no DAW")), "{said}");
+    assert!(!said.contains("Live"), "{said}");
+    let out = Rc::new(Out::default());
+    assert_eq!(kumi_daw_renoise::PROVIDER.setup_bridge(daw_io(out.clone(), &env), yes()).await.unwrap(), 0, "{}", out.0.borrow());
+    assert_eq!(kumi::install::no_daw_yet(&env), None, "Kumi's tool is in Renoise");
+    let said = update_said(&env).await;
+    assert!(!said.contains("Live") && !said.contains("isn't in a DAW yet"), "{said}");
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn renoises_tool_goes_in_is_found_and_chosen_and_comes_out() {
     let (dir, env) = renoise_home();
@@ -537,7 +562,7 @@ async fn an_update_keeps_the_bridges_in_place_and_a_rollback_takes_each_to_the_c
     daw_bridge::lifecycle::Lifecycle::new(std::path::Path::new(&home), target).install(&extension, "0.1.0").unwrap();
     let installed = [receipt_of(&env, Daw::Reaper), receipt_of(&env, Daw::Renoise)];
 
-    // `kumi update` to a Kumi bringing the same bridges, twice: nothing changes, nothing is said.
+    // `kumi update` to a Kumi bringing the same bridges, twice: nothing changes, and each says so, as Live's does.
     out.0.borrow_mut().clear();
     for _ in 0..2 {
         for provider in [&kumi_daw_reaper::PROVIDER as &dyn DawProvider, &kumi_daw_renoise::PROVIDER] {
@@ -545,7 +570,7 @@ async fn an_update_keeps_the_bridges_in_place_and_a_rollback_takes_each_to_the_c
         }
     }
     assert_eq!([receipt_of(&env, Daw::Reaper), receipt_of(&env, Daw::Renoise)], installed);
-    assert_eq!(out.0.borrow().as_str(), "");
+    assert_eq!(out.0.borrow().as_str(), "Kumi's extension in REAPER is up to date.\nKumi's tool in Renoise is up to date.\n".repeat(2));
 
     // Rolled back to a Kumi carrying 0.0.9 and 0.9.0, then forward again.
     for (app, kumi_version, reaper, renoise) in [(&earlier, "1.19.2", "0.0.9", "0.9.0"), (&now, "1.19.3", "0.1.0", tool.as_str())] {

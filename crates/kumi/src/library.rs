@@ -185,7 +185,7 @@ pub async fn run_library(io: LibraryIo) -> Result<i32, RuntimeError> {
             lines.push(format!("  {}{}{}", source.label, " ".repeat(width - source.label.encode_utf16().count()), tilde(&source.path)));
         }
         if sources.is_empty() {
-            lines.push("  Nowhere yet: Live's User Library wasn't found.".into());
+            lines.push("  Nowhere yet: Kumi found no DAW's library on this computer.".into());
         }
         let taste = library.taste().await?;
         if !taste.is_empty() {

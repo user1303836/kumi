@@ -651,17 +651,20 @@ pub async fn setup_bridge(io: BridgeSetupIo) -> Result<i32, RuntimeError> {
         let connected = format!("Live is connected through this Kumi's bridge again. Run: {}", *KUMI_START);
         return Ok(wait_for_live(&io, config.clone(), &activate, &connected).await);
     }
-    say(&if config.is_some() {
-        format!(
+    // An update's or a rollback's last step (Kumi's updater, or an older Kumi's through the migration
+    // shim): Kumi itself has changed, so a bridge left for later isn't the command failing. The update has said which
+    // bridge Live has and which this Kumi brings.
+    let after_update = io.env.get("KUMI_BRIDGE_AFTER").is_some_and(|value| value == "1");
+    say(&match &config {
+        Some(_) if after_update => "Updating it takes a minute.".into(),
+        Some(_) => format!(
             "Kumi's bridge is {bundled}; the one Live uses is {}. Updating it takes a minute.",
             installed.as_ref().and_then(|s| s.version.as_deref()).unwrap_or("older")
-        )
-    } else {
-        format!("Kumi will install the Ableton bridge {bundled}: the Remote Script Live loads, and the local server Kumi talks to.")
+        ),
+        None => {
+            format!("Kumi will install the Ableton bridge {bundled}: the Remote Script Live loads, and the local server Kumi talks to.")
+        }
     });
-    // An update's or a rollback's last step (Kumi's updater, or an older Kumi's through the migration
-    // shim): Kumi itself has changed, so a bridge left for later isn't the command failing.
-    let after_update = io.env.get("KUMI_BRIDGE_AFTER").is_some_and(|value| value == "1");
     let later = |why: &str| {
         say(&format!("The bridge wasn't updated yet{why}. {}.", *CONNECT_LIVE));
         Ok(0)
@@ -822,12 +825,17 @@ pub async fn setup_bridge(io: BridgeSetupIo) -> Result<i32, RuntimeError> {
     say(&format!("Done: the Ableton bridge {bundled} is installed ({}).", tilde(&scripts)));
     place_extension(&io, std::slice::from_ref(&root), false);
     place_ears(io.out.as_ref(), &scripts).await;
-    say("");
-    say(if config.is_some() {
-        "Now open Live. Kumi connects on its own."
+    if after_update && config.is_some() {
+        // An update brought it up to date: the producer may be about to work in another DAW, so nothing says to open Live.
+        say("Live loads it the next time it opens.");
     } else {
-        "Now open Live, and in Settings → Link, Tempo & MIDI choose AbletonMcpBridge as a Control Surface. Kumi connects on its own."
-    });
+        say("");
+        say(if config.is_some() {
+            "Now open Live. Kumi connects on its own."
+        } else {
+            "Now open Live, and in Settings → Link, Tempo & MIDI choose AbletonMcpBridge as a Control Surface. Kumi connects on its own."
+        });
+    }
     let config_path = find_bridge_config(&io.env).unwrap_or_else(|| join(&state, "bridge-config.json"));
     let activate = || lifecycle("activate", vec![]);
     Ok(wait_for_live(&io, config_path, &activate, &format!("Live is connected through the new bridge. Run: {}", *KUMI_START)).await)

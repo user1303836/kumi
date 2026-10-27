@@ -365,8 +365,8 @@ async fn checked_executable_update_swap_and_rollback() {
     );
     assert!(!home.join("app.new").exists());
     assert!(!home.join("downloads/kumi.tar.gz").exists());
-    // No bridge in Live yet: the one way to connect it, said as everywhere Live runs.
-    says_no_bridge_yet(&out.0.borrow());
+    // Kumi in no DAW yet: how to set it up in the producer's, whichever it is.
+    says_no_daw_yet(&out.0.borrow(), &env);
     // What this Kumi kept in its database is written back for the older Kumi to read.
     let (database, _) = StoreClient::open(home.join("kumi.db"), json_files(&env).unwrap(), 1).await.unwrap();
     SqliteMemoryStore::new(database).remember(MemoryScope::Producer, None, "Mixes on headphones", None, 2).await.unwrap();
@@ -426,8 +426,8 @@ async fn an_update_in_place_is_an_update_even_when_its_download_cant_be_removed(
     fs::set_permissions(&downloads, fs::Permissions::from_mode(0o755)).unwrap();
     assert_eq!(code.unwrap(), 0, "{}", out.0.borrow());
     assert!(out.0.borrow().contains(&format!("Kumi {KUMI_VERSION} → 99.0.0.")), "{}", out.0.borrow());
-    // The update goes on to its bridge step, which has something to say where Live runs.
-    says_no_bridge_yet(&out.0.borrow());
+    // The update goes on to its bridge step, which says how to set Kumi up in a DAW.
+    says_no_daw_yet(&out.0.borrow(), &env);
 }
 #[tokio::test]
 async fn failed_unpack_or_probe_preserves_current_app() {
@@ -1383,20 +1383,13 @@ fn an_updates_bridge_step_is_lives_whatever_kumi_daw_says() {
     let removed = command.as_std().get_envs().find(|(name, _)| *name == "KUMI_DAW").map(|(_, value)| value);
     assert_eq!(removed, Some(None), "KUMI_DAW taken out of the child's environment");
 }
-/// After an update, with no bridge in Live: how to connect it where Live runs, and on Linux nothing about Live at all.
-fn says_no_bridge_yet(said: &str) {
-    match kumi_daw_ableton::app::install::no_bridge_yet(system::platform()) {
-        Some(words) => assert!(said.contains(&words), "{said}"),
-        None => assert!(!said.contains("Live"), "nothing about Live where it doesn't run: {said}"),
-    }
-}
-#[test]
-fn with_no_bridge_in_live_an_update_says_how_to_connect_it_only_where_live_runs() {
-    let words = format!("The bridge isn't in Live yet. {}.", *kumi_types::command::CONNECT_LIVE);
-    for platform in ["darwin", "win32"] {
-        assert_eq!(kumi_daw_ableton::app::install::no_bridge_yet(platform).as_deref(), Some(words.as_str()), "{platform}");
-    }
-    assert_eq!(kumi_daw_ableton::app::install::no_bridge_yet("linux"), None, "no Live for Linux");
+/// After an update, with Kumi in no DAW: how to set it up in the producer's, on every system, and nothing about Live
+/// (they may work in another DAW).
+fn says_no_daw_yet(said: &str, env: &Env) {
+    let words = kumi::install::no_daw_yet(env).expect("Kumi is in no DAW");
+    assert!(words.starts_with("Kumi isn't in a DAW yet: run ") && words.ends_with(", and it sets itself up for the one you work in."));
+    assert!(said.contains(&words), "{said}");
+    assert!(!said.contains("Live"), "nothing about Live: {said}");
 }
 
 /// Everything a producer keeps in Kumi's folder, which no uninstall without --all may touch.
