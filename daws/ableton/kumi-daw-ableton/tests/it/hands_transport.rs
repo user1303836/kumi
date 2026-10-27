@@ -126,9 +126,10 @@ async fn helpers_are_reused_and_each_operation_has_source_fields_and_results() {
 }
 #[cfg(unix)]
 #[tokio::test(flavor = "current_thread")]
-async fn requests_correlate_out_of_order_and_errors_timeout_and_cancellation_do_not_break_the_helper() {
+async fn requests_correlate_out_of_order_and_errors_and_cancellation_do_not_break_the_helper() {
     let folder = tempfile::tempdir().unwrap();
-    let hands = persistent(helper(folder.path()), vec![], Some(1000));
+    // Time for every answer on a busy runner: nothing here waits the limit out (the next test does).
+    let hands = persistent(helper(folder.path()), vec![], Some(30_000));
     let path = ["defer".into()];
     let combos = ["cmd+g".into()];
     let (first, second) = tokio::join!(hands.menu(&path, MenuOptions::default()), hands.keys(&combos, KeysOptions::default()));
@@ -141,12 +142,21 @@ async fn requests_correlate_out_of_order_and_errors_timeout_and_cancellation_do_
     assert_eq!(error.kind, HandsErrorKind::NoLive);
     assert_eq!(error.message, "Live isn't running.");
     assert_eq!(hands.answer("disabled", None).await.unwrap().error.as_deref(), Some("disabled"));
-    let error = hands.keys(&["hang".into()], KeysOptions::default()).await.unwrap_err();
-    assert_eq!(error.message, "Live didn't answer in time; is a dialog open in Live?");
+    // A request given up on (stopped here; at the limit it's let go the same way) leaves the helper answering.
     let error =
         hands.keys(&["hang".into()], KeysOptions { signal: Some(kumi_common::abort::timeout(10)), gap_ms: None }).await.unwrap_err();
     assert_eq!(error.message, "Stopped");
     assert_eq!(hands.menus(None).await.unwrap().len(), 1);
+    hands.close();
+}
+#[cfg(unix)]
+#[tokio::test(flavor = "current_thread")]
+async fn a_request_never_answered_ends_at_the_limit_and_says_what_to_check() {
+    let folder = tempfile::tempdir().unwrap();
+    // A short limit: the helper never answers this, so nothing else here needs time.
+    let hands = persistent(helper(folder.path()), vec![], Some(200));
+    let error = hands.keys(&["hang".into()], KeysOptions::default()).await.unwrap_err();
+    assert_eq!(error.message, "Live didn't answer in time; is a dialog open in Live?");
     hands.close();
 }
 #[cfg(unix)]
