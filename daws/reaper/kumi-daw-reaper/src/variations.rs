@@ -435,7 +435,8 @@ impl<S: RefScheme + 'static> VariationsBackend for ReaperVariations<S> {
     }
 
     fn anchors_kept(&self, source: &ItemTake, take: &ItemTake) -> Result<(), String> {
-        if !source.midi && take.offset - source.offset > ATTACK + 1e-6 {
+        // (within half the 10 000th of a second a take is held to: its start as REAPER holds it)
+        if !source.midi && take.offset - source.offset > ATTACK + 5e-5 {
             return Err(format!("its start moved {:.0} ms into the sound: past its attack", (take.offset - source.offset) * 1000.));
         }
         anchors_in(&source.anchors, &take.notes)

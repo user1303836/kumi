@@ -1154,10 +1154,11 @@ async fn variations_of_a_chop_are_slots_of_their_own_and_an_edited_take_is_never
         .await;
 }
 
-/// (M7) Each pattern take is rendered before it's shown: one that clips where the source doesn't is drawn again and rewritten
-/// (a change of its own each time, at most twice), and its line says what was heard. While Renoise plays, nothing is rendered.
+/// (M7, #407) Each pattern take is rendered before it's shown: one that clips where the source doesn't is turned down to the
+/// source's peak by its volume column (a change of its own each time, at most twice), the source as it was, and its line says
+/// what was heard. While Renoise plays, nothing is rendered.
 #[tokio::test(flavor = "current_thread")]
-async fn a_take_that_clips_where_the_source_doesnt_is_drawn_again_and_nothing_renders_while_renoise_plays() {
+async fn a_take_that_clips_where_the_source_doesnt_is_turned_down_and_nothing_renders_while_renoise_plays() {
     tokio::task::LocalSet::new()
         .run_until(async {
             let home = tempfile::tempdir().unwrap();
@@ -1179,13 +1180,23 @@ async fn a_take_that_clips_where_the_source_doesnt_is_drawn_again_and_nothing_re
             let made = run_tool(&variations, json!({"action": "make", "source": source, "seed": 5, "takes": rolls})).await;
             assert!(made["takes"][0]["line"].as_str().unwrap().contains(" · heard: peak −"), "{made}");
             assert_eq!(told.borrow().len(), 1);
-            // (the song's end plays louder: the takes clip there, the source doesn't)
+            // (the song's end plays louder: the takes clip there, the source doesn't; the simulator's level there doesn't follow a
+            // take's volume column, so it clips again after each turn-down)
+            let lines = script.lines(2, 1);
             script.listening().set_level_from("1:track:1", 32., 1.0);
             let made = run_tool(&variations, json!({"action": "make", "source": source, "seed": 6, "takes": rolls})).await;
             let line = made["takes"][0]["line"].as_str().unwrap();
-            assert!(line.contains("(drawn again after the render: it clips (peak −0.0 dBFS))"), "{made}");
-            assert!(line.ends_with(" · heard: it clips (peak −0.0 dBFS)"), "still clipping after two draws, it says so: {made}");
-            assert_eq!(told.borrow().len(), 4, "the take, and two rewrites: {made}");
+            assert!(line.contains(" · turned down 10.5 dB to the source's peak (c3): its render clipped (peak −0.0 dBFS)"), "{made}");
+            assert!(line.contains(" · turned down 10.5 dB to the source's peak (c4):"), "{made}");
+            assert!(!line.contains("drawn again"), "{made}");
+            assert!(line.ends_with(" · heard: it clips (peak −0.0 dBFS)"), "still clipping after two turn-downs, it says so: {made}");
+            assert_eq!(told.borrow().len(), 4, "the take, and two turn-downs: {made}");
+            // (each note's level twice 10.5 dB down: full (80) to 26 to 0B, D-4's 30 to 0E to 04; the source as it was)
+            let take = script.variation_slots()[1].1;
+            let volumes: Vec<Value> =
+                script.lines(take, 1).as_array().unwrap().iter().map(|row| row["notes"][0]["volume"].clone()).collect();
+            assert_eq!(volumes, [json!("0B"), json!("04"), json!("0B"), json!("0B")], "{}", script.lines(take, 1));
+            assert_eq!(script.lines(2, 1), lines, "the source is as it was");
             // (Renoise plays: a render would stop it)
             script.set_transport_playing(true);
             let renders = script.listening().renders().len();

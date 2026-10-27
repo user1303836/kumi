@@ -876,7 +876,7 @@ Kumi wrote it, one named goes all the same. list: the set's takes.",
         words.at,
         hears = words.hears.map_or_else(
             || format!(
-                "renders and hears the takes before they're shown (never while {app} plays; listen: false skips it), turning one that clips where the source doesn't down to the source's peak"
+                "renders and hears the takes before they're shown (never while {app} plays; listen: false skips it), turning one that peaks at full scale where the source doesn't down to the source's peak"
             ),
             str::to_owned
         ),
