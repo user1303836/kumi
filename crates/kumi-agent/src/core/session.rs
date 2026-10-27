@@ -769,10 +769,10 @@ pub fn create_session(options: SessionOptions) -> Result<Session, RuntimeError> 
             let emit = emit.clone();
             Rc::new(crate::core::palette::Palettes::new(
                 store,
-                options
-                    .library
-                    .clone()
-                    .map(|library| Rc::new(crate::core::palette::LibrarySounds(library)) as Rc<dyn crate::core::palette::PaletteLibrary>),
+                options.library.clone().map(|library| {
+                    Rc::new(crate::core::palette::LibrarySounds(library, options.profile.id))
+                        as Rc<dyn crate::core::palette::PaletteLibrary>
+                }),
                 Rc::new(move |palette| emit(SessionEvent::Palette { palette })),
             ))
         });

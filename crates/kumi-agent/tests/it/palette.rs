@@ -40,7 +40,7 @@ fn sound(folder: &std::path::Path, name: &str, bytes: usize) -> Gathered {
 struct Library {
     asked: RefCell<Vec<(String, i64)>>,
     moved: Option<(String, i64)>,
-    index: Option<Rc<SoundIndex>>,
+    index: RefCell<Option<Rc<SoundIndex>>>,
     used: HashMap<String, usize>,
 }
 
@@ -51,7 +51,7 @@ impl PaletteLibrary for Library {
         wanted.iter().map(|(name, size)| self.moved.clone().filter(|(to, _)| to.ends_with(name.as_str()) && *size == 10)).collect()
     }
     async fn index(&self) -> Option<Rc<SoundIndex>> {
-        self.index.clone()
+        self.index.borrow().clone()
     }
     async fn used(&self) -> HashMap<String, usize> {
         self.used.clone()
@@ -201,7 +201,7 @@ case!(a_loose_palette_brings_each_sounds_nearest_taste_first_and_none_it_has_or_
     let (index, sounds) = library(dir.path(), 8, 6);
     // Kick 4 is the farthest of the three nearest Kick 0 and Kick 1 have, and two of the producer's projects use it.
     let used = HashMap::from([(sounds[4].path.clone(), 2)]);
-    let library = Rc::new(Library { index: Some(index), used, ..Default::default() });
+    let library = Rc::new(Library { index: RefCell::new(Some(index)), used, ..Default::default() });
     let (palettes, told) = palettes(dir.path(), Some(library));
     palettes.gather(vec![sounds[0].clone(), sounds[1].clone()]).await.unwrap();
     assert!(palettes.reached().await.unwrap().is_empty(), "strict: nothing brought in");
@@ -225,6 +225,27 @@ case!(a_loose_palette_brings_each_sounds_nearest_taste_first_and_none_it_has_or_
     assert_eq!(palettes.view().await.unwrap().unwrap().excluded.len(), 1);
 });
 
+/// What the palette brings in, by name, in name order.
+async fn reached_names(palettes: &Palettes) -> Vec<String> {
+    let mut names: Vec<String> = palettes.reached().await.unwrap().iter().map(|sound| sound.name.clone()).collect();
+    names.sort();
+    names
+}
+
+case!(a_loose_palette_brings_in_sounds_the_library_learned_since_it_last_changed, async {
+    let dir = tempfile::tempdir().unwrap();
+    let (index, sounds) = library(dir.path(), 8, 6);
+    let (learned, _) = library(dir.path(), 10, 6);
+    let library = Rc::new(Library { index: RefCell::new(Some(index)), ..Default::default() });
+    let (palettes, _) = palettes(dir.path(), Some(library.clone()));
+    palettes.gather(vec![sounds[7].clone()]).await.unwrap();
+    palettes.command("loose 2").await.unwrap();
+    assert_eq!(reached_names(&palettes).await, ["Kick 5", "Kick 6"]);
+    // The library learns two more kicks, Kick 8 as near Kick 7 as Kick 6 is: brought in, the palette as it was.
+    *library.index.borrow_mut() = Some(learned);
+    assert_eq!(reached_names(&palettes).await, ["Kick 6", "Kick 8"]);
+});
+
 case!(kumis_turn_is_told_of_the_palette_strict_or_loose, async {
     let dir = tempfile::tempdir().unwrap();
     let (palettes, _) = palettes(dir.path(), None);
@@ -243,7 +264,7 @@ case!(kumis_turn_is_told_of_the_palette_strict_or_loose, async {
 case!(the_palette_tool_lists_searches_brings_in_adds_takes_out_and_excludes, async {
     let dir = tempfile::tempdir().unwrap();
     let (index, sounds) = library(dir.path(), 6, 4);
-    let library = Rc::new(Library { index: Some(index), ..Default::default() });
+    let library = Rc::new(Library { index: RefCell::new(Some(index)), ..Default::default() });
     let (palettes, _) = palettes(dir.path(), Some(library));
     let palettes = Rc::new(palettes);
     let tool = PaletteTool::new(palettes.clone());
