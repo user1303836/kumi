@@ -28,11 +28,13 @@ env:
 
 jobs:
   tests:
-    # Shards, so that no runner takes more than about ten minutes.
+    # Shards, so that no runner takes much more than a quarter of an hour (each builds for 5 to 7 minutes, then runs its
+    # share). The limit leaves room for a build that starts cold: the first run after a release, whose version bump changes
+    # every crate, built for 14 minutes before its tests began.
     name: Extended / ${{ matrix.label }} (${{ matrix.part }}/${{ matrix.parts }})
     if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-tests')
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -42,7 +44,7 @@ jobs:
           - { os: ubuntu-24.04, label: Linux, part: 3, parts: 3, cache: kumi-rust-linux }
           - { os: macos-15, label: macOS, part: 1, parts: 2, cache: rust-platforms }
           - { os: macos-15, label: macOS, part: 2, parts: 2, cache: rust-platforms }
-          # (Windows runs the slowest: three shards took 12, 18 and 20 minutes, the last at its limit)
+          # (Windows runs the slowest, its install lifecycles most: four shards took 11 to 14 minutes in October 2026)
           - { os: windows-2025, label: Windows, part: 1, parts: 4, cache: app-rust-windows, linker: rust-lld }
           - { os: windows-2025, label: Windows, part: 2, parts: 4, cache: app-rust-windows, linker: rust-lld }
           - { os: windows-2025, label: Windows, part: 3, parts: 4, cache: app-rust-windows, linker: rust-lld }

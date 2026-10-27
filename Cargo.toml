@@ -148,7 +148,7 @@ opt-level = 3
 [profile.dev.package.kumi-genexpr]
 opt-level = 3
 
-# And the map's layout: t-SNE over thousands of points in its tests, and 300,000 in Extended's, takes seconds optimized.
+# And the map's layout: t-SNE over thousands of points in its tests takes seconds optimized.
 [profile.dev.package.kumi-layout]
 opt-level = 3
 

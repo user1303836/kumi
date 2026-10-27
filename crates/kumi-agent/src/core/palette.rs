@@ -12,12 +12,12 @@ use async_trait::async_trait;
 use kumi_common::time::now_ms;
 use kumi_library::{search::SoundIndex, Library};
 use kumi_store::palettes::{self, Item, ItemKind, Palette};
-use kumi_types::errors::RuntimeError;
+use kumi_types::{daw::DawId, errors::RuntimeError};
 use serde::{Deserialize, Serialize};
 use std::{
     cell::RefCell,
     collections::{BTreeMap, HashMap, HashSet},
-    rc::Rc,
+    rc::{Rc, Weak},
 };
 
 /// What a palette works with in the producer's library: sounds that moved found again, the library's sounds (their
@@ -28,12 +28,16 @@ pub trait PaletteLibrary {
     async fn refind(&self, wanted: Vec<(String, i64)>) -> Vec<Option<(String, i64)>>;
     /// The library's sounds as the search compares them: None when they can't be read.
     async fn index(&self) -> Option<Rc<SoundIndex>>;
+    /// How many indexes the library has built, read without building: while it stays the same, `index` would hand
+    /// out the one it did, so what a palette worked out over it holds without asking.
+    fn indexes_built(&self) -> u64;
     /// How many of the producer's projects use each sound, by its path.
     async fn used(&self) -> HashMap<String, usize>;
 }
 
-/// The producer's library, for palettes.
-pub struct LibrarySounds(pub Rc<Library>);
+/// The producer's library, for palettes: its sounds as a session with this DAW is offered them (Live's when none is
+/// known), the index the session's search reads too.
+pub struct LibrarySounds(pub Rc<Library>, pub Option<DawId>);
 
 #[async_trait(?Send)]
 impl PaletteLibrary for LibrarySounds {
@@ -51,7 +55,10 @@ impl PaletteLibrary for LibrarySounds {
             .collect()
     }
     async fn index(&self) -> Option<Rc<SoundIndex>> {
-        self.0.sound_index().await.ok()
+        self.0.sound_index_in(self.1).await.ok()
+    }
+    fn indexes_built(&self) -> u64 {
+        self.0.sound_indexes_built()
     }
     async fn used(&self) -> HashMap<String, usize> {
         self.0.samples_in_sets().await
@@ -168,8 +175,10 @@ pub struct Palettes {
     /// The producer's library: where a sound that moved is found again (by its name and size), and what a loose
     /// palette brings in.
     library: Option<Rc<dyn PaletteLibrary>>,
-    /// What the palette brought in last, and what it was worked out for (its files, its excluded sounds, its reach).
-    reached: RefCell<Option<(String, Rc<Vec<Reached>>)>>,
+    /// What the palette brought in last, what it was worked out for, and its sounds' nearest, kept for the next change.
+    /// One look at a time, held while the app is told of a change: a later change starts from what an earlier one kept,
+    /// and the app hears them in order.
+    reached: tokio::sync::Mutex<Option<Reaching>>,
     current: RefCell<Option<String>>,
     /// Told the palette as it is after each change (None: there's none now).
     on_change: Rc<dyn Fn(Option<PaletteView>)>,
@@ -181,7 +190,7 @@ fn failed(error: kumi_store::StoreError) -> RuntimeError {
 
 impl Palettes {
     pub fn new(store: StoreClient, library: Option<Rc<dyn PaletteLibrary>>, on_change: Rc<dyn Fn(Option<PaletteView>)>) -> Palettes {
-        Palettes { store, library, reached: RefCell::new(None), current: RefCell::new(None), on_change }
+        Palettes { store, library, reached: tokio::sync::Mutex::new(None), current: RefCell::new(None), on_change }
     }
 
     /// The session's palette, with its files: None before one is made or chosen.
@@ -368,13 +377,16 @@ impl Palettes {
 
     /// What the session's palette brings in when it's loose: each of its sounds' `reach` nearest in the library (none of
     /// its own or those it excludes), the ones the producer's own projects use first, then those near more of its sounds,
-    /// then the nearest. Worked out again only when the palette changed.
+    /// then the nearest. Worked out again only when the palette or the library's sounds changed, and then only as far as
+    /// the change needs.
     pub async fn reached(&self) -> Result<Rc<Vec<Reached>>, RuntimeError> {
+        let mut kept = self.reached.lock().await;
         let Some(view) = self.view().await? else { return Ok(Rc::default()) };
-        self.reached_for(&view).await
+        self.reached_for(&view, &mut kept).await
     }
 
-    async fn reached_for(&self, view: &PaletteView) -> Result<Rc<Vec<Reached>>, RuntimeError> {
+    /// `reached`, for `view`, with what was kept (its lock held).
+    async fn reached_for(&self, view: &PaletteView, kept: &mut Option<Reaching>) -> Result<Rc<Vec<Reached>>, RuntimeError> {
         let Some(library) = self.library.clone().filter(|_| view.reach > 0) else { return Ok(Rc::default()) };
         let key = format!(
             "{} {} {:?} {:?}",
@@ -383,15 +395,22 @@ impl Palettes {
             view.files.iter().map(|file| &file.path).collect::<Vec<_>>(),
             view.excluded.iter().map(|file| &file.path).collect::<Vec<_>>()
         );
-        if let Some((kept, reached)) = self.reached.borrow().as_ref() {
-            if *kept == key {
-                return Ok(reached.clone());
-            }
+        // The palette as it was, with no index built since: what it brought then, without asking the library.
+        let built = library.indexes_built();
+        if let Some(kept) = kept.as_ref().filter(|kept| kept.key == key && kept.built == built) {
+            return Ok(kept.reached.clone());
         }
-        let Some(index) = library.index().await else { return Ok(Rc::default()) };
+        // An index that can't be read keeps what this palette brought last.
+        let Some(index) = library.index().await else {
+            return Ok(kept.as_ref().filter(|kept| kept.key == key).map(|kept| kept.reached.clone()).unwrap_or_default());
+        };
+        // Asking may have built one: the count after it is the one this index goes with.
+        let built = library.indexes_built();
         let used = library.used().await;
-        let reached = Rc::new(reach_of(view, &index, &used).await);
-        *self.reached.borrow_mut() = Some((key, reached.clone()));
+        // Brought up to date in place: a look stopped partway leaves what it did, which the next one carries on from.
+        let reaching = kept.get_or_insert_with(Reaching::default);
+        let reached = Rc::new(reaching.nearest.reach(view, &index, &used).await);
+        (reaching.key, reaching.built, reaching.reached) = (key, built, reached.clone());
         Ok(reached)
     }
 
@@ -514,65 +533,194 @@ impl Palettes {
         Ok(count)
     }
 
-    /// The app hears the palette as it is now, with what it brings in.
+    /// The app hears the palette as it is now, with what it brings in: one change after another (the lock held from
+    /// reading the palette to telling the app), so the last it hears is the palette as the last change left it.
     async fn changed(&self) {
+        let mut kept = self.reached.lock().await;
         let mut view = self.view().await.ok().flatten();
         if let Some(view) = view.as_mut() {
-            view.reached =
-                self.reached_for(view).await.map(|reached| reached.iter().map(|sound| sound.path.clone()).collect()).unwrap_or_default();
+            view.reached = self
+                .reached_for(view, &mut kept)
+                .await
+                .map(|reached| reached.iter().map(|sound| sound.path.clone()).collect())
+                .unwrap_or_default();
         }
         (self.on_change)(view);
     }
 }
 
-/// Each of `palette`'s sounds' `reach` nearest in `index` (none of the palette's own, none it excludes), ranked by taste
-/// (how many of the producer's projects use each), then by how many of the palette's sounds call it near, then by how near.
-/// Read on Kumi's thread a sound at a time, the thread's other work going on between them.
-async fn reach_of(palette: &PaletteView, index: &SoundIndex, used: &HashMap<String, usize>) -> Vec<Reached> {
-    let reach = palette.reach as usize;
-    if reach == 0 {
-        return vec![];
+/// What a loose palette brought in, what it was worked out for (its files, its excluded sounds, its reach, and how many
+/// indexes the library had built), and its sounds' nearest then.
+#[derive(Default)]
+struct Reaching {
+    key: String,
+    built: u64,
+    reached: Rc<Vec<Reached>>,
+    nearest: Nearest,
+}
+
+/// A sound's nearest: how far apart (squared) and where, by its place among the index's measured sounds (`compared`).
+type Near = (f32, usize);
+
+/// Each of a loose palette's sounds' nearest in the library, kept from one change to the next. A change looks through the
+/// library again only for the sounds new to the palette, and for one left with fewer than the palette brings when it
+/// takes their nearest in; an index with other sounds (sounds learned since) for every one.
+#[derive(Default)]
+struct Nearest {
+    /// The library's sounds they're among, held weakly: the library makes its next index from this one when nothing else
+    /// holds it.
+    index: Weak<SoundIndex>,
+    /// What they depend on in that index (`print`): another index with the same keeps them.
+    print: u64,
+    /// The sounds the palette had or excluded, by their places.
+    own: HashSet<usize>,
+    /// By a palette sound's place: the nearest it can bring in (none the palette has or excludes, none gone), nearest
+    /// first, and whether they're every one there is.
+    lists: HashMap<usize, (Vec<Near>, bool)>,
+}
+
+impl Nearest {
+    /// Whether these are among `index`'s sounds.
+    fn among(&self, index: &Rc<SoundIndex>) -> bool {
+        std::ptr::eq(self.index.as_ptr(), Rc::as_ptr(index))
     }
-    let own: HashSet<&str> = palette.files.iter().chain(&palette.excluded).map(|file| file.path.as_str()).collect();
-    let measured: Vec<(usize, &[f32])> = index.compared().collect();
-    let place: HashMap<&str, usize> = measured.iter().enumerate().map(|(at, (row, _))| (index.entries[*row].path.as_str(), at)).collect();
-    let mut found: HashMap<usize, Reached> = HashMap::new();
-    for file in palette.files.iter().filter(|file| !file.song) {
-        let Some(at) = place.get(file.path.as_str()).copied() else { continue };
-        let here = measured[at].1;
-        let mut nearest: Vec<(f32, usize)> = Vec::with_capacity(reach + 1);
-        for (other, (row, there)) in measured.iter().enumerate() {
-            if other == at || own.contains(index.entries[*row].path.as_str()) || index.entries[*row].gone == Some(true) {
-                continue;
+
+    /// Each of `palette`'s sounds' `reach` nearest in `index` (none of the palette's own, none it excludes), ranked by
+    /// taste (how many of the producer's projects use each), then by how many of the palette's sounds call it near, then
+    /// by how near. Brought up to date first, as far as the change needs: the library is looked through on Kumi's thread a
+    /// sound at a time, the thread's other work going on between them.
+    async fn reach(&mut self, palette: &PaletteView, index: &Rc<SoundIndex>, used: &HashMap<String, usize>) -> Vec<Reached> {
+        let reach = palette.reach as usize;
+        if reach == 0 {
+            return vec![];
+        }
+        // Another index: the same sounds again (the library builds one after each pass, and for sounds it hides here) keep
+        // what's kept; other sounds, or other numbers for them, start afresh.
+        if !self.among(index) {
+            let print = print(index);
+            if print != self.print {
+                *self = Nearest { print, ..Nearest::default() };
             }
-            let apart: f32 = here.iter().zip(*there).map(|(a, b)| (a - b) * (a - b)).sum();
-            if nearest.len() < reach || apart < nearest[nearest.len() - 1].0 {
-                let place = nearest.partition_point(|(seen, _)| *seen <= apart);
-                nearest.insert(place, (apart, other));
-                nearest.truncate(reach);
+            self.index = Rc::downgrade(index);
+        }
+        let measured: Vec<(usize, &[f32])> = index.compared().collect();
+        let place: HashMap<&str, usize> =
+            measured.iter().enumerate().map(|(at, (row, _))| (index.entries[*row].path.as_str(), at)).collect();
+        let own: HashSet<usize> =
+            palette.files.iter().chain(&palette.excluded).filter_map(|file| place.get(file.path.as_str()).copied()).collect();
+        let sounds: Vec<(&PaletteFile, usize)> =
+            palette.files.iter().filter(|file| !file.song).filter_map(|file| place.get(file.path.as_str()).map(|at| (file, *at))).collect();
+        // As many again to spare: the palette taking in one of a sound's nearest seldom leaves it too few.
+        let keep = 2 * reach;
+        // Let go since (taken out): brought again.
+        let freed: Vec<usize> = self.own.difference(&own).copied().filter(|at| index.entries[measured[*at].0].gone != Some(true)).collect();
+        let wanted: HashSet<usize> = sounds.iter().map(|(_, at)| *at).collect();
+        self.lists.retain(|at, _| wanted.contains(at));
+        let mut again = vec![];
+        for (&at, (list, whole)) in self.lists.iter_mut() {
+            // None the palette has or excludes now (taken in since), and no more than it brings now.
+            list.retain(|(_, other)| !own.contains(other));
+            if list.len() > keep {
+                list.truncate(keep);
+                *whole = false;
+            }
+            // Each one let go, once (a look stopped partway may have put it in already).
+            for &other in &freed {
+                if !list.iter().any(|(_, there)| *there == other) {
+                    offer(list, whole, (apart(measured[at].1, measured[other].1), other), keep);
+                }
+            }
+            if list.len() < reach && !*whole {
+                again.push(at);
+            }
+            if !freed.is_empty() {
+                tokio::task::yield_now().await;
             }
         }
-        for (apart, other) in nearest {
-            let row = measured[other].0;
-            let entry = &index.entries[row];
-            let reached = found.entry(other).or_insert_with(|| Reached {
-                path: entry.path.clone(),
-                name: index.name(row).to_string(),
-                class: entry.r#class.map(|class| class.as_str().to_string()),
-                near: vec![],
-                used: used.get(&entry.path).copied().unwrap_or(0),
-                apart: f32::INFINITY,
-            });
-            reached.near.push(file.name.clone());
-            reached.apart = reached.apart.min(apart.sqrt());
+        self.own = own;
+        let new: Vec<usize> = wanted.into_iter().filter(|at| !self.lists.contains_key(at)).collect();
+        for at in again.into_iter().chain(new) {
+            let looked = look(index, &measured, at, &self.own, keep);
+            self.lists.insert(at, looked);
+            tokio::task::yield_now().await;
         }
-        tokio::task::yield_now().await;
+        let mut found: HashMap<usize, Reached> = HashMap::new();
+        for (file, at) in &sounds {
+            for &(apart, other) in self.lists[at].0.iter().take(reach) {
+                let row = measured[other].0;
+                let entry = &index.entries[row];
+                let reached = found.entry(other).or_insert_with(|| Reached {
+                    path: entry.path.clone(),
+                    name: index.name(row).to_string(),
+                    class: entry.r#class.map(|class| class.as_str().to_string()),
+                    near: vec![],
+                    used: used.get(&entry.path).copied().unwrap_or(0),
+                    apart: f32::INFINITY,
+                });
+                reached.near.push(file.name.clone());
+                reached.apart = reached.apart.min(apart.sqrt());
+            }
+        }
+        let mut reached: Vec<Reached> = found.into_values().collect();
+        reached.sort_by(|a, b| {
+            b.used.cmp(&a.used).then(b.near.len().cmp(&a.near.len())).then(a.apart.total_cmp(&b.apart)).then(a.path.cmp(&b.path))
+        });
+        reached
     }
-    let mut reached: Vec<Reached> = found.into_values().collect();
-    reached.sort_by(|a, b| {
-        b.used.cmp(&a.used).then(b.near.len().cmp(&a.near.len())).then(a.apart.total_cmp(&b.apart)).then(a.path.cmp(&b.path))
-    });
-    reached
+}
+
+/// The `keep` nearest the sound at `at` can bring in among `measured` (none of `own`, which has it, none gone), nearest
+/// first, and whether they're every one there is.
+fn look(index: &SoundIndex, measured: &[(usize, &[f32])], at: usize, own: &HashSet<usize>, keep: usize) -> (Vec<Near>, bool) {
+    let here = measured[at].1;
+    let (mut nearest, mut whole) = (Vec::with_capacity(keep + 1), true);
+    for (other, (row, there)) in measured.iter().enumerate() {
+        if own.contains(&other) || index.entries[*row].gone == Some(true) {
+            continue;
+        }
+        offer(&mut nearest, &mut whole, (apart(here, there), other), keep);
+    }
+    (nearest, whole)
+}
+
+/// One more sound offered to a sound's nearest, which hold the nearest of what it can bring in (`whole`: every one):
+/// it goes where it belongs, unless it's past the last of nearest that aren't whole; over `keep`, the last goes. A look
+/// and a change's update both go through here, so what an update keeps is what a look would find.
+fn offer(nearest: &mut Vec<Near>, whole: &mut bool, near: Near, keep: usize) {
+    if !*whole && !nearest.last().is_some_and(|last| before(near, *last)) {
+        return;
+    }
+    let place = nearest.partition_point(|seen| before(*seen, near));
+    nearest.insert(place, near);
+    if nearest.len() > keep {
+        nearest.pop();
+        *whole = false;
+    }
+}
+
+/// What a sound's nearest depend on in `index`: each measured sound's path, whether it's gone, and its numbers, in their
+/// order. Two indexes with the same give every sound the same nearest.
+fn print(index: &SoundIndex) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    for (row, numbers) in index.compared() {
+        index.entries[row].path.hash(&mut hasher);
+        (index.entries[row].gone == Some(true)).hash(&mut hasher);
+        for number in numbers {
+            hasher.write_u32(number.to_bits());
+        }
+    }
+    hasher.finish()
+}
+
+/// How far apart two sounds are (squared), in the numbers the search compares.
+fn apart(here: &[f32], there: &[f32]) -> f32 {
+    here.iter().zip(there).map(|(a, b)| (a - b) * (a - b)).sum()
+}
+
+/// Whether one of a sound's nearest comes before another: nearer, or as near and earlier in the index.
+fn before(one: Near, other: Near) -> bool {
+    one.0 < other.0 || (one.0 == other.0 && one.1 < other.1)
 }
 
 const USAGE: &str = "/palette lists your palettes; /palette new <name>, use <name>, rename <name> or forget <name>; /palette strict keeps Kumi to its own sounds, /palette loose [k] lets each bring its k nearest.";
@@ -629,5 +777,105 @@ fn item_of(file: Gathered, now: i64) -> Item {
         class: file.class,
         excluded: false,
         added_at: now,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use kumi_library::{
+        learn::SoundEntry,
+        sources::{Source, SourceKind},
+        store::{pack_vector, Entry},
+    };
+
+    /// A library of `kicks` kicks, then `pads` pads: each kind alike, kick n n steps from kick 0, pad n from pad 0.
+    fn library(kicks: usize, pads: usize) -> Rc<SoundIndex> {
+        let entries = [("Kick", kicks), ("Pad", pads)].into_iter().flat_map(|(kind, count)| {
+            (0..count).map(move |n| {
+                let numbers: Vec<f32> = (0..kumi_library::features::VECTOR_LENGTH)
+                    .map(|d| if (d % 2 == 0) == (kind == "Kick") { 5. } else { 0. } + d as f32 * 0.001 * n as f32)
+                    .collect();
+                let file = Entry { path: format!("/Samples/{kind} {n}.wav"), size: 10, mtime: 1, gone: None };
+                SoundEntry { file, vector: Some(pack_vector(&numbers)), ..Default::default() }
+            })
+        });
+        let source = Source { path: "/Samples".into(), label: "Samples".into(), kind: SourceKind::Folder };
+        Rc::new(SoundIndex::of_every_source(entries, &[source]))
+    }
+
+    fn file(name: &str) -> PaletteFile {
+        PaletteFile { path: format!("/Samples/{name}.wav"), size: 10, mtime: 1, name: name.into(), song: false, class: None }
+    }
+
+    /// A palette reaching `reach`, with these sounds, excluding those.
+    fn palette(reach: u32, sounds: &[&str], excluded: &[&str]) -> PaletteView {
+        PaletteView {
+            id: "1".into(),
+            name: "Palette 1".into(),
+            reach,
+            files: sounds.iter().map(|name| file(name)).collect(),
+            excluded: excluded.iter().map(|name| file(name)).collect(),
+            reached: vec![],
+        }
+    }
+
+    /// Where each palette sound's nearest are kept, by its name.
+    fn kept(nearest: &Nearest, index: &SoundIndex) -> HashMap<String, usize> {
+        let measured: Vec<(usize, &[f32])> = index.compared().collect();
+        nearest.lists.iter().map(|(at, (list, _))| (index.name(measured[*at].0).to_string(), list.as_ptr() as usize)).collect()
+    }
+
+    /// `nearest` brought up to date for `palette`: it brings what a fresh look brings, having looked through the library
+    /// again only for `looked` (every other sound's nearest kept where they were).
+    async fn step(nearest: &mut Nearest, index: &Rc<SoundIndex>, palette: PaletteView, looked: &[&str]) {
+        let (before, used) = (kept(nearest, index), HashMap::new());
+        let reached = nearest.reach(&palette, index, &used).await;
+        assert_eq!(reached, Nearest::default().reach(&palette, index, &used).await, "as a fresh look");
+        let mut again: Vec<String> =
+            kept(nearest, index).into_iter().filter(|(name, at)| before.get(name) != Some(at)).map(|(name, _)| name).collect();
+        again.sort();
+        assert_eq!(again, looked, "looked for again");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_change_looks_through_the_library_again_only_for_the_sounds_it_needs_and_brings_what_a_fresh_look_does() {
+        let index = library(12, 6);
+        let mut nearest = Nearest::default();
+        let sounds = ["Kick 0", "Pad 0", "Pad 5"];
+        step(&mut nearest, &index, palette(2, &sounds[..2], &[]), &["Kick 0", "Pad 0"]).await;
+        // New to it: only that one, Kick 1 though it's among Kick 0's nearest (Kick 0 has more to spare).
+        step(&mut nearest, &index, palette(2, &sounds, &[]), &["Pad 5"]).await;
+        step(&mut nearest, &index, palette(2, &[&sounds[..], &["Kick 1"][..]].concat(), &[]), &["Kick 1"]).await;
+        // Taken out, it's among Kick 0's nearest again; another excluded, it's not.
+        step(&mut nearest, &index, palette(2, &sounds, &[]), &[]).await;
+        step(&mut nearest, &index, palette(2, &sounds, &["Kick 2"]), &[]).await;
+        // Kick 0 is left with one of its nearest when the palette takes two more of them: looked for again.
+        let more = [&sounds[..], &["Kick 3", "Kick 4"][..]].concat();
+        step(&mut nearest, &index, palette(2, &more, &["Kick 2"]), &["Kick 0", "Kick 3", "Kick 4"]).await;
+        // Reaching further, within what each keeps to spare, and nearer.
+        step(&mut nearest, &index, palette(3, &more, &["Kick 2"]), &[]).await;
+        step(&mut nearest, &index, palette(1, &more, &["Kick 2"]), &[]).await;
+        // The same sounds in another index, as the library builds after each pass (the one before let go first, as the
+        // library lets it go): every one's nearest kept.
+        drop(index);
+        let index = library(12, 6);
+        assert!(!nearest.among(&index));
+        step(&mut nearest, &index, palette(2, &more, &["Kick 2"]), &[]).await;
+        assert!(nearest.among(&index));
+        // Sounds learned since (another index): every one looked for again.
+        let learned = library(14, 6);
+        let reached = nearest.reach(&palette(2, &more, &["Kick 2"]), &learned, &HashMap::new()).await;
+        assert_eq!(reached, Nearest::default().reach(&palette(2, &more, &["Kick 2"]), &learned, &HashMap::new()).await);
+        assert!(nearest.among(&learned) && !nearest.among(&index));
+        assert_eq!(nearest.lists.len(), more.len());
+
+        // A library with fewer than a sound keeps: they're all there, so one let go goes among them however far it is.
+        let index = library(3, 1);
+        let mut nearest = Nearest::default();
+        step(&mut nearest, &index, palette(3, &["Kick 0", "Pad 0"], &[]), &["Kick 0", "Pad 0"]).await;
+        step(&mut nearest, &index, palette(3, &["Kick 0"], &[]), &[]).await;
+        let reached = nearest.reach(&palette(3, &["Kick 0"], &[]), &index, &HashMap::new()).await;
+        assert_eq!(reached.iter().map(|sound| sound.name.as_str()).collect::<Vec<_>>(), ["Kick 1", "Kick 2", "Pad 0"]);
     }
 }

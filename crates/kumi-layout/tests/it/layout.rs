@@ -4,7 +4,7 @@ use kumi_layout::{layout, layout_until, Layout};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 /// A number in [0, 1) for `at`, the same every time (SplitMix64).
-pub fn noise(at: u64) -> f64 {
+fn noise(at: u64) -> f64 {
     let mut z = at.wrapping_add(0x9e37_79b9_7f4a_7c15);
     z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
     z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
@@ -13,14 +13,14 @@ pub fn noise(at: u64) -> f64 {
 }
 
 /// A Gaussian number for `at` (Box–Muller on two of the above).
-pub fn gaussian(at: u64) -> f64 {
+fn gaussian(at: u64) -> f64 {
     let (u, v) = (noise(2 * at).max(1e-12), noise(2 * at + 1));
     (-2. * u.ln()).sqrt() * (std::f64::consts::TAU * v).cos()
 }
 
 /// `groups` groups of points in `dims` numbers: point `at` is in group `at % groups`, around its centre (each centre's
 /// numbers drawn about ±1 apart from the others) by `wide`.
-pub fn grouped(at: usize, dims: usize, groups: usize, wide: f64, buffer: &mut [f32]) {
+fn grouped(at: usize, dims: usize, groups: usize, wide: f64, buffer: &mut [f32]) {
     let group = at % groups;
     for (d, value) in buffer.iter_mut().enumerate().take(dims) {
         let centre = gaussian((1_000_003 * group + d) as u64);
@@ -57,7 +57,7 @@ fn trustworthiness(points: &[Vec<f32>], places: &[[f32; 2]], k: usize) -> f64 {
 }
 
 /// How many points sit nearer their own group's middle on the map than any other group's.
-pub fn kept_together(places: &[[f32; 2]], groups: usize) -> usize {
+fn kept_together(places: &[[f32; 2]], groups: usize) -> usize {
     let middles: Vec<[f64; 2]> = (0..groups)
         .map(|group| {
             let mine: Vec<&[f32; 2]> = places.iter().skip(group).step_by(groups).collect();
