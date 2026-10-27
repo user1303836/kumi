@@ -139,7 +139,18 @@ fn stand_in_kumi() -> PathBuf {
     println!("Kumi {version}");
 }
 "#;
-    let folder = Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!("stand-in-kumi-{}", &hex::encode(Sha256::digest(CODE))[..12]));
+    // Small, as every fake release packs it: no debug info, and on MSVC no PDB (rustc asks MSVC's linker for one whatever
+    // -C strip says), which it writes through a server every link on the machine shares. macOS keeps std's debug info out
+    // of the file already.
+    let flags: &[&str] = if cfg!(target_env = "msvc") {
+        &["-C", "debuginfo=0", "-C", "link-arg=/DEBUG:NONE"]
+    } else if cfg!(target_os = "macos") {
+        &["-C", "debuginfo=0"]
+    } else {
+        &["-C", "debuginfo=0", "-C", "strip=debuginfo"]
+    };
+    let key = hex::encode(Sha256::digest(format!("{CODE}{flags:?}")));
+    let folder = Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!("stand-in-kumi-{}", &key[..12]));
     let kumi = folder.join(executable_name("kumi"));
     if kumi.is_file() {
         return kumi;
@@ -151,14 +162,7 @@ fn stand_in_kumi() -> PathBuf {
         let code = folder.join("main.rs");
         fs::write(&code, CODE).unwrap();
         let built = folder.join(format!("{}-{}", std::process::id(), executable_name("kumi")));
-        let mut rustc = std::process::Command::new("rustc");
-        rustc.arg(&code).arg("-o").arg(&built).args(["-C", "debuginfo=0"]);
-        // No PDB (rustc asks MSVC's linker for one whatever -C strip says): it's written through a server every link on
-        // the machine shares.
-        if cfg!(target_env = "msvc") {
-            rustc.args(["-C", "link-arg=/DEBUG:NONE"]);
-        }
-        let made = rustc.output().unwrap();
+        let made = std::process::Command::new("rustc").arg(&code).arg("-o").arg(&built).args(flags).output().unwrap();
         assert!(made.status.success(), "{}", String::from_utf8_lossy(&made.stderr));
         fs::rename(&built, &kumi).unwrap();
     }
