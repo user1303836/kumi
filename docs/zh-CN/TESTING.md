@@ -36,7 +36,7 @@ python3 -m unittest discover -s scripts/tests -p 'test_*release.py'
 
 | 命令 | 作用 |
 | --- | --- |
-| `sh scripts/test-isolated.sh`（Windows：`./scripts/test-isolated.ps1`） | 在独立的主目录中用 cargo-nextest 运行全部测试，每个测试一个进程；参数会传给 `cargo nextest run`（`KUMI_NEXTEST=0`：改用 `cargo test`，一个 crate 的测试共用一个进程） |
+| `sh scripts/test-isolated.sh`（Windows：`./scripts/test-isolated.ps1`） | 在独立的主目录中用 cargo-nextest 运行全部测试，每个测试一个进程；参数会传给 `cargo nextest run`（`KUMI_NEXTEST=0`：改用 `cargo test`，一个 crate 的测试共用一个进程；`KUMI_NEXTEST_ARCHIVE`：使用在别处构建的测试，即 `cargo nextest archive` 生成的归档，解压到检出目录的 `target/`） |
 | `sh scripts/test-isolated.sh -p kumi-daw-ableton -E 'test(/^hands_transport::/)'` | 只运行一个 crate 的一个测试文件：一个 crate 的测试是一个二进制（`tests/it/`，每个文件一个模块） |
 | `cargo fmt --all --check` | 按 CI 的方式检查格式 |
 | `cargo clippy --workspace --all-targets --locked -- -D warnings` | Lint 检查；目前在 CI 中仅供参考 |
@@ -116,7 +116,7 @@ python3 -m unittest discover -s scripts/tests -p test_native_release.py
 | | `REAPER extension loads / macos-15`、`ubuntu-22.04`、`windows-2025` | 按发布时的样子检查 REAPER 扩展：发布构建和平台自己的 strip，发布脚本对发行包可携带内容的检查（REAPER 的入口点；macOS 上的签名和自身名称；Windows 上静态链接的 C 运行库；Linux 上不需要比 Kumi 更新的 glibc），用系统的加载器加载，以及 REAPER 经由 C++ 垫片（shim）的调用 |
 | | `Renoise tool`（Ubuntu） | 在固定版本的 LuaJIT 上针对 Renoise API 的模拟运行工具的 Lua 测试，以及对照 Renoise API 6.2 定义的 `lua-language-server --check` |
 | | `Required CI` | 只有以上全部通过时才通过 |
-| **Extended** | `Extended / Linux (1/3)` 至 `(3/3)`、`Extended / macOS (1/2)`、`(2/2)`、`Extended / Windows (1/3)` 至 `(3/3)`、`Extended / documentation tests` | 在装好官方 SDK 的情况下运行全部测试（`extended` 集合）：`ci` 省去的内容（录制源的预言测试，长时间的聆听、曲式和渲染模拟，使用 ffmpeg 的视频测试，基准测试，与官方 MCP 和模型 SDK 并排运行的互操作测试，从 Kumi 1.7.5 的迁移，计时构件的长时间扫描）以及每个平台的全部测试；然后是文档测试。每周、手动以及在带有 `full-tests` 标签的拉取请求上运行，不阻塞任何合并 |
+| **Extended** | `Extended / Linux build`、`Extended / macOS build`、`Extended / Windows build`，`Extended / Linux (1/3)` 至 `(3/3)`、`Extended / macOS (1/2)`、`(2/2)`、`Extended / Windows (1/4)` 至 `(4/4)`，`Extended / documentation and eval runner tests` | 每个系统的测试只构建一次并归档（`cargo nextest archive`），再从归档分片运行。在装好官方 SDK 的情况下运行全部测试（`extended` 集合）：`ci` 省去的内容（录制源的预言测试，长时间的聆听、曲式和渲染模拟，使用 ffmpeg 的视频测试，基准测试，与官方 MCP 和模型 SDK 并排运行的互操作测试，从 Kumi 1.7.5 的迁移，计时构件的长时间扫描）以及每个平台的全部测试；然后是文档测试。每周、手动以及在带有 `full-tests` 标签的拉取请求上运行，不阻塞任何合并 |
 | | `Extended / REAPER SDK, newest header` | 用 Cockos 发布的最新 SDK 头文件构建 REAPER 扩展，检查生成的函数表，并列出改用它们会新增的函数 |
 | **Network** | `Network / What changed`，然后是 `Network / Linux`、`macOS`、`Windows` | Kumi 的 HTTP 客户端，使用装进各系统自身信任存储的证书颁发机构，并经过系统自身设置中的代理（`network.rs` 中被忽略的测试）。各系统的作业只在修改客户端构建方式的变更（`scripts/areas.toml` 中的 `network` 区域）时运行 |
 | **Willington files** | `Willington files`（Ubuntu） | 只有仓库所有者从本仓库 `willington/` 分支发出的拉取请求才能修改 `vendor/willington/`，而这样的拉取请求不修改其他任何内容。运行的是 `main` 上的这项检查，它读取拉取请求的文件列表，从不读取其代码 |

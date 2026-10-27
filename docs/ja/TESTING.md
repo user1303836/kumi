@@ -36,7 +36,7 @@ Windows では、いくつかのテストがシンボリックリンクを作成
 
 | コマンド | 内容 |
 | --- | --- |
-| `sh scripts/test-isolated.sh`（Windows では `./scripts/test-isolated.ps1`） | テスト専用のホームで、すべてのテストを cargo-nextest で一つずつ別のプロセスで実行します。引数は `cargo nextest run` に渡します（`KUMI_NEXTEST=0` では `cargo test`。クレートのテストが一つのプロセスで動きます） |
+| `sh scripts/test-isolated.sh`（Windows では `./scripts/test-isolated.ps1`） | テスト専用のホームで、すべてのテストを cargo-nextest で一つずつ別のプロセスで実行します。引数は `cargo nextest run` に渡します（`KUMI_NEXTEST=0` では `cargo test`。クレートのテストが一つのプロセスで動きます。`KUMI_NEXTEST_ARCHIVE` では別の場所でビルドしたテストを `cargo nextest archive` から使い、チェックアウトの `target/` に展開します） |
 | `sh scripts/test-isolated.sh -p kumi-daw-ableton -E 'test(/^hands_transport::/)'` | 一つのクレートの、一つのテストファイルだけを実行します。クレートのテストは一つのバイナリ（`tests/it/`、ファイルごとに一つのモジュール）です |
 | `cargo fmt --all --check` | CI と同じようにフォーマットを確認します |
 | `cargo clippy --workspace --all-targets --locked -- -D warnings` | Lint。CI では今のところ参考扱いです |
@@ -116,7 +116,7 @@ python3 -m unittest discover -s scripts/tests -p test_native_release.py
 | | `REAPER extension loads / macos-15`、`ubuntu-22.04`、`windows-2025` | 配布するとおりの REAPER の拡張機能：リリースビルドとプラットフォーム自身の strip、バンドルに入れてよいものかのリリーススクリプトによる確認（REAPER のエントリーポイント。macOS では署名と自身の名前、Windows では C ランタイムの組み込み、Linux では Kumi より新しい glibc を要しないこと）、システムのローダーでの読み込み、C++ シムを通じた REAPER からの呼び出し |
 | | `Renoise tool`（Ubuntu） | 固定した LuaJIT でのツールの Lua テスト（Renoise の API のモックに対して）と、Renoise の API 6.2 の定義に対する `lua-language-server --check` |
 | | `Required CI` | 上記がすべてパスした場合にだけパスします |
-| **Extended** | `Extended / Linux (1/3)` から `(3/3)`、`Extended / macOS (1/2)`、`(2/2)`、`Extended / Windows (1/3)` から `(3/3)`、`Extended / documentation tests` | 公式 SDK をインストールした状態での全テスト（`extended` セット）：`ci` が省くもの（記録されたソースのオラクル、長いリスニング・フォーム・レンダリングのシミュレーション、ffmpeg を使うビデオ、ベンチマーク、公式の MCP とモデルの SDK と並べて実行する相互運用テスト、Kumi 1.7.5 からの移行、タイミングのビルディングブロックの長いスイープ）と、各プラットフォームの全テスト。続いてドキュメントテスト。毎週、手動で、また `full-tests` ラベルの付いたプルリクエストで実行され、何もブロックしません |
+| **Extended** | `Extended / Linux build`、`Extended / macOS build`、`Extended / Windows build`、`Extended / Linux (1/3)` から `(3/3)`、`Extended / macOS (1/2)`、`(2/2)`、`Extended / Windows (1/4)` から `(4/4)`、`Extended / documentation and eval runner tests` | 各システムのテストを一度だけビルドしてアーカイブ（`cargo nextest archive`）し、そのアーカイブから分割して実行します。公式 SDK をインストールした状態での全テスト（`extended` セット）：`ci` が省くもの（記録されたソースのオラクル、長いリスニング・フォーム・レンダリングのシミュレーション、ffmpeg を使うビデオ、ベンチマーク、公式の MCP とモデルの SDK と並べて実行する相互運用テスト、Kumi 1.7.5 からの移行、タイミングのビルディングブロックの長いスイープ）と、各プラットフォームの全テスト。続いてドキュメントテスト。毎週、手動で、また `full-tests` ラベルの付いたプルリクエストで実行され、何もブロックしません |
 | | `Extended / REAPER SDK, newest header` | Cockos が公開している最新の SDK ヘッダーで REAPER の拡張機能をビルドし、生成した関数テーブルを確認し、それに移ると増える関数を一覧します |
 | **Network** | `Network / What changed`、続いて `Network / Linux`、`macOS`、`Windows` | 各システム自身の信頼ストアに入れた認証局と、システム自身の設定にあるプロキシを通した、Kumi の HTTP クライアント（`network.rs` の ignored のテスト）。各システムのジョブは、クライアントの作り方を変える変更（`scripts/areas.toml` の `network` エリア）のときだけ実行されます |
 | **Willington files** | `Willington files`（Ubuntu） | `vendor/willington/` を変えられるのは、このリポジトリの `willington/` ブランチから出たリポジトリ所有者のプルリクエストだけで、そのプルリクエストはほかに何も変えません。`main` にあるこのチェックが、プルリクエストのコードではなくファイルの一覧を読んで実行されます |
