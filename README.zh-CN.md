@@ -41,9 +41,7 @@ irm https://github.com/user1303836/kumi/releases/latest/download/install.ps1 | i
 之后，打开终端并输入 `kumi` 即可。
 
 > [!NOTE]
-> Kumi 在终端窗口中运行，但你不需要会任何命令。运行完安装的那一行，剩下的就是聊天。
-
-- 在 TUI 中拖动文本即可选中，按 Ctrl-C 或右键复制；Esc 取消选择。
+> Kumi 在终端窗口中运行，但你不需要会任何命令。运行完安装的那一行，剩下的就是聊天。拖动选中文字后，按 Ctrl-C 即可复制。
 
 ## 你可以让 Kumi 做什么
 

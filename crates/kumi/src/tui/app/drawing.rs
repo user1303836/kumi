@@ -139,10 +139,19 @@ impl TuiApp {
             if state.selection.as_ref().is_some_and(|s| s.screen.width != screen.width || s.screen.height != screen.height) {
                 state.selection = None;
             }
-            state.selection.as_ref().filter(|s| s.moved).map(|s| s.painted())
+            state.selection.as_ref().filter(|s| s.moved).map(|s| {
+                let mut painted = s.painted();
+                let footer = Rect::new(0, painted.height - 1, painted.width, 1);
+                painted.fill(footer, &st::RAISED);
+                painted.put(1, footer.y, "Selected · view paused · Ctrl+C/right-click copies · Esc resumes", &st::DIM);
+                (painted, s.screen.clone())
+            })
         };
-        let frame =
-            self.0.renderer.borrow_mut().frame(selected.as_ref().unwrap_or(&screen), if selected.is_some() { None } else { cursor });
+        let frame = self
+            .0
+            .renderer
+            .borrow_mut()
+            .frame(selected.as_ref().map(|s| &s.0).unwrap_or(&screen), if selected.is_some() { None } else { cursor });
         // Images go up before the cells that show them, inside the frame's synchronized update so a picture taken down
         // and its cells change at once; those no longer shown are taken down.
         self.touch_images();
@@ -155,7 +164,7 @@ impl TuiApp {
                 self.0.tty.write(&frame);
             }
         }
-        *self.0.screen.borrow_mut() = Some(selected.map_or(screen, |_| self.0.state.borrow().selection.as_ref().unwrap().screen.clone()));
+        *self.0.screen.borrow_mut() = Some(selected.map_or(screen, |(_, original)| original));
         // Between frames, the terminal's status follows what was drawn.
         if !self.0.state.borrow().closing {
             self.show_status();

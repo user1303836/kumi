@@ -129,6 +129,7 @@ impl TuiApp {
                 if let Some(text) = text {
                     self.0.state.borrow_mut().selection = None;
                     self.copy_text(&text);
+                    self.selection_copied();
                     return true;
                 }
             }
@@ -181,6 +182,7 @@ impl TuiApp {
                 if let Some(text) = text {
                     self.0.state.borrow_mut().selection = None;
                     self.copy_text(&text);
+                    self.selection_copied();
                     return true;
                 }
             }
@@ -1258,6 +1260,12 @@ impl TuiApp {
         if let Some(copy) = &self.0.options.copy {
             copy(text);
         }
+    }
+    fn selection_copied(&self) {
+        self.notice(
+            "Copied selected text. If it didn't arrive, hold Shift and drag (Option in iTerm2) to use your terminal's selection.",
+            NoticeTone::Info,
+        );
     }
     fn copy_last_answer(&self) {
         let answer = self.0.state.borrow().transcript.entries.iter().rev().find_map(|e| {
