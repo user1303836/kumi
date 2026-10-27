@@ -3,6 +3,24 @@
 Kumi's releases. The Ableton bridge (`crates/ableton-mcp-server`) is versioned on its own;
 each Kumi release names the bridge it ships with.
 
+## 1.24.1 — 2026-10-27
+
+Ships with bridge 1.0.97, as 1.24.0 did.
+
+- kumi update speaks only of the DAWs Kumi is in: a Renoise or REAPER producer no longer hears about
+  Live, and with Kumi in no DAW yet it says how to set one up.
+- After updating Live's bridge, kumi update no longer says its versions twice or tells you to open
+  Live.
+- kumi update says when Kumi's extension in REAPER or tool in Renoise is up to date, as it does for
+  Live.
+- A loose palette brings in sounds your library learned since it last changed.
+- Adding or taking out a palette's sounds no longer looks through your whole library again for every
+  sound in it.
+- In REAPER and Renoise, a loose palette brings in sounds from the same library search offers there.
+
+Tested with Live 12.4 on macOS. On Windows, installing and updating are tested; using Kumi with Live
+there is still new.
+
 ## 1.24.0 — 2026-10-25
 
 Ships with bridge 1.0.97, which Live loads when it restarts. After updating, Kumi offers to quit Live
