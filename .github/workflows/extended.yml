@@ -28,11 +28,12 @@ env:
 
 jobs:
   tests:
-    # Shards, so that no runner takes more than about ten minutes.
+    # Shards, so that no runner takes more than about ten minutes. The limit leaves room for a build that starts cold: the
+    # first run after a release, whose version bump changes every crate, built for 14 minutes before its tests began.
     name: Extended / ${{ matrix.label }} (${{ matrix.part }}/${{ matrix.parts }})
     if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-tests')
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
