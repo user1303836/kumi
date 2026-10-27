@@ -38,6 +38,7 @@ loads = [
   "daws/own/daw-bridge/src/handshake.rs",
   "daws/own/daw-bridge/src/loopback.rs",
   "daws/own/daw-bridge/src/owner.rs",
+  "daws/own/daw-bridge/src/vst3.rs",
   "daws/own/daw-bridge/src/paths.rs",
   "daws/own/daw-bridge/src/wire.rs",
 ]

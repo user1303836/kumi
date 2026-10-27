@@ -242,7 +242,12 @@ impl Goal {
     async fn adopt(&self, name: &str, label: &str, signal: Signal) -> Result<GoalSlotInfo, RuntimeError> {
         let r = &self.render;
         let mut read = r.read_knobs(name, signal.clone()).await?;
-        if read.devices.last().and_then(|d| d.get("className")).and_then(Value::as_str) != Some("Limiter") {
+        let limited = read.devices.last().is_some_and(|device| {
+            device.get("enabled") != Some(&Value::Bool(false))
+                && (device.get("className").and_then(Value::as_str) == Some("Limiter")
+                    || kumi_library::plugins::inventory::is_limiter_name(&device_name(device)))
+        });
+        if !limited {
             r.history
                 .quietly(None, r.step("load_device", json!({"itemId":"audio_effects/Limiter","trackRef":read.reference}), signal.clone()))
                 .await?;

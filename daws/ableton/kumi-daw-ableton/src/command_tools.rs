@@ -1437,6 +1437,9 @@ impl CommandTools {
         if !self.available() {
             return Ok(ToolResult::error(NO_CURRENT_LIVE));
         }
+        if input.get("action").and_then(Value::as_str) == Some("prepare-preset") {
+            return self.prepare_plugin_preset(input, signal).await;
+        }
         let Some(device) = input.get("device").and_then(Value::as_str) else {
             return Ok(ToolResult::error("Give the plug-in device (its deviceRef from this turn)."));
         };
@@ -1455,6 +1458,43 @@ impl CommandTools {
                 }))
             }
         }
+    }
+    async fn prepare_plugin_preset(&self, input: &JsonObject, signal: Signal) -> Result<ToolResult, RuntimeError> {
+        let Some(file) = input.get("file").and_then(Value::as_str) else {
+            return Ok(ToolResult::error("Give the absolute .vstpreset file from vst3 create/edit."));
+        };
+        let name = input.get("name").and_then(Value::as_str).unwrap_or("Kumi preset");
+        let library = PathBuf::from(self.options.user_library.clone().unwrap_or_else(|| super::samples::user_library(None, None)));
+        let made = match super::plugin_presets::prepare(std::path::Path::new(file), &library, name) {
+            Ok(made) => made,
+            Err(why) => return Ok(ToolResult::error(why)),
+        };
+        let mut item = made.item.clone();
+        let mut indexed = false;
+        // Live releases differ on whether BrowserItem.name includes the file's extension.
+        for _ in 0..10 {
+            signal.check()?;
+            for candidate in [made.item.clone(), format!("{}.vstpreset", made.item)] {
+                let result = self.connection.call("live_browser_inspect", args(json!({"itemId":candidate})), signal.clone()).await;
+                if result.is_ok_and(|reply| reply.is_error != Some(true)) {
+                    item = candidate;
+                    indexed = true;
+                    break;
+                }
+            }
+            if indexed {
+                break;
+            }
+            tokio::select! { _ = signal.cancelled() => {signal.check()?;}, _ = tokio::time::sleep(Duration::from_millis(300)) => {} }
+        }
+        Ok(ToolResult {
+            text: stringify(
+                &json!({"file":made.file,"itemId":item,"indexed":indexed,"name":made.name,"plugin":made.plugin,"classId":made.class_id,
+            "next": if indexed {"Use load_device with this itemId and the target trackRef; the normal device change records HISTORY and supports undo_change. Read back controls and listen after loading."} else {"The file is ready; Live has not indexed it yet. Search the User Library for this unique name, then use load_device with the returned itemId. Do not report it loaded until load_device succeeds."},
+            "kind":made.kind,"existingDevice":"For an existing instance, use its exposed parameters, or load this preset on a new track/empty rack chain and compare before replacing anything. Live's API does not expose arbitrary plug-in state replacement."}),
+            ),
+            ..Default::default()
+        })
     }
     async fn run_plugin(&self, input: &JsonObject, long: &str, signal: &Signal) -> Result<ToolResult, CommandError> {
         let tools = self.connection.tools().unwrap();

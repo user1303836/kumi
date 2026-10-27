@@ -1499,6 +1499,7 @@ impl Session {
             tools.extend(self.0.shelf.iter().map(|tool| self.with_background(tool.clone())));
             tools.extend(self.0.recipes.clone());
             tools.extend(self.0.palette_tool.clone());
+            tools.push(crate::core::plugin_tools::PluginTool::new());
             tools.extend(self.0.recall.iter().map(|tool| self.with_background(tool.clone())));
             if let Some(learned) = &self.0.learned {
                 tools.extend(learned.tools.clone());
@@ -1575,6 +1576,7 @@ impl Session {
                 .map(|m| memory_instructions_for(&self.0.options.profile, m, observation.project.as_ref().map(|p| p.name.as_str())))
                 .unwrap_or_default(),
             habits,
+            crate::core::plugin_tools::GUIDANCE.into(),
             music,
             recipe_instructions(&recipes),
             if self.0.learned.is_some() { technique_guidance(&self.0.options.profile) } else { String::new() },

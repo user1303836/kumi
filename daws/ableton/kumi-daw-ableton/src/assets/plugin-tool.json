@@ -1,10 +1,9 @@
 {
-  "description": "Work with a plug-in (Serum 2, Vital, Ozone, Pro-Q 4, Saturn 2, OTT, Supermassive, Decapitator, Pigments, Pro-L 2, or any other) the way its owner would. Read its guide before working on one. guide: what Kumi knows of it (its architecture, sound-design moves, what isn't a knob and how to get there), matched to its real parameter names, which of them Kumi can turn now (set those with set_device_parameter by name, in the plug-in's own units: \"800 Hz\", \"-6 dB\"), and how to get to the rest. wavetable: make a wavetable (keyframes of harmonics or shapes morphing frame to frame, or single cycles cut from a held note) into the plug-in's own wavetable folder, for its oscillator's menu.",
+  "description": "Work with a plug-in (Serum 2, Vital, Ozone, Pro-Q 4, Saturn 2, OTT, Supermassive, Decapitator, Pigments, Pro-L 2, or any other) the way its owner would. Read its guide before working on one. guide: what Kumi knows of it (its architecture, sound-design moves, what isn't a knob and how to get there), matched to its real parameter names, which of them Kumi can turn now (set those with set_device_parameter by name, in the plug-in's own units: \"800 Hz\", \"-6 dB\"), and how to get to the rest. wavetable: make a wavetable (keyframes of harmonics or shapes morphing frame to frame, or single cycles cut from a held note) into the plug-in's own wavetable folder, for its oscillator's menu. prepare-preset: put a VST3 preset created by the shared vst3 tool in Live's User Library and return its browser itemId; load_device then loads it with HISTORY and undo. This action takes file/name, without device.",
   "schema": {
     "type": "object",
     "additionalProperties": false,
     "required": [
-      "device",
       "action"
     ],
     "properties": {
@@ -18,7 +17,8 @@
         "type": "string",
         "enum": [
           "guide",
-          "wavetable"
+          "wavetable",
+          "prepare-preset"
         ]
       },
       "wavetable": {
@@ -100,6 +100,15 @@
             }
           }
         }
+      },
+      "file": {
+        "type": "string",
+        "description": "prepare-preset: absolute .vstpreset path from vst3 create/edit"
+      },
+      "name": {
+        "type": "string",
+        "maxLength": 64,
+        "description": "prepare-preset: name in Live's User Library"
       }
     }
   }

@@ -779,7 +779,11 @@ See [how arranging works](KUMI_CHANGES.md#arrangements).
 
 ## Plug-ins
 
-Kumi knows ten plug-ins well: Serum 2, Vital, Ozone 12, Pro-Q 4, Pro-L 2,
+- **Built-in VST3 presets.** Ask Kumi to create or edit a preset. It checks its local format catalog before external research, and can load supported presets with history and undo. Serum 2, Ozone 12 and its modules, Valhalla, Minimal Audio, Pulsar Modular and other catalogued products have versioned format support; see [capabilities and limits](../../plugin-formats/README.md).
+- **Installed processors first.** Mastering and reference mastering check Ozone 12, then other suitable installed VST3s, then native devices. Kumi measures and listens before and after; a reference is compared at matched loudness.
+- **Native file limits.** Softube and some Zynaptiq presets can be read and edited from a supplied template, but VST3 state loading is not claimed for locally unverified products. Live loads a new preset instance from its browser; existing instances use exposed parameters.
+
+Kumi also has detailed guides for Serum 2, Vital, Ozone 12, Pro-Q 4, Pro-L 2,
 Saturn 2, Decapitator, OTT, Supermassive and Pigments. Before it works on one, it
 reads the plug-in's guide: what it does, its sections, recipes for common sounds,
 and its real parameters, matched against what the plug-in shows Live.
@@ -799,11 +803,11 @@ and its real parameters, matched against what the plug-in shows Live.
   turns it only when it's configured. When it isn't, Kumi says which knob to
   configure, and has another device on the same track do the job meanwhile:
   Ozone 12 first, then the other plug-ins Kumi knows, then Live's own devices.
-  With none on the track, Kumi says which of Live's devices to add and where: a
+  With none on the track, Kumi checks suitable installed VST3s before Live's own devices: a
   limiter last, an EQ or a compressor before the last limiter.
-- **What isn't a parameter** (an oscillator's wavetable, filter types, modulation
-  routing, Ozone's Master Assistant) is done in the plug-in's window; the guide
-  says where.
+- **Beyond exposed parameters.** Kumi checks the built-in preset format for supported settings first.
+  Controls outside that format and interactive features such as Ozone's Master Assistant still use the
+  plug-in's window; the guide says where.
 - **Wavetables.** Kumi makes wavetables, from shapes and harmonics or cut from a
   sound, for Serum, Vital and other wavetable synths, into the plug-in's folder;
   you drop one on an oscillator.
@@ -1479,5 +1483,3 @@ Running it again repairs Kumi and keeps the Kumi that `kumi update --rollback` g
 before the new Kumi is in place changes nothing. When something goes wrong, it says why: no such
 release, no connection (DNS, TLS, a proxy or a timeout), or a Wi-Fi sign-in page answering in
 GitHub's place.
-
-- Kumi has no affiliation, association, sponsorship, or other relationship with third-party plugin manufacturers. Plugin names are used only to identify compatible products; trademarks belong to their owners.

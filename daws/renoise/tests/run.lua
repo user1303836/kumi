@@ -131,6 +131,7 @@ for _, file in ipairs({ "test_json.lua", "test_sha256.lua", "test_wire.lua", "te
   "test_instruments.lua", "test_samples.lua", "test_modfx.lua", "test_phrases.lua", "test_instrument_reads.lua", "test_matrix_instruments.lua", "test_fences_instruments.lua", "test_continuity_instruments.lua",
   -- n-devices
   "test_devices_m4.lua",
+  "test_vst3_presets.lua",
   -- #401: scripts kept for a chore
   "test_chores.lua",
   -- M5 (listening)

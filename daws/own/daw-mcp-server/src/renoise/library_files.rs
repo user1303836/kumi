@@ -5,6 +5,7 @@
 //! a newer Renoise than the one whose library is here (a file Renoise can't load shows a dialog that holds Renoise).
 
 use crate::renoise::presets::{Refusal, MAX_PRESET_BYTES};
+use base64::Engine;
 use serde_json::Value;
 use std::collections::BTreeMap;
 use std::io::Read;
@@ -235,6 +236,16 @@ pub fn with_file(daw: daw_bridge::Daw, kind: &str, input: &Value, libraries: &Li
     if daw != daw_bridge::Daw::Renoise {
         return None;
     }
+    if matches!(kind, "device-preset-data" | "plugin-preset-data") {
+        if input.get("vst3Data").is_some() {
+            return Some(Err(Refusal::Bad("give path: Kumi's host validates and snapshots the VST3 preset".into())));
+        }
+        let is_vst3 =
+            input["path"].as_str().is_some_and(|path| Path::new(path).extension().is_some_and(|e| e.eq_ignore_ascii_case("vstpreset")));
+        if kind == "plugin-preset-data" || is_vst3 {
+            return Some(vst3_file(input));
+        }
+    }
     let spec = FILE_KINDS.iter().find(|spec| spec.kind == kind)?;
     let path = input.get("path");
     if spec.text.is_some() && path.is_none() {
@@ -270,9 +281,66 @@ pub fn with_file(daw: daw_bridge::Daw, kind: &str, input: &Value, libraries: &Li
     })())
 }
 
+/// VST3 files are Kumi-generated output or producer-selected files, so they need not live in Renoise's preset library.
+/// Snapshot validated bytes now: an apply uses this exact content even if the source file changes after its preview.
+fn vst3_file(input: &Value) -> Result<Value, Refusal> {
+    let path = input["path"].as_str().ok_or_else(|| Refusal::Bad("path: an absolute .vstpreset file".into()))?;
+    let file = Path::new(path);
+    if !file.is_absolute() || !file.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("vstpreset")) {
+        return Err(Refusal::Bad("path: an absolute .vstpreset file".into()));
+    }
+    if ["presetData", "presetName", "vst3Data"].iter().any(|key| input.get(*key).is_some()) {
+        return Err(Refusal::Bad("give path alone; the host reads and validates its VST3 state".into()));
+    }
+    // Leave space for base64 and Renoise's XML wrapper inside the tool's 8 MiB state bound.
+    let most = (MAX_PRESET_BYTES - 65536) / 4 * 3;
+    let mut bytes = Vec::new();
+    std::fs::File::open(file)
+        .and_then(|f| f.take(most as u64 + 1).read_to_end(&mut bytes))
+        .map_err(|err| Refusal::Bad(format!("couldn't read that VST3 preset: {err}")))?;
+    if bytes.len() > most {
+        return Err(Refusal::Bad("that VST3 preset exceeds Renoise's undo state limit".into()));
+    }
+    daw_bridge::vst3::read(&bytes).map_err(Refusal::Bad)?;
+    let mut output = input.clone();
+    let fields = output.as_object_mut().ok_or_else(|| Refusal::Bad("input must be an object".into()))?;
+    fields.remove("path");
+    fields.insert("vst3Data".into(), base64::engine::general_purpose::STANDARD.encode(bytes).into());
+    fields.insert("presetName".into(), file.file_stem().unwrap_or_default().to_string_lossy().into_owned().into());
+    Ok(output)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn vst3_files_are_validated_and_snapshotted_for_both_device_kinds() {
+        let temp = tempfile::tempdir().unwrap();
+        let file = temp.path().join("Created.vstpreset");
+        let mut bytes = b"VST3".to_vec();
+        bytes.extend(1u32.to_le_bytes());
+        bytes.extend(b"00112233445566778899AABBCCDDEEFF");
+        bytes.extend(51u64.to_le_bytes());
+        bytes.extend(b"abcList");
+        bytes.extend(1u32.to_le_bytes());
+        bytes.extend(b"Comp");
+        bytes.extend(48u64.to_le_bytes());
+        bytes.extend(3u64.to_le_bytes());
+        std::fs::write(&file, &bytes).unwrap();
+        for kind in ["device-preset-data", "plugin-preset-data"] {
+            let made = with_file(daw_bridge::Daw::Renoise, kind, &serde_json::json!({"ref":"r", "path":file}), &Libraries::default())
+                .unwrap()
+                .unwrap();
+            assert!(made.get("path").is_none());
+            assert_eq!(made["presetName"], "Created");
+            assert_eq!(base64::engine::general_purpose::STANDARD.decode(made["vst3Data"].as_str().unwrap()).unwrap(), bytes);
+            assert!(with_file(daw_bridge::Daw::Renoise, kind, &made, &Libraries::default()).unwrap().is_err());
+        }
+        std::fs::write(&file, b"not a preset").unwrap();
+        assert!(vst3_file(&serde_json::json!({"path":file})).is_err());
+        assert!(vst3_file(&serde_json::json!({"path":"relative.vstpreset"})).is_err());
+    }
     use serde_json::json;
 
     const PRESET: &str = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<FilterDevicePreset doc_version=\"14\">\n  <DeviceSlot type=\"CompressorDevice\">\n    <IsMaximized>true</IsMaximized>\n  </DeviceSlot>\n</FilterDevicePreset>\n";
