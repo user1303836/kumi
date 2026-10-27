@@ -11925,6 +11925,10 @@ class LiveObjectMapper:
         siblings = [{"ref": self.refs.put("device", device, f"{chain_path}:{index}"), "objectIdentity": self._capture_object_identity(device)} for index, device in enumerate(before)]
         if not isinstance(args.get("expectedSiblings"), list) or not hmac.compare_digest(self._bounded_canonical(siblings), self._bounded_canonical(args["expectedSiblings"])): raise ValueError("browser target chain's devices changed since preview")
         spec = self._chain_placeholder(metadata)
+        if spec is None:
+            # A User Library item's category says nothing of its kind; the folder it's in does, as a track load reads it
+            # (a device Kumi made is in User Library/Kumi/Audio Effects, MIDI Effects or Instruments).
+            spec = {1: ("Simpler", 1), 2: ("Utility", 2), 4: ("Velocity", 4)}.get(self._browser_item_type(metadata))
         if spec is None: raise ValueError("browser items of this kind load onto a track, not into a chain")
         holder, holder_type = spec
         if holder_type == 1 and any(self._read_attr(device, "type") == 1 for device in before): raise ValueError("this chain already has an instrument, which Live would replace; add another chain for it")
