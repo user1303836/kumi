@@ -97,7 +97,7 @@ impl LiveRenderer {
             .and_then(Value::as_str)
             .ok_or_else(|| observation(format!("The track “{name}” is gone.")))?
             .to_owned();
-        let devices = self.rows("device", json!({"parent":reference,"fields":["name","className"]}), signal.clone()).await?;
+        let devices = self.rows("device", json!({"parent":reference,"fields":["name","className","enabled"]}), signal.clone()).await?;
         let mut knobs = vec![];
         for (index, device) in devices.iter().enumerate() {
             let mut input = object(json!({"fields":["name","value","min","max","quantization"]}));

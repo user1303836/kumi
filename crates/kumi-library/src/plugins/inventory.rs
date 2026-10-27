@@ -239,7 +239,9 @@ pub fn is_limiter_name(name: &str) -> bool {
             // A suite can have only EQ, or a bypassed Maximizer; its name proves no limiting.
             return name_key != "ozone12" && ozone_roles(exact.map(|id| id.name.as_str()).unwrap_or(name)).contains(&"limiting");
         }
-        p.info.roles.iter().any(|role| normalize_role(role) == "limiting")
+        // A compressor that can also limit may have that stage disabled. Only dedicated
+        // loudness/limiter products qualify without reading their internal signal path.
+        matches!(p.info.plugin.as_str(), "softube-weiss-mm-1-mastering-maximizer" | "zynaptiq-loud-1")
     }) || matches!(name_key.as_str(), "fabfilterprol2" | "prol2")
 }
 
@@ -309,5 +311,8 @@ mod tests {
         assert!(is_limiter_name("Ozone 12 Maximizer"));
         assert!(!is_limiter_name("Ozone 12"));
         assert!(!is_limiter_name("Ozone 12 Imager"));
+        assert!(!is_limiter_name("Weiss DS1-MK3"));
+        assert!(!is_limiter_name("P11 Abyss"));
+        assert!(is_limiter_name("Weiss MM-1 Mastering Maximizer"));
     }
 }
