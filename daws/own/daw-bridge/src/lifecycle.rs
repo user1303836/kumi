@@ -340,7 +340,7 @@ impl Lifecycle {
     /// Waits for any other install, upgrade, rollback or uninstall of this DAW's bridge (in this process or another) to
     /// finish, then holds the lock until the returned file is dropped.
     fn exclusive(&self) -> Result<std::fs::File, LifecycleError> {
-        owner::create_owner_only_dir(&self.paths.root)?;
+        self.make_root()?;
         // Opened in place, never replaced: a lock is on the file itself, and a replaced one is another file. The folder
         // is owner-only already.
         let mut options = std::fs::OpenOptions::new();
@@ -353,6 +353,29 @@ impl Lifecycle {
         let file = options.open(self.paths.lock())?;
         file.lock()?;
         Ok(file)
+    }
+
+    /// Makes Kumi's folder for this DAW when it isn't there. The lock is in it, so two actions starting at once both get
+    /// here before either waits: the folder is made owner-only beside its place (`.<name>.tmp-<random>`) and only then
+    /// renamed into it, so neither ever works in it while the other is still setting its permissions (on Windows a
+    /// PowerShell run of seconds; a folder's permissions, as they're set, spread to what's inside it, and could undo those
+    /// the other was setting in there). When another's got there first, this one gives way. One there already is left as
+    /// it is: it was locked as it was made.
+    fn make_root(&self) -> Result<(), LifecycleError> {
+        let root = &self.paths.root;
+        if !root.is_dir() {
+            let aside = owner::temporary_beside(root);
+            if let Err(error) = owner::create_owner_only_dir(&aside).and_then(|()| std::fs::rename(&aside, root)) {
+                let _ = std::fs::remove_dir(&aside);
+                // (another's, or this one taken away by its clean-up: see recover)
+                if !root.is_dir() {
+                    return Err(error.into());
+                }
+            }
+        }
+        // (unix also sets a folder that's there back to 0700, as before)
+        owner::create_owner_only_dir(root)?;
+        Ok(())
     }
 
     fn begin(&self, action: &str, leftovers: &[&Path]) -> Result<(), LifecycleError> {
@@ -384,6 +407,18 @@ impl Lifecycle {
             for entry in entries.flatten() {
                 if entry.file_name().to_string_lossy().starts_with(&old) {
                     let _ = remove_tree(&entry.path());
+                }
+            }
+        }
+        // Kumi's folder made aside by an action stopped before it was renamed into place (make_root, named as
+        // owner::temporary_beside names it): always empty. One another action is still making gives way to this.
+        if let (Some(parent), Some(name)) = (self.paths.root.parent(), self.paths.root.file_name()) {
+            let aside = format!(".{}.tmp-", name.to_string_lossy());
+            if let Ok(entries) = std::fs::read_dir(parent) {
+                for entry in entries.flatten() {
+                    if entry.file_name().to_string_lossy().starts_with(&aside) {
+                        let _ = std::fs::remove_dir(entry.path());
+                    }
                 }
             }
         }
@@ -1025,6 +1060,26 @@ mod tests {
     }
 
     #[test]
+    fn kumis_folder_is_owner_only_from_the_moment_another_action_can_see_it() {
+        // Two actions starting at once both make Kumi's folder (the lock is in it): the one that gets the lock first must
+        // never work in it while the other is still setting its permissions (#543). Taken the moment it appears, it's
+        // owner-only already.
+        let root = tempfile::tempdir().unwrap();
+        let life = renoise(root.path());
+        let folder = life.paths.root.clone();
+        let taken = root.path().join("taken");
+        let source = bridge_folder(root.path(), "1.0");
+        let first = std::thread::spawn(move || life.install(&source, "1.0"));
+        while std::fs::rename(&folder, &taken).is_err() {
+            assert!(!first.is_finished() || folder.exists(), "the install made no folder");
+            std::thread::yield_now();
+        }
+        // (the install, its folder taken, may fail: what it would have done doesn't matter here)
+        let _ = first.join().unwrap();
+        assert!(owner::is_owner_only(&taken));
+    }
+
+    #[test]
     fn a_file_target_is_replaced_by_rename_and_a_changed_one_is_kept_on_uninstall() {
         let root = tempfile::tempdir().unwrap();
         let plugins = root.path().join("REAPER").join("UserPlugins");
@@ -1072,11 +1127,14 @@ mod tests {
         life.install(&bridge_folder(root.path(), "1.0"), "1.0").unwrap();
         let stray = life.target.dir.join(".com.kumi.Bridge.xrnx.kumi-new-abc");
         let held = life.target.dir.join("com.kumi.Bridge.xrnx.kumi-old-def");
+        // (Kumi's folder made aside by an action stopped before it was renamed into place)
+        let aside = owner::temporary_beside(&life.paths.root);
         std::fs::create_dir_all(&stray).unwrap();
         std::fs::create_dir_all(&held).unwrap();
+        std::fs::create_dir(&aside).unwrap();
         life.begin("place", &[&stray]).unwrap();
         life.install(&bridge_folder(root.path(), "2.0"), "2.0").unwrap();
-        assert!(!stray.exists() && !held.exists() && !life.paths.journal().exists());
+        assert!(!stray.exists() && !held.exists() && !aside.exists() && !life.paths.journal().exists());
         assert!(life.status().unwrap().matches);
     }
 
