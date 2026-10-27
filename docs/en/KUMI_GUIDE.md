@@ -1479,3 +1479,5 @@ Running it again repairs Kumi and keeps the Kumi that `kumi update --rollback` g
 before the new Kumi is in place changes nothing. When something goes wrong, it says why: no such
 release, no connection (DNS, TLS, a proxy or a timeout), or a Wi-Fi sign-in page answering in
 GitHub's place.
+
+- Kumi has no affiliation, association, sponsorship, or other relationship with third-party plugin manufacturers. Plugin names are used only to identify compatible products; trademarks belong to their owners.

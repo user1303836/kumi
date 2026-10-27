@@ -123,3 +123,5 @@ REAPER 7.82 和 Renoise 3.5.4 已在 macOS 上验证。在 Windows 和 Linux 上
 ## 许可证
 
 [MIT](LICENSE.md)。来自他人成果的部分，以及 Kumi 下载的模型，见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。Ableton Live 是 Ableton AG 的商标；Kumi 与 Ableton、Cockos（REAPER）和 Renoise 没有关联，也未获它们认可。
+
+- Kumi 是独立项目，与任何第三方插件制造商均无隶属、关联、赞助或背书关系。产品名称仅用于标识兼容软件，所有商标均归各自所有者所有。

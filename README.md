@@ -122,3 +122,5 @@ To build Kumi from source, see [DEVELOPMENT.md](DEVELOPMENT.md) and the [develop
 ## License
 
 [MIT](LICENSE.md); the parts from other people's work, and the models Kumi fetches, are in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Ableton Live is a trademark of Ableton AG; Kumi is not affiliated with or endorsed by Ableton, Cockos (REAPER) or Renoise.
+
+- Kumi is independent and is not affiliated with, associated with, sponsored by, or endorsed by any third-party plugin manufacturer. Product names identify compatible software; all trademarks belong to their owners.

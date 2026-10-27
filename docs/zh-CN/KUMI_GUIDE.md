@@ -620,3 +620,5 @@ Kumi 把一切都保存在 `~/.kumi` 中。`~/.kumi/settings.json` 包含：
 - `KUMI_ALLOW_ROOT=1`：用 sudo 运行时为 root 安装。否则安装程序会在此停下，因为 Kumi 会被装进 root 的主目录，而不是你的。
 
 再次运行会修复 Kumi，并保留 `kumi update --rollback` 要回到的那个 Kumi。在新的 Kumi 就位之前按 Ctrl-C，不会改变任何东西。出错时它会说明原因：没有这个版本、连不上（DNS、TLS、代理或超时），或是 Wi-Fi 登录页代替 GitHub 作了应答。
+
+- Kumi 与第三方插件制造商没有隶属、关联、赞助或其他关系。插件名称仅用于标识兼容产品，商标归各自所有者所有。

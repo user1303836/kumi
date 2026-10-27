@@ -123,3 +123,5 @@ Kumi をソースからビルドするには、[DEVELOPMENT.md](DEVELOPMENT.md)�
 ## ライセンス
 
 [MIT](LICENSE.md)。他の人の成果から来た部分と、Kumi が取得するモデルについては [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) にあります。Ableton Live は Ableton AG の商標です。Kumi は Ableton、Cockos（REAPER）、Renoise と提携しておらず、その承認を受けたものでもありません。
+
+- Kumi は独立したプロジェクトであり、サードパーティーのプラグインメーカーとの提携、関係、スポンサー契約、推奨関係はありません。製品名は互換性のあるソフトウェアを示すために使用しており、商標は各所有者に帰属します。
