@@ -269,8 +269,10 @@ async fn live_export_cache_and_guarded_backup_lifecycle() {
     let preview = call(&host, "live_project_backup_preview", json!({"confirmation":"backup","allowedRoot":root})).await;
     let args = json!({"transactionId":preview["result"]["content"][0]["text"]["transactionId"],"confirmation":"apply","idempotencyKey":"changed-key"});
     std::fs::write(&path, base64::engine::general_purpose::STANDARD.decode(f["changedRaw"].as_str().unwrap()).unwrap()).unwrap();
-    let changed = call(&host, "live_project_backup_apply", args).await;
+    let changed = call(&host, "live_project_backup_apply", args.clone()).await;
     assert!(changed["result"]["content"][0]["text"]["reason"].as_str().unwrap().contains("content changed"));
+    // Nothing was written: the transaction is as the preview left it, not left applying.
+    assert_eq!(host.transaction_record(args["transactionId"].as_str().unwrap()).unwrap().borrow()["state"], "previewed");
 }
 /// A host whose Set is `tracks` copies of the simulator's first track.
 fn big_set(tracks: usize) -> (Rc<Adapter>, McpHost) {
@@ -413,4 +415,39 @@ async fn source_backup_complete_traces_preserve_cancellation_replay_uncertainty_
         equal(&normalize_backup(&json!(results), root.to_str().unwrap(), &id, ""), &row["results"], mode);
         equal(&json!(*adapter.calls.borrow()), &row["calls"], &format!("{mode} dispatch"));
     }
+}
+#[tokio::test]
+async fn two_applies_of_one_backup_transaction_at_once_write_one_backup_and_record_it() {
+    let directory = tempfile::tempdir().unwrap();
+    let root = fixture_paths::native_path(&std::fs::canonicalize(directory.path()).unwrap());
+    let path = root.join("Test.als");
+    std::fs::write(&path, base64::engine::general_purpose::STANDARD.decode(fixture()["raw"].as_str().unwrap()).unwrap()).unwrap();
+    let adapter = adapter(json!({}));
+    *adapter.path.borrow_mut() = Some(path.to_string_lossy().into_owned());
+    let host = pinned_host(adapter);
+    let preview = call(&host, "live_project_backup_preview", json!({"confirmation":"backup","allowedRoot":root})).await;
+    let id = preview["result"]["content"][0]["text"]["transactionId"].as_str().unwrap().to_owned();
+    let apply = |key: &str| json!({"transactionId":id,"confirmation":"apply","idempotencyKey":key});
+    let (one, two) = (apply("backup-key-1"), apply("backup-key-2"));
+    let (request_one, request_two) = (json!(1), json!(2));
+    // The second comes in while the first waits on its reads of the Set file. (The bridge's dispatcher runs one apply of a
+    // transaction at a time already: this is the apply's own guard, as a caller that doesn't go through it meets it.)
+    let (first, second) = tokio::join!(
+        host.live_project_backup_apply_async(&request_one, &one, None),
+        host.live_project_backup_apply_async(&request_two, &two, None)
+    );
+    let (first, second) = (parsed(first), parsed(second));
+    assert_eq!(first["result"]["content"][0]["text"]["state"], "applied", "{first}");
+    assert_eq!(second["result"]["content"][0]["text"]["reason"], "Project backup apply is already in progress", "{second}");
+    let backups: Vec<String> = std::fs::read_dir(&root)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .filter(|name| name.starts_with("Test.backup-"))
+        .collect();
+    assert_eq!(backups.len(), 1, "{backups:?}");
+    // The one backup written is the one the transaction keeps.
+    let replay = parsed(host.live_project_backup_apply_async(&json!(3), &one, None).await);
+    let kept = replay["result"]["content"][0]["text"]["backup"]["backup"].as_str().unwrap().to_owned();
+    assert_eq!(std::path::Path::new(&kept).file_name().unwrap().to_string_lossy(), backups[0], "{replay}");
+    assert_eq!(host.transaction_record(&id).unwrap().borrow()["state"], "applied");
 }
