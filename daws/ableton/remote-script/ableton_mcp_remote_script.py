@@ -11877,18 +11877,21 @@ class LiveObjectMapper:
             raise ValueError("browser load result mapping failed without a residual device") from error
         return {"loaded": True, "deviceRef": created_ref, "deviceObjectIdentity": device_identity, "createdFingerprint": fingerprint}
 
-    @staticmethod
-    def _chain_placeholder(metadata: dict[str, Any]) -> tuple[str, int] | None:
+    # The native device that holds a chain's place for each kind of item, by Live's device type: its name and that type.
+    _CHAIN_PLACEHOLDERS = {1: ("Simpler", 1), 2: ("Utility", 2), 4: ("Velocity", 4)}
+
+    @classmethod
+    def _chain_placeholder(cls, metadata: dict[str, Any]) -> tuple[str, int] | None:
         """The native device that holds a place in a chain while a Browser item is hot-swapped onto
         it, by the item's kind: its name and Live's device type (1 instrument, 2 audio, 4 MIDI)."""
         category = metadata.get("category"); words = f"{metadata.get('name') or ''} {metadata.get('path') or ''}"
-        if category in {"instruments", "drums", "sounds"}: return ("Simpler", 1)
-        if category == "midi_effects": return ("Velocity", 4)
-        if category == "audio_effects": return ("Utility", 2)
+        if category in {"instruments", "drums", "sounds"}: return cls._CHAIN_PLACEHOLDERS[1]
+        if category == "midi_effects": return cls._CHAIN_PLACEHOLDERS[4]
+        if category == "audio_effects": return cls._CHAIN_PLACEHOLDERS[2]
         if category in {"modulators", "max_for_live"}:
-            if re.search(r"instrument", words, re.I): return ("Simpler", 1)
-            if re.search(r"\bmidi\b|expression control", words, re.I): return ("Velocity", 4)
-            return ("Utility", 2)
+            if re.search(r"instrument", words, re.I): return cls._CHAIN_PLACEHOLDERS[1]
+            if re.search(r"\bmidi\b|expression control", words, re.I): return cls._CHAIN_PLACEHOLDERS[4]
+            return cls._CHAIN_PLACEHOLDERS[2]
         return None
 
     # The folders Live keeps presets in, by the kind of device they hold (User Library/Presets/Audio Effects/…).
@@ -11928,7 +11931,7 @@ class LiveObjectMapper:
         if spec is None:
             # A User Library item's category says nothing of its kind; the folder it's in does, as a track load reads it
             # (a device Kumi made is in User Library/Kumi/Audio Effects, MIDI Effects or Instruments).
-            spec = {1: ("Simpler", 1), 2: ("Utility", 2), 4: ("Velocity", 4)}.get(self._browser_item_type(metadata))
+            spec = self._CHAIN_PLACEHOLDERS.get(self._browser_item_type(metadata))
         if spec is None: raise ValueError("browser items of this kind load onto a track, not into a chain")
         holder, holder_type = spec
         if holder_type == 1 and any(self._read_attr(device, "type") == 1 for device in before): raise ValueError("this chain already has an instrument, which Live would replace; add another chain for it")
