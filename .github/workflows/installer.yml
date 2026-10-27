@@ -415,11 +415,10 @@ jobs:
           before="$(bridge)"; before_extension="$(extension)"
           kumi update | tee update.txt
           test "$(kumi --version)" = "Kumi $version"
-          # The update ran in the earlier Kumi, which leaves this build's bridge as the bundle carries it, the lifecycle's
-          # tarball: the first Kumi that looks for the bridge unpacks its package. With the bridge in Live up to date
-          # nothing ran `kumi bridge`, so the package isn't there yet; doctor then starts the bridge from where a session
-          # looks for it.
-          if grep -q "The bridge in Live is up to date" update.txt; then test ! -e "$home/.kumi/app/bridge/package"; fi
+          # The update ran in the earlier Kumi, whose bridge step (since 1.23.2) unpacks this build's bridge package from
+          # the lifecycle's tarball the bundle carries, whether or not the bridge in Live needed updating; doctor then
+          # starts the bridge from there, where a session looks for it.
+          test -x "$home/.kumi/app/bridge/package/ableton-mcp-server"
           if [[ "$RUNNER_OS" == macOS ]]; then
             kumi doctor 2>&1 | tee doctor.txt || true
             grep -q "Kumi's bridge .* starts" doctor.txt
@@ -696,12 +695,11 @@ jobs:
           $env:KUMI_RELEASES = $releases
           $update = Kumi update | Out-String; Write-Host $update
           if ((& $kumi --version) -ne "Kumi $version") { throw "the update didn't give $version" }
-          # The update ran in the earlier Kumi, which leaves this build's bridge as the bundle carries it, the lifecycle's
-          # tarball: the first Kumi that looks for the bridge unpacks its package. With the bridge in Live up to date
-          # nothing ran `kumi bridge`, so the package isn't there yet; doctor then starts the bridge from where a session
-          # looks for it.
+          # The update ran in the earlier Kumi, whose bridge step (since 1.23.2) unpacks this build's bridge package from
+          # the lifecycle's tarball the bundle carries, whether or not the bridge in Live needed updating; doctor then
+          # starts the bridge from there, where a session looks for it.
           $package = Join-Path $env:KUMI_HOME 'app\bridge\package'
-          if ($update.Contains('The bridge in Live is up to date') -and (Test-Path -LiteralPath $package)) { throw 'the bridge package was unpacked before anything looked for the bridge' }
+          if (-not (Test-Path -LiteralPath (Join-Path $package 'ableton-mcp-server.exe'))) { throw 'the update did not unpack the bridge package beside its tarball' }
           $doctor = & $kumi doctor 2>&1 | Out-String; $global:LASTEXITCODE = 0
           Write-Host $doctor
           if ($doctor -notmatch "Kumi's bridge .* starts") { throw 'doctor did not start the bundled bridge after the update' }
