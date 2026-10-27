@@ -2,7 +2,7 @@
 //! draws and checks each take, keeps the sets (in Kumi's folder, by the project's own id, so a restart forgets nothing kept),
 //! renders and hears takes before they're shown, and answers a line per take; the DAW's backend reads, writes, finds and renders.
 use super::backend::{found, gone, Recipe, Rewritten, Set, Source, Undroppable, VariationsBackend, Words};
-use super::heard::Heard;
+use super::heard::{db_text, Fault, Heard};
 use super::{
     bolder_or_milder, check, kept_name, roll, seed_of, take_name, Bounds, Material, Purpose, Rng, Take, TakeSet, TakeState, TRIES,
 };
@@ -662,10 +662,11 @@ impl<B: VariationsBackend + 'static> Variations<B> {
 
     // Listening
 
-    /// Renders the takes offline, with the source once, and hears them. A take that is silent, or clips where the source
-    /// doesn't, is drawn again and rewritten (one more change, up to twice; lines the model wrote are only said), and each take's
-    /// line says how it sounded and how much of the source's rhythm it keeps (its family). Never while the DAW plays: a render
-    /// stops playback. Answers what to tell.
+    /// Renders the takes offline, with the source once, and hears them. A take that clips where the source doesn't is turned
+    /// down to the source's peak, otherwise as it was (#407); one that is silent, or clips in a DAW that can't turn it down, is
+    /// drawn again (lines the model wrote are only said). Either is one more change, and is heard again (up to twice). Each
+    /// take's line says how it sounded and how much of the source's rhythm it keeps (its family). Never while the DAW plays: a
+    /// render stops playback. Answers what to tell.
     async fn listen(
         &self,
         set: &mut Set<B>,
@@ -699,10 +700,10 @@ impl<B: VariationsBackend + 'static> Variations<B> {
         let mut pending: Vec<usize> = numbers.to_vec();
         let mut source: Option<Option<Heard>> = None;
         for round in 0..3u32 {
-            // (a later round renders the takes drawn again: the producer may have pressed play meanwhile)
+            // (a later round renders the takes drawn again or turned down: the producer may have pressed play meanwhile)
             if round > 0 && self.backend.playing(signal).await != Some(false) {
                 notes.push(format!(
-                    "{app} plays now (or couldn't say whether it does): the takes drawn again weren't rendered again. Ask to hear them once it's stopped."
+                    "{app} plays now (or couldn't say whether it does): the takes drawn again or turned down weren't rendered again. Ask to hear them once it's stopped."
                 ));
                 break;
             }
@@ -730,22 +731,42 @@ impl<B: VariationsBackend + 'static> Variations<B> {
                 let family = source.as_ref().map(|source| heard.family(source));
                 let fault = heard.fault(source.as_ref());
                 let redraw = recipes.get(&number).filter(|recipe| !recipe.ops.is_empty() && round < 2);
-                match (fault, redraw) {
-                    (Some(fault), Some(recipe)) => match self.redraw(set, number, recipe, bounds, round, signal).await {
-                        Ok(()) => {
+                // (a take that clips is turned down, the rest of it as it was: its level is no reason to draw it again, and the
+                // producer lowering it by hand would leave it edited since Kumi wrote it (#407))
+                let quieter = match &fault {
+                    Some(Fault::Clips { over, .. }) if round < 2 => Some(
+                        set.take(number)
+                            .ok_or_else(|| "the take is gone".to_string())
+                            .and_then(|take| self.backend.quieter(&take.material, *over)),
+                    ),
+                    _ => None,
+                };
+                match (fault, quieter, redraw) {
+                    (Some(fault), Some(Ok(material)), _) => match self.turn_down(set, number, material, signal).await {
+                        Ok(done) => {
                             if let Some(take) = set.take_mut(number) {
-                                take.line = format!("{} (drawn again after the render: it {fault})", take.line);
+                                take.line = format!("{} · {}", take.line, turned_down(&fault, &done));
                             }
                             again.push(number);
                         }
-                        Err(why) => notes.push(format!("V{number} {fault} in the render, and drawing it again failed: {why}")),
+                        Err(why) => notes.push(format!("V{number} {} in the render, and turning it down failed: {why}", fault.words())),
                     },
-                    (Some(fault), None) => {
+                    (Some(fault), _, Some(recipe)) => match self.redraw(set, number, recipe, bounds, round, signal).await {
+                        Ok(()) => {
+                            if let Some(take) = set.take_mut(number) {
+                                take.line = format!("{} (drawn again after the render: it {})", take.line, fault.words());
+                            }
+                            again.push(number);
+                        }
+                        Err(why) => notes.push(format!("V{number} {} in the render, and drawing it again failed: {why}", fault.words())),
+                    },
+                    (Some(fault), quieter, None) => {
+                        let why = quieter.and_then(Result::err).map(|why| format!(" (not turned down: {why})")).unwrap_or_default();
                         if let Some(take) = set.take_mut(number) {
-                            take.line = format!("{} · heard: it {fault}", take.line);
+                            take.line = format!("{} · heard: it {}{why}", take.line, fault.words());
                         }
                     }
-                    (None, _) => {
+                    (None, _, _) => {
                         if let Some(take) = set.take_mut(number) {
                             take.line = format!("{} · heard: {}", take.line, heard.words(family, source.as_ref()));
                         }
@@ -789,6 +810,33 @@ impl<B: VariationsBackend + 'static> Variations<B> {
         Ok(())
     }
 
+    /// Writes take `number` as `quieter` (the backend's take turned down after its render clipped; one change), and keeps it as
+    /// Kumi's: a change or a drop takes it as Kumi wrote it. Its change, and why only part went in when it didn't all.
+    async fn turn_down(
+        &self,
+        set: &mut Set<B>,
+        number: usize,
+        quieter: B::Material,
+        signal: &Signal,
+    ) -> Result<(String, Option<String>), String> {
+        let before = set.take(number).map(|take| take.material.clone()).ok_or("the take is gone")?;
+        let row = self.backend.find(set, &[number], signal).await?.into_iter().next().unwrap_or(Value::Null);
+        if !found(&row) {
+            return Err(format!("it isn't in the {} any more", self.backend.words().app));
+        }
+        let (change, instead) = self.backend.rewrite(set, &row, &before, &quieter, signal).await.map_err(|(why, _)| why)?;
+        let (material, partly) = match instead {
+            Some((holds, why)) => (holds, Some(why)),
+            None => (quieter, None),
+        };
+        if let Some(take) = set.take_mut(number) {
+            take.digest = self.backend.digest(&material);
+            take.material = material;
+            take.change = Some(change.clone());
+        }
+        Ok((change, partly))
+    }
+
     fn put_back(&self, set: Set<B>) {
         let mut sets = self.sets.borrow_mut();
         if let Some(slot) = sets.iter_mut().find(|held| held.id == set.id) {
@@ -827,7 +875,9 @@ Kumi wrote it, one named goes all the same. list: the set's takes.",
         words.options,
         words.at,
         hears = words.hears.map_or_else(
-            || format!("renders and hears the takes before they're shown (never while {app} plays; listen: false skips it)"),
+            || format!(
+                "renders and hears the takes before they're shown (never while {app} plays; listen: false skips it), turning one that clips where the source doesn't down to the source's peak"
+            ),
             str::to_owned
         ),
         rewrites = words.rewrites.unwrap_or("one change each"),
@@ -957,6 +1007,15 @@ fn direction_of(recipe: &Recipe) -> &str {
     } else {
         &recipe.direction
     }
+}
+
+/// What a take turned down after its render says (#407): "turned down 1.4 dB to the source's peak (c13): its render clipped
+/// (peak 1.1 dBFS)".
+fn turned_down(fault: &Fault, (change, partly): &(String, Option<String>)) -> String {
+    let Fault::Clips { peak, over, to_source } = fault else { return String::new() };
+    let to = if *to_source { "the source's peak".to_string() } else { format!("{} dBFS", db_text(super::heard::UNDER_FULL_SCALE_DB)) };
+    let partly = partly.as_ref().map(|why| format!("; only part went in: {why}")).unwrap_or_default();
+    format!("turned down {over:.1} dB to {to} ({change}{partly}): its render clipped (peak {} dBFS)", db_text(*peak))
 }
 
 /// A take's line: "V4 (more reverses): reversed lines 06, 14 · 0.24 from the source (c12)".

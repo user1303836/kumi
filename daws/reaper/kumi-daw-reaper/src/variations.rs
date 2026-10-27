@@ -2,7 +2,8 @@
 //! its takes are copies of it after it on its track, each with its own settings (pitch, rate, start offset, length, fades,
 //! volume; a MIDI take its own notes), made, rewritten and dropped by REAPER's own kinds (`item_variation`,
 //! `item_variation_set`, `items_delete`), one change each. Takes are found by their items' ids, else by the names Kumi gave
-//! them, and heard as their track plays them. Core's tool does the rest.
+//! them, heard as their track plays them, and turned down by their take volume when that clips (#407). Core's tool does the
+//! rest.
 use async_trait::async_trait;
 use kumi_agent::core::{
     refs::RefScheme,
@@ -180,6 +181,52 @@ impl<S: RefScheme + 'static> ReaperVariations<S> {
             Err(error) => Err(error.to_string()),
         }
     }
+}
+
+/// A take as REAPER holds it once written: its settings as `settings` writes them and REAPER's reads give them back (times,
+/// pitch and rate to the 10 000th, the volume to the 100th of a dB), so what Kumi reads back is what it kept and the take
+/// stays Kumi's (#407: a take drawn to more places read back as edited since Kumi wrote it).
+fn as_held(take: &ItemTake) -> ItemTake {
+    ItemTake {
+        length: round(take.length.max(0.001)),
+        offset: round(take.offset.max(0.)),
+        pitch: round(take.pitch.clamp(-96., 96.)),
+        playrate: round(take.playrate.clamp(0.01, 100.)),
+        volume_db: (take.volume_db.clamp(-150., 24.) * 100.).round() / 100.,
+        fade_in: round(take.fade_in.clamp(0., take.length)),
+        fade_out: round(take.fade_out.clamp(0., take.length)),
+        ..take.clone()
+    }
+}
+
+/// The operators applied to a take so far, each `factor` times as much (what each did, in a few words), the take then as REAPER
+/// will hold it.
+fn applied(ops: &[Value], factor: f64, take: &mut ItemTake, source: &ItemTake, rng: &mut Rng) -> Result<Vec<String>, String> {
+    let said = ops.iter().map(|op| apply_one(op, factor, take, source, rng)).collect();
+    *take = as_held(take);
+    said
+}
+
+/// A take whose render clipped, turned down by its take volume (#407): `db` quieter, the rest of it as it is.
+fn turned_down(take: &ItemTake, db: f64) -> ItemTake {
+    as_held(&ItemTake { volume_db: take.volume_db - db, ..take.clone() })
+}
+
+/// What a take holds, as kept between runs: what its digest is of.
+fn material_value(material: &ItemTake) -> Value {
+    json!({
+        "midi": material.midi, "length": material.length, "offset": material.offset, "pitch": material.pitch,
+        "playrate": material.playrate, "volumeDb": material.volume_db, "fadeIn": material.fade_in, "fadeOut": material.fade_out,
+        "notes": material.notes.iter().map(Note::json).collect::<Vec<_>>(),
+        "anchors": material.anchors.iter().map(Note::json).collect::<Vec<_>>(),
+    })
+}
+
+fn digest_of(material: &ItemTake) -> String {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    material_value(material).to_string().hash(&mut hasher);
+    format!("{:016x}", hasher.finish())
 }
 
 /// The settings a change writes for a take.
@@ -364,7 +411,7 @@ impl<S: RefScheme + 'static> VariationsBackend for ReaperVariations<S> {
     }
 
     fn apply_ops(&self, ops: &[Value], factor: f64, take: &mut ItemTake, source: &ItemTake, rng: &mut Rng) -> Result<Vec<String>, String> {
-        ops.iter().map(|op| apply_one(op, factor, take, source, rng)).collect()
+        applied(ops, factor, take, source, rng)
     }
 
     fn written(&self, _set: &ReaperSet, lines: &[Value], base: &ItemTake) -> Result<ItemTake, String> {
@@ -401,10 +448,11 @@ impl<S: RefScheme + 'static> VariationsBackend for ReaperVariations<S> {
     }
 
     fn digest(&self, material: &ItemTake) -> String {
-        use std::hash::{Hash, Hasher};
-        let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        self.material_json(material).to_string().hash(&mut hasher);
-        format!("{:016x}", hasher.finish())
+        digest_of(material)
+    }
+
+    fn quieter(&self, take: &ItemTake, db: f64) -> Result<ItemTake, String> {
+        Ok(turned_down(take, db))
     }
 
     async fn write_new(
@@ -580,12 +628,7 @@ impl<S: RefScheme + 'static> VariationsBackend for ReaperVariations<S> {
     }
 
     fn material_json(&self, material: &ItemTake) -> Value {
-        json!({
-            "midi": material.midi, "length": material.length, "offset": material.offset, "pitch": material.pitch,
-            "playrate": material.playrate, "volumeDb": material.volume_db, "fadeIn": material.fade_in, "fadeOut": material.fade_out,
-            "notes": material.notes.iter().map(Note::json).collect::<Vec<_>>(),
-            "anchors": material.anchors.iter().map(Note::json).collect::<Vec<_>>(),
-        })
+        material_value(material)
     }
 
     fn material_of(&self, value: &Value) -> Option<ItemTake> {
@@ -682,6 +725,44 @@ mod tests {
             apply_one(op, 1.0, &mut take, &source, &mut rng).unwrap();
         }
         assert!(take.length < source.length / take.playrate + 1e-9, "never longer than its sound at the new rate: {take:?}");
+    }
+
+    /// (#407) What REAPER's reads give back of an audio take Kumi wrote (reaper-kumi's item and take rows: times, pitch and rate
+    /// to the millionth, the volume to the 100th of a dB) is the take Kumi kept, drawn by any operator and then turned down:
+    /// it stays Kumi's for a change or a drop. Before, a take kept the places its draw gave it, and read back as edited.
+    #[test]
+    fn an_audio_take_reads_back_from_reaper_as_kumi_kept_it_drawn_or_turned_down() {
+        let read_back = |take: &ItemTake| {
+            let written = settings(take, None);
+            let number = |key: &str| written[key].as_f64().unwrap();
+            let millionth = |value: f64| (value * 1e6).round() / 1e6;
+            let length = number("length");
+            let gain = 10f64.powf(number("volumeDb") / 20.);
+            ItemTake {
+                length: millionth(length),
+                offset: millionth(number("startOffset")),
+                pitch: millionth(number("pitch")),
+                playrate: millionth(number("playrate")),
+                volume_db: millionth((20. * gain.log10() * 100.).round() / 100.),
+                fade_in: millionth(number("fadeIn").min(length)),
+                fade_out: millionth(number("fadeOut").min(length)),
+                ..take.clone()
+            }
+        };
+        // (a source as REAPER reads it: a hot one, its offset to the millionth)
+        let source = ItemTake { volume_db: -0.37, offset: 0.123456, ..audio() };
+        for name in AUDIO_OPS {
+            for (seed, up) in [(1, true), (2, false), (3, true), (4, false)] {
+                let mut take = source.clone();
+                let mut rng = Rng::new(seed);
+                applied(&[json!({"op": name, "amount": 0.5, "up": up})], 1.35, &mut take, &source, &mut rng).unwrap();
+                assert_eq!(digest_of(&read_back(&take)), digest_of(&take), "{name}: {take:?}");
+                let quieter = turned_down(&take, 1.4);
+                assert!((quieter.volume_db - (take.volume_db - 1.4)).abs() < 1e-9, "{name}: {quieter:?}");
+                assert_eq!(ItemTake { volume_db: take.volume_db, ..quieter.clone() }, take, "{name}: only its volume moves");
+                assert_eq!(digest_of(&read_back(&quieter)), digest_of(&quieter), "{name}: {quieter:?}");
+            }
+        }
     }
 
     #[test]
