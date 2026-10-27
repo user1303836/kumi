@@ -663,8 +663,9 @@ impl<B: VariationsBackend + 'static> Variations<B> {
     // Listening
 
     /// Renders the takes offline, with the source once, and hears them. A take that clips where the source doesn't is turned
-    /// down to the source's peak, otherwise as it was (#407); one that is silent, or clips in a DAW that can't turn it down, is
-    /// drawn again (lines the model wrote are only said). Either is one more change, and is heard again (up to twice). Each
+    /// down to the source's peak, otherwise as it was (#407), and again only if that lowered its peak; one that is silent, or
+    /// clips in a DAW that can't turn it down, is drawn again (lines the model wrote are only said). Either is one more change,
+    /// and is heard again (up to twice). Each
     /// take's line says how it sounded and how much of the source's rhythm it keeps (its family). Never while the DAW plays: a
     /// render stops playback. Answers what to tell.
     async fn listen(
@@ -699,6 +700,8 @@ impl<B: VariationsBackend + 'static> Variations<B> {
         let mut notes = Vec::new();
         let mut pending: Vec<usize> = numbers.to_vec();
         let mut source: Option<Option<Heard>> = None;
+        // (each take turned down in the round before: its peak then, and how far down it was turned)
+        let mut turned: BTreeMap<usize, (f64, f64)> = BTreeMap::new();
         for round in 0..3u32 {
             // (a later round renders the takes drawn again or turned down: the producer may have pressed play meanwhile)
             if round > 0 && self.backend.playing(signal).await != Some(false) {
@@ -731,10 +734,14 @@ impl<B: VariationsBackend + 'static> Variations<B> {
                 let family = source.as_ref().map(|source| heard.family(source));
                 let fault = heard.fault(source.as_ref());
                 let redraw = recipes.get(&number).filter(|recipe| !recipe.ops.is_empty() && round < 2);
+                // (a turn-down that didn't lower the take's peak by half of it isn't repeated: the DAW's lever doesn't reach its
+                // level, as a Renoise plug-in that takes the volume column for a velocity it ignores doesn't; the take stays as
+                // it was turned down, and says so)
+                let unmoved = turned.remove(&number).is_some_and(|(peak, over)| peak - heard.peak < over / 2.);
                 // (a take that clips is turned down, the rest of it as it was: its level is no reason to draw it again, and the
                 // producer lowering it by hand would leave it edited since Kumi wrote it (#407))
                 let quieter = match &fault {
-                    Some(Fault::Clips { over, .. }) if round < 2 => Some(
+                    Some(Fault::Clips { over, .. }) if round < 2 && !unmoved => Some(
                         set.take(number)
                             .ok_or_else(|| "the take is gone".to_string())
                             .and_then(|take| self.backend.quieter(&take.material, *over)),
@@ -744,14 +751,15 @@ impl<B: VariationsBackend + 'static> Variations<B> {
                 match (fault, quieter, redraw) {
                     (Some(fault), Some(Ok(material)), _) => match self.turn_down(set, number, material, signal).await {
                         Ok(done) => {
-                            if let Some(take) = set.take_mut(number) {
+                            if let (Some(take), Fault::Clips { peak, over, .. }) = (set.take_mut(number), &fault) {
                                 take.line = format!("{} · {}", take.line, turned_down(&fault, &done));
+                                turned.insert(number, (*peak, *over));
                             }
                             again.push(number);
                         }
                         Err(why) => notes.push(format!("V{number} {} in the render, and turning it down failed: {why}", fault.words())),
                     },
-                    (Some(fault), _, Some(recipe)) => match self.redraw(set, number, recipe, bounds, round, signal).await {
+                    (Some(fault), _, Some(recipe)) if !unmoved => match self.redraw(set, number, recipe, bounds, round, signal).await {
                         Ok(()) => {
                             if let Some(take) = set.take_mut(number) {
                                 take.line = format!("{} (drawn again after the render: it {})", take.line, fault.words());
@@ -760,8 +768,12 @@ impl<B: VariationsBackend + 'static> Variations<B> {
                         }
                         Err(why) => notes.push(format!("V{number} {} in the render, and drawing it again failed: {why}", fault.words())),
                     },
-                    (Some(fault), quieter, None) => {
-                        let why = quieter.and_then(Result::err).map(|why| format!(" (not turned down: {why})")).unwrap_or_default();
+                    (Some(fault), quieter, _) => {
+                        let why = match quieter.and_then(Result::err) {
+                            _ if unmoved => " (turning it down didn't lower its peak)".to_string(),
+                            Some(why) => format!(" (not turned down: {why})"),
+                            None => String::new(),
+                        };
                         if let Some(take) = set.take_mut(number) {
                             take.line = format!("{} · heard: it {}{why}", take.line, fault.words());
                         }

@@ -44,10 +44,10 @@ struct Daw {
     plays_after: Cell<usize>,
     renders: Cell<usize>,
     clips: Cell<usize>,
-    /// Where the source peaks in a render, as a take that doesn't clip does (−6 dBFS by default), and where a take that clips
-    /// peaks (0 dBFS by default).
+    /// Where the source peaks in a render, as a take that doesn't clip does (−6 dBFS by default), and where takes that clip
+    /// peak, render by render (the last again once the others are used; 0 dBFS by default): a level a turn-down didn't move.
     source_peak: Cell<Option<f64>>,
-    clip_peak: Cell<Option<f64>>,
+    clip_peaks: RefCell<Vec<f64>>,
     /// The DAW can't turn a take down; what it was asked to turn down (dB) and the take it was.
     gainless: Cell<bool>,
     quieted: RefCell<Vec<(f64, Steps)>>,
@@ -305,10 +305,13 @@ impl VariationsBackend for Fake {
         for number in numbers {
             let Some(take) = set.take(*number) else { continue };
             let clips = daw.clips.get() > 0;
+            let mut at = peak;
             if clips {
                 daw.clips.set(daw.clips.get() - 1);
+                let mut peaks = daw.clip_peaks.borrow_mut();
+                at = if peaks.len() > 1 { peaks.remove(0) } else { peaks.first().copied().unwrap_or(0.) };
             }
-            takes.insert(*number, Ok(heard(&take.material, if clips { daw.clip_peak.get().unwrap_or(0.) } else { peak })));
+            takes.insert(*number, Ok(heard(&take.material, at)));
         }
         Ok((source, takes))
     }
@@ -523,7 +526,7 @@ async fn takes_that_clip_where_a_hot_source_doesnt_are_turned_down_to_its_peak_a
     let daw = Rc::new(Daw::default());
     let tool = kumi(&daw, home.path());
     daw.source_peak.set(Some(-0.3));
-    daw.clip_peak.set(Some(1.1));
+    daw.clip_peaks.borrow_mut().push(1.1);
     daw.clips.set(2);
     let made = run(&tool, json!({"action": "make", "source": {"steps": BEAT}, "count": 2, "seed": 7})).await.unwrap();
     for (take, change) in made["takes"].as_array().unwrap().iter().zip(["c3", "c4"]) {
@@ -554,6 +557,32 @@ async fn takes_that_clip_where_a_hot_source_doesnt_are_turned_down_to_its_peak_a
     let written =
         run(&tool, json!({"action": "make", "source": {"steps": BEAT}, "takes": [{"lines": [{"step": 2, "level": 9}]}]})).await.unwrap();
     assert!(written["takes"][0]["line"].as_str().unwrap().contains(" · turned down 1.4 dB to the source's peak"), "{written}");
+}
+
+/// (#407, review) A turn-down that didn't lower the take's peak by half of it isn't repeated: where the DAW's lever doesn't reach
+/// the take's level (a plug-in that ignores velocity), the take stays as first turned down, not turned down again for nothing,
+/// and its line says so. One that lowered it, but not enough, is turned down again.
+#[tokio::test(flavor = "current_thread")]
+async fn a_turn_down_that_didnt_lower_the_peak_isnt_repeated_and_one_that_did_is() {
+    let home = tempfile::tempdir().unwrap();
+    let daw = Rc::new(Daw::default());
+    let tool = kumi(&daw, home.path());
+    // (V1 peaks at 0 dBFS before its turn-down and after)
+    daw.clips.set(2);
+    let made = run(&tool, json!({"action": "make", "source": {"steps": BEAT}, "count": 1, "seed": 7})).await.unwrap();
+    let line = made["takes"][0]["line"].as_str().unwrap();
+    let said = " · turned down 6.0 dB to the source's peak (c2): its render clipped (peak 0.0 dBFS) · heard: it clips (peak 0.0 dBFS) (turning it down didn't lower its peak)";
+    assert!(line.ends_with(said), "{line}");
+    assert_eq!((daw.quieted.borrow().len(), daw.changes.get(), daw.renders.get()), (1, 2, 2), "turned down once");
+
+    // (V2 peaks at +6 dBFS, then at 0 after its turn-down: lowered by half of it, so turned down again, and heard fine)
+    daw.clips.set(2);
+    *daw.clip_peaks.borrow_mut() = vec![6., 0.];
+    let made = run(&tool, json!({"action": "make", "source": {"steps": BEAT}, "count": 1, "seed": 8})).await.unwrap();
+    let line = made["takes"][0]["line"].as_str().unwrap();
+    let said = " · turned down 12.0 dB to the source's peak (c4): its render clipped (peak 6.0 dBFS) · turned down 6.0 dB to the source's peak (c5): its render clipped (peak 0.0 dBFS) · heard: peak \u{2212}6.0 dBFS";
+    assert!(line.contains(said), "{line}");
+    assert_eq!(daw.quieted.borrow().iter().map(|(db, _)| *db).collect::<Vec<_>>(), [6., 12., 6.]);
 }
 
 /// (#400 review notes) Numbers once given to takes of a name never come back, though Kumi let go of the set that gave them (it
