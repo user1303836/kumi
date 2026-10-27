@@ -491,6 +491,9 @@ async fn a_devices_code_is_checked_in_a_process_of_its_own_it_cant_reach_kumi_ca
     use_built_harness();
     // Each check in a process of its own, all at once: two of them wait out their deadline.
     let isolated = |code: Value, options: IsolatedOptions| async move { check_midi_device_isolated(&spec(code), options).await };
+    // The loops that send or say without end are stopped by what a run keeps, not at the deadline: theirs is twice the
+    // usual, as a Windows runner took 9 s and more to get there beside the other checks.
+    let capped = IsolatedOptions { timeout_ms: Some(20_000) };
     let (same, escape, (endless, endless_took), sending, saying, looping, throwing) = tokio::join!(
         isolated(json!({}), IsolatedOptions::default()),
         isolated(
@@ -508,12 +511,9 @@ async fn a_devices_code_is_checked_in_a_process_of_its_own_it_cant_reach_kumi_ca
         },
         isolated(
             json!({ "code": "function midi(event) { for (;;) send({ type: 'cc', controller: 1, value: 1 }); }", "tests": [] }),
-            IsolatedOptions::default(),
+            capped.clone(),
         ),
-        isolated(
-            json!({ "code": "function midi(event) { for (;;) post('Kumi device: again\\n'); pass(event); }", "tests": [] }),
-            IsolatedOptions::default()
-        ),
+        isolated(json!({ "code": "function midi(event) { for (;;) post('Kumi device: again\\n'); pass(event); }", "tests": [] }), capped),
         isolated(
             json!({ "code": "let i = 0; while (true) { i++; }\nfunction midi(event) { pass(event); }", "tests": [] }),
             IsolatedOptions::default()
