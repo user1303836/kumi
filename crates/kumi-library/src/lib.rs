@@ -764,3 +764,46 @@ pub fn library_dir(kumi_dir: &str, env: Option<&HashMap<String, String>>) -> Str
     });
     value.filter(|s| !s.is_empty()).unwrap_or_else(|| sources::join(kumi_dir, "library"))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use store::Entry;
+
+    /// While a learn goes on, the sounds it learns show in the index at most every 3 s; once it's done (its logs
+    /// written), at once.
+    #[tokio::test(flavor = "current_thread")]
+    async fn what_a_learn_learned_shows_at_once_when_its_done() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let dir = tempfile::tempdir().unwrap();
+                let samples = dir.path().join("Samples");
+                std::fs::create_dir_all(&samples).unwrap();
+                let library = create_library(LibraryOptions {
+                    dir: dir.path().join("library").to_string_lossy().into(),
+                    folders: Some(vec![samples.to_string_lossy().into()]),
+                    sources: Some(SourceOptions { home: Some(dir.path().to_string_lossy().into()), ..Default::default() }),
+                    fork: Some(false),
+                    find_sets: Some(false),
+                    delay_ms: Some(3_600_000),
+                    ..Default::default()
+                });
+                let folder = library.sources().await.into_iter().next().unwrap().path;
+                let sound = |name: &str| SoundEntry {
+                    file: Entry { path: format!("{folder}/{name}"), size: 1, mtime: 1, gone: None },
+                    ..Default::default()
+                };
+                let logs = library_logs(&library.dir);
+                logs.sounds.append(&[sound("A.wav")]).await.unwrap();
+                assert_eq!(library.sound_index().await.unwrap().entries.len(), 1);
+                // A learn going on learns another, a moment after the index was built: held back.
+                logs.sounds.append(&[sound("B.wav")]).await.unwrap();
+                *library.progress.borrow_mut() = Some(LearnProgress { phase: LearnPhase::Sounds, ..Default::default() });
+                assert_eq!(library.sound_index().await.unwrap().entries.len(), 1, "while it learns");
+                library.progress.borrow_mut().as_mut().unwrap().phase = LearnPhase::Done;
+                assert_eq!(library.sound_index().await.unwrap().entries.len(), 2, "once it's done");
+                library.close().await;
+            })
+            .await;
+    }
+}
