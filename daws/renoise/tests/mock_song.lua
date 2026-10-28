@@ -303,6 +303,7 @@ local function device_setters(data)
   local function setter(member, field, observable, transform)
     return function(value)
       if member == "active_preset_data" then
+        if data.ignore_preset_data == value then return end
         if data.reject_preset_data == value then
           data.preset_data = "partial state"
           error("plug-in rejected state")

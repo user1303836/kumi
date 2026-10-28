@@ -27,7 +27,8 @@
       "4"
     ],
     "source": "Installed native preset files and shipped parameter-name metadata; no factory preset bodies copied.",
-    "verification": "Native documents inspected; installed-binary version and runtime acceptance remain unverified."
+    "verification": "Native documents inspected; installed-binary version and runtime acceptance remain unverified.",
+    "parameterLinks": "Guessed links associate names and indices from installed metadata; physical-unit mappings remain unverified."
   },
   "fields": {
     "@progName": {
@@ -952,353 +953,283 @@
   "parameters": {
     "bypass": {
       "field": "inputParams/@p0",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "doublePrecision": {
       "field": "inputParams/@p1",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "inputGain": {
       "field": "inputParams/@p2",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "eqAmount": {
       "field": "inputParams/@p3",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "learn": {
       "field": "inputParams/@p4",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "reset": {
       "field": "inputParams/@p5",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "slope": {
       "field": "inputParams/@p6",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "weighting": {
       "field": "inputParams/@p7",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "bassRolloff": {
       "field": "inputParams/@p8",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "bassFrequ": {
       "field": "inputParams/@p9",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "hiShelf": {
       "field": "inputParams/@p10",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "targetAirFrequ": {
       "field": "inputParams/@p11",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "lowcut": {
       "field": "inputParams/@p12",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "hiCut": {
       "field": "inputParams/@p13",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "outputGain": {
       "field": "inputParams/@p14",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "kReserved1": {
       "field": "inputParams/@p15",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "kReserved2": {
       "field": "inputParams/@p16",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "kReserved3": {
       "field": "inputParams/@p17",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "kReserved4": {
       "field": "inputParams/@p18",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "kReserved5": {
       "field": "inputParams/@p19",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "kReserved6": {
       "field": "inputParams/@p20",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "kReserved7": {
       "field": "inputParams/@p21",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "ch01bypass": {
       "field": "inputParams/@p22",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "ch01mute": {
       "field": "inputParams/@p23",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "ch01solo": {
       "field": "inputParams/@p24",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "ch02bypass": {
       "field": "inputParams/@p25",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "ch02mute": {
       "field": "inputParams/@p26",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "ch02solo": {
       "field": "inputParams/@p27",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "ch03bypass": {
       "field": "inputParams/@p28",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "ch03mute": {
       "field": "inputParams/@p29",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "ch03solo": {
       "field": "inputParams/@p30",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "ch04bypass": {
       "field": "inputParams/@p31",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "ch04mute": {
       "field": "inputParams/@p32",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "ch04solo": {
       "field": "inputParams/@p33",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "ch05bypass": {
       "field": "inputParams/@p34",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "ch05mute": {
       "field": "inputParams/@p35",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "ch05solo": {
       "field": "inputParams/@p36",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "ch06bypass": {
       "field": "inputParams/@p37",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "ch06mute": {
       "field": "inputParams/@p38",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "ch06solo": {
       "field": "inputParams/@p39",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "ch07bypass": {
       "field": "inputParams/@p40",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "ch07mute": {
       "field": "inputParams/@p41",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "ch07solo": {
       "field": "inputParams/@p42",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "ch08bypass": {
       "field": "inputParams/@p43",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "ch08mute": {
       "field": "inputParams/@p44",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "ch08solo": {
       "field": "inputParams/@p45",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "ch09bypass": {
       "field": "inputParams/@p46",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "ch09mute": {
       "field": "inputParams/@p47",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "ch09solo": {
       "field": "inputParams/@p48",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "ch10bypass": {
       "field": "inputParams/@p49",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "ch10mute": {
       "field": "inputParams/@p50",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "ch10solo": {
       "field": "inputParams/@p51",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "ch11bypass": {
       "field": "inputParams/@p52",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "ch11mute": {
       "field": "inputParams/@p53",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "ch11solo": {
       "field": "inputParams/@p54",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "ch12bypass": {
       "field": "inputParams/@p55",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "ch12mute": {
       "field": "inputParams/@p56",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "ch12solo": {
       "field": "inputParams/@p57",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "ch13bypass": {
       "field": "inputParams/@p58",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "ch13mute": {
       "field": "inputParams/@p59",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "ch13solo": {
       "field": "inputParams/@p60",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "ch14bypass": {
       "field": "inputParams/@p61",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "ch14mute": {
       "field": "inputParams/@p62",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "ch14solo": {
       "field": "inputParams/@p63",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "ch15bypass": {
       "field": "inputParams/@p64",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "ch15mute": {
       "field": "inputParams/@p65",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "ch15solo": {
       "field": "inputParams/@p66",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "ch16bypass": {
       "field": "inputParams/@p67",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "ch16mute": {
       "field": "inputParams/@p68",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "ch16solo": {
       "field": "inputParams/@p69",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     }
   }
 }

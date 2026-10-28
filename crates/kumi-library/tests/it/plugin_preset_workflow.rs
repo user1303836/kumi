@@ -22,7 +22,8 @@ fn change(path: &str, value: Value) -> Edit {
 }
 
 fn evidence(plugin: &str) -> Value {
-    let path = std::path::Path::new(env!("KUMI_WORKSPACE")).join("plugin-formats").join(plugin).join("format-1/verified.json");
+    let source = structure::builtin(plugin).unwrap().info.format_directory();
+    let path = std::path::Path::new(env!("KUMI_WORKSPACE")).join("plugin-formats").join(source).join("verified.json");
     serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap()
 }
 
@@ -179,14 +180,23 @@ fn serum_creation_clears_the_path_and_one_edit_preserves_each_state_halfs_keys()
     let opts = options("serum-2");
     let created = preset::create("serum-2", &opts, &[]).unwrap();
     let fresh = serum2::SerumState::read(created.component().unwrap(), created.controller()).unwrap();
+    assert!(fresh.processor.header_json().unwrap().get("presetName").is_none());
     assert_eq!(fresh.controller.as_ref().unwrap().body.get("selectedPresetPath").and_then(cbor::Value::as_str), Some(""));
     for key in ["selectedPresetPath", "presetComment", "presetHasBeenEdited"] {
         assert!(fresh.processor.body.get(key).is_none(), "controller key leaked: {key}");
     }
+    assert!(fresh.processor.body.at("VoicePanel0/displayName").is_none());
+    assert_eq!(fresh.controller.as_ref().unwrap().body.at("VoicePanel0/displayName").and_then(cbor::Value::as_str), Some(""));
+    assert!(matches!(fresh.controller.as_ref().unwrap().body.get("LFO0"), Some(cbor::Value::Simple(22, _))));
     let mut container = VstPreset::read(templates::initial("serum-2").unwrap()).unwrap();
     let mut old = serum2::SerumState::read(container.component().unwrap(), container.controller()).unwrap();
     put(&mut old.processor.body, "futureProcessor", cbor::Value::text("processor only"));
     put(&mut old.controller.as_mut().unwrap().body, "futureController", cbor::Value::text("controller only"));
+    for (file, key) in [(&mut old.processor, "processorOnly"), (old.controller.as_mut().unwrap(), "controllerOnly")] {
+        let cbor::Value::Map(sections, _) = &mut file.body else { panic!("map expected") };
+        let voice = &mut sections.iter_mut().find(|(name, _)| name.as_str() == Some("VoicePanel0")).unwrap().1;
+        put(voice, key, cbor::Value::text("preserve nested ownership"));
+    }
     // Use an artificial source location: edits must preserve it, new files must not.
     let cbor::Value::Map(entries, _) = &mut old.controller.as_mut().unwrap().body else { panic!("map expected") };
     let path = entries.iter_mut().find(|(key, _)| key.as_str() == Some("selectedPresetPath")).unwrap();
@@ -212,6 +222,37 @@ fn serum_creation_clears_the_path_and_one_edit_preserves_each_state_halfs_keys()
         old.controller.as_ref().unwrap().body.get("selectedPresetPath")
     );
     assert_eq!(new.processor.body.at("Oscillator1/plainParams/kParamVolume").and_then(cbor::Value::as_f64), Some(0.45));
+    // The entire controller tree, including null sentinels, is untouched by a
+    // processor-only control edit. No nested editor keys migrate across halves.
+    assert_eq!(new.controller.as_ref().unwrap().body, old.controller.as_ref().unwrap().body);
+    assert!(new.processor.body.at("VoicePanel0/controllerOnly").is_none());
+    let mut expected = old.processor.body.clone();
+    let cbor::Value::Map(sections, _) = &mut expected else { panic!("map expected") };
+    let cbor::Value::Map(oscillator, _) = &mut sections.iter_mut().find(|(key, _)| key.as_str() == Some("Oscillator1")).unwrap().1 else {
+        panic!("map expected")
+    };
+    let parameters = &mut oscillator.iter_mut().find(|(key, _)| key.as_str() == Some("plainParams")).unwrap().1;
+    put(parameters, "kParamVolume", cbor::Value::Float(cbor::Float::Double(0.45f64.to_bits())));
+    assert_eq!(new.processor.body, expected);
+}
+
+#[test]
+fn serum_text_edits_cannot_introduce_paths_or_replace_containers() {
+    let mut native = serum2::SerumPreset::init("Safe native text").unwrap();
+    for (path, text) in [
+        ("Oscillator0/SampleOsc0/samplePath", r"\\host\share\sample.wav"),
+        ("Oscillator0/GranularOsc0/samplePath", "C:/samples/local.wav"),
+        ("Oscillator0/WTOsc0/relativePathToWT", "S2 Tables/user.wav"),
+        ("FXRack0/FX/0/FXConv/pathToIR", r"\\host\share\room.wav"),
+        ("Oscillator0/plainParams", "replace the whole map"),
+        ("presetAuthor", "unverified author field"),
+    ] {
+        assert!(native.set(path, &json!(text)).is_err(), "accepted {path}");
+        assert!(preset::create("serum-2", &options("serum-2"), &[change(path, json!(text))]).is_err(), "workflow accepted {path}");
+    }
+    native.set("Oscillator0/plainParams", &json!("default")).unwrap();
+    native.set("presetName", &json!("Verified label")).unwrap();
+    assert_eq!(native.name().as_deref(), Some("Verified label"));
 }
 
 #[test]
@@ -326,14 +367,14 @@ fn native_softube_templates_require_the_exact_product_and_full_parameter_layout(
         template.document["PresetList"].as_array_mut().unwrap().push(second);
         let bytes = template.write().unwrap();
         assert_eq!(preset::edit_native(&format.info.plugin, &bytes, None, &[]).unwrap().bytes, bytes);
-        let created = preset::create_native_from_template(
+        let created = preset::create_native_from_template(&format.info.plugin, &bytes, 1, "My new preset", &[]).unwrap();
+        assert!(preset::edit_native(
             &format.info.plugin,
             &bytes,
-            1,
-            "My new preset",
-            &[change(&format!("presets/0/parameters/{}", parameters[0].0), json!(0.25))],
+            None,
+            &[change(&format!("presets/0/parameters/{}", parameters[0].0), json!(0.25))]
         )
-        .unwrap();
+        .is_err());
         assert!(!created.runtime_verified);
         assert_eq!(created.extension, ".softubepreset");
         assert_eq!(created.source_version.as_deref(), Some("2.4.44"));

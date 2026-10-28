@@ -1156,6 +1156,12 @@ fn set_config(owner: u64, index: c_int, key: *const c_char, value: *const c_char
                 true
             }
             "vst_chunk" => {
+                if fx.config.contains_key("fake.refuseState") {
+                    return false;
+                }
+                if fx.config.contains_key("fake.ignoreState") {
+                    return true;
+                }
                 if fx.chunk.is_none() {
                     return false;
                 }
@@ -1166,6 +1172,12 @@ fn set_config(owner: u64, index: c_int, key: *const c_char, value: *const c_char
                         p.value = v;
                         p.shown = p.text_for(v);
                     }
+                }
+                let extra = value.split('+').skip(fx.params.len()).collect::<Vec<_>>().join("+");
+                if extra.is_empty() {
+                    fx.config.remove("fake.stateExtra");
+                } else {
+                    fx.config.insert("fake.stateExtra".into(), format!("+{extra}"));
                 }
                 fx.chunk = Some(value);
                 if fx.config.contains_key("fake.normalizeState") {
@@ -1303,7 +1315,10 @@ fn set_preset(owner: u64, index: c_int, name: *const c_char) -> bool {
                 p.value = value;
                 p.shown = p.text_for(value);
             }
-            fx.preset = "File preset".into();
+            fx.preset = name.clone();
+            if let Some(extra) = fx.config.get("fake.fileExtra").cloned() {
+                fx.config.insert("fake.stateExtra".into(), extra);
+            }
             fx.config.insert("fake.loadedFile".into(), name);
             let refused = fx.config.contains_key("fake.refusePresetFile");
             s.undo_dirty = true;

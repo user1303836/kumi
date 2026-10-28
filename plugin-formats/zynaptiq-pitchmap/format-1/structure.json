@@ -27,7 +27,8 @@
       "4"
     ],
     "source": "Installed native preset files and shipped parameter-name metadata; no factory preset bodies copied.",
-    "verification": "Native documents inspected; installed-binary version and runtime acceptance remain unverified."
+    "verification": "Native documents inspected; installed-binary version and runtime acceptance remain unverified.",
+    "parameterLinks": "Guessed links associate names and indices from installed metadata; physical-unit mappings remain unverified."
   },
   "fields": {
     "@progName": {
@@ -315,108 +316,87 @@
   "parameters": {
     "BYPASS": {
       "field": "inputParams/@p0",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "THRESHOLD": {
       "field": "inputParams/@p1",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "FEEL": {
       "field": "inputParams/@p2",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "PURIFY": {
       "field": "inputParams/@p3",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "GLIDE": {
       "field": "inputParams/@p4",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "ELECTRIFY": {
       "field": "inputParams/@p5",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "STRICT": {
       "field": "inputParams/@p6",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "ALGOMODE": {
       "field": "inputParams/@p7",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "MUTE": {
       "field": "inputParams/@p8",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "XCLUDE": {
       "field": "inputParams/@p9",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "MIDIMAP": {
       "field": "inputParams/@p10",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "EXTMIDI": {
       "field": "inputParams/@p11",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "INPUTTUNING": {
       "field": "inputParams/@p12",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "OUTPUTTUNING": {
       "field": "inputParams/@p13",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "LOW_KEY": {
       "field": "inputParams/@p14",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "HIGH_KEY": {
       "field": "inputParams/@p15",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "ROUNDING_MODE": {
       "field": "inputParams/@p16",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "REPEAT": {
       "field": "inputParams/@p17",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "GLOBAL_THRES": {
       "field": "inputParams/@p18",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "LOAD_SNAPSHOT": {
       "field": "inputParams/@p19",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "KEYB_OCTAVE": {
       "field": "inputParams/@p20",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     }
   }
 }

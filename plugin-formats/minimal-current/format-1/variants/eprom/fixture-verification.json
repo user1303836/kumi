@@ -1,0 +1,9 @@
+{
+  "plugin": "minimal-eprom-memory-rites",
+  "version": "1.0.3",
+  "fixtureSha256": "f72e6d968da55c950720246b99c7867f04cd355b053ff6877c55fb89d0339e55",
+  "sessionId": "all zeros",
+  "runtime": "Sanitized component restored in a fresh VST3 instance. Product root, source version and every mapped parameter matched after reload within native floating-point serialization precision.",
+  "parametersChecked": 1533,
+  "maxRelativeErrorWithUnitFloor": 1.430511474609375e-06
+}

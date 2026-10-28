@@ -133,14 +133,18 @@ fn superior_creates_sampler_state_inside_its_vst3_container() {
 }
 
 #[test]
-fn superior_record_edits_preserve_other_sections_and_escape_strings() {
+fn superior_numeric_edits_preserve_other_sections_and_refuse_text_changes() {
     let bytes = b"PlugVersion 3.4.1\r\nSAMPLER {\r\nHQ {\r\nmastervol 1\r\n}\r\nmic {\r\nname \"Room One\"\r\nlevels 1 2\r\n}\r\nmic {\r\nname \"Room Two\"\r\n}\r\n}\r\n";
     let mut preset = superior_drummer::Preset::read(bytes).unwrap();
     assert_eq!(preset.write(), bytes);
-    preset.set("SAMPLER[0]/mic[0]/name[0]", &json!("My \"room\"")).unwrap();
+    for value in ["My \"room\"", r"\\host\share\sample.wav", r"C:\Samples\kick.wav", "/mnt/library/snare.wav"] {
+        let before = preset.clone();
+        assert!(preset.set("SAMPLER[0]/mic[0]/name[0]", &json!(value)).unwrap_err().to_string().contains("read-only"));
+        assert_eq!(preset, before);
+    }
     preset.set("SAMPLER[0]/mic[0]/levels[0]", &json!([0.25, 0.75])).unwrap();
     let written = String::from_utf8(preset.write()).unwrap();
-    assert!(written.contains("name \"My \\\"room\\\"\"\r\n"));
+    assert!(written.contains("name \"Room One\"\r\n"));
     assert!(written.contains("name \"Room Two\"\r\n"));
     assert!(written.contains("mastervol 1\r\n"));
     assert!(preset.set("SAMPLER[0]/mic[0]/levels[0]", &json!(0.5)).is_err());
@@ -151,7 +155,7 @@ fn superior_record_edits_preserve_other_sections_and_escape_strings() {
 }
 
 #[test]
-fn superior_section_arguments_and_quoted_braces_keep_their_types() {
+fn superior_section_arguments_quoted_braces_and_bare_text_remain_read_only() {
     let bytes = b"PlugVersion 3.4.1\nSAMPLER {\ninstbox 12 \"Kick { 2 }\" {\nname \"123\"\nlevel 1\nmode kick\n}\n}\n";
     let mut preset = superior_drummer::Preset::read(bytes).unwrap();
     assert_eq!(
@@ -159,18 +163,63 @@ fn superior_section_arguments_and_quoted_braces_keep_their_types() {
         Some(&Node::List(vec![Node::Float(12.0), Node::Text("Kick { 2 }".into())]))
     );
     assert_eq!(preset.to_node().get("SAMPLER[0]/instbox[0]/name[0]"), Some(&Node::Text("123".into())));
-    preset.set("SAMPLER[0]/instbox[0]/$args", &json!([15, "Snare { main }"])).unwrap();
+    assert!(preset.set("SAMPLER[0]/instbox[0]/$args", &json!([15, "Snare { main }"])).is_err());
     assert!(preset.set("SAMPLER[0]/instbox[0]/$args", &json!(["15", "Snare"])).is_err());
     assert!(preset.set("SAMPLER[0]/instbox[0]/name[0]", &json!(123)).is_err());
     assert!(preset.set("SAMPLER[0]/instbox[0]/level[0]", &json!("1")).is_err());
-    preset.set("SAMPLER[0]/instbox[0]/mode[0]", &json!("snare")).unwrap();
+    assert!(preset.set("SAMPLER[0]/instbox[0]/mode[0]", &json!("snare")).is_err());
     assert!(preset.set("SAMPLER[0]/instbox[0]/mode[0]", &json!("two tokens")).is_err());
     assert!(preset.set("SAMPLER[0]/instbox[0]/mode[0]", &json!("123")).is_err());
     let reread = superior_drummer::Preset::read(&preset.write()).unwrap();
     assert_eq!(
         reread.to_node().get("SAMPLER[0]/instbox[0]/$args"),
-        Some(&Node::List(vec![Node::Float(15.0), Node::Text("Snare { main }".into())]))
+        Some(&Node::List(vec![Node::Float(12.0), Node::Text("Kick { 2 }".into())]))
     );
-    assert!(String::from_utf8(preset.write()).unwrap().contains("name \"123\"\nlevel 1\n"));
-    assert!(String::from_utf8(preset.write()).unwrap().contains("mode snare\n"));
+    assert_eq!(preset.write(), bytes);
+}
+
+#[test]
+fn superior_rejects_path_amplification_within_input_and_token_limits() {
+    // Both inputs are small and every individual path is below 4096 bytes.
+    // Materializing the repeated parent path without an aggregate budget
+    // would nevertheless retain more than 60 MiB of generated path strings.
+    for repeated in ["a 1\n".repeat(32_000), "a 1 {\n}\n".repeat(16_000)] {
+        let text = format!("PlugVersion 3.4.1\nSAMPLER {{\n{} {{\n{repeated}}}\n}}\n", "s".repeat(3900));
+        assert!(text.len() < 140_000);
+        let error = superior_drummer::Preset::read(text.as_bytes()).unwrap_err();
+        assert!(error.to_string().contains("total record path budget exceeded"), "{error}");
+    }
+
+    // An ordinary smaller document with the same long parent remains usable.
+    let section = "s".repeat(3900);
+    let text = format!("PlugVersion 3.4.1\nSAMPLER {{\n{section} {{\n{}}}\n}}\n", "a 1\n".repeat(100));
+    let mut preset = superior_drummer::Preset::read(text.as_bytes()).unwrap();
+    let path = format!("SAMPLER[0]/{section}[0]/a[99]");
+    preset.set(&path, &json!(0.5)).unwrap();
+    assert_eq!(preset.to_node().get(&path), Some(&Node::Float(0.5)));
+}
+
+#[test]
+fn softube_observed_normalization_does_not_open_numeric_write_ranges() {
+    use kumi_library::plugins::formats::structure::{self, Status};
+
+    let mut ranges = 0;
+    for plugin in [
+        "softube-tape",
+        "softube-tape-multi-track",
+        "softube-weiss-compressor-limiter",
+        "softube-weiss-ds1-mk3",
+        "softube-weiss-deess",
+        "softube-weiss-mm-1-mastering-maximizer",
+    ] {
+        let format = structure::builtin(plugin).unwrap();
+        for (path, field) in &format.structure.fields {
+            if path.starts_with("presets[]/parameters/") {
+                ranges += 1;
+                assert_eq!(field.range_status, Some(Status::Guessed), "{plugin}/{path}");
+                assert!(structure::validate_number(plugin, path, 0.5).is_err(), "{plugin}/{path}");
+            }
+        }
+    }
+    assert_eq!(ranges, 194);
 }

@@ -1,0 +1,9 @@
+{
+  "plugin": "minimal-ripple-phaser",
+  "version": "1.4.0",
+  "fixtureSha256": "cb35216ab01e1394ec8b5b26d1e98c093d1893b787c47c839e68808fa19905b3",
+  "sessionId": "all zeros",
+  "runtime": "Sanitized component restored in a fresh VST3 instance. Product root, source version and every mapped parameter matched after reload within native floating-point serialization precision.",
+  "parametersChecked": 14,
+  "maxRelativeErrorWithUnitFloor": 1.430511474609375e-06
+}

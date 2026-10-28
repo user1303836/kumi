@@ -19,12 +19,13 @@
   "survey": {
     "files": 1,
     "presets": 24,
-    "source": "Installed bundle inspected for parameter names, IDs and numeric ranges only.",
+    "source": "Installed bundle inspected for parameter names, IDs and observed numeric values only.",
     "nativePresetVersionMarkers": [
       "2.4.44"
     ],
     "observedBinaryVersion": "2.4.83",
-    "binaryVersionSource": "Installed PE ProductVersion; loading did not complete. Native bundle markers, including 9.9.9, are not installed-binary version evidence."
+    "binaryVersionSource": "Installed PE ProductVersion; loading did not complete. Native bundle markers, including 9.9.9, are not installed-binary version evidence.",
+    "numericWrites": "Observed normalized 0..1 values do not establish legal write bounds; numeric edits remain closed without plug-in restore/readback verification."
   },
   "fields": {
     "presets[]/parameters/0": {
@@ -41,8 +42,8 @@
         0.5,
         0.5
       ],
-      "about": "Input Gain. Native full-parameter tuples store normalized values in 0..1. This format bound does not establish the control meaning or host acceptance.",
-      "range_status": "verified"
+      "about": "Input Gain.",
+      "range_status": "guessed"
     },
     "presets[]/parameters/1": {
       "type": "float",
@@ -58,8 +59,8 @@
         0.5,
         0.5
       ],
-      "about": "Output Gain. Native full-parameter tuples store normalized values in 0..1. This format bound does not establish the control meaning or host acceptance.",
-      "range_status": "verified"
+      "about": "Output Gain.",
+      "range_status": "guessed"
     },
     "presets[]/parameters/2": {
       "type": "float",
@@ -75,8 +76,8 @@
         0.0,
         0.0
       ],
-      "about": "Limiter Gain. Native full-parameter tuples store normalized values in 0..1. This format bound does not establish the control meaning or host acceptance.",
-      "range_status": "verified"
+      "about": "Limiter Gain.",
+      "range_status": "guessed"
     },
     "presets[]/parameters/3": {
       "type": "float",
@@ -92,8 +93,8 @@
         0.0,
         1.0
       ],
-      "about": "Safety Limiter. Native full-parameter tuples store normalized values in 0..1. This format bound does not establish the control meaning or host acceptance.",
-      "range_status": "verified"
+      "about": "Safety Limiter.",
+      "range_status": "guessed"
     },
     "presets[]/parameters/4": {
       "type": "float",
@@ -109,8 +110,8 @@
         0.1,
         0.1
       ],
-      "about": "Safety Limiter Mode. Native full-parameter tuples store normalized values in 0..1. This format bound does not establish the control meaning or host acceptance.",
-      "range_status": "verified"
+      "about": "Safety Limiter Mode.",
+      "range_status": "guessed"
     },
     "presets[]/parameters/5": {
       "type": "float",
@@ -126,8 +127,8 @@
         0.0,
         0.0
       ],
-      "about": "Bypass. Native full-parameter tuples store normalized values in 0..1. This format bound does not establish the control meaning or host acceptance.",
-      "range_status": "verified"
+      "about": "Bypass.",
+      "range_status": "guessed"
     },
     "presets[]/parameters/6": {
       "type": "float",
@@ -143,8 +144,8 @@
         0.0,
         0.0
       ],
-      "about": "Monitor. Native full-parameter tuples store normalized values in 0..1. This format bound does not establish the control meaning or host acceptance.",
-      "range_status": "verified"
+      "about": "Monitor.",
+      "range_status": "guessed"
     },
     "presets[]/parameters/7": {
       "type": "float",
@@ -160,8 +161,8 @@
         0.0,
         0.0
       ],
-      "about": "Channel. Native full-parameter tuples store normalized values in 0..1. This format bound does not establish the control meaning or host acceptance.",
-      "range_status": "verified"
+      "about": "Channel.",
+      "range_status": "guessed"
     },
     "presets[]/parameters/8": {
       "type": "float",
@@ -177,8 +178,8 @@
         0.0,
         0.0
       ],
-      "about": "Auto Make-Up. Native full-parameter tuples store normalized values in 0..1. This format bound does not establish the control meaning or host acceptance.",
-      "range_status": "verified"
+      "about": "Auto Make-Up.",
+      "range_status": "guessed"
     },
     "presets[]/parameters/9": {
       "type": "float",
@@ -194,8 +195,8 @@
         0.4375,
         0.75
       ],
-      "about": "Preview. Native full-parameter tuples store normalized values in 0..1. This format bound does not establish the control meaning or host acceptance.",
-      "range_status": "verified"
+      "about": "Preview.",
+      "range_status": "guessed"
     },
     "presets[]/parameters/10": {
       "type": "float",
@@ -211,8 +212,8 @@
         0.0,
         0.716981
       ],
-      "about": "RMS. Native full-parameter tuples store normalized values in 0..1. This format bound does not establish the control meaning or host acceptance.",
-      "range_status": "verified"
+      "about": "RMS.",
+      "range_status": "guessed"
     },
     "presets[]/parameters/11": {
       "type": "float",
@@ -228,8 +229,8 @@
         0.0,
         1.0
       ],
-      "about": "Filter Type 1. Native full-parameter tuples store normalized values in 0..1. This format bound does not establish the control meaning or host acceptance.",
-      "range_status": "verified"
+      "about": "Filter Type 1.",
+      "range_status": "guessed"
     },
     "presets[]/parameters/12": {
       "type": "float",
@@ -245,8 +246,8 @@
         0.0,
         0.595745
       ],
-      "about": "Bandwidth 1. Native full-parameter tuples store normalized values in 0..1. This format bound does not establish the control meaning or host acceptance.",
-      "range_status": "verified"
+      "about": "Bandwidth 1.",
+      "range_status": "guessed"
     },
     "presets[]/parameters/13": {
       "type": "float",
@@ -262,8 +263,8 @@
         0.07619,
         0.92381
       ],
-      "about": "Center Frequency 1. Native full-parameter tuples store normalized values in 0..1. This format bound does not establish the control meaning or host acceptance.",
-      "range_status": "verified"
+      "about": "Center Frequency 1.",
+      "range_status": "guessed"
     },
     "presets[]/parameters/14": {
       "type": "float",
@@ -279,8 +280,8 @@
         0.0,
         0.837209
       ],
-      "about": "Attack 1. Native full-parameter tuples store normalized values in 0..1. This format bound does not establish the control meaning or host acceptance.",
-      "range_status": "verified"
+      "about": "Attack 1.",
+      "range_status": "guessed"
     },
     "presets[]/parameters/15": {
       "type": "float",
@@ -296,8 +297,8 @@
         0.056604,
         0.396226
       ],
-      "about": "Release Delay 1. Native full-parameter tuples store normalized values in 0..1. This format bound does not establish the control meaning or host acceptance.",
-      "range_status": "verified"
+      "about": "Release Delay 1.",
+      "range_status": "guessed"
     },
     "presets[]/parameters/16": {
       "type": "float",
@@ -313,8 +314,8 @@
         0.509434,
         0.735849
       ],
-      "about": "Release Fast 1. Native full-parameter tuples store normalized values in 0..1. This format bound does not establish the control meaning or host acceptance.",
-      "range_status": "verified"
+      "about": "Release Fast 1.",
+      "range_status": "guessed"
     },
     "presets[]/parameters/17": {
       "type": "float",
@@ -330,8 +331,8 @@
         0.584906,
         0.811321
       ],
-      "about": "Average 1. Native full-parameter tuples store normalized values in 0..1. This format bound does not establish the control meaning or host acceptance.",
-      "range_status": "verified"
+      "about": "Average 1.",
+      "range_status": "guessed"
     },
     "presets[]/parameters/18": {
       "type": "float",
@@ -347,8 +348,8 @@
         0.679245,
         0.943396
       ],
-      "about": "Release Slow 1. Native full-parameter tuples store normalized values in 0..1. This format bound does not establish the control meaning or host acceptance.",
-      "range_status": "verified"
+      "about": "Release Slow 1.",
+      "range_status": "guessed"
     },
     "presets[]/parameters/19": {
       "type": "float",
@@ -364,8 +365,8 @@
         0.0,
         0.7
       ],
-      "about": "Soft Knee 1. Native full-parameter tuples store normalized values in 0..1. This format bound does not establish the control meaning or host acceptance.",
-      "range_status": "verified"
+      "about": "Soft Knee 1.",
+      "range_status": "guessed"
     },
     "presets[]/parameters/20": {
       "type": "float",
@@ -381,8 +382,8 @@
         0.166667,
         1.0
       ],
-      "about": "Threshold 1. Native full-parameter tuples store normalized values in 0..1. This format bound does not establish the control meaning or host acceptance.",
-      "range_status": "verified"
+      "about": "Threshold 1.",
+      "range_status": "guessed"
     },
     "presets[]/parameters/21": {
       "type": "float",
@@ -398,8 +399,8 @@
         0.471154,
         0.975962
       ],
-      "about": "Ratio 1. Native full-parameter tuples store normalized values in 0..1. This format bound does not establish the control meaning or host acceptance.",
-      "range_status": "verified"
+      "about": "Ratio 1.",
+      "range_status": "guessed"
     },
     "presets[]/parameters/22": {
       "type": "float",
@@ -415,8 +416,8 @@
         0.0,
         0.833333
       ],
-      "about": "Gain Make-Up 1. Native full-parameter tuples store normalized values in 0..1. This format bound does not establish the control meaning or host acceptance.",
-      "range_status": "verified"
+      "about": "Gain Make-Up 1.",
+      "range_status": "guessed"
     },
     "presets[]/parameters/23": {
       "type": "float",
@@ -432,8 +433,8 @@
         0.0,
         1.0
       ],
-      "about": "Filter Type 2. Native full-parameter tuples store normalized values in 0..1. This format bound does not establish the control meaning or host acceptance.",
-      "range_status": "verified"
+      "about": "Filter Type 2.",
+      "range_status": "guessed"
     },
     "presets[]/parameters/24": {
       "type": "float",
@@ -449,8 +450,8 @@
         0.0,
         0.595745
       ],
-      "about": "Bandwidth 2. Native full-parameter tuples store normalized values in 0..1. This format bound does not establish the control meaning or host acceptance.",
-      "range_status": "verified"
+      "about": "Bandwidth 2.",
+      "range_status": "guessed"
     },
     "presets[]/parameters/25": {
       "type": "float",
@@ -466,8 +467,8 @@
         0.07619,
         0.92381
       ],
-      "about": "Center Frequency 2. Native full-parameter tuples store normalized values in 0..1. This format bound does not establish the control meaning or host acceptance.",
-      "range_status": "verified"
+      "about": "Center Frequency 2.",
+      "range_status": "guessed"
     },
     "presets[]/parameters/26": {
       "type": "float",
@@ -483,8 +484,8 @@
         0.0,
         0.837209
       ],
-      "about": "Attack 2. Native full-parameter tuples store normalized values in 0..1. This format bound does not establish the control meaning or host acceptance.",
-      "range_status": "verified"
+      "about": "Attack 2.",
+      "range_status": "guessed"
     },
     "presets[]/parameters/27": {
       "type": "float",
@@ -500,8 +501,8 @@
         0.056604,
         0.396226
       ],
-      "about": "Release Delay 2. Native full-parameter tuples store normalized values in 0..1. This format bound does not establish the control meaning or host acceptance.",
-      "range_status": "verified"
+      "about": "Release Delay 2.",
+      "range_status": "guessed"
     },
     "presets[]/parameters/28": {
       "type": "float",
@@ -517,8 +518,8 @@
         0.509434,
         0.735849
       ],
-      "about": "Release Fast 2. Native full-parameter tuples store normalized values in 0..1. This format bound does not establish the control meaning or host acceptance.",
-      "range_status": "verified"
+      "about": "Release Fast 2.",
+      "range_status": "guessed"
     },
     "presets[]/parameters/29": {
       "type": "float",
@@ -534,8 +535,8 @@
         0.584906,
         0.811321
       ],
-      "about": "Average 2. Native full-parameter tuples store normalized values in 0..1. This format bound does not establish the control meaning or host acceptance.",
-      "range_status": "verified"
+      "about": "Average 2.",
+      "range_status": "guessed"
     },
     "presets[]/parameters/30": {
       "type": "float",
@@ -551,8 +552,8 @@
         0.679245,
         0.943396
       ],
-      "about": "Release Slow 2. Native full-parameter tuples store normalized values in 0..1. This format bound does not establish the control meaning or host acceptance.",
-      "range_status": "verified"
+      "about": "Release Slow 2.",
+      "range_status": "guessed"
     },
     "presets[]/parameters/31": {
       "type": "float",
@@ -568,8 +569,8 @@
         0.0,
         0.7
       ],
-      "about": "Soft Knee 2. Native full-parameter tuples store normalized values in 0..1. This format bound does not establish the control meaning or host acceptance.",
-      "range_status": "verified"
+      "about": "Soft Knee 2.",
+      "range_status": "guessed"
     },
     "presets[]/parameters/32": {
       "type": "float",
@@ -585,8 +586,8 @@
         0.166667,
         1.0
       ],
-      "about": "Threshold 2. Native full-parameter tuples store normalized values in 0..1. This format bound does not establish the control meaning or host acceptance.",
-      "range_status": "verified"
+      "about": "Threshold 2.",
+      "range_status": "guessed"
     },
     "presets[]/parameters/33": {
       "type": "float",
@@ -602,8 +603,8 @@
         0.471154,
         0.975962
       ],
-      "about": "Ratio 2. Native full-parameter tuples store normalized values in 0..1. This format bound does not establish the control meaning or host acceptance.",
-      "range_status": "verified"
+      "about": "Ratio 2.",
+      "range_status": "guessed"
     },
     "presets[]/parameters/34": {
       "type": "float",
@@ -619,8 +620,8 @@
         0.0,
         0.833333
       ],
-      "about": "Gain Make-Up 2. Native full-parameter tuples store normalized values in 0..1. This format bound does not establish the control meaning or host acceptance.",
-      "range_status": "verified"
+      "about": "Gain Make-Up 2.",
+      "range_status": "guessed"
     },
     "presets[]/parameters/35": {
       "type": "float",
@@ -636,8 +637,8 @@
         0.0,
         1.0
       ],
-      "about": "MS Mode. Native full-parameter tuples store normalized values in 0..1. This format bound does not establish the control meaning or host acceptance.",
-      "range_status": "verified"
+      "about": "MS Mode.",
+      "range_status": "guessed"
     },
     "presets[]/parameters/36": {
       "type": "float",
@@ -653,8 +654,8 @@
         0.0,
         1.0
       ],
-      "about": "Sidechain Link. Native full-parameter tuples store normalized values in 0..1. This format bound does not establish the control meaning or host acceptance.",
-      "range_status": "verified"
+      "about": "Sidechain Link.",
+      "range_status": "guessed"
     },
     "presets[]/parameters/37": {
       "type": "float",
@@ -670,8 +671,8 @@
         0.0,
         0.0
       ],
-      "about": "Sidechain. Native full-parameter tuples store normalized values in 0..1. This format bound does not establish the control meaning or host acceptance.",
-      "range_status": "verified"
+      "about": "Sidechain.",
+      "range_status": "guessed"
     },
     "presets[]/parameters/38": {
       "type": "float",
@@ -687,8 +688,8 @@
         0.0,
         1.0
       ],
-      "about": "Parallel Compression. Native full-parameter tuples store normalized values in 0..1. This format bound does not establish the control meaning or host acceptance.",
-      "range_status": "verified"
+      "about": "Parallel Compression.",
+      "range_status": "guessed"
     },
     "presets[]/parameters/39": {
       "type": "float",
@@ -704,8 +705,8 @@
         0.0,
         0.333333
       ],
-      "about": "Dither. Native full-parameter tuples store normalized values in 0..1. This format bound does not establish the control meaning or host acceptance.",
-      "range_status": "verified"
+      "about": "Dither.",
+      "range_status": "guessed"
     },
     "presets[]/parameters/40": {
       "type": "float",
@@ -721,8 +722,8 @@
         0.0,
         0.0
       ],
-      "about": "Set Number of Overs. Native full-parameter tuples store normalized values in 0..1. This format bound does not establish the control meaning or host acceptance.",
-      "range_status": "verified"
+      "about": "Set Number of Overs.",
+      "range_status": "guessed"
     },
     "presets[]/parameters/41": {
       "type": "float",
@@ -738,8 +739,8 @@
         0.0,
         1.0
       ],
-      "about": "Ganged. Native full-parameter tuples store normalized values in 0..1. This format bound does not establish the control meaning or host acceptance.",
-      "range_status": "verified"
+      "about": "Ganged.",
+      "range_status": "guessed"
     },
     "presets[]/parameters/42": {
       "type": "float",
@@ -755,8 +756,8 @@
         0.0,
         1.0
       ],
-      "about": "Gain Select. Native full-parameter tuples store normalized values in 0..1. This format bound does not establish the control meaning or host acceptance.",
-      "range_status": "verified"
+      "about": "Gain Select.",
+      "range_status": "guessed"
     },
     "presets[]/parameters/43": {
       "type": "float",
@@ -772,8 +773,8 @@
         1.0,
         1.0
       ],
-      "about": "Peak Auto Reset. Native full-parameter tuples store normalized values in 0..1. This format bound does not establish the control meaning or host acceptance.",
-      "range_status": "verified"
+      "about": "Peak Auto Reset.",
+      "range_status": "guessed"
     },
     "presets[]/parameters/44": {
       "type": "float",
@@ -789,8 +790,8 @@
         0.0,
         0.0
       ],
-      "about": "Compressor GR Meter. Native full-parameter tuples store normalized values in 0..1. This format bound does not establish the control meaning or host acceptance.",
-      "range_status": "verified"
+      "about": "Compressor GR Meter.",
+      "range_status": "guessed"
     },
     "presets[]/parameters/45": {
       "type": "float",
@@ -806,8 +807,8 @@
         0.333333,
         0.333333
       ],
-      "about": "Limiter GR Meter. Native full-parameter tuples store normalized values in 0..1. This format bound does not establish the control meaning or host acceptance.",
-      "range_status": "verified"
+      "about": "Limiter GR Meter.",
+      "range_status": "guessed"
     },
     "presets[]/parameters/46": {
       "type": "float",
@@ -823,8 +824,8 @@
         1.0,
         1.0
       ],
-      "about": "Peak Meter Type. Native full-parameter tuples store normalized values in 0..1. This format bound does not establish the control meaning or host acceptance.",
-      "range_status": "verified"
+      "about": "Peak Meter Type.",
+      "range_status": "guessed"
     },
     "presets[]/parameters/47": {
       "type": "float",
@@ -840,8 +841,8 @@
         0.333333,
         0.333333
       ],
-      "about": "Meter Range. Native full-parameter tuples store normalized values in 0..1. This format bound does not establish the control meaning or host acceptance.",
-      "range_status": "verified"
+      "about": "Meter Range.",
+      "range_status": "guessed"
     },
     "presets[]/parameters/48": {
       "type": "float",
@@ -857,8 +858,8 @@
         1.0,
         1.0
       ],
-      "about": "Meter Text. Native full-parameter tuples store normalized values in 0..1. This format bound does not establish the control meaning or host acceptance.",
-      "range_status": "verified"
+      "about": "Meter Text.",
+      "range_status": "guessed"
     }
   },
   "parameters": {

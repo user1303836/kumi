@@ -2552,12 +2552,12 @@ dependencies = [
 name = "reaper-kumi"
 version = "0.1.6"
 dependencies = [
+ "base64 0.22.1",
  "cc",
  "daw-bridge",
  "hex",
  "kumi-common",
  "kumi-testkit",
- "libc",
  "serde_json",
  "tempfile",
 ]

@@ -781,8 +781,8 @@ See [how arranging works](KUMI_CHANGES.md#arrangements).
 
 - **Built-in VST3 presets.** Ask Kumi to create or edit a preset. It checks its local format catalog before external research, and can load supported presets with history and undo. Serum 2, Ozone 12 and its modules, Valhalla, Minimal Audio, Pulsar Modular and other catalogued products have versioned format support; see [capabilities and limits](../../plugin-formats/README.md).
 - **Installed processors first.** Mastering and reference mastering check Ozone 12, then other suitable installed VST3s, then native devices. Kumi measures and listens before and after; a reference is compared at matched loudness.
-- **Native file limits.** Softube and some Zynaptiq presets can be read and edited from a supplied template, but VST3 state loading is not claimed for locally unverified products. Live loads a new preset instance from its browser; existing instances use exposed parameters.
-- **Verified writes.** The installed version must match a tested writer. Numeric edits need a verified write range. New files stay in Kumi's preset folder; Live also saves a User Library copy, which remains when undo removes the loaded device.
+- **Native file limits.** Softube and some Zynaptiq presets support inspection, template copies and renaming; unverified numeric controls remain read-only. VST3 state loading is not claimed for locally unverified products. Live loads a new preset instance from its browser; existing instances use exposed parameters.
+- **Verified writes.** The installed version must match a tested writer. Numeric edits need a verified write range; text and Boolean edits need verified semantics or an explicit allowlist. Resource paths stay read-only. New files stay in Kumi's preset folder; Live also saves a User Library copy, which remains when undo removes the loaded device.
 
 Kumi also has detailed guides for Serum 2, Vital, Ozone 12, Pro-Q 4, Pro-L 2,
 Saturn 2, Decapitator, OTT, Supermassive and Pigments. Before it works on one, it

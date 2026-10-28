@@ -44,11 +44,11 @@ test("vst3 presets: preview and undo refuse a later state and a replacement plug
   local peer = setup()
   local asked = input(peer)
   local preview, epoch, layout = I.preview(peer, "plugin-preset-data", asked)
-  mock.data.instruments[3].plugin.preset_data = xml(A):gsub("10,20", "30,40")
+  mock.data.instruments[3].plugin.preset_data = xml(A):gsub("</DeviceSlot>", "<Hidden>edit</Hidden></DeviceSlot>")
   I.failure(I.apply(peer, "plugin-preset-data", asked, "preset", preview.fence, epoch, layout), "changed")
   mock.data.instruments[3].plugin.preset_data = xml(A)
   local record = I.change(peer, "plugin-preset-data", input(peer))
-  mock.data.instruments[3].plugin.preset_data = xml(B):gsub("10,20", "30,40")
+  mock.data.instruments[3].plugin.preset_data = xml(B):gsub("</DeviceSlot>", "<Hidden>edit</Hidden></DeviceSlot>")
   I.failure(I.restore(peer, "plugin-preset-data", record), "changed")
   mock.data.instruments[3].plugin.path = "Audio/Generators/VST3/" .. string.rep("F", 32)
   I.failure(I.restore(peer, "plugin-preset-data", record, nil, { discard = true }), "changed")
@@ -66,11 +66,11 @@ end)
 test("vst3 presets: a clean instrument restore accepts normalized bytes while earlier edits remain fenced", function()
   local peer = setup()
   local record = I.change(peer, "plugin-preset-data", input(peer))
-  mock.data.instruments[3].plugin.normalize_preset_data = function(value) return (value:gsub("10,20", "30,40")) end
+  mock.data.instruments[3].plugin.normalize_preset_data = function(value) return (value:gsub("</DeviceSlot>", "<Version>normalized</Version></DeviceSlot>")) end
   local restored = I.restore(peer, "plugin-preset-data", record)
   ok(restored.result)
   ok(restored.result.display.note:find("normalized", 1, true))
-  eq(mock.data.instruments[3].plugin.preset_data, (xml(A):gsub("10,20", "30,40")))
+  eq(mock.data.instruments[3].plugin.preset_data, (xml(A):gsub("</DeviceSlot>", "<Version>normalized</Version></DeviceSlot>")))
 end)
 
 local function effect_setup()
@@ -112,9 +112,55 @@ test("vst3 presets: an effect partial load failure rolls back and clean normaliz
   eq(device.preset_data, xml(A))
   device.reject_preset_data = nil
   local record = I.change(peer, "device-preset-data", effect_input(peer))
-  device.normalize_preset_data = function(value) return (value:gsub("10,20", "30,40")) end
+  device.normalize_preset_data = function(value) return (value:gsub("</DeviceSlot>", "<Version>normalized</Version></DeviceSlot>")) end
   local restored = I.restore(peer, "device-preset-data", record)
   ok(restored.result)
   ok(restored.result.display.note:find("normalized", 1, true))
-  eq(device.preset_data, (xml(A):gsub("10,20", "30,40")))
+  eq(device.preset_data, (xml(A):gsub("</DeviceSlot>", "<Version>normalized</Version></DeviceSlot>")))
+end)
+
+
+test("vst3 presets: instrument preview and undo tolerate editor window moves", function()
+  local peer = setup()
+  local asked = input(peer)
+  local preview, epoch, layout = I.preview(peer, "plugin-preset-data", asked)
+  mock.data.instruments[3].plugin.preset_data = xml(A):gsub("10,20", "30,40")
+  local applied = I.apply(peer, "plugin-preset-data", asked, "preset", preview.fence, epoch, layout)
+  ok(applied.result)
+  -- Use the journal path for a fresh record, then move the view again after its apply.
+  mock.data.instruments[3].plugin.preset_data = xml(A)
+  local record = I.change(peer, "plugin-preset-data", input(peer))
+  mock.data.instruments[3].plugin.preset_data = xml(B):gsub("10,20", "50,60")
+  mock.data.instruments[3].plugin.normalize_preset_data = function(value) return (value:gsub("10,20", "70,80")) end
+  local restored = I.restore(peer, "plugin-preset-data", record)
+  ok(restored.result)
+  eq(restored.result.display.note, nil, "view changes are not state normalization")
+end)
+
+test("vst3 presets: undo refuses a silent no-op instrument restore", function()
+  local peer = setup()
+  local record = I.change(peer, "plugin-preset-data", input(peer))
+  mock.data.instruments[3].plugin.ignore_preset_data = xml(A)
+  I.failure(I.restore(peer, "plugin-preset-data", record), "failed")
+  eq(mock.data.instruments[3].plugin.preset_data, xml(B))
+end)
+
+test("vst3 presets: undo refuses a silent no-op effect restore", function()
+  local peer, device = effect_setup()
+  local record = I.change(peer, "device-preset-data", effect_input(peer))
+  device.ignore_preset_data = xml(A)
+  I.failure(I.restore(peer, "device-preset-data", record), "failed")
+  eq(device.preset_data, xml(B))
+end)
+
+test("vst3 presets: a native effect undo does not claim VST3 normalization", function()
+  local peer, device = effect_setup()
+  local asked = effect_input(peer)
+  asked.vst3Data, asked.presetData = nil, xml(B)
+  device.path = "Audio/Effects/Native/Test"
+  local record = I.change(peer, "device-preset-data", asked)
+  device.normalize_preset_data = function(value) return (value:gsub("10,20", "30,40")) end
+  local restored = I.restore(peer, "device-preset-data", record)
+  ok(restored.result)
+  eq(restored.result.display.note, nil)
 end)

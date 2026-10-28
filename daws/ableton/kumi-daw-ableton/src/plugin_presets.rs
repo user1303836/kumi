@@ -20,6 +20,12 @@ pub struct PreparedPreset {
 }
 
 pub fn prepare(input: &Path, library: &Path, name: &str) -> Result<PreparedPreset, String> {
+    if [input, library]
+        .iter()
+        .any(|path| path.to_string_lossy().chars().any(char::is_control) || kumi_common::path::reserved_device(&path.to_string_lossy()))
+    {
+        return Err("Use local preset and User Library paths without control characters or reserved device names.".into());
+    }
     if !input.is_absolute() || !library.is_absolute() {
         return Err("Preset and User Library paths must be absolute".into());
     }
@@ -39,8 +45,9 @@ pub fn prepare(input: &Path, library: &Path, name: &str) -> Result<PreparedPrese
     {
         return Err("Preset name must be 1–64 characters without filename separators or control characters".into());
     }
-    if !std::fs::metadata(input).map_err(|e| e.to_string())?.is_file() {
-        return Err("Preset input must be a regular file".into());
+    let metadata = std::fs::symlink_metadata(input).map_err(|e| e.to_string())?;
+    if !metadata.is_file() || metadata.len() > MAX_DECODED_BYTES as u64 {
+        return Err("Preset input must be a regular file within the supported size limit".into());
     }
     let mut options = std::fs::OpenOptions::new();
     options.read(true);
@@ -50,8 +57,9 @@ pub fn prepare(input: &Path, library: &Path, name: &str) -> Result<PreparedPrese
         options.custom_flags(libc::O_NONBLOCK | libc::O_NOFOLLOW);
     }
     let source = options.open(input).map_err(|e| e.to_string())?;
-    if !source.metadata().map_err(|e| e.to_string())?.is_file() {
-        return Err("Preset input must be a regular file".into());
+    let metadata = source.metadata().map_err(|e| e.to_string())?;
+    if !metadata.is_file() || metadata.len() > MAX_DECODED_BYTES as u64 {
+        return Err("Preset input must be a regular file within the supported size limit".into());
     }
     let mut bytes = Vec::new();
     source.take(MAX_DECODED_BYTES as u64 + 1).read_to_end(&mut bytes).map_err(|e| e.to_string())?;
@@ -83,7 +91,9 @@ pub fn prepare(input: &Path, library: &Path, name: &str) -> Result<PreparedPrese
             if let Err(e) = out.write_all(&bytes).and_then(|_| out.sync_all()) {
                 drop(out);
                 let _ = std::fs::remove_file(&file);
-                return Err(e.to_string());
+                return Err(format!(
+                    "Kumi couldn't finish saving the preset in Live's User Library; check free disk space and folder permissions: {e}"
+                ));
             }
         }
         Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
@@ -133,6 +143,14 @@ mod tests {
         assert!(prepare(&source, temp.path(), "../escape").is_err());
         assert!(prepare(&source, &temp.path().join("missing"), "valid").unwrap_err().contains("Library is missing"));
         assert!(!temp.path().join("missing").exists());
+        let blocked = tempfile::tempdir().unwrap();
+        std::fs::write(blocked.path().join("Kumi"), b"not a folder").unwrap();
+        let error = prepare(&source, blocked.path(), "valid").unwrap_err();
+        assert!(error.contains("User Library") && error.contains("permissions"), "{error}");
         assert!(prepare(Path::new("//host/share/test.vstpreset"), temp.path(), "valid").is_err());
+        for path in ["\0//host/share/x.vstpreset", "C:/P/CON.vstpreset", "/tmp/x\n.vstpreset"] {
+            assert!(prepare(Path::new(path), temp.path(), "valid").unwrap_err().contains("local"));
+            assert!(prepare(&source, Path::new(path), "valid").unwrap_err().contains("local"));
+        }
     }
 }

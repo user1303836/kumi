@@ -17,12 +17,22 @@ use super::formats::{
     valhalla::ValhallaPreset,
     vital::VitalPreset,
     vstpreset::{self, VstPreset},
-    xml, zynaptiq, FormatError, MAX_DECODED_BYTES,
+    write_value, xml, zynaptiq, FormatError, MAX_DECODED_BYTES,
 };
 use super::templates;
 
 mod native;
 pub use native::{create_native_from_template, edit_native, NativePreset};
+
+/// Vital embeds audio in its JSON. Keep its established bounded input allowance
+/// while using the smaller cap for the other formats and their state trees.
+pub fn input_limit(plugin: &str) -> usize {
+    if plugin == "vital" {
+        64 * 1024 * 1024
+    } else {
+        MAX_DECODED_BYTES
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Edit {
@@ -57,7 +67,7 @@ pub fn create(plugin: &str, options: &WriteOptions, edits: &[Edit]) -> Result<Vs
 pub fn edit(plugin: &str, input: &[u8], options: &WriteOptions, edits: &[Edit]) -> Result<VstPreset, FormatError> {
     let format = known(plugin)?;
     writable(format, &options.version)?;
-    if input.len() > MAX_DECODED_BYTES {
+    if input.len() > input_limit(plugin) {
         return Err(error("preset exceeds the size limit"));
     }
     if let Some(name) = &options.name {
@@ -98,15 +108,10 @@ pub fn edit(plugin: &str, input: &[u8], options: &WriteOptions, edits: &[Edit]) 
                 }
             }
             check_serum_file(&preset.file, &options.version)?;
-            let mut edited = preset.to_state()?;
-            if let Some(old) = old {
-                retain_unknown_xfer(&old.processor, &mut edited.processor)?;
-                if let (Some(old), Some(new)) = (&old.controller, &mut edited.controller) {
-                    retain_unknown_xfer(old, new)?;
-                } else if old.controller.is_none() {
-                    edited.controller = None;
-                }
-            }
+            let edited = match old {
+                Some(old) => old.with_preset(&preset)?,
+                None => preset.to_state()?,
+            };
             check_serum_state(&edited, &options.version)?;
             if let Some(controller) = edited.controller {
                 replace_chunk(&mut output, "Cont", controller.write()?);
@@ -251,7 +256,7 @@ pub fn edit(plugin: &str, input: &[u8], options: &WriteOptions, edits: &[Edit]) 
 /// Ozone additionally exposes a compact parameters map and its module chain.
 pub fn inspect(plugin: &str, input: &[u8], requested_class: Option<&str>) -> Result<Value, FormatError> {
     let format = known(plugin)?;
-    if input.len() > MAX_DECODED_BYTES {
+    if input.len() > input_limit(plugin) {
         return Err(error("preset exceeds the size limit"));
     }
     let source = read_container(input)?;
@@ -425,13 +430,26 @@ fn preview(value: &Value) -> (Value, bool) {
                 .collect();
             (Value::Array(items), truncated)
         }
+        Value::Object(fields) => {
+            let mut truncated = fields.len() > 32;
+            let fields = fields
+                .iter()
+                .take(32)
+                .map(|(key, value)| {
+                    let (value, cut) = preview(value);
+                    truncated |= cut;
+                    (key.clone(), value)
+                })
+                .collect();
+            (Value::Object(fields), truncated)
+        }
         _ => (value.clone(), false),
     }
 }
 
 fn leaves(value: &Value, path: &str, family: &str, collect: &mut impl FnMut(&str, &Value)) {
     match value {
-        Value::Object(fields) if !fields.is_empty() && !fields.contains_key("bytes") => {
+        Value::Object(fields) if !fields.is_empty() && !(fields.len() == 1 && fields.get("bytes").is_some_and(Value::is_u64)) => {
             for (key, value) in fields {
                 let path = if path.is_empty() { key.clone() } else { format!("{path}/{key}") };
                 leaves(value, &path, family, collect);
@@ -551,19 +569,13 @@ fn check_range(format: &PluginFormat, edit: &Edit) -> Result<(), FormatError> {
     };
     fn check(format: &PluginFormat, path: &str, value: &Value) -> Result<(), FormatError> {
         match value {
-            Value::Number(value) => {
-                structure::validate_number(&format.info.plugin, path, value.as_f64().ok_or_else(|| error("numeric value is not finite"))?)
-            }
-            Value::Bool(value) if format.structure.field(path).is_none_or(|field| field.kind != "bool") => {
-                structure::validate_number(&format.info.plugin, path, u8::from(*value) as f64)
-            }
             Value::Array(values) => {
                 for value in values {
                     check(format, path, value)?;
                 }
                 Ok(())
             }
-            _ => Ok(()),
+            _ => write_value::validate_scalar(&format.info.plugin, path, value),
         }
     }
     check(format, &canonical, &edit.value)
@@ -626,52 +638,6 @@ fn check_serum_file(file: &serum2::XferFile, version: &str) -> Result<(), Format
     Ok(())
 }
 
-fn retain_unknown_xfer(original: &serum2::XferFile, edited: &mut serum2::XferFile) -> Result<(), FormatError> {
-    // Re-splitting a merged preset must not move controller-only (including
-    // unknown future) sections into the processor, or fabricate another half.
-    if let cbor::Value::Map(fields, _) = &mut edited.body {
-        fields.retain(|(key, _)| key.as_str().is_some_and(|key| original.body.get(key).is_some()));
-    }
-    let mut body = original.body.clone();
-    overlay(&mut body, &edited.body);
-    edited.body = body;
-    let mut header = original.header_json()?;
-    if let (Some(old), Some(new)) = (header.as_object_mut(), edited.header_json()?.as_object()) {
-        for (key, value) in new {
-            if old.contains_key(key) {
-                old.insert(key.clone(), value.clone());
-            }
-        }
-    }
-    edited.header = serde_json::to_vec(&header).map_err(|e| error(&e.to_string()))?;
-    Ok(())
-}
-
-fn overlay(original: &mut cbor::Value, updated: &cbor::Value) {
-    match (original, updated) {
-        (cbor::Value::Map(old, _), cbor::Value::Map(new, _)) => {
-            for (key, value) in new {
-                if let Some((_, previous)) = old.iter_mut().find(|(old, _)| old == key) {
-                    overlay(previous, value);
-                } else {
-                    old.push((key.clone(), value.clone()));
-                }
-            }
-        }
-        (cbor::Value::Array(old, _), cbor::Value::Array(new, _)) => {
-            for (index, value) in new.iter().enumerate() {
-                if let Some(previous) = old.get_mut(index) {
-                    overlay(previous, value);
-                } else {
-                    old.push(value.clone());
-                }
-            }
-            old.truncate(new.len());
-        }
-        (old, new) => *old = new.clone(),
-    }
-}
-
 fn node_json(node: &Node) -> Value {
     match node {
         Node::Null => Value::Null,
@@ -690,4 +656,23 @@ fn node_json(node: &Node) -> Value {
 
 fn error(message: &str) -> FormatError {
     FormatError::new(format!("Plug-in preset: {message}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_bytes_key_cannot_hide_a_whole_object_from_inspection_limits() {
+        let value = json!({"bytes":"x".repeat(5000),"nested":{"gain":2}});
+        let mut found = Vec::new();
+        leaves(&value, "", "ozone-12", &mut |path, _| found.push(path.to_string()));
+        assert_eq!(found, ["bytes", "nested/gain"]);
+        let (shown, truncated) = preview(&value);
+        assert!(truncated);
+        assert_eq!(shown["bytes"].as_str().unwrap().len(), 4096);
+        let mut blobs = Vec::new();
+        leaves(&json!({"bytes":123}), "sample", "serum-2", &mut |path, _| blobs.push(path.to_string()));
+        assert_eq!(blobs, ["sample"]);
+    }
 }

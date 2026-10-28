@@ -177,6 +177,7 @@ mod tests {
     fn a_probe_authenticates_and_reads_the_status() {
         let secret = Secret::new("p".repeat(40)).unwrap();
         let identity = Identity {
+            preset_files: Vec::new(),
             daw: "renoise".into(),
             bridge: "0.1.0".into(),
             daw_version: "3.5.4".into(),

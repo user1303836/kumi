@@ -461,6 +461,7 @@ impl Shared {
     fn identity(&self) -> (Identity, Offer) {
         let snapshot = lock(&self.snapshot).clone();
         let identity = Identity {
+            preset_files: vec!["vst3".into()],
             daw: Daw::Reaper.id().into(),
             bridge: BRIDGE_VERSION.into(),
             daw_version: snapshot.daw_version,
@@ -1392,8 +1393,10 @@ mod tests {
     #[test]
     fn status_answers_off_the_main_thread_and_says_when_it_is_held() {
         let mut lab = Lab::start(VECTOR_SECRET, ServerConnection::new);
-        let (mut stream, mut reader, _) = lab.authenticated();
+        let (mut stream, mut reader, welcome) = lab.authenticated();
+        assert_eq!(welcome["presetFiles"], json!(["vst3"]));
         let status = request(&mut stream, &mut reader, 1, "status")["result"].clone();
+        assert_eq!(status["presetFiles"], json!(["vst3"]));
         assert_eq!(status["busy"], false);
         assert_eq!(status["tracks"], 3);
         assert_eq!(status["dawVersion"], "7.82/macOS-arm64");

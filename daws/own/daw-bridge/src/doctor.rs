@@ -401,6 +401,7 @@ mod tests {
         // Answering, with an older bridge than the one installed.
         let secret = read_secret(&BridgePaths::new(&kumi, Daw::Renoise).secret()).unwrap();
         let identity = Identity {
+            preset_files: Vec::new(),
             daw: "renoise".into(),
             bridge: "0.0.9".into(),
             daw_version: "3.5.4".into(),

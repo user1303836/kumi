@@ -11,7 +11,7 @@ use async_trait::async_trait;
 use kumi_common::{
     abort::{Signal, SignalExt},
     js::json::stringify,
-    path::network_or_device,
+    path::{network_or_device, reserved_device},
 };
 use kumi_library::plugins::{
     formats::{structure, MAX_DECODED_BYTES},
@@ -156,11 +156,11 @@ impl PluginTool {
                 }
             }
             "inspect" => {
-                let bytes = read_file(Path::new(required("input")?))?;
+                let bytes = read_file(Path::new(required("input")?), required("plugin")?)?;
                 preset::inspect_fields(required("plugin")?, &bytes, string("class_id"), string("query"), limit).map_err(|e| e.to_string())
             }
             "edit-native" | "create-native-from-template" => {
-                let bytes = read_file(Path::new(required("input")?))?;
+                let bytes = read_file(Path::new(required("input")?), required("plugin")?)?;
                 let edits: Vec<preset::Edit> =
                     serde_json::from_value(input.get("edits").cloned().unwrap_or_else(|| json!([]))).map_err(|e| format!("edits: {e}"))?;
                 if edits.len() > 512 {
@@ -198,7 +198,9 @@ impl PluginTool {
                             && string("class_id").is_none_or(|id| p.class_id.as_deref().is_some_and(|known| known.eq_ignore_ascii_case(id)))
                     })
                     .collect();
-                if matches.len() != 1 {
+                let classes: std::collections::BTreeSet<_> =
+                    matches.iter().filter_map(|p| p.class_id.as_ref().map(|id| id.to_ascii_uppercase())).collect();
+                if matches.is_empty() || classes.len() != 1 || matches.iter().any(|p| p.class_id.is_none()) {
                     return Err(
                         "Choose an installed VST3 class with installed/class_id; a write requires one exact installed product and version"
                             .into(),
@@ -206,17 +208,23 @@ impl PluginTool {
                 }
                 // Discovery is cached, but a plug-in may have been updated since the last
                 // query. Read this installation again before deciding which state to write.
-                let cached = matches[0];
-                let current = inventory::scan(std::slice::from_ref(&cached.path));
-                let installed = current
-                    .plugins
-                    .iter()
-                    .find(|p| p.plugin == cached.plugin && p.class_id == cached.class_id)
-                    .ok_or("The selected VST3 installation changed; refresh installed and choose it again")?;
-                if installed.installed_version_verified != Some(true) {
-                    return Err("The installed VST3 version is unknown or has no verified writer. Inspect presets or use the host's exposed parameters.".into());
+                let mut versions = std::collections::BTreeSet::new();
+                for cached in &matches {
+                    let current = inventory::scan(std::slice::from_ref(&cached.path));
+                    let installed = current
+                        .plugins
+                        .iter()
+                        .find(|p| p.plugin == cached.plugin && p.class_id == cached.class_id)
+                        .ok_or("The selected VST3 installation changed; refresh installed and choose it again")?;
+                    if installed.installed_version_verified != Some(true) {
+                        return Err("The installed VST3 version is unknown or has no verified writer. Inspect presets or use the host's exposed parameters.".into());
+                    }
+                    versions.insert(installed.version.clone().ok_or("Installed VST3 version is unknown")?);
                 }
-                let version = installed.version.as_deref().ok_or("Installed VST3 version is unknown")?;
+                if versions.len() != 1 {
+                    return Err("The same VST3 class has conflicting installed versions; use exposed parameters until the installation is unambiguous".into());
+                }
+                let version = versions.iter().next().expect("at least one checked installation").as_str();
                 if string("version").is_some_and(|asked| asked != version) {
                     return Err(format!("The installed version is {version}; a requested version cannot override it"));
                 }
@@ -227,13 +235,13 @@ impl PluginTool {
                 }
                 let options = preset::WriteOptions {
                     version: version.into(),
-                    class_id: installed.class_id.clone(),
+                    class_id: matches[0].class_id.clone(),
                     name: string("name").map(str::to_string),
                 };
                 let result = if action == "create" {
                     preset::create(plugin, &options, &edits)
                 } else {
-                    preset::edit(plugin, &read_file(Path::new(required("input")?))?, &options, &edits)
+                    preset::edit(plugin, &read_file(Path::new(required("input")?), plugin)?, &options, &edits)
                 }
                 .map_err(|e| e.to_string())?;
                 let bytes = result.write();
@@ -251,13 +259,14 @@ impl PluginTool {
 }
 
 fn local_path(path: &Path) -> Result<(), String> {
-    if network_or_device(&path.to_string_lossy()) || !path.is_absolute() {
+    let text = path.to_string_lossy();
+    if text.chars().any(char::is_control) || network_or_device(&text) || reserved_device(&text) || !path.is_absolute() {
         return Err("Use an absolute local path; network and device paths are not supported".into());
     }
     Ok(())
 }
 
-fn read_file(path: &Path) -> Result<Vec<u8>, String> {
+fn read_file(path: &Path, plugin: &str) -> Result<Vec<u8>, String> {
     local_path(path)?;
     if !std::fs::metadata(path).map_err(|e| e.to_string())?.is_file() {
         return Err("input must be a regular file".into());
@@ -274,8 +283,9 @@ fn read_file(path: &Path) -> Result<Vec<u8>, String> {
         return Err("input must be a regular file".into());
     }
     let mut bytes = Vec::new();
-    file.take(MAX_DECODED_BYTES as u64 + 1).read_to_end(&mut bytes).map_err(|e| e.to_string())?;
-    if bytes.len() > MAX_DECODED_BYTES {
+    let limit = preset::input_limit(plugin);
+    file.take(limit as u64 + 1).read_to_end(&mut bytes).map_err(|e| e.to_string())?;
+    if bytes.len() > limit {
         return Err("Preset exceeds the supported size limit".into());
     }
     Ok(bytes)
@@ -423,16 +433,55 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let tool = tool(temp.path());
         for path in [r"\\server\share\x.vstpreset", "//server/share/x", r"\??\C:\x", r"\\.\pipe\x"] {
-            assert!(read_file(Path::new(path)).unwrap_err().contains("local path"));
+            assert!(read_file(Path::new(path), "serum-2").unwrap_err().contains("local path"));
             assert!(tool.run(&input(json!({"action":"installed","folders":[path]}))).is_err());
         }
         for name in ["../escape.vstpreset", "CON.vstpreset", "NUL.vstpreset", "LPT1.vstpreset", "x/escape.vstpreset", "x.vstpreset."] {
             assert!(tool.output(name, "vstpreset").is_err(), "{name}");
         }
-        assert!(read_file(temp.path()).unwrap_err().contains("regular file"));
+        assert!(read_file(temp.path(), "serum-2").unwrap_err().contains("regular file"));
         assert!(!tool.output.exists());
         let all = tool.run(&input(json!({"action":"catalog"}))).unwrap();
         assert_eq!(all["plugins"].as_array().unwrap().len(), 20);
         assert!(tool.deferred());
+    }
+
+    #[test]
+    fn input_paths_refuse_controls_and_device_components_before_opening() {
+        for path in [r"C:\x\COM3.vstpreset", r"C:\x\NUL .vstpreset", "/tmp/LPT¹.xml", "\0\\\\host\\share\\x.vstpreset\0", "/tmp/a\n.vital"]
+        {
+            assert!(read_file(Path::new(path), "vital").unwrap_err().contains("local path"), "{path:?}");
+        }
+    }
+
+    #[test]
+    fn duplicate_installs_of_the_same_verified_release_allow_writes_but_conflicts_do_not() {
+        let temp = tempfile::tempdir().unwrap();
+        installation(&temp.path().join("one"), Some("3.0.5"));
+        let second = temp.path().join("two");
+        installation(&second, Some("3.0.5"));
+        let tool = tool(temp.path());
+        let make = input(json!({"action":"create","plugin":"valhalla-delay","output":"same.vstpreset"}));
+        assert!(tool.run(&make).is_ok());
+        installation(&second, Some("99.0.0"));
+        let make = input(json!({"action":"create","plugin":"valhalla-delay","output":"different.vstpreset"}));
+        assert!(tool.run(&make).unwrap_err().contains("no verified writer"));
+        assert!(!tool.output.join("different.vstpreset").exists());
+    }
+
+    #[test]
+    fn vital_embedded_audio_can_exceed_two_mebibytes_while_tool_output_stays_bounded() {
+        let temp = tempfile::tempdir().unwrap();
+        let file = temp.path().join("sample.vital");
+        let bytes =
+            serde_json::to_vec(&json!({"synth_version":"1.0.7", "settings":{"sample":{"samples":"A".repeat(MAX_DECODED_BYTES + 16)}}}))
+                .unwrap();
+        std::fs::write(&file, &bytes).unwrap();
+        assert_eq!(read_file(&file, "vital").unwrap().len(), bytes.len());
+        assert!(read_file(&file, "serum-2").unwrap_err().contains("size limit"));
+        let reply =
+            tool(temp.path()).run(&input(json!({"action":"inspect","plugin":"vital","input":file,"query":"samples","limit":1}))).unwrap();
+        assert_eq!(reply["fields"][0]["value"].as_str().unwrap().len(), 4096);
+        assert_eq!(reply["fields"][0]["truncated"], true);
     }
 }

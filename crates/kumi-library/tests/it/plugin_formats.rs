@@ -12,7 +12,8 @@ use kumi_library::plugins::formats::vital::VitalPreset;
 use kumi_library::plugins::formats::vstpreset::{vst2_chunk, VstPreset};
 
 fn fixture(plugin: &str, name: &str) -> Vec<u8> {
-    let path = kumi_testkit::workspace_path("plugin-formats").join(plugin).join("format-1/fixtures").join(name);
+    let source = builtin(plugin).unwrap().info.format_directory();
+    let path = kumi_testkit::workspace_path("plugin-formats").join(source).join("fixtures").join(name);
     std::fs::read(&path).unwrap_or_else(|error| panic!("{}: {error}", path.display()))
 }
 

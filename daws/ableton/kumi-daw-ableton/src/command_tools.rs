@@ -1498,7 +1498,9 @@ impl CommandTools {
             tokio::select! { _ = signal.cancelled() => {signal.check()?;}, _ = tokio::time::sleep(Duration::from_millis(300)) => {} }
         }
         if !indexed {
-            self.options.made.borrow_mut().written_unlisted(&item);
+            let mut made_items = self.options.made.borrow_mut();
+            made_items.written_unlisted(&made.item);
+            made_items.written_unlisted(&format!("{}.vstpreset", made.item));
         }
         Ok(ToolResult {
             text: stringify(

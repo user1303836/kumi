@@ -267,6 +267,7 @@ fn frame_vectors() {
 fn identity() -> (Identity, Offer) {
     (
         Identity {
+            preset_files: Vec::new(),
             daw: "reaper".into(),
             bridge: "0.1.0".into(),
             daw_version: "7.82/macOS-arm64".into(),

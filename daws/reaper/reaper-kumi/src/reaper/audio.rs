@@ -45,13 +45,13 @@ impl Reaper<'_> {
 
     /// A project setting by name (`RENDER_SETTINGS`, `DIRTY`…); None when this REAPER lacks the call.
     pub fn project_number(&self, proj: Project, key: &str) -> Option<f64> {
-        let key = ctext(key);
+        let Some(key) = ctext(key) else { return None };
         self.api.GetSetProjectInfo().map(|f| unsafe { f(proj.0, key.as_ptr(), 0.0, false) })
     }
 
     pub fn set_project_number(&self, proj: Project, key: &str, value: f64) -> bool {
         super::wrote();
-        let key = ctext(key);
+        let Some(key) = ctext(key) else { return false };
         match self.api.GetSetProjectInfo() {
             Some(f) => {
                 unsafe { f(proj.0, key.as_ptr(), value, true) };
@@ -65,14 +65,14 @@ impl Reaper<'_> {
     /// back exactly; None when REAPER refuses the key.
     pub fn project_text_long(&self, proj: Project, key: &str) -> Option<String> {
         let f = self.api.GetSetProjectInfo_String()?;
-        let key = ctext(key);
+        let Some(key) = ctext(key) else { return None };
         super::objects::big_string(|buf| unsafe { f(proj.0, key.as_ptr(), buf, false) })
     }
 
     /// The address of a project's own config variable (`projrenderlimit`, the render speed) and its size in bytes.
     fn project_config(&self, proj: Project, name: &str) -> Option<(*mut c_void, i32)> {
         let (offset_of, address_of) = (self.api.projectconfig_var_getoffs()?, self.api.projectconfig_var_addr()?);
-        let name = ctext(name);
+        let Some(name) = ctext(name) else { return None };
         let mut size: c_int = 0;
         let offset = unsafe { offset_of(name.as_ptr(), &mut size) };
         if offset <= 0 && size <= 0 {
@@ -125,7 +125,7 @@ impl Reaper<'_> {
     /// What the device is (`MODE`, `IDENT_OUT`, `SRATE`, `BSIZE`); None when REAPER can't say.
     pub fn audio_device(&self, key: &str) -> Option<String> {
         let f = self.api.GetAudioDeviceInfo()?;
-        let key = ctext(key);
+        let Some(key) = ctext(key) else { return None };
         let mut ok = false;
         let text = api::read_buffer(|buf, size| ok = unsafe { f(key.as_ptr(), buf, size) });
         ok.then_some(text)
@@ -156,7 +156,7 @@ impl Reaper<'_> {
     /// A source made from a media file; None when REAPER can't read it.
     pub fn source_from_file(&self, path: &str) -> Option<Source> {
         let f = self.api.PCM_Source_CreateFromFile()?;
-        let path = ctext(path);
+        let Some(path) = ctext(path) else { return None };
         let source = unsafe { f(path.as_ptr()) };
         (!source.is_null()).then_some(Source(source))
     }

@@ -48,5 +48,6 @@
   ],
   "binaries": [
     "Lucid.vst3"
-  ]
+  ],
+  "format_source": "minimal-evoke/format-1/variants/lucid"
 }

@@ -432,9 +432,7 @@ impl OzoneState {
         if matches!(id, "Element Name" | "Param Version" | "Extra Bytes") {
             return Err(FormatError::new(format!("Ozone {id} is structural state, not a numeric setting")));
         }
-        if let Some(number) = value.as_f64() {
-            super::structure::validate_number("ozone-12", &format!("DSP State/DSP Elements/{element}/{id}"), number)?;
-        }
+        super::write_value::validate_scalar("ozone-12", &format!("DSP State/DSP Elements/{element}/{id}"), &value)?;
         let node = self
             .elements_mut()?
             .get_mut(element)
@@ -533,7 +531,10 @@ impl OzoneState {
                     }
                     updated.set_chain(&entries.iter().map(|entry| entry.name.as_str()).collect::<Vec<_>>())?;
                 } else if !bytes.is_empty() {
-                    updated.set_extra(element, bytes)?;
+                    let encoded = base64::engine::general_purpose::STANDARD.encode(bytes);
+                    if updated.value(element, "Extra Bytes").and_then(Value::as_str) != Some(encoded.as_str()) {
+                        return Err(FormatError::new(format!("Ozone {element} extra data is opaque and cannot be imported or changed")));
+                    }
                 }
             }
             if let Some(enabled) = module.enabled {
@@ -590,16 +591,15 @@ fn numeric_setting(state: &OzoneState, element: &str, id: &str, value: f64) -> R
     if !value.is_finite() {
         return Err(FormatError::new("Ozone preset values must be finite"));
     }
-    if node.get("Type").and_then(Value::as_str) != Some("Bool") {
-        super::structure::validate_number("ozone-12", &format!("DSP State/DSP Elements/{element}/{id}"), value)?;
-    }
-    match node.get("Type").and_then(Value::as_str) {
-        Some("Bool") if value == 0.0 || value == 1.0 => Ok(json!(value == 1.0)),
-        Some("UInt") if value.fract() == 0.0 && (0.0..=u32::MAX as f64).contains(&value) => Ok(json!(value as u32)),
-        Some("Int") if value.fract() == 0.0 && (i32::MIN as f64..=i32::MAX as f64).contains(&value) => Ok(json!(value as i32)),
-        Some("Float") if (value as f32).is_finite() => Ok(json!((value as f32) as f64)),
-        _ => Err(FormatError::new(format!("Ozone {element}/{id} cannot take numeric value {value}"))),
-    }
+    let converted = match node.get("Type").and_then(Value::as_str) {
+        Some("Bool") if value == 0.0 || value == 1.0 => json!(value == 1.0),
+        Some("UInt") if value.fract() == 0.0 && (0.0..=u32::MAX as f64).contains(&value) => json!(value as u32),
+        Some("Int") if value.fract() == 0.0 && (i32::MIN as f64..=i32::MAX as f64).contains(&value) => json!(value as i32),
+        Some("Float") if (value as f32).is_finite() => json!((value as f32) as f64),
+        _ => return Err(FormatError::new(format!("Ozone {element}/{id} cannot take numeric value {value}"))),
+    };
+    super::write_value::validate_scalar("ozone-12", &format!("DSP State/DSP Elements/{element}/{id}"), &converted)?;
+    Ok(converted)
 }
 
 fn set_attribute(element: &mut Element, key: &str, value: String) {
@@ -632,6 +632,43 @@ mod tests {
     use super::*;
     use flate2::write::ZlibEncoder;
     use std::io::Write;
+
+    #[test]
+    fn every_writable_boolean_has_native_evidence() {
+        let proof: Value = serde_json::from_str(include_str!(concat!(
+            env!("KUMI_WORKSPACE"),
+            "/plugin-formats/ozone-12/format-1/boolean-verification.json"
+        )))
+        .unwrap();
+        let format = super::super::structure::builtin("ozone-12").unwrap();
+        let mut count = 0;
+        for (path, field) in &format.structure.fields {
+            if field.kind != "bool" || field.status != super::super::structure::Status::Verified {
+                continue;
+            }
+            count += 1;
+            let observed = &proof["fields"][path];
+            assert!(observed.is_object(), "{path} lacks evidence");
+            if path.ends_with("/Prevent Intersample Clipping") {
+                let states = observed["states"].as_array().unwrap();
+                assert_eq!(states.len(), 4);
+                for pair in states.chunks_exact(2) {
+                    assert_eq!(pair[0]["requested"], json!(false));
+                    assert_eq!(pair[1]["requested"], json!(true));
+                    for point in pair {
+                        assert_eq!(point["stored"], point["requested"]);
+                    }
+                }
+            } else {
+                assert!(observed["parameterId"].is_u64());
+                assert_eq!(observed["classId"].as_str(), Some(MAIN_CLASS_ID));
+                assert_eq!(observed["normalized"], json!([0, 1, 0.25]));
+                assert_eq!(observed["stored"], json!([false, true, false]));
+            }
+        }
+        assert_eq!(count, proof["fields"].as_object().unwrap().len());
+        assert_eq!(count, 169);
+    }
 
     #[test]
     fn reads_a_module_preset() {
@@ -830,6 +867,13 @@ mod tests {
         let invalid_extra =
             OzonePreset::read(br#"<OzoneMS PluginVer="120100" PluginBuild="1440" PresetVer="6"><Global><ExtraBytes ElementID="ElementChain" Data="!bad!"/></Global></OzoneMS>"#).unwrap();
         assert!(state.apply_preset(&invalid_extra).is_err());
+        assert_eq!(state, original);
+        let opaque_path = OzonePreset::read(br#"<OzoneMS PluginVer="120100" PluginBuild="1440" PresetVer="6"><Global><ExtraBytes ElementID="Preset State" Data="Ly9ob3N0L3NoYXJlL3ByZXNldA=="/></Global></OzoneMS>"#).unwrap();
+        assert!(state.apply_preset(&opaque_path).is_err());
+        assert_eq!(state, original);
+        assert!(state.set_value("AudioStreamer", "Vectorscope Auto-Normalize", json!(true)).is_err());
+        assert!(state.set_value("Maximizer", "Gain", json!("//host/share/file")).is_err());
+        assert!(state.set_value("Preset State", "Extra Bytes", json!("Ly9ob3N0L3NoYXJl")).is_err());
         assert_eq!(state, original);
         assert!(preset.set_value("Maximizer", "missing", 1.0).is_err());
         assert!(preset.set_value("Maximizer", "Gain", f64::INFINITY).is_err());

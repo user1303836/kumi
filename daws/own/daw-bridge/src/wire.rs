@@ -113,6 +113,9 @@ pub struct Welcome {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Identity {
+    /// Checked preset-file formats this bridge can load. Absent in older bridges.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub preset_files: Vec<String>,
     /// `reaper` or `renoise`, kept as text so another DAW's bridge is reported, not a parse error.
     pub daw: String,
     /// The bridge's own version.
@@ -390,6 +393,7 @@ mod tests {
         let welcome = Frame::Welcome(Box::new(Welcome {
             session: "0".repeat(32),
             identity: Identity {
+                preset_files: Vec::new(),
                 daw: "renoise".into(),
                 bridge: "0.1.0".into(),
                 daw_version: "3.5.4".into(),

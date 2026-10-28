@@ -47,7 +47,7 @@ impl Reaper<'_> {
 
     pub fn set_item_value(&self, item: Item, parm: &str, value: f64) -> bool {
         super::wrote();
-        let parm = ctext(parm);
+        let Some(parm) = ctext(parm) else { return false };
         self.api.SetMediaItemInfo_Value().is_some_and(|f| unsafe { f(item.0, parm.as_ptr(), value) })
     }
 
@@ -100,7 +100,7 @@ impl Reaper<'_> {
 
     pub fn set_item_chunk(&self, item: Item, chunk: &str) -> bool {
         super::wrote();
-        let chunk = ctext(chunk);
+        let Some(chunk) = ctext(chunk) else { return false };
         self.api.SetItemStateChunk().is_some_and(|f| unsafe { f(item.0, chunk.as_ptr(), false) })
     }
 
@@ -161,14 +161,14 @@ impl Reaper<'_> {
 
     pub fn set_take_value(&self, take: Take, parm: &str, value: f64) -> bool {
         super::wrote();
-        let parm = ctext(parm);
+        let Some(parm) = ctext(parm) else { return false };
         self.api.SetMediaItemTakeInfo_Value().is_some_and(|f| unsafe { f(take.0, parm.as_ptr(), value) })
     }
 
     /// A take's text attribute (`P_NAME`).
     pub fn set_take_string(&self, take: Take, parm: &str, value: &str) -> bool {
         super::wrote();
-        let (parm, value) = (ctext(parm), ctext(value));
+        let (Some(parm), Some(value)) = (ctext(parm), ctext(value)) else { return false };
         let Some(f) = self.api.GetSetMediaItemTakeInfo_String() else { return false };
         let mut buf = value.into_bytes_with_nul();
         unsafe { f(take.0, parm.as_ptr(), buf.as_mut_ptr().cast::<c_char>(), true) }
@@ -178,7 +178,7 @@ impl Reaper<'_> {
     /// unreadable file reads as an empty source of length 0).
     pub fn media(&self, path: &str) -> Option<Media> {
         let (create, destroy) = (self.api.PCM_Source_CreateFromFile()?, self.api.PCM_Source_Destroy()?);
-        let path = ctext(path);
+        let Some(path) = ctext(path) else { return None };
         let source = unsafe { create(path.as_ptr()) };
         if source.is_null() {
             return None;
@@ -203,7 +203,7 @@ impl Reaper<'_> {
         super::wrote();
         let (create, destroy, set) =
             (self.api.PCM_Source_CreateFromFile()?, self.api.PCM_Source_Destroy()?, self.api.GetSetMediaItemTakeInfo()?);
-        let path = ctext(path);
+        let Some(path) = ctext(path) else { return None };
         let source = unsafe { create(path.as_ptr()) };
         if source.is_null() {
             return None;
@@ -298,7 +298,7 @@ impl Reaper<'_> {
     pub fn set_take_marker(&self, take: Take, index: i32, name: &str, source: Option<f64>, color: Option<i32>) -> i32 {
         super::wrote();
         let Some(f) = self.api.SetTakeMarker() else { return -1 };
-        let name = ctext(name);
+        let Some(name) = ctext(name) else { return -1 };
         let mut source = source;
         let mut color = color;
         let source_ptr = source.as_mut().map_or(ptr::null_mut(), |s| s as *mut f64);

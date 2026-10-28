@@ -3,7 +3,7 @@
 
 use serde_json::{json, Value as Json};
 
-use super::cbor::{Float, Head, Length, Value};
+use super::cbor::{self, Float, Head, Length, Value};
 use super::serum2::{SerumPreset, SerumState, XferFile, ZSTD};
 use super::structure;
 use super::tree::PathRule;
@@ -108,6 +108,9 @@ impl SerumPreset {
         }
         let format = structure::builtin("serum-2").ok_or_else(|| FormatError::new("Serum format missing"))?;
         let field = format.structure.field(&canonical).ok_or_else(|| FormatError::new(format!("unknown Serum field {path}")))?;
+        if !value.is_number() {
+            super::write_value::validate_scalar("serum-2", &canonical, value)?;
+        }
         let replacement = match value {
             Json::Number(n) if field.kind.split('|').any(|k| matches!(k, "int" | "float")) => {
                 let number = n.as_f64().filter(|n| n.is_finite()).ok_or_else(|| FormatError::new("Serum value must be finite"))?;
@@ -248,7 +251,7 @@ impl SerumPreset {
                     }
                     put(&mut entry, "default", float(v / 100.0));
                 }
-                put(&mut controller, name, entry);
+                put(&mut controller, name, null_if_empty(entry));
             } else if numbered(name, "MidiClip") {
                 let mut entry = value.clone();
                 if let Value::Map(fields, _) = &mut entry {
@@ -282,7 +285,9 @@ impl SerumPreset {
                         put(&mut settings, "kUIParamMixOrGain", slot.get("kUIParamMixOrGain").cloned().unwrap_or_else(|| float(0.0)));
                         defaults.push(settings);
                     }
-                    put(&mut entry, "FX", Value::Array(defaults, *length));
+                    if !defaults.is_empty() {
+                        put(&mut entry, "FX", Value::Array(defaults, *length));
+                    }
                 }
                 put(&mut controller, name, entry);
             } else if numbered(name, "LFO") {
@@ -290,7 +295,7 @@ impl SerumPreset {
                 if let Some(v) = value.get("curveDisplayName") {
                     put(&mut entry, "curveDisplayName", v.clone());
                 }
-                put(&mut controller, name, entry);
+                put(&mut controller, name, null_if_empty(entry));
             } else if numbered(name, "ArpClip") {
                 put(&mut controller, name, map());
             } else if numbered(name, "VoicePanel") {
@@ -303,10 +308,16 @@ impl SerumPreset {
             for (key, section) in sections {
                 let name = key.as_str().unwrap_or_default();
                 if numbered(name, "Macro") {
-                    take(section, &["name"]);
+                    take(section, &["name", "default"]);
                 }
                 if numbered(name, "FXRack") {
                     take(section, &["displayName"]);
+                }
+                if numbered(name, "VoicePanel") {
+                    take(section, &["displayName"]);
+                }
+                if numbered(name, "LFO") {
+                    take(section, &["curveDisplayName"]);
                 }
                 if numbered(name, "MidiClip") {
                     take(section, MIDI_EDITOR);
@@ -330,8 +341,14 @@ impl SerumPreset {
         let mut header = header.clone();
         header["productVersion"] = json!(product);
         header["version"] = json!(version);
+        let mut processor_header = header.clone();
+        if let Some(fields) = processor_header.as_object_mut() {
+            for key in ["presetName", "presetAuthor", "presetComment", "presetDescription", "tags"] {
+                fields.remove(key);
+            }
+        }
         Ok(SerumState {
-            processor: container(header.clone(), processor, "processor")?,
+            processor: container(processor_header, processor, "processor")?,
             controller: Some(container(header, controller, "controller")?),
         })
     }
@@ -351,9 +368,31 @@ impl SerumPreset {
 
 const MIDI_EDITOR: &[&str] = &["displayLength_Beats", "gridWidth_Beats", "gridYOffset_Rows", "laneTabs", "name"];
 
+fn null_if_empty(value: Value) -> Value {
+    if matches!(&value, Value::Map(entries, _) if entries.is_empty()) {
+        Value::Simple(22, Head::Inline)
+    } else {
+        value
+    }
+}
+
 impl SerumState {
-    /// Reconstitute the editable preset document. A caller editing a saved host state should retain
-    /// the original halves and overlay the translated edits, so unknown controller fields survive.
+    /// Apply only the translated difference to each original half. Regenerating
+    /// and overlaying the entire split would migrate unknown editor fields and
+    /// turn unchanged null sentinels into empty objects.
+    pub fn with_preset(&self, preset: &SerumPreset) -> Result<Self, FormatError> {
+        let before = self.to_preset()?.to_state()?;
+        let after = preset.to_state()?;
+        let mut result = self.clone();
+        apply_file_delta(&mut result.processor, &before.processor, &after.processor)?;
+        if let (Some(original), Some(before), Some(after)) = (&mut result.controller, &before.controller, &after.controller) {
+            apply_file_delta(original, before, after)?;
+        }
+        Ok(result)
+    }
+
+    /// Reconstitute the editable preset document. Use `with_preset` to apply it
+    /// back to a saved state without regenerating unrelated nested fields.
     pub fn to_preset(&self) -> Result<SerumPreset, FormatError> {
         if self.processor.hash_ok == Some(false) || self.controller.as_ref().is_some_and(|c| c.hash_ok == Some(false)) {
             return Err(FormatError::new("Serum state checksum does not match"));
@@ -382,6 +421,81 @@ impl SerumState {
                 hash_ok: None,
             },
         })
+    }
+}
+
+fn apply_file_delta(original: &mut XferFile, before: &XferFile, after: &XferFile) -> Result<(), FormatError> {
+    apply_delta(&mut original.body, &before.body, &after.body);
+    let mut header = original.header_json()?;
+    let previous = before.header_json()?;
+    let updated = after.header_json()?;
+    let mut changed = false;
+    if let Some(fields) = header.as_object_mut() {
+        for (key, value) in fields {
+            if previous.get(key) != updated.get(key) {
+                if let Some(replacement) = updated.get(key) {
+                    *value = replacement.clone();
+                    changed = true;
+                }
+            }
+        }
+    }
+    if changed {
+        original.header = serde_json::to_vec(&header).map_err(|error| FormatError::new(error.to_string()))?;
+    }
+    original.hash_ok = None;
+    Ok(())
+}
+
+fn apply_delta(original: &mut Value, before: &Value, after: &Value) {
+    if before == after {
+        return;
+    }
+    match (original, before, after) {
+        (Value::Map(target, _), Value::Map(previous, _), Value::Map(updated, _)) => {
+            use std::collections::{HashMap, HashSet};
+            let previous: HashMap<_, _> = previous.iter().map(|(key, value)| (cbor::encode(key), value)).collect();
+            let updated_keys: HashSet<_> = updated.iter().map(|(key, _)| cbor::encode(key)).collect();
+            target.retain(|(key, _)| {
+                let key = cbor::encode(key);
+                !previous.contains_key(&key) || updated_keys.contains(&key)
+            });
+            let positions: HashMap<_, _> = target.iter().enumerate().map(|(index, (key, _))| (cbor::encode(key), index)).collect();
+            for (key, value) in updated {
+                let encoded = cbor::encode(key);
+                let old = previous.get(&encoded).copied();
+                if old == Some(value) {
+                    continue;
+                }
+                if let Some(index) = positions.get(&encoded) {
+                    let target = &mut target[*index].1;
+                    if let Some(old) = old {
+                        apply_delta(target, old, value);
+                    } else {
+                        *target = value.clone();
+                    }
+                } else {
+                    target.push((key.clone(), value.clone()));
+                }
+            }
+        }
+        (Value::Array(target, _), Value::Array(previous, _), Value::Array(updated, _)) => {
+            for (index, value) in updated.iter().enumerate() {
+                if let Some(target) = target.get_mut(index) {
+                    if let Some(old) = previous.get(index) {
+                        apply_delta(target, old, value);
+                    } else {
+                        *target = value.clone();
+                    }
+                } else {
+                    target.push(value.clone());
+                }
+            }
+            if updated.len() != previous.len() {
+                target.truncate(updated.len());
+            }
+        }
+        (target, _, value) => *target = value.clone(),
     }
 }
 

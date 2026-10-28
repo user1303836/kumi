@@ -27,7 +27,8 @@
       "3"
     ],
     "source": "Installed native preset files and shipped parameter-name metadata; no factory preset bodies copied.",
-    "verification": "Native documents inspected; installed-binary version and runtime acceptance remain unverified."
+    "verification": "Native documents inspected; installed-binary version and runtime acceptance remain unverified.",
+    "parameterLinks": "Guessed links associate names and indices from installed metadata; physical-unit mappings remain unverified."
   },
   "fields": {
     "@progName": {
@@ -292,53 +293,43 @@
   "parameters": {
     "bypass": {
       "field": "inputParams/@p0",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "focus": {
       "field": "inputParams/@p1",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "localize": {
       "field": "inputParams/@p2",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "refract": {
       "field": "inputParams/@p3",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "adapt": {
       "field": "inputParams/@p4",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "presence": {
       "field": "inputParams/@p5",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "transient_threshold": {
       "field": "inputParams/@p6",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "transient_solo": {
       "field": "inputParams/@p7",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "io_diff": {
       "field": "inputParams/@p18",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "out_gain": {
       "field": "inputParams/@p19",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     }
   }
 }

@@ -1,0 +1,9 @@
+{
+  "plugin": "minimal-poly-flanger",
+  "version": "1.1.0",
+  "fixtureSha256": "83afde96c7c6da4897dd5a4098515703b787d7c17569c47d4b07460c1b390006",
+  "sessionId": "all zeros",
+  "runtime": "Sanitized component restored in a fresh VST3 instance. Product root, source version and every mapped parameter matched after reload within native floating-point serialization precision.",
+  "parametersChecked": 17,
+  "maxRelativeErrorWithUnitFloor": 1.430511474609375e-06
+}

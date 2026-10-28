@@ -23,6 +23,7 @@ pub mod tree;
 pub mod valhalla;
 pub mod vital;
 pub mod vstpreset;
+pub mod write_value;
 pub mod xml;
 pub mod zynaptiq;
 

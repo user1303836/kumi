@@ -27,7 +27,8 @@
       "4"
     ],
     "source": "Installed native preset files and shipped parameter-name metadata; no factory preset bodies copied.",
-    "verification": "Native documents inspected; installed-binary version and runtime acceptance remain unverified."
+    "verification": "Native documents inspected; installed-binary version and runtime acceptance remain unverified.",
+    "parameterLinks": "Guessed links associate names and indices from installed metadata; physical-unit mappings remain unverified."
   },
   "fields": {
     "@progName": {
@@ -1004,373 +1005,299 @@
   "parameters": {
     "pluginActive": {
       "field": "inputParams/@p0",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "pluginDoublePrecision": {
       "field": "inputParams/@p1",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "pluginAlign": {
       "field": "inputParams/@p2",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "mainInGain": {
       "field": "inputParams/@p3",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "auxInGain": {
       "field": "inputParams/@p4",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "outputGain": {
       "field": "inputParams/@p5",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "limiterOn": {
       "field": "inputParams/@p6",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "morphBypass": {
       "field": "inputParams/@p7",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "morphBSource": {
       "field": "inputParams/@p8",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "morphAlgorithm": {
       "field": "inputParams/@p9",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "morphIndex": {
       "field": "inputParams/@p10",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "morphXFade": {
       "field": "inputParams/@p11",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "morphAmpSense": {
       "field": "inputParams/@p12",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "morphComplexity": {
       "field": "inputParams/@p13",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "morphCrest": {
       "field": "inputParams/@p14",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "morphOsmosis": {
       "field": "inputParams/@p15",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "morphOsmosisRelease": {
       "field": "inputParams/@p16",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "transientBypassOn": {
       "field": "inputParams/@p17",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "transientMode": {
       "field": "inputParams/@p18",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "transientBypassAmount": {
       "field": "inputParams/@p19",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "transientSize": {
       "field": "inputParams/@p20",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "transientsBypassFmtShift": {
       "field": "inputParams/@p21",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "formantShiftEnable": {
       "field": "inputParams/@p22",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "formantShift": {
       "field": "inputParams/@p23",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "formantShiftLegacyOn": {
       "field": "inputParams/@p24",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "modelerOnOff": {
       "field": "inputParams/@p25",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "modelerMode": {
       "field": "inputParams/@p26",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "modelerSliceLength": {
       "field": "inputParams/@p27",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "modelerInertia": {
       "field": "inputParams/@p28",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "modelerMinSlice": {
       "field": "inputParams/@p29",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "modelerMaxSlice": {
       "field": "inputParams/@p30",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "modelerFileGate": {
       "field": "inputParams/@p31",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "modelerSkipSilence": {
       "field": "inputParams/@p32",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "modelerSliceFade": {
       "field": "inputParams/@p33",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "modelerSpectralRange": {
       "field": "inputParams/@p34",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "modelerSliceSorting": {
       "field": "inputParams/@p35",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "modelerInputAnalysis": {
       "field": "inputParams/@p36",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "mixerMorphMix": {
       "field": "inputParams/@p37",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "mixerMorphMute": {
       "field": "inputParams/@p38",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "mixerMorphSolo": {
       "field": "inputParams/@p39",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "mixerMorphFilter": {
       "field": "inputParams/@p40",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "mixerMainInMix": {
       "field": "inputParams/@p41",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "mixerMainInMute": {
       "field": "inputParams/@p42",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "mixerMainInSolo": {
       "field": "inputParams/@p43",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "mixerMainInFilter": {
       "field": "inputParams/@p44",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "mixerAuxInMix": {
       "field": "inputParams/@p45",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "mixerAuxInMute": {
       "field": "inputParams/@p46",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "mixerAuxInSolo": {
       "field": "inputParams/@p47",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "mixerAuxInFilter": {
       "field": "inputParams/@p48",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "mixerModelerMix": {
       "field": "inputParams/@p49",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "mixerModelerMute": {
       "field": "inputParams/@p50",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "mixerModelerSolo": {
       "field": "inputParams/@p51",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "mixerModelerFilter": {
       "field": "inputParams/@p52",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "reverbMix": {
       "field": "inputParams/@p53",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "reverbRoomSize": {
       "field": "inputParams/@p54",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "reverbDamp": {
       "field": "inputParams/@p55",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "mappingZone1OnOff": {
       "field": "inputParams/@p56",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "mappingZone1Mute": {
       "field": "inputParams/@p57",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "mappingZone1InputPosition": {
       "field": "inputParams/@p58",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "mappingZone1InputWidth": {
       "field": "inputParams/@p59",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "mappingZone1FileFrom": {
       "field": "inputParams/@p60",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "mappingZone1FileTo": {
       "field": "inputParams/@p61",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "mappingZone2OnOff": {
       "field": "inputParams/@p62",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "mappingZone2Mute": {
       "field": "inputParams/@p63",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "mappingZone2InputPosition": {
       "field": "inputParams/@p64",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "mappingZone2InputWidth": {
       "field": "inputParams/@p65",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "mappingZone2FileFrom": {
       "field": "inputParams/@p66",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "mappingZone2FileTo": {
       "field": "inputParams/@p67",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "mappingZone3OnOff": {
       "field": "inputParams/@p68",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "mappingZone3Mute": {
       "field": "inputParams/@p69",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "mappingZone3InputPosition": {
       "field": "inputParams/@p70",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "mappingZone3InputWidth": {
       "field": "inputParams/@p71",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "mappingZone3FileFrom": {
       "field": "inputParams/@p72",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "mappingZone3FileTo": {
       "field": "inputParams/@p73",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     }
   }
 }

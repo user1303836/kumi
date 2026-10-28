@@ -317,10 +317,14 @@ local function settings_restore(kind, song, env, restore, desc, what)
       pcall(function() device.active_preset_data = material.presetData end)
     end
   end
+  local after_content, prior_content = M.content_of(device.active_preset_data), M.content_of(material.presetData)
+  if after_content == M.content_of(now) and after_content ~= prior_content then
+    fail("failed", "the device kept the applied settings instead of restoring its earlier settings")
+  end
   base.note_restored_at(env.journal, kind, { track = t, device = d })
   return {
     restored = { preset = device.active_preset }, display = { title = label .. ": settings put back",
-      note = M.print_of(device.active_preset_data) ~= M.print_of(material.presetData)
+      note = material.vst3 and after_content ~= prior_content
         and "The device accepted its earlier settings and normalized the saved bytes." or nil },
     undo = { desc = desc, entry = true },
   }
@@ -388,6 +392,7 @@ local function data_apply(song, env, input, fence, desc)
   local printed = M.print_of(back)
   local kept = keep(env, t, d, track, device)
   kept.presetData = xml
+  kept.vst3 = input.vst3Data ~= nil
   return {
     applied = { state = material_.device_state(device).state, print = printed, content = content_fence(device, back) }, material = kept, target = target_of(t, d),
     display = { title = data_title(input, label) }, undo = { desc = desc, entry = true },

@@ -47,5 +47,6 @@
   ],
   "binaries": [
     "EPROM - Memory Rites.vst3"
-  ]
+  ],
+  "format_source": "minimal-current/format-1/variants/eprom"
 }

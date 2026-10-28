@@ -27,7 +27,8 @@
       "4"
     ],
     "source": "Installed native preset files and shipped parameter-name metadata; no factory preset bodies copied.",
-    "verification": "Native documents inspected; installed-binary version and runtime acceptance remain unverified."
+    "verification": "Native documents inspected; installed-binary version and runtime acceptance remain unverified.",
+    "parameterLinks": "Guessed links associate names and indices from installed metadata; physical-unit mappings remain unverified."
   },
   "fields": {
     "@progName": {
@@ -393,138 +394,111 @@
   "parameters": {
     "bypass": {
       "field": "inputParams/@p0",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "mix": {
       "field": "inputParams/@p1",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "warpMix": {
       "field": "inputParams/@p2",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "warpDepth": {
       "field": "inputParams/@p3",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "warpPoles": {
       "field": "inputParams/@p4",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "warpTilt": {
       "field": "inputParams/@p5",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "warpTiltFilter": {
       "field": "inputParams/@p6",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "tiltPrePost": {
       "field": "inputParams/@p7",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "revMix": {
       "field": "inputParams/@p8",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "revSize": {
       "field": "inputParams/@p9",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "revDamp": {
       "field": "inputParams/@p10",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "shiftMix": {
       "field": "inputParams/@p11",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "pitchShift": {
       "field": "inputParams/@p12",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "frqShift": {
       "field": "inputParams/@p13",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "frqShiftLinear": {
       "field": "inputParams/@p14",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "frqShiftMode": {
       "field": "inputParams/@p15",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "swapWarpShift": {
       "field": "inputParams/@p16",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "warpOn": {
       "field": "inputParams/@p17",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "shiftOn": {
       "field": "inputParams/@p18",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "reverbOn": {
       "field": "inputParams/@p19",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "wetGain": {
       "field": "inputParams/@p20",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "pitchMode": {
       "field": "inputParams/@p21",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "blendMode": {
       "field": "inputParams/@p22",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "delayTime": {
       "field": "inputParams/@p23",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "delayChannelInvert": {
       "field": "inputParams/@p24",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "fsDecayTime": {
       "field": "inputParams/@p25",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     },
     "revRouting": {
       "field": "inputParams/@p26",
-      "status": "guessed",
-      "note": "Name/index association observed in installed metadata; verify physical-unit mapping against the loaded plug-in."
+      "status": "guessed"
     }
   }
 }

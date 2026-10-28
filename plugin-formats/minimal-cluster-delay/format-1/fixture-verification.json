@@ -1,0 +1,9 @@
+{
+  "plugin": "minimal-cluster-delay",
+  "version": "1.4.0",
+  "fixtureSha256": "aec2b325a7cd038a692e539e4fb1a8e18ec57fbe52784e096fe77eaefb3039e8",
+  "sessionId": "all zeros",
+  "runtime": "Sanitized component restored in a fresh VST3 instance. Product root, source version and every mapped parameter matched after reload within native floating-point serialization precision.",
+  "parametersChecked": 14,
+  "maxRelativeErrorWithUnitFloor": 1.430511474609375e-06
+}

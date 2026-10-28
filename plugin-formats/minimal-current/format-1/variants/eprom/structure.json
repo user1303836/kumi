@@ -1,0 +1,58 @@
+{
+  "extends": "minimal-current",
+  "plugin": "minimal-eprom-memory-rites",
+  "files": {
+    "preset": {
+      "constants": {
+        "root": "EPROM-MemoryRites"
+      }
+    },
+    "state": {
+      "constants": {
+        "root": "EPROM-MemoryRites"
+      }
+    }
+  },
+  "fields": {
+    "parameters/MKUSynthClickableEnvelopeNode_Mod_Slot_1_PhaseOffset": null,
+    "parameters/MKUSynthClickableEnvelopeNode_Mod_Slot_2_PhaseOffset": null,
+    "parameters/MKUSynthClickableEnvelopeNode_Mod_Slot_3_PhaseOffset": null,
+    "parameters/MKUSynthClickableEnvelopeNode_Mod_Slot_4_PhaseOffset": null,
+    "parameters/MKUSynthClickableEnvelopeNode_Mod_Slot_5_PhaseOffset": null,
+    "parameters/MKUSynthClickableEnvelopeNode_Mod_Slot_6_PhaseOffset": null,
+    "parameters/MKUSynthClickableEnvelopeNode_Mod_Slot_7_PhaseOffset": null,
+    "parameters/MKUSynthClickableEnvelopeNode_Mod_Slot_8_PhaseOffset": null,
+    "parameters/MKUSynthClickableEnvelopeNode_Mod_Slot_9_PhaseOffset": null
+  },
+  "parameters": {
+    "Macro 1 [VST3 1381922179]": null,
+    "Macro 2 [VST3 121942212]": null,
+    "Macro 3 [VST3 1009445893]": null,
+    "Macro 4 [VST3 1896949574]": null,
+    "Curve 1 Phase [VST3 425918764]": null,
+    "Curve 2 Phase [VST3 132515757]": null,
+    "Curve 3 Phase [VST3 1986596398]": null,
+    "Curve 4 Phase [VST3 1693193391]": null,
+    "Curve 5 Phase [VST3 1399790384]": null,
+    "Curve 6 Phase [VST3 1106387377]": null,
+    "Curve 7 Phase [VST3 812984370]": null,
+    "Curve 8 Phase [VST3 519581363]": null,
+    "Curve 9 Phase [VST3 226178356]": null,
+    "Macro 1 Macro [VST3 1381922179]": {
+      "field": "parameters/MKUMacroNode_Macro_1_Macro",
+      "status": "verified"
+    },
+    "Macro 2 Macro [VST3 121942212]": {
+      "field": "parameters/MKUMacroNode_Macro_2_Macro",
+      "status": "verified"
+    },
+    "Macro 3 Macro [VST3 1009445893]": {
+      "field": "parameters/MKUMacroNode_Macro_3_Macro",
+      "status": "verified"
+    },
+    "Macro 4 Macro [VST3 1896949574]": {
+      "field": "parameters/MKUMacroNode_Macro_4_Macro",
+      "status": "verified"
+    }
+  }
+}

@@ -9,7 +9,8 @@ use kumi_library::plugins::formats::{
 use serde_json::{json, Value};
 
 fn fixture(plugin: &str) -> VstPreset {
-    let path = std::path::Path::new(env!("KUMI_WORKSPACE")).join("plugin-formats").join(plugin).join("format-1/fixtures/init.vstpreset");
+    let source = structure::builtin(plugin).unwrap().info.format_directory();
+    let path = std::path::Path::new(env!("KUMI_WORKSPACE")).join("plugin-formats").join(source).join("fixtures/init.vstpreset");
     VstPreset::read(&std::fs::read(path).unwrap()).unwrap()
 }
 
@@ -33,7 +34,8 @@ fn every_vendor_product_has_an_exact_init_roundtrip_and_a_recorded_runtime_edit(
         let preset = fixture(id);
         assert!(format.has_id(&preset.class_id), "{id}: fixture belongs to another processor");
         assert!(format.info.ids.vst2.is_empty() && format.info.ids.au.is_empty() && format.info.ids.clap.is_empty());
-        let path = std::path::Path::new(env!("KUMI_WORKSPACE")).join("plugin-formats").join(id).join("format-1/verified.json");
+        let path =
+            std::path::Path::new(env!("KUMI_WORKSPACE")).join("plugin-formats").join(format.info.format_directory()).join("verified.json");
         let evidence: Value = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
         let check = &evidence["checks"][0];
         let path = check["path"].as_str().unwrap();
@@ -200,4 +202,150 @@ fn numeric_writes_need_verified_intervals_and_cannot_use_raw_text_attributes() {
         .find(|(_, _, field)| field.seen.is_some() && field.range_status != Some(structure::Status::Verified))
         .unwrap();
     assert!(structure::validate_number(&unverified.0.info.plugin, unverified.1, unverified.2.seen.unwrap()[0]).is_err());
+}
+
+fn range_evidence(plugin: &str, depth: usize) -> Value {
+    assert!(depth < 8, "cyclic shared range evidence");
+    let source = structure::builtin(plugin).unwrap().info.format_directory();
+    let path = std::path::Path::new(env!("KUMI_WORKSPACE")).join("plugin-formats").join(source).join("range-verification.json");
+    let mut value: Value =
+        serde_json::from_slice(&std::fs::read(&path).unwrap_or_else(|error| panic!("{}: {error}", path.display()))).unwrap();
+    if let Some(parent) = value.as_object_mut().unwrap().remove("extends") {
+        let mut base = range_evidence(parent.as_str().unwrap(), depth + 1);
+        structure::merge_format_patch(&mut base, &value);
+        value = base;
+    }
+    value
+}
+
+fn endpoint_bounds(record: &Value) -> [f64; 2] {
+    assert!(record["parameterId"].as_u64().is_some(), "missing host control ID: {record}");
+    let stored = record["stored"].as_array().expect("stored endpoint witnesses");
+    assert_eq!(stored.len(), 3);
+    assert!(stored.iter().all(|value| value.as_f64().is_some_and(f64::is_finite)));
+    let mut bounds = [stored[0].as_f64().unwrap(), stored[1].as_f64().unwrap()];
+    if bounds[0] > bounds[1] {
+        bounds.swap(0, 1);
+    }
+    bounds
+}
+
+#[test]
+fn every_verified_numeric_interval_has_committed_endpoint_evidence() {
+    let mut witnessed = 0;
+    for format in structure::builtins() {
+        let fields: Vec<_> =
+            format.structure.fields.iter().filter(|(_, field)| field.range_status == Some(structure::Status::Verified)).collect();
+        if fields.is_empty() {
+            continue;
+        }
+        let plugin = &format.info.plugin;
+        let evidence = range_evidence(plugin, 0);
+        for (path, field) in fields {
+            let bounds = field.range.expect("verified range needs bounds");
+            assert!(bounds.iter().all(|n| n.is_finite()) && bounds[0] <= bounds[1]);
+            match format.info.family.as_str() {
+                "valhalla" | "minimal-audio" | "pulsar-modular" => {
+                    let record = &evidence["fields"][path];
+                    assert_eq!(endpoint_bounds(record), bounds, "{plugin}/{path}");
+                    assert_eq!(record["readback"][0], 0.0);
+                    assert_eq!(record["readback"][1], 1.0);
+                    let id = record["parameterId"].as_u64().unwrap();
+                    assert!(format.structure.parameters.iter().any(|(name, link)| link.field == *path
+                        && link.status == structure::Status::Verified
+                        && name.ends_with(&format!("[VST3 {id}]"))));
+                }
+                "serum-2" => {
+                    let links: Vec<_> = format
+                        .structure
+                        .parameters
+                        .values()
+                        .filter(|link| link.field == *path && link.status == structure::Status::Verified)
+                        .collect();
+                    assert!(!links.is_empty(), "Serum range has no concrete verified control");
+                    for link in links {
+                        let record = &evidence["fields"][structure::Structure::location(link)];
+                        assert_eq!(endpoint_bounds(record), bounds);
+                        assert_eq!(record["readback"][0], 0.0);
+                        assert_eq!(record["readback"][1], 1.0);
+                        assert!(link.note.as_ref().unwrap().contains(&format!("parameter {}", record["parameterId"])));
+                    }
+                }
+                "ozone-12" => {
+                    let record = &evidence["fields"][path];
+                    let observations = std::iter::once(record).chain(record["variants"].as_array().into_iter().flatten());
+                    for observed in observations {
+                        let endpoints = endpoint_bounds(observed);
+                        assert!(
+                            bounds[0] >= endpoints[0] && bounds[1] <= endpoints[1],
+                            "{plugin}/{path}: interval exceeds a checked variant"
+                        );
+                        let normalized: Vec<_> =
+                            observed["normalized"].as_array().unwrap().iter().map(|value| value.as_f64().unwrap()).collect();
+                        assert_eq!(normalized, [0.0, 1.0, 0.25]);
+                        assert!(format.has_id(observed["classId"].as_str().unwrap()));
+                    }
+                }
+                "zynaptiq" => {
+                    let record = evidence["controls"].as_array().unwrap().iter().find(|record| record["path"] == *path).unwrap();
+                    assert_eq!(record["range"], json!(bounds));
+                    assert_eq!(record["passed"], true);
+                    assert_eq!(record["nativeEndpointsVerified"], true);
+                    assert_eq!(record["nativeEndpointReadbacks"], json!(bounds));
+                    assert_eq!(record["parameterId"].as_u64(), path.strip_prefix("inputParams/@p").and_then(|id| id.parse().ok()));
+                }
+                "superior-drummer" => {
+                    for endpoint in bounds {
+                        assert!(evidence["controls"].as_array().unwrap().iter().any(|record| record["path"] == *path
+                            && record["requested"].as_f64() == Some(endpoint)
+                            && record["readback"].as_f64() == Some(endpoint)
+                            && record["passed"] == true));
+                    }
+                }
+                family => panic!("verified range in {family} needs an evidence adapter"),
+            }
+            witnessed += 1;
+        }
+    }
+    assert!(witnessed > 6000);
+}
+
+#[test]
+fn shared_minimal_formats_keep_exact_product_templates_and_zero_session_ids() {
+    use kumi_library::plugins::templates;
+    use sha2::{Digest, Sha256};
+    for (parent, variant) in [("minimal-current", "minimal-eprom-memory-rites"), ("minimal-evoke", "minimal-lucid")] {
+        let source = structure::builtin(variant).unwrap().info.format_directory();
+        assert!(source.starts_with(&format!("{parent}/format-1/variants/")));
+        assert_ne!(fixture(parent).class_id, fixture(variant).class_id);
+    }
+    for format in structure::builtins().iter().filter(|format| format.info.family == "minimal-audio") {
+        let plugin = &format.info.plugin;
+        let path = std::path::Path::new(env!("KUMI_WORKSPACE")).join("plugin-formats").join(format.info.format_directory());
+        let bytes = std::fs::read(path.join("fixtures/init.vstpreset")).unwrap();
+        assert_eq!(templates::initial(plugin).unwrap(), bytes, "build compression changed {plugin}");
+        let proof: Value = serde_json::from_slice(&std::fs::read(path.join("fixture-verification.json")).unwrap()).unwrap();
+        assert_eq!(proof["fixtureSha256"], format!("{:x}", Sha256::digest(&bytes)));
+        let container = VstPreset::read(&bytes).unwrap();
+        assert!(format.has_id(&container.class_id));
+        let state = XmlState::read(container.component().unwrap()).unwrap();
+        fn session_ids(element: &kumi_library::plugins::formats::xml::Element, count: &mut usize) {
+            for (key, value) in &element.attributes {
+                if key == "SESSION_ID" {
+                    assert_eq!(value, "00000000000000000000000000000000");
+                    *count += 1;
+                }
+            }
+            for child in &element.children {
+                session_ids(child, count);
+            }
+        }
+        let mut count = 0;
+        session_ids(&state.document.root, &mut count);
+        assert_eq!(count, 1, "{plugin}");
+        let native = MinimalAudioPreset::read(container.component().unwrap()).unwrap();
+        for (name, value) in native.parameters() {
+            assert_eq!(format.structure.fields[&format!("parameters/{name}")].default, Some(value), "{plugin}/{name}");
+        }
+    }
 }

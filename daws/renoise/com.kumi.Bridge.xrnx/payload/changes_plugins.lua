@@ -275,14 +275,14 @@ base.register({
   kind = "plugin-preset-data", custom = true, by_place = true,
   preview = function(song, env, input)
     local plan = data_plan(song, env, input)
-    return { target = places_.target_of(env, "instrument", plan.n), prior = { hash = state_hash(plan.state) },
-      fence = { path = plan.path, hash = state_hash(plan.state), wanted = state_hash(plan.wanted) },
+    return { target = places_.target_of(env, "instrument", plan.n), prior = { hash = material_.content_of(plan.state) },
+      fence = { path = plan.path, hash = material_.content_of(plan.state), wanted = material_.content_of(plan.wanted) },
       display = { title = data_title(plan, input), unchanged = plan.state == plan.wanted or nil } }
   end,
   apply = function(song, env, input, fence, desc)
     local ok, plan = pcall(data_plan, song, env, input)
     if not ok then base.gone_is_changed(plan) end
-    if plan.path ~= fence.path or state_hash(plan.state) ~= fence.hash or state_hash(plan.wanted) ~= fence.wanted then
+    if plan.path ~= fence.path or material_.content_of(plan.state) ~= fence.hash or material_.content_of(plan.wanted) ~= fence.wanted then
       fail("changed", q(plan.label) .. "'s plug-in state or requested preset changed since the preview")
     end
     local unchanged = plan.state == plan.wanted
@@ -294,7 +294,7 @@ base.register({
       end
     end
     local back = plan.device.active_preset_data or ""
-    return { applied = { path = plan.path, hash = state_hash(back) }, material = { path = plan.path, state = plan.state },
+    return { applied = { path = plan.path, hash = material_.content_of(back) }, material = { path = plan.path, state = plan.state },
       target = places_.target_of(env, "instrument", plan.n), prior = { hash = fence.hash },
       display = { title = data_title(plan, input), unchanged = unchanged or nil },
       undo = { desc = desc, entry = not unchanged and M.UNDO_COVERS.preset },
@@ -306,24 +306,27 @@ base.register({
     local n, objects, label = places_.locate(song, env, "instrument", { place = restore.target and restore.target.place }, "plugin-preset-data")
     local device = plugin_device_of(objects)
     if device.device_path ~= material.path then fail("changed", q(label) .. " plays another plug-in now") end
-    local hash = state_hash(device.active_preset_data or "")
-    if hash == state_hash(material.state) then
+    local hash = material_.content_of(device.active_preset_data or "")
+    if hash == material_.content_of(material.state) then
       return { restored = { hash = hash }, display = { title = q(label) .. "'s state is back already" }, undo = { desc = desc, entry = false }, unwritten = true }
     end
     if not restore.discard and hash ~= applied.hash then fail("changed", q(label) .. "'s plug-in changed since Kumi loaded its preset") end
     if M.UNDO_COVERS.preset then song:describe_undo(desc) end
     if not pcall(function() device.active_preset_data = material.state end) then fail("failed", "the plug-in refused its prior state") end
-    local after = state_hash(device.active_preset_data or "")
+    local after = material_.content_of(device.active_preset_data or "")
+    if after == hash and after ~= material_.content_of(material.state) then
+      fail("failed", "the plug-in kept the applied state instead of restoring its earlier state")
+    end
     base.note_restored(env.journal, "plugin-preset-data", places_.journal_place("instrument", n), applied, base.KINDS["plugin-preset-data"])
     return { restored = { path = material.path, hash = after }, display = { title = q(label) .. "'s state put back",
-      note = after ~= state_hash(material.state) and "The plug-in accepted its earlier state and normalized the saved bytes." or nil },
+      note = after ~= material_.content_of(material.state) and "The plug-in accepted its earlier state and normalized the saved bytes." or nil },
       undo = { desc = desc, entry = M.UNDO_COVERS.preset } }
   end,
   reread = function(song, place)
     local instrument = places_.reread("instrument")(song, place)
     return instrument and instrument.plugin_properties.plugin_loaded and instrument.plugin_properties.plugin_device or nil
   end,
-  read = function(device) return { path = device.device_path, hash = state_hash(device.active_preset_data or "") } end,
+  read = function(device) return { path = device.device_path, hash = material_.content_of(device.active_preset_data or "") } end,
   same = function(a, b) return a.path == b.path and a.hash == b.hash end,
 })
 

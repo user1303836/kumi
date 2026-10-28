@@ -1,0 +1,9 @@
+{
+  "plugin": "minimal-lucid",
+  "version": "1.0.0",
+  "fixtureSha256": "ce351a92c0745d455fcaef195612368d755ad6942194a45381cda5aa829ea03b",
+  "sessionId": "all zeros",
+  "runtime": "Sanitized component restored in a fresh VST3 instance. Product root, source version and every mapped parameter matched after reload within native floating-point serialization precision.",
+  "parametersChecked": 1175,
+  "maxRelativeErrorWithUnitFloor": 1.430511474609375e-06
+}

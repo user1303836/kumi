@@ -15,13 +15,11 @@ crate-type = ["cdylib", "rlib"]
 path = "src/lib.rs"
 
 [dependencies]
+base64.workspace = true
 daw-bridge = { workspace = true }
 kumi-common.workspace = true
 serde_json = { workspace = true }
 tempfile.workspace = true
-
-[target.'cfg(unix)'.dependencies]
-libc.workspace = true
 
 [dev-dependencies]
 kumi-testkit.workspace = true

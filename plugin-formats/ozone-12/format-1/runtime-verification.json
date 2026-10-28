@@ -366,10 +366,15 @@
         "parameters_swept": 14,
         "scalar_state_links": 11
       }
-    ]
+    ],
+    "evidence": "range-verification.json"
   },
   "fixture_privacy": {
     "uuid": "Zero in committed initialized fixtures; random UUIDv4 on create; source UUID preserved on edit.",
     "preset_browser_state": "Cleared older fixture Preset State/Extra Bytes, which held local user paths. Current native host reload preserves processing state and the supplied random UUID; browser metadata normalizes to empty initialized content."
+  },
+  "boolean_fields": {
+    "verified": 169,
+    "evidence": "boolean-verification.json"
   }
 }

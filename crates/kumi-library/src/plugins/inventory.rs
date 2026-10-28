@@ -67,7 +67,7 @@ pub fn scan(roots: &[PathBuf]) -> Inventory {
     let mut visited = BTreeSet::new();
     let mut count = 0usize;
     while let Some((path, depth)) = pending.pop() {
-        if kumi_common::path::network_or_device(&path.to_string_lossy()) {
+        if !local_links(&path, 32) {
             out.warnings.push("Skipped a network or device VST3 location".into());
             continue;
         }
@@ -122,6 +122,65 @@ pub fn scan(roots: &[PathBuf]) -> Inventory {
     out
 }
 
+// Walk prefixes before canonicalizing: canonicalize itself would already follow
+// a junction/symlink to a network share. Relative links are checked from their
+// resolved parent, with a finite hop budget for cycles.
+fn local_links(path: &Path, hops: usize) -> bool {
+    let text = path.to_string_lossy();
+    if text.chars().any(char::is_control)
+        || kumi_common::path::network_or_device(&text)
+        || kumi_common::path::reserved_device(&text)
+        || hops == 0
+    {
+        return false;
+    }
+    if !path.is_absolute() {
+        return std::path::absolute(path).is_ok_and(|absolute| local_links(&absolute, hops));
+    }
+    let mut prefix = PathBuf::new();
+    for part in path.components() {
+        prefix.push(part);
+        if !prefix.is_absolute() {
+            continue;
+        }
+        let metadata = match fs::symlink_metadata(&prefix) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return true,
+            Err(_) => return false,
+        };
+        #[cfg(windows)]
+        let is_link = {
+            use std::os::windows::fs::MetadataExt;
+            metadata.file_attributes() & 0x400 != 0
+        };
+        #[cfg(not(windows))]
+        let is_link = metadata.file_type().is_symlink();
+        if is_link {
+            let Ok(target) = fs::read_link(&prefix) else { return false };
+            // Windows supplies a verbatim prefix for local junction targets.
+            // Only that explicit drive form may be unwrapped; UNC stays refused.
+            #[cfg(windows)]
+            let target = {
+                let text = target.to_string_lossy();
+                match text.strip_prefix(r"\\?\") {
+                    Some(rest)
+                        if rest.as_bytes().get(1) == Some(&b':')
+                            && rest.as_bytes().get(2) == Some(&b'\\')
+                            && rest.as_bytes().first().is_some_and(u8::is_ascii_alphabetic) =>
+                    {
+                        PathBuf::from(rest)
+                    }
+                    _ => target,
+                }
+            };
+            let target = if target.is_absolute() { target } else { prefix.parent().unwrap_or(Path::new("")).join(target) };
+            let Ok(rest) = path.strip_prefix(&prefix) else { return false };
+            return local_links(&target.join(rest), hops - 1);
+        }
+    }
+    true
+}
+
 fn key(s: &str) -> String {
     s.chars().filter(|c| c.is_alphanumeric()).flat_map(char::to_lowercase).collect()
 }
@@ -147,13 +206,20 @@ fn agreed_version(module: Option<&str>, binary: Option<&str>) -> Option<String> 
 }
 
 fn binary_file(path: &Path) -> Option<PathBuf> {
+    if !local_links(path, 32) {
+        return None;
+    }
     if path.is_file() {
         return Some(path.to_path_buf());
     }
     #[cfg(windows)]
     {
         let architecture = if cfg!(target_arch = "aarch64") { "arm64ec-win" } else { "x86_64-win" };
-        return fs::read_dir(path.join("Contents").join(architecture)).ok().and_then(|entries| {
+        let directory = path.join("Contents").join(architecture);
+        if !local_links(&directory, 32) {
+            return None;
+        }
+        return fs::read_dir(directory).ok().and_then(|entries| {
             entries.take(16).flatten().map(|entry| entry.path()).find(|p| p.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("vst3")))
         });
     }
@@ -161,8 +227,19 @@ fn binary_file(path: &Path) -> Option<PathBuf> {
     None
 }
 
+#[cfg(any(windows, test))]
+fn version_resource_range(data: &[u32], pointer: *const std::ffi::c_void, bytes: usize, alignment: usize) -> bool {
+    let start = pointer as usize;
+    let base = data.as_ptr() as usize;
+    let Some(end) = start.checked_add(bytes) else { return false };
+    let Some(buffer_end) = data.len().checked_mul(std::mem::size_of::<u32>()).and_then(|bytes| base.checked_add(bytes)) else {
+        return false;
+    };
+    !pointer.is_null() && alignment != 0 && start % alignment == 0 && start >= base && end <= buffer_end
+}
+
 fn metadata_bytes(path: &Path) -> Option<Vec<u8>> {
-    if kumi_common::path::network_or_device(&path.to_string_lossy()) {
+    if !local_links(path, 32) {
         return None;
     }
     let metadata = fs::metadata(path).ok()?;
@@ -340,7 +417,7 @@ fn windows_version(path: &Path) -> Option<String> {
         fn GetFileVersionInfoW(name: *const u16, handle: u32, length: u32, data: *mut c_void) -> i32;
         fn VerQueryValueW(data: *const c_void, block: *const u16, output: *mut *mut c_void, length: *mut u32) -> i32;
     }
-    if kumi_common::path::network_or_device(&path.to_string_lossy()) || !fs::metadata(path).ok()?.is_file() {
+    if !local_links(path, 32) || !fs::metadata(path).ok()?.is_file() {
         return None;
     }
     let name: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
@@ -366,6 +443,7 @@ fn windows_version(path: &Path) -> Option<String> {
             && !translations.is_null()
             && translated_bytes >= 4
             && translated_bytes <= 256
+            && version_resource_range(&data, translations, translated_bytes as usize, 2)
         {
             for pair in std::slice::from_raw_parts(translations.cast::<u16>(), translated_bytes as usize / 2).chunks_exact(2) {
                 let query: Vec<u16> =
@@ -376,6 +454,7 @@ fn windows_version(path: &Path) -> Option<String> {
                     && !value.is_null()
                     && chars > 1
                     && chars <= 128
+                    && version_resource_range(&data, value, chars as usize * 2, 2)
                 {
                     let version = String::from_utf16_lossy(std::slice::from_raw_parts(value.cast::<u16>(), chars as usize));
                     let version = version.trim_matches('\0').trim();
@@ -390,7 +469,11 @@ fn windows_version(path: &Path) -> Option<String> {
         }
         let mut output = std::ptr::null_mut();
         let mut length = 0;
-        if VerQueryValueW(data.as_ptr().cast(), [92u16, 0].as_ptr(), &mut output, &mut length) == 0 || output.is_null() || length < 52 {
+        if VerQueryValueW(data.as_ptr().cast(), [92u16, 0].as_ptr(), &mut output, &mut length) == 0
+            || output.is_null()
+            || length < 52
+            || !version_resource_range(&data, output, length as usize, 4)
+        {
             return None;
         }
         let words = std::slice::from_raw_parts(output.cast::<u32>(), 13);
@@ -513,6 +596,9 @@ fn fingerprint_version(path: &Path, format: &PluginFormat) -> Option<String> {
         return None;
     }
     let path = binary_file(path)?;
+    if !local_links(&path, 32) {
+        return None;
+    }
     let metadata = fs::metadata(&path).ok()?;
     if !metadata.is_file() || metadata.len() > 256 * 1024 * 1024 {
         return None;
@@ -609,6 +695,33 @@ fn normalize_role(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn version_resource_pointers_and_lengths_stay_inside_the_allocated_buffer() {
+        let data = [0u32; 16];
+        let start = data.as_ptr().cast::<u8>();
+        assert!(version_resource_range(&data, start.cast(), 64, 4));
+        assert!(version_resource_range(&data, start.wrapping_add(60).cast(), 4, 2));
+        assert!(!version_resource_range(&data, start.wrapping_add(60).cast(), 6, 2));
+        assert!(!version_resource_range(&data, start.wrapping_add(1).cast(), 2, 2));
+        assert!(!version_resource_range(&data, start.wrapping_sub(4).cast(), 4, 4));
+        assert!(!version_resource_range(&data, std::ptr::null(), 0, 4));
+        assert!(!version_resource_range(&data, start.cast(), usize::MAX, 4));
+    }
+    #[cfg(unix)]
+    #[test]
+    fn remote_links_are_rejected_before_canonicalization_including_parent_links() {
+        let temp = tempfile::tempdir().unwrap();
+        let link = temp.path().join("remote");
+        std::os::unix::fs::symlink("//invalid-kumi-test/share", &link).unwrap();
+        assert!(!local_links(&link, 32));
+        assert!(!local_links(&link.join("Plugin.vst3"), 32));
+        let cycle = temp.path().join("cycle");
+        std::os::unix::fs::symlink("cycle", &cycle).unwrap();
+        assert!(!local_links(&cycle, 32));
+        let inventory = scan(&[temp.path().into()]);
+        assert!(inventory.plugins.is_empty());
+        assert!(inventory.warnings.iter().any(|warning| warning.contains("network or device")));
+    }
     #[test]
     fn only_exact_binary_evidence_supplies_a_missing_installed_version() {
         let temp = tempfile::tempdir().unwrap();

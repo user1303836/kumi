@@ -12,6 +12,9 @@ use super::{tree::Node, vstpreset, FormatError, MAX_DECODED_BYTES};
 const MAX_PRESET_BYTES: usize = 2 * 1024 * 1024;
 const MAX_TOKENS: usize = 65_536;
 const MAX_PATH_BYTES: usize = 4096;
+// A short record can repeat a long parent path. Limit their combined size
+// before allocating any path, independently of input bytes and token count.
+const MAX_TOTAL_PATH_BYTES: usize = 2 * 1024 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Preset {
@@ -60,8 +63,9 @@ impl Preset {
     }
 
     /// Record paths include zero-based occurrence indices, e.g.
-    /// `SAMPLER[0]/HQ[0]/mastervol[0]`. Strings are safely quoted and arrays
-    /// address multi-value records. Unknown paths are refused.
+    /// `SAMPLER[0]/HQ[0]/mastervol[0]`. Arrays address multi-value records.
+    /// Text records remain read-only until their semantics are verified; that
+    /// includes strings naming samples, libraries, and other external files.
     pub fn set(&mut self, path: &str, value: &Value) -> Result<(), FormatError> {
         if path == "PlugVersion[0]" {
             return Err(error("the serialized plug-in version is read-only"));
@@ -78,16 +82,14 @@ impl Preset {
         }
         for ((old, quoted), value) in record.tokens.iter().zip(&values) {
             let numeric = !quoted && old.parse::<f64>().is_ok_and(f64::is_finite);
-            if (numeric && !value.is_number() && !value.is_boolean()) || (!numeric && !value.is_string()) {
+            if !numeric {
+                return Err(error("text records are read-only until their semantics are verified"));
+            }
+            if !value.is_number() && !value.is_boolean() {
                 return Err(error("an edit must preserve each record value's type"));
             }
         }
-        let encoded = values
-            .into_iter()
-            .zip(&record.tokens)
-            .map(|(value, (_, quoted))| encode_token(value, *quoted))
-            .collect::<Result<Vec<_>, _>>()?
-            .join(" ");
+        let encoded = values.into_iter().map(encode_token).collect::<Result<Vec<_>, _>>()?.join(" ");
         if self.text.len() - record.values.len() + encoded.len() > MAX_PRESET_BYTES.min(MAX_DECODED_BYTES) {
             return Err(error("document is too large"));
         }
@@ -130,6 +132,7 @@ impl Preset {
         let mut offset = 0;
         let mut sampler = false;
         let mut token_budget = MAX_TOKENS;
+        let mut path_budget = MAX_TOTAL_PATH_BYTES;
         for line in self.text.split_inclusive('\n') {
             let content = line.trim();
             if content.is_empty() || content.starts_with("//") || content.starts_with('#') {
@@ -158,19 +161,29 @@ impl Preset {
             let count = counts.last_mut().unwrap().entry(name.clone()).or_default();
             let segment = format!("{name}[{count}]");
             *count += 1;
-            let path = sections.iter().chain(std::iter::once(&segment)).cloned().collect::<Vec<_>>().join("/");
-            if path.len() > MAX_PATH_BYTES {
+            let arguments = open && tokens.len() > 2;
+            let path_len = sections.iter().map(|section| section.len() + 1).sum::<usize>() + segment.len();
+            let stored_path_len = path_len + if arguments { "/$args".len() } else { 0 };
+            if stored_path_len > MAX_PATH_BYTES {
                 return Err(error("record path is too long"));
             }
+            path_budget = path_budget.checked_sub(stored_path_len).ok_or_else(|| error("total record path budget exceeded"))?;
+            let mut path = String::with_capacity(stored_path_len);
+            for section in &sections {
+                path.push_str(section);
+                path.push('/');
+            }
+            path.push_str(&segment);
             if open {
                 if sections.is_empty() && first.0 == "SAMPLER" {
                     sampler = true;
                 }
-                if tokens.len() > 2 {
+                if arguments {
                     let start = line.find(content).unwrap() + tokens[1].1.start;
                     let end = line.find(content).unwrap() + tokens[tokens.len() - 2].1.end;
+                    path.push_str("/$args");
                     result.push(Record {
-                        path: format!("{path}/$args"),
+                        path,
                         values: offset + start..offset + end,
                         tokens: tokens[1..tokens.len() - 1].iter().map(|t| (t.0.clone(), t.2)).collect(),
                     });
@@ -249,23 +262,11 @@ fn tokenize(line: &str, budget: usize) -> Result<Vec<(String, Range<usize>, bool
     Ok(tokens)
 }
 
-fn encode_token(value: &Value, quoted: bool) -> Result<String, FormatError> {
+fn encode_token(value: &Value) -> Result<String, FormatError> {
     match value {
         Value::Number(n) if n.as_f64().is_some_and(f64::is_finite) => Ok(n.to_string()),
-        Value::String(text) if !text.chars().any(|c| matches!(c, '\0' | '\r' | '\n')) => {
-            if quoted {
-                Ok(format!("\"{}\"", text.replace('\\', "\\\\").replace('"', "\\\"")))
-            } else if text.is_empty()
-                || text.chars().any(|c| c.is_whitespace() || matches!(c, '"' | '{' | '}'))
-                || text.parse::<f64>().is_ok_and(f64::is_finite)
-            {
-                Err(error("the edited text must remain one nonnumeric bare token"))
-            } else {
-                Ok(text.clone())
-            }
-        }
         Value::Bool(value) => Ok(if *value { "1" } else { "0" }.to_string()),
-        _ => Err(error("record values must be finite numbers, booleans, or single-line strings")),
+        _ => Err(error("writable record values must be finite numbers or booleans")),
     }
 }
 

@@ -51,7 +51,7 @@ impl Reaper<'_> {
     /// the place without its flag), or at the end; what REAPER answers (the place in the chain it went to, or -1).
     pub fn fx_add(&self, owner: FxOwner, name: &str, input: bool, place: Option<i32>) -> i32 {
         super::wrote();
-        let name = ctext(name);
+        let Some(name) = ctext(name) else { return -1 };
         let instantiate = place.map_or(-1, |p| -1000 - p);
         match owner {
             FxOwner::Track(t) => self.api.TrackFX_AddByName().map_or(-1, |f| unsafe { f(t.0, name.as_ptr(), input, instantiate) }),
@@ -150,7 +150,7 @@ impl Reaper<'_> {
     /// false and takes): the change reads it back.
     pub fn fx_set_config(&self, fx: Fx, key: &str, value: &str) -> bool {
         super::wrote();
-        let (key, value) = (ctext(key), ctext(value));
+        let (Some(key), Some(value)) = (ctext(key), ctext(value)) else { return false };
         match fx.owner {
             FxOwner::Track(t) => {
                 self.api.TrackFX_SetNamedConfigParm().is_some_and(|f| unsafe { f(t.0, fx.index, key.as_ptr(), value.as_ptr()) })
@@ -163,7 +163,7 @@ impl Reaper<'_> {
 
     /// A named configuration value that can be big (a plug-in's state, `vst_chunk`): None when the FX has none.
     pub fn fx_config_big(&self, fx: Fx, key: &str) -> Option<String> {
-        let key = ctext(key);
+        let Some(key) = ctext(key) else { return None };
         match fx.owner {
             FxOwner::Track(t) => {
                 let f = self.api.TrackFX_GetNamedConfigParm()?;
@@ -178,7 +178,7 @@ impl Reaper<'_> {
 
     /// The parameter a stable ident names (`:wet`, `:delta`, `:bypass`, `0:_Threshold`).
     pub fn fx_ident(&self, fx: Fx, ident: &str) -> Option<i32> {
-        let ident = ctext(ident);
+        let Some(ident) = ctext(ident) else { return None };
         let index = match fx.owner {
             FxOwner::Track(t) => unsafe { self.api.TrackFX_GetParamFromIdent()?(t.0, fx.index, ident.as_ptr()) },
             FxOwner::Take(t) => unsafe { self.api.TakeFX_GetParamFromIdent()?(t.0, fx.index, ident.as_ptr()) },
@@ -198,7 +198,7 @@ impl Reaper<'_> {
 
     pub fn fx_set_preset(&self, fx: Fx, name: &str) -> bool {
         super::wrote();
-        let name = ctext(name);
+        let Some(name) = ctext(name) else { return false };
         match fx.owner {
             FxOwner::Track(t) => self.api.TrackFX_SetPreset().is_some_and(|f| unsafe { f(t.0, fx.index, name.as_ptr()) }),
             FxOwner::Take(t) => self.api.TakeFX_SetPreset().is_some_and(|f| unsafe { f(t.0, fx.index, name.as_ptr()) }),
@@ -321,27 +321,27 @@ impl Reaper<'_> {
 
     pub fn set_env_chunk(&self, envelope: Envelope, chunk: &str) -> bool {
         super::wrote();
-        let chunk = ctext(chunk);
+        let Some(chunk) = ctext(chunk) else { return false };
         self.api.SetEnvelopeStateChunk().is_some_and(|f| unsafe { f(envelope.0, chunk.as_ptr(), false) })
     }
 
     /// An envelope's yes/no attribute written: `ACTIVE`, `VISIBLE` or `ARM`.
     pub fn set_env_flag(&self, envelope: Envelope, key: &str, on: bool) -> bool {
         super::wrote();
-        let key = ctext(key);
+        let Some(key) = ctext(key) else { return false };
         let Some(f) = self.api.GetSetEnvelopeInfo_String() else { return false };
         let mut buf = if on { *b"1\0" } else { *b"0\0" };
         unsafe { f(envelope.0, key.as_ptr(), buf.as_mut_ptr().cast(), true) }
     }
 
     pub fn track_envelope_by_name(&self, track: Track, name: &str) -> Option<Envelope> {
-        let name = ctext(name);
+        let Some(name) = ctext(name) else { return None };
         let envelope = unsafe { self.api.GetTrackEnvelopeByName()?(track.0, name.as_ptr()) };
         (!envelope.is_null()).then_some(Envelope(envelope))
     }
 
     pub fn take_envelope_by_name(&self, take: Take, name: &str) -> Option<Envelope> {
-        let name = ctext(name);
+        let Some(name) = ctext(name) else { return None };
         let envelope = unsafe { self.api.GetTakeEnvelopeByName()?(take.0, name.as_ptr()) };
         (!envelope.is_null()).then_some(Envelope(envelope))
     }
@@ -360,13 +360,13 @@ impl Reaper<'_> {
     /// An automation item's number attribute: `D_POOL_ID`, `D_POSITION`, `D_LENGTH`, `D_STARTOFFS`, `D_PLAYRATE`,
     /// `D_BASELINE`, `D_AMPLITUDE`, `D_LOOPSRC`, `D_MUTE`, `D_UISEL`.
     pub fn ai_value(&self, envelope: Envelope, item: i32, key: &str) -> f64 {
-        let key = ctext(key);
+        let Some(key) = ctext(key) else { return 0.0 };
         self.api.GetSetAutomationItemInfo().map_or(0.0, |f| unsafe { f(envelope.0, item, key.as_ptr(), 0.0, false) })
     }
 
     pub fn set_ai_value(&self, envelope: Envelope, item: i32, key: &str, value: f64) -> bool {
         super::wrote();
-        let key = ctext(key);
+        let Some(key) = ctext(key) else { return false };
         match self.api.GetSetAutomationItemInfo() {
             Some(f) => {
                 unsafe { f(envelope.0, item, key.as_ptr(), value, true) };
@@ -378,7 +378,7 @@ impl Reaper<'_> {
 
     /// An automation item's text attribute: `P_POOL_NAME`.
     pub fn ai_text(&self, envelope: Envelope, item: i32, key: &str) -> Option<String> {
-        let key = ctext(key);
+        let Some(key) = ctext(key) else { return None };
         let f = self.api.GetSetAutomationItemInfo_String()?;
         super::objects::big_string(|buf| unsafe { f(envelope.0, item, key.as_ptr(), buf, false) })
     }

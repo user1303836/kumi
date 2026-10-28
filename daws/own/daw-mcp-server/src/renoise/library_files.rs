@@ -5,6 +5,7 @@
 //! a newer Renoise than the one whose library is here (a file Renoise can't load shows a dialog that holds Renoise).
 
 use crate::renoise::presets::{Refusal, MAX_PRESET_BYTES};
+#[cfg(test)]
 use base64::Engine;
 use serde_json::Value;
 use std::collections::BTreeMap;
@@ -240,8 +241,7 @@ pub fn with_file(daw: daw_bridge::Daw, kind: &str, input: &Value, libraries: &Li
         if input.get("vst3Data").is_some() {
             return Some(Err(Refusal::Bad("give path: Kumi's host validates and snapshots the VST3 preset".into())));
         }
-        let is_vst3 =
-            input["path"].as_str().is_some_and(|path| Path::new(path).extension().is_some_and(|e| e.eq_ignore_ascii_case("vstpreset")));
+        let is_vst3 = input["path"].as_str().is_some_and(crate::preset_files::has_suffix);
         if kind == "plugin-preset-data" || is_vst3 {
             return Some(vst3_file(input));
         }
@@ -285,46 +285,7 @@ pub fn with_file(daw: daw_bridge::Daw, kind: &str, input: &Value, libraries: &Li
 /// Snapshot validated bytes now: an apply uses this exact content even if the source file changes after its preview.
 fn vst3_file(input: &Value) -> Result<Value, Refusal> {
     let path = input["path"].as_str().ok_or_else(|| Refusal::Bad("path: an absolute .vstpreset file".into()))?;
-    if kumi_common::path::network_or_device(path) {
-        return Err(Refusal::Bad("VST3 presets must be local files, not network shares or devices".into()));
-    }
-    let file = Path::new(path);
-    if !file.is_absolute() || !file.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("vstpreset")) {
-        return Err(Refusal::Bad("path: an absolute .vstpreset file".into()));
-    }
-    if ["presetData", "presetName", "vst3Data"].iter().any(|key| input.get(*key).is_some()) {
-        return Err(Refusal::Bad("give path alone; the host reads and validates its VST3 state".into()));
-    }
-    // Leave space for base64 and Renoise's XML wrapper inside the tool's 8 MiB state bound.
-    let most = (MAX_PRESET_BYTES - 65536) / 4 * 3;
-    let metadata = std::fs::symlink_metadata(file).map_err(|e| Refusal::Bad(format!("couldn't inspect that VST3 preset: {e}")))?;
-    if !metadata.is_file() || metadata.len() > most as u64 {
-        return Err(Refusal::Bad("the VST3 preset must be a bounded regular file".into()));
-    }
-    let mut options = std::fs::OpenOptions::new();
-    options.read(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.custom_flags(libc::O_NONBLOCK | libc::O_NOFOLLOW);
-    }
-    let opened = options.open(file).map_err(|e| Refusal::Bad(format!("couldn't open that VST3 preset: {e}")))?;
-    let metadata = opened.metadata().map_err(|e| Refusal::Bad(format!("couldn't inspect the opened VST3 preset: {e}")))?;
-    if !metadata.is_file() || metadata.len() > most as u64 {
-        return Err(Refusal::Bad("the VST3 preset changed into a non-regular or oversized file".into()));
-    }
-    let mut bytes = Vec::new();
-    opened.take(most as u64 + 1).read_to_end(&mut bytes).map_err(|err| Refusal::Bad(format!("couldn't read that VST3 preset: {err}")))?;
-    if bytes.len() > most {
-        return Err(Refusal::Bad("that VST3 preset exceeds Renoise's undo state limit".into()));
-    }
-    daw_bridge::vst3::read(&bytes).map_err(Refusal::Bad)?;
-    let mut output = input.clone();
-    let fields = output.as_object_mut().ok_or_else(|| Refusal::Bad("input must be an object".into()))?;
-    fields.remove("path");
-    fields.insert("vst3Data".into(), base64::engine::general_purpose::STANDARD.encode(bytes).into());
-    fields.insert("presetName".into(), file.file_stem().unwrap_or_default().to_string_lossy().into_owned().into());
-    Ok(output)
+    crate::preset_files::snapshot(daw_bridge::Daw::Renoise, input, path).map_err(Refusal::Bad)
 }
 
 #[cfg(test)]

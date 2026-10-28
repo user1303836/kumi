@@ -16,14 +16,14 @@ belong to their owners.
 | Products | Native format | VST3 creation, editing and reload evidence |
 | --- | --- | --- |
 | Serum 2 | Xfer JSON header, Zstandard CBOR; separate processor/controller documents | 2.1.5: oscillators, scalar fields, names and initialized Distortion insertion; translated state reloaded and read back |
-| Ozone 12 suite and all 20 standalone modules | XML native presets; typed JSON in zlib component state | 12.1.0.1440: each exact class initialized, edited by Rust, loaded and read back; suite module ordering supported |
+| Ozone 12 suite and all 20 standalone modules | XML native presets; typed JSON in zlib component state | 12.1.0.1440: each exact class initialized, edited by Rust, loaded and read back; 644 measured numeric fields, 169 verified Boolean fields and suite module ordering |
 | All 10 captured Valhalla DSP products | XML in product-specific VST3 wrappers | Each product's recorded version; native XML conversion preserves its component wrapper and private data. ValhallaDelay BBD mode checked |
 | All 16 captured Minimal Audio products | JUCE binary XML, physical `mapped_value` controls | Each product's recorded version; normalized host values and stored physical values remain distinct |
 | All 13 captured Pulsar Modular products | JUCE binary XML, physical parameter values | Each product's recorded version; stale/unknown parameter IDs rejected |
 | Zynaptiq PUNCH 1 and UNMIX DRUMS | Native XML and length-prefixed XML component state | 1.1.1 and 1.3: initialized states, Rust edits, native reload and parameter readback |
-| Superior Drummer 3 | Native brace text and VST3 compatibility wrapper | 3.4.1: new initialized state and existing-state edits; installed sample libraries remain external |
-| Other catalogued Zynaptiq products | Native XML; known fields and local preset schemas | Native reading and edits from a supplied template where the schema is known. VST3 state creation remains unavailable where the installed binary could not initialize or class/state identity was not verified |
-| Weiss Compressor Limiter, DS1-MK3, MM-1, Deess; Tape and Tape Multi Track | Softube JSON bundles/presets with normalized parameter tuples | Native reading and edits from a supplied template. VST3 component writing remains unavailable: the local standalone host and Renoise rejected these installed binaries |
+| Superior Drummer 3 | Native brace text and VST3 compatibility wrapper | 3.4.1: new initialized state and verified numeric edits, including attenuation; text and resource paths are read-only, and installed sample libraries remain external |
+| Other catalogued Zynaptiq products | Native XML; known fields and local preset schemas | Native reading, template copies and preset renaming. Unverified numeric fields remain read-only. VST3 state creation remains unavailable where the installed binary could not initialize or class/state identity was not verified |
+| Weiss Compressor Limiter, DS1-MK3, MM-1, Deess; Tape and Tape Multi Track | Softube JSON bundles/presets with normalized parameter tuples | Native reading, template copies and preset renaming; numeric edits remain read-only because their ranges have not been verified. VST3 component writing remains unavailable: the local standalone host and Renoise could not initialize these installed binaries |
 
 `plugin.json` lists every individual product, VST3 class, filename aliases and processing roles.
 `verified.json` gives exact versions and the checks performed. Runtime readback proves the named controls
@@ -42,8 +42,8 @@ synthetic fixtures; they never require an installed plug-in, a running DAW or a 
   markers are checked wherever the format stores them. Some component formats
   contain only a schema version: their source binary version cannot be inferred. Wrong classes and incompatible
   schemas are rejected. Unrelated chunks and opaque state are retained.
-- Softube and the remaining documented Zynaptiq native formats can be edited or used as the source of a new
-  native preset. Those outputs explicitly say that plugin reload has not been verified; they are not passed
+- Softube and the remaining documented Zynaptiq native formats support inspection, template copying and
+  renaming. Their unverified controls cannot be edited. These outputs explicitly say that plug-in reload has not been verified; they are not passed
   to a VST3 loader as if they were component state. No factory templates are bundled.
 - In Live, `plugin prepare-preset` places the file in the User Library, then `load_device` loads the browser
   item with its existing HISTORY and undo. Live's API does not replace arbitrary state in an existing
@@ -70,10 +70,22 @@ plugin-formats/
 
 - **Guessed or verified.** Every ID, folder, field meaning and parameter link says which. Verified means checked
   against the plug-in itself: by changing one thing and reading what moved, or (Vital) from its published source.
+- **Write ranges are separate evidence.** A field's `status` describes its identification; `range_status`
+  describes whether its numeric write bounds were checked. Values merely observed in presets remain guessed
+  and do not authorize writes. `range-verification.json` records concrete fields, parameter IDs, tested
+  endpoints and stored values where native measurements provide the bounds; tests check those records against
+  every verified numeric range. Ozone Boolean evidence is recorded separately in `boolean-verification.json`.
+- **Text is not a path loader.** Nonnumeric writes require verified semantics or an explicit display-name
+  allowlist, and enumerations must match documented options. Resource paths and opaque data stay read-only.
+  A `map|text` field accepts only its documented `default` sentinel as text.
 - **VST3 writes follow `verified.json`.** Kumi writes VST3 state only for a requested plug-in version listed
   under `writes`. Native-template edits report their identity checks and unverified reload status separately;
   host parameter changes remain available when a VST3 state writer is unavailable.
 - **Plug-ins are known by their IDs**, not by the name a host shows.
+- **Shared formats stay shared.** Current/EPROM Memory Rites and Evoke/Lucid share their format folders;
+  each retains its own identity and initialized state. The build compacts JSON and compresses initialized
+  VST3 resources; repository fixtures remain standard `.vstpreset` files. The embedded resource payload is
+  2.32 MB, down from 4.27 MB before compaction and sharing; this is not a measurement of executable size.
 - **No vendor content.** Factory presets, wavetables and samples stay on the machine they were installed on.
   The survey below reads them where they lie and keeps only counts, types, ranges and option-like values.
 - **Evidence stays explicit.** Learn from files, behaviour and normal host APIs by default. Disassembling or

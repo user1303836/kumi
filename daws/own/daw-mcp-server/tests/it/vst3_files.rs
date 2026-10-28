@@ -8,7 +8,7 @@ use daw_mcp_server::simulator::{Simulator, SimulatorConfig};
 use serde_json::{json, Map, Value};
 use std::sync::{
     atomic::{AtomicBool, AtomicUsize, Ordering},
-    Arc,
+    Arc, Mutex,
 };
 
 #[tokio::test]
@@ -25,11 +25,16 @@ async fn old_bridges_never_receive_preset_files_even_through_reapers_named_prese
         let capable = Arc::new(AtomicBool::new(false));
         let requests = Arc::new(AtomicUsize::new(0));
         let count = requests.clone();
-        let respond = Arc::new(move |method: &str, _: &Value| {
+        let inputs = Arc::new(Mutex::new(Vec::new()));
+        let sent = inputs.clone();
+        let respond = Arc::new(move |method: &str, params: &Value| {
             if !matches!(method, "change_preview" | "change_apply" | "change_restore") {
                 return None;
             }
             count.fetch_add(1, Ordering::SeqCst);
+            if matches!(method, "change_preview" | "change_apply") {
+                sent.lock().unwrap().push(params["input"].clone());
+            }
             Some(Ok(match method {
                 "change_preview" => json!({"epoch":"e1","target":{"kind":"device","ref":"e1:device:1.2"},"prior":{"hash":"before"},
                     "fence":{"hash":"before"},"display":{"title":"Loaded preset"}}),
@@ -89,6 +94,25 @@ async fn old_bridges_never_receive_preset_files_even_through_reapers_named_prese
             .await;
         assert!(failed && answer["code"] == "bridge-update-required", "{answer}");
         assert_eq!(requests.load(Ordering::SeqCst), 1, "a downgraded/restarted bridge receives no mutation");
+        // Source files may change or disappear after preview. The stored checked bytes are the apply input.
+        capable.store(true, Ordering::SeqCst);
+        std::fs::remove_file(&file).unwrap();
+        let (answer, failed) = session
+            .tool_full(
+                4,
+                "change_apply",
+                json!({"transactionId":record["transactionId"],
+            "confirmation":record["confirmation"],"idempotencyKey":"snapshot"}),
+                false,
+            )
+            .await;
+        assert!(!failed, "{daw}: {answer}");
+        let inputs = inputs.lock().unwrap();
+        assert_eq!(inputs.len(), 2);
+        assert_eq!(inputs[0], inputs[1], "the exact validated snapshot reaches apply");
+        assert!(inputs[0].get("path").is_none() && inputs[0].get("preset").is_none());
+        assert!(inputs[0]["vst3Data"].as_str().is_some_and(|s| !s.is_empty()));
+        assert_eq!(inputs[0]["presetName"], if daw == Daw::Reaper { "Created.vstpreset" } else { "Created" });
     }
 }
 
@@ -96,11 +120,40 @@ async fn old_bridges_never_receive_preset_files_even_through_reapers_named_prese
 async fn network_preset_names_are_refused_before_connecting_to_any_bridge() {
     let home = tempfile::tempdir().unwrap();
     let mut session = Session::start(Daw::Reaper, home.path());
-    for (n, field) in ["path", "preset"].iter().enumerate() {
-        let mut input = json!({"ref":"r:fx:{test}"});
-        input[*field] = r"\\untrusted\share\preset.vstpreset".into();
-        let (answer, failed) = session.tool_full(n as u64 + 1, "change_preview", json!({"kind":"fx-preset","input":input}), false).await;
-        assert!(failed && answer["code"] == "bad-params", "{answer}");
-        assert!(answer["error"].as_str().unwrap().contains("local"));
+    let mut request_id = 1;
+    for field in ["path", "preset"] {
+        for name in [
+            r"\\untrusted\share\preset.vstpreset",
+            "\0\\\\untrusted\\share\\preset.vstpreset\0",
+            "C:\\P\\preset.vstpreset\0",
+            "preset\nname",
+            "C:\\P\\CON.vstpreset",
+            "C:\\P\\COM9.vstpreset",
+            "/tmp/x\u{7f}.vstpreset",
+        ] {
+            let mut input = json!({"ref":"r:fx:{test}"});
+            input[field] = name.into();
+            let (answer, failed) = session.tool_full(request_id, "change_preview", json!({"kind":"fx-preset","input":input}), false).await;
+            request_id += 1;
+            assert!(failed && answer["code"] == "bad-params", "{answer}");
+            assert!(answer["error"].as_str().unwrap().contains("local"));
+        }
+    }
+}
+
+#[tokio::test]
+async fn file_names_cannot_bypass_checked_loading_as_ordinary_program_names() {
+    let home = tempfile::tempdir().unwrap();
+    let mut session = Session::start(Daw::Reaper, home.path());
+    for (n, name) in
+        ["C:x", "C:\\P\\x.fxp", "/tmp/plugin.fxp", "x.vstpreset.", "x.vstpreset ", "C:x.vstpreset. ", ".\\x.vstpreset.", "./x.fxp"]
+            .into_iter()
+            .enumerate()
+    {
+        let (answer, failed) = session
+            .tool_full(n as u64 + 1, "change_preview", json!({"kind":"fx-preset","input":{"ref":"r:fx:{test}","preset":name}}), false)
+            .await;
+        assert!(failed && answer["code"] == "bad-params", "{name}: {answer}");
+        assert!(answer["error"].as_str().unwrap().contains("named program"), "{answer}");
     }
 }

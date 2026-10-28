@@ -631,11 +631,11 @@ impl crate::host::Host {
     /// named-preset argument without checking its class. Advertise the format explicitly rather than guessing versions.
     async fn preset_file_bridge(&self, pick: &crate::host::Pick, kind: &str, input: &Value) -> Result<(), Value> {
         let path = |field: &str| input[field].as_str().map(str::trim);
-        let vst3 = |value: Option<&str>| {
-            value.is_some_and(|value| std::path::Path::new(value).extension().is_some_and(|ext| ext.eq_ignore_ascii_case("vstpreset")))
-        };
+        let vst3 = |value: Option<&str>| value.is_some_and(crate::preset_files::has_suffix);
         let needed = match (self.daw(), kind) {
-            (daw_bridge::Daw::Reaper, "fx-preset") => input.get("path").is_some() || vst3(path("preset")),
+            (daw_bridge::Daw::Reaper, "fx-preset") => {
+                input.get("path").is_some() || input.get("vst3Data").is_some() || vst3(path("preset"))
+            }
             (daw_bridge::Daw::Renoise, "plugin-preset-data") => true,
             (daw_bridge::Daw::Renoise, "device-preset-data") => vst3(path("path")) || input.get("vst3Data").is_some(),
             _ => false,
@@ -665,12 +665,27 @@ impl crate::host::Host {
             return (json!({"error": "input must be an object", "code": "bad-params"}), true);
         };
         if matches!(kind.as_str(), "fx-preset" | "device-preset-data" | "plugin-preset-data")
-            && ["path", "preset"]
-                .into_iter()
-                .filter_map(|field| input[field].as_str())
-                .any(|path| kumi_common::path::network_or_device(path.trim()))
+            && ["path", "preset"].into_iter().filter_map(|field| input[field].as_str()).any(|path| {
+                path.chars().any(char::is_control)
+                    || kumi_common::path::network_or_device(path.trim())
+                    || kumi_common::path::reserved_device(path)
+            })
         {
-            return (json!({"code":"bad-params", "error":"Preset paths must name local files, not network shares or devices."}), true);
+            return (
+                json!({"code":"bad-params", "error":"Preset names and paths must be local and contain no control characters or reserved devices."}),
+                true,
+            );
+        }
+        if self.daw() == daw_bridge::Daw::Reaper
+            && kind == "fx-preset"
+            && input["preset"]
+                .as_str()
+                .is_some_and(|name| crate::preset_files::file_program(name) && !crate::preset_files::has_suffix(name))
+        {
+            return (
+                json!({"code":"bad-params", "error":"A local preset file must use an absolute .vstpreset path, not a named program."}),
+                true,
+            );
         }
         let layout = arguments.get("layout").and_then(Value::as_u64);
         let pick = match self.pin(&pick).await {
@@ -686,6 +701,9 @@ impl crate::host::Host {
         let read;
         let (daw, asked, given) = (self.daw(), kind.clone(), input.clone());
         let with_file = tokio::task::spawn_blocking(move || {
+            if let Some(result) = crate::preset_files::with_file(daw, &asked, &given) {
+                return Some(result.map_err(crate::renoise::presets::Refusal::Bad));
+            }
             crate::renoise::library_files::with_file(daw, &asked, &given, &crate::renoise::library_files::library_roots())
         })
         .await

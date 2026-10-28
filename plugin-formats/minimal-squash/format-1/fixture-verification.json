@@ -1,0 +1,9 @@
+{
+  "plugin": "minimal-squash",
+  "version": "1.3.0",
+  "fixtureSha256": "401c149c5305110d72e71c255b571d0b318aaa7af4d7d56e35bdad76a05fa56b",
+  "sessionId": "all zeros",
+  "runtime": "Sanitized component restored in a fresh VST3 instance. Product root, source version and every mapped parameter matched after reload within native floating-point serialization precision.",
+  "parametersChecked": 3,
+  "maxRelativeErrorWithUnitFloor": 0.0
+}
