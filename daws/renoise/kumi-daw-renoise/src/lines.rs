@@ -198,6 +198,31 @@ impl Lines {
             .collect()
     }
 
+    /// (#407) The lines `db` quieter by the volume column: each level on a line that isn't an anchor scaled by the gain, and a
+    /// note that starts a sound without one (at full) given one; the anchors stay as they are (every take keeps them), and so do
+    /// volume column commands. Why not, when nothing is left to turn down.
+    pub fn quieter(&self, db: f64) -> Result<Lines, String> {
+        let gain = 10f64.powf(-db / 20.);
+        let mut out = self.clone();
+        let mut turned = 0;
+        for (_, line) in out.rows.iter_mut().filter(|(number, _)| !self.anchors.contains(number)) {
+            for note in &mut line.notes {
+                let level = match note.volume.as_deref().map(|text| u8::from_str_radix(text, 16).ok().filter(|v| *v <= 0x80)) {
+                    Some(Some(level)) => level,
+                    None if is_note(&note.note) => 0x80,
+                    // (a command, or a cell that starts nothing)
+                    _ => continue,
+                };
+                note.volume = Some(format!("{:02X}", (level as f64 * gain).round() as u8));
+                turned += 1;
+            }
+        }
+        if turned == 0 {
+            return Err("its notes are its anchors, or their volume columns hold commands".into());
+        }
+        Ok(out)
+    }
+
     /// (#401) Each note cell that starts a sound: its line, its column, where it starts (lines, its delay included), its note
     /// value and its velocity (its volume column's level, 0 to 1: full without one).
     pub fn note_cells(&self) -> Vec<(u32, u8, f64, u8, f64)> {
@@ -880,6 +905,27 @@ mod tests {
         }
         assert!(Op::parse(&json!({"op": "explode"})).unwrap_err().contains("isn't an operator"));
         assert!(Op::parse(&json!({"op": "speed", "factor": 3})).is_err());
+    }
+
+    /// (#407) A take turned down by the volume column: its levels scaled (a note at full given one), its anchors and a volume
+    /// column command as they are, and only those lines written again; nothing left to turn down is said.
+    #[test]
+    fn a_take_turned_down_scales_its_levels_and_leaves_its_anchors_and_commands() {
+        let mut take = chop();
+        take.rows.get_mut(&12).unwrap().notes[0].volume = Some("G4".into());
+        let quieter = take.quieter(6.0).unwrap();
+        let volume = |lines: &Lines, line: u32| lines.rows[&line].notes[0].volume.clone();
+        assert_eq!(volume(&quieter, 3).as_deref(), Some("10"), "20, half as loud");
+        assert_eq!(volume(&quieter, 6).as_deref(), Some("40"), "a note at full, half as loud");
+        assert_eq!((volume(&quieter, 0), volume(&quieter, 4)), (None, None), "the anchors as they are");
+        assert_eq!(volume(&quieter, 12).as_deref(), Some("G4"), "a command as it is");
+        assert_eq!(take.anchors_kept_in(&quieter), Ok(()));
+        let written: Vec<Value> = quieter.rewrite(&take, 16).iter().map(|cell| cell["line"].clone()).collect();
+        assert_eq!(written, [json!(19), json!(22)], "only the lines turned down");
+        assert_ne!(quieter.digest(), take.digest());
+        let mut anchored = chop();
+        anchored.anchors = anchored.rows.keys().copied().collect();
+        assert!(anchored.quieter(3.).unwrap_err().contains("anchors"));
     }
 
     #[test]

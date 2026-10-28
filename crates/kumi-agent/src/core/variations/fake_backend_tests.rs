@@ -44,6 +44,13 @@ struct Daw {
     plays_after: Cell<usize>,
     renders: Cell<usize>,
     clips: Cell<usize>,
+    /// Where the source peaks in a render, as a take that doesn't clip does (−6 dBFS by default), and where takes that clip
+    /// peak, render by render (the last again once the others are used; 0 dBFS by default): a level a turn-down didn't move.
+    source_peak: Cell<Option<f64>>,
+    clip_peaks: RefCell<Vec<f64>>,
+    /// The DAW can't turn a take down; what it was asked to turn down (dB) and the take it was.
+    gainless: Cell<bool>,
+    quieted: RefCell<Vec<(f64, Steps)>>,
     generation: Cell<u64>,
     unreadable: Cell<Option<u64>>,
     /// Kept sets' keys as their sources' places give them now (a position the producer moved).
@@ -171,6 +178,15 @@ impl VariationsBackend for Fake {
         format!("{:?}", material.0)
     }
 
+    /// Each step that plays a level lower (as low as 1).
+    fn quieter(&self, take: &Steps, db: f64) -> Result<Steps, String> {
+        if self.0.gainless.get() {
+            return Err("Fake can't turn a take down".into());
+        }
+        self.0.quieted.borrow_mut().push((db, take.clone()));
+        Ok(Steps(take.0.iter().map(|level| if *level > 1 { level - 1 } else { *level }).collect()))
+    }
+
     async fn write_new(
         &self,
         set: &Set<Self>,
@@ -283,15 +299,19 @@ impl VariationsBackend for Fake {
             level: -18.,
             onsets: steps.0.iter().enumerate().filter(|(_, level)| **level > 0).map(|(step, _)| step as f64 * 0.125).collect(),
         };
-        let source = set.source.material.as_ref().filter(|_| with_source).map(|steps| heard(steps, -6.));
+        let peak = daw.source_peak.get().unwrap_or(-6.);
+        let source = set.source.material.as_ref().filter(|_| with_source).map(|steps| heard(steps, peak));
         let mut takes = BTreeMap::new();
         for number in numbers {
             let Some(take) = set.take(*number) else { continue };
             let clips = daw.clips.get() > 0;
+            let mut at = peak;
             if clips {
                 daw.clips.set(daw.clips.get() - 1);
+                let mut peaks = daw.clip_peaks.borrow_mut();
+                at = if peaks.len() > 1 { peaks.remove(0) } else { peaks.first().copied().unwrap_or(0.) };
             }
-            takes.insert(*number, Ok(heard(&take.material, if clips { 0. } else { -6. })));
+            takes.insert(*number, Ok(heard(&take.material, at)));
         }
         Ok((source, takes))
     }
@@ -464,7 +484,7 @@ async fn lines_the_model_writes_are_written_with_a_warning_and_operator_takes_me
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn nothing_renders_while_the_daw_plays_and_a_take_that_clips_where_the_source_doesnt_is_drawn_again() {
+async fn nothing_renders_while_the_daw_plays_and_a_take_that_clips_is_drawn_again_where_the_daw_cant_turn_it_down() {
     let home = tempfile::tempdir().unwrap();
     let daw = Rc::new(Daw::default());
     let tool = kumi(&daw, home.path());
@@ -475,6 +495,7 @@ async fn nothing_renders_while_the_daw_plays_and_a_take_that_clips_where_the_sou
     assert_eq!(daw.renders.get(), 0, "a render would stop the playback");
 
     daw.playing.set(false);
+    daw.gainless.set(true);
     daw.clips.set(1);
     let made = run(&tool, json!({"action": "make", "source": {"steps": BEAT}, "count": 1, "seed": 7})).await.unwrap();
     let line = made["takes"][0]["line"].as_str().unwrap();
@@ -482,6 +503,86 @@ async fn nothing_renders_while_the_daw_plays_and_a_take_that_clips_where_the_sou
     assert!(line.contains(" \u{b7} heard: peak \u{2212}6.0 dBFS"), "heard again, fine now: {made}");
     assert_eq!(daw.changes.get(), 3, "the first take, the second, and its rewrite");
     assert_eq!(daw.renders.get(), 2, "the take, then the take drawn again");
+
+    // (lines the model wrote aren't drawn again: the take says why it wasn't turned down either)
+    daw.clips.set(1);
+    let written =
+        run(&tool, json!({"action": "make", "source": {"steps": BEAT}, "takes": [{"lines": [{"step": 2, "level": 9}]}]})).await.unwrap();
+    assert!(
+        written["takes"][0]["line"]
+            .as_str()
+            .unwrap()
+            .ends_with(" · heard: it clips (peak 0.0 dBFS) (not turned down: Fake can't turn a take down)"),
+        "{written}"
+    );
+}
+
+/// (#407, P31) Takes of a hot source that clip where the source doesn't are turned down to the source's peak, not drawn again
+/// (re-rolls can't cure a hot source): each as drawn but its level, in one more change, heard again, its line saying so. They
+/// stay Kumi's: a change takes one, and a drop of the rest takes the other, neither taken for edited since Kumi wrote it.
+#[tokio::test(flavor = "current_thread")]
+async fn takes_that_clip_where_a_hot_source_doesnt_are_turned_down_to_its_peak_and_stay_kumis() {
+    let home = tempfile::tempdir().unwrap();
+    let daw = Rc::new(Daw::default());
+    let tool = kumi(&daw, home.path());
+    daw.source_peak.set(Some(-0.3));
+    daw.clip_peaks.borrow_mut().push(1.1);
+    daw.clips.set(2);
+    let made = run(&tool, json!({"action": "make", "source": {"steps": BEAT}, "count": 2, "seed": 7})).await.unwrap();
+    for (take, change) in made["takes"].as_array().unwrap().iter().zip(["c3", "c4"]) {
+        let line = take["line"].as_str().unwrap();
+        let said = format!(
+            " · turned down 1.4 dB to the source's peak ({change}): its render clipped (peak 1.1 dBFS) · heard: peak \u{2212}0.3 dBFS"
+        );
+        assert!(line.contains(&said), "{line}");
+        assert!(!line.contains("drawn again"), "{line}");
+    }
+    let quieted = daw.quieted.borrow().clone();
+    assert_eq!(quieted.iter().map(|(db, _)| *db).collect::<Vec<_>>(), [1.4, 1.4]);
+    for (id, (_, drawn)) in [1, 2].into_iter().zip(&quieted) {
+        let lower: Vec<u8> = drawn.0.iter().map(|level| if *level > 1 { level - 1 } else { *level }).collect();
+        assert_eq!(daw.takes.borrow()[&id].1 .0, lower, "V{id} as drawn, a level lower");
+    }
+    assert_eq!(daw.changes.get(), 4, "two takes, each turned down");
+    assert_eq!(daw.renders.get(), 2, "the takes, then the takes turned down");
+
+    let changed = run(&tool, json!({"action": "change", "names": ["V1"], "listen": false})).await.unwrap();
+    assert_eq!(changed["changed"].as_array().unwrap().len(), 1, "{changed}");
+    let dropped = run(&tool, json!({"action": "drop"})).await.unwrap();
+    assert_eq!(dropped["dropped"], json!(["V1", "V2"]), "{dropped}");
+    assert!(dropped["skipped"].as_array().unwrap().is_empty() && dropped.get("edited").is_none(), "{dropped}");
+
+    // (lines the model wrote are turned down too: their level, not their lines)
+    daw.clips.set(1);
+    let written =
+        run(&tool, json!({"action": "make", "source": {"steps": BEAT}, "takes": [{"lines": [{"step": 2, "level": 9}]}]})).await.unwrap();
+    assert!(written["takes"][0]["line"].as_str().unwrap().contains(" · turned down 1.4 dB to the source's peak"), "{written}");
+}
+
+/// (#407, review) A turn-down that didn't lower the take's peak by half of it isn't repeated: where the DAW's lever doesn't reach
+/// the take's level (a plug-in that ignores velocity), the take stays as first turned down, not turned down again for nothing,
+/// and its line says so. One that lowered it, but not enough, is turned down again.
+#[tokio::test(flavor = "current_thread")]
+async fn a_turn_down_that_didnt_lower_the_peak_isnt_repeated_and_one_that_did_is() {
+    let home = tempfile::tempdir().unwrap();
+    let daw = Rc::new(Daw::default());
+    let tool = kumi(&daw, home.path());
+    // (V1 peaks at 0 dBFS before its turn-down and after)
+    daw.clips.set(2);
+    let made = run(&tool, json!({"action": "make", "source": {"steps": BEAT}, "count": 1, "seed": 7})).await.unwrap();
+    let line = made["takes"][0]["line"].as_str().unwrap();
+    let said = " · turned down 6.0 dB to the source's peak (c2): its render clipped (peak 0.0 dBFS) · heard: it clips (peak 0.0 dBFS) (turning it down didn't lower its peak)";
+    assert!(line.ends_with(said), "{line}");
+    assert_eq!((daw.quieted.borrow().len(), daw.changes.get(), daw.renders.get()), (1, 2, 2), "turned down once");
+
+    // (V2 peaks at +6 dBFS, then at 0 after its turn-down: lowered by half of it, so turned down again, and heard fine)
+    daw.clips.set(2);
+    *daw.clip_peaks.borrow_mut() = vec![6., 0.];
+    let made = run(&tool, json!({"action": "make", "source": {"steps": BEAT}, "count": 1, "seed": 8})).await.unwrap();
+    let line = made["takes"][0]["line"].as_str().unwrap();
+    let said = " · turned down 12.0 dB to the source's peak (c4): its render clipped (peak 6.0 dBFS) · turned down 6.0 dB to the source's peak (c5): its render clipped (peak 0.0 dBFS) · heard: peak \u{2212}6.0 dBFS";
+    assert!(line.contains(said), "{line}");
+    assert_eq!(daw.quieted.borrow().iter().map(|(db, _)| *db).collect::<Vec<_>>(), [6., 12., 6.]);
 }
 
 /// (#400 review notes) Numbers once given to takes of a name never come back, though Kumi let go of the set that gave them (it
@@ -525,8 +626,8 @@ async fn a_set_goes_on_from_where_its_source_moved_to() {
     assert_ne!(other["set"], on["set"], "{other} {on}");
 }
 
-/// (#400 review notes) Nothing renders when the DAW can't say whether it plays, and a take drawn again isn't rendered again once
-/// the producer pressed play.
+/// (#400 review notes) Nothing renders when the DAW can't say whether it plays, and a take turned down after its render isn't
+/// rendered again once the producer pressed play.
 #[tokio::test(flavor = "current_thread")]
 async fn nothing_renders_when_the_daw_cant_say_it_plays_or_starts_playing_between_rounds() {
     let home = tempfile::tempdir().unwrap();
@@ -542,8 +643,8 @@ async fn nothing_renders_when_the_daw_cant_say_it_plays_or_starts_playing_betwee
     daw.plays_after.set(1);
     let made = run(&tool, json!({"action": "make", "source": {"steps": BEAT}, "count": 1, "seed": 7})).await.unwrap();
     assert!(made["heard"].to_string().contains("Fake plays now (or couldn't say whether it does)"), "{made}");
-    assert!(made["takes"][0]["line"].as_str().unwrap().contains("drawn again after the render"), "{made}");
-    assert_eq!(daw.renders.get(), 1, "the take drawn again isn't rendered while the DAW plays");
+    assert!(made["takes"][0]["line"].as_str().unwrap().contains("turned down 6.0 dB to the source's peak"), "{made}");
+    assert_eq!(daw.renders.get(), 1, "the take turned down isn't rendered while the DAW plays");
 }
 
 /// (review W9) A make on the same source goes on with the source as it is now: a take is drawn from the producer's edit.

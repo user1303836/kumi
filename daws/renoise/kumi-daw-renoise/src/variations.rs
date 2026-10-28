@@ -3,7 +3,8 @@
 //! slots of their own in a "Variations of …" section (a copy of the source pattern whose other tracks are aliases of the source's).
 //! Takes are found by the places the tool's logs follow, else by the names Kumi gave them; the source pattern, track and
 //! instrument the same way. Pattern takes render on the source's track from their slots, phrase takes through players of their
-//! phrases (scratch tracks, gone after). Core's tool does the rest.
+//! phrases (scratch tracks, gone after); a take whose render clips is turned down by its volume column (#407). Core's tool does
+//! the rest.
 use crate::lines::{note_text, note_value, Lines, Op};
 use async_trait::async_trait;
 use kumi_agent::core::{
@@ -626,6 +627,11 @@ impl<S: RefScheme + 'static> VariationsBackend for RenoiseBackend<S> {
 
     fn digest(&self, material: &Lines) -> String {
         material.digest()
+    }
+
+    /// (by its volume column: a gain device would turn the source down too, as its takes play on its track or its instrument)
+    fn quieter(&self, take: &Lines, db: f64) -> Result<Lines, String> {
+        take.quieter(db)
     }
 
     async fn write_new(

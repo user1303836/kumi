@@ -167,6 +167,13 @@ pub trait VariationsBackend: Sized {
     /// What a found take holds now.
     async fn current(&self, set: &Set<Self>, row: &Value, signal: &Signal) -> Result<Self::Material, String>;
 
+    /// The take `db` quieter, the rest of it as it is (REAPER's take volume, Renoise's volume column): how core turns down a
+    /// take whose render clipped where the source's didn't, written with `rewrite` (#407). Why not when the DAW can't: core
+    /// draws the take again instead.
+    fn quieter(&self, _take: &Self::Material, _db: f64) -> Result<Self::Material, String> {
+        Err(format!("{} can't turn a take down", self.words().app))
+    }
+
     /// Writes `after` over a found take that holds `before` (one change, or two for a setting the DAW changes apart): the id of
     /// the last change made, and, when only part of `after` went in, what the take holds instead and why.
     async fn rewrite(
