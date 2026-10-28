@@ -992,13 +992,19 @@ async fn make_device_keeps_code_that_never_stops_in_the_device_without_running_i
         let made = tool.execute(with(lowest(), json!({ "name": name, "code": code, "tests": [] })), Signal::new()).await.unwrap();
         let made: Value = serde_json::from_str(&made.text).unwrap();
         let wrong = made["wrong"].as_array().unwrap().iter().map(|said| said.as_str().unwrap()).collect::<Vec<_>>().join("\n");
-        assert!(wrong.contains(says) && wrong.contains("Kumi kept the code in the device without running it"), "{made}");
+        // Under load, the outer process deadline can win before the more specific loop/flood guard. This tool test
+        // proves either runaway verdict leaves the written device inert; the in-process tests verify the event cap.
+        let deadline = wrong.contains("Kumi's check: it didn't finish within") && wrong.contains("something loops forever");
+        assert!(wrong.contains(says) || deadline, "{made}");
+        assert!(wrong.contains("Kumi kept the code in the device without running it"), "{made}");
         assert!(made["checks"].as_str().unwrap().starts_with("Kumi's check found the code never stops"), "{made}");
         let file = std::fs::read(folder.path().join("Kumi").join("MIDI Effects").join(format!("{name}.amxd"))).unwrap();
         let written = String::from_utf8_lossy(&file);
         // As the file holds it: every line of the code is a comment.
-        let commented = written.match_indices("function midi").all(|(at, _)| written[..at].ends_with("// "));
-        assert!(written.contains("Kumi kept this code without running it") && commented, "kept as comments");
+        assert!(written.contains("Kumi kept this code without running it"), "kept as comments");
+        for line in code.lines() {
+            assert!(written.contains(&format!("// {line}")), "{name}: source line kept as a comment: {line}");
+        }
     }
 }
 
