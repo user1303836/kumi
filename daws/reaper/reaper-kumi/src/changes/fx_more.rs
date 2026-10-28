@@ -468,9 +468,12 @@ enum PresetAsk {
 /// interprets drive-relative names and strips trailing dots/spaces before opening a filename.
 fn file_program(name: &str) -> bool {
     let name = name.trim();
-    name.starts_with(['/', '\\'])
-        || (name.as_bytes().get(1) == Some(&b':') && name.as_bytes()[0].is_ascii_alphabetic())
-        || ["./", "../", ".\\", "..\\"].iter().any(|prefix| name.starts_with(prefix))
+    name.starts_with('/')
+        || ["./", "../"].iter().any(|prefix| name.starts_with(prefix))
+        || (cfg!(windows)
+            && (name.starts_with('\\')
+                || (name.as_bytes().get(1) == Some(&b':') && name.as_bytes()[0].is_ascii_alphabetic())
+                || [".\\", "..\\"].iter().any(|prefix| name.starts_with(prefix))))
         || name.trim_end_matches([' ', '.']).to_ascii_lowercase().ends_with(".vstpreset")
 }
 
@@ -588,7 +591,27 @@ mod preset_file_tests {
         for name in
             ["C:x", "C:\\P\\x.fxp", "/tmp/plugin.fxp", "x.vstpreset.", "x.vstpreset ", "C:x.vstpreset. ", ".\\x.vstpreset.", "./x.fxp"]
         {
+            if !cfg!(windows) && matches!(name, "C:x" | "C:\\P\\x.fxp") {
+                continue;
+            }
             assert!(preset_ask(&json!({"preset":name})).is_err(), "{name}");
+        }
+        if !cfg!(windows) {
+            for name in ["Aux: Hall", "A: Bright Pad"] {
+                assert!(preset_ask(&json!({"preset":name})).is_ok(), "{name}");
+            }
+        }
+        let directory = tempfile::tempdir().unwrap();
+        let source = directory.path().join("Exists.VSTPRESET");
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode("VlNUMwEAAAAwMDExMjIzMzQ0NTU2Njc3ODg5OUFBQkJDQ0RERUVGRjMAAAAAAAAAYWJjTGlzdAEAAABDb21wMAAAAAAAAAADAAAAAAAAAA==")
+            .unwrap();
+        daw_bridge::vst3::read(&bytes).unwrap();
+        std::fs::write(&source, bytes).unwrap();
+        for field in ["path", "preset"] {
+            let mut input = json!({});
+            input[field] = source.to_string_lossy().into_owned().into();
+            assert!(preset_ask(&input).is_err(), "existing source was read: {input}");
         }
         assert!(preset_ask(&json!({"preset":"Regular program"})).is_ok());
         assert!(preset_ask(&json!({"preset":"Regular program.."})).is_ok());
@@ -664,14 +687,14 @@ pub fn preset_apply(ctx: &Ctx, input: &Value, fence: &Value) -> Done<Applied> {
     let after = match preset_state(ctx, &at, &volatile, false, full) {
         Ok(after) => after,
         Err(error) => {
-            put_back_preset(ctx, &at, &now)?;
+            rollback_preset(ctx, &at, &now)?;
             return Err(error);
         }
     };
     if !loaded {
         if after["hash"] != now["hash"] || after["stateHash"] != now["stateHash"] {
             // REAPER said no and changed something: what it changed goes back.
-            put_back_preset(ctx, &at, &now)?;
+            rollback_preset(ctx, &at, &now)?;
         }
         return Err(failed(match ask {
             PresetAsk::Name(name) => {
@@ -687,6 +710,22 @@ pub fn preset_apply(ctx: &Ctx, input: &Value, fence: &Value) -> Done<Applied> {
         applied["stateHash"] = after["stateHash"].clone();
     }
     Ok(Applied { applied, display: json!({"title": preset_title(ctx, &at, Some(&ask), Some(&name))}), ..Default::default() })
+}
+
+/// A failed apply can be reported as unwritten only after the complete prior state reads back.
+/// If that proof fails, preserve a native undo point and tell the host that state may have changed.
+fn rollback_preset(ctx: &Ctx, at: &FxAt, prior: &Value) -> Done<()> {
+    let uncertain = || {
+        (daw_bridge::wire::code::UNCERTAIN.into(),
+        "The preset load failed and its earlier state could not be verified after rollback. REAPER's undo point keeps the attempted change.".into())
+    };
+    put_back_preset(ctx, at, prior).map_err(|_| uncertain())?;
+    let after = preset_state(ctx, at, &volatile_of(prior), false, prior["stateHash"].is_string()).map_err(|_| uncertain())?;
+    let state_back = prior["state"].as_str().is_none_or(|before| state_chunk(ctx, at.fx).is_some_and(|(_, after)| after == before));
+    if after["hash"] != prior["hash"] || !state_back {
+        return Err(uncertain());
+    }
+    Ok(())
 }
 
 /// Puts an FX back to a state a preset change took it from: the preset loaded again (its name), then the exact values (its

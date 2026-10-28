@@ -560,7 +560,11 @@ impl Shared {
             Some(open) if open.id == step => open.label,
             _ => return Frame::error(id, code::FAILED, "that step isn't open (it ended already, or the project changed under it)"),
         };
-        let desc = params["label"].as_str().filter(|label| !label.is_empty()).map_or(begun, str::to_string);
+        let desc = params["label"]
+            .as_str()
+            .filter(|label| !label.is_empty() && !label.chars().any(char::is_control))
+            .map_or(begun, str::to_string);
+        let desc = crate::reaper::undo_label(&desc).into_owned();
         // Nobody waits for the job's answer: it runs when the main thread is free, and the host has the name already.
         let (job, _waiter) = queue::job("undo_step_end", params);
         if lock(&self.jobs).send(job).is_err() {
@@ -1240,6 +1244,31 @@ mod tests {
         send(&mut stream, 2, "undo_step_end", json!({"stepId": "s7", "label": "Kumi: Vocal volume −4.5 dB and 1 more (k2222)"}));
         assert_eq!(read_frame(&mut reader)["result"], json!({"deferred": true, "desc": "Kumi: Vocal volume −4.5 dB and 1 more (k2222)"}));
         assert_eq!(jobs.try_recv().unwrap().params["label"], "Kumi: Vocal volume −4.5 dB and 1 more (k2222)");
+    }
+
+    #[test]
+    fn a_deferred_close_with_an_invalid_rename_keeps_its_validated_label() {
+        for label in [json!(7), json!("Warm\0pad"), json!("Warm\npad"), json!("Warm\u{7f}pad")] {
+            let mut lab = Lab::start(VECTOR_SECRET, ServerConnection::new);
+            let (mut stream, mut reader, _) = lab.authenticated();
+            let jobs = std::mem::replace(&mut lab.jobs, mpsc::channel().1);
+            let main = thread::spawn(move || {
+                let job = jobs.recv_timeout(Duration::from_secs(5)).unwrap();
+                assert!(job.claim());
+                job.answer(Ok(json!({"stepId":"s7"})));
+                jobs
+            });
+            send(&mut stream, 1, "undo_step_begin", json!({"label":"Kumi: Warm pad (k2222)"}));
+            assert_eq!(read_frame(&mut reader)["result"]["stepId"], "s7");
+            let jobs = main.join().unwrap();
+            lab.snapshot.lock().unwrap().busy = Some(Busy::Modal);
+            send(&mut stream, 2, "undo_step_end", json!({"stepId":"s7","label":label}));
+            assert_eq!(read_frame(&mut reader)["result"], json!({"deferred":true,"desc":"Kumi: Warm pad (k2222)"}));
+            assert_eq!(jobs.try_recv().unwrap().method, "undo_step_end");
+            send(&mut stream, 3, "undo_step_end", json!({"stepId":"s7"}));
+            assert_eq!(read_frame(&mut reader)["error"]["code"], code::FAILED);
+            assert!(jobs.try_recv().is_err());
+        }
     }
 
     #[test]

@@ -45,6 +45,7 @@ impl Lab {
             "change_apply" => self.changes.apply(&reaper, &self.reads, &params),
             "change_restore" => self.changes.restore(&reaper, &self.reads, &params),
             "read" => self.reads.read(&reaper, &params),
+            "focus_body" => self.reads.focus_body(&reaper, &params),
             "fx_chain_save" => self.changes.fx_chain_save(&reaper, &self.reads, &params),
             "undo_step_begin" => self.changes.step_begin(&reaper, &self.reads, &params),
             "undo_step_end" => self.changes.step_end(&reaper, &self.reads, &params),
@@ -652,6 +653,13 @@ fn vst3_preset_files_load_checked_copies_and_undo_accepts_normalization_but_refu
     let (preview, applied) = lab.make("fx-preset", file_input(&path));
     assert_eq!(values("{FILE}")[0], 0.8, "the bytes validated before the source swap were loaded");
     assert!(applied["display"]["title"].as_str().unwrap().ends_with("preset “Created.vstpreset”"));
+    assert_eq!(applied["applied"]["preset"], "Created.vstpreset");
+    let row = lab.call("read", json!({"ref":fx_ref("{FILE}")})).unwrap();
+    assert!(!row.to_string().contains("kumi-vst3-"), "{row}");
+    assert!(row.to_string().contains("Created.vstpreset"), "{row}");
+    let body = lab.call("focus_body", json!({"kind":"fx","ref":"r:track:{BBBB}"})).unwrap();
+    assert!(!body.to_string().contains("kumi-vst3-"), "{body}");
+    assert!(body.to_string().contains("Created.vstpreset"), "{body}");
     let staged = state(|s| s.tracks[1].fx[0].config["fake.loadedFile"].clone());
     assert_ne!(std::path::Path::new(&staged), path);
     assert!(!std::path::Path::new(&staged).exists(), "the owned copy is removed after the synchronous native load");
@@ -691,6 +699,35 @@ fn vst3_preset_files_refuse_wrong_classes_changed_sources_and_roll_back_partial_
     let preview = lab.preview("fx-preset", input.clone()).unwrap();
     assert_eq!(lab.apply("fx-preset", &input, &preview["fence"]).unwrap_err().0, "failed");
     assert_eq!(values("{FILE}"), before, "a partial native load is completely restored");
+}
+
+#[test]
+fn a_failed_preset_load_keeps_native_undo_when_rollback_is_refused_ignored_or_normalized() {
+    for flag in ["fake.refuseState", "fake.ignoreState", "fake.normalizeState"] {
+        for in_plan in [false, true] {
+            let lab = Lab::new();
+            let dir = tempfile::tempdir().unwrap();
+            let path = vst3_file(&dir, PRESET_CLASS);
+            state(|s| {
+                let mut fx = file_plugin();
+                fx.config.insert("fake.refusePresetFile".into(), "1".into());
+                fx.config.insert(flag.into(), "1".into());
+                s.tracks[1].fx = vec![fx];
+                s.state_count += 1;
+            });
+            if in_plan {
+                lab.call("undo_step_begin", json!({"label":"Kumi: attempted preset"})).unwrap();
+            }
+            let input = file_input(&path);
+            let preview = lab.preview("fx-preset", input.clone()).unwrap();
+            let before = state(|s| s.undo_entries);
+            let error = lab.apply("fx-preset", &input, &preview["fence"]).unwrap_err();
+            assert_eq!(error.0, "uncertain", "{flag}/{in_plan}: {error:?}");
+            assert_eq!(state(|s| s.undo_depth), 0, "no open block remains");
+            assert_eq!(state(|s| s.undo_end_flags), -1, "the partial write remains in native undo");
+            assert!(state(|s| s.undo_entries) > before);
+        }
+    }
 }
 
 #[test]

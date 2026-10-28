@@ -448,10 +448,25 @@ mod tests {
 
     #[test]
     fn input_paths_refuse_controls_and_device_components_before_opening() {
-        for path in [r"C:\x\COM3.vstpreset", r"C:\x\NUL .vstpreset", "/tmp/LPT¹.xml", "\0\\\\host\\share\\x.vstpreset\0", "/tmp/a\n.vital"]
-        {
+        for path in [r"C:\x\COM3.vstpreset", r"C:\x\NUL .vstpreset", "\0\\\\host\\share\\x.vstpreset\0", "/tmp/a\n.vital"] {
             assert!(read_file(Path::new(path), "vital").unwrap_err().contains("local path"), "{path:?}");
         }
+        #[cfg(windows)]
+        assert!(read_file(Path::new("/tmp/LPT¹.xml"), "vital").unwrap_err().contains("local path"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unix_preset_paths_can_use_aux_folders_and_colon_filenames() {
+        let temp = tempfile::tempdir().unwrap();
+        let folder = temp.path().join("Aux");
+        std::fs::create_dir(&folder).unwrap();
+        let path = folder.join("A: Bright Pad.vital");
+        let bytes = br#"{"synth_version":"1.0.7","settings":{"osc_1_level":1}}"#;
+        std::fs::write(&path, bytes).unwrap();
+        assert_eq!(read_file(&path, "vital").unwrap().as_slice(), bytes);
+        let result = tool(temp.path()).run(&input(json!({"action":"inspect","plugin":"vital","input":path}))).unwrap();
+        assert!(!result["fields"].as_array().unwrap().is_empty());
     }
 
     #[test]

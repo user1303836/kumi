@@ -556,7 +556,17 @@ impl Reaper<'_> {
             FxOwner::Track(t) => self.api.TrackFX_GetPreset().map(|f| text(|buf, size| unsafe { f(t.0, fx.index, buf, size) })),
             FxOwner::Take(t) => self.api.TakeFX_GetPreset().map(|f| text(|buf, size| unsafe { f(t.0, fx.index, buf, size) })),
         };
-        preset.unwrap_or_default()
+        let preset = preset.unwrap_or_default();
+        // REAPER retains the pathname after reading Kumi's short-lived checked copy. It is an
+        // implementation detail, not a user-selectable preset path, in reads and change history.
+        let mut parts = preset.rsplit(['/', '\\']);
+        let name = parts.next().unwrap_or_default();
+        if parts.next().is_some_and(|parent| parent.starts_with("kumi-vst3-") && parent.len() > "kumi-vst3-".len())
+            && name.to_ascii_lowercase().ends_with(".vstpreset")
+        {
+            return name.to_string();
+        }
+        preset
     }
 
     pub fn fx_param_count(&self, fx: Fx) -> i32 {

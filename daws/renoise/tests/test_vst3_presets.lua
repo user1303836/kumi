@@ -159,7 +159,7 @@ test("vst3 presets: a native effect undo does not claim VST3 normalization", fun
   asked.vst3Data, asked.presetData = nil, xml(B)
   device.path = "Audio/Effects/Native/Test"
   local record = I.change(peer, "device-preset-data", asked)
-  device.normalize_preset_data = function(value) return (value:gsub("10,20", "30,40")) end
+  device.normalize_preset_data = function(value) return (value:gsub("</DeviceSlot>", "<Version>normalized</Version></DeviceSlot>")) end
   local restored = I.restore(peer, "device-preset-data", record)
   ok(restored.result)
   eq(restored.result.display.note, nil)

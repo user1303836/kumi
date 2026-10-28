@@ -469,6 +469,7 @@ pub struct State {
     /// Blocks begun and not ended, and whether anything was written since the last point: a bare edit makes no point
     /// of its own and joins the next block that is ended with flags.
     pub undo_depth: i32,
+    pub undo_end_flags: i32,
     pub undo_dirty: bool,
     // m4-r-fxenv
     /// In a block, each FX parameter written (by FX GUID and index): its value before and its value now. REAPER keeps a
@@ -584,6 +585,7 @@ impl Default for State {
             undo_first: None,
             undo_cur: None,
             undo_depth: 0,
+            undo_end_flags: 0,
             undo_dirty: false,
             block_params: HashMap::new(),
             state_changed: false,
@@ -2804,6 +2806,7 @@ unsafe extern "C" fn undo_begin_block2(_proj: *mut ReaProject) {
 unsafe extern "C" fn undo_end_block2(_proj: *mut ReaProject, desc: *const c_char, flags: c_int) {
     let desc = name_of(desc);
     with(|s| {
+        s.undo_end_flags = flags;
         s.undo_depth = (s.undo_depth - 1).max(0);
         if s.undo_depth > 0 {
             return;

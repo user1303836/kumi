@@ -479,8 +479,7 @@ impl<'a, 'r> PutBack<'a, 'r> {
             }
         }
         for (key, value) in &self.saved.texts {
-            reaper.set_project_text(proj, key, value);
-            if reaper.project_text_long(proj, key).is_some_and(|now| now != *value) {
+            if !reaper.set_project_text(proj, key, value) || reaper.project_text_long(proj, key).as_deref() != Some(value.as_str()) {
                 missed.push(key.to_string());
             }
         }
@@ -662,11 +661,20 @@ pub fn run(reaper: &Reaper, reads: &Reads, plan: &Plan, hooks: &dyn Hooks) -> En
         set("RENDER_DITHER", 0.0);
         set("RENDER_NORMALIZE", NO_POSTPROCESSING);
         let folder = plan.folder.to_string_lossy().into_owned();
-        reaper.set_project_text(proj, "RENDER_FILE", &folder);
-        reaper.set_project_text(proj, "RENDER_PATTERN", &plan.pattern(pass, n));
-        reaper.set_project_text(proj, "RENDER_FORMAT", FLOAT_WAV);
-        reaper.set_project_text(proj, "RENDER_FORMAT2", "");
-        reaper.set_project_text(proj, "RENDER_EXTRAFILEDIR", &folder);
+        let pattern = plan.pattern(pass, n);
+        let texts = [
+            ("RENDER_FILE", folder.as_str()),
+            ("RENDER_PATTERN", pattern.as_str()),
+            ("RENDER_FORMAT", FLOAT_WAV),
+            ("RENDER_FORMAT2", ""),
+            ("RENDER_EXTRAFILEDIR", folder.as_str()),
+        ];
+        if let Some((key, _)) = texts.into_iter().find(|(key, value)| {
+            !reaper.set_project_text(proj, key, value) || reaper.project_text_long(proj, key).as_deref() != Some(*value)
+        }) {
+            outcome = Err(("failed".into(), format!("REAPER refused {key}; nothing was rendered")));
+            break;
+        }
         if let Some(master) = master {
             let on = if pass.before_chain { 0.0 } else { put_back.saved.master_fx.map_or(1.0, |(_, on)| on) };
             if reaper.track_value(master, "I_FXEN") != on {

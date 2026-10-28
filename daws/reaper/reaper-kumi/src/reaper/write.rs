@@ -1,7 +1,7 @@
 //! What the bridge writes to REAPER, and the undo history it names its writes in. Each call is REAPER's own, one for one;
 //! a function this REAPER lacks answers false or None, and the change that needed it is refused before it begins.
 
-use std::ffi::{c_char, c_int};
+use std::ffi::{c_char, c_int, CString};
 use std::ptr;
 
 use super::ctext;
@@ -197,7 +197,9 @@ impl Reaper<'_> {
     /// Ends the block as one undo point named `desc`. `flags` -1 covers every kind of change; 0 makes a point only if
     /// something REAPER itself marked changed.
     pub fn undo_end(&self, proj: Project, desc: &str, flags: i32) -> bool {
-        let Some(desc) = ctext(desc) else { return false };
+        // An old saved plan can still carry an invalid label. Ending a block must never fail open:
+        // the input boundaries reject controls, but this finalizer repairs old labels before calling REAPER.
+        let desc = CString::new(super::undo_label(desc).as_ref()).unwrap_or_default();
         match self.api.Undo_EndBlock2() {
             Some(f) => {
                 unsafe { f(proj.0, desc.as_ptr(), flags) };

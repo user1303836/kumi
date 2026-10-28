@@ -484,7 +484,11 @@ pub struct Changes {
 }
 
 fn text<'a>(params: &'a Value, name: &str) -> Done<&'a str> {
-    params.get(name).and_then(Value::as_str).filter(|text| !text.is_empty()).ok_or_else(|| bad(format!("{name} must be a string")))
+    params
+        .get(name)
+        .and_then(Value::as_str)
+        .filter(|text| !text.is_empty() && !text.chars().any(char::is_control))
+        .ok_or_else(|| bad(format!("{name} must be text without control characters")))
 }
 
 fn object<'a>(params: &'a Value, name: &str) -> Done<&'a Value> {
@@ -507,6 +511,22 @@ impl Changes {
     /// As `context`; with `past` (an undo, whose refs are ids that hold across a look at another tab and back) an earlier
     /// epoch of the project that is open now is accepted too.
     fn context_from<'a, 'r>(&self, reaper: &'a Reaper<'r>, reads: &'a Reads, params: &Value, past: bool) -> Done<Ctx<'a, 'r>> {
+        // A C string cannot represent NUL. Check every new change/restore argument before the first write,
+        // including names whose low-level setter result is followed by another write. Multiline notes remain valid.
+        let mut pending = vec![params];
+        while let Some(value) = pending.pop() {
+            match value {
+                Value::String(text) if text.contains('\0') => return Err(bad("change text must contain no NUL characters")),
+                Value::Array(values) => pending.extend(values),
+                Value::Object(values) => {
+                    if values.keys().any(|key| key.contains('\0')) {
+                        return Err(bad("change keys must contain no NUL characters"));
+                    }
+                    pending.extend(values.values());
+                }
+                _ => {}
+            }
+        }
         let epoch = text(params, "epoch").map_err(|_| bad("epoch: the epoch the refs were read in"))?;
         let of_this_project = past && reaper.current_project().is_some_and(|info| reads.epoch_is_of(epoch, info.ptr));
         if epoch != reads.epoch() && !of_this_project {
@@ -596,6 +616,8 @@ impl Changes {
         marks: bool,
         write: impl FnOnce(&Ctx) -> Done<T>,
     ) -> Done<(T, Value)> {
+        let clean_desc = crate::reaper::undo_label(desc);
+        let desc = clean_desc.as_ref();
         let in_plan = match self.plan.borrow_mut().as_mut() {
             Some(plan) => {
                 plan.active = Instant::now();
@@ -613,20 +635,27 @@ impl Changes {
         ctx.unkept.set(false);
         let result = write(ctx);
         if in_plan {
+            if result.as_ref().is_err_and(|(code, _)| code == daw_bridge::wire::code::UNCERTAIN) {
+                let plan = self.plan.borrow_mut().take();
+                if let Some(plan) = plan {
+                    self.close(ctx.reaper, ctx.reads, plan);
+                }
+            }
             return result.map(|done| {
                 let covered = point && !done.unwritten() && !ctx.unkept.get();
                 (done, json!({"desc": desc, "entry": null, "stateCount": null, "inPlan": true, "covered": covered}))
             });
         }
-        // A change that refused, or found everything as it should be, wrote nothing: its block makes no point (flags 0),
-        // and pending bare edits of the producer's stay where they were.
-        let wrote = result.as_ref().is_ok_and(|done| !done.unwritten());
+        // A refusal that restored its writes makes no point (flags 0). An uncertain rollback keeps a point so the producer
+        // can recover with native undo; pending bare edits otherwise stay where they were.
+        let uncertain = result.as_ref().is_err_and(|(code, _)| code == daw_bridge::wire::code::UNCERTAIN);
+        let wrote = uncertain || result.as_ref().is_ok_and(|done| !done.unwritten());
         // (r-tracks) An action's block ends with flags 0: REAPER makes a point only of what the action marked itself.
         // Inside the block REAPER's history doesn't move, but for an undo or redo the action ran: then the watch isn't told
         // the history is Kumi's own, and its next look tells HISTORY what was taken back or made again.
         let moved = history.is_some_and(|before| before != (ctx.reaper.undo_can_undo(ctx.proj), ctx.reaper.undo_can_redo(ctx.proj)));
         open.armed = false;
-        ctx.reaper.undo_end(ctx.proj, desc, if wrote && !marks { -1 } else { 0 });
+        ctx.reaper.undo_end(ctx.proj, desc, if uncertain || (wrote && !marks) { -1 } else { 0 });
         if moved {
             if wrote {
                 ctx.reaper.refresh_after_change();
@@ -724,10 +753,8 @@ impl Changes {
     /// (what the plan did, known only once it's done).
     pub fn step_end(&self, reaper: &Reaper, reads: &Reads, params: &Value) -> Answer {
         let id = text(params, "stepId")?;
-        let label = match params.get("label") {
-            None | Some(Value::Null) => None,
-            Some(_) => Some(text(params, "label")?.to_string()),
-        };
+        // A cosmetic rename cannot prevent cleanup: retain the validated beginning label if it is invalid.
+        let label = text(params, "label").ok().map(str::to_string);
         let mut plan = {
             let mut open = self.plan.borrow_mut();
             match open.as_ref() {
@@ -741,7 +768,8 @@ impl Changes {
         Ok(self.close(reaper, reads, plan))
     }
 
-    fn close(&self, reaper: &Reaper, reads: &Reads, plan: Plan) -> Value {
+    fn close(&self, reaper: &Reaper, reads: &Reads, mut plan: Plan) -> Value {
+        plan.label = crate::reaper::undo_label(&plan.label).into_owned();
         // A project that went away takes its blocks with it.
         let alive = reaper.project_valid(plan.proj);
         if alive {

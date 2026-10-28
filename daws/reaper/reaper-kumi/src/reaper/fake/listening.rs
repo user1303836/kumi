@@ -50,6 +50,7 @@ pub struct FakeMedia {
 pub struct FakeListening {
     pub numbers: HashMap<String, f64>,
     pub texts: HashMap<String, String>,
+    pub refuse_text_once: Option<(String, bool)>,
     /// `projrenderlimit` (the render speed), where REAPER's projectconfig_var_addr points.
     pub speed: Box<i32>,
     pub audio: bool,
@@ -140,6 +141,7 @@ impl Default for FakeListening {
         FakeListening {
             numbers,
             texts,
+            refuse_text_once: None,
             speed: Box::new(0),
             audio: true,
             device_opens: false,
@@ -178,6 +180,7 @@ impl Clone for FakeListening {
         FakeListening {
             numbers: self.numbers.clone(),
             texts: self.texts.clone(),
+            refuse_text_once: self.refuse_text_once.clone(),
             speed: Box::new(*self.speed),
             audio: self.audio,
             device_opens: self.device_opens,
@@ -337,6 +340,9 @@ unsafe extern "C" fn get_set_project_info_string(proj: *mut ReaProject, desc: *c
     if is_set {
         let value = name_of(buf);
         return counted(|s| {
+            if s.listening.refuse_text_once.as_ref().is_some_and(|(refused, _)| refused == &key) {
+                return s.listening.refuse_text_once.take().unwrap().1;
+            }
             if s.listening.dirty_on_set && key.starts_with("RENDER_") {
                 s.dirty = true;
             }

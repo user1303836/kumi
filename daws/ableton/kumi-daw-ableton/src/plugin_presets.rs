@@ -148,9 +148,24 @@ mod tests {
         let error = prepare(&source, blocked.path(), "valid").unwrap_err();
         assert!(error.contains("User Library") && error.contains("permissions"), "{error}");
         assert!(prepare(Path::new("//host/share/test.vstpreset"), temp.path(), "valid").is_err());
-        for path in ["\0//host/share/x.vstpreset", "C:/P/CON.vstpreset", "/tmp/x\n.vstpreset"] {
+        for path in ["\0//host/share/x.vstpreset", "/tmp/x\n.vstpreset"] {
             assert!(prepare(Path::new(path), temp.path(), "valid").unwrap_err().contains("local"));
             assert!(prepare(&source, Path::new(path), "valid").unwrap_err().contains("local"));
         }
+        #[cfg(windows)]
+        assert!(prepare(Path::new("C:/P/CON.vstpreset"), temp.path(), "valid").unwrap_err().contains("local"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unix_preset_paths_allow_colons_and_dos_device_directory_names() {
+        let temp = tempfile::tempdir().unwrap();
+        let directory = temp.path().join("Aux");
+        std::fs::create_dir(&directory).unwrap();
+        let source = directory.join("X:Y.vstpreset");
+        let bytes = include_bytes!(concat!(env!("KUMI_WORKSPACE"), "/plugin-formats/serum-2/format-1/fixtures/init.vstpreset"));
+        std::fs::write(&source, bytes).unwrap();
+        let made = prepare(&source, &directory, "Kumi synth").unwrap();
+        assert_eq!(std::fs::read(made.file).unwrap(), bytes);
     }
 }

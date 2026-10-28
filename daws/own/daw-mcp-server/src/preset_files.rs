@@ -13,9 +13,12 @@ pub fn has_suffix(name: &str) -> bool {
 /// interprets drive-relative names and strips trailing dots/spaces before opening a filename.
 pub fn file_program(name: &str) -> bool {
     let name = name.trim();
-    name.starts_with(['/', '\\'])
-        || (name.as_bytes().get(1) == Some(&b':') && name.as_bytes()[0].is_ascii_alphabetic())
-        || ["./", "../", ".\\", "..\\"].iter().any(|prefix| name.starts_with(prefix))
+    name.starts_with('/')
+        || ["./", "../"].iter().any(|prefix| name.starts_with(prefix))
+        || (cfg!(windows)
+            && (name.starts_with('\\')
+                || (name.as_bytes().get(1) == Some(&b':') && name.as_bytes()[0].is_ascii_alphabetic())
+                || [".\\", "..\\"].iter().any(|prefix| name.starts_with(prefix))))
         || has_suffix(name.trim_end_matches([' ', '.']))
 }
 
@@ -76,7 +79,13 @@ pub fn snapshot(daw: Daw, input: &Value, path: &str) -> Result<Value, String> {
     fields.remove("path");
     fields.remove("preset");
     fields.insert("vst3Data".into(), base64::engine::general_purpose::STANDARD.encode(bytes).into());
-    let name = if daw == Daw::Reaper { file.file_name() } else { file.file_stem() }.unwrap_or_default().to_string_lossy().into_owned();
+    let mut name = if daw == Daw::Reaper { file.file_name() } else { file.file_stem() }.unwrap_or_default().to_string_lossy().into_owned();
+    if daw == Daw::Reaper {
+        name = name.chars().map(|c| if r#"<>:"/\|?*"#.contains(c) { '_' } else { c }).collect();
+        if kumi_common::path::windows_reserved_device(&name) {
+            name.insert(0, '_');
+        }
+    }
     fields.insert("presetName".into(), name.into());
     Ok(output)
 }
@@ -98,6 +107,25 @@ mod tests {
         let large = temp.path().join("large.vstpreset");
         fs::File::create(&large).unwrap().set_len(4 << 20).unwrap();
         assert!(snapshot(Daw::Reaper, &json!({}), large.to_str().unwrap()).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unix_colon_files_and_program_names_are_supported() {
+        for name in ["Aux: Hall", "A: Bright Pad"] {
+            assert!(!file_program(name));
+        }
+        let temp = tempfile::tempdir().unwrap();
+        let folder = temp.path().join("Aux");
+        fs::create_dir(&folder).unwrap();
+        let source = folder.join("A: Bright Pad.vstpreset");
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode("VlNUMwEAAAAwMDExMjIzMzQ0NTU2Njc3ODg5OUFBQkJDQ0RERUVGRjMAAAAAAAAAYWJjTGlzdAEAAABDb21wMAAAAAAAAAADAAAAAAAAAA==")
+            .unwrap();
+        fs::write(&source, &bytes).unwrap();
+        let made = snapshot(Daw::Reaper, &json!({}), source.to_str().unwrap()).unwrap();
+        assert_eq!(made["presetName"], "A_ Bright Pad.vstpreset");
+        assert_eq!(base64::engine::general_purpose::STANDARD.decode(made["vst3Data"].as_str().unwrap()).unwrap(), bytes);
     }
 
     #[cfg(unix)]

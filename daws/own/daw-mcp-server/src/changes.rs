@@ -274,6 +274,9 @@ impl Journal {
             .map(str::to_owned)
             .or_else(|| record.display.get("title").and_then(Value::as_str).map(str::to_owned))
             .unwrap_or_else(|| record.kind.clone());
+        if title.chars().any(char::is_control) {
+            return Err(refuse("bad-params", "title must contain no control characters"));
+        }
         record.desc = Some(format!("Kumi: {title} ({})", record.nonce));
         record.state = State::Applying;
         let record = record.clone();
@@ -381,8 +384,11 @@ impl Journal {
             }
             State::Previewed | State::Applying => return Err(refuse("not-applied", "this change wasn't applied")),
         }
-        record.state = State::Undoing;
         let title = record.display.get("title").and_then(Value::as_str).map(str::to_owned).unwrap_or_else(|| record.kind.clone());
+        // A saved title may predate input validation or come from a producer's existing DAW name.
+        // Preserve recovery of that history while giving the native undo block a valid label.
+        let title: String = title.chars().map(|c| if c.is_control() { ' ' } else { c }).collect();
+        record.state = State::Undoing;
         let desc = format!("Kumi: undo {title} (k{})", token(seed));
         record.undo_desc = Some(desc.clone());
         Ok(Ok((record.clone(), desc)))
@@ -993,6 +999,11 @@ impl crate::host::Host {
     /// `undo_step_begin` / `undo_step_end`: one DAW undo step around a plan's changes, where the DAW gives one. Its
     /// label carries a nonce, so the DAW's own undo of the plan names the plan's changes.
     pub async fn undo_step(&self, method: &str, arguments: &Value) -> (Value, bool) {
+        if method == "undo_step_begin"
+            && arguments.get("label").is_some_and(|value| value.as_str().is_none_or(|label| label.chars().any(char::is_control)))
+        {
+            return (json!({"code":"bad-params", "error":"label must be text without control characters"}), true);
+        }
         let (params, label, named) = match method {
             "undo_step_begin" => match text(arguments, "label") {
                 Ok(label) => {
@@ -1006,7 +1017,11 @@ impl crate::host::Host {
                     let mut params = json!({"stepId": step});
                     // Named by what the plan did, as it closes (REAPER names a block when it ends it); the changes made in it
                     // are told by that name once the DAW confirms it.
-                    let named = arguments.get("label").and_then(Value::as_str).and_then(|label| self.journal().step_named(label));
+                    // A failed cosmetic rename must still close the native block and the journal's open step.
+                    let named = text(arguments, "label")
+                        .ok()
+                        .filter(|label| !label.chars().any(char::is_control))
+                        .and_then(|label| self.journal().step_named(label));
                     if let Some(named) = &named {
                         params["label"] = named.clone().into();
                     }
@@ -1058,6 +1073,53 @@ mod tests {
     fn preview(journal: &Journal) -> Record {
         let answer = json!({"epoch": "e1", "target": {"ref": "r:track:{A}", "kind": "track"}, "prior": {"volumeDb": 0.0}, "fence": {"volumeDb": 0.0}, "display": {"title": "Bass volume −6 dB"}});
         journal.previewed("track-volume", &json!({"ref": "r:track:{A}", "volumeDb": -6.0}), &answer, None, Pick::default()).unwrap()
+    }
+
+    #[test]
+    fn new_control_titles_are_refused_and_old_history_remains_undoable() {
+        let journal = Journal::default();
+        let record = preview(&journal);
+        for title in ["Warm\0pad", "Warm\npad", "Warm\u{7f}pad"] {
+            assert_eq!(journal.begin_apply(&record.id, &record.confirmation, "a", Some(title)).unwrap_err().code, "bad-params");
+            assert_eq!(journal.get(&record.id).unwrap().state, State::Previewed);
+        }
+        journal.begin_apply(&record.id, &record.confirmation, "a", Some("Warm pad")).unwrap().unwrap();
+        journal.end_apply(&record.id, "a", Ok(&json!({"applied":{},"display":{"title":"Warm\0pad"},"undo":{}})));
+        let (_, desc) = journal.begin_undo(&record.id, "u").unwrap().unwrap();
+        assert!(desc.starts_with("Kumi: undo Warm pad (k"), "{desc}");
+        assert!(!desc.chars().any(char::is_control));
+        assert_eq!(journal.get(&record.id).unwrap().state, State::Undoing);
+    }
+
+    #[tokio::test]
+    async fn an_invalid_optional_closing_label_closes_the_host_journal_and_native_step() {
+        let home = tempfile::tempdir().unwrap();
+        let paths = daw_bridge::paths::BridgePaths::new(home.path(), daw_bridge::Daw::Reaper);
+        let secret = daw_bridge::files::ensure_secret(&paths.secret()).unwrap();
+        let script = crate::reaper::simulator::ReaperScript::new(3, 0);
+        let mut config = script.config(secret, "/lab/REAPER");
+        config.discovery_dir = Some(paths.discovery());
+        let _simulator = crate::simulator::Simulator::start(config).await.unwrap();
+        let host = crate::host::Host::new(daw_bridge::Daw::Reaper, home.path());
+        for label in [json!(7), json!(""), json!("Warm\0pad"), json!("Warm\npad"), json!("Warm\u{7f}pad")] {
+            let (begun, failed) = host.undo_step("undo_step_begin", &json!({"label":"Warm pad"})).await;
+            assert!(!failed, "{begun}");
+            let journal = host.journal();
+            let original = journal.inner.lock().unwrap().open_step.clone().unwrap();
+            let record = preview(journal);
+            journal.begin_apply(&record.id, &record.confirmation, "a", None).unwrap().unwrap();
+            journal.end_apply(&record.id, "a", Ok(&json!({"applied":{},"undo":{"inPlan":true,"covered":true}})));
+            let (closed, failed) = host.undo_step("undo_step_end", &json!({"stepId":begun["stepId"],"label":label})).await;
+            assert!(!failed, "{closed}");
+            assert_eq!(closed["desc"], original);
+            assert_eq!(closed["entry"], true);
+            assert_eq!(script.undo_history().last(), Some(&original));
+            assert!(journal.inner.lock().unwrap().open_step.is_none());
+            assert_eq!(journal.get(&record.id).unwrap().step_desc.as_deref(), Some(original.as_str()));
+            let after = preview(journal);
+            assert!(journal.begin_apply(&after.id, &after.confirmation, "a", None).unwrap().unwrap().step_desc.is_none());
+        }
+        host.close().await;
     }
 
     #[test]

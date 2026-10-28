@@ -60,7 +60,7 @@ async fn old_bridges_never_receive_preset_files_even_through_reapers_named_prese
         config.discovery_dir = Some(paths.discovery());
         let _simulator = Simulator::start(config).await.unwrap();
         let mut session = Session::start(daw, home.path());
-        let file = home.path().join("Created.vstpreset");
+        let file = home.path().join(if field == "preset" { "X.VSTPRESET" } else { "Created.vstpreset" });
         let mut bytes = b"VST3".to_vec();
         bytes.extend(1u32.to_le_bytes());
         bytes.extend(b"00112233445566778899AABBCCDDEEFF");
@@ -79,6 +79,13 @@ async fn old_bridges_never_receive_preset_files_even_through_reapers_named_prese
         assert!(answer["error"].as_str().unwrap().contains("restart"));
         assert_eq!(requests.load(Ordering::SeqCst), 0);
         capable.store(true, Ordering::SeqCst);
+        for (n, path) in [r"C:x.vstpreset", r"\x.vstpreset"].into_iter().enumerate() {
+            let mut invalid = json!({"ref":"e1:device:1.2"});
+            invalid[field] = path.into();
+            let (answer, failed) = session.tool_full(20 + n as u64, "change_preview", json!({"kind":kind,"input":invalid}), false).await;
+            assert!(failed && answer["code"] == "bad-params", "{daw}/{field}/{path}: {answer}");
+            assert_eq!(requests.load(Ordering::SeqCst), 0, "relative/rooted paths never reach the DAW");
+        }
         let (record, failed) = session.tool_full(2, "change_preview", preview, false).await;
         assert!(!failed, "{record}");
         assert_eq!(requests.load(Ordering::SeqCst), 1);
@@ -112,7 +119,10 @@ async fn old_bridges_never_receive_preset_files_even_through_reapers_named_prese
         assert_eq!(inputs[0], inputs[1], "the exact validated snapshot reaches apply");
         assert!(inputs[0].get("path").is_none() && inputs[0].get("preset").is_none());
         assert!(inputs[0]["vst3Data"].as_str().is_some_and(|s| !s.is_empty()));
-        assert_eq!(inputs[0]["presetName"], if daw == Daw::Reaper { "Created.vstpreset" } else { "Created" });
+        assert_eq!(
+            inputs[0]["presetName"],
+            if daw == Daw::Reaper { file.file_name() } else { file.file_stem() }.unwrap().to_string_lossy().as_ref()
+        );
     }
 }
 
@@ -131,6 +141,9 @@ async fn network_preset_names_are_refused_before_connecting_to_any_bridge() {
             "C:\\P\\COM9.vstpreset",
             "/tmp/x\u{7f}.vstpreset",
         ] {
+            if !cfg!(windows) && (name.contains("CON.vstpreset") || name.contains("COM9.vstpreset")) {
+                continue;
+            }
             let mut input = json!({"ref":"r:fx:{test}"});
             input[field] = name.into();
             let (answer, failed) = session.tool_full(request_id, "change_preview", json!({"kind":"fx-preset","input":input}), false).await;
@@ -150,10 +163,25 @@ async fn file_names_cannot_bypass_checked_loading_as_ordinary_program_names() {
             .into_iter()
             .enumerate()
     {
+        if !cfg!(windows) && matches!(name, "C:x" | "C:\\P\\x.fxp") {
+            continue;
+        }
         let (answer, failed) = session
             .tool_full(n as u64 + 1, "change_preview", json!({"kind":"fx-preset","input":{"ref":"r:fx:{test}","preset":name}}), false)
             .await;
         assert!(failed && answer["code"] == "bad-params", "{name}: {answer}");
         assert!(answer["error"].as_str().unwrap().contains("named program"), "{answer}");
+    }
+}
+
+#[tokio::test]
+async fn undo_labels_with_controls_are_refused_before_connecting() {
+    let home = tempfile::tempdir().unwrap();
+    let mut session = Session::start(Daw::Reaper, home.path());
+    let mut id = 100;
+    for label in ["Warm\0pad", "Warm\npad", "Warm\u{7f}pad"] {
+        id += 1;
+        let (answer, failed) = session.tool_full(id, "undo_step_begin", json!({"label":label}), false).await;
+        assert!(failed && answer["code"] == "bad-params", "{answer}");
     }
 }

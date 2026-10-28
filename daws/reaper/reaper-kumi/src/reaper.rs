@@ -1,6 +1,7 @@
 //! The REAPER calls the bridge makes, as safe functions over the API table. Main thread only (Api isn't Send).
 //! A function this REAPER lacks reads as empty or None rather than failing.
 
+use std::borrow::Cow;
 use std::cell::Cell;
 use std::ffi::{c_char, c_int, CString};
 use std::ptr;
@@ -39,6 +40,15 @@ pub(crate) struct CText {
 }
 
 const CTEXT_SHORT: usize = 64;
+
+/// Closing an undo block is cleanup: old saved labels must not keep it open or disagree with its metadata.
+pub(crate) fn undo_label(label: &str) -> Cow<'_, str> {
+    if label.chars().any(char::is_control) {
+        Cow::Owned(label.chars().map(|c| if c.is_control() { ' ' } else { c }).collect())
+    } else {
+        Cow::Borrowed(label)
+    }
+}
 
 pub(crate) fn ctext(text: &str) -> Option<CText> {
     if text.as_bytes().contains(&0) {
