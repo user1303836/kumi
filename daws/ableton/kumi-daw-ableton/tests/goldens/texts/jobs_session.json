@@ -11,7 +11,7 @@
   "jobs: stop which": "[error] Say which job to stop, by its number.",
   "jobs: unknown action": "[error] Unknown action pause: list, result or stop.",
   "start_job: a tool": "Job 2 started in the background. Say so in one line and carry on; its report reaches you when it's done.",
-  "start_job: a tool near the DAW": "[error] A job can't use live_discover: only tools away from the DAW, here read_manual.",
+  "start_job: a tool near the DAW": "[error] A job can't use live_discover: only tools away from the DAW, here vst3, read_manual.",
   "start_job: a worker that carries on": "Job 3 started in the background. Say so in one line and end your answer: you carry on with this request when its report is in.",
   "start_job: a worker that tells": "Job 1 started in the background. Say so in one line and carry on; its report reaches you when it's done.",
   "start_job: neither task nor tool": "[error] Give a task for a worker, or a tool and its args.",
