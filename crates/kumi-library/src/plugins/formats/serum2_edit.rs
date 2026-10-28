@@ -72,9 +72,7 @@ impl SerumPreset {
     }
 
     pub fn rename(&mut self, name: &str) -> Result<(), FormatError> {
-        if name.trim().is_empty() || name.len() > 256 || name.chars().any(char::is_control) {
-            return Err(FormatError::new("Serum preset name must be 1–256 bytes without control characters"));
-        }
+        super::write_value::validate_display_name(name)?;
         let mut header = self.header();
         header["presetName"] = json!(name);
         self.file.header = serde_json::to_vec(&header).map_err(|e| FormatError::new(e.to_string()))?;
@@ -228,8 +226,6 @@ impl SerumPreset {
             "presetComment",
             "presetHasBeenEdited",
             "selectedPresetPath",
-            "modMatrixLocked",
-            "scalarCurvesLocked",
         ];
         let mut processor = self.file.body.clone();
         expand(&mut processor);
@@ -251,7 +247,9 @@ impl SerumPreset {
                     }
                     put(&mut entry, "default", float(v / 100.0));
                 }
-                put(&mut controller, name, null_if_empty(entry));
+                if !matches!(&entry, Value::Map(fields, _) if fields.is_empty()) {
+                    put(&mut controller, name, entry);
+                }
             } else if numbered(name, "MidiClip") {
                 let mut entry = value.clone();
                 if let Value::Map(fields, _) = &mut entry {
@@ -264,7 +262,7 @@ impl SerumPreset {
                 if let Some(Value::Array(slots, length)) = value.get("FX") {
                     let mut defaults = Vec::new();
                     for slot in slots {
-                        let mut reset = map();
+                        let mut reset = if slot.get("FXDistortion").is_some() { distortion_defaults()? } else { map() };
                         if let Value::Map(fields, _) = slot {
                             for (key, module) in fields {
                                 if key.as_str().is_some_and(|k| k.starts_with("FX")) {
@@ -332,6 +330,23 @@ impl SerumPreset {
             put(tree, "productVersion", Value::text(product));
             put(tree, "version", float(version));
         }
+        // These shared product markers appear in both native state bodies.
+        // Preserve their captured values rather than inventing controller data.
+        for key in ["product", "url", "vendor"] {
+            if let Some(value) = self.file.body.get(key).cloned().or_else(|| header.get(key).and_then(Json::as_str).map(Value::text)) {
+                put(&mut controller, key, value);
+            }
+        }
+        if processor.get("modMatrixLocked").is_none() {
+            put(&mut processor, "modMatrixLocked", Value::Simple(20, Head::Inline));
+        }
+        if processor.get("scalarCurvesLocked").is_none() {
+            put(
+                &mut processor,
+                "scalarCurvesLocked",
+                Value::Array(vec![Value::Simple(20, Head::Inline); 2], Length::Definite(Head::Inline)),
+            );
+        }
         if controller.get("presetHasBeenEdited").is_none() {
             put(&mut controller, "presetHasBeenEdited", Value::Simple(20, Head::Inline));
         }
@@ -341,6 +356,7 @@ impl SerumPreset {
         let mut header = header.clone();
         header["productVersion"] = json!(product);
         header["version"] = json!(version);
+        header.as_object_mut().unwrap().remove("tags");
         let mut processor_header = header.clone();
         if let Some(fields) = processor_header.as_object_mut() {
             for key in ["presetName", "presetAuthor", "presetComment", "presetDescription", "tags"] {
@@ -374,6 +390,15 @@ fn null_if_empty(value: Value) -> Value {
     } else {
         value
     }
+}
+
+fn distortion_defaults() -> Result<Value, FormatError> {
+    let fixture = VstPreset::read(include_bytes!(concat!(
+        env!("KUMI_WORKSPACE"),
+        "/plugin-formats/serum-2/format-1/fixtures/init-distortion.vstpreset"
+    )))?;
+    let controller = XferFile::read(fixture.controller().ok_or_else(|| FormatError::new("missing Distortion controller template"))?)?;
+    controller.body.at("FXRack0/FX/0/defaultPlainValues").cloned().ok_or_else(|| FormatError::new("missing Distortion defaults"))
 }
 
 impl SerumState {
@@ -565,5 +590,18 @@ mod tests {
         assert!(state.to_preset().is_err());
         patch.file.hash_ok = Some(false);
         assert!(patch.to_vstpreset().is_err());
+    }
+
+    #[test]
+    fn preset_conversion_preserves_processor_lock_flags() {
+        let mut patch = SerumPreset::init("Stored lock flags").unwrap();
+        let locked = Value::Simple(21, Head::Inline);
+        put(&mut patch.file.body, "modMatrixLocked", locked.clone());
+        put(&mut patch.file.body, "scalarCurvesLocked", Value::Array(vec![locked.clone(); 2], Length::Definite(Head::Inline)));
+        let state = patch.to_state().unwrap();
+        assert_eq!(state.processor.body.get("modMatrixLocked"), Some(&locked));
+        assert_eq!(state.processor.body.get("scalarCurvesLocked"), patch.file.body.get("scalarCurvesLocked"));
+        assert!(state.controller.as_ref().unwrap().body.get("modMatrixLocked").is_none());
+        assert!(state.controller.as_ref().unwrap().body.get("scalarCurvesLocked").is_none());
     }
 }

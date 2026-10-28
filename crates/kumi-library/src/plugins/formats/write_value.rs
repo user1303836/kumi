@@ -8,6 +8,28 @@ use super::{
     FormatError,
 };
 
+/// A preset's display name can be copied into a browser or host label. Keep it
+/// portable and distinct from a resource path regardless of which writer sets it.
+pub fn validate_display_name(name: &str) -> Result<(), FormatError> {
+    let drive_prefix =
+        name.trim_start().as_bytes().get(1) == Some(&b':') && name.trim_start().as_bytes().first().is_some_and(u8::is_ascii_alphabetic);
+    if name.trim().is_empty()
+        || name.len() > 256
+        || name.chars().any(char::is_control)
+        || name.contains(['/', '\\'])
+        || name.contains("..")
+        || name.trim() == "."
+        || drive_prefix
+        || kumi_common::path::network_or_device(name.trim())
+        || kumi_common::path::windows_reserved_device(name.trim())
+    {
+        return Err(FormatError::new(
+            "preset name must be 1–256 bytes without control characters, path separators, parent paths, drive prefixes or device names",
+        ));
+    }
+    Ok(())
+}
+
 /// `path` is a structure key, with the codec's repeated indices canonicalized.
 pub fn validate_scalar(plugin: &str, path: &str, value: &Value) -> Result<(), FormatError> {
     let fail = |why: &str| FormatError::new(format!("{path}: {why}"));
@@ -58,6 +80,9 @@ pub fn validate_scalar(plugin: &str, path: &str, value: &Value) -> Result<(), Fo
                 (family, path),
                 ("serum-2", "presetName") | ("valhalla", "name") | ("softube", "presets[]/name") | ("zynaptiq", "@progName")
             );
+            if display_name {
+                validate_display_name(text)?;
+            }
             if (field.status != Status::Verified && !display_name) || !field.kind.split('|').any(|kind| kind == "text") {
                 return Err(fail("text writes have no verified semantics"));
             }

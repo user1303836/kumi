@@ -4,7 +4,7 @@
 
 use serde_json::Value;
 
-use super::{tree::Node, xml, FormatError, MAX_DECODED_BYTES};
+use super::{tree::Node, write_value::validate_display_name, xml, FormatError, MAX_DECODED_BYTES};
 
 // The largest observed product has 207 parameters. Keep headroom without
 // allowing an untrusted count to size an arbitrary allocation.
@@ -106,7 +106,8 @@ impl Preset {
     /// Paths returned by `to_node`: `inputParams/@p4` and `@progName`.
     pub fn set(&mut self, path: &str, value: &Value) -> Result<(), FormatError> {
         if path == "@progName" {
-            let name = value.as_str().filter(|s| !s.contains('\0')).ok_or_else(|| error("preset name must be text without NUL"))?;
+            let name = value.as_str().ok_or_else(|| error("preset name must be text"))?;
+            validate_display_name(name)?;
             let attribute = self.document.root.attributes.iter_mut().find(|(key, _)| key == "progName");
             if let Some((_, old)) = attribute {
                 *old = name.to_string();

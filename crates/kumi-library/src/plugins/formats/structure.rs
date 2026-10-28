@@ -105,7 +105,7 @@ pub struct FileKind {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Field {
-    /// Its kind ("float", "text", "map" â€¦), or kinds joined by "|" when it takes more than one ("map|text").
+    /// Its kind ("float", "text", "map" ...), or kinds joined by "|" when it takes more than one ("map|text").
     #[serde(rename = "type")]
     pub kind: String,
     /// The kinds of file it appears in.
@@ -125,6 +125,11 @@ pub struct Field {
     /// host-reported numeric domain uncertain, or an observed value a bound.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub range_status: Option<Status>,
+    /// Products whose own binary supplied this field's numeric range evidence.
+    /// Shared schemas require this list so a parent-only addition cannot grant
+    /// numeric writes to every product inheriting that schema.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub range_products: Vec<String>,
     /// Verified spacing of discrete values, starting at the lower bound.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub step: Option<f64>,
@@ -145,7 +150,7 @@ pub struct Field {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ParameterLink {
     pub field: String,
-    /// The numbers that fill the field path's "{n}"s, in order ([1] for "Env{n}/â€¦" is Env1).
+    /// The numbers that fill the field path's "{n}"s, in order ([1] for "Env{n}/..." is Env1).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub at: Vec<u32>,
     pub status: Status,
@@ -166,6 +171,10 @@ pub struct Structure {
     #[serde(default, skip_serializing_if = "Value::is_null")]
     pub survey: Value,
     pub fields: BTreeMap<String, Field>,
+    /// Every numeric write needs explicit per-field product coverage when a
+    /// schema is shared by products with separately captured host evidence.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub range_scope_required: bool,
     /// Preserved raw subtrees whose attributes are derived from the file rather
     /// than duplicated in this control schema. Their descendants are read-only.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -224,7 +233,7 @@ pub struct PluginFormat {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Check {
     pub unknown: BTreeSet<String>,
-    /// Path â†’ (the structure's type, the tree's).
+    /// Path -> (the structure's type, the tree's).
     pub mismatched: BTreeMap<String, (String, String)>,
 }
 
@@ -245,6 +254,29 @@ pub struct Reading<'a> {
 impl Structure {
     pub fn field(&self, path: &str) -> Option<&Field> {
         self.fields.get(path)
+    }
+
+    /// Validate a numeric edit against this product's verified write interval.
+    pub fn validate_number(&self, path: &str, value: f64) -> Result<(), FormatError> {
+        let plugin = &self.plugin;
+        let field = self.field(path).ok_or_else(|| FormatError::new(format!("Unknown numeric field {plugin}/{path}")))?;
+        if (self.range_scope_required || !field.range_products.is_empty()) && !field.range_products.contains(plugin) {
+            return Err(FormatError::new(format!("{plugin}/{path} has no range evidence for this product")));
+        }
+        let [low, high] = field
+            .range
+            .filter(|_| field.range_status == Some(Status::Verified))
+            .ok_or_else(|| FormatError::new(format!("{plugin}/{path} has no verified writable range")))?;
+        if !value.is_finite() || !low.is_finite() || !high.is_finite() || low > high || value < low || value > high {
+            return Err(FormatError::new(format!("{plugin}/{path} must be between {low} and {high}")));
+        }
+        if let Some(step) = field.step {
+            let position = (value - low) / step;
+            if !step.is_finite() || step <= 0.0 || !position.is_finite() || (position - position.round()).abs() > 1e-6 {
+                return Err(FormatError::new(format!("{plugin}/{path} requires steps of {step} from {low}")));
+            }
+        }
+        Ok(())
     }
 
     /// The field a host parameter moves, by the parameter's name.
@@ -400,23 +432,7 @@ pub fn builtin(plugin: &str) -> Option<&'static PluginFormat> {
 
 /// Numeric writes require a proven domain. `seen` is deliberately never used.
 pub fn validate_number(plugin: &str, path: &str, value: f64) -> Result<(), FormatError> {
-    let field = builtin(plugin)
-        .and_then(|format| format.structure.field(path))
-        .ok_or_else(|| FormatError::new(format!("Unknown numeric field {plugin}/{path}")))?;
-    let [low, high] = field
-        .range
-        .filter(|_| field.range_status == Some(Status::Verified))
-        .ok_or_else(|| FormatError::new(format!("{plugin}/{path} has no verified writable range")))?;
-    if !value.is_finite() || !low.is_finite() || !high.is_finite() || low > high || value < low || value > high {
-        return Err(FormatError::new(format!("{plugin}/{path} must be between {low} and {high}")));
-    }
-    if let Some(step) = field.step {
-        let position = (value - low) / step;
-        if !step.is_finite() || step <= 0.0 || !position.is_finite() || (position - position.round()).abs() > 1e-6 {
-            return Err(FormatError::new(format!("{plugin}/{path} requires steps of {step} from {low}")));
-        }
-    }
-    Ok(())
+    builtin(plugin).ok_or_else(|| FormatError::new(format!("Unknown plug-in {plugin}")))?.structure.validate_number(path, value)
 }
 
 /// A shipped plug-in's format by a plug-in ID a host reports.

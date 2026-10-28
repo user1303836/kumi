@@ -96,9 +96,7 @@ impl ValhallaPreset {
             self.set_parameter(name, value.as_f64().ok_or_else(|| FormatError::new("Valhalla parameter needs a number"))?)
         } else if path == "name" {
             let name = value.as_str().ok_or_else(|| FormatError::new("Valhalla preset name needs text"))?;
-            if name.contains('\0') {
-                return Err(FormatError::new("Valhalla preset name contains NUL"));
-            }
+            super::write_value::validate_display_name(name)?;
             let root = &mut self.state.document.root;
             if let Some((_, value)) = root.attributes.iter_mut().find(|(key, _)| key == "presetName") {
                 *value = name.into();

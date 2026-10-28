@@ -571,7 +571,7 @@ fn described(
     let version = version.map(|v| writes.iter().find(|known| same_version(known, &v)).cloned().unwrap_or(v));
     let create_preset = version.as_ref().is_some_and(|v| writes.contains(v))
         && format.is_some_and(|p| {
-            !writes.is_empty() && (templates::initial(&p.info.plugin).is_some() || (p.info.plugin == "ozone-12" && class_id.is_some()))
+            !writes.is_empty() && (templates::has_initial(&p.info.plugin) || (p.info.plugin == "ozone-12" && class_id.is_some()))
         });
     InstalledPlugin {
         name: name.into(),

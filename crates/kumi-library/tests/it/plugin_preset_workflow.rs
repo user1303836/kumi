@@ -129,6 +129,40 @@ fn batches_refuse_unknown_fields_and_invalid_parameter_values() {
     assert!(preset::edit("valhalla-delay", initial, &invalid_name, &[]).is_err());
 }
 
+#[test]
+fn serum_and_valhalla_create_and_rename_refuse_paths_and_device_names() {
+    for (plugin, name_path) in [("serum-2", "presetName"), ("valhalla-delay", "name")] {
+        let original = templates::initial(plugin).unwrap();
+        for name in [r"\\host\share\patch", "../patch", "C:patch", r"C:\patch", "CON", "COM3", ".", "a\nb", "a\0b"] {
+            let mut opts = options(plugin);
+            opts.name = Some(name.into());
+            assert!(preset::create(plugin, &opts, &[]).is_err(), "create {plugin}: {name:?}");
+            assert!(preset::edit(plugin, original, &opts, &[]).is_err(), "rename {plugin}: {name:?}");
+            let edits = [change(name_path, json!(name))];
+            assert!(preset::create(plugin, &options(plugin), &edits).is_err(), "name edit {plugin}: {name:?}");
+            assert!(preset::edit(plugin, original, &options(plugin), &edits).is_err(), "saved name edit {plugin}: {name:?}");
+            if plugin == "serum-2" {
+                let mut native = serum2::SerumPreset::init("Original").unwrap();
+                let before = native.clone();
+                assert!(native.rename(name).is_err());
+                assert!(native.set(name_path, &json!(name)).is_err());
+                assert_eq!(native, before);
+            } else {
+                let container = VstPreset::read(original).unwrap();
+                let mut native = ValhallaPreset::read_state(container.component().unwrap()).unwrap();
+                let before = native.clone();
+                assert!(native.set(name_path, &json!(name)).is_err());
+                assert_eq!(native, before);
+            }
+        }
+        let mut opts = options(plugin);
+        opts.name = Some("Warm dusk 02".into());
+        let named = preset::create(plugin, &opts, &[]).unwrap();
+        let renamed = preset::edit(plugin, &named.write(), &options(plugin), &[change(name_path, json!("Warm dusk 03"))]).unwrap();
+        assert_ne!(renamed.write(), named.write());
+    }
+}
+
 fn put(tree: &mut cbor::Value, name: &str, value: cbor::Value) {
     let cbor::Value::Map(fields, _) = tree else { panic!("expected a map") };
     fields.push((cbor::Value::text(name), value));
@@ -234,6 +268,64 @@ fn serum_creation_clears_the_path_and_one_edit_preserves_each_state_halfs_keys()
     let parameters = &mut oscillator.iter_mut().find(|(key, _)| key.as_str() == Some("plainParams")).unwrap().1;
     put(parameters, "kParamVolume", cbor::Value::Float(cbor::Float::Double(0.45f64.to_bits())));
     assert_eq!(new.processor.body, expected);
+}
+
+#[test]
+fn serum_created_state_has_the_native_nested_keys_and_container_types() {
+    use kumi_library::plugins::formats::tree::Node;
+    use std::collections::BTreeMap;
+    fn shape(node: &Node) -> BTreeMap<String, &'static str> {
+        fn visit(node: &Node, path: &str, fields: &mut BTreeMap<String, &'static str>) {
+            // Header JSON may spell a whole number as an integer or a float;
+            // their value domain is the same. Null and empty maps are distinct.
+            fields.insert(path.into(), if matches!(node, Node::Int(_) | Node::Float(_)) { "number" } else { node.kind() });
+            match node {
+                Node::Map(entries) => {
+                    for (key, value) in entries {
+                        visit(value, &format!("{path}/{key}"), fields);
+                    }
+                }
+                Node::List(items) => {
+                    for (index, item) in items.iter().enumerate() {
+                        visit(item, &format!("{path}/{index}"), fields);
+                    }
+                }
+                _ => {}
+            }
+        }
+        let mut fields = BTreeMap::new();
+        visit(node, "", &mut fields);
+        fields
+    }
+    for (fixture, edits) in [("init.vstpreset", vec![]), ("init-distortion.vstpreset", vec![change("$add_distortion", json!(0))])] {
+        let path = std::path::Path::new(env!("KUMI_WORKSPACE")).join("plugin-formats/serum-2/format-1/fixtures").join(fixture);
+        let native = VstPreset::read(&std::fs::read(path).unwrap()).unwrap();
+        let native = serum2::SerumState::read(native.component().unwrap(), native.controller()).unwrap();
+        let created = preset::create("serum-2", &options("serum-2"), &edits).unwrap();
+        let created = serum2::SerumState::read(created.component().unwrap(), created.controller()).unwrap();
+        for (part, expected, actual) in [
+            ("processor", &native.processor, &created.processor),
+            ("controller", native.controller.as_ref().unwrap(), created.controller.as_ref().unwrap()),
+        ] {
+            assert_eq!(shape(&actual.body.to_node()), shape(&expected.body.to_node()), "{fixture}: {part} body layout");
+            assert_eq!(
+                shape(&Node::from(&actual.header_json().unwrap())),
+                shape(&Node::from(&expected.header_json().unwrap())),
+                "{fixture}: {part} header layout"
+            );
+        }
+        for key in ["modMatrixLocked", "scalarCurvesLocked"] {
+            assert_eq!(created.processor.body.get(key), native.processor.body.get(key));
+            assert!(created.controller.as_ref().unwrap().body.get(key).is_none());
+        }
+        for key in ["product", "url", "vendor"] {
+            assert_eq!(created.processor.body.get(key), native.processor.body.get(key));
+            assert_eq!(created.controller.as_ref().unwrap().body.get(key), native.controller.as_ref().unwrap().body.get(key));
+        }
+        for index in 0..8 {
+            assert!(created.controller.as_ref().unwrap().body.get(&format!("Macro{index}")).is_none());
+        }
+    }
 }
 
 #[test]

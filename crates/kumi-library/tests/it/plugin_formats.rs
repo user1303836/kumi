@@ -67,6 +67,11 @@ fn the_shipped_formats_parse_and_agree_with_the_readers() {
         .map(|entry| entry.file_name().to_string_lossy().into_owned())
         .collect();
     let registered: std::collections::BTreeSet<_> = builtins().iter().map(|format| format.info.plugin.clone()).collect();
+    let catalog: Vec<String> =
+        serde_json::from_slice(&std::fs::read(kumi_testkit::workspace_path("plugin-formats/catalog.json")).unwrap()).unwrap();
+    let manifest: std::collections::BTreeSet<_> = catalog.iter().cloned().collect();
+    assert_eq!(manifest.len(), catalog.len(), "duplicate catalog product");
+    assert_eq!(manifest, shipped, "the build catalog must cover every product directory");
     assert_eq!(registered.len(), builtins().len(), "duplicate registered plug-in");
     assert_eq!(registered, shipped, "every shipped plug-in format must be registered");
     for format in builtins() {

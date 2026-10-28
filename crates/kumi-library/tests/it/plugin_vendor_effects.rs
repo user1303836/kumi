@@ -230,6 +230,21 @@ fn endpoint_bounds(record: &Value) -> [f64; 2] {
     bounds
 }
 
+fn capture_covers_product(evidence: &Value, record: &Value) -> bool {
+    record["captureIds"].as_array().is_some_and(|ids| {
+        ids.iter().any(|id| {
+            let Some(id) = id.as_str() else { return false };
+            let capture = &evidence["captures"][id];
+            capture["plugin"] == evidence["plugin"]
+                && capture["version"] == evidence["version"]
+                && capture["binarySha256"] == evidence["binarySha256"]
+                && capture["binarySha256"]
+                    .as_str()
+                    .is_some_and(|hash| hash.len() == 64 && hash.bytes().all(|byte| byte.is_ascii_hexdigit()))
+        })
+    })
+}
+
 #[test]
 fn every_verified_numeric_interval_has_committed_endpoint_evidence() {
     let mut witnessed = 0;
@@ -248,6 +263,12 @@ fn every_verified_numeric_interval_has_committed_endpoint_evidence() {
                 "valhalla" | "minimal-audio" | "pulsar-modular" => {
                     let record = &evidence["fields"][path];
                     assert_eq!(endpoint_bounds(record), bounds, "{plugin}/{path}");
+                    assert_eq!(evidence["plugin"], *plugin);
+                    assert!(format.verified.writes.iter().any(|version| evidence["version"] == version.version));
+                    if format.structure.range_scope_required {
+                        assert!(field.range_products.contains(plugin), "{plugin}/{path}: missing product scope");
+                        assert!(capture_covers_product(&evidence, record), "{plugin}/{path}: missing binary capture");
+                    }
                     for (index, endpoint) in [0.0, 1.0].into_iter().enumerate() {
                         let readback = record["readback"][index].as_f64().expect("normalized host readback");
                         assert!((readback - endpoint).abs() <= 1e-6, "{plugin}/{path}: endpoint readback {readback}");
@@ -310,6 +331,43 @@ fn every_verified_numeric_interval_has_committed_endpoint_evidence() {
         }
     }
     assert!(witnessed > 6000);
+}
+
+#[test]
+fn a_parent_only_range_cannot_authorize_an_inheriting_product() {
+    for (parent, child) in [("minimal-current", "minimal-eprom-memory-rites"), ("minimal-evoke", "minimal-lucid")] {
+        let mut schema = serde_json::to_value(&structure::builtin(parent).unwrap().structure).unwrap();
+        let mut proof = range_evidence(parent, 0);
+        let path = "parameters/FutureParentOnlyControl";
+        let capture = parent.strip_prefix("minimal-").unwrap();
+        schema["fields"][path] = json!({
+            "type": "float", "status": "guessed", "range": [0, 1], "range_status": "verified", "range_products": [parent]
+        });
+        proof["fields"][path] = json!({"parameterId": 123, "stored": [0, 1, 0.25], "readback": [0, 1, 0.25], "captureIds": [capture]});
+        let parent_schema: structure::Structure = serde_json::from_value(schema.clone()).unwrap();
+        assert!(parent_schema.validate_number(path, 0.5).is_ok());
+        assert!(capture_covers_product(&proof, &proof["fields"][path]));
+
+        // The same merge used for real shared formats preserves the new base
+        // field, but it must not turn the parent's capture into child evidence.
+        structure::merge_format_patch(&mut schema, &json!({"plugin": child}));
+        let child_proof = range_evidence(child, 0);
+        structure::merge_format_patch(
+            &mut proof,
+            &json!({
+                "plugin": child, "version": child_proof["version"], "binarySha256": child_proof["binarySha256"]
+            }),
+        );
+        let inherited: structure::Structure = serde_json::from_value(schema.clone()).unwrap();
+        assert!(inherited.fields.contains_key(path));
+        assert!(inherited.validate_number(path, 0.5).is_err());
+        assert!(!capture_covers_product(&proof, &proof["fields"][path]));
+
+        // Omitting coverage entirely must also fail closed for a shared schema.
+        schema["fields"][path].as_object_mut().unwrap().remove("range_products");
+        let missing: structure::Structure = serde_json::from_value(schema).unwrap();
+        assert!(missing.validate_number(path, 0.5).is_err());
+    }
 }
 
 #[test]

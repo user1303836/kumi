@@ -25,7 +25,9 @@ belong to their owners.
 | Other catalogued Zynaptiq products | Native XML; known fields and local preset schemas | Native reading, template copies and preset renaming. Unverified numeric fields remain read-only. VST3 state creation remains unavailable where the installed binary could not initialize or class/state identity was not verified |
 | Weiss Compressor Limiter, DS1-MK3, MM-1, Deess; Tape and Tape Multi Track | Softube JSON bundles/presets with normalized parameter tuples | Native reading, template copies and preset renaming; numeric edits remain read-only because their ranges have not been verified. VST3 component writing remains unavailable: the local standalone host and Renoise could not initialize these installed binaries |
 
-`plugin.json` lists every individual product, VST3 class, filename aliases and processing roles.
+`catalog.json` lists the product folders included in Kumi. Each folder's `plugin.json` records its
+VST3 classes, filename aliases and processing roles. Add new product folders to the catalog;
+tests check that none are omitted and that folder names match product IDs.
 `verified.json` gives exact versions and the checks performed. Runtime readback proves the named controls
 and serialization, not every audible DSP behavior. Unit and integration tests use committed initialized or
 synthetic fixtures; they never require an installed plug-in, a running DAW or a factory library.
@@ -58,6 +60,7 @@ synthetic fixtures; they never require an installed plug-in, a running DAW or a 
 
 ```
 plugin-formats/
+  catalog.json           product folders included in the built-in catalog
   serum-2/
     plugin.json          vendor, VST3 IDs, filename aliases, roles, preset extensions, folders
     format-1/            a new one only when the bytes change
@@ -74,10 +77,14 @@ plugin-formats/
   describes whether its numeric write bounds were checked. Values merely observed in presets remain guessed
   and do not authorize writes. `range-verification.json` records concrete fields, parameter IDs, tested
   endpoints and stored values where native measurements provide the bounds; tests check those records against
-  every verified numeric range. Ozone Boolean evidence is recorded separately in `boolean-verification.json`.
+  every verified numeric range. Shared schemas also record which product supplied each field's evidence,
+  with capture records identifying its version and binary hash; a base product's range does not authorize
+  writes for a variant without its own evidence. Ozone Boolean evidence is recorded separately in `boolean-verification.json`.
 - **Text is not a path loader.** Nonnumeric writes require verified semantics or an explicit display-name
   allowlist, and enumerations must match documented options. Resource paths and opaque data stay read-only.
-  A `map|text` field accepts only its documented `default` sentinel as text.
+  A `map|text` field accepts only its documented `default` sentinel as text. Preset names use the same
+  validation through rename options and field edits: names cannot contain control characters, path
+  separators, parent-path sequences, drive prefixes or Windows device names.
 - **VST3 writes follow `verified.json`.** Kumi writes VST3 state only for a requested plug-in version listed
   under `writes`. Native-template edits report their identity checks and unverified reload status separately;
   host parameter changes remain available when a VST3 state writer is unavailable.
@@ -85,7 +92,7 @@ plugin-formats/
 - **Shared formats stay shared.** Current/EPROM Memory Rites and Evoke/Lucid share their format folders;
   each retains its own identity and initialized state. The build compacts JSON and compresses initialized
   VST3 resources; repository fixtures remain standard `.vstpreset` files. The embedded resource payload is
-  2.33 MB, down from 4.27 MB before compaction and sharing; this is not a measurement of executable size.
+  2.48 MB, down from 4.27 MB before compaction and sharing; this is not a measurement of executable size.
 - **No vendor content.** Factory presets, wavetables and samples stay on the machine they were installed on.
   The survey below reads them where they lie and keeps only counts, types, ranges and option-like values.
 - **Evidence stays explicit.** Learn from files, behaviour and normal host APIs by default. Disassembling or

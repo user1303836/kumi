@@ -28,6 +28,14 @@
     "numericWrites": "Observed normalized 0..1 values do not establish legal write bounds; numeric edits remain closed without plug-in restore/readback verification."
   },
   "fields": {
+    "presets[]/name": {
+      "type": "text",
+      "in": [
+        "preset"
+      ],
+      "status": "guessed",
+      "about": "PresetName display label; not a file or resource path."
+    },
     "presets[]/parameters/0": {
       "type": "float",
       "in": [

@@ -6,7 +6,7 @@ use std::collections::BTreeSet;
 
 use serde_json::{json, Value};
 
-use super::{bounded_json, tree::Node, FormatError, MAX_DECODED_BYTES};
+use super::{bounded_json, tree::Node, write_value::validate_display_name, FormatError, MAX_DECODED_BYTES};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Preset {
@@ -67,6 +67,7 @@ impl Preset {
         name: &str,
         parameters: &[(u32, f64, String)],
     ) -> Result<Self, FormatError> {
+        validate_display_name(name)?;
         let result = Self {
             document: json!({
                 "AssetType": "SoftubePresetFile", "FileFormatVersion": 1,
@@ -128,6 +129,7 @@ impl Preset {
             ),
             ["presets", _, "name"] => {
                 let name = value.as_str().ok_or_else(|| error("preset name must be text"))?;
+                validate_display_name(name)?;
                 let preset = self
                     .document
                     .get_mut("PresetList")

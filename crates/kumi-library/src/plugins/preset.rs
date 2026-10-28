@@ -614,10 +614,7 @@ fn check_range(format: &PluginFormat, edit: &Edit) -> Result<(), FormatError> {
 }
 
 fn check_name(name: &str) -> Result<(), FormatError> {
-    if name.trim().is_empty() || name.len() > 256 || name.chars().any(char::is_control) {
-        return Err(error("preset name must be 1–256 bytes without control characters"));
-    }
-    Ok(())
+    write_value::validate_display_name(name)
 }
 
 fn set_name(preset: &mut VstPreset, name: &str) -> Result<(), FormatError> {

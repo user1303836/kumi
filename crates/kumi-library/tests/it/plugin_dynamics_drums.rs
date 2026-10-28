@@ -1,10 +1,32 @@
 use kumi_library::plugins::formats::tree::Node;
 use kumi_library::plugins::formats::vstpreset::VstPreset;
-use kumi_library::plugins::formats::{softube, superior_drummer, zynaptiq};
+use kumi_library::plugins::formats::{softube, structure, superior_drummer, zynaptiq};
+use kumi_library::plugins::preset::{self, Edit};
 use serde_json::json;
 
 fn fixture(plugin: &str, file: &str) -> Vec<u8> {
     std::fs::read(kumi_testkit::workspace_path("plugin-formats").join(plugin).join("format-1/fixtures").join(file)).unwrap()
+}
+
+const SOFTUBE_PLUGINS: [&str; 6] = [
+    "softube-tape",
+    "softube-tape-multi-track",
+    "softube-weiss-compressor-limiter",
+    "softube-weiss-ds1-mk3",
+    "softube-weiss-deess",
+    "softube-weiss-mm-1-mastering-maximizer",
+];
+
+fn synthetic_softube(plugin: &str) -> softube::Preset {
+    let format = structure::builtin(plugin).unwrap();
+    let identity = format.structure.files["preset"].constants["nativePluginId"].as_str().unwrap();
+    let parameters: Vec<_> = format
+        .structure
+        .fields
+        .keys()
+        .filter_map(|path| path.strip_prefix("presets[]/parameters/").map(|id| (id.parse().unwrap(), 0.5, format!("Synthetic {id}"))))
+        .collect();
+    softube::Preset::create(identity, &format.info.name, "2.4.44", "First preset", &parameters).unwrap()
 }
 
 #[test]
@@ -106,6 +128,77 @@ fn native_template_copies_retain_source_state_and_new_softube_identity() {
 }
 
 #[test]
+fn native_softube_bundle_rename_changes_only_the_selected_name() {
+    for plugin in SOFTUBE_PLUGINS {
+        let mut bundle = synthetic_softube(plugin);
+        bundle.document["SharedData"] = json!({"unrecognized": ["retain", 2]});
+        let mut second = bundle.document["PresetList"][0].clone();
+        second["PresetName"] = json!("Second preset");
+        second["ParameterData"]["Parameters"][0][1] = json!(0.75);
+        second["Unrecognized"] = json!({"nested": true});
+        bundle.document["PresetList"].as_array_mut().unwrap().push(second);
+        let input = bundle.write().unwrap();
+
+        let renamed =
+            preset::edit_native(plugin, &input, None, &[Edit { path: "presets/1/name".into(), value: json!("Renamed second") }]).unwrap();
+        assert!(!renamed.runtime_verified);
+        let output = softube::Preset::read(&renamed.bytes).unwrap();
+        let mut expected = bundle.clone();
+        expected.document["PresetList"][1]["PresetName"] = json!("Renamed second");
+        // Whole-document equality covers both parameter sets, the first name,
+        // UUIDs, unknown metadata, and shared resources.
+        assert_eq!(output, expected, "{plugin}");
+
+        let id = bundle.document["PresetList"][1]["ParameterData"]["Parameters"][0][0].as_u64().unwrap();
+        assert!(
+            preset::edit_native(plugin, &input, None, &[Edit { path: format!("presets/1/parameters/{id}"), value: json!(0.25) }]).is_err()
+        );
+    }
+}
+
+#[test]
+fn native_names_reject_resource_paths_through_create_edit_and_direct_codecs() {
+    let softube = synthetic_softube("softube-tape");
+    let zynaptiq = zynaptiq::Preset::read(&fixture("zynaptiq-punch-1", "init.preset")).unwrap();
+    let inputs =
+        [("softube-tape", "presets/0/name", softube.write().unwrap()), ("zynaptiq-punch-1", "@progName", zynaptiq.write().unwrap())];
+    for name in [
+        r"\\host\share\name",
+        r"C:\Presets\name",
+        "C:relative",
+        "../escape",
+        "..",
+        "folder/name",
+        r"folder\name",
+        "CON",
+        "AUX.vstpreset",
+        "bad\0name",
+        "bad\nname",
+        "",
+    ] {
+        for (plugin, path, input) in &inputs {
+            assert!(preset::create_native_from_template(plugin, input, 0, name, &[]).is_err(), "create {plugin}: {name:?}");
+            assert!(preset::edit_native(plugin, input, Some(name), &[]).is_err(), "rename option {plugin}: {name:?}");
+            assert!(
+                preset::edit_native(plugin, input, None, &[Edit { path: (*path).into(), value: json!(name) }]).is_err(),
+                "name edit {plugin}: {name:?}"
+            );
+        }
+
+        assert!(softube::Preset::create("test", "Synthetic", "1", name, &[(0, 0.5, "Gain".into())]).is_err());
+        assert!(softube::Preset::from_template(&softube, 0, name).is_err());
+        let mut edited = softube.clone();
+        assert!(edited.set("presets/0/name", &json!(name)).is_err());
+        assert_eq!(edited, softube);
+
+        assert!(zynaptiq::Preset::from_template(&zynaptiq, name).is_err());
+        let mut edited = zynaptiq.clone();
+        assert!(edited.set("@progName", &json!(name)).is_err());
+        assert_eq!(edited, zynaptiq);
+    }
+}
+
+#[test]
 fn superior_creates_sampler_state_inside_its_vst3_container() {
     let mut wrapper = VstPreset::read(&fixture("superior-drummer-3", "empty.vstpreset")).unwrap();
     let mut state = superior_drummer::State::read(wrapper.component().unwrap()).unwrap();
@@ -201,17 +294,10 @@ fn superior_rejects_path_amplification_within_input_and_token_limits() {
 
 #[test]
 fn softube_observed_normalization_does_not_open_numeric_write_ranges() {
-    use kumi_library::plugins::formats::structure::{self, Status};
+    use kumi_library::plugins::formats::structure::Status;
 
     let mut ranges = 0;
-    for plugin in [
-        "softube-tape",
-        "softube-tape-multi-track",
-        "softube-weiss-compressor-limiter",
-        "softube-weiss-ds1-mk3",
-        "softube-weiss-deess",
-        "softube-weiss-mm-1-mastering-maximizer",
-    ] {
+    for plugin in SOFTUBE_PLUGINS {
         let format = structure::builtin(plugin).unwrap();
         for (path, field) in &format.structure.fields {
             if path.starts_with("presets[]/parameters/") {

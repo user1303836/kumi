@@ -38,21 +38,9 @@
     "Curve 7 Phase [VST3 812984370]": null,
     "Curve 8 Phase [VST3 519581363]": null,
     "Curve 9 Phase [VST3 226178356]": null,
-    "Macro 1 Macro [VST3 1381922179]": {
-      "field": "parameters/MKUMacroNode_Macro_1_Macro",
-      "status": "verified"
-    },
-    "Macro 2 Macro [VST3 121942212]": {
-      "field": "parameters/MKUMacroNode_Macro_2_Macro",
-      "status": "verified"
-    },
-    "Macro 3 Macro [VST3 1009445893]": {
-      "field": "parameters/MKUMacroNode_Macro_3_Macro",
-      "status": "verified"
-    },
-    "Macro 4 Macro [VST3 1896949574]": {
-      "field": "parameters/MKUMacroNode_Macro_4_Macro",
-      "status": "verified"
-    }
+    "Macro 1 Macro [VST3 1381922179]": {"field":"parameters/MKUMacroNode_Macro_1_Macro","status":"verified"},
+    "Macro 2 Macro [VST3 121942212]": {"field":"parameters/MKUMacroNode_Macro_2_Macro","status":"verified"},
+    "Macro 3 Macro [VST3 1009445893]": {"field":"parameters/MKUMacroNode_Macro_3_Macro","status":"verified"},
+    "Macro 4 Macro [VST3 1896949574]": {"field":"parameters/MKUMacroNode_Macro_4_Macro","status":"verified"}
   }
 }
