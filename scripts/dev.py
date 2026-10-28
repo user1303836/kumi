@@ -359,7 +359,7 @@ def command_affected(args: argparse.Namespace) -> int:
         print(f"Every tracked file belongs to a package or an area ({len(workspace.folders)} packages, {len(areas)} areas).")
         return 0
     if args.changes is not None:
-        changes = parse_name_status(sys.stdin.read() if args.changes == "-" else Path(args.changes).read_text())
+        changes = parse_name_status(sys.stdin.read() if args.changes == "-" else Path(args.changes).read_text(encoding="utf-8"))
     elif args.base and args.base.strip("0"):
         changes = changes_since(args.base)
     else:
@@ -838,7 +838,9 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     # What it prints carries git's and cargo's text, so it writes UTF-8 as they do: a pipe on Windows is in its code page
-    # (cp1252), which fails on a character outside it (a → in a commit subject).
+    # (cp1252), which fails on a character outside it (a → in a commit subject). It reads stdin (affected --changes -),
+    # git's output again, as UTF-8 too.
+    sys.stdin.reconfigure(encoding="utf-8", errors="replace")
     for stream in (sys.stdout, sys.stderr):
         stream.reconfigure(encoding="utf-8", errors="backslashreplace")
     sys.exit(main())

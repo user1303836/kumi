@@ -5,6 +5,7 @@ import ast
 import contextlib
 import importlib.util
 import io
+import json
 import os
 from pathlib import Path
 import subprocess
@@ -347,15 +348,30 @@ class ThisCheckout(unittest.TestCase):
         self.assertEqual(done.returncode, 0, done.stderr.decode("utf-8", "replace"))
         self.assertTrue(done.stdout.decode("utf-8").startswith("docs/→.md: "), done.stdout)
 
-    def test_every_command_it_reads_as_text_is_read_as_utf8(self):
-        # text=True alone reads in the system's encoding: cp1252 on Windows, where git's UTF-8 fails to decode. CI runs
+    def test_what_it_reads_from_stdin_is_utf8_whatever_the_streams_encoding(self):
+        # cp1252 can't decode the kana's 0x81.
+        done = subprocess.run([sys.executable, str(ROOT / "scripts/dev.py"), "affected", "--changes", "-", "--json"],
+                              input="M\tdocs/かな.md\n".encode("utf-8"), capture_output=True,
+                              env={**os.environ, "PYTHONIOENCODING": "cp1252"})
+        self.assertEqual(done.returncode, 0, done.stderr.decode("utf-8", "replace"))
+        self.assertEqual(json.loads(done.stdout)["files"], 1)
+
+    def test_every_text_it_reads_or_writes_names_its_encoding(self):
+        # Without one, Python uses the system's encoding: cp1252 on Windows, where git's UTF-8 fails to decode. CI runs
         # these tests on Linux, whose UTF-8 hides that.
+        def text(call: ast.Call) -> bool:
+            name, named = ast.unparse(call.func), {keyword.arg for keyword in call.keywords}
+            if name == "subprocess.run":
+                return bool(named & {"text", "universal_newlines"})
+            if name == "open":
+                mode = call.args[1] if len(call.args) > 1 else next((k.value for k in call.keywords if k.arg == "mode"), None)
+                return not (isinstance(mode, ast.Constant) and "b" in mode.value)
+            return name.endswith((".read_text", ".write_text"))
+
         tree = ast.parse((ROOT / "scripts/dev.py").read_text(encoding="utf-8"))
-        unread = sorted(call.lineno for call in ast.walk(tree) if isinstance(call, ast.Call)
-                        and ast.unparse(call.func) == "subprocess.run"
-                        and {keyword.arg for keyword in call.keywords} & {"text", "universal_newlines"}
-                        and "encoding" not in {keyword.arg for keyword in call.keywords})
-        self.assertEqual(unread, [], 'subprocess.run on these lines reads text without encoding="utf-8", errors="replace"')
+        unnamed = sorted(call.lineno for call in ast.walk(tree) if isinstance(call, ast.Call) and text(call)
+                         and "encoding" not in {keyword.arg for keyword in call.keywords})
+        self.assertEqual(unnamed, [], 'these lines read or write text without encoding="utf-8"')
 
 
 class Moves(unittest.TestCase):
