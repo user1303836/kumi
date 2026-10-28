@@ -434,6 +434,9 @@ Ok(success_text(&response_id, &project(page_audited_semantic_project_diff(&diff,
             if t["state"] == "applied" && t["applyKey"] == params["idempotencyKey"] {
                 return success_text(id, &json!({"transactionId":t["id"],"state":"applied","backup":t["created"],"idempotent":true}));
             }
+            if t["state"] == "applying" {
+                return transaction_error(id, "Project backup apply is already in progress");
+            }
             if t["state"] != "previewed" {
                 return transaction_error(id, "Transaction is no longer applicable");
             }
@@ -441,6 +444,9 @@ Ok(success_text(&response_id, &project(page_audited_semantic_project_diff(&diff,
         if signal.is_some_and(Signal::is_cancelled) {
             return Value::Null;
         }
+        // Marked before the first await: a second apply of this transaction coming in while this one reads and copies the
+        // Set is refused, rather than writing a backup of its own that the record would then name in place of this one's.
+        transaction.borrow_mut()["state"] = json!("applying");
         let result: Result<Value, LiveError> = async {
             let snapshot = self.views.view(None, LiveViewScope::Indices(vec![]), Some(&[LiveSnapshotPart::Set])).await?;
             let t = transaction.borrow().clone();
@@ -469,7 +475,15 @@ Ok(success_text(&response_id, &project(page_audited_semantic_project_diff(&diff,
             Ok(success_text(id, &json!({"transactionId":t["id"],"state":"applied","backup":result.backup,"manifest":result.manifest,"verified":result.verified,"idempotent":false})))
         }.await;
         match result {
-            Ok(value) => value,
+            Ok(value) => {
+                // A fence refused it before anything was written (the path or the content changed): the transaction can
+                // be applied again, as before the apply.
+                let mut t = transaction.borrow_mut();
+                if t["state"] == "applying" {
+                    t["state"] = json!("previewed");
+                }
+                value
+            }
             Err(cause) => {
                 transaction.borrow_mut()["state"] = json!("uncertain");
                 adapter_tool_error(id, &cause, "Project backup is uncertain; verify the backup file before relying on it.")
