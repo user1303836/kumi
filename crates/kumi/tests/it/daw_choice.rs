@@ -178,7 +178,7 @@ fn every_daw_is_asked_whether_it_runs_from_one_process_listing() {
     }
     let env = env();
     let chosen = kumi::daw::chosen_with(None, &env, &|provider| provider.running_now(&kumi::daw::processes())).0.id();
-    kumi::daw::also_running(chosen, &env, &|provider| provider.running_now(&kumi::daw::processes()));
+    kumi::daw::also_running(chosen, &|provider| provider.running_now(&kumi::daw::processes()));
     for provider in kumi::daw::providers() {
         provider.running_now(&kumi::daw::processes());
     }
@@ -200,7 +200,7 @@ fn without_a_bridge_the_daw_here_is_the_one_a_first_run_sets_up() {
     };
     let asked = |here: &[DawId], env: &Env| {
         let here = here.to_vec();
-        kumi::daw::to_ask(env, &move |provider| here.contains(&provider.id()))
+        kumi::daw::to_ask(env, &move |provider| here.contains(&provider.id()), &not_running)
     };
     assert_eq!(first(&[DawId::Reaper], &env), DawId::Reaper, "REAPER alone");
     assert_eq!(first(&[DawId::Renoise], &env), DawId::Renoise, "Renoise alone");
@@ -210,10 +210,146 @@ fn without_a_bridge_the_daw_here_is_the_one_a_first_run_sets_up() {
     assert_eq!(first(&[DawId::Ableton, DawId::Reaper], &env), DawId::Ableton);
     assert_eq!(asked(&[DawId::Ableton, DawId::Reaper], &env), [DawId::Ableton, DawId::Reaper]);
     assert_eq!(first(&[DawId::Reaper, DawId::Renoise], &env), DawId::Reaper);
+    // One open is the answer: nothing to ask.
+    assert!(kumi::daw::to_ask(&env, &|_| true, &|provider| provider.id() == DawId::Renoise).is_empty(), "Renoise open");
     // Chosen once (setup remembers it): that one, and nothing asked again.
     kumi::daw::remember_used(DawId::Renoise, &env);
     assert_eq!(first(&[DawId::Ableton, DawId::Renoise], &env), DawId::Renoise);
     assert!(asked(&[DawId::Ableton, DawId::Renoise], &env).is_empty());
     // Asked for, it's that one whatever is here.
     assert_eq!(kumi::daw::chosen_among(Some(DawId::Ableton), &env, &not_running, &|_| true).0.id(), DawId::Ableton);
+}
+
+/// A home where Kumi's bridge is in Live (its reference and configuration, as `kumi bridge` leaves them) and Renoise has
+/// run (its preferences folder), with no tool of Kumi's in it yet.
+fn live_and_renoise_home() -> (tempfile::TempDir, Env) {
+    let dir = tempfile::tempdir().unwrap();
+    let scripts = dir.path().join("Remote Scripts");
+    std::fs::create_dir_all(scripts.join("AbletonMcpBridge")).unwrap();
+    let config = dir.path().join("bridge-config.json");
+    std::fs::write(&config, "{}").unwrap();
+    std::fs::write(scripts.join("AbletonMcpBridge/bridge-reference.json"), serde_json::json!({ "config": config }).to_string()).unwrap();
+    let prefs = dir.path().join("Renoise");
+    std::fs::create_dir_all(prefs.join("V3.5.4/Scripts/Tools")).unwrap();
+    let path = |path: std::path::PathBuf| path.to_string_lossy().into_owned();
+    let env = Env::from([
+        ("HOME".into(), path(dir.path().to_path_buf())),
+        ("KUMI_HOME".into(), path(dir.path().join(".kumi"))),
+        ("KUMI_SETTINGS_FILE".into(), path(dir.path().join("settings.json"))),
+        ("KUMI_REMOTE_SCRIPTS_DIR".into(), path(scripts)),
+        ("KUMI_RENOISE_PREFS_DIR".into(), path(prefs)),
+    ]);
+    (dir, env)
+}
+
+fn open(ids: &'static [kumi_types::daw::DawId]) -> impl Fn(&dyn kumi_daw::provider::DawProvider) -> bool {
+    move |provider| ids.contains(&provider.id())
+}
+
+/// The DAW open is the one Kumi works with, its bridge in or not: a producer with Kumi in Live who opens Renoise gets
+/// Renoise (first-run setup puts Kumi's tool in), and Live again once nothing else is open.
+#[test]
+fn the_daw_open_is_the_one_kumi_works_with() {
+    use kumi::daw::chosen_with;
+    use kumi_types::daw::DawId;
+    let (_dir, env) = live_and_renoise_home();
+    let chosen = |ids: &'static [DawId]| {
+        let (provider, config) = chosen_with(None, &env, &open(ids));
+        (provider.id(), config.is_some())
+    };
+    assert_eq!(chosen(&[DawId::Renoise]), (DawId::Renoise, false), "Renoise open: Renoise, without its tool yet");
+    assert_eq!(chosen(&[DawId::Reaper]), (DawId::Reaper, false), "REAPER open: REAPER");
+    assert_eq!(chosen(&[]), (DawId::Ableton, true), "none open: Live, whose bridge is in");
+    assert_eq!(chosen(&[DawId::Ableton]), (DawId::Ableton, true));
+    assert_eq!(chosen(&[DawId::Ableton, DawId::Renoise]), (DawId::Ableton, true), "both open: the one Kumi is in");
+    assert_eq!(chosen_with(Some(DawId::Ableton), &env, &open(&[DawId::Renoise])).0.id(), DawId::Ableton, "asked for, always");
+    // Which others are open, for the session to say.
+    let others = kumi::daw::also_running(DawId::Ableton, &open(&[DawId::Ableton, DawId::Renoise]));
+    assert_eq!(others.iter().map(|provider| provider.id()).collect::<Vec<_>>(), [DawId::Renoise], "with its tool in or not");
+}
+
+/// `kumi` alone, as a producer runs it, with Renoise open: Kumi works with Renoise, and setup puts its tool in. With
+/// nothing open it's Live, whose bridge is in, as always.
+#[test]
+fn kumi_alone_works_with_the_daw_open() {
+    let (_dir, mut env) = live_and_renoise_home();
+    env.insert("KUMI_PROCESSES".into(), "7 /Applications/Renoise.app/Contents/MacOS/Renoise".into());
+    let config = serde_json::to_value(load_config(&[], &env).unwrap()).unwrap();
+    assert_eq!(
+        (config["mode"].as_str(), config["daw"].as_str(), config["bridgeMissing"].as_bool()),
+        (Some("inference-only"), Some("renoise"), Some(true)),
+        "{config}"
+    );
+    env.insert("KUMI_PROCESSES".into(), "none".into());
+    let config = serde_json::to_value(load_config(&[], &env).unwrap()).unwrap();
+    assert_eq!((config["mode"].as_str(), config.get("daw")), (Some("live"), None), "{config}");
+}
+
+/// Kumi follows the producer to the DAW they open while it isn't connected: the one open instead of its own, or one
+/// whose bridge is in while its own has none. It's chosen as a start chooses, so Kumi opened again starts with it, and
+/// never follows back and forth.
+#[test]
+fn kumi_follows_to_the_daw_opened_as_a_start_would_choose_it() {
+    use kumi::daw::{chosen_with, to_follow};
+    use kumi_types::daw::DawId;
+    let (_dir, env) = live_and_renoise_home();
+    let all = [DawId::Ableton, DawId::Reaper, DawId::Renoise];
+    for mask in 0..8u8 {
+        let running: Vec<DawId> = all.iter().enumerate().filter(|(at, _)| mask & (1 << at) != 0).map(|(_, id)| *id).collect();
+        let open = |provider: &dyn kumi_daw::provider::DawProvider| running.contains(&provider.id());
+        for current in all {
+            if let Some(next) = to_follow(current, &env, &open) {
+                assert_ne!(next.id(), current, "{running:?}");
+                assert_eq!(chosen_with(None, &env, &open).0.id(), next.id(), "from {current:?} with {running:?} open");
+            }
+        }
+    }
+    let follows = |current: DawId, ids: &'static [DawId]| to_follow(current, &env, &open(ids)).map(|provider| provider.id());
+    assert_eq!(follows(DawId::Ableton, &[DawId::Renoise]), Some(DawId::Renoise), "Renoise opened, Live not");
+    assert_eq!(follows(DawId::Ableton, &[]), None, "nothing open");
+    assert_eq!(follows(DawId::Ableton, &[DawId::Ableton, DawId::Renoise]), None, "Live open: Kumi waits for it to answer");
+    assert_eq!(
+        follows(DawId::Renoise, &[DawId::Renoise, DawId::Ableton]),
+        Some(DawId::Ableton),
+        "Renoise without the tool, Live with the bridge"
+    );
+    assert_eq!(follows(DawId::Renoise, &[DawId::Renoise]), None, "Renoise alone: setup puts its tool in");
+    assert_eq!(follows(DawId::Reaper, &[DawId::Renoise]), Some(DawId::Renoise));
+}
+
+/// Kumi's bridge in REAPER or Renoise, as its receipt says.
+fn own_bridge_in(env: &Env, daw: daw_bridge::Daw) {
+    let paths = daw_bridge::paths::BridgePaths::new(std::path::Path::new(&env["KUMI_HOME"]), daw);
+    std::fs::create_dir_all(&paths.root).unwrap();
+    let receipt = daw_bridge::lifecycle::Receipt {
+        schema: daw_bridge::lifecycle::RECEIPT_SCHEMA.into(),
+        daw: daw.id().into(),
+        status: "installed".into(),
+        target: paths.root.join("bridge").to_string_lossy().into_owned(),
+        reference: paths.root.join("bridge-reference.json").to_string_lossy().into_owned(),
+        generation: Some("g1".into()),
+        version: Some("1.0.0".into()),
+        sha256: None,
+        previous: vec![],
+        copies: vec![],
+        updated_ms: 0,
+        history: vec![],
+    };
+    std::fs::write(paths.receipt(), serde_json::to_string(&receipt).unwrap()).unwrap();
+}
+
+/// With no DAW open, a producer who works with Kumi in several DAWs hears which to open, not how to make one answer;
+/// with Kumi in one, its own words say it (another DAW only being installed changes nothing).
+#[test]
+fn with_no_daw_open_kumi_says_to_open_one_of_theirs() {
+    use kumi::daw::open_one_words;
+    let (_dir, env) = live_and_renoise_home();
+    assert_eq!(open_one_words(&env), None, "Kumi in Live alone, Renoise here");
+    own_bridge_in(&env, daw_bridge::Daw::Renoise);
+    assert_eq!(open_one_words(&env).as_deref(), Some("No DAW is open yet: open Live or Renoise, and Kumi connects to the one you open."));
+    own_bridge_in(&env, daw_bridge::Daw::Reaper);
+    assert_eq!(
+        open_one_words(&env).as_deref(),
+        Some("No DAW is open yet: open Live, REAPER or Renoise, and Kumi connects to the one you open.")
+    );
 }

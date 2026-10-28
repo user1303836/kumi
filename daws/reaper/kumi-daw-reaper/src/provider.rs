@@ -28,10 +28,10 @@ pub static PROVIDER: Own = Own {
     bridge_folder: "bridges/reaper",
     create: crate::create_reaper_integration,
     instructions: "REAPER isn't connected, so Kumi can't see your project: answer from what you know, and say so.",
-    not_found: "REAPER isn't installed (or not where Kumi looks: set KUMI_REAPER_RESOURCE_DIR to its resource folder)",
+    not_found: "REAPER isn't where Kumi looks (open it, and Kumi finds it; or set KUMI_REAPER_RESOURCE_DIR to its resource folder)",
     watch_words: WatchWords {
         starting: "REAPER is open; Kumi connects once its extension answers.",
-        unreachable: "Kumi couldn't reach REAPER, so this is chat without it. Open REAPER with Kumi's extension installed (kumi --daw reaper bridge); Kumi connects by itself once it answers.",
+        unreachable: "Kumi couldn't reach REAPER, so this is chat without it. Open REAPER, or restart it if it's open, so it loads Kumi's extension; Kumi connects by itself once it answers.",
         answered: "REAPER answered, so Kumi is connected to it now.",
     },
     removal_question: "take Kumi's extension out of REAPER too",
@@ -58,8 +58,12 @@ pub static PROVIDER: Own = Own {
     },
 };
 
-/// The REAPERs here, and the one Kumi's extension was put in (a portable one Kumi doesn't find by itself).
+/// The REAPERs here, the one Kumi's extension was put in (a portable one Kumi doesn't find by itself), and the ones
+/// running now, first: the one the producer has open is the one the extension goes in, wherever it is.
 fn reapers(own: &Own, env: &Env) -> Vec<detect::ReaperInstall> {
     let placed = own.receipt(env).map(|receipt| PathBuf::from(receipt.target));
-    detected(env, |found| detect::with_placed(found, detect::detect_reaper(found), placed.as_deref()))
+    detected(env, |found| {
+        let installs = detect::with_placed(found, detect::detect_reaper(found), placed.as_deref());
+        detect::with_running(found, installs, &detect::running_programs(Daw::Reaper, found))
+    })
 }

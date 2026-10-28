@@ -303,6 +303,46 @@ pub fn with_placed(env: &Env, mut installs: Vec<ReaperInstall>, placed: Option<&
     installs
 }
 
+/// `installs`, with the REAPERs running now first (`programs`: their executables, as [`programs`] reads them), so the
+/// one the producer has open is the one Kumi's extension goes in. One detection didn't find (a portable REAPER outside
+/// the folders Kumi looks in, on another drive say) is added: its resource folder is the `reaper.ini` beside it, else
+/// the default one. Not while `KUMI_REAPER_RESOURCE_DIR` names a folder: that one is the only one then.
+pub fn with_running(env: &Env, mut installs: Vec<ReaperInstall>, programs: &[PathBuf]) -> Vec<ReaperInstall> {
+    if env.var("KUMI_REAPER_RESOURCE_DIR").is_some() {
+        return installs;
+    }
+    let same = |left: &Path, right: &Path| {
+        left == right || std::fs::canonicalize(left).is_ok_and(|left| std::fs::canonicalize(right).is_ok_and(|right| left == right))
+    };
+    let mut running: Vec<ReaperInstall> = vec![];
+    for program in programs {
+        let app = app_of(env.os, program);
+        let portable = reaper_portable_dir(env.os, &app);
+        let resource = portable.clone().unwrap_or_else(|| reaper_default_resource(env));
+        let mine =
+            |install: &ReaperInstall| install.app.as_deref().is_some_and(|known| same(known, &app)) || same(&install.resource, &resource);
+        if running.iter().any(mine) {
+            continue;
+        }
+        let install = match installs.iter().position(mine) {
+            // Found by detection already: first now, with its app when detection had only the folder.
+            Some(at) => {
+                let found = installs.remove(at);
+                match found.app {
+                    Some(_) => found,
+                    None => reaper_described(env, Some(&app), found.resource, found.resource_from),
+                }
+            }
+            None => {
+                reaper_described(env, Some(&app), resource, if portable.is_some() { ResourceFrom::Portable } else { ResourceFrom::Default })
+            }
+        };
+        running.push(install);
+    }
+    running.extend(installs);
+    running
+}
+
 /// A Renoise version, from `V3.5.4` or `3.5.4`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub struct Version(pub u32, pub u32, pub u32);
@@ -481,8 +521,39 @@ pub fn renoise_config(prefs: &Path, tool_id: &str) -> Option<RenoiseConfig> {
     })
 }
 
-/// The pids of this DAW's running processes, from one `ps` (or `tasklist`); empty when it can't be read.
-pub fn running(daw: Daw) -> Vec<u32> {
+/// What stands in for the listing of this computer's processes when it's set: lines of "pid program", as `ps` writes
+/// them (other lines list nothing). The isolated test runner sets it to `none`, so no test sees a DAW running on the
+/// computer it runs on.
+pub const PROCESSES: &str = "KUMI_PROCESSES";
+
+/// This computer's processes (pid and program; macOS's `ps` names each program by its path), from one `ps`
+/// (`tasklist` on Windows), or what `KUMI_PROCESSES` says, in `var` or this process's environment; empty when the
+/// listing can't be read.
+pub fn list_processes(var: &dyn Fn(&str) -> Option<String>) -> Vec<(u32, String)> {
+    listed_as(stand_in(var).as_deref())
+}
+
+fn stand_in(var: &dyn Fn(&str) -> Option<String>) -> Option<String> {
+    var(PROCESSES).or_else(|| std::env::var(PROCESSES).ok())
+}
+
+/// The stand-in's processes, else this computer's.
+fn listed_as(stand_in: Option<&str>) -> Vec<(u32, String)> {
+    match stand_in {
+        Some(listing) => parse_processes(listing, false),
+        None => listing_now(),
+    }
+}
+
+/// This computer's processes, listed now: Windows' from a snapshot (tasklist, when one can't be taken).
+fn listing_now() -> Vec<(u32, String)> {
+    #[cfg(windows)]
+    {
+        let listed = snapshot();
+        if !listed.is_empty() {
+            return listed;
+        }
+    }
     let listing = if cfg!(windows) {
         std::process::Command::new("tasklist").args(["/FO", "CSV", "/NH"]).output()
     } else {
@@ -490,10 +561,151 @@ pub fn running(daw: Daw) -> Vec<u32> {
     };
     let Ok(output) = listing else { return vec![] };
     parse_processes(&String::from_utf8_lossy(&output.stdout), cfg!(windows))
-        .into_iter()
-        .filter(|(_, name)| process_is(daw, name))
-        .map(|(pid, _)| pid)
-        .collect()
+}
+
+/// Windows' processes by their image names, from a Toolhelp snapshot: a moment's work, where tasklist takes a good part
+/// of a second. Empty when it can't be taken.
+#[cfg(windows)]
+fn snapshot() -> Vec<(u32, String)> {
+    type Handle = *mut std::ffi::c_void;
+    /// PROCESSENTRY32W: Windows fills in every field; Kumi reads the pid and the name.
+    #[repr(C)]
+    #[allow(dead_code)]
+    struct Entry {
+        size: u32,
+        usage: u32,
+        pid: u32,
+        heap: usize,
+        module: u32,
+        threads: u32,
+        parent: u32,
+        priority: i32,
+        flags: u32,
+        exe: [u16; 260],
+    }
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn CreateToolhelp32Snapshot(flags: u32, pid: u32) -> Handle;
+        fn Process32FirstW(snapshot: Handle, entry: *mut Entry) -> i32;
+        fn Process32NextW(snapshot: Handle, entry: *mut Entry) -> i32;
+        fn CloseHandle(handle: Handle) -> i32;
+    }
+    const SNAPPROCESS: u32 = 0x2;
+    let mut listed = vec![];
+    // SAFETY: the snapshot is checked before use and closed once; `size` tells each call the entry's layout, and the name
+    // is read up to its end within the array.
+    unsafe {
+        let snapshot = CreateToolhelp32Snapshot(SNAPPROCESS, 0);
+        if snapshot.is_null() || snapshot as isize == -1 {
+            return listed;
+        }
+        let mut entry: Entry = std::mem::zeroed();
+        entry.size = std::mem::size_of::<Entry>() as u32;
+        let mut more = Process32FirstW(snapshot, &mut entry) != 0;
+        while more {
+            let end = entry.exe.iter().position(|unit| *unit == 0).unwrap_or(entry.exe.len());
+            listed.push((entry.pid, String::from_utf16_lossy(&entry.exe[..end])));
+            more = Process32NextW(snapshot, &mut entry) != 0;
+        }
+        CloseHandle(snapshot);
+    }
+    listed
+}
+
+/// How long one listing answers for every DAW: choosing the DAW a session works with, saying which others are open,
+/// and each look for a DAW the producer opened list the processes once.
+const LISTING: std::time::Duration = std::time::Duration::from_secs(2);
+
+type Listed = std::rc::Rc<Vec<(u32, String)>>;
+
+thread_local! {
+    static KEPT: std::cell::RefCell<Option<(std::time::Instant, Option<String>, Listed)>> = const { std::cell::RefCell::new(None) };
+    static LISTINGS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+/// [`list_processes`], made once and reused for a moment, so every DAW asked whether it runs reads the same listing.
+pub fn processes(var: &dyn Fn(&str) -> Option<String>) -> Listed {
+    let stand_in = stand_in(var);
+    let kept = KEPT.with(|kept| kept.borrow().clone()).filter(|(at, said, _)| *said == stand_in && at.elapsed() < LISTING);
+    if let Some((_, _, listed)) = kept {
+        return listed;
+    }
+    LISTINGS.with(|count| count.set(count.get() + 1));
+    let listed = std::rc::Rc::new(listed_as(stand_in.as_deref()));
+    KEPT.with(|kept| *kept.borrow_mut() = Some((std::time::Instant::now(), stand_in, listed.clone())));
+    listed
+}
+
+/// How many listings [`processes`] has made on this thread.
+pub fn listings() -> u64 {
+    LISTINGS.with(std::cell::Cell::get)
+}
+
+/// The pids of this DAW's running processes, from a listing made now; empty when it can't be read.
+pub fn running(daw: Daw) -> Vec<u32> {
+    list_processes(&|_| None).into_iter().filter(|(_, name)| process_is(daw, name)).map(|(pid, _)| pid).collect()
+}
+
+/// The programs of the DAW's processes in a listing, by their paths: as listed where the listing names a path (macOS's
+/// `ps`, a stand-in), else as the system names the process's own (Linux's `/proc`, Windows' image name). One the system
+/// won't say is left out.
+pub fn programs(daw: Daw, listing: &[(u32, String)]) -> Vec<PathBuf> {
+    let mut found: Vec<PathBuf> = vec![];
+    for (pid, name) in listing.iter().filter(|(_, name)| process_is(daw, name)) {
+        let path = if name.contains(['/', '\\']) { Some(PathBuf::from(name)) } else { program_of(*pid) };
+        if let Some(path) = path.filter(|path| !found.contains(path)) {
+            found.push(path);
+        }
+    }
+    found
+}
+
+/// The DAW's programs running now, from the listing kept a moment ([`processes`]).
+pub fn running_programs(daw: Daw, env: &Env) -> Vec<PathBuf> {
+    programs(daw, &processes(env.var))
+}
+
+#[cfg(target_os = "linux")]
+fn program_of(pid: u32) -> Option<PathBuf> {
+    std::fs::read_link(format!("/proc/{pid}/exe")).ok()
+}
+
+#[cfg(windows)]
+fn program_of(pid: u32) -> Option<PathBuf> {
+    use std::os::windows::ffi::OsStringExt;
+    type Handle = *mut std::ffi::c_void;
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn OpenProcess(access: u32, inherit: i32, pid: u32) -> Handle;
+        fn QueryFullProcessImageNameW(process: Handle, flags: u32, name: *mut u16, size: *mut u32) -> i32;
+        fn CloseHandle(handle: Handle) -> i32;
+    }
+    const PROCESS_QUERY_LIMITED_INFORMATION: u32 = 0x1000;
+    let mut name = vec![0u16; 32_768];
+    let mut size = name.len() as u32;
+    // SAFETY: the handle is checked before use and closed once; the buffer holds `size` UTF-16 units, which the call
+    // reduces to the length it wrote.
+    let read = unsafe {
+        let process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+        if process.is_null() {
+            return None;
+        }
+        let read = QueryFullProcessImageNameW(process, 0, name.as_mut_ptr(), &mut size);
+        CloseHandle(process);
+        read
+    };
+    (read != 0).then(|| PathBuf::from(std::ffi::OsString::from_wide(&name[..size as usize])))
+}
+
+#[cfg(not(any(target_os = "linux", windows)))]
+fn program_of(_pid: u32) -> Option<PathBuf> {
+    None
+}
+
+/// The app a program belongs to, as detection names apps: on macOS the `.app` it's inside, elsewhere the program.
+pub fn app_of(os: Os, program: &Path) -> PathBuf {
+    let bundle = (os == Os::Mac).then(|| program.ancestors().find(|dir| dir.extension().is_some_and(|ext| ext == "app"))).flatten();
+    bundle.unwrap_or(program).to_path_buf()
 }
 
 pub fn parse_processes(listing: &str, windows: bool) -> Vec<(u32, String)> {
@@ -684,6 +896,106 @@ mod tests {
         touch(&root.path().join("home/opt/REAPER/reaper.ini"), b"");
         let found = detect_reaper(&env(Os::Linux, root.path(), &none));
         assert_eq!(found.iter().map(|install| install.resource_from).collect::<Vec<_>>(), [ResourceFrom::Default, ResourceFrom::Portable]);
+    }
+
+    /// A REAPER the producer has open is the one Kumi's extension goes in, wherever it runs from: a portable one outside
+    /// the folders Kumi looks in is found by its program and the reaper.ini beside it, and comes first.
+    #[test]
+    fn the_reaper_running_comes_first_wherever_it_is() {
+        let root = tempfile::tempdir().unwrap();
+        let none = |_: &str| None;
+        let app = root.path().join("sys/Applications/REAPER.app");
+        touch(&app.join("Contents/MacOS/REAPER"), &mach_universal());
+        touch(&root.path().join("home/Library/Application Support/REAPER/reaper.ini"), b"[REAPER]\n");
+        // A portable REAPER on another drive, with its reaper.ini beside it: not found until it runs.
+        let lab = root.path().join("Volumes/Music/REAPER Lab");
+        touch(&lab.join("REAPER.app/Contents/Info.plist"), b"<key>CFBundleShortVersionString</key><string>7.82</string>");
+        touch(&lab.join("REAPER.app/Contents/MacOS/REAPER"), &mach_universal());
+        touch(&lab.join("reaper.ini"), b"[REAPER]\n");
+        let mac = env(Os::Mac, root.path(), &none);
+        let found = detect_reaper(&mac);
+        assert_eq!(found.len(), 1);
+        assert_eq!(with_running(&mac, found.clone(), &[]), found, "nothing running: as detection found them");
+
+        let listing = format!("  101 {}\n  202 /usr/sbin/cfprefsd\n", lab.join("REAPER.app/Contents/MacOS/REAPER").display());
+        let running = programs(Daw::Reaper, &parse_processes(&listing, false));
+        assert_eq!(running, [lab.join("REAPER.app/Contents/MacOS/REAPER")]);
+        let installs = with_running(&mac, found.clone(), &running);
+        assert_eq!(installs.len(), 2);
+        assert_eq!((installs[0].resource.clone(), installs[0].resource_from), (lab.clone(), ResourceFrom::Portable));
+        assert_eq!(installs[0].app.as_deref(), Some(lab.join("REAPER.app").as_path()));
+        assert_eq!(installs[0].version.as_deref(), Some("7.82"));
+        assert!(installs[0].opened);
+        assert_eq!(crate::install::reaper_install(&installs).unwrap().resource, lab, "the extension goes in the one open");
+
+        // The default REAPER running: the one detection found comes first, once, with its app.
+        let listing = format!("101 {}\n102 {}\n", app.join("Contents/MacOS/REAPER").display(), app.join("Contents/MacOS/REAPER").display());
+        let installs = with_running(&mac, detect_reaper(&mac), &programs(Daw::Reaper, &parse_processes(&listing, false)));
+        assert_eq!(installs, detect_reaper(&mac), "two of the same REAPER: one row");
+        // Running from elsewhere without a reaper.ini beside it, it uses the default resource folder: that row, with this app.
+        let elsewhere = root.path().join("home/Downloads/REAPER.app");
+        touch(&elsewhere.join("Contents/MacOS/REAPER"), &mach_universal());
+        let installs = with_running(&mac, vec![], &[elsewhere.join("Contents/MacOS/REAPER")]);
+        assert_eq!(
+            (installs[0].resource.clone(), installs[0].resource_from),
+            (root.path().join("home/Library/Application Support/REAPER"), ResourceFrom::Default)
+        );
+        assert_eq!(installs[0].app.as_deref(), Some(elsewhere.as_path()));
+
+        // KUMI_REAPER_RESOURCE_DIR names the only one.
+        let chosen = root.path().join("home/chosen").to_string_lossy().into_owned();
+        let vars = move |name: &str| (name == "KUMI_REAPER_RESOURCE_DIR").then(|| chosen.clone());
+        let named = env(Os::Mac, root.path(), &vars);
+        let found = detect_reaper(&named);
+        assert_eq!(with_running(&named, found.clone(), &running), found);
+    }
+
+    /// The programs of a DAW's processes, by path: macOS's `ps` names them so; the app is the `.app` around a Mac's.
+    #[test]
+    fn a_daws_programs_and_their_apps() {
+        let listing = parse_processes(
+            "  1 /sbin/launchd\n 61153 /Users/me/lab/REAPER.app/Contents/MacOS/REAPER\n 7 /Applications/Renoise.app/Contents/MacOS/Renoise\n",
+            false,
+        );
+        assert_eq!(programs(Daw::Reaper, &listing), [PathBuf::from("/Users/me/lab/REAPER.app/Contents/MacOS/REAPER")]);
+        assert_eq!(programs(Daw::Renoise, &listing), [PathBuf::from("/Applications/Renoise.app/Contents/MacOS/Renoise")]);
+        assert_eq!(app_of(Os::Mac, Path::new("/Users/me/lab/REAPER.app/Contents/MacOS/REAPER")), PathBuf::from("/Users/me/lab/REAPER.app"));
+        assert_eq!(app_of(Os::Linux, Path::new("/opt/REAPER/reaper")), PathBuf::from("/opt/REAPER/reaper"));
+        assert_eq!(app_of(Os::Windows, Path::new(r"D:\REAPER\reaper.exe")), PathBuf::from(r"D:\REAPER\reaper.exe"));
+        assert_eq!(app_of(Os::Mac, Path::new("/usr/local/bin/reaper")), PathBuf::from("/usr/local/bin/reaper"), "no app around it");
+    }
+
+    /// KUMI_PROCESSES stands in for the listing, in the environment given (else this process's): lines of "pid
+    /// program", anything else listing nothing. A listing is kept a moment, for that same stand-in only.
+    #[test]
+    fn a_stand_in_lists_the_processes_and_a_listing_is_kept_a_moment() {
+        let renoise = |name: &str| (name == PROCESSES).then(|| "7 /Applications/Renoise.app/Contents/MacOS/Renoise".to_string());
+        assert_eq!(list_processes(&renoise), [(7, "/Applications/Renoise.app/Contents/MacOS/Renoise".to_string())]);
+        let nothing = |name: &str| (name == PROCESSES).then(|| "none".to_string());
+        assert!(list_processes(&nothing).is_empty());
+        let before = listings();
+        assert_eq!(processes(&renoise).len(), 1);
+        assert_eq!(processes(&renoise).len(), 1);
+        assert_eq!(listings() - before, 1, "the same stand-in: one listing");
+        assert!(processes(&nothing).is_empty(), "another stand-in: listed again");
+        assert_eq!(listings() - before, 2);
+        assert_eq!(
+            running_programs(Daw::Renoise, &env(Os::Mac, Path::new("/"), &renoise)),
+            [PathBuf::from("/Applications/Renoise.app/Contents/MacOS/Renoise")]
+        );
+    }
+
+    /// This computer's listing has this test's own process in it, and where Kumi asks the system for a program's path
+    /// (Linux's /proc, Windows' image name) it names this test's.
+    #[test]
+    fn this_computers_listing_has_this_test_in_it() {
+        let pid = std::process::id();
+        let listed = listing_now();
+        assert!(listed.iter().any(|(listed, _)| *listed == pid), "{pid} in {listed:?}");
+        if cfg!(any(target_os = "linux", windows)) {
+            let canonical = |path: PathBuf| std::fs::canonicalize(&path).unwrap_or(path);
+            assert_eq!(program_of(pid).map(canonical), std::env::current_exe().ok().map(canonical));
+        }
     }
 
     #[test]

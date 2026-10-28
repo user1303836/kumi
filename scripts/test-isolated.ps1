@@ -1,6 +1,7 @@
 # Runs the tests in a home of their own (the Windows side of scripts/test-isolated.sh): HOME, USERPROFILE,
 # APPDATA, LOCALAPPDATA, XDG_CONFIG_HOME and KUMI_HOME point into a fresh temporary folder, so no test can
-# reach this machine's Live folders, Remote Scripts or ~/.kumi through a default it forgot to override.
+# reach this machine's Live folders, Remote Scripts or ~/.kumi through a default it forgot to override. KUMI_PROCESSES
+# stands in for the list of running programs, so no test sees a DAW open on this machine.
 # Cargo and rustup keep their own folders, named before the profile moves. The tests run on cargo-nextest, each in a
 # process of its own: a crate's tests are one binary, and some set the environment. The arguments are `cargo nextest
 # run`'s; KUMI_NEXTEST_LIST names a file for the tests the run selects (`cargo nextest list`'s JSON), written first, to
@@ -21,6 +22,7 @@ try {
   $env:XDG_CONFIG_HOME = Join-Path $home_ '.config'; $env:KUMI_HOME = Join-Path $home_ '.kumi'
   Remove-Item Env:KUMI_REMOTE_SCRIPTS_DIR -ErrorAction SilentlyContinue
   Remove-Item Env:KUMI_LIVE_EXTENSIONS_DIR -ErrorAction SilentlyContinue
+  $env:KUMI_PROCESSES = 'none'
   # A profile that names its test binaries (`binary(…)`, or a crate's `binary_id(<crate>::it)`, in its default-filter,
   # .config/nextest.toml) builds only those: nextest builds every binary it could run, whatever the filter, and runs the
   # ones the filter leaves.

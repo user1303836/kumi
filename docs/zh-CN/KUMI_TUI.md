@@ -53,14 +53,14 @@ Kumi 占据整个终端窗口，并在 Kumi 关闭、崩溃或被停止时把窗
 
 | 命令 | 作用 |
 | --- | --- |
-| `kumi` | 在 Live 当前打开的工程上打开 Kumi；第一次时登录，并把桥接装入 Live（Kumi 可以替你重启 Live） |
-| `kumi --daw reaper`、`kumi --daw renoise` | 在当前打开的 REAPER 工程或 Renoise 歌曲上打开 Kumi；第一次时登录，并装入 Kumi 的扩展或工具。`KUMI_DAW` 作用相同；`kumi --daw reaper doctor`（或 `report`）说的是那个 DAW |
+| `kumi` | 在你的 DAW（Live、REAPER 或 Renoise，在 Kumi 之前或之后打开都可以）当前打开的内容上打开 Kumi；第一次时登录，并把 Kumi 的桥接装入那个 DAW（Kumi 可以替你重启 Live）。Kumi 未连接时打开另一个 DAW，Kumi 会跟过去 |
+| `kumi --daw live`、`kumi --daw reaper`、`kumi --daw renoise` | 不论开着哪个 DAW，都只用那个 DAW；第一次时登录，并装入 Kumi 的桥接。`KUMI_DAW` 作用相同；`kumi --daw reaper doctor`（或 `report`）说的是那个 DAW |
 | `kumi --daw reaper bridge [--yes]`（或 `renoise`） | 把 Kumi 的扩展装入 REAPER，或把它的工具装入 Renoise，或把它们更新到最新；`--yes` 预先回答它的提问 |
 | `kumi -c`（或 `--continue`） | 接着你上次使用的对话继续，不论它属于哪个工程 |
 | `kumi -r [ID 或名称]`（或 `--resume`） | 按 ID（或其开头）或名称继续一段保存的对话；不加参数则从列表中选择。两者都可与 `--inference-only` 一起使用 |
 | `kumi export [ID 或名称 \| --last] [--md \| --html \| --json] [--full] [--raw] [-o 路径]` | 将保存的对话存为 Markdown（默认）、网页或供 Kumi 使用的文件；不写 ID 或加 `--last` 时为最近的对话。`--full` 加上每个步骤的输入和结果，`--raw` 保留密钥和路径 |
 | `kumi import <文件>` | 导入用 `kumi export --json` 保存的对话，之后可用 `kumi -r` 继续 |
-| `kumi --inference-only` | 不连接 Live，只聊天 |
+| `kumi --inference-only` | 不连接 DAW，只聊天 |
 | `kumi --bridge-config <absolute path>` | 使用你自己的桥接配置 |
 | `kumi login` | 登录：询问使用 ChatGPT 还是 API 密钥 |
 | `kumi login <provider>` | 登录 `openai-codex`（ChatGPT；没有浏览器时加 `--device`，通过 SSH 时默认如此；要用浏览器则加 `--browser`），或用 API 密钥登录 `anthropic`、`openai`、`opencode` 或 `opencode-go` |

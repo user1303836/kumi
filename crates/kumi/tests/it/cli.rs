@@ -144,15 +144,19 @@ case!(help_version_errors_and_checkout_commands, async {
     assert!(!f.output().contains("Node"));
     assert!(help(true).contains("kumi update --rollback"));
     assert!(!help(false).contains("update --rollback"));
-    // Help leads with kumi itself, which connects Live; kumi bridge is the way by hand.
+    // Help leads with kumi itself, which connects to the DAW the producer opens, whichever it is: no option to learn.
+    // kumi bridge is Live's way by hand, and --daw keeps Kumi to one DAW.
     let installed = help(true);
     let first: Vec<&str> = installed.lines().skip_while(|l| *l != "First run:").skip(1).take_while(|l| !l.is_empty()).collect();
     assert!(
-        first[0].starts_with("  kumi ")
-            && first[0].contains("Sign in and connect Live: it puts the bridge in Live and can restart Live for you."),
+        first[0].starts_with("  kumi ") && first[0].contains("Sign in, then open your DAW (Live, REAPER or Renoise), before or after Kumi"),
         "{installed}"
     );
     assert!(first.iter().any(|l| l.starts_with("  kumi bridge") && l.contains("Or, with Live closed:")), "{installed}");
+    assert!(
+        first.iter().any(|l| l.starts_with("  kumi --daw live|reaper|renoise ") && l.contains("Work with that DAW only")),
+        "{installed}"
+    );
     for asked in [&["-h"][..], &["help"], &["help", "bridge"], &["model", "--help"]] {
         f.out.0.borrow_mut().clear();
         assert_eq!(run(f.io(asked), unused_factory()).await, 0, "{asked:?}");

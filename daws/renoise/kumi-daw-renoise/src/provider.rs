@@ -24,10 +24,10 @@ pub static PROVIDER: Own = Own {
     bridge_folder: "bridges/renoise",
     create: crate::create_renoise_integration,
     instructions: "Renoise isn't connected, so Kumi can't see your song: answer from what you know, and say so.",
-    not_found: "Renoise isn't installed (or not where Kumi looks: set KUMI_RENOISE_PREFS_DIR to its preferences folder)",
+    not_found: "Renoise isn't where Kumi looks (open it once, so it makes its preferences folder; or set KUMI_RENOISE_PREFS_DIR to that folder)",
     watch_words: WatchWords {
         starting: "Renoise is open; Kumi connects once its tool answers.",
-        unreachable: "Kumi couldn't reach Renoise, so this is chat without it. Open Renoise with Kumi's tool installed (kumi --daw renoise bridge); Kumi connects by itself once it answers.",
+        unreachable: "Kumi couldn't reach Renoise, so this is chat without it. Open Renoise, or restart it if it's open, so it loads Kumi's tool; Kumi connects by itself once it answers.",
         answered: "Renoise answered, so Kumi is connected to it now.",
     },
     removal_question: "take Kumi's tool out of Renoise too",

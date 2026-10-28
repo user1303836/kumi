@@ -1136,3 +1136,37 @@ case!(whats_new_shows_once_as_kumi_starts_below_a_conversation_carried_on_and_ch
     h.has("Every release: https://github.com/user1303836/kumi/blob/main/CHANGELOG.md");
     h.close().await;
 });
+// Kumi follows the producer to a DAW they opened only once nothing would be lost: not while they're typing, or while an
+// answer is under way; then it says so and closes, handing over that DAW.
+case!(following_a_daw_the_producer_opened_waits_for_what_they_are_doing, async {
+    use kumi_types::daw::DawId;
+    use std::cell::RefCell;
+    let followed = Rc::new(RefCell::new(Vec::<DawId>::new()));
+    let into = followed.clone();
+    let h = Harness::with(120, 36, Rc::new(Control::default()), move |o| {
+        o.follow_daw = Some(Rc::new(move |daw| into.borrow_mut().push(daw)));
+    });
+    let done = h.app.run();
+    delay(5).await;
+    h.type_text("half a thought").await;
+    assert!(!h.app.follow_daw(DawId::Renoise), "typing: not yet");
+    h.type_text(&"\x7f".repeat("half a thought".len())).await;
+    h.emit(json!({"type":"state","state":"running"}));
+    assert!(!h.app.follow_daw(DawId::Renoise), "an answer under way: not yet");
+    h.emit(json!({"type":"state","state":"idle"}));
+    assert!(followed.borrow().is_empty());
+    assert!(h.app.follow_daw(DawId::Renoise));
+    assert_eq!(*followed.borrow(), [DawId::Renoise]);
+    assert_eq!(done.await, 0);
+    assert!(h.calls().contains(&"close".into()));
+    let said = h.output.text.borrow().clone();
+    assert!(said.contains("Renoise is open, so Kumi opens again with it.") && !said.contains("Kumi closed."), "{said}");
+});
+// Without a DAW to follow to (the producer asked for one), nothing follows.
+case!(a_daw_asked_for_is_never_followed_away_from, async {
+    let h = Harness::new(120, 36);
+    h.start().await;
+    assert!(!h.app.follow_daw(kumi_types::daw::DawId::Renoise));
+    assert!(!h.calls().contains(&"close".into()));
+    h.close().await;
+});

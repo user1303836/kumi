@@ -258,10 +258,10 @@ through its host (`daw-mcp-server`, installed beside Kumi), on your computer
 only: the bridge listens on 127.0.0.1 and answers only Kumi, with a secret kept
 in `~/.kumi`. There's no Control Surface to choose.
 
-**Setting up.** Run `kumi --daw reaper` or `kumi --daw renoise` (or set
-`KUMI_DAW` to `reaper` or `renoise`). Setup signs you in, then runs **Connect to
-REAPER** (or **Connect to Renoise**), on Linux too: Kumi puts its extension (or
-tool) in place and opens the DAW.
+**Setting up.** Run `kumi` and open REAPER or Renoise, before or after Kumi:
+Kumi works with the DAW that's open. The first time, setup signs you in, then
+runs **Connect to REAPER** (or **Connect to Renoise**), on Linux too: Kumi puts
+its extension (or tool) in place and opens the DAW.
 
 - **The DAW is open:** it loads Kumi's bridge only as it starts, and Kumi never
   quits it for you. Choose **I'll quit it** and quit it yourself (it asks to
@@ -278,21 +278,27 @@ tool) in place and opens the DAW.
 before writing into the DAW's folder (`--yes` answers beforehand), puts the
 bridge in or brings it up to date, and says to restart the DAW if it's open.
 
-**Which DAW.** After that, `kumi` alone works with the DAW whose bridge is in.
-With several, it takes the one running now, else the one you used last, else
-Live, and says when another is open too ("Renoise is open too: Kumi works with
-REAPER. /daw renoise switches to Renoise."). `/daw` says which DAW Kumi works
-with, and `/daw <name>` (`live`, `reaper` or `renoise`) closes Kumi and opens it
-again with that one. `--daw` and `KUMI_DAW` always decide.
+**Which DAW.** `kumi` works with the DAW that's open, its bridge in yet or not.
+With several open, it takes the one whose bridge is in, else the one you used
+last, else Live, and says when another is open too ("Renoise is open too: Kumi
+works with REAPER. /daw renoise switches to Renoise."). With none open, it takes
+the one whose bridge is in (with several, the one you used last) and says to
+open one of yours. Open another DAW while Kumi isn't connected to its own (or
+its own doesn't have Kumi's bridge yet), and Kumi follows: it says so, closes
+and opens again with that one, once you're not typing or waiting for an answer.
+`/daw` says which DAW Kumi works with, and `/daw <name>` (`live`, `reaper` or
+`renoise`) closes Kumi and opens it again with that one. `--daw` and `KUMI_DAW`
+always decide, and Kumi then stays with that DAW.
 
 **Where Kumi looks.**
 
 - **REAPER:** its resource folder (`~/Library/Application Support/REAPER` on a
   Mac, `%APPDATA%\REAPER` on Windows, `~/.config/REAPER` or `~/.reaper` on
   Linux), each portable REAPER in the usual app folders (a `reaper.ini` beside
-  the app), the one Kumi's extension went in, or only the folder
-  `KUMI_REAPER_RESOURCE_DIR` names. A portable REAPER elsewhere (on another
-  drive, say) needs `KUMI_REAPER_RESOURCE_DIR` the first time.
+  the app), any REAPER that's open, wherever it is, the one Kumi's extension
+  went in, or only the folder `KUMI_REAPER_RESOURCE_DIR` names. A portable
+  REAPER elsewhere (on another drive, say) is found while it's open; the
+  extension goes in the REAPER that's open.
 - **Renoise:** the newest preferences folder for 3.5 or later (such as
   `V3.5.4` in `~/Library/Preferences/Renoise`, `%APPDATA%\Renoise`, or
   `~/.config/Renoise` or `~/.renoise` on Linux), or the one

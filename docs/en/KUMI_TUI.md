@@ -142,14 +142,14 @@ Run these as `kumi <command>`; from a copy of the repository, as
 
 | Command | What it does |
 | --- | --- |
-| `kumi` | Open Kumi on the Set Live has open; the first time, sign in and put the bridge in Live (Kumi can restart Live for you) |
-| `kumi --daw reaper`, `kumi --daw renoise` | Open Kumi on the REAPER project or Renoise song that's open; the first time, sign in and put Kumi's extension or tool in. `KUMI_DAW` does the same; `kumi --daw reaper doctor` (or `report`) speaks of that DAW |
+| `kumi` | Open Kumi on what's open in your DAW (Live, REAPER or Renoise, opened before or after Kumi); the first time, sign in and put Kumi's bridge in that DAW (Kumi can restart Live for you). Open another DAW while Kumi isn't connected, and Kumi follows |
+| `kumi --daw live`, `kumi --daw reaper`, `kumi --daw renoise` | Work with that DAW only, whichever DAW is open; the first time, sign in and put Kumi's bridge in. `KUMI_DAW` does the same; `kumi --daw reaper doctor` (or `report`) speaks of that DAW |
 | `kumi --daw reaper bridge [--yes]` (or `renoise`) | Put Kumi's extension into REAPER, or its tool into Renoise, or bring it up to date; `--yes` answers its question beforehand |
-| `kumi -c` (or `--continue`) | Carry on the conversation you had last, in any Set |
+| `kumi -c` (or `--continue`) | Carry on the conversation you had last, in any project |
 | `kumi -r [id or name]` (or `--resume`) | Carry on a kept conversation by its id (or its start) or name; alone, choose one. Both work with `--inference-only` |
 | `kumi export [id or name \| --last] [--md \| --html \| --json] [--full] [--raw] [-o path]` | Save a kept conversation as Markdown (the default), a web page or a file for Kumi; without an id (or with `--last`), your latest. `--full` adds each step's input and result; `--raw` leaves keys and paths in |
 | `kumi import <file>` | Keep a conversation saved with `kumi export --json`, to carry on with `kumi -r` |
-| `kumi --inference-only` | Chat without Live |
+| `kumi --inference-only` | Chat without a DAW |
 | `kumi --bridge-config <absolute path>` | Use your own bridge configuration |
 | `kumi login` | Sign in: asks whether with ChatGPT or an API key |
 | `kumi login <provider>` | Sign in to `openai-codex` (ChatGPT; `--device` without a browser, the default over SSH; `--browser` for the browser), or `anthropic`, `openai`, `opencode` or `opencode-go` with an API key |
