@@ -11,7 +11,6 @@ use kumi_types::{
 };
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
-use std::time::{Duration, Instant};
 
 /// Each registered DAW's provider, in the DAW table's order: Live's first, then the DAWs whose bridges are Kumi's own.
 pub fn providers() -> impl Iterator<Item = &'static dyn DawProvider> + Clone {
@@ -25,12 +24,14 @@ pub fn provider(id: DawId) -> Option<&'static dyn DawProvider> {
 
 /// The DAW a session works with, and where Kumi's bridge for it says how to reach it:
 /// 1. the one asked for (with --daw or KUMI_DAW);
-/// 2. the only DAW whose bridge is installed (a producer who uses Live alone starts in Live, as always);
-/// 3. with several installed: the one running now, else the one used last, else Live, else the first;
-/// 4. with none installed, the DAW on this computer, for first-run setup to set up: the only one here, else the one
+/// 2. the DAW open now, whether or not its bridge is in yet (first-run setup puts it in): with several open, as
+///    [`open_among`] chooses;
+/// 3. with none open, the only DAW whose bridge is installed (a producer who uses Live alone starts in Live, as always);
+/// 4. with several installed: the one used last, else Live, else the first;
+/// 5. with none installed, the DAW on this computer, for first-run setup to set up: the only one here, else the one
 ///    the producer picked last, else Live, else the first (setup asks which, `to_ask`); with none here, Live's words.
 pub fn chosen(asked: Option<DawId>, env: &Env) -> (&'static dyn DawProvider, Option<String>) {
-    chosen_with(asked, env, &|provider| provider.running_now(&processes()))
+    chosen_with(asked, env, &|provider| provider.running_now(&processes_in(env)))
 }
 
 /// `chosen`, with whether each DAW runs now given (a test's answer, or one process listing each).
@@ -51,8 +52,11 @@ fn found_here(env: &Env, here: &dyn Fn(&dyn DawProvider) -> bool) -> Vec<&'stati
 }
 
 /// The DAWs a first run asks the producer to choose among ("Which DAW do you work in?"): with no bridge installed,
-/// several DAWs here, and none of them picked before.
-pub fn to_ask(env: &Env, here: &dyn Fn(&dyn DawProvider) -> bool) -> Vec<DawId> {
+/// several DAWs here, none of them picked before, and none open (the one open is the answer).
+pub fn to_ask(env: &Env, here: &dyn Fn(&dyn DawProvider) -> bool, running: &dyn Fn(&dyn DawProvider) -> bool) -> Vec<DawId> {
+    if providers().into_iter().any(running) {
+        return vec![];
+    }
     let found = found_here(env, here);
     let picked = last_used(env);
     if found.len() < 2 || found.iter().any(|provider| Some(provider.id()) == picked) {
@@ -69,6 +73,10 @@ pub fn chosen_among(
     here: &dyn Fn(&dyn DawProvider) -> bool,
 ) -> (&'static dyn DawProvider, Option<String>) {
     if let Some(provider) = asked.and_then(provider) {
+        return (provider, provider.bridge_config(env));
+    }
+    let open: Vec<&'static dyn DawProvider> = providers().into_iter().filter(|provider| running(*provider)).collect();
+    if let Some(provider) = open_among(&open, env) {
         return (provider, provider.bridge_config(env));
     }
     let installed: Vec<(&'static dyn DawProvider, String)> =
@@ -92,30 +100,75 @@ pub fn chosen_among(
         }
         [(provider, config)] => pick(*provider, config),
         several => {
-            let running: Vec<&(&'static dyn DawProvider, String)> = several.iter().filter(|(provider, _)| running(*provider)).collect();
-            let among = if running.is_empty() { several.iter().collect::<Vec<_>>() } else { running };
-            if let [(provider, config)] = among.as_slice() {
-                return pick(*provider, config);
-            }
             let last = last_used(env);
-            let found = among
+            let found = several
                 .iter()
                 .find(|(provider, _)| Some(provider.id()) == last)
-                .or_else(|| among.iter().find(|(provider, _)| provider.id() == DawId::Ableton))
-                .unwrap_or(&among[0]);
+                .or_else(|| several.iter().find(|(provider, _)| provider.id() == DawId::Ableton))
+                .unwrap_or(&several[0]);
             pick(found.0, &found.1)
         }
     }
 }
 
-/// The DAWs with a bridge in that run now beside `chosen`: a session that chose among them says so, and how to switch.
-pub fn also_running(chosen: DawId, env: &Env, running: &dyn Fn(&dyn DawProvider) -> bool) -> Vec<&'static dyn DawProvider> {
-    let installed: Vec<&'static dyn DawProvider> =
-        providers().into_iter().filter(|provider| provider.bridge_config(env).is_some()).collect();
-    if installed.len() < 2 {
-        return vec![];
+/// The other DAWs open beside `chosen`: a session that chose among them says so, and how to switch.
+pub fn also_running(chosen: DawId, running: &dyn Fn(&dyn DawProvider) -> bool) -> Vec<&'static dyn DawProvider> {
+    providers().into_iter().filter(|provider| provider.id() != chosen && running(*provider)).collect()
+}
+
+/// Among the DAWs open now, the one Kumi works with: the only one; else, of those whose bridge is in (all of them when
+/// none's is), the one used last, else Live, else the first.
+pub fn open_among(open: &[&'static dyn DawProvider], env: &Env) -> Option<&'static dyn DawProvider> {
+    match open {
+        [] => None,
+        [one] => Some(*one),
+        several => {
+            let bridged: Vec<&'static dyn DawProvider> =
+                several.iter().copied().filter(|provider| provider.bridge_config(env).is_some()).collect();
+            let among = if bridged.is_empty() { several.to_vec() } else { bridged };
+            let last = last_used(env);
+            among
+                .iter()
+                .find(|provider| Some(provider.id()) == last)
+                .or_else(|| among.iter().find(|provider| provider.id() == DawId::Ableton))
+                .or(among.first())
+                .copied()
+        }
     }
-    installed.into_iter().filter(|provider| provider.id() != chosen && running(*provider)).collect()
+}
+
+/// The DAW Kumi follows the producer to while its session isn't connected (none asked for): the one open instead of the
+/// session's own, when that one isn't running and another is, or has no bridge in while a DAW whose bridge is in runs.
+/// Chosen as a start chooses among the DAWs open ([`open_among`]), so Kumi, opened again, starts with it.
+pub fn to_follow(current: DawId, env: &Env, running: &dyn Fn(&dyn DawProvider) -> bool) -> Option<&'static dyn DawProvider> {
+    let open: Vec<&'static dyn DawProvider> = providers().into_iter().filter(|provider| running(*provider)).collect();
+    let follows = if open.iter().any(|provider| provider.id() == current) {
+        provider(current).is_some_and(|provider| provider.bridge_config(env).is_none())
+            && open.iter().any(|provider| provider.id() != current && provider.bridge_config(env).is_some())
+    } else {
+        !open.is_empty()
+    };
+    open_among(&open, env).filter(|provider| follows && provider.id() != current)
+}
+
+/// A test's stand-in for which DAWs run at each look of the session's watch for a DAW the producer opened, in place of
+/// listing this computer's processes.
+#[derive(Clone)]
+pub struct RunningDaws(pub Rc<dyn Fn() -> Vec<DawId>>);
+
+/// What Kumi says while no DAW is open and the producer works in several here: which to open, rather than how to make
+/// one answer. None with fewer than two (each DAW's own words say it).
+pub fn open_one_words(env: &Env, here: &dyn Fn(&dyn DawProvider) -> bool) -> Option<String> {
+    let names: Vec<&str> = providers()
+        .into_iter()
+        .filter(|provider| here(*provider) || provider.bridge_installed(env))
+        .map(|provider| provider.profile().words.app)
+        .collect();
+    let (last, rest) = names.split_last()?;
+    if rest.is_empty() {
+        return None;
+    }
+    Some(format!("No DAW is open yet: open {} or {last}, and Kumi connects to the one you open.", rest.join(", ")))
 }
 
 /// What a session says when it chose `chosen` while `others` run too.
@@ -131,41 +184,21 @@ pub fn also_running_words(chosen: DawId, others: &[&'static dyn DawProvider], en
     Some(format!("{open}: Kumi works with {chosen_name}{why}. {switch}."))
 }
 
-/// How long one process listing answers for every DAW: a start (choosing among several bridges, then saying which
-/// others are open) lists the processes once.
-const LISTING_MS: u64 = 2_000;
-
-thread_local! {
-    static LISTING: RefCell<Option<(Instant, Rc<Vec<(u32, String)>>)>> = const { RefCell::new(None) };
-    static LISTINGS: Cell<u64> = const { Cell::new(0) };
+/// The processes running now (pid and name), from one listing (`ps`, `tasklist` on Windows) that every DAW's
+/// `running_now` matches against; a listing is reused for a moment, then made again. KUMI_PROCESSES stands in for it
+/// (the isolated test runner sets it to `none`: no test sees a DAW running on the computer it runs on).
+pub fn processes() -> Rc<Vec<(u32, String)>> {
+    daw_bridge::detect::processes(&|name| std::env::var(name).ok())
 }
 
-/// The processes running now (pid and name), from one listing (`ps`, `tasklist` on Windows) that every DAW's
-/// `running_now` matches against; a listing is reused for a moment, then made again.
-pub fn processes() -> Rc<Vec<(u32, String)>> {
-    if let Some((at, listed)) = LISTING.with(|listing| listing.borrow().clone()) {
-        if at.elapsed() < Duration::from_millis(LISTING_MS) {
-            return listed;
-        }
-    }
-    let output = if cfg!(windows) {
-        std::process::Command::new("tasklist").args(["/FO", "CSV", "/NH"]).output()
-    } else {
-        std::process::Command::new("ps").args(["-axo", "pid=,comm="]).output()
-    };
-    LISTINGS.with(|count| count.set(count.get() + 1));
-    let listed = Rc::new(
-        output
-            .map(|output| daw_bridge::detect::parse_processes(&String::from_utf8_lossy(&output.stdout), cfg!(windows)))
-            .unwrap_or_default(),
-    );
-    LISTING.with(|listing| *listing.borrow_mut() = Some((Instant::now(), listed.clone())));
-    listed
+/// [`processes`], with KUMI_PROCESSES read from a session's environment first.
+pub fn processes_in(env: &Env) -> Rc<Vec<(u32, String)>> {
+    daw_bridge::detect::processes(&|name| env.get(name).cloned())
 }
 
 /// How many process listings this Kumi has made (`processes`).
 pub fn process_listings() -> u64 {
-    LISTINGS.with(Cell::get)
+    daw_bridge::detect::listings()
 }
 
 /// A DAW as `/daw` takes it: "live", "reaper", "renoise".

@@ -38,7 +38,7 @@ irm https://github.com/user1303836/kumi/releases/latest/download/install.ps1 | i
 
 Follow Kumi's guided setup.
 
-Next time, open a terminal and type `kumi`.
+Next time, open a terminal and type `kumi`, then open your DAW (Live, REAPER or Renoise, before or after Kumi): Kumi connects to the one that's open.
 
 > [!NOTE]
 > Kumi runs in a terminal window, but you don't need to know any commands. After the install line, it's a chat. Drag across text to select it, then press Ctrl-C to copy.

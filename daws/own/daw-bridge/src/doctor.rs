@@ -74,12 +74,14 @@ fn reaper_target(inputs: &Inputs, checks: &mut Vec<Check>) -> Option<(Target, Ve
         .and_then(|text| serde_json::from_str::<crate::lifecycle::Receipt>(&text).ok())
         .filter(|receipt| receipt.status == "installed")
         .map(|receipt| std::path::PathBuf::from(receipt.target));
-    let mut installs = detect::with_placed(&inputs.env, detect::detect_reaper(&inputs.env), receipt.as_deref());
+    let installs = detect::with_placed(&inputs.env, detect::detect_reaper(&inputs.env), receipt.as_deref());
+    // A REAPER running from anywhere (a portable one on another drive) counts too.
+    let mut installs = detect::with_running(&inputs.env, installs, &detect::running_programs(Daw::Reaper, &inputs.env));
     if installs.is_empty() {
         checks.push(check(
             "installed",
             Level::Note,
-            "REAPER isn't installed (or not where Kumi looks: set KUMI_REAPER_RESOURCE_DIR to its resource folder)",
+            "REAPER isn't where Kumi looks (open it, and Kumi finds it; or set KUMI_REAPER_RESOURCE_DIR to its resource folder)",
         ));
         return None;
     }
@@ -125,7 +127,7 @@ fn renoise_target(inputs: &Inputs, checks: &mut Vec<Check>) -> Option<(Target, V
         checks.push(check(
             "installed",
             Level::Note,
-            "Renoise isn't installed (or not where Kumi looks: set KUMI_RENOISE_PREFS_DIR to its preferences folder)",
+            "Renoise isn't where Kumi looks (open it once, so it makes its preferences folder; or set KUMI_RENOISE_PREFS_DIR to that folder)",
         ));
         return None;
     }

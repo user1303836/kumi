@@ -3,10 +3,10 @@ a key). An API key in ANTHROPIC_API_KEY, OPENAI_API_KEY or OPENCODE_API_KEY is u
 Models on this computer need no sign-in: Ollama and LM Studio are found while they run, and other
 OpenAI-compatible servers (llama.cpp, vLLM, Jan) can be named in ~/.kumi/settings.json as modelServers.
 KUMI_MODEL overrides the chosen model.
-Kumi reads the open Live Set and makes the changes you ask for; each change can be undone. It plays, records
-and bounces when you ask, listens to audio (a reference, a sample, a recording) and compares it, keeps short notes
-of what you tell it that Live can't show, and saves your ways of working as recipes to replay, including ones it
-learns by watching you.
+Kumi reads what's open in your DAW (a Live Set, a REAPER project, a Renoise song) and makes the changes you ask
+for; each change can be undone. It plays, records and bounces when you ask, listens to audio (a reference, a sample,
+a recording) and compares it, keeps short notes of what you tell it that the DAW can't show, and saves your ways of
+working as recipes to replay, including ones it learns by watching you.
 In a session: /help /status /model /effort /login /logout /memory /recipes /resume /rename /fork /export /share /voice /undo /refresh /reconnect /new /update /quit. Ctrl-C cancels work, or exits if idle.
 Ctrl-T talks instead of typing: what you say is written down on this computer (whisper.cpp) and lands in the input box.
 KUMI_TRACE=1 prints MCP dispatch names only.

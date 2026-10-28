@@ -96,8 +96,11 @@ pub struct TuiOptions {
     pub tabs: Vec<Rc<dyn Tab>>,
     pub panel_tab: Option<PanelTab>,
     pub updates: Option<UpdateControl>,
-    /// /daw <name>: Kumi closes and opens again with that DAW. None where the producer works with Live alone.
+    /// /daw <name>: Kumi closes and opens again with that DAW. None where Live is the only DAW here.
     pub switch_daw: Option<Rc<dyn Fn(kumi_types::daw::DawId)>>,
+    /// Kumi follows the producer to a DAW they opened ([`Terminal::follow_daw`]): it closes and opens again with it.
+    /// None where the producer asked for a DAW.
+    pub follow_daw: Option<Rc<dyn Fn(kumi_types::daw::DawId)>>,
     /// A first run on a computer with several DAWs and no bridge yet: the DAWs setup asks the producer to choose among,
     /// and what it does with the one chosen (remembers it, and Kumi opens again with it when it isn't this run's).
     pub ask_daw: Vec<kumi_types::daw::DawId>,
@@ -187,6 +190,7 @@ impl TuiOptions {
             panel_tab: None,
             updates: None,
             switch_daw: None,
+            follow_daw: None,
             ask_daw: vec![],
             pick_daw: None,
             voice: None,
@@ -1040,6 +1044,31 @@ impl Terminal for TuiApp {
     }
     fn close(&self) -> LocalBoxFuture<'static, i32> {
         self.finish(0, None)
+    }
+    fn follow_daw(&self, daw: kumi_types::daw::DawId) -> bool {
+        let Some(follow) = self.0.options.follow_daw.clone() else { return false };
+        // Nothing the producer is in the middle of: an answer, setup, a panel or question, the map, what they typed or
+        // attached, a background job.
+        let waiting = {
+            let state = self.0.state.borrow();
+            state.closing
+                || state.setup.is_some()
+                || state.panel.is_some()
+                || state.offer.is_some()
+                || state.set_ask.is_some()
+                || state.map.is_some()
+                || !state.editor.is_empty()
+                || !state.attachments.is_empty()
+                || state.jobs.values().any(|job| !job.state.ended())
+        };
+        if waiting || self.busy() {
+            return false;
+        }
+        // Said in place of the goodbye: Kumi opens again at once.
+        let app = crate::daw::provider(daw).map(|provider| provider.profile().words.app).unwrap_or_default();
+        follow(daw);
+        drop(self.finish(0, Some(format!("{app} is open, so Kumi opens again with it."))));
+        true
     }
 }
 impl Drop for Inner {

@@ -164,7 +164,7 @@ async fn the_doctor_says_nothing_of_a_daw_this_user_never_used() {
 }
 
 /// With several DAWs' bridges installed and none asked for: the one running now, else the one used last, else Live,
-/// else the first. A producer with Live's bridge alone starts in Live, whatever runs.
+/// else the first.
 #[tokio::test(flavor = "current_thread")]
 async fn among_several_bridges_the_running_daw_then_the_last_used_is_chosen() {
     use kumi::daw::{chosen_with, remember_used};
@@ -204,13 +204,13 @@ async fn among_several_bridges_the_running_daw_then_the_last_used_is_chosen() {
     assert_eq!(chosen_with(Some(DawId::Reaper), &env, &none).0.id(), DawId::Reaper, "asked for, always");
     // Both running and none asked for: the session says which one it works with, and how to switch.
     use kumi::daw::{also_running, also_running_words};
-    let others = also_running(DawId::Renoise, &env, &both);
+    let others = also_running(DawId::Renoise, &both);
     assert_eq!(others.iter().map(|provider| provider.id()).collect::<Vec<_>>(), vec![DawId::Reaper]);
     assert_eq!(
         also_running_words(DawId::Renoise, &others, &env).as_deref(),
         Some("REAPER is open too: Kumi works with Renoise, the one you used last. /daw reaper switches to REAPER.")
     );
-    assert!(also_running(DawId::Renoise, &env, &only(DawId::Renoise)).is_empty(), "alone: nothing to say");
+    assert!(also_running(DawId::Renoise, &only(DawId::Renoise)).is_empty(), "alone: nothing to say");
 }
 
 /// `/daw` says which DAW Kumi works with, and takes the DAW by the producer's name for it ("live") or Kumi's id.
@@ -240,7 +240,8 @@ fn daw_says_which_daw_kumi_works_with_and_switches_by_name() {
 }
 
 /// What `kumi --daw reaper|renoise bridge`, uninstall and update say for REAPER and Renoise: their own words, never
-/// Live's, and the command that sets up their bridge (`--daw`), not Live's.
+/// Live's, and where a command is said, the one that sets up their bridge (`--daw`), not Live's. Waiting for the DAW,
+/// Kumi says what to do in it, with no command to type.
 #[tokio::test(flavor = "current_thread")]
 async fn reapers_and_renoises_bridge_messages_never_speak_lives_words() {
     let (dir, mut env) = renoise_home();
@@ -268,7 +269,8 @@ async fn reapers_and_renoises_bridge_messages_never_speak_lives_words() {
         let leaks = live_words::leaks(&said);
         assert!(leaks.is_empty(), "{:?} says Live's words:\n{}\n\nin:\n{said}", provider.id(), leaks.join("\n"));
         let command = format!("kumi --daw {} bridge", provider.id().as_str());
-        assert!(state.notice.unwrap().contains(&command) && watch.unreachable.contains(&command), "{said}");
+        assert!(state.notice.unwrap().contains(&command), "{said}");
+        assert!(watch.unreachable.contains("restart it if it's open") && !watch.unreachable.contains("kumi "), "{said}");
     }
 }
 

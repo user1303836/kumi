@@ -430,6 +430,40 @@ case!(daw_in_a_reaper_session_offers_only_the_daws_on_this_computer, async {
     assert!(offered.contains("[daw] Kumi works with REAPER, the only DAW it works with on this computer."), "{offered}");
 });
 
+/// `kumi` alone, as a producer runs it: Kumi works with the DAW open (Renoise), and when the producer quits it and opens
+/// REAPER, Kumi follows: it says so, and opens again with no DAW asked for, so the start chooses REAPER, the one open.
+case!(kumi_alone_follows_the_producer_to_the_daw_they_open, async {
+    let script = RenoiseScript::new();
+    let lab = AppLab::new(DawId::Renoise, Daw::Renoise, move |secret| script.config(secret, "/lab/Renoise")).await;
+    let running: Rc<RefCell<Vec<DawId>>> = Rc::new(RefCell::new(vec![DawId::Renoise]));
+    let reopened: Rc<RefCell<Option<Vec<String>>>> = Rc::default();
+    let input = Rc::new(Input::default());
+    let out = Rc::new(Output::default());
+    let mut env = lab.env.clone();
+    env.insert("KUMI_UI".into(), "plain".into());
+    // Renoise runs as Kumi starts.
+    env.insert("KUMI_PROCESSES".into(), "202 /Applications/Renoise.app/Contents/MacOS/Renoise".into());
+    let mut io = CliIo::new(input.clone(), out.clone(), Rc::new(Output::default()), env);
+    let into = reopened.clone();
+    io.reopen = Some(Rc::new(move |args| {
+        *into.borrow_mut() = Some(args);
+        async { 7 }.boxed_local()
+    }));
+    let looks = running.clone();
+    let answers = lab.factory.clone().with(kumi::daw::RunningDaws(Rc::new(move || looks.borrow().clone())));
+    let task = tokio::task::spawn_local(run(io, answers));
+    wait_for("the first look", &out, |text| text.lines().any(|l| l.starts_with("[observation] "))).await;
+    assert!(out.0.borrow().contains("MCP/Renoise"), "Kumi works with Renoise, the DAW open: {}", out.0.borrow());
+    // The producer quits Renoise, and opens REAPER.
+    lab.simulator.stop();
+    *running.borrow_mut() = vec![];
+    wait_for("Renoise gone", &out, |text| text.contains(": disconnected")).await;
+    *running.borrow_mut() = vec![DawId::Reaper];
+    assert_eq!(tokio::time::timeout(std::time::Duration::from_secs(20), task).await.unwrap().unwrap(), 7, "{}", out.0.borrow());
+    assert!(out.0.borrow().contains("[daw] REAPER is open, so Kumi opens again with it."), "{}", out.0.borrow());
+    assert_eq!(reopened.borrow().clone(), Some(vec![]), "opened again with no DAW asked for: it goes on following");
+});
+
 case!(renoise_started_again_on_the_same_song_keeps_its_conversation_and_says_only_that_it_is_back, async {
     let script = RenoiseScript::new();
     let first = script.clone();

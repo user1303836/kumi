@@ -2,7 +2,8 @@
 # Runs the tests in a home of their own: HOME, USERPROFILE, APPDATA, LOCALAPPDATA, XDG_CONFIG_HOME and
 # KUMI_HOME point into a fresh temporary folder, so no test can reach this machine's Live folders,
 # Remote Scripts or ~/.kumi through a default it forgot to override (home_dir(), kumi_dir() and the like).
-# Live's folders set in this shell (KUMI_REMOTE_SCRIPTS_DIR, KUMI_LIVE_EXTENSIONS_DIR) aren't passed on.
+# Live's folders set in this shell (KUMI_REMOTE_SCRIPTS_DIR, KUMI_LIVE_EXTENSIONS_DIR) aren't passed on, and
+# KUMI_PROCESSES stands in for the list of running programs, so no test sees a DAW open on this machine.
 # Cargo and rustup keep their own folders, named before HOME moves. The tests run on cargo-nextest, each in a process of
 # its own: a crate's tests are one binary, and some set the environment. The arguments are `cargo nextest run`'s;
 # KUMI_NEXTEST_LIST names a file for the tests the run selects (`cargo nextest list`'s JSON), written first, to compare
@@ -15,6 +16,7 @@ test_home="$(mktemp -d "${TMPDIR:-/tmp}/kumi-test-home-XXXXXX")"
 trap 'rm -rf "$test_home"' EXIT INT TERM
 export HOME="$test_home" USERPROFILE="$test_home" APPDATA="$test_home/AppData/Roaming" LOCALAPPDATA="$test_home/AppData/Local" XDG_CONFIG_HOME="$test_home/.config" KUMI_HOME="$test_home/.kumi"
 unset KUMI_REMOTE_SCRIPTS_DIR KUMI_LIVE_EXTENSIONS_DIR
+export KUMI_PROCESSES=none
 if [ "${KUMI_NEXTEST:-1}" != 0 ]; then
   if ! cargo nextest --version > /dev/null 2>&1; then
     echo "test-isolated.sh: the tests run on cargo-nextest: cargo install cargo-nextest --locked (KUMI_NEXTEST=0: cargo test)" >&2

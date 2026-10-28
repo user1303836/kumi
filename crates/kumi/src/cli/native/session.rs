@@ -59,6 +59,45 @@ struct Pace {
 }
 const PACE: Pace = Pace { look_ms: 2_000, retry_ms: 20_000, tries: 10, looks: 1_800, hold_ms: 15_000 };
 
+/// What the watch says while the DAW isn't open and the producer works in several DAWs here (which to open), and
+/// whether this one is open now, from the listing kept a moment.
+struct Absent {
+    words: Rc<str>,
+    opened: Rc<dyn Fn() -> bool>,
+}
+
+/// How often Kumi looks for a DAW the producer opened while its session isn't connected.
+const FOLLOW_MS: u64 = 2_000;
+
+/// Following the producer to the DAW they open: while the session isn't connected, each look (`look`) says which DAW is
+/// open instead of the session's ([`crate::daw::to_follow`]), and the screen is handed it: it closes Kumi, to open again
+/// with that DAW, once nothing would be lost, and until then the next look hands it again. Ends once handed over, or
+/// when the session or the screen has gone.
+async fn follow_the_daw<L, F>(
+    look: L,
+    controller: Rc<RefCell<Option<Weak<dyn SessionController>>>>,
+    terminal: Rc<RefCell<Option<Weak<dyn Terminal>>>>,
+    look_ms: u64,
+) where
+    L: Fn() -> F,
+    F: std::future::Future<Output = Option<kumi_types::daw::DawId>>,
+{
+    loop {
+        tokio::time::sleep(std::time::Duration::from_millis(look_ms)).await;
+        let Some(session) = controller.borrow().as_ref().and_then(Weak::upgrade) else { break };
+        let connected = session.status().connection == ConnectionState::Connected;
+        drop(session);
+        if connected {
+            continue;
+        }
+        let Some(daw) = look().await else { continue };
+        let Some(ui) = terminal.borrow().as_ref().and_then(Weak::upgrade) else { break };
+        if ui.follow_daw(daw) {
+            break;
+        }
+    }
+}
+
 /// Live answers once it's open with AbletonMcpBridge chosen as a Control Surface: then the session
 /// reconnects by itself. Live can accept connections before it's ready (a dialog open, a Set still
 /// loading), so a failed reconnect is tried again while it answers. Watching ends once connected,
@@ -67,10 +106,15 @@ const PACE: Pace = Pace { look_ms: 2_000, retry_ms: 20_000, tries: 10, looks: 1_
 /// A Live that isn't open is told at once. One that's open is most likely still starting (first-run
 /// setup has just opened it, say), so Kumi says it's waiting for it, and how to make it answer only if
 /// it hasn't connected within `hold_ms` (AbletonMcpBridge not chosen as a Control Surface, say).
+///
+/// With `absent` (the producer works in several DAWs here), a DAW that isn't open gets those words instead, which say
+/// to open one of them: Kumi follows the producer to the one they open. This one opening later is said as it starts,
+/// and the hold runs from then.
 async fn connect_when_daw_answers<F, A, O, B>(
     answers: F,
     live_open: O,
     words: WatchWords,
+    absent: Option<Absent>,
     controller: Rc<RefCell<Option<Weak<dyn SessionController>>>>,
     emit: Rc<dyn Fn(SessionEvent)>,
     watching: Rc<Cell<bool>>,
@@ -82,13 +126,21 @@ async fn connect_when_daw_answers<F, A, O, B>(
     O: FnOnce() -> B,
     B: std::future::Future<Output = bool>,
 {
-    let began = std::time::Instant::now();
+    let mut began = Some(std::time::Instant::now());
     let open = live_open().await;
+    let absent = absent.filter(|_| !told && !open);
     // Told what to do already (restart Live, when it runs another version of the bridge): nothing more to say until
     // it connects.
-    let mut said = told || !open;
+    let mut said = told || (!open && absent.is_none());
     if !told {
-        emit(SessionEvent::Notice { message: if said { words.unreachable } else { words.starting }.into() });
+        let message = match &absent {
+            Some(absent) => {
+                began = None;
+                absent.words.to_string()
+            }
+            None => if said { words.unreachable } else { words.starting }.into(),
+        };
+        emit(SessionEvent::Notice { message });
     }
     let mut tries = 0;
     let mut next: Option<std::time::Instant> = Some(std::time::Instant::now());
@@ -97,7 +149,11 @@ async fn connect_when_daw_answers<F, A, O, B>(
         if session.status().connection == ConnectionState::Connected {
             break;
         }
-        if !said && began.elapsed() >= std::time::Duration::from_millis(pace.hold_ms) {
+        if began.is_none() && absent.as_ref().is_some_and(|absent| (absent.opened)()) {
+            began = Some(std::time::Instant::now());
+            emit(SessionEvent::Notice { message: words.starting.into() });
+        }
+        if !said && began.is_some_and(|at| at.elapsed() >= std::time::Duration::from_millis(pace.hold_ms)) {
             said = true;
             emit(SessionEvent::Notice { message: words.unreachable.into() });
         }
@@ -138,7 +194,7 @@ async fn connect_when_live_answers<F, A, O, B>(
     B: std::future::Future<Output = bool>,
 {
     let words = live_words();
-    connect_when_daw_answers(answers, live_open, words, controller, emit, watching, told, pace).await
+    connect_when_daw_answers(answers, live_open, words, None, controller, emit, watching, told, pace).await
 }
 /// Live's words for its watch, as the DAW table has them.
 #[cfg(test)]
@@ -379,6 +435,16 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
     let restore_file = load_restore_file(&io.env)?;
     let env = io.env.clone();
     let trace = io.env.get("KUMI_TRACE").is_some_and(|s| s == "1");
+    // A DAW asked for (--daw, KUMI_DAW, a bridge configuration given) is the one Kumi works with. Otherwise Kumi follows
+    // the producer to the DAW they open, and while none is open it says to open one of theirs, not how to make this one
+    // answer, when they work in several.
+    let asked = crate::config::take_daw(&io.args, &io.env).ok().and_then(|(_, asked)| asked);
+    let given = io.args.first().is_some_and(|arg| arg == "--bridge-config");
+    let follows = asked.is_none() && !given && (bridge_config.is_some() || bridge_missing);
+    let absent_words: Option<Rc<str>> =
+        follows.then(|| crate::daw::open_one_words(&io.env, &|other| other.here(&io.env))).flatten().map(Rc::from);
+    // A test's answer for which DAWs run at each look for one the producer opened.
+    let running_stand_in = answers.get::<crate::daw::RunningDaws>().cloned();
     // Watching for Live to answer, so a chat without Live connects by itself once it does.
     let watching_live = Rc::new(Cell::new(false));
     // Whether the producer was told to restart Live (it runs another version of the bridge): said once a session.
@@ -522,6 +588,7 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
             let watching_live = watching_live.clone();
             let restart_said = restart_said.clone();
             let env = env.clone();
+            let absent_words = absent_words.clone();
             with_fallback_failure(
                 provider.integration(options, &session),
                 Rc::new(move || {
@@ -544,11 +611,16 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
                     } else if !watching_live.replace(true) {
                         // Said once, by the watch: its own retries fall back here too, quietly.
                         let config = bridge_config.clone();
-                        let (env, answers_env) = (env.clone(), env.clone());
+                        let (env, answers_env, listed_env) = (env.clone(), env.clone(), env.clone());
+                        let absent = absent_words.clone().map(|words| Absent {
+                            words,
+                            opened: Rc::new(move || provider.running_now(&crate::daw::processes_in(&listed_env))),
+                        });
                         tokio::task::spawn_local(connect_when_daw_answers(
                             move || provider.bridge_answers(&config, &answers_env),
                             move || provider.app_open(&env),
                             provider.watch_words(),
+                            absent,
                             controller.clone(),
                             emit.clone(),
                             watching_live.clone(),
@@ -654,9 +726,8 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
         (notice, resume) => notice.or(resume),
     };
     // Several DAWs open and none asked for: which one Kumi works with, and how to switch.
-    let asked = crate::config::take_daw(&io.args, &io.env).ok().and_then(|(_, asked)| asked);
     let also = if asked.is_none() {
-        let others = crate::daw::also_running(provider.id(), &io.env, &|other| other.running_now(&crate::daw::processes()));
+        let others = crate::daw::also_running(provider.id(), &|other| other.running_now(&crate::daw::processes_in(&io.env)));
         crate::daw::also_running_words(provider.id(), &others, &io.env)
     } else {
         None
@@ -668,30 +739,41 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
     // In the app, first-run setup puts the bridge in place instead, with the DAW restarting around it (where it runs).
     let connect_why = bridge.why;
     let update_after = Rc::new(Cell::new(false));
-    // /daw <name>: Kumi closes and opens again with that DAW. Offered once the producer works with more than Live.
-    let daw_after: Rc<Cell<Option<kumi_types::daw::DawId>>> = Rc::default();
-    let offers_daw = provider.id() != kumi_types::daw::DawId::Ableton
-        || crate::daw::providers()
-            .into_iter()
-            .any(|other| other.id() != kumi_types::daw::DawId::Ableton && other.bridge_installed(&io.env));
-    let switch_daw = offers_daw.then(|| {
-        let daw_after = daw_after.clone();
-        Rc::new(move |daw| daw_after.set(Some(daw))) as Rc<dyn Fn(kumi_types::daw::DawId)>
-    });
+    // The DAW Kumi opens again with once this run closes, and whether it was asked for (/daw, setup's question) or
+    // followed to (the producer opened it).
+    let daw_after: Rc<Cell<Option<(kumi_types::daw::DawId, bool)>>> = Rc::default();
     // What /daw offers: the DAWs on this computer (or with a bridge in), by this session's environment.
-    crate::daw::offer_here(io.daws_here.clone().unwrap_or_else(|| {
+    let here: crate::daw::Here = io.daws_here.clone().unwrap_or_else(|| {
         let env = io.env.clone();
         Rc::new(move |id| crate::daw::provider(id).is_some_and(|other| other.here(&env) || other.bridge_installed(&env)))
-    }));
-    // A first run with several DAWs here and no bridge yet: setup asks which, remembers it, and opens Kumi again with it
-    // when it isn't this run's (review L2).
-    let ask_daw = if asked.is_none() && bridge_missing { crate::daw::to_ask(&io.env, &|other| other.here(&io.env)) } else { vec![] };
+    });
+    crate::daw::offer_here(here.clone());
+    // /daw <name>: Kumi closes and opens again with that DAW. Offered once the producer works with more than Live, or has
+    // another DAW here.
+    let offers_daw = provider.id() != kumi_types::daw::DawId::Ableton
+        || crate::daw::providers().into_iter().any(|other| other.id() != kumi_types::daw::DawId::Ableton && here(other.id()));
+    let switch_daw = offers_daw.then(|| {
+        let daw_after = daw_after.clone();
+        Rc::new(move |daw| daw_after.set(Some((daw, true)))) as Rc<dyn Fn(kumi_types::daw::DawId)>
+    });
+    // Kumi follows the producer to the DAW they open (`follow_the_daw`): it closes, and opens again with that one.
+    let follow_daw = follows.then(|| {
+        let daw_after = daw_after.clone();
+        Rc::new(move |daw| daw_after.set(Some((daw, false)))) as Rc<dyn Fn(kumi_types::daw::DawId)>
+    });
+    // A first run with several DAWs here, no bridge yet and none open: setup asks which, remembers it, and opens Kumi
+    // again with it when it isn't this run's (review L2).
+    let ask_daw = if asked.is_none() && bridge_missing {
+        crate::daw::to_ask(&io.env, &|other| other.here(&io.env), &|other| other.running_now(&crate::daw::processes_in(&io.env)))
+    } else {
+        vec![]
+    };
     let pick_daw = (!ask_daw.is_empty()).then(|| {
         let (daw_after, env, current) = (daw_after.clone(), io.env.clone(), provider.id());
         Rc::new(move |daw| {
             crate::daw::remember_used(daw, &env);
             if daw != current {
-                daw_after.set(Some(daw));
+                daw_after.set(Some((daw, true)));
             }
         }) as Rc<dyn Fn(kumi_types::daw::DawId)>
     });
@@ -767,6 +849,7 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
         });
         options.updates = Some(updates);
         options.switch_daw = switch_daw;
+        options.follow_daw = follow_daw;
         options.ask_daw = ask_daw;
         options.pick_daw = pick_daw;
         options.willington = provider.toggle(&io.env);
@@ -825,6 +908,7 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
         options.history = Some(history);
         options.updates = Some(updates);
         options.switch_daw = switch_daw;
+        options.follow_daw = follow_daw;
         options.willington = provider.toggle(&io.env);
         Rc::new(create_terminal(options))
     };
@@ -854,6 +938,31 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
         None
     });
     let running = ui.run();
+    // Following the producer to the DAW they open: one listing a look, made off the screen's thread, or a test's answer.
+    let following = follows.then(|| {
+        let (env, current) = (io.env.clone(), provider.id());
+        let stand_in = running_stand_in.clone();
+        tokio::task::spawn_local(follow_the_daw(
+            move || {
+                let (env, stand_in) = (env.clone(), stand_in.clone());
+                async move {
+                    if let Some(running) = stand_in {
+                        let open = (running.0)();
+                        return crate::daw::to_follow(current, &env, &|other| open.contains(&other.id())).map(|other| other.id());
+                    }
+                    let listed = env.clone();
+                    let listing =
+                        tokio::task::spawn_blocking(move || daw_bridge::detect::list_processes(&|name| listed.get(name).cloned()))
+                            .await
+                            .unwrap_or_default();
+                    crate::daw::to_follow(current, &env, &|other| other.running_now(&listing)).map(|other| other.id())
+                }
+            },
+            controller.clone(),
+            terminal.clone(),
+            FOLLOW_MS,
+        ))
+    });
     library.start();
     music.start();
     let settings = read_settings(&settings_file);
@@ -902,11 +1011,14 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
     if let Some(task) = update_check {
         task.abort();
     }
+    if let Some(task) = following {
+        task.abort();
+    }
     terminal.borrow_mut().take();
     controller.borrow_mut().take();
-    if let Some(daw) = daw_after.get() {
+    if let Some((daw, asked)) = daw_after.get() {
         let mut again = io.clone();
-        again.args = switched_args(&io.args, daw);
+        again.args = if asked { switched_args(&io.args, daw) } else { followed_args(&io.args) };
         return super::reopen(&again).await;
     }
     if update_after.get() {
@@ -942,6 +1054,13 @@ fn reopened_args(args: &[String], going: Option<&str>) -> Vec<String> {
     }
 }
 
+/// What Kumi opens again with when it follows the producer to the DAW they opened: the same arguments, with no
+/// conversation (each DAW's project has its own) and still no DAW asked for, so the start chooses the one open and goes
+/// on following.
+fn followed_args(args: &[String]) -> Vec<String> {
+    crate::config::take_resume(args).map(|(rest, _)| rest).unwrap_or_else(|_| args.to_vec())
+}
+
 /// What Kumi opens again with after /daw: the same arguments, with that DAW asked for and no conversation (each DAW's
 /// project has its own).
 fn switched_args(args: &[String], daw: kumi_types::daw::DawId) -> Vec<String> {
@@ -960,6 +1079,13 @@ mod reopen_tests {
         assert_eq!(switched_args(&args(&[]), DawId::Renoise), args(&["--daw", "renoise"]));
         assert_eq!(switched_args(&args(&["--daw", "reaper", "-r", "night"]), DawId::Ableton), args(&["--daw", "ableton"]));
         assert_eq!(switched_args(&args(&["--daw=renoise", "-c"]), DawId::Reaper), args(&["--daw", "reaper"]));
+    }
+    #[test]
+    fn followed_to_the_daw_opened_kumi_opens_again_with_no_conversation_and_no_daw_asked_for() {
+        let args = |words: &[&str]| words.iter().map(|w| w.to_string()).collect::<Vec<_>>();
+        assert_eq!(super::followed_args(&args(&[])), args(&[]));
+        assert_eq!(super::followed_args(&args(&["-c"])), args(&[]));
+        assert_eq!(super::followed_args(&args(&["-r", "night", "drive"])), args(&[]));
     }
     #[test]
     fn opened_again_after_an_update_kumi_carries_on_with_the_conversation_going_on() {
@@ -1058,6 +1184,117 @@ mod watch_tests {
         .await;
         let notices = notices.borrow().clone();
         (fake.reconnects.get(), notices, watching.get())
+    }
+
+    /// What the watch says with several DAWs here (`absent`), for a DAW open as Kumi starts, or opening at the
+    /// `opens_at`th look, never answering.
+    async fn watch_absent(open: bool, opens_at: u32) -> Vec<String> {
+        let fake = Rc::new(Fake { reconnects: Cell::new(0), connect_on: u32::MAX, connected: Cell::new(false) });
+        let session: Rc<dyn SessionController> = fake.clone();
+        let controller = Rc::new(RefCell::new(Some(Rc::downgrade(&session))));
+        let notices = Rc::new(RefCell::new(Vec::new()));
+        let emit: Rc<dyn Fn(SessionEvent)> = {
+            let notices = notices.clone();
+            Rc::new(move |event| {
+                if let SessionEvent::Notice { message } = event {
+                    notices.borrow_mut().push(message)
+                }
+            })
+        };
+        let looked = Rc::new(Cell::new(0u32));
+        let absent = Absent {
+            words: Rc::from("open one of yours"),
+            opened: Rc::new(move || {
+                looked.set(looked.get() + 1);
+                looked.get() >= opens_at
+            }),
+        };
+        let pace = Pace { look_ms: 1, retry_ms: 0, tries: 10, looks: 60, hold_ms: 5 };
+        let watching = Rc::new(Cell::new(true));
+        connect_when_daw_answers(
+            || async { false },
+            move || async move { open },
+            live_words(),
+            Some(absent),
+            controller,
+            emit,
+            watching,
+            false,
+            pace,
+        )
+        .await;
+        let notices = notices.borrow().clone();
+        notices
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn with_several_daws_here_one_not_open_is_said_as_which_to_open() {
+        assert_eq!(watch_absent(false, u32::MAX).await, ["open one of yours"], "never opened: nothing more");
+        assert_eq!(
+            watch_absent(false, 3).await,
+            ["open one of yours", live_words().starting, live_words().unreachable],
+            "opened later: said as it starts, and how to make it answer once the hold is over"
+        );
+        assert_eq!(watch_absent(true, 0).await, [live_words().starting, live_words().unreachable], "open as Kumi starts: as before");
+    }
+
+    /// A screen that takes the DAW handed to it the `takes`th time (busy before that).
+    struct Screen {
+        handed: RefCell<Vec<kumi_types::daw::DawId>>,
+        takes: usize,
+    }
+    impl Terminal for Screen {
+        fn run(&self) -> LocalBoxFuture<'static, i32> {
+            async { 0 }.boxed_local()
+        }
+        fn handle_event(&self, _: SessionEvent) {}
+        fn offer_update(&self, _: &str) {}
+        fn interrupt(&self) {}
+        fn close(&self) -> LocalBoxFuture<'static, i32> {
+            async { 0 }.boxed_local()
+        }
+        fn follow_daw(&self, daw: kumi_types::daw::DawId) -> bool {
+            self.handed.borrow_mut().push(daw);
+            self.handed.borrow().len() >= self.takes
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn kumi_follows_to_the_daw_opened_once_the_screen_can_close() {
+        tokio::task::LocalSet::new().run_until(follow_while_not_connected()).await;
+    }
+    async fn follow_while_not_connected() {
+        use kumi_types::daw::DawId;
+        let fake = Rc::new(Fake { reconnects: Cell::new(0), connect_on: u32::MAX, connected: Cell::new(false) });
+        let session: Rc<dyn SessionController> = fake.clone();
+        let controller = Rc::new(RefCell::new(Some(Rc::downgrade(&session))));
+        let screen = Rc::new(Screen { handed: RefCell::default(), takes: 3 });
+        let ui: Rc<dyn Terminal> = screen.clone();
+        let terminal = Rc::new(RefCell::new(Some(Rc::downgrade(&ui))));
+        let counting = |looks: Rc<Cell<u32>>, open: Option<DawId>| {
+            move || {
+                looks.set(looks.get() + 1);
+                async move { open }
+            }
+        };
+        let looks = Rc::new(Cell::new(0));
+        follow_the_daw(counting(looks.clone(), Some(DawId::Renoise)), controller.clone(), terminal.clone(), 1).await;
+        assert_eq!(*screen.handed.borrow(), [DawId::Renoise; 3], "handed again until the screen takes it");
+        assert_eq!(looks.get(), 3);
+        // Nothing open instead: nothing handed.
+        let looks = Rc::new(Cell::new(0));
+        let watch = tokio::task::spawn_local(follow_the_daw(counting(looks.clone(), None), controller.clone(), terminal.clone(), 1));
+        tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+        assert!(looks.get() > 1 && screen.handed.borrow().len() == 3, "looked {} times", looks.get());
+        watch.abort();
+        // Connected: Kumi works with its DAW, and looks for none; the watch ends with the session.
+        fake.connected.set(true);
+        let looks = Rc::new(Cell::new(0));
+        let watch = tokio::task::spawn_local(follow_the_daw(counting(looks.clone(), Some(DawId::Renoise)), controller, terminal, 1));
+        tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+        assert_eq!(looks.get(), 0);
+        drop((fake, session));
+        tokio::time::timeout(std::time::Duration::from_secs(5), watch).await.expect("the watch ends with the session").unwrap();
     }
 
     #[tokio::test(flavor = "current_thread")]

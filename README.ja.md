@@ -38,7 +38,7 @@ irm https://github.com/user1303836/kumi/releases/latest/download/install.ps1 | i
 
 Kumi のガイド付きセットアップに従ってください。
 
-次回からは、ターミナルを開いて `kumi` と入力します。
+次回からは、ターミナルを開いて `kumi` と入力し、DAW（Live、REAPER、Renoise。Kumi の前でも後でもかまいません）を開きます。Kumi は開いている DAW につながります。
 
 > [!NOTE]
 > Kumi はターミナルのウィンドウで動きますが、コマンドを知っている必要はありません。インストールの一行のあとは、チャットです。テキストをドラッグして選択し、Ctrl-C でコピーできます。

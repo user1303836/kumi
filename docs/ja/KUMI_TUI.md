@@ -53,14 +53,14 @@ REAPER と Renoise でも画面は同じで（[つなぎ方](KUMI_GUIDE.md#reape
 
 | コマンド | 内容 |
 | --- | --- |
-| `kumi` | Live で開いている Set で Kumi を開く。初回はサインインし、ブリッジを Live に入れる（Live の再起動も任せられる） |
-| `kumi --daw reaper`、`kumi --daw renoise` | 開いている REAPER のプロジェクトや Renoise のソングで Kumi を開く。初回はサインインし、Kumi の拡張機能かツールを入れる。`KUMI_DAW` でも同じ。`kumi --daw reaper doctor`（または `report`）はその DAW について伝える |
+| `kumi` | DAW（Live、REAPER、Renoise。Kumi の前でも後でも開いてよい）で開いているもので Kumi を開く。初回はサインインし、Kumi のブリッジをその DAW に入れる（Live の再起動も任せられる）。Kumi がつながっていない間にほかの DAW を開くと、Kumi はそちらに移る |
+| `kumi --daw live`、`kumi --daw reaper`、`kumi --daw renoise` | どの DAW が開いていても、その DAW だけを使う。初回はサインインし、Kumi のブリッジを入れる。`KUMI_DAW` でも同じ。`kumi --daw reaper doctor`（または `report`）はその DAW について伝える |
 | `kumi --daw reaper bridge [--yes]`（または `renoise`） | Kumi の拡張機能を REAPER に、ツールを Renoise に入れる、または最新にする。`--yes` で確認に前もって答える |
-| `kumi -c`（`--continue` でも可） | どの Set のものでも、最後に使った会話の続きから始める |
+| `kumi -c`（`--continue` でも可） | どのプロジェクトのものでも、最後に使った会話の続きから始める |
 | `kumi -r [ID または名前]`（`--resume` でも可） | 保存された会話を ID（または先頭部分）か名前で選んで続ける。引数なしなら一覧から選ぶ。どちらも `--inference-only` と使える |
 | `kumi export [ID または名前 \| --last] [--md \| --html \| --json] [--full] [--raw] [-o パス]` | 保存された会話を Markdown（既定）、Web ページ、Kumi 用ファイルとして保存。ID を省くか `--last` で最新の会話。`--full` で各ステップの入力と結果も加え、`--raw` でキーやパスを残す |
 | `kumi import <ファイル>` | `kumi export --json` で保存した会話を取り込み、`kumi -r` で続けられるようにする |
-| `kumi --inference-only` | Live なしでチャットする |
+| `kumi --inference-only` | DAW なしでチャットする |
 | `kumi --bridge-config <absolute path>` | 自分のブリッジ設定を使う |
 | `kumi login` | サインイン：ChatGPT か API キーかを尋ねる |
 | `kumi login <provider>` | `openai-codex`（ChatGPT。ブラウザなしなら `--device`。SSH 経由ではこれが既定。ブラウザなら `--browser`）に、または API キーで `anthropic`、`openai`、`opencode`、`opencode-go` にサインインする |
