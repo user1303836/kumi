@@ -272,16 +272,24 @@ local_test!(missing_capabilities_cannot_be_called_even_under_the_allowlist, {
     tools.close().await.unwrap();
 });
 
-local_test!(a_bridge_that_exits_while_a_child_holds_its_pipes_is_seen_closed, {
-    // A host a bridge launched can keep the bridge's stdout and stderr open after the bridge is gone: its requests
-    // fail once it's gone, not at their timeouts.
-    let (_, tools) = open("normal", 20_000).await;
-    tools.refresh(signal()).await.unwrap();
-    let started = Instant::now();
-    assert!(call(&tools, "server_status", json!({"action":"exit-held"})).await.is_err());
-    assert!(started.elapsed() < Duration::from_secs(10), "{:?}", started.elapsed());
-    tools.close().await.unwrap();
-});
+#[test]
+fn a_bridge_that_exits_while_a_child_holds_its_pipes_is_seen_closed_and_leaves_nothing_reading_them() {
+    // A host a bridge launched can keep the bridge's stdout and stderr open after the bridge is gone: its requests fail
+    // once it's gone, not at their timeouts, and no task is left reading the pipes for Kumi's exit to wait on.
+    let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+    let _case = runtime.block_on(MCP_CASE.lock());
+    let local = tokio::task::LocalSet::new();
+    local.block_on(&runtime, async {
+        let (_, tools) = open("normal", 20_000).await;
+        tools.refresh(signal()).await.unwrap();
+        let started = Instant::now();
+        assert!(call(&tools, "server_status", json!({"action":"exit-held"})).await.is_err());
+        assert!(started.elapsed() < Duration::from_secs(10), "{:?}", started.elapsed());
+        tools.close().await.unwrap();
+    });
+    let drained = runtime.block_on(async { tokio::time::timeout(Duration::from_millis(900), local).await.is_ok() });
+    assert!(drained, "a task outlived the bridge");
+}
 
 #[test]
 fn a_closed_bridge_leaves_no_task_running_for_kumis_exit_to_wait_on() {

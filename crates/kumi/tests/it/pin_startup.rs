@@ -355,3 +355,28 @@ case!(a_live_setup_failure_falls_back_and_says_so, async {
     said.insert("another bridge".into(), again);
     golden_json("fallback.json", &Value::Object(said));
 });
+#[tokio::test(flavor = "current_thread")]
+async fn quitting_while_the_watch_for_live_waits_leaves_nothing_running() {
+    // The watch for Live sleeps 2 s after each look, and on Windows a look at a Live that isn't open takes 1.5 s. Quitting
+    // mustn't wait on it: the process's shutdown waits 2 s for every task, then calls a leftover a live handle and exits 1.
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let f = Fixture::new();
+            let config = f.folder.path().join("bridge.json");
+            std::fs::write(&config, "{}").unwrap();
+            f.settings(json!({"model":"anthropic/claude-sonnet-5-5","updateCheck":false,"modelCatalog":false,"libraryFolders":[]}));
+            let starts = Rc::new(Cell::new(0));
+            let count = starts.clone();
+            // Live runs another version of the bridge: the watch starts, and its first look starts the integration again.
+            let factory = AbletonFactory(Rc::new(move |_| {
+                Rc::new(Failing(kumi_common::bridge::ANOTHER_BRIDGE.into(), count.clone())) as Rc<dyn Integration>
+            }));
+            let task = tokio::task::spawn_local(run(f.io(&["--bridge-config", config.to_str().unwrap()]), factory));
+            f.input.wait_ready().await;
+            wait_for("the watch for Live to start the integration again", || starts.get() >= 2).await;
+            quit(&f, task).await;
+        })
+        .await;
+    assert!(tokio::time::timeout(std::time::Duration::from_millis(500), local).await.is_ok(), "the watch for Live outlived Kumi");
+}
