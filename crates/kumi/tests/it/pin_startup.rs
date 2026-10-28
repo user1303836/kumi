@@ -366,15 +366,15 @@ async fn quitting_while_the_watch_for_live_waits_leaves_nothing_running() {
             let config = f.folder.path().join("bridge.json");
             std::fs::write(&config, "{}").unwrap();
             f.settings(json!({"model":"anthropic/claude-sonnet-5-5","updateCheck":false,"modelCatalog":false,"libraryFolders":[]}));
-            let starts = Rc::new(Cell::new(0));
-            let count = starts.clone();
-            // Live runs another version of the bridge: the watch starts, and its first look starts the integration again.
+            let count = Rc::new(Cell::new(0));
+            // Live runs another version of the bridge: Kumi carries on without it, and the watch for Live starts before the
+            // first look.
             let factory = AbletonFactory(Rc::new(move |_| {
                 Rc::new(Failing(kumi_common::bridge::ANOTHER_BRIDGE.into(), count.clone())) as Rc<dyn Integration>
             }));
             let task = tokio::task::spawn_local(run(f.io(&["--bridge-config", config.to_str().unwrap()]), factory));
             f.input.wait_ready().await;
-            wait_for("the watch for Live to start the integration again", || starts.get() >= 2).await;
+            wait_for("the first look", || f.output().lines().any(|l| l.starts_with("[observation] "))).await;
             quit(&f, task).await;
         })
         .await;
