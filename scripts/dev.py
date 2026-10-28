@@ -195,7 +195,7 @@ class Workspace:
     def read(root: Path = ROOT) -> Workspace:
         try:
             out = subprocess.run(["cargo", "metadata", "--format-version", "1", "--no-deps", "--offline"], cwd=root,
-                                 capture_output=True, text=True, check=True).stdout
+                                 capture_output=True, encoding="utf-8", errors="replace", check=True).stdout
         except FileNotFoundError:
             raise Refused("cargo isn't on PATH: dev.py reads the packages from `cargo metadata`") from None
         except subprocess.CalledProcessError as failed:
@@ -236,7 +236,7 @@ def changes_since(base: str, root: Path = ROOT) -> list[tuple[str, list[str]]]:
     rename its old and new paths."""
     try:
         out = subprocess.run(["git", "diff", "--name-status", "-M", f"{base}...HEAD"], cwd=root, capture_output=True,
-                             text=True, check=True).stdout
+                             encoding="utf-8", errors="replace", check=True).stdout
     except subprocess.CalledProcessError as failed:
         raise Refused(f"git diff {base}...HEAD failed: {failed.stderr.strip()}") from None
     return parse_name_status(out)
@@ -338,7 +338,8 @@ def layer_breaks(workspace: Workspace) -> list[str]:
 
 
 def tracked(root: Path = ROOT) -> list[str]:
-    return subprocess.run(["git", "ls-files", "-z"], cwd=root, capture_output=True, text=True, check=True).stdout.split("\0")[:-1]
+    return subprocess.run(["git", "ls-files", "-z"], cwd=root, capture_output=True, encoding="utf-8", errors="replace",
+                          check=True).stdout.split("\0")[:-1]
 
 
 def unplaced(paths: list[str], workspace: Workspace, areas: list[Area]) -> list[str]:
@@ -594,9 +595,11 @@ def moved_to(path: str, rewrites: list[Rewrite]) -> str:
 
 
 def git(repo: Path, *args: str) -> str:
+    # Read as the UTF-8 git writes, like every command here: in Windows' code page (cp1252), a ” or a kana in a diff
+    # fails to decode and the output comes back None. A byte that isn't UTF-8 (a file in another encoding) becomes U+FFFD.
     try:
-        return subprocess.run(["git", "-c", "core.quotePath=false", *args], cwd=repo, capture_output=True, text=True,
-                              check=True).stdout
+        return subprocess.run(["git", "-c", "core.quotePath=false", *args], cwd=repo, capture_output=True,
+                              encoding="utf-8", errors="replace", check=True).stdout
     except subprocess.CalledProcessError as failed:
         raise Refused(f"git {' '.join(args)} failed: {failed.stderr.strip()}") from None
 
@@ -664,7 +667,7 @@ def rebase_moves(repo: Path, onto: str, merge: bool = False, build: bool = True)
         command = ["git", "-c", "merge.directoryRenames=true", "-c", "merge.renameLimit=100000",
                    *(["merge", "--no-edit", onto] if merge else ["rebase", onto])]
         print(f"-- {' '.join(command)}", flush=True)
-        done = subprocess.run(command, cwd=repo, capture_output=True, text=True)
+        done = subprocess.run(command, cwd=repo, capture_output=True, encoding="utf-8", errors="replace")
         if (done.stdout + done.stderr).strip():
             print((done.stdout + done.stderr).rstrip())
         if done.returncode:
@@ -697,7 +700,7 @@ def rebase_moves(repo: Path, onto: str, merge: bool = False, build: bool = True)
         else:
             print("-- cargo check --workspace --all-targets --locked", flush=True)
             done = subprocess.run(["cargo", "check", "--workspace", "--all-targets", "--locked", "--message-format", "short"],
-                                  cwd=repo, capture_output=True, text=True)
+                                  cwd=repo, capture_output=True, encoding="utf-8", errors="replace")
             errors = [line for line in done.stderr.splitlines() if re.search(r"(^|: )error(\[\w+\])?: ", line)
                       and "could not compile" not in line]
             if done.returncode:
@@ -834,4 +837,8 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
+    # What it prints carries git's and cargo's text, so it writes UTF-8 as they do: a pipe on Windows is in its code page
+    # (cp1252), which fails on a character outside it (a → in a commit subject).
+    for stream in (sys.stdout, sys.stderr):
+        stream.reconfigure(encoding="utf-8", errors="backslashreplace")
     sys.exit(main())

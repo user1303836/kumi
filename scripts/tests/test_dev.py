@@ -1,6 +1,7 @@
 """scripts/dev.py: globs, packages and their dependents, and what a change affects, on a made-up workspace and on this
 checkout's own (git and cargo read it); and rebase-moves, on repositories of its own.
 """
+import ast
 import contextlib
 import importlib.util
 import io
@@ -339,6 +340,23 @@ class ThisCheckout(unittest.TestCase):
             self.assertFalse(any(path == gone or path.startswith(gone + "/") for path in tracked), f"{gone} still holds files")
             self.assertTrue(any(path == there or path.startswith(there + "/") for path in tracked), f"{there} holds none")
 
+    def test_what_it_prints_is_utf8_whatever_the_streams_encoding(self):
+        # PYTHONIOENCODING=cp1252 stands for a pipe on Windows, which can't encode the arrow.
+        done = subprocess.run([sys.executable, str(ROOT / "scripts/dev.py"), "areas", "docs/→.md"], capture_output=True,
+                              env={**os.environ, "PYTHONIOENCODING": "cp1252"})
+        self.assertEqual(done.returncode, 0, done.stderr.decode("utf-8", "replace"))
+        self.assertTrue(done.stdout.decode("utf-8").startswith("docs/→.md: "), done.stdout)
+
+    def test_every_command_it_reads_as_text_is_read_as_utf8(self):
+        # text=True alone reads in the system's encoding: cp1252 on Windows, where git's UTF-8 fails to decode. CI runs
+        # these tests on Linux, whose UTF-8 hides that.
+        tree = ast.parse((ROOT / "scripts/dev.py").read_text(encoding="utf-8"))
+        unread = sorted(call.lineno for call in ast.walk(tree) if isinstance(call, ast.Call)
+                        and ast.unparse(call.func) == "subprocess.run"
+                        and {keyword.arg for keyword in call.keywords} & {"text", "universal_newlines"}
+                        and "encoding" not in {keyword.arg for keyword in call.keywords})
+        self.assertEqual(unread, [], 'subprocess.run on these lines reads text without encoding="utf-8", errors="replace"')
+
 
 class Moves(unittest.TestCase):
     def test_a_moved_folder_is_rewritten_where_a_path_names_it_from_the_root(self):
@@ -493,6 +511,16 @@ class RebaseMoves(unittest.TestCase):
         code, out = self.bring(merge=True)
         self.assertEqual(code, 1, out)
         self.assertIn("crates/a/src/late.rs -> daws/x/a/src/late.rs", out)
+
+    def test_lines_cp1252_cant_decode_are_rewritten_and_a_file_that_isnt_utf8_is_left_as_it_is(self):
+        # git's output is read as UTF-8 whatever the system's encoding: Windows' cp1252 can't decode a ” or a kana.
+        self.write("README.md", self.read("README.md") + "\n“Quoted” in crates/a/src/lib.rs, かな.\n")
+        (self.repo / "latin1.txt").write_bytes(b"caf\xe9 in crates/a\n")
+        self.commit("Text")
+        code, out = self.bring()
+        self.assertEqual(code, 0, out)
+        self.assertTrue(self.read("README.md").endswith("\n“Quoted” in daws/x/a/src/lib.rs, かな.\n"), out)
+        self.assertEqual((self.repo / "latin1.txt").read_bytes(), b"caf\xe9 in crates/a\n")
 
     def test_a_conflict_stops_it_and_names_the_file(self):
         self.write("README.md", self.read("README.md").replace("See crates/a/src/lib.rs.", "Read crates/a/src/lib.rs."))
