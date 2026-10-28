@@ -60,10 +60,10 @@ struct Pace {
 const PACE: Pace = Pace { look_ms: 2_000, retry_ms: 20_000, tries: 10, looks: 1_800, hold_ms: 15_000 };
 
 /// What the watch says while the DAW isn't open and the producer works in several DAWs here (which to open), and
-/// whether this one is open now, from the listing kept a moment.
+/// whether this one is open now, from a listing made off the screen's thread.
 struct Absent {
     words: Rc<str>,
-    opened: Rc<dyn Fn() -> bool>,
+    opened: Rc<dyn Fn() -> LocalBoxFuture<'static, bool>>,
 }
 
 /// How often Kumi looks for a DAW the producer opened while its session isn't connected.
@@ -149,9 +149,11 @@ async fn connect_when_daw_answers<F, A, O, B>(
         if session.status().connection == ConnectionState::Connected {
             break;
         }
-        if began.is_none() && absent.as_ref().is_some_and(|absent| (absent.opened)()) {
-            began = Some(std::time::Instant::now());
-            emit(SessionEvent::Notice { message: words.starting.into() });
+        if let Some(absent) = absent.as_ref().filter(|_| began.is_none()) {
+            if (absent.opened)().await {
+                began = Some(std::time::Instant::now());
+                emit(SessionEvent::Notice { message: words.starting.into() });
+            }
         }
         if !said && began.is_some_and(|at| at.elapsed() >= std::time::Duration::from_millis(pace.hold_ms)) {
             said = true;
@@ -614,7 +616,18 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
                         let (env, answers_env, listed_env) = (env.clone(), env.clone(), env.clone());
                         let absent = absent_words.clone().map(|words| Absent {
                             words,
-                            opened: Rc::new(move || provider.running_now(&crate::daw::processes_in(&listed_env))),
+                            opened: Rc::new(move || {
+                                let listed = listed_env.clone();
+                                async move {
+                                    let listing = tokio::task::spawn_blocking(move || {
+                                        daw_bridge::detect::list_processes(&|name| listed.get(name).cloned())
+                                    })
+                                    .await
+                                    .unwrap_or_default();
+                                    provider.running_now(&listing)
+                                }
+                                .boxed_local()
+                            }),
                         });
                         tokio::task::spawn_local(connect_when_daw_answers(
                             move || provider.bridge_answers(&config, &answers_env),
@@ -1206,7 +1219,8 @@ mod watch_tests {
             words: Rc::from("open one of yours"),
             opened: Rc::new(move || {
                 looked.set(looked.get() + 1);
-                looked.get() >= opens_at
+                let open = looked.get() >= opens_at;
+                async move { open }.boxed_local()
             }),
         };
         let pace = Pace { look_ms: 1, retry_ms: 0, tries: 10, looks: 60, hold_ms: 5 };
