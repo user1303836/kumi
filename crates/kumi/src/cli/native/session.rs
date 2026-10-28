@@ -394,8 +394,9 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
         fetch: None,
         installed: None,
     }));
-    // models.dev's catalog of models: the copy Kumi kept, then a newer one at most once a day, never in the way.
-    tokio::task::spawn_local(kumi_ai::providers::catalog::refresh(kumi_ai::providers::catalog::RefreshOptions {
+    // models.dev's catalog of models: the copy Kumi kept, then a newer one at most once a day, never in the way (a slow
+    // answer ends with the session, so Kumi's exit doesn't wait on it).
+    let catalog = tokio::task::spawn_local(kumi_ai::providers::catalog::refresh(kumi_ai::providers::catalog::RefreshOptions {
         cache: std::path::Path::new(&crate::config::kumi_dir(&io.env)).join("cache").join("models-catalog.json"),
         fetch: kumi_ai::http::default_fetch(),
         now: kumi_common::time::now_ms() as f64,
@@ -482,6 +483,9 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
     let running_stand_in = answers.get::<crate::daw::RunningDaws>().cloned();
     // Watching for Live to answer, so a chat without Live connects by itself once it does.
     let watching_live = Rc::new(Cell::new(false));
+    // That watch, ended with the session: it would notice only after its look and its sleep, and on Windows a look at a
+    // DAW that isn't open takes 1.5 s, past what Kumi's shutdown waits for.
+    let live_watch: Rc<RefCell<Option<tokio::task::JoinHandle<()>>>> = Rc::default();
     // Whether the producer was told to restart Live (it runs another version of the bridge): said once a session.
     let restart_said = Rc::new(Cell::new(false));
     // Where the session finds Live: first-run setup sets it once the bridge is in place.
@@ -489,6 +493,7 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
     let full_screen = io.input.is_tty() && io.out.is_tty() && io.env.get("KUMI_UI").map(String::as_str) != Some("plain");
     let integration_factory: IntegrationFactory = {
         let watching_live = watching_live.clone();
+        let live_watch = live_watch.clone();
         let restart_said = restart_said.clone();
         let library = library.clone();
         let music = music.clone();
@@ -621,6 +626,7 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
             let bundled = bundled.clone();
             let controller = controller.clone();
             let watching_live = watching_live.clone();
+            let live_watch = live_watch.clone();
             let restart_said = restart_said.clone();
             let env = env.clone();
             let absent_words = absent_words.clone();
@@ -662,7 +668,7 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
                                 .boxed_local()
                             }),
                         });
-                        tokio::task::spawn_local(connect_when_daw_answers(
+                        *live_watch.borrow_mut() = Some(tokio::task::spawn_local(connect_when_daw_answers(
                             move || provider.bridge_answers(&config, &answers_env),
                             move || provider.app_open(&env),
                             provider.watch_words(),
@@ -672,7 +678,7 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
                             watching_live.clone(),
                             restart,
                             PACE,
-                        ));
+                        )));
                     }
                 }),
             )
@@ -857,7 +863,7 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
     let redact = crate::export::redactor_maker(&io.env);
     let ui: Rc<dyn Terminal> = if full_screen {
         let mut options = TuiOptions::new(session, io.input.clone(), io.out.clone(), mode);
-        options.models = Some(models);
+        options.models = Some(models.clone());
         options.redact = Some(redact);
         options.command = io.command().to_string();
         options.reveal = Some(Rc::new(crate::export::reveal));
@@ -942,7 +948,7 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
         });
         Rc::new(create_tui(options))
     } else {
-        let mut options = TerminalOptions::new(session, io.input.clone(), io.out.clone(), models, mode);
+        let mut options = TerminalOptions::new(session, io.input.clone(), io.out.clone(), models.clone(), mode);
         options.startup_notice = notice;
         options.redact = Some(redact);
         options.command = io.command().to_string();
@@ -1065,12 +1071,17 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
     drop(terminate);
     library.close().await;
     music.close().await;
+    catalog.abort();
+    models.close();
     fetch_notices.abort();
     configure_programs(ProgramDefaults::default());
     if let Some(task) = update_check {
         task.abort();
     }
     if let Some(task) = following {
+        task.abort();
+    }
+    if let Some(task) = live_watch.borrow_mut().take() {
         task.abort();
     }
     terminal.borrow_mut().take();
