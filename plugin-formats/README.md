@@ -34,6 +34,10 @@ synthetic fixtures; they never require an installed plug-in, a running DAW or a 
 
 ## Using the built-in tools
 
+- Background workers and single-tool jobs receive the same `vst3` preset tool as the main conversation,
+  with the same output folder, discovery cache and write checks. Workers receive it directly, without
+  `find_tools`. They can create and edit files; the foreground conversation prepares, loads, reads back
+  and auditions them through the DAW's guarded tools. A saved file alone does not verify plug-in acceptance.
 - `vst3 installed` scans standard VST3 directories, plus optional custom folders, without executing binaries.
   It reports roles, class identity when available and tested write versions. Presence does not mean the DAW
   can load or authorize the plug-in; filename identification is explicitly marked for confirmation.

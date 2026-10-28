@@ -297,6 +297,9 @@ impl Session {
             tools
                 .extend(library.tools_for(&options.profile, LibraryToolsOptions { on_event: Some(tool_events(&on_event)), resolve: None }));
         }
+        // Reuse the conversation's preset folder and discovery cache. Writing a preset file
+        // works away from the DAW; preparing, loading and auditioning it stay in the foreground.
+        tools.push(self.0.plugins.clone());
         tools.extend(self.0.recall.clone());
         if let Some(dirs) = &options.watch {
             tools.extend(video_tools_for(

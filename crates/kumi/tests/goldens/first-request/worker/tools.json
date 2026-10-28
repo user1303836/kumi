@@ -311,6 +311,107 @@
     "stream": false
   },
   {
+    "name": "vst3",
+    "description": "Built-in VST3 discovery, preset creation and editing. Use before external research. installed lists local plug-ins and roles; catalog gives tested versions and exact editable fields; inspect reads a preset; create starts an initialized patch; edit preserves existing state. Writes a new .vstpreset for the DAW's loading tools. guide gives the measured mastering/reference workflow.",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "action"
+      ],
+      "properties": {
+        "action": {
+          "type": "string",
+          "enum": [
+            "installed",
+            "catalog",
+            "guide",
+            "inspect",
+            "create",
+            "edit",
+            "edit-native",
+            "create-native-from-template"
+          ]
+        },
+        "plugin": {
+          "type": "string",
+          "description": "Catalog ID, e.g. serum-2, ozone-12, valhalla-delay"
+        },
+        "role": {
+          "type": "string",
+          "description": "installed: mastering, limiting, eq, compression, stereo, delay, bbd, reverb, instrument…"
+        },
+        "query": {
+          "type": "string",
+          "description": "Name/control search; narrow catalog results before choosing paths"
+        },
+        "folders": {
+          "type": "array",
+          "maxItems": 16,
+          "items": {
+            "type": "string"
+          },
+          "description": "Additional absolute VST3 install directories"
+        },
+        "refresh": {
+          "type": "boolean",
+          "description": "Rescan the session's installed inventory after installing or updating a plug-in"
+        },
+        "input": {
+          "type": "string",
+          "description": "Absolute local existing preset path"
+        },
+        "output": {
+          "type": "string",
+          "description": "New filename only, saved in Kumi's preset folder; .vstpreset for create/edit, native extension for native actions; never overwrites"
+        },
+        "preset_index": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "create-native-from-template: source preset index within a Softube bundle (0 otherwise)"
+        },
+        "version": {
+          "type": "string",
+          "description": "Optional assertion of installed version; cannot override inventory's version gate"
+        },
+        "class_id": {
+          "type": "string",
+          "description": "Exact VST3 class, required to choose an Ozone individual module"
+        },
+        "name": {
+          "type": "string"
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 40
+        },
+        "edits": {
+          "type": "array",
+          "maxItems": 512,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "path",
+              "value"
+            ],
+            "properties": {
+              "path": {
+                "type": "string"
+              },
+              "value": {}
+            }
+          }
+        }
+      }
+    },
+    "deferred": false,
+    "listedBy": null,
+    "reach": "AwayFromDaw",
+    "stream": false
+  },
+  {
     "name": "search_conversations",
     "description": "Search earlier conversations with the producer, in every Set, and the techniques and recipes Kumi kept, by their words. Use it when they refer to something from before that isn't in this conversation (\"the reverb chain from last week's vocal\"). Give the telling words (vocal reverb chain), not when it was: each find says when. Local, with no model call.",
     "inputSchema": {

@@ -450,7 +450,7 @@ local_test!(a_worker_gets_only_tools_away_from_the_daw_and_never_starts_a_job, {
     h.until("the worker", |h| !h.worker_tools.borrow().is_empty()).await;
     let given = h.worker_tools.borrow()[0].clone();
     let names: Vec<&str> = given.iter().map(|(name, _, _)| name.as_str()).collect();
-    assert_eq!(names, ["search_web", "read_web", "find_sounds", "find_presets", "my_sets", "live_manual"]);
+    assert_eq!(names, ["search_web", "read_web", "find_sounds", "find_presets", "my_sets", "live_manual", "vst3"]);
     assert!(given.iter().all(|(_, reach, _)| *reach == Reach::AwayFromDaw));
     // The conversation keeps some behind find_tools; a worker's few all go with its every request.
     assert!(h.main_tools.borrow().iter().any(|t| t.name() == "find_presets" && t.deferred()));
@@ -465,6 +465,97 @@ local_test!(a_worker_gets_only_tools_away_from_the_daw_and_never_starts_a_job, {
     let refused = start.execute(object(json!({"title":"sneaky","tool":"make_changes","args":{}})), Signal::new()).await.unwrap();
     assert!(refused.is_error && refused.text.contains("only tools away from the DAW"), "{}", refused.text);
     gate.notify_one();
+});
+
+local_test!(workers_can_call_the_builtin_vst3_catalog_for_every_daw, {
+    for profile in [kumi_types::daw::DawProfile::ABLETON, kumi_types::daw::DawProfile::REAPER, kumi_types::daw::DawProfile::RENOISE] {
+        let worker: Script = Rc::new(|turn: Turn| {
+            async move {
+                let vst3 = tool(&turn.tools, "vst3");
+                assert!(!vst3.deferred());
+                assert_eq!(vst3.reach(), Reach::AwayFromDaw);
+                let result = vst3.execute(object(json!({"action":"catalog","plugin":"serum-2","query":"volume"})), turn.signal).await?;
+                assert!(!result.is_error, "{}", result.text);
+                let catalog: Value = serde_json::from_str(&result.text).unwrap();
+                assert_eq!(catalog["plugin"]["plugin"], "serum-2");
+                assert!(catalog["operations"]["$add_distortion"].is_object());
+                (turn.emit)(KernelEvent::Text { text: "Serum's built-in preset tools are available.".into() })?;
+                Ok(done())
+            }
+            .boxed_local()
+        });
+        let h = harness(starts_a_worker("tell"), worker, |options| options.profile = profile);
+        h.session.start().await.unwrap();
+        h.session.submit("look up Serum's preset controls", None).await.unwrap();
+        h.until("the preset worker", |h| h.last(1).is_some_and(|s| s.state.ended())).await;
+        assert_eq!(h.last(1).unwrap().state, JobState::Done);
+        assert_eq!(h.session.job(1).unwrap().report.as_deref(), Some("Serum's built-in preset tools are available."));
+        assert!(tool(&h.main_tools.borrow(), "vst3").deferred());
+        h.session.close().await.unwrap();
+    }
+});
+
+local_test!(workers_and_single_tool_jobs_write_presets_in_the_sessions_folder, {
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("source.preset");
+    let fixture = include_bytes!("../../../../plugin-formats/zynaptiq-unmix-drums/format-1/fixtures/init.preset");
+    std::fs::write(&source, fixture).unwrap();
+    let output = dir.path().join("presets");
+    // Native template writes exercise the real writer without scanning this machine's installations.
+    let worker: Script = {
+        let source = source.clone();
+        Rc::new(move |turn: Turn| {
+            let source = source.clone();
+            async move {
+                let result = tool(&turn.tools, "vst3")
+                    .execute(
+                        object(json!({"action":"create-native-from-template","plugin":"zynaptiq-unmix-drums",
+                            "input":source,"output":"worker.preset","name":"Worker preset"})),
+                        turn.signal,
+                    )
+                    .await?;
+                assert!(!result.is_error, "{}", result.text);
+                (turn.emit)(KernelEvent::Text { text: result.text })?;
+                Ok(done())
+            }
+            .boxed_local()
+        })
+    };
+    let h = harness(starts_a_worker("tell"), worker, |options| options.preset_dir = Some(output.clone()));
+    h.session.start().await.unwrap();
+    h.session.submit("build a preset in the background", None).await.unwrap();
+    h.until("the preset file", |h| h.last(1).is_some_and(|s| s.state.ended())).await;
+    assert_eq!(h.last(1).unwrap().state, JobState::Done);
+    let made: Value = serde_json::from_str(h.session.job(1).unwrap().report.as_deref().unwrap()).unwrap();
+    let file = output.join("worker.preset");
+    assert_eq!(made["file"], json!(file));
+    assert_eq!(made["runtime_verified"], false);
+    let first = std::fs::read_to_string(&file).unwrap();
+    assert!(first.contains("progName=\"Worker preset\""));
+
+    let start = tool(&h.main_tools.borrow(), "start_job");
+    let args = json!({"action":"edit-native","plugin":"zynaptiq-unmix-drums",
+        "input":file,"output":"edited.preset","name":"Tool job preset"});
+    let result = start.execute(object(json!({"title":"Edit the preset","tool":"vst3","args":args})), Signal::new()).await.unwrap();
+    assert!(!result.is_error, "{}", result.text);
+    h.until("the tool job", |h| h.last(2).is_some_and(|s| s.state.ended())).await;
+    assert_eq!(h.last(2).unwrap().state, JobState::Done);
+    let edited: Value = serde_json::from_str(h.session.job(2).unwrap().report.as_deref().unwrap()).unwrap();
+    let edited_file = output.join("edited.preset");
+    assert_eq!(edited["file"], json!(edited_file));
+    let edited_bytes = std::fs::read_to_string(&edited_file).unwrap();
+    assert!(edited_bytes.contains("progName=\"Tool job preset\""));
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), first);
+    assert_eq!(std::fs::read(&source).unwrap().as_slice(), fixture.as_slice());
+
+    // A second job cannot overwrite the first job's output.
+    let result = start.execute(object(json!({"title":"Try the same output","tool":"vst3","args":args})), Signal::new()).await.unwrap();
+    assert!(!result.is_error, "{}", result.text);
+    h.until("the refused overwrite", |h| h.last(3).is_some_and(|s| s.state.ended())).await;
+    assert_eq!(h.last(3).unwrap().state, JobState::Failed);
+    assert!(h.session.job(3).unwrap().report.as_deref().unwrap().contains("use a new output filename"));
+    assert_eq!(std::fs::read_to_string(&edited_file).unwrap(), edited_bytes);
+    h.session.close().await.unwrap();
 });
 
 local_test!(ctrl_b_moves_a_step_away_from_the_daw_to_a_job_and_the_answer_carries_on, {

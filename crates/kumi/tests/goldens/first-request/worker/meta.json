@@ -1,7 +1,7 @@
 {
-  "toolsKey": "g_K2jIdp6v2V6Xh0X7iyGv",
-  "fixed": 18141,
-  "fixedByHand": 18141,
+  "toolsKey": "DhvEbTOhr0AGELPN4ehg-4",
+  "fixed": 20530,
+  "fixedByHand": 20530,
   "sent": [
     "search_web",
     "read_web",
@@ -9,6 +9,7 @@
     "find_presets",
     "my_sets",
     "live_manual",
+    "vst3",
     "search_conversations",
     "watch_video",
     "make_device"
