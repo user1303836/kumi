@@ -382,17 +382,24 @@ pub fn inspect_fields(
     limit: usize,
 ) -> Result<Value, FormatError> {
     let decoded = inspect(plugin, input, requested_class)?;
+    inspect_path_budget(&decoded["data"], 0)?;
     let family = family(known(plugin)?);
     let needle = query.unwrap_or_default().to_lowercase();
     let mut fields = Vec::new();
     let mut total: usize = 0;
+    let mut bytes = 0;
     let limit = limit.clamp(1, 200);
     let mut collect = |path: &str, value: &Value| {
         if needle.is_empty() || path.to_lowercase().contains(&needle) || value.to_string().to_lowercase().contains(&needle) {
             total += 1;
             if fields.len() < limit {
                 let (value, truncated) = preview(value);
-                fields.push(json!({"path":path,"value":value,"truncated":truncated}));
+                let field = json!({"path":path,"value":value,"truncated":truncated});
+                let size = field.to_string().len();
+                if size <= MAX_INSPECT_BYTES - bytes {
+                    bytes += size;
+                    fields.push(field);
+                }
             }
         }
     };
@@ -405,7 +412,32 @@ pub fn inspect_fields(
     } else {
         leaves(&decoded["data"], "", family, &mut collect);
     }
-    Ok(json!({"plugin":decoded["plugin"],"classId":decoded["classId"],"fields":fields,"more":total.saturating_sub(limit)}))
+    let more = total.saturating_sub(fields.len());
+    Ok(json!({"plugin":decoded["plugin"],"classId":decoded["classId"],"fields":fields,"more":more}))
+}
+
+const MAX_INSPECT_BYTES: usize = 256 * 1024;
+
+// A large embedded audio string is valid, but a large object key must not be
+// copied into every descendant's editable path or returned to the model whole.
+fn inspect_path_budget(value: &Value, parent: usize) -> Result<(), FormatError> {
+    if parent > 4096 {
+        return Err(error("preset field path exceeds the inspection limit"));
+    }
+    match value {
+        Value::Object(fields) => {
+            for (key, value) in fields {
+                inspect_path_budget(value, parent + usize::from(parent != 0) + key.len())?;
+            }
+        }
+        Value::Array(values) => {
+            for (index, value) in values.iter().enumerate() {
+                inspect_path_budget(value, parent + 1 + index.to_string().len())?;
+            }
+        }
+        _ => {}
+    }
+    Ok(())
 }
 
 fn preview(value: &Value) -> (Value, bool) {
@@ -661,6 +693,20 @@ fn error(message: &str) -> FormatError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn inspection_bounds_field_paths_and_the_combined_preview() {
+        let oversized_key = "x".repeat(4097);
+        let source = serde_json::to_vec(&json!({"synth_version":"1.0.7", "settings":{oversized_key:1}})).unwrap();
+        assert!(inspect_fields("vital", &source, None, None, 200).unwrap_err().to_string().contains("field path"));
+
+        let settings: serde_json::Map<String, Value> = (0..200).map(|index| (format!("field{index}"), json!("x".repeat(4096)))).collect();
+        let source = serde_json::to_vec(&json!({"synth_version":"1.0.7", "settings":settings})).unwrap();
+        let shown = inspect_fields("vital", &source, None, None, 200).unwrap();
+        assert!(shown.to_string().len() <= MAX_INSPECT_BYTES + 1024);
+        assert!(shown["fields"].as_array().unwrap().len() < 200);
+        assert!(shown["more"].as_u64().unwrap() > 0);
+    }
 
     #[test]
     fn a_bytes_key_cannot_hide_a_whole_object_from_inspection_limits() {
