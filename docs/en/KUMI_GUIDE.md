@@ -365,9 +365,6 @@ Kumi does slow work that doesn't change the Set in the background, so you can
 keep working with it: research on the web, a tutorial video, Live's manual, your
 library or earlier conversations, or a Max for Live device's file.
 
-- **Plug-in presets:** workers can use the built-in VST3 tool to create and edit supported preset files,
-  with the same version and write checks as the main conversation. They return file paths; Kumi loads,
-  reads back and auditions the presets in the foreground. This works with Live, REAPER and Renoise.
 - **Starting:** Kumi says what's running in a line and is free for your next
   message. Ask for one ("look into this in the background") or let Kumi decide.
 - **Seeing:** the header counts the jobs at work (◐ 2 jobs), and the **JOBS** tab
@@ -380,6 +377,10 @@ library or earlier conversations, or a Max for Live device's file.
 - **Live stays Kumi's:** a job researches and writes but never reads or changes
   Live. Kumi makes any change itself, in HISTORY with its undo. What a job reads
   is data, not instructions.
+- **Plug-in presets:** jobs can use the built-in VST3 tool to create and edit
+  supported preset files, with the same version and write checks as the main
+  conversation. They return file paths; Kumi loads, reads back and auditions the
+  presets in the foreground. This works with Live, REAPER and Renoise.
 - **Ctrl-B** moves the answer's slow step that doesn't use Live (a video, pages)
   to the background, and the answer carries on. In tmux, press Ctrl-B twice.
 - **Stopping:** `x` on a JOBS row or in a job's details. Esc stops the answer,
