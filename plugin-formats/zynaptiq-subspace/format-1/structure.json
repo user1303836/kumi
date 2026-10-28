@@ -22,7 +22,8 @@
     "files": 0,
     "parameterCounts": [],
     "presetVersions": [],
-    "source": "Installed native preset files and shipped parameter-name metadata; no factory preset bodies copied."
+    "source": "Installed native preset files and shipped parameter-name metadata; no factory preset bodies copied.",
+    "verification": "Native documents inspected; installed-binary version and runtime acceptance remain unverified."
   },
   "fields": {
     "@progName": {
@@ -31,7 +32,7 @@
         "preset",
         "state"
       ],
-      "status": "verified"
+      "status": "guessed"
     }
   },
   "parameters": {}

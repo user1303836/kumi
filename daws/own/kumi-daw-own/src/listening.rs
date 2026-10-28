@@ -171,6 +171,17 @@ pub struct DeviceRow {
     pub mixer: bool,
 }
 
+/// Only host identity, never the producer's display name, establishes a VST3 limiter.
+pub(crate) fn verified_plugin_limiter(device: &DeviceRow) -> bool {
+    if !device.on || !device.plugin || device.instrument {
+        return false;
+    }
+    if let Some(name) = device.identity.strip_prefix("VST3: ") {
+        return kumi_library::plugins::inventory::is_limiter_name(&plugin_name(name));
+    }
+    device.identity.rsplit_once("/VST3/").is_some_and(|(_, id)| kumi_library::plugins::inventory::is_limiter_class_id(id))
+}
+
 /// What a scratch set keeps to set and drop its copies.
 struct Scratch {
     id: String,
@@ -1527,7 +1538,7 @@ impl<S: RefScheme + 'static> Renderer for OwnRenderer<S> {
     async fn limited(&self, track: Option<&str>, signal: Signal) -> bool {
         let Ok(Ok((scope, _))) = self.scope(track, &signal).await else { return false };
         let Ok(Ok(devices)) = self.devices(&scope, &signal).await else { return false };
-        self.gain_stage(&devices).is_some_and(|(_, _, _, limited)| limited)
+        devices.last().is_some_and(verified_plugin_limiter) || self.gain_stage(&devices).is_some_and(|(_, _, _, limited)| limited)
     }
     async fn chain(&self, track: Option<&str>) -> Result<Vec<Placed>, String> {
         let signal = self.cleanup_signal();
@@ -2513,6 +2524,35 @@ impl<S: RefScheme + 'static> KernelTool for ListeningTool<S> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn only_an_enabled_vst3_limiter_identity_satisfies_the_existing_chain() {
+        let mut device = super::DeviceRow {
+            reference: "fx1".into(),
+            name: "Producer name".into(),
+            own_name: "ignored".into(),
+            identity: "VST3: Ozone 12 Maximizer (iZotope)".into(),
+            on: true,
+            plugin: true,
+            instrument: false,
+            index: 0,
+            mixer: false,
+        };
+        assert!(super::verified_plugin_limiter(&device));
+        device.on = false;
+        assert!(!super::verified_plugin_limiter(&device));
+        device.on = true;
+        device.name = "Ozone 12 Maximizer".into();
+        device.identity = "VST3: Serum 2 (Xfer Records)".into();
+        assert!(!super::verified_plugin_limiter(&device));
+        device.identity = "VST3: Ozone 12 (iZotope)".into();
+        assert!(!super::verified_plugin_limiter(&device));
+        let catalog = kumi_library::plugins::formats::structure::builtin("ozone-12").unwrap();
+        let id = &catalog.info.ids.vst3.iter().find(|id| id.name == "Ozone 12 Maximizer").unwrap().id;
+        device.identity = format!("Audio/Effects/VST3/{id}");
+        assert!(super::verified_plugin_limiter(&device));
+        device.identity = "VST: Ozone 12 Maximizer (iZotope)".into();
+        assert!(!super::verified_plugin_limiter(&device));
+    }
     use super::*;
 
     fn knob(name: &str, raw: f64) -> DeviceKnob {

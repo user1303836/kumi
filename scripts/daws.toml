@@ -28,6 +28,7 @@ library = { crate = "daws/reaper/reaper-kumi", entry = "ReaperPluginEntry" }
 # the doctor, installing) is Kumi's alone.
 loads = [
   "daws/reaper/reaper-kumi/",
+  "crates/kumi-common/",
   "daws/own/daw-bridge/Cargo.toml",
   "daws/own/daw-bridge/src/lib.rs",
   "daws/own/daw-bridge/src/auth.rs",
@@ -38,8 +39,8 @@ loads = [
   "daws/own/daw-bridge/src/handshake.rs",
   "daws/own/daw-bridge/src/loopback.rs",
   "daws/own/daw-bridge/src/owner.rs",
-  "daws/own/daw-bridge/src/vst3.rs",
   "daws/own/daw-bridge/src/paths.rs",
+  "daws/own/daw-bridge/src/vst3.rs",
   "daws/own/daw-bridge/src/wire.rs",
 ]
 

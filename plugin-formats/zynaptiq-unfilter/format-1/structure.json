@@ -26,7 +26,8 @@
     "presetVersions": [
       "4"
     ],
-    "source": "Installed native preset files and shipped parameter-name metadata; no factory preset bodies copied."
+    "source": "Installed native preset files and shipped parameter-name metadata; no factory preset bodies copied.",
+    "verification": "Native documents inspected; installed-binary version and runtime acceptance remain unverified."
   },
   "fields": {
     "@progName": {
@@ -35,7 +36,7 @@
         "preset",
         "state"
       ],
-      "status": "verified"
+      "status": "guessed"
     },
     "inputParams/@p0": {
       "type": "float",
@@ -47,7 +48,7 @@
         0.0,
         0.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "bypass"
     },
     "inputParams/@p1": {
@@ -60,7 +61,7 @@
         0.0,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "learn"
     },
     "inputParams/@p2": {
@@ -73,7 +74,7 @@
         0.0,
         0.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "reset"
     },
     "inputParams/@p3": {
@@ -86,7 +87,7 @@
         0.0,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "inharmicMode"
     },
     "inputParams/@p4": {
@@ -99,7 +100,7 @@
         0.0,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "learnslider"
     },
     "inputParams/@p5": {
@@ -112,7 +113,7 @@
         0.0,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "learnRate"
     },
     "inputParams/@p6": {
@@ -125,7 +126,7 @@
         -1.0,
         0.78125
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "intensity"
     },
     "inputParams/@p7": {
@@ -138,7 +139,7 @@
         0.0,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "weighting"
     },
     "inputParams/@p8": {
@@ -151,7 +152,7 @@
         0.0546875,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "f_resolution"
     },
     "inputParams/@p9": {
@@ -164,7 +165,7 @@
         0.0,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "f_smoothing"
     },
     "inputParams/@p10": {
@@ -177,7 +178,7 @@
         -12.0,
         7.5
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "gain"
     },
     "inputParams/@p11": {
@@ -190,7 +191,7 @@
         0.0,
         200.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "hpfCutOff"
     },
     "inputParams/@p12": {
@@ -203,7 +204,7 @@
         0.0,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "limit"
     },
     "inputParams/@p13": {
@@ -216,7 +217,7 @@
         0.0,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "link"
     },
     "inputParams/@p14": {
@@ -229,7 +230,7 @@
         0.0,
         3.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "curveSelector"
     },
     "inputParams/@p15": {
@@ -242,7 +243,7 @@
         0.0,
         2.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "curveTarget"
     },
     "inputParams/@p16": {
@@ -255,7 +256,7 @@
         -3.559322033898308,
         3.2542372881355917
       ],
-      "status": "verified"
+      "status": "guessed"
     },
     "inputParams/@p17": {
       "type": "float",
@@ -267,7 +268,7 @@
         -2.338983050847458,
         3.1525423728813564
       ],
-      "status": "verified"
+      "status": "guessed"
     },
     "inputParams/@p18": {
       "type": "float",
@@ -279,7 +280,7 @@
         0.0,
         2.5423728813559325
       ],
-      "status": "verified"
+      "status": "guessed"
     },
     "inputParams/@p19": {
       "type": "float",
@@ -291,7 +292,7 @@
         0.0,
         1.8305084745762716
       ],
-      "status": "verified"
+      "status": "guessed"
     },
     "inputParams/@p20": {
       "type": "float",
@@ -303,7 +304,7 @@
         0.0,
         1.2203389830508469
       ],
-      "status": "verified"
+      "status": "guessed"
     },
     "inputParams/@p21": {
       "type": "float",
@@ -315,7 +316,7 @@
         0.0,
         0.20338983050847403
       ],
-      "status": "verified"
+      "status": "guessed"
     },
     "inputParams/@p22": {
       "type": "float",
@@ -327,7 +328,7 @@
         0.0,
         0.0
       ],
-      "status": "verified"
+      "status": "guessed"
     },
     "inputParams/@p23": {
       "type": "float",
@@ -339,7 +340,7 @@
         0.0,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "inharmonicMonitor"
     }
   },

@@ -13,14 +13,14 @@ local function class_id(data)
   if type(data) ~= "string" or #data < 64 or #data > MAX or #data % 4 ~= 0 or data:find("[^A-Za-z0-9+/=]") then
     base.bad("vst3Data must be a bounded base64 VST3 preset checked by Kumi's host")
   end
-  local head = {}
+  local parts = {}
   for n = 1, 64, 4 do
     local a, b, c, d = digits[data:sub(n,n)], digits[data:sub(n+1,n+1)], digits[data:sub(n+2,n+2)], digits[data:sub(n+3,n+3)]
     if not a or not b or not c or not d then base.bad("invalid VST3 preset header") end
     local value = a * 262144 + b * 4096 + c * 64 + d
-    head[#head+1] = string.char(math.floor(value / 65536), math.floor(value / 256) % 256, value % 256)
+    parts[#parts+1] = string.char(math.floor(value / 65536), math.floor(value / 256) % 256, value % 256)
   end
-  head = table.concat(head)
+  local head = table.concat(parts)
   local id = head:sub(9, 40)
   if head:sub(1,8) ~= "VST3\1\0\0\0" or #id ~= 32 or id:find("[^0-9a-fA-F]") then base.bad("invalid VST3 preset header or class ID") end
   return id:upper()

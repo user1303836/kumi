@@ -1,0 +1,25 @@
+{
+  "plugin": "valhalla-plate",
+  "version": "1.6.3",
+  "binarySha256": "c40f39065c9b4666f28b2f5ca8c2aea32b5d0e459a3b8d5fb264200f63a7562c",
+  "method": "Restore the initial component, set one public VST3 parameter, capture its XML value, then reload only that field into the initial component. Saved value and host readback must match at both normalized endpoints and 0.25. Bounds are supported intervals in this product version; no survey extrema are used. Raw XML and mappings without this proof remain read-only.",
+  "points": [
+    0,
+    1,
+    0.25
+  ],
+  "fields": {
+    "parameters/Mix": {"parameterId":48,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/PreDelay": {"parameterId":49,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/Decay": {"parameterId":50,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/Size": {"parameterId":51,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/Width": {"parameterId":52,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/ModRate": {"parameterId":53,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/ModDepth": {"parameterId":54,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/LowEQFreq": {"parameterId":55,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/LowEQGain": {"parameterId":56,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/HighEQFreq": {"parameterId":57,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/HighEQGain": {"parameterId":1567,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/Type": {"parameterId":1568,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]}
+  }
+}

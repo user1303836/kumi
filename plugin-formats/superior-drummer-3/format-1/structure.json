@@ -26,7 +26,7 @@
         "preset",
         "state"
       ],
-      "status": "verified"
+      "status": "guessed"
     },
     "SAMPLER[0]/HQ[0]/mastervol[0]": {
       "type": "float",
@@ -36,7 +36,13 @@
       ],
       "default": 1,
       "status": "verified",
-      "about": "Sampler master volume (linear gain)."
+      "about": "Sampler master volume. Kumi supports attenuation only: 0..1 is its supported write interval, not a claim about the full UI range. Native restore/readback confirmed both endpoints and 0.25/0.5 intermediate values.",
+      "unit": "linear gain",
+      "range": [
+        0.0,
+        1.0
+      ],
+      "range_status": "verified"
     },
     "SAMPLER[0]/HQ[0]/mastervol2[0]": {
       "type": "float",
@@ -45,7 +51,7 @@
         "state"
       ],
       "default": 1,
-      "status": "verified",
+      "status": "guessed",
       "about": "Secondary sampler master volume (linear gain)."
     }
   },

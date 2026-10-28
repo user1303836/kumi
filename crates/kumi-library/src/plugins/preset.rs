@@ -44,6 +44,10 @@ pub fn create(plugin: &str, options: &WriteOptions, edits: &[Edit]) -> Result<Vs
     let format = known(plugin)?;
     writable(format, &options.version)?;
     let class = class_id(format, options.class_id.as_deref(), None)?;
+    if family(format) == "serum-2" {
+        let preset = serum2::SerumPreset::init(options.name.as_deref().unwrap_or("Kumi Init"))?;
+        return edit(plugin, &preset.file.write()?, options, edits);
+    }
     let initial = initial(format, &class)?;
     edit(plugin, &initial.write(), options, edits)
 }
@@ -99,6 +103,8 @@ pub fn edit(plugin: &str, input: &[u8], options: &WriteOptions, edits: &[Edit]) 
                 retain_unknown_xfer(&old.processor, &mut edited.processor)?;
                 if let (Some(old), Some(new)) = (&old.controller, &mut edited.controller) {
                     retain_unknown_xfer(old, new)?;
+                } else if old.controller.is_none() {
+                    edited.controller = None;
                 }
             }
             check_serum_state(&edited, &options.version)?;
@@ -537,14 +543,30 @@ fn replace_chunk(preset: &mut VstPreset, id: &str, data: Vec<u8>) {
 }
 
 fn check_range(format: &PluginFormat, edit: &Edit) -> Result<(), FormatError> {
-    if let (Some(value), Some([low, high])) =
-        (edit.value.as_f64(), format.structure.field(edit.path.trim_start_matches('/')).and_then(|field| field.range))
-    {
-        if !value.is_finite() || value < low || value > high {
-            return Err(error(&format!("{} must be between {low} and {high}", edit.path)));
+    let path = edit.path.trim_start_matches('/');
+    let canonical = if let Some(rest) = path.strip_prefix("presets/") {
+        rest.split_once('/').map(|(_, field)| format!("presets[]/{field}")).unwrap_or_else(|| path.into())
+    } else {
+        path.into()
+    };
+    fn check(format: &PluginFormat, path: &str, value: &Value) -> Result<(), FormatError> {
+        match value {
+            Value::Number(value) => {
+                structure::validate_number(&format.info.plugin, path, value.as_f64().ok_or_else(|| error("numeric value is not finite"))?)
+            }
+            Value::Bool(value) if format.structure.field(path).is_none_or(|field| field.kind != "bool") => {
+                structure::validate_number(&format.info.plugin, path, u8::from(*value) as f64)
+            }
+            Value::Array(values) => {
+                for value in values {
+                    check(format, path, value)?;
+                }
+                Ok(())
+            }
+            _ => Ok(()),
         }
     }
-    Ok(())
+    check(format, &canonical, &edit.value)
 }
 
 fn check_name(name: &str) -> Result<(), FormatError> {
@@ -605,12 +627,21 @@ fn check_serum_file(file: &serum2::XferFile, version: &str) -> Result<(), Format
 }
 
 fn retain_unknown_xfer(original: &serum2::XferFile, edited: &mut serum2::XferFile) -> Result<(), FormatError> {
+    // Re-splitting a merged preset must not move controller-only (including
+    // unknown future) sections into the processor, or fabricate another half.
+    if let cbor::Value::Map(fields, _) = &mut edited.body {
+        fields.retain(|(key, _)| key.as_str().is_some_and(|key| original.body.get(key).is_some()));
+    }
     let mut body = original.body.clone();
     overlay(&mut body, &edited.body);
     edited.body = body;
     let mut header = original.header_json()?;
     if let (Some(old), Some(new)) = (header.as_object_mut(), edited.header_json()?.as_object()) {
-        old.extend(new.clone());
+        for (key, value) in new {
+            if old.contains_key(key) {
+                old.insert(key.clone(), value.clone());
+            }
+        }
     }
     edited.header = serde_json::to_vec(&header).map_err(|e| error(&e.to_string()))?;
     Ok(())

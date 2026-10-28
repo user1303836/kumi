@@ -118,6 +118,10 @@ fn batches_refuse_unknown_fields_and_invalid_parameter_values() {
     )
     .is_err());
     assert!(preset::edit("valhalla-delay", initial, &opts, &[change("parameters/Mix", json!(1.1))]).is_err());
+    let serum = options("serum-2");
+    assert!(preset::create("serum-2", &serum, &[change("Oscillator1/plainParams/kParamEnable", json!(0.5))]).is_err());
+    assert!(preset::create("serum-2", &serum, &[change("Oscillator1/plainParams/kParamCoarsePit", json!(65))]).is_err());
+    assert!(preset::create("serum-2", &serum, &[change("Oscillator3/plainParams/kParamCoarsePit", json!(12))]).is_err());
     assert_eq!(initial, original);
     let mut invalid_name = opts;
     invalid_name.name = Some("a\nb".into());
@@ -168,6 +172,46 @@ fn serum_state_edits_keep_unknown_processor_and_controller_data_and_check_hashes
     let hash = data.windows(8).position(|w| w == b"\"hash\":\"").unwrap() + 8;
     data[hash] = if data[hash] == b'0' { b'1' } else { b'0' };
     assert!(preset::edit("serum-2", &corrupted.write(), &opts, &[]).is_err());
+}
+
+#[test]
+fn serum_creation_clears_the_path_and_one_edit_preserves_each_state_halfs_keys() {
+    let opts = options("serum-2");
+    let created = preset::create("serum-2", &opts, &[]).unwrap();
+    let fresh = serum2::SerumState::read(created.component().unwrap(), created.controller()).unwrap();
+    assert_eq!(fresh.controller.as_ref().unwrap().body.get("selectedPresetPath").and_then(cbor::Value::as_str), Some(""));
+    for key in ["selectedPresetPath", "presetComment", "presetHasBeenEdited"] {
+        assert!(fresh.processor.body.get(key).is_none(), "controller key leaked: {key}");
+    }
+    let mut container = VstPreset::read(templates::initial("serum-2").unwrap()).unwrap();
+    let mut old = serum2::SerumState::read(container.component().unwrap(), container.controller()).unwrap();
+    put(&mut old.processor.body, "futureProcessor", cbor::Value::text("processor only"));
+    put(&mut old.controller.as_mut().unwrap().body, "futureController", cbor::Value::text("controller only"));
+    // Use an artificial source location: edits must preserve it, new files must not.
+    let cbor::Value::Map(entries, _) = &mut old.controller.as_mut().unwrap().body else { panic!("map expected") };
+    let path = entries.iter_mut().find(|(key, _)| key.as_str() == Some("selectedPresetPath")).unwrap();
+    path.1 = cbor::Value::text("/synthetic/preset-location.SerumPreset");
+    for (id, bytes) in &mut container.chunks {
+        if id == "Comp" {
+            *bytes = old.processor.write().unwrap();
+        }
+        if id == "Cont" {
+            *bytes = old.controller.as_ref().unwrap().write().unwrap();
+        }
+    }
+    let edited =
+        preset::edit("serum-2", &container.write(), &opts, &[change("Oscillator1/plainParams/kParamVolume", json!(0.45))]).unwrap();
+    let new = serum2::SerumState::read(edited.component().unwrap(), edited.controller()).unwrap();
+    let keys = |file: &serum2::XferFile| file.body.entries().map(|(key, _)| key.to_owned()).collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(keys(&old.processor), keys(&new.processor));
+    assert_eq!(keys(old.controller.as_ref().unwrap()), keys(new.controller.as_ref().unwrap()));
+    assert!(new.processor.body.get("futureController").is_none());
+    assert!(new.controller.as_ref().unwrap().body.get("futureProcessor").is_none());
+    assert_eq!(
+        new.controller.as_ref().unwrap().body.get("selectedPresetPath"),
+        old.controller.as_ref().unwrap().body.get("selectedPresetPath")
+    );
+    assert_eq!(new.processor.body.at("Oscillator1/plainParams/kParamVolume").and_then(cbor::Value::as_f64), Some(0.45));
 }
 
 #[test]
@@ -318,20 +362,22 @@ fn native_zynaptiq_actions_preserve_context_without_claiming_vst3_identity() {
     let input = format!(
         "<Preset version=\"4\" progName=\"Synthetic\"><inputParams count=\"{count}\" {parameters}/><Unknown value=\"preserve\"/></Preset>"
     );
-    let edits = [change("inputParams/@p1", json!(0.4))];
-    let output = preset::create_native_from_template(plugin, input.as_bytes(), 0, "A wider preset", &edits).unwrap();
+    // This product's native grammar is known, but no numeric control has a
+    // verified host interval. Naming a copy does not enable speculative edits.
+    assert!(preset::edit_native(plugin, input.as_bytes(), None, &[change("inputParams/@p1", json!(0.4))]).is_err());
+    let output = preset::create_native_from_template(plugin, input.as_bytes(), 0, "A wider preset", &[]).unwrap();
     assert!(!output.runtime_verified);
     assert_eq!(output.extension, ".preset");
     assert!(output.source_version.is_none());
     assert!(output.identity_note.contains("does not identify its product"));
     let decoded = zynaptiq::Preset::read(&output.bytes).unwrap();
-    assert_eq!(decoded.parameter(1), Some(0.4));
+    assert_eq!(decoded.parameter(1), Some(0.25));
     assert_eq!(decoded.document.root.attribute("progName"), Some("A wider preset"));
     assert_eq!(decoded.document.root.child("Unknown").unwrap().attribute("value"), Some("preserve"));
     let inspected = preset::inspect_fields(plugin, &output.bytes, None, Some("inputParams/@p1"), 1).unwrap();
     assert!(inspected["classId"].is_null());
     assert_eq!(inspected["fields"][0]["path"], "inputParams/@p1");
-    assert_eq!(inspected["fields"][0]["value"], 0.4);
+    assert_eq!(inspected["fields"][0]["value"], 0.25);
     assert!(preset::create_native_from_template(plugin, input.as_bytes(), 1, "Wrong index", &[]).is_err());
     assert!(preset::edit_native(plugin, input.replace("version=\"4\"", "version=\"3\"").as_bytes(), None, &[]).is_err());
     assert!(preset::edit_native(plugin, input.as_bytes(), None, &[change(&format!("inputParams/@p{count}"), json!(1))]).is_err());

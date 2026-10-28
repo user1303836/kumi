@@ -266,6 +266,7 @@ HISTORY の行がないもの：`play`、`stop`、`set_cursor`、`save_project`�
 | `modset_add`, `modset_delete`, `modset_set`, `modset_load`, `moddevice_add`, `moddevice_delete`, `moddevice_move`, `moddevice_set`, `moddevice_param`, `chain_add`, `chain_delete`, `chain_set`, `chaindevice_add`, `chaindevice_delete`, `chaindevice_move`, `chaindevice_bypass`, `chaindevice_param` | モジュレーションセットとそのデバイス（.xrno ファイルからの読み込みも）。サンプル FX チェーンとそのデバイス |
 | `phrase_add`, `phrase_delete`, `phrase_set`, `phrase_map`, `phrase_playback`, `phrase_write`, `phrase_clear`, `phrase_script`, `phrase_render`, `phrase_load` | フレーズの追加、削除、設定、キーへの割り当て、インストゥルメントでの鳴らし方。行の書き込みとクリア。フレーズスクリプトの書き込みとレンダリング。フレーズファイル（.xrnz）の読み込み |
 | `plugin_load`, `plugin_param`, `plugin_preset`, `plugin_set`, `plugin_suspend`, `midi_set` | プラグインインストゥルメントの読み込み、パラメーター、プログラム、設定、自動サスペンド。MIDI インストゥルメントの出力 |
+| `plugin_preset_data` | VST3 インストゥルメントのプリセットファイルを対応するプラグインに読み込み。Kumi は取り消し用に変更前の完全な状態を保持 |
 | `scratch_keep`, `run_lua` | ゴールの最良のスクラッチコピーを残す。renoise API 全体を使う Lua（戻せるのは Renoise の取り消しだけ） |
 
 HISTORY の行がないもの：`play`、`stop`、`audition_note`（ノートを鳴らして聴かせる）、`select`（Renoise で何かを表示する）、`plugin_editor`、`save_song`、`save_instrument`、`save_device_preset`。`renoise_read` はソングを読みます。トラック、パターンシーケンス、パターンとその行、オートメーション、インストゥルメント、サンプル、フレーズ、デバイスとパラメーター、モジュレーションセット、サンプル FX チェーンです。

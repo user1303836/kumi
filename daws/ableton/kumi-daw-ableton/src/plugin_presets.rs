@@ -1,6 +1,7 @@
 //! Put a complete VST3 preset in Live's User Library. `load_device` then performs the normal
 //! preview/apply/history/undo transaction; preparing a file itself changes no Live device.
 
+use kumi_common::path::network_or_device;
 use kumi_library::plugins::formats::{structure, vstpreset::VstPreset, MAX_DECODED_BYTES};
 use sha2::{Digest, Sha256};
 use std::{
@@ -8,6 +9,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
+#[derive(Debug)]
 pub struct PreparedPreset {
     pub file: PathBuf,
     pub item: String,
@@ -21,6 +23,12 @@ pub fn prepare(input: &Path, library: &Path, name: &str) -> Result<PreparedPrese
     if !input.is_absolute() || !library.is_absolute() {
         return Err("Preset and User Library paths must be absolute".into());
     }
+    if network_or_device(&input.to_string_lossy()) || network_or_device(&library.to_string_lossy()) {
+        return Err("Use local preset and User Library paths; network and device paths are not supported".into());
+    }
+    if !library.is_dir() {
+        return Err("Live's configured User Library is missing. Open Live, check its Library location, then restart Kumi.".into());
+    }
     if !input.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("vstpreset")) {
         return Err("Give a .vstpreset produced by vst3 create/edit".into());
     }
@@ -31,14 +39,24 @@ pub fn prepare(input: &Path, library: &Path, name: &str) -> Result<PreparedPrese
     {
         return Err("Preset name must be 1–64 characters without filename separators or control characters".into());
     }
-    let source = std::fs::File::open(input).map_err(|e| e.to_string())?;
+    if !std::fs::metadata(input).map_err(|e| e.to_string())?.is_file() {
+        return Err("Preset input must be a regular file".into());
+    }
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NONBLOCK | libc::O_NOFOLLOW);
+    }
+    let source = options.open(input).map_err(|e| e.to_string())?;
     if !source.metadata().map_err(|e| e.to_string())?.is_file() {
         return Err("Preset input must be a regular file".into());
     }
     let mut bytes = Vec::new();
     source.take(MAX_DECODED_BYTES as u64 + 1).read_to_end(&mut bytes).map_err(|e| e.to_string())?;
     if bytes.len() > MAX_DECODED_BYTES {
-        return Err("VST3 preset exceeds 64 MiB".into());
+        return Err("VST3 preset exceeds the supported size limit".into());
     }
     let preset = VstPreset::read(&bytes).map_err(|e| e.to_string())?;
     if preset.version != 1 {
@@ -57,7 +75,8 @@ pub fn prepare(input: &Path, library: &Path, name: &str) -> Result<PreparedPrese
     let digest = hex::encode(Sha256::digest(&bytes));
     let label = format!("{name} {}", &digest[..12]);
     let directory = library.join("Kumi").join(folder);
-    std::fs::create_dir_all(&directory).map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(&directory)
+        .map_err(|e| format!("Kumi couldn't write Live's User Library; check its location and folder permissions: {e}"))?;
     let file = directory.join(format!("{label}.vstpreset"));
     match std::fs::OpenOptions::new().write(true).create_new(true).open(&file) {
         Ok(mut out) => {
@@ -69,11 +88,22 @@ pub fn prepare(input: &Path, library: &Path, name: &str) -> Result<PreparedPrese
         }
         Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
             // A concurrent copy or a repeated request is safe only if its bytes are still ours.
-            if std::fs::read(&file).map_err(|e| e.to_string())? != bytes {
+            let metadata = std::fs::symlink_metadata(&file).map_err(|e| e.to_string())?;
+            if !metadata.is_file() || metadata.len() != bytes.len() as u64 {
+                return Err("Preset destination already exists with different bytes".into());
+            }
+            let mut existing = Vec::new();
+            options
+                .open(&file)
+                .map_err(|e| e.to_string())?
+                .take(bytes.len() as u64 + 1)
+                .read_to_end(&mut existing)
+                .map_err(|e| e.to_string())?;
+            if existing != bytes {
                 return Err("Preset destination already exists with different bytes".into());
             }
         }
-        Err(e) => return Err(e.to_string()),
+        Err(e) => return Err(format!("Kumi couldn't write Live's User Library; check its folder permissions: {e}")),
     }
     Ok(PreparedPreset {
         file,
@@ -101,5 +131,8 @@ mod tests {
         std::fs::write(&made.file, b"someone else's preset").unwrap();
         assert!(prepare(&source, temp.path(), "Kumi synth").is_err());
         assert!(prepare(&source, temp.path(), "../escape").is_err());
+        assert!(prepare(&source, &temp.path().join("missing"), "valid").unwrap_err().contains("Library is missing"));
+        assert!(!temp.path().join("missing").exists());
+        assert!(prepare(Path::new("//host/share/test.vstpreset"), temp.path(), "valid").is_err());
     }
 }

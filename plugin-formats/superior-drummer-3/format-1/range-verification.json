@@ -1,0 +1,20 @@
+{
+  "checked": "2026-10-27",
+  "platform": "Windows x64",
+  "version": "3.4.1",
+  "method": "Attenuation-only supported write interval. Inserted each endpoint into native VST3 component state and confirmed plugin-reserialized mastervol. Full UI range is unknown.",
+  "controls": [
+    {
+      "path": "SAMPLER[0]/HQ[0]/mastervol[0]",
+      "requested": 0,
+      "readback": 0.0,
+      "passed": true
+    },
+    {
+      "path": "SAMPLER[0]/HQ[0]/mastervol[0]",
+      "requested": 1,
+      "readback": 1.0,
+      "passed": true
+    }
+  ]
+}

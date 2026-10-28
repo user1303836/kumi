@@ -44,6 +44,13 @@ fn zynaptiq_rejects_bad_lengths_unknown_parameters_and_nonfinite_numbers() {
     assert!(zynaptiq::Preset::read(b"<!DOCTYPE Preset><Preset version=\"4\"/>").is_err());
     assert!(zynaptiq::Preset::read(b"<Preset version=\"4\"><inputParams count=\"0\"/><inputParams count=\"0\"/></Preset>").is_err());
     assert!(zynaptiq::Preset::read(b"<Preset version=\"4\"><inputParams count=\"0\" count=\"1\"/></Preset>").is_err());
+    let excessive = b"<Preset version=\"4\"><inputParams count=\"1000000\" p0=\"0\"/></Preset>";
+    assert!(zynaptiq::Preset::read(excessive).unwrap_err().to_string().contains("too many parameters"));
+    assert!(zynaptiq::Preset::read(b"<Preset version=\"4\"><inputParams count=\"2\" p0=\"0\" p01=\"0\"/></Preset>").is_err());
+    assert!(zynaptiq::Preset::read(
+        b"<Preset version=\"4\"><!-- <inputParams count='9999999'/> --><inputParams count=\"1\" p0=\"0\"/></Preset>"
+    )
+    .is_ok());
 }
 
 #[test]
@@ -145,7 +152,7 @@ fn superior_record_edits_preserve_other_sections_and_escape_strings() {
 
 #[test]
 fn superior_section_arguments_and_quoted_braces_keep_their_types() {
-    let bytes = b"PlugVersion 3.4.1\nSAMPLER {\ninstbox 12 \"Kick { 2 }\" {\nname \"123\"\nlevel 1\n}\n}\n";
+    let bytes = b"PlugVersion 3.4.1\nSAMPLER {\ninstbox 12 \"Kick { 2 }\" {\nname \"123\"\nlevel 1\nmode kick\n}\n}\n";
     let mut preset = superior_drummer::Preset::read(bytes).unwrap();
     assert_eq!(
         preset.to_node().get("SAMPLER[0]/instbox[0]/$args"),
@@ -156,10 +163,14 @@ fn superior_section_arguments_and_quoted_braces_keep_their_types() {
     assert!(preset.set("SAMPLER[0]/instbox[0]/$args", &json!(["15", "Snare"])).is_err());
     assert!(preset.set("SAMPLER[0]/instbox[0]/name[0]", &json!(123)).is_err());
     assert!(preset.set("SAMPLER[0]/instbox[0]/level[0]", &json!("1")).is_err());
+    preset.set("SAMPLER[0]/instbox[0]/mode[0]", &json!("snare")).unwrap();
+    assert!(preset.set("SAMPLER[0]/instbox[0]/mode[0]", &json!("two tokens")).is_err());
+    assert!(preset.set("SAMPLER[0]/instbox[0]/mode[0]", &json!("123")).is_err());
     let reread = superior_drummer::Preset::read(&preset.write()).unwrap();
     assert_eq!(
         reread.to_node().get("SAMPLER[0]/instbox[0]/$args"),
         Some(&Node::List(vec![Node::Float(15.0), Node::Text("Snare { main }".into())]))
     );
     assert!(String::from_utf8(preset.write()).unwrap().contains("name \"123\"\nlevel 1\n"));
+    assert!(String::from_utf8(preset.write()).unwrap().contains("mode snare\n"));
 }

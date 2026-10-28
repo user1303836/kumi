@@ -1,0 +1,385 @@
+{
+  "checked": "2026-10-27",
+  "platform": "Windows x64",
+  "method": "Public VST3 normalized-to-plain endpoint ranges and step counts; each serialized parameter changed separately through the host API, then each endpoint independently restored from component state and read back.",
+  "controls": [
+    {
+      "plugin": "zynaptiq-unmix-drums",
+      "path": "inputParams/@p0",
+      "parameterId": 0,
+      "name": "Bypass",
+      "unit": "",
+      "steps": 1,
+      "range": [
+        0.0,
+        1.0
+      ],
+      "normalized": 1.0,
+      "expectedPlain": 1.0,
+      "readback": 1.0,
+      "passed": true,
+      "nativeEndpointsVerified": true,
+      "nativeEndpointReadbacks": [
+        0.0,
+        1.0
+      ]
+    },
+    {
+      "plugin": "zynaptiq-unmix-drums",
+      "path": "inputParams/@p1",
+      "parameterId": 1,
+      "name": "DRUM LEVEL",
+      "unit": "",
+      "steps": 0,
+      "range": [
+        0.0,
+        1.0
+      ],
+      "normalized": 0.25,
+      "expectedPlain": 0.25,
+      "readback": 0.25,
+      "passed": true,
+      "nativeEndpointsVerified": true,
+      "nativeEndpointReadbacks": [
+        0.0,
+        1.0
+      ]
+    },
+    {
+      "plugin": "zynaptiq-unmix-drums",
+      "path": "inputParams/@p2",
+      "parameterId": 2,
+      "name": "ATTACK",
+      "unit": "",
+      "steps": 0,
+      "range": [
+        0.0,
+        1.0
+      ],
+      "normalized": 0.75,
+      "expectedPlain": 0.75,
+      "readback": 0.75,
+      "passed": true,
+      "nativeEndpointsVerified": true,
+      "nativeEndpointReadbacks": [
+        0.0,
+        1.0
+      ]
+    },
+    {
+      "plugin": "zynaptiq-unmix-drums",
+      "path": "inputParams/@p3",
+      "parameterId": 3,
+      "name": "THRESHOLD",
+      "unit": "",
+      "steps": 0,
+      "range": [
+        0.0,
+        1.0
+      ],
+      "normalized": 0.25,
+      "expectedPlain": 0.25,
+      "readback": 0.25,
+      "passed": true,
+      "nativeEndpointsVerified": true,
+      "nativeEndpointReadbacks": [
+        0.0,
+        1.0
+      ]
+    },
+    {
+      "plugin": "zynaptiq-unmix-drums",
+      "path": "inputParams/@p4",
+      "parameterId": 4,
+      "name": "DETECTION DENSITY",
+      "unit": "%",
+      "steps": 0,
+      "range": [
+        0.0,
+        100.0
+      ],
+      "normalized": 0.25,
+      "expectedPlain": 25.0,
+      "readback": 25.0,
+      "passed": true,
+      "nativeEndpointsVerified": true,
+      "nativeEndpointReadbacks": [
+        0.0,
+        100.0
+      ]
+    },
+    {
+      "plugin": "zynaptiq-unmix-drums",
+      "path": "inputParams/@p5",
+      "parameterId": 5,
+      "name": "MAX CUT",
+      "unit": "",
+      "steps": 0,
+      "range": [
+        0.0,
+        1.0
+      ],
+      "normalized": 0.25,
+      "expectedPlain": 0.25,
+      "readback": 0.25,
+      "passed": true,
+      "nativeEndpointsVerified": true,
+      "nativeEndpointReadbacks": [
+        0.0,
+        1.0
+      ]
+    },
+    {
+      "plugin": "zynaptiq-unmix-drums",
+      "path": "inputParams/@p6",
+      "parameterId": 6,
+      "name": "RELEASE",
+      "unit": "",
+      "steps": 0,
+      "range": [
+        0.0,
+        1.0
+      ],
+      "normalized": 0.25,
+      "expectedPlain": 0.25,
+      "readback": 0.25,
+      "passed": true,
+      "nativeEndpointsVerified": true,
+      "nativeEndpointReadbacks": [
+        0.0,
+        1.0
+      ]
+    },
+    {
+      "plugin": "zynaptiq-unmix-drums",
+      "path": "inputParams/@p7",
+      "parameterId": 7,
+      "name": "UNMIX FEATHER",
+      "unit": "",
+      "steps": 0,
+      "range": [
+        0.0,
+        1.0
+      ],
+      "normalized": 0.25,
+      "expectedPlain": 0.25,
+      "readback": 0.25,
+      "passed": true,
+      "nativeEndpointsVerified": true,
+      "nativeEndpointReadbacks": [
+        0.0,
+        1.0
+      ]
+    },
+    {
+      "plugin": "zynaptiq-unmix-drums",
+      "path": "inputParams/@p8",
+      "parameterId": 8,
+      "name": "BASS SYNTH",
+      "unit": "",
+      "steps": 0,
+      "range": [
+        0.0,
+        1.0
+      ],
+      "normalized": 0.25,
+      "expectedPlain": 0.25,
+      "readback": 0.25,
+      "passed": true,
+      "nativeEndpointsVerified": true,
+      "nativeEndpointReadbacks": [
+        0.0,
+        1.0
+      ]
+    },
+    {
+      "plugin": "zynaptiq-unmix-drums",
+      "path": "inputParams/@p9",
+      "parameterId": 9,
+      "name": "LEVEL COMPENSATION",
+      "unit": "",
+      "steps": 1,
+      "range": [
+        0.0,
+        1.0
+      ],
+      "normalized": 0.0,
+      "expectedPlain": 0.0,
+      "readback": 0.0,
+      "passed": true,
+      "nativeEndpointsVerified": true,
+      "nativeEndpointReadbacks": [
+        0.0,
+        1.0
+      ]
+    },
+    {
+      "plugin": "zynaptiq-unmix-drums",
+      "path": "inputParams/@p10",
+      "parameterId": 10,
+      "name": "SIDE ONLY",
+      "unit": "",
+      "steps": 1,
+      "range": [
+        0.0,
+        1.0
+      ],
+      "normalized": 1.0,
+      "expectedPlain": 1.0,
+      "readback": 1.0,
+      "passed": true,
+      "nativeEndpointsVerified": true,
+      "nativeEndpointReadbacks": [
+        0.0,
+        1.0
+      ]
+    },
+    {
+      "plugin": "zynaptiq-unmix-drums",
+      "path": "inputParams/@p11",
+      "parameterId": 11,
+      "name": "LIMIT",
+      "unit": "",
+      "steps": 1,
+      "range": [
+        0.0,
+        1.0
+      ],
+      "normalized": 1.0,
+      "expectedPlain": 1.0,
+      "readback": 1.0,
+      "passed": true,
+      "nativeEndpointsVerified": true,
+      "nativeEndpointReadbacks": [
+        0.0,
+        1.0
+      ]
+    },
+    {
+      "plugin": "zynaptiq-unmix-drums",
+      "path": "inputParams/@p12",
+      "parameterId": 12,
+      "name": "THRESHOLD CURVE ON/OFF",
+      "unit": "",
+      "steps": 1,
+      "range": [
+        0.0,
+        1.0
+      ],
+      "normalized": 1.0,
+      "expectedPlain": 1.0,
+      "readback": 1.0,
+      "passed": true,
+      "nativeEndpointsVerified": true,
+      "nativeEndpointReadbacks": [
+        0.0,
+        1.0
+      ]
+    },
+    {
+      "plugin": "zynaptiq-unmix-drums",
+      "path": "inputParams/@p13",
+      "parameterId": 13,
+      "name": "DRUM LEVEL CURVE ON/OFF",
+      "unit": "",
+      "steps": 1,
+      "range": [
+        0.0,
+        1.0
+      ],
+      "normalized": 1.0,
+      "expectedPlain": 1.0,
+      "readback": 1.0,
+      "passed": true,
+      "nativeEndpointsVerified": true,
+      "nativeEndpointReadbacks": [
+        0.0,
+        1.0
+      ]
+    },
+    {
+      "plugin": "zynaptiq-unmix-drums",
+      "path": "inputParams/@p14",
+      "parameterId": 14,
+      "name": "RELEASE CURVE ON/OFF",
+      "unit": "",
+      "steps": 1,
+      "range": [
+        0.0,
+        1.0
+      ],
+      "normalized": 1.0,
+      "expectedPlain": 1.0,
+      "readback": 1.0,
+      "passed": true,
+      "nativeEndpointsVerified": true,
+      "nativeEndpointReadbacks": [
+        0.0,
+        1.0
+      ]
+    },
+    {
+      "plugin": "zynaptiq-unmix-drums",
+      "path": "inputParams/@p15",
+      "parameterId": 15,
+      "name": "GAIN",
+      "unit": "dB",
+      "steps": 0,
+      "range": [
+        -12.0,
+        12.0
+      ],
+      "normalized": 0.25,
+      "expectedPlain": -6.0,
+      "readback": -6.0,
+      "passed": true,
+      "nativeEndpointsVerified": true,
+      "nativeEndpointReadbacks": [
+        -12.0,
+        12.0
+      ]
+    },
+    {
+      "plugin": "zynaptiq-unmix-drums",
+      "path": "inputParams/@p16",
+      "parameterId": 16,
+      "name": "ALGORITHM",
+      "unit": "",
+      "steps": 1,
+      "range": [
+        0.0,
+        1.0
+      ],
+      "normalized": 0.0,
+      "expectedPlain": 0.0,
+      "readback": 0.0,
+      "passed": true,
+      "nativeEndpointsVerified": true,
+      "nativeEndpointReadbacks": [
+        0.0,
+        1.0
+      ]
+    },
+    {
+      "plugin": "zynaptiq-unmix-drums",
+      "path": "inputParams/@p17",
+      "parameterId": 17,
+      "name": "SOLO",
+      "unit": "",
+      "steps": 1,
+      "range": [
+        0.0,
+        1.0
+      ],
+      "normalized": 1.0,
+      "expectedPlain": 1.0,
+      "readback": 1.0,
+      "passed": true,
+      "nativeEndpointsVerified": true,
+      "nativeEndpointReadbacks": [
+        0.0,
+        1.0
+      ]
+    }
+  ]
+}

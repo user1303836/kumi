@@ -26,7 +26,8 @@
     "presetVersions": [
       "4"
     ],
-    "source": "Installed native preset files and shipped parameter-name metadata; no factory preset bodies copied."
+    "source": "Installed native preset files and shipped parameter-name metadata; no factory preset bodies copied.",
+    "verification": "Native documents inspected; installed-binary version and runtime acceptance remain unverified."
   },
   "fields": {
     "@progName": {
@@ -35,7 +36,7 @@
         "preset",
         "state"
       ],
-      "status": "verified"
+      "status": "guessed"
     },
     "inputParams/@p0": {
       "type": "float",
@@ -47,7 +48,7 @@
         0.0,
         0.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "bypass"
     },
     "inputParams/@p1": {
@@ -60,7 +61,7 @@
         33.0,
         100.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "kFxMix"
     },
     "inputParams/@p2": {
@@ -73,7 +74,7 @@
         0.0,
         0.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "kFxSolo"
     },
     "inputParams/@p3": {
@@ -86,7 +87,7 @@
         0.0,
         0.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "kOutputGain"
     },
     "inputParams/@p4": {
@@ -99,7 +100,7 @@
         0.0,
         0.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "kMono"
     },
     "inputParams/@p5": {
@@ -112,7 +113,7 @@
         0.0,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "kMonoMode"
     },
     "inputParams/@p6": {
@@ -125,7 +126,7 @@
         0.0,
         3.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "kAlgorithmMode"
     },
     "inputParams/@p7": {
@@ -138,7 +139,7 @@
         0.0,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "kWidth"
     },
     "inputParams/@p8": {
@@ -151,7 +152,7 @@
         0.0,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "kBiasMode"
     },
     "inputParams/@p9": {
@@ -164,7 +165,7 @@
         -0.25,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "kBias"
     },
     "inputParams/@p10": {
@@ -177,7 +178,7 @@
         0.0,
         16.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "kBiasCurvePreset"
     },
     "inputParams/@p11": {
@@ -190,7 +191,7 @@
         -1.0,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "kBand0"
     },
     "inputParams/@p12": {
@@ -203,7 +204,7 @@
         -1.0,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "kBand1"
     },
     "inputParams/@p13": {
@@ -216,7 +217,7 @@
         -1.0,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "kBand2"
     },
     "inputParams/@p14": {
@@ -229,7 +230,7 @@
         -0.4,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "kBand3"
     },
     "inputParams/@p15": {
@@ -242,7 +243,7 @@
         -1.0,
         0.6200000000000001
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "kBand4"
     },
     "inputParams/@p16": {
@@ -255,7 +256,7 @@
         -0.06999999999999995,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "kBand5"
     },
     "inputParams/@p17": {
@@ -268,7 +269,7 @@
         -1.0,
         0.7500000000000001
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "kBand6"
     },
     "inputParams/@p18": {
@@ -281,7 +282,7 @@
         -0.26,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "kBand7"
     },
     "inputParams/@p19": {
@@ -294,7 +295,7 @@
         -1.0,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "kBand8"
     },
     "inputParams/@p20": {
@@ -307,7 +308,7 @@
         1.0,
         2.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "kBiasBandWidth"
     },
     "inputParams/@p21": {
@@ -320,7 +321,7 @@
         0.0,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "kDecorrelate"
     },
     "inputParams/@p22": {
@@ -333,7 +334,7 @@
         0.0,
         0.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "kReserved0"
     },
     "inputParams/@p23": {
@@ -346,7 +347,7 @@
         0.0,
         0.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "kReserved1"
     }
   },

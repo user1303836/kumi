@@ -62,3 +62,59 @@ test("vst3 presets: a plug-in rejection restores the earlier complete state", fu
   I.failure(I.apply(peer, "plugin-preset-data", asked, "preset", preview.fence, epoch, layout), "failed")
   eq(mock.data.instruments[3].plugin.preset_data, xml(A), "a partially accepted state must be restored")
 end)
+
+test("vst3 presets: a clean instrument restore accepts normalized bytes while earlier edits remain fenced", function()
+  local peer = setup()
+  local record = I.change(peer, "plugin-preset-data", input(peer))
+  mock.data.instruments[3].plugin.normalize_preset_data = function(value) return (value:gsub("10,20", "30,40")) end
+  local restored = I.restore(peer, "plugin-preset-data", record)
+  ok(restored.result)
+  ok(restored.result.display.note:find("normalized", 1, true))
+  eq(mock.data.instruments[3].plugin.preset_data, (xml(A):gsub("10,20", "30,40")))
+end)
+
+local function effect_setup()
+  local H = T.harness
+  local env = H.setup({ song = { name = "VST3", mixer_device = true, tracks = {
+    { name = "Mastering", devices = { { name = "Synthetic effect", path = "Audio/Effects/VST3/" .. ID,
+      params = {}, presets = {}, preset_data = xml(A) } } },
+  }, send_tracks = 0, patterns = 1, pattern_lines = 16, instruments = 1 } })
+  local peer = H.connect(env)
+  H.frames(peer)
+  mock.data.undo.stack, mock.data.undo.redo = {}, {}
+  return peer, mock.data.tracks[1].devices[2]
+end
+local function effect_input(peer)
+  local epoch = I.place(peer)
+  return { ref = epoch .. ":device:1.2", vst3Data = B, presetName = "Created" }
+end
+
+test("vst3 presets: effects load and restore full state and fence later hidden edits", function()
+  local peer, device = effect_setup()
+  local record = I.change(peer, "device-preset-data", effect_input(peer))
+  eq(device.preset_data, xml(B))
+  device.preset_data = xml(B):gsub("</DeviceSlot>", "<Hidden>edited</Hidden></DeviceSlot>")
+  I.failure(I.restore(peer, "device-preset-data", record), "changed")
+  device.preset_data = xml(B)
+  ok(I.restore(peer, "device-preset-data", record).result)
+  eq(device.preset_data, xml(A))
+  local steps = I.steps()
+  ok(I.restore(peer, "device-preset-data", record).result)
+  eq(I.steps(), steps)
+end)
+
+test("vst3 presets: an effect partial load failure rolls back and clean normalized undo succeeds", function()
+  local peer, device = effect_setup()
+  local asked = effect_input(peer)
+  local preview, epoch, layout = I.preview(peer, "device-preset-data", asked)
+  device.reject_preset_data = xml(B)
+  I.failure(I.apply(peer, "device-preset-data", asked, "preset", preview.fence, epoch, layout), "failed")
+  eq(device.preset_data, xml(A))
+  device.reject_preset_data = nil
+  local record = I.change(peer, "device-preset-data", effect_input(peer))
+  device.normalize_preset_data = function(value) return (value:gsub("10,20", "30,40")) end
+  local restored = I.restore(peer, "device-preset-data", record)
+  ok(restored.result)
+  ok(restored.result.display.note:find("normalized", 1, true))
+  eq(device.preset_data, (xml(A):gsub("10,20", "30,40")))
+end)

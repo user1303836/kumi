@@ -18,6 +18,7 @@ path = "src/bin/daw-mcp-server.rs"
 
 [dependencies]
 daw-bridge.workspace = true
+kumi-common.workspace = true
 base64.workspace = true
 flate2.workspace = true
 serde.workspace = true

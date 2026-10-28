@@ -1,0 +1,24 @@
+{
+  "plugin": "minimal-hybrid-filter",
+  "version": "1.5.0",
+  "binarySha256": "e360e3eaf8325b9c96cf5c6b41f67bc78338d1fda14815fbfa0a990cf2ce8378",
+  "method": "Restore the initial component, set one public VST3 parameter, capture its XML value, then reload only that field into the initial component. Saved value and host readback must match at both normalized endpoints and 0.25. Bounds are supported intervals in this product version; no survey extrema are used. Raw XML and mappings without this proof remain read-only.",
+  "points": [
+    0,
+    1,
+    0.25
+  ],
+  "fields": {
+    "parameters/MKUHybridFilterNode_Main_InputGain": {"parameterId":182091925,"stored":[-60.0,12.0,-42.0],"readback":[0.0,1.0,0.25]},
+    "parameters/MKUHybridFilterNode_Main_OutputGain": {"parameterId":859166580,"stored":[-60.0,12.0,-42.0],"readback":[0.0,1.0,0.25]},
+    "parameters/MKUHybridFilterNode_Main_DryWet": {"parameterId":237869839,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/MKUHybridFilterNode_Main_Cutoff": {"parameterId":211885377,"stored":[20.0,20000.0,112.46826171875],"readback":[0.0,1.0,0.25]},
+    "parameters/MKUHybridFilterNode_Main_NormResonance": {"parameterId":393499678,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/MKUHybridFilterNode_Main_Spread": {"parameterId":665264839,"stored":[-1.0,1.0,-0.5],"readback":[0.0,1.0,0.25]},
+    "parameters/MKUHybridFilterNode_Main_Morph": {"parameterId":154436916,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/MKUHybridFilterNode_Main_AmpMod": {"parameterId":147087346,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/MKUHybridFilterNode_Main_LowCrossoverFreq": {"parameterId":929022732,"stored":[20.0,20000.0,112.46826171875],"readback":[0.0,1.0,0.25]},
+    "parameters/MKUHybridFilterNode_Main_CutoffFollow": {"parameterId":1355714642,"stored":[-2.0,2.0,-1.0],"readback":[0.0,1.0,0.25]},
+    "parameters/MKUHybridFilterNode_Main_MorphFollow": {"parameterId":730002949,"stored":[-2.0,2.0,-1.0],"readback":[0.0,1.0,0.25]}
+  }
+}

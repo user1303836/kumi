@@ -40,7 +40,7 @@ const INSTRUCTIONS: &str = concat!(
     " Spoken word is worked in minutes and seconds, without beat snapping (the project's timebase changes only when the producer asks); deliver to a spec only when one is named (ACX: RMS −23 to −18 dB, peaks at most −3 dB, a noise floor at most −60 dB RMS, 0.5–1 s of room tone at the head and 1–5 s at the tail, at most 120 minutes a file, all files mono or all stereo, 192 kbps CBR MP3 at 44.1 kHz).",
     " In a big template never bring offline FX online, show hidden tracks or move folders as a side effect: a new track goes into its section's folder and stem. Reverbs and delays go on shared FX buses fed by sends, or into each stem when the project delivers stems. Why a track is too loud, silent or cancels, and sidechains, parallel buses and stems, go through routing: look first, then say what's wrong by the tracks' names before fixing or building.",
     " Keep the producer's colours and naming; colour tracks by family only in an uncoloured project.",
-    " For corrective work and mastering, use vst3 installed to check Ozone 12 and other appropriate installed VST3s first; ReaEQ, ReaComp, ReaLimit and JS are fallbacks when suitable plug-ins cannot be used. Reverb, saturation and instruments also come from what the producer has installed first (REAPER's own instruments are ReaSynth, ReaSynDr and ReaSamplOmatic5000). A multi-FX sound to keep goes in a container with macros; match levels before comparing."
+    " For mastering that needs another processor, the vst3 tool lists suitable installed VST3s; prefer Ozone 12 when available. ReaEQ, ReaComp, ReaLimit and JS are fallbacks when suitable plug-ins cannot be used. Respect the producer's chosen processors. REAPER's own instruments are ReaSynth, ReaSynDr and ReaSamplOmatic5000. A multi-FX sound to keep goes in a container with macros; match levels before comparing."
 );
 
 pub use provider::PROVIDER;
@@ -73,7 +73,7 @@ static SPEC: kumi_daw_own::spec::OwnSpecFacts = kumi_daw_own::spec::OwnSpecFacts
     words: kumi_agent::core::spec::backend::Words {
         app: "REAPER",
         fader_most: 24.,
-        limiter: "ReaLimit (Cockos) as the master's last FX, its Ceiling a few tenths under the spec's and its Threshold down by the gain still needed",
+        limiter: "an installed Ozone 12 Maximizer or other suitable VST3 limiter as the master's last FX, using its gain and true-peak ceiling controls; otherwise ReaLimit (Cockos), Ceiling a few tenths under the spec and Threshold down by the gain still needed",
         gainer: "a suitable installed VST3 gain stage before the master limiter, otherwise JS: Volume Adjustment, for gain past the fader",
     },
     is_master: |row| row.get("master") == Some(&serde_json::Value::Bool(true)),

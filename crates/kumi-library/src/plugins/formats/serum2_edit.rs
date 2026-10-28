@@ -111,8 +111,15 @@ impl SerumPreset {
         let replacement = match value {
             Json::Number(n) if field.kind.split('|').any(|k| matches!(k, "int" | "float")) => {
                 let number = n.as_f64().filter(|n| n.is_finite()).ok_or_else(|| FormatError::new("Serum value must be finite"))?;
-                if field.range.is_some_and(|[lo, hi]| number < lo || number > hi) {
-                    return Err(FormatError::new(format!("{path} is outside its range")));
+                structure::validate_number("serum-2", &canonical, number)?;
+                if canonical.contains("{n}")
+                    && !format.structure.parameters.values().any(|link| {
+                        link.status == structure::Status::Verified
+                            && link.field == canonical
+                            && structure::Structure::location(link) == path
+                    })
+                {
+                    return Err(FormatError::new(format!("{path} has no verified concrete control mapping")));
                 }
                 if field.kind == "int" {
                     let integer = n.as_i64().ok_or_else(|| FormatError::new(format!("{path} requires an integer")))?;
@@ -215,6 +222,11 @@ impl SerumPreset {
             "presetName",
             "presetAuthor",
             "presetDescription",
+            "presetComment",
+            "presetHasBeenEdited",
+            "selectedPresetPath",
+            "modMatrixLocked",
+            "scalarCurvesLocked",
         ];
         let mut processor = self.file.body.clone();
         expand(&mut processor);
@@ -309,7 +321,12 @@ impl SerumPreset {
             put(tree, "productVersion", Value::text(product));
             put(tree, "version", float(version));
         }
-        put(&mut controller, "presetHasBeenEdited", Value::Simple(20, Head::Inline));
+        if controller.get("presetHasBeenEdited").is_none() {
+            put(&mut controller, "presetHasBeenEdited", Value::Simple(20, Head::Inline));
+        }
+        if controller.get("selectedPresetPath").is_none() {
+            put(&mut controller, "selectedPresetPath", Value::text(""));
+        }
         let mut header = header.clone();
         header["productVersion"] = json!(product);
         header["version"] = json!(version);

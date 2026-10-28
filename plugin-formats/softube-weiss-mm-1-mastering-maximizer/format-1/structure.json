@@ -19,10 +19,12 @@
   "survey": {
     "files": 1,
     "presets": 5,
-    "versions": [
+    "source": "Installed bundle inspected for parameter names, IDs and numeric ranges only.",
+    "nativePresetVersionMarkers": [
       "2.4.44"
     ],
-    "source": "Installed bundle inspected for parameter names, IDs and numeric ranges only."
+    "observedBinaryVersion": "2.4.83",
+    "binaryVersionSource": "Installed PE ProductVersion; loading did not complete. Native bundle markers, including 9.9.9, are not installed-binary version evidence."
   },
   "fields": {
     "presets[]/parameters/0": {
@@ -31,15 +33,16 @@
         "preset"
       ],
       "range": [
-        0,
-        1
+        0.0,
+        1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "seen": [
         0.5,
         0.7575
       ],
-      "about": "Amount"
+      "about": "Amount. Native full-parameter tuples store normalized values in 0..1. This format bound does not establish the control meaning or host acceptance.",
+      "range_status": "verified"
     },
     "presets[]/parameters/1": {
       "type": "float",
@@ -47,15 +50,16 @@
         "preset"
       ],
       "range": [
-        0,
-        1
+        0.0,
+        1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "seen": [
         0.7475,
         1.0
       ],
-      "about": "Parallel Mix"
+      "about": "Parallel Mix. Native full-parameter tuples store normalized values in 0..1. This format bound does not establish the control meaning or host acceptance.",
+      "range_status": "verified"
     },
     "presets[]/parameters/2": {
       "type": "float",
@@ -63,15 +67,16 @@
         "preset"
       ],
       "range": [
-        0,
-        1
+        0.0,
+        1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "seen": [
         0.5,
         0.605
       ],
-      "about": "Limiter Gain"
+      "about": "Limiter Gain. Native full-parameter tuples store normalized values in 0..1. This format bound does not establish the control meaning or host acceptance.",
+      "range_status": "verified"
     },
     "presets[]/parameters/3": {
       "type": "float",
@@ -79,15 +84,16 @@
         "preset"
       ],
       "range": [
-        0,
-        1
+        0.0,
+        1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "seen": [
         0.0,
         0.0
       ],
-      "about": "Bypass"
+      "about": "Bypass. Native full-parameter tuples store normalized values in 0..1. This format bound does not establish the control meaning or host acceptance.",
+      "range_status": "verified"
     },
     "presets[]/parameters/4": {
       "type": "float",
@@ -95,15 +101,16 @@
         "preset"
       ],
       "range": [
-        0,
-        1
+        0.0,
+        1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "seen": [
         0.0,
         0.75
       ],
-      "about": "Style"
+      "about": "Style. Native full-parameter tuples store normalized values in 0..1. This format bound does not establish the control meaning or host acceptance.",
+      "range_status": "verified"
     },
     "presets[]/parameters/5": {
       "type": "float",
@@ -111,47 +118,48 @@
         "preset"
       ],
       "range": [
-        0,
-        1
+        0.0,
+        1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "seen": [
         0.0,
         1.0
       ],
-      "about": "Out Trim"
+      "about": "Out Trim. Native full-parameter tuples store normalized values in 0..1. This format bound does not establish the control meaning or host acceptance.",
+      "range_status": "verified"
     }
   },
   "parameters": {
     "Amount": {
       "field": "presets[]/parameters/0",
-      "status": "verified",
-      "note": "Parameter ID and name are stored together in the native JSON tuple."
+      "status": "guessed",
+      "note": "ID and label appear together in native tuples; no installed-host parameter-change verification."
     },
     "Parallel Mix": {
       "field": "presets[]/parameters/1",
-      "status": "verified",
-      "note": "Parameter ID and name are stored together in the native JSON tuple."
+      "status": "guessed",
+      "note": "ID and label appear together in native tuples; no installed-host parameter-change verification."
     },
     "Limiter Gain": {
       "field": "presets[]/parameters/2",
-      "status": "verified",
-      "note": "Parameter ID and name are stored together in the native JSON tuple."
+      "status": "guessed",
+      "note": "ID and label appear together in native tuples; no installed-host parameter-change verification."
     },
     "Bypass": {
       "field": "presets[]/parameters/3",
-      "status": "verified",
-      "note": "Parameter ID and name are stored together in the native JSON tuple."
+      "status": "guessed",
+      "note": "ID and label appear together in native tuples; no installed-host parameter-change verification."
     },
     "Style": {
       "field": "presets[]/parameters/4",
-      "status": "verified",
-      "note": "Parameter ID and name are stored together in the native JSON tuple."
+      "status": "guessed",
+      "note": "ID and label appear together in native tuples; no installed-host parameter-change verification."
     },
     "Out Trim": {
       "field": "presets[]/parameters/5",
-      "status": "verified",
-      "note": "Parameter ID and name are stored together in the native JSON tuple."
+      "status": "guessed",
+      "note": "ID and label appear together in native tuples; no installed-host parameter-change verification."
     }
   }
 }

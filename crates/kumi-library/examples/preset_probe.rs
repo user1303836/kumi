@@ -9,6 +9,7 @@
 //! A native vendor XML input can use the same product's VST3 template to produce a loadable state.
 //! `workflow:<plugin-id> INPUT OUTPUT EDITS.json OPTIONS.json` exercises the public workflow;
 //! INPUT may be `init` to create a patch. Options contain `version`, `classId`, and `name`.
+//! `inventory [ROOT]` checks installed version metadata without executing plug-ins.
 
 use kumi_library::plugins::formats::{
     minimal_audio::MinimalAudioPreset, ozone12::OzoneState, pulsar_modular::PulsarModularPreset, serum2::SerumPreset,
@@ -19,6 +20,11 @@ use kumi_library::plugins::preset::{self, Edit, WriteOptions};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<_> = std::env::args().skip(1).collect();
+    if args.first().is_some_and(|arg| arg == "inventory") {
+        let roots = args.get(1).map(|p| vec![std::path::PathBuf::from(p)]).unwrap_or_else(kumi_library::plugins::inventory::standard_roots);
+        println!("{}", serde_json::to_string_pretty(&kumi_library::plugins::inventory::scan(&roots))?);
+        return Ok(());
+    }
     if !(4..=5).contains(&args.len()) {
         return Err("usage: preset_probe FAMILY INPUT OUTPUT EDITS.json [TEMPLATE.vstpreset]".into());
     }

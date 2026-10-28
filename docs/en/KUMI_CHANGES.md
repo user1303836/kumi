@@ -474,6 +474,7 @@ REAPER's API functions that only read.
 | `modset_add`, `modset_delete`, `modset_set`, `modset_load`, `moddevice_add`, `moddevice_delete`, `moddevice_move`, `moddevice_set`, `moddevice_param`, `chain_add`, `chain_delete`, `chain_set`, `chaindevice_add`, `chaindevice_delete`, `chaindevice_move`, `chaindevice_bypass`, `chaindevice_param` | Modulation sets and their devices (also loaded from .xrno files); sample FX chains and their devices |
 | `phrase_add`, `phrase_delete`, `phrase_set`, `phrase_map`, `phrase_playback`, `phrase_write`, `phrase_clear`, `phrase_script`, `phrase_render`, `phrase_load` | Phrases added, deleted, set, mapped to keys, how the instrument plays them; their lines written or cleared; phrase scripts written and rendered; phrase files (.xrnz) loaded |
 | `plugin_load`, `plugin_param`, `plugin_preset`, `plugin_set`, `plugin_suspend`, `midi_set` | Plug-in instruments loaded, their parameters, programs, settings and auto-suspend; a MIDI instrument's output |
+| `plugin_preset_data` | A VST3 instrument preset file loaded into the matching plug-in; Kumi keeps its previous complete state for undo |
 | `scratch_keep`, `run_lua` | A goal's best scratch copy kept; Lua with the whole renoise API (only Renoise's undo takes it back) |
 
 Without a HISTORY row: `play`, `stop`, `audition_note` (plays a note out loud),

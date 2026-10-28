@@ -109,16 +109,17 @@ fn binary_xml_rejects_truncation_and_inconsistent_lengths() {
 
 #[test]
 fn minimal_audio_edits_the_authoritative_physical_value() {
-    let xml = b"<ClusterDelay><App_State><Parameters><Gain unmapped_value=\"0.5\" mapped_value=\"-24\"/></Parameters><Other value=\"keep\"/></App_State></ClusterDelay>";
+    let xml = b"<ClusterDelay><App_State><Parameters><MKUClusterDelayNode_Main_InputGain unmapped_value=\"0.5\" mapped_value=\"-24\"/></Parameters><Other value=\"keep\"/></App_State></ClusterDelay>";
     let mut state = MinimalAudioPreset::read(xml).unwrap();
-    state.set("parameters/Gain", &json!(-6)).unwrap();
+    state.set("parameters/MKUClusterDelayNode_Main_InputGain", &json!(-6)).unwrap();
     let output = XmlState::read(&state.write().unwrap()).unwrap();
-    let gain = output.document.root.child("App_State").unwrap().child("Parameters").unwrap().child("Gain").unwrap();
+    let gain =
+        output.document.root.child("App_State").unwrap().child("Parameters").unwrap().child("MKUClusterDelayNode_Main_InputGain").unwrap();
     assert_eq!(gain.attribute("mapped_value"), Some("-6"));
     assert_eq!(gain.attribute("unmapped_value"), Some("0.5"));
-    assert!(state.set("state/App_State/Parameters/Gain/@unmapped_value", &json!(0.8)).is_err());
+    assert!(state.set("state/App_State/Parameters/MKUClusterDelayNode_Main_InputGain/@unmapped_value", &json!(0.8)).is_err());
     assert!(state.set_parameter("invented", 0.5).is_err());
-    assert!(state.set_parameter("Gain", f64::NAN).is_err());
+    assert!(state.set_parameter("MKUClusterDelayNode_Main_InputGain", f64::NAN).is_err());
 }
 
 #[test]
@@ -161,4 +162,42 @@ fn native_xml_converts_to_the_matching_product_component_envelope() {
     let freq_echo = fixture("valhalla-freq-echo");
     let shimmer = ValhallaPreset::read_state(shimmer.component().unwrap()).unwrap();
     assert!(shimmer.to_state(freq_echo.component().unwrap()).is_err());
+}
+
+#[test]
+fn decoded_tree_budgets_reject_small_inputs_with_excessive_expansion() {
+    use kumi_library::plugins::formats::{bounded_json, cbor, xml, MAX_DECODED_DEPTH, MAX_DECODED_ITEMS};
+
+    let json = format!("[{}0]", "0,".repeat(MAX_DECODED_ITEMS));
+    assert!(bounded_json::parse(json.as_bytes()).unwrap_err().to_string().contains("item budget"));
+    let mut cbor = vec![0x9f];
+    cbor.extend(std::iter::repeat_n(0, MAX_DECODED_ITEMS));
+    cbor.push(0xff);
+    assert!(cbor::decode(&cbor).unwrap_err().to_string().contains("item budget"));
+    let attributes = (0..MAX_DECODED_ITEMS / 2).map(|i| format!(" p{i}=\"0\"")).collect::<String>();
+    assert!(xml::parse(&format!("<Preset{attributes}/>")).unwrap_err().to_string().contains("item budget"));
+    let nodes = format!("<Root>{}</Root>", "<x/>".repeat(MAX_DECODED_ITEMS));
+    assert!(xml::parse(&nodes).unwrap_err().to_string().contains("item budget"));
+    let deep = format!("{}0{}", "[".repeat(MAX_DECODED_DEPTH + 2), "]".repeat(MAX_DECODED_DEPTH + 2));
+    assert!(bounded_json::parse(deep.as_bytes()).is_err());
+    assert!(bounded_json::parse(br#"{"same":1,"same":2}"#).is_err());
+    assert!(xml::parse("<Root same=\"1\" same=\"2\"/>").is_err());
+}
+
+#[test]
+fn numeric_writes_need_verified_intervals_and_cannot_use_raw_text_attributes() {
+    let mut minimal = MinimalAudioPreset::read(
+        b"<ClusterDelay><App_State><Parameters><FutureControl mapped_value=\"0.5\"/></Parameters></App_State></ClusterDelay>",
+    )
+    .unwrap();
+    assert!(minimal.set_parameter("FutureControl", 0.75).unwrap_err().to_string().contains("Unknown numeric field"));
+    assert!(minimal.set("state/App_State/Parameters/FutureControl/@mapped_value", &json!("999999999")).is_err());
+    let mut pulsar = PulsarModularPreset::read(fixture("pulsar-p11-abyss").component().unwrap()).unwrap();
+    assert!(pulsar.set("state/PARAM[0]/@value", &json!("999999999")).is_err());
+    let unverified = structure::builtins()
+        .iter()
+        .flat_map(|format| format.structure.fields.iter().map(move |(path, field)| (format, path, field)))
+        .find(|(_, _, field)| field.seen.is_some() && field.range_status != Some(structure::Status::Verified))
+        .unwrap();
+    assert!(structure::validate_number(&unverified.0.info.plugin, unverified.1, unverified.2.seen.unwrap()[0]).is_err());
 }

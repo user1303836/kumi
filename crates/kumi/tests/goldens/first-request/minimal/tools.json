@@ -3054,12 +3054,11 @@
   },
   {
     "name": "plugin",
-    "description": "Work with a plug-in (Serum 2, Vital, Ozone, Pro-Q 4, Saturn 2, OTT, Supermassive, Decapitator, Pigments, Pro-L 2, or any other) the way its owner would. Read its guide before working on one. guide: what Kumi knows of it (its architecture, sound-design moves, what isn't a knob and how to get there), matched to its real parameter names, which of them Kumi can turn now (set those with set_device_parameter by name, in the plug-in's own units: \"800 Hz\", \"-6 dB\"), and how to get to the rest. wavetable: make a wavetable (keyframes of harmonics or shapes morphing frame to frame, or single cycles cut from a held note) into the plug-in's own wavetable folder, for its oscillator's menu.",
+    "description": "For preset creation and settings beyond configured knobs, use Kumi's shared vst3 catalog/create/edit tools first, then prepare-preset and load_device. Use exposed parameters for an existing instance, or load a new instance for comparison; Live does not expose arbitrary state replacement. Use windows or external resources when the built-in format and host tools cannot handle the request. Work with a plug-in (Serum 2, Vital, Ozone, Pro-Q 4, Saturn 2, OTT, Supermassive, Decapitator, Pigments, Pro-L 2, or any other) the way its owner would. Read its guide before working on one. guide: what Kumi knows of it (its architecture, sound-design moves, what isn't a knob and how to get there), matched to its real parameter names, which of them Kumi can turn now (set those with set_device_parameter by name, in the plug-in's own units: \"800 Hz\", \"-6 dB\"), and how to get to the rest. wavetable: make a wavetable (keyframes of harmonics or shapes morphing frame to frame, or single cycles cut from a held note) into the plug-in's own wavetable folder, for its oscillator's menu. prepare-preset: put a VST3 preset created by the shared vst3 tool in Live's User Library and return its browser itemId; load_device then loads it with HISTORY and undo. This action takes file/name, without device.",
     "inputSchema": {
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "device",
         "action"
       ],
       "properties": {
@@ -3073,7 +3072,8 @@
           "type": "string",
           "enum": [
             "guide",
-            "wavetable"
+            "wavetable",
+            "prepare-preset"
           ]
         },
         "wavetable": {
@@ -3155,6 +3155,15 @@
               }
             }
           }
+        },
+        "file": {
+          "type": "string",
+          "description": "prepare-preset: absolute .vstpreset path from vst3 create/edit"
+        },
+        "name": {
+          "type": "string",
+          "maxLength": 64,
+          "description": "prepare-preset: name in Live's User Library"
         }
       }
     },
@@ -3332,6 +3341,107 @@
     "deferred": true,
     "listedBy": null,
     "reach": "DawWrite",
+    "stream": false
+  },
+  {
+    "name": "vst3",
+    "description": "Built-in VST3 discovery, preset creation and editing. Use before external research. installed lists local plug-ins and roles; catalog gives tested versions and exact editable fields; inspect reads a preset; create starts an initialized patch; edit preserves existing state. Writes a new .vstpreset for the DAW's loading tools. guide gives the measured mastering/reference workflow.",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "action"
+      ],
+      "properties": {
+        "action": {
+          "type": "string",
+          "enum": [
+            "installed",
+            "catalog",
+            "guide",
+            "inspect",
+            "create",
+            "edit",
+            "edit-native",
+            "create-native-from-template"
+          ]
+        },
+        "plugin": {
+          "type": "string",
+          "description": "Catalog ID, e.g. serum-2, ozone-12, valhalla-delay"
+        },
+        "role": {
+          "type": "string",
+          "description": "installed: mastering, limiting, eq, compression, stereo, delay, bbd, reverb, instrument…"
+        },
+        "query": {
+          "type": "string",
+          "description": "Name/control search; narrow catalog results before choosing paths"
+        },
+        "folders": {
+          "type": "array",
+          "maxItems": 16,
+          "items": {
+            "type": "string"
+          },
+          "description": "Additional absolute VST3 install directories"
+        },
+        "refresh": {
+          "type": "boolean",
+          "description": "Rescan the session's installed inventory after installing or updating a plug-in"
+        },
+        "input": {
+          "type": "string",
+          "description": "Absolute local existing preset path"
+        },
+        "output": {
+          "type": "string",
+          "description": "New filename only, saved in Kumi's preset folder; .vstpreset for create/edit, native extension for native actions; never overwrites"
+        },
+        "preset_index": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "create-native-from-template: source preset index within a Softube bundle (0 otherwise)"
+        },
+        "version": {
+          "type": "string",
+          "description": "Optional assertion of installed version; cannot override inventory's version gate"
+        },
+        "class_id": {
+          "type": "string",
+          "description": "Exact VST3 class, required to choose an Ozone individual module"
+        },
+        "name": {
+          "type": "string"
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 40
+        },
+        "edits": {
+          "type": "array",
+          "maxItems": 512,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "path",
+              "value"
+            ],
+            "properties": {
+              "path": {
+                "type": "string"
+              },
+              "value": {}
+            }
+          }
+        }
+      }
+    },
+    "deferred": true,
+    "listedBy": null,
+    "reach": "AwayFromDaw",
     "stream": false
   }
 ]

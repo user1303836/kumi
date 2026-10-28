@@ -3,7 +3,8 @@
 //! and which are refused rather than expanded. Mixed text keeps only its trimmed characters.
 
 use super::tree::Node;
-use super::FormatError;
+use super::{FormatError, MAX_DECODED_BYTES, MAX_DECODED_DEPTH, MAX_DECODED_ITEMS};
+use std::collections::HashSet;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Element {
@@ -59,10 +60,13 @@ pub struct Document {
     pub root: Element,
 }
 
-const MAX_DEPTH: usize = 256;
+const MAX_DEPTH: usize = MAX_DECODED_DEPTH;
 
 pub fn parse(text: &str) -> Result<Document, FormatError> {
-    let mut parser = Parser { text: text.strip_prefix('\u{feff}').unwrap_or(text), at: 0 };
+    if text.len() > MAX_DECODED_BYTES {
+        return Err(FormatError::new("XML exceeds the decoded byte budget"));
+    }
+    let mut parser = Parser { text: text.strip_prefix('\u{feff}').unwrap_or(text), at: 0, items: MAX_DECODED_ITEMS };
     parser.space_and_comments()?;
     let declaration = if parser.rest().starts_with("<?xml") {
         let end = parser.rest().find("?>").ok_or_else(|| parser.error("an unclosed declaration"))?;
@@ -136,9 +140,15 @@ fn escape(text: &str) -> String {
 struct Parser<'a> {
     text: &'a str,
     at: usize,
+    items: usize,
 }
 
 impl Parser<'_> {
+    fn charge(&mut self, count: usize) -> Result<(), FormatError> {
+        self.items = self.items.checked_sub(count).ok_or_else(|| self.error("decoded item budget exceeded"))?;
+        Ok(())
+    }
+
     fn rest(&self) -> &str {
         &self.text[self.at..]
     }
@@ -171,6 +181,7 @@ impl Parser<'_> {
     }
 
     fn element(&mut self, depth: usize) -> Result<Element, FormatError> {
+        self.charge(1)?;
         if depth > MAX_DEPTH {
             return Err(self.error("elements nested too deep"));
         }
@@ -180,6 +191,7 @@ impl Parser<'_> {
         self.at += 1;
         let name = self.name()?;
         let mut attributes = Vec::new();
+        let mut attribute_names = HashSet::new();
         loop {
             self.space_and_comments_in_tag();
             if self.rest().starts_with("/>") {
@@ -190,7 +202,11 @@ impl Parser<'_> {
                 self.at += 1;
                 break;
             }
+            self.charge(2)?;
             let key = self.name()?;
+            if !attribute_names.insert(key.clone()) {
+                return Err(self.error("a repeated attribute"));
+            }
             self.space_and_comments_in_tag();
             if !self.rest().starts_with('=') {
                 return Err(self.error("an attribute without a value"));
@@ -207,9 +223,6 @@ impl Parser<'_> {
             }
             let value = unescape(raw).map_err(|what| self.error(&what))?;
             self.at += end + 1;
-            if attributes.iter().any(|(k, _)| *k == key) {
-                return Err(self.error("a repeated attribute"));
-            }
             attributes.push((key, value));
         }
         let mut children = Vec::new();

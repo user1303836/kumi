@@ -4,7 +4,8 @@ Kumi reads, creates and edits third-party plug-in presets locally. The Rust code
 `crates/kumi-library/src/plugins/formats/`; `plugins/preset.rs` combines them into complete VST3 presets.
 The `vst3` tool discovers installed products, searches editable fields, inspects presets and writes new files.
 These workflows support **VST3 only**. Kumi carries the catalog and initialized states in its binary;
-creating a supported preset needs no downloaded converter or running plug-in.
+creating a supported preset needs no downloaded converter or running plug-in. The installed version must
+match a verified writer; an unknown or newer version stays read-only until verified.
 
 Kumi is independent: it is not affiliated with, associated with, sponsored by or endorsed by any plug-in
 manufacturer, and has no relationship with them. Product names identify compatible software. All trademarks
@@ -36,8 +37,9 @@ synthetic fixtures; they never require an installed plug-in, a running DAW or a 
   can load or authorize the plug-in; filename identification is explicitly marked for confirmation.
 - `vst3 catalog` searches parameter names and stored paths. `inspect` reads concrete fields from a file.
   `create` starts from initialized state; `edit` applies a batch to an existing native or VST3 preset.
-  Output is a new `.vstpreset`; existing files are never overwritten. The requested write version must be
-  verified, and source version markers are checked wherever the format stores them. Some component formats
+  Output is a plain filename saved under Kumi's `presets/` folder; existing files are never overwritten.
+  The actual installed version must be verified; a model-supplied version cannot override it. Source version
+  markers are checked wherever the format stores them. Some component formats
   contain only a schema version: their source binary version cannot be inferred. Wrong classes and incompatible
   schemas are rejected. Unrelated chunks and opaque state are retained.
 - Softube and the remaining documented Zynaptiq native formats can be edited or used as the source of a new
@@ -46,6 +48,7 @@ synthetic fixtures; they never require an installed plug-in, a running DAW or a 
 - In Live, `plugin prepare-preset` places the file in the User Library, then `load_device` loads the browser
   item with its existing HISTORY and undo. Live's API does not replace arbitrary state in an existing
   instance: use exposed parameters or load a new instance for comparison.
+  The saved User Library preset is retained when undo removes its loaded device.
 - In REAPER, `fx_preset` takes a `.vstpreset` path. In Renoise, `device_preset_data` loads an effect and
   `plugin_preset_data` loads an instrument. Both preserve before-state for undo and reject a different class.
 - For mastering and reference mastering, `vst3 guide` gives a measure/change/listen workflow. Kumi checks
@@ -73,8 +76,9 @@ plugin-formats/
 - **Plug-ins are known by their IDs**, not by the name a host shows.
 - **No vendor content.** Factory presets, wavetables and samples stay on the machine they were installed on.
   The survey below reads them where they lie and keeps only counts, types, ranges and option-like values.
-- **Evidence stays explicit.** Format investigation uses local artifacts, initialized state and normal host
-  APIs. No manufacturer code or authorization workarounds are included. Vital's published source (GPL-3.0)
+- **Evidence stays explicit.** Learn from files, behaviour and normal host APIs by default. Disassembling or
+  decompiling a plug-in requires explicit repository-owner authorization. No manufacturer code or authorization
+  workarounds are included. Vital's published source (GPL-3.0)
   is read to learn its format; none of its code is copied.
 
 ## Fixtures
@@ -92,6 +96,9 @@ patch when the device was dragged into its browser (Live writes a VST3 device as
 | `vital/…/init.vstpreset` | Live's state of that patch from Vital's VST3 build, which wraps its VST2 chunk |
 | `ozone-12/…/init.xml`, `init-maximizer.xml` | Ozone 12's and the Maximizer's default settings, saved as presets |
 | `ozone-12/…/init.vstpreset`, `init-maximizer.vstpreset`, `init-exciter.vstpreset` | Live's states of those, and of Ozone 12 with an Exciter module added |
+
+Ozone fixture UUIDs are zeroed, and preset-browser extra state that contained local user paths is cleared.
+New presets receive a fresh random UUID; edits retain the source identity.
 
 The additional initialized VST3 captures were made on 2026-10-27. Ozone's `fixtures/defaults/` holds one
 state per class; each other verified product has its own initialized state. Blank SD3 state contains no

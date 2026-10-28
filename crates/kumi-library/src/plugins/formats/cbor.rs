@@ -191,11 +191,14 @@ impl Value {
 }
 
 /// How deep containers may nest before decoding gives up.
-const MAX_DEPTH: usize = 256;
+const MAX_DEPTH: usize = super::MAX_DECODED_DEPTH;
 
 /// One CBOR item that fills `bytes` exactly.
 pub fn decode(bytes: &[u8]) -> Result<Value, FormatError> {
-    let mut reader = Reader { bytes, at: 0 };
+    if bytes.len() > super::MAX_DECODED_BYTES {
+        return Err(FormatError::new("CBOR exceeds the decoded byte budget"));
+    }
+    let mut reader = Reader { bytes, at: 0, items: super::MAX_DECODED_ITEMS };
     let value = reader.item(0)?;
     if reader.at != bytes.len() {
         return Err(FormatError::new(format!("CBOR: {} bytes after the item", bytes.len() - reader.at)));
@@ -213,6 +216,7 @@ pub fn encode(value: &Value) -> Vec<u8> {
 struct Reader<'a> {
     bytes: &'a [u8],
     at: usize,
+    items: usize,
 }
 
 enum Arg {
@@ -269,6 +273,7 @@ impl Reader<'_> {
     }
 
     fn item(&mut self, depth: usize) -> Result<Value, FormatError> {
+        self.items = self.items.checked_sub(1).ok_or_else(|| FormatError::new("CBOR decoded item budget exceeded"))?;
         if depth > MAX_DEPTH {
             return self.fail("nests too deep");
         }
@@ -298,6 +303,9 @@ impl Reader<'_> {
             }
             (4, Arg::Value(n, head)) => {
                 let n = self.length(n, 1)?;
+                if n > self.items {
+                    return self.fail("decoded item budget exceeded");
+                }
                 let items = (0..n).map(|_| self.item(depth + 1)).collect::<Result<_, _>>()?;
                 Ok(Value::Array(items, Length::Definite(head)))
             }
@@ -310,6 +318,9 @@ impl Reader<'_> {
             }
             (5, Arg::Value(n, head)) => {
                 let n = self.length(n, 2)?;
+                if n.saturating_mul(2) > self.items {
+                    return self.fail("decoded item budget exceeded");
+                }
                 let entries = (0..n).map(|_| Ok((self.item(depth + 1)?, self.item(depth + 1)?))).collect::<Result<_, FormatError>>()?;
                 Ok(Value::Map(entries, Length::Definite(head)))
             }
@@ -329,6 +340,7 @@ impl Reader<'_> {
     fn chunks(&mut self, major: u8) -> Result<Vec<u8>, FormatError> {
         let mut joined = Vec::new();
         while !self.is_break()? {
+            self.items = self.items.checked_sub(1).ok_or_else(|| FormatError::new("CBOR decoded item budget exceeded"))?;
             let initial = self.take(1)?[0];
             if initial >> 5 != major {
                 return self.fail("a chunk of another type inside an indefinite-length string");

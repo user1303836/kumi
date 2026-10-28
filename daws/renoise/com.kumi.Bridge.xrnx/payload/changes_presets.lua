@@ -319,7 +319,10 @@ local function settings_restore(kind, song, env, restore, desc, what)
   end
   base.note_restored_at(env.journal, kind, { track = t, device = d })
   return {
-    restored = { preset = device.active_preset }, display = { title = label .. ": settings put back" }, undo = { desc = desc, entry = true },
+    restored = { preset = device.active_preset }, display = { title = label .. ": settings put back",
+      note = M.print_of(device.active_preset_data) ~= M.print_of(material.presetData)
+        and "The device accepted its earlier settings and normalized the saved bytes." or nil },
+    undo = { desc = desc, entry = true },
   }
 end
 

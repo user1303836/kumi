@@ -232,7 +232,10 @@ fn a_job_on_lives_own_devices_by_their_live_12_names() {
     assert_eq!(knob(find(&stock("d9", "Limiter", "Limiter", &["Device On", "Gain", "Ceiling"]), "limiter gain")), "Gain");
     // A Limiter showing no gain knob says so, and doesn't send for another Limiter.
     match resolve(&[stock("d9", "Limiter", "Limiter", &["Device On", "Ceiling"])], 0, &strings(&["limiter gain"])) {
-        Resolved::Refused(why) => assert_eq!(why, "Limiter shows no limiter gain knob (Input Gain). Nothing else on this track does it."),
+        Resolved::Refused(why) => {
+            assert!(why.starts_with("Limiter shows no limiter gain knob (Input Gain). Nothing else on this track does it."));
+            assert!(why.contains("Check vst3 installed"));
+        }
         other => panic!("{other:?}"),
     }
     assert_eq!(knob(find(&limiter("d0"), "ceiling")), "Ceiling");

@@ -14,6 +14,7 @@
   ],
   "writes": [
     {
+      "binary_sha256": "c7da5c903e3acb1c6192a31392ec82eb32dcda263cc141f926a9808934dace24",
       "version": "1.3 Build 28 (2197919)",
       "files": [
         "preset",

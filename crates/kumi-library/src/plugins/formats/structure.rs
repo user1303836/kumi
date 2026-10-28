@@ -113,9 +113,17 @@ pub struct Field {
     /// The smallest and largest value the survey saw.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub seen: Option<[f64; 2]>,
-    /// The range the plug-in allows, when known.
+    /// The supported, verified numeric write interval; it may be deliberately
+    /// narrower than the plug-in's complete UI range.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub range: Option<[f64; 2]>,
+    /// Bounds have their own evidence; a guessed control label does not make a
+    /// host-reported numeric domain uncertain, or an observed value a bound.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub range_status: Option<Status>,
+    /// Verified spacing of discrete values, starting at the lower bound.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub step: Option<f64>,
     /// Its value when the file leaves it out (Serum and Ozone write only what differs from it).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default: Option<f64>,
@@ -154,6 +162,10 @@ pub struct Structure {
     #[serde(default, skip_serializing_if = "Value::is_null")]
     pub survey: Value,
     pub fields: BTreeMap<String, Field>,
+    /// Preserved raw subtrees whose attributes are derived from the file rather
+    /// than duplicated in this control schema. Their descendants are read-only.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub opaque: Vec<String>,
     #[serde(default)]
     pub parameters: BTreeMap<String, ParameterLink>,
 }
@@ -168,6 +180,10 @@ pub struct VerifiedVersion {
     pub how: String,
     /// When (YYYY-MM-DD).
     pub checked: String,
+    /// Exact initialized binary whose public factory reported this version, for
+    /// products which ship neither moduleinfo nor OS version metadata.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub binary_sha256: Option<String>,
 }
 
 /// `verified.json`: the plug-in versions this format was checked against. Kumi writes only for these.
@@ -256,7 +272,12 @@ impl Structure {
     pub fn check(&self, tree: &Node) -> Check {
         let mut check = Check::default();
         tree.walk(self.paths, &mut |path, node| {
-            if path.is_empty() {
+            if path.is_empty()
+                || self
+                    .opaque
+                    .iter()
+                    .any(|prefix| path.strip_prefix(prefix).is_some_and(|rest| rest.starts_with('/') || rest.starts_with('[')))
+            {
                 return;
             }
             match self.fields.get(path) {
@@ -530,6 +551,27 @@ pub fn builtins() -> &'static [PluginFormat] {
 /// A shipped plug-in's format by its folder name ("serum-2").
 pub fn builtin(plugin: &str) -> Option<&'static PluginFormat> {
     BUILTIN.iter().find(|format| format.info.plugin == plugin)
+}
+
+/// Numeric writes require a proven domain. `seen` is deliberately never used.
+pub fn validate_number(plugin: &str, path: &str, value: f64) -> Result<(), FormatError> {
+    let field = builtin(plugin)
+        .and_then(|format| format.structure.field(path))
+        .ok_or_else(|| FormatError::new(format!("Unknown numeric field {plugin}/{path}")))?;
+    let [low, high] = field
+        .range
+        .filter(|_| field.range_status == Some(Status::Verified))
+        .ok_or_else(|| FormatError::new(format!("{plugin}/{path} has no verified writable range")))?;
+    if !value.is_finite() || !low.is_finite() || !high.is_finite() || low > high || value < low || value > high {
+        return Err(FormatError::new(format!("{plugin}/{path} must be between {low} and {high}")));
+    }
+    if let Some(step) = field.step {
+        let position = (value - low) / step;
+        if !step.is_finite() || step <= 0.0 || !position.is_finite() || (position - position.round()).abs() > 1e-6 {
+            return Err(FormatError::new(format!("{plugin}/{path} requires steps of {step} from {low}")));
+        }
+    }
+    Ok(())
 }
 
 /// A shipped plug-in's format by a plug-in ID a host reports.

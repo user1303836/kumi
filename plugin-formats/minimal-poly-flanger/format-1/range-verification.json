@@ -1,0 +1,26 @@
+{
+  "plugin": "minimal-poly-flanger",
+  "version": "1.1.0",
+  "binarySha256": "149e134ad80b79f85691dbda7396a937cb5b2994dd2ca42c19d40b954081eaef",
+  "method": "Restore the initial component, set one public VST3 parameter, capture its XML value, then reload only that field into the initial component. Saved value and host readback must match at both normalized endpoints and 0.25. Bounds are supported intervals in this product version; no survey extrema are used. Raw XML and mappings without this proof remain read-only.",
+  "points": [
+    0,
+    1,
+    0.25
+  ],
+  "fields": {
+    "parameters/MKUPolyFlangerNode_Main_InputGain": {"parameterId":381523906,"stored":[-60.0,12.0,-42.0],"readback":[0.0,1.0,0.25]},
+    "parameters/MKUPolyFlangerNode_Main_OutputGain": {"parameterId":599107047,"stored":[-60.0,12.0,-42.0],"readback":[0.0,1.0,0.25]},
+    "parameters/MKUPolyFlangerNode_Main_DryWet": {"parameterId":853842690,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/MKUPolyFlangerNode_Main_VoiceSpread": {"parameterId":29168734,"stored":[-1.0,1.0,-0.5],"readback":[0.0,1.0,0.25]},
+    "parameters/MKUPolyFlangerNode_Main_Frequency": {"parameterId":752417461,"stored":[20.0,20000.0,112.46826171875],"readback":[0.0,1.0,0.25]},
+    "parameters/MKUPolyFlangerNode_Main_PitchOffset": {"parameterId":1088825100,"stored":[-48.0,48.0,-24.0],"readback":[0.0,1.0,0.25]},
+    "parameters/MKUPolyFlangerNode_Main_ModDepth": {"parameterId":1870676072,"stored":[-1.0,1.0,-0.5],"readback":[0.0,1.0,0.25]},
+    "parameters/MKUPolyFlangerNode_Main_ModRandomize": {"parameterId":852423894,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/MKUPolyFlangerNode_Main_ModPhaseOffset": {"parameterId":158529491,"stored":[-0.5,0.5,-0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/MKUPolyFlangerNode_Main_WidthAmount": {"parameterId":1565982935,"stored":[-1.0,1.0,-0.5],"readback":[0.0,1.0,0.25]},
+    "parameters/MKUPolyFlangerNode_Main_FeedbackNorm": {"parameterId":1129489640,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/MKUPolyFlangerNode_Main_DampingAmount": {"parameterId":666685651,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/MKUPolyFlangerNode_Main_NoteRate": {"parameterId":1953964921,"stored":[0.0,24.0,6.0],"readback":[0.0,1.0,0.25]}
+  }
+}

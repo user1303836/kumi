@@ -26,7 +26,8 @@
     "presetVersions": [
       "4"
     ],
-    "source": "Installed native preset files and shipped parameter-name metadata; no factory preset bodies copied."
+    "source": "Installed native preset files and shipped parameter-name metadata; no factory preset bodies copied.",
+    "verification": "Native documents inspected; installed-binary version and runtime acceptance remain unverified."
   },
   "fields": {
     "@progName": {
@@ -35,7 +36,7 @@
         "preset",
         "state"
       ],
-      "status": "verified"
+      "status": "guessed"
     },
     "inputParams/@p0": {
       "type": "float",
@@ -47,7 +48,7 @@
         0.0,
         0.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "BYPASS"
     },
     "inputParams/@p1": {
@@ -60,7 +61,7 @@
         0.0,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "THRESHOLD"
     },
     "inputParams/@p2": {
@@ -73,7 +74,7 @@
         0.0,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "FEEL"
     },
     "inputParams/@p3": {
@@ -86,7 +87,7 @@
         0.0,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "PURIFY"
     },
     "inputParams/@p4": {
@@ -99,7 +100,7 @@
         0.0,
         0.25
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "GLIDE"
     },
     "inputParams/@p5": {
@@ -112,7 +113,7 @@
         0.0,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "ELECTRIFY"
     },
     "inputParams/@p6": {
@@ -125,7 +126,7 @@
         0.0,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "STRICT"
     },
     "inputParams/@p7": {
@@ -138,7 +139,7 @@
         0.0,
         2.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "ALGOMODE"
     },
     "inputParams/@p8": {
@@ -151,7 +152,7 @@
         0.0,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "MUTE"
     },
     "inputParams/@p9": {
@@ -164,7 +165,7 @@
         0.0,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "XCLUDE"
     },
     "inputParams/@p10": {
@@ -177,7 +178,7 @@
         0.0,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "MIDIMAP"
     },
     "inputParams/@p11": {
@@ -190,7 +191,7 @@
         0.0,
         0.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "EXTMIDI"
     },
     "inputParams/@p12": {
@@ -203,7 +204,7 @@
         440.0,
         440.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "INPUTTUNING"
     },
     "inputParams/@p13": {
@@ -216,7 +217,7 @@
         440.0,
         440.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "OUTPUTTUNING"
     },
     "inputParams/@p14": {
@@ -229,7 +230,7 @@
         0.0,
         108.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "LOW_KEY"
     },
     "inputParams/@p15": {
@@ -242,7 +243,7 @@
         0.0,
         107.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "HIGH_KEY"
     },
     "inputParams/@p16": {
@@ -255,7 +256,7 @@
         0.0,
         3.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "ROUNDING_MODE"
     },
     "inputParams/@p17": {
@@ -268,7 +269,7 @@
         0.0,
         2.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "REPEAT"
     },
     "inputParams/@p18": {
@@ -281,7 +282,7 @@
         0.0,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "GLOBAL_THRES"
     },
     "inputParams/@p19": {
@@ -294,7 +295,7 @@
         0.0,
         0.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "LOAD_SNAPSHOT"
     },
     "inputParams/@p20": {
@@ -307,7 +308,7 @@
         1.0,
         2.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "KEYB_OCTAVE"
     }
   },

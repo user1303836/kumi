@@ -1,0 +1,16 @@
+{
+  "plugin": "minimal-squash",
+  "version": "1.3.0",
+  "binarySha256": "d54afd0ece1dc0baee8c3b66fa7bbcffab62f59d985f183f5130dd657342ffb6",
+  "method": "Restore the initial component, set one public VST3 parameter, capture its XML value, then reload only that field into the initial component. Saved value and host readback must match at both normalized endpoints and 0.25. Bounds are supported intervals in this product version; no survey extrema are used. Raw XML and mappings without this proof remain read-only.",
+  "points": [
+    0,
+    1,
+    0.25
+  ],
+  "fields": {
+    "parameters/MKUSquashCompressorNode_Main_Depth": {"parameterId":33163679,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/MKUSquashCompressorNode_Main_Tone": {"parameterId":278650646,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/MKUSquashCompressorNode_Main_Mix": {"parameterId":1879370808,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]}
+  }
+}

@@ -4,7 +4,7 @@
 
 use serde_json::Value;
 
-use super::juce_xml::{self, XmlState};
+use super::juce_xml::XmlState;
 use super::tree::Node;
 use super::FormatError;
 
@@ -83,6 +83,7 @@ impl PulsarModularPreset {
                 "Pulsar Modular parameter {name} is not a current host control; legacy state is preserved"
             )));
         }
+        super::structure::validate_number(self.plugin, &format!("parameters/{name}"), value)?;
         let matches = self.state.document.root.children.iter().filter(|e| e.name == "PARAM" && e.attribute("id") == Some(name)).count();
         if matches != 1 {
             return Err(FormatError::new(format!("Pulsar Modular parameter {name} is missing or ambiguous")));
@@ -101,13 +102,8 @@ impl PulsarModularPreset {
         let path = path.trim_start_matches('/');
         if let Some(name) = path.strip_prefix("parameters/") {
             self.set_parameter(name, value.as_f64().ok_or_else(|| FormatError::new("Pulsar Modular parameter needs a number"))?)
-        } else if let Some(path) = path.strip_prefix("state/") {
-            if path.starts_with("PARAM") {
-                return Err(FormatError::new("Edit parameters/<id> in the control's native units"));
-            }
-            juce_xml::set_attribute(&mut self.state.document.root, path, &juce_xml::scalar(value)?)
         } else {
-            Err(FormatError::new("Pulsar Modular edits use parameters/<id> or an existing state XML attribute"))
+            Err(FormatError::new("Pulsar Modular edits use parameters/<id>; other state is preserved read-only"))
         }
     }
 

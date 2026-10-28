@@ -12,6 +12,7 @@ use super::FormatError;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MinimalAudioPreset {
     state: XmlState,
+    plugin: &'static str,
 }
 
 impl MinimalAudioPreset {
@@ -40,7 +41,26 @@ impl MinimalAudioPreset {
         {
             return Err(FormatError::new("Minimal Audio preset: no supported full preset state"));
         }
-        Ok(Self { state })
+        let plugin = match root.name.as_str() {
+            "ClusterDelay" => "minimal-cluster-delay",
+            "Current" => "minimal-current",
+            "EPROM-MemoryRites" => "minimal-eprom-memory-rites",
+            "Evoke" => "minimal-evoke",
+            "FlexChorus" => "minimal-flex-chorus",
+            "Formant" => "minimal-formant",
+            "FuseCompressor" => "minimal-fuse-compressor",
+            "HybridFilter" => "minimal-hybrid-filter",
+            "Lucid" => "minimal-lucid",
+            "MorphEQ" => "minimal-morph-eq",
+            "PolyFlanger" => "minimal-poly-flanger",
+            "Rift" => "minimal-rift",
+            "RipplePhaser" => "minimal-ripple-phaser",
+            "Squash" => "minimal-squash",
+            "SwarmReverb" => "minimal-swarm-reverb",
+            "WaveShifter" => "minimal-wave-shifter",
+            _ => unreachable!(),
+        };
+        Ok(Self { state, plugin })
     }
 
     pub fn read_state(bytes: &[u8]) -> Result<Self, FormatError> {
@@ -86,6 +106,7 @@ impl MinimalAudioPreset {
         if !self.parameters().any(|(key, _)| key == name) {
             return Err(FormatError::new(format!("Minimal Audio preset has no parameter {name}")));
         }
+        super::structure::validate_number(self.plugin, &format!("parameters/{name}"), value)?;
         juce_xml::set_attribute(&mut self.state.document.root, &format!("App_State/Parameters/{name}/@mapped_value"), &value.to_string())
     }
 
@@ -93,13 +114,8 @@ impl MinimalAudioPreset {
         let path = path.trim_start_matches('/');
         if let Some(name) = path.strip_prefix("parameters/") {
             self.set_parameter(name, value.as_f64().ok_or_else(|| FormatError::new("Minimal Audio parameter needs a number"))?)
-        } else if let Some(path) = path.strip_prefix("state/App_State/") {
-            if path.starts_with("Parameters/") {
-                return Err(FormatError::new("Edit parameters/<field> in physical units; normalized caches are not authoritative"));
-            }
-            juce_xml::set_attribute(&mut self.state.document.root, &format!("App_State/{path}"), &juce_xml::scalar(value)?)
         } else {
-            Err(FormatError::new("Minimal Audio edits use parameters/<field> or an existing state/App_State XML attribute"))
+            Err(FormatError::new("Minimal Audio edits use parameters/<field>; other state and normalized caches are preserved read-only"))
         }
     }
 

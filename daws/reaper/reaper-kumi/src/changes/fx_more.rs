@@ -17,6 +17,8 @@ use crate::refs;
 
 /// The most a state chunk (or a preset's prior state) may be for Kumi to keep it for an undo.
 const STATE_LIMIT: usize = 4 << 20;
+/// A file becomes base64 in REAPER's saved state; leave room for its wrapper under the undo limit.
+const PRESET_FILE_LIMIT: usize = (STATE_LIMIT - 65536) / 4 * 3;
 /// The most an FX chain file may be.
 const CHAIN_FILE_LIMIT: u64 = 32 << 20;
 
@@ -456,7 +458,7 @@ fn volatile_of(recorded: &Value) -> Vec<i64> {
 /// A named program, a validated VST3 file, or a place/step in the plug-in's program list.
 enum PresetAsk {
     Name(String),
-    File { path: String, class_id: String, hash: String },
+    File { path: String, class_id: String, hash: String, bytes: Vec<u8> },
     Index(i32),
     Step(i32),
 }
@@ -475,6 +477,9 @@ fn preset_ask(input: &Value) -> Done<PresetAsk> {
     match (name, index, step) {
         (Some(Value::String(name)), None, None) if !name.trim().is_empty() => {
             let name = name.trim();
+            if kumi_common::path::network_or_device(name) {
+                return Err(bad("preset names must not point to network shares or devices"));
+            }
             if Path::new(name).extension().is_some_and(|ext| ext.eq_ignore_ascii_case("vstpreset")) {
                 preset_file(name)
             } else {
@@ -495,22 +500,70 @@ fn preset_ask(input: &Value) -> Done<PresetAsk> {
 
 fn preset_file(path: &str) -> Done<PresetAsk> {
     let file = Path::new(path);
+    if kumi_common::path::network_or_device(path) {
+        return Err(bad("preset paths must name local files, not network shares or devices"));
+    }
     if !file.is_absolute() || !file.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("vstpreset")) {
         return Err(bad("path must be an absolute .vstpreset file path"));
     }
+    let metadata = fs::symlink_metadata(file).map_err(|e| bad(format!("couldn't inspect that VST3 preset: {e}")))?;
+    if !metadata.is_file() || metadata.len() > PRESET_FILE_LIMIT as u64 {
+        return Err(bad("the VST3 preset must be a regular file small enough to restore within REAPER's 4 MiB state limit"));
+    }
+    let mut options = fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NONBLOCK | libc::O_NOFOLLOW);
+    }
+    let opened = options.open(file).map_err(|e| bad(format!("couldn't open that VST3 preset: {e}")))?;
+    let metadata = opened.metadata().map_err(|e| bad(format!("couldn't inspect the opened VST3 preset: {e}")))?;
+    if !metadata.is_file() || metadata.len() > PRESET_FILE_LIMIT as u64 {
+        return Err(bad("the VST3 preset changed into a non-regular or oversized file"));
+    }
     let mut bytes = Vec::new();
-    fs::File::open(file)
-        .and_then(|file| file.take(daw_bridge::vst3::MAX_PRESET_BYTES as u64 + 1).read_to_end(&mut bytes))
-        .map_err(|e| bad(format!("couldn't read that VST3 preset: {e}")))?;
+    opened.take(PRESET_FILE_LIMIT as u64 + 1).read_to_end(&mut bytes).map_err(|e| bad(format!("couldn't read that VST3 preset: {e}")))?;
+    if bytes.len() > PRESET_FILE_LIMIT {
+        return Err(bad("the VST3 preset exceeds REAPER's undo state limit"));
+    }
     let preset = daw_bridge::vst3::read(&bytes).map_err(bad)?;
-    Ok(PresetAsk::File { path: path.to_string(), class_id: preset.class_id, hash: bytes_hash(&bytes) })
+    Ok(PresetAsk::File { path: path.to_string(), class_id: preset.class_id, hash: bytes_hash(&bytes), bytes })
+}
+
+/// The DAW reopens the name it gets: give it a private copy of the validated bytes, never the producer's mutable path.
+fn load_preset_file(ctx: &Ctx, at: &FxAt, bytes: &[u8]) -> Done<bool> {
+    let root = std::env::temp_dir();
+    if kumi_common::path::network_or_device(&root.to_string_lossy()) {
+        return Err(failed("Kumi's temporary preset folder must be on this machine"));
+    }
+    let owned = tempfile::Builder::new()
+        .prefix("kumi-vst3-")
+        .tempdir_in(root)
+        .map_err(|e| failed(format!("couldn't stage the VST3 preset: {e}")))?;
+    let path = owned.path().join("preset.vstpreset");
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&path)
+        .map_err(|e| failed(format!("couldn't stage the VST3 preset: {e}")))?;
+    file.write_all(bytes).map_err(|e| failed(format!("couldn't stage the VST3 preset: {e}")))?;
+    drop(file);
+    Ok(ctx.reaper.fx_set_preset(at.fx, &path.to_string_lossy()))
+}
+
+/// REAPER's cache/config identifier ends in the canonical class ID after `{`.
+fn reaper_class_id(identifier: &str) -> Option<String> {
+    let (_, id) = identifier.rsplit_once('{')?;
+    let id = id.strip_suffix('}').unwrap_or(id);
+    (id.len() == 32 && id.bytes().all(|b| b.is_ascii_hexdigit())).then(|| id.to_ascii_uppercase())
 }
 
 fn check_preset_plugin(ctx: &Ctx, at: &FxAt, ask: &PresetAsk) -> Done<()> {
     if let PresetAsk::File { class_id, .. } = ask {
         let kind = ctx.reaper.fx_config(at.fx, "fx_type").unwrap_or_default();
         let ident = ctx.reaper.fx_config(at.fx, "fx_ident").unwrap_or_default();
-        if !kind.starts_with("VST3") || daw_bridge::vst3::reaper_class_id(&ident).as_ref() != Some(class_id) {
+        if !kind.starts_with("VST3") || reaper_class_id(&ident).as_ref() != Some(class_id) {
             return Err(bad(format!("that VST3 preset is for class {class_id}; the selected FX's VST3 identity does not match")));
         }
     }
@@ -543,8 +596,34 @@ mod preset_file_tests {
         assert_ne!(hash, changed, "a changed file cannot pass the preview's fingerprint");
         assert!(preset_ask(&json!({"path": path, "index": 0})).is_err());
         assert!(preset_ask(&json!({"path": "relative.vstpreset"})).is_err());
+        for key in ["path", "preset"] {
+            let mut input = json!({});
+            input[key] = r"\\untrusted\share\preset.vstpreset".into();
+            assert!(preset_ask(&input).is_err());
+        }
         fs::write(&path, "ordinary text").unwrap();
         assert!(preset_ask(&json!({"path": path})).is_err());
+        fs::File::create(&path).unwrap().set_len(PRESET_FILE_LIMIT as u64 + 1).unwrap();
+        assert!(preset_ask(&json!({"path": path})).is_err());
+        let folder = dir.path().join("folder.vstpreset");
+        fs::create_dir(&folder).unwrap();
+        assert!(preset_ask(&json!({"path": folder})).is_err());
+        assert_eq!(reaper_class_id("Thing.vst3<10{00112233445566778899aabbccddeeff"), Some(class_id));
+        assert_eq!(reaper_class_id("Thing.vst3"), None);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn preset_files_refuse_symlinks_and_fifos_without_opening_them() {
+        use std::os::unix::{ffi::OsStrExt, fs::symlink};
+        let dir = tempfile::tempdir().unwrap();
+        let fifo = dir.path().join("fifo.vstpreset");
+        let name = std::ffi::CString::new(fifo.as_os_str().as_bytes()).unwrap();
+        assert_eq!(unsafe { libc::mkfifo(name.as_ptr(), 0o600) }, 0);
+        assert!(preset_file(fifo.to_str().unwrap()).is_err());
+        let link = dir.path().join("link.vstpreset");
+        symlink(&fifo, &link).unwrap();
+        assert!(preset_file(link.to_str().unwrap()).is_err());
     }
 }
 
@@ -608,7 +687,7 @@ pub fn preset_apply(ctx: &Ctx, input: &Value, fence: &Value) -> Done<Applied> {
         let _quiet = QuietAutomation::around(ctx.reaper, at.holder.track(ctx.reaper));
         match &ask {
             PresetAsk::Name(name) => ctx.reaper.fx_set_preset(at.fx, name),
-            PresetAsk::File { path, .. } => ctx.reaper.fx_set_preset(at.fx, path),
+            PresetAsk::File { bytes, .. } => load_preset_file(ctx, &at, bytes)?,
             PresetAsk::Index(i) => ctx.reaper.fx_set_preset_index(at.fx, *i),
             PresetAsk::Step(step) => ctx.reaper.fx_step_preset(at.fx, *step),
         }
@@ -698,7 +777,7 @@ pub fn preset_restore(ctx: &Ctx, restore: &Restore) -> Done<Restored> {
     }
     let other_name = put_back_preset(ctx, &at, restore.prior);
     let after = preset_state(ctx, &at, &volatile, false, full)?;
-    if after["hash"] != restore.prior["hash"] || after["stateHash"] != restore.prior["stateHash"] {
+    if after["hash"] != restore.prior["hash"] {
         return Err(failed("the plug-in didn't take its earlier values back"));
     }
     let mut display = json!({"title": format!("{} back as it was", label(ctx, &at))});
@@ -708,6 +787,13 @@ pub fn preset_restore(ctx: &Ctx, restore: &Restore) -> Done<Restored> {
         } else {
             format!("Its values are back exactly; REAPER still shows the preset name {}.", super::quoted(&shown)).into()
         };
+    }
+    if full && after["stateHash"] != restore.prior["stateHash"] {
+        let note = display["note"].as_str().unwrap_or_default();
+        display["note"] =
+            format!("{note} The plug-in accepted its earlier state and normalized the saved bytes; its parameter values match.")
+                .trim()
+                .into();
     }
     Ok(Restored { restored: after, display, unwritten: false })
 }

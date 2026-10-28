@@ -1,0 +1,30 @@
+{
+  "plugin": "minimal-swarm-reverb",
+  "version": "1.4.0",
+  "binarySha256": "796bb181ec7bbd9b46e5360685d8b7bf49d550cbc1e1cf8e6ec2b69e916df98e",
+  "method": "Restore the initial component, set one public VST3 parameter, capture its XML value, then reload only that field into the initial component. Saved value and host readback must match at both normalized endpoints and 0.25. Bounds are supported intervals in this product version; no survey extrema are used. Raw XML and mappings without this proof remain read-only.",
+  "points": [
+    0,
+    1,
+    0.25
+  ],
+  "fields": {
+    "parameters/MKUSwarmReverbNode_Main_InputGain": {"parameterId":846361037,"stored":[-60.0,12.0,-42.0],"readback":[0.0,1.0,0.25]},
+    "parameters/MKUSwarmReverbNode_Main_OutputGain": {"parameterId":2124156220,"stored":[-60.0,12.0,-42.0],"readback":[0.0,1.0,0.25]},
+    "parameters/MKUSwarmReverbNode_Main_DryWet": {"parameterId":1147532503,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/MKUSwarmReverbNode_Main_Size": {"parameterId":1637384733,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/MKUSwarmReverbNode_Main_Decay": {"parameterId":1352808734,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/MKUSwarmReverbNode_Main_EarlyLateBalance": {"parameterId":2115553807,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/MKUSwarmReverbNode_Main_DiffusionSendAmount": {"parameterId":58433033,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/MKUSwarmReverbNode_Main_Damping": {"parameterId":716739942,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/MKUSwarmReverbNode_Main_Attack": {"parameterId":1063352676,"stored":[-1.0,1.0,-0.5],"readback":[0.0,1.0,0.25]},
+    "parameters/MKUSwarmReverbNode_Main_ModDepth": {"parameterId":638744829,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/MKUSwarmReverbNode_Main_ModRate": {"parameterId":505933670,"stored":[0.009999999776482582,20.0,0.1025145426392555],"readback":[0.0,1.0,0.25]},
+    "parameters/MKUSwarmReverbNode_Main_Highpass": {"parameterId":1751504079,"stored":[10.0,10000.0,56.234130859375],"readback":[0.0,1.0,0.25]},
+    "parameters/MKUSwarmReverbNode_Main_Lowpass": {"parameterId":1784354249,"stored":[20.0,20000.0,456.386962890625],"readback":[0.0,1.0,0.25]},
+    "parameters/MKUSwarmReverbNode_Main_HighShelfFreq": {"parameterId":1408711076,"stored":[100.0,15000.0,425.4337158203125],"readback":[0.0,1.0,0.25]},
+    "parameters/MKUSwarmReverbNode_Main_HighShelfGain": {"parameterId":1408724651,"stored":[-36.0,0.0,-27.0],"readback":[0.0,1.0,0.25]},
+    "parameters/MKUSwarmReverbNode_Main_PredelayFeedback": {"parameterId":1345854593,"stored":[0.0,0.9900000095367432,0.2475000023841858],"readback":[0.0,1.0,0.25]},
+    "parameters/MKUSwarmReverbNode_Main_Width": {"parameterId":1370476330,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]}
+  }
+}

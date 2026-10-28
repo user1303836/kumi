@@ -16,6 +16,8 @@ use kumi_daw_ableton::{
 use kumi_types::contracts::*;
 use kumi_types::errors::RuntimeError;
 use serde_json::{json, Value};
+#[path = "../support/plugin_catalog.rs"]
+mod plugin_catalog;
 use std::{cell::Cell, rc::Rc};
 
 struct Fixture {
@@ -126,7 +128,11 @@ async fn complete_public_tool_catalog_matches_source_versions_capabilities_and_s
             integration.start(Signal::new()).await.unwrap();
             integration.connection.tools().unwrap().refresh(Signal::new()).await.unwrap();
             integration.connection.epoch.set(Some(7.));
-            let definitions:Vec<_>=integration.definitions().iter().map(|tool|json!({"name":tool.name(),"description":tool.description(),"inputSchema":tool.input_schema(),"stream":tool.stream(Signal::new(),Rc::new(||{})).is_some()})).collect();
+            let definitions:Vec<_>=integration.definitions().iter().map(|tool| {
+                let (description,schema) = if tool.name()=="plugin" { plugin_catalog::legacy(tool.description(),&json!(tool.input_schema())) }
+                    else { (tool.description().to_string(),json!(tool.input_schema())) };
+                json!({"name":tool.name(),"description":description,"inputSchema":schema,"stream":tool.stream(Signal::new(),Rc::new(||{})).is_some()})
+            }).collect();
             assert_eq!(json!(definitions),expand(&case["definitions"]),"catalog {index} config {}",case["config"]);
             assert!(integration.has_undo()&&integration.has_audio_file()&&integration.has_stop_live()&&integration.has_device_tree()&&integration.has_clip_view()&&integration.has_session_strip()&&integration.has_arrangement_strip()&&integration.has_audition()&&integration.has_goal()&&integration.has_hear());
             let (first,second)=futures::join!(integration.close(),integration.close());first.unwrap();second.unwrap();

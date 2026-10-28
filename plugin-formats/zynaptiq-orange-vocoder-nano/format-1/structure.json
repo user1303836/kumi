@@ -26,7 +26,8 @@
     "presetVersions": [
       "4"
     ],
-    "source": "Installed native preset files and shipped parameter-name metadata; no factory preset bodies copied."
+    "source": "Installed native preset files and shipped parameter-name metadata; no factory preset bodies copied.",
+    "verification": "Native documents inspected; installed-binary version and runtime acceptance remain unverified."
   },
   "fields": {
     "@progName": {
@@ -35,7 +36,7 @@
         "preset",
         "state"
       ],
-      "status": "verified"
+      "status": "guessed"
     },
     "inputParams/@p0": {
       "type": "float",
@@ -47,7 +48,7 @@
         0.0,
         0.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "bypass"
     },
     "inputParams/@p1": {
@@ -60,7 +61,7 @@
         -6.0,
         -6.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "gain"
     },
     "inputParams/@p2": {
@@ -73,7 +74,7 @@
         0.0,
         321.8997270557747
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "glideTime"
     },
     "inputParams/@p3": {
@@ -86,7 +87,7 @@
         0.0,
         0.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "voiceMix"
     },
     "inputParams/@p4": {
@@ -99,7 +100,7 @@
         1.0,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "vocoderMix"
     },
     "inputParams/@p5": {
@@ -112,7 +113,7 @@
         0.0,
         0.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "carrierMix"
     },
     "inputParams/@p6": {
@@ -125,7 +126,7 @@
         0.0,
         0.55
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "ChorusAmount"
     },
     "inputParams/@p7": {
@@ -138,7 +139,7 @@
         0.0,
         3.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "algoSelect"
     },
     "inputParams/@p8": {
@@ -151,7 +152,7 @@
         -3.4000000000000004,
         12.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "formantShift"
     },
     "inputParams/@p9": {
@@ -164,7 +165,7 @@
         3998.091175556183,
         22050.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "filterCutOffFrq"
     },
     "inputParams/@p10": {
@@ -177,7 +178,7 @@
         0.0,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "keyboardMode"
     },
     "inputParams/@p11": {
@@ -190,7 +191,7 @@
         0.0,
         0.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "kInputLevel"
     }
   },

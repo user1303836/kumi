@@ -1,0 +1,25 @@
+{
+  "plugin": "valhalla-shimmer",
+  "version": "1.2.2",
+  "binarySha256": "1cc717406df7f4667b34d4a6c655e10319a7073c415ea558b416d79202b85933",
+  "method": "Restore the initial component, set one public VST3 parameter, capture its XML value, then reload only that field into the initial component. Saved value and host readback must match at both normalized endpoints and 0.25. Bounds are supported intervals in this product version; no survey extrema are used. Raw XML and mappings without this proof remain read-only.",
+  "points": [
+    0,
+    1,
+    0.25
+  ],
+  "fields": {
+    "parameters/parameter0": {"parameterId":48,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/parameter1": {"parameterId":49,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/parameter2": {"parameterId":50,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/parameter3": {"parameterId":51,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/parameter4": {"parameterId":52,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/parameter5": {"parameterId":53,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/parameter6": {"parameterId":54,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/parameter7": {"parameterId":55,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/parameter8": {"parameterId":56,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/parameter9": {"parameterId":57,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/parameter10": {"parameterId":1567,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/parameter11": {"parameterId":1568,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]}
+  }
+}

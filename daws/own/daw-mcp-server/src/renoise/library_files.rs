@@ -285,6 +285,9 @@ pub fn with_file(daw: daw_bridge::Daw, kind: &str, input: &Value, libraries: &Li
 /// Snapshot validated bytes now: an apply uses this exact content even if the source file changes after its preview.
 fn vst3_file(input: &Value) -> Result<Value, Refusal> {
     let path = input["path"].as_str().ok_or_else(|| Refusal::Bad("path: an absolute .vstpreset file".into()))?;
+    if kumi_common::path::network_or_device(path) {
+        return Err(Refusal::Bad("VST3 presets must be local files, not network shares or devices".into()));
+    }
     let file = Path::new(path);
     if !file.is_absolute() || !file.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("vstpreset")) {
         return Err(Refusal::Bad("path: an absolute .vstpreset file".into()));
@@ -294,10 +297,24 @@ fn vst3_file(input: &Value) -> Result<Value, Refusal> {
     }
     // Leave space for base64 and Renoise's XML wrapper inside the tool's 8 MiB state bound.
     let most = (MAX_PRESET_BYTES - 65536) / 4 * 3;
+    let metadata = std::fs::symlink_metadata(file).map_err(|e| Refusal::Bad(format!("couldn't inspect that VST3 preset: {e}")))?;
+    if !metadata.is_file() || metadata.len() > most as u64 {
+        return Err(Refusal::Bad("the VST3 preset must be a bounded regular file".into()));
+    }
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NONBLOCK | libc::O_NOFOLLOW);
+    }
+    let opened = options.open(file).map_err(|e| Refusal::Bad(format!("couldn't open that VST3 preset: {e}")))?;
+    let metadata = opened.metadata().map_err(|e| Refusal::Bad(format!("couldn't inspect the opened VST3 preset: {e}")))?;
+    if !metadata.is_file() || metadata.len() > most as u64 {
+        return Err(Refusal::Bad("the VST3 preset changed into a non-regular or oversized file".into()));
+    }
     let mut bytes = Vec::new();
-    std::fs::File::open(file)
-        .and_then(|f| f.take(most as u64 + 1).read_to_end(&mut bytes))
-        .map_err(|err| Refusal::Bad(format!("couldn't read that VST3 preset: {err}")))?;
+    opened.take(most as u64 + 1).read_to_end(&mut bytes).map_err(|err| Refusal::Bad(format!("couldn't read that VST3 preset: {err}")))?;
     if bytes.len() > most {
         return Err(Refusal::Bad("that VST3 preset exceeds Renoise's undo state limit".into()));
     }

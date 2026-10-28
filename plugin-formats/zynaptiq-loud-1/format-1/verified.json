@@ -1,15 +1,6 @@
 {
   "plugin": "zynaptiq-loud-1",
   "format": "format-1",
-  "reads": [
-    {
-      "version": "unknown",
-      "files": [
-        "preset"
-      ],
-      "checked": "2026-10-27",
-      "how": "Inspected 42 installed native preset documents. VST3 runtime unavailable; no component write validation."
-    }
-  ],
+  "reads": [],
   "writes": []
 }

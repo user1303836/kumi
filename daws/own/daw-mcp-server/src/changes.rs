@@ -627,6 +627,30 @@ pub(crate) fn place(params: &mut Value, epoch: Option<&str>, layout: Option<u64>
 }
 
 impl crate::host::Host {
+    /// New preset-file fields must never be sent to an old bridge. In particular, an old REAPER accepts a file in its
+    /// named-preset argument without checking its class. Advertise the format explicitly rather than guessing versions.
+    async fn preset_file_bridge(&self, pick: &crate::host::Pick, kind: &str, input: &Value) -> Result<(), Value> {
+        let path = |field: &str| input[field].as_str().map(str::trim);
+        let vst3 = |value: Option<&str>| {
+            value.is_some_and(|value| std::path::Path::new(value).extension().is_some_and(|ext| ext.eq_ignore_ascii_case("vstpreset")))
+        };
+        let needed = match (self.daw(), kind) {
+            (daw_bridge::Daw::Reaper, "fx-preset") => input.get("path").is_some() || vst3(path("preset")),
+            (daw_bridge::Daw::Renoise, "plugin-preset-data") => true,
+            (daw_bridge::Daw::Renoise, "device-preset-data") => vst3(path("path")) || input.get("vst3Data").is_some(),
+            _ => false,
+        };
+        if !needed {
+            return Ok(());
+        }
+        let status = self.call("status", json!({}), pick, CHANGE_TIMEOUT).await.map_err(|e| self.call_error(&e))?;
+        if !status["presetFiles"].as_array().is_some_and(|formats| formats.iter().any(|format| format == "vst3")) {
+            return Err(json!({"code":"bridge-update-required", "error":format!(
+                "The bridge running in {} cannot safely load VST3 preset files. Update Kumi's bridge and restart {} before loading this preset.", self.daw(), self.daw())}));
+        }
+        Ok(())
+    }
+
     /// `change_preview`: what a change would do, and the id and confirmation to apply it by. Nothing changes.
     pub async fn change_preview(&self, arguments: &Value) -> (Value, bool) {
         let pick = match crate::host::Pick::from_arguments(arguments) {
@@ -640,7 +664,22 @@ impl crate::host::Host {
         let Some(input) = arguments.get("input").filter(|input| input.is_object()) else {
             return (json!({"error": "input must be an object", "code": "bad-params"}), true);
         };
+        if matches!(kind.as_str(), "fx-preset" | "device-preset-data" | "plugin-preset-data")
+            && ["path", "preset"]
+                .into_iter()
+                .filter_map(|field| input[field].as_str())
+                .any(|path| kumi_common::path::network_or_device(path.trim()))
+        {
+            return (json!({"code":"bad-params", "error":"Preset paths must name local files, not network shares or devices."}), true);
+        }
         let layout = arguments.get("layout").and_then(Value::as_u64);
+        let pick = match self.pin(&pick).await {
+            Ok(pinned) => pinned,
+            Err(error) => return (self.call_error(&error), true),
+        };
+        if let Err(answer) = self.preset_file_bridge(&pick, &kind, input).await {
+            return (answer, true);
+        }
         // (M4 n-devices: a device's preset data from an .xrdp file in Renoise's library is read here; the tool writes it as
         // preset data given in full)
         // (the library's files are read off the runtime's workers)
@@ -662,10 +701,6 @@ impl crate::host::Host {
         // (M4 n-devices: the Doofer, Splitter and Notepad edits are made here from the device's preset data, and an
         // instrument's macro mappings added or removed from its file)
         // The instance the change is previewed in: its apply and undo go there.
-        let pick = match self.pin(&pick).await {
-            Ok(pinned) => pinned,
-            Err(error) => return (self.call_error(&error), true),
-        };
         if crate::renoise::presets::host_makes(self.daw(), &kind, input) {
             return self.preset_preview(&pick, &kind, input, arguments.get("epoch").and_then(Value::as_str), layout).await;
         }
@@ -699,6 +734,9 @@ impl crate::host::Host {
             Err(why) => return refusal(why),
         };
         if let Some(answer) = self.elsewhere(&record.instance) {
+            return self.journal().end_apply(&id, &key, Err((&answer, false)));
+        }
+        if let Err(answer) = self.preset_file_bridge(&record.instance, &record.kind, &record.input).await {
             return self.journal().end_apply(&id, &key, Err((&answer, false)));
         }
         let params = if crate::renoise::presets::host_makes(self.daw(), &record.kind, &record.input) {
@@ -744,6 +782,9 @@ impl crate::host::Host {
             Err(why) => return refusal(why),
         };
         if let Some(answer) = self.elsewhere(&record.instance) {
+            return self.journal().end_undo(&id, &key, Err(&answer));
+        }
+        if let Err(answer) = self.preset_file_bridge(&record.instance, &record.kind, &record.input).await {
             return self.journal().end_undo(&id, &key, Err(&answer));
         }
         let discard = arguments.get("discard") == Some(&Value::Bool(true));

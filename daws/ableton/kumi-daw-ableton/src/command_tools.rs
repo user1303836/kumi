@@ -285,6 +285,7 @@ pub type FrontLive = Rc<dyn Fn() -> LocalBoxFuture<'static, bool>>;
 pub struct CommandToolsOptions {
     pub hands: Option<HandsSetup>,
     pub user_library: Option<String>,
+    pub made: Rc<RefCell<crate::devices::tool::Made>>,
     pub on_action: Option<Rc<dyn Fn(ActionEvent)>>,
     /// How Live's window is brought forward (the Live that's open, by its app, when left out).
     pub front_live: Option<FrontLive>,
@@ -1464,15 +1465,24 @@ impl CommandTools {
             return Ok(ToolResult::error("Give the absolute .vstpreset file from vst3 create/edit."));
         };
         let name = input.get("name").and_then(Value::as_str).unwrap_or("Kumi preset");
-        let library = PathBuf::from(self.options.user_library.clone().unwrap_or_else(|| super::samples::user_library(None, None)));
-        let made = match super::plugin_presets::prepare(std::path::Path::new(file), &library, name) {
+        let Some(library) = self.options.user_library.clone() else {
+            return Ok(ToolResult::error(
+                "Kumi couldn't find Live's configured User Library. Open Live, check its Library location, then restart Kumi.",
+            ));
+        };
+        let (file, name) = (PathBuf::from(file), name.to_string());
+        let made = match tokio::task::spawn_blocking(move || super::plugin_presets::prepare(&file, std::path::Path::new(&library), &name))
+            .await
+            .map_err(|e| RuntimeError::plain(format!("Preset preparation failed: {e}")))?
+        {
             Ok(made) => made,
             Err(why) => return Ok(ToolResult::error(why)),
         };
         let mut item = made.item.clone();
         let mut indexed = false;
         // Live releases differ on whether BrowserItem.name includes the file's extension.
-        for _ in 0..10 {
+        let deadline = std::time::Instant::now() + Duration::from_secs(20);
+        while std::time::Instant::now() < deadline {
             signal.check()?;
             for candidate in [made.item.clone(), format!("{}.vstpreset", made.item)] {
                 let result = self.connection.call("live_browser_inspect", args(json!({"itemId":candidate})), signal.clone()).await;
@@ -1487,10 +1497,14 @@ impl CommandTools {
             }
             tokio::select! { _ = signal.cancelled() => {signal.check()?;}, _ = tokio::time::sleep(Duration::from_millis(300)) => {} }
         }
+        if !indexed {
+            self.options.made.borrow_mut().written_unlisted(&item);
+        }
         Ok(ToolResult {
             text: stringify(
                 &json!({"file":made.file,"itemId":item,"indexed":indexed,"name":made.name,"plugin":made.plugin,"classId":made.class_id,
-            "next": if indexed {"Use load_device with this itemId and the target trackRef; the normal device change records HISTORY and supports undo_change. Read back controls and listen after loading."} else {"The file is ready; Live has not indexed it yet. Search the User Library for this unique name, then use load_device with the returned itemId. Do not report it loaded until load_device succeeds."},
+            "next": if indexed {"Use load_device with this itemId and the target trackRef; the normal device change records HISTORY and supports undo_change. Read back controls and listen after loading."} else {"The file is ready; Live has not indexed it yet. load_device with this itemId waits for the browser before applying the change. Do not report it loaded until load_device succeeds."},
+            "savedPreset":"The User Library file is retained as a saved preset. Undo removes the loaded device, not this file.",
             "kind":made.kind,"existingDevice":"For an existing instance, use its exposed parameters, or load this preset on a new track/empty rack chain and compare before replacing anything. Live's API does not expose arbitrary plug-in state replacement."}),
             ),
             ..Default::default()

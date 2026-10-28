@@ -124,6 +124,8 @@ pub struct SessionOptions {
     /// Where each turn's timing goes (`timings.jsonl`); none keeps no log.
     pub timings: Option<String>,
     pub library: Option<Rc<Library>>,
+    /// Kumi-owned output folder for new plug-in presets; a private temporary folder when absent.
+    pub preset_dir: Option<std::path::PathBuf>,
     /// The producer's own music, when Kumi knows where it is: how learning it goes reaches the app.
     pub music: Option<Rc<kumi_listening::music::learning::Music>>,
     pub matching: bool,
@@ -172,6 +174,7 @@ impl SessionOptions {
             files: None,
             timings: None,
             library: None,
+            preset_dir: None,
             music: None,
             matching: true,
             match_budget: None,
@@ -421,6 +424,7 @@ struct Inner {
     palette_tool: Option<Rc<dyn KernelTool>>,
     timings: Option<String>,
     shelf: Vec<Rc<dyn KernelTool>>,
+    plugins: Rc<dyn KernelTool>,
     /// The taste tool, when Kumi knows where the producer's music is.
     music_tools: Vec<Rc<dyn KernelTool>>,
     /// Background jobs, when the session runs them.
@@ -785,6 +789,7 @@ pub fn create_session(options: SessionOptions) -> Result<Session, RuntimeError> 
             .as_ref()
             .map(|library| library.on_status(Rc::new(move |status| emit(SessionEvent::Library(LibraryEvent { status })))));
         Inner {
+            plugins: crate::core::plugin_tools::PluginTool::new(options.preset_dir.clone()),
             options,
             timeout_ms,
             idle_ms,
@@ -1499,7 +1504,7 @@ impl Session {
             tools.extend(self.0.shelf.iter().map(|tool| self.with_background(tool.clone())));
             tools.extend(self.0.recipes.clone());
             tools.extend(self.0.palette_tool.clone());
-            tools.push(crate::core::plugin_tools::PluginTool::new());
+            tools.push(self.with_background(self.0.plugins.clone()));
             tools.extend(self.0.recall.iter().map(|tool| self.with_background(tool.clone())));
             if let Some(learned) = &self.0.learned {
                 tools.extend(learned.tools.clone());

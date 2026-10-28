@@ -69,6 +69,19 @@ fn gain(read: &Knobs) -> Option<&Knob> {
             && matches!(knob.name.to_ascii_lowercase().as_str(), "gain" | "input" | "input gain")
     })
 }
+
+fn is_final_limiter(device: &JsonObject) -> bool {
+    if device.get("enabled") == Some(&Value::Bool(false)) {
+        return false;
+    }
+    match device.get("className").and_then(Value::as_str) {
+        Some("Limiter") => true,
+        Some("PluginDevice") if device.get("enabled") == Some(&Value::Bool(true)) => {
+            device.get("classDisplayName").and_then(Value::as_str).is_some_and(kumi_library::plugins::inventory::is_limiter_name)
+        }
+        _ => false,
+    }
+}
 fn by_device(read: &Knobs, moved: &[(Knob, f64)]) -> IndexMap<String, Vec<Value>> {
     let by_key: HashMap<_, _> = read.knobs.iter().map(|knob| (key(knob), knob)).collect();
     let mut devices: IndexMap<String, Vec<Value>> = IndexMap::new();
@@ -97,7 +110,9 @@ impl LiveRenderer {
             .and_then(Value::as_str)
             .ok_or_else(|| observation(format!("The track “{name}” is gone.")))?
             .to_owned();
-        let devices = self.rows("device", json!({"parent":reference,"fields":["name","className","enabled"]}), signal.clone()).await?;
+        let devices = self
+            .rows("device", json!({"parent":reference,"fields":["name","className","classDisplayName","enabled"]}), signal.clone())
+            .await?;
         let mut knobs = vec![];
         for (index, device) in devices.iter().enumerate() {
             let mut input = object(json!({"fields":["name","value","min","max","quantization"]}));
@@ -242,11 +257,7 @@ impl Goal {
     async fn adopt(&self, name: &str, label: &str, signal: Signal) -> Result<GoalSlotInfo, RuntimeError> {
         let r = &self.render;
         let mut read = r.read_knobs(name, signal.clone()).await?;
-        let limited = read.devices.last().is_some_and(|device| {
-            device.get("enabled") != Some(&Value::Bool(false))
-                && (device.get("className").and_then(Value::as_str) == Some("Limiter")
-                    || kumi_library::plugins::inventory::is_limiter_name(&device_name(device)))
-        });
+        let limited = read.devices.last().is_some_and(is_final_limiter);
         if !limited {
             r.history
                 .quietly(None, r.step("load_device", json!({"itemId":"audio_effects/Limiter","trackRef":read.reference}), signal.clone()))
@@ -682,4 +693,29 @@ fn parse_float(text: &str) -> Option<f64> {
     let text = kumi_common::js::string::trim_start(text);
     let expression = regex::Regex::new(r"^[+-]?(?:Infinity|(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?)").unwrap();
     expression.find(text).and_then(|found| found.as_str().parse().ok())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_renamed_device_cannot_impersonate_an_enabled_plugin_limiter() {
+        let mut device =
+            object(json!({"className":"PluginDevice","classDisplayName":"Serum 2","name":"Ozone 12 Maximizer","enabled":true}));
+        assert!(!is_final_limiter(&device));
+        device.insert("classDisplayName".into(), json!("Ozone 12 Maximizer"));
+        device.insert("name".into(), json!("My master ceiling"));
+        assert!(is_final_limiter(&device));
+        device.insert("enabled".into(), json!(false));
+        assert!(!is_final_limiter(&device));
+        device.remove("enabled");
+        assert!(!is_final_limiter(&device));
+        device.insert("enabled".into(), json!(true));
+        device.insert("classDisplayName".into(), json!("Ozone 12"));
+        assert!(!is_final_limiter(&device));
+        device.insert("className".into(), json!("Eq8"));
+        device.insert("classDisplayName".into(), json!("Ozone 12 Maximizer"));
+        assert!(!is_final_limiter(&device));
+    }
 }

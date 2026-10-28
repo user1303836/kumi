@@ -69,6 +69,7 @@ fn native(plugin: &str, input: &[u8], name: Option<&str>, template: Option<usize
                 }
             }
             for edit in edits {
+                check_range(format, edit)?;
                 preset.set(&edit.path, &edit.value)?;
             }
             validate_softube(format, &preset)?;

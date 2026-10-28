@@ -1182,6 +1182,7 @@ local function plugin_device_object(instrument)
         plugin.preset_data = "partial state"
         error("plug-in rejected state")
       end
+      if plugin.normalize_preset_data then value = plugin.normalize_preset_data(value) end
       write(plugin, "preset_data", value)
     end,
   })

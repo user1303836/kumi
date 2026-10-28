@@ -6,7 +6,7 @@ use std::collections::BTreeSet;
 
 use serde_json::{json, Value};
 
-use super::{tree::Node, FormatError, MAX_DECODED_BYTES};
+use super::{bounded_json, tree::Node, FormatError, MAX_DECODED_BYTES};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Preset {
@@ -18,7 +18,7 @@ impl Preset {
         if bytes.len() > MAX_DECODED_BYTES {
             return Err(error("document is too large"));
         }
-        let preset = Self { document: serde_json::from_slice(bytes).map_err(|e| error(&e.to_string()))? };
+        let preset = Self { document: bounded_json::parse(bytes)? };
         preset.validate()?;
         Ok(preset)
     }

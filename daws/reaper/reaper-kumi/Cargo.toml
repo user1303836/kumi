@@ -16,12 +16,16 @@ path = "src/lib.rs"
 
 [dependencies]
 daw-bridge = { workspace = true }
+kumi-common.workspace = true
 serde_json = { workspace = true }
+tempfile.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true
 
 [dev-dependencies]
 kumi-testkit.workspace = true
 hex = { workspace = true }
-tempfile = { workspace = true }
 
 [build-dependencies]
 cc = "1"

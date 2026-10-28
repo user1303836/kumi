@@ -304,7 +304,9 @@ impl OzoneState {
     pub fn init(class_id: &str) -> Result<Self, FormatError> {
         let variant = variant(class_id).ok_or_else(|| FormatError::new("Unknown Ozone 12 VST3 class ID"))?;
         let preset = VstPreset::read(variant.init)?;
-        Self::read(preset.component().ok_or_else(|| FormatError::new("Ozone init preset has no component state"))?)
+        let mut state = Self::read(preset.component().ok_or_else(|| FormatError::new("Ozone init preset has no component state"))?)?;
+        state.json["Context State"]["Value"]["PluginUUID"]["Value"] = uuid::Uuid::new_v4().to_string().to_ascii_uppercase().into();
+        Ok(state)
     }
 
     pub fn read(bytes: &[u8]) -> Result<OzoneState, FormatError> {
@@ -330,7 +332,7 @@ impl OzoneState {
         if decoded.len() != decoded_len {
             return Err(FormatError::new(format!("Ozone state decodes to {} bytes, its header says {decoded_len}", decoded.len())));
         }
-        let json: Value = serde_json::from_slice(&decoded).map_err(|error| FormatError::new(format!("Ozone state isn't JSON: {error}")))?;
+        let json = super::bounded_json::parse(&decoded).map_err(|error| FormatError::new(format!("Ozone state: {error}")))?;
         Ok(OzoneState { version, json })
     }
 
@@ -430,6 +432,9 @@ impl OzoneState {
         if matches!(id, "Element Name" | "Param Version" | "Extra Bytes") {
             return Err(FormatError::new(format!("Ozone {id} is structural state, not a numeric setting")));
         }
+        if let Some(number) = value.as_f64() {
+            super::structure::validate_number("ozone-12", &format!("DSP State/DSP Elements/{element}/{id}"), number)?;
+        }
         let node = self
             .elements_mut()?
             .get_mut(element)
@@ -514,24 +519,34 @@ impl OzoneState {
         }
         let mut updated = self.clone();
         for module in preset.modules() {
-            if module.enabled == Some(false) {
-                continue;
-            }
-            for param in module.params {
+            for param in &module.params {
                 let number: f64 =
                     param.value.parse().map_err(|_| FormatError::new(format!("Ozone {}/{} isn't numeric", param.element, param.id)))?;
                 let value = numeric_setting(&updated, &param.element, &param.id, number)?;
                 updated.set_value(&param.element, &param.id, value)?;
             }
-            for (element, bytes) in module.extra {
+            for (element, bytes) in &module.extra {
                 if element == "ElementChain" {
-                    let entries = chain(&bytes)?;
+                    let entries = chain(bytes)?;
                     if entries.iter().any(|entry| entry.flag != 0) {
                         return Err(FormatError::new("Ozone chain uses an unverified flag"));
                     }
                     updated.set_chain(&entries.iter().map(|entry| entry.name.as_str()).collect::<Vec<_>>())?;
                 } else if !bytes.is_empty() {
-                    updated.set_extra(&element, &bytes)?;
+                    updated.set_extra(element, bytes)?;
+                }
+            }
+            if let Some(enabled) = module.enabled {
+                let elements: BTreeSet<_> = module
+                    .params
+                    .iter()
+                    .map(|param| param.element.as_str())
+                    .chain(module.extra.iter().map(|(element, _)| element.as_str()))
+                    .collect();
+                for element in elements {
+                    if updated.value(element, "Bypass").is_some() {
+                        updated.set_value(element, "Bypass", json!(!enabled))?;
+                    }
                 }
             }
         }
@@ -574,6 +589,9 @@ fn numeric_setting(state: &OzoneState, element: &str, id: &str, value: f64) -> R
         .ok_or_else(|| FormatError::new(format!("Ozone has no setting {element}/{id}")))?;
     if !value.is_finite() {
         return Err(FormatError::new("Ozone preset values must be finite"));
+    }
+    if node.get("Type").and_then(Value::as_str) != Some("Bool") {
+        super::structure::validate_number("ozone-12", &format!("DSP State/DSP Elements/{element}/{id}"), value)?;
     }
     match node.get("Type").and_then(Value::as_str) {
         Some("Bool") if value == 0.0 || value == 1.0 => Ok(json!(value == 1.0)),
@@ -675,6 +693,11 @@ mod tests {
         for variant in VARIANTS {
             assert!(ids.insert(variant.class_id));
             let state = OzoneState::init(variant.class_id).unwrap();
+            let fresh = OzoneState::init(variant.class_id).unwrap();
+            let id = &state.json["Context State"]["Value"]["PluginUUID"]["Value"];
+            let uuid = uuid::Uuid::parse_str(id.as_str().unwrap()).unwrap();
+            assert_eq!(uuid.get_version_num(), 4);
+            assert_ne!(id, &fresh.json["Context State"]["Value"]["PluginUUID"]["Value"]);
             assert!(state.elements().is_some_and(|elements| !elements.is_empty()));
             let preset = state.to_vstpreset(variant.class_id).unwrap();
             assert_eq!(preset.class_id, variant.class_id);
@@ -685,6 +708,38 @@ mod tests {
         assert!(OzoneState::init("unknown").is_err());
         let maximizer = OzoneState::init("5653545A425A4D4F7A6F6E652050726F").unwrap();
         assert!(maximizer.to_vstpreset(MAIN_CLASS_ID).is_err());
+    }
+
+    #[test]
+    fn initialized_fixtures_have_no_user_paths_or_machine_uuids() {
+        fn audit(value: &Value) {
+            if let Some(object) = value.as_object() {
+                if object.get("Type").and_then(Value::as_str) == Some("Base64") {
+                    let bytes = base64::engine::general_purpose::STANDARD.decode(object["Value"].as_str().unwrap()).unwrap();
+                    assert!(!bytes.windows(7).any(|window| window == b"\\Users\\"));
+                    let utf16: Vec<u8> = "\\Users\\".encode_utf16().flat_map(u16::to_le_bytes).collect();
+                    assert!(!bytes.windows(utf16.len()).any(|window| window == utf16));
+                }
+                for child in object.values() {
+                    audit(child);
+                }
+            } else if let Some(array) = value.as_array() {
+                for child in array {
+                    audit(child);
+                }
+            }
+        }
+        let old: &[&[u8]] = &[
+            include_bytes!(concat!(env!("KUMI_WORKSPACE"), "/plugin-formats/ozone-12/format-1/fixtures/init.vstpreset")),
+            include_bytes!(concat!(env!("KUMI_WORKSPACE"), "/plugin-formats/ozone-12/format-1/fixtures/init-exciter.vstpreset")),
+            include_bytes!(concat!(env!("KUMI_WORKSPACE"), "/plugin-formats/ozone-12/format-1/fixtures/init-maximizer.vstpreset")),
+        ];
+        for bytes in old.iter().copied().chain(VARIANTS.iter().map(|variant| variant.init)) {
+            let preset = VstPreset::read(bytes).unwrap();
+            let state = OzoneState::read(preset.component().unwrap()).unwrap();
+            assert_eq!(state.json["Context State"]["Value"]["PluginUUID"]["Value"], "00000000-0000-0000-0000-000000000000");
+            audit(&state.json);
+        }
     }
 
     #[test]
@@ -727,6 +782,9 @@ mod tests {
         }
         assert!(state.set_value("missing", "Gain", json!(3)).is_err());
         assert!(state.set_value("Maximizer", "Gain", json!(f64::MAX)).is_err());
+        assert!(state.set_value("Maximizer", "Gain", json!(20.01)).is_err());
+        assert!(state.set_value("Maximizer", "Margin", json!(0.01)).is_err());
+        assert!(state.set_value("AudioStreamer", "Vectorscope Mode", json!(0)).is_err(), "unverified numeric fields remain read-only");
         assert!(state.set_chain(&["Maximizer", "Maximizer"]).is_err());
         assert!(state.set_chain(&["Global"]).is_err());
         assert_eq!(state, original);
@@ -762,6 +820,9 @@ mod tests {
         state.apply_preset(&preset).unwrap();
         assert_eq!(state.value("Maximizer", "Gain"), Some(&json!(3.0)));
         assert_eq!(state.value("Maximizer", "Prevent Intersample Clipping"), Some(&json!(true)));
+        let disabled = OzonePreset::read(br#"<OzoneMS PluginVer="120100" PluginBuild="1440" PresetVer="6"><Maximizer Enabled="0"><Param ElementID="Maximizer" ParamID="Gain" Value="3"/><Param ElementID="Maximizer" ParamID="Bypass" Value="0"/></Maximizer></OzoneMS>"#).unwrap();
+        state.apply_preset(&disabled).unwrap();
+        assert_eq!(state.value("Maximizer", "Bypass"), Some(&json!(true)));
         let original = state.clone();
         let unsupported = OzonePreset::read(br#"<OzoneMS PluginVer="120100" PluginBuild="1440" PresetVer="6"><Maximizer Enabled="1"><Param ElementID="Maximizer" ParamID="Gain" Value="6"/><Param ElementID="Maximizer" ParamID="UnrecognizedLegacyField" Value="1"/></Maximizer></OzoneMS>"#).unwrap();
         assert!(state.apply_preset(&unsupported).is_err());
@@ -772,6 +833,7 @@ mod tests {
         assert_eq!(state, original);
         assert!(preset.set_value("Maximizer", "missing", 1.0).is_err());
         assert!(preset.set_value("Maximizer", "Gain", f64::INFINITY).is_err());
+        assert!(preset.set_value("Maximizer", "Gain", 21.0).is_err());
         assert!(preset.set_value("Maximizer", "Prevent Intersample Clipping", 0.5).is_err());
         set_attribute(&mut preset.document.root, "PluginVer", "130000".into());
         assert!(preset.set_value("Maximizer", "Gain", 1.0).is_err());

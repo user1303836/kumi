@@ -266,6 +266,7 @@ Kumi 在连接时读取桥接的版本，不会提供桥接版本过旧而无法
 | `modset_add`, `modset_delete`, `modset_set`, `modset_load`, `moddevice_add`, `moddevice_delete`, `moddevice_move`, `moddevice_set`, `moddevice_param`, `chain_add`, `chain_delete`, `chain_set`, `chaindevice_add`, `chaindevice_delete`, `chaindevice_move`, `chaindevice_bypass`, `chaindevice_param` | 调制组及其设备（也可从 .xrno 文件载入）；采样 FX 链及其设备 |
 | `phrase_add`, `phrase_delete`, `phrase_set`, `phrase_map`, `phrase_playback`, `phrase_write`, `phrase_clear`, `phrase_script`, `phrase_render`, `phrase_load` | 乐句（phrase）的添加、删除、设置、映射到琴键、乐器如何播放乐句；写入或清除乐句的行；编写并渲染乐句脚本；载入乐句文件（.xrnz） |
 | `plugin_load`, `plugin_param`, `plugin_preset`, `plugin_set`, `plugin_suspend`, `midi_set` | 插件乐器的载入、参数、音色（program）、设置和自动休眠；MIDI 乐器的输出 |
+| `plugin_preset_data` | 将 VST3 乐器预设文件载入匹配的插件；Kumi 保留此前的完整状态以供撤销 |
 | `scratch_keep`, `run_lua` | 保留目标的最佳临时副本；可使用整个 renoise API 的 Lua（只有 Renoise 的撤销能撤回） |
 
 没有 HISTORY 行的：`play`、`stop`、`audition_note`（把一个音符播放给你听）、`select`（在 Renoise 中显示某样东西）、`plugin_editor`、`save_song`、`save_instrument` 和 `save_device_preset`。`renoise_read` 读取歌曲：轨道、模式序列、模式及其行、自动化、乐器、采样、乐句、设备与参数、调制组和采样 FX 链。

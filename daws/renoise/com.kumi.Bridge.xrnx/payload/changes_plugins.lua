@@ -314,9 +314,10 @@ base.register({
     if M.UNDO_COVERS.preset then song:describe_undo(desc) end
     if not pcall(function() device.active_preset_data = material.state end) then fail("failed", "the plug-in refused its prior state") end
     local after = state_hash(device.active_preset_data or "")
-    if after ~= state_hash(material.state) then fail("failed", "the plug-in did not restore its exact prior state") end
     base.note_restored(env.journal, "plugin-preset-data", places_.journal_place("instrument", n), applied, base.KINDS["plugin-preset-data"])
-    return { restored = { path = material.path, hash = after }, display = { title = q(label) .. "'s state put back" }, undo = { desc = desc, entry = M.UNDO_COVERS.preset } }
+    return { restored = { path = material.path, hash = after }, display = { title = q(label) .. "'s state put back",
+      note = after ~= state_hash(material.state) and "The plug-in accepted its earlier state and normalized the saved bytes." or nil },
+      undo = { desc = desc, entry = M.UNDO_COVERS.preset } }
   end,
   reread = function(song, place)
     local instrument = places_.reread("instrument")(song, place)

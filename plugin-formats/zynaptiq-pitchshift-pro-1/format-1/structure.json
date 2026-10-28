@@ -27,7 +27,8 @@
     "presetVersions": [
       "4"
     ],
-    "source": "Installed native preset files and shipped parameter-name metadata; no factory preset bodies copied."
+    "source": "Installed native preset files and shipped parameter-name metadata; no factory preset bodies copied.",
+    "verification": "Native documents inspected; installed-binary version and runtime acceptance remain unverified."
   },
   "fields": {
     "@progName": {
@@ -36,7 +37,7 @@
         "preset",
         "state"
       ],
-      "status": "verified"
+      "status": "guessed"
     },
     "inputParams/@p0": {
       "type": "float",
@@ -48,7 +49,7 @@
         0.0,
         0.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "bypass"
     },
     "inputParams/@p1": {
@@ -61,7 +62,7 @@
         0.0,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "doublePrecision"
     },
     "inputParams/@p2": {
@@ -74,7 +75,7 @@
         -0.5833333333333333,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "dryWet"
     },
     "inputParams/@p3": {
@@ -87,7 +88,7 @@
         0.0,
         0.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "mute"
     },
     "inputParams/@p4": {
@@ -100,7 +101,7 @@
         0.0,
         0.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "solo"
     },
     "inputParams/@p5": {
@@ -113,7 +114,7 @@
         -0.42000000000000004,
         0.52
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "filter"
     },
     "inputParams/@p6": {
@@ -126,7 +127,7 @@
         0.0,
         0.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "wetGain"
     },
     "inputParams/@p7": {
@@ -139,7 +140,7 @@
         0.0,
         0.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "dummy1"
     },
     "inputParams/@p8": {
@@ -152,7 +153,7 @@
         0.0,
         5.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "algorithm"
     },
     "inputParams/@p9": {
@@ -165,7 +166,7 @@
         -1.0,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "pitchShift"
     },
     "inputParams/@p10": {
@@ -178,7 +179,7 @@
         0.0,
         71.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "conformPitch"
     },
     "inputParams/@p11": {
@@ -191,7 +192,7 @@
         -1.0,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "formantShift"
     },
     "inputParams/@p12": {
@@ -204,7 +205,7 @@
         -24.0,
         24.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "formantShiftTypeEF"
     },
     "inputParams/@p13": {
@@ -217,7 +218,7 @@
         0.0,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "linkFormantShift"
     },
     "inputParams/@p14": {
@@ -230,7 +231,7 @@
         0.0,
         3.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "signalTypeA"
     },
     "inputParams/@p15": {
@@ -243,7 +244,7 @@
         0.0,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "sfxTransient"
     },
     "inputParams/@p16": {
@@ -256,7 +257,7 @@
         0.1,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "drumTransient"
     },
     "inputParams/@p17": {
@@ -269,7 +270,7 @@
         0.0,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "mixTransient"
     },
     "inputParams/@p18": {
@@ -282,7 +283,7 @@
         0.0,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "smoothTransient"
     },
     "inputParams/@p19": {
@@ -295,7 +296,7 @@
         0.0,
         2.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "overlap"
     },
     "inputParams/@p20": {
@@ -308,7 +309,7 @@
         0.0,
         5.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "windowType"
     },
     "inputParams/@p21": {
@@ -321,7 +322,7 @@
         -1.0,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "formantStrength"
     },
     "inputParams/@p22": {
@@ -334,7 +335,7 @@
         -1.0,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "dispersion"
     },
     "inputParams/@p23": {
@@ -347,7 +348,7 @@
         0.0,
         2.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "resynthQuality"
     },
     "inputParams/@p24": {
@@ -360,7 +361,7 @@
         0.0,
         3.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "punchBoost"
     },
     "inputParams/@p25": {
@@ -373,7 +374,7 @@
         0.0,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "jitter"
     },
     "inputParams/@p26": {
@@ -386,7 +387,7 @@
         0.0,
         2.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "grainMode"
     },
     "inputParams/@p27": {
@@ -399,7 +400,7 @@
         0.0,
         2.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "k_TypeELpcRange"
     },
     "inputParams/@p28": {
@@ -412,7 +413,7 @@
         0.0,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "k_TypeELooseness"
     },
     "inputParams/@p29": {
@@ -425,7 +426,7 @@
         0.0,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "k_TypeESensitivity"
     },
     "inputParams/@p30": {
@@ -438,7 +439,7 @@
         0.0,
         2.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "resynthQualityTF"
     },
     "inputParams/@p31": {
@@ -451,7 +452,7 @@
         0.0,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "typeFConformMode"
     },
     "inputParams/@p32": {
@@ -464,7 +465,7 @@
         -1.0,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "conformStrictness"
     },
     "inputParams/@p33": {
@@ -477,7 +478,7 @@
         0.0,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "typeFAperiodicity"
     },
     "inputParams/@p34": {
@@ -490,7 +491,7 @@
         0.0,
         2.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "typeDQuality"
     },
     "inputParams/@p35": {
@@ -503,7 +504,7 @@
         0.0,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "typeDCycleLength"
     },
     "inputParams/@p36": {
@@ -516,7 +517,7 @@
         0.0,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "typeCMode"
     },
     "inputParams/@p37": {
@@ -529,7 +530,7 @@
         0.0,
         0.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "dummy2"
     },
     "inputParams/@p38": {
@@ -542,7 +543,7 @@
         1.0,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "ch01bypass"
     },
     "inputParams/@p39": {
@@ -555,7 +556,7 @@
         0.0,
         0.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "ch01mute"
     },
     "inputParams/@p40": {
@@ -568,7 +569,7 @@
         0.0,
         0.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "ch01solo"
     },
     "inputParams/@p41": {
@@ -581,7 +582,7 @@
         1.0,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "ch02bypass"
     },
     "inputParams/@p42": {
@@ -594,7 +595,7 @@
         0.0,
         0.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "ch02mute"
     },
     "inputParams/@p43": {
@@ -607,7 +608,7 @@
         0.0,
         0.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "ch02solo"
     },
     "inputParams/@p44": {
@@ -620,7 +621,7 @@
         1.0,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "ch03bypass"
     },
     "inputParams/@p45": {
@@ -633,7 +634,7 @@
         0.0,
         0.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "ch03mute"
     },
     "inputParams/@p46": {
@@ -646,7 +647,7 @@
         0.0,
         0.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "ch03solo"
     },
     "inputParams/@p47": {
@@ -659,7 +660,7 @@
         1.0,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "ch04bypass"
     },
     "inputParams/@p48": {
@@ -672,7 +673,7 @@
         0.0,
         0.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "ch04mute"
     },
     "inputParams/@p49": {
@@ -685,7 +686,7 @@
         0.0,
         0.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "ch04solo"
     },
     "inputParams/@p50": {
@@ -698,7 +699,7 @@
         1.0,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "ch05bypass"
     },
     "inputParams/@p51": {
@@ -711,7 +712,7 @@
         0.0,
         0.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "ch05mute"
     },
     "inputParams/@p52": {
@@ -724,7 +725,7 @@
         0.0,
         0.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "ch05solo"
     },
     "inputParams/@p53": {
@@ -737,7 +738,7 @@
         1.0,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "ch06bypass"
     },
     "inputParams/@p54": {
@@ -750,7 +751,7 @@
         0.0,
         0.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "ch06mute"
     },
     "inputParams/@p55": {
@@ -763,7 +764,7 @@
         0.0,
         0.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "ch06solo"
     },
     "inputParams/@p56": {
@@ -776,7 +777,7 @@
         1.0,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "ch07bypass"
     },
     "inputParams/@p57": {
@@ -789,7 +790,7 @@
         0.0,
         0.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "ch07mute"
     },
     "inputParams/@p58": {
@@ -802,7 +803,7 @@
         0.0,
         0.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "ch07solo"
     },
     "inputParams/@p59": {
@@ -815,7 +816,7 @@
         1.0,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "ch08bypass"
     },
     "inputParams/@p60": {
@@ -828,7 +829,7 @@
         0.0,
         0.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "ch08mute"
     },
     "inputParams/@p61": {
@@ -841,7 +842,7 @@
         0.0,
         0.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "ch08solo"
     },
     "inputParams/@p62": {
@@ -854,7 +855,7 @@
         1.0,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "ch09bypass"
     },
     "inputParams/@p63": {
@@ -867,7 +868,7 @@
         0.0,
         0.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "ch09mute"
     },
     "inputParams/@p64": {
@@ -880,7 +881,7 @@
         0.0,
         0.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "ch09solo"
     },
     "inputParams/@p65": {
@@ -893,7 +894,7 @@
         1.0,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "ch10bypass"
     },
     "inputParams/@p66": {
@@ -906,7 +907,7 @@
         0.0,
         0.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "ch10mute"
     },
     "inputParams/@p67": {
@@ -919,7 +920,7 @@
         0.0,
         0.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "ch10solo"
     },
     "inputParams/@p68": {
@@ -932,7 +933,7 @@
         1.0,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "ch11bypass"
     },
     "inputParams/@p69": {
@@ -945,7 +946,7 @@
         0.0,
         0.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "ch11mute"
     },
     "inputParams/@p70": {
@@ -958,7 +959,7 @@
         0.0,
         0.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "ch11solo"
     },
     "inputParams/@p71": {
@@ -971,7 +972,7 @@
         1.0,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "ch12bypass"
     },
     "inputParams/@p72": {
@@ -984,7 +985,7 @@
         0.0,
         0.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "ch12mute"
     },
     "inputParams/@p73": {
@@ -997,7 +998,7 @@
         0.0,
         0.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "ch12solo"
     },
     "inputParams/@p74": {
@@ -1010,7 +1011,7 @@
         1.0,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "ch13bypass"
     },
     "inputParams/@p75": {
@@ -1023,7 +1024,7 @@
         0.0,
         0.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "ch13mute"
     },
     "inputParams/@p76": {
@@ -1036,7 +1037,7 @@
         0.0,
         0.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "ch13solo"
     },
     "inputParams/@p77": {
@@ -1049,7 +1050,7 @@
         1.0,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "ch14bypass"
     },
     "inputParams/@p78": {
@@ -1062,7 +1063,7 @@
         0.0,
         0.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "ch14mute"
     },
     "inputParams/@p79": {
@@ -1075,7 +1076,7 @@
         0.0,
         0.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "ch14solo"
     },
     "inputParams/@p80": {
@@ -1088,7 +1089,7 @@
         1.0,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "ch15bypass"
     },
     "inputParams/@p81": {
@@ -1101,7 +1102,7 @@
         0.0,
         0.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "ch15mute"
     },
     "inputParams/@p82": {
@@ -1114,7 +1115,7 @@
         0.0,
         0.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "ch15solo"
     },
     "inputParams/@p83": {
@@ -1127,7 +1128,7 @@
         1.0,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "ch16bypass"
     },
     "inputParams/@p84": {
@@ -1140,7 +1141,7 @@
         0.0,
         0.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "ch16mute"
     },
     "inputParams/@p85": {
@@ -1153,7 +1154,7 @@
         0.0,
         0.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "ch16solo"
     },
     "inputParams/@p86": {
@@ -1166,7 +1167,7 @@
         0.0,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "midiControlPitch"
     },
     "inputParams/@p87": {
@@ -1179,7 +1180,7 @@
         0.0,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "midiControlFormants"
     },
     "inputParams/@p88": {
@@ -1192,7 +1193,7 @@
         2.0,
         12.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "pitchBendRange"
     },
     "inputParams/@p89": {
@@ -1205,7 +1206,7 @@
         0.0,
         1.3
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "glideTime"
     },
     "inputParams/@p90": {
@@ -1218,7 +1219,7 @@
         0.0,
         3.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "glideMode"
     }
   },

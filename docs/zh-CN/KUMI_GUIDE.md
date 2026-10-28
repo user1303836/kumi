@@ -299,6 +299,7 @@ Kumi 从每次匹配中学到的东西会作为一条经验（✦）保留下来
 - **内置 VST3 预设工具。** 请求创建或修改预设时，Kumi 会先检查本地格式目录，再考虑外部资源。支持的预设可通过带历史记录和撤销的操作加载。Serum 2、Ozone 12 及其独立模块、Valhalla、Minimal Audio、Pulsar Modular 等的版本和限制见[格式说明](../../plugin-formats/README.md)。
 - **优先使用已安装的处理器。** 母带和参考母带处理先检查 Ozone 12，再检查其他合适的 VST3，最后使用 DAW 原生设备。Kumi 会在修改前后测量和试听，并在匹配响度后比较参考音频。
 - **原生文件的限制。** Softube 和部分 Zynaptiq 预设可从指定模板读取和编辑，但未验证产品的 VST3 状态加载不会被视为可用。Live 从浏览器加载新的预设实例；现有实例通过公开参数修改。
+- **经验证的写入。** 已安装版本必须与经过测试的写入器匹配，数值修改必须有经验证的写入范围。新文件保存在 Kumi 的预设文件夹中。Live 还会在 User Library 保存副本；撤销已加载设备时，该文件仍会保留。
 
 Serum 2、Vital、Ozone 12、Pro-Q 4、Pro-L 2、Saturn 2、Decapitator、OTT、Supermassive 和 Pigments 还有详细指南。处理某个插件之前，Kumi 会先读这个插件的指南：它的用途、各个部分、常见声音的配方，以及与插件向 Live 显示的真实参数的对照。
 

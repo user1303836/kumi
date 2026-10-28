@@ -68,13 +68,6 @@ pub fn read(bytes: &[u8]) -> Result<Preset<'_>, String> {
     })
 }
 
-/// REAPER's VST3 identifier ends in the canonical 32-digit class ID after `{` (also used in its VST3 cache).
-pub fn reaper_class_id(identifier: &str) -> Option<String> {
-    let (_, id) = identifier.rsplit_once('{')?;
-    let id = id.strip_suffix('}').unwrap_or(id);
-    (id.len() == 32 && id.bytes().all(|b| b.is_ascii_hexdigit())).then(|| id.to_ascii_uppercase())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -107,7 +100,5 @@ mod tests {
         let mut invalid = bytes.clone();
         invalid[71..79].copy_from_slice(&u64::MAX.to_le_bytes());
         assert!(read(&invalid).is_err());
-        assert_eq!(reaper_class_id("Thing.vst3<10{00112233445566778899aabbccddeeff"), Some(parsed.class_id));
-        assert_eq!(reaper_class_id("Thing.vst3"), None);
     }
 }

@@ -9,6 +9,10 @@ use serde_json::Value;
 
 use super::{tree::Node, vstpreset, FormatError, MAX_DECODED_BYTES};
 
+const MAX_PRESET_BYTES: usize = 2 * 1024 * 1024;
+const MAX_TOKENS: usize = 65_536;
+const MAX_PATH_BYTES: usize = 4096;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Preset {
     text: String,
@@ -23,7 +27,7 @@ struct Record {
 
 impl Preset {
     pub fn read(bytes: &[u8]) -> Result<Self, FormatError> {
-        if bytes.len() > MAX_DECODED_BYTES {
+        if bytes.len() > MAX_PRESET_BYTES.min(MAX_DECODED_BYTES) {
             return Err(error("document is too large"));
         }
         let text = std::str::from_utf8(bytes).map_err(|_| error("document is not UTF-8"))?.to_string();
@@ -78,7 +82,15 @@ impl Preset {
                 return Err(error("an edit must preserve each record value's type"));
             }
         }
-        let encoded = values.into_iter().map(encode_token).collect::<Result<Vec<_>, _>>()?.join(" ");
+        let encoded = values
+            .into_iter()
+            .zip(&record.tokens)
+            .map(|(value, (_, quoted))| encode_token(value, *quoted))
+            .collect::<Result<Vec<_>, _>>()?
+            .join(" ");
+        if self.text.len() - record.values.len() + encoded.len() > MAX_PRESET_BYTES.min(MAX_DECODED_BYTES) {
+            return Err(error("document is too large"));
+        }
         self.text.replace_range(record.values.clone(), &encoded);
         Ok(())
     }
@@ -117,6 +129,7 @@ impl Preset {
         let mut counts: Vec<BTreeMap<String, usize>> = vec![BTreeMap::new()];
         let mut offset = 0;
         let mut sampler = false;
+        let mut token_budget = MAX_TOKENS;
         for line in self.text.split_inclusive('\n') {
             let content = line.trim();
             if content.is_empty() || content.starts_with("//") || content.starts_with('#') {
@@ -131,7 +144,8 @@ impl Preset {
                 offset += line.len();
                 continue;
             }
-            let tokens = tokenize(content)?;
+            let tokens = tokenize(content, token_budget)?;
+            token_budget -= tokens.len();
             let Some(first) = tokens.first() else {
                 offset += line.len();
                 continue;
@@ -145,6 +159,9 @@ impl Preset {
             let segment = format!("{name}[{count}]");
             *count += 1;
             let path = sections.iter().chain(std::iter::once(&segment)).cloned().collect::<Vec<_>>().join("/");
+            if path.len() > MAX_PATH_BYTES {
+                return Err(error("record path is too long"));
+            }
             if open {
                 if sections.is_empty() && first.0 == "SAMPLER" {
                     sampler = true;
@@ -181,12 +198,15 @@ impl Preset {
     }
 }
 
-fn tokenize(line: &str) -> Result<Vec<(String, Range<usize>, bool)>, FormatError> {
+fn tokenize(line: &str, budget: usize) -> Result<Vec<(String, Range<usize>, bool)>, FormatError> {
     let mut tokens = Vec::new();
     let mut chars = line.char_indices().peekable();
     while let Some((start, ch)) = chars.next() {
         if ch.is_whitespace() {
             continue;
+        }
+        if tokens.len() >= budget {
+            return Err(error("too many record tokens"));
         }
         let mut value = String::new();
         let mut end = start + ch.len_utf8();
@@ -229,11 +249,20 @@ fn tokenize(line: &str) -> Result<Vec<(String, Range<usize>, bool)>, FormatError
     Ok(tokens)
 }
 
-fn encode_token(value: &Value) -> Result<String, FormatError> {
+fn encode_token(value: &Value, quoted: bool) -> Result<String, FormatError> {
     match value {
         Value::Number(n) if n.as_f64().is_some_and(f64::is_finite) => Ok(n.to_string()),
         Value::String(text) if !text.chars().any(|c| matches!(c, '\0' | '\r' | '\n')) => {
-            Ok(format!("\"{}\"", text.replace('\\', "\\\\").replace('"', "\\\"")))
+            if quoted {
+                Ok(format!("\"{}\"", text.replace('\\', "\\\\").replace('"', "\\\"")))
+            } else if text.is_empty()
+                || text.chars().any(|c| c.is_whitespace() || matches!(c, '"' | '{' | '}'))
+                || text.parse::<f64>().is_ok_and(f64::is_finite)
+            {
+                Err(error("the edited text must remain one nonnumeric bare token"))
+            } else {
+                Ok(text.clone())
+            }
         }
         Value::Bool(value) => Ok(if *value { "1" } else { "0" }.to_string()),
         _ => Err(error("record values must be finite numbers, booleans, or single-line strings")),
@@ -251,7 +280,7 @@ pub struct State {
 
 impl State {
     pub fn read(bytes: &[u8]) -> Result<Self, FormatError> {
-        if bytes.len() > MAX_DECODED_BYTES {
+        if bytes.len() > MAX_PRESET_BYTES.min(MAX_DECODED_BYTES) {
             return Err(error("component state is too large"));
         }
         let chunk = vstpreset::vst2_chunk(bytes)?.ok_or_else(|| error("missing VST3 compatibility wrapper"))?;
@@ -291,7 +320,7 @@ impl State {
             body.push(0);
         }
         body.extend_from_slice(&self.tail);
-        if self.header.len() + body.len() + self.trailer.len() > MAX_DECODED_BYTES {
+        if self.header.len() + body.len() + self.trailer.len() > MAX_PRESET_BYTES.min(MAX_DECODED_BYTES) {
             return Err(error("component state is too large"));
         }
         let mut bytes = self.header.clone();

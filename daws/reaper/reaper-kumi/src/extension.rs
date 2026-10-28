@@ -622,6 +622,7 @@ impl Extension {
         let reaper = self.reaper();
         let rates = self.rates.borrow();
         let mut status = self.status_static.clone();
+        status["presetFiles"] = json!(["vst3"]);
         status["ticksPerSecond"] = json!({"timer": rates.timer_hz, "surface": rates.surface_hz});
         // What a tick costs REAPER's main thread (the last whole second's average and longest), for the perf work's proof.
         status["tickMicros"] = json!({"average": rates.tick_avg_us, "max": rates.tick_max_us});

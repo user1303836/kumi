@@ -1,0 +1,24 @@
+{
+  "plugin": "minimal-flex-chorus",
+  "version": "1.4.0",
+  "binarySha256": "eea78537789023155670581dad975d73ac568907412f26e4d2270690b91489a0",
+  "method": "Restore the initial component, set one public VST3 parameter, capture its XML value, then reload only that field into the initial component. Saved value and host readback must match at both normalized endpoints and 0.25. Bounds are supported intervals in this product version; no survey extrema are used. Raw XML and mappings without this proof remain read-only.",
+  "points": [
+    0,
+    1,
+    0.25
+  ],
+  "fields": {
+    "parameters/MKUFlexChorusNode_Main_InputGain": {"parameterId":1061406346,"stored":[-60.0,12.0,-42.0],"readback":[0.0,1.0,0.25]},
+    "parameters/MKUFlexChorusNode_Main_OutputGain": {"parameterId":200626207,"stored":[-60.0,12.0,-42.0],"readback":[0.0,1.0,0.25]},
+    "parameters/MKUFlexChorusNode_Main_DryWet": {"parameterId":776085818,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/MKUFlexChorusNode_Main_TimeNorm": {"parameterId":880417768,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/MKUFlexChorusNode_Main_ModDepth": {"parameterId":160766112,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/MKUFlexChorusNode_Main_ModRate": {"parameterId":1875988323,"stored":[0.009999999776482582,20.0,0.1025145426392555],"readback":[0.0,1.0,0.25]},
+    "parameters/MKUFlexChorusNode_Main_ModRandomize": {"parameterId":164425998,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/MKUFlexChorusNode_Main_Width": {"parameterId":1497041511,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/MKUFlexChorusNode_Main_Feedback": {"parameterId":618970948,"stored":[0.0,0.9900000095367432,0.2475000023841858],"readback":[0.0,1.0,0.25]},
+    "parameters/MKUFlexChorusNode_Main_HPFreq": {"parameterId":857709311,"stored":[20.0,2500.0,74.16615295410156],"readback":[0.0,1.0,0.2500000298023224]},
+    "parameters/MKUFlexChorusNode_Main_LPFreq": {"parameterId":972225915,"stored":[160.0,20000.0,593.3292236328125],"readback":[0.0,1.0,0.2500000298023224]}
+  }
+}

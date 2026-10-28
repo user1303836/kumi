@@ -1,0 +1,16 @@
+{
+  "plugin": "minimal-formant",
+  "version": "1.2.0",
+  "binarySha256": "f43305a1f68ee47b77f68d7e9d4751809ca58c0edc0cd0d5a9e2fe27e05615e7",
+  "method": "Restore the initial component, set one public VST3 parameter, capture its XML value, then reload only that field into the initial component. Saved value and host readback must match at both normalized endpoints and 0.25. Bounds are supported intervals in this product version; no survey extrema are used. Raw XML and mappings without this proof remain read-only.",
+  "points": [
+    0,
+    1,
+    0.25
+  ],
+  "fields": {
+    "parameters/MKUFormantXYNode_Main_FormantShiftSemitones": {"parameterId":1681819166,"stored":[-12.0,12.0,-6.0],"readback":[0.0,1.0,0.25]},
+    "parameters/MKUFormantXYNode_Main_Tilt": {"parameterId":317590803,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/MKUFormantXYNode_Main_Mix": {"parameterId":148785478,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]}
+  }
+}

@@ -26,7 +26,8 @@
     "presetVersions": [
       "4"
     ],
-    "source": "Installed native preset files and shipped parameter-name metadata; no factory preset bodies copied."
+    "source": "Installed native preset files and shipped parameter-name metadata; no factory preset bodies copied.",
+    "verification": "Native documents inspected; installed-binary version and runtime acceptance remain unverified."
   },
   "fields": {
     "@progName": {
@@ -35,7 +36,7 @@
         "preset",
         "state"
       ],
-      "status": "verified"
+      "status": "guessed"
     },
     "inputParams/@p0": {
       "type": "float",
@@ -47,7 +48,7 @@
         0.0,
         0.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "bypass"
     },
     "inputParams/@p1": {
@@ -60,7 +61,7 @@
         0.03,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "mix"
     },
     "inputParams/@p2": {
@@ -73,7 +74,7 @@
         0.0,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "warpMix"
     },
     "inputParams/@p3": {
@@ -86,7 +87,7 @@
         0.11,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "warpDepth"
     },
     "inputParams/@p4": {
@@ -99,7 +100,7 @@
         -0.35403919219970703,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "warpPoles"
     },
     "inputParams/@p5": {
@@ -112,7 +113,7 @@
         -1.0,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "warpTilt"
     },
     "inputParams/@p6": {
@@ -125,7 +126,7 @@
         0.1,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "warpTiltFilter"
     },
     "inputParams/@p7": {
@@ -138,7 +139,7 @@
         0.0,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "tiltPrePost"
     },
     "inputParams/@p8": {
@@ -151,7 +152,7 @@
         0.0,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "revMix"
     },
     "inputParams/@p9": {
@@ -164,7 +165,7 @@
         0.0,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "revSize"
     },
     "inputParams/@p10": {
@@ -177,7 +178,7 @@
         0.0,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "revDamp"
     },
     "inputParams/@p11": {
@@ -190,7 +191,7 @@
         0.0,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "shiftMix"
     },
     "inputParams/@p12": {
@@ -203,7 +204,7 @@
         -48.0,
         48.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "pitchShift"
     },
     "inputParams/@p13": {
@@ -216,7 +217,7 @@
         -4000.0,
         4000.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "frqShift"
     },
     "inputParams/@p14": {
@@ -229,7 +230,7 @@
         -4000.0,
         4000.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "frqShiftLinear"
     },
     "inputParams/@p15": {
@@ -242,7 +243,7 @@
         0.0,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "frqShiftMode"
     },
     "inputParams/@p16": {
@@ -255,7 +256,7 @@
         0.0,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "swapWarpShift"
     },
     "inputParams/@p17": {
@@ -268,7 +269,7 @@
         0.0,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "warpOn"
     },
     "inputParams/@p18": {
@@ -281,7 +282,7 @@
         0.0,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "shiftOn"
     },
     "inputParams/@p19": {
@@ -294,7 +295,7 @@
         0.0,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "reverbOn"
     },
     "inputParams/@p20": {
@@ -307,7 +308,7 @@
         -2.5,
         24.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "wetGain"
     },
     "inputParams/@p21": {
@@ -320,7 +321,7 @@
         0.0,
         3.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "pitchMode"
     },
     "inputParams/@p22": {
@@ -333,7 +334,7 @@
         0.0,
         2.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "blendMode"
     },
     "inputParams/@p23": {
@@ -346,7 +347,7 @@
         -413.0,
         500.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "delayTime"
     },
     "inputParams/@p24": {
@@ -359,7 +360,7 @@
         0.0,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "delayChannelInvert"
     },
     "inputParams/@p25": {
@@ -372,7 +373,7 @@
         0.0,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "fsDecayTime"
     },
     "inputParams/@p26": {
@@ -385,7 +386,7 @@
         0.0,
         2.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "revRouting"
     }
   },

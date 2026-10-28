@@ -1,0 +1,25 @@
+{
+  "plugin": "minimal-ripple-phaser",
+  "version": "1.4.0",
+  "binarySha256": "a2bd8fae98742abf7e5d92556aaafda2a9981fd104c4b93827f39bc7ba6f6663",
+  "method": "Restore the initial component, set one public VST3 parameter, capture its XML value, then reload only that field into the initial component. Saved value and host readback must match at both normalized endpoints and 0.25. Bounds are supported intervals in this product version; no survey extrema are used. Raw XML and mappings without this proof remain read-only.",
+  "points": [
+    0,
+    1,
+    0.25
+  ],
+  "fields": {
+    "parameters/MKURipplePhaserNode_Main_InputGain": {"parameterId":1458221474,"stored":[-60.0,12.0,-42.0],"readback":[0.0,1.0,0.25]},
+    "parameters/MKURipplePhaserNode_Main_OutputGain": {"parameterId":1764476935,"stored":[-60.0,12.0,-42.0],"readback":[0.0,1.0,0.25]},
+    "parameters/MKURipplePhaserNode_Main_DryWet": {"parameterId":604032290,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/MKURipplePhaserNode_Main_ModDepth": {"parameterId":173566600,"stored":[-1.0,1.0,-0.5],"readback":[0.0,1.0,0.25]},
+    "parameters/MKURipplePhaserNode_Main_ModRandomize": {"parameterId":1933905654,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/MKURipplePhaserNode_Main_ModPhaseOffset": {"parameterId":80415219,"stored":[-0.5,0.5,-0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/MKURipplePhaserNode_Main_ModBalance": {"parameterId":1694970209,"stored":[-1.0,1.0,-0.5],"readback":[0.0,1.0,0.25]},
+    "parameters/MKURipplePhaserNode_Main_Feedback": {"parameterId":631771436,"stored":[0.0,0.9990000128746033,0.2497500032186508],"readback":[0.0,1.0,0.25]},
+    "parameters/MKURipplePhaserNode_Main_Bend": {"parameterId":1980442208,"stored":[-1.0,1.0,-0.5],"readback":[0.0,1.0,0.25]},
+    "parameters/MKURipplePhaserNode_Main_CenterFreq": {"parameterId":2052815956,"stored":[40.0,10000.0,86.09529113769531],"readback":[0.0,1.0,0.25]},
+    "parameters/MKURipplePhaserNode_Main_Spread": {"parameterId":1031427290,"stored":[-1.0,1.0,-0.5],"readback":[0.0,1.0,0.25]},
+    "parameters/MKURipplePhaserNode_Main_CenterSpread": {"parameterId":1736855631,"stored":[-1.0,1.0,-0.5],"readback":[0.0,1.0,0.25]}
+  }
+}

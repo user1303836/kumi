@@ -26,7 +26,8 @@
     "presetVersions": [
       "4"
     ],
-    "source": "Installed native preset files and shipped parameter-name metadata; no factory preset bodies copied."
+    "source": "Installed native preset files and shipped parameter-name metadata; no factory preset bodies copied.",
+    "verification": "Native documents inspected; installed-binary version and runtime acceptance remain unverified."
   },
   "fields": {
     "@progName": {
@@ -35,7 +36,7 @@
         "preset",
         "state"
       ],
-      "status": "verified"
+      "status": "guessed"
     },
     "inputParams/@p0": {
       "type": "float",
@@ -47,7 +48,7 @@
         0.0,
         0.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "bypass"
     },
     "inputParams/@p1": {
@@ -60,7 +61,7 @@
         0.5,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "DryWet"
     },
     "inputParams/@p2": {
@@ -73,7 +74,7 @@
         -24.0,
         24.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "OutLevel"
     },
     "inputParams/@p3": {
@@ -86,7 +87,7 @@
         0.0,
         520.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "LowCut"
     },
     "inputParams/@p4": {
@@ -99,7 +100,7 @@
         0.0,
         240.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "PreDelay"
     },
     "inputParams/@p5": {
@@ -112,7 +113,7 @@
         0.0,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "Soften"
     },
     "inputParams/@p6": {
@@ -125,7 +126,7 @@
         0.0,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "Air"
     },
     "inputParams/@p7": {
@@ -138,7 +139,7 @@
         0.0,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "Sustain"
     },
     "inputParams/@p8": {
@@ -151,7 +152,7 @@
         0.0,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "Freeze"
     },
     "inputParams/@p9": {
@@ -164,7 +165,7 @@
         0.0,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "Diffusion"
     },
     "inputParams/@p10": {
@@ -177,7 +178,7 @@
         0.0,
         100.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "Richness"
     },
     "inputParams/@p11": {
@@ -190,7 +191,7 @@
         0.0,
         4.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "RichnessInterval"
     },
     "inputParams/@p12": {
@@ -203,7 +204,7 @@
         0.0,
         100.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "Randomize"
     },
     "inputParams/@p13": {
@@ -216,7 +217,7 @@
         -1.0,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "hcfAmt"
     },
     "inputParams/@p14": {
@@ -229,7 +230,7 @@
         0.0,
         2.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "hcfMode"
     },
     "inputParams/@p15": {
@@ -242,7 +243,7 @@
         0.0,
         4.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "ActiveSnapshot"
     },
     "inputParams/@p16": {
@@ -255,7 +256,7 @@
         0.0,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "Simplify"
     },
     "inputParams/@p17": {
@@ -268,7 +269,7 @@
         0.0,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "Breathiness"
     },
     "inputParams/@p18": {
@@ -281,7 +282,7 @@
         0.0,
         2.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "trackingMode"
     },
     "inputParams/@p19": {
@@ -294,7 +295,7 @@
         0.0,
         2.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "ReverbModel"
     },
     "inputParams/@p20": {
@@ -307,7 +308,7 @@
         0.0,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "ReverbSize"
     },
     "inputParams/@p21": {
@@ -320,7 +321,7 @@
         0.0,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "ReverbDamp"
     },
     "inputParams/@p22": {
@@ -333,7 +334,7 @@
         0.0,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "ReverbMix"
     },
     "inputParams/@p23": {
@@ -346,7 +347,7 @@
         0.0,
         3.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "HcfKeyboardAlgo"
     },
     "inputParams/@p24": {
@@ -359,7 +360,7 @@
         -1.0,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "HcfTrackWeight"
     }
   },

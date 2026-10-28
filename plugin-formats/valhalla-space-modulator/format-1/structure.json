@@ -1,7 +1,7 @@
 {
   "plugin": "valhalla-space-modulator",
   "format": "format-1",
-  "about": "Normalized Valhalla sound controls in XML root attributes.",
+  "about": "Normalized Valhalla sound controls in XML root attributes. Numeric edits require the verified intervals below. Raw XML attributes are preserved read-only and not duplicated here. Individual endpoint reload evidence is in range-verification.json.",
   "paths": "exact",
   "files": {
     "preset": {
@@ -25,36 +25,28 @@
       }
     }
   },
+  "opaque": [
+    "state"
+  ],
   "fields": {
-    "": {"type":"map","in":["state","preset"],"status":"verified"},
-    "root": {"type":"text","in":["state","preset"],"status":"verified"},
-    "parameters": {"type":"map","in":["state","preset"],"status":"verified"},
-    "parameters/wetDry": {"type":"float","in":["state","preset"],"status":"verified","default":0.5,"about":"Native stored value. Host parameter: wetDry.","range":[0,1],"unit":"normalized"},
-    "parameters/rate": {"type":"float","in":["state","preset"],"status":"verified","default":0.6259999871253967,"about":"Native stored value. Host parameter: rate.","range":[0,1],"unit":"normalized"},
-    "parameters/depth": {"type":"float","in":["state","preset"],"status":"verified","default":0.5,"about":"Native stored value. Host parameter: depth.","range":[0,1],"unit":"normalized"},
-    "parameters/feedback": {"type":"float","in":["state","preset"],"status":"verified","default":0.5,"about":"Native stored value. Host parameter: feedback.","range":[0,1],"unit":"normalized"},
-    "parameters/manual": {"type":"float","in":["state","preset"],"status":"verified","default":0.5,"about":"Native stored value. Host parameter: manual.","range":[0,1],"unit":"normalized"},
-    "parameters/Mode": {"type":"float","in":["state","preset"],"status":"verified","default":0.09090909361839294,"about":"Native stored value. Host parameter: Mode.","range":[0,1],"unit":"normalized"},
-    "state": {"type":"map","in":["state","preset"],"status":"verified"},
-    "state/@pluginVersion": {"type":"text","in":["state","preset"],"status":"verified"},
-    "state/@presetName": {"type":"text","in":["state","preset"],"status":"verified"},
-    "state/@wetDry": {"type":"text","in":["state","preset"],"status":"verified"},
-    "state/@rate": {"type":"text","in":["state","preset"],"status":"verified"},
-    "state/@depth": {"type":"text","in":["state","preset"],"status":"verified"},
-    "state/@feedback": {"type":"text","in":["state","preset"],"status":"verified"},
-    "state/@manual": {"type":"text","in":["state","preset"],"status":"verified"},
-    "state/@Mode": {"type":"text","in":["state","preset"],"status":"verified"},
-    "state/@mixLock": {"type":"text","in":["state","preset"],"status":"verified"},
-    "state/@uiWidth": {"type":"text","in":["state","preset"],"status":"verified"},
-    "state/@uiHeight": {"type":"text","in":["state","preset"],"status":"verified"},
-    "name": {"type":"text","in":["state","preset"],"status":"verified"}
+    "": {"type":"map","in":["state","preset"],"status":"guessed"},
+    "root": {"type":"text","in":["state","preset"],"status":"guessed"},
+    "parameters": {"type":"map","in":["state","preset"],"status":"guessed"},
+    "parameters/wetDry": {"type":"float","status":"guessed","default":0.5,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/rate": {"type":"float","status":"guessed","default":0.6259999871253967,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/depth": {"type":"float","status":"guessed","default":0.5,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/feedback": {"type":"float","status":"guessed","default":0.5,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/manual": {"type":"float","status":"guessed","default":0.5,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/Mode": {"type":"float","status":"guessed","default":0.09090909361839294,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "state": {"type":"map","in":["state","preset"],"status":"guessed"},
+    "name": {"type":"text","in":["state","preset"],"status":"guessed"}
   },
   "parameters": {
-    "wetDry [VST3 48]": {"field":"parameters/wetDry","status":"guessed","note":"VST3 parameter ID 48. Matched by stored name or JUCE ID hash; jointly probed host changes corroborate the field mapping."},
-    "rate [VST3 49]": {"field":"parameters/rate","status":"guessed","note":"VST3 parameter ID 49. Matched by stored name or JUCE ID hash; jointly probed host changes corroborate the field mapping."},
-    "depth [VST3 50]": {"field":"parameters/depth","status":"guessed","note":"VST3 parameter ID 50. Matched by stored name or JUCE ID hash; jointly probed host changes corroborate the field mapping."},
-    "feedback [VST3 51]": {"field":"parameters/feedback","status":"verified","note":"VST3 parameter ID 51. Isolated file edit and host readback verified."},
-    "manual [VST3 52]": {"field":"parameters/manual","status":"guessed","note":"VST3 parameter ID 52. Matched by stored name or JUCE ID hash; jointly probed host changes corroborate the field mapping."},
-    "Mode [VST3 53]": {"field":"parameters/Mode","status":"guessed","note":"VST3 parameter ID 53. Matched by stored name or JUCE ID hash; jointly probed host changes corroborate the field mapping."}
+    "wetDry [VST3 48]": {"field":"parameters/wetDry","status":"verified"},
+    "rate [VST3 49]": {"field":"parameters/rate","status":"verified"},
+    "depth [VST3 50]": {"field":"parameters/depth","status":"verified"},
+    "feedback [VST3 51]": {"field":"parameters/feedback","status":"verified"},
+    "manual [VST3 52]": {"field":"parameters/manual","status":"verified"},
+    "Mode [VST3 53]": {"field":"parameters/Mode","status":"verified"}
   }
 }

@@ -26,7 +26,8 @@
     "presetVersions": [
       "4"
     ],
-    "source": "Installed native preset files and shipped parameter-name metadata; no factory preset bodies copied."
+    "source": "Installed native preset files and shipped parameter-name metadata; no factory preset bodies copied.",
+    "verification": "Native documents inspected; installed-binary version and runtime acceptance remain unverified."
   },
   "fields": {
     "@progName": {
@@ -35,7 +36,7 @@
         "preset",
         "state"
       ],
-      "status": "verified"
+      "status": "guessed"
     },
     "inputParams/@p0": {
       "type": "float",
@@ -47,7 +48,7 @@
         0.0,
         0.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "bypass"
     },
     "inputParams/@p1": {
@@ -60,7 +61,7 @@
         0.2890625,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "DryWetMix"
     },
     "inputParams/@p2": {
@@ -73,7 +74,7 @@
         0.0,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "IoDifference"
     },
     "inputParams/@p3": {
@@ -86,7 +87,7 @@
         -3.6226415094339615,
         0.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "OutputGain"
     },
     "inputParams/@p4": {
@@ -99,7 +100,7 @@
         0.0,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "SideOnly"
     },
     "inputParams/@p5": {
@@ -112,7 +113,7 @@
         0.0,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "HdMode"
     },
     "inputParams/@p6": {
@@ -125,7 +126,7 @@
         0.0,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "Limit"
     },
     "inputParams/@p7": {
@@ -138,7 +139,7 @@
         1.0,
         4.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "CurveSelector"
     },
     "inputParams/@p8": {
@@ -151,7 +152,7 @@
         0.0,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "MusicalNoiseReduction"
     },
     "inputParams/@p9": {
@@ -164,7 +165,7 @@
         0.0,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "MusicalNoiseBandwidth"
     },
     "inputParams/@p10": {
@@ -177,7 +178,7 @@
         0.0,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "DechirpAmount"
     },
     "inputParams/@p11": {
@@ -190,7 +191,7 @@
         0.0,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "DechirpWindowLength"
     },
     "inputParams/@p12": {
@@ -203,7 +204,7 @@
         0.0,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "TransientSolo"
     },
     "inputParams/@p13": {
@@ -216,7 +217,7 @@
         0.0,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "TransientThreshold"
     },
     "inputParams/@p14": {
@@ -229,7 +230,7 @@
         0.0,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "OriginalTransientLevel"
     },
     "inputParams/@p15": {
@@ -242,7 +243,7 @@
         0.0,
         0.6981132075471698
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "SyntheticTransientLevel"
     },
     "inputParams/@p16": {
@@ -255,7 +256,7 @@
         0.0,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "Warmth"
     },
     "inputParams/@p17": {
@@ -268,7 +269,7 @@
         0.0,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "SyncFrames"
     },
     "inputParams/@p18": {
@@ -281,7 +282,7 @@
         0.0,
         0.7265625
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "TrebleBoostAmount"
     },
     "inputParams/@p19": {
@@ -294,7 +295,7 @@
         0.0,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "TrebleEnhanceExcite"
     },
     "inputParams/@p20": {
@@ -307,7 +308,7 @@
         0.0,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "MnRedBiasOnOff"
     },
     "inputParams/@p21": {
@@ -320,7 +321,7 @@
         0.0,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "DechirpAmtBiasOnOff"
     },
     "inputParams/@p22": {
@@ -333,7 +334,7 @@
         0.0,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "TransThrshBiasOnOff"
     },
     "inputParams/@p23": {
@@ -346,7 +347,7 @@
         0.0,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "SynthTransBiasOnOff"
     },
     "inputParams/@p24": {
@@ -359,7 +360,7 @@
         0.0,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "OrigTransBiasOnOff"
     }
   },

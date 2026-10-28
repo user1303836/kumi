@@ -79,7 +79,7 @@ static SPEC: kumi_daw_own::spec::OwnSpecFacts = kumi_daw_own::spec::OwnSpecFacts
         app: "Renoise",
         fader_most: 3.,
         limiter:
-            "an installed Ozone 12 Maximizer or other suitable VST3 limiter as the master's last device, otherwise the native Maximizer, its Ceiling a few tenths under the spec's and its Boost by the gain still needed",
+            "an installed Ozone 12 Maximizer or other suitable VST3 limiter as the master's last device, using that plug-in's gain and true-peak ceiling controls; otherwise the native Maximizer with Ceiling a few tenths under the spec and Boost by the gain still needed",
         gainer: "a suitable installed VST3 gain stage on the master before its limiter, otherwise a native Gainer (up to +12 dB), for the gain past the fader's +3",
     },
     is_master: |row| row.get("type").and_then(serde_json::Value::as_str) == Some("master"),

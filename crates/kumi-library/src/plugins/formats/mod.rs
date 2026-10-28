@@ -7,6 +7,7 @@
 //! Format evidence comes from saved files, initialized states and local plug-in/host investigation.
 //! Manufacturer code and factory content are not bundled; Vital's published source is read without copying it.
 
+pub mod bounded_json;
 pub mod cbor;
 pub mod juce_xml;
 pub mod minimal_audio;
@@ -36,5 +37,9 @@ impl FormatError {
     }
 }
 
-/// The most a compressed body may grow to when decoded, so a hostile file can't exhaust memory.
-pub const MAX_DECODED_BYTES: usize = 64 * 1024 * 1024;
+/// The largest committed decoded fixture is 322 KiB. Leave room for user patches,
+/// while bounding both raw bytes and the tree's allocation amplification.
+pub const MAX_DECODED_BYTES: usize = 2 * 1024 * 1024;
+/// The largest fixture has 13,667 nodes including XML attributes or JSON keys.
+pub const MAX_DECODED_ITEMS: usize = 65_536;
+pub const MAX_DECODED_DEPTH: usize = 64;

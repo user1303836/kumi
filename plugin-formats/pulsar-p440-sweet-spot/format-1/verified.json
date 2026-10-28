@@ -13,6 +13,7 @@
   ],
   "writes": [
     {
+      "binary_sha256": "495de02293694cdbfca5c9add15b1182c64687b5bd026bfb54aeb43b9484fb41",
       "version": "2.3.2",
       "files": [
         "state"

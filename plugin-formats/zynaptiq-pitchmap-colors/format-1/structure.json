@@ -26,7 +26,8 @@
     "presetVersions": [
       "4"
     ],
-    "source": "Installed native preset files and shipped parameter-name metadata; no factory preset bodies copied."
+    "source": "Installed native preset files and shipped parameter-name metadata; no factory preset bodies copied.",
+    "verification": "Native documents inspected; installed-binary version and runtime acceptance remain unverified."
   },
   "fields": {
     "@progName": {
@@ -35,7 +36,7 @@
         "preset",
         "state"
       ],
-      "status": "verified"
+      "status": "guessed"
     },
     "inputParams/@p0": {
       "type": "float",
@@ -47,7 +48,7 @@
         0.0,
         0.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "BYPASS"
     },
     "inputParams/@p1": {
@@ -60,7 +61,7 @@
         0.0,
         2.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "SoundMode"
     },
     "inputParams/@p2": {
@@ -73,7 +74,7 @@
         0.0,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "hpOn"
     },
     "inputParams/@p3": {
@@ -86,7 +87,7 @@
         0.0,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "lpOn"
     },
     "inputParams/@p4": {
@@ -99,7 +100,7 @@
         0.0,
         0.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "SnapshotOrMIDI"
     },
     "inputParams/@p5": {
@@ -112,7 +113,7 @@
         0.0,
         109.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "lowPitchKey"
     },
     "inputParams/@p6": {
@@ -125,7 +126,7 @@
         0.0,
         109.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "highPitchKey"
     },
     "inputParams/@p7": {
@@ -138,7 +139,7 @@
         0.0,
         106.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "transientBypass"
     },
     "inputParams/@p8": {
@@ -151,7 +152,7 @@
         0.0,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "transientBypassOn"
     },
     "inputParams/@p9": {
@@ -164,7 +165,7 @@
         -24.0,
         12.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "scaleShift"
     },
     "inputParams/@p10": {
@@ -177,7 +178,7 @@
         0.0,
         2.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "pitchRounding"
     },
     "inputParams/@p11": {
@@ -190,7 +191,7 @@
         -12.0,
         12.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "formantShift"
     },
     "inputParams/@p12": {
@@ -203,7 +204,7 @@
         0.0,
         1.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "formantGamma"
     },
     "inputParams/@p13": {
@@ -216,7 +217,7 @@
         0.0,
         1000.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "lowPitchCutoff"
     },
     "inputParams/@p14": {
@@ -229,7 +230,7 @@
         1550.0,
         20050.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "highPitchCutoff"
     },
     "inputParams/@p15": {
@@ -242,7 +243,7 @@
         0.0,
         0.0
       ],
-      "status": "verified",
+      "status": "guessed",
       "about": "minMaxPitchMode"
     }
   },

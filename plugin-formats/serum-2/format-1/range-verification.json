@@ -1,0 +1,195 @@
+{
+  "plugin": "serum-2",
+  "version": "2.1.5",
+  "binarySha256": "501e7bb3dd9cafe416b3412df3d4e084c01b7468201e5690b9009d7ecd4e5283",
+  "method": "Each public VST3 parameter was set to normalized 0, 1 and 0.25. Only its stored CBOR field was copied into a fresh initialized processor state. Reloaded host values and serialized values matched. Bounds apply only to the verified concrete mappings; other oscillator indices remain read-only.",
+  "points": [
+    0,
+    1,
+    0.25
+  ],
+  "fields": {
+    "Oscillator0/plainParams/kParamEnable": {
+      "parameterId": 1000000,
+      "stored": [
+        0.0,
+        1.0,
+        0.0
+      ],
+      "readback": [
+        0.0,
+        1.0,
+        0.0
+      ]
+    },
+    "Oscillator0/plainParams/kParamVolume": {
+      "parameterId": 1000001,
+      "stored": [
+        0.0,
+        1.0,
+        0.0625
+      ],
+      "readback": [
+        0.0,
+        1.0,
+        0.25
+      ]
+    },
+    "Oscillator0/plainParams/kParamCoarsePit": {
+      "parameterId": 1000006,
+      "stored": [
+        -64.0,
+        64.0,
+        -32.0
+      ],
+      "readback": [
+        0.0,
+        1.0,
+        0.25
+      ]
+    },
+    "Oscillator1/plainParams/kParamEnable": {
+      "parameterId": 1001000,
+      "stored": [
+        0.0,
+        1.0,
+        0.0
+      ],
+      "readback": [
+        0.0,
+        1.0,
+        0.0
+      ]
+    },
+    "Oscillator1/plainParams/kParamVolume": {
+      "parameterId": 1001001,
+      "stored": [
+        0.0,
+        1.0,
+        0.0625
+      ],
+      "readback": [
+        0.0,
+        1.0,
+        0.25
+      ]
+    },
+    "Oscillator1/plainParams/kParamCoarsePit": {
+      "parameterId": 1001006,
+      "stored": [
+        -64.0,
+        64.0,
+        -32.0
+      ],
+      "readback": [
+        0.0,
+        1.0,
+        0.25
+      ]
+    },
+    "Oscillator2/plainParams/kParamEnable": {
+      "parameterId": 1002000,
+      "stored": [
+        0.0,
+        1.0,
+        0.0
+      ],
+      "readback": [
+        0.0,
+        1.0,
+        0.0
+      ]
+    },
+    "Oscillator2/plainParams/kParamVolume": {
+      "parameterId": 1002001,
+      "stored": [
+        0.0,
+        1.0,
+        0.0625
+      ],
+      "readback": [
+        0.0,
+        1.0,
+        0.25
+      ]
+    },
+    "Oscillator2/plainParams/kParamCoarsePit": {
+      "parameterId": 1002006,
+      "stored": [
+        -64.0,
+        64.0,
+        -32.0
+      ],
+      "readback": [
+        0.0,
+        1.0,
+        0.25
+      ]
+    },
+    "Oscillator3/plainParams/kParamEnable": {
+      "parameterId": 1003000,
+      "stored": [
+        0.0,
+        1.0,
+        0.0
+      ],
+      "readback": [
+        0.0,
+        1.0,
+        0.0
+      ]
+    },
+    "Oscillator3/plainParams/kParamVolume": {
+      "parameterId": 1003001,
+      "stored": [
+        0.0,
+        1.0,
+        0.0625
+      ],
+      "readback": [
+        0.0,
+        1.0,
+        0.25
+      ]
+    },
+    "Oscillator4/plainParams/kParamEnable": {
+      "parameterId": 1004000,
+      "stored": [
+        0.0,
+        1.0,
+        0.0
+      ],
+      "readback": [
+        0.0,
+        1.0,
+        0.0
+      ]
+    },
+    "Oscillator4/plainParams/kParamVolume": {
+      "parameterId": 1004001,
+      "stored": [
+        0.0,
+        1.0,
+        0.0625
+      ],
+      "readback": [
+        0.0,
+        1.0,
+        0.25
+      ]
+    },
+    "Oscillator4/plainParams/kParamCoarsePit": {
+      "parameterId": 1004006,
+      "stored": [
+        -64.0,
+        64.0,
+        -32.0
+      ],
+      "readback": [
+        0.0,
+        1.0,
+        0.25
+      ]
+    }
+  }
+}

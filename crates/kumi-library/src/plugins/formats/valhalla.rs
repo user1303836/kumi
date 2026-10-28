@@ -11,6 +11,7 @@ use super::FormatError;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ValhallaPreset {
     state: XmlState,
+    plugin: &'static str,
 }
 
 impl ValhallaPreset {
@@ -30,7 +31,20 @@ impl ValhallaPreset {
         ) {
             return Err(FormatError::new("Valhalla preset: unknown XML root"));
         }
-        Ok(Self { state })
+        let plugin = match state.document.root.name.as_str() {
+            "ValhallaDelay" => "valhalla-delay",
+            "MYPLUGINSETTINGS" if state.document.root.attribute("parameter0").is_some() => "valhalla-shimmer",
+            "MYPLUGINSETTINGS" => "valhalla-freq-echo",
+            "ValhallaFutureVerb" => "valhalla-future-verb",
+            "ValhallaPlate" => "valhalla-plate",
+            "ValhallaRoom" => "valhalla-room",
+            "ValhallaSpaceModulator" => "valhalla-space-modulator",
+            "ValhallaSupermassive" => "valhalla-supermassive",
+            "ValhallaUberMod" => "valhalla-uber-mod",
+            "ValhallaVintageVerb" => "valhalla-vintage-verb",
+            _ => unreachable!(),
+        };
+        Ok(Self { state, plugin })
     }
 
     pub fn read_state(bytes: &[u8]) -> Result<Self, FormatError> {
@@ -72,6 +86,7 @@ impl ValhallaPreset {
         if !self.parameters().any(|(key, _)| key == name) {
             return Err(FormatError::new(format!("Valhalla preset has no parameter {name}")));
         }
+        super::structure::validate_number(self.plugin, &format!("parameters/{name}"), value)?;
         juce_xml::set_attribute(&mut self.state.document.root, &format!("@{name}"), &value.to_string())
     }
 

@@ -1,5 +1,7 @@
 use kumi_daw_ableton::{audition::*, hands::MenuItem, live_command::*, plugin_tool::*};
 use serde_json::{json, Value};
+#[path = "../support/plugin_catalog.rs"]
+mod plugin_catalog;
 fn oracle() -> Value {
     serde_json::from_str(&kumi_testkit::oracle("kumi-daw-ableton/audition-menu-oracle.json")).unwrap()
 }
@@ -64,8 +66,9 @@ fn menu_matching_shortcuts_and_model_schemas_match_source() {
     assert_eq!(*LIVE_COMMAND_SCHEMA, assets["commands"]["schema"].as_object().unwrap().clone());
     let commands: serde_json::Map<String, Value> = COMMANDS.iter().map(|(k, v)| (k.clone(), serde_json::to_value(v).unwrap())).collect();
     assert_eq!(commands, assets["commands"]["commands"].as_object().unwrap().clone());
-    assert_eq!(*PLUGIN_DESCRIPTION, assets["plugin"]["description"]);
-    assert_eq!(*PLUGIN_SCHEMA, assets["plugin"]["schema"].as_object().unwrap().clone());
+    let (description, schema) = plugin_catalog::legacy(&PLUGIN_DESCRIPTION, &json!(*PLUGIN_SCHEMA));
+    assert_eq!(description, assets["plugin"]["description"]);
+    assert_eq!(schema, assets["plugin"]["schema"]);
 }
 #[test]
 fn crash_restore_journal_is_private_validated_and_best_effort() {

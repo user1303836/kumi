@@ -1,0 +1,39 @@
+{
+  "plugin": "minimal-rift",
+  "version": "2.6.0",
+  "binarySha256": "6fd9cc3c1a7a9f898900a5d4e52be7d816c38a2dae6cc5ef9824476eaea6cd8c",
+  "method": "Restore the initial component, set one public VST3 parameter, capture its XML value, then reload only that field into the initial component. Saved value and host readback must match at both normalized endpoints and 0.25. Bounds are supported intervals in this product version; no survey extrema are used. Raw XML and mappings without this proof remain read-only.",
+  "points": [
+    0,
+    1,
+    0.25
+  ],
+  "fields": {
+    "parameters/MKUMorphingLFONode_Mod_1_Randomize": {"parameterId":945754637,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/MKUEnvelopeFollowerNode_Mod_4_Attack": {"parameterId":1175699080,"stored":[0.004999999888241291,1.0,0.06718750298023224],"readback":[0.0,1.0,0.25]},
+    "parameters/MKUEnvelopeFollowerNode_Mod_4_Release": {"parameterId":1705402311,"stored":[0.004999999888241291,10.0,0.04404296725988388],"readback":[0.0,1.0,0.25]},
+    "parameters/MKUEnvelopeFollowerNode_Mod_4_Gain": {"parameterId":1167862719,"stored":[-72.0,24.0,-48.0],"readback":[0.0,1.0,0.25]},
+    "parameters/MKUMacroNode_Mod_5_Macro": {"parameterId":1932537277,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/MKUMacroNode_Mod_6_Macro": {"parameterId":672557310,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/MKURiftInputNode_Main_InputGain": {"parameterId":2142679954,"stored":[-60.0,24.0,-39.0],"readback":[0.0,1.0,0.25]},
+    "parameters/MKURiftProcessorNode_Main_Trim": {"parameterId":1786208801,"stored":[0.0,12.0,3.0],"readback":[0.0,1.0,0.25]},
+    "parameters/MKURiftProcessorNode_Main_PosPolReduction": {"parameterId":679230395,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/MKURiftProcessorNode_Main_Split": {"parameterId":1684401403,"stored":[-1.0,1.0,-0.5],"readback":[0.0,1.0,0.25]},
+    "parameters/MKURiftProcessorNode_Main_NegPolReduction": {"parameterId":1945581815,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/MKURiftProcessorNode_Main_Mode": {"parameterId":1785997218,"stored":[0.0,4.0,1.0],"readback":[0.0,1.0,0.25]},
+    "parameters/MKURiftProcessorNode_Main_DELAY_DryWet": {"parameterId":1017509654,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/MKURiftProcessorNode_Main_DELAY_Time": {"parameterId":1445100264,"stored":[12.0,108.0,36.0],"readback":[0.0,1.0,0.25]},
+    "parameters/MKURiftProcessorNode_Main_DELAY_Feedback": {"parameterId":699043360,"stored":[-1.25,1.25,-0.625],"readback":[0.0,1.0,0.25]},
+    "parameters/MKURiftProcessorNode_Main_DELAY_Mode": {"parameterId":1444897214,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/MKURiftProcessorNode_Main_DELAY_Lowpass": {"parameterId":2048613226,"stored":[20.0,20000.0,112.46826171875],"readback":[0.0,1.0,0.25]},
+    "parameters/MKURiftProcessorNode_Main_DELAY_Highpass": {"parameterId":1353597774,"stored":[5.0,5000.0,28.1170654296875],"readback":[0.0,1.0,0.25]},
+    "parameters/MKURiftProcessorNode_Main_DELAY_Spread": {"parameterId":1444904654,"stored":[-1.0,1.0,-0.5],"readback":[0.0,1.0,0.25]},
+    "parameters/MKURiftFilterNode_Main_DryWet": {"parameterId":1978511192,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/MKURiftFilterNode_Main_Cutoff": {"parameterId":1952526730,"stored":[20.0,20000.0,112.46826171875],"readback":[0.0,1.0,0.25]},
+    "parameters/MKURiftFilterNode_Main_Resonance": {"parameterId":939360657,"stored":[0.7070000171661377,6.0,2.030250072479248],"readback":[0.0,1.0,0.25]},
+    "parameters/MKURiftFilterNode_Main_Spread": {"parameterId":258422544,"stored":[-1.0,1.0,-0.5],"readback":[0.0,1.0,0.25]},
+    "parameters/MKURiftFilterNode_Main_Morph": {"parameterId":141312971,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/MKURiftOutputNode_Main_WetDry": {"parameterId":1482039691,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/MKURiftOutputNode_Main_OutputGain": {"parameterId":1418448454,"stored":[-60.0,24.0,-39.0],"readback":[0.0,1.0,0.25]}
+  }
+}
