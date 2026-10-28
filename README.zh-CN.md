@@ -111,7 +111,7 @@ Kumi 是免费的开源软件（MIT）。模型由你选择：
 
 ## 当前状态
 
-Kumi 1.24.6 已在 macOS 的 Ableton Live 12.4（测试版）中验证。
+Kumi 1.24.7 已在 macOS 的 Ableton Live 12.4（测试版）中验证。
 在 Windows 上，安装和升级已经过验证，但与 Live 一起使用还是新的。
 出问题时请发送 `kumi report`。
 REAPER 7.82 和 Renoise 3.5.4 已在 macOS 上验证。在 Windows 和 Linux 上，CI 验证了装入 Kumi 的扩展和工具以及加载该扩展，但在那里配合 REAPER 和 Renoise 使用还是新的。
