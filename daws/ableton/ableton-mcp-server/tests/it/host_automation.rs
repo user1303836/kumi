@@ -490,8 +490,33 @@ async fn clearing_envelopes_fences_on_what_live_reports_not_the_snapshot() {
     assert_eq!(live.0.state.borrow()["tracks"][0]["clips"][0]["envelopes"], json!({}));
 }
 #[tokio::test]
+async fn undoing_an_insert_into_an_envelope_that_was_not_there_deletes_the_envelope() {
+    // #325: drawn into a parameter with no envelope yet, then undone. The undo took the points out and left the envelope,
+    // empty, where there had been none: its exact-prior check failed and the change read "check Live".
+    let adapter = Rc::new(Adapter::new("insert-absent"));
+    setup(&adapter.sim, "insert-absent");
+    let host = McpHost::new(adapter.clone(), McpHostOptions::default()).unwrap();
+    let text = |result: Value| -> Value { serde_json::from_str(result["result"]["content"][0]["text"].as_str().unwrap()).unwrap() };
+    let envelope = || adapter.sim.state.borrow()["tracks"][0]["clips"][0]["envelopes"].get(PREF).cloned();
+    let args = json!({"action":"insert","clipRef":"clip:clip-1","parameterRef":PREF,"points":[{"time":0,"value":0},{"time":4,"value":1}]});
+    let preview = text(host.live_automation_preview_async(&json!(1), &args).await);
+    assert_eq!(preview["current"], json!({"exists":false,"points":[]}), "{preview}");
+    let apply = json!({"transactionId":preview["transactionId"],"confirmation":"apply","idempotencyKey":"apply-key"});
+    let applied = text(host.live_automation_apply_async(&json!(2), &apply, None).await.unwrap());
+    assert_eq!(applied["state"], "applied", "{applied}");
+    assert_eq!(envelope(), Some(json!([{"time":0,"value":0},{"time":4,"value":1}])));
+    let (id, undo) = (json!(3), json!({"transactionId":preview["transactionId"],"confirmation":"undo","idempotencyKey":"undo-key"}));
+    let undone = text(host.with_undo_watch(&id, &undo, async { Ok(host.undo_automation_async(&id, &undo, None).await) }).await.unwrap());
+    assert_eq!(undone["state"], "undone", "{undone}");
+    assert_eq!(envelope(), None);
+}
+#[tokio::test]
 async fn automation_apply_and_exact_key_undo_match_source() {
-    for row in fixture()["workflows"].as_array().unwrap() {
+    let fixture = fixture();
+    let workflows = fixture["workflows"].as_array().unwrap();
+    // The reads and sends each insert-absent and step-absent workflow made from its undo on, by scenario.
+    let mut undoes = HashMap::new();
+    for row in workflows {
         let kind = row["kind"].as_str().unwrap();
         let scenario = row["scenario"].as_str().unwrap();
         let adapter = Rc::new(Adapter::new(kind));
@@ -505,6 +530,8 @@ async fn automation_apply_and_exact_key_undo_match_source() {
         let body: Value = preview["result"]["content"][0]["text"].as_str().map(|s| serde_json::from_str(s).unwrap()).unwrap_or(json!({}));
         let mut results = vec![clean(preview)];
         let mut states = vec![];
+        // How many results, states and calls came before the undo.
+        let mut applied = (1, 0, 0);
         if let Some(txid) = body.get("transactionId") {
             let record = host.transaction_record(txid.as_str().unwrap()).unwrap();
             if scenario == "expire" {
@@ -529,6 +556,7 @@ async fn automation_apply_and_exact_key_undo_match_source() {
             for key in ["apply-key", "other-key", "apply-key"] {
                 perform(&host, "apply", key, txid, &mut results, &mut states, &record, scenario == "apply-preabort").await;
             }
+            applied = (results.len(), states.len(), adapter.calls.borrow().len());
             adapter.reset("");
             {
                 let mut s = adapter.sim.state.borrow_mut();
@@ -553,10 +581,48 @@ async fn automation_apply_and_exact_key_undo_match_source() {
             perform(&host, "undo", "new-undo-key", txid, &mut results, &mut states, &record, false).await;
         }
         let label = format!("{kind} {scenario}");
+        if kind == "insert-absent" || kind == "step-absent" {
+            let calls = &adapter.calls.borrow()[applied.2..];
+            undoes.insert(
+                (kind, scenario),
+                calls.iter().map(|call| json!([call["method"], call["invocation"]["operation"]])).collect::<Vec<_>>(),
+            );
+        }
+        if kind == "insert-absent" {
+            // #325: the source undid an insert into an envelope that wasn't there by deleting the points it put in. That
+            // left the envelope there, empty, where the prior had none, so the undo failed its own exact-prior check
+            // ("automation undo did not restore the exact prior envelope"). The port deletes the envelope, as the source
+            // undid an insert-step into a missing envelope. So up to the undo these match the source's insert, and from
+            // the undo on its insert-step: the same answers, states, Live calls (checked below, once every workflow has
+            // run) and envelope left (or not) at the end.
+            let step = workflows.iter().find(|w| w["kind"] == "step-absent" && w["scenario"] == scenario).unwrap();
+            let (answers, held, sent) = applied;
+            let states_of = |rows: &[Value]| -> Vec<Value> { rows.iter().map(|row| json!([row["state"], row["undoKey"]])).collect() };
+            let envelope = |state: &Value| state["tracks"][0]["clips"][0]["envelopes"].get(PREF).is_some();
+            let calls = adapter.calls.borrow();
+            same(&json!(results[..answers]), &json!(row["results"].as_array().unwrap()[..answers]), &format!("{label} results"));
+            same(&json!(results[answers..]), &json!(step["results"].as_array().unwrap()[answers..]), &format!("{label} undo results"));
+            same(&json!(states[..held]), &json!(row["states"].as_array().unwrap()[..held]), &format!("{label} states"));
+            same(
+                &json!(states_of(&states[held..])),
+                &json!(states_of(&step["states"].as_array().unwrap()[held..])),
+                &format!("{label} undo states"),
+            );
+            same(&json!(calls[..sent]), &json!(row["calls"].as_array().unwrap()[..sent]), &format!("{label} calls"));
+            assert_eq!(envelope(&adapter.sim.state.borrow()), envelope(&step["state"]), "{label} envelope");
+            continue;
+        }
         same(&json!(results), &row["results"], &format!("{label} results"));
         same(&json!(states), &row["states"], &format!("{label} states"));
         same(&json!(*adapter.calls.borrow()), &row["calls"], &format!("{label} calls"));
         same(&adapter.sim.state.borrow(), &row["state"], &format!("{label} state"));
+    }
+    // From the undo on, an insert-absent workflow makes the Live calls its step-absent one made: every one, in order.
+    // The step-absent ones matched the source's whole calls above.
+    for ((kind, scenario), calls) in &undoes {
+        if *kind == "insert-absent" {
+            same(&json!(calls), &json!(undoes[&("step-absent", *scenario)]), &format!("{kind} {scenario} undo calls"));
+        }
     }
 }
 
