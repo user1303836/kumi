@@ -3,6 +3,17 @@
 Kumi's releases. The Ableton bridge (`crates/ableton-mcp-server`) is versioned on its own;
 each Kumi release names the bridge it ships with.
 
+## 1.24.3 — 2026-10-27
+
+Ships with bridge 1.0.97, as 1.24.2 did.
+
+- `kumi uninstall` finds Kumi's PATH line under a marker you edited, and leaves one it could break
+  (after `&&`, `||`, `|` or `\`, or in a function whose body is in brackets), naming each one's own
+  lines to take out by hand.
+
+Tested with Live 12.4 on macOS. On Windows, installing and updating are tested; using Kumi with Live
+there is still new.
+
 ## 1.24.2 — 2026-10-27
 
 Ships with bridge 1.0.97, as 1.24.1 did.
