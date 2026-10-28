@@ -1035,39 +1035,131 @@ pub struct PathLines {
     pub after: Option<String>,
     /// Kumi's lines it takes out, with their line numbers (from 1), as they are in the file.
     pub removed: Vec<(usize, String)>,
-    /// Kumi's lines it leaves alone because they sit inside an if, for or function there: taking them out could leave
-    /// an empty body, which the shell refuses.
-    pub left: Vec<(usize, String)>,
+    /// Kumi's blocks it leaves alone, because taking them out could break the code around them.
+    pub left: Vec<LeftAlone>,
 }
-/// A line that opens a body Kumi's lines could sit in: one ending in `then`, `do`, `{`, `else` or a case's `in`; in
-/// fish, one starting with `if`, `for`, `while`, `function`, `begin`, `switch`, `case` or `else` that doesn't end it.
+/// One of Kumi's blocks left in a startup file, and why.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LeftAlone {
+    /// Kumi's lines in it, with their line numbers (from 1), as they are in the file: the PATH line alone when its
+    /// marker ends a line of the producer's code.
+    pub lines: Vec<(usize, String)>,
+    /// Why it stays, as said after its lines: "it sits inside an if, for or function there".
+    pub why: String,
+}
+/// A line's code without the comment at its end: from a `#` that starts a word outside quotes.
+fn uncommented(line: &str) -> &str {
+    let (mut quote, mut escaped, mut in_word) = (None, false, false);
+    for (at, c) in line.char_indices() {
+        if escaped {
+            escaped = false;
+        } else if let Some(open) = quote {
+            if c == open {
+                quote = None;
+            } else if c == '\\' && open == '"' {
+                escaped = true;
+            }
+        } else if c == '#' && !in_word {
+            return &line[..at];
+        } else if c == '\\' {
+            escaped = true;
+        } else if c == '\'' || c == '"' {
+            quote = Some(c);
+        } else if c.is_whitespace() || ";&|()<>".contains(c) {
+            in_word = false;
+            continue;
+        }
+        in_word = true;
+    }
+    line
+}
+/// A line that opens a body Kumi's lines could sit in: one whose code ends in `then`, `do`, `{`, `(`, `else` or a
+/// case's `in`; in fish, one starting with `if`, `for`, `while`, `function`, `begin`, `switch`, `case` or `else` that
+/// doesn't end it.
 fn opens_a_body(line: &str, fish: bool) -> bool {
-    let words: Vec<&str> = line.split_whitespace().collect();
+    let words: Vec<&str> = uncommented(line).split_whitespace().collect();
     let last = words.last().copied().unwrap_or("");
     if fish {
         return words.first().is_some_and(|first| ["if", "for", "while", "function", "begin", "switch", "case", "else"].contains(first))
             && last != "end";
     }
-    ["then", "do", "{", "else", "in"].contains(&last) || last.ends_with(";then") || last.ends_with(";do")
+    ["then", "do", "else", "in"].contains(&last) || last.ends_with(";then") || last.ends_with(";do") || last.ends_with(['{', '('])
 }
-/// A line that closes such a body: `fi`, `done`, `}`, `esac`, `else`, `elif`, `;;`, or fish's `end`.
+/// A line that closes such a body: `fi`, `done`, `}`, `)`, `esac`, `else`, `elif`, `;;`, or fish's `end`.
 fn closes_a_body(line: &str) -> bool {
     line.split_whitespace().next().is_some_and(|first| {
         ["fi", "done", "}", "esac", "else", "elif", ";;", "end"].contains(&first.trim_end_matches(';'))
-            || first.starts_with('}')
+            || first.starts_with(['}', ')'])
             || first == ";;"
     })
+}
+/// What joins a line to the next, said as it's written: `&&`, `||` or `|` ending its code, or a backslash before its
+/// newline.
+fn runs_on(line: &str) -> Option<&'static str> {
+    let line = line.trim_end_matches('\r');
+    let code = uncommented(line);
+    if code.len() == line.len() && (code.len() - code.trim_end_matches('\\').len()) % 2 == 1 {
+        return Some("a backslash");
+    }
+    ["&&", "||", "|"].into_iter().find(|op| code.trim_end().ends_with(op))
 }
 /// A line with code on it: not blank, not a comment.
 fn code(line: &&str) -> bool {
     let line = line.trim();
     !line.is_empty() && !line.starts_with('#')
 }
-/// The startup files with Kumi's PATH lines. A marker is found as install.sh finds it, CRLF endings and trailing
-/// spaces included. Kumi's line is the one under it naming this Kumi's bin, as written or spelled from $HOME,
-/// ${HOME} or ~; the installer's blank line above the marker goes with them, and so does a marker with no PATH line
-/// under it. A marker over another Kumi's PATH line, every line under no marker, and a block inside an if, for or
-/// function body stay.
+/// Kumi's blocks in a startup file's `text`, found as [`path_lines`] says: the text without the ones that go, their
+/// lines, and the ones left alone. `ours` tells this Kumi's PATH line.
+fn take_out_blocks(text: &str, fish: bool, ours: impl Fn(&str) -> bool) -> (String, Vec<(usize, String)>, Vec<LeftAlone>) {
+    let lines: Vec<&str> = text.split('\n').collect();
+    let mut kept: Vec<&str> = vec![];
+    let (mut removed, mut left) = (vec![], vec![]);
+    let mut index = 0;
+    while index < lines.len() {
+        let line = lines[index];
+        let next = lines.get(index + 1).copied();
+        let other_kumis = next.is_some_and(|next| !ours(next) && next.contains("PATH"));
+        let block = if next.is_some_and(&ours) { 2 } else { 1 };
+        // A marker in a line of the producer's own code, with no PATH line of Kumi's under it, is only words of theirs.
+        if !line.contains(PATH_MARKER) || other_kumis || (code(&line) && block == 1) {
+            kept.push(line);
+            index += 1;
+            continue;
+        }
+        // The code around the block, past blank lines and comments: an if, for or function it may sit in.
+        let above = kept.iter().rev().find(|line| code(line)).copied();
+        let below = lines[index + block..].iter().find(|line| code(line)).copied();
+        let indented = line.starts_with([' ', '\t']) || (block == 2 && next.is_some_and(|next| next.starts_with([' ', '\t'])));
+        let joined = above.and_then(runs_on).or_else(|| next.filter(|_| block == 2).and_then(runs_on));
+        // A marker ending a line of the producer's code is the only part of that line that's Kumi's.
+        let shared = code(&line);
+        let why = if shared {
+            Some(format!("its marker shares line {} with code of yours, and only the marker at that line's end can go with it", index + 1))
+        } else if indented || above.is_some_and(|above| opens_a_body(above, fish)) || below.is_some_and(closes_a_body) {
+            Some("it sits inside an if, for or function there".to_string())
+        } else {
+            joined.map(|op| format!("it's joined to the code beside it there by {op}"))
+        };
+        let numbered = (index + usize::from(shared)..index + block).map(|at| (at + 1, lines[at].trim_end_matches('\r').to_string()));
+        if let Some(why) = why {
+            left.push(LeftAlone { lines: numbered.collect(), why });
+            kept.extend(&lines[index..index + block]);
+        } else {
+            if kept.last().is_some_and(|last| last.trim().is_empty()) {
+                kept.pop();
+            }
+            removed.extend(numbered);
+        }
+        index += block;
+    }
+    (kept.join("\n"), removed, left)
+}
+/// The startup files with Kumi's PATH lines. A marker is found as install.sh finds it: anywhere in a line, so one
+/// edited by hand counts too, CRLF endings and trailing spaces included. Kumi's line is the one under it naming this
+/// Kumi's bin, as written or spelled from $HOME, ${HOME} or ~; the installer's blank line above the marker goes with
+/// them, and so does a marker with no PATH line under it. A marker over another Kumi's PATH line and every line under no
+/// marker stay. So does a block that taking out could break: in an if, for or function body (or a subshell's
+/// brackets), joined to the code beside it by `&&`, `||`, `|` or a backslash, or with its marker on a line of code.
 pub fn path_lines(env: &Env, home: &str) -> Vec<PathLines> {
     if cfg!(windows) {
         return vec![];
@@ -1094,39 +1186,10 @@ pub fn path_lines(env: &Env, home: &str) -> Vec<PathLines> {
     let mut found = vec![];
     for file in startup_files(env) {
         let Ok(text) = fs::read_to_string(&file) else { continue };
-        let lines: Vec<&str> = text.split('\n').collect();
-        let mut kept: Vec<&str> = vec![];
-        let (mut removed, mut left) = (vec![], vec![]);
-        let mut index = 0;
-        while index < lines.len() {
-            let line = lines[index];
-            let next = lines.get(index + 1).copied();
-            let other_kumis = next.is_some_and(|next| !ours(next) && next.contains("PATH"));
-            if line.trim() != PATH_MARKER || other_kumis {
-                kept.push(line);
-                index += 1;
-                continue;
-            }
-            let block = if next.is_some_and(ours) { 2 } else { 1 };
-            // The code around the block, past blank lines and comments: an if, for or function it may sit in.
-            let above = kept.iter().rev().find(|line| code(line)).copied();
-            let below = lines[index + block..].iter().find(|line| code(line)).copied();
-            let indented = line.starts_with([' ', '\t']) || (block == 2 && next.is_some_and(|next| next.starts_with([' ', '\t'])));
-            if indented || above.is_some_and(|above| opens_a_body(above, file.ends_with(".fish"))) || below.is_some_and(closes_a_body) {
-                left.extend((index..index + block).map(|at| (at + 1, lines[at].trim_end_matches('\r').to_string())));
-                kept.extend(&lines[index..index + block]);
-            } else {
-                if kept.last().is_some_and(|last| last.trim().is_empty()) {
-                    kept.pop();
-                }
-                removed.extend((index..index + block).map(|at| (at + 1, lines[at].trim_end_matches('\r').to_string())));
-            }
-            index += block;
-        }
+        let (after, removed, left) = take_out_blocks(&text, file.ends_with(".fish"), &ours);
         if removed.is_empty() && left.is_empty() {
             continue;
         }
-        let after = kept.join("\n");
         let emptied = file.ends_with("kumi.fish") && after.trim().is_empty();
         found.push(PathLines { file, after: (!emptied).then_some(after), removed, left });
     }
@@ -1147,12 +1210,15 @@ fn can_change(lines: &PathLines) -> bool {
         true
     }
 }
-/// Kumi's lines as the producer would take them out by hand.
+/// Kumi's lines as the producer would take them out by hand: each block's own line numbers, never a span that takes in
+/// the producer's lines between two blocks.
 fn by_hand(lines: &[(usize, String)]) -> String {
-    let first = lines.first().map_or(0, |(at, _)| *at);
-    let last = lines.last().map_or(0, |(at, _)| *at);
-    let span = if first == last { format!("line {first}") } else { format!("lines {first}–{last}") };
-    format!("{span}: {}", lines.iter().map(|(_, line)| line.as_str()).collect::<Vec<_>>().join(" / "))
+    let blocks = lines.chunk_by(|line, next| next.0 == line.0 + 1).map(|block| {
+        let (first, last) = (block[0].0, block[block.len() - 1].0);
+        let span = if first == last { format!("line {first}") } else { format!("lines {first}–{last}") };
+        format!("{span}: {}", block.iter().map(|(_, line)| line.as_str()).collect::<Vec<_>>().join(" / "))
+    });
+    blocks.collect::<Vec<_>>().join("; ")
 }
 /// Takes Kumi's PATH lines out of the startup files, and says what it did and what it couldn't do (with the lines to
 /// take out by hand). False when a file couldn't be changed.
@@ -1161,10 +1227,11 @@ pub fn remove_path_lines(io: &InstalledIo, home: &str) -> bool {
     let mut changed = true;
     for lines in path_lines(&io.env, home) {
         let shown = tilde_in(&lines.file, &user);
-        if !lines.left.is_empty() {
+        for block in &lines.left {
             io.out.write(&format!(
-                "Left Kumi's PATH line in {shown} alone ({}): it sits inside an if, for or function there; take it out by hand if you like.\n",
-                by_hand(&lines.left)
+                "Left Kumi's PATH line in {shown} alone ({}): {}; take it out by hand if you like.\n",
+                by_hand(&block.lines),
+                block.why
             ));
         }
         if lines.removed.is_empty() {
@@ -1842,12 +1909,8 @@ fn dry_run(io: &InstalledIo, home: &str, options: UninstallOptions, display: &dy
         if !lines.removed.is_empty() && !can_change(lines) {
             say(format!("It couldn't change {} (it isn't writable): take out {} by hand.", display(&lines.file), by_hand(&lines.removed)));
         }
-        if !lines.left.is_empty() {
-            say(format!(
-                "It would leave Kumi's PATH line in {} alone ({}): it sits inside an if, for or function there.",
-                display(&lines.file),
-                by_hand(&lines.left)
-            ));
+        for block in &lines.left {
+            say(format!("It would leave Kumi's PATH line in {} alone ({}): {}.", display(&lines.file), by_hand(&block.lines), block.why));
         }
     }
     if options.all && !parts.alone && !parts.data.is_empty() {
@@ -2324,5 +2387,113 @@ mod swap_tests {
     fn put_file(path: &str) {
         fs::create_dir_all(Path::new(path).parent().unwrap()).unwrap();
         fs::write(path, "").unwrap();
+    }
+}
+
+#[cfg(test)]
+mod path_line_tests {
+    use super::*;
+
+    const LINE: &str = "export PATH=\"/home/me/.kumi/bin:$PATH\"";
+    const IN_A_BODY: &str = "it sits inside an if, for or function there";
+
+    fn ours(line: &str) -> bool {
+        line.contains("/home/me/.kumi/bin")
+    }
+    /// Whether sh reads `text` (`sh -n`); None where there's no sh.
+    fn sh_reads(text: &str) -> Option<bool> {
+        use std::io::Write;
+        use std::process::{Command, Stdio};
+        let mut sh = Command::new("sh").arg("-n").stdin(Stdio::piped()).stdout(Stdio::null()).stderr(Stdio::null()).spawn().ok()?;
+        sh.stdin.take()?.write_all(text.as_bytes()).ok()?;
+        Some(sh.wait().ok()?.success())
+    }
+    /// What an uninstall makes of a startup file's `text`. Where there's an sh, what it leaves of a file sh reads, sh
+    /// still reads.
+    fn take_out(text: &str) -> (String, Vec<(usize, String)>, Vec<LeftAlone>) {
+        let found = take_out_blocks(text, false, ours);
+        if sh_reads(text) == Some(true) {
+            assert_eq!(sh_reads(&found.0), Some(true), "sh refuses what's left of\n{text}---\n{}", found.0);
+        }
+        found
+    }
+    fn numbered(lines: &[(usize, &str)]) -> Vec<(usize, String)> {
+        lines.iter().map(|(at, line)| (*at, line.to_string())).collect()
+    }
+
+    #[test]
+    fn a_marker_edited_by_hand_is_kumis_as_install_sh_finds_it() {
+        let text = format!("alias ll='ls -l'\n\n# Added by the Kumi installer (mine)\n{LINE}\n");
+        let (after, removed, left) = take_out(&text);
+        assert_eq!(after, "alias ll='ls -l'\n");
+        assert_eq!(removed, numbered(&[(3, "# Added by the Kumi installer (mine)"), (4, LINE)]));
+        assert!(left.is_empty());
+        // The marker's words at the end of the producer's own line: that line and Kumi's under it stay, and only Kumi's
+        // line is named to take out, with the marker as the only part of the producer's line that can go with it.
+        let shared = format!("export EDITOR=vim {PATH_MARKER}\n{LINE}\n");
+        let (after, removed, left) = take_out(&shared);
+        assert_eq!((after.as_str(), removed), (shared.as_str(), vec![]));
+        let why = "its marker shares line 1 with code of yours, and only the marker at that line's end can go with it".to_string();
+        assert_eq!(left, vec![LeftAlone { lines: numbered(&[(2, LINE)]), why }]);
+        // With no PATH line of Kumi's under them, they're only the producer's.
+        let theirs = format!("echo '{PATH_MARKER}'\nexport EDITOR=vim\n");
+        assert_eq!(take_out(&theirs), (theirs.clone(), vec![], vec![]));
+    }
+
+    #[test]
+    fn a_block_in_a_function_whose_body_is_a_subshell_stays() {
+        let text = format!("f() (\n{PATH_MARKER}\n{LINE}\n)\n");
+        let (after, removed, left) = take_out(&text);
+        assert_eq!((after.as_str(), removed), (text.as_str(), vec![]));
+        assert_eq!(left, vec![LeftAlone { lines: numbered(&[(2, PATH_MARKER), (3, LINE)]), why: IN_A_BODY.into() }]);
+        // Taken out, it would leave an empty body, which sh refuses.
+        if sh_reads(&text) == Some(true) {
+            assert_eq!(sh_reads("f() (\n)\n"), Some(false));
+        }
+        let (_, removed, left) = take_out(&format!("x=$(\n{PATH_MARKER}\n{LINE}\n)\n"));
+        assert_eq!((removed, left.len()), (vec![], 1));
+    }
+
+    #[test]
+    fn a_block_joined_to_the_code_beside_it_stays() {
+        for (above, op) in [("make_thing &&", "&&"), ("make_thing ||", "||"), ("make_thing |", "|"), ("make_thing \\", "a backslash")] {
+            let text = format!("{above}\n\n{PATH_MARKER}\n{LINE}\necho done\n");
+            let (after, removed, left) = take_out(&text);
+            assert_eq!((after.as_str(), removed), (text.as_str(), vec![]), "{above}");
+            let why = format!("it's joined to the code beside it there by {op}");
+            assert_eq!(left, vec![LeftAlone { lines: numbered(&[(3, PATH_MARKER), (4, LINE)]), why }], "{above}");
+        }
+        // Kumi's own line, ended by hand with &&, runs on into the producer's.
+        let text = format!("{PATH_MARKER}\n{LINE} &&\necho done\n");
+        let (after, _, left) = take_out(&text);
+        assert_eq!(after, text);
+        assert_eq!(left[0].why, "it's joined to the code beside it there by &&");
+        // An escaped backslash, an && in a comment and a lone & join nothing.
+        for above in ["echo \\\\", "make_thing # && then", "make_thing &"] {
+            let (after, removed, left) = take_out(&format!("{above}\n\n{PATH_MARKER}\n{LINE}\n"));
+            assert_eq!((after, removed.len(), left), (format!("{above}\n"), 2, vec![]), "{above}");
+        }
+    }
+
+    #[test]
+    fn a_comment_ending_in_a_keyword_opens_no_body() {
+        for above in ["export LANG=C # set in", "cd ~ # then", "x=$# # how many, then", "echo \"# do\" # done {", "a=1;# else"] {
+            let (after, removed, left) = take_out(&format!("{above}\n\n{PATH_MARKER}\n{LINE}\n"));
+            assert_eq!((after, removed.len(), left), (format!("{above}\n"), 2, vec![]), "{above}");
+        }
+        // Words before the comment still open one.
+        let text = format!("if [ -d /opt ]; then # Kumi's below\n{PATH_MARKER}\n{LINE}\necho ok\nfi\n");
+        let (after, _, left) = take_out(&text);
+        assert_eq!((after.as_str(), left[0].why.as_str()), (text.as_str(), IN_A_BODY));
+        assert_eq!(uncommented("echo 'a # b' \"c # d\" e\\ #f #g"), "echo 'a # b' \"c # d\" e\\ #f ");
+    }
+
+    #[test]
+    fn by_hand_names_each_blocks_own_lines() {
+        let text = format!("{PATH_MARKER}\n{LINE}\nexport EDITOR=vim\nalias ll='ls -l'\n\n{PATH_MARKER}\n{LINE}\n");
+        let (after, removed, left) = take_out(&text);
+        assert_eq!((after.as_str(), left), ("export EDITOR=vim\nalias ll='ls -l'\n", vec![]));
+        assert_eq!(by_hand(&removed), format!("lines 1–2: {PATH_MARKER} / {LINE}; lines 6–7: {PATH_MARKER} / {LINE}"));
+        assert_eq!(by_hand(&numbered(&[(4, PATH_MARKER)])), format!("line 4: {PATH_MARKER}"));
     }
 }

@@ -21,7 +21,12 @@ use kumi_types::{
 };
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-use std::{cell::RefCell, fs, path::Path, rc::Rc};
+use std::{
+    cell::RefCell,
+    fs,
+    path::{Path, PathBuf},
+    rc::Rc,
+};
 #[derive(Default)]
 struct Out(RefCell<String>);
 impl TtyOutput for Out {
@@ -124,6 +129,45 @@ async fn release_check_distinguishes_newer_and_unreachable() {
     let offline = Serve { offline: true, ..Rc::try_unwrap(Serve::new(Value::Null)).ok().unwrap() };
     assert!(check_release(&env, Some(Rc::new(offline))).await.unwrap_err().message().contains("couldn't reach GitHub"));
 }
+/// A `kumi` whose `--version` says the version in the package.json beside it, as a fake release carries one. Built once,
+/// by the first test that needs it while the others wait (nextest runs each test in a process of its own): four tests
+/// each building theirs at once on Windows stalled together to their 30 s limit.
+fn stand_in_kumi() -> PathBuf {
+    const CODE: &str = r#"fn main() {
+    let package = std::env::current_exe().ok().and_then(|exe| std::fs::read_to_string(exe.with_file_name("package.json")).ok());
+    let version = package.as_deref().and_then(|text| text.split("\"version\":\"").nth(1)?.split('"').next()).unwrap_or_default();
+    println!("Kumi {version}");
+}
+"#;
+    // Small, as every fake release packs it: no debug info, and on MSVC no PDB (rustc asks MSVC's linker for one whatever
+    // -C strip says), which it writes through a server every link on the machine shares. macOS keeps std's debug info out
+    // of the file already.
+    let flags: &[&str] = if cfg!(target_env = "msvc") {
+        &["-C", "debuginfo=0", "-C", "link-arg=/DEBUG:NONE"]
+    } else if cfg!(target_os = "macos") {
+        &["-C", "debuginfo=0"]
+    } else {
+        &["-C", "debuginfo=0", "-C", "strip=debuginfo"]
+    };
+    let key = hex::encode(Sha256::digest(format!("{CODE}{flags:?}")));
+    let folder = Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!("stand-in-kumi-{}", &key[..12]));
+    let kumi = folder.join(executable_name("kumi"));
+    if kumi.is_file() {
+        return kumi;
+    }
+    fs::create_dir_all(&folder).unwrap();
+    let building = fs::File::create(folder.join("building")).unwrap();
+    building.lock().unwrap();
+    if !kumi.is_file() {
+        let code = folder.join("main.rs");
+        fs::write(&code, CODE).unwrap();
+        let built = folder.join(format!("{}-{}", std::process::id(), executable_name("kumi")));
+        let made = std::process::Command::new("rustc").arg(&code).arg("-o").arg(&built).args(flags).output().unwrap();
+        assert!(made.status.success(), "{}", String::from_utf8_lossy(&made.stderr));
+        fs::rename(&built, &kumi).unwrap();
+    }
+    kumi
+}
 fn fake_release(dir: &Path, version: &str) -> Vec<u8> {
     fake_release_with(dir, version, None)
 }
@@ -142,17 +186,7 @@ fn fake_release_carrying_bytes(dir: &Path, version: &str, bridge: Option<&str>, 
     for (path, bytes) in files {
         put(stage.join(path), bytes);
     }
-    let code = dir.join("main.rs");
-    put(&code, format!("fn main() {{ println!(\"Kumi {version}\"); }}"));
-    let built = std::process::Command::new("rustc")
-        .arg(&code)
-        .arg("-o")
-        .arg(stage.join(executable_name("kumi")))
-        .arg("-C")
-        .arg("debuginfo=0")
-        .output()
-        .unwrap();
-    assert!(built.status.success(), "{}", String::from_utf8_lossy(&built.stderr));
+    fs::copy(stand_in_kumi(), stage.join(executable_name("kumi"))).unwrap();
     put(stage.join("package.json"), json!({"version":version,"bridge":bridge}).to_string());
     put(
         stage.join("CHANGELOG.md"),
@@ -2019,7 +2053,8 @@ async fn uninstall_tries_every_part_says_what_stayed_and_keeps_kumi_to_run_again
     assert!(!home.join("app").exists() && !home.join("app.previous").exists() && !home.join("bin").exists());
     assert_eq!(fs::read_to_string(user.join(".profile")).unwrap(), "");
 }
-/// A startup file uninstall can't change is named with the lines to take out by hand, in the dry run too.
+/// A startup file uninstall can't change is named with the lines to take out by hand, in the dry run too: each block's
+/// own, never a span over the producer's lines between two.
 #[cfg(unix)]
 #[tokio::test]
 async fn uninstall_names_a_startup_file_it_cant_change_and_the_lines_to_take_out() {
@@ -2034,11 +2069,12 @@ async fn uninstall_names_a_startup_file_it_cant_change_and_the_lines_to_take_out
     let user = Path::new(&env["HOME"]);
     installed_kumi(home);
     let line = format!("export PATH=\"{}/bin:$PATH\"", home.display());
-    let rc = format!("alias ll='ls -l'\n\n{PATH_MARKER}\n{line}\n");
+    // Two blocks with the producer's lines between them: each block is named with its own lines.
+    let rc = format!("alias ll='ls -l'\n\n{PATH_MARKER}\n{line}\nexport EDITOR=vim\nalias la='ls -a'\n\n{PATH_MARKER}\n{line}\n");
     let profile = user.join(".profile");
     put(&profile, &rc);
     fs::set_permissions(&profile, fs::Permissions::from_mode(0o444)).unwrap();
-    let lines = format!("lines 3–4: {PATH_MARKER} / {line}");
+    let lines = format!("lines 3–4: {PATH_MARKER} / {line}; lines 8–9: {PATH_MARKER} / {line}");
     let (dry, out) = io(&env);
     assert_eq!(uninstall_installed(dry, UninstallOptions { dry_run: true, ..Default::default() }).await.unwrap(), 0);
     let said = out.0.borrow().clone();
@@ -2093,6 +2129,51 @@ async fn uninstall_finds_kumis_block_as_install_sh_does_and_leaves_one_in_a_body
         said.contains(&format!("Left Kumi's PATH line in ~/.bashrc alone (lines 2–3: {PATH_MARKER} / {line}): it sits inside an if, for or function there; take it out by hand if you like.")),
         "{said}"
     );
+}
+/// A marker edited by hand is Kumi's, as install.sh counts it, and a comment's last word opens no body. A block that
+/// taking out could break stays, each named on its own with its lines and why: in a function whose body is a subshell
+/// (taken out, the empty body fails `sh -n`), or after a line ending in && (which would be left with nothing after it).
+/// A marker ending a line of the producer's code stays with that line, and only Kumi's PATH line is named to take out.
+#[cfg(not(windows))]
+#[tokio::test]
+async fn uninstall_reads_the_code_around_kumis_block_as_the_shell_does() {
+    let dir = tempfile::tempdir().unwrap();
+    let env = env(dir.path());
+    let home = Path::new(&env["KUMI_HOME"]);
+    let user = Path::new(&env["HOME"]);
+    installed_kumi(home);
+    let line = format!("export PATH=\"{}/bin:$PATH\"", home.display());
+    put(user.join(".zshrc"), format!("export LANG=C # set in\n\n# Added by the Kumi installer (mine)\n{line}\n"));
+    let kept = format!("f() (\n{PATH_MARKER}\n{line}\n)\nmake_thing &&\n{PATH_MARKER}\n{line}\n");
+    put(user.join(".bashrc"), &kept);
+    let shared = format!("export EDITOR=vim {PATH_MARKER}\n{line}\n");
+    put(user.join(".profile"), &shared);
+    let only_kumis = format!(
+        "alone (line 2: {line}): its marker shares line 1 with code of yours, and only the marker at that line's end can go with it"
+    );
+    let (dry, out) = io(&env);
+    assert_eq!(uninstall_installed(dry, UninstallOptions { dry_run: true, ..Default::default() }).await.unwrap(), 0);
+    let said = out.0.borrow().clone();
+    for words in [
+        "It would also take Kumi out of ~/.zshrc.".to_string(),
+        format!("It would leave Kumi's PATH line in ~/.bashrc alone (lines 2–3: {PATH_MARKER} / {line}): it sits inside an if, for or function there."),
+        format!("It would leave Kumi's PATH line in ~/.bashrc alone (lines 6–7: {PATH_MARKER} / {line}): it's joined to the code beside it there by &&."),
+        format!("It would leave Kumi's PATH line in ~/.profile {only_kumis}."),
+    ] {
+        assert!(said.contains(&words), "{words}: {said}");
+    }
+    let (removing, out) = io(&env);
+    assert_eq!(uninstall_installed(removing, UninstallOptions { yes: true, ..Default::default() }).await.unwrap(), 0, "{}", out.0.borrow());
+    assert_eq!(fs::read_to_string(user.join(".zshrc")).unwrap(), "export LANG=C # set in\n");
+    assert_eq!(fs::read_to_string(user.join(".bashrc")).unwrap(), kept);
+    assert_eq!(fs::read_to_string(user.join(".profile")).unwrap(), shared);
+    let said = out.0.borrow().clone();
+    for words in [
+        format!("Left Kumi's PATH line in ~/.bashrc alone (lines 6–7: {PATH_MARKER} / {line}): it's joined to the code beside it there by &&; take it out by hand if you like."),
+        format!("Left Kumi's PATH line in ~/.profile {only_kumis}; take it out by hand if you like."),
+    ] {
+        assert!(said.contains(&words), "{words}: {said}");
+    }
 }
 /// sudo sets HOME to root's own while Kumi's launcher still finds Kumi's folder beside it: in the home folder of the
 /// account that ran sudo, when an earlier installer put Kumi there. The account database's home folders count too,

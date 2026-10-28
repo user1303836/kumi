@@ -194,8 +194,12 @@ test("scratch: make refuses before anything is made: not a sequencer track, coun
   refused({ ref = track_ref(epoch, 3), count = 1, label = "two\nlines" }, "bad-params")
   refused({ ref = "1f:track:3", count = 1 }, "stale")
   refused({ ref = track_ref(epoch, 3), count = 1, scratchId = "x9" }, "bad-params", "scratchId")
-  -- the journal can't be written (the listening folder is a file): nothing is made
+  local journal = read_journal(env)
+  eq(journal and #journal.entries or 0, 0, "a make refused notes nothing")
+  -- the journal can't be written (the listening folder is a file): nothing is made. The folder may be there already (#516:
+  -- in some runs of the tests it was by now), and nothing in it matters here.
   local folder = env.dir .. "/kumi/bridges/renoise/listening"
+  assert(os.execute("rm -rf '" .. folder .. "'") == 0)
   local f = assert(io.open(folder, "wb"))
   f:write("in the way")
   f:close()
