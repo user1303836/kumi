@@ -3,6 +3,22 @@
 Kumi's releases. The Ableton bridge (`crates/ableton-mcp-server`) is versioned on its own;
 each Kumi release names the bridge it ships with.
 
+## 1.24.5 — 2026-10-27
+
+Ships with bridge 1.0.98, as 1.24.4 did.
+
+- On Windows, two Kumis setting up REAPER's or Renoise's bridge at the same moment no longer fail with
+  "it inherits its folder's permissions".
+- In REAPER and Renoise, a loose palette no longer ranks the sounds it brings in by their use in your
+  Live Sets.
+- When your library finishes learning, a loose palette brings in what it learned at once, and the map
+  marks it.
+- A palette sound that moved is found again in any DAW's session, wherever your library learned it.
+- Kumi stays responsive while a big loose palette works out what it brings in.
+
+Tested with Live 12.4 on macOS. On Windows, installing and updating are tested; using Kumi with Live
+there is still new.
+
 ## 1.24.4 — 2026-10-27
 
 Ships with bridge 1.0.98, which Live loads when it restarts. After updating, Kumi offers to quit Live
