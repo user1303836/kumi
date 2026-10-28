@@ -6,7 +6,7 @@ use ableton_mcp_server::{
 };
 use base64::Engine;
 use serde_json::{json, Value};
-use std::{cell::RefCell, rc::Rc};
+use std::{cell::RefCell, future::Future, rc::Rc, task::Poll};
 struct Adapter {
     sim: DeterministicLiveSimulator,
     status: RefCell<LiveStatus>,
@@ -430,15 +430,24 @@ async fn two_applies_of_one_backup_transaction_at_once_write_one_backup_and_reco
     let apply = |key: &str| json!({"transactionId":id,"confirmation":"apply","idempotencyKey":key});
     let (one, two) = (apply("backup-key-1"), apply("backup-key-2"));
     let (request_one, request_two) = (json!(1), json!(2));
-    // The second comes in while the first waits on its reads of the Set file. (The bridge's dispatcher runs one apply of a
-    // transaction at a time already: this is the apply's own guard, as a caller that doesn't go through it meets it.)
-    let (first, second) = tokio::join!(
-        host.live_project_backup_apply_async(&request_one, &one, None),
-        host.live_project_backup_apply_async(&request_two, &two, None)
-    );
-    let (first, second) = (parsed(first), parsed(second));
+    // One step of the first apply: it marks the transaction applying, then mostly waits there on its reads of the Set file
+    // as the second comes in. (The bridge's dispatcher runs one apply of a transaction at a time already: this is the
+    // apply's own guard, as a caller that doesn't go through it meets it.)
+    let mut first = std::pin::pin!(host.live_project_backup_apply_async(&request_one, &one, None));
+    let stepped = std::future::poll_fn(|cx| Poll::Ready(first.as_mut().poll(cx))).await;
+    let waiting = stepped.is_pending();
+    if waiting {
+        assert_eq!(host.transaction_record(&id).unwrap().borrow()["state"], "applying");
+    }
+    let second = parsed(host.live_project_backup_apply_async(&request_two, &two, None).await);
+    let first = parsed(match stepped {
+        Poll::Ready(done) => done,
+        Poll::Pending => first.await,
+    });
     assert_eq!(first["result"]["content"][0]["text"]["state"], "applied", "{first}");
-    assert_eq!(second["result"]["content"][0]["text"]["reason"], "Project backup apply is already in progress", "{second}");
+    // A first whose reads all finished within that step had applied before the second came in.
+    let refused = if waiting { "Project backup apply is already in progress" } else { "Transaction is no longer applicable" };
+    assert_eq!(second["result"]["content"][0]["text"]["reason"], refused, "{second}");
     let backups: Vec<String> = std::fs::read_dir(&root)
         .unwrap()
         .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
