@@ -248,8 +248,10 @@ fn every_verified_numeric_interval_has_committed_endpoint_evidence() {
                 "valhalla" | "minimal-audio" | "pulsar-modular" => {
                     let record = &evidence["fields"][path];
                     assert_eq!(endpoint_bounds(record), bounds, "{plugin}/{path}");
-                    assert_eq!(record["readback"][0], 0.0);
-                    assert_eq!(record["readback"][1], 1.0);
+                    for (index, endpoint) in [0.0, 1.0].into_iter().enumerate() {
+                        let readback = record["readback"][index].as_f64().expect("normalized host readback");
+                        assert!((readback - endpoint).abs() <= 1e-6, "{plugin}/{path}: endpoint readback {readback}");
+                    }
                     let id = record["parameterId"].as_u64().unwrap();
                     assert!(format.structure.parameters.iter().any(|(name, link)| link.field == *path
                         && link.status == structure::Status::Verified

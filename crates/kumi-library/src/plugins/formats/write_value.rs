@@ -8,6 +8,7 @@ use super::{
     FormatError,
 };
 
+/// `path` is a structure key, with the codec's repeated indices canonicalized.
 pub fn validate_scalar(plugin: &str, path: &str, value: &Value) -> Result<(), FormatError> {
     let fail = |why: &str| FormatError::new(format!("{path}: {why}"));
     let format = structure::builtin(plugin).ok_or_else(|| fail("unknown format"))?;
@@ -77,22 +78,23 @@ mod tests {
     #[test]
     fn guessed_paths_and_text_cannot_be_written_but_safe_names_and_defaults_can() {
         for path in [
-            "Oscillator0/SampleOsc0/samplePath",
-            "Oscillator0/GranularOsc0/samplePath",
-            "FXConv0/pathToIR",
-            "Oscillator0/WTOsc0/relativePathToWT",
+            "Oscillator{n}/SampleOsc{n}/samplePath",
+            "Oscillator{n}/GranularOsc{n}/samplePath",
+            "FXRack{n}/FX[]/FXConv/pathToIR",
+            "Oscillator{n}/WTOsc{n}/relativePathToWT",
         ] {
+            assert!(structure::builtin("serum-2").unwrap().structure.field(path).is_some(), "missing fixture field {path}");
             for value in [r"\\host\share\sample.wav", r"C:\samples\sample.wav", "relative.wav"] {
                 assert!(validate_scalar("serum-2", path, &json!(value)).is_err(), "{path}");
             }
         }
-        assert!(validate_scalar("serum-2", "VoicePanel0/displayName", &json!("inferred")).is_err());
-        assert!(validate_scalar("serum-2", "Oscillator0/plainParams", &json!("arbitrary container replacement")).is_err());
-        assert!(validate_scalar("serum-2", "Oscillator0/plainParams", &json!("default")).is_ok());
+        assert!(validate_scalar("serum-2", "VoicePanel{n}/displayName", &json!("inferred")).is_err());
+        assert!(validate_scalar("serum-2", "Oscillator{n}/plainParams", &json!("arbitrary container replacement")).is_err());
+        assert!(validate_scalar("serum-2", "Oscillator{n}/plainParams", &json!("default")).is_ok());
         assert!(validate_scalar("serum-2", "presetName", &json!("Kumi Pad")).is_ok());
         assert!(validate_scalar("serum-2", "presetName", &json!("\0\\\\host\\share")).is_err());
         assert!(validate_scalar("serum-2", "presetName", &json!("\\\\host\\share")).is_err());
-        assert!(validate_scalar("serum-2", "Oscillator0/plainParams/kParamEnable", &json!(1)).is_ok());
-        assert!(validate_scalar("serum-2", "Oscillator0/plainParams/kParamEnable", &json!(0.5)).is_err());
+        assert!(validate_scalar("serum-2", "Oscillator{n}/plainParams/kParamEnable", &json!(1)).is_ok());
+        assert!(validate_scalar("serum-2", "Oscillator{n}/plainParams/kParamEnable", &json!(0.5)).is_err());
     }
 }
