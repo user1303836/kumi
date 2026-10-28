@@ -2053,7 +2053,8 @@ async fn uninstall_tries_every_part_says_what_stayed_and_keeps_kumi_to_run_again
     assert!(!home.join("app").exists() && !home.join("app.previous").exists() && !home.join("bin").exists());
     assert_eq!(fs::read_to_string(user.join(".profile")).unwrap(), "");
 }
-/// A startup file uninstall can't change is named with the lines to take out by hand, in the dry run too.
+/// A startup file uninstall can't change is named with the lines to take out by hand, in the dry run too: each block's
+/// own, never a span over the producer's lines between two.
 #[cfg(unix)]
 #[tokio::test]
 async fn uninstall_names_a_startup_file_it_cant_change_and_the_lines_to_take_out() {
@@ -2068,11 +2069,12 @@ async fn uninstall_names_a_startup_file_it_cant_change_and_the_lines_to_take_out
     let user = Path::new(&env["HOME"]);
     installed_kumi(home);
     let line = format!("export PATH=\"{}/bin:$PATH\"", home.display());
-    let rc = format!("alias ll='ls -l'\n\n{PATH_MARKER}\n{line}\n");
+    // Two blocks with the producer's lines between them: each block is named with its own lines.
+    let rc = format!("alias ll='ls -l'\n\n{PATH_MARKER}\n{line}\nexport EDITOR=vim\nalias la='ls -a'\n\n{PATH_MARKER}\n{line}\n");
     let profile = user.join(".profile");
     put(&profile, &rc);
     fs::set_permissions(&profile, fs::Permissions::from_mode(0o444)).unwrap();
-    let lines = format!("lines 3–4: {PATH_MARKER} / {line}");
+    let lines = format!("lines 3–4: {PATH_MARKER} / {line}; lines 8–9: {PATH_MARKER} / {line}");
     let (dry, out) = io(&env);
     assert_eq!(uninstall_installed(dry, UninstallOptions { dry_run: true, ..Default::default() }).await.unwrap(), 0);
     let said = out.0.borrow().clone();
@@ -2127,6 +2129,51 @@ async fn uninstall_finds_kumis_block_as_install_sh_does_and_leaves_one_in_a_body
         said.contains(&format!("Left Kumi's PATH line in ~/.bashrc alone (lines 2–3: {PATH_MARKER} / {line}): it sits inside an if, for or function there; take it out by hand if you like.")),
         "{said}"
     );
+}
+/// A marker edited by hand is Kumi's, as install.sh counts it, and a comment's last word opens no body. A block that
+/// taking out could break stays, each named on its own with its lines and why: in a function whose body is a subshell
+/// (taken out, the empty body fails `sh -n`), or after a line ending in && (which would be left with nothing after it).
+/// A marker ending a line of the producer's code stays with that line, and only Kumi's PATH line is named to take out.
+#[cfg(not(windows))]
+#[tokio::test]
+async fn uninstall_reads_the_code_around_kumis_block_as_the_shell_does() {
+    let dir = tempfile::tempdir().unwrap();
+    let env = env(dir.path());
+    let home = Path::new(&env["KUMI_HOME"]);
+    let user = Path::new(&env["HOME"]);
+    installed_kumi(home);
+    let line = format!("export PATH=\"{}/bin:$PATH\"", home.display());
+    put(user.join(".zshrc"), format!("export LANG=C # set in\n\n# Added by the Kumi installer (mine)\n{line}\n"));
+    let kept = format!("f() (\n{PATH_MARKER}\n{line}\n)\nmake_thing &&\n{PATH_MARKER}\n{line}\n");
+    put(user.join(".bashrc"), &kept);
+    let shared = format!("export EDITOR=vim {PATH_MARKER}\n{line}\n");
+    put(user.join(".profile"), &shared);
+    let only_kumis = format!(
+        "alone (line 2: {line}): its marker shares line 1 with code of yours, and only the marker at that line's end can go with it"
+    );
+    let (dry, out) = io(&env);
+    assert_eq!(uninstall_installed(dry, UninstallOptions { dry_run: true, ..Default::default() }).await.unwrap(), 0);
+    let said = out.0.borrow().clone();
+    for words in [
+        "It would also take Kumi out of ~/.zshrc.".to_string(),
+        format!("It would leave Kumi's PATH line in ~/.bashrc alone (lines 2–3: {PATH_MARKER} / {line}): it sits inside an if, for or function there."),
+        format!("It would leave Kumi's PATH line in ~/.bashrc alone (lines 6–7: {PATH_MARKER} / {line}): it's joined to the code beside it there by &&."),
+        format!("It would leave Kumi's PATH line in ~/.profile {only_kumis}."),
+    ] {
+        assert!(said.contains(&words), "{words}: {said}");
+    }
+    let (removing, out) = io(&env);
+    assert_eq!(uninstall_installed(removing, UninstallOptions { yes: true, ..Default::default() }).await.unwrap(), 0, "{}", out.0.borrow());
+    assert_eq!(fs::read_to_string(user.join(".zshrc")).unwrap(), "export LANG=C # set in\n");
+    assert_eq!(fs::read_to_string(user.join(".bashrc")).unwrap(), kept);
+    assert_eq!(fs::read_to_string(user.join(".profile")).unwrap(), shared);
+    let said = out.0.borrow().clone();
+    for words in [
+        format!("Left Kumi's PATH line in ~/.bashrc alone (lines 6–7: {PATH_MARKER} / {line}): it's joined to the code beside it there by &&; take it out by hand if you like."),
+        format!("Left Kumi's PATH line in ~/.profile {only_kumis}; take it out by hand if you like."),
+    ] {
+        assert!(said.contains(&words), "{words}: {said}");
+    }
 }
 /// sudo sets HOME to root's own while Kumi's launcher still finds Kumi's folder beside it: in the home folder of the
 /// account that ran sudo, when an earlier installer put Kumi there. The account database's home folders count too,

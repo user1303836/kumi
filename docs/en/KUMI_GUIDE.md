@@ -1285,8 +1285,9 @@ had changed (in `~/.kumi/bridges/<daw>/changed`) always stay.
   Kumi itself goes, and they stay there, named, for you to delete.
 - When a part can't be removed, it says which and why, and Kumi stays so you
   can run `kumi uninstall` again.
-- A PATH line it can't take out (in a file it can't write, or inside an `if`,
-  `for` or function) is named with its lines, to take out by hand.
+- A PATH line it can't take out (in a file it can't write, inside an `if`, `for`
+  or function, or joined to the code beside it by `&&`, `||`, `|` or `\`) is
+  named with its lines, to take out by hand.
 
 ## Limits
 
