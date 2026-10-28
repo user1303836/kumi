@@ -3,6 +3,16 @@
 Kumi's releases. The Ableton bridge (`crates/ableton-mcp-server`) is versioned on its own;
 each Kumi release names the bridge it ships with.
 
+## 1.24.11 — 2026-10-28
+
+Ships with bridge 1.0.101, as 1.24.10 did.
+
+- Background jobs can create and edit supported plug-in preset files with Kumi's built-in tools, then
+  hand them back for loading and checking in the DAW.
+
+Tested with Live 12.4 on macOS. On Windows, installing and updating are tested; using Kumi with Live
+there is still new.
+
 ## 1.24.10 — 2026-10-28
 
 Ships with bridge 1.0.101, which Live loads when it restarts. After updating, Kumi offers to quit Live
