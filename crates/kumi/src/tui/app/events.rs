@@ -277,6 +277,7 @@ impl TuiApp {
                 }
             }
             "set-asked" => {
+                self.0.state.borrow_mut().selection = None;
                 let ask: Option<SetAsk> = serde_json::from_value(value["ask"].clone()).ok();
                 self.open_set_ask(ask);
             }
@@ -928,6 +929,7 @@ impl TuiApp {
                 }
                 self.answer_ended(reason, n("elapsedMs"), &answer, offered.as_ref().map(|(_, choices)| choices.len()));
                 if let Some(offered) = offered {
+                    self.0.state.borrow_mut().selection = None;
                     self.open_answers(offered);
                 }
                 if reason == "max-steps" {

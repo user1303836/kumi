@@ -366,6 +366,7 @@ struct State {
     undoing: bool,
     hits: Vec<Hit>,
     tabs_area: Option<Rect>,
+    selection: Option<super::selection::Selection>,
     scroll: i32,
     last_total: i32,
     page: i32,
@@ -510,6 +511,7 @@ impl State {
             undoing: false,
             hits: vec![],
             tabs_area: None,
+            selection: None,
             scroll: 0,
             last_total: 0,
             page: 10,
@@ -788,6 +790,7 @@ impl TuiApp {
     }
     fn notice(&self, text: &str, tone: NoticeTone) {
         let clean = self.clean(text, usize::MAX);
+        self.0.state.borrow_mut().selection = None;
         static LINES: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
             regex::Regex::new(r"[\t-\r \u{00a0}\u{1680}\u{2000}-\u{200a}\u{2028}\u{2029}\u{202f}\u{205f}\u{3000}\u{feff}]*\n[\t-\r \u{00a0}\u{1680}\u{2000}-\u{200a}\u{2028}\u{2029}\u{202f}\u{205f}\u{3000}\u{feff}]*").unwrap()
         });

@@ -278,7 +278,7 @@ its undo. They're in English for now.
 | --- | --- |
 | Tab, when idle | Into FOCUS's device tree, at Live's selection: ↑↓ move, Enter points at the row, Esc or Tab goes back to typing |
 | Shift-Tab | Into the tabs (again for the next tab): ↑↓ and Page Up/Down move. On a change, Enter, → or Space opens its picture, Enter or ← closes it, and `u` undoes it while it's open; on a kept item, Enter forgets it; on a JOBS row, Enter opens the job and `x` stops it. Esc or Tab goes back |
-| Mouse | Click **undo** or **forget** at a row's end, a change's words to open its picture (a job's to open the job), a tab's name, or a device in the tree to point at it; click the pin to unpin. Hold Shift while dragging (Option in iTerm2) to select text |
+| Mouse | Click **undo** or **forget** at a row's end, a change's words to open its picture (a job's to open the job), a tab's name, or a device in the tree to point at it; click the pin to unpin. Drag across text to highlight it; Ctrl-C or right-click copies it, and Esc clears the selection. The selected view stays still while Kumi works. Shift-drag (Option in iTerm2) still uses the terminal's selection |
 
 **Panels** (`/model`, `/effort`, `/login`, `/memory` and the others): ↑↓ move,
 Enter chooses, Esc closes; in `/model`, `/memory`, `/resume` and

@@ -41,7 +41,7 @@ Follow Kumi's guided setup.
 Next time, open a terminal and type `kumi`.
 
 > [!NOTE]
-> Kumi runs in a terminal window, but you don't need to know any commands. After the install line, it's a chat.
+> Kumi runs in a terminal window, but you don't need to know any commands. After the install line, it's a chat. Drag across text to select it, then press Ctrl-C to copy.
 
 ## What can I ask it?
 
