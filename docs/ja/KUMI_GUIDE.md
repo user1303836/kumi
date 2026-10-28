@@ -125,7 +125,7 @@ Kumi は User Library の中から Live の Remote Scripts フォルダーを見
 
 Kumi は REAPER 7 以降と Renoise 3.5 以降で、macOS、Windows、Linux のどれでも動きます。どちらにも Kumi 専用のブリッジがあります。REAPER が `UserPlugins` フォルダーから読み込む拡張機能（`reaper_kumi`）と、Renoise が設定フォルダーの `Scripts/Tools` から読み込むツール（`com.kumi.Bridge.xrnx`）です。Kumi はそこへ自分のホスト（`daw-mcp-server`。Kumi と同じ場所にインストールされます）を通じてつなぎます。やりとりはこのコンピューターの中だけです。ブリッジは 127.0.0.1 で待ち受け、`~/.kumi` にあるシークレットを使う Kumi にだけ応答します。Control Surface を選ぶ必要はありません。
 
-**セットアップ。** `kumi --daw reaper` か `kumi --daw renoise` を実行します（`KUMI_DAW` を `reaper` か `renoise` にしても同じです）。セットアップはサインインのあと、Linux でも **Connect to REAPER**（または **Connect to Renoise**）を進めます。Kumi が拡張機能（またはツール）を配置し、DAW を開きます。
+**セットアップ。** `kumi` を実行し、REAPER か Renoise を開きます。Kumi より先でも後でもかまいません。Kumi は開いている DAW を使います。初回は、セットアップがサインインのあと、Linux でも **Connect to REAPER**（または **Connect to Renoise**）を進めます。Kumi が拡張機能（またはツール）を配置し、DAW を開きます。
 
 - **DAW が開いているとき：** DAW が Kumi のブリッジを読み込むのは起動するときだけで、Kumi が DAW を終了させることはありません。**I'll quit it** を選び、自分で終了してください（先に保存を求められます）。Kumi がブリッジを入れ、DAW をまた開きます。保存したプロジェクトやソングは、DAW の最近使ったファイルの一覧にあります。
 - **インストールされていないとき：** 入手先（reaper.fm、renoise.com）を伝えます。入れたら **Look again** で確かめ直します。古い REAPER や Renoise が開いている場合はそう伝え、開いたままにします。
@@ -134,11 +134,11 @@ Kumi は REAPER 7 以降と Renoise 3.5 以降で、macOS、Windows、Linux の�
 
 `kumi --daw reaper bridge`（または `renoise`）は、同じことをシェルから行います。DAW のフォルダーに書き込む前に確認を求め（`--yes` で事前に確認済みにできます）、ブリッジを入れるか最新にし、DAW が開いていれば再起動するよう伝えます。
 
-**どの DAW を使うか。** 以後は `kumi` だけで、ブリッジが入っている DAW を使います。複数あるときは、いま動いているもの、なければ前回使ったもの、なければ Live を選び、ほかの DAW も開いていればそう伝えます（"Renoise is open too: Kumi works with REAPER. /daw renoise switches to Renoise."）。`/daw` は Kumi がどの DAW を使っているかを伝え、`/daw <name>`（`live`、`reaper`、`renoise`）は Kumi を閉じてその DAW でまた開きます。`--daw` と `KUMI_DAW` は常にそれより優先されます。
+**どの DAW を使うか。** `kumi` は、ブリッジがまだ入っていなくても、開いている DAW を使います。複数開いているときは、ブリッジが入っているもの、なければ前回使ったもの、なければ Live を選び、ほかの DAW も開いていればそう伝えます（"Renoise is open too: Kumi works with REAPER. /daw renoise switches to Renoise."）。どれも開いていないときは、ブリッジが入っているもの（複数あれば前回使ったもの）を選び、どれかを開くよう伝えます。Kumi が自分の DAW につながっていない間（またはその DAW にまだ Kumi のブリッジがない間）にほかの DAW を開くと、Kumi はそちらに移ります。入力中や応答待ちでなければ、そう伝えてから閉じ、その DAW でまた開きます。`/daw` は Kumi がどの DAW を使っているかを伝え、`/daw <name>`（`live`、`reaper`、`renoise`）は Kumi を閉じてその DAW でまた開きます。`--daw` と `KUMI_DAW` は常にそれより優先され、そのときは Kumi はその DAW だけを使います。
 
 **Kumi が探す場所。**
 
-- **REAPER：** リソースフォルダー（Mac は `~/Library/Application Support/REAPER`、Windows は `%APPDATA%\REAPER`、Linux は `~/.config/REAPER` か `~/.reaper`）、いつものアプリフォルダーにあるポータブル版の REAPER（アプリの隣に `reaper.ini` があるもの）それぞれ、Kumi の拡張機能を入れた REAPER、または `KUMI_REAPER_RESOURCE_DIR` で指定したフォルダーだけ。ほかの場所（別のドライブなど）にあるポータブル版は、最初の一度だけ `KUMI_REAPER_RESOURCE_DIR` が要ります。
+- **REAPER：** リソースフォルダー（Mac は `~/Library/Application Support/REAPER`、Windows は `%APPDATA%\REAPER`、Linux は `~/.config/REAPER` か `~/.reaper`）、いつものアプリフォルダーにあるポータブル版の REAPER（アプリの隣に `reaper.ini` があるもの）それぞれ、どこにあっても開いている REAPER、Kumi の拡張機能を入れた REAPER、または `KUMI_REAPER_RESOURCE_DIR` で指定したフォルダーだけ。ほかの場所（別のドライブなど）にあるポータブル版は、開いている間に見つかります。拡張機能は開いている REAPER に入ります。
 - **Renoise：** 3.5 以降でいちばん新しい設定フォルダー（`~/Library/Preferences/Renoise`、`%APPDATA%\Renoise`、Linux では `~/.config/Renoise` か `~/.renoise` の中の `V3.5.4` など）、または `KUMI_RENOISE_PREFS_DIR` で指定したもの（`V<x.y.z>` フォルダーか、それを収めたフォルダー）。
 
 **接続。** DAW がブリッジ付きで動いていれば Kumi は自分で接続し、DAW が戻ってきたときもまた接続します。DAW がダイアログやレンダリングで手が離せない間は、Kumi はそう伝え、応答するまで何も変更しません。
@@ -146,8 +146,8 @@ Kumi は REAPER 7 以降と Renoise 3.5 以降で、macOS、Windows、Linux の�
 **そこでできること。** Kumi はプロジェクトやソングを読み、取り消し付きで変更します（何を変更できるか、取り消しがどう働くかは [REAPER と Renoise](KUMI_CHANGES.md#reaper-と-renoise) にあります）。FOCUS、NOW、HISTORY は DAW 自身のビューに沿って表示されます（[コマンド、キー、画面](KUMI_TUI.md#reaper-と-renoise)）。聴く、自分の変更を判定する、`/loop` と `/goal`、リファレンスに合わせる、インスタントフレーズ、閉じていた間の変化を伝える、手作業をレシピにする、ライブラリーやメモや会話を使う、のすべてを DAW の言葉で行います（DAW ごとの一覧は [Live、REAPER、Renoise で Kumi ができること](DAWS.md)）。REAPER ではアクション、API、Lua（ReaScript）も、Renoise では Lua も実行できます。Max for Live デバイス、Kumi Ears、Willington、Kumi の Live 拡張機能（**Ask Kumi about this**）、Live 自身のコマンド、Live のマニュアルは Live だけのものです。
 
 **バージョン。** Kumi の各リリースには拡張機能とツールが付属し、`kumi update` がそれを最新にします（下の「更新、レポート、アンインストール」）。
-Kumi 1.24.0〜1.24.3 には REAPER 拡張機能 0.1.6、1.23.3 には 0.1.5、1.23.2 には 0.1.4、1.23.1 には 0.1.3、1.21.2〜1.23.0 には 0.1.2、1.21.0〜1.21.1 には 0.1.1、1.20.0 には 0.1.0。
-Kumi 1.24.0〜1.24.3 には Renoise ツール 1.0.5、1.23.3 には 1.0.4、1.23.2 には 1.0.3、1.23.1 には 1.0.2、1.21.0〜1.23.0 には 1.0.1、1.20.0 には 1.0.0。
+Kumi 1.24.0〜1.24.7 には REAPER 拡張機能 0.1.6、1.23.3 には 0.1.5、1.23.2 には 0.1.4、1.23.1 には 0.1.3、1.21.2〜1.23.0 には 0.1.2、1.21.0〜1.21.1 には 0.1.1、1.20.0 には 0.1.0。
+Kumi 1.24.0〜1.24.7 には Renoise ツール 1.0.5、1.23.3 には 1.0.4、1.23.2 には 1.0.3、1.23.1 には 1.0.2、1.21.0〜1.23.0 には 1.0.1、1.20.0 には 1.0.0。
 
 ## Kumi との作業
 

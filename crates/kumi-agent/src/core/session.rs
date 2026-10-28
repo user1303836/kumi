@@ -46,7 +46,7 @@ use serde_json::{json, Value};
 use std::{
     cell::{Cell, RefCell},
     future::Future,
-    rc::Rc,
+    rc::{Rc, Weak},
     time::Duration,
 };
 use tokio::{
@@ -784,10 +784,18 @@ pub fn create_session(options: SessionOptions) -> Result<Session, RuntimeError> 
             let emit = emit.clone();
             music.on_status(Rc::new(move |status| emit(SessionEvent::Music(MusicEvent { status }))))
         });
-        let unlisten_library = options
-            .library
-            .as_ref()
-            .map(|library| library.on_status(Rc::new(move |status| emit(SessionEvent::Library(LibraryEvent { status })))));
+        let unlisten_library = options.library.as_ref().map(|library| {
+            // A learn finished: a loose palette brings in what it learned too, and the app's map marks it.
+            let (palettes, learned_at) = (palettes.as_ref().map(Rc::downgrade), Cell::new(library.status().learned_at));
+            library.on_status(Rc::new(move |status| {
+                if status.learned_at.is_some() && learned_at.replace(status.learned_at) != status.learned_at {
+                    if let Some(palettes) = palettes.as_ref().and_then(Weak::upgrade) {
+                        tokio::task::spawn_local(async move { palettes.learned().await });
+                    }
+                }
+                emit(SessionEvent::Library(LibraryEvent { status }))
+            }))
+        });
         Inner {
             plugins: crate::core::plugin_tools::PluginTool::new(options.preset_dir.clone()),
             options,

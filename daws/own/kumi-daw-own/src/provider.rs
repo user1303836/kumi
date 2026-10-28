@@ -214,10 +214,19 @@ impl Own {
 
     /// Puts the bridge this Kumi brings in the DAW, where detection finds it, or what stopped it, in words.
     fn install(&self, env: &Env) -> Result<Put, String> {
+        self.install_in(env, None)
+    }
+
+    /// [`Own::install`], into `target` when it's given (where the DAW was while it ran: a portable REAPER found only by
+    /// its process, closed since so it loads the bridge as it starts again).
+    fn install_in(&self, env: &Env, target: Option<Target>) -> Result<Put, String> {
         let source = self
             .bundled_source()
             .ok_or_else(|| format!("this Kumi doesn't carry {} for {}: build it, or install a release", self.bridge, self.name()))?;
-        let target = self.target(env)?;
+        let target = match target {
+            Some(target) => target,
+            None => self.target(env)?,
+        };
         // A DAW that can't load it (a 32-bit REAPER, say) is said, and nothing goes in.
         if let Some(why) = (self.unloadable)(self, env, &source) {
             return Err(why);
@@ -324,9 +333,9 @@ impl DawProvider for Own {
     fn running_now(&self, processes: &[(u32, String)]) -> bool {
         processes.iter().any(|(_, name)| detect::process_is(self.daw, name))
     }
-    fn app_open(&self, _env: &Env) -> LocalBoxFuture<'static, bool> {
-        let daw = self.daw;
-        async move { tokio::task::spawn_blocking(move || !detect::running(daw).is_empty()).await.unwrap_or(false) }.boxed_local()
+    fn app_open(&self, env: &Env) -> LocalBoxFuture<'static, bool> {
+        let (daw, env) = (self.daw, env.clone());
+        async move { tokio::task::spawn_blocking(move || open_now(daw, &env)).await.unwrap_or(false) }.boxed_local()
     }
     fn watch_words(&self) -> WatchWords {
         self.watch_words
@@ -382,7 +391,7 @@ impl DawProvider for Own {
         given: bool,
         controller: Rc<RefCell<Option<Weak<dyn SessionController>>>>,
     ) -> Rc<dyn DawSetup> {
-        Rc::new(OwnSetup { own: *self, env: env.clone(), bridge, given, controller })
+        Rc::new(OwnSetup { own: *self, env: env.clone(), bridge, given, controller, seen: RefCell::new(None) })
     }
     fn doctor_checks<'a>(&'a self, io: &'a DawIo, _node: &'a Check) -> LocalBoxFuture<'a, Vec<Check>> {
         if !self.present(&io.env) {
@@ -393,10 +402,10 @@ impl DawProvider for Own {
             let note = Check::note(
                 format!("{} isn't in {}", self.bridge, self.name()),
                 Some(format!(
-                    "{} --daw {} bridge puts it in, if you want Kumi in {}",
+                    "Open {} with Kumi running, and Kumi puts it in ({} --daw {} bridge does too)",
+                    self.name(),
                     *kumi_types::command::KUMI,
-                    self.id.as_str(),
-                    self.name()
+                    self.id.as_str()
                 )),
             );
             return async move { vec![note] }.boxed_local();
@@ -789,6 +798,9 @@ struct OwnSetup {
     /// A bridge configuration given on the command line stays.
     given: bool,
     controller: Rc<RefCell<Option<Weak<dyn SessionController>>>>,
+    /// Where the bridge goes in the DAW as it was while it ran: the producer quits it before the bridge goes in, and a
+    /// portable REAPER outside the folders Kumi looks in is found only while it runs.
+    seen: RefCell<Option<Target>>,
 }
 
 impl OwnSetup {
@@ -799,6 +811,11 @@ impl OwnSetup {
     fn app(&self) -> Option<PathBuf> {
         (self.own.app)(&self.own, &self.env)
     }
+}
+
+/// Whether the DAW runs now, from a listing made now (KUMI_PROCESSES in the session's environment stands in for it).
+fn open_now(daw: Daw, env: &Env) -> bool {
+    detected(env, |found| detect::list_processes(found.var)).iter().any(|(_, name)| detect::process_is(daw, name))
 }
 
 /// Opens the DAW's app apart from Kumi: on macOS through `open`, whose answer says whether it opened; elsewhere as a
@@ -840,10 +857,22 @@ fn start_apart(mut command: std::process::Command) -> bool {
 
 #[async_trait(?Send)]
 impl DawSetup for OwnSetup {
+    /// The DAW's app when it's open: the one running, from where it runs (a portable REAPER on another drive, a Renoise
+    /// outside the app folders), else the one setup would open.
     async fn open_live(&self) -> Option<String> {
-        let daw = self.own().daw;
-        let open = tokio::task::spawn_blocking(move || !detect::running(daw).is_empty()).await.unwrap_or(false);
-        open.then(|| self.app()).flatten().map(|app| app.to_string_lossy().into_owned())
+        let (daw, env) = (self.own().daw, self.env.clone());
+        let running = tokio::task::spawn_blocking(move || {
+            let listing = detected(&env, |found| detect::list_processes(found.var));
+            let open = listing.iter().any(|(_, name)| detect::process_is(daw, name));
+            open.then(|| detect::programs(daw, &listing).first().map(|program| detect::app_of(Os::current(), program)))
+        })
+        .await
+        .ok()
+        .flatten()?;
+        if let Ok(target) = self.own.target(&self.env) {
+            *self.seen.borrow_mut() = Some(target);
+        }
+        running.or_else(|| self.app()).map(|app| app.to_string_lossy().into_owned())
     }
     async fn ask_to_quit(&self) -> bool {
         // Kumi never scripts the DAW's menus: the producer quits it, and saves first if it asks.
@@ -855,7 +884,8 @@ impl DawSetup for OwnSetup {
     async fn closed(&self, stop: &Signal) -> bool {
         let daw = self.own().daw;
         loop {
-            if tokio::task::spawn_blocking(move || detect::running(daw).is_empty()).await.unwrap_or(false) {
+            let env = self.env.clone();
+            if !tokio::task::spawn_blocking(move || open_now(daw, &env)).await.unwrap_or(true) {
                 return true;
             }
             if stop.is_cancelled() {
@@ -865,7 +895,8 @@ impl DawSetup for OwnSetup {
         }
     }
     async fn install(&self) -> Result<String, String> {
-        self.own().install(&self.env).map(|put| put.version)
+        let seen = self.seen.borrow().clone();
+        self.own().install_in(&self.env, seen).map(|put| put.version)
     }
     async fn start(&self, app: Option<String>, _set: Option<String>) -> bool {
         // An app setup didn't find ("") is looked for again.

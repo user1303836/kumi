@@ -40,6 +40,83 @@ case!(startup_restore, async {
         .ends_with(&format!("{}Kumi closed. Each Set's conversation continues next time.\n", kumi::tui::tty::RESTORE)));
     h.close().await;
 });
+case!(drag_select_and_copy_the_displayed_text_while_streaming, async {
+    use std::cell::RefCell;
+    let copied = Rc::new(RefCell::new(Vec::<String>::new()));
+    let copy = copied.clone();
+    let h = Harness::with(120, 36, Rc::new(Control::default()), move |o| {
+        o.copy = Some(Rc::new(move |text| copy.borrow_mut().push(text.into())));
+    });
+    h.start().await;
+    h.connect();
+    h.type_text("Say something\r").await;
+    h.type_text("keep my draft").await;
+    h.emit(json!({"type":"state","state":"running"}));
+    h.emit(json!({"type":"text","text":"Select these words"}));
+    h.wait_for("Select these words").await;
+    let lines = h.screen();
+    let y = lines.iter().position(|line| line.contains("Select these words")).unwrap();
+    let x = lines[y].find("Select these words").unwrap();
+    h.type_text(&format!("\x1b[<0;{};{}M\x1b[<32;{};{}M\x1b[<0;{};{}m", x + 1, y + 1, x + 6, y + 1, x + 6, y + 1)).await;
+    h.emit(json!({"type":"text","text":"\nAnother streamed line"}));
+    assert!(!has(&h.screen(), "Another streamed line"));
+    h.has("view paused");
+    h.type_text("\x03").await;
+    assert_eq!(&*copied.borrow(), &["Select"]);
+    h.has("Copied selected text");
+    h.has("keep my draft");
+    h.has("Another streamed line");
+    assert!(!h.calls().contains(&"cancel".into()));
+    assert!(!h.calls().contains(&"close".into()));
+    h.close().await;
+});
+case!(escape_and_resize_clear_a_text_selection_without_cancelling, async {
+    let h = Harness::new(120, 36);
+    h.start().await;
+    h.connect();
+    h.type_text("Say something\r").await;
+    h.emit(json!({"type":"state","state":"running"}));
+    h.emit(json!({"type":"text","text":"Selection survives a redraw"}));
+    h.wait_for("Selection survives a redraw").await;
+    let lines = h.screen();
+    let y = lines.iter().position(|line| line.contains("Selection survives")).unwrap();
+    h.type_text(&format!("\x1b[<0;3;{}M\x1b[<32;8;{}M\x1b[<0;8;{}m", y + 1, y + 1, y + 1)).await;
+    h.type_text("\x1b").await;
+    assert!(!h.calls().contains(&"cancel".into()));
+    h.type_text(&format!("\x1b[<0;3;{}M\x1b[<32;8;{}M", y + 1, y + 1)).await;
+    h.resize(90, 28);
+    h.has("Selection survives a redraw");
+    h.type_text("\x1b").await;
+    h.wait_for_call("cancel").await;
+    h.close().await;
+});
+case!(right_click_copies_unicode_and_new_notices_leave_the_frozen_view, async {
+    use std::cell::RefCell;
+    let copied = Rc::new(RefCell::new(Vec::<String>::new()));
+    let copy = copied.clone();
+    let h = Harness::with(120, 36, Rc::new(Control::default()), move |o| {
+        o.copy = Some(Rc::new(move |text| copy.borrow_mut().push(text.into())));
+    });
+    h.start().await;
+    h.connect();
+    h.type_text("Say something\r").await;
+    h.emit(json!({"type":"state","state":"running"}));
+    h.emit(json!({"type":"text","text":"界é music"}));
+    h.wait_for("界é music").await;
+    let lines = h.screen();
+    let y = lines.iter().position(|line| line.contains("界é music")).unwrap();
+    let x = lines[y].find("界é music").unwrap();
+    let drag = format!("\x1b[<0;{};{}M\x1b[<32;{};{}M\x1b[<0;{};{}m", x + 1, y + 1, x + 3, y + 1, x + 3, y + 1);
+    h.type_text(&drag).await;
+    h.type_text(&format!("\x1b[<2;{};{}M", x + 3, y + 1)).await;
+    assert_eq!(&*copied.borrow(), &["界é"]);
+    h.type_text(&drag).await;
+    h.has("view paused");
+    h.emit(json!({"type":"notice","message":"Choose the reference to compare."}));
+    h.has("Choose the reference to compare.");
+    assert!(!has(&h.screen(), "view paused"));
+    h.close().await;
+});
 case!(started_by_the_installer_the_farewell_says_how_to_start_kumi_next_time, async {
     let next = "Next time: open a new terminal window and type kumi";
     let h = Harness::with(120, 36, Rc::new(Control::default()), |o| o.next_time = Some(next.into()));
@@ -1057,5 +1134,39 @@ case!(whats_new_shows_once_as_kumi_starts_below_a_conversation_carried_on_and_ch
     // /changelog shows the notes from the real changelog, with where the rest are.
     h.type_text("/changelog\r").await;
     h.has("Every release: https://github.com/user1303836/kumi/blob/main/CHANGELOG.md");
+    h.close().await;
+});
+// Kumi follows the producer to a DAW they opened only once nothing would be lost: not while they're typing, or while an
+// answer is under way; then it says so and closes, handing over that DAW.
+case!(following_a_daw_the_producer_opened_waits_for_what_they_are_doing, async {
+    use kumi_types::daw::DawId;
+    use std::cell::RefCell;
+    let followed = Rc::new(RefCell::new(Vec::<DawId>::new()));
+    let into = followed.clone();
+    let h = Harness::with(120, 36, Rc::new(Control::default()), move |o| {
+        o.follow_daw = Some(Rc::new(move |daw| into.borrow_mut().push(daw)));
+    });
+    let done = h.app.run();
+    delay(5).await;
+    h.type_text("half a thought").await;
+    assert!(!h.app.follow_daw(DawId::Renoise), "typing: not yet");
+    h.type_text(&"\x7f".repeat("half a thought".len())).await;
+    h.emit(json!({"type":"state","state":"running"}));
+    assert!(!h.app.follow_daw(DawId::Renoise), "an answer under way: not yet");
+    h.emit(json!({"type":"state","state":"idle"}));
+    assert!(followed.borrow().is_empty());
+    assert!(h.app.follow_daw(DawId::Renoise));
+    assert_eq!(*followed.borrow(), [DawId::Renoise]);
+    assert_eq!(done.await, 0);
+    assert!(h.calls().contains(&"close".into()));
+    let said = h.output.text.borrow().clone();
+    assert!(said.contains("Renoise is open, so Kumi opens again with it.") && !said.contains("Kumi closed."), "{said}");
+});
+// Without a DAW to follow to (the producer asked for one), nothing follows.
+case!(a_daw_asked_for_is_never_followed_away_from, async {
+    let h = Harness::new(120, 36);
+    h.start().await;
+    assert!(!h.app.follow_daw(kumi_types::daw::DawId::Renoise));
+    assert!(!h.calls().contains(&"close".into()));
     h.close().await;
 });

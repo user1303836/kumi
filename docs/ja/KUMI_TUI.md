@@ -53,14 +53,14 @@ REAPER と Renoise でも画面は同じで（[つなぎ方](KUMI_GUIDE.md#reape
 
 | コマンド | 内容 |
 | --- | --- |
-| `kumi` | Live で開いている Set で Kumi を開く。初回はサインインし、ブリッジを Live に入れる（Live の再起動も任せられる） |
-| `kumi --daw reaper`、`kumi --daw renoise` | 開いている REAPER のプロジェクトや Renoise のソングで Kumi を開く。初回はサインインし、Kumi の拡張機能かツールを入れる。`KUMI_DAW` でも同じ。`kumi --daw reaper doctor`（または `report`）はその DAW について伝える |
+| `kumi` | DAW（Live、REAPER、Renoise。Kumi の前でも後でも開いてよい）で開いているもので Kumi を開く。初回はサインインし、Kumi のブリッジをその DAW に入れる（Live の再起動も任せられる）。Kumi がつながっていない間にほかの DAW を開くと、Kumi はそちらに移る |
+| `kumi --daw live`、`kumi --daw reaper`、`kumi --daw renoise` | どの DAW が開いていても、その DAW だけを使う。初回はサインインし、Kumi のブリッジを入れる。`KUMI_DAW` でも同じ。`kumi --daw reaper doctor`（または `report`）はその DAW について伝える |
 | `kumi --daw reaper bridge [--yes]`（または `renoise`） | Kumi の拡張機能を REAPER に、ツールを Renoise に入れる、または最新にする。`--yes` で確認に前もって答える |
-| `kumi -c`（`--continue` でも可） | どの Set のものでも、最後に使った会話の続きから始める |
+| `kumi -c`（`--continue` でも可） | どのプロジェクトのものでも、最後に使った会話の続きから始める |
 | `kumi -r [ID または名前]`（`--resume` でも可） | 保存された会話を ID（または先頭部分）か名前で選んで続ける。引数なしなら一覧から選ぶ。どちらも `--inference-only` と使える |
 | `kumi export [ID または名前 \| --last] [--md \| --html \| --json] [--full] [--raw] [-o パス]` | 保存された会話を Markdown（既定）、Web ページ、Kumi 用ファイルとして保存。ID を省くか `--last` で最新の会話。`--full` で各ステップの入力と結果も加え、`--raw` でキーやパスを残す |
 | `kumi import <ファイル>` | `kumi export --json` で保存した会話を取り込み、`kumi -r` で続けられるようにする |
-| `kumi --inference-only` | Live なしでチャットする |
+| `kumi --inference-only` | DAW なしでチャットする |
 | `kumi --bridge-config <absolute path>` | 自分のブリッジ設定を使う |
 | `kumi login` | サインイン：ChatGPT か API キーかを尋ねる |
 | `kumi login <provider>` | `openai-codex`（ChatGPT。ブラウザなしなら `--device`。SSH 経由ではこれが既定。ブラウザなら `--browser`）に、または API キーで `anthropic`、`openai`、`opencode`、`opencode-go` にサインインする |
@@ -176,7 +176,7 @@ REAPER と Renoise でも画面は同じで（[つなぎ方](KUMI_GUIDE.md#reape
 | --- | --- |
 | Tab（Kumi が何もしていないとき） | FOCUS のデバイスツリーに、Live の選択位置から入る：↑↓ で移動、Enter でその行を指し示す、Esc か Tab で入力に戻る |
 | Shift-Tab | タブに入る（もう一度押すと次のタブ）：↑↓ と Page Up/Down で移動。変更の行では Enter、→、Space でその図を開き、Enter か ← で閉じる。図を開いている間は `u` で取り消す。保存したものの行では Enter で forget。JOBS の行では Enter でジョブを開き、`x` で止める。Esc か Tab で戻る |
-| マウス | 行末の **undo** や **forget**、変更の文字（図が開く）やジョブの文字（ジョブが開く）、タブの名前をクリックする。ツリーのデバイスをクリックすると、それを指し示す。ピンをクリックするとピン留めを外す。テキストを選択するには Shift を押しながらドラッグする（iTerm2 では Option） |
+| マウス | 行末の **undo** や **forget**、変更の文字（図が開く）やジョブの文字（ジョブが開く）、タブの名前をクリックする。ツリーのデバイスをクリックすると、それを指し示す。ピンをクリックするとピン留めを外す。テキストをドラッグして選択し、Ctrl-C または右クリックでコピーする。Esc で選択を解除する。選択中の表示は Kumi が作業していても動かない。Shift を押しながらドラッグするとターミナルの選択を使う（iTerm2 では Option） |
 
 **パネル**（`/model`、`/effort`、`/login`、`/memory` など）：↑↓ で移動、Enter で選択、Esc で閉じます。`/model`、`/memory`、`/resume`、`/recipes` では、入力すると一覧を絞り込めます。`/model` では ctrl+f でフォールバックを設定します。`/resume` では Tab で This Set と All Sets を切り替え、ctrl+f で選んだ会話の名前の変更、ピン留め、削除、ID のコピーができます。会話が別の Set のものなら、Kumi は尋ねます：その Set を Live で開く（おすすめ）、ここでコピーとして続ける、キャンセル（Esc）。**Your answer**（番号付きの選択肢で質問して終わる答え）：番号を押して Enter で答えます。Kumi のおすすめの選択肢には印が付き、最初から選ばれています。誰もいないとき（`/goal`、`/loop`、マッチングの実行中だったとき、または Kumi のウィンドウが 2 分間ほかのウィンドウの後ろにあったとき）は、カウントダウンの後に Kumi がその選択肢を選びます（「Taking 2 (recommended) in 60 s · any key cancels」）。キーの入力欄ではキーを貼り付けて Enter を押します。Kumi はプロバイダーでキーを確認し、プロバイダーに接続できないときは確認せずに保存します。ChatGPT のサインインパネルでは `c` でリンク（またはコード）をコピーし、`d` でブラウザの代わりにコードでサインインし、`b` でブラウザに戻ります。`/btw` パネルでは ↑↓ と Page Up/Down でスクロール、←→ で以前の答えをたどり、`c` でコピー、Esc、Enter、Space で閉じます。ジョブの詳細では ↑↓ でスクロール、`x` で止め、`r` でもう一度実行し、`c` でレポートをコピー、Esc で閉じます。
 

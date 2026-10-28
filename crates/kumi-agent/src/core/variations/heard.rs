@@ -1,5 +1,6 @@
 //! How a take's render sounded (M7): its peak, its level and where its hits start, against the source's render. A take that is
-//! silent, or clips where the source doesn't, can't be shown; its hits against the source's say how much of its rhythm it keeps.
+//! silent, or clips where the source doesn't, can't be shown as it is; one that clips is turned down to the source's peak
+//! (#407). Its hits against the source's say how much of its rhythm it keeps.
 use kumi_common::abort::Signal;
 use kumi_types::contracts::Render;
 
@@ -14,14 +15,36 @@ pub struct Heard {
 /// Quieter than this throughout is silent; a peak this close to full scale clips.
 pub const SILENT_DB: f64 = -60.;
 pub const CLIPS_DB: f64 = -0.1;
+/// Where a take that clips is turned down to when no source was heard to match (dBFS).
+pub const UNDER_FULL_SCALE_DB: f64 = -1.;
 /// Onsets this close (s) are the same hit.
 const SAME_HIT_S: f64 = 0.03;
 /// A take louder than a source that clips by this much clips by itself.
 const LOUDER_DB: f64 = 0.5;
 
 /// A level in dB as Kumi writes it: a true minus.
-fn db_text(db: f64) -> String {
+pub fn db_text(db: f64) -> String {
     format!("{db:.1}").replace('-', "\u{2212}")
+}
+
+/// Why a take as heard can't be shown as it is.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Fault {
+    /// Nothing in it sounds, where the source does.
+    Silent,
+    /// It clips where the source doesn't, or is louder than a source that clips: its peak, and how many dB quieter it peaks
+    /// where the source does (`to_source`), or 1 dB under full scale when no source that sounds was heard; to a tenth of a dB,
+    /// rounded up.
+    Clips { peak: f64, over: f64, to_source: bool },
+}
+
+impl Fault {
+    pub fn words(&self) -> String {
+        match self {
+            Fault::Silent => "is silent".into(),
+            Fault::Clips { peak, .. } => format!("clips (peak {} dBFS)", db_text(*peak)),
+        }
+    }
 }
 
 impl Heard {
@@ -32,16 +55,19 @@ impl Heard {
         Heard { peak: db(peak), level: db(power.sqrt()), onsets: kumi_listening::notes::onsets(samples, rate) }
     }
 
-    /// Why it can't be shown, or None: silent where the source isn't, or clipping where the source doesn't (a source that clips
-    /// makes no take re-roll for clipping as much as it does).
-    pub fn fault(&self, source: Option<&Heard>) -> Option<String> {
+    /// Why it can't be shown as it is, or None: silent where the source isn't, or clipping where the source doesn't (a source
+    /// that clips makes no take turn down for clipping as much as it does).
+    pub fn fault(&self, source: Option<&Heard>) -> Option<Fault> {
         let source_silent = source.is_some_and(|source| source.level < SILENT_DB);
         if self.level < SILENT_DB && !source_silent {
-            return Some("is silent".into());
+            return Some(Fault::Silent);
         }
         let as_loud_as_a_clipping_source = source.is_some_and(|source| source.peak >= CLIPS_DB && self.peak <= source.peak + LOUDER_DB);
         if self.peak >= CLIPS_DB && !as_loud_as_a_clipping_source {
-            return Some(format!("clips (peak {} dBFS)", db_text(self.peak)));
+            let to = source.filter(|_| !source_silent).map(|source| source.peak);
+            // (a hair under the tenth, so a float's last bit doesn't round a whole tenth more)
+            let over = ((self.peak - to.unwrap_or(UNDER_FULL_SCALE_DB)) * 10. - 1e-9).ceil().max(1.) / 10.;
+            return Some(Fault::Clips { peak: self.peak, over, to_source: to.is_some() });
         }
         None
     }
@@ -97,13 +123,31 @@ mod tests {
 
     #[test]
     fn a_take_is_faulted_for_silence_or_clipping_only_where_the_source_isnt() {
-        assert_eq!(heard(-70., -80.).fault(Some(&heard(-6., -18.))).as_deref(), Some("is silent"));
+        assert_eq!(heard(-70., -80.).fault(Some(&heard(-6., -18.))), Some(Fault::Silent));
+        assert_eq!(Fault::Silent.words(), "is silent");
         assert_eq!(heard(-70., -80.).fault(Some(&heard(-70., -80.))), None, "a silent source makes a silent take no fault");
-        assert!(heard(0., -10.).fault(Some(&heard(-6., -18.))).unwrap().starts_with("clips (peak"));
+        assert!(heard(0., -10.).fault(Some(&heard(-6., -18.))).unwrap().words().starts_with("clips (peak"));
         assert_eq!(heard(0., -10.).fault(Some(&heard(0., -10.))), None, "as loud as a source that clips");
         assert!(heard(1.2, -8.).fault(Some(&heard(0., -10.))).is_some(), "louder than a clipping source clips by itself");
         assert_eq!(heard(-3., -15.).fault(None), None);
         assert!(heard(0., -10.).words(None, Some(&heard(0., -10.))).contains("clipping as the source does"));
+    }
+
+    /// (#407) A take that clips is turned down by how far it peaks over where the source peaks, to a tenth of a dB: a hot
+    /// source's takes to its own peak, a clipping source's to its, and with no source that sounds, to 1 dB under full scale.
+    #[test]
+    fn a_take_that_clips_is_turned_down_to_where_the_source_peaks() {
+        let clips = |take: Heard, source: Option<Heard>| match take.fault(source.as_ref()) {
+            Some(Fault::Clips { over, to_source, .. }) => (over, to_source),
+            other => panic!("{other:?}"),
+        };
+        assert_eq!(clips(heard(1.1, -9.), Some(heard(-0.3, -12.))), (1.4, true), "P31's hot footstep");
+        assert_eq!(clips(heard(1.13, -9.), Some(heard(-0.3, -12.))), (1.5, true), "rounded up: never short of the source's peak");
+        assert_eq!(clips(heard(0., -10.), Some(heard(-6., -18.))), (6., true));
+        assert_eq!(clips(heard(1.2, -8.), Some(heard(0., -10.))), (1.2, true), "to a clipping source's peak");
+        assert_eq!(clips(heard(0., -10.), None), (1., false), "no source heard: 1 dB under full scale");
+        assert_eq!(clips(heard(0.5, -10.), Some(heard(-90., -100.))), (1.5, false), "a silent source has no peak to match");
+        assert_eq!(heard(1.1, -9.).fault(None).unwrap().words(), "clips (peak 1.1 dBFS)");
     }
 
     #[test]

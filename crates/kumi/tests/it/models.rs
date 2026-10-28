@@ -238,6 +238,32 @@ async fn a_saved_model_its_providers_list_no_longer_shows_is_said() {
     sign_in_chatgpt(&pinned.store).await;
     assert_eq!(missing_model(&pinned.control).await, None);
 }
+/// A provider or model server that never answers: its request ends only when the request's signal does, as Kumi's HTTP's.
+struct Silent;
+#[async_trait(?Send)]
+impl Fetch for Silent {
+    async fn fetch(&self, _: &str, init: FetchInit) -> Result<Response, LanguageModelError> {
+        init.signal.unwrap_or_default().cancelled().await;
+        Err(LanguageModelError::other("This operation was aborted"))
+    }
+}
+#[tokio::test(flavor = "current_thread")]
+async fn closing_ends_the_lookups_under_way_so_kumis_exit_doesnt_wait_on_them() {
+    // As Kumi starts, the screen asks the saved model's provider for its list (with none saved, every provider and model
+    // server too): a quit while one is slow to answer ends it at once, not at its 15 s (a probe's 1.5 s).
+    let f = Fixture::with_fetch(Env::from([("ANTHROPIC_API_KEY".into(), GOOD.into())]), Rc::new(Silent));
+    let started = std::time::Instant::now();
+    let close = async {
+        tokio::task::yield_now().await;
+        f.control.close();
+    };
+    let (listed, servers, ()) = tokio::join!(f.control.models("anthropic", false), f.control.local(), close);
+    assert!(started.elapsed() < std::time::Duration::from_millis(500), "{:?}", started.elapsed());
+    assert!(listed.is_err());
+    assert!(servers.is_empty());
+    // One asked for once Kumi is closing ends as soon.
+    assert!(f.control.models("anthropic", false).await.is_err());
+}
 #[tokio::test(flavor = "current_thread")]
 async fn environment_model_choices_are_temporary_and_environment_keys_cannot_be_removed() {
     let f =

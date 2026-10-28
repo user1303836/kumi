@@ -178,8 +178,10 @@ next version), track templates and FX chains.
   copy after it on its track with its own pitch, rate, start, length, fades
   and volume (a MIDI item's notes, velocities and timing vary instead). Kumi
   checks each differs from the source and the others yet stays the same sound
-  (its attack, and any notes you name, kept), renders them to hear them, and
-  keeps, changes or drops them as you say; `render_files` delivers a file each.
+  (its attack, and any notes you name, kept), renders them to hear them (one
+  that clips where the source doesn't is turned down to the source's peak),
+  and keeps, changes or drops them as you say; `render_files` delivers a file
+  each.
 - **Stems** (`stems`): a track's stretch split by Kumi's own splitter into
   drums (what hits), bass (what sustains under 150 Hz) and other (the rest,
   voices too), which add up to the track. Each goes on a new track under it,
@@ -298,7 +300,8 @@ saves the song, instruments and device presets.
   you name as what defines it, varies the rest (slices, rolls, reverses, ghost
   notes, accents, register), checks each take differs from the source and the
   others yet keeps the idea, the key and the grid, and renders the takes to
-  hear them first (never while Renoise plays). Each take is a phrase, or a slot of its own in a "Variations of …"
+  hear them first (never while Renoise plays; one that clips where the source
+  doesn't is turned down to the source's peak by its volume column). Each take is a phrase, or a slot of its own in a "Variations of …"
   section at the sequence's end that plays the rest of the pattern with it.
   Then "keep 1, 3 and 5; change the rest" changes only those, each in its own
   direction, and the rest go in one step; a take you edited is left alone.

@@ -269,12 +269,34 @@ pub fn copy_to_clipboard(text: &str) {
         }
         let Ok(mut child) = command.spawn() else { continue };
         if let Some(mut input) = child.stdin.take() {
-            let _ = input.write_all(text.as_bytes());
+            let _ = input.write_all(&clipboard_bytes(text, tool == &"clip"));
         }
         std::thread::spawn(move || {
             let _ = child.wait();
         });
         return;
+    }
+}
+
+fn clipboard_bytes(text: &str, windows: bool) -> Vec<u8> {
+    if windows {
+        // clip.exe interprets BOM-less bytes in the console code page, not as UTF-8.
+        std::iter::once(0xfeff).chain(text.encode_utf16()).flat_map(u16::to_le_bytes).collect()
+    } else {
+        text.as_bytes().to_vec()
+    }
+}
+
+#[cfg(test)]
+mod clipboard_tests {
+    #[test]
+    fn native_clipboard_keeps_multilingual_text_and_surrogate_pairs() {
+        let text = "界 é 🎹";
+        let bytes = super::clipboard_bytes(text, true);
+        assert_eq!(&bytes[..2], &[0xff, 0xfe]);
+        let units: Vec<u16> = bytes[2..].chunks_exact(2).map(|b| u16::from_le_bytes([b[0], b[1]])).collect();
+        assert_eq!(String::from_utf16(&units).unwrap(), text);
+        assert_eq!(super::clipboard_bytes(text, false), text.as_bytes());
     }
 }
 

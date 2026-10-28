@@ -1,9 +1,11 @@
 """scripts/dev.py: globs, packages and their dependents, and what a change affects, on a made-up workspace and on this
 checkout's own (git and cargo read it); and rebase-moves, on repositories of its own.
 """
+import ast
 import contextlib
 import importlib.util
 import io
+import json
 import os
 from pathlib import Path
 import subprocess
@@ -339,6 +341,38 @@ class ThisCheckout(unittest.TestCase):
             self.assertFalse(any(path == gone or path.startswith(gone + "/") for path in tracked), f"{gone} still holds files")
             self.assertTrue(any(path == there or path.startswith(there + "/") for path in tracked), f"{there} holds none")
 
+    def test_what_it_prints_is_utf8_whatever_the_streams_encoding(self):
+        # PYTHONIOENCODING=cp1252 stands for a pipe on Windows, which can't encode the arrow.
+        done = subprocess.run([sys.executable, str(ROOT / "scripts/dev.py"), "areas", "docs/→.md"], capture_output=True,
+                              env={**os.environ, "PYTHONIOENCODING": "cp1252"})
+        self.assertEqual(done.returncode, 0, done.stderr.decode("utf-8", "replace"))
+        self.assertTrue(done.stdout.decode("utf-8").startswith("docs/→.md: "), done.stdout)
+
+    def test_what_it_reads_from_stdin_is_utf8_whatever_the_streams_encoding(self):
+        # cp1252 can't decode the kana's 0x81.
+        done = subprocess.run([sys.executable, str(ROOT / "scripts/dev.py"), "affected", "--changes", "-", "--json"],
+                              input="M\tdocs/かな.md\n".encode("utf-8"), capture_output=True,
+                              env={**os.environ, "PYTHONIOENCODING": "cp1252"})
+        self.assertEqual(done.returncode, 0, done.stderr.decode("utf-8", "replace"))
+        self.assertEqual(json.loads(done.stdout)["files"], 1)
+
+    def test_every_text_it_reads_or_writes_names_its_encoding(self):
+        # Without one, Python uses the system's encoding: cp1252 on Windows, where git's UTF-8 fails to decode. CI runs
+        # these tests on Linux, whose UTF-8 hides that.
+        def text(call: ast.Call) -> bool:
+            name, named = ast.unparse(call.func), {keyword.arg for keyword in call.keywords}
+            if name == "subprocess.run":
+                return bool(named & {"text", "universal_newlines"})
+            if name == "open":
+                mode = call.args[1] if len(call.args) > 1 else next((k.value for k in call.keywords if k.arg == "mode"), None)
+                return not (isinstance(mode, ast.Constant) and "b" in mode.value)
+            return name.endswith((".read_text", ".write_text"))
+
+        tree = ast.parse((ROOT / "scripts/dev.py").read_text(encoding="utf-8"))
+        unnamed = sorted(call.lineno for call in ast.walk(tree) if isinstance(call, ast.Call) and text(call)
+                         and "encoding" not in {keyword.arg for keyword in call.keywords})
+        self.assertEqual(unnamed, [], 'these lines read or write text without encoding="utf-8"')
+
 
 class Moves(unittest.TestCase):
     def test_a_moved_folder_is_rewritten_where_a_path_names_it_from_the_root(self):
@@ -493,6 +527,16 @@ class RebaseMoves(unittest.TestCase):
         code, out = self.bring(merge=True)
         self.assertEqual(code, 1, out)
         self.assertIn("crates/a/src/late.rs -> daws/x/a/src/late.rs", out)
+
+    def test_lines_cp1252_cant_decode_are_rewritten_and_a_file_that_isnt_utf8_is_left_as_it_is(self):
+        # git's output is read as UTF-8 whatever the system's encoding: Windows' cp1252 can't decode a ” or a kana.
+        self.write("README.md", self.read("README.md") + "\n“Quoted” in crates/a/src/lib.rs, かな.\n")
+        (self.repo / "latin1.txt").write_bytes(b"caf\xe9 in crates/a\n")
+        self.commit("Text")
+        code, out = self.bring()
+        self.assertEqual(code, 0, out)
+        self.assertTrue(self.read("README.md").endswith("\n“Quoted” in daws/x/a/src/lib.rs, かな.\n"), out)
+        self.assertEqual((self.repo / "latin1.txt").read_bytes(), b"caf\xe9 in crates/a\n")
 
     def test_a_conflict_stops_it_and_names_the_file(self):
         self.write("README.md", self.read("README.md").replace("See crates/a/src/lib.rs.", "Read crates/a/src/lib.rs."))

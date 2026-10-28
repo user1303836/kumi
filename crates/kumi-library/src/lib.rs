@@ -507,12 +507,7 @@ impl Library {
         // One check and build at a time. The model's first searches come together (a kick, a snare, a hat, a perc),
         // and each used to find no index and build its own from the whole log: four at once took four times one.
         let _building = self.building.lock().await;
-        let mut reader = self.sounds.lock().await;
-        if reader.refresh().await.map_err(io_error)?.changed {
-            self.stale.set(true);
-        }
-        let (_, presets, sets) = self.counts.get();
-        self.counts.set((reader.entries.len(), presets, sets));
+        let reader = self.sounds_now().await?;
         let (current, hidden): (Vec<Source>, Vec<Source>) = self.sources().await.into_iter().partition(|s| s.offered_in(daw));
         // Another DAW's library is never offered here, even where a folder offered here holds it (a Live Place around
         // Renoise's User Library): what that library's own walk reads stays out of this index.
@@ -520,10 +515,13 @@ impl Library {
         // Live's when none is known, as `offered_in` reads it: the warm-up's index (built with none) is Live's own.
         let key =
             format!("{:?}\n{}", daw.unwrap_or(DawId::Ableton), current.iter().map(|s| s.path.as_str()).collect::<Vec<_>>().join("\n"));
-        let rebuild =
-            self.held.borrow().as_ref().is_none_or(|held| {
-                held.key != key || (self.stale.get() && (self.progress.borrow().is_none() || now_ms() - held.at >= 3000))
-            });
+        // While a learn goes on, what it learns shows at most every 3 s; once it's done (its logs written), at once.
+        let learning = self.progress.borrow().as_ref().is_some_and(|progress| progress.phase != LearnPhase::Done);
+        let rebuild = self
+            .held
+            .borrow()
+            .as_ref()
+            .is_none_or(|held| held.key != key || (self.stale.get() && (!learning || now_ms() - held.at >= 3000)));
         if rebuild {
             let entries = reader
                 .entries
@@ -546,6 +544,39 @@ impl Library {
     /// over an index (a palette's nearest) checks this before asking.
     pub fn sound_indexes_built(&self) -> u64 {
         self.built.get()
+    }
+    /// Sounds that moved, each by its file's name and size: where one is now, and its modification time, found among
+    /// every sound the library learned under its sources, whichever DAW offers it (a palette is every session's); None
+    /// for one it doesn't have.
+    pub async fn find_moved_sounds(&self, wanted: &[(String, i64)]) -> Vec<Option<(String, i64)>> {
+        let sources = self.sources().await;
+        let Ok(reader) = self.sounds_now().await else { return vec![None; wanted.len()] };
+        wanted
+            .iter()
+            .map(|(name, size)| {
+                reader
+                    .entries
+                    .values()
+                    .find(|entry| {
+                        entry.gone != Some(true)
+                            && entry.size as i64 == *size
+                            && entry.path.rsplit(['/', '\\']).next() == Some(name.as_str())
+                            && sources.iter().any(|source| below(&entry.path, &source.path).is_some())
+                    })
+                    .map(|entry| (entry.path.clone(), entry.mtime))
+            })
+            .collect()
+    }
+    /// The sounds' log, read as far as it goes now: their count kept for the status, and the index held marked stale when
+    /// there's more (the next ask builds it again).
+    async fn sounds_now(&self) -> Result<MutexGuard<'_, LogReader<SoundEntry>>, RuntimeError> {
+        let mut reader = self.sounds.lock().await;
+        if reader.refresh().await.map_err(io_error)?.changed {
+            self.stale.set(true);
+        }
+        let (_, presets, sets) = self.counts.get();
+        self.counts.set((reader.entries.len(), presets, sets));
+        Ok(reader)
     }
     /// The presets' log, read as far as it goes now (their count kept for the status).
     async fn presets_now(&self) -> Result<MutexGuard<'_, LogReader<PresetEntry>>, RuntimeError> {
@@ -732,4 +763,47 @@ pub fn library_dir(kumi_dir: &str, env: Option<&HashMap<String, String>>) -> Str
         }
     });
     value.filter(|s| !s.is_empty()).unwrap_or_else(|| sources::join(kumi_dir, "library"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use store::Entry;
+
+    /// While a learn goes on, the sounds it learns show in the index at most every 3 s; once it's done (its logs
+    /// written), at once.
+    #[tokio::test(flavor = "current_thread")]
+    async fn what_a_learn_learned_shows_at_once_when_its_done() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let dir = tempfile::tempdir().unwrap();
+                let samples = dir.path().join("Samples");
+                std::fs::create_dir_all(&samples).unwrap();
+                let library = create_library(LibraryOptions {
+                    dir: dir.path().join("library").to_string_lossy().into(),
+                    folders: Some(vec![samples.to_string_lossy().into()]),
+                    sources: Some(SourceOptions { home: Some(dir.path().to_string_lossy().into()), ..Default::default() }),
+                    fork: Some(false),
+                    find_sets: Some(false),
+                    delay_ms: Some(3_600_000),
+                    ..Default::default()
+                });
+                let folder = library.sources().await.into_iter().next().unwrap().path;
+                let sound = |name: &str| SoundEntry {
+                    file: Entry { path: format!("{folder}/{name}"), size: 1, mtime: 1, gone: None },
+                    ..Default::default()
+                };
+                let logs = library_logs(&library.dir);
+                logs.sounds.append(&[sound("A.wav")]).await.unwrap();
+                assert_eq!(library.sound_index().await.unwrap().entries.len(), 1);
+                // A learn going on learns another, a moment after the index was built: held back.
+                logs.sounds.append(&[sound("B.wav")]).await.unwrap();
+                *library.progress.borrow_mut() = Some(LearnProgress { phase: LearnPhase::Sounds, ..Default::default() });
+                assert_eq!(library.sound_index().await.unwrap().entries.len(), 1, "while it learns");
+                library.progress.borrow_mut().as_mut().unwrap().phase = LearnPhase::Done;
+                assert_eq!(library.sound_index().await.unwrap().entries.len(), 2, "once it's done");
+                library.close().await;
+            })
+            .await;
+    }
 }

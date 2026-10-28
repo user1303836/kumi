@@ -3,6 +3,64 @@
 Kumi's releases. The Ableton bridge (`crates/ableton-mcp-server`) is versioned on its own;
 each Kumi release names the bridge it ships with.
 
+## 1.24.7 — 2026-10-28
+
+Ships with bridge 1.0.98, as 1.24.6 did.
+
+- Brings everything in 1.24.6, which never published: a quit that waited on a slow network stopped its
+  build.
+- Quitting Kumi soon after it starts, or on Windows while it waits for Live, ends at once instead of
+  now and then with "Kumi shutdown left a live handle".
+
+Tested with Live 12.4 on macOS. On Windows, installing and updating are tested; using Kumi with Live
+there is still new.
+
+## 1.24.6 — 2026-10-28
+
+Ships with bridge 1.0.98, as 1.24.5 did.
+
+- Open your DAW before or after Kumi: `kumi` works with the one that's open, Live, REAPER or Renoise,
+  and puts its bridge in the first time, with no `--daw` to learn.
+- Kumi follows you to the DAW you open while it isn't connected, and with none open it says which of
+  yours to open instead of Live's setup steps.
+- A portable REAPER anywhere (another drive, a folder of your own) is found while it's open, and
+  Kumi's extension goes into it.
+
+Tested with Live 12.4 on macOS. On Windows, installing and updating are tested; using Kumi with Live
+there is still new.
+
+## 1.24.5 — 2026-10-27
+
+Ships with bridge 1.0.98, as 1.24.4 did.
+
+- On Windows, two Kumis setting up REAPER's or Renoise's bridge at the same moment no longer fail with
+  "it inherits its folder's permissions".
+- In REAPER and Renoise, a loose palette no longer ranks the sounds it brings in by their use in your
+  Live Sets.
+- When your library finishes learning, a loose palette brings in what it learned at once, and the map
+  marks it.
+- A palette sound that moved is found again in any DAW's session, wherever your library learned it.
+- Kumi stays responsive while a big loose palette works out what it brings in.
+
+Tested with Live 12.4 on macOS. On Windows, installing and updating are tested; using Kumi with Live
+there is still new.
+
+## 1.24.4 — 2026-10-27
+
+Ships with bridge 1.0.98, which Live loads when it restarts. After updating, Kumi offers to quit Live
+(it asks to save first) and opens it again with the new bridge; or run `kumi bridge` with Live closed.
+
+- In REAPER and Renoise, a variation that clips where its source doesn't is turned down to the
+  source's peak instead of drawn again, and Kumi still changes or drops it when you ask.
+- In REAPER, "change the rest" and "drop the rest" no longer skip Kumi's own variations as if you had
+  edited them.
+- Select text in Kumi's window by dragging, and copy it with Ctrl-C or right-click.
+- Copied text keeps Japanese, Chinese and other Unicode characters when using the Windows clipboard
+  fallback.
+
+Tested with Live 12.4 on macOS. On Windows, installing and updating are tested; using Kumi with Live
+there is still new.
+
 ## 1.24.3 — 2026-10-27
 
 Ships with bridge 1.0.97, as 1.24.2 did.

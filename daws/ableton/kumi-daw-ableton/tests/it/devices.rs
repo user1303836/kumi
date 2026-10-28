@@ -491,6 +491,9 @@ async fn a_devices_code_is_checked_in_a_process_of_its_own_it_cant_reach_kumi_ca
     use_built_harness();
     // Each check in a process of its own, all at once: two of them wait out their deadline.
     let isolated = |code: Value, options: IsolatedOptions| async move { check_midi_device_isolated(&spec(code), options).await };
+    // The loops that send or say without end are stopped by what a run keeps, not at the deadline: theirs is twice the
+    // usual, as a Windows runner took 9 s and more to get there beside the other checks.
+    let capped = IsolatedOptions { timeout_ms: Some(20_000) };
     let (same, escape, (endless, endless_took), sending, saying, looping, throwing) = tokio::join!(
         isolated(json!({}), IsolatedOptions::default()),
         isolated(
@@ -508,12 +511,9 @@ async fn a_devices_code_is_checked_in_a_process_of_its_own_it_cant_reach_kumi_ca
         },
         isolated(
             json!({ "code": "function midi(event) { for (;;) send({ type: 'cc', controller: 1, value: 1 }); }", "tests": [] }),
-            IsolatedOptions::default(),
+            capped.clone(),
         ),
-        isolated(
-            json!({ "code": "function midi(event) { for (;;) post('Kumi device: again\\n'); pass(event); }", "tests": [] }),
-            IsolatedOptions::default()
-        ),
+        isolated(json!({ "code": "function midi(event) { for (;;) post('Kumi device: again\\n'); pass(event); }", "tests": [] }), capped),
         isolated(
             json!({ "code": "let i = 0; while (true) { i++; }\nfunction midi(event) { pass(event); }", "tests": [] }),
             IsolatedOptions::default()
@@ -992,13 +992,20 @@ async fn make_device_keeps_code_that_never_stops_in_the_device_without_running_i
         let made = tool.execute(with(lowest(), json!({ "name": name, "code": code, "tests": [] })), Signal::new()).await.unwrap();
         let made: Value = serde_json::from_str(&made.text).unwrap();
         let wrong = made["wrong"].as_array().unwrap().iter().map(|said| said.as_str().unwrap()).collect::<Vec<_>>().join("\n");
-        assert!(wrong.contains(says) && wrong.contains("Kumi kept the code in the device without running it"), "{made}");
+        // Under load, the outer process deadline can win before the more specific loop/flood guard. This tool test
+        // proves either runaway verdict leaves the written device inert; the in-process tests verify the event cap.
+        let deadline = wrong.contains("Kumi's check: it didn't finish within") && wrong.contains("something loops forever");
+        assert!(wrong.contains(says) || deadline, "{made}");
+        assert!(wrong.contains("Kumi kept the code in the device without running it"), "{made}");
         assert!(made["checks"].as_str().unwrap().starts_with("Kumi's check found the code never stops"), "{made}");
         let file = std::fs::read(folder.path().join("Kumi").join("MIDI Effects").join(format!("{name}.amxd"))).unwrap();
         let written = String::from_utf8_lossy(&file);
         // As the file holds it: every line of the code is a comment.
         let commented = written.match_indices("function midi").all(|(at, _)| written[..at].ends_with("// "));
-        assert!(written.contains("Kumi kept this code without running it") && commented, "kept as comments");
+        assert!(written.contains("Kumi kept this code without running it") && commented, "kept as comments, with no live copy");
+        for line in code.lines() {
+            assert!(written.contains(&format!("// {line}")), "{name}: source line kept as a comment: {line}");
+        }
     }
 }
 

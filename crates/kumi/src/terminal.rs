@@ -34,6 +34,13 @@ pub trait Terminal {
     fn offer_update(&self, latest: &str);
     fn interrupt(&self);
     fn close(&self) -> LocalBoxFuture<'static, i32>;
+    /// Kumi follows the producer to `daw`, a DAW they opened while the session isn't connected: once nothing would be
+    /// lost (no answer under way, no question or setup waiting, nothing typed), it says so and closes, to open again with
+    /// that DAW. False when it can't yet: Kumi asks again later.
+    fn follow_daw(&self, daw: kumi_types::daw::DawId) -> bool {
+        let _ = daw;
+        false
+    }
 }
 #[derive(Clone)]
 pub struct TerminalOptions {
@@ -47,8 +54,11 @@ pub struct TerminalOptions {
     pub close_timeout_ms: Option<u64>,
     pub history: Option<Rc<RefCell<InputHistory>>>,
     pub updates: Option<UpdateControl>,
-    /// /daw <name>: Kumi closes and opens again with that DAW. None where the producer works with Live alone.
+    /// /daw <name>: Kumi closes and opens again with that DAW. None where Live is the only DAW here.
     pub switch_daw: Option<Rc<dyn Fn(kumi_types::daw::DawId)>>,
+    /// Kumi follows the producer to a DAW they opened ([`Terminal::follow_daw`]): it closes and opens again with it.
+    /// None where the producer asked for a DAW.
+    pub follow_daw: Option<Rc<dyn Fn(kumi_types::daw::DawId)>>,
     /// /willington, where Kumi's bridge can carry Willington.
     pub willington: Option<kumi_daw::provider::Toggle>,
     /// What's new since the producer last opened Kumi, said once as it starts.
@@ -87,6 +97,7 @@ impl TerminalOptions {
             history: None,
             updates: None,
             switch_daw: None,
+            follow_daw: None,
             willington: None,
             whats_new: None,
             instant: true,
@@ -1660,6 +1671,21 @@ impl Terminal for PlainTerminal {
     }
     fn close(&self) -> LocalBoxFuture<'static, i32> {
         self.finish(0)
+    }
+    fn follow_daw(&self, daw: kumi_types::daw::DawId) -> bool {
+        let Some(follow) = self.0.options.follow_daw.clone() else { return false };
+        let waiting = {
+            let state = self.0.state.borrow();
+            state.closing || state.asking.is_some()
+        };
+        if waiting || self.busy() {
+            return false;
+        }
+        let app = crate::daw::provider(daw).map(|provider| provider.profile().words.app).unwrap_or_default();
+        self.notice(&format!("[daw] {app} is open, so Kumi opens again with it."));
+        follow(daw);
+        drop(self.finish(0));
+        true
     }
 }
 fn str_(value: &Value) -> &str {

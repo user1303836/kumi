@@ -470,9 +470,15 @@ impl Transport {
 
     async fn read_stdout(self: Rc<Self>, stdout: Option<ChildStdout>) {
         if let Some(mut stdout) = stdout {
+            let mut closed = self.closed.subscribe();
             let mut chunk = vec![0u8; 64 * 1024];
             loop {
-                let read = match stdout.read(&mut chunk).await {
+                // Closed without this pipe's end (a process the bridge started holds it): nothing more is read.
+                let read = tokio::select! {
+                    read = stdout.read(&mut chunk) => read,
+                    _ = closed.wait_for(|closed| *closed) => break,
+                };
+                let read = match read {
                     Ok(0) | Err(_) => break,
                     Ok(read) => read,
                 };
@@ -507,9 +513,14 @@ impl Transport {
     // Drain early output to avoid child backpressure, retaining only bounded byte-count metadata.
     async fn drain_stderr(self: Rc<Self>, stderr: Option<ChildStderr>) {
         if let Some(mut stderr) = stderr {
+            let mut closed = self.closed.subscribe();
             let mut chunk = vec![0u8; 64 * 1024];
             loop {
-                match stderr.read(&mut chunk).await {
+                let read = tokio::select! {
+                    read = stderr.read(&mut chunk) => read,
+                    _ = closed.wait_for(|closed| *closed) => break,
+                };
+                match read {
                     Ok(0) | Err(_) => break,
                     Ok(read) => {
                         let bytes = self.stderr_bytes.get();
@@ -559,8 +570,8 @@ impl Transport {
         self.exited.set(true);
         self.one_closed();
         // A process the bridge started may hold its pipes open (on Windows it can inherit them), so their ends may
-        // never come: once the bridge is gone, what it wrote gets a moment to be read, then the transport is closed.
-        // The moment ends as soon as the pipes have: a task left waiting holds up Kumi's own exit.
+        // never come: once the bridge is gone, what it wrote gets a moment to be read, then the transport is closed and
+        // its readers stop. The moment ends as soon as the pipes have: a task left waiting holds up Kumi's own exit.
         let until = tokio::time::Instant::now() + EXIT_GRACE;
         while self.closes_needed.get() > 0 && tokio::time::Instant::now() < until {
             tokio::time::sleep(Duration::from_millis(20)).await;

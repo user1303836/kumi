@@ -58,6 +58,11 @@ impl Library {
         *self.index.borrow_mut() = Some(index);
         self.built.set(self.built.get() + 1);
     }
+
+    /// What a learn leaves: other sounds, their index built when the library's next asked for one.
+    fn learns(&self, index: Rc<SoundIndex>) {
+        *self.index.borrow_mut() = Some(index);
+    }
 }
 
 #[async_trait(?Send)]
@@ -257,22 +262,62 @@ async fn reached_names(palettes: &Palettes) -> Vec<String> {
     names
 }
 
+/// The paths the app heard last that the palette brings in, in path order.
+fn heard_reached(told: &RefCell<Vec<Option<PaletteView>>>) -> Vec<String> {
+    let mut reached = told.borrow().last().cloned().flatten().unwrap().reached;
+    reached.sort();
+    reached
+}
+
 case!(a_loose_palette_brings_in_sounds_the_library_learned_since_it_last_changed, async {
     let dir = tempfile::tempdir().unwrap();
     let (index, sounds) = library(dir.path(), 8, 6);
-    let (learned, _) = library(dir.path(), 10, 6);
+    let (learned, more) = library(dir.path(), 10, 6);
     let library = Rc::new(Library { index: RefCell::new(Some(index)), ..Default::default() });
-    let (palettes, _) = palettes(dir.path(), Some(library.clone()));
+    let (palettes, told) = palettes(dir.path(), Some(library.clone()));
     palettes.gather(vec![sounds[7].clone()]).await.unwrap();
     palettes.command("loose 2").await.unwrap();
     assert_eq!(reached_names(&palettes).await, ["Kick 5", "Kick 6"]);
     // Asked again with nothing built since: what it brought, without asking the library (once, for loose 2).
     assert_eq!(reached_names(&palettes).await, ["Kick 5", "Kick 6"]);
     assert_eq!(library.looked.get(), 1);
-    // The library learns two more kicks, Kick 8 as near Kick 7 as Kick 6 is: brought in, the palette as it was.
+    let heard = told.borrow().len();
+    // The library learns two more kicks, Kick 8 as near Kick 7 as Kick 6 is: brought in, the palette as it was, and the
+    // app hears it (the map marks what Kumi brings).
     library.learned(learned);
     assert_eq!(reached_names(&palettes).await, ["Kick 6", "Kick 8"]);
     assert_eq!(library.looked.get(), 2);
+    assert_eq!((told.borrow().len(), heard_reached(&told)), (heard + 1, vec![more[6].path.clone(), more[8].path.clone()]));
+    // Asked again: the same, and nothing more for the app.
+    assert_eq!(reached_names(&palettes).await, ["Kick 6", "Kick 8"]);
+    assert_eq!(told.borrow().len(), heard + 1);
+});
+
+case!(when_a_learn_finishes_a_loose_palette_brings_in_what_it_learned_and_the_app_hears_it, async {
+    let dir = tempfile::tempdir().unwrap();
+    let (index, sounds) = library(dir.path(), 8, 6);
+    let (learned, more) = library(dir.path(), 10, 6);
+    let library = Rc::new(Library { index: RefCell::new(Some(index)), ..Default::default() });
+    let (palettes, told) = palettes(dir.path(), Some(library.clone()));
+    palettes.gather(vec![sounds[7].clone()]).await.unwrap();
+    // Strict: nothing brought in, and nothing to tell.
+    let heard = told.borrow().len();
+    palettes.learned().await;
+    assert_eq!((told.borrow().len(), library.looked.get()), (heard, 0));
+    palettes.command("loose 2").await.unwrap();
+    assert_eq!(heard_reached(&told), [sounds[5].path.clone(), sounds[6].path.clone()]);
+    // A learn leaves two more kicks, the index of them built when the library's asked: until then the palette brings
+    // what it did.
+    library.learns(learned);
+    assert_eq!(reached_names(&palettes).await, ["Kick 5", "Kick 6"]);
+    let heard = told.borrow().len();
+    // Its end asks the library: Kick 8 brought in, and the app hears it.
+    palettes.learned().await;
+    assert_eq!((told.borrow().len(), heard_reached(&told)), (heard + 1, vec![more[6].path.clone(), more[8].path.clone()]));
+    assert_eq!(reached_names(&palettes).await, ["Kick 6", "Kick 8"]);
+    // Another learn that learned nothing: nothing more for the app.
+    palettes.learned().await;
+    assert_eq!(told.borrow().len(), heard + 1);
 });
 
 case!(changes_that_overlap_reach_the_app_one_after_another_the_last_one_last, async {

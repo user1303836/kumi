@@ -53,14 +53,14 @@ Kumi 占据整个终端窗口，并在 Kumi 关闭、崩溃或被停止时把窗
 
 | 命令 | 作用 |
 | --- | --- |
-| `kumi` | 在 Live 当前打开的工程上打开 Kumi；第一次时登录，并把桥接装入 Live（Kumi 可以替你重启 Live） |
-| `kumi --daw reaper`、`kumi --daw renoise` | 在当前打开的 REAPER 工程或 Renoise 歌曲上打开 Kumi；第一次时登录，并装入 Kumi 的扩展或工具。`KUMI_DAW` 作用相同；`kumi --daw reaper doctor`（或 `report`）说的是那个 DAW |
+| `kumi` | 在你的 DAW（Live、REAPER 或 Renoise，在 Kumi 之前或之后打开都可以）当前打开的内容上打开 Kumi；第一次时登录，并把 Kumi 的桥接装入那个 DAW（Kumi 可以替你重启 Live）。Kumi 未连接时打开另一个 DAW，Kumi 会跟过去 |
+| `kumi --daw live`、`kumi --daw reaper`、`kumi --daw renoise` | 不论开着哪个 DAW，都只用那个 DAW；第一次时登录，并装入 Kumi 的桥接。`KUMI_DAW` 作用相同；`kumi --daw reaper doctor`（或 `report`）说的是那个 DAW |
 | `kumi --daw reaper bridge [--yes]`（或 `renoise`） | 把 Kumi 的扩展装入 REAPER，或把它的工具装入 Renoise，或把它们更新到最新；`--yes` 预先回答它的提问 |
 | `kumi -c`（或 `--continue`） | 接着你上次使用的对话继续，不论它属于哪个工程 |
 | `kumi -r [ID 或名称]`（或 `--resume`） | 按 ID（或其开头）或名称继续一段保存的对话；不加参数则从列表中选择。两者都可与 `--inference-only` 一起使用 |
 | `kumi export [ID 或名称 \| --last] [--md \| --html \| --json] [--full] [--raw] [-o 路径]` | 将保存的对话存为 Markdown（默认）、网页或供 Kumi 使用的文件；不写 ID 或加 `--last` 时为最近的对话。`--full` 加上每个步骤的输入和结果，`--raw` 保留密钥和路径 |
 | `kumi import <文件>` | 导入用 `kumi export --json` 保存的对话，之后可用 `kumi -r` 继续 |
-| `kumi --inference-only` | 不连接 Live，只聊天 |
+| `kumi --inference-only` | 不连接 DAW，只聊天 |
 | `kumi --bridge-config <absolute path>` | 使用你自己的桥接配置 |
 | `kumi login` | 登录：询问使用 ChatGPT 还是 API 密钥 |
 | `kumi login <provider>` | 登录 `openai-codex`（ChatGPT；没有浏览器时加 `--device`，通过 SSH 时默认如此；要用浏览器则加 `--browser`），或用 API 密钥登录 `anthropic`、`openai`、`opencode` 或 `opencode-go` |
@@ -176,7 +176,7 @@ Kumi 占据整个终端窗口，并在 Kumi 关闭、崩溃或被停止时把窗
 | --- | --- |
 | Tab（空闲时） | 进入 FOCUS 的设备树，定位到 Live 的当前选择：↑↓ 移动，Enter 指向该行，Esc 或 Tab 回到输入 |
 | Shift-Tab | 进入标签页（再按一次切到下一个标签页）：↑↓ 和 Page Up/Down 移动。在修改上，Enter、→ 或空格展开它的图示，Enter 或 ← 收起，展开时按 `u` 撤销；在记住的内容上，Enter 执行 forget；在 JOBS 的行上，Enter 打开任务，按 `x` 停止。Esc 或 Tab 返回 |
-| 鼠标 | 点击行末的 **undo** 或 **forget**、修改的文字（展开图示）或任务的文字（打开任务）、标签页名称，或点击设备树中的设备以指向它；点击图钉取消固定。拖动时按住 Shift（iTerm2 中为 Option）可选择文字 |
+| 鼠标 | 点击行末的 **undo** 或 **forget**、修改的文字（展开图示）或任务的文字（打开任务）、标签页名称，或点击设备树中的设备以指向它；点击图钉取消固定。拖动文本即可选中，Ctrl-C 或右键复制，Esc 取消选择。选择期间显示保持不动，Kumi 继续工作。按住 Shift 拖动仍使用终端的选择功能（iTerm2 中为 Option） |
 
 **面板**（`/model`、`/effort`、`/login`、`/memory` 等）：↑↓ 移动，Enter 选择，Esc 关闭；在 `/model`、`/memory`、`/resume` 和 `/recipes` 中，输入文字可筛选列表。在 `/model` 中，ctrl+f 设定备用模型。在 `/resume` 中，Tab 在 This Set 和 All Sets 之间切换，ctrl+f 可重命名、置顶、删除所选对话或复制它的 ID。对话属于其他工程时，Kumi 会询问：在 Live 中打开它的工程（推荐）、在这里作为副本继续，或取消（Esc）。**Your answer**（以带编号选项的问题结尾的回答）：按编号再按 Enter 即可回答。Kumi 推荐的选项带有标记，并一开始就被选中；没有人在时（运行过 `/goal`、`/loop` 或匹配，或 Kumi 的窗口已在其他窗口后面 2 分钟），倒计时结束后 Kumi 会选它（“Taking 2 (recommended) in 60 s · any key cancels”）。在密钥输入框中，粘贴密钥后按 Enter；Kumi 会向提供方验证它，无法连接提供方时则不经验证直接保存。在 ChatGPT 登录面板中，`c` 复制链接（或代码），`d` 改用代码登录而不用浏览器，`b` 改回浏览器。在 `/btw` 面板中，↑↓ 和 Page Up/Down 滚动，←→ 翻看之前的回答，`c` 复制，Esc、Enter 或 Space 关闭面板。在任务详情中，↑↓ 滚动，`x` 停止任务，`r` 重新运行，`c` 复制报告，Esc 关闭。
 

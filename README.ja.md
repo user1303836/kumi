@@ -38,10 +38,10 @@ irm https://github.com/user1303836/kumi/releases/latest/download/install.ps1 | i
 
 Kumi のガイド付きセットアップに従ってください。
 
-次回からは、ターミナルを開いて `kumi` と入力します。
+次回からは、ターミナルを開いて `kumi` と入力し、DAW（Live、REAPER、Renoise。Kumi の前でも後でもかまいません）を開きます。Kumi は開いている DAW につながります。
 
 > [!NOTE]
-> Kumi はターミナルのウィンドウで動きますが、コマンドを知っている必要はありません。インストールの一行のあとは、チャットです。
+> Kumi はターミナルのウィンドウで動きますが、コマンドを知っている必要はありません。インストールの一行のあとは、チャットです。テキストをドラッグして選択し、Ctrl-C でコピーできます。
 
 ## Kumi に頼めること
 
@@ -112,7 +112,7 @@ Kumi は無料のオープンソース（MIT）です。モデルはあなたが
 
 ## 現状
 
-Kumi 1.24.3 は macOS の Ableton Live 12.4（ベータ）で確認しています。
+Kumi 1.24.7 は macOS の Ableton Live 12.4（ベータ）で確認しています。
 Windows ではインストールと更新を確認済みですが、Live と一緒に使うのはまだ新しいです。
 問題が起きたら `kumi report` を送ってください。
 REAPER 7.82 と Renoise 3.5.4 は macOS で確認しています。Windows と Linux では、Kumi の拡張機能とツールの配置と拡張機能の読み込みを CI で確認していますが、そこで REAPER や Renoise と一緒に使うのはまだ新しいです。

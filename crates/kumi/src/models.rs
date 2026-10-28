@@ -171,6 +171,9 @@ struct Inner {
     state: RefCell<State>,
     /// Cloud models found this session to turn tools down: they're sent none from then on.
     learned: chat_only::Learned,
+    /// Fired as Kumi closes: a provider's list or a model server's probe still under way ends with it, so Kumi's exit
+    /// doesn't wait on an answer nobody will read.
+    closed: Signal,
 }
 #[derive(Clone)]
 pub struct ModelControl {
@@ -201,10 +204,15 @@ pub fn create_model_control(options: ModelControlOptions) -> ModelControl {
                 defaulting: None,
             }),
             learned: Default::default(),
+            closed: Signal::new(),
         }),
     }
 }
 impl ModelControl {
+    /// Ends the lookups under way, and any asked for later, as Kumi closes.
+    pub fn close(&self) {
+        self.inner.closed.cancel();
+    }
     fn servers(&self) -> Vec<LocalServer> {
         if let Some(named) = &self.inner.state.borrow().named {
             return named.clone();
@@ -379,7 +387,9 @@ impl ModelControl {
     pub async fn local(&self) -> Vec<LocalStatus> {
         self.inner.state.borrow_mut().named = None;
         futures::future::join_all(self.servers().into_iter().map(|server| async move {
-            let running = local::probe_local(&server, Transport { fetch: self.inner.options.fetch.clone(), signal: None }).await;
+            let running =
+                local::probe_local(&server, Transport { fetch: self.inner.options.fetch.clone(), signal: Some(self.inner.closed.clone()) })
+                    .await;
             let theirs =
                 server.kind == LocalKind::OpenaiCompatible
                     || server.kind == LocalKind::Ollama && self.inner.options.env.get("OLLAMA_HOST").is_some_and(|s| !s.is_empty())
@@ -462,7 +472,7 @@ impl ModelControl {
                 return Ok(known.clone());
             }
         }
-        let signal = Some(abort::timeout(15000));
+        let signal = Some(abort::any([abort::timeout(15000), self.inner.closed.clone()]));
         let listed = if let Some(server) = server {
             local::list_local_models_in(&server, Transport { fetch: self.inner.options.fetch.clone(), signal }, crate::daw::profile())
                 .await?

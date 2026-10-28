@@ -22,6 +22,10 @@ impl TuiApp {
         if matches!(event, InputEvent::Key { .. } | InputEvent::Text { .. } | InputEvent::Paste { .. } | InputEvent::Mouse { .. }) {
             self.stop_answer_countdown();
         }
+        if !self.map_shown() && self.selection_input(&event) {
+            self.0.scheduler.request();
+            return;
+        }
         if self.setup_active() {
             // A sign-in under way takes its own keys; its esc goes back to the setup's choices.
             let signing =
@@ -116,6 +120,81 @@ impl TuiApp {
         // The producer may have finished what they were in the middle of: a job's answer can start.
         self.maybe_carry_on();
         self.0.scheduler.request();
+    }
+    /// Plain dragging selects text even when mouse reporting is needed for scrolling and buttons.
+    fn selection_input(&self, event: &InputEvent) -> bool {
+        match event {
+            InputEvent::Key { name, mods, .. } if name == "c" && mods.ctrl && !mods.alt => {
+                let text = self.0.state.borrow().selection.as_ref().filter(|s| s.moved).map(|s| s.text());
+                if let Some(text) = text {
+                    self.0.state.borrow_mut().selection = None;
+                    self.copy_text(&text);
+                    self.selection_copied();
+                    return true;
+                }
+            }
+            InputEvent::Key { name, .. } if name == "escape" => {
+                if self.0.state.borrow_mut().selection.take().is_some_and(|s| s.moved) {
+                    return true;
+                }
+            }
+            InputEvent::Mouse { action: MouseAction::Drag, button: MouseButton::Left, x, y, .. } => {
+                if let Some(selection) = self.0.state.borrow_mut().selection.as_mut().filter(|s| s.dragging) {
+                    selection.update(*x, *y);
+                    return true;
+                }
+            }
+            InputEvent::Mouse { action: MouseAction::Release, button: MouseButton::Left, x, y, .. } => {
+                let mut state = self.0.state.borrow_mut();
+                if let Some(selection) = state.selection.as_mut().filter(|s| s.dragging) {
+                    selection.update(*x, *y);
+                    selection.dragging = false;
+                    if !selection.moved {
+                        state.selection = None;
+                    }
+                    return true;
+                }
+            }
+            InputEvent::Mouse { action: MouseAction::Press, button: MouseButton::Left, x, y, .. } => {
+                let was_selected = self.0.state.borrow_mut().selection.take().is_some_and(|s| s.moved);
+                // A click on an existing selection only dismisses it; the live view may have changed underneath it.
+                if was_selected {
+                    return true;
+                }
+                if self.0.state.borrow().hits.iter().any(|h| *y == h.y && *x >= h.x && *x < h.x + h.width) {
+                    return false;
+                }
+                if let Some(screen) = self.0.screen.borrow().as_ref().filter(|s| s.width > 0 && s.height > 0) {
+                    let (pane, left) = Self::layout_for(screen.width);
+                    let area = if pane == 0 || self.setup_active() {
+                        screen.bounds()
+                    } else if *x < left {
+                        Rect::new(0, 0, left, screen.height)
+                    } else {
+                        Rect::new(left, 0, pane, screen.height)
+                    };
+                    self.0.state.borrow_mut().selection = Some(super::super::selection::Selection::new(screen.clone(), area, *x, *y));
+                    return true;
+                }
+            }
+            InputEvent::Mouse { action: MouseAction::Press, button: MouseButton::Right, .. } => {
+                let text = self.0.state.borrow().selection.as_ref().filter(|s| s.moved).map(|s| s.text());
+                if let Some(text) = text {
+                    self.0.state.borrow_mut().selection = None;
+                    self.copy_text(&text);
+                    self.selection_copied();
+                    return true;
+                }
+            }
+            InputEvent::Key { .. }
+            | InputEvent::Text { .. }
+            | InputEvent::Paste { .. }
+            | InputEvent::Mouse { action: MouseAction::Wheel, .. } => {
+                self.0.state.borrow_mut().selection = None;
+            }
+            _ => {}
+        }
+        false
     }
     fn key(&self, name: &str, mods: Modifiers) {
         let Modifiers { ctrl, alt, shift } = mods;
@@ -1182,6 +1261,12 @@ impl TuiApp {
             copy(text);
         }
     }
+    fn selection_copied(&self) {
+        self.notice(
+            "Copied selected text. If it didn't arrive, hold Shift and drag (Option in iTerm2) to use your terminal's selection.",
+            NoticeTone::Info,
+        );
+    }
     fn copy_last_answer(&self) {
         let answer = self.0.state.borrow().transcript.entries.iter().rev().find_map(|e| {
             if let Entry::Assistant { text, .. } = &*e.borrow() {
@@ -1199,7 +1284,7 @@ impl TuiApp {
             self.notice("That answer is too long to copy this way; hold Shift and drag to select it.", NoticeTone::Info);
             return;
         }
-        self.0.tty.write(&format!("\x1b]52;c;{}\x07", base64::engine::general_purpose::STANDARD.encode(text)));
+        self.copy_text(&text);
         self.notice(
             "Copied Kumi's last answer. If it didn't arrive, your terminal may not allow it: hold Shift and drag to select instead.",
             NoticeTone::Info,
@@ -1295,7 +1380,7 @@ pub(super) fn help(daw: bool) -> String {
         ""
     };
     format!(
-        "enter sends · ctrl+j or alt+enter starts a new line · ctrl+t talks instead of typing: press it again to stop, or hold it while you talk, and what you said lands in the box (enter stops and sends at once); /voice chooses the language and the microphone · ↑ and ↓ go through what you sent before · while Kumi works, enter sends a message it reads after the step under way, tab one for after the answer, and alt+↑ takes the last waiting one back · /btw asks something on the side without interrupting · ctrl+b moves a slow step that doesn't use {app} (a video, pages) to the background (press it twice in tmux), and /jobs shows, stops or reruns background jobs · esc stops Kumi · page up/down or the mouse wheel scroll, ctrl+home goes to the start and ctrl+end back · click undo in HISTORY, or /undo, to take back a change · /new starts a fresh conversation, /resume goes back to one kept (this {place}'s, or any {place}'s by its id or name), /rename names this one, and /fork carries on in a copy · /reconnect connects to {app} again, keeping the conversation{daw} · /copy copies the last answer, /export copies or saves the whole conversation, and /share saves it as a web page to send; to select text yourself, hold Shift while dragging (Option in iTerm2) · /model and /effort choose the model and how hard it thinks, and /fast turns on its faster tier when it has one;{willington} /slots shows which model does each listening job (stems, transcription, listening, embeddings), swaps one in plain words after a quick test, and /slots back <job> takes a swap back; /music shows your own music, which Kumi learns your taste from on this computer, and adds or removes a folder, pauses or forgets it; /map draws your sounds and songs as a map to move around, where space or the mouse plays a point, and /map open shows it in your browser; /login and /logout sign in and out · /memory shows what Kumi remembers (notes, techniques, recipes and what it learned from your {places}), and forget in MEMORY drops one; /recipes your saved ways of working · /update gets the newest Kumi, and /changelog says what's new in it · drag files in, or ctrl+v a picture, to send them with your next message (backspace in an empty box takes the last one back) · ctrl+c clears the box, then quits · type / for commands"
+        "enter sends · ctrl+j or alt+enter starts a new line · ctrl+t talks instead of typing: press it again to stop, or hold it while you talk, and what you said lands in the box (enter stops and sends at once); /voice chooses the language and the microphone · ↑ and ↓ go through what you sent before · while Kumi works, enter sends a message it reads after the step under way, tab one for after the answer, and alt+↑ takes the last waiting one back · /btw asks something on the side without interrupting · ctrl+b moves a slow step that doesn't use {app} (a video, pages) to the background (press it twice in tmux), and /jobs shows, stops or reruns background jobs · esc stops Kumi · page up/down or the mouse wheel scroll, ctrl+home goes to the start and ctrl+end back · click undo in HISTORY, or /undo, to take back a change · /new starts a fresh conversation, /resume goes back to one kept (this {place}'s, or any {place}'s by its id or name), /rename names this one, and /fork carries on in a copy · /reconnect connects to {app} again, keeping the conversation{daw} · /copy copies the last answer, /export copies or saves the whole conversation, and /share saves it as a web page to send; drag to select text, then Ctrl+C or right-click copies it; Esc clears the selection (Shift-drag, or Option in iTerm2, uses terminal selection) · /model and /effort choose the model and how hard it thinks, and /fast turns on its faster tier when it has one;{willington} /slots shows which model does each listening job (stems, transcription, listening, embeddings), swaps one in plain words after a quick test, and /slots back <job> takes a swap back; /music shows your own music, which Kumi learns your taste from on this computer, and adds or removes a folder, pauses or forgets it; /map draws your sounds and songs as a map to move around, where space or the mouse plays a point, and /map open shows it in your browser; /login and /logout sign in and out · /memory shows what Kumi remembers (notes, techniques, recipes and what it learned from your {places}), and forget in MEMORY drops one; /recipes your saved ways of working · /update gets the newest Kumi, and /changelog says what's new in it · drag files in, or ctrl+v a picture, to send them with your next message (backspace in an empty box takes the last one back) · ctrl+c clears the box, then quits · type / for commands"
     )
 }
 pub(super) const COMMANDS: &[Command] = &[

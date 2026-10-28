@@ -14,6 +14,7 @@ pub mod pictures;
 pub mod render;
 pub mod scheduler;
 pub mod screen;
+mod selection;
 pub mod style;
 pub mod tabs;
 pub mod transcript;
