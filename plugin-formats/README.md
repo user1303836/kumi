@@ -85,7 +85,7 @@ plugin-formats/
 - **Shared formats stay shared.** Current/EPROM Memory Rites and Evoke/Lucid share their format folders;
   each retains its own identity and initialized state. The build compacts JSON and compresses initialized
   VST3 resources; repository fixtures remain standard `.vstpreset` files. The embedded resource payload is
-  2.32 MB, down from 4.27 MB before compaction and sharing; this is not a measurement of executable size.
+  2.33 MB, down from 4.27 MB before compaction and sharing; this is not a measurement of executable size.
 - **No vendor content.** Factory presets, wavetables and samples stay on the machine they were installed on.
   The survey below reads them where they lie and keeps only counts, types, ranges and option-like values.
 - **Evidence stays explicit.** Learn from files, behaviour and normal host APIs by default. Disassembling or
