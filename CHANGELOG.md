@@ -3,6 +3,20 @@
 Kumi's releases. The Ableton bridge (`crates/ableton-mcp-server`) is versioned on its own;
 each Kumi release names the bridge it ships with.
 
+## 1.24.6 — 2026-10-28
+
+Ships with bridge 1.0.98, as 1.24.5 did.
+
+- Open your DAW before or after Kumi: `kumi` works with the one that's open, Live, REAPER or Renoise,
+  and puts its bridge in the first time, with no `--daw` to learn.
+- Kumi follows you to the DAW you open while it isn't connected, and with none open it says which of
+  yours to open instead of Live's setup steps.
+- A portable REAPER anywhere (another drive, a folder of your own) is found while it's open, and
+  Kumi's extension goes into it.
+
+Tested with Live 12.4 on macOS. On Windows, installing and updating are tested; using Kumi with Live
+there is still new.
+
 ## 1.24.5 — 2026-10-27
 
 Ships with bridge 1.0.98, as 1.24.4 did.
