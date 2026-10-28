@@ -3,6 +3,22 @@
 Kumi's releases. The Ableton bridge (`crates/ableton-mcp-server`) is versioned on its own;
 each Kumi release names the bridge it ships with.
 
+## 1.24.4 — 2026-10-27
+
+Ships with bridge 1.0.98, which Live loads when it restarts. After updating, Kumi offers to quit Live
+(it asks to save first) and opens it again with the new bridge; or run `kumi bridge` with Live closed.
+
+- In REAPER and Renoise, a variation that clips where its source doesn't is turned down to the
+  source's peak instead of drawn again, and Kumi still changes or drops it when you ask.
+- In REAPER, "change the rest" and "drop the rest" no longer skip Kumi's own variations as if you had
+  edited them.
+- Select text in Kumi's window by dragging, and copy it with Ctrl-C or right-click.
+- Copied text keeps Japanese, Chinese and other Unicode characters when using the Windows clipboard
+  fallback.
+
+Tested with Live 12.4 on macOS. On Windows, installing and updating are tested; using Kumi with Live
+there is still new.
+
 ## 1.24.3 — 2026-10-27
 
 Ships with bridge 1.0.97, as 1.24.2 did.
