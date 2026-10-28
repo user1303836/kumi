@@ -1001,7 +1001,8 @@ async fn make_device_keeps_code_that_never_stops_in_the_device_without_running_i
         let file = std::fs::read(folder.path().join("Kumi").join("MIDI Effects").join(format!("{name}.amxd"))).unwrap();
         let written = String::from_utf8_lossy(&file);
         // As the file holds it: every line of the code is a comment.
-        assert!(written.contains("Kumi kept this code without running it"), "kept as comments");
+        let commented = written.match_indices("function midi").all(|(at, _)| written[..at].ends_with("// "));
+        assert!(written.contains("Kumi kept this code without running it") && commented, "kept as comments, with no live copy");
         for line in code.lines() {
             assert!(written.contains(&format!("// {line}")), "{name}: source line kept as a comment: {line}");
         }
