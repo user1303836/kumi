@@ -6237,8 +6237,11 @@ class BrowserChainLoadTests(unittest.TestCase):
                 self.audio_effects = Item("audio_effects", [Item("Reverb", loadable=True), Item("LFO", loadable=True)])
                 self.instruments = Item("instruments", [Item("Operator", loadable=True), Item("DS Kick", loadable=True)])
                 self.midi_effects = Item("midi_effects", [Item("Arpeggiator", loadable=True), Item("Expression Control", loadable=True)])
+                # The devices Kumi makes, each in the User Library folder of its kind, and a sample, which has none.
+                kinds = [Item(folder, [Item(name, loadable=True)]) for folder, name in (("Audio Effects", "Kumi Crush.amxd"), ("Instruments", "Kumi Keys.amxd"), ("MIDI Effects", "Kumi Chords.amxd"))]
+                self.user_library = Item("user_library", [Item("Kumi", kinds), Item("Samples", [Item("Kick.wav", loadable=True)])])
             def load_item(self, _item):
-                device = FakeDevice(); device.name = _item.name; device.type = {"DS Kick": 1}.get(_item.name, 2)
+                device = FakeDevice(); device.name = _item.name; device.type = {"DS Kick": 1, "Kumi Keys.amxd": 1}.get(_item.name, 2)
                 if misplace: track.devices.append(device); return
                 # Hot-swap replaces its target where it is; without one, Live replaces the track's instrument.
                 for chain in rack.chains:
@@ -6271,6 +6274,17 @@ class BrowserChainLoadTests(unittest.TestCase):
         song, track, rack, filled, empty, mapper = self._setup()
         self._load(mapper, "instruments", "DS Kick", 1)
         self.assertEqual([device.name for device in empty.devices], ["DS Kick"]); self.assertEqual(track.devices, [rack])
+
+    def test_a_user_library_device_goes_in_by_the_kind_its_folder_names(self):
+        # A User Library item's category says nothing of its kind, so every one was refused (#315); its folder does.
+        song, track, rack, filled, empty, mapper = self._setup()
+        self._load(mapper, "user_library", "Kumi Crush.amxd", 0)
+        self.assertEqual([device.name for device in filled.devices], ["Utility", "Kumi Crush.amxd"], "an audio effect at the chain's end")
+        self._load(mapper, "user_library", "Kumi Keys.amxd", 1)
+        self.assertEqual([device.name for device in empty.devices], ["Kumi Keys.amxd"], "an instrument in an empty chain")
+        with self.assertRaisesRegex(ValueError, "MIDI effect preset into a chain from outside"): self._load(mapper, "user_library", "Kumi Chords.amxd", 1)
+        with self.assertRaisesRegex(ValueError, "load onto a track, not into a chain"): self._load(mapper, "user_library", "Kick.wav", 1)
+        self.assertEqual([device.name for device in empty.devices], ["Kumi Keys.amxd"]); self.assertEqual(track.devices, [rack])
 
     def test_a_load_live_puts_elsewhere_is_taken_away(self):
         song, track, rack, filled, empty, mapper = self._setup(misplace=True)
