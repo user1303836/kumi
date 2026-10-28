@@ -3,6 +3,33 @@
 Kumi's releases. The Ableton bridge (`crates/ableton-mcp-server`) is versioned on its own;
 each Kumi release names the bridge it ships with.
 
+## 1.24.10 — 2026-10-28
+
+Ships with bridge 1.0.101, which Live loads when it restarts. After updating, Kumi offers to quit Live
+(it asks to save first) and opens it again with the new bridge; or run `kumi bridge` with Live closed.
+Ships with REAPER extension 0.1.7 and Renoise tool 1.0.6, which REAPER and Renoise load when they
+restart; `kumi update` puts them in.
+
+- Create and edit supported VST3 presets inside Kumi, including Serum 2, Ozone 12 and its modules,
+  Valhalla, Minimal Audio, Pulsar Modular and Superior Drummer 3.
+- Mastering and reference requests check suitable installed VST3 processors before falling back to
+  native devices.
+
+Tested with Live 12.4 on macOS. On Windows, installing and updating are tested; using Kumi with Live
+there is still new.
+
+### Bridge 1.0.101
+
+- Load VST3 presets created by Kumi from Live's User Library with history and undo.
+
+### REAPER extension 0.1.7
+
+- Load VST3 preset files onto an existing plug-in with history and undo.
+
+### Renoise tool 1.0.6
+
+- Load VST3 preset files onto effects and instruments with history and undo.
+
 ## 1.24.9 — 2026-10-28
 
 Ships with bridge 1.0.100, which Live loads when it restarts. After updating, Kumi offers to quit Live
