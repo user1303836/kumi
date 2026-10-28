@@ -1,0 +1,402 @@
+{
+  "plugin": "zynaptiq-pitchmap",
+  "format": "format-1",
+  "about": "Zynaptiq Preset XML version 3 or 4. inputParams count and pN attributes hold scalar values. VST3 component state (verified on PUNCH 1 and UNMIX DRUMS) uses a u32 little-endian XML length including a terminating NUL, then the XML and NUL.",
+  "paths": "exact",
+  "files": {
+    "preset": {
+      "extension": ".preset",
+      "layers": [
+        "UTF-8 XML Preset; inputParams attributes p0 through p<count-1>; preserve all other elements"
+      ],
+      "constants": {}
+    },
+    "state": {
+      "layers": [
+        "u32 LE byte count including NUL; XML Preset; NUL"
+      ],
+      "constants": {}
+    }
+  },
+  "survey": {
+    "files": 48,
+    "parameterCounts": [
+      21
+    ],
+    "presetVersions": [
+      "4"
+    ],
+    "source": "Installed native preset files and shipped parameter-name metadata; no factory preset bodies copied.",
+    "verification": "Native documents inspected; installed-binary version and runtime acceptance remain unverified.",
+    "parameterLinks": "Guessed links associate names and indices from installed metadata; physical-unit mappings remain unverified."
+  },
+  "fields": {
+    "@progName": {
+      "type": "text",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "status": "guessed"
+    },
+    "inputParams/@p0": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "guessed",
+      "about": "BYPASS"
+    },
+    "inputParams/@p1": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "about": "THRESHOLD"
+    },
+    "inputParams/@p2": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "about": "FEEL"
+    },
+    "inputParams/@p3": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "about": "PURIFY"
+    },
+    "inputParams/@p4": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.25
+      ],
+      "status": "guessed",
+      "about": "GLIDE"
+    },
+    "inputParams/@p5": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "about": "ELECTRIFY"
+    },
+    "inputParams/@p6": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "about": "STRICT"
+    },
+    "inputParams/@p7": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        2.0
+      ],
+      "status": "guessed",
+      "about": "ALGOMODE"
+    },
+    "inputParams/@p8": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "about": "MUTE"
+    },
+    "inputParams/@p9": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "about": "XCLUDE"
+    },
+    "inputParams/@p10": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "about": "MIDIMAP"
+    },
+    "inputParams/@p11": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "guessed",
+      "about": "EXTMIDI"
+    },
+    "inputParams/@p12": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        440.0,
+        440.0
+      ],
+      "status": "guessed",
+      "about": "INPUTTUNING"
+    },
+    "inputParams/@p13": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        440.0,
+        440.0
+      ],
+      "status": "guessed",
+      "about": "OUTPUTTUNING"
+    },
+    "inputParams/@p14": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        108.0
+      ],
+      "status": "guessed",
+      "about": "LOW_KEY"
+    },
+    "inputParams/@p15": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        107.0
+      ],
+      "status": "guessed",
+      "about": "HIGH_KEY"
+    },
+    "inputParams/@p16": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        3.0
+      ],
+      "status": "guessed",
+      "about": "ROUNDING_MODE"
+    },
+    "inputParams/@p17": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        2.0
+      ],
+      "status": "guessed",
+      "about": "REPEAT"
+    },
+    "inputParams/@p18": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "about": "GLOBAL_THRES"
+    },
+    "inputParams/@p19": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "guessed",
+      "about": "LOAD_SNAPSHOT"
+    },
+    "inputParams/@p20": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        1.0,
+        2.0
+      ],
+      "status": "guessed",
+      "about": "KEYB_OCTAVE"
+    }
+  },
+  "parameters": {
+    "BYPASS": {
+      "field": "inputParams/@p0",
+      "status": "guessed"
+    },
+    "THRESHOLD": {
+      "field": "inputParams/@p1",
+      "status": "guessed"
+    },
+    "FEEL": {
+      "field": "inputParams/@p2",
+      "status": "guessed"
+    },
+    "PURIFY": {
+      "field": "inputParams/@p3",
+      "status": "guessed"
+    },
+    "GLIDE": {
+      "field": "inputParams/@p4",
+      "status": "guessed"
+    },
+    "ELECTRIFY": {
+      "field": "inputParams/@p5",
+      "status": "guessed"
+    },
+    "STRICT": {
+      "field": "inputParams/@p6",
+      "status": "guessed"
+    },
+    "ALGOMODE": {
+      "field": "inputParams/@p7",
+      "status": "guessed"
+    },
+    "MUTE": {
+      "field": "inputParams/@p8",
+      "status": "guessed"
+    },
+    "XCLUDE": {
+      "field": "inputParams/@p9",
+      "status": "guessed"
+    },
+    "MIDIMAP": {
+      "field": "inputParams/@p10",
+      "status": "guessed"
+    },
+    "EXTMIDI": {
+      "field": "inputParams/@p11",
+      "status": "guessed"
+    },
+    "INPUTTUNING": {
+      "field": "inputParams/@p12",
+      "status": "guessed"
+    },
+    "OUTPUTTUNING": {
+      "field": "inputParams/@p13",
+      "status": "guessed"
+    },
+    "LOW_KEY": {
+      "field": "inputParams/@p14",
+      "status": "guessed"
+    },
+    "HIGH_KEY": {
+      "field": "inputParams/@p15",
+      "status": "guessed"
+    },
+    "ROUNDING_MODE": {
+      "field": "inputParams/@p16",
+      "status": "guessed"
+    },
+    "REPEAT": {
+      "field": "inputParams/@p17",
+      "status": "guessed"
+    },
+    "GLOBAL_THRES": {
+      "field": "inputParams/@p18",
+      "status": "guessed"
+    },
+    "LOAD_SNAPSHOT": {
+      "field": "inputParams/@p19",
+      "status": "guessed"
+    },
+    "KEYB_OCTAVE": {
+      "field": "inputParams/@p20",
+      "status": "guessed"
+    }
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "plugin": "zynaptiq-punch-1",
+  "format": "format-1",
+  "reads": [
+    {
+      "version": "1.1.1 Build 8 (3902bda)",
+      "files": [
+        "preset",
+        "state"
+      ],
+      "checked": "2026-10-27",
+      "how": "Inspected 27 installed native preset documents. Captured initialized VST3 component state and byte-identical host roundtrip."
+    }
+  ],
+  "writes": [
+    {
+      "binary_sha256": "6d480e6adea524afb2455f8bc0dd6fbfcc9588d27be4872010bf5ba16533457c",
+      "version": "1.1.1 Build 8 (3902bda)",
+      "files": [
+        "preset",
+        "state"
+      ],
+      "checked": "2026-10-27",
+      "how": "Kumi Rust codec changed inputParams/@p4 to 3.0, encoded VST3 component state, and reloaded it through the installed Windows x64 plugin public VST3 API. The requested value was present in plugin-reserialized state and a subsequent host roundtrip was byte-identical. Native preset and component XML share one document; no factory preset collection is embedded."
+    }
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "plugin": "valhalla-freq-echo",
+  "version": "1.2.0",
+  "binarySha256": "d2d1a5cda27940fd3a0dc3ad1ee05675ce8f10ba274190eb81cef9276c53523b",
+  "method": "Restore the initial component, set one public VST3 parameter, capture its XML value, then reload only that field into the initial component. Saved value and host readback must match at both normalized endpoints and 0.25. Bounds are supported intervals in this product version; no survey extrema are used. Raw XML and mappings without this proof remain read-only.",
+  "points": [
+    0,
+    1,
+    0.25
+  ],
+  "fields": {
+    "parameters/wetDryMix": {"parameterId":48,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/shift": {"parameterId":49,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/delay": {"parameterId":50,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/sync": {"parameterId":51,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/feedback": {"parameterId":52,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/lowCut": {"parameterId":53,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/highCut": {"parameterId":54,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/stereo": {"parameterId":55,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]}
+  }
+}

@@ -1,0 +1,104 @@
+{
+  "plugin": "valhalla-future-verb",
+  "format": "format-1",
+  "about": "Normalized Valhalla sound controls in XML root attributes. Numeric edits require the verified intervals below. Raw XML attributes are preserved read-only and not duplicated here. Individual endpoint reload evidence is in range-verification.json.",
+  "paths": "exact",
+  "files": {
+    "preset": {
+      "extension": ".vpreset",
+      "layers": [
+        "native XML"
+      ],
+      "constants": {
+        "root": "ValhallaFutureVerb"
+      }
+    },
+    "state": {
+      "layers": [
+        "VST3 Comp chunk",
+        "optional VstW compatibility bank",
+        "VC2! + little-endian XML byte length + XML + NUL + preserved opaque JUCE private data"
+      ],
+      "constants": {
+        "xml_magic": "VC2!",
+        "root": "ValhallaFutureVerb"
+      }
+    }
+  },
+  "opaque": [
+    "state"
+  ],
+  "fields": {
+    "": {"type":"map","in":["state","preset"],"status":"guessed"},
+    "root": {"type":"text","in":["state","preset"],"status":"guessed"},
+    "parameters": {"type":"map","in":["state","preset"],"status":"guessed"},
+    "parameters/Mix": {"type":"float","status":"guessed","default":0.5,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/Width": {"type":"float","status":"guessed","default":1.0,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/EchoSync": {"type":"float","status":"guessed","default":0.25,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/EchoNote": {"type":"float","status":"guessed","default":0.3333333432674408,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/Echo_Ms": {"type":"float","status":"guessed","default":0.1500000059604645,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/EchoFeedback": {"type":"float","status":"guessed","default":0.0,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/EchoSpread": {"type":"float","status":"guessed","default":0.0,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/EchoDrive": {"type":"float","status":"guessed","default":0.125,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/EchoDetune": {"type":"float","status":"guessed","default":0.5666666626930237,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/EchoLevel": {"type":"float","status":"guessed","default":0.0,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/Routing": {"type":"float","status":"guessed","default":0.0,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/ReverbDecay": {"type":"float","status":"guessed","default":0.2916666567325592,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/ReverbSize": {"type":"float","status":"guessed","default":0.5,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/ReverbAttack": {"type":"float","status":"guessed","default":0.5,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/ReverbEarlyLate": {"type":"float","status":"guessed","default":0.5,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/ReverbDensity": {"type":"float","status":"guessed","default":1.0,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/ReverbLevel": {"type":"float","status":"guessed","default":1.0,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/ModRate": {"type":"float","status":"guessed","default":0.1322262585163116,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/ModDepth": {"type":"float","status":"guessed","default":0.4000000059604645,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/LowEQFreq": {"type":"float","status":"guessed","default":0.2499999850988388,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/HighEQFreq": {"type":"float","status":"guessed","default":0.208197295665741,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/EchoMode": {"type":"float","status":"guessed","default":0.0833333358168602,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/ReverbMode": {"type":"float","status":"guessed","default":0.0833333358168602,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/Color": {"type":"float","status":"guessed","default":0.1666666716337204,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/Reserved1": {"type":"float","status":"guessed","default":0.0,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/Reserved2": {"type":"float","status":"guessed","default":0.0,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/Reserved3": {"type":"float","status":"guessed","default":0.0,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/Reserved4": {"type":"float","status":"guessed","default":0.0,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/Reserved5": {"type":"float","status":"guessed","default":0.0,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/Reserved6": {"type":"float","status":"guessed","default":0.0,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/Reserved7": {"type":"float","status":"guessed","default":0.0,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/Reserved8": {"type":"float","status":"guessed","default":0.0,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "state": {"type":"map","in":["state","preset"],"status":"guessed"},
+    "name": {"type":"text","in":["state","preset"],"status":"guessed"}
+  },
+  "parameters": {
+    "Mix [VST3 48]": {"field":"parameters/Mix","status":"verified"},
+    "Width [VST3 49]": {"field":"parameters/Width","status":"verified"},
+    "EchoSync [VST3 50]": {"field":"parameters/EchoSync","status":"verified"},
+    "EchoNote [VST3 51]": {"field":"parameters/EchoNote","status":"verified"},
+    "Echo_Ms [VST3 52]": {"field":"parameters/Echo_Ms","status":"verified"},
+    "EchoFeedback [VST3 53]": {"field":"parameters/EchoFeedback","status":"verified"},
+    "EchoSpread [VST3 54]": {"field":"parameters/EchoSpread","status":"verified"},
+    "EchoDrive [VST3 55]": {"field":"parameters/EchoDrive","status":"verified"},
+    "EchoDetune [VST3 56]": {"field":"parameters/EchoDetune","status":"verified"},
+    "EchoLevel [VST3 57]": {"field":"parameters/EchoLevel","status":"verified"},
+    "Routing [VST3 1567]": {"field":"parameters/Routing","status":"verified"},
+    "ReverbDecay [VST3 1568]": {"field":"parameters/ReverbDecay","status":"verified"},
+    "ReverbSize [VST3 1569]": {"field":"parameters/ReverbSize","status":"verified"},
+    "ReverbAttack [VST3 1570]": {"field":"parameters/ReverbAttack","status":"verified"},
+    "ReverbEarlyLate [VST3 1571]": {"field":"parameters/ReverbEarlyLate","status":"verified"},
+    "ReverbDensity [VST3 1572]": {"field":"parameters/ReverbDensity","status":"verified"},
+    "ReverbLevel [VST3 1573]": {"field":"parameters/ReverbLevel","status":"verified"},
+    "ModRate [VST3 1574]": {"field":"parameters/ModRate","status":"verified"},
+    "ModDepth [VST3 1575]": {"field":"parameters/ModDepth","status":"verified"},
+    "LowEQFreq [VST3 1576]": {"field":"parameters/LowEQFreq","status":"verified"},
+    "HighEQFreq [VST3 1598]": {"field":"parameters/HighEQFreq","status":"verified"},
+    "EchoMode [VST3 1599]": {"field":"parameters/EchoMode","status":"verified"},
+    "ReverbMode [VST3 1600]": {"field":"parameters/ReverbMode","status":"verified"},
+    "Color [VST3 1601]": {"field":"parameters/Color","status":"verified"},
+    "Reserved1 [VST3 1602]": {"field":"parameters/Reserved1","status":"verified"},
+    "Reserved2 [VST3 1603]": {"field":"parameters/Reserved2","status":"verified"},
+    "Reserved3 [VST3 1604]": {"field":"parameters/Reserved3","status":"verified"},
+    "Reserved4 [VST3 1605]": {"field":"parameters/Reserved4","status":"verified"},
+    "Reserved5 [VST3 1606]": {"field":"parameters/Reserved5","status":"verified"},
+    "Reserved6 [VST3 1607]": {"field":"parameters/Reserved6","status":"verified"},
+    "Reserved7 [VST3 1629]": {"field":"parameters/Reserved7","status":"verified"},
+    "Reserved8 [VST3 1630]": {"field":"parameters/Reserved8","status":"verified"}
+  }
+}

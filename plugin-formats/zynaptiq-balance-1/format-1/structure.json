@@ -1,0 +1,1235 @@
+{
+  "plugin": "zynaptiq-balance-1",
+  "format": "format-1",
+  "about": "Zynaptiq Preset XML version 3 or 4. inputParams count and pN attributes hold scalar values. VST3 component state (verified on PUNCH 1 and UNMIX DRUMS) uses a u32 little-endian XML length including a terminating NUL, then the XML and NUL.",
+  "paths": "exact",
+  "files": {
+    "preset": {
+      "extension": ".preset",
+      "layers": [
+        "UTF-8 XML Preset; inputParams attributes p0 through p<count-1>; preserve all other elements"
+      ],
+      "constants": {}
+    },
+    "state": {
+      "layers": [
+        "u32 LE byte count including NUL; XML Preset; NUL"
+      ],
+      "constants": {}
+    }
+  },
+  "survey": {
+    "files": 48,
+    "parameterCounts": [
+      70
+    ],
+    "presetVersions": [
+      "4"
+    ],
+    "source": "Installed native preset files and shipped parameter-name metadata; no factory preset bodies copied.",
+    "verification": "Native documents inspected; installed-binary version and runtime acceptance remain unverified.",
+    "parameterLinks": "Guessed links associate names and indices from installed metadata; physical-unit mappings remain unverified."
+  },
+  "fields": {
+    "@progName": {
+      "type": "text",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "status": "guessed"
+    },
+    "inputParams/@p0": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "guessed",
+      "about": "bypass"
+    },
+    "inputParams/@p1": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "about": "doublePrecision"
+    },
+    "inputParams/@p2": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "guessed",
+      "about": "inputGain"
+    },
+    "inputParams/@p3": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.4,
+        1.0
+      ],
+      "status": "guessed",
+      "about": "eqAmount"
+    },
+    "inputParams/@p4": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        1.0,
+        1.0
+      ],
+      "status": "guessed",
+      "about": "learn"
+    },
+    "inputParams/@p5": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "guessed",
+      "about": "reset"
+    },
+    "inputParams/@p6": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        6.0
+      ],
+      "status": "guessed",
+      "about": "slope"
+    },
+    "inputParams/@p7": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -12.0,
+        6.0
+      ],
+      "status": "guessed",
+      "about": "weighting"
+    },
+    "inputParams/@p8": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -12.0,
+        6.0
+      ],
+      "status": "guessed",
+      "about": "bassRolloff"
+    },
+    "inputParams/@p9": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        8.0
+      ],
+      "status": "guessed",
+      "about": "bassFrequ"
+    },
+    "inputParams/@p10": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -2.5,
+        8.5
+      ],
+      "status": "guessed",
+      "about": "hiShelf"
+    },
+    "inputParams/@p11": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        1.0,
+        15.0
+      ],
+      "status": "guessed",
+      "about": "targetAirFrequ"
+    },
+    "inputParams/@p12": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        250.0
+      ],
+      "status": "guessed",
+      "about": "lowcut"
+    },
+    "inputParams/@p13": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        10.0,
+        23.0
+      ],
+      "status": "guessed",
+      "about": "hiCut"
+    },
+    "inputParams/@p14": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -6.0,
+        3.0
+      ],
+      "status": "guessed",
+      "about": "outputGain"
+    },
+    "inputParams/@p15": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        42.0,
+        42.0
+      ],
+      "status": "guessed",
+      "about": "kReserved1"
+    },
+    "inputParams/@p16": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        42.0,
+        42.0
+      ],
+      "status": "guessed",
+      "about": "kReserved2"
+    },
+    "inputParams/@p17": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        42.0,
+        42.0
+      ],
+      "status": "guessed",
+      "about": "kReserved3"
+    },
+    "inputParams/@p18": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        42.0,
+        42.0
+      ],
+      "status": "guessed",
+      "about": "kReserved4"
+    },
+    "inputParams/@p19": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        42.0,
+        42.0
+      ],
+      "status": "guessed",
+      "about": "kReserved5"
+    },
+    "inputParams/@p20": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        42.0,
+        42.0
+      ],
+      "status": "guessed",
+      "about": "kReserved6"
+    },
+    "inputParams/@p21": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        42.0,
+        42.0
+      ],
+      "status": "guessed",
+      "about": "kReserved7"
+    },
+    "inputParams/@p22": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        1.0,
+        1.0
+      ],
+      "status": "guessed",
+      "about": "ch01bypass"
+    },
+    "inputParams/@p23": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "guessed",
+      "about": "ch01mute"
+    },
+    "inputParams/@p24": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "guessed",
+      "about": "ch01solo"
+    },
+    "inputParams/@p25": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        1.0,
+        1.0
+      ],
+      "status": "guessed",
+      "about": "ch02bypass"
+    },
+    "inputParams/@p26": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "guessed",
+      "about": "ch02mute"
+    },
+    "inputParams/@p27": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "guessed",
+      "about": "ch02solo"
+    },
+    "inputParams/@p28": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        1.0,
+        1.0
+      ],
+      "status": "guessed",
+      "about": "ch03bypass"
+    },
+    "inputParams/@p29": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "guessed",
+      "about": "ch03mute"
+    },
+    "inputParams/@p30": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "guessed",
+      "about": "ch03solo"
+    },
+    "inputParams/@p31": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        1.0,
+        1.0
+      ],
+      "status": "guessed",
+      "about": "ch04bypass"
+    },
+    "inputParams/@p32": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "guessed",
+      "about": "ch04mute"
+    },
+    "inputParams/@p33": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "guessed",
+      "about": "ch04solo"
+    },
+    "inputParams/@p34": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        1.0,
+        1.0
+      ],
+      "status": "guessed",
+      "about": "ch05bypass"
+    },
+    "inputParams/@p35": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "guessed",
+      "about": "ch05mute"
+    },
+    "inputParams/@p36": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "guessed",
+      "about": "ch05solo"
+    },
+    "inputParams/@p37": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        1.0,
+        1.0
+      ],
+      "status": "guessed",
+      "about": "ch06bypass"
+    },
+    "inputParams/@p38": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "guessed",
+      "about": "ch06mute"
+    },
+    "inputParams/@p39": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "guessed",
+      "about": "ch06solo"
+    },
+    "inputParams/@p40": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        1.0,
+        1.0
+      ],
+      "status": "guessed",
+      "about": "ch07bypass"
+    },
+    "inputParams/@p41": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "guessed",
+      "about": "ch07mute"
+    },
+    "inputParams/@p42": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "guessed",
+      "about": "ch07solo"
+    },
+    "inputParams/@p43": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        1.0,
+        1.0
+      ],
+      "status": "guessed",
+      "about": "ch08bypass"
+    },
+    "inputParams/@p44": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "guessed",
+      "about": "ch08mute"
+    },
+    "inputParams/@p45": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "guessed",
+      "about": "ch08solo"
+    },
+    "inputParams/@p46": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        1.0,
+        1.0
+      ],
+      "status": "guessed",
+      "about": "ch09bypass"
+    },
+    "inputParams/@p47": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "guessed",
+      "about": "ch09mute"
+    },
+    "inputParams/@p48": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "guessed",
+      "about": "ch09solo"
+    },
+    "inputParams/@p49": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        1.0,
+        1.0
+      ],
+      "status": "guessed",
+      "about": "ch10bypass"
+    },
+    "inputParams/@p50": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "guessed",
+      "about": "ch10mute"
+    },
+    "inputParams/@p51": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "guessed",
+      "about": "ch10solo"
+    },
+    "inputParams/@p52": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        1.0,
+        1.0
+      ],
+      "status": "guessed",
+      "about": "ch11bypass"
+    },
+    "inputParams/@p53": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "guessed",
+      "about": "ch11mute"
+    },
+    "inputParams/@p54": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "guessed",
+      "about": "ch11solo"
+    },
+    "inputParams/@p55": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        1.0,
+        1.0
+      ],
+      "status": "guessed",
+      "about": "ch12bypass"
+    },
+    "inputParams/@p56": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "guessed",
+      "about": "ch12mute"
+    },
+    "inputParams/@p57": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "guessed",
+      "about": "ch12solo"
+    },
+    "inputParams/@p58": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        1.0,
+        1.0
+      ],
+      "status": "guessed",
+      "about": "ch13bypass"
+    },
+    "inputParams/@p59": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "guessed",
+      "about": "ch13mute"
+    },
+    "inputParams/@p60": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "guessed",
+      "about": "ch13solo"
+    },
+    "inputParams/@p61": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        1.0,
+        1.0
+      ],
+      "status": "guessed",
+      "about": "ch14bypass"
+    },
+    "inputParams/@p62": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "guessed",
+      "about": "ch14mute"
+    },
+    "inputParams/@p63": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "guessed",
+      "about": "ch14solo"
+    },
+    "inputParams/@p64": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        1.0,
+        1.0
+      ],
+      "status": "guessed",
+      "about": "ch15bypass"
+    },
+    "inputParams/@p65": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "guessed",
+      "about": "ch15mute"
+    },
+    "inputParams/@p66": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "guessed",
+      "about": "ch15solo"
+    },
+    "inputParams/@p67": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        1.0,
+        1.0
+      ],
+      "status": "guessed",
+      "about": "ch16bypass"
+    },
+    "inputParams/@p68": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "guessed",
+      "about": "ch16mute"
+    },
+    "inputParams/@p69": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "guessed",
+      "about": "ch16solo"
+    }
+  },
+  "parameters": {
+    "bypass": {
+      "field": "inputParams/@p0",
+      "status": "guessed"
+    },
+    "doublePrecision": {
+      "field": "inputParams/@p1",
+      "status": "guessed"
+    },
+    "inputGain": {
+      "field": "inputParams/@p2",
+      "status": "guessed"
+    },
+    "eqAmount": {
+      "field": "inputParams/@p3",
+      "status": "guessed"
+    },
+    "learn": {
+      "field": "inputParams/@p4",
+      "status": "guessed"
+    },
+    "reset": {
+      "field": "inputParams/@p5",
+      "status": "guessed"
+    },
+    "slope": {
+      "field": "inputParams/@p6",
+      "status": "guessed"
+    },
+    "weighting": {
+      "field": "inputParams/@p7",
+      "status": "guessed"
+    },
+    "bassRolloff": {
+      "field": "inputParams/@p8",
+      "status": "guessed"
+    },
+    "bassFrequ": {
+      "field": "inputParams/@p9",
+      "status": "guessed"
+    },
+    "hiShelf": {
+      "field": "inputParams/@p10",
+      "status": "guessed"
+    },
+    "targetAirFrequ": {
+      "field": "inputParams/@p11",
+      "status": "guessed"
+    },
+    "lowcut": {
+      "field": "inputParams/@p12",
+      "status": "guessed"
+    },
+    "hiCut": {
+      "field": "inputParams/@p13",
+      "status": "guessed"
+    },
+    "outputGain": {
+      "field": "inputParams/@p14",
+      "status": "guessed"
+    },
+    "kReserved1": {
+      "field": "inputParams/@p15",
+      "status": "guessed"
+    },
+    "kReserved2": {
+      "field": "inputParams/@p16",
+      "status": "guessed"
+    },
+    "kReserved3": {
+      "field": "inputParams/@p17",
+      "status": "guessed"
+    },
+    "kReserved4": {
+      "field": "inputParams/@p18",
+      "status": "guessed"
+    },
+    "kReserved5": {
+      "field": "inputParams/@p19",
+      "status": "guessed"
+    },
+    "kReserved6": {
+      "field": "inputParams/@p20",
+      "status": "guessed"
+    },
+    "kReserved7": {
+      "field": "inputParams/@p21",
+      "status": "guessed"
+    },
+    "ch01bypass": {
+      "field": "inputParams/@p22",
+      "status": "guessed"
+    },
+    "ch01mute": {
+      "field": "inputParams/@p23",
+      "status": "guessed"
+    },
+    "ch01solo": {
+      "field": "inputParams/@p24",
+      "status": "guessed"
+    },
+    "ch02bypass": {
+      "field": "inputParams/@p25",
+      "status": "guessed"
+    },
+    "ch02mute": {
+      "field": "inputParams/@p26",
+      "status": "guessed"
+    },
+    "ch02solo": {
+      "field": "inputParams/@p27",
+      "status": "guessed"
+    },
+    "ch03bypass": {
+      "field": "inputParams/@p28",
+      "status": "guessed"
+    },
+    "ch03mute": {
+      "field": "inputParams/@p29",
+      "status": "guessed"
+    },
+    "ch03solo": {
+      "field": "inputParams/@p30",
+      "status": "guessed"
+    },
+    "ch04bypass": {
+      "field": "inputParams/@p31",
+      "status": "guessed"
+    },
+    "ch04mute": {
+      "field": "inputParams/@p32",
+      "status": "guessed"
+    },
+    "ch04solo": {
+      "field": "inputParams/@p33",
+      "status": "guessed"
+    },
+    "ch05bypass": {
+      "field": "inputParams/@p34",
+      "status": "guessed"
+    },
+    "ch05mute": {
+      "field": "inputParams/@p35",
+      "status": "guessed"
+    },
+    "ch05solo": {
+      "field": "inputParams/@p36",
+      "status": "guessed"
+    },
+    "ch06bypass": {
+      "field": "inputParams/@p37",
+      "status": "guessed"
+    },
+    "ch06mute": {
+      "field": "inputParams/@p38",
+      "status": "guessed"
+    },
+    "ch06solo": {
+      "field": "inputParams/@p39",
+      "status": "guessed"
+    },
+    "ch07bypass": {
+      "field": "inputParams/@p40",
+      "status": "guessed"
+    },
+    "ch07mute": {
+      "field": "inputParams/@p41",
+      "status": "guessed"
+    },
+    "ch07solo": {
+      "field": "inputParams/@p42",
+      "status": "guessed"
+    },
+    "ch08bypass": {
+      "field": "inputParams/@p43",
+      "status": "guessed"
+    },
+    "ch08mute": {
+      "field": "inputParams/@p44",
+      "status": "guessed"
+    },
+    "ch08solo": {
+      "field": "inputParams/@p45",
+      "status": "guessed"
+    },
+    "ch09bypass": {
+      "field": "inputParams/@p46",
+      "status": "guessed"
+    },
+    "ch09mute": {
+      "field": "inputParams/@p47",
+      "status": "guessed"
+    },
+    "ch09solo": {
+      "field": "inputParams/@p48",
+      "status": "guessed"
+    },
+    "ch10bypass": {
+      "field": "inputParams/@p49",
+      "status": "guessed"
+    },
+    "ch10mute": {
+      "field": "inputParams/@p50",
+      "status": "guessed"
+    },
+    "ch10solo": {
+      "field": "inputParams/@p51",
+      "status": "guessed"
+    },
+    "ch11bypass": {
+      "field": "inputParams/@p52",
+      "status": "guessed"
+    },
+    "ch11mute": {
+      "field": "inputParams/@p53",
+      "status": "guessed"
+    },
+    "ch11solo": {
+      "field": "inputParams/@p54",
+      "status": "guessed"
+    },
+    "ch12bypass": {
+      "field": "inputParams/@p55",
+      "status": "guessed"
+    },
+    "ch12mute": {
+      "field": "inputParams/@p56",
+      "status": "guessed"
+    },
+    "ch12solo": {
+      "field": "inputParams/@p57",
+      "status": "guessed"
+    },
+    "ch13bypass": {
+      "field": "inputParams/@p58",
+      "status": "guessed"
+    },
+    "ch13mute": {
+      "field": "inputParams/@p59",
+      "status": "guessed"
+    },
+    "ch13solo": {
+      "field": "inputParams/@p60",
+      "status": "guessed"
+    },
+    "ch14bypass": {
+      "field": "inputParams/@p61",
+      "status": "guessed"
+    },
+    "ch14mute": {
+      "field": "inputParams/@p62",
+      "status": "guessed"
+    },
+    "ch14solo": {
+      "field": "inputParams/@p63",
+      "status": "guessed"
+    },
+    "ch15bypass": {
+      "field": "inputParams/@p64",
+      "status": "guessed"
+    },
+    "ch15mute": {
+      "field": "inputParams/@p65",
+      "status": "guessed"
+    },
+    "ch15solo": {
+      "field": "inputParams/@p66",
+      "status": "guessed"
+    },
+    "ch16bypass": {
+      "field": "inputParams/@p67",
+      "status": "guessed"
+    },
+    "ch16mute": {
+      "field": "inputParams/@p68",
+      "status": "guessed"
+    },
+    "ch16solo": {
+      "field": "inputParams/@p69",
+      "status": "guessed"
+    }
+  }
+}

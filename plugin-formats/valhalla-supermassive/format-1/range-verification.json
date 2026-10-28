@@ -1,0 +1,31 @@
+{
+  "plugin": "valhalla-supermassive",
+  "version": "5.0.0",
+  "binarySha256": "5c6fe8dbab10a8fee09c12244bb7c5ad6169e614ea558a0a456a8fbd5fd8f0ab",
+  "method": "Restore the initial component, set one public VST3 parameter, capture its XML value, then reload only that field into the initial component. Saved value and host readback must match at both normalized endpoints and 0.25. Bounds are supported intervals in this product version; no survey extrema are used. Raw XML and mappings without this proof remain read-only.",
+  "points": [
+    0,
+    1,
+    0.25
+  ],
+  "fields": {
+    "parameters/Mix": {"parameterId":48,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/DelaySync": {"parameterId":49,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/DelayNote": {"parameterId":50,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/Delay_Ms": {"parameterId":51,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/DelayWarp": {"parameterId":52,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/Clear": {"parameterId":53,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/Feedback": {"parameterId":54,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/Density": {"parameterId":55,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/Width": {"parameterId":56,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/LowCut": {"parameterId":57,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/HighCut": {"parameterId":1567,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/ModRate": {"parameterId":1568,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/ModDepth": {"parameterId":1569,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/Mode": {"parameterId":1570,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/Reserved1": {"parameterId":1571,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/Reserved2": {"parameterId":1572,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/Reserved3": {"parameterId":1573,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/Reserved4": {"parameterId":1574,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]}
+  }
+}

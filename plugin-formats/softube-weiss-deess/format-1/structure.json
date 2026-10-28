@@ -1,0 +1,1494 @@
+{
+  "plugin": "softube-weiss-deess",
+  "format": "format-1",
+  "about": "UTF-8 JSON AssetType SoftubePresetFile, FileFormatVersion 1. PresetList entries identify the plugin and contain ParameterData Type Full, Parameters tuples [id, normalized value, optional name]. SharedData is retained unchanged.",
+  "paths": "exact",
+  "files": {
+    "preset": {
+      "extension": ".softubepreset",
+      "layers": [
+        "JSON SoftubePresetFile version 1",
+        "PresetList entries and SharedData"
+      ],
+      "constants": {
+        "FileFormatVersion": 1,
+        "nativePluginId": "fndm"
+      }
+    }
+  },
+  "survey": {
+    "files": 1,
+    "presets": 10,
+    "source": "Installed bundle inspected for parameter names, IDs and observed numeric values only.",
+    "nativePresetVersionMarkers": [
+      "2.4.55"
+    ],
+    "observedBinaryVersion": "2.4.83",
+    "binaryVersionSource": "Installed PE ProductVersion; loading did not complete. Native bundle markers, including 9.9.9, are not installed-binary version evidence.",
+    "numericWrites": "Observed normalized 0..1 values do not establish legal write bounds; numeric edits remain closed without plug-in restore/readback verification."
+  },
+  "fields": {
+    "presets[]/name": {
+      "type": "text",
+      "in": [
+        "preset"
+      ],
+      "status": "guessed",
+      "about": "PresetName display label; not a file or resource path."
+    },
+    "presets[]/parameters/0": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "seen": [
+        0.5,
+        0.5
+      ],
+      "about": "Input Gain.",
+      "range_status": "guessed"
+    },
+    "presets[]/parameters/1": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "seen": [
+        0.5,
+        0.5
+      ],
+      "about": "Output Gain.",
+      "range_status": "guessed"
+    },
+    "presets[]/parameters/2": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "about": "Bypass.",
+      "range_status": "guessed"
+    },
+    "presets[]/parameters/3": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "about": "Solo/Monitor.",
+      "range_status": "guessed"
+    },
+    "presets[]/parameters/4": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "about": "MS Mode.",
+      "range_status": "guessed"
+    },
+    "presets[]/parameters/5": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "about": "Channel.",
+      "range_status": "guessed"
+    },
+    "presets[]/parameters/6": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "seen": [
+        1.0,
+        1.0
+      ],
+      "about": "Parallel Mix.",
+      "range_status": "guessed"
+    },
+    "presets[]/parameters/7": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "about": "Sidechain.",
+      "range_status": "guessed"
+    },
+    "presets[]/parameters/8": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "about": "Sidechain Link.",
+      "range_status": "guessed"
+    },
+    "presets[]/parameters/9": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "about": "Ganged.",
+      "range_status": "guessed"
+    },
+    "presets[]/parameters/10": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "seen": [
+        0.0,
+        0.995
+      ],
+      "about": "Zoom.",
+      "range_status": "guessed"
+    },
+    "presets[]/parameters/11": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "about": "Low Latency.",
+      "range_status": "guessed"
+    },
+    "presets[]/parameters/12": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "about": "On/Off L.",
+      "range_status": "guessed"
+    },
+    "presets[]/parameters/13": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "about": "On/Off H.",
+      "range_status": "guessed"
+    },
+    "presets[]/parameters/14": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "about": "Filter Type L1.",
+      "range_status": "guessed"
+    },
+    "presets[]/parameters/15": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "seen": [
+        0.0,
+        0.106383
+      ],
+      "about": "Bandwidth L1.",
+      "range_status": "guessed"
+    },
+    "presets[]/parameters/16": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "seen": [
+        0.542857,
+        0.552381
+      ],
+      "about": "Center Frequency L1.",
+      "range_status": "guessed"
+    },
+    "presets[]/parameters/17": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "seen": [
+        0.44186,
+        0.44186
+      ],
+      "about": "Attack L1.",
+      "range_status": "guessed"
+    },
+    "presets[]/parameters/18": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "seen": [
+        0.0,
+        0.245283
+      ],
+      "about": "Release Delay L1.",
+      "range_status": "guessed"
+    },
+    "presets[]/parameters/19": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "seen": [
+        0.396226,
+        0.509434
+      ],
+      "about": "Release Fast L1.",
+      "range_status": "guessed"
+    },
+    "presets[]/parameters/20": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "seen": [
+        0.396226,
+        0.584906
+      ],
+      "about": "Release Average L1.",
+      "range_status": "guessed"
+    },
+    "presets[]/parameters/21": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "seen": [
+        0.396226,
+        0.698113
+      ],
+      "about": "Release Slow L1.",
+      "range_status": "guessed"
+    },
+    "presets[]/parameters/22": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "seen": [
+        0.0,
+        0.6
+      ],
+      "about": "Soft Knee L1.",
+      "range_status": "guessed"
+    },
+    "presets[]/parameters/23": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "seen": [
+        0.2,
+        1.0
+      ],
+      "about": "Threshold L1.",
+      "range_status": "guessed"
+    },
+    "presets[]/parameters/24": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "seen": [
+        0.831731,
+        0.975962
+      ],
+      "about": "Ratio L1.",
+      "range_status": "guessed"
+    },
+    "presets[]/parameters/25": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "seen": [
+        0.5,
+        0.761905
+      ],
+      "about": "Gain Make-Up L1.",
+      "range_status": "guessed"
+    },
+    "presets[]/parameters/26": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "seen": [
+        0.136001,
+        1.0
+      ],
+      "about": "Range L1.",
+      "range_status": "guessed"
+    },
+    "presets[]/parameters/27": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "seen": [
+        1.0,
+        1.0
+      ],
+      "about": "Filter Type L2.",
+      "range_status": "guessed"
+    },
+    "presets[]/parameters/28": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "seen": [
+        0.0,
+        0.085106
+      ],
+      "about": "Bandwidth L2.",
+      "range_status": "guessed"
+    },
+    "presets[]/parameters/29": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "seen": [
+        0.542857,
+        0.552381
+      ],
+      "about": "Center Frequency L2.",
+      "range_status": "guessed"
+    },
+    "presets[]/parameters/30": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "seen": [
+        0.44186,
+        0.44186
+      ],
+      "about": "Attack L2.",
+      "range_status": "guessed"
+    },
+    "presets[]/parameters/31": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "about": "Release Delay L2.",
+      "range_status": "guessed"
+    },
+    "presets[]/parameters/32": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "seen": [
+        0.396226,
+        0.396226
+      ],
+      "about": "Release Fast L2.",
+      "range_status": "guessed"
+    },
+    "presets[]/parameters/33": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "seen": [
+        0.396226,
+        0.396226
+      ],
+      "about": "Release Average L2.",
+      "range_status": "guessed"
+    },
+    "presets[]/parameters/34": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "seen": [
+        0.396226,
+        0.396226
+      ],
+      "about": "Release Slow L2.",
+      "range_status": "guessed"
+    },
+    "presets[]/parameters/35": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "about": "Soft Knee L2.",
+      "range_status": "guessed"
+    },
+    "presets[]/parameters/36": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "seen": [
+        0.05,
+        0.866667
+      ],
+      "about": "Threshold L2.",
+      "range_status": "guessed"
+    },
+    "presets[]/parameters/37": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "seen": [
+        0.831731,
+        0.831731
+      ],
+      "about": "Ratio L2.",
+      "range_status": "guessed"
+    },
+    "presets[]/parameters/38": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "seen": [
+        0.5,
+        0.5
+      ],
+      "about": "Gain Make-Up L2.",
+      "range_status": "guessed"
+    },
+    "presets[]/parameters/39": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "seen": [
+        0.163001,
+        1.0
+      ],
+      "about": "Range L2.",
+      "range_status": "guessed"
+    },
+    "presets[]/parameters/40": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "seen": [
+        1.0,
+        1.0
+      ],
+      "about": "Filter Type H1.",
+      "range_status": "guessed"
+    },
+    "presets[]/parameters/41": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "seen": [
+        0.0,
+        0.234043
+      ],
+      "about": "Bandwidth H1.",
+      "range_status": "guessed"
+    },
+    "presets[]/parameters/42": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "seen": [
+        0.552381,
+        0.666667
+      ],
+      "about": "Center Frequency H1.",
+      "range_status": "guessed"
+    },
+    "presets[]/parameters/43": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "seen": [
+        0.44186,
+        0.44186
+      ],
+      "about": "Attack H1.",
+      "range_status": "guessed"
+    },
+    "presets[]/parameters/44": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "seen": [
+        0.0,
+        0.245283
+      ],
+      "about": "Release Delay H1.",
+      "range_status": "guessed"
+    },
+    "presets[]/parameters/45": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "seen": [
+        0.396226,
+        0.509434
+      ],
+      "about": "Release Fast H1.",
+      "range_status": "guessed"
+    },
+    "presets[]/parameters/46": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "seen": [
+        0.396226,
+        0.584906
+      ],
+      "about": "Release Average H1.",
+      "range_status": "guessed"
+    },
+    "presets[]/parameters/47": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "seen": [
+        0.396226,
+        0.509434
+      ],
+      "about": "Release Slow H1.",
+      "range_status": "guessed"
+    },
+    "presets[]/parameters/48": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "seen": [
+        0.0,
+        0.4
+      ],
+      "about": "Soft Knee H1.",
+      "range_status": "guessed"
+    },
+    "presets[]/parameters/49": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "seen": [
+        0.3,
+        0.8
+      ],
+      "about": "Threshold H1.",
+      "range_status": "guessed"
+    },
+    "presets[]/parameters/50": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "seen": [
+        0.831731,
+        0.951923
+      ],
+      "about": "Ratio H1.",
+      "range_status": "guessed"
+    },
+    "presets[]/parameters/51": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "seen": [
+        0.5,
+        0.65873
+      ],
+      "about": "Gain Make-Up H1.",
+      "range_status": "guessed"
+    },
+    "presets[]/parameters/52": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "seen": [
+        0.077502,
+        1.0
+      ],
+      "about": "Range H1.",
+      "range_status": "guessed"
+    },
+    "presets[]/parameters/53": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "seen": [
+        0.5,
+        1.0
+      ],
+      "about": "Filter Type H2.",
+      "range_status": "guessed"
+    },
+    "presets[]/parameters/54": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "seen": [
+        0.0,
+        0.234043
+      ],
+      "about": "Bandwidth H2.",
+      "range_status": "guessed"
+    },
+    "presets[]/parameters/55": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "seen": [
+        0.552381,
+        0.666667
+      ],
+      "about": "Center Frequency H2.",
+      "range_status": "guessed"
+    },
+    "presets[]/parameters/56": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "seen": [
+        0.44186,
+        0.44186
+      ],
+      "about": "Attack H2.",
+      "range_status": "guessed"
+    },
+    "presets[]/parameters/57": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "about": "Release Delay H2.",
+      "range_status": "guessed"
+    },
+    "presets[]/parameters/58": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "seen": [
+        0.396226,
+        0.396226
+      ],
+      "about": "Release Fast H2.",
+      "range_status": "guessed"
+    },
+    "presets[]/parameters/59": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "seen": [
+        0.396226,
+        0.396226
+      ],
+      "about": "Release Average H2.",
+      "range_status": "guessed"
+    },
+    "presets[]/parameters/60": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "seen": [
+        0.396226,
+        0.396226
+      ],
+      "about": "Release Slow H2.",
+      "range_status": "guessed"
+    },
+    "presets[]/parameters/61": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "about": "Soft Knee H2.",
+      "range_status": "guessed"
+    },
+    "presets[]/parameters/62": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "seen": [
+        0.3,
+        0.866667
+      ],
+      "about": "Threshold H2.",
+      "range_status": "guessed"
+    },
+    "presets[]/parameters/63": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "seen": [
+        0.831731,
+        0.831731
+      ],
+      "about": "Ratio H2.",
+      "range_status": "guessed"
+    },
+    "presets[]/parameters/64": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "seen": [
+        0.5,
+        0.5
+      ],
+      "about": "Gain Make-Up H2.",
+      "range_status": "guessed"
+    },
+    "presets[]/parameters/65": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "seen": [
+        0.077501,
+        1.0
+      ],
+      "about": "Range H2.",
+      "range_status": "guessed"
+    }
+  },
+  "parameters": {
+    "Input Gain": {
+      "field": "presets[]/parameters/0",
+      "status": "guessed",
+      "note": "ID and label appear together in native tuples; no installed-host parameter-change verification."
+    },
+    "Output Gain": {
+      "field": "presets[]/parameters/1",
+      "status": "guessed",
+      "note": "ID and label appear together in native tuples; no installed-host parameter-change verification."
+    },
+    "Bypass": {
+      "field": "presets[]/parameters/2",
+      "status": "guessed",
+      "note": "ID and label appear together in native tuples; no installed-host parameter-change verification."
+    },
+    "Solo/Monitor": {
+      "field": "presets[]/parameters/3",
+      "status": "guessed",
+      "note": "ID and label appear together in native tuples; no installed-host parameter-change verification."
+    },
+    "MS Mode": {
+      "field": "presets[]/parameters/4",
+      "status": "guessed",
+      "note": "ID and label appear together in native tuples; no installed-host parameter-change verification."
+    },
+    "Channel": {
+      "field": "presets[]/parameters/5",
+      "status": "guessed",
+      "note": "ID and label appear together in native tuples; no installed-host parameter-change verification."
+    },
+    "Parallel Mix": {
+      "field": "presets[]/parameters/6",
+      "status": "guessed",
+      "note": "ID and label appear together in native tuples; no installed-host parameter-change verification."
+    },
+    "Sidechain": {
+      "field": "presets[]/parameters/7",
+      "status": "guessed",
+      "note": "ID and label appear together in native tuples; no installed-host parameter-change verification."
+    },
+    "Sidechain Link": {
+      "field": "presets[]/parameters/8",
+      "status": "guessed",
+      "note": "ID and label appear together in native tuples; no installed-host parameter-change verification."
+    },
+    "Ganged": {
+      "field": "presets[]/parameters/9",
+      "status": "guessed",
+      "note": "ID and label appear together in native tuples; no installed-host parameter-change verification."
+    },
+    "Zoom": {
+      "field": "presets[]/parameters/10",
+      "status": "guessed",
+      "note": "ID and label appear together in native tuples; no installed-host parameter-change verification."
+    },
+    "Low Latency": {
+      "field": "presets[]/parameters/11",
+      "status": "guessed",
+      "note": "ID and label appear together in native tuples; no installed-host parameter-change verification."
+    },
+    "On/Off L": {
+      "field": "presets[]/parameters/12",
+      "status": "guessed",
+      "note": "ID and label appear together in native tuples; no installed-host parameter-change verification."
+    },
+    "On/Off H": {
+      "field": "presets[]/parameters/13",
+      "status": "guessed",
+      "note": "ID and label appear together in native tuples; no installed-host parameter-change verification."
+    },
+    "Filter Type L1": {
+      "field": "presets[]/parameters/14",
+      "status": "guessed",
+      "note": "ID and label appear together in native tuples; no installed-host parameter-change verification."
+    },
+    "Bandwidth L1": {
+      "field": "presets[]/parameters/15",
+      "status": "guessed",
+      "note": "ID and label appear together in native tuples; no installed-host parameter-change verification."
+    },
+    "Center Frequency L1": {
+      "field": "presets[]/parameters/16",
+      "status": "guessed",
+      "note": "ID and label appear together in native tuples; no installed-host parameter-change verification."
+    },
+    "Attack L1": {
+      "field": "presets[]/parameters/17",
+      "status": "guessed",
+      "note": "ID and label appear together in native tuples; no installed-host parameter-change verification."
+    },
+    "Release Delay L1": {
+      "field": "presets[]/parameters/18",
+      "status": "guessed",
+      "note": "ID and label appear together in native tuples; no installed-host parameter-change verification."
+    },
+    "Release Fast L1": {
+      "field": "presets[]/parameters/19",
+      "status": "guessed",
+      "note": "ID and label appear together in native tuples; no installed-host parameter-change verification."
+    },
+    "Release Average L1": {
+      "field": "presets[]/parameters/20",
+      "status": "guessed",
+      "note": "ID and label appear together in native tuples; no installed-host parameter-change verification."
+    },
+    "Release Slow L1": {
+      "field": "presets[]/parameters/21",
+      "status": "guessed",
+      "note": "ID and label appear together in native tuples; no installed-host parameter-change verification."
+    },
+    "Soft Knee L1": {
+      "field": "presets[]/parameters/22",
+      "status": "guessed",
+      "note": "ID and label appear together in native tuples; no installed-host parameter-change verification."
+    },
+    "Threshold L1": {
+      "field": "presets[]/parameters/23",
+      "status": "guessed",
+      "note": "ID and label appear together in native tuples; no installed-host parameter-change verification."
+    },
+    "Ratio L1": {
+      "field": "presets[]/parameters/24",
+      "status": "guessed",
+      "note": "ID and label appear together in native tuples; no installed-host parameter-change verification."
+    },
+    "Gain Make-Up L1": {
+      "field": "presets[]/parameters/25",
+      "status": "guessed",
+      "note": "ID and label appear together in native tuples; no installed-host parameter-change verification."
+    },
+    "Range L1": {
+      "field": "presets[]/parameters/26",
+      "status": "guessed",
+      "note": "ID and label appear together in native tuples; no installed-host parameter-change verification."
+    },
+    "Filter Type L2": {
+      "field": "presets[]/parameters/27",
+      "status": "guessed",
+      "note": "ID and label appear together in native tuples; no installed-host parameter-change verification."
+    },
+    "Bandwidth L2": {
+      "field": "presets[]/parameters/28",
+      "status": "guessed",
+      "note": "ID and label appear together in native tuples; no installed-host parameter-change verification."
+    },
+    "Center Frequency L2": {
+      "field": "presets[]/parameters/29",
+      "status": "guessed",
+      "note": "ID and label appear together in native tuples; no installed-host parameter-change verification."
+    },
+    "Attack L2": {
+      "field": "presets[]/parameters/30",
+      "status": "guessed",
+      "note": "ID and label appear together in native tuples; no installed-host parameter-change verification."
+    },
+    "Release Delay L2": {
+      "field": "presets[]/parameters/31",
+      "status": "guessed",
+      "note": "ID and label appear together in native tuples; no installed-host parameter-change verification."
+    },
+    "Release Fast L2": {
+      "field": "presets[]/parameters/32",
+      "status": "guessed",
+      "note": "ID and label appear together in native tuples; no installed-host parameter-change verification."
+    },
+    "Release Average L2": {
+      "field": "presets[]/parameters/33",
+      "status": "guessed",
+      "note": "ID and label appear together in native tuples; no installed-host parameter-change verification."
+    },
+    "Release Slow L2": {
+      "field": "presets[]/parameters/34",
+      "status": "guessed",
+      "note": "ID and label appear together in native tuples; no installed-host parameter-change verification."
+    },
+    "Soft Knee L2": {
+      "field": "presets[]/parameters/35",
+      "status": "guessed",
+      "note": "ID and label appear together in native tuples; no installed-host parameter-change verification."
+    },
+    "Threshold L2": {
+      "field": "presets[]/parameters/36",
+      "status": "guessed",
+      "note": "ID and label appear together in native tuples; no installed-host parameter-change verification."
+    },
+    "Ratio L2": {
+      "field": "presets[]/parameters/37",
+      "status": "guessed",
+      "note": "ID and label appear together in native tuples; no installed-host parameter-change verification."
+    },
+    "Gain Make-Up L2": {
+      "field": "presets[]/parameters/38",
+      "status": "guessed",
+      "note": "ID and label appear together in native tuples; no installed-host parameter-change verification."
+    },
+    "Range L2": {
+      "field": "presets[]/parameters/39",
+      "status": "guessed",
+      "note": "ID and label appear together in native tuples; no installed-host parameter-change verification."
+    },
+    "Filter Type H1": {
+      "field": "presets[]/parameters/40",
+      "status": "guessed",
+      "note": "ID and label appear together in native tuples; no installed-host parameter-change verification."
+    },
+    "Bandwidth H1": {
+      "field": "presets[]/parameters/41",
+      "status": "guessed",
+      "note": "ID and label appear together in native tuples; no installed-host parameter-change verification."
+    },
+    "Center Frequency H1": {
+      "field": "presets[]/parameters/42",
+      "status": "guessed",
+      "note": "ID and label appear together in native tuples; no installed-host parameter-change verification."
+    },
+    "Attack H1": {
+      "field": "presets[]/parameters/43",
+      "status": "guessed",
+      "note": "ID and label appear together in native tuples; no installed-host parameter-change verification."
+    },
+    "Release Delay H1": {
+      "field": "presets[]/parameters/44",
+      "status": "guessed",
+      "note": "ID and label appear together in native tuples; no installed-host parameter-change verification."
+    },
+    "Release Fast H1": {
+      "field": "presets[]/parameters/45",
+      "status": "guessed",
+      "note": "ID and label appear together in native tuples; no installed-host parameter-change verification."
+    },
+    "Release Average H1": {
+      "field": "presets[]/parameters/46",
+      "status": "guessed",
+      "note": "ID and label appear together in native tuples; no installed-host parameter-change verification."
+    },
+    "Release Slow H1": {
+      "field": "presets[]/parameters/47",
+      "status": "guessed",
+      "note": "ID and label appear together in native tuples; no installed-host parameter-change verification."
+    },
+    "Soft Knee H1": {
+      "field": "presets[]/parameters/48",
+      "status": "guessed",
+      "note": "ID and label appear together in native tuples; no installed-host parameter-change verification."
+    },
+    "Threshold H1": {
+      "field": "presets[]/parameters/49",
+      "status": "guessed",
+      "note": "ID and label appear together in native tuples; no installed-host parameter-change verification."
+    },
+    "Ratio H1": {
+      "field": "presets[]/parameters/50",
+      "status": "guessed",
+      "note": "ID and label appear together in native tuples; no installed-host parameter-change verification."
+    },
+    "Gain Make-Up H1": {
+      "field": "presets[]/parameters/51",
+      "status": "guessed",
+      "note": "ID and label appear together in native tuples; no installed-host parameter-change verification."
+    },
+    "Range H1": {
+      "field": "presets[]/parameters/52",
+      "status": "guessed",
+      "note": "ID and label appear together in native tuples; no installed-host parameter-change verification."
+    },
+    "Filter Type H2": {
+      "field": "presets[]/parameters/53",
+      "status": "guessed",
+      "note": "ID and label appear together in native tuples; no installed-host parameter-change verification."
+    },
+    "Bandwidth H2": {
+      "field": "presets[]/parameters/54",
+      "status": "guessed",
+      "note": "ID and label appear together in native tuples; no installed-host parameter-change verification."
+    },
+    "Center Frequency H2": {
+      "field": "presets[]/parameters/55",
+      "status": "guessed",
+      "note": "ID and label appear together in native tuples; no installed-host parameter-change verification."
+    },
+    "Attack H2": {
+      "field": "presets[]/parameters/56",
+      "status": "guessed",
+      "note": "ID and label appear together in native tuples; no installed-host parameter-change verification."
+    },
+    "Release Delay H2": {
+      "field": "presets[]/parameters/57",
+      "status": "guessed",
+      "note": "ID and label appear together in native tuples; no installed-host parameter-change verification."
+    },
+    "Release Fast H2": {
+      "field": "presets[]/parameters/58",
+      "status": "guessed",
+      "note": "ID and label appear together in native tuples; no installed-host parameter-change verification."
+    },
+    "Release Average H2": {
+      "field": "presets[]/parameters/59",
+      "status": "guessed",
+      "note": "ID and label appear together in native tuples; no installed-host parameter-change verification."
+    },
+    "Release Slow H2": {
+      "field": "presets[]/parameters/60",
+      "status": "guessed",
+      "note": "ID and label appear together in native tuples; no installed-host parameter-change verification."
+    },
+    "Soft Knee H2": {
+      "field": "presets[]/parameters/61",
+      "status": "guessed",
+      "note": "ID and label appear together in native tuples; no installed-host parameter-change verification."
+    },
+    "Threshold H2": {
+      "field": "presets[]/parameters/62",
+      "status": "guessed",
+      "note": "ID and label appear together in native tuples; no installed-host parameter-change verification."
+    },
+    "Ratio H2": {
+      "field": "presets[]/parameters/63",
+      "status": "guessed",
+      "note": "ID and label appear together in native tuples; no installed-host parameter-change verification."
+    },
+    "Gain Make-Up H2": {
+      "field": "presets[]/parameters/64",
+      "status": "guessed",
+      "note": "ID and label appear together in native tuples; no installed-host parameter-change verification."
+    },
+    "Range H2": {
+      "field": "presets[]/parameters/65",
+      "status": "guessed",
+      "note": "ID and label appear together in native tuples; no installed-host parameter-change verification."
+    }
+  }
+}

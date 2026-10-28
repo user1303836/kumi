@@ -1,0 +1,110 @@
+{
+  "plugin": "valhalla-uber-mod",
+  "format": "format-1",
+  "about": "Normalized Valhalla sound controls in XML root attributes. Numeric edits require the verified intervals below. Raw XML attributes are preserved read-only and not duplicated here. Individual endpoint reload evidence is in range-verification.json.",
+  "paths": "exact",
+  "files": {
+    "preset": {
+      "extension": ".vpreset",
+      "layers": [
+        "native XML"
+      ],
+      "constants": {
+        "root": "ValhallaUberMod"
+      }
+    },
+    "state": {
+      "layers": [
+        "VST3 Comp chunk",
+        "optional VstW compatibility bank",
+        "VC2! + little-endian XML byte length + XML + NUL + preserved opaque JUCE private data"
+      ],
+      "constants": {
+        "xml_magic": "VC2!",
+        "root": "ValhallaUberMod"
+      }
+    }
+  },
+  "opaque": [
+    "state"
+  ],
+  "fields": {
+    "": {"type":"map","in":["state","preset"],"status":"guessed"},
+    "root": {"type":"text","in":["state","preset"],"status":"guessed"},
+    "parameters": {"type":"map","in":["state","preset"],"status":"guessed"},
+    "parameters/Mix": {"type":"float","status":"guessed","default":0.5,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/Depth": {"type":"float","status":"guessed","default":0.5,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/StereoWidth": {"type":"float","status":"guessed","default":0.5,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/Delay": {"type":"float","status":"guessed","default":0.009999999776482582,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/Feedback": {"type":"float","status":"guessed","default":0.0,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/Spread": {"type":"float","status":"guessed","default":0.5,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/Slope": {"type":"float","status":"guessed","default":0.5,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/Skew": {"type":"float","status":"guessed","default":0.5,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/Random": {"type":"float","status":"guessed","default":0.0,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/TapGain": {"type":"float","status":"guessed","default":0.5,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/Diffusion": {"type":"float","status":"guessed","default":0.5,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/DiffSize": {"type":"float","status":"guessed","default":0.02040816284716129,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/DiffModRate": {"type":"float","status":"guessed","default":0.04904904961585999,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/DiffModDepth": {"type":"float","status":"guessed","default":0.5,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/LowCut": {"type":"float","status":"guessed","default":0.0,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/HighCut": {"type":"float","status":"guessed","default":1.0,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/SpatialXover": {"type":"float","status":"guessed","default":0.1457286477088928,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/DetuneRate": {"type":"float","status":"guessed","default":0.04904904961585999,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/DetuneDepth": {"type":"float","status":"guessed","default":0.5,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/VibratoRate": {"type":"float","status":"guessed","default":0.2982455790042877,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/VibratoDepth": {"type":"float","status":"guessed","default":0.0,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/OverMod": {"type":"float","status":"guessed","default":0.0,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/DriveInGain": {"type":"float","status":"guessed","default":0.375,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/DriveOutGain": {"type":"float","status":"guessed","default":0.75,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/DriveNoiseGain": {"type":"float","status":"guessed","default":0.3333333432674408,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/FeedbackRotate": {"type":"float","status":"guessed","default":0.5,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/SmoothingTime": {"type":"float","status":"guessed","default":0.09909909963607788,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/ColorMode": {"type":"float","status":"guessed","default":0.0,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/DelaySync": {"type":"float","status":"guessed","default":0.0,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/type": {"type":"float","status":"guessed","default":0.0416666679084301,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/DiffEnable": {"type":"float","status":"guessed","default":0.0,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/Drive": {"type":"float","status":"guessed","default":0.0,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/DrivePrePost": {"type":"float","status":"guessed","default":1.0,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/Speed": {"type":"float","status":"guessed","default":0.0,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/InputPan": {"type":"float","status":"guessed","default":0.125,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "state": {"type":"map","in":["state","preset"],"status":"guessed"},
+    "name": {"type":"text","in":["state","preset"],"status":"guessed"}
+  },
+  "parameters": {
+    "Mix [VST3 48]": {"field":"parameters/Mix","status":"verified"},
+    "Depth [VST3 49]": {"field":"parameters/Depth","status":"verified"},
+    "StereoWidth [VST3 50]": {"field":"parameters/StereoWidth","status":"verified"},
+    "Delay [VST3 51]": {"field":"parameters/Delay","status":"verified"},
+    "Feedback [VST3 52]": {"field":"parameters/Feedback","status":"verified"},
+    "Spread [VST3 53]": {"field":"parameters/Spread","status":"verified"},
+    "Slope [VST3 54]": {"field":"parameters/Slope","status":"verified"},
+    "Skew [VST3 55]": {"field":"parameters/Skew","status":"verified"},
+    "Random [VST3 56]": {"field":"parameters/Random","status":"verified"},
+    "TapGain [VST3 57]": {"field":"parameters/TapGain","status":"verified"},
+    "Diffusion [VST3 1567]": {"field":"parameters/Diffusion","status":"verified"},
+    "DiffSize [VST3 1568]": {"field":"parameters/DiffSize","status":"verified"},
+    "DiffModRate [VST3 1569]": {"field":"parameters/DiffModRate","status":"verified"},
+    "DiffModDepth [VST3 1570]": {"field":"parameters/DiffModDepth","status":"verified"},
+    "LowCut [VST3 1571]": {"field":"parameters/LowCut","status":"verified"},
+    "HighCut [VST3 1572]": {"field":"parameters/HighCut","status":"verified"},
+    "SpatialXover [VST3 1573]": {"field":"parameters/SpatialXover","status":"verified"},
+    "DetuneRate [VST3 1574]": {"field":"parameters/DetuneRate","status":"verified"},
+    "DetuneDepth [VST3 1575]": {"field":"parameters/DetuneDepth","status":"verified"},
+    "VibratoRate [VST3 1576]": {"field":"parameters/VibratoRate","status":"verified"},
+    "VibratoDepth [VST3 1598]": {"field":"parameters/VibratoDepth","status":"verified"},
+    "OverMod [VST3 1599]": {"field":"parameters/OverMod","status":"verified"},
+    "DriveInGain [VST3 1600]": {"field":"parameters/DriveInGain","status":"verified"},
+    "DriveOutGain [VST3 1601]": {"field":"parameters/DriveOutGain","status":"verified"},
+    "DriveNoiseGain [VST3 1602]": {"field":"parameters/DriveNoiseGain","status":"verified"},
+    "FeedbackRotate [VST3 1603]": {"field":"parameters/FeedbackRotate","status":"verified"},
+    "SmoothingTime [VST3 1604]": {"field":"parameters/SmoothingTime","status":"verified"},
+    "ColorMode [VST3 1605]": {"field":"parameters/ColorMode","status":"verified"},
+    "DelaySync [VST3 1606]": {"field":"parameters/DelaySync","status":"verified"},
+    "type [VST3 1607]": {"field":"parameters/type","status":"verified"},
+    "DiffEnable [VST3 1629]": {"field":"parameters/DiffEnable","status":"verified"},
+    "Drive [VST3 1630]": {"field":"parameters/Drive","status":"verified"},
+    "DrivePrePost [VST3 1631]": {"field":"parameters/DrivePrePost","status":"verified"},
+    "Speed [VST3 1632]": {"field":"parameters/Speed","status":"verified"},
+    "InputPan [VST3 1633]": {"field":"parameters/InputPan","status":"verified"}
+  }
+}

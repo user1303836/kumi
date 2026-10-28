@@ -1,6 +1,7 @@
 //! The REAPER calls the bridge makes, as safe functions over the API table. Main thread only (Api isn't Send).
 //! A function this REAPER lacks reads as empty or None rather than failing.
 
+use std::borrow::Cow;
 use std::cell::Cell;
 use std::ffi::{c_char, c_int, CString};
 use std::ptr;
@@ -29,7 +30,7 @@ pub use audio::*;
 pub const ACTION_QUIT: i32 = 40004;
 
 /// A text as REAPER's C takes it, NUL-terminated: on the stack when short (nearly every key is a literal, "D_VOL" or
-/// "P_NAME"), on the heap past 63 bytes (a path, a chunk); an inner NUL is dropped. A track's row asks for some two
+/// "P_NAME"), on the heap past 63 bytes (a path, a chunk); an inner NUL is refused. A track's row asks for some two
 /// hundred keys, a snapshot of 200 tracks for forty thousand: none of them is an allocation.
 pub(crate) struct CText {
     short: [u8; CTEXT_SHORT],
@@ -40,20 +41,25 @@ pub(crate) struct CText {
 
 const CTEXT_SHORT: usize = 64;
 
-pub(crate) fn ctext(text: &str) -> CText {
+/// Closing an undo block is cleanup: old saved labels must not keep it open or disagree with its metadata.
+pub(crate) fn undo_label(label: &str) -> Cow<'_, str> {
+    if label.chars().any(char::is_control) {
+        Cow::Owned(label.chars().map(|c| if c.is_control() { ' ' } else { c }).collect())
+    } else {
+        Cow::Borrowed(label)
+    }
+}
+
+pub(crate) fn ctext(text: &str) -> Option<CText> {
+    if text.as_bytes().contains(&0) {
+        return None;
+    }
     if text.len() < CTEXT_SHORT {
         let mut short = [0u8; CTEXT_SHORT];
-        let mut len = 0;
-        for &byte in text.as_bytes() {
-            if byte != 0 {
-                short[len] = byte;
-                len += 1;
-            }
-        }
-        CText { short, len: len + 1, long: None }
+        short[..text.len()].copy_from_slice(text.as_bytes());
+        Some(CText { short, len: text.len() + 1, long: None })
     } else {
-        let bytes: Vec<u8> = text.bytes().filter(|&byte| byte != 0).collect();
-        CText { short: [0; CTEXT_SHORT], len: 0, long: Some(CString::new(bytes).unwrap_or_default()) }
+        Some(CText { short: [0; CTEXT_SHORT], len: 0, long: Some(CString::new(text).ok()?) })
     }
 }
 
@@ -517,21 +523,21 @@ mod tests {
     }
 
     #[test]
-    fn a_c_text_is_on_the_stack_when_short_on_the_heap_when_long_and_drops_an_inner_nul() {
+    fn a_c_text_is_on_the_stack_when_short_on_the_heap_when_long_and_refuses_an_inner_nul() {
         let read = |text: &CText| unsafe { std::ffi::CStr::from_ptr(text.as_ptr()) }.to_str().unwrap().to_owned();
-        let short = ctext("D_VOL");
+        let short = ctext("D_VOL").unwrap();
         assert!(short.long.is_none());
         assert_eq!(read(&short), "D_VOL");
         assert_eq!(short.into_bytes_with_nul(), b"D_VOL\0");
-        let edge = ctext(&"k".repeat(63));
+        let edge = ctext(&"k".repeat(63)).unwrap();
         assert!(edge.long.is_none(), "63 bytes and the NUL fit");
         assert_eq!(read(&edge).len(), 63);
-        let long = ctext(&"k".repeat(64));
+        let long = ctext(&"k".repeat(64)).unwrap();
         assert!(long.long.is_some());
         assert_eq!(read(&long).len(), 64);
         assert_eq!(long.into_bytes_with_nul().len(), 65);
-        assert_eq!(read(&ctext("a\0b")), "ab");
-        assert_eq!(read(&ctext(&format!("{}\0{}", "x".repeat(40), "y".repeat(40)))), format!("{}{}", "x".repeat(40), "y".repeat(40)));
-        assert_eq!(read(&ctext("")), "");
+        assert!(ctext("a\0b").is_none());
+        assert!(ctext(&format!("{}\0{}", "x".repeat(40), "y".repeat(40))).is_none());
+        assert_eq!(read(&ctext("").unwrap()), "");
     }
 }

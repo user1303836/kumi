@@ -1,0 +1,51 @@
+{
+  "plugin": "pulsar-p44-magnum",
+  "name": "P44 Magnum",
+  "vendor": "Pulsar Modular",
+  "kind": "effect",
+  "ids": {
+    "vst3": [
+      {
+        "id": "ABCDEF019182FAEB50756C734D346466",
+        "name": "P44 Magnum",
+        "parameters": 30,
+        "status": "verified"
+      }
+    ]
+  },
+  "presets": {
+    "extensions": [
+      ".P44Preset",
+      ".vstpreset"
+    ],
+    "windows": [
+      {
+        "path": "%PUBLIC%/Documents/Pulsar Modular/P44 Magnum/Presets",
+        "holds": "native presets",
+        "status": "verified"
+      }
+    ],
+    "mac": [
+      {
+        "path": "/Users/Shared/Pulsar Modular/P44 Magnum/Presets",
+        "holds": "native presets; path not tested on this Windows installation",
+        "status": "guessed"
+      }
+    ]
+  },
+  "formats": [
+    "format-1"
+  ],
+  "notes": [
+    "VST3 only. The processor class ID was enumerated from the installed VST3 factory.",
+    "Kumi writes from a plug-in-generated initial VST3 state, retaining controller state and unknown data. No factory presets, sample libraries, or waveforms are bundled."
+  ],
+  "family": "pulsar-modular",
+  "roles": [
+    "saturation",
+    "clipper"
+  ],
+  "binaries": [
+    "P44 Magnum.vst3"
+  ]
+}

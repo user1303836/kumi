@@ -1,0 +1,45 @@
+{
+  "plugin": "minimal-formant",
+  "format": "format-1",
+  "about": "Minimal Audio full XML; parameters/<name> edits mapped_value in physical units. Numeric edits require the verified intervals below. Raw XML attributes are preserved read-only and not duplicated here. Individual endpoint reload evidence is in range-verification.json.",
+  "paths": "exact",
+  "files": {
+    "preset": {
+      "extension": ".xml",
+      "layers": [
+        "native XML"
+      ],
+      "constants": {
+        "root": "Formant"
+      }
+    },
+    "state": {
+      "layers": [
+        "VST3 Comp chunk",
+        "optional VstW compatibility bank",
+        "VC2! + little-endian XML byte length + XML + NUL + preserved opaque JUCE private data"
+      ],
+      "constants": {
+        "xml_magic": "VC2!",
+        "root": "Formant"
+      }
+    }
+  },
+  "opaque": [
+    "state"
+  ],
+  "fields": {
+    "": {"type":"map","in":["state","preset"],"status":"guessed"},
+    "root": {"type":"text","in":["state","preset"],"status":"guessed"},
+    "parameters": {"type":"map","in":["state","preset"],"status":"guessed"},
+    "parameters/MKUFormantXYNode_Main_FormantShiftSemitones": {"type":"float","status":"guessed","default":0.0,"range":[-12.0,12.0],"range_status":"verified"},
+    "parameters/MKUFormantXYNode_Main_Tilt": {"type":"float","status":"guessed","default":0.5,"range":[0.0,1.0],"range_status":"verified"},
+    "parameters/MKUFormantXYNode_Main_Mix": {"type":"float","status":"guessed","default":1.0,"range":[0.0,1.0],"range_status":"verified"},
+    "state": {"type":"map","in":["state","preset"],"status":"guessed"}
+  },
+  "parameters": {
+    "Shift [VST3 1681819166]": {"field":"parameters/MKUFormantXYNode_Main_FormantShiftSemitones","status":"verified"},
+    "Tilt [VST3 317590803]": {"field":"parameters/MKUFormantXYNode_Main_Tilt","status":"verified"},
+    "Mix [VST3 148785478]": {"field":"parameters/MKUFormantXYNode_Main_Mix","status":"verified"}
+  }
+}

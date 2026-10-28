@@ -1,0 +1,65 @@
+{
+  "plugin": "minimal-fuse-compressor",
+  "format": "format-1",
+  "about": "Minimal Audio full XML; parameters/<name> edits mapped_value in physical units. Numeric edits require the verified intervals below. Raw XML attributes are preserved read-only and not duplicated here. Individual endpoint reload evidence is in range-verification.json.",
+  "paths": "exact",
+  "files": {
+    "preset": {
+      "extension": ".xml",
+      "layers": [
+        "native XML"
+      ],
+      "constants": {
+        "root": "FuseCompressor"
+      }
+    },
+    "state": {
+      "layers": [
+        "VST3 Comp chunk",
+        "optional VstW compatibility bank",
+        "VC2! + little-endian XML byte length + XML + NUL + preserved opaque JUCE private data"
+      ],
+      "constants": {
+        "xml_magic": "VC2!",
+        "root": "FuseCompressor"
+      }
+    }
+  },
+  "opaque": [
+    "state"
+  ],
+  "fields": {
+    "": {"type":"map","in":["state","preset"],"status":"guessed"},
+    "root": {"type":"text","in":["state","preset"],"status":"guessed"},
+    "parameters": {"type":"map","in":["state","preset"],"status":"guessed"},
+    "parameters/MKUFuseCompressorNode_Main_InputGain": {"type":"float","status":"guessed","default":0.0,"range":[-60.0,12.0],"range_status":"verified"},
+    "parameters/MKUFuseCompressorNode_Main_OutputGain": {"type":"float","status":"guessed","default":0.0,"range":[-60.0,12.0],"range_status":"verified"},
+    "parameters/MKUFuseCompressorNode_Main_DryWet": {"type":"float","status":"guessed","default":1.0,"range":[0.0,1.0],"range_status":"verified"},
+    "parameters/MKUFuseCompressorNode_Main_UpwardRatioScalar": {"type":"float","status":"guessed","default":1.0,"range":[0.0,2.0],"range_status":"verified"},
+    "parameters/MKUFuseCompressorNode_Main_DownwardRatioScalar": {"type":"float","status":"guessed","default":1.0,"range":[0.0,2.0],"range_status":"verified"},
+    "parameters/MKUFuseCompressorNode_Main_UpwardThresholdOffset": {"type":"float","status":"guessed","default":0.0,"range":[-1.0,1.0],"range_status":"verified"},
+    "parameters/MKUFuseCompressorNode_Main_DownwardThresholdOffset": {"type":"float","status":"guessed","default":0.0,"range":[-1.0,1.0],"range_status":"verified"},
+    "parameters/MKUFuseCompressorNode_Main_MakeupGainDB": {"type":"float","status":"guessed","default":0.0,"range":[-24.0,24.0],"range_status":"verified"},
+    "parameters/MKUFuseCompressorNode_Main_ThresholdTiltDB": {"type":"float","status":"guessed","default":0.0,"range":[-24.0,24.0],"range_status":"verified"},
+    "parameters/MKUFuseCompressorNode_Main_AttackSec": {"type":"float","status":"guessed","default":0.001000000047497451,"range":[9.999999747378752e-05,0.5],"range_status":"verified"},
+    "parameters/MKUFuseCompressorNode_Main_ReleaseSec": {"type":"float","status":"guessed","default":0.05000000074505806,"range":[0.001000000047497451,2.0],"range_status":"verified"},
+    "parameters/MKUFuseCompressorNode_Main_SoftKneeDB": {"type":"float","status":"guessed","default":6.0,"range":[0.0,60.0],"range_status":"verified"},
+    "parameters/MKUFuseCompressorNode_Main_ChannelLinkAmount": {"type":"float","status":"guessed","default":1.0,"range":[0.0,1.0],"range_status":"verified"},
+    "state": {"type":"map","in":["state","preset"],"status":"guessed"}
+  },
+  "parameters": {
+    "Input [VST3 37012131]": {"field":"parameters/MKUFuseCompressorNode_Main_InputGain","status":"verified"},
+    "Output [VST3 656660262]": {"field":"parameters/MKUFuseCompressorNode_Main_OutputGain","status":"verified"},
+    "Dry Wet [VST3 1533232065]": {"field":"parameters/MKUFuseCompressorNode_Main_DryWet","status":"verified"},
+    "Up Ratio [VST3 1797268986]": {"field":"parameters/MKUFuseCompressorNode_Main_UpwardRatioScalar","status":"verified"},
+    "Down Ratio [VST3 2059844243]": {"field":"parameters/MKUFuseCompressorNode_Main_DownwardRatioScalar","status":"verified"},
+    "Up Threshold [VST3 1482452353]": {"field":"parameters/MKUFuseCompressorNode_Main_UpwardThresholdOffset","status":"verified"},
+    "Down Threshold [VST3 1392840090]": {"field":"parameters/MKUFuseCompressorNode_Main_DownwardThresholdOffset","status":"verified"},
+    "Makeup [VST3 1932181548]": {"field":"parameters/MKUFuseCompressorNode_Main_MakeupGainDB","status":"verified"},
+    "Tilt [VST3 1713455360]": {"field":"parameters/MKUFuseCompressorNode_Main_ThresholdTiltDB","status":"verified"},
+    "Attack [VST3 2146496803]": {"field":"parameters/MKUFuseCompressorNode_Main_AttackSec","status":"verified"},
+    "Release [VST3 413774288]": {"field":"parameters/MKUFuseCompressorNode_Main_ReleaseSec","status":"verified"},
+    "Soft Knee [VST3 1543835857]": {"field":"parameters/MKUFuseCompressorNode_Main_SoftKneeDB","status":"verified"},
+    "Channel Link [VST3 194609295]": {"field":"parameters/MKUFuseCompressorNode_Main_ChannelLinkAmount","status":"verified"}
+  }
+}

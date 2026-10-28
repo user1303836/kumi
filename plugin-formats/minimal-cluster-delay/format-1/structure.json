@@ -1,0 +1,67 @@
+{
+  "plugin": "minimal-cluster-delay",
+  "format": "format-1",
+  "about": "Minimal Audio full XML; parameters/<name> edits mapped_value in physical units. Numeric edits require the verified intervals below. Raw XML attributes are preserved read-only and not duplicated here. Individual endpoint reload evidence is in range-verification.json.",
+  "paths": "exact",
+  "files": {
+    "preset": {
+      "extension": ".xml",
+      "layers": [
+        "native XML"
+      ],
+      "constants": {
+        "root": "ClusterDelay"
+      }
+    },
+    "state": {
+      "layers": [
+        "VST3 Comp chunk",
+        "optional VstW compatibility bank",
+        "VC2! + little-endian XML byte length + XML + NUL + preserved opaque JUCE private data"
+      ],
+      "constants": {
+        "xml_magic": "VC2!",
+        "root": "ClusterDelay"
+      }
+    }
+  },
+  "opaque": [
+    "state"
+  ],
+  "fields": {
+    "": {"type":"map","in":["state","preset"],"status":"guessed"},
+    "root": {"type":"text","in":["state","preset"],"status":"guessed"},
+    "parameters": {"type":"map","in":["state","preset"],"status":"guessed"},
+    "parameters/MKUClusterDelayNode_Main_InputGain": {"type":"float","status":"guessed","default":0.0,"range":[-60.0,12.0],"range_status":"verified"},
+    "parameters/MKUClusterDelayNode_Main_OutputGain": {"type":"float","status":"guessed","default":0.0,"range":[-60.0,12.0],"range_status":"verified"},
+    "parameters/MKUClusterDelayNode_Main_DryWet": {"type":"float","status":"guessed","default":0.5,"range":[0.0,1.0],"range_status":"verified"},
+    "parameters/MKUClusterDelayNode_Main_DelayTime": {"type":"float","status":"guessed","default":12.0},
+    "parameters/MKUClusterDelayNode_Main_Feedback": {"type":"float","status":"guessed","default":0.4995000064373016,"range":[0.0,0.9990000128746033],"range_status":"verified"},
+    "parameters/MKUClusterDelayNode_Main_Crossfeed": {"type":"float","status":"guessed","default":0.0,"range":[0.0,1.0],"range_status":"verified"},
+    "parameters/MKUClusterDelayNode_Main_Spread": {"type":"float","status":"guessed","default":0.0,"range":[-1.0,1.0],"range_status":"verified"},
+    "parameters/MKUClusterDelayNode_Main_Lowpass": {"type":"float","status":"guessed","default":5000.0,"range":[20.0,20000.0],"range_status":"verified"},
+    "parameters/MKUClusterDelayNode_Main_Highpass": {"type":"float","status":"guessed","default":40.0,"range":[5.0,10000.0],"range_status":"verified"},
+    "parameters/MKUClusterDelayNode_Main_TapSpray": {"type":"float","status":"guessed","default":0.0,"range":[-1.0,1.0],"range_status":"verified"},
+    "parameters/MKUClusterDelayNode_Main_TapSpacing": {"type":"float","status":"guessed","default":0.0,"range":[-1.0,1.0],"range_status":"verified"},
+    "parameters/MKUClusterDelayNode_Main_TapRamp": {"type":"float","status":"guessed","default":0.0,"range":[-1.0,1.0],"range_status":"verified"},
+    "parameters/MKUClusterDelayNode_Main_EffectDepth": {"type":"float","status":"guessed","default":0.5,"range":[0.0,1.0],"range_status":"verified"},
+    "parameters/MKUClusterDelayNode_Main_EffectRate": {"type":"float","status":"guessed","default":0.5,"range":[0.009999999776482582,20.0],"range_status":"verified"},
+    "state": {"type":"map","in":["state","preset"],"status":"guessed"}
+  },
+  "parameters": {
+    "Input [VST3 1194426208]": {"field":"parameters/MKUClusterDelayNode_Main_InputGain","status":"verified"},
+    "Output [VST3 29274633]": {"field":"parameters/MKUClusterDelayNode_Main_OutputGain","status":"verified"},
+    "Dry Wet [VST3 1661798436]": {"field":"parameters/MKUClusterDelayNode_Main_DryWet","status":"verified"},
+    "Time [VST3 1166238695]": {"field":"parameters/MKUClusterDelayNode_Main_DelayTime","status":"guessed"},
+    "Feedback [VST3 1385272238]": {"field":"parameters/MKUClusterDelayNode_Main_Feedback","status":"verified"},
+    "Crossfeed [VST3 885766869]": {"field":"parameters/MKUClusterDelayNode_Main_Crossfeed","status":"verified"},
+    "Spread [VST3 2089193436]": {"field":"parameters/MKUClusterDelayNode_Main_Spread","status":"verified"},
+    "Lowpass [VST3 546728988]": {"field":"parameters/MKUClusterDelayNode_Main_Lowpass","status":"verified"},
+    "Highpass [VST3 2039826652]": {"field":"parameters/MKUClusterDelayNode_Main_Highpass","status":"verified"},
+    "Scatter [VST3 1059419891]": {"field":"parameters/MKUClusterDelayNode_Main_TapSpray","status":"verified"},
+    "Spacing [VST3 179613961]": {"field":"parameters/MKUClusterDelayNode_Main_TapSpacing","status":"verified"},
+    "Ramp [VST3 796140812]": {"field":"parameters/MKUClusterDelayNode_Main_TapRamp","status":"verified"},
+    "Depth [VST3 1243049705]": {"field":"parameters/MKUClusterDelayNode_Main_EffectDepth","status":"verified"},
+    "Rate [VST3 871795706]": {"field":"parameters/MKUClusterDelayNode_Main_EffectRate","status":"verified"}
+  }
+}

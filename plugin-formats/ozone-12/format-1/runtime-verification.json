@@ -1,0 +1,380 @@
+{
+  "plugin": "ozone-12",
+  "format": "format-1",
+  "version": "12.1.0.1440",
+  "platform": "windows-x86_64",
+  "checked": "2026-10-27",
+  "method": "Kumi's Rust OzoneState encoder edits initialized component states; fresh native VST3 instances receive IComponent::setState and controller synchronization; IComponent::getState verifies requested DSP values and byte-exact restore/readback equality. All 21 listed cases use the compiled preset_probe example. No editor, audio device or factory preset required.",
+  "host_loading": {
+    "host": "Renoise 3.5.4 on Windows x64",
+    "plugin": "Ozone 12 Maximizer 12.1.0.1440 VST3",
+    "route": "Kumi daw-mcp-server change_preview / change_apply / change_undo, device-preset-data with an absolute .vstpreset file",
+    "edit": "Maximizer Gain 0 to 3 dB",
+    "result": "Requested gain read back from the live VST3 component; undo restored the complete original VST3 component/controller chunks byte-for-byte. Another plug-in's class ID was refused before loading."
+  },
+  "limitations": [
+    "A component state identifies serialization schema 1.1 and module parameter versions, not its producing product build. Writes validate that layout against the verified variant template. XML writes require PluginVer 120100, PluginBuild 1440 and PresetVer 6.",
+    "These observations verify state framing and the listed edits, not every legal parameter range or every plugin version.",
+    "XML Enabled flags and legacy parameter migrations are not independently verified by native XML loading."
+  ],
+  "cases": [
+    {
+      "name": "Ozone 12",
+      "status": "success",
+      "element": "Maximizer",
+      "parameter": "Gain",
+      "requested": 3,
+      "readback": 3,
+      "roundtrip_byte_equal": true,
+      "pass": true,
+      "chain_readback": "AAkAAABFcXVhbGl6ZXIADQAAAFN0ZXJlbyBJbWFnZXIACQAAAE1heGltaXplcg=="
+    },
+    {
+      "name": "Ozone 12 Bass Control",
+      "status": "success",
+      "element": "Bass Control",
+      "parameter": "Balance",
+      "requested": 1,
+      "readback": 1,
+      "roundtrip_byte_equal": true,
+      "pass": true
+    },
+    {
+      "name": "Ozone 12 Clarity",
+      "status": "success",
+      "element": "Clarity",
+      "parameter": "Amount",
+      "requested": 25,
+      "readback": 25,
+      "roundtrip_byte_equal": true,
+      "pass": true
+    },
+    {
+      "name": "Ozone 12 Dynamic EQ",
+      "status": "success",
+      "element": "Dynamic EQ",
+      "parameter": "Band 1 Gain",
+      "requested": -1,
+      "readback": -1,
+      "roundtrip_byte_equal": true,
+      "pass": true
+    },
+    {
+      "name": "Ozone 12 Dynamics",
+      "status": "success",
+      "element": "Dynamics",
+      "parameter": "Band 1 Comp Threshold",
+      "requested": -14,
+      "readback": -14,
+      "roundtrip_byte_equal": true,
+      "pass": true
+    },
+    {
+      "name": "Ozone 12 Equalizer",
+      "status": "success",
+      "element": "Equalizer",
+      "parameter": "Band 1 Gain",
+      "requested": -1,
+      "readback": -1,
+      "roundtrip_byte_equal": true,
+      "pass": true
+    },
+    {
+      "name": "Ozone 12 Exciter",
+      "status": "success",
+      "element": "Exciter",
+      "parameter": "Band 1 Amount",
+      "requested": 2,
+      "readback": 2,
+      "roundtrip_byte_equal": true,
+      "pass": true
+    },
+    {
+      "name": "Ozone 12 Imager",
+      "status": "success",
+      "element": "Stereo Imager",
+      "parameter": "Band 1 Width Percent",
+      "requested": 10,
+      "readback": 10,
+      "roundtrip_byte_equal": true,
+      "pass": true
+    },
+    {
+      "name": "Ozone 12 Impact",
+      "status": "success",
+      "element": "Impact",
+      "parameter": "Band 1 Amount",
+      "requested": 10,
+      "readback": 10,
+      "roundtrip_byte_equal": true,
+      "pass": true
+    },
+    {
+      "name": "Ozone 12 Low End Focus",
+      "status": "success",
+      "element": "Low End Focus",
+      "parameter": "Strength",
+      "requested": 10,
+      "readback": 10,
+      "roundtrip_byte_equal": true,
+      "pass": true
+    },
+    {
+      "name": "Ozone 12 Master Rebalance",
+      "status": "success",
+      "element": "Master Rebalance",
+      "parameter": "SourceGain",
+      "requested": 1,
+      "readback": 1,
+      "roundtrip_byte_equal": true,
+      "pass": true
+    },
+    {
+      "name": "Ozone 12 Match EQ",
+      "status": "success",
+      "element": "Match Equalizer",
+      "parameter": "Band 1 Gain",
+      "requested": 1,
+      "readback": 1,
+      "roundtrip_byte_equal": true,
+      "pass": true
+    },
+    {
+      "name": "Ozone 12 Maximizer",
+      "status": "success",
+      "element": "Maximizer",
+      "parameter": "Gain",
+      "requested": 3,
+      "readback": 3,
+      "roundtrip_byte_equal": true,
+      "pass": true
+    },
+    {
+      "name": "Ozone 12 Spectral Shaper",
+      "status": "success",
+      "element": "Spectral Shaper",
+      "parameter": "Amount",
+      "requested": 10,
+      "readback": 10,
+      "roundtrip_byte_equal": true,
+      "pass": true
+    },
+    {
+      "name": "Ozone 12 Stabilizer",
+      "status": "success",
+      "element": "Stabilizer",
+      "parameter": "Amount",
+      "requested": 20,
+      "readback": 20,
+      "roundtrip_byte_equal": true,
+      "pass": true
+    },
+    {
+      "name": "Ozone 12 Stem EQ",
+      "status": "success",
+      "element": "Stem EQ",
+      "parameter": "Bass Band 1 Gain",
+      "requested": -1,
+      "readback": -1,
+      "roundtrip_byte_equal": true,
+      "pass": true
+    },
+    {
+      "name": "Ozone 12 Unlimiter",
+      "status": "success",
+      "element": "Unlimiter",
+      "parameter": "Amount",
+      "requested": 10,
+      "readback": 10,
+      "roundtrip_byte_equal": true,
+      "pass": true
+    },
+    {
+      "name": "Ozone 12 Vintage Compressor",
+      "status": "success",
+      "element": "Vintage Compressor",
+      "parameter": "Ratio",
+      "requested": 2,
+      "readback": 2,
+      "roundtrip_byte_equal": true,
+      "pass": true
+    },
+    {
+      "name": "Ozone 12 Vintage EQ",
+      "status": "success",
+      "element": "Vintage EQ",
+      "parameter": "EQP Low Boost",
+      "requested": 1,
+      "readback": 1,
+      "roundtrip_byte_equal": true,
+      "pass": true
+    },
+    {
+      "name": "Ozone 12 Vintage Limiter",
+      "status": "success",
+      "element": "Vintage Limiter",
+      "parameter": "Margin",
+      "requested": -1,
+      "readback": -1,
+      "roundtrip_byte_equal": true,
+      "pass": true
+    },
+    {
+      "name": "Ozone 12 Vintage Tape",
+      "status": "success",
+      "element": "Vintage Tape",
+      "parameter": "Input/Drive",
+      "requested": 1,
+      "readback": 1,
+      "roundtrip_byte_equal": true,
+      "pass": true
+    }
+  ],
+  "parameter_ranges": {
+    "version": "12.1.0.1440",
+    "method": "Fresh initialized component restored before setting each exposed host parameter at normalized 0, 1 and 0.25 through IAudioProcessor parameter queues. Changed numeric state fields must equal IEditController normalizedParamToPlain at all three points. Stored intervals are the intersection when a field appears in multiple variants. Fields without this evidence refuse numeric edits.",
+    "normalized_points": [
+      0,
+      1,
+      0.25
+    ],
+    "verified_scalar_fields": 644,
+    "products": [
+      {
+        "name": "Ozone 12",
+        "class_id": "5653545A424F5A4F7A6F6E6500000000",
+        "parameters_swept": 873,
+        "scalar_state_links": 644
+      },
+      {
+        "name": "Ozone 12 Bass Control",
+        "class_id": "5653545A4242414F7A6F6E652050726F",
+        "parameters_swept": 19,
+        "scalar_state_links": 13
+      },
+      {
+        "name": "Ozone 12 Clarity",
+        "class_id": "5653545A42434C4F7A6F6E652050726F",
+        "parameters_swept": 18,
+        "scalar_state_links": 14
+      },
+      {
+        "name": "Ozone 12 Dynamic EQ",
+        "class_id": "5653545A42595A4F7A6F6E652050726F",
+        "parameters_swept": 166,
+        "scalar_state_links": 126
+      },
+      {
+        "name": "Ozone 12 Dynamics",
+        "class_id": "5653545A42445A4F7A6F6E652050726F",
+        "parameters_swept": 118,
+        "scalar_state_links": 108
+      },
+      {
+        "name": "Ozone 12 Equalizer",
+        "class_id": "5653545A425A554F7A6F6E652050726F",
+        "parameters_swept": 107,
+        "scalar_state_links": 71
+      },
+      {
+        "name": "Ozone 12 Exciter",
+        "class_id": "5653545A425A584F7A6F6E652050726F",
+        "parameters_swept": 38,
+        "scalar_state_links": 26
+      },
+      {
+        "name": "Ozone 12 Imager",
+        "class_id": "5653545A42495A4F7A6F6E652050726F",
+        "parameters_swept": 25,
+        "scalar_state_links": 19
+      },
+      {
+        "name": "Ozone 12 Impact",
+        "class_id": "5653545A424F494F7A6F6E652050726F",
+        "parameters_swept": 24,
+        "scalar_state_links": 17
+      },
+      {
+        "name": "Ozone 12 Low End Focus",
+        "class_id": "5653545A425A4C4F7A6F6E652050726F",
+        "parameters_swept": 14,
+        "scalar_state_links": 10
+      },
+      {
+        "name": "Ozone 12 Master Rebalance",
+        "class_id": "5653545A425A524F7A6F6E652050726F",
+        "parameters_swept": 9,
+        "scalar_state_links": 7
+      },
+      {
+        "name": "Ozone 12 Match EQ",
+        "class_id": "5653545A425A484F7A6F6E652050726F",
+        "parameters_swept": 14,
+        "scalar_state_links": 10
+      },
+      {
+        "name": "Ozone 12 Maximizer",
+        "class_id": "5653545A425A4D4F7A6F6E652050726F",
+        "parameters_swept": 20,
+        "scalar_state_links": 14
+      },
+      {
+        "name": "Ozone 12 Spectral Shaper",
+        "class_id": "5653545A425A534F7A6F6E652050726F",
+        "parameters_swept": 20,
+        "scalar_state_links": 14
+      },
+      {
+        "name": "Ozone 12 Stabilizer",
+        "class_id": "5653545A424F534F7A6F6E652050726F",
+        "parameters_swept": 27,
+        "scalar_state_links": 22
+      },
+      {
+        "name": "Ozone 12 Stem EQ",
+        "class_id": "5653545A4253514F7A6F6E652050726F",
+        "parameters_swept": 176,
+        "scalar_state_links": 138
+      },
+      {
+        "name": "Ozone 12 Unlimiter",
+        "class_id": "5653545A42554C4F7A6F6E652050726F",
+        "parameters_swept": 12,
+        "scalar_state_links": 10
+      },
+      {
+        "name": "Ozone 12 Vintage Compressor",
+        "class_id": "5653545A425A434F7A6F6E652050726F",
+        "parameters_swept": 34,
+        "scalar_state_links": 26
+      },
+      {
+        "name": "Ozone 12 Vintage EQ",
+        "class_id": "5653545A425A514F7A6F6E652050726F",
+        "parameters_swept": 38,
+        "scalar_state_links": 28
+      },
+      {
+        "name": "Ozone 12 Vintage Limiter",
+        "class_id": "5653545A425A564F7A6F6E652050726F",
+        "parameters_swept": 13,
+        "scalar_state_links": 9
+      },
+      {
+        "name": "Ozone 12 Vintage Tape",
+        "class_id": "5653545A425A544F7A6F6E652050726F",
+        "parameters_swept": 14,
+        "scalar_state_links": 11
+      }
+    ],
+    "evidence": "range-verification.json"
+  },
+  "fixture_privacy": {
+    "uuid": "Zero in committed initialized fixtures; random UUIDv4 on create; source UUID preserved on edit.",
+    "preset_browser_state": "Cleared older fixture Preset State/Extra Bytes, which held local user paths. Current native host reload preserves processing state and the supplied random UUID; browser metadata normalizes to empty initialized content."
+  },
+  "boolean_fields": {
+    "verified": 169,
+    "evidence": "boolean-verification.json"
+  }
+}

@@ -12,5 +12,18 @@
       "how": "Ozone 12.1.0's init patch saved as presets of the main plug-in and the Maximizer, and the states Live 12.4 saved for them (and for the main plug-in with Exciter added): all decode, the presets round-trip, and every file fits structure.json. Also the 679 factory presets it ships (written by Ozone 8 to 12) and the states in the machine's Sets."
     }
   ],
-  "writes": []
+  "writes": [
+    {
+      "version": "12.1.0",
+      "files": ["state", "vstpreset", "preset"],
+      "checked": "2026-10-27",
+      "how": "Windows VST3 build 12.1.0.1440: initialized all 21 class IDs in plugin.json through the public VST3 host API, captured component states, restored them and obtained byte-identical readbacks. Wrote a different DSP parameter for each class, loaded the rewritten states into fresh instances and checked the requested values in the resulting state. The suite also accepted a newly constructed Equalizer -> Stereo Imager -> Maximizer chain with +3 dB gain, -1 dB margin, true peak enabled and width 10. The defaults/ fixtures contain these plugins' unedited initialized states with PluginUUID replaced by zeros; no factory preset content. All controller states were empty. XML writing covers numeric edits and strict import of known current fields into VST3 state; unknown legacy settings are rejected. runtime-verification.json records each tested edit; legal ranges for untested settings are not inferred from this check."
+    },
+    {
+      "version": "12.1.0.1440",
+      "files": ["state", "vstpreset", "preset"],
+      "checked": "2026-10-27",
+      "how": "The exact Windows build of the 12.1.0 verification above; both strings are reported by hosts for the same binaries."
+    }
+  ]
 }

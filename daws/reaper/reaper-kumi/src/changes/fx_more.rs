@@ -6,6 +6,7 @@ use std::fs;
 use std::io::Write;
 use std::path::{Component, Path, PathBuf};
 
+use base64::Engine;
 use serde_json::{json, Value};
 
 use super::fx::{self, fx_label, fx_target, place_phrase, signature, signature_as, target_fx};
@@ -17,6 +18,8 @@ use crate::refs;
 
 /// The most a state chunk (or a preset's prior state) may be for Kumi to keep it for an undo.
 const STATE_LIMIT: usize = 4 << 20;
+/// A file becomes base64 in REAPER's saved state; leave room for its wrapper under the undo limit.
+const PRESET_FILE_LIMIT: usize = (STATE_LIMIT - 65536) / 4 * 3;
 /// The most an FX chain file may be.
 const CHAIN_FILE_LIMIT: u64 = 32 << 20;
 
@@ -423,18 +426,27 @@ fn state_chunk(ctx: &Ctx, fx: Fx) -> Option<(&'static str, String)> {
         .find_map(|key| ctx.reaper.fx_config_big(fx, key).filter(|text| !text.is_empty()).map(|text| (key, text)))
 }
 
-fn preset_state(ctx: &Ctx, at: &FxAt, volatile: &[i64], keep: bool) -> Done<Value> {
+fn preset_state(ctx: &Ctx, at: &FxAt, volatile: &[i64], keep: bool, full: bool) -> Done<Value> {
     let (index, count) = ctx.reaper.fx_preset_index(at.fx).unwrap_or((-1, 0));
     let (list, hash) = values(ctx, at.fx, volatile);
     let mut state = json!({"preset": ctx.reaper.fx_preset(at.fx), "index": index, "count": count, "hash": hash, "volatile": volatile});
     if keep {
         state["params"] = list.into();
+    }
+    if keep || full {
         if let Some((key, text)) = state_chunk(ctx, at.fx) {
             if text.len() > STATE_LIMIT {
                 return Err(failed(format!("the plug-in's state is {} MB: Kumi won't change what it can't put back", text.len() >> 20)));
             }
-            state["stateKey"] = key.into();
-            state["state"] = text.into();
+            if full {
+                state["stateHash"] = text_hash(&text).into();
+            }
+            if keep {
+                state["stateKey"] = key.into();
+                state["state"] = text.into();
+            }
+        } else if full {
+            return Err(failed("the plug-in gives REAPER no state to restore: Kumi cannot load a preset file into it"));
         }
     }
     Ok(state)
@@ -444,33 +456,174 @@ fn volatile_of(recorded: &Value) -> Vec<i64> {
     recorded["volatile"].as_array().into_iter().flatten().filter_map(Value::as_i64).collect()
 }
 
-/// What a preset request asks for: a name, a place in the plug-in's list, or a step to the next or previous.
+/// A named program, a validated VST3 file, or a place/step in the plug-in's program list.
 enum PresetAsk {
     Name(String),
+    File { name: String, class_id: String, hash: String, bytes: Vec<u8> },
     Index(i32),
     Step(i32),
 }
 
+/// A named program must not smuggle a filesystem path into the native preset loader. Windows also
+/// interprets drive-relative names and strips trailing dots/spaces before opening a filename.
+fn file_program(name: &str) -> bool {
+    let name = name.trim();
+    name.starts_with('/')
+        || ["./", "../"].iter().any(|prefix| name.starts_with(prefix))
+        || (cfg!(windows)
+            && (name.starts_with('\\')
+                || (name.as_bytes().get(1) == Some(&b':') && name.as_bytes()[0].is_ascii_alphabetic())
+                || [".\\", "..\\"].iter().any(|prefix| name.starts_with(prefix))))
+        || name.trim_end_matches([' ', '.']).to_ascii_lowercase().ends_with(".vstpreset")
+}
+
 fn preset_ask(input: &Value) -> Done<PresetAsk> {
+    for field in ["path", "preset", "presetName"] {
+        if let Some(text) = input[field].as_str() {
+            if text.chars().any(char::is_control)
+                || kumi_common::path::network_or_device(text.trim())
+                || kumi_common::path::reserved_device(text)
+            {
+                return Err(bad("preset names and paths must be local text without control characters or reserved devices"));
+            }
+        }
+    }
+    if let Some(data) = input.get("vst3Data") {
+        if ["path", "preset", "index", "step"].iter().any(|field| input.get(*field).is_some()) {
+            return Err(bad("give one preset source"));
+        }
+        let name = input["presetName"]
+            .as_str()
+            .filter(|name| {
+                !name.is_empty()
+                    && name.len() <= 1024
+                    && !name.contains(['/', '\\', ':'])
+                    && name.to_ascii_lowercase().ends_with(".vstpreset")
+            })
+            .ok_or_else(|| bad("presetName must be the checked file's name, without folders"))?;
+        let data = data
+            .as_str()
+            .filter(|data| data.len() <= (PRESET_FILE_LIMIT + 2) / 3 * 4)
+            .ok_or_else(|| bad("vst3Data must be a bounded base64 preset snapshot from Kumi's host"))?;
+        let bytes = base64::engine::general_purpose::STANDARD.decode(data).map_err(|_| bad("invalid VST3 preset base64"))?;
+        if bytes.len() > PRESET_FILE_LIMIT {
+            return Err(bad("the preset exceeds REAPER's undo state limit"));
+        }
+        let preset = daw_bridge::vst3::read(&bytes).map_err(bad)?;
+        return Ok(PresetAsk::File { name: name.into(), class_id: preset.class_id, hash: bytes_hash(&bytes), bytes });
+    }
+    let path = input.get("path").filter(|v| !v.is_null());
     let name = input.get("preset").filter(|v| !v.is_null());
     let index = input.get("index").filter(|v| !v.is_null());
     let step = input.get("step").filter(|v| !v.is_null());
+    if path.is_some() || name.and_then(Value::as_str).is_some_and(file_program) {
+        return Err(bad("load preset files through Kumi's host; the bridge accepts only checked vst3Data and never reads producer paths"));
+    }
     match (name, index, step) {
         (Some(Value::String(name)), None, None) if !name.trim().is_empty() => Ok(PresetAsk::Name(name.trim().to_string())),
-        (None, Some(index), None) => {
-            index.as_u64().map(|i| PresetAsk::Index(i as i32)).ok_or_else(|| bad("index must be a preset's place, from 0"))
-        }
+        (None, Some(index), None) => index
+            .as_u64()
+            .and_then(|n| i32::try_from(n).ok())
+            .map(PresetAsk::Index)
+            .ok_or_else(|| bad("index must be a preset's place, from 0")),
         (None, None, Some(step)) => match step.as_i64() {
             Some(1) => Ok(PresetAsk::Step(1)),
             Some(-1) => Ok(PresetAsk::Step(-1)),
-            _ => Err(bad("step must be 1 (the next preset) or -1 (the previous one)")),
+            _ => Err(bad("step must be 1 (next) or -1 (previous)")),
         },
-        _ => Err(bad("pass one of preset (its name), index (its place in the plug-in's list) or step (1 or -1)")),
+        _ => Err(bad("pass one of a checked preset file, preset name, index or step")),
+    }
+}
+
+/// The DAW reopens the name it gets: give it a private copy of the validated bytes, never the producer's mutable path.
+fn load_preset_file(ctx: &Ctx, at: &FxAt, name: &str, bytes: &[u8]) -> Done<bool> {
+    let root = std::env::temp_dir();
+    if kumi_common::path::network_or_device(&root.to_string_lossy()) {
+        return Err(failed("Kumi's temporary preset folder must be on this machine"));
+    }
+    let owned = tempfile::Builder::new()
+        .prefix("kumi-vst3-")
+        .tempdir_in(root)
+        .map_err(|e| failed(format!("couldn't stage the VST3 preset: {e}")))?;
+    let path = owned.path().join(name);
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&path)
+        .map_err(|e| failed(format!("couldn't stage the VST3 preset: {e}")))?;
+    file.write_all(bytes).map_err(|e| failed(format!("couldn't stage the VST3 preset: {e}")))?;
+    drop(file);
+    Ok(ctx.reaper.fx_set_preset(at.fx, &path.to_string_lossy()))
+}
+
+/// REAPER's cache/config identifier ends in the canonical class ID after `{`.
+fn reaper_class_id(identifier: &str) -> Option<String> {
+    let (_, id) = identifier.rsplit_once('{')?;
+    let id = id.strip_suffix('}').unwrap_or(id);
+    (id.len() == 32 && id.bytes().all(|b| b.is_ascii_hexdigit())).then(|| id.to_ascii_uppercase())
+}
+
+fn check_preset_plugin(ctx: &Ctx, at: &FxAt, ask: &PresetAsk) -> Done<()> {
+    if let PresetAsk::File { class_id, .. } = ask {
+        let kind = ctx.reaper.fx_config(at.fx, "fx_type").unwrap_or_default();
+        let ident = ctx.reaper.fx_config(at.fx, "fx_ident").unwrap_or_default();
+        if !kind.starts_with("VST3") || reaper_class_id(&ident).as_ref() != Some(class_id) {
+            return Err(bad(format!("that VST3 preset is for class {class_id}; the selected FX's VST3 identity does not match")));
+        }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod preset_file_tests {
+    use super::*;
+    #[test]
+    fn file_paths_and_control_padded_names_never_reach_the_native_preset_api() {
+        for field in ["path", "preset"] {
+            for text in
+                ["\0\\\\host\\share\\x.vstpreset\0", "C:\\P\\x.vstpreset\0", "C:\\P\\x.VSTPRESET", "/tmp/x.vstpreset", "preset\nname"]
+            {
+                let mut input = json!({});
+                input[field] = text.into();
+                assert!(preset_ask(&input).is_err(), "{input}");
+            }
+        }
+        for name in
+            ["C:x", "C:\\P\\x.fxp", "/tmp/plugin.fxp", "x.vstpreset.", "x.vstpreset ", "C:x.vstpreset. ", ".\\x.vstpreset.", "./x.fxp"]
+        {
+            if !cfg!(windows) && matches!(name, "C:x" | "C:\\P\\x.fxp") {
+                continue;
+            }
+            assert!(preset_ask(&json!({"preset":name})).is_err(), "{name}");
+        }
+        if !cfg!(windows) {
+            for name in ["Aux: Hall", "A: Bright Pad"] {
+                assert!(preset_ask(&json!({"preset":name})).is_ok(), "{name}");
+            }
+        }
+        let directory = tempfile::tempdir().unwrap();
+        let source = directory.path().join("Exists.VSTPRESET");
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode("VlNUMwEAAAAwMDExMjIzMzQ0NTU2Njc3ODg5OUFBQkJDQ0RERUVGRjMAAAAAAAAAYWJjTGlzdAEAAABDb21wMAAAAAAAAAADAAAAAAAAAA==")
+            .unwrap();
+        daw_bridge::vst3::read(&bytes).unwrap();
+        std::fs::write(&source, bytes).unwrap();
+        for field in ["path", "preset"] {
+            let mut input = json!({});
+            input[field] = source.to_string_lossy().into_owned().into();
+            assert!(preset_ask(&input).is_err(), "existing source was read: {input}");
+        }
+        assert!(preset_ask(&json!({"preset":"Regular program"})).is_ok());
+        assert!(preset_ask(&json!({"preset":"Regular program.."})).is_ok());
+        assert!(preset_ask(&json!({"vst3Data":"abc", "presetName":"../x.vstpreset"})).is_err());
+        assert!(preset_ask(&json!({"vst3Data":"abc", "presetName":"x.vstpreset"})).is_err());
+        assert_eq!(reaper_class_id("Thing.vst3{00112233445566778899aabbccddeeff"), Some("00112233445566778899AABBCCDDEEFF".into()));
     }
 }
 
 fn preset_title(ctx: &Ctx, at: &FxAt, ask: Option<&PresetAsk>, loaded: Option<&str>) -> String {
     let what = match (loaded, ask) {
+        (_, Some(PresetAsk::File { name, .. })) => format!("preset {}", super::quoted(name)),
         (Some(name), _) if !name.is_empty() => format!("preset {}", super::quoted(name)),
         (_, Some(PresetAsk::Name(name))) => format!("preset {}", super::quoted(name)),
         (_, Some(PresetAsk::Index(i))) => format!("preset {}", i + 1),
@@ -484,15 +637,22 @@ fn preset_title(ctx: &Ctx, at: &FxAt, ask: Option<&PresetAsk>, loaded: Option<&s
 pub fn preset_preview(ctx: &Ctx, input: &Value) -> Done<Preview> {
     let at = fxchain::locate(ctx, &input["ref"])?;
     let ask = preset_ask(input)?;
+    check_preset_plugin(ctx, &at, &ask)?;
     let volatile: Vec<i64> = signature(ctx, at.fx)["volatile"].as_array().into_iter().flatten().filter_map(Value::as_i64).collect();
-    let now = preset_state(ctx, &at, &volatile, true)?;
+    let full = matches!(ask, PresetAsk::File { .. });
+    let now = preset_state(ctx, &at, &volatile, true, full)?;
     if let PresetAsk::Index(i) = ask {
         let count = now["count"].as_i64().unwrap_or(0);
         if i as i64 >= count {
             return Err(bad(format!("that plug-in has {count} presets (index from 0)")));
         }
     }
-    let fence = json!({"preset": now["preset"], "hash": now["hash"], "volatile": volatile});
+    let mut fence = json!({"preset": now["preset"], "hash": now["hash"], "volatile": volatile});
+    if let PresetAsk::File { hash, class_id, .. } = &ask {
+        fence["fileHash"] = hash.clone().into();
+        fence["classId"] = class_id.clone().into();
+        fence["stateHash"] = now["stateHash"].clone();
+    }
     let mut display = json!({"title": preset_title(ctx, &at, Some(&ask), None)});
     if matches!(&ask, PresetAsk::Name(name) if *name == now["preset"].as_str().unwrap_or_default()) {
         display["note"] = "That preset is loaded already: loading it again puts back its stored values.".into();
@@ -503,47 +663,89 @@ pub fn preset_preview(ctx: &Ctx, input: &Value) -> Done<Preview> {
 pub fn preset_apply(ctx: &Ctx, input: &Value, fence: &Value) -> Done<Applied> {
     let at = fxchain::locate(ctx, &input["ref"]).map_err(went)?;
     let ask = preset_ask(input)?;
+    check_preset_plugin(ctx, &at, &ask)?;
+    if let PresetAsk::File { hash, class_id, .. } = &ask {
+        if fence["fileHash"] != *hash || fence["classId"] != *class_id {
+            return Err(changed("the VST3 preset file changed since the preview"));
+        }
+    }
     let volatile = volatile_of(fence);
-    let now = preset_state(ctx, &at, &volatile, true)?;
-    if now["preset"] != fence["preset"] || now["hash"] != fence["hash"] {
+    let full = fence["stateHash"].is_string();
+    let now = preset_state(ctx, &at, &volatile, true, full)?;
+    if now["preset"] != fence["preset"] || now["hash"] != fence["hash"] || now["stateHash"] != fence["stateHash"] {
         return Err(changed("the FX's preset or values changed since the preview"));
     }
     let loaded = {
         let _quiet = QuietAutomation::around(ctx.reaper, at.holder.track(ctx.reaper));
         match &ask {
             PresetAsk::Name(name) => ctx.reaper.fx_set_preset(at.fx, name),
+            PresetAsk::File { name, bytes, .. } => load_preset_file(ctx, &at, name, bytes)?,
             PresetAsk::Index(i) => ctx.reaper.fx_set_preset_index(at.fx, *i),
             PresetAsk::Step(step) => ctx.reaper.fx_step_preset(at.fx, *step),
         }
     };
-    let after = preset_state(ctx, &at, &volatile, false)?;
+    let after = match preset_state(ctx, &at, &volatile, false, full) {
+        Ok(after) => after,
+        Err(error) => {
+            rollback_preset(ctx, &at, &now)?;
+            return Err(error);
+        }
+    };
     if !loaded {
-        if after["hash"] != now["hash"] {
+        if after["hash"] != now["hash"] || after["stateHash"] != now["stateHash"] {
             // REAPER said no and changed something: what it changed goes back.
-            put_back_preset(ctx, &at, &now);
+            rollback_preset(ctx, &at, &now)?;
         }
         return Err(failed(match ask {
             PresetAsk::Name(name) => {
                 format!("{} has no preset named \"{name}\": read the FX for its presets' count, or step through them", fx_label(ctx, at.fx))
             }
+            PresetAsk::File { .. } => "REAPER wouldn't load that VST3 preset file".into(),
             _ => "REAPER wouldn't load that preset".into(),
         }));
     }
     let name = after["preset"].as_str().unwrap_or_default().to_string();
-    Ok(Applied {
-        applied: json!({"preset": after["preset"], "index": after["index"], "hash": after["hash"]}),
-        display: json!({"title": preset_title(ctx, &at, Some(&ask), Some(&name))}),
-        ..Default::default()
-    })
+    let mut applied = json!({"preset": after["preset"], "index": after["index"], "hash": after["hash"]});
+    if full {
+        applied["stateHash"] = after["stateHash"].clone();
+    }
+    Ok(Applied { applied, display: json!({"title": preset_title(ctx, &at, Some(&ask), Some(&name))}), ..Default::default() })
+}
+
+/// A failed apply can be reported as unwritten only after the complete prior state reads back.
+/// If that proof fails, preserve a native undo point and tell the host that state may have changed.
+fn rollback_preset(ctx: &Ctx, at: &FxAt, prior: &Value) -> Done<()> {
+    let uncertain = || {
+        (daw_bridge::wire::code::UNCERTAIN.into(),
+        "The preset load failed and its earlier state could not be verified after rollback. REAPER's undo point keeps the attempted change.".into())
+    };
+    put_back_preset(ctx, at, prior).map_err(|_| uncertain())?;
+    let after = preset_state(ctx, at, &volatile_of(prior), false, prior["stateHash"].is_string()).map_err(|_| uncertain())?;
+    let state_back = prior["state"].as_str().is_none_or(|before| state_chunk(ctx, at.fx).is_some_and(|(_, after)| after == before));
+    if after["hash"] != prior["hash"] || !state_back {
+        return Err(uncertain());
+    }
+    Ok(())
 }
 
 /// Puts an FX back to a state a preset change took it from: the preset loaded again (its name), then the exact values (its
 /// state chunk, or each parameter). A chunk clears the preset's name in REAPER (measured), so the name stays only where
 /// the preset alone gives the values back.
-fn put_back_preset(ctx: &Ctx, at: &FxAt, prior: &Value) -> Option<String> {
+fn put_back_preset(ctx: &Ctx, at: &FxAt, prior: &Value) -> Done<Option<String>> {
     let reaper = ctx.reaper;
     let _quiet = QuietAutomation::around(reaper, at.holder.track(reaper));
     let name = prior["preset"].as_str().unwrap_or_default();
+    if prior["stateHash"].is_string() {
+        let (Some(key), Some(state)) = (prior["stateKey"].as_str(), prior["state"].as_str()) else {
+            return Err(failed("the recorded preset has no complete state to restore"));
+        };
+        if !reaper.fx_set_config(at.fx, key, state) {
+            return Err(failed("the plug-in refused its earlier state"));
+        }
+        mark_fx(reaper, at.fx);
+        let shown = reaper.fx_preset(at.fx);
+        return Ok((shown != name).then_some(shown));
+    }
     if !name.is_empty() {
         let by_name = reaper.fx_set_preset(at.fx, name);
         if !by_name {
@@ -556,10 +758,14 @@ fn put_back_preset(ctx: &Ctx, at: &FxAt, prior: &Value) -> Option<String> {
         reaper.fx_set_preset_index(at.fx, -2);
     }
     let volatile = volatile_of(prior);
-    if values(ctx, at.fx, &volatile).1 != prior["hash"].as_str().unwrap_or_default() {
+    let state_changed =
+        prior["stateHash"].as_str().is_some_and(|hash| state_chunk(ctx, at.fx).is_none_or(|(_, state)| text_hash(&state) != hash));
+    if state_changed || values(ctx, at.fx, &volatile).1 != prior["hash"].as_str().unwrap_or_default() {
         match (prior["stateKey"].as_str(), prior["state"].as_str()) {
             (Some(key), Some(state)) => {
-                reaper.fx_set_config(at.fx, key, state);
+                if !reaper.fx_set_config(at.fx, key, state) {
+                    return Err(failed("the plug-in refused its earlier state"));
+                }
                 mark_fx(reaper, at.fx);
             }
             _ => {
@@ -574,24 +780,30 @@ fn put_back_preset(ctx: &Ctx, at: &FxAt, prior: &Value) -> Option<String> {
         }
     }
     let shown = reaper.fx_preset(at.fx);
-    (shown != name).then_some(shown)
+    Ok((shown != name).then_some(shown))
 }
 
 pub fn preset_restore(ctx: &Ctx, restore: &Restore) -> Done<Restored> {
     let at = target_fx(ctx, restore.target)?;
     let volatile = volatile_of(restore.prior);
-    let now = preset_state(ctx, &at, &volatile, false)?;
-    let already = now["hash"] == restore.prior["hash"] && now["preset"] == restore.prior["preset"];
+    let full = restore.prior["stateHash"].is_string();
+    let now = preset_state(ctx, &at, &volatile, false, full)?;
+    let already = now["hash"] == restore.prior["hash"]
+        && (full || now["preset"] == restore.prior["preset"])
+        && now["stateHash"] == restore.prior["stateHash"];
     if already {
         return Ok(Restored { restored: now, display: json!({"title": format!("{} is back already", label(ctx, &at))}), unwritten: true });
     }
-    if !restore.discard && now["hash"] != restore.applied["hash"] {
+    if !restore.discard && (now["hash"] != restore.applied["hash"] || now["stateHash"] != restore.applied["stateHash"]) {
         return Err(changed("the FX's values have been changed in REAPER since Kumi loaded the preset"));
     }
-    let other_name = put_back_preset(ctx, &at, restore.prior);
-    let after = preset_state(ctx, &at, &volatile, false)?;
+    let other_name = put_back_preset(ctx, &at, restore.prior)?;
+    let after = preset_state(ctx, &at, &volatile, false, full)?;
     if after["hash"] != restore.prior["hash"] {
         return Err(failed("the plug-in didn't take its earlier values back"));
+    }
+    if full && after["stateHash"] != restore.prior["stateHash"] && after["stateHash"] == now["stateHash"] {
+        return Err(failed("the plug-in kept the applied state instead of restoring its earlier state"));
     }
     let mut display = json!({"title": format!("{} back as it was", label(ctx, &at))});
     if let Some(shown) = other_name {
@@ -600,6 +812,13 @@ pub fn preset_restore(ctx: &Ctx, restore: &Restore) -> Done<Restored> {
         } else {
             format!("Its values are back exactly; REAPER still shows the preset name {}.", super::quoted(&shown)).into()
         };
+    }
+    if full && after["stateHash"] != restore.prior["stateHash"] {
+        let note = display["note"].as_str().unwrap_or_default();
+        display["note"] =
+            format!("{note} The plug-in accepted its earlier state and normalized the saved bytes; its parameter values match.")
+                .trim()
+                .into();
     }
     Ok(Restored { restored: after, display, unwritten: false })
 }
@@ -629,11 +848,15 @@ fn state_input(input: &Value) -> Done<(String, Option<&'static str>)> {
 }
 
 fn text_hash(text: &str) -> String {
+    bytes_hash(text.as_bytes())
+}
+
+fn bytes_hash(bytes: &[u8]) -> String {
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
-    for byte in text.bytes() {
-        hash = (hash ^ byte as u64).wrapping_mul(0x0000_0100_0000_01b3);
+    for byte in bytes {
+        hash = (hash ^ *byte as u64).wrapping_mul(0x0000_0100_0000_01b3);
     }
-    format!("{hash:016x}-{}", text.len())
+    format!("{hash:016x}-{}", bytes.len())
 }
 
 fn current_state(ctx: &Ctx, at: &FxAt, key: Option<&str>) -> Done<(&'static str, String)> {

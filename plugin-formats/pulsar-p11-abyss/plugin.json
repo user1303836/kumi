@@ -1,0 +1,51 @@
+{
+  "plugin": "pulsar-p11-abyss",
+  "name": "P11 Abyss",
+  "vendor": "Pulsar Modular",
+  "kind": "effect",
+  "ids": {
+    "vst3": [
+      {
+        "id": "ABCDEF019182FAEB50756C734F79797A",
+        "name": "P11 Abyss",
+        "parameters": 68,
+        "status": "verified"
+      }
+    ]
+  },
+  "presets": {
+    "extensions": [
+      ".Abysspreset",
+      ".vstpreset"
+    ],
+    "windows": [
+      {
+        "path": "%PUBLIC%/Documents/Pulsar Modular/P11 Abyss/Presets",
+        "holds": "native presets",
+        "status": "verified"
+      }
+    ],
+    "mac": [
+      {
+        "path": "/Users/Shared/Pulsar Modular/P11 Abyss/Presets",
+        "holds": "native presets; path not tested on this Windows installation",
+        "status": "guessed"
+      }
+    ]
+  },
+  "formats": [
+    "format-1"
+  ],
+  "notes": [
+    "VST3 only. The processor class ID was enumerated from the installed VST3 factory.",
+    "Kumi writes from a plug-in-generated initial VST3 state, retaining controller state and unknown data. No factory presets, sample libraries, or waveforms are bundled."
+  ],
+  "family": "pulsar-modular",
+  "roles": [
+    "compressor",
+    "limiter"
+  ],
+  "binaries": [
+    "P11 Abyss.vst3"
+  ]
+}

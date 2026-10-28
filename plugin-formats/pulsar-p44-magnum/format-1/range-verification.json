@@ -1,0 +1,42 @@
+{
+  "plugin": "pulsar-p44-magnum",
+  "version": "1.1.1",
+  "binarySha256": "d0bca8cf30120fffa6a4c78d4ee39a2b454ed41908ee79d6ca0b617337e7573f",
+  "method": "Restore the initial component, set one public VST3 parameter, capture its XML value, then reload only that field into the initial component. Saved value and host readback must match at both normalized endpoints and 0.25. Bounds are supported intervals in this product version; no survey extrema are used. Raw XML and mappings without this proof remain read-only.",
+  "points": [
+    0,
+    1,
+    0.25
+  ],
+  "fields": {
+    "parameters/pm_p44_bypass_btn": {"parameterId":593945014,"stored":[0.0,1.0,0.0],"readback":[0.0,1.0,0.0]},
+    "parameters/pm_p44_clipper_btn": {"parameterId":1231386073,"stored":[0.0,1.0,0.300000011920929],"readback":[0.0,1.0,0.30000001192092896]},
+    "parameters/pm_p44_clipper_sldr": {"parameterId":1666244810,"stored":[-18.0,0.0,-13.5],"readback":[0.0,1.0,0.25]},
+    "parameters/pm_p44_clipperoutgain_sldr": {"parameterId":1396515349,"stored":[-18.0,9.0,-11.19999980926514],"readback":[0.0,1.0,0.2518518567085266]},
+    "parameters/pm_p44_delta_Btn": {"parameterId":366030820,"stored":[0.0,1.0,0.0],"readback":[0.0,1.0,0.0]},
+    "parameters/pm_p44_dualmono_btn": {"parameterId":118435437,"stored":[0.0,1.0,0.300000011920929],"readback":[0.0,1.0,0.30000001192092896]},
+    "parameters/pm_p44_gainin_sldr": {"parameterId":1780188689,"stored":[-6.0,24.0,-4.849999904632568],"readback":[0.0,1.0,0.2500460743904114]},
+    "parameters/pm_p44_infodump_btn": {"parameterId":844568368,"stored":[0.0,1.0,0.0],"readback":[0.0,1.0,0.0]},
+    "parameters/pm_p44_mainout_sldr": {"parameterId":198247074,"stored":[-24.0,6.0,-4.819999694824219],"readback":[0.0,1.0,0.2498934417963028]},
+    "parameters/pm_p44_mix_sldr": {"parameterId":2114856987,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/pm_p44_mod_sldr": {"parameterId":424845109,"stored":[0.0,1.0,0.0],"readback":[0.0,1.0,0.0]},
+    "parameters/pm_p44_o2_btn": {"parameterId":1516301681,"stored":[0.0,1.0,0.0],"readback":[0.0,1.0,0.0]},
+    "parameters/pm_p44_o2_sldr": {"parameterId":1908694066,"stored":[0.0,100.0,25.0],"readback":[0.0,1.0,0.25]},
+    "parameters/pm_p44_oomph_btn": {"parameterId":839101201,"stored":[0.0,1.0,0.0],"readback":[0.0,1.0,0.0]},
+    "parameters/pm_p44_oomph_sldr": {"parameterId":242832018,"stored":[10.0,45.0,18.79999923706055],"readback":[0.0,1.0,0.2514285445213318]},
+    "parameters/pm_p44_oomphsmoothing_sldr": {"parameterId":1020021510,"stored":[0.0,100.0,25.0],"readback":[0.0,1.0,0.25]},
+    "parameters/pm_p44_os_btn": {"parameterId":1576330546,"stored":[0.0,1.0,0.0],"readback":[0.0,1.0,0.0]},
+    "parameters/pm_p44_ostype_btn": {"parameterId":549287148,"stored":[0.0,2.0,1.0],"readback":[0.0,1.0,0.5]},
+    "parameters/pm_p44_phase_btn": {"parameterId":2034850887,"stored":[0.0,1.0,0.0],"readback":[0.0,1.0,0.0]},
+    "parameters/pm_p44_poomph_btn": {"parameterId":1106168099,"stored":[0.0,1.0,0.0],"readback":[0.0,1.0,0.0]},
+    "parameters/pm_p44_poomph_sldr": {"parameterId":2079454912,"stored":[45.0,82.0,54.29999923706055],"readback":[0.0,1.0,0.25135132670402527]},
+    "parameters/pm_p44_poomphsmoothing_sldr": {"parameterId":1744730776,"stored":[0.0,100.0,25.0],"readback":[0.0,1.0,0.25]},
+    "parameters/pm_p44_routswitch_btn": {"parameterId":1747342366,"stored":[0.0,1.0,0.0],"readback":[0.0,1.0,0.0]},
+    "parameters/pm_p44_satpos_btn": {"parameterId":671860348,"stored":[0.0,1.0,0.0],"readback":[0.0,1.0,0.0]},
+    "parameters/pm_p44_saturation_sldr": {"parameterId":262935651,"stored":[0.0,1.5,0.1690299957990646],"readback":[0.0,1.0,0.24999944865703583]},
+    "parameters/pm_p44_sweet_btn": {"parameterId":147898172,"stored":[0.0,1.0,0.0],"readback":[0.0,1.0,0.0]},
+    "parameters/pm_p44_sweet_sldr": {"parameterId":290374599,"stored":[0.0,100.0,25.0],"readback":[0.0,1.0,0.25]},
+    "parameters/pm_p44_clip_knee_sldr": {"parameterId":413293221,"stored":[0.0,8.5,2.100000143051147],"readback":[0.0,1.0,0.24705883860588074]},
+    "parameters/pm_p44_sweetfine_sldr": {"parameterId":1793608141,"stored":[-5.0,5.0,-2.5],"readback":[0.0,1.0,0.25]}
+  }
+}

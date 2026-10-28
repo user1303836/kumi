@@ -219,7 +219,10 @@ impl<S: RefScheme + 'static> OwnGoalRig<S> {
             Err(why) => return Ok(Err(why)),
         };
         let (add, limiter) = r.table.safety_limiter;
-        if !devices.last().is_some_and(|device| device.own_name.contains(limiter)) {
+        if !devices
+            .last()
+            .is_some_and(|device| device.on && (device.own_name.contains(limiter) || crate::listening::verified_plugin_limiter(device)))
+        {
             let mut input = json!({"ref": track});
             input[r.table.add_field] = add.into();
             // Part of the candidate, as a goal's is in Live: kept quietly, at its input's unity once the search settles.

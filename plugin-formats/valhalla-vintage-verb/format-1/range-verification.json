@@ -1,0 +1,30 @@
+{
+  "plugin": "valhalla-vintage-verb",
+  "version": "4.0.5",
+  "binarySha256": "759915421c6724f3bf9a04d3e5b051efa74d74d77c84de58e35cb50be8b7bcb8",
+  "method": "Restore the initial component, set one public VST3 parameter, capture its XML value, then reload only that field into the initial component. Saved value and host readback must match at both normalized endpoints and 0.25. Bounds are supported intervals in this product version; no survey extrema are used. Raw XML and mappings without this proof remain read-only.",
+  "points": [
+    0,
+    1,
+    0.25
+  ],
+  "fields": {
+    "parameters/Mix": {"parameterId":48,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/PreDelay": {"parameterId":49,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/Decay": {"parameterId":50,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/Size": {"parameterId":51,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/Attack": {"parameterId":52,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/BassMult": {"parameterId":53,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/BassXover": {"parameterId":54,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/HighShelf": {"parameterId":55,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/HighFreq": {"parameterId":56,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/EarlyDiffusion": {"parameterId":57,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/LateDiffusion": {"parameterId":1567,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/ModRate": {"parameterId":1568,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/ModDepth": {"parameterId":1569,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/HighCut": {"parameterId":1570,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/LowCut": {"parameterId":1571,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/ColorMode": {"parameterId":1572,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/ReverbMode": {"parameterId":1573,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]}
+  }
+}

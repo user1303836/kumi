@@ -1,0 +1,74 @@
+{
+  "plugin": "valhalla-vintage-verb",
+  "format": "format-1",
+  "about": "Normalized Valhalla sound controls in XML root attributes. Numeric edits require the verified intervals below. Raw XML attributes are preserved read-only and not duplicated here. Individual endpoint reload evidence is in range-verification.json.",
+  "paths": "exact",
+  "files": {
+    "preset": {
+      "extension": ".vpreset",
+      "layers": [
+        "native XML"
+      ],
+      "constants": {
+        "root": "ValhallaVintageVerb"
+      }
+    },
+    "state": {
+      "layers": [
+        "VST3 Comp chunk",
+        "optional VstW compatibility bank",
+        "VC2! + little-endian XML byte length + XML + NUL + preserved opaque JUCE private data"
+      ],
+      "constants": {
+        "xml_magic": "VC2!",
+        "root": "ValhallaVintageVerb"
+      }
+    }
+  },
+  "opaque": [
+    "state"
+  ],
+  "fields": {
+    "": {"type":"map","in":["state","preset"],"status":"guessed"},
+    "root": {"type":"text","in":["state","preset"],"status":"guessed"},
+    "parameters": {"type":"map","in":["state","preset"],"status":"guessed"},
+    "parameters/Mix": {"type":"float","status":"guessed","default":1.0,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/PreDelay": {"type":"float","status":"guessed","default":0.25,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/Decay": {"type":"float","status":"guessed","default":0.4204803109169006,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/Size": {"type":"float","status":"guessed","default":1.0,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/Attack": {"type":"float","status":"guessed","default":0.5,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/BassMult": {"type":"float","status":"guessed","default":0.6230387687683105,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/BassXover": {"type":"float","status":"guessed","default":0.3810649514198303,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/HighShelf": {"type":"float","status":"guessed","default":0.0,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/HighFreq": {"type":"float","status":"guessed","default":0.5,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/EarlyDiffusion": {"type":"float","status":"guessed","default":1.0,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/LateDiffusion": {"type":"float","status":"guessed","default":1.0,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/ModRate": {"type":"float","status":"guessed","default":0.2454545646905899,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/ModDepth": {"type":"float","status":"guessed","default":0.3799999952316284,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/HighCut": {"type":"float","status":"guessed","default":0.5905388593673706,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/LowCut": {"type":"float","status":"guessed","default":0.0,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/ColorMode": {"type":"float","status":"guessed","default":0.3333333432674408,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/ReverbMode": {"type":"float","status":"guessed","default":0.0416666679084301,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "state": {"type":"map","in":["state","preset"],"status":"guessed"},
+    "name": {"type":"text","in":["state","preset"],"status":"guessed"}
+  },
+  "parameters": {
+    "Mix [VST3 48]": {"field":"parameters/Mix","status":"verified"},
+    "PreDelay [VST3 49]": {"field":"parameters/PreDelay","status":"verified"},
+    "Decay [VST3 50]": {"field":"parameters/Decay","status":"verified"},
+    "Size [VST3 51]": {"field":"parameters/Size","status":"verified"},
+    "Attack [VST3 52]": {"field":"parameters/Attack","status":"verified"},
+    "BassMult [VST3 53]": {"field":"parameters/BassMult","status":"verified"},
+    "BassXover [VST3 54]": {"field":"parameters/BassXover","status":"verified"},
+    "HighShelf [VST3 55]": {"field":"parameters/HighShelf","status":"verified"},
+    "HighFreq [VST3 56]": {"field":"parameters/HighFreq","status":"verified"},
+    "EarlyDiffusion [VST3 57]": {"field":"parameters/EarlyDiffusion","status":"verified"},
+    "LateDiffusion [VST3 1567]": {"field":"parameters/LateDiffusion","status":"verified"},
+    "ModRate [VST3 1568]": {"field":"parameters/ModRate","status":"verified"},
+    "ModDepth [VST3 1569]": {"field":"parameters/ModDepth","status":"verified"},
+    "HighCut [VST3 1570]": {"field":"parameters/HighCut","status":"verified"},
+    "LowCut [VST3 1571]": {"field":"parameters/LowCut","status":"verified"},
+    "ColorMode [VST3 1572]": {"field":"parameters/ColorMode","status":"verified"},
+    "ReverbMode [VST3 1573]": {"field":"parameters/ReverbMode","status":"verified"}
+  }
+}

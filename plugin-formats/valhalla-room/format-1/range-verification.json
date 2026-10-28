@@ -1,0 +1,35 @@
+{
+  "plugin": "valhalla-room",
+  "version": "2.0.5",
+  "binarySha256": "e641663441569a47b4617f1e9ed27db65f7df9da35f43f0fc59ed9c0d1098b19",
+  "method": "Restore the initial component, set one public VST3 parameter, capture its XML value, then reload only that field into the initial component. Saved value and host readback must match at both normalized endpoints and 0.25. Bounds are supported intervals in this product version; no survey extrema are used. Raw XML and mappings without this proof remain read-only.",
+  "points": [
+    0,
+    1,
+    0.25
+  ],
+  "fields": {
+    "parameters/mix": {"parameterId":48,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/predelay": {"parameterId":49,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/decay": {"parameterId":50,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/HiCut": {"parameterId":51,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/earlyLateMix": {"parameterId":52,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/lateSize": {"parameterId":53,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/lateCross": {"parameterId":54,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/lateModRate": {"parameterId":55,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/lateModDepth": {"parameterId":56,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/RTBassMultiply": {"parameterId":57,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/RTXover": {"parameterId":1567,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/RTHighMultiply": {"parameterId":1568,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/RTHighXover": {"parameterId":1569,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/earlySize": {"parameterId":1570,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/earlyCross": {"parameterId":1571,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/earlyModRate": {"parameterId":1572,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/earlyModDepth": {"parameterId":1573,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/earlySend": {"parameterId":1574,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/diffusion": {"parameterId":1575,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/type": {"parameterId":1576,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/space": {"parameterId":1598,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/LoCut": {"parameterId":1599,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]}
+  }
+}

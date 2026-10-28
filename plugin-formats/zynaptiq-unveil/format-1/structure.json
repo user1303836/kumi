@@ -1,0 +1,335 @@
+{
+  "plugin": "zynaptiq-unveil",
+  "format": "format-1",
+  "about": "Zynaptiq Preset XML version 3 or 4. inputParams count and pN attributes hold scalar values. VST3 component state (verified on PUNCH 1 and UNMIX DRUMS) uses a u32 little-endian XML length including a terminating NUL, then the XML and NUL.",
+  "paths": "exact",
+  "files": {
+    "preset": {
+      "extension": ".preset",
+      "layers": [
+        "UTF-8 XML Preset; inputParams attributes p0 through p<count-1>; preserve all other elements"
+      ],
+      "constants": {}
+    },
+    "state": {
+      "layers": [
+        "u32 LE byte count including NUL; XML Preset; NUL"
+      ],
+      "constants": {}
+    }
+  },
+  "survey": {
+    "files": 21,
+    "parameterCounts": [
+      20
+    ],
+    "presetVersions": [
+      "3"
+    ],
+    "source": "Installed native preset files and shipped parameter-name metadata; no factory preset bodies copied.",
+    "verification": "Native documents inspected; installed-binary version and runtime acceptance remain unverified.",
+    "parameterLinks": "Guessed links associate names and indices from installed metadata; physical-unit mappings remain unverified."
+  },
+  "fields": {
+    "@progName": {
+      "type": "text",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "status": "guessed"
+    },
+    "inputParams/@p0": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "guessed",
+      "about": "bypass"
+    },
+    "inputParams/@p1": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "about": "focus"
+    },
+    "inputParams/@p2": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "about": "localize"
+    },
+    "inputParams/@p3": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "about": "refract"
+    },
+    "inputParams/@p4": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.06,
+        1.0
+      ],
+      "status": "guessed",
+      "about": "adapt"
+    },
+    "inputParams/@p5": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.59
+      ],
+      "status": "guessed",
+      "about": "presence"
+    },
+    "inputParams/@p6": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "about": "transient_threshold"
+    },
+    "inputParams/@p7": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "guessed",
+      "about": "transient_solo"
+    },
+    "inputParams/@p8": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.5
+      ],
+      "status": "guessed"
+    },
+    "inputParams/@p9": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.6800000071525574
+      ],
+      "status": "guessed"
+    },
+    "inputParams/@p10": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.17000000178813934,
+        1.0
+      ],
+      "status": "guessed"
+    },
+    "inputParams/@p11": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.4000000059604645,
+        1.0
+      ],
+      "status": "guessed"
+    },
+    "inputParams/@p12": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.8999999761581421
+      ],
+      "status": "guessed"
+    },
+    "inputParams/@p13": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed"
+    },
+    "inputParams/@p14": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.49,
+        1.0
+      ],
+      "status": "guessed"
+    },
+    "inputParams/@p15": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.49,
+        1.0
+      ],
+      "status": "guessed"
+    },
+    "inputParams/@p16": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.9003999829292297
+      ],
+      "status": "guessed"
+    },
+    "inputParams/@p17": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.7943000197410583
+      ],
+      "status": "guessed"
+    },
+    "inputParams/@p18": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "about": "io_diff"
+    },
+    "inputParams/@p19": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        2.575199604034424
+      ],
+      "status": "guessed",
+      "about": "out_gain"
+    }
+  },
+  "parameters": {
+    "bypass": {
+      "field": "inputParams/@p0",
+      "status": "guessed"
+    },
+    "focus": {
+      "field": "inputParams/@p1",
+      "status": "guessed"
+    },
+    "localize": {
+      "field": "inputParams/@p2",
+      "status": "guessed"
+    },
+    "refract": {
+      "field": "inputParams/@p3",
+      "status": "guessed"
+    },
+    "adapt": {
+      "field": "inputParams/@p4",
+      "status": "guessed"
+    },
+    "presence": {
+      "field": "inputParams/@p5",
+      "status": "guessed"
+    },
+    "transient_threshold": {
+      "field": "inputParams/@p6",
+      "status": "guessed"
+    },
+    "transient_solo": {
+      "field": "inputParams/@p7",
+      "status": "guessed"
+    },
+    "io_diff": {
+      "field": "inputParams/@p18",
+      "status": "guessed"
+    },
+    "out_gain": {
+      "field": "inputParams/@p19",
+      "status": "guessed"
+    }
+  }
+}

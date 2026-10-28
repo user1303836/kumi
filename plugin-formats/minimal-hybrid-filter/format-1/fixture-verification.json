@@ -1,0 +1,9 @@
+{
+  "plugin": "minimal-hybrid-filter",
+  "version": "1.5.0",
+  "fixtureSha256": "3ba185a6d3d06cf27f748762b9685af7ffaa326915e0ee09aac3fb1cb976ac37",
+  "sessionId": "all zeros",
+  "runtime": "Sanitized component restored in a fresh VST3 instance. Product root, source version and every mapped parameter matched after reload within native floating-point serialization precision.",
+  "parametersChecked": 11,
+  "maxRelativeErrorWithUnitFloor": 1.430511474609375e-06
+}

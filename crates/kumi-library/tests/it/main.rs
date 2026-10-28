@@ -9,3 +9,8 @@ mod plugin_adapters;
 mod plugin_formats;
 mod plugin_roles;
 mod plugins;
+
+mod plugin_vendor_effects;
+
+mod plugin_dynamics_drums;
+mod plugin_preset_workflow;

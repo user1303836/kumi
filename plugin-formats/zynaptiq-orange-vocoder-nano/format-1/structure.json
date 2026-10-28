@@ -1,0 +1,249 @@
+{
+  "plugin": "zynaptiq-orange-vocoder-nano",
+  "format": "format-1",
+  "about": "Zynaptiq Preset XML version 3 or 4. inputParams count and pN attributes hold scalar values. VST3 component state (verified on PUNCH 1 and UNMIX DRUMS) uses a u32 little-endian XML length including a terminating NUL, then the XML and NUL.",
+  "paths": "exact",
+  "files": {
+    "preset": {
+      "extension": ".preset",
+      "layers": [
+        "UTF-8 XML Preset; inputParams attributes p0 through p<count-1>; preserve all other elements"
+      ],
+      "constants": {}
+    },
+    "state": {
+      "layers": [
+        "u32 LE byte count including NUL; XML Preset; NUL"
+      ],
+      "constants": {}
+    }
+  },
+  "survey": {
+    "files": 20,
+    "parameterCounts": [
+      12
+    ],
+    "presetVersions": [
+      "4"
+    ],
+    "source": "Installed native preset files and shipped parameter-name metadata; no factory preset bodies copied.",
+    "verification": "Native documents inspected; installed-binary version and runtime acceptance remain unverified.",
+    "parameterLinks": "Guessed links associate names and indices from installed metadata; physical-unit mappings remain unverified."
+  },
+  "fields": {
+    "@progName": {
+      "type": "text",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "status": "guessed"
+    },
+    "inputParams/@p0": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "guessed",
+      "about": "bypass"
+    },
+    "inputParams/@p1": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -6.0,
+        -6.0
+      ],
+      "status": "guessed",
+      "about": "gain"
+    },
+    "inputParams/@p2": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        321.8997270557747
+      ],
+      "status": "guessed",
+      "about": "glideTime"
+    },
+    "inputParams/@p3": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "guessed",
+      "about": "voiceMix"
+    },
+    "inputParams/@p4": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        1.0,
+        1.0
+      ],
+      "status": "guessed",
+      "about": "vocoderMix"
+    },
+    "inputParams/@p5": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "guessed",
+      "about": "carrierMix"
+    },
+    "inputParams/@p6": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.55
+      ],
+      "status": "guessed",
+      "about": "ChorusAmount"
+    },
+    "inputParams/@p7": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        3.0
+      ],
+      "status": "guessed",
+      "about": "algoSelect"
+    },
+    "inputParams/@p8": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -3.4000000000000004,
+        12.0
+      ],
+      "status": "guessed",
+      "about": "formantShift"
+    },
+    "inputParams/@p9": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        3998.091175556183,
+        22050.0
+      ],
+      "status": "guessed",
+      "about": "filterCutOffFrq"
+    },
+    "inputParams/@p10": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "about": "keyboardMode"
+    },
+    "inputParams/@p11": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "guessed",
+      "about": "kInputLevel"
+    }
+  },
+  "parameters": {
+    "bypass": {
+      "field": "inputParams/@p0",
+      "status": "guessed"
+    },
+    "gain": {
+      "field": "inputParams/@p1",
+      "status": "guessed"
+    },
+    "glideTime": {
+      "field": "inputParams/@p2",
+      "status": "guessed"
+    },
+    "voiceMix": {
+      "field": "inputParams/@p3",
+      "status": "guessed"
+    },
+    "vocoderMix": {
+      "field": "inputParams/@p4",
+      "status": "guessed"
+    },
+    "carrierMix": {
+      "field": "inputParams/@p5",
+      "status": "guessed"
+    },
+    "ChorusAmount": {
+      "field": "inputParams/@p6",
+      "status": "guessed"
+    },
+    "algoSelect": {
+      "field": "inputParams/@p7",
+      "status": "guessed"
+    },
+    "formantShift": {
+      "field": "inputParams/@p8",
+      "status": "guessed"
+    },
+    "filterCutOffFrq": {
+      "field": "inputParams/@p9",
+      "status": "guessed"
+    },
+    "keyboardMode": {
+      "field": "inputParams/@p10",
+      "status": "guessed"
+    },
+    "kInputLevel": {
+      "field": "inputParams/@p11",
+      "status": "guessed"
+    }
+  }
+}

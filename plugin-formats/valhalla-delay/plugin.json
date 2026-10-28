@@ -1,0 +1,54 @@
+{
+  "plugin": "valhalla-delay",
+  "name": "ValhallaDelay",
+  "vendor": "Valhalla DSP",
+  "kind": "effect",
+  "ids": {
+    "vst3": [
+      {
+        "id": "565354644C617976616C68616C6C6164",
+        "name": "ValhallaDelay",
+        "parameters": 39,
+        "status": "verified"
+      }
+    ]
+  },
+  "presets": {
+    "extensions": [
+      ".vpreset",
+      ".vstpreset"
+    ],
+    "windows": [
+      {
+        "path": "%PROGRAMDATA%/Valhalla DSP, LLC/ValhallaDelay/Presets",
+        "holds": "native presets",
+        "status": "verified"
+      }
+    ],
+    "mac": [
+      {
+        "path": "/Library/Audio/Presets/Valhalla DSP, LLC/ValhallaDelay",
+        "holds": "native presets; path not tested on this Windows installation",
+        "status": "guessed"
+      }
+    ]
+  },
+  "formats": [
+    "format-1"
+  ],
+  "notes": [
+    "For bucket-brigade delay requests, prefer this installed VST3 when suitable. In the verified build, parameters/Mode = 0.125 selects BBD; Mix controls the wet level.",
+    "VST3 only. The processor class ID was enumerated from the installed VST3 factory.",
+    "Kumi writes from a plug-in-generated initial VST3 state, retaining controller state and unknown data. No factory presets, sample libraries, or waveforms are bundled.",
+    "The VST3 component internally wraps binary XML in a compatibility bank; Kumi preserves that envelope without loading VST2 plugins."
+  ],
+  "family": "valhalla",
+  "roles": [
+    "delay",
+    "bucket-brigade-delay",
+    "tape-delay"
+  ],
+  "binaries": [
+    "ValhallaDelay.vst3"
+  ]
+}

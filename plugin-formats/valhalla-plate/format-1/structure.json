@@ -1,0 +1,64 @@
+{
+  "plugin": "valhalla-plate",
+  "format": "format-1",
+  "about": "Normalized Valhalla sound controls in XML root attributes. Numeric edits require the verified intervals below. Raw XML attributes are preserved read-only and not duplicated here. Individual endpoint reload evidence is in range-verification.json.",
+  "paths": "exact",
+  "files": {
+    "preset": {
+      "extension": ".vpreset",
+      "layers": [
+        "native XML"
+      ],
+      "constants": {
+        "root": "ValhallaPlate"
+      }
+    },
+    "state": {
+      "layers": [
+        "VST3 Comp chunk",
+        "optional VstW compatibility bank",
+        "VC2! + little-endian XML byte length + XML + NUL + preserved opaque JUCE private data"
+      ],
+      "constants": {
+        "xml_magic": "VC2!",
+        "root": "ValhallaPlate"
+      }
+    }
+  },
+  "opaque": [
+    "state"
+  ],
+  "fields": {
+    "": {"type":"map","in":["state","preset"],"status":"guessed"},
+    "root": {"type":"text","in":["state","preset"],"status":"guessed"},
+    "parameters": {"type":"map","in":["state","preset"],"status":"guessed"},
+    "parameters/Mix": {"type":"float","status":"guessed","default":1.0,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/PreDelay": {"type":"float","status":"guessed","default":0.0,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/Decay": {"type":"float","status":"guessed","default":0.5,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/Size": {"type":"float","status":"guessed","default":0.5,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/Width": {"type":"float","status":"guessed","default":0.5,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/ModRate": {"type":"float","status":"guessed","default":0.3653445541858673,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/ModDepth": {"type":"float","status":"guessed","default":0.0,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/LowEQFreq": {"type":"float","status":"guessed","default":0.3487739264965057,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/LowEQGain": {"type":"float","status":"guessed","default":0.5,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/HighEQFreq": {"type":"float","status":"guessed","default":0.5,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/HighEQGain": {"type":"float","status":"guessed","default":0.5,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/Type": {"type":"float","status":"guessed","default":0.0416666679084301,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "state": {"type":"map","in":["state","preset"],"status":"guessed"},
+    "name": {"type":"text","in":["state","preset"],"status":"guessed"}
+  },
+  "parameters": {
+    "Mix [VST3 48]": {"field":"parameters/Mix","status":"verified"},
+    "PreDelay [VST3 49]": {"field":"parameters/PreDelay","status":"verified"},
+    "Decay [VST3 50]": {"field":"parameters/Decay","status":"verified"},
+    "Size [VST3 51]": {"field":"parameters/Size","status":"verified"},
+    "Width [VST3 52]": {"field":"parameters/Width","status":"verified"},
+    "ModRate [VST3 53]": {"field":"parameters/ModRate","status":"verified"},
+    "ModDepth [VST3 54]": {"field":"parameters/ModDepth","status":"verified"},
+    "LowEQFreq [VST3 55]": {"field":"parameters/LowEQFreq","status":"verified"},
+    "LowEQGain [VST3 56]": {"field":"parameters/LowEQGain","status":"verified"},
+    "HighEQFreq [VST3 57]": {"field":"parameters/HighEQFreq","status":"verified"},
+    "HighEQGain [VST3 1567]": {"field":"parameters/HighEQGain","status":"verified"},
+    "Type [VST3 1568]": {"field":"parameters/Type","status":"verified"}
+  }
+}

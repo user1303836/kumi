@@ -52,5 +52,13 @@
     "The VST3 controller class is 56534558667343736572756D20320000 (the bundle's moduleinfo.json).",
     "Serum 2 FX (VST3 56534558667351736572756D20322066) is the effect build of the same plug-in. Its .SerumFX and .SerumFXRack files, and Xfer's .XferShape, .XferClip and .XferArp, use the same container.",
     "No AU or CLAP build was on the Windows machine this was checked on, so those IDs and the macOS folders are still to find."
+  ],
+  "family": "serum-2",
+  "roles": [
+    "instrument",
+    "synthesizer"
+  ],
+  "binaries": [
+    "Serum 2.vst3"
   ]
 }

@@ -1,0 +1,97 @@
+{
+  "plugin": "pulsar-p44-magnum",
+  "format": "format-1",
+  "about": "Pulsar Modular XML PARAM id/value records in physical units; omitted values mean zero. Numeric edits require the verified intervals below. Raw XML attributes are preserved read-only and not duplicated here. Individual endpoint reload evidence is in range-verification.json.",
+  "paths": "exact",
+  "files": {
+    "preset": {
+      "extension": ".P44Preset",
+      "layers": [
+        "VC2! + little-endian XML byte length + XML + NUL"
+      ],
+      "constants": {
+        "root": "P44"
+      }
+    },
+    "state": {
+      "layers": [
+        "VST3 Comp chunk",
+        "optional VstW compatibility bank",
+        "VC2! + little-endian XML byte length + XML + NUL + preserved opaque JUCE private data"
+      ],
+      "constants": {
+        "xml_magic": "VC2!",
+        "root": "P44"
+      }
+    }
+  },
+  "opaque": [
+    "state"
+  ],
+  "fields": {
+    "": {"type":"map","in":["state","preset"],"status":"guessed"},
+    "root": {"type":"text","in":["state","preset"],"status":"guessed"},
+    "parameters": {"type":"map","in":["state","preset"],"status":"guessed"},
+    "parameters/pm_p44_bypass_btn": {"type":"float","status":"guessed","default":0.0,"range":[0.0,1.0],"range_status":"verified"},
+    "parameters/pm_p44_clipper_btn": {"type":"float","status":"guessed","default":0.0,"range":[0.0,1.0],"range_status":"verified"},
+    "parameters/pm_p44_clipper_sldr": {"type":"float","status":"guessed","default":0.0,"range":[-18.0,0.0],"range_status":"verified"},
+    "parameters/pm_p44_clipperoutgain_sldr": {"type":"float","status":"guessed","default":0.0,"range":[-18.0,9.0],"range_status":"verified"},
+    "parameters/pm_p44_delta_Btn": {"type":"float","status":"guessed","default":0.0,"range":[0.0,1.0],"range_status":"verified"},
+    "parameters/pm_p44_dualmono_btn": {"type":"float","status":"guessed","default":0.0,"range":[0.0,1.0],"range_status":"verified"},
+    "parameters/pm_p44_gainin_sldr": {"type":"float","status":"guessed","default":0.0,"range":[-6.0,24.0],"range_status":"verified"},
+    "parameters/pm_p44_infodump_btn": {"type":"float","status":"guessed","default":0.0,"range":[0.0,1.0],"range_status":"verified"},
+    "parameters/pm_p44_mainout_sldr": {"type":"float","status":"guessed","default":0.0,"range":[-24.0,6.0],"range_status":"verified"},
+    "parameters/pm_p44_mix_sldr": {"type":"float","status":"guessed","default":0.0,"range":[0.0,1.0],"range_status":"verified"},
+    "parameters/pm_p44_mod_sldr": {"type":"float","status":"guessed","default":0.0,"range":[0.0,1.0],"range_status":"verified"},
+    "parameters/pm_p44_o2_btn": {"type":"float","status":"guessed","default":0.0,"range":[0.0,1.0],"range_status":"verified"},
+    "parameters/pm_p44_o2_sldr": {"type":"float","status":"guessed","default":0.0,"range":[0.0,100.0],"range_status":"verified"},
+    "parameters/pm_p44_oomph_btn": {"type":"float","status":"guessed","default":0.0,"range":[0.0,1.0],"range_status":"verified"},
+    "parameters/pm_p44_oomph_sldr": {"type":"float","status":"guessed","default":10.0,"range":[10.0,45.0],"range_status":"verified"},
+    "parameters/pm_p44_oomphsmoothing_sldr": {"type":"float","status":"guessed","default":0.0,"range":[0.0,100.0],"range_status":"verified"},
+    "parameters/pm_p44_os_btn": {"type":"float","status":"guessed","default":0.0,"range":[0.0,1.0],"range_status":"verified"},
+    "parameters/pm_p44_ostype_btn": {"type":"float","status":"guessed","default":0.0,"range":[0.0,2.0],"range_status":"verified"},
+    "parameters/pm_p44_phase_btn": {"type":"float","status":"guessed","default":0.0,"range":[0.0,1.0],"range_status":"verified"},
+    "parameters/pm_p44_poomph_btn": {"type":"float","status":"guessed","default":0.0,"range":[0.0,1.0],"range_status":"verified"},
+    "parameters/pm_p44_poomph_sldr": {"type":"float","status":"guessed","default":45.0,"range":[45.0,82.0],"range_status":"verified"},
+    "parameters/pm_p44_poomphsmoothing_sldr": {"type":"float","status":"guessed","default":0.0,"range":[0.0,100.0],"range_status":"verified"},
+    "parameters/pm_p44_routswitch_btn": {"type":"float","status":"guessed","default":0.0,"range":[0.0,1.0],"range_status":"verified"},
+    "parameters/pm_p44_satpos_btn": {"type":"float","status":"guessed","default":0.0,"range":[0.0,1.0],"range_status":"verified"},
+    "parameters/pm_p44_saturation_sldr": {"type":"float","status":"guessed","default":0.0,"range":[0.0,1.5],"range_status":"verified"},
+    "parameters/pm_p44_sweet_btn": {"type":"float","status":"guessed","default":0.0,"range":[0.0,1.0],"range_status":"verified"},
+    "parameters/pm_p44_sweet_sldr": {"type":"float","status":"guessed","default":0.0,"range":[0.0,100.0],"range_status":"verified"},
+    "parameters/pm_p44_clip_knee_sldr": {"type":"float","status":"guessed","default":0.0,"range":[0.0,8.5],"range_status":"verified"},
+    "parameters/pm_p44_sweetfine_sldr": {"type":"float","status":"guessed","default":0.0,"range":[-5.0,5.0],"range_status":"verified"},
+    "state": {"type":"map","in":["state","preset"],"status":"guessed"}
+  },
+  "parameters": {
+    "Bypass [VST3 593945014]": {"field":"parameters/pm_p44_bypass_btn","status":"verified"},
+    "Clip SW [VST3 1231386073]": {"field":"parameters/pm_p44_clipper_btn","status":"verified"},
+    "Clip [VST3 1666244810]": {"field":"parameters/pm_p44_clipper_sldr","status":"verified"},
+    "Clip Out [VST3 1396515349]": {"field":"parameters/pm_p44_clipperoutgain_sldr","status":"verified"},
+    "Delta [VST3 366030820]": {"field":"parameters/pm_p44_delta_Btn","status":"verified"},
+    "Dual Mono [VST3 118435437]": {"field":"parameters/pm_p44_dualmono_btn","status":"verified"},
+    "IN Drive [VST3 1780188689]": {"field":"parameters/pm_p44_gainin_sldr","status":"verified"},
+    "InfoDump [VST3 844568368]": {"field":"parameters/pm_p44_infodump_btn","status":"verified"},
+    "Main Out [VST3 198247074]": {"field":"parameters/pm_p44_mainout_sldr","status":"verified"},
+    "Mix [VST3 2114856987]": {"field":"parameters/pm_p44_mix_sldr","status":"verified"},
+    "MOD [VST3 424845109]": {"field":"parameters/pm_p44_mod_sldr","status":"verified"},
+    "O2 SW [VST3 1516301681]": {"field":"parameters/pm_p44_o2_btn","status":"verified"},
+    "O2 [VST3 1908694066]": {"field":"parameters/pm_p44_o2_sldr","status":"verified"},
+    "Oomph SW [VST3 839101201]": {"field":"parameters/pm_p44_oomph_btn","status":"verified"},
+    "Oomph [VST3 242832018]": {"field":"parameters/pm_p44_oomph_sldr","status":"verified"},
+    "Oomph Attn [VST3 1020021510]": {"field":"parameters/pm_p44_oomphsmoothing_sldr","status":"verified"},
+    "OS SW [VST3 1576330546]": {"field":"parameters/pm_p44_os_btn","status":"verified"},
+    "OS Type [VST3 549287148]": {"field":"parameters/pm_p44_ostype_btn","status":"verified"},
+    "Polarity Flip [VST3 2034850887]": {"field":"parameters/pm_p44_phase_btn","status":"verified"},
+    "Poomph SW [VST3 1106168099]": {"field":"parameters/pm_p44_poomph_btn","status":"verified"},
+    "Poomph [VST3 2079454912]": {"field":"parameters/pm_p44_poomph_sldr","status":"verified"},
+    "Poomph Attn [VST3 1744730776]": {"field":"parameters/pm_p44_poomphsmoothing_sldr","status":"verified"},
+    "Route SW [VST3 1747342366]": {"field":"parameters/pm_p44_routswitch_btn","status":"verified"},
+    "Sat. @  [VST3 671860348]": {"field":"parameters/pm_p44_satpos_btn","status":"verified"},
+    "Sat [VST3 262935651]": {"field":"parameters/pm_p44_saturation_sldr","status":"verified"},
+    "Sweet SW [VST3 147898172]": {"field":"parameters/pm_p44_sweet_btn","status":"verified"},
+    "Sweet [VST3 290374599]": {"field":"parameters/pm_p44_sweet_sldr","status":"verified"},
+    "Clip Knee [VST3 413293221]": {"field":"parameters/pm_p44_clip_knee_sldr","status":"verified"},
+    "Sweet FT [VST3 1793608141]": {"field":"parameters/pm_p44_sweetfine_sldr","status":"verified"}
+  }
+}

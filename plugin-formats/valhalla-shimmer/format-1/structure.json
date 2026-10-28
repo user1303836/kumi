@@ -1,0 +1,64 @@
+{
+  "plugin": "valhalla-shimmer",
+  "format": "format-1",
+  "about": "Normalized Valhalla sound controls in XML root attributes. Numeric edits require the verified intervals below. Raw XML attributes are preserved read-only and not duplicated here. Individual endpoint reload evidence is in range-verification.json.",
+  "paths": "exact",
+  "files": {
+    "preset": {
+      "extension": ".vpreset",
+      "layers": [
+        "native XML"
+      ],
+      "constants": {
+        "root": "MYPLUGINSETTINGS"
+      }
+    },
+    "state": {
+      "layers": [
+        "VST3 Comp chunk",
+        "optional VstW compatibility bank",
+        "VC2! + little-endian XML byte length + XML + NUL + preserved opaque JUCE private data"
+      ],
+      "constants": {
+        "xml_magic": "VC2!",
+        "root": "MYPLUGINSETTINGS"
+      }
+    }
+  },
+  "opaque": [
+    "state"
+  ],
+  "fields": {
+    "": {"type":"map","in":["state","preset"],"status":"guessed"},
+    "root": {"type":"text","in":["state","preset"],"status":"guessed"},
+    "parameters": {"type":"map","in":["state","preset"],"status":"guessed"},
+    "parameters/parameter0": {"type":"float","status":"guessed","default":0.5,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/parameter1": {"type":"float","status":"guessed","default":1.0,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/parameter2": {"type":"float","status":"guessed","default":0.0,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/parameter3": {"type":"float","status":"guessed","default":0.9191919565200806,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/parameter4": {"type":"float","status":"guessed","default":0.5,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/parameter5": {"type":"float","status":"guessed","default":0.0,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/parameter6": {"type":"float","status":"guessed","default":0.5302013158798218,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/parameter7": {"type":"float","status":"guessed","default":0.1000000014901161,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/parameter8": {"type":"float","status":"guessed","default":0.300000011920929,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/parameter9": {"type":"float","status":"guessed","default":0.0,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/parameter10": {"type":"float","status":"guessed","default":0.0,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/parameter11": {"type":"float","status":"guessed","default":0.0,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "state": {"type":"map","in":["state","preset"],"status":"guessed"},
+    "name": {"type":"text","in":["state","preset"],"status":"guessed"}
+  },
+  "parameters": {
+    "wetDry [VST3 48]": {"field":"parameters/parameter0","status":"verified"},
+    "shift [VST3 49]": {"field":"parameters/parameter1","status":"verified"},
+    "feedback [VST3 50]": {"field":"parameters/parameter2","status":"verified"},
+    "diffusion [VST3 51]": {"field":"parameters/parameter3","status":"verified"},
+    "size [VST3 52]": {"field":"parameters/parameter4","status":"verified"},
+    "lowCut [VST3 53]": {"field":"parameters/parameter5","status":"verified"},
+    "highCut [VST3 54]": {"field":"parameters/parameter6","status":"verified"},
+    "modRate [VST3 55]": {"field":"parameters/parameter7","status":"verified"},
+    "modDepth [VST3 56]": {"field":"parameters/parameter8","status":"verified"},
+    "reverbMode [VST3 57]": {"field":"parameters/parameter9","status":"verified"},
+    "shiftMode [VST3 1567]": {"field":"parameters/parameter10","status":"verified"},
+    "colorMode [VST3 1568]": {"field":"parameters/parameter11","status":"verified"}
+  }
+}

@@ -975,6 +975,40 @@ fn a_plan_is_one_undo_block_and_its_changes_open_none_of_their_own() {
 }
 
 #[test]
+fn invalid_labels_are_refused_before_writes_and_old_control_labels_still_close() {
+    let lab = Lab::new();
+    let input = json!({"ref":KICK,"volumeDb":-3.0});
+    let preview = lab.call("change_preview", json!({"kind":"track-volume","input":input})).unwrap();
+    for label in ["Warm\0pad", "Warm\npad", "Warm\u{7f}pad"] {
+        assert_eq!(
+            lab.call("change_apply", json!({"kind":"track-volume","input":input,"fence":preview["fence"],"desc":label})).unwrap_err().0,
+            "bad-params"
+        );
+        assert_eq!(lab.call("undo_step_begin", json!({"label":label})).unwrap_err().0, "bad-params");
+        assert_eq!(state(|s| s.undo_depth), 0);
+    }
+    assert_eq!(lab.call("change_preview", json!({"kind":"project-notes","input":{"notes":"line\0two"}})).unwrap_err().0, "bad-params");
+    assert!(lab.call("change_preview", json!({"kind":"project-notes","input":{"notes":"line\ntwo"}})).is_ok());
+    let api = fake::api();
+    let reaper = Reaper::new(&api);
+    let proj = reaper.current_project().unwrap().ptr;
+    assert!(reaper.undo_begin(proj));
+    state(|s| s.undo_dirty = true);
+    assert!(reaper.undo_end(proj, "Warm\0pad\n\u{7f}", -1));
+    assert_eq!(state(|s| s.undo_depth), 0);
+    assert_eq!(reaper.undo_can_undo(proj).as_deref(), Some("Warm pad  "));
+    let id = lab.call("undo_step_begin", json!({"label":"old plan"})).unwrap();
+    lab.changes.plan.borrow_mut().as_mut().unwrap().label = "old\0plan\n\u{7f}".into();
+    state(|s| s.undo_dirty = true);
+    let closed = lab.call("undo_step_end", json!({"stepId":id["stepId"]})).unwrap();
+    assert_eq!(closed["desc"], "old plan  ");
+    assert_eq!(closed["entry"], true);
+    assert_eq!(reaper.undo_can_undo(proj).as_deref(), Some("old plan  "));
+    assert!(lab.changes.plan.borrow().is_none());
+    assert_eq!(state(|s| s.undo_depth), 0);
+}
+
+#[test]
 fn a_change_that_panics_inside_its_undo_block_leaves_no_block_open() {
     // The extension catches a panic per request; a block left open would swallow every later edit (review R15).
     let lab = Lab::new();
@@ -982,7 +1016,7 @@ fn a_change_that_panics_inside_its_undo_block_leaves_no_block_open() {
     let reaper = Reaper::new(&api);
     let ctx = lab.changes.context(&reaper, &lab.reads, &json!({"epoch": lab.reads.epoch()})).unwrap();
     let panicked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let _ = lab.changes.in_block::<super::Applied>(&ctx, "Kumi: boom (kpn01)", true, false, |_| panic!("a bug"));
+        let _ = lab.changes.in_block::<super::Applied>(&ctx, "Kumi: boom\0 (kpn01)", true, false, |_| panic!("a bug"));
     }));
     assert!(panicked.is_err());
     assert_eq!(state(|s| s.undo_depth), 0, "the block is ended");
@@ -2102,10 +2136,17 @@ fn a_plan_is_named_by_what_it_did_when_it_ends() {
     let ended = lab.call("undo_step_end", json!({"stepId": id, "label": "Kumi: Kick muted and 1 more (kplan)"})).unwrap();
     assert_eq!((ended["desc"].clone(), ended["entry"].clone()), (json!("Kumi: Kick muted and 1 more (kplan)"), json!(true)));
     assert_eq!(top().as_deref(), Some("Kumi: Kick muted and 1 more (kplan)"), "REAPER's undo menu says what the plan did");
-    // A label that isn't text is refused, and the step stays open to be ended.
-    let id = lab.call("undo_step_begin", json!({"label": "Kumi: Kumi (kplan)"})).unwrap()["stepId"].as_str().unwrap().to_string();
-    assert_eq!(lab.call("undo_step_end", json!({"stepId": id, "label": 7})).unwrap_err().0, "bad-params");
-    assert!(lab.call("undo_step_end", json!({"stepId": id})).is_ok());
+    // A malformed optional rename still closes under the label it began with.
+    for label in [json!(7), json!(""), json!("Warm\0pad"), json!("Warm\npad"), json!("Warm\u{7f}pad")] {
+        let id = lab.call("undo_step_begin", json!({"label": "Kumi: Kumi (kplan)"})).unwrap()["stepId"].clone();
+        state(|s| s.undo_dirty = true);
+        let ended = lab.call("undo_step_end", json!({"stepId": id, "label": label})).unwrap();
+        assert_eq!(ended["desc"], "Kumi: Kumi (kplan)");
+        assert_eq!(ended["entry"], true);
+        assert_eq!(state(|s| s.undo_depth), 0);
+        assert!(lab.changes.plan.borrow().is_none());
+        assert!(lab.call("undo_step_end", json!({"stepId": id})).is_err());
+    }
 }
 
 #[test]

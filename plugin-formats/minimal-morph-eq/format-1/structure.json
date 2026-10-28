@@ -1,0 +1,55 @@
+{
+  "plugin": "minimal-morph-eq",
+  "format": "format-1",
+  "about": "Minimal Audio full XML; parameters/<name> edits mapped_value in physical units. Numeric edits require the verified intervals below. Raw XML attributes are preserved read-only and not duplicated here. Individual endpoint reload evidence is in range-verification.json.",
+  "paths": "exact",
+  "files": {
+    "preset": {
+      "extension": ".xml",
+      "layers": [
+        "native XML"
+      ],
+      "constants": {
+        "root": "MorphEQ"
+      }
+    },
+    "state": {
+      "layers": [
+        "VST3 Comp chunk",
+        "optional VstW compatibility bank",
+        "VC2! + little-endian XML byte length + XML + NUL + preserved opaque JUCE private data"
+      ],
+      "constants": {
+        "xml_magic": "VC2!",
+        "root": "MorphEQ"
+      }
+    }
+  },
+  "opaque": [
+    "state"
+  ],
+  "fields": {
+    "": {"type":"map","in":["state","preset"],"status":"guessed"},
+    "root": {"type":"text","in":["state","preset"],"status":"guessed"},
+    "parameters": {"type":"map","in":["state","preset"],"status":"guessed"},
+    "parameters/MKUMorphEQNode_Main_InputGain": {"type":"float","status":"guessed","default":0.0,"range":[-60.0,12.0],"range_status":"verified"},
+    "parameters/MKUMorphEQNode_Main_OutputGain": {"type":"float","status":"guessed","default":0.0,"range":[-60.0,12.0],"range_status":"verified"},
+    "parameters/MKUMorphEQNode_Main_WetDry": {"type":"float","status":"guessed","default":1.0,"range":[0.0,1.0],"range_status":"verified"},
+    "parameters/MKUMorphEQNode_Main_Morph": {"type":"float","status":"guessed","default":0.0,"range":[0.0,1.0],"range_status":"verified"},
+    "parameters/MKUMorphEQNode_Main_Offset": {"type":"float","status":"guessed","default":0.0,"range":[-0.5,0.5],"range_status":"verified"},
+    "parameters/MKUMorphEQNode_Main_Pinch": {"type":"float","status":"guessed","default":0.0,"range":[-1.0,1.0],"range_status":"verified"},
+    "parameters/MKUMorphEQNode_Main_Spread": {"type":"float","status":"guessed","default":0.0,"range":[-1.0,1.0],"range_status":"verified"},
+    "parameters/MKUMorphEQNode_Main_Scale": {"type":"float","status":"guessed","default":1.0,"range":[-2.0,2.0],"range_status":"verified"},
+    "state": {"type":"map","in":["state","preset"],"status":"guessed"}
+  },
+  "parameters": {
+    "Input [VST3 437048003]": {"field":"parameters/MKUMorphEQNode_Main_InputGain","status":"verified"},
+    "Output [VST3 172870406]": {"field":"parameters/MKUMorphEQNode_Main_OutputGain","status":"verified"},
+    "Dry Wet [VST3 34897483]": {"field":"parameters/MKUMorphEQNode_Main_WetDry","status":"verified"},
+    "Morph [VST3 684924514]": {"field":"parameters/MKUMorphEQNode_Main_Morph","status":"verified"},
+    "Shift [VST3 1953899129]": {"field":"parameters/MKUMorphEQNode_Main_Offset","status":"verified"},
+    "Pinch [VST3 687512084]": {"field":"parameters/MKUMorphEQNode_Main_Pinch","status":"verified"},
+    "Spread [VST3 2077994841]": {"field":"parameters/MKUMorphEQNode_Main_Spread","status":"verified"},
+    "Scale [VST3 690091684]": {"field":"parameters/MKUMorphEQNode_Main_Scale","status":"verified"}
+  }
+}

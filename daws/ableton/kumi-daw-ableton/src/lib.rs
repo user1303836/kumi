@@ -43,6 +43,7 @@ pub mod notes;
 pub mod observation;
 pub mod options;
 pub mod parameters;
+pub mod plugin_presets;
 pub use options::AbletonOptions;
 pub mod plan_execution;
 pub mod plan_stream;

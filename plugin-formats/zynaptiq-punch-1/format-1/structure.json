@@ -1,0 +1,1985 @@
+{
+  "plugin": "zynaptiq-punch-1",
+  "format": "format-1",
+  "about": "Zynaptiq Preset XML version 3 or 4. inputParams count and pN attributes hold scalar values. VST3 component state (verified on PUNCH 1 and UNMIX DRUMS) uses a u32 little-endian XML length including a terminating NUL, then the XML and NUL.",
+  "paths": "exact",
+  "files": {
+    "preset": {
+      "extension": ".preset",
+      "layers": [
+        "UTF-8 XML Preset; inputParams attributes p0 through p<count-1>; preserve all other elements"
+      ],
+      "constants": {}
+    },
+    "state": {
+      "layers": [
+        "u32 LE byte count including NUL; XML Preset; NUL"
+      ],
+      "constants": {}
+    }
+  },
+  "survey": {
+    "files": 27,
+    "parameterCounts": [
+      76
+    ],
+    "presetVersions": [
+      "4"
+    ],
+    "source": "Installed native preset files and shipped parameter-name metadata; no factory preset bodies copied."
+  },
+  "fields": {
+    "@progName": {
+      "type": "text",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "status": "guessed"
+    },
+    "inputParams/@p0": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "default": 0.0,
+      "about": "Bypass. Range and discrete steps from the public VST3 parameter domain. An isolated host-control change confirmed the field, and separate component-state restores confirmed both endpoints.",
+      "unit": "",
+      "range": [
+        0.0,
+        1.0
+      ],
+      "range_status": "verified",
+      "step": 1.0
+    },
+    "inputParams/@p1": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "default": 0.0,
+      "about": "DOUBLE PRECISION. Range and discrete steps from the public VST3 parameter domain. An isolated host-control change confirmed the field, and separate component-state restores confirmed both endpoints.",
+      "unit": "",
+      "range": [
+        0.0,
+        1.0
+      ],
+      "range_status": "verified",
+      "step": 1.0
+    },
+    "inputParams/@p2": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "verified",
+      "default": 0.24,
+      "about": "PUNCH. Range and discrete steps from the public VST3 parameter domain. An isolated host-control change confirmed the field, and separate component-state restores confirmed both endpoints.",
+      "unit": "",
+      "range": [
+        0.0,
+        1.0
+      ],
+      "range_status": "verified"
+    },
+    "inputParams/@p3": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.1875,
+        1.0
+      ],
+      "status": "verified",
+      "default": 0.359375,
+      "about": "RELEASE. Range and discrete steps from the public VST3 parameter domain. An isolated host-control change confirmed the field, and separate component-state restores confirmed both endpoints.",
+      "unit": "",
+      "range": [
+        0.0,
+        1.0
+      ],
+      "range_status": "verified"
+    },
+    "inputParams/@p4": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -12.0,
+        1.5
+      ],
+      "status": "verified",
+      "default": -2.25,
+      "about": "GAIN. Range and discrete steps from the public VST3 parameter domain. An isolated host-control change confirmed the field, and separate component-state restores confirmed both endpoints.",
+      "unit": "",
+      "range": [
+        -12.0,
+        12.0
+      ],
+      "range_status": "verified"
+    },
+    "inputParams/@p5": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "verified",
+      "default": 0.0,
+      "about": "OUTPUT MODE. Range and discrete steps from the public VST3 parameter domain. An isolated host-control change confirmed the field, and separate component-state restores confirmed both endpoints.",
+      "unit": "",
+      "range": [
+        0.0,
+        1.0
+      ],
+      "range_status": "verified",
+      "step": 1.0
+    },
+    "inputParams/@p6": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "verified",
+      "default": 0.0,
+      "about": "BIAS MODE. Range and discrete steps from the public VST3 parameter domain. An isolated host-control change confirmed the field, and separate component-state restores confirmed both endpoints.",
+      "unit": "",
+      "range": [
+        0.0,
+        1.0
+      ],
+      "range_status": "verified",
+      "step": 1.0
+    },
+    "inputParams/@p7": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        7.0
+      ],
+      "status": "verified",
+      "default": 1.0,
+      "about": "BIAS CURVE PRESET. Range and discrete steps from the public VST3 parameter domain. An isolated host-control change confirmed the field, and separate component-state restores confirmed both endpoints.",
+      "unit": "",
+      "range": [
+        0.0,
+        6.0
+      ],
+      "range_status": "verified",
+      "step": 1.0
+    },
+    "inputParams/@p8": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -1.0,
+        1.0
+      ],
+      "status": "verified",
+      "default": -0.0,
+      "about": "BIAS 1. Range and discrete steps from the public VST3 parameter domain. An isolated host-control change confirmed the field, and separate component-state restores confirmed both endpoints.",
+      "unit": "",
+      "range": [
+        -1.0,
+        1.0
+      ],
+      "range_status": "verified"
+    },
+    "inputParams/@p9": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -1.0,
+        0.4099999999999999
+      ],
+      "status": "verified",
+      "default": 0.0,
+      "about": "BIAS 2. Range and discrete steps from the public VST3 parameter domain. An isolated host-control change confirmed the field, and separate component-state restores confirmed both endpoints.",
+      "unit": "",
+      "range": [
+        -1.0,
+        1.0
+      ],
+      "range_status": "verified"
+    },
+    "inputParams/@p10": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -1.0,
+        0.29000000000000004
+      ],
+      "status": "verified",
+      "default": -0.0,
+      "about": "BIAS 3. Range and discrete steps from the public VST3 parameter domain. An isolated host-control change confirmed the field, and separate component-state restores confirmed both endpoints.",
+      "unit": "",
+      "range": [
+        -1.0,
+        1.0
+      ],
+      "range_status": "verified"
+    },
+    "inputParams/@p11": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -1.0,
+        0.56
+      ],
+      "status": "verified",
+      "default": -0.0,
+      "about": "BIAS 4. Range and discrete steps from the public VST3 parameter domain. An isolated host-control change confirmed the field, and separate component-state restores confirmed both endpoints.",
+      "unit": "",
+      "range": [
+        -1.0,
+        1.0
+      ],
+      "range_status": "verified"
+    },
+    "inputParams/@p12": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -1.0,
+        1.0
+      ],
+      "status": "verified",
+      "default": 0.0,
+      "about": "BIAS 5. Range and discrete steps from the public VST3 parameter domain. An isolated host-control change confirmed the field, and separate component-state restores confirmed both endpoints.",
+      "unit": "",
+      "range": [
+        -1.0,
+        1.0
+      ],
+      "range_status": "verified"
+    },
+    "inputParams/@p13": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "verified",
+      "default": 0.0,
+      "about": "BIAS 6. Range and discrete steps from the public VST3 parameter domain. An isolated host-control change confirmed the field, and separate component-state restores confirmed both endpoints.",
+      "unit": "",
+      "range": [
+        -1.0,
+        1.0
+      ],
+      "range_status": "verified"
+    },
+    "inputParams/@p14": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -0.22999999999999998,
+        1.0
+      ],
+      "status": "verified",
+      "default": 0.0,
+      "about": "BIAS 7. Range and discrete steps from the public VST3 parameter domain. An isolated host-control change confirmed the field, and separate component-state restores confirmed both endpoints.",
+      "unit": "",
+      "range": [
+        -1.0,
+        1.0
+      ],
+      "range_status": "verified"
+    },
+    "inputParams/@p15": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -1.0,
+        1.0
+      ],
+      "status": "verified",
+      "default": 0.0,
+      "about": "BIAS 8. Range and discrete steps from the public VST3 parameter domain. An isolated host-control change confirmed the field, and separate component-state restores confirmed both endpoints.",
+      "unit": "",
+      "range": [
+        -1.0,
+        1.0
+      ],
+      "range_status": "verified"
+    },
+    "inputParams/@p16": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "default": 0.0,
+      "about": "BIAS BAND SOLO. Range and discrete steps from the public VST3 parameter domain. An isolated host-control change confirmed the field, and separate component-state restores confirmed both endpoints.",
+      "unit": "",
+      "range": [
+        0.0,
+        1.0
+      ],
+      "range_status": "verified",
+      "step": 1.0
+    },
+    "inputParams/@p17": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -1.0,
+        -1.0
+      ],
+      "status": "verified",
+      "default": -1.0,
+      "about": "SOLOED BIAS BAND. Range and discrete steps from the public VST3 parameter domain. An isolated host-control change confirmed the field, and separate component-state restores confirmed both endpoints.",
+      "unit": "",
+      "range": [
+        0.0,
+        8.0
+      ],
+      "range_status": "verified",
+      "step": 1.0
+    },
+    "inputParams/@p18": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "verified",
+      "default": 0.3400000000000001,
+      "about": "BIAS. Range and discrete steps from the public VST3 parameter domain. An isolated host-control change confirmed the field, and separate component-state restores confirmed both endpoints.",
+      "unit": "",
+      "range": [
+        -1.0,
+        1.0
+      ],
+      "range_status": "verified"
+    },
+    "inputParams/@p19": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "verified",
+      "default": 0.0,
+      "about": "PUNCH TYPE. Range and discrete steps from the public VST3 parameter domain. An isolated host-control change confirmed the field, and separate component-state restores confirmed both endpoints.",
+      "unit": "",
+      "range": [
+        0.0,
+        1.0
+      ],
+      "range_status": "verified",
+      "step": 1.0
+    },
+    "inputParams/@p20": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "default": 0.0,
+      "about": "SUB BASS GAIN. Range and discrete steps from the public VST3 parameter domain. An isolated host-control change confirmed the field, and separate component-state restores confirmed both endpoints.",
+      "unit": "",
+      "range": [
+        0.0,
+        12.0
+      ],
+      "range_status": "verified"
+    },
+    "inputParams/@p21": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "default": 0.0,
+      "about": "AIR BAND GAIN. Range and discrete steps from the public VST3 parameter domain. An isolated host-control change confirmed the field, and separate component-state restores confirmed both endpoints.",
+      "unit": "",
+      "range": [
+        0.0,
+        12.0
+      ],
+      "range_status": "verified"
+    },
+    "inputParams/@p22": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "default": 0.0,
+      "about": "COMPENSATION GAIN. Range and discrete steps from the public VST3 parameter domain. An isolated host-control change confirmed the field, and separate component-state restores confirmed both endpoints.",
+      "unit": "",
+      "range": [
+        -12.0,
+        12.0
+      ],
+      "range_status": "verified"
+    },
+    "inputParams/@p23": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "default": 0.0,
+      "about": "COMP GAIN ON. Range and discrete steps from the public VST3 parameter domain. An isolated host-control change confirmed the field, and separate component-state restores confirmed both endpoints.",
+      "unit": "",
+      "range": [
+        0.0,
+        1.0
+      ],
+      "range_status": "verified",
+      "step": 1.0
+    },
+    "inputParams/@p24": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "default": 0.0,
+      "about": ". Range and discrete steps from the public VST3 parameter domain. An isolated host-control change confirmed the field, and separate component-state restores confirmed both endpoints.",
+      "unit": "",
+      "range": [
+        -1.0,
+        1.0
+      ],
+      "range_status": "verified"
+    },
+    "inputParams/@p25": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "default": 0.0,
+      "about": ". Range and discrete steps from the public VST3 parameter domain. An isolated host-control change confirmed the field, and separate component-state restores confirmed both endpoints.",
+      "unit": "",
+      "range": [
+        -1.0,
+        1.0
+      ],
+      "range_status": "verified"
+    },
+    "inputParams/@p26": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "default": 0.0,
+      "about": ". Range and discrete steps from the public VST3 parameter domain. An isolated host-control change confirmed the field, and separate component-state restores confirmed both endpoints.",
+      "unit": "",
+      "range": [
+        -1.0,
+        1.0
+      ],
+      "range_status": "verified"
+    },
+    "inputParams/@p27": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "default": 0.0,
+      "about": ". Range and discrete steps from the public VST3 parameter domain. An isolated host-control change confirmed the field, and separate component-state restores confirmed both endpoints.",
+      "unit": "",
+      "range": [
+        -1.0,
+        1.0
+      ],
+      "range_status": "verified"
+    },
+    "inputParams/@p28": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        1.0,
+        1.0
+      ],
+      "status": "verified",
+      "default": 1.0,
+      "about": "CHANNEL 01 FX ON. Range and discrete steps from the public VST3 parameter domain. An isolated host-control change confirmed the field, and separate component-state restores confirmed both endpoints.",
+      "unit": "",
+      "range": [
+        0.0,
+        1.0
+      ],
+      "range_status": "verified",
+      "step": 1.0
+    },
+    "inputParams/@p29": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "default": 0.0,
+      "about": "CHANNEL 01 MUTE. Range and discrete steps from the public VST3 parameter domain. An isolated host-control change confirmed the field, and separate component-state restores confirmed both endpoints.",
+      "unit": "",
+      "range": [
+        0.0,
+        1.0
+      ],
+      "range_status": "verified",
+      "step": 1.0
+    },
+    "inputParams/@p30": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "default": 0.0,
+      "about": "CHANNEL 01 SOLO. Range and discrete steps from the public VST3 parameter domain. An isolated host-control change confirmed the field, and separate component-state restores confirmed both endpoints.",
+      "unit": "",
+      "range": [
+        0.0,
+        1.0
+      ],
+      "range_status": "verified",
+      "step": 1.0
+    },
+    "inputParams/@p31": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        1.0,
+        1.0
+      ],
+      "status": "verified",
+      "default": 1.0,
+      "about": "CHANNEL 02 FX ON. Range and discrete steps from the public VST3 parameter domain. An isolated host-control change confirmed the field, and separate component-state restores confirmed both endpoints.",
+      "unit": "",
+      "range": [
+        0.0,
+        1.0
+      ],
+      "range_status": "verified",
+      "step": 1.0
+    },
+    "inputParams/@p32": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "default": 0.0,
+      "about": "CHANNEL 02 MUTE. Range and discrete steps from the public VST3 parameter domain. An isolated host-control change confirmed the field, and separate component-state restores confirmed both endpoints.",
+      "unit": "",
+      "range": [
+        0.0,
+        1.0
+      ],
+      "range_status": "verified",
+      "step": 1.0
+    },
+    "inputParams/@p33": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "default": 0.0,
+      "about": "CHANNEL 02 SOLO. Range and discrete steps from the public VST3 parameter domain. An isolated host-control change confirmed the field, and separate component-state restores confirmed both endpoints.",
+      "unit": "",
+      "range": [
+        0.0,
+        1.0
+      ],
+      "range_status": "verified",
+      "step": 1.0
+    },
+    "inputParams/@p34": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        1.0,
+        1.0
+      ],
+      "status": "verified",
+      "default": 1.0,
+      "about": "CHANNEL 03 FX ON. Range and discrete steps from the public VST3 parameter domain. An isolated host-control change confirmed the field, and separate component-state restores confirmed both endpoints.",
+      "unit": "",
+      "range": [
+        0.0,
+        1.0
+      ],
+      "range_status": "verified",
+      "step": 1.0
+    },
+    "inputParams/@p35": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "default": 0.0,
+      "about": "CHANNEL 03 MUTE. Range and discrete steps from the public VST3 parameter domain. An isolated host-control change confirmed the field, and separate component-state restores confirmed both endpoints.",
+      "unit": "",
+      "range": [
+        0.0,
+        1.0
+      ],
+      "range_status": "verified",
+      "step": 1.0
+    },
+    "inputParams/@p36": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "default": 0.0,
+      "about": "CHANNEL 03 SOLO. Range and discrete steps from the public VST3 parameter domain. An isolated host-control change confirmed the field, and separate component-state restores confirmed both endpoints.",
+      "unit": "",
+      "range": [
+        0.0,
+        1.0
+      ],
+      "range_status": "verified",
+      "step": 1.0
+    },
+    "inputParams/@p37": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        1.0,
+        1.0
+      ],
+      "status": "verified",
+      "default": 1.0,
+      "about": "CHANNEL 04 FX ON. Range and discrete steps from the public VST3 parameter domain. An isolated host-control change confirmed the field, and separate component-state restores confirmed both endpoints.",
+      "unit": "",
+      "range": [
+        0.0,
+        1.0
+      ],
+      "range_status": "verified",
+      "step": 1.0
+    },
+    "inputParams/@p38": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "default": 0.0,
+      "about": "CHANNEL 04 MUTE. Range and discrete steps from the public VST3 parameter domain. An isolated host-control change confirmed the field, and separate component-state restores confirmed both endpoints.",
+      "unit": "",
+      "range": [
+        0.0,
+        1.0
+      ],
+      "range_status": "verified",
+      "step": 1.0
+    },
+    "inputParams/@p39": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "default": 0.0,
+      "about": "CHANNEL 04 SOLO. Range and discrete steps from the public VST3 parameter domain. An isolated host-control change confirmed the field, and separate component-state restores confirmed both endpoints.",
+      "unit": "",
+      "range": [
+        0.0,
+        1.0
+      ],
+      "range_status": "verified",
+      "step": 1.0
+    },
+    "inputParams/@p40": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        1.0,
+        1.0
+      ],
+      "status": "verified",
+      "default": 1.0,
+      "about": "CHANNEL 05 FX ON. Range and discrete steps from the public VST3 parameter domain. An isolated host-control change confirmed the field, and separate component-state restores confirmed both endpoints.",
+      "unit": "",
+      "range": [
+        0.0,
+        1.0
+      ],
+      "range_status": "verified",
+      "step": 1.0
+    },
+    "inputParams/@p41": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "default": 0.0,
+      "about": "CHANNEL 05 MUTE. Range and discrete steps from the public VST3 parameter domain. An isolated host-control change confirmed the field, and separate component-state restores confirmed both endpoints.",
+      "unit": "",
+      "range": [
+        0.0,
+        1.0
+      ],
+      "range_status": "verified",
+      "step": 1.0
+    },
+    "inputParams/@p42": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "default": 0.0,
+      "about": "CHANNEL 05 SOLO. Range and discrete steps from the public VST3 parameter domain. An isolated host-control change confirmed the field, and separate component-state restores confirmed both endpoints.",
+      "unit": "",
+      "range": [
+        0.0,
+        1.0
+      ],
+      "range_status": "verified",
+      "step": 1.0
+    },
+    "inputParams/@p43": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        1.0,
+        1.0
+      ],
+      "status": "verified",
+      "default": 1.0,
+      "about": "CHANNEL 06 FX ON. Range and discrete steps from the public VST3 parameter domain. An isolated host-control change confirmed the field, and separate component-state restores confirmed both endpoints.",
+      "unit": "",
+      "range": [
+        0.0,
+        1.0
+      ],
+      "range_status": "verified",
+      "step": 1.0
+    },
+    "inputParams/@p44": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "default": 0.0,
+      "about": "CHANNEL 06 MUTE. Range and discrete steps from the public VST3 parameter domain. An isolated host-control change confirmed the field, and separate component-state restores confirmed both endpoints.",
+      "unit": "",
+      "range": [
+        0.0,
+        1.0
+      ],
+      "range_status": "verified",
+      "step": 1.0
+    },
+    "inputParams/@p45": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "default": 0.0,
+      "about": "CHANNEL 06 SOLO. Range and discrete steps from the public VST3 parameter domain. An isolated host-control change confirmed the field, and separate component-state restores confirmed both endpoints.",
+      "unit": "",
+      "range": [
+        0.0,
+        1.0
+      ],
+      "range_status": "verified",
+      "step": 1.0
+    },
+    "inputParams/@p46": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        1.0,
+        1.0
+      ],
+      "status": "verified",
+      "default": 1.0,
+      "about": "CHANNEL 07 FX ON. Range and discrete steps from the public VST3 parameter domain. An isolated host-control change confirmed the field, and separate component-state restores confirmed both endpoints.",
+      "unit": "",
+      "range": [
+        0.0,
+        1.0
+      ],
+      "range_status": "verified",
+      "step": 1.0
+    },
+    "inputParams/@p47": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "default": 0.0,
+      "about": "CHANNEL 07 MUTE. Range and discrete steps from the public VST3 parameter domain. An isolated host-control change confirmed the field, and separate component-state restores confirmed both endpoints.",
+      "unit": "",
+      "range": [
+        0.0,
+        1.0
+      ],
+      "range_status": "verified",
+      "step": 1.0
+    },
+    "inputParams/@p48": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "default": 0.0,
+      "about": "CHANNEL 07 SOLO. Range and discrete steps from the public VST3 parameter domain. An isolated host-control change confirmed the field, and separate component-state restores confirmed both endpoints.",
+      "unit": "",
+      "range": [
+        0.0,
+        1.0
+      ],
+      "range_status": "verified",
+      "step": 1.0
+    },
+    "inputParams/@p49": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        1.0,
+        1.0
+      ],
+      "status": "verified",
+      "default": 1.0,
+      "about": "CHANNEL 08 FX ON. Range and discrete steps from the public VST3 parameter domain. An isolated host-control change confirmed the field, and separate component-state restores confirmed both endpoints.",
+      "unit": "",
+      "range": [
+        0.0,
+        1.0
+      ],
+      "range_status": "verified",
+      "step": 1.0
+    },
+    "inputParams/@p50": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "default": 0.0,
+      "about": "CHANNEL 08 MUTE. Range and discrete steps from the public VST3 parameter domain. An isolated host-control change confirmed the field, and separate component-state restores confirmed both endpoints.",
+      "unit": "",
+      "range": [
+        0.0,
+        1.0
+      ],
+      "range_status": "verified",
+      "step": 1.0
+    },
+    "inputParams/@p51": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "default": 0.0,
+      "about": "CHANNEL 08 SOLO. Range and discrete steps from the public VST3 parameter domain. An isolated host-control change confirmed the field, and separate component-state restores confirmed both endpoints.",
+      "unit": "",
+      "range": [
+        0.0,
+        1.0
+      ],
+      "range_status": "verified",
+      "step": 1.0
+    },
+    "inputParams/@p52": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        1.0,
+        1.0
+      ],
+      "status": "verified",
+      "default": 1.0,
+      "about": "CHANNEL 09 FX ON. Range and discrete steps from the public VST3 parameter domain. An isolated host-control change confirmed the field, and separate component-state restores confirmed both endpoints.",
+      "unit": "",
+      "range": [
+        0.0,
+        1.0
+      ],
+      "range_status": "verified",
+      "step": 1.0
+    },
+    "inputParams/@p53": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "default": 0.0,
+      "about": "CHANNEL 09 MUTE. Range and discrete steps from the public VST3 parameter domain. An isolated host-control change confirmed the field, and separate component-state restores confirmed both endpoints.",
+      "unit": "",
+      "range": [
+        0.0,
+        1.0
+      ],
+      "range_status": "verified",
+      "step": 1.0
+    },
+    "inputParams/@p54": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "default": 0.0,
+      "about": "CHANNEL 09 SOLO. Range and discrete steps from the public VST3 parameter domain. An isolated host-control change confirmed the field, and separate component-state restores confirmed both endpoints.",
+      "unit": "",
+      "range": [
+        0.0,
+        1.0
+      ],
+      "range_status": "verified",
+      "step": 1.0
+    },
+    "inputParams/@p55": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        1.0,
+        1.0
+      ],
+      "status": "verified",
+      "default": 1.0,
+      "about": "CHANNEL 10 FX ON. Range and discrete steps from the public VST3 parameter domain. An isolated host-control change confirmed the field, and separate component-state restores confirmed both endpoints.",
+      "unit": "",
+      "range": [
+        0.0,
+        1.0
+      ],
+      "range_status": "verified",
+      "step": 1.0
+    },
+    "inputParams/@p56": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "default": 0.0,
+      "about": "CHANNEL 10 MUTE. Range and discrete steps from the public VST3 parameter domain. An isolated host-control change confirmed the field, and separate component-state restores confirmed both endpoints.",
+      "unit": "",
+      "range": [
+        0.0,
+        1.0
+      ],
+      "range_status": "verified",
+      "step": 1.0
+    },
+    "inputParams/@p57": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "default": 0.0,
+      "about": "CHANNEL 10 SOLO. Range and discrete steps from the public VST3 parameter domain. An isolated host-control change confirmed the field, and separate component-state restores confirmed both endpoints.",
+      "unit": "",
+      "range": [
+        0.0,
+        1.0
+      ],
+      "range_status": "verified",
+      "step": 1.0
+    },
+    "inputParams/@p58": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        1.0,
+        1.0
+      ],
+      "status": "verified",
+      "default": 1.0,
+      "about": "CHANNEL 11 FX ON. Range and discrete steps from the public VST3 parameter domain. An isolated host-control change confirmed the field, and separate component-state restores confirmed both endpoints.",
+      "unit": "",
+      "range": [
+        0.0,
+        1.0
+      ],
+      "range_status": "verified",
+      "step": 1.0
+    },
+    "inputParams/@p59": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "default": 0.0,
+      "about": "CHANNEL 11 MUTE. Range and discrete steps from the public VST3 parameter domain. An isolated host-control change confirmed the field, and separate component-state restores confirmed both endpoints.",
+      "unit": "",
+      "range": [
+        0.0,
+        1.0
+      ],
+      "range_status": "verified",
+      "step": 1.0
+    },
+    "inputParams/@p60": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "default": 0.0,
+      "about": "CHANNEL 11 SOLO. Range and discrete steps from the public VST3 parameter domain. An isolated host-control change confirmed the field, and separate component-state restores confirmed both endpoints.",
+      "unit": "",
+      "range": [
+        0.0,
+        1.0
+      ],
+      "range_status": "verified",
+      "step": 1.0
+    },
+    "inputParams/@p61": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        1.0,
+        1.0
+      ],
+      "status": "verified",
+      "default": 1.0,
+      "about": "CHANNEL 12 FX ON. Range and discrete steps from the public VST3 parameter domain. An isolated host-control change confirmed the field, and separate component-state restores confirmed both endpoints.",
+      "unit": "",
+      "range": [
+        0.0,
+        1.0
+      ],
+      "range_status": "verified",
+      "step": 1.0
+    },
+    "inputParams/@p62": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "default": 0.0,
+      "about": "CHANNEL 12 MUTE. Range and discrete steps from the public VST3 parameter domain. An isolated host-control change confirmed the field, and separate component-state restores confirmed both endpoints.",
+      "unit": "",
+      "range": [
+        0.0,
+        1.0
+      ],
+      "range_status": "verified",
+      "step": 1.0
+    },
+    "inputParams/@p63": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "default": 0.0,
+      "about": "CHANNEL 12 SOLO. Range and discrete steps from the public VST3 parameter domain. An isolated host-control change confirmed the field, and separate component-state restores confirmed both endpoints.",
+      "unit": "",
+      "range": [
+        0.0,
+        1.0
+      ],
+      "range_status": "verified",
+      "step": 1.0
+    },
+    "inputParams/@p64": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        1.0,
+        1.0
+      ],
+      "status": "verified",
+      "default": 1.0,
+      "about": "CHANNEL 13 FX ON. Range and discrete steps from the public VST3 parameter domain. An isolated host-control change confirmed the field, and separate component-state restores confirmed both endpoints.",
+      "unit": "",
+      "range": [
+        0.0,
+        1.0
+      ],
+      "range_status": "verified",
+      "step": 1.0
+    },
+    "inputParams/@p65": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "default": 0.0,
+      "about": "CHANNEL 13 MUTE. Range and discrete steps from the public VST3 parameter domain. An isolated host-control change confirmed the field, and separate component-state restores confirmed both endpoints.",
+      "unit": "",
+      "range": [
+        0.0,
+        1.0
+      ],
+      "range_status": "verified",
+      "step": 1.0
+    },
+    "inputParams/@p66": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "default": 0.0,
+      "about": "CHANNEL 13 SOLO. Range and discrete steps from the public VST3 parameter domain. An isolated host-control change confirmed the field, and separate component-state restores confirmed both endpoints.",
+      "unit": "",
+      "range": [
+        0.0,
+        1.0
+      ],
+      "range_status": "verified",
+      "step": 1.0
+    },
+    "inputParams/@p67": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        1.0,
+        1.0
+      ],
+      "status": "verified",
+      "default": 1.0,
+      "about": "CHANNEL 14 FX ON. Range and discrete steps from the public VST3 parameter domain. An isolated host-control change confirmed the field, and separate component-state restores confirmed both endpoints.",
+      "unit": "",
+      "range": [
+        0.0,
+        1.0
+      ],
+      "range_status": "verified",
+      "step": 1.0
+    },
+    "inputParams/@p68": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "default": 0.0,
+      "about": "CHANNEL 14 MUTE. Range and discrete steps from the public VST3 parameter domain. An isolated host-control change confirmed the field, and separate component-state restores confirmed both endpoints.",
+      "unit": "",
+      "range": [
+        0.0,
+        1.0
+      ],
+      "range_status": "verified",
+      "step": 1.0
+    },
+    "inputParams/@p69": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "default": 0.0,
+      "about": "CHANNEL 14 SOLO. Range and discrete steps from the public VST3 parameter domain. An isolated host-control change confirmed the field, and separate component-state restores confirmed both endpoints.",
+      "unit": "",
+      "range": [
+        0.0,
+        1.0
+      ],
+      "range_status": "verified",
+      "step": 1.0
+    },
+    "inputParams/@p70": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        1.0,
+        1.0
+      ],
+      "status": "verified",
+      "default": 1.0,
+      "about": "CHANNEL 15 FX ON. Range and discrete steps from the public VST3 parameter domain. An isolated host-control change confirmed the field, and separate component-state restores confirmed both endpoints.",
+      "unit": "",
+      "range": [
+        0.0,
+        1.0
+      ],
+      "range_status": "verified",
+      "step": 1.0
+    },
+    "inputParams/@p71": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "default": 0.0,
+      "about": "CHANNEL 15 MUTE. Range and discrete steps from the public VST3 parameter domain. An isolated host-control change confirmed the field, and separate component-state restores confirmed both endpoints.",
+      "unit": "",
+      "range": [
+        0.0,
+        1.0
+      ],
+      "range_status": "verified",
+      "step": 1.0
+    },
+    "inputParams/@p72": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "default": 0.0,
+      "about": "CHANNEL 15 SOLO. Range and discrete steps from the public VST3 parameter domain. An isolated host-control change confirmed the field, and separate component-state restores confirmed both endpoints.",
+      "unit": "",
+      "range": [
+        0.0,
+        1.0
+      ],
+      "range_status": "verified",
+      "step": 1.0
+    },
+    "inputParams/@p73": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        1.0,
+        1.0
+      ],
+      "status": "verified",
+      "default": 1.0,
+      "about": "CHANNEL 16 FX ON. Range and discrete steps from the public VST3 parameter domain. An isolated host-control change confirmed the field, and separate component-state restores confirmed both endpoints.",
+      "unit": "",
+      "range": [
+        0.0,
+        1.0
+      ],
+      "range_status": "verified",
+      "step": 1.0
+    },
+    "inputParams/@p74": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "default": 0.0,
+      "about": "CHANNEL 16 MUTE. Range and discrete steps from the public VST3 parameter domain. An isolated host-control change confirmed the field, and separate component-state restores confirmed both endpoints.",
+      "unit": "",
+      "range": [
+        0.0,
+        1.0
+      ],
+      "range_status": "verified",
+      "step": 1.0
+    },
+    "inputParams/@p75": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "default": 0.0,
+      "about": "CHANNEL 16 SOLO. Range and discrete steps from the public VST3 parameter domain. An isolated host-control change confirmed the field, and separate component-state restores confirmed both endpoints.",
+      "unit": "",
+      "range": [
+        0.0,
+        1.0
+      ],
+      "range_status": "verified",
+      "step": 1.0
+    }
+  },
+  "parameters": {
+    "Bypass": {
+      "field": "inputParams/@p0",
+      "status": "verified",
+      "note": "One host parameter changed; the serialized field matched its public plain-value conversion."
+    },
+    "DOUBLE PRECISION": {
+      "field": "inputParams/@p1",
+      "status": "verified",
+      "note": "One host parameter changed; the serialized field matched its public plain-value conversion."
+    },
+    "PUNCH": {
+      "field": "inputParams/@p2",
+      "status": "verified",
+      "note": "One host parameter changed; the serialized field matched its public plain-value conversion."
+    },
+    "RELEASE": {
+      "field": "inputParams/@p3",
+      "status": "verified",
+      "note": "One host parameter changed; the serialized field matched its public plain-value conversion."
+    },
+    "GAIN": {
+      "field": "inputParams/@p4",
+      "status": "verified",
+      "note": "One host parameter changed; the serialized field matched its public plain-value conversion."
+    },
+    "OUTPUT MODE": {
+      "field": "inputParams/@p5",
+      "status": "verified",
+      "note": "One host parameter changed; the serialized field matched its public plain-value conversion."
+    },
+    "BIAS MODE": {
+      "field": "inputParams/@p6",
+      "status": "verified",
+      "note": "One host parameter changed; the serialized field matched its public plain-value conversion."
+    },
+    "BIAS CURVE PRESET": {
+      "field": "inputParams/@p7",
+      "status": "verified",
+      "note": "One host parameter changed; the serialized field matched its public plain-value conversion."
+    },
+    "BIAS 1": {
+      "field": "inputParams/@p8",
+      "status": "verified",
+      "note": "One host parameter changed; the serialized field matched its public plain-value conversion."
+    },
+    "BIAS 2": {
+      "field": "inputParams/@p9",
+      "status": "verified",
+      "note": "One host parameter changed; the serialized field matched its public plain-value conversion."
+    },
+    "BIAS 3": {
+      "field": "inputParams/@p10",
+      "status": "verified",
+      "note": "One host parameter changed; the serialized field matched its public plain-value conversion."
+    },
+    "BIAS 4": {
+      "field": "inputParams/@p11",
+      "status": "verified",
+      "note": "One host parameter changed; the serialized field matched its public plain-value conversion."
+    },
+    "BIAS 5": {
+      "field": "inputParams/@p12",
+      "status": "verified",
+      "note": "One host parameter changed; the serialized field matched its public plain-value conversion."
+    },
+    "BIAS 6": {
+      "field": "inputParams/@p13",
+      "status": "verified",
+      "note": "One host parameter changed; the serialized field matched its public plain-value conversion."
+    },
+    "BIAS 7": {
+      "field": "inputParams/@p14",
+      "status": "verified",
+      "note": "One host parameter changed; the serialized field matched its public plain-value conversion."
+    },
+    "BIAS 8": {
+      "field": "inputParams/@p15",
+      "status": "verified",
+      "note": "One host parameter changed; the serialized field matched its public plain-value conversion."
+    },
+    "BIAS BAND SOLO": {
+      "field": "inputParams/@p16",
+      "status": "verified",
+      "note": "One host parameter changed; the serialized field matched its public plain-value conversion."
+    },
+    "SOLOED BIAS BAND": {
+      "field": "inputParams/@p17",
+      "status": "verified",
+      "note": "One host parameter changed; the serialized field matched its public plain-value conversion."
+    },
+    "BIAS": {
+      "field": "inputParams/@p18",
+      "status": "verified",
+      "note": "One host parameter changed; the serialized field matched its public plain-value conversion."
+    },
+    "PUNCH TYPE": {
+      "field": "inputParams/@p19",
+      "status": "verified",
+      "note": "One host parameter changed; the serialized field matched its public plain-value conversion."
+    },
+    "SUB BASS GAIN": {
+      "field": "inputParams/@p20",
+      "status": "verified",
+      "note": "One host parameter changed; the serialized field matched its public plain-value conversion."
+    },
+    "AIR BAND GAIN": {
+      "field": "inputParams/@p21",
+      "status": "verified",
+      "note": "One host parameter changed; the serialized field matched its public plain-value conversion."
+    },
+    "COMPENSATION GAIN": {
+      "field": "inputParams/@p22",
+      "status": "verified",
+      "note": "One host parameter changed; the serialized field matched its public plain-value conversion."
+    },
+    "COMP GAIN ON": {
+      "field": "inputParams/@p23",
+      "status": "verified",
+      "note": "One host parameter changed; the serialized field matched its public plain-value conversion."
+    },
+    "": {
+      "field": "inputParams/@p27",
+      "status": "verified",
+      "note": "One host parameter changed; the serialized field matched its public plain-value conversion."
+    },
+    "CHANNEL 01 FX ON": {
+      "field": "inputParams/@p28",
+      "status": "verified",
+      "note": "One host parameter changed; the serialized field matched its public plain-value conversion."
+    },
+    "CHANNEL 01 MUTE": {
+      "field": "inputParams/@p29",
+      "status": "verified",
+      "note": "One host parameter changed; the serialized field matched its public plain-value conversion."
+    },
+    "CHANNEL 01 SOLO": {
+      "field": "inputParams/@p30",
+      "status": "verified",
+      "note": "One host parameter changed; the serialized field matched its public plain-value conversion."
+    },
+    "CHANNEL 02 FX ON": {
+      "field": "inputParams/@p31",
+      "status": "verified",
+      "note": "One host parameter changed; the serialized field matched its public plain-value conversion."
+    },
+    "CHANNEL 02 MUTE": {
+      "field": "inputParams/@p32",
+      "status": "verified",
+      "note": "One host parameter changed; the serialized field matched its public plain-value conversion."
+    },
+    "CHANNEL 02 SOLO": {
+      "field": "inputParams/@p33",
+      "status": "verified",
+      "note": "One host parameter changed; the serialized field matched its public plain-value conversion."
+    },
+    "CHANNEL 03 FX ON": {
+      "field": "inputParams/@p34",
+      "status": "verified",
+      "note": "One host parameter changed; the serialized field matched its public plain-value conversion."
+    },
+    "CHANNEL 03 MUTE": {
+      "field": "inputParams/@p35",
+      "status": "verified",
+      "note": "One host parameter changed; the serialized field matched its public plain-value conversion."
+    },
+    "CHANNEL 03 SOLO": {
+      "field": "inputParams/@p36",
+      "status": "verified",
+      "note": "One host parameter changed; the serialized field matched its public plain-value conversion."
+    },
+    "CHANNEL 04 FX ON": {
+      "field": "inputParams/@p37",
+      "status": "verified",
+      "note": "One host parameter changed; the serialized field matched its public plain-value conversion."
+    },
+    "CHANNEL 04 MUTE": {
+      "field": "inputParams/@p38",
+      "status": "verified",
+      "note": "One host parameter changed; the serialized field matched its public plain-value conversion."
+    },
+    "CHANNEL 04 SOLO": {
+      "field": "inputParams/@p39",
+      "status": "verified",
+      "note": "One host parameter changed; the serialized field matched its public plain-value conversion."
+    },
+    "CHANNEL 05 FX ON": {
+      "field": "inputParams/@p40",
+      "status": "verified",
+      "note": "One host parameter changed; the serialized field matched its public plain-value conversion."
+    },
+    "CHANNEL 05 MUTE": {
+      "field": "inputParams/@p41",
+      "status": "verified",
+      "note": "One host parameter changed; the serialized field matched its public plain-value conversion."
+    },
+    "CHANNEL 05 SOLO": {
+      "field": "inputParams/@p42",
+      "status": "verified",
+      "note": "One host parameter changed; the serialized field matched its public plain-value conversion."
+    },
+    "CHANNEL 06 FX ON": {
+      "field": "inputParams/@p43",
+      "status": "verified",
+      "note": "One host parameter changed; the serialized field matched its public plain-value conversion."
+    },
+    "CHANNEL 06 MUTE": {
+      "field": "inputParams/@p44",
+      "status": "verified",
+      "note": "One host parameter changed; the serialized field matched its public plain-value conversion."
+    },
+    "CHANNEL 06 SOLO": {
+      "field": "inputParams/@p45",
+      "status": "verified",
+      "note": "One host parameter changed; the serialized field matched its public plain-value conversion."
+    },
+    "CHANNEL 07 FX ON": {
+      "field": "inputParams/@p46",
+      "status": "verified",
+      "note": "One host parameter changed; the serialized field matched its public plain-value conversion."
+    },
+    "CHANNEL 07 MUTE": {
+      "field": "inputParams/@p47",
+      "status": "verified",
+      "note": "One host parameter changed; the serialized field matched its public plain-value conversion."
+    },
+    "CHANNEL 07 SOLO": {
+      "field": "inputParams/@p48",
+      "status": "verified",
+      "note": "One host parameter changed; the serialized field matched its public plain-value conversion."
+    },
+    "CHANNEL 08 FX ON": {
+      "field": "inputParams/@p49",
+      "status": "verified",
+      "note": "One host parameter changed; the serialized field matched its public plain-value conversion."
+    },
+    "CHANNEL 08 MUTE": {
+      "field": "inputParams/@p50",
+      "status": "verified",
+      "note": "One host parameter changed; the serialized field matched its public plain-value conversion."
+    },
+    "CHANNEL 08 SOLO": {
+      "field": "inputParams/@p51",
+      "status": "verified",
+      "note": "One host parameter changed; the serialized field matched its public plain-value conversion."
+    },
+    "CHANNEL 09 FX ON": {
+      "field": "inputParams/@p52",
+      "status": "verified",
+      "note": "One host parameter changed; the serialized field matched its public plain-value conversion."
+    },
+    "CHANNEL 09 MUTE": {
+      "field": "inputParams/@p53",
+      "status": "verified",
+      "note": "One host parameter changed; the serialized field matched its public plain-value conversion."
+    },
+    "CHANNEL 09 SOLO": {
+      "field": "inputParams/@p54",
+      "status": "verified",
+      "note": "One host parameter changed; the serialized field matched its public plain-value conversion."
+    },
+    "CHANNEL 10 FX ON": {
+      "field": "inputParams/@p55",
+      "status": "verified",
+      "note": "One host parameter changed; the serialized field matched its public plain-value conversion."
+    },
+    "CHANNEL 10 MUTE": {
+      "field": "inputParams/@p56",
+      "status": "verified",
+      "note": "One host parameter changed; the serialized field matched its public plain-value conversion."
+    },
+    "CHANNEL 10 SOLO": {
+      "field": "inputParams/@p57",
+      "status": "verified",
+      "note": "One host parameter changed; the serialized field matched its public plain-value conversion."
+    },
+    "CHANNEL 11 FX ON": {
+      "field": "inputParams/@p58",
+      "status": "verified",
+      "note": "One host parameter changed; the serialized field matched its public plain-value conversion."
+    },
+    "CHANNEL 11 MUTE": {
+      "field": "inputParams/@p59",
+      "status": "verified",
+      "note": "One host parameter changed; the serialized field matched its public plain-value conversion."
+    },
+    "CHANNEL 11 SOLO": {
+      "field": "inputParams/@p60",
+      "status": "verified",
+      "note": "One host parameter changed; the serialized field matched its public plain-value conversion."
+    },
+    "CHANNEL 12 FX ON": {
+      "field": "inputParams/@p61",
+      "status": "verified",
+      "note": "One host parameter changed; the serialized field matched its public plain-value conversion."
+    },
+    "CHANNEL 12 MUTE": {
+      "field": "inputParams/@p62",
+      "status": "verified",
+      "note": "One host parameter changed; the serialized field matched its public plain-value conversion."
+    },
+    "CHANNEL 12 SOLO": {
+      "field": "inputParams/@p63",
+      "status": "verified",
+      "note": "One host parameter changed; the serialized field matched its public plain-value conversion."
+    },
+    "CHANNEL 13 FX ON": {
+      "field": "inputParams/@p64",
+      "status": "verified",
+      "note": "One host parameter changed; the serialized field matched its public plain-value conversion."
+    },
+    "CHANNEL 13 MUTE": {
+      "field": "inputParams/@p65",
+      "status": "verified",
+      "note": "One host parameter changed; the serialized field matched its public plain-value conversion."
+    },
+    "CHANNEL 13 SOLO": {
+      "field": "inputParams/@p66",
+      "status": "verified",
+      "note": "One host parameter changed; the serialized field matched its public plain-value conversion."
+    },
+    "CHANNEL 14 FX ON": {
+      "field": "inputParams/@p67",
+      "status": "verified",
+      "note": "One host parameter changed; the serialized field matched its public plain-value conversion."
+    },
+    "CHANNEL 14 MUTE": {
+      "field": "inputParams/@p68",
+      "status": "verified",
+      "note": "One host parameter changed; the serialized field matched its public plain-value conversion."
+    },
+    "CHANNEL 14 SOLO": {
+      "field": "inputParams/@p69",
+      "status": "verified",
+      "note": "One host parameter changed; the serialized field matched its public plain-value conversion."
+    },
+    "CHANNEL 15 FX ON": {
+      "field": "inputParams/@p70",
+      "status": "verified",
+      "note": "One host parameter changed; the serialized field matched its public plain-value conversion."
+    },
+    "CHANNEL 15 MUTE": {
+      "field": "inputParams/@p71",
+      "status": "verified",
+      "note": "One host parameter changed; the serialized field matched its public plain-value conversion."
+    },
+    "CHANNEL 15 SOLO": {
+      "field": "inputParams/@p72",
+      "status": "verified",
+      "note": "One host parameter changed; the serialized field matched its public plain-value conversion."
+    },
+    "CHANNEL 16 FX ON": {
+      "field": "inputParams/@p73",
+      "status": "verified",
+      "note": "One host parameter changed; the serialized field matched its public plain-value conversion."
+    },
+    "CHANNEL 16 MUTE": {
+      "field": "inputParams/@p74",
+      "status": "verified",
+      "note": "One host parameter changed; the serialized field matched its public plain-value conversion."
+    },
+    "CHANNEL 16 SOLO": {
+      "field": "inputParams/@p75",
+      "status": "verified",
+      "note": "One host parameter changed; the serialized field matched its public plain-value conversion."
+    }
+  }
+}

@@ -1,0 +1,418 @@
+{
+  "plugin": "zynaptiq-unfilter",
+  "format": "format-1",
+  "about": "Zynaptiq Preset XML version 3 or 4. inputParams count and pN attributes hold scalar values. VST3 component state (verified on PUNCH 1 and UNMIX DRUMS) uses a u32 little-endian XML length including a terminating NUL, then the XML and NUL.",
+  "paths": "exact",
+  "files": {
+    "preset": {
+      "extension": ".preset",
+      "layers": [
+        "UTF-8 XML Preset; inputParams attributes p0 through p<count-1>; preserve all other elements"
+      ],
+      "constants": {}
+    },
+    "state": {
+      "layers": [
+        "u32 LE byte count including NUL; XML Preset; NUL"
+      ],
+      "constants": {}
+    }
+  },
+  "survey": {
+    "files": 176,
+    "parameterCounts": [
+      24
+    ],
+    "presetVersions": [
+      "4"
+    ],
+    "source": "Installed native preset files and shipped parameter-name metadata; no factory preset bodies copied.",
+    "verification": "Native documents inspected; installed-binary version and runtime acceptance remain unverified.",
+    "parameterLinks": "Guessed links associate names and indices from installed metadata; physical-unit mappings remain unverified."
+  },
+  "fields": {
+    "@progName": {
+      "type": "text",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "status": "guessed"
+    },
+    "inputParams/@p0": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "guessed",
+      "about": "bypass"
+    },
+    "inputParams/@p1": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "about": "learn"
+    },
+    "inputParams/@p2": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "guessed",
+      "about": "reset"
+    },
+    "inputParams/@p3": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "about": "inharmicMode"
+    },
+    "inputParams/@p4": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "about": "learnslider"
+    },
+    "inputParams/@p5": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "about": "learnRate"
+    },
+    "inputParams/@p6": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -1.0,
+        0.78125
+      ],
+      "status": "guessed",
+      "about": "intensity"
+    },
+    "inputParams/@p7": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "about": "weighting"
+    },
+    "inputParams/@p8": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0546875,
+        1.0
+      ],
+      "status": "guessed",
+      "about": "f_resolution"
+    },
+    "inputParams/@p9": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "about": "f_smoothing"
+    },
+    "inputParams/@p10": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -12.0,
+        7.5
+      ],
+      "status": "guessed",
+      "about": "gain"
+    },
+    "inputParams/@p11": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        200.0
+      ],
+      "status": "guessed",
+      "about": "hpfCutOff"
+    },
+    "inputParams/@p12": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "about": "limit"
+    },
+    "inputParams/@p13": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "about": "link"
+    },
+    "inputParams/@p14": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        3.0
+      ],
+      "status": "guessed",
+      "about": "curveSelector"
+    },
+    "inputParams/@p15": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        2.0
+      ],
+      "status": "guessed",
+      "about": "curveTarget"
+    },
+    "inputParams/@p16": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -3.559322033898308,
+        3.2542372881355917
+      ],
+      "status": "guessed"
+    },
+    "inputParams/@p17": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -2.338983050847458,
+        3.1525423728813564
+      ],
+      "status": "guessed"
+    },
+    "inputParams/@p18": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        2.5423728813559325
+      ],
+      "status": "guessed"
+    },
+    "inputParams/@p19": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.8305084745762716
+      ],
+      "status": "guessed"
+    },
+    "inputParams/@p20": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.2203389830508469
+      ],
+      "status": "guessed"
+    },
+    "inputParams/@p21": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.20338983050847403
+      ],
+      "status": "guessed"
+    },
+    "inputParams/@p22": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "guessed"
+    },
+    "inputParams/@p23": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "about": "inharmonicMonitor"
+    }
+  },
+  "parameters": {
+    "bypass": {
+      "field": "inputParams/@p0",
+      "status": "guessed"
+    },
+    "learn": {
+      "field": "inputParams/@p1",
+      "status": "guessed"
+    },
+    "reset": {
+      "field": "inputParams/@p2",
+      "status": "guessed"
+    },
+    "inharmicMode": {
+      "field": "inputParams/@p3",
+      "status": "guessed"
+    },
+    "learnslider": {
+      "field": "inputParams/@p4",
+      "status": "guessed"
+    },
+    "learnRate": {
+      "field": "inputParams/@p5",
+      "status": "guessed"
+    },
+    "intensity": {
+      "field": "inputParams/@p6",
+      "status": "guessed"
+    },
+    "weighting": {
+      "field": "inputParams/@p7",
+      "status": "guessed"
+    },
+    "f_resolution": {
+      "field": "inputParams/@p8",
+      "status": "guessed"
+    },
+    "f_smoothing": {
+      "field": "inputParams/@p9",
+      "status": "guessed"
+    },
+    "gain": {
+      "field": "inputParams/@p10",
+      "status": "guessed"
+    },
+    "hpfCutOff": {
+      "field": "inputParams/@p11",
+      "status": "guessed"
+    },
+    "limit": {
+      "field": "inputParams/@p12",
+      "status": "guessed"
+    },
+    "link": {
+      "field": "inputParams/@p13",
+      "status": "guessed"
+    },
+    "curveSelector": {
+      "field": "inputParams/@p14",
+      "status": "guessed"
+    },
+    "curveTarget": {
+      "field": "inputParams/@p15",
+      "status": "guessed"
+    },
+    "inharmonicMonitor": {
+      "field": "inputParams/@p23",
+      "status": "guessed"
+    }
+  }
+}

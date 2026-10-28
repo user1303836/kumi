@@ -45,6 +45,7 @@ impl Lab {
             "change_apply" => self.changes.apply(&reaper, &self.reads, &params),
             "change_restore" => self.changes.restore(&reaper, &self.reads, &params),
             "read" => self.reads.read(&reaper, &params),
+            "focus_body" => self.reads.focus_body(&reaper, &params),
             "fx_chain_save" => self.changes.fx_chain_save(&reaper, &self.reads, &params),
             "undo_step_begin" => self.changes.step_begin(&reaper, &self.reads, &params),
             "undo_step_end" => self.changes.step_end(&reaper, &self.reads, &params),
@@ -606,6 +607,150 @@ fn a_plug_ins_state_chunk_is_written_and_put_back_and_one_without_a_chunk_is_tol
 }
 
 // ----- FX chain files and copies -----
+
+const PRESET_CLASS: &str = "00112233445566778899AABBCCDDEEFF";
+
+fn vst3_file(dir: &tempfile::TempDir, class_id: &str) -> std::path::PathBuf {
+    let component = fake::chunk_of(&[0.8, 0.5, 0.0, 1.0, 0.0]);
+    let mut bytes = b"VST3".to_vec();
+    bytes.extend(1u32.to_le_bytes());
+    bytes.extend(class_id.as_bytes());
+    bytes.extend((48u64 + component.len() as u64).to_le_bytes());
+    bytes.extend(component.as_bytes());
+    bytes.extend(b"List");
+    bytes.extend(1u32.to_le_bytes());
+    bytes.extend(b"Comp");
+    bytes.extend(48u64.to_le_bytes());
+    bytes.extend((component.len() as u64).to_le_bytes());
+    let path = dir.path().join("Created.vstpreset");
+    std::fs::write(&path, bytes).unwrap();
+    path
+}
+
+fn file_input(path: &std::path::Path) -> Value {
+    use base64::Engine;
+    json!({"ref":fx_ref("{FILE}"),"presetName":path.file_name().unwrap().to_string_lossy(),
+        "vst3Data":base64::engine::general_purpose::STANDARD.encode(std::fs::read(path).unwrap())})
+}
+
+fn file_plugin() -> FakeFx {
+    let mut fx = with_presets(plugin("{FILE}", "VST3: Synthetic (Kumi test)"), true);
+    fx.config.insert("fx_ident".into(), format!("Synthetic.vst3{{{PRESET_CLASS}"));
+    fx
+}
+
+#[test]
+fn vst3_preset_files_load_checked_copies_and_undo_accepts_normalization_but_refuses_later_edits() {
+    let lab = Lab::new();
+    let dir = tempfile::tempdir().unwrap();
+    let path = vst3_file(&dir, PRESET_CLASS);
+    state(|s| {
+        s.tracks[1].fx = vec![file_plugin()];
+        s.tracks[1].fx[0].config.insert("fake.swapSource".into(), path.to_string_lossy().into());
+        s.state_count += 1;
+    });
+    let before = values("{FILE}");
+    let (preview, applied) = lab.make("fx-preset", file_input(&path));
+    assert_eq!(values("{FILE}")[0], 0.8, "the bytes validated before the source swap were loaded");
+    assert!(applied["display"]["title"].as_str().unwrap().ends_with("preset “Created.vstpreset”"));
+    assert_eq!(applied["applied"]["preset"], "Created.vstpreset");
+    let row = lab.call("read", json!({"ref":fx_ref("{FILE}")})).unwrap();
+    assert!(!row.to_string().contains("kumi-vst3-"), "{row}");
+    assert!(row.to_string().contains("Created.vstpreset"), "{row}");
+    let body = lab.call("focus_body", json!({"kind":"fx","ref":"r:track:{BBBB}"})).unwrap();
+    assert!(!body.to_string().contains("kumi-vst3-"), "{body}");
+    assert!(body.to_string().contains("Created.vstpreset"), "{body}");
+    let staged = state(|s| s.tracks[1].fx[0].config["fake.loadedFile"].clone());
+    assert_ne!(std::path::Path::new(&staged), path);
+    assert!(!std::path::Path::new(&staged).exists(), "the owned copy is removed after the synchronous native load");
+    state(|s| s.tracks[1].fx[0].config.insert("fake.stateExtra".into(), "+producerEdit".into()));
+    assert_eq!(lab.undo("fx-preset", &preview, &applied).unwrap_err().0, "changed");
+    state(|s| {
+        s.tracks[1].fx[0].config.remove("fake.stateExtra");
+        s.tracks[1].fx[0].config.insert("fake.normalizeState".into(), "1".into());
+    });
+    let undone = lab.undo("fx-preset", &preview, &applied).unwrap();
+    assert_eq!(values("{FILE}"), before);
+    assert!(undone["display"]["note"].as_str().unwrap().contains("normalized"));
+}
+
+#[test]
+fn vst3_preset_files_refuse_wrong_classes_changed_sources_and_roll_back_partial_rejection() {
+    let lab = Lab::new();
+    let dir = tempfile::tempdir().unwrap();
+    state(|s| {
+        s.tracks[1].fx = vec![file_plugin()];
+        s.state_count += 1;
+    });
+    let wrong = vst3_file(&dir, "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF");
+    assert_eq!(lab.preview("fx-preset", file_input(&wrong)).unwrap_err().0, "bad-params");
+    let path = vst3_file(&dir, PRESET_CLASS);
+    let mut input = file_input(&path);
+    let preview = lab.preview("fx-preset", input.clone()).unwrap();
+    let mut changed = std::fs::read(&path).unwrap();
+    changed[48] = b'4';
+    std::fs::write(&path, changed).unwrap();
+    input = file_input(&path);
+    assert_eq!(lab.apply("fx-preset", &input, &preview["fence"]).unwrap_err().0, "changed");
+    vst3_file(&dir, PRESET_CLASS);
+    input = file_input(&path);
+    let before = values("{FILE}");
+    state(|s| s.tracks[1].fx[0].config.insert("fake.refusePresetFile".into(), "1".into()));
+    let preview = lab.preview("fx-preset", input.clone()).unwrap();
+    assert_eq!(lab.apply("fx-preset", &input, &preview["fence"]).unwrap_err().0, "failed");
+    assert_eq!(values("{FILE}"), before, "a partial native load is completely restored");
+}
+
+#[test]
+fn a_failed_preset_load_keeps_native_undo_when_rollback_is_refused_ignored_or_normalized() {
+    for flag in ["fake.refuseState", "fake.ignoreState", "fake.normalizeState"] {
+        for in_plan in [false, true] {
+            let lab = Lab::new();
+            let dir = tempfile::tempdir().unwrap();
+            let path = vst3_file(&dir, PRESET_CLASS);
+            state(|s| {
+                let mut fx = file_plugin();
+                fx.config.insert("fake.refusePresetFile".into(), "1".into());
+                fx.config.insert(flag.into(), "1".into());
+                s.tracks[1].fx = vec![fx];
+                s.state_count += 1;
+            });
+            if in_plan {
+                lab.call("undo_step_begin", json!({"label":"Kumi: attempted preset"})).unwrap();
+            }
+            let input = file_input(&path);
+            let preview = lab.preview("fx-preset", input.clone()).unwrap();
+            let before = state(|s| s.undo_entries);
+            let error = lab.apply("fx-preset", &input, &preview["fence"]).unwrap_err();
+            assert_eq!(error.0, "uncertain", "{flag}/{in_plan}: {error:?}");
+            assert_eq!(state(|s| s.undo_depth), 0, "no open block remains");
+            assert_eq!(state(|s| s.undo_end_flags), -1, "the partial write remains in native undo");
+            assert!(state(|s| s.undo_entries) > before);
+        }
+    }
+}
+
+#[test]
+fn vst3_preset_undo_requires_acceptance_and_a_change_back_in_hidden_state() {
+    for flag in ["fake.refuseState", "fake.ignoreState"] {
+        let lab = Lab::new();
+        let dir = tempfile::tempdir().unwrap();
+        let path = vst3_file(&dir, PRESET_CLASS);
+        state(|s| {
+            let mut fx = file_plugin();
+            for (p, v) in fx.params.iter_mut().zip([0.8, 0.5, 0.0, 1.0, 0.0]) {
+                p.value = v;
+            }
+            fx.config.insert("fake.fileExtra".into(), "+appliedOpaque".into());
+            s.tracks[1].fx = vec![fx];
+            s.state_count += 1;
+        });
+        let (preview, applied) = lab.make("fx-preset", file_input(&path));
+        state(|s| s.tracks[1].fx[0].config.insert(flag.into(), "1".into()));
+        assert_eq!(lab.undo("fx-preset", &preview, &applied).unwrap_err().0, "failed", "{flag}");
+        assert_eq!(state(|s| s.tracks[1].fx[0].config["fake.stateExtra"].clone()), "+appliedOpaque");
+    }
+}
 
 fn write_chain(dir: &tempfile::TempDir, name: &str, guids: &[&str]) {
     // Entries as the fake writes them (REAPER's lines: BYPASS … FXID … WAK).

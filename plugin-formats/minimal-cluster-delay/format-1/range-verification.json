@@ -1,0 +1,26 @@
+{
+  "plugin": "minimal-cluster-delay",
+  "version": "1.4.0",
+  "binarySha256": "1f67ebfb40c70661857e8eea7f3b2e8257d3322756bedb867ee9afd09d0defaf",
+  "method": "Restore the initial component, set one public VST3 parameter, capture its XML value, then reload only that field into the initial component. Saved value and host readback must match at both normalized endpoints and 0.25. Bounds are supported intervals in this product version; no survey extrema are used. Raw XML and mappings without this proof remain read-only.",
+  "points": [
+    0,
+    1,
+    0.25
+  ],
+  "fields": {
+    "parameters/MKUClusterDelayNode_Main_InputGain": {"parameterId":1194426208,"stored":[-60.0,12.0,-42.0],"readback":[0.0,1.0,0.25]},
+    "parameters/MKUClusterDelayNode_Main_OutputGain": {"parameterId":29274633,"stored":[-60.0,12.0,-42.0],"readback":[0.0,1.0,0.25]},
+    "parameters/MKUClusterDelayNode_Main_DryWet": {"parameterId":1661798436,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/MKUClusterDelayNode_Main_Feedback": {"parameterId":1385272238,"stored":[0.0,0.9990000128746033,0.2497500032186508],"readback":[0.0,1.0,0.25]},
+    "parameters/MKUClusterDelayNode_Main_Crossfeed": {"parameterId":885766869,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/MKUClusterDelayNode_Main_Spread": {"parameterId":2089193436,"stored":[-1.0,1.0,-0.5],"readback":[0.0,1.0,0.25]},
+    "parameters/MKUClusterDelayNode_Main_Lowpass": {"parameterId":546728988,"stored":[20.0,20000.0,112.46826171875],"readback":[0.0,1.0,0.25]},
+    "parameters/MKUClusterDelayNode_Main_Highpass": {"parameterId":2039826652,"stored":[5.0,10000.0,51.25727462768555],"readback":[0.0,1.0,0.25]},
+    "parameters/MKUClusterDelayNode_Main_TapSpray": {"parameterId":1059419891,"stored":[-1.0,1.0,-0.5],"readback":[0.0,1.0,0.25]},
+    "parameters/MKUClusterDelayNode_Main_TapSpacing": {"parameterId":179613961,"stored":[-1.0,1.0,-0.5],"readback":[0.0,1.0,0.25]},
+    "parameters/MKUClusterDelayNode_Main_TapRamp": {"parameterId":796140812,"stored":[-1.0,1.0,-0.5],"readback":[0.0,1.0,0.25]},
+    "parameters/MKUClusterDelayNode_Main_EffectDepth": {"parameterId":1243049705,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/MKUClusterDelayNode_Main_EffectRate": {"parameterId":871795706,"stored":[0.009999999776482582,20.0,0.1025145426392555],"readback":[0.0,1.0,0.25]}
+  }
+}

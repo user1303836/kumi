@@ -14,6 +14,7 @@ local rows = import("rows")
 local base = import("changes_base")
 local material_ = import("changes_material")
 local devices_ = import("changes_devices")
+local vst3_ = import("vst3_presets")
 local json_null = import("json").null
 local json_encode = import("json").encode
 local json_array = import("json").array
@@ -316,9 +317,16 @@ local function settings_restore(kind, song, env, restore, desc, what)
       pcall(function() device.active_preset_data = material.presetData end)
     end
   end
+  local after_content, prior_content = M.content_of(device.active_preset_data), M.content_of(material.presetData)
+  if after_content == M.content_of(now) and after_content ~= prior_content then
+    fail("failed", "the device kept the applied settings instead of restoring its earlier settings")
+  end
   base.note_restored_at(env.journal, kind, { track = t, device = d })
   return {
-    restored = { preset = device.active_preset }, display = { title = label .. ": settings put back" }, undo = { desc = desc, entry = true },
+    restored = { preset = device.active_preset }, display = { title = label .. ": settings put back",
+      note = material.vst3 and after_content ~= prior_content
+        and "The device accepted its earlier settings and normalized the saved bytes." or nil },
+    undo = { desc = desc, entry = true },
   }
 end
 
@@ -346,12 +354,13 @@ local function data_preview(song, env, input)
   local t, d, track, device = device_by_ref(song, env, input.ref, "device-preset-data")
   local label = label_of(t, track, device)
   local xml = device.active_preset_data
-  check_preset_data(device, input.presetData, label, xml)
+  local wanted = input.vst3Data and vst3_.compose(device, xml, input) or input.presetData
+  check_preset_data(device, wanted, label, xml)
   return {
     target = target_of(t, d), prior = { preset = device.active_preset, print = M.print_of(xml) },
     fence = { id = identity(track, device), state = material_.device_state(device).state, content = content_fence(device, xml) },
     display = {
-      title = data_title(input, label), unchanged = xml == input.presetData or nil,
+      title = data_title(input, label), unchanged = xml == wanted or nil,
       note = "Kumi keeps the settings it replaces to put back.",
     },
   }
@@ -364,19 +373,26 @@ local function data_apply(song, env, input, fence, desc)
   if fence.id ~= identity(track, device) then fail("changed", base.moved_text(label)) end
   local xml = device.active_preset_data
   if material_.device_state(device).state ~= fence.state or content_fence(device, xml) ~= fence.content then fail("changed", label .. "'s settings changed since the preview") end
-  check_preset_data(device, input.presetData, label, xml)
+  local wanted = input.vst3Data and vst3_.compose(device, xml, input) or input.presetData
+  check_preset_data(device, wanted, label, xml)
   if #xml > M.MAX_PRESET_BYTES then
     fail("failed", string.format("%s holds %.1f MB of settings, more than Kumi keeps to put back, so it won't replace them", label, #xml / 1048576))
   end
   song:describe_undo(desc)
   watch_all(env, t, d, device)
-  local written, err = pcall(function() device.active_preset_data = input.presetData end)
-  -- (Renoise raises before it writes anything: text that isn't XML, an empty one, a newer version)
-  if not written then fail("failed", "Renoise refused the preset data: " .. tostring(err):gsub("^[^%s:]*%.lua:%d+: ", "")) end
+  local written, err = pcall(function() device.active_preset_data = wanted end)
+  -- XML parsing errors occur before writes. A plug-in may reject a later part of its VST3 state after accepting another,
+  -- so a VST3 load failure restores the saved whole state before returning an error.
+  if not written then
+    local restored = not input.vst3Data or pcall(function() device.active_preset_data = xml end)
+    fail("failed", "Renoise refused the preset data: " .. tostring(err):gsub("^[^%s:]*%.lua:%d+: ", "")
+      .. (restored and "" or "; the previous state could not be restored"))
+  end
   local back = device.active_preset_data
   local printed = M.print_of(back)
   local kept = keep(env, t, d, track, device)
   kept.presetData = xml
+  kept.vst3 = input.vst3Data ~= nil
   return {
     applied = { state = material_.device_state(device).state, print = printed, content = content_fence(device, back) }, material = kept, target = target_of(t, d),
     display = { title = data_title(input, label) }, undo = { desc = desc, entry = true },

@@ -1,0 +1,73 @@
+{
+  "plugin": "minimal-poly-flanger",
+  "format": "format-1",
+  "about": "Minimal Audio full XML; parameters/<name> edits mapped_value in physical units. Numeric edits require the verified intervals below. Raw XML attributes are preserved read-only and not duplicated here. Individual endpoint reload evidence is in range-verification.json.",
+  "paths": "exact",
+  "files": {
+    "preset": {
+      "extension": ".xml",
+      "layers": [
+        "native XML"
+      ],
+      "constants": {
+        "root": "PolyFlanger"
+      }
+    },
+    "state": {
+      "layers": [
+        "VST3 Comp chunk",
+        "optional VstW compatibility bank",
+        "VC2! + little-endian XML byte length + XML + NUL + preserved opaque JUCE private data"
+      ],
+      "constants": {
+        "xml_magic": "VC2!",
+        "root": "PolyFlanger"
+      }
+    }
+  },
+  "opaque": [
+    "state"
+  ],
+  "fields": {
+    "": {"type":"map","in":["state","preset"],"status":"guessed"},
+    "root": {"type":"text","in":["state","preset"],"status":"guessed"},
+    "parameters": {"type":"map","in":["state","preset"],"status":"guessed"},
+    "parameters/MKUPolyFlangerNode_Main_InputGain": {"type":"float","status":"guessed","default":0.0,"range":[-60.0,12.0],"range_status":"verified"},
+    "parameters/MKUPolyFlangerNode_Main_OutputGain": {"type":"float","status":"guessed","default":0.0,"range":[-60.0,12.0],"range_status":"verified"},
+    "parameters/MKUPolyFlangerNode_Main_DryWet": {"type":"float","status":"guessed","default":0.5,"range":[0.0,1.0],"range_status":"verified"},
+    "parameters/MKUPolyFlangerNode_Main_NumVoices": {"type":"float","status":"guessed","default":2.0},
+    "parameters/MKUPolyFlangerNode_Main_VoiceSpread": {"type":"float","status":"guessed","default":0.0,"range":[-1.0,1.0],"range_status":"verified"},
+    "parameters/MKUPolyFlangerNode_Main_Frequency": {"type":"float","status":"guessed","default":650.0,"range":[20.0,20000.0],"range_status":"verified"},
+    "parameters/MKUPolyFlangerNode_Main_PitchOffset": {"type":"float","status":"guessed","default":0.0,"range":[-48.0,48.0],"range_status":"verified"},
+    "parameters/MKUPolyFlangerNode_Main_ModDepth": {"type":"float","status":"guessed","default":0.5,"range":[-1.0,1.0],"range_status":"verified"},
+    "parameters/MKUPolyFlangerNode_Main_ModRate": {"type":"float","status":"guessed","default":7.0},
+    "parameters/MKUPolyFlangerNode_Main_ModShape": {"type":"float","status":"guessed","default":0.0},
+    "parameters/MKUPolyFlangerNode_Main_ModRandomize": {"type":"float","status":"guessed","default":0.0,"range":[0.0,1.0],"range_status":"verified"},
+    "parameters/MKUPolyFlangerNode_Main_ModPhaseOffset": {"type":"float","status":"guessed","default":0.0,"range":[-0.5,0.5],"range_status":"verified"},
+    "parameters/MKUPolyFlangerNode_Main_WidthAmount": {"type":"float","status":"guessed","default":0.0,"range":[-1.0,1.0],"range_status":"verified"},
+    "parameters/MKUPolyFlangerNode_Main_FeedbackNorm": {"type":"float","status":"guessed","default":0.5,"range":[0.0,1.0],"range_status":"verified"},
+    "parameters/MKUPolyFlangerNode_Main_DampingAmount": {"type":"float","status":"guessed","default":0.0,"range":[0.0,1.0],"range_status":"verified"},
+    "parameters/MKUPolyFlangerNode_Main_NoteRate": {"type":"float","status":"guessed","default":0.0,"range":[0.0,24.0],"range_status":"verified"},
+    "parameters/MKUPolyFlangerNode_Main_RootNote": {"type":"float","status":"guessed","default":0.0},
+    "state": {"type":"map","in":["state","preset"],"status":"guessed"}
+  },
+  "parameters": {
+    "Input [VST3 381523906]": {"field":"parameters/MKUPolyFlangerNode_Main_InputGain","status":"verified"},
+    "Output [VST3 599107047]": {"field":"parameters/MKUPolyFlangerNode_Main_OutputGain","status":"verified"},
+    "Dry Wet [VST3 853842690]": {"field":"parameters/MKUPolyFlangerNode_Main_DryWet","status":"verified"},
+    "Voices [VST3 2137789952]": {"field":"parameters/MKUPolyFlangerNode_Main_NumVoices","status":"guessed"},
+    "Span [VST3 29168734]": {"field":"parameters/MKUPolyFlangerNode_Main_VoiceSpread","status":"verified"},
+    "Frequency [VST3 752417461]": {"field":"parameters/MKUPolyFlangerNode_Main_Frequency","status":"verified"},
+    "Pitch [VST3 1088825100]": {"field":"parameters/MKUPolyFlangerNode_Main_PitchOffset","status":"verified"},
+    "Mod Depth [VST3 1870676072]": {"field":"parameters/MKUPolyFlangerNode_Main_ModDepth","status":"verified"},
+    "Rate [VST3 2138967707]": {"field":"parameters/MKUPolyFlangerNode_Main_ModRate","status":"guessed"},
+    "Shape [VST3 1884603718]": {"field":"parameters/MKUPolyFlangerNode_Main_ModShape","status":"guessed"},
+    "Randomize [VST3 852423894]": {"field":"parameters/MKUPolyFlangerNode_Main_ModRandomize","status":"verified"},
+    "Offset [VST3 158529491]": {"field":"parameters/MKUPolyFlangerNode_Main_ModPhaseOffset","status":"verified"},
+    "Stereo [VST3 1565982935]": {"field":"parameters/MKUPolyFlangerNode_Main_WidthAmount","status":"verified"},
+    "Feedback [VST3 1129489640]": {"field":"parameters/MKUPolyFlangerNode_Main_FeedbackNorm","status":"verified"},
+    "Damping [VST3 666685651]": {"field":"parameters/MKUPolyFlangerNode_Main_DampingAmount","status":"verified"},
+    "Note Rate [VST3 1953964921]": {"field":"parameters/MKUPolyFlangerNode_Main_NoteRate","status":"verified"},
+    "Scale Root [VST3 205873019]": {"field":"parameters/MKUPolyFlangerNode_Main_RootNote","status":"guessed"}
+  }
+}

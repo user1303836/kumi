@@ -150,6 +150,7 @@ impl Ableton {
                         HandsSetup::Open(open) => HandsSetup::Open(open.clone()),
                     }),
                     user_library: options.user_library.clone(),
+                    made: made.clone(),
                     on_action: options.on_action.clone(),
                     front_live: None,
                 },

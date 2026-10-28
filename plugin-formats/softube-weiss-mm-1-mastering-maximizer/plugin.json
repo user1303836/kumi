@@ -1,0 +1,45 @@
+{
+  "plugin": "softube-weiss-mm-1-mastering-maximizer",
+  "name": "Weiss MM-1 Mastering Maximizer",
+  "vendor": "Softube",
+  "kind": "effect",
+  "ids": {
+    "vst3": [
+      {
+        "id": "FF933DD04991403C898A165391734544",
+        "name": "Weiss MM-1 Mastering Maximizer",
+        "status": "verified"
+      }
+    ]
+  },
+  "presets": {
+    "extensions": [
+      ".softubepreset",
+      ".softubebundle",
+      ".vstpreset"
+    ],
+    "windows": [
+      {
+        "path": "C:/ProgramData/Softube/Presets",
+        "holds": "installed native preset bundles",
+        "status": "verified"
+      }
+    ]
+  },
+  "formats": [
+    "format-1"
+  ],
+  "notes": [
+    "VST3 only. Native JSON presets carry normalized parameters. SharedData and unknown fields are preserved.",
+    "VST3 class identity comes from the installed host scan when available. The isolated verification host did not finish loading this binary; VST3 component serialization is not yet verified."
+  ],
+  "family": "softube",
+  "roles": [
+    "limiter",
+    "loudness",
+    "mastering"
+  ],
+  "binaries": [
+    "Weiss MM-1 Mastering Maximizer.vst3"
+  ]
+}

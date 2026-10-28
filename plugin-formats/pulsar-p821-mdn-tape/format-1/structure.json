@@ -1,0 +1,107 @@
+{
+  "plugin": "pulsar-p821-mdn-tape",
+  "format": "format-1",
+  "about": "Pulsar Modular XML PARAM id/value records in physical units; omitted values mean zero. Numeric edits require the verified intervals below. Raw XML attributes are preserved read-only and not duplicated here. Individual endpoint reload evidence is in range-verification.json.",
+  "paths": "exact",
+  "files": {
+    "preset": {
+      "extension": ".P821Preset",
+      "layers": [
+        "VC2! + little-endian XML byte length + XML + NUL"
+      ],
+      "constants": {
+        "root": "P821"
+      }
+    },
+    "state": {
+      "layers": [
+        "VST3 Comp chunk",
+        "optional VstW compatibility bank",
+        "VC2! + little-endian XML byte length + XML + NUL + preserved opaque JUCE private data"
+      ],
+      "constants": {
+        "xml_magic": "VC2!",
+        "root": "P821"
+      }
+    }
+  },
+  "opaque": [
+    "state"
+  ],
+  "fields": {
+    "": {"type":"map","in":["state","preset"],"status":"guessed"},
+    "root": {"type":"text","in":["state","preset"],"status":"guessed"},
+    "parameters": {"type":"map","in":["state","preset"],"status":"guessed"},
+    "parameters/pm_p821_bypass_btn": {"type":"float","status":"guessed","default":0.0,"range":[0.0,1.0],"range_status":"verified","step":1.0},
+    "parameters/pm_p821_flutterperc_sldr": {"type":"float","status":"guessed","default":10.0,"range":[0.0,100.0],"range_status":"verified"},
+    "parameters/pm_p821_highbias_sldr": {"type":"float","status":"guessed","default":0.0,"range":[-10.0,10.0],"range_status":"verified"},
+    "parameters/pm_p821_highbiasactv_btn": {"type":"float","status":"guessed","default":1.0,"range":[0.0,1.0],"range_status":"verified","step":1.0},
+    "parameters/pm_p821_hiss_sldr": {"type":"float","status":"guessed","default":0.0,"range":[0.0,100.0],"range_status":"verified"},
+    "parameters/pm_p821_hsactv_btn": {"type":"float","status":"guessed","default":1.0,"range":[0.0,1.0],"range_status":"verified","step":1.0},
+    "parameters/pm_p821_hsgain_sldr": {"type":"float","status":"guessed","default":0.0,"range":[-10.0,10.0],"range_status":"verified"},
+    "parameters/pm_p821_infodump_btn": {"type":"float","status":"guessed","default":0.0,"range":[0.0,1.0],"range_status":"verified","step":1.0},
+    "parameters/pm_p821_input_sldr": {"type":"float","status":"guessed","default":0.0,"range":[-18.0,18.0],"range_status":"verified"},
+    "parameters/pm_p821_lofi_btn": {"type":"float","status":"guessed","default":0.0,"range":[0.0,1.0],"range_status":"verified","step":1.0},
+    "parameters/pm_p821_lowbias_sldr": {"type":"float","status":"guessed","default":0.0,"range":[-10.0,10.0],"range_status":"verified"},
+    "parameters/pm_p821_lowbiasactv_btn": {"type":"float","status":"guessed","default":1.0,"range":[0.0,1.0],"range_status":"verified","step":1.0},
+    "parameters/pm_p821_lsactv_btn": {"type":"float","status":"guessed","default":1.0,"range":[0.0,1.0],"range_status":"verified","step":1.0},
+    "parameters/pm_p821_lsgain_sldr": {"type":"float","status":"guessed","default":0.0,"range":[-10.0,10.0],"range_status":"verified"},
+    "parameters/pm_p821_output_sldr": {"type":"float","status":"guessed","default":0.0,"range":[-18.0,18.0],"range_status":"verified"},
+    "parameters/pm_p821_pol_btn": {"type":"float","status":"guessed","default":0.0,"range":[0.0,1.0],"range_status":"verified","step":1.0},
+    "parameters/pm_p821_shelfPos_btn": {"type":"float","status":"guessed","default":0.0,"range":[0.0,1.0],"range_status":"verified","step":1.0},
+    "parameters/pm_p821_tapeips_sldr": {"type":"float","status":"guessed","default":0.0,"range":[0.0,1.0],"range_status":"verified","step":1.0},
+    "parameters/pm_p821_tapemode_sldr": {"type":"float","status":"guessed","default":0.0,"range":[0.0,1.0],"range_status":"verified","step":1.0},
+    "parameters/pm_p821_tapemodel_sldr": {"type":"float","status":"guessed","default":0.0,"range":[0.0,1.0],"range_status":"verified","step":1.0},
+    "parameters/pm_p821_wowperc_sldr": {"type":"float","status":"guessed","default":10.0,"range":[0.0,100.0],"range_status":"verified"},
+    "parameters/pm_p821_deciactv_btn": {"type":"float","status":"guessed","default":0.0,"range":[0.0,1.0],"range_status":"verified","step":1.0},
+    "parameters/pm_p821_deciblend_sldr": {"type":"float","status":"guessed","default":0.0,"range":[0.0,100.0],"range_status":"verified"},
+    "parameters/pm_p821_decifb_sldr": {"type":"float","status":"guessed","default":0.0,"range":[0.0,100.0],"range_status":"verified"},
+    "parameters/pm_p821_decihp_sldr": {"type":"float","status":"guessed","default":0.0},
+    "parameters/pm_p821_decilp_sldr": {"type":"float","status":"guessed","default":0.0,"range":[500.0,21000.0],"range_status":"verified"},
+    "parameters/pm_p821_decioffset_sldr": {"type":"float","status":"guessed","default":0.0,"range":[0.0,10.0],"range_status":"verified"},
+    "parameters/pm_p821_decirate_sldr": {"type":"float","status":"guessed","default":0.0,"range":[0.0,2.0],"range_status":"verified"},
+    "parameters/pm_p821_flange_btn": {"type":"float","status":"guessed","default":0.0,"range":[0.0,1.0],"range_status":"verified","step":1.0},
+    "parameters/pm_p821_lofirange_sldr": {"type":"float","status":"guessed","default":0.0,"range":[-10.0,10.0],"range_status":"verified"},
+    "parameters/pm_p821_modmode_sldr": {"type":"float","status":"guessed","default":1.0,"range":[0.0,1.0],"range_status":"verified","step":1.0},
+    "parameters/pm_p821_wfactv_btn": {"type":"float","status":"guessed","default":0.0,"range":[0.0,1.0],"range_status":"verified","step":1.0},
+    "parameters/pm_p821_widener_sldr": {"type":"float","status":"guessed","default":2.0,"range":[0.0,2.0],"range_status":"verified"},
+    "parameters/pm_p821_widenerstage_sldr": {"type":"float","status":"guessed","default":0.0,"range":[0.0,1.0],"range_status":"verified","step":1.0},
+    "state": {"type":"map","in":["state","preset"],"status":"guessed"}
+  },
+  "parameters": {
+    "Bypass [VST3 1983187323]": {"field":"parameters/pm_p821_bypass_btn","status":"verified"},
+    "Flutter [VST3 1552107578]": {"field":"parameters/pm_p821_flutterperc_sldr","status":"verified"},
+    "Bias HI Range [VST3 306025557]": {"field":"parameters/pm_p821_highbias_sldr","status":"verified"},
+    "Bias HI SW [VST3 1007451282]": {"field":"parameters/pm_p821_highbiasactv_btn","status":"verified"},
+    "Hiss [VST3 931607887]": {"field":"parameters/pm_p821_hiss_sldr","status":"verified"},
+    "HS SW [VST3 197987010]": {"field":"parameters/pm_p821_hsactv_btn","status":"verified"},
+    "HS Gain [VST3 1143527558]": {"field":"parameters/pm_p821_hsgain_sldr","status":"verified"},
+    "InfoDump [VST3 171598261]": {"field":"parameters/pm_p821_infodump_btn","status":"verified"},
+    "Input [VST3 1743207154]": {"field":"parameters/pm_p821_input_sldr","status":"verified"},
+    "Lo-fi SW [VST3 514730137]": {"field":"parameters/pm_p821_lofi_btn","status":"verified"},
+    "Bias LO Range [VST3 1448796943]": {"field":"parameters/pm_p821_lowbias_sldr","status":"verified"},
+    "Bias LO SW [VST3 1251539864]": {"field":"parameters/pm_p821_lowbiasactv_btn","status":"verified"},
+    "LS SW [VST3 1559416638]": {"field":"parameters/pm_p821_lsactv_btn","status":"verified"},
+    "LS Gain [VST3 398173066]": {"field":"parameters/pm_p821_lsgain_sldr","status":"verified"},
+    "Output [VST3 1638907119]": {"field":"parameters/pm_p821_output_sldr","status":"verified"},
+    "Polarity Flip [VST3 2047844916]": {"field":"parameters/pm_p821_pol_btn","status":"verified"},
+    "SHLF Pos SW [VST3 1455925725]": {"field":"parameters/pm_p821_shelfPos_btn","status":"verified"},
+    "IPS SW [VST3 397342066]": {"field":"parameters/pm_p821_tapeips_sldr","status":"verified"},
+    "Tape SW [VST3 923359275]": {"field":"parameters/pm_p821_tapemode_sldr","status":"verified"},
+    "Formula SW [VST3 1060774549]": {"field":"parameters/pm_p821_tapemodel_sldr","status":"verified"},
+    "Wow [VST3 254984727]": {"field":"parameters/pm_p821_wowperc_sldr","status":"verified"},
+    "DLY SW [VST3 1840494814]": {"field":"parameters/pm_p821_deciactv_btn","status":"verified"},
+    "DLY Blend [VST3 1163156402]": {"field":"parameters/pm_p821_deciblend_sldr","status":"verified"},
+    "DLY FB [VST3 1331474317]": {"field":"parameters/pm_p821_decifb_sldr","status":"verified"},
+    "DLY HP [VST3 1359806145]": {"field":"parameters/pm_p821_decihp_sldr","status":"guessed"},
+    "DLY LP [VST3 614853573]": {"field":"parameters/pm_p821_decilp_sldr","status":"verified"},
+    "DLY Offset [VST3 778783894]": {"field":"parameters/pm_p821_decioffset_sldr","status":"verified"},
+    "DLY Ips [VST3 881959209]": {"field":"parameters/pm_p821_decirate_sldr","status":"verified"},
+    "Flange SW [VST3 1143020452]": {"field":"parameters/pm_p821_flange_btn","status":"verified"},
+    "Lo-fi Range [VST3 1483732069]": {"field":"parameters/pm_p821_lofirange_sldr","status":"verified"},
+    "Mod. Mode [VST3 295685751]": {"field":"parameters/pm_p821_modmode_sldr","status":"verified"},
+    "Modulation SW [VST3 1419839622]": {"field":"parameters/pm_p821_wfactv_btn","status":"verified"},
+    "Stage Focus [VST3 574925332]": {"field":"parameters/pm_p821_widener_sldr","status":"verified"},
+    "Center SW [VST3 595537274]": {"field":"parameters/pm_p821_widenerstage_sldr","status":"verified"}
+  }
+}

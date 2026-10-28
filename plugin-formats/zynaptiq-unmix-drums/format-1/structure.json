@@ -1,0 +1,502 @@
+{
+  "plugin": "zynaptiq-unmix-drums",
+  "format": "format-1",
+  "about": "Zynaptiq Preset XML version 3 or 4. inputParams count and pN attributes hold scalar values. VST3 component state (verified on PUNCH 1 and UNMIX DRUMS) uses a u32 little-endian XML length including a terminating NUL, then the XML and NUL.",
+  "paths": "exact",
+  "files": {
+    "preset": {
+      "extension": ".preset",
+      "layers": [
+        "UTF-8 XML Preset; inputParams attributes p0 through p<count-1>; preserve all other elements"
+      ],
+      "constants": {}
+    },
+    "state": {
+      "layers": [
+        "u32 LE byte count including NUL; XML Preset; NUL"
+      ],
+      "constants": {}
+    }
+  },
+  "survey": {
+    "files": 75,
+    "parameterCounts": [
+      18
+    ],
+    "presetVersions": [
+      "4"
+    ],
+    "source": "Installed native preset files and shipped parameter-name metadata; no factory preset bodies copied."
+  },
+  "fields": {
+    "@progName": {
+      "type": "text",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "status": "guessed"
+    },
+    "inputParams/@p0": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "default": 0.0,
+      "about": "Bypass. Range and discrete steps from the public VST3 parameter domain. An isolated host-control change confirmed the field, and separate component-state restores confirmed both endpoints.",
+      "unit": "",
+      "range": [
+        0.0,
+        1.0
+      ],
+      "range_status": "verified",
+      "step": 1.0
+    },
+    "inputParams/@p1": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "verified",
+      "default": 0.5,
+      "about": "DRUM LEVEL. Range and discrete steps from the public VST3 parameter domain. An isolated host-control change confirmed the field, and separate component-state restores confirmed both endpoints.",
+      "unit": "",
+      "range": [
+        0.0,
+        1.0
+      ],
+      "range_status": "verified"
+    },
+    "inputParams/@p2": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "verified",
+      "default": 0.25,
+      "about": "ATTACK. Range and discrete steps from the public VST3 parameter domain. An isolated host-control change confirmed the field, and separate component-state restores confirmed both endpoints.",
+      "unit": "",
+      "range": [
+        0.0,
+        1.0
+      ],
+      "range_status": "verified"
+    },
+    "inputParams/@p3": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "verified",
+      "default": 0.5,
+      "about": "THRESHOLD. Range and discrete steps from the public VST3 parameter domain. An isolated host-control change confirmed the field, and separate component-state restores confirmed both endpoints.",
+      "unit": "",
+      "range": [
+        0.0,
+        1.0
+      ],
+      "range_status": "verified"
+    },
+    "inputParams/@p4": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        100.0
+      ],
+      "status": "verified",
+      "default": 70.0,
+      "about": "DETECTION DENSITY. Range and discrete steps from the public VST3 parameter domain. An isolated host-control change confirmed the field, and separate component-state restores confirmed both endpoints.",
+      "unit": "%",
+      "range": [
+        0.0,
+        100.0
+      ],
+      "range_status": "verified"
+    },
+    "inputParams/@p5": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.07368421052631578,
+        1.0
+      ],
+      "status": "verified",
+      "default": 1.0,
+      "about": "MAX CUT. Range and discrete steps from the public VST3 parameter domain. An isolated host-control change confirmed the field, and separate component-state restores confirmed both endpoints.",
+      "unit": "",
+      "range": [
+        0.0,
+        1.0
+      ],
+      "range_status": "verified"
+    },
+    "inputParams/@p6": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "verified",
+      "default": 0.17,
+      "about": "RELEASE. Range and discrete steps from the public VST3 parameter domain. An isolated host-control change confirmed the field, and separate component-state restores confirmed both endpoints.",
+      "unit": "",
+      "range": [
+        0.0,
+        1.0
+      ],
+      "range_status": "verified"
+    },
+    "inputParams/@p7": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "verified",
+      "default": 0.5473684210526316,
+      "about": "UNMIX FEATHER. Range and discrete steps from the public VST3 parameter domain. An isolated host-control change confirmed the field, and separate component-state restores confirmed both endpoints.",
+      "unit": "",
+      "range": [
+        0.0,
+        1.0
+      ],
+      "range_status": "verified"
+    },
+    "inputParams/@p8": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "verified",
+      "default": 0.0,
+      "about": "BASS SYNTH. Range and discrete steps from the public VST3 parameter domain. An isolated host-control change confirmed the field, and separate component-state restores confirmed both endpoints.",
+      "unit": "",
+      "range": [
+        0.0,
+        1.0
+      ],
+      "range_status": "verified"
+    },
+    "inputParams/@p9": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "verified",
+      "default": 1.0,
+      "about": "LEVEL COMPENSATION. Range and discrete steps from the public VST3 parameter domain. An isolated host-control change confirmed the field, and separate component-state restores confirmed both endpoints.",
+      "unit": "",
+      "range": [
+        0.0,
+        1.0
+      ],
+      "range_status": "verified",
+      "step": 1.0
+    },
+    "inputParams/@p10": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "verified",
+      "default": 0.0,
+      "about": "SIDE ONLY. Range and discrete steps from the public VST3 parameter domain. An isolated host-control change confirmed the field, and separate component-state restores confirmed both endpoints.",
+      "unit": "",
+      "range": [
+        0.0,
+        1.0
+      ],
+      "range_status": "verified",
+      "step": 1.0
+    },
+    "inputParams/@p11": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "verified",
+      "default": 0.0,
+      "about": "LIMIT. Range and discrete steps from the public VST3 parameter domain. An isolated host-control change confirmed the field, and separate component-state restores confirmed both endpoints.",
+      "unit": "",
+      "range": [
+        0.0,
+        1.0
+      ],
+      "range_status": "verified",
+      "step": 1.0
+    },
+    "inputParams/@p12": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "verified",
+      "default": 0.0,
+      "about": "THRESHOLD CURVE ON/OFF. Range and discrete steps from the public VST3 parameter domain. An isolated host-control change confirmed the field, and separate component-state restores confirmed both endpoints.",
+      "unit": "",
+      "range": [
+        0.0,
+        1.0
+      ],
+      "range_status": "verified",
+      "step": 1.0
+    },
+    "inputParams/@p13": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "verified",
+      "default": 0.0,
+      "about": "DRUM LEVEL CURVE ON/OFF. Range and discrete steps from the public VST3 parameter domain. An isolated host-control change confirmed the field, and separate component-state restores confirmed both endpoints.",
+      "unit": "",
+      "range": [
+        0.0,
+        1.0
+      ],
+      "range_status": "verified",
+      "step": 1.0
+    },
+    "inputParams/@p14": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "verified",
+      "default": 0.0,
+      "about": "RELEASE CURVE ON/OFF. Range and discrete steps from the public VST3 parameter domain. An isolated host-control change confirmed the field, and separate component-state restores confirmed both endpoints.",
+      "unit": "",
+      "range": [
+        0.0,
+        1.0
+      ],
+      "range_status": "verified",
+      "step": 1.0
+    },
+    "inputParams/@p15": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -6.0,
+        1.8947368421052637
+      ],
+      "status": "verified",
+      "default": 0.0,
+      "about": "GAIN. Range and discrete steps from the public VST3 parameter domain. An isolated host-control change confirmed the field, and separate component-state restores confirmed both endpoints.",
+      "unit": "dB",
+      "range": [
+        -12.0,
+        12.0
+      ],
+      "range_status": "verified"
+    },
+    "inputParams/@p16": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "verified",
+      "default": 1.0,
+      "about": "ALGORITHM. Range and discrete steps from the public VST3 parameter domain. An isolated host-control change confirmed the field, and separate component-state restores confirmed both endpoints.",
+      "unit": "",
+      "range": [
+        0.0,
+        1.0
+      ],
+      "range_status": "verified",
+      "step": 1.0
+    },
+    "inputParams/@p17": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "verified",
+      "default": 0.0,
+      "about": "SOLO. Range and discrete steps from the public VST3 parameter domain. An isolated host-control change confirmed the field, and separate component-state restores confirmed both endpoints.",
+      "unit": "",
+      "range": [
+        0.0,
+        1.0
+      ],
+      "range_status": "verified",
+      "step": 1.0
+    }
+  },
+  "parameters": {
+    "Bypass": {
+      "field": "inputParams/@p0",
+      "status": "verified",
+      "note": "One host parameter changed; the serialized field matched its public plain-value conversion."
+    },
+    "DRUM LEVEL": {
+      "field": "inputParams/@p1",
+      "status": "verified",
+      "note": "One host parameter changed; the serialized field matched its public plain-value conversion."
+    },
+    "ATTACK": {
+      "field": "inputParams/@p2",
+      "status": "verified",
+      "note": "One host parameter changed; the serialized field matched its public plain-value conversion."
+    },
+    "THRESHOLD": {
+      "field": "inputParams/@p3",
+      "status": "verified",
+      "note": "One host parameter changed; the serialized field matched its public plain-value conversion."
+    },
+    "DETECTION DENSITY": {
+      "field": "inputParams/@p4",
+      "status": "verified",
+      "note": "One host parameter changed; the serialized field matched its public plain-value conversion."
+    },
+    "MAX CUT": {
+      "field": "inputParams/@p5",
+      "status": "verified",
+      "note": "One host parameter changed; the serialized field matched its public plain-value conversion."
+    },
+    "RELEASE": {
+      "field": "inputParams/@p6",
+      "status": "verified",
+      "note": "One host parameter changed; the serialized field matched its public plain-value conversion."
+    },
+    "UNMIX FEATHER": {
+      "field": "inputParams/@p7",
+      "status": "verified",
+      "note": "One host parameter changed; the serialized field matched its public plain-value conversion."
+    },
+    "BASS SYNTH": {
+      "field": "inputParams/@p8",
+      "status": "verified",
+      "note": "One host parameter changed; the serialized field matched its public plain-value conversion."
+    },
+    "LEVEL COMPENSATION": {
+      "field": "inputParams/@p9",
+      "status": "verified",
+      "note": "One host parameter changed; the serialized field matched its public plain-value conversion."
+    },
+    "SIDE ONLY": {
+      "field": "inputParams/@p10",
+      "status": "verified",
+      "note": "One host parameter changed; the serialized field matched its public plain-value conversion."
+    },
+    "LIMIT": {
+      "field": "inputParams/@p11",
+      "status": "verified",
+      "note": "One host parameter changed; the serialized field matched its public plain-value conversion."
+    },
+    "THRESHOLD CURVE ON/OFF": {
+      "field": "inputParams/@p12",
+      "status": "verified",
+      "note": "One host parameter changed; the serialized field matched its public plain-value conversion."
+    },
+    "DRUM LEVEL CURVE ON/OFF": {
+      "field": "inputParams/@p13",
+      "status": "verified",
+      "note": "One host parameter changed; the serialized field matched its public plain-value conversion."
+    },
+    "RELEASE CURVE ON/OFF": {
+      "field": "inputParams/@p14",
+      "status": "verified",
+      "note": "One host parameter changed; the serialized field matched its public plain-value conversion."
+    },
+    "GAIN": {
+      "field": "inputParams/@p15",
+      "status": "verified",
+      "note": "One host parameter changed; the serialized field matched its public plain-value conversion."
+    },
+    "ALGORITHM": {
+      "field": "inputParams/@p16",
+      "status": "verified",
+      "note": "One host parameter changed; the serialized field matched its public plain-value conversion."
+    },
+    "SOLO": {
+      "field": "inputParams/@p17",
+      "status": "verified",
+      "note": "One host parameter changed; the serialized field matched its public plain-value conversion."
+    }
+  }
+}

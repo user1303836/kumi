@@ -1,0 +1,77 @@
+{
+  "plugin": "minimal-wave-shifter",
+  "format": "format-1",
+  "about": "Minimal Audio full XML; parameters/<name> edits mapped_value in physical units. Numeric edits require the verified intervals below. Raw XML attributes are preserved read-only and not duplicated here. Individual endpoint reload evidence is in range-verification.json.",
+  "paths": "exact",
+  "files": {
+    "preset": {
+      "extension": ".xml",
+      "layers": [
+        "native XML"
+      ],
+      "constants": {
+        "root": "WaveShifter"
+      }
+    },
+    "state": {
+      "layers": [
+        "VST3 Comp chunk",
+        "optional VstW compatibility bank",
+        "VC2! + little-endian XML byte length + XML + NUL + preserved opaque JUCE private data"
+      ],
+      "constants": {
+        "xml_magic": "VC2!",
+        "root": "WaveShifter"
+      }
+    }
+  },
+  "opaque": [
+    "state"
+  ],
+  "fields": {
+    "": {"type":"map","in":["state","preset"],"status":"guessed"},
+    "root": {"type":"text","in":["state","preset"],"status":"guessed"},
+    "parameters": {"type":"map","in":["state","preset"],"status":"guessed"},
+    "parameters/MKUWaveShifterNode_Main_InputGain": {"type":"float","status":"guessed","default":0.0,"range":[-60.0,12.0],"range_status":"verified"},
+    "parameters/MKUWaveShifterNode_Main_OutputGain": {"type":"float","status":"guessed","default":0.0,"range":[-60.0,12.0],"range_status":"verified"},
+    "parameters/MKUWaveShifterNode_Main_DryWet": {"type":"float","status":"guessed","default":0.5,"range":[0.0,1.0],"range_status":"verified"},
+    "parameters/MKUWaveShifterNode_Main_ModDepth": {"type":"float","status":"guessed","default":0.0,"range":[-1.0,1.0],"range_status":"verified"},
+    "parameters/MKUWaveShifterNode_Main_ModRate": {"type":"float","status":"guessed","default":7.0},
+    "parameters/MKUWaveShifterNode_Main_ModShape": {"type":"float","status":"guessed","default":0.0},
+    "parameters/MKUWaveShifterNode_Main_ModRandomize": {"type":"float","status":"guessed","default":0.0,"range":[0.0,1.0],"range_status":"verified"},
+    "parameters/MKUWaveShifterNode_Main_ModPhaseOffset": {"type":"float","status":"guessed","default":0.0,"range":[-0.5,0.5],"range_status":"verified"},
+    "parameters/MKUWaveShifterNode_Main_Frequency": {"type":"float","status":"guessed","default":0.0,"range":[-5000.0,5000.0],"range_status":"verified"},
+    "parameters/MKUWaveShifterNode_Main_FrequencySpread": {"type":"float","status":"guessed","default":0.0,"range":[-1.0,1.0],"range_status":"verified"},
+    "parameters/MKUWaveShifterNode_Main_StereoPhaseOffset": {"type":"float","status":"guessed","default":0.0,"range":[-1.0,1.0],"range_status":"verified"},
+    "parameters/MKUWaveShifterNode_Main_FMAmount": {"type":"float","status":"guessed","default":0.0,"range":[0.0,2.0],"range_status":"verified"},
+    "parameters/MKUWaveShifterNode_Main_FMRatio": {"type":"float","status":"guessed","default":0.0},
+    "parameters/MKUWaveShifterNode_Main_FMFilter": {"type":"float","status":"guessed","default":10000.0,"range":[20.0,20000.0],"range_status":"verified"},
+    "parameters/MKUWaveShifterNode_Main_Depth": {"type":"float","status":"guessed","default":0.5,"range":[0.0,1.0],"range_status":"verified"},
+    "parameters/MKUWaveShifterNode_Main_Feedback": {"type":"float","status":"guessed","default":0.0,"range":[0.0,1.5],"range_status":"verified"},
+    "parameters/MKUWaveShifterNode_Main_DelayTime": {"type":"float","status":"guessed","default":0.0,"range":[0.0,2.0],"range_status":"verified"},
+    "parameters/MKUWaveShifterNode_Main_FeedbackFilterFrequency": {"type":"float","status":"guessed","default":1000.0,"range":[25.0,17500.0],"range_status":"verified"},
+    "parameters/MKUWaveShifterNode_Main_FeedbackFilterBandWidth": {"type":"float","status":"guessed","default":1.0,"range":[0.0,1.0],"range_status":"verified"},
+    "state": {"type":"map","in":["state","preset"],"status":"guessed"}
+  },
+  "parameters": {
+    "Input [VST3 830402625]": {"field":"parameters/MKUWaveShifterNode_Main_InputGain","status":"verified"},
+    "Output [VST3 1629445448]": {"field":"parameters/MKUWaveShifterNode_Main_OutputGain","status":"verified"},
+    "Dry Wet [VST3 1741368035]": {"field":"parameters/MKUWaveShifterNode_Main_DryWet","status":"verified"},
+    "Mod Depth [VST3 84040713]": {"field":"parameters/MKUWaveShifterNode_Main_ModDepth","status":"verified"},
+    "Rate [VST3 1734965978]": {"field":"parameters/MKUWaveShifterNode_Main_ModRate","status":"guessed"},
+    "Shape [VST3 97968359]": {"field":"parameters/MKUWaveShifterNode_Main_ModShape","status":"guessed"},
+    "Randomize [VST3 1017665527]": {"field":"parameters/MKUWaveShifterNode_Main_ModRandomize","status":"verified"},
+    "Offset [VST3 41948852]": {"field":"parameters/MKUWaveShifterNode_Main_ModPhaseOffset","status":"verified"},
+    "Frequency [VST3 1201296180]": {"field":"parameters/MKUWaveShifterNode_Main_Frequency","status":"verified"},
+    "Spread [VST3 605419975]": {"field":"parameters/MKUWaveShifterNode_Main_FrequencySpread","status":"verified"},
+    "Stereo [VST3 2142268590]": {"field":"parameters/MKUWaveShifterNode_Main_StereoPhaseOffset","status":"verified"},
+    "FM Amount [VST3 1842546439]": {"field":"parameters/MKUWaveShifterNode_Main_FMAmount","status":"verified"},
+    "FM Ratio [VST3 975341436]": {"field":"parameters/MKUWaveShifterNode_Main_FMRatio","status":"guessed"},
+    "FM Lowpass [VST3 1981907495]": {"field":"parameters/MKUWaveShifterNode_Main_FMFilter","status":"verified"},
+    "Depth [VST3 402146459]": {"field":"parameters/MKUWaveShifterNode_Main_Depth","status":"verified"},
+    "Feedback [VST3 542245549]": {"field":"parameters/MKUWaveShifterNode_Main_Feedback","status":"verified"},
+    "Feedback Time [VST3 802215112]": {"field":"parameters/MKUWaveShifterNode_Main_DelayTime","status":"verified"},
+    "Feedback Frequency [VST3 1353557591]": {"field":"parameters/MKUWaveShifterNode_Main_FeedbackFilterFrequency","status":"verified"},
+    "Feedback Band Width [VST3 1575743884]": {"field":"parameters/MKUWaveShifterNode_Main_FeedbackFilterBandWidth","status":"verified"}
+  }
+}

@@ -3,6 +3,8 @@
   "name": "Ozone 12",
   "vendor": "iZotope",
   "kind": "effect",
+  "family": "ozone-12",
+  "roles": ["mastering", "eq", "compression", "limiting", "stereo"],
   "ids": {
     "vst3": [
       {
@@ -135,7 +137,8 @@
   },
   "presets": {
     "extensions": [
-      ".xml"
+      ".xml",
+      ".vstpreset"
     ],
     "windows": [
       {
@@ -156,6 +159,8 @@
   "notes": [
     "The main plug-in holds every module; each module is also its own plug-in. Their presets share one XML format, so they share this folder.",
     "Ozone 12 has no wavetables or samples; Match EQ snapshots and the reference tracks it keeps are not in presets.",
-    "No AU, AAX or CLAP builds were checked; only the VST3s were on the Windows machine."
+    "No AU, AAX or CLAP builds were checked; only the VST3s were on the Windows machine.",
+    "Kumi can create and edit VST3 presets for the suite and all twenty standalone modules using their own initialized component states. State writes are verified for 12.1.0; XML edits/import require PluginVer 120100, PluginBuild 1440 and PresetVer 6, and reject unknown legacy fields.",
+    "Component states do not identify the producing product build. Kumi checks their header version 4, serialization schema 1.1, exact variant identity, module parameter versions and known setting types against initialized templates; these checks establish format compatibility, not the source binary version."
   ]
 }

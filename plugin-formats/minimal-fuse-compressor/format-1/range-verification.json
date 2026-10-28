@@ -1,0 +1,26 @@
+{
+  "plugin": "minimal-fuse-compressor",
+  "version": "1.4.0",
+  "binarySha256": "1a4cbcf3e786d202cc4aad83164dc1648a777b26d888e3321af5e08f95a9c610",
+  "method": "Restore the initial component, set one public VST3 parameter, capture its XML value, then reload only that field into the initial component. Saved value and host readback must match at both normalized endpoints and 0.25. Bounds are supported intervals in this product version; no survey extrema are used. Raw XML and mappings without this proof remain read-only.",
+  "points": [
+    0,
+    1,
+    0.25
+  ],
+  "fields": {
+    "parameters/MKUFuseCompressorNode_Main_InputGain": {"parameterId":37012131,"stored":[-60.0,12.0,-42.0],"readback":[0.0,1.0,0.25]},
+    "parameters/MKUFuseCompressorNode_Main_OutputGain": {"parameterId":656660262,"stored":[-60.0,12.0,-42.0],"readback":[0.0,1.0,0.25]},
+    "parameters/MKUFuseCompressorNode_Main_DryWet": {"parameterId":1533232065,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/MKUFuseCompressorNode_Main_UpwardRatioScalar": {"parameterId":1797268986,"stored":[0.0,2.0,0.5],"readback":[0.0,1.0,0.25]},
+    "parameters/MKUFuseCompressorNode_Main_DownwardRatioScalar": {"parameterId":2059844243,"stored":[0.0,2.0,0.5],"readback":[0.0,1.0,0.25]},
+    "parameters/MKUFuseCompressorNode_Main_UpwardThresholdOffset": {"parameterId":1482452353,"stored":[-1.0,1.0,-0.5],"readback":[0.0,1.0,0.25]},
+    "parameters/MKUFuseCompressorNode_Main_DownwardThresholdOffset": {"parameterId":1392840090,"stored":[-1.0,1.0,-0.5],"readback":[0.0,1.0,0.25]},
+    "parameters/MKUFuseCompressorNode_Main_MakeupGainDB": {"parameterId":1932181548,"stored":[-24.0,24.0,-12.0],"readback":[0.0,1.0,0.25]},
+    "parameters/MKUFuseCompressorNode_Main_ThresholdTiltDB": {"parameterId":1713455360,"stored":[-24.0,24.0,-12.0],"readback":[0.0,1.0,0.25]},
+    "parameters/MKUFuseCompressorNode_Main_AttackSec": {"parameterId":2146496803,"stored":[9.999999747378752e-05,0.5,0.002052734373137355],"readback":[0.0,1.0,0.25]},
+    "parameters/MKUFuseCompressorNode_Main_ReleaseSec": {"parameterId":413774288,"stored":[0.001000000047497451,2.0,0.008808594197034836],"readback":[0.0,1.0,0.25]},
+    "parameters/MKUFuseCompressorNode_Main_SoftKneeDB": {"parameterId":1543835857,"stored":[0.0,60.0,3.75],"readback":[0.0,1.0,0.25]},
+    "parameters/MKUFuseCompressorNode_Main_ChannelLinkAmount": {"parameterId":194609295,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]}
+  }
+}

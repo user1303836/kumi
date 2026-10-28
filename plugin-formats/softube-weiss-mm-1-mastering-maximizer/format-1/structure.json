@@ -1,0 +1,174 @@
+{
+  "plugin": "softube-weiss-mm-1-mastering-maximizer",
+  "format": "format-1",
+  "about": "UTF-8 JSON AssetType SoftubePresetFile, FileFormatVersion 1. PresetList entries identify the plugin and contain ParameterData Type Full, Parameters tuples [id, normalized value, optional name]. SharedData is retained unchanged.",
+  "paths": "exact",
+  "files": {
+    "preset": {
+      "extension": ".softubepreset",
+      "layers": [
+        "JSON SoftubePresetFile version 1",
+        "PresetList entries and SharedData"
+      ],
+      "constants": {
+        "FileFormatVersion": 1,
+        "nativePluginId": "vxek"
+      }
+    }
+  },
+  "survey": {
+    "files": 1,
+    "presets": 5,
+    "source": "Installed bundle inspected for parameter names, IDs and observed numeric values only.",
+    "nativePresetVersionMarkers": [
+      "2.4.44"
+    ],
+    "observedBinaryVersion": "2.4.83",
+    "binaryVersionSource": "Installed PE ProductVersion; loading did not complete. Native bundle markers, including 9.9.9, are not installed-binary version evidence.",
+    "numericWrites": "Observed normalized 0..1 values do not establish legal write bounds; numeric edits remain closed without plug-in restore/readback verification."
+  },
+  "fields": {
+    "presets[]/name": {
+      "type": "text",
+      "in": [
+        "preset"
+      ],
+      "status": "guessed",
+      "about": "PresetName display label; not a file or resource path."
+    },
+    "presets[]/parameters/0": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "seen": [
+        0.5,
+        0.7575
+      ],
+      "about": "Amount.",
+      "range_status": "guessed"
+    },
+    "presets[]/parameters/1": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "seen": [
+        0.7475,
+        1.0
+      ],
+      "about": "Parallel Mix.",
+      "range_status": "guessed"
+    },
+    "presets[]/parameters/2": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "seen": [
+        0.5,
+        0.605
+      ],
+      "about": "Limiter Gain.",
+      "range_status": "guessed"
+    },
+    "presets[]/parameters/3": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "about": "Bypass.",
+      "range_status": "guessed"
+    },
+    "presets[]/parameters/4": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "seen": [
+        0.0,
+        0.75
+      ],
+      "about": "Style.",
+      "range_status": "guessed"
+    },
+    "presets[]/parameters/5": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "about": "Out Trim.",
+      "range_status": "guessed"
+    }
+  },
+  "parameters": {
+    "Amount": {
+      "field": "presets[]/parameters/0",
+      "status": "guessed",
+      "note": "ID and label appear together in native tuples; no installed-host parameter-change verification."
+    },
+    "Parallel Mix": {
+      "field": "presets[]/parameters/1",
+      "status": "guessed",
+      "note": "ID and label appear together in native tuples; no installed-host parameter-change verification."
+    },
+    "Limiter Gain": {
+      "field": "presets[]/parameters/2",
+      "status": "guessed",
+      "note": "ID and label appear together in native tuples; no installed-host parameter-change verification."
+    },
+    "Bypass": {
+      "field": "presets[]/parameters/3",
+      "status": "guessed",
+      "note": "ID and label appear together in native tuples; no installed-host parameter-change verification."
+    },
+    "Style": {
+      "field": "presets[]/parameters/4",
+      "status": "guessed",
+      "note": "ID and label appear together in native tuples; no installed-host parameter-change verification."
+    },
+    "Out Trim": {
+      "field": "presets[]/parameters/5",
+      "status": "guessed",
+      "note": "ID and label appear together in native tuples; no installed-host parameter-change verification."
+    }
+  }
+}

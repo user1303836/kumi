@@ -518,9 +518,8 @@ pub fn resolve_near(devices: &[Seen], asked: usize, words: &[String], near: Opti
             off.reference
         ));
     }
-    // Nothing on the track does it: Live's own devices that would, each with its knobs (not the kind asked, which
-    // just said it can't), and where each goes: a limiter's job last on the chain, the rest before the track's last
-    // limiter.
+    // Nothing on the track does it: discover installed processing before suggesting a native fallback.
+    // This pure resolver has no filesystem access; the deferred inventory tool checks the producer's machine.
     let last_limiter =
         devices.iter().rposition(|device| LIMITER_JOBS.iter().filter_map(|name| job_named(name)).any(|job| does(device, job)));
     let place = |job: &Job| match last_limiter {
@@ -541,11 +540,12 @@ pub fn resolve_near(devices: &[Seen], asked: usize, words: &[String], near: Opti
     }
     let suggested: Vec<String> =
         by_device.iter().map(|(device, knobs, place)| format!("Live's {device} ({}) {place}", knobs.join(", "))).collect();
+    let installed = "Check vst3 installed for suitable processing before adding a device; prefer available Ozone 12 for mastering, then other suitable VST3s.";
     if suggested.is_empty() {
-        return Resolved::Refused(format!("{why} Nothing else on this track does it."));
+        return Resolved::Refused(format!("{why} Nothing else on this track does it. {installed}"));
     }
     Resolved::Refused(format!(
-        "{why} Nothing else on this track does it: put {}, and tune it by the same role (make_changes loads it).",
+        "{why} Nothing else on this track does it. {installed} If no suitable plug-in can be used, put {}, and tune it by the same role (make_changes loads it).",
         suggested.join(" and ")
     ))
 }

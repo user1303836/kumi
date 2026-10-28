@@ -1,0 +1,107 @@
+{
+  "plugin": "pulsar-p19-igloo",
+  "format": "format-1",
+  "about": "Pulsar Modular XML PARAM id/value records in physical units; omitted values mean zero. Numeric edits require the verified intervals below. Raw XML attributes are preserved read-only and not duplicated here. Individual endpoint reload evidence is in range-verification.json.",
+  "paths": "exact",
+  "files": {
+    "preset": {
+      "extension": ".P19Preset",
+      "layers": [
+        "VC2! + little-endian XML byte length + XML + NUL"
+      ],
+      "constants": {
+        "root": "P19"
+      }
+    },
+    "state": {
+      "layers": [
+        "VST3 Comp chunk",
+        "optional VstW compatibility bank",
+        "VC2! + little-endian XML byte length + XML + NUL + preserved opaque JUCE private data"
+      ],
+      "constants": {
+        "xml_magic": "VC2!",
+        "root": "P19"
+      }
+    }
+  },
+  "opaque": [
+    "state"
+  ],
+  "fields": {
+    "": {"type":"map","in":["state","preset"],"status":"guessed"},
+    "root": {"type":"text","in":["state","preset"],"status":"guessed"},
+    "parameters": {"type":"map","in":["state","preset"],"status":"guessed"},
+    "parameters/pm_p19_attack_sldr": {"type":"float","status":"guessed","default":7.0,"range":[1.5,135.0],"range_status":"verified"},
+    "parameters/pm_p19_bypass_btn": {"type":"float","status":"guessed","default":0.0,"range":[0.0,1.0],"range_status":"verified","step":1.0},
+    "parameters/pm_p19_cleanout_sldr": {"type":"float","status":"guessed","default":0.0,"range":[-18.0,18.0],"range_status":"verified"},
+    "parameters/pm_p19_infodump_btn": {"type":"float","status":"guessed","default":1.0,"range":[0.0,1.0],"range_status":"verified"},
+    "parameters/pm_p19_input_sldr": {"type":"float","status":"guessed","default":1.300000190734863,"range":[-9.0,9.0],"range_status":"verified"},
+    "parameters/pm_p19_knee_sldr": {"type":"float","status":"guessed","default":0.0,"range":[0.0,4.0],"range_status":"verified"},
+    "parameters/pm_p19_limiter_sldr": {"type":"float","status":"guessed","default":1.5,"range":[0.0,100.0],"range_status":"verified"},
+    "parameters/pm_p19_mix_sldr": {"type":"float","status":"guessed","default":0.0,"range":[0.0,100.0],"range_status":"verified"},
+    "parameters/pm_p19_os_btn": {"type":"float","status":"guessed","default":0.0,"range":[0.0,1.0],"range_status":"verified"},
+    "parameters/pm_p19_ostype_sldr": {"type":"float","status":"guessed","default":1.0,"range":[0.0,1.0],"range_status":"verified"},
+    "parameters/pm_p19_phaseflip_btn": {"type":"float","status":"guessed","default":0.0,"range":[0.0,1.0],"range_status":"verified"},
+    "parameters/pm_p19_psi_sldr": {"type":"float","status":"guessed","default":7.099999904632568,"range":[0.0,10.0],"range_status":"verified"},
+    "parameters/pm_p19_ratio_sldr": {"type":"float","status":"guessed","default":2.0,"range":[0.0,6.0],"range_status":"verified"},
+    "parameters/pm_p19_ratiofeel_btn": {"type":"float","status":"guessed","default":1.0,"range":[0.0,1.0],"range_status":"verified"},
+    "parameters/pm_p19_release_sldr": {"type":"float","status":"guessed","default":13.0,"range":[1.5,2500.0],"range_status":"verified"},
+    "parameters/pm_p19_schpf_freq_sldr": {"type":"float","status":"guessed","default":1.0,"range":[0.0,9.0],"range_status":"verified"},
+    "parameters/pm_p19_schpffeel_btn": {"type":"float","status":"guessed","default":1.0,"range":[0.0,1.0],"range_status":"verified"},
+    "parameters/pm_p19_soul_btn": {"type":"float","status":"guessed","default":0.0,"range":[0.0,1.0],"range_status":"verified"},
+    "parameters/pm_p19_threshold_sldr": {"type":"float","status":"guessed","default":-11.28000259399414,"range":[-50.0,0.0],"range_status":"verified"},
+    "parameters/pm_p19_txgain_sldr": {"type":"float","status":"guessed","default":1.299999237060547,"range":[-18.0,18.0],"range_status":"verified"},
+    "parameters/pm_p19_link_sldr": {"type":"float","status":"guessed","default":100.0,"range":[0.0,100.0],"range_status":"verified"},
+    "parameters/pm_p19_lookahead_btn": {"type":"float","status":"guessed","default":0.0,"range":[0.0,1.0],"range_status":"verified"},
+    "parameters/pm_p19_overdrive_sldr": {"type":"float","status":"guessed","default":0.0,"range":[0.0,100.0],"range_status":"verified"},
+    "parameters/pm_p19_sc_btn": {"type":"float","status":"guessed","default":0.0,"range":[0.0,1.0],"range_status":"verified"},
+    "parameters/pm_p19_bwlimiterrls_sldr": {"type":"float","status":"guessed","default":4.0,"range":[3.0,10.0],"range_status":"verified"},
+    "parameters/pm_p19_trimout_sldr": {"type":"float","status":"guessed","default":0.0,"range":[-18.0,18.0],"range_status":"verified"},
+    "parameters/pm_p821_hiss_btn": {"type":"float","status":"guessed","default":1.0,"range":[0.0,1.0],"range_status":"verified"},
+    "parameters/pm_p821_hammer_sldr": {"type":"float","status":"guessed","default":0.0,"range":[0.0,2.0],"range_status":"verified"},
+    "parameters/pm_p821_stepcont_btn": {"type":"float","status":"guessed","default":0.0,"range":[0.0,1.0],"range_status":"verified"},
+    "parameters/pm_p19_bwlimitermode_sldr": {"type":"float","status":"guessed","default":1.0,"range":[0.0,2.0],"range_status":"verified"},
+    "parameters/pm_p19_bwlimiterthr_sldr": {"type":"float","status":"guessed","default":0.0,"range":[-18.0,0.0],"range_status":"verified"},
+    "parameters/pm_p19_clpknee_sldr": {"type":"float","status":"guessed","default":0.0,"range":[0.0,5.0],"range_status":"verified"},
+    "parameters/pm_p821_sub_btn": {"type":"float","status":"guessed","default":0.0,"range":[0.0,1.0],"range_status":"verified"},
+    "parameters/pm_p821_linkstepcont_btn": {"type":"float","status":"guessed","default":0.0,"range":[0.0,1.0],"range_status":"verified"},
+    "state": {"type":"map","in":["state","preset"],"status":"guessed"}
+  },
+  "parameters": {
+    "Attack [VST3 1730547413]": {"field":"parameters/pm_p19_attack_sldr","status":"verified"},
+    "Bypass [VST3 2119567630]": {"field":"parameters/pm_p19_bypass_btn","status":"verified"},
+    "Makeup [VST3 657659160]": {"field":"parameters/pm_p19_cleanout_sldr","status":"verified"},
+    "InfoDump [VST3 236570760]": {"field":"parameters/pm_p19_infodump_btn","status":"verified"},
+    "TX IN [VST3 1879587461]": {"field":"parameters/pm_p19_input_sldr","status":"verified"},
+    "Knee [VST3 268865146]": {"field":"parameters/pm_p19_knee_sldr","status":"verified"},
+    "Dynamics [VST3 678410535]": {"field":"parameters/pm_p19_limiter_sldr","status":"verified"},
+    "Mix [VST3 80692595]": {"field":"parameters/pm_p19_mix_sldr","status":"verified"},
+    "OS SW [VST3 680360074]": {"field":"parameters/pm_p19_os_btn","status":"verified"},
+    "OS Type [VST3 2045675455]": {"field":"parameters/pm_p19_ostype_sldr","status":"verified"},
+    "Phase Flip [VST3 862024412]": {"field":"parameters/pm_p19_phaseflip_btn","status":"verified"},
+    "PSI [VST3 869821257]": {"field":"parameters/pm_p19_psi_sldr","status":"verified"},
+    "Ratio [VST3 458572516]": {"field":"parameters/pm_p19_ratio_sldr","status":"verified"},
+    "RatioFeel [VST3 771476005]": {"field":"parameters/pm_p19_ratiofeel_btn","status":"verified"},
+    "Release [VST3 1448970792]": {"field":"parameters/pm_p19_release_sldr","status":"verified"},
+    "Sc/HPF [VST3 1617446452]": {"field":"parameters/pm_p19_schpf_freq_sldr","status":"verified"},
+    "ScHpfFeel [VST3 683928360]": {"field":"parameters/pm_p19_schpffeel_btn","status":"verified"},
+    "Soul [VST3 755704537]": {"field":"parameters/pm_p19_soul_btn","status":"verified"},
+    "Threshold [VST3 1694432772]": {"field":"parameters/pm_p19_threshold_sldr","status":"verified"},
+    "Bias [VST3 5202426]": {"field":"parameters/pm_p19_txgain_sldr","status":"verified"},
+    "link [VST3 54150691]": {"field":"parameters/pm_p19_link_sldr","status":"verified"},
+    "LookAhead SW [VST3 796670966]": {"field":"parameters/pm_p19_lookahead_btn","status":"verified"},
+    "OverDrive [VST3 1345775641]": {"field":"parameters/pm_p19_overdrive_sldr","status":"verified"},
+    "SC SW [VST3 780100342]": {"field":"parameters/pm_p19_sc_btn","status":"verified"},
+    "Limiter Rls [VST3 328358327]": {"field":"parameters/pm_p19_bwlimiterrls_sldr","status":"verified"},
+    "Out [VST3 1817880931]": {"field":"parameters/pm_p19_trimout_sldr","status":"verified"},
+    "Hiss SW [VST3 1484782772]": {"field":"parameters/pm_p821_hiss_btn","status":"verified"},
+    "Hammer [VST3 576851530]": {"field":"parameters/pm_p821_hammer_sldr","status":"verified"},
+    "Rl&Atk Step SW [VST3 1361619985]": {"field":"parameters/pm_p821_stepcont_btn","status":"verified"},
+    "Lmt ModeSW. [VST3 548358393]": {"field":"parameters/pm_p19_bwlimitermode_sldr","status":"verified"},
+    "Limiter Threshold [VST3 235335122]": {"field":"parameters/pm_p19_bwlimiterthr_sldr","status":"verified"},
+    "CLP Knee [VST3 567158053]": {"field":"parameters/pm_p19_clpknee_sldr","status":"verified"},
+    "Sub SW [VST3 577928359]": {"field":"parameters/pm_p821_sub_btn","status":"verified"},
+    "link Step SW [VST3 2014939659]": {"field":"parameters/pm_p821_linkstepcont_btn","status":"verified"}
+  }
+}

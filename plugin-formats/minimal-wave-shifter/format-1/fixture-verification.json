@@ -1,0 +1,9 @@
+{
+  "plugin": "minimal-wave-shifter",
+  "version": "1.3.0",
+  "fixtureSha256": "2c79dfd955bce1f1e7d8ea946fe5a98a41ca75c31d97fae29226f762ed4e2eb9",
+  "sessionId": "all zeros",
+  "runtime": "Sanitized component restored in a fresh VST3 instance. Product root, source version and every mapped parameter matched after reload within native floating-point serialization precision.",
+  "parametersChecked": 19,
+  "maxRelativeErrorWithUnitFloor": 1.430511474609375e-06
+}

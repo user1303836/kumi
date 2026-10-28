@@ -1,0 +1,79 @@
+{
+  "plugin": "pulsar-p450-mdn-eq",
+  "format": "format-1",
+  "about": "Pulsar Modular XML PARAM id/value records in physical units; omitted values mean zero. Numeric edits require the verified intervals below. Raw XML attributes are preserved read-only and not duplicated here. Individual endpoint reload evidence is in range-verification.json.",
+  "paths": "exact",
+  "files": {
+    "preset": {
+      "extension": ".P450Preset",
+      "layers": [
+        "VC2! + little-endian XML byte length + XML + NUL"
+      ],
+      "constants": {
+        "root": "P450"
+      }
+    },
+    "state": {
+      "layers": [
+        "VST3 Comp chunk",
+        "optional VstW compatibility bank",
+        "VC2! + little-endian XML byte length + XML + NUL + preserved opaque JUCE private data"
+      ],
+      "constants": {
+        "xml_magic": "VC2!",
+        "root": "P450"
+      }
+    }
+  },
+  "opaque": [
+    "state"
+  ],
+  "fields": {
+    "": {"type":"map","in":["state","preset"],"status":"guessed"},
+    "root": {"type":"text","in":["state","preset"],"status":"guessed"},
+    "parameters": {"type":"map","in":["state","preset"],"status":"guessed"},
+    "parameters/pm_p450_infodump_btn": {"type":"float","status":"guessed","default":0.0,"range":[0.0,1.0],"range_status":"verified"},
+    "parameters/pm_p450_bypass_btn": {"type":"float","status":"guessed","default":0.0,"range":[0.0,1.0],"range_status":"verified","step":1.0},
+    "parameters/pm_p450_eq_gainx_sldr": {"type":"float","status":"guessed","default":0.0,"range":[0.0,2.0],"range_status":"verified"},
+    "parameters/pm_p450_eq_hfreq_sldr": {"type":"float","status":"guessed","default":0.0,"range":[0.0,6.0],"range_status":"verified"},
+    "parameters/pm_p450_eq_hgain_sldr": {"type":"float","status":"guessed","default":0.0,"range":[-5.0,5.0],"range_status":"verified"},
+    "parameters/pm_p450_eq_hpf_sldr": {"type":"float","status":"guessed","default":0.0,"range":[0.0,4.0],"range_status":"verified"},
+    "parameters/pm_p450_eq_lfreq_sldr": {"type":"float","status":"guessed","default":0.0,"range":[0.0,6.0],"range_status":"verified"},
+    "parameters/pm_p450_eq_lgain_sldr": {"type":"float","status":"guessed","default":0.0,"range":[-5.0,5.0],"range_status":"verified"},
+    "parameters/pm_p450_eq_lmfreq_sldr": {"type":"float","status":"guessed","default":0.0,"range":[0.0,6.0],"range_status":"verified"},
+    "parameters/pm_p450_eq_lmgain_sldr": {"type":"float","status":"guessed","default":0.0,"range":[-5.0,5.0],"range_status":"verified"},
+    "parameters/pm_p450_eq_lpf_sldr": {"type":"float","status":"guessed","default":0.0,"range":[0.0,4.0],"range_status":"verified"},
+    "parameters/pm_p450_eq_mhfreq_sldr": {"type":"float","status":"guessed","default":0.0,"range":[0.0,6.0],"range_status":"verified"},
+    "parameters/pm_p450_eq_mhgain_sldr": {"type":"float","status":"guessed","default":0.0,"range":[-5.0,5.0],"range_status":"verified"},
+    "parameters/pm_p450_eq_peakhighshelf_sldr": {"type":"float","status":"guessed","default":0.0,"range":[0.0,1.0],"range_status":"verified"},
+    "parameters/pm_p450_eq_peaklowshelf_sldr": {"type":"float","status":"guessed","default":0.0,"range":[0.0,1.0],"range_status":"verified"},
+    "parameters/pm_p450_output_sldr": {"type":"float","status":"guessed","default":0.0,"range":[-12.0,12.0],"range_status":"verified"},
+    "parameters/pm_p450_pol_btn": {"type":"float","status":"guessed","default":0.0,"range":[0.0,1.0],"range_status":"verified"},
+    "parameters/pm_p455_os_btn": {"type":"float","status":"guessed","default":0.0,"range":[0.0,1.0],"range_status":"verified"},
+    "parameters/pm_p450_bias_sldr": {"type":"float","status":"guessed","default":0.0,"range":[-36.0,36.0],"range_status":"verified"},
+    "parameters/pm_p450_boostengine_sldr": {"type":"float","status":"guessed","default":0.0,"range":[0.0,1.0],"range_status":"verified"},
+    "state": {"type":"map","in":["state","preset"],"status":"guessed"}
+  },
+  "parameters": {
+    "InfoDump [VST3 799498077]": {"field":"parameters/pm_p450_infodump_btn","status":"verified"},
+    "Bypass [VST3 848646435]": {"field":"parameters/pm_p450_bypass_btn","status":"verified"},
+    "EQ Mult. [VST3 351939170]": {"field":"parameters/pm_p450_eq_gainx_sldr","status":"verified"},
+    "EQ H Freq [VST3 762992827]": {"field":"parameters/pm_p450_eq_hfreq_sldr","status":"verified"},
+    "EQ H Gain [VST3 709177364]": {"field":"parameters/pm_p450_eq_hgain_sldr","status":"verified"},
+    "HPF [VST3 104474429]": {"field":"parameters/pm_p450_eq_hpf_sldr","status":"verified"},
+    "EQ L Freq [VST3 2124422455]": {"field":"parameters/pm_p450_eq_lfreq_sldr","status":"verified"},
+    "EQ L Gain [VST3 2070606992]": {"field":"parameters/pm_p450_eq_lgain_sldr","status":"verified"},
+    "EQ LM Freq [VST3 2037751352]": {"field":"parameters/pm_p450_eq_lmfreq_sldr","status":"verified"},
+    "EQ LM Gain [VST3 1983935889]": {"field":"parameters/pm_p450_eq_lmgain_sldr","status":"verified"},
+    "LPF [VST3 633264825]": {"field":"parameters/pm_p450_eq_lpf_sldr","status":"verified"},
+    "EQ MH Freq [VST3 1223367518]": {"field":"parameters/pm_p450_eq_mhfreq_sldr","status":"verified"},
+    "EQ MH Gain [VST3 1169552055]": {"field":"parameters/pm_p450_eq_mhgain_sldr","status":"verified"},
+    "EQ H Band [VST3 310177906]": {"field":"parameters/pm_p450_eq_peakhighshelf_sldr","status":"verified"},
+    "EQ L Band [VST3 955165116]": {"field":"parameters/pm_p450_eq_peaklowshelf_sldr","status":"verified"},
+    "M. Out [VST3 827877959]": {"field":"parameters/pm_p450_output_sldr","status":"verified"},
+    "Polarity Flip [VST3 1863629708]": {"field":"parameters/pm_p450_pol_btn","status":"verified"},
+    "OS SW [VST3 366736250]": {"field":"parameters/pm_p455_os_btn","status":"verified"},
+    "BIAS [VST3 1306563599]": {"field":"parameters/pm_p450_bias_sldr","status":"verified"},
+    "Smooth [VST3 2009466143]": {"field":"parameters/pm_p450_boostengine_sldr","status":"verified"}
+  }
+}

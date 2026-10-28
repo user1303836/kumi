@@ -1646,6 +1646,36 @@ class ControlSurfaceTests(unittest.TestCase):
         with self.assertRaises(ValueError): mapper.invoke("browser.load", {"itemId": instrument["id"], "trackRef": return_ref, "expectedName": instrument["name"]})
         self.assertEqual(len(browser.loaded), 1)
 
+    def test_browser_loads_vst3_presets_without_accepting_other_loadable_files(self):
+        class Item:
+            def __init__(self, name, loadable=False, folder=False, children=None):
+                self.name = name; self.is_loadable = loadable; self.is_folder = folder
+                self.is_device = False; self.children = children or []
+        class Browser:
+            def __init__(self, song):
+                self.song = song; self.loaded = []
+                self.user_library = Item("User Library", folder=True, children=[
+                    Item("Init.vstpreset", True), Item("Upper.VSTPRESET", True),
+                    Item("Unavailable.vstpreset"), Item("Folder.vstpreset", True, True),
+                    Item("Loop.wav", True), Item("Clip.alc", True), Item("Wrong.vstpreset.wav", True),
+                ])
+            def load_item(self, item):
+                self.loaded.append(item); self.song.view.selected_track.devices.append(FakeDevice())
+        song = FakeSong(); song.tracks.append(FakeTrack()); song.tracks[0].devices = []
+        song.view = type("View", (), {"selected_track": song.tracks[1]})()
+        browser = Browser(song); mapper = LiveObjectMapper(song); mapper._browser = lambda: browser
+        items = mapper.invoke("browser.search", {"category": "user_library", "limit": 20})["items"]
+        self.assertEqual([item["name"] for item in items if item["isDevice"]], ["Init.vstpreset", "Upper.VSTPRESET"])
+        for item in items:
+            self.assertEqual(mapper.invoke("browser.inspect", {"itemId": item["id"]}), item)
+        item = items[0]; track = mapper.snapshot()["tracks"][0]
+        result = mapper.invoke("browser.load", {"itemId": item["id"], "trackRef": track["ref"],
+            "expectedName": item["name"], "expectedItemIdentity": item["objectIdentity"],
+            "expectedTrackIdentity": track["objectIdentity"], "expectedSiblings": []})
+        self.assertTrue(result["loaded"]); self.assertEqual(len(browser.loaded), 1)
+        self.assertIs(song.view.selected_track, song.tracks[1])
+        self.assertEqual(len(song.tracks[0].devices), 1)
+
     def test_browser_failure_cleans_transaction_owned_device_before_returning(self):
         class Item:
             def __init__(self, name, loadable=False, children=None): self.name = name; self.is_loadable = loadable; self.children = children or []

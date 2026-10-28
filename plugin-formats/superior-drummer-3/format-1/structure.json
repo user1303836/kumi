@@ -1,0 +1,59 @@
+{
+  "plugin": "superior-drummer-3",
+  "format": "format-1",
+  "about": "Line-oriented UTF-8 records and brace-delimited sections. Quoted tokens retain spaces. Paths use zero-based occurrence indices, for example SAMPLER[0]/HQ[0]/mastervol[0]. The VST3 processor wraps the same text in VstW/FBCh with plugin ID SD3a and preserves opaque bytes following the NUL-terminated text. Section header arguments use a /$args suffix. Edits preserve each record value count and numeric or text type.",
+  "paths": "exact",
+  "files": {
+    "preset": {
+      "extension": ".sd3p",
+      "layers": [
+        "UTF-8 records with brace-delimited sections"
+      ],
+      "constants": {}
+    },
+    "state": {
+      "layers": [
+        "VST3 component compatibility container VstW/FBCh, ID SD3a",
+        "NUL-terminated native preset text, opaque host and plugin state tail"
+      ],
+      "constants": {}
+    }
+  },
+  "fields": {
+    "PlugVersion[0]": {
+      "type": "text",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "status": "guessed"
+    },
+    "SAMPLER[0]/HQ[0]/mastervol[0]": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "default": 1,
+      "status": "verified",
+      "about": "Sampler master volume. Kumi supports attenuation only: 0..1 is its supported write interval, not a claim about the full UI range. Native restore/readback confirmed both endpoints and 0.25/0.5 intermediate values.",
+      "unit": "linear gain",
+      "range": [
+        0.0,
+        1.0
+      ],
+      "range_status": "verified"
+    },
+    "SAMPLER[0]/HQ[0]/mastervol2[0]": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "default": 1,
+      "status": "guessed",
+      "about": "Secondary sampler master volume (linear gain)."
+    }
+  },
+  "parameters": {}
+}

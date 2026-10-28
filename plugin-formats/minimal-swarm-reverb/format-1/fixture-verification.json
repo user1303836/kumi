@@ -1,0 +1,9 @@
+{
+  "plugin": "minimal-swarm-reverb",
+  "version": "1.4.0",
+  "fixtureSha256": "84cb634abb0ff35b48ad05226a63cd84371c8757325f4369279bd5ad6cf702f8",
+  "sessionId": "all zeros",
+  "runtime": "Sanitized component restored in a fresh VST3 instance. Product root, source version and every mapped parameter matched after reload within native floating-point serialization precision.",
+  "parametersChecked": 17,
+  "maxRelativeErrorWithUnitFloor": 1.430511474609375e-06
+}

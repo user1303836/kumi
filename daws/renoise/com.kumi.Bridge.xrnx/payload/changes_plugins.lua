@@ -10,6 +10,7 @@ local places_ = import("instruments")
 local instruments_ = import("changes_instruments")
 local modfx_ = import("changes_modfx")
 local material_ = import("changes_material")
+local vst3_ = import("vst3_presets")
 
 local bad, fail = base.bad, base.fail
 local q = base.q
@@ -253,6 +254,80 @@ base.register({
   end,
   read = function(device) return { preset = device.active_preset, hash = state_hash(device.active_preset_data or "") } end,
   same = function(a, b) return a.preset == b.preset and a.hash == b.hash end,
+})
+
+-- plugin-preset-data: the host snapshots a validated .vstpreset file. Keep the complete prior device XML, and apply only
+-- to the same VST3 identity. A program number is not sufficient to undo a synth's arbitrary oscillator/sample/FX state.
+local function data_plan(song, env, input)
+  local n, objects, label = places_.locate(song, env, "instrument", input, "plugin-preset-data")
+  local device = plugin_device_of(objects)
+  local state = device.active_preset_data or ""
+  if #state > M.MAX_STATE_BYTES then fail("failed", "the plug-in's state exceeds Kumi's undo state limit") end
+  return { n = n, label = label, device = device, state = state, path = device.device_path,
+    wanted = vst3_.compose(device, state, input) }
+end
+
+local function data_title(plan, input)
+  return string.format("%s plays preset %s", q(plan.label), q(input.presetName or "VST3 state"))
+end
+
+base.register({
+  kind = "plugin-preset-data", custom = true, by_place = true,
+  preview = function(song, env, input)
+    local plan = data_plan(song, env, input)
+    return { target = places_.target_of(env, "instrument", plan.n), prior = { hash = material_.content_of(plan.state) },
+      fence = { path = plan.path, hash = material_.content_of(plan.state), wanted = material_.content_of(plan.wanted) },
+      display = { title = data_title(plan, input), unchanged = plan.state == plan.wanted or nil } }
+  end,
+  apply = function(song, env, input, fence, desc)
+    local ok, plan = pcall(data_plan, song, env, input)
+    if not ok then base.gone_is_changed(plan) end
+    if plan.path ~= fence.path or material_.content_of(plan.state) ~= fence.hash or material_.content_of(plan.wanted) ~= fence.wanted then
+      fail("changed", q(plan.label) .. "'s plug-in state or requested preset changed since the preview")
+    end
+    local unchanged = plan.state == plan.wanted
+    if not unchanged then
+      if M.UNDO_COVERS.preset then song:describe_undo(desc) end
+      if not pcall(function() plan.device.active_preset_data = plan.wanted end) then
+        local restored = pcall(function() plan.device.active_preset_data = plan.state end)
+        fail("failed", "Renoise refused the VST3 preset state" .. (restored and "" or "; the previous state could not be restored"))
+      end
+    end
+    local back = plan.device.active_preset_data or ""
+    return { applied = { path = plan.path, hash = material_.content_of(back) }, material = { path = plan.path, state = plan.state },
+      target = places_.target_of(env, "instrument", plan.n), prior = { hash = fence.hash },
+      display = { title = data_title(plan, input), unchanged = unchanged or nil },
+      undo = { desc = desc, entry = not unchanged and M.UNDO_COVERS.preset },
+      place = places_.journal_place("instrument", plan.n), unwritten = unchanged }
+  end,
+  restore = function(song, env, restore, desc)
+    local material, applied = restore.material, restore.applied
+    if type(material) ~= "table" or type(material.state) ~= "string" or type(applied) ~= "table" then bad("material: the plug-in's prior state") end
+    local n, objects, label = places_.locate(song, env, "instrument", { place = restore.target and restore.target.place }, "plugin-preset-data")
+    local device = plugin_device_of(objects)
+    if device.device_path ~= material.path then fail("changed", q(label) .. " plays another plug-in now") end
+    local hash = material_.content_of(device.active_preset_data or "")
+    if hash == material_.content_of(material.state) then
+      return { restored = { hash = hash }, display = { title = q(label) .. "'s state is back already" }, undo = { desc = desc, entry = false }, unwritten = true }
+    end
+    if not restore.discard and hash ~= applied.hash then fail("changed", q(label) .. "'s plug-in changed since Kumi loaded its preset") end
+    if M.UNDO_COVERS.preset then song:describe_undo(desc) end
+    if not pcall(function() device.active_preset_data = material.state end) then fail("failed", "the plug-in refused its prior state") end
+    local after = material_.content_of(device.active_preset_data or "")
+    if after == hash and after ~= material_.content_of(material.state) then
+      fail("failed", "the plug-in kept the applied state instead of restoring its earlier state")
+    end
+    base.note_restored(env.journal, "plugin-preset-data", places_.journal_place("instrument", n), applied, base.KINDS["plugin-preset-data"])
+    return { restored = { path = material.path, hash = after }, display = { title = q(label) .. "'s state put back",
+      note = after ~= material_.content_of(material.state) and "The plug-in accepted its earlier state and normalized the saved bytes." or nil },
+      undo = { desc = desc, entry = M.UNDO_COVERS.preset } }
+  end,
+  reread = function(song, place)
+    local instrument = places_.reread("instrument")(song, place)
+    return instrument and instrument.plugin_properties.plugin_loaded and instrument.plugin_properties.plugin_device or nil
+  end,
+  read = function(device) return { path = device.device_path, hash = material_.content_of(device.active_preset_data or "") } end,
+  same = function(a, b) return a.path == b.path and a.hash == b.hash end,
 })
 
 -- plugin-set {ref: instrument, channel?, transpose?, volumeDb?, autoSuspend?}: the plug-in instrument's own settings.

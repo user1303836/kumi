@@ -1,0 +1,317 @@
+{
+  "plugin": "zynaptiq-pitchmap-colors",
+  "format": "format-1",
+  "about": "Zynaptiq Preset XML version 3 or 4. inputParams count and pN attributes hold scalar values. VST3 component state (verified on PUNCH 1 and UNMIX DRUMS) uses a u32 little-endian XML length including a terminating NUL, then the XML and NUL.",
+  "paths": "exact",
+  "files": {
+    "preset": {
+      "extension": ".preset",
+      "layers": [
+        "UTF-8 XML Preset; inputParams attributes p0 through p<count-1>; preserve all other elements"
+      ],
+      "constants": {}
+    },
+    "state": {
+      "layers": [
+        "u32 LE byte count including NUL; XML Preset; NUL"
+      ],
+      "constants": {}
+    }
+  },
+  "survey": {
+    "files": 38,
+    "parameterCounts": [
+      16
+    ],
+    "presetVersions": [
+      "4"
+    ],
+    "source": "Installed native preset files and shipped parameter-name metadata; no factory preset bodies copied.",
+    "verification": "Native documents inspected; installed-binary version and runtime acceptance remain unverified.",
+    "parameterLinks": "Guessed links associate names and indices from installed metadata; physical-unit mappings remain unverified."
+  },
+  "fields": {
+    "@progName": {
+      "type": "text",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "status": "guessed"
+    },
+    "inputParams/@p0": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "guessed",
+      "about": "BYPASS"
+    },
+    "inputParams/@p1": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        2.0
+      ],
+      "status": "guessed",
+      "about": "SoundMode"
+    },
+    "inputParams/@p2": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "about": "hpOn"
+    },
+    "inputParams/@p3": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "about": "lpOn"
+    },
+    "inputParams/@p4": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "guessed",
+      "about": "SnapshotOrMIDI"
+    },
+    "inputParams/@p5": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        109.0
+      ],
+      "status": "guessed",
+      "about": "lowPitchKey"
+    },
+    "inputParams/@p6": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        109.0
+      ],
+      "status": "guessed",
+      "about": "highPitchKey"
+    },
+    "inputParams/@p7": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        106.0
+      ],
+      "status": "guessed",
+      "about": "transientBypass"
+    },
+    "inputParams/@p8": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "about": "transientBypassOn"
+    },
+    "inputParams/@p9": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -24.0,
+        12.0
+      ],
+      "status": "guessed",
+      "about": "scaleShift"
+    },
+    "inputParams/@p10": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        2.0
+      ],
+      "status": "guessed",
+      "about": "pitchRounding"
+    },
+    "inputParams/@p11": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -12.0,
+        12.0
+      ],
+      "status": "guessed",
+      "about": "formantShift"
+    },
+    "inputParams/@p12": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "about": "formantGamma"
+    },
+    "inputParams/@p13": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1000.0
+      ],
+      "status": "guessed",
+      "about": "lowPitchCutoff"
+    },
+    "inputParams/@p14": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        1550.0,
+        20050.0
+      ],
+      "status": "guessed",
+      "about": "highPitchCutoff"
+    },
+    "inputParams/@p15": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "guessed",
+      "about": "minMaxPitchMode"
+    }
+  },
+  "parameters": {
+    "BYPASS": {
+      "field": "inputParams/@p0",
+      "status": "guessed"
+    },
+    "SoundMode": {
+      "field": "inputParams/@p1",
+      "status": "guessed"
+    },
+    "hpOn": {
+      "field": "inputParams/@p2",
+      "status": "guessed"
+    },
+    "lpOn": {
+      "field": "inputParams/@p3",
+      "status": "guessed"
+    },
+    "SnapshotOrMIDI": {
+      "field": "inputParams/@p4",
+      "status": "guessed"
+    },
+    "lowPitchKey": {
+      "field": "inputParams/@p5",
+      "status": "guessed"
+    },
+    "highPitchKey": {
+      "field": "inputParams/@p6",
+      "status": "guessed"
+    },
+    "transientBypass": {
+      "field": "inputParams/@p7",
+      "status": "guessed"
+    },
+    "transientBypassOn": {
+      "field": "inputParams/@p8",
+      "status": "guessed"
+    },
+    "scaleShift": {
+      "field": "inputParams/@p9",
+      "status": "guessed"
+    },
+    "pitchRounding": {
+      "field": "inputParams/@p10",
+      "status": "guessed"
+    },
+    "formantShift": {
+      "field": "inputParams/@p11",
+      "status": "guessed"
+    },
+    "formantGamma": {
+      "field": "inputParams/@p12",
+      "status": "guessed"
+    },
+    "lowPitchCutoff": {
+      "field": "inputParams/@p13",
+      "status": "guessed"
+    },
+    "highPitchCutoff": {
+      "field": "inputParams/@p14",
+      "status": "guessed"
+    },
+    "minMaxPitchMode": {
+      "field": "inputParams/@p15",
+      "status": "guessed"
+    }
+  }
+}

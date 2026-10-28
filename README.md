@@ -48,6 +48,7 @@ Next time, open a terminal and type `kumi`, then open your DAW (Live, REAPER or 
 - **Build a sound from a tutorial.** Paste a YouTube link: Kumi watches it and builds what it shows on a new track.
 - **Fix the mix.** Ask “is the bass muddy?” and Kumi listens, finds what's clashing and fixes it, listening again after each change.
 - **Match a reference.** Give it a track you love: Kumi tries a few takes, scores each against it and refines the best.
+- **Create plug-in presets and master a track.** Kumi uses its built-in VST3 formats and checks suitable installed processors before native devices. See [supported formats and limits](plugin-formats/README.md).
 - **Make a device.** Describe a Max for Live effect or instrument and Kumi builds it and puts it on your track.
 - **Find your sounds.** “A dusty snare like this one”, “my usual vocal chain”: Kumi knows your samples, presets and projects.
 - **Map your sounds.** `/map` lays out your samples and songs so similar ones sit together; point at one to hear it. Gather the ones you like into a palette, and Kumi picks from it when you ask for “a darker kick from my palette”, or loads the whole palette as a kit.
@@ -121,4 +122,4 @@ To build Kumi from source, see [DEVELOPMENT.md](DEVELOPMENT.md) and the [develop
 
 ## License
 
-[MIT](LICENSE.md); the parts from other people's work, and the models Kumi fetches, are in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Ableton Live is a trademark of Ableton AG; Kumi is not affiliated with or endorsed by Ableton, Cockos (REAPER) or Renoise.
+[MIT](LICENSE.md); the parts from other people's work, and the models Kumi fetches, are in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Ableton Live is a trademark of Ableton AG; Kumi is not affiliated with, associated with, sponsored by or endorsed by Ableton, Cockos (REAPER), Renoise or the makers of the plug-ins it works with; product names only identify compatible software.

@@ -1,0 +1,67 @@
+{
+  "plugin": "minimal-ripple-phaser",
+  "format": "format-1",
+  "about": "Minimal Audio full XML; parameters/<name> edits mapped_value in physical units. Numeric edits require the verified intervals below. Raw XML attributes are preserved read-only and not duplicated here. Individual endpoint reload evidence is in range-verification.json.",
+  "paths": "exact",
+  "files": {
+    "preset": {
+      "extension": ".xml",
+      "layers": [
+        "native XML"
+      ],
+      "constants": {
+        "root": "RipplePhaser"
+      }
+    },
+    "state": {
+      "layers": [
+        "VST3 Comp chunk",
+        "optional VstW compatibility bank",
+        "VC2! + little-endian XML byte length + XML + NUL + preserved opaque JUCE private data"
+      ],
+      "constants": {
+        "xml_magic": "VC2!",
+        "root": "RipplePhaser"
+      }
+    }
+  },
+  "opaque": [
+    "state"
+  ],
+  "fields": {
+    "": {"type":"map","in":["state","preset"],"status":"guessed"},
+    "root": {"type":"text","in":["state","preset"],"status":"guessed"},
+    "parameters": {"type":"map","in":["state","preset"],"status":"guessed"},
+    "parameters/MKURipplePhaserNode_Main_InputGain": {"type":"float","status":"guessed","default":0.0,"range":[-60.0,12.0],"range_status":"verified"},
+    "parameters/MKURipplePhaserNode_Main_OutputGain": {"type":"float","status":"guessed","default":0.0,"range":[-60.0,12.0],"range_status":"verified"},
+    "parameters/MKURipplePhaserNode_Main_DryWet": {"type":"float","status":"guessed","default":1.0,"range":[0.0,1.0],"range_status":"verified"},
+    "parameters/MKURipplePhaserNode_Main_ModDepth": {"type":"float","status":"guessed","default":0.5,"range":[-1.0,1.0],"range_status":"verified"},
+    "parameters/MKURipplePhaserNode_Main_ModRate": {"type":"float","status":"guessed","default":7.0},
+    "parameters/MKURipplePhaserNode_Main_ModRandomize": {"type":"float","status":"guessed","default":0.0,"range":[0.0,1.0],"range_status":"verified"},
+    "parameters/MKURipplePhaserNode_Main_ModShape": {"type":"float","status":"guessed","default":0.0},
+    "parameters/MKURipplePhaserNode_Main_ModPhaseOffset": {"type":"float","status":"guessed","default":0.25,"range":[-0.5,0.5],"range_status":"verified"},
+    "parameters/MKURipplePhaserNode_Main_ModBalance": {"type":"float","status":"guessed","default":0.0,"range":[-1.0,1.0],"range_status":"verified"},
+    "parameters/MKURipplePhaserNode_Main_Feedback": {"type":"float","status":"guessed","default":0.4995000064373016,"range":[0.0,0.9990000128746033],"range_status":"verified"},
+    "parameters/MKURipplePhaserNode_Main_Bend": {"type":"float","status":"guessed","default":0.0,"range":[-1.0,1.0],"range_status":"verified"},
+    "parameters/MKURipplePhaserNode_Main_CenterFreq": {"type":"float","status":"guessed","default":650.0,"range":[40.0,10000.0],"range_status":"verified"},
+    "parameters/MKURipplePhaserNode_Main_Spread": {"type":"float","status":"guessed","default":0.0,"range":[-1.0,1.0],"range_status":"verified"},
+    "parameters/MKURipplePhaserNode_Main_CenterSpread": {"type":"float","status":"guessed","default":0.0,"range":[-1.0,1.0],"range_status":"verified"},
+    "state": {"type":"map","in":["state","preset"],"status":"guessed"}
+  },
+  "parameters": {
+    "Input [VST3 1458221474]": {"field":"parameters/MKURipplePhaserNode_Main_InputGain","status":"verified"},
+    "Output [VST3 1764476935]": {"field":"parameters/MKURipplePhaserNode_Main_OutputGain","status":"verified"},
+    "Dry Wet [VST3 604032290]": {"field":"parameters/MKURipplePhaserNode_Main_DryWet","status":"verified"},
+    "Mod Depth [VST3 173566600]": {"field":"parameters/MKURipplePhaserNode_Main_ModDepth","status":"verified"},
+    "Rate [VST3 837296251]": {"field":"parameters/MKURipplePhaserNode_Main_ModRate","status":"guessed"},
+    "Randomize [VST3 1933905654]": {"field":"parameters/MKURipplePhaserNode_Main_ModRandomize","status":"verified"},
+    "Shape [VST3 187494246]": {"field":"parameters/MKURipplePhaserNode_Main_ModShape","status":"guessed"},
+    "Offset [VST3 80415219]": {"field":"parameters/MKURipplePhaserNode_Main_ModPhaseOffset","status":"verified"},
+    "Mod Balance [VST3 1694970209]": {"field":"parameters/MKURipplePhaserNode_Main_ModBalance","status":"verified"},
+    "Feedback [VST3 631771436]": {"field":"parameters/MKURipplePhaserNode_Main_Feedback","status":"verified"},
+    "Bend [VST3 1980442208]": {"field":"parameters/MKURipplePhaserNode_Main_Bend","status":"verified"},
+    "Center [VST3 2052815956]": {"field":"parameters/MKURipplePhaserNode_Main_CenterFreq","status":"verified"},
+    "Spread [VST3 1031427290]": {"field":"parameters/MKURipplePhaserNode_Main_Spread","status":"verified"},
+    "Stereo [VST3 1736855631]": {"field":"parameters/MKURipplePhaserNode_Main_CenterSpread","status":"verified"}
+  }
+}

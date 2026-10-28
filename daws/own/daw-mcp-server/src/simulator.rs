@@ -62,6 +62,7 @@ impl SimulatorConfig {
         Self {
             secret,
             identity: Identity {
+                preset_files: Vec::new(),
                 daw: Daw::Reaper.id().into(),
                 bridge: "0.1.0".into(),
                 daw_version: "7.82/macOS-arm64".into(),
@@ -98,6 +99,7 @@ impl SimulatorConfig {
         Self {
             secret,
             identity: Identity {
+                preset_files: Vec::new(),
                 daw: Daw::Renoise.id().into(),
                 bridge: "0.1.0".into(),
                 daw_version: "3.5.4".into(),

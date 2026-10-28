@@ -1,0 +1,56 @@
+{
+  "plugin": "valhalla-freq-echo",
+  "format": "format-1",
+  "about": "Normalized Valhalla sound controls in XML root attributes. Numeric edits require the verified intervals below. Raw XML attributes are preserved read-only and not duplicated here. Individual endpoint reload evidence is in range-verification.json.",
+  "paths": "exact",
+  "files": {
+    "preset": {
+      "extension": ".vpreset",
+      "layers": [
+        "native XML"
+      ],
+      "constants": {
+        "root": "MYPLUGINSETTINGS"
+      }
+    },
+    "state": {
+      "layers": [
+        "VST3 Comp chunk",
+        "optional VstW compatibility bank",
+        "VC2! + little-endian XML byte length + XML + NUL + preserved opaque JUCE private data"
+      ],
+      "constants": {
+        "xml_magic": "VC2!",
+        "root": "MYPLUGINSETTINGS"
+      }
+    }
+  },
+  "opaque": [
+    "state"
+  ],
+  "fields": {
+    "": {"type":"map","in":["state","preset"],"status":"guessed"},
+    "root": {"type":"text","in":["state","preset"],"status":"guessed"},
+    "parameters": {"type":"map","in":["state","preset"],"status":"guessed"},
+    "parameters/wetDryMix": {"type":"float","status":"guessed","default":0.5,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/shift": {"type":"float","status":"guessed","default":0.5000749826431274,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/delay": {"type":"float","status":"guessed","default":0.000990009866654873,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/sync": {"type":"float","status":"guessed","default":0.0,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/feedback": {"type":"float","status":"guessed","default":0.5,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/lowCut": {"type":"float","status":"guessed","default":0.06040268391370773,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/highCut": {"type":"float","status":"guessed","default":0.3311036825180054,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/stereo": {"type":"float","status":"guessed","default":1.0,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "state": {"type":"map","in":["state","preset"],"status":"guessed"},
+    "name": {"type":"text","in":["state","preset"],"status":"guessed"}
+  },
+  "parameters": {
+    "wetDry [VST3 48]": {"field":"parameters/wetDryMix","status":"verified"},
+    "shift [VST3 49]": {"field":"parameters/shift","status":"verified"},
+    "delay [VST3 50]": {"field":"parameters/delay","status":"verified"},
+    "sync [VST3 51]": {"field":"parameters/sync","status":"verified"},
+    "feedback [VST3 52]": {"field":"parameters/feedback","status":"verified"},
+    "lowCut [VST3 53]": {"field":"parameters/lowCut","status":"verified"},
+    "highCut [VST3 54]": {"field":"parameters/highCut","status":"verified"},
+    "stereo [VST3 55]": {"field":"parameters/stereo","status":"verified"}
+  }
+}

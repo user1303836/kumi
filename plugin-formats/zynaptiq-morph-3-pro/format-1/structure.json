@@ -1,0 +1,1303 @@
+{
+  "plugin": "zynaptiq-morph-3-pro",
+  "format": "format-1",
+  "about": "Zynaptiq Preset XML version 3 or 4. inputParams count and pN attributes hold scalar values. VST3 component state (verified on PUNCH 1 and UNMIX DRUMS) uses a u32 little-endian XML length including a terminating NUL, then the XML and NUL.",
+  "paths": "exact",
+  "files": {
+    "preset": {
+      "extension": ".preset",
+      "layers": [
+        "UTF-8 XML Preset; inputParams attributes p0 through p<count-1>; preserve all other elements"
+      ],
+      "constants": {}
+    },
+    "state": {
+      "layers": [
+        "u32 LE byte count including NUL; XML Preset; NUL"
+      ],
+      "constants": {}
+    }
+  },
+  "survey": {
+    "files": 11,
+    "parameterCounts": [
+      74
+    ],
+    "presetVersions": [
+      "4"
+    ],
+    "source": "Installed native preset files and shipped parameter-name metadata; no factory preset bodies copied.",
+    "verification": "Native documents inspected; installed-binary version and runtime acceptance remain unverified.",
+    "parameterLinks": "Guessed links associate names and indices from installed metadata; physical-unit mappings remain unverified."
+  },
+  "fields": {
+    "@progName": {
+      "type": "text",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "status": "guessed"
+    },
+    "inputParams/@p0": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "guessed",
+      "about": "pluginActive"
+    },
+    "inputParams/@p1": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "guessed",
+      "about": "pluginDoublePrecision"
+    },
+    "inputParams/@p2": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "guessed",
+      "about": "pluginAlign"
+    },
+    "inputParams/@p3": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        6.0
+      ],
+      "status": "guessed",
+      "about": "mainInGain"
+    },
+    "inputParams/@p4": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "guessed",
+      "about": "auxInGain"
+    },
+    "inputParams/@p5": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "guessed",
+      "about": "outputGain"
+    },
+    "inputParams/@p6": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "about": "limiterOn"
+    },
+    "inputParams/@p7": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        1.0,
+        1.0
+      ],
+      "status": "guessed",
+      "about": "morphBypass"
+    },
+    "inputParams/@p8": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        2.0,
+        2.0
+      ],
+      "status": "guessed",
+      "about": "morphBSource"
+    },
+    "inputParams/@p9": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        10.0
+      ],
+      "status": "guessed",
+      "about": "morphAlgorithm"
+    },
+    "inputParams/@p10": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -0.4066666666666666,
+        0.21333333333333337
+      ],
+      "status": "guessed",
+      "about": "morphIndex"
+    },
+    "inputParams/@p11": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        1.0,
+        1.0
+      ],
+      "status": "guessed",
+      "about": "morphXFade"
+    },
+    "inputParams/@p12": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        1.0,
+        1.0
+      ],
+      "status": "guessed",
+      "about": "morphAmpSense"
+    },
+    "inputParams/@p13": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.020000000000000018,
+        1.0
+      ],
+      "status": "guessed",
+      "about": "morphComplexity"
+    },
+    "inputParams/@p14": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -0.76,
+        0.8999999999999999
+      ],
+      "status": "guessed",
+      "about": "morphCrest"
+    },
+    "inputParams/@p15": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -0.33999999999999997,
+        0.5800000000000001
+      ],
+      "status": "guessed",
+      "about": "morphOsmosis"
+    },
+    "inputParams/@p16": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -1.0,
+        -0.96
+      ],
+      "status": "guessed",
+      "about": "morphOsmosisRelease"
+    },
+    "inputParams/@p17": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "about": "transientBypassOn"
+    },
+    "inputParams/@p18": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "about": "transientMode"
+    },
+    "inputParams/@p19": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        18.0,
+        85.0
+      ],
+      "status": "guessed",
+      "about": "transientBypassAmount"
+    },
+    "inputParams/@p20": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.26,
+        1.0
+      ],
+      "status": "guessed",
+      "about": "transientSize"
+    },
+    "inputParams/@p21": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "about": "transientsBypassFmtShift"
+    },
+    "inputParams/@p22": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "about": "formantShiftEnable"
+    },
+    "inputParams/@p23": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -0.375,
+        0.20833333333333326
+      ],
+      "status": "guessed",
+      "about": "formantShift"
+    },
+    "inputParams/@p24": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "guessed",
+      "about": "formantShiftLegacyOn"
+    },
+    "inputParams/@p25": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        1.0,
+        1.0
+      ],
+      "status": "guessed",
+      "about": "modelerOnOff"
+    },
+    "inputParams/@p26": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        3.0
+      ],
+      "status": "guessed",
+      "about": "modelerMode"
+    },
+    "inputParams/@p27": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -0.19999998807907104,
+        1.0
+      ],
+      "status": "guessed",
+      "about": "modelerSliceLength"
+    },
+    "inputParams/@p28": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -0.6126732673267326,
+        0.56
+      ],
+      "status": "guessed",
+      "about": "modelerInertia"
+    },
+    "inputParams/@p29": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -1.0,
+        0.5827586206896551
+      ],
+      "status": "guessed",
+      "about": "modelerMinSlice"
+    },
+    "inputParams/@p30": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.05714285714285716,
+        1.0
+      ],
+      "status": "guessed",
+      "about": "modelerMaxSlice"
+    },
+    "inputParams/@p31": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -96.0,
+        -35.0
+      ],
+      "status": "guessed",
+      "about": "modelerFileGate"
+    },
+    "inputParams/@p32": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "about": "modelerSkipSilence"
+    },
+    "inputParams/@p33": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -1.0,
+        1.0
+      ],
+      "status": "guessed",
+      "about": "modelerSliceFade"
+    },
+    "inputParams/@p34": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "about": "modelerSpectralRange"
+    },
+    "inputParams/@p35": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        2.0,
+        3.0
+      ],
+      "status": "guessed",
+      "about": "modelerSliceSorting"
+    },
+    "inputParams/@p36": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        2.0,
+        2.0
+      ],
+      "status": "guessed",
+      "about": "modelerInputAnalysis"
+    },
+    "inputParams/@p37": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -3.0,
+        0.0
+      ],
+      "status": "guessed",
+      "about": "mixerMorphMix"
+    },
+    "inputParams/@p38": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "guessed",
+      "about": "mixerMorphMute"
+    },
+    "inputParams/@p39": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "guessed",
+      "about": "mixerMorphSolo"
+    },
+    "inputParams/@p40": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.3400000000000001
+      ],
+      "status": "guessed",
+      "about": "mixerMorphFilter"
+    },
+    "inputParams/@p41": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -60.0,
+        -8.0
+      ],
+      "status": "guessed",
+      "about": "mixerMainInMix"
+    },
+    "inputParams/@p42": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "guessed",
+      "about": "mixerMainInMute"
+    },
+    "inputParams/@p43": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "guessed",
+      "about": "mixerMainInSolo"
+    },
+    "inputParams/@p44": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.6399999999999999
+      ],
+      "status": "guessed",
+      "about": "mixerMainInFilter"
+    },
+    "inputParams/@p45": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -60.0,
+        -60.0
+      ],
+      "status": "guessed",
+      "about": "mixerAuxInMix"
+    },
+    "inputParams/@p46": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "guessed",
+      "about": "mixerAuxInMute"
+    },
+    "inputParams/@p47": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "guessed",
+      "about": "mixerAuxInSolo"
+    },
+    "inputParams/@p48": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "guessed",
+      "about": "mixerAuxInFilter"
+    },
+    "inputParams/@p49": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -60.0,
+        -8.0
+      ],
+      "status": "guessed",
+      "about": "mixerModelerMix"
+    },
+    "inputParams/@p50": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "guessed",
+      "about": "mixerModelerMute"
+    },
+    "inputParams/@p51": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "guessed",
+      "about": "mixerModelerSolo"
+    },
+    "inputParams/@p52": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.78
+      ],
+      "status": "guessed",
+      "about": "mixerModelerFilter"
+    },
+    "inputParams/@p53": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -1.0,
+        -0.45999999999999996
+      ],
+      "status": "guessed",
+      "about": "reverbMix"
+    },
+    "inputParams/@p54": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.72
+      ],
+      "status": "guessed",
+      "about": "reverbRoomSize"
+    },
+    "inputParams/@p55": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.3999999999999999
+      ],
+      "status": "guessed",
+      "about": "reverbDamp"
+    },
+    "inputParams/@p56": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        1.0,
+        1.0
+      ],
+      "status": "guessed",
+      "about": "mappingZone1OnOff"
+    },
+    "inputParams/@p57": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "guessed",
+      "about": "mappingZone1Mute"
+    },
+    "inputParams/@p58": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        20.0
+      ],
+      "status": "guessed",
+      "about": "mappingZone1InputPosition"
+    },
+    "inputParams/@p59": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        20.0,
+        100.0000001
+      ],
+      "status": "guessed",
+      "about": "mappingZone1InputWidth"
+    },
+    "inputParams/@p60": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        51.034481048583984
+      ],
+      "status": "guessed",
+      "about": "mappingZone1FileFrom"
+    },
+    "inputParams/@p61": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        100.0
+      ],
+      "status": "guessed",
+      "about": "mappingZone1FileTo"
+    },
+    "inputParams/@p62": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "about": "mappingZone2OnOff"
+    },
+    "inputParams/@p63": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "guessed",
+      "about": "mappingZone2Mute"
+    },
+    "inputParams/@p64": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        20.0,
+        20.0
+      ],
+      "status": "guessed",
+      "about": "mappingZone2InputPosition"
+    },
+    "inputParams/@p65": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        20.0,
+        20.0
+      ],
+      "status": "guessed",
+      "about": "mappingZone2InputWidth"
+    },
+    "inputParams/@p66": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        20.0,
+        50.17241287231445
+      ],
+      "status": "guessed",
+      "about": "mappingZone2FileFrom"
+    },
+    "inputParams/@p67": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        40.0,
+        60.000003814697266
+      ],
+      "status": "guessed",
+      "about": "mappingZone2FileTo"
+    },
+    "inputParams/@p68": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "guessed",
+      "about": "mappingZone3OnOff"
+    },
+    "inputParams/@p69": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "guessed",
+      "about": "mappingZone3Mute"
+    },
+    "inputParams/@p70": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        60.0,
+        60.0
+      ],
+      "status": "guessed",
+      "about": "mappingZone3InputPosition"
+    },
+    "inputParams/@p71": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        20.0,
+        20.0
+      ],
+      "status": "guessed",
+      "about": "mappingZone3InputWidth"
+    },
+    "inputParams/@p72": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        60.0,
+        60.0
+      ],
+      "status": "guessed",
+      "about": "mappingZone3FileFrom"
+    },
+    "inputParams/@p73": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        80.0,
+        80.0
+      ],
+      "status": "guessed",
+      "about": "mappingZone3FileTo"
+    }
+  },
+  "parameters": {
+    "pluginActive": {
+      "field": "inputParams/@p0",
+      "status": "guessed"
+    },
+    "pluginDoublePrecision": {
+      "field": "inputParams/@p1",
+      "status": "guessed"
+    },
+    "pluginAlign": {
+      "field": "inputParams/@p2",
+      "status": "guessed"
+    },
+    "mainInGain": {
+      "field": "inputParams/@p3",
+      "status": "guessed"
+    },
+    "auxInGain": {
+      "field": "inputParams/@p4",
+      "status": "guessed"
+    },
+    "outputGain": {
+      "field": "inputParams/@p5",
+      "status": "guessed"
+    },
+    "limiterOn": {
+      "field": "inputParams/@p6",
+      "status": "guessed"
+    },
+    "morphBypass": {
+      "field": "inputParams/@p7",
+      "status": "guessed"
+    },
+    "morphBSource": {
+      "field": "inputParams/@p8",
+      "status": "guessed"
+    },
+    "morphAlgorithm": {
+      "field": "inputParams/@p9",
+      "status": "guessed"
+    },
+    "morphIndex": {
+      "field": "inputParams/@p10",
+      "status": "guessed"
+    },
+    "morphXFade": {
+      "field": "inputParams/@p11",
+      "status": "guessed"
+    },
+    "morphAmpSense": {
+      "field": "inputParams/@p12",
+      "status": "guessed"
+    },
+    "morphComplexity": {
+      "field": "inputParams/@p13",
+      "status": "guessed"
+    },
+    "morphCrest": {
+      "field": "inputParams/@p14",
+      "status": "guessed"
+    },
+    "morphOsmosis": {
+      "field": "inputParams/@p15",
+      "status": "guessed"
+    },
+    "morphOsmosisRelease": {
+      "field": "inputParams/@p16",
+      "status": "guessed"
+    },
+    "transientBypassOn": {
+      "field": "inputParams/@p17",
+      "status": "guessed"
+    },
+    "transientMode": {
+      "field": "inputParams/@p18",
+      "status": "guessed"
+    },
+    "transientBypassAmount": {
+      "field": "inputParams/@p19",
+      "status": "guessed"
+    },
+    "transientSize": {
+      "field": "inputParams/@p20",
+      "status": "guessed"
+    },
+    "transientsBypassFmtShift": {
+      "field": "inputParams/@p21",
+      "status": "guessed"
+    },
+    "formantShiftEnable": {
+      "field": "inputParams/@p22",
+      "status": "guessed"
+    },
+    "formantShift": {
+      "field": "inputParams/@p23",
+      "status": "guessed"
+    },
+    "formantShiftLegacyOn": {
+      "field": "inputParams/@p24",
+      "status": "guessed"
+    },
+    "modelerOnOff": {
+      "field": "inputParams/@p25",
+      "status": "guessed"
+    },
+    "modelerMode": {
+      "field": "inputParams/@p26",
+      "status": "guessed"
+    },
+    "modelerSliceLength": {
+      "field": "inputParams/@p27",
+      "status": "guessed"
+    },
+    "modelerInertia": {
+      "field": "inputParams/@p28",
+      "status": "guessed"
+    },
+    "modelerMinSlice": {
+      "field": "inputParams/@p29",
+      "status": "guessed"
+    },
+    "modelerMaxSlice": {
+      "field": "inputParams/@p30",
+      "status": "guessed"
+    },
+    "modelerFileGate": {
+      "field": "inputParams/@p31",
+      "status": "guessed"
+    },
+    "modelerSkipSilence": {
+      "field": "inputParams/@p32",
+      "status": "guessed"
+    },
+    "modelerSliceFade": {
+      "field": "inputParams/@p33",
+      "status": "guessed"
+    },
+    "modelerSpectralRange": {
+      "field": "inputParams/@p34",
+      "status": "guessed"
+    },
+    "modelerSliceSorting": {
+      "field": "inputParams/@p35",
+      "status": "guessed"
+    },
+    "modelerInputAnalysis": {
+      "field": "inputParams/@p36",
+      "status": "guessed"
+    },
+    "mixerMorphMix": {
+      "field": "inputParams/@p37",
+      "status": "guessed"
+    },
+    "mixerMorphMute": {
+      "field": "inputParams/@p38",
+      "status": "guessed"
+    },
+    "mixerMorphSolo": {
+      "field": "inputParams/@p39",
+      "status": "guessed"
+    },
+    "mixerMorphFilter": {
+      "field": "inputParams/@p40",
+      "status": "guessed"
+    },
+    "mixerMainInMix": {
+      "field": "inputParams/@p41",
+      "status": "guessed"
+    },
+    "mixerMainInMute": {
+      "field": "inputParams/@p42",
+      "status": "guessed"
+    },
+    "mixerMainInSolo": {
+      "field": "inputParams/@p43",
+      "status": "guessed"
+    },
+    "mixerMainInFilter": {
+      "field": "inputParams/@p44",
+      "status": "guessed"
+    },
+    "mixerAuxInMix": {
+      "field": "inputParams/@p45",
+      "status": "guessed"
+    },
+    "mixerAuxInMute": {
+      "field": "inputParams/@p46",
+      "status": "guessed"
+    },
+    "mixerAuxInSolo": {
+      "field": "inputParams/@p47",
+      "status": "guessed"
+    },
+    "mixerAuxInFilter": {
+      "field": "inputParams/@p48",
+      "status": "guessed"
+    },
+    "mixerModelerMix": {
+      "field": "inputParams/@p49",
+      "status": "guessed"
+    },
+    "mixerModelerMute": {
+      "field": "inputParams/@p50",
+      "status": "guessed"
+    },
+    "mixerModelerSolo": {
+      "field": "inputParams/@p51",
+      "status": "guessed"
+    },
+    "mixerModelerFilter": {
+      "field": "inputParams/@p52",
+      "status": "guessed"
+    },
+    "reverbMix": {
+      "field": "inputParams/@p53",
+      "status": "guessed"
+    },
+    "reverbRoomSize": {
+      "field": "inputParams/@p54",
+      "status": "guessed"
+    },
+    "reverbDamp": {
+      "field": "inputParams/@p55",
+      "status": "guessed"
+    },
+    "mappingZone1OnOff": {
+      "field": "inputParams/@p56",
+      "status": "guessed"
+    },
+    "mappingZone1Mute": {
+      "field": "inputParams/@p57",
+      "status": "guessed"
+    },
+    "mappingZone1InputPosition": {
+      "field": "inputParams/@p58",
+      "status": "guessed"
+    },
+    "mappingZone1InputWidth": {
+      "field": "inputParams/@p59",
+      "status": "guessed"
+    },
+    "mappingZone1FileFrom": {
+      "field": "inputParams/@p60",
+      "status": "guessed"
+    },
+    "mappingZone1FileTo": {
+      "field": "inputParams/@p61",
+      "status": "guessed"
+    },
+    "mappingZone2OnOff": {
+      "field": "inputParams/@p62",
+      "status": "guessed"
+    },
+    "mappingZone2Mute": {
+      "field": "inputParams/@p63",
+      "status": "guessed"
+    },
+    "mappingZone2InputPosition": {
+      "field": "inputParams/@p64",
+      "status": "guessed"
+    },
+    "mappingZone2InputWidth": {
+      "field": "inputParams/@p65",
+      "status": "guessed"
+    },
+    "mappingZone2FileFrom": {
+      "field": "inputParams/@p66",
+      "status": "guessed"
+    },
+    "mappingZone2FileTo": {
+      "field": "inputParams/@p67",
+      "status": "guessed"
+    },
+    "mappingZone3OnOff": {
+      "field": "inputParams/@p68",
+      "status": "guessed"
+    },
+    "mappingZone3Mute": {
+      "field": "inputParams/@p69",
+      "status": "guessed"
+    },
+    "mappingZone3InputPosition": {
+      "field": "inputParams/@p70",
+      "status": "guessed"
+    },
+    "mappingZone3InputWidth": {
+      "field": "inputParams/@p71",
+      "status": "guessed"
+    },
+    "mappingZone3FileFrom": {
+      "field": "inputParams/@p72",
+      "status": "guessed"
+    },
+    "mappingZone3FileTo": {
+      "field": "inputParams/@p73",
+      "status": "guessed"
+    }
+  }
+}

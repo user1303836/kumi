@@ -1,0 +1,45 @@
+{
+  "plugin": "minimal-squash",
+  "format": "format-1",
+  "about": "Minimal Audio full XML; parameters/<name> edits mapped_value in physical units. Numeric edits require the verified intervals below. Raw XML attributes are preserved read-only and not duplicated here. Individual endpoint reload evidence is in range-verification.json.",
+  "paths": "exact",
+  "files": {
+    "preset": {
+      "extension": ".xml",
+      "layers": [
+        "native XML"
+      ],
+      "constants": {
+        "root": "Squash"
+      }
+    },
+    "state": {
+      "layers": [
+        "VST3 Comp chunk",
+        "optional VstW compatibility bank",
+        "VC2! + little-endian XML byte length + XML + NUL + preserved opaque JUCE private data"
+      ],
+      "constants": {
+        "xml_magic": "VC2!",
+        "root": "Squash"
+      }
+    }
+  },
+  "opaque": [
+    "state"
+  ],
+  "fields": {
+    "": {"type":"map","in":["state","preset"],"status":"guessed"},
+    "root": {"type":"text","in":["state","preset"],"status":"guessed"},
+    "parameters": {"type":"map","in":["state","preset"],"status":"guessed"},
+    "parameters/MKUSquashCompressorNode_Main_Depth": {"type":"float","status":"guessed","default":0.5,"range":[0.0,1.0],"range_status":"verified"},
+    "parameters/MKUSquashCompressorNode_Main_Tone": {"type":"float","status":"guessed","default":0.5,"range":[0.0,1.0],"range_status":"verified"},
+    "parameters/MKUSquashCompressorNode_Main_Mix": {"type":"float","status":"guessed","default":1.0,"range":[0.0,1.0],"range_status":"verified"},
+    "state": {"type":"map","in":["state","preset"],"status":"guessed"}
+  },
+  "parameters": {
+    "Depth [VST3 33163679]": {"field":"parameters/MKUSquashCompressorNode_Main_Depth","status":"verified"},
+    "Tone [VST3 278650646]": {"field":"parameters/MKUSquashCompressorNode_Main_Tone","status":"verified"},
+    "Mix [VST3 1879370808]": {"field":"parameters/MKUSquashCompressorNode_Main_Mix","status":"verified"}
+  }
+}

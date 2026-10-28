@@ -1,0 +1,44 @@
+{
+  "plugin": "zynaptiq-punch-1",
+  "name": "PUNCH 1",
+  "vendor": "Zynaptiq",
+  "kind": "effect",
+  "ids": {
+    "vst3": [
+      {
+        "id": "132A82E52E2548ED8D1384E92C1C8B0E",
+        "name": "PUNCH 1",
+        "parameters": 2173,
+        "status": "verified"
+      }
+    ]
+  },
+  "presets": {
+    "extensions": [
+      ".preset",
+      ".vstpreset"
+    ],
+    "windows": [
+      {
+        "path": "C:/Program Files/Zynaptiq/PUNCH 1/PUNCH 1 data/Presets",
+        "holds": "installed native presets",
+        "status": "verified"
+      }
+    ]
+  },
+  "formats": [
+    "format-1"
+  ],
+  "notes": [
+    "Only VST3 integration is supported. Native presets hold physical parameter values, not normalized VST3 values.",
+    "Unknown custom properties, DSP state and UI fields are preserved."
+  ],
+  "family": "zynaptiq",
+  "roles": [
+    "transient",
+    "mastering"
+  ],
+  "binaries": [
+    "PUNCH 1 VST3.vst3"
+  ]
+}

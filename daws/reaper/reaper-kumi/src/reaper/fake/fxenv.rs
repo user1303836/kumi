@@ -1005,7 +1005,15 @@ fn config_get(owner: u64, index: c_int, key: &str) -> Option<String> {
                 })
             }
             // The fake's state chunk is its parameters' values (see `chunk_of`), for a plug-in that gives one.
-            "vst_chunk" => return fx.chunk.as_ref().map(|_| chunk_of(&fx.params.iter().map(|p| p.value).collect::<Vec<_>>())),
+            "vst_chunk" => {
+                return fx.chunk.as_ref().map(|_| {
+                    let mut chunk = chunk_of(&fx.params.iter().map(|p| p.value).collect::<Vec<_>>());
+                    if let Some(extra) = fx.config.get("fake.stateExtra") {
+                        chunk.push_str(extra);
+                    }
+                    chunk
+                })
+            }
             "parent_container" => {
                 return (path.len() > 1).then(|| fx_address(s, owner, &path[..path.len() - 1], input).to_string());
             }
@@ -1148,6 +1156,12 @@ fn set_config(owner: u64, index: c_int, key: *const c_char, value: *const c_char
                 true
             }
             "vst_chunk" => {
+                if fx.config.contains_key("fake.refuseState") {
+                    return false;
+                }
+                if fx.config.contains_key("fake.ignoreState") {
+                    return true;
+                }
                 if fx.chunk.is_none() {
                     return false;
                 }
@@ -1159,7 +1173,16 @@ fn set_config(owner: u64, index: c_int, key: *const c_char, value: *const c_char
                         p.shown = p.text_for(v);
                     }
                 }
+                let extra = value.split('+').skip(fx.params.len()).collect::<Vec<_>>().join("+");
+                if extra.is_empty() {
+                    fx.config.remove("fake.stateExtra");
+                } else {
+                    fx.config.insert("fake.stateExtra".into(), format!("+{extra}"));
+                }
                 fx.chunk = Some(value);
+                if fx.config.contains_key("fake.normalizeState") {
+                    fx.config.insert("fake.stateExtra".into(), "+normalized".into());
+                }
                 fx.preset.clear();
                 s.state_changed = true;
                 true
@@ -1279,6 +1302,28 @@ fn load_preset(s: &mut State, owner: u64, index: c_int, at: usize) -> bool {
 fn set_preset(owner: u64, index: c_int, name: *const c_char) -> bool {
     let name = name_of(name);
     counted(|s| {
+        if std::path::Path::new(&name).extension().is_some_and(|ext| ext.eq_ignore_ascii_case("vstpreset")) {
+            let Some(fx) = fx_mut(s, owner, index) else { return false };
+            if let Some(original) = fx.config.get("fake.swapSource") {
+                std::fs::write(original, b"replaced after validation").unwrap();
+            }
+            let Ok(bytes) = std::fs::read(&name) else { return false };
+            let Ok(preset) = daw_bridge::vst3::read(&bytes) else { return false };
+            let Ok(component) = std::str::from_utf8(preset.component) else { return false };
+            for (p, value) in fx.params.iter_mut().zip(component.split('+')) {
+                let Some(value) = u64::from_str_radix(value, 16).ok().map(f64::from_bits) else { return false };
+                p.value = value;
+                p.shown = p.text_for(value);
+            }
+            fx.preset = name.clone();
+            if let Some(extra) = fx.config.get("fake.fileExtra").cloned() {
+                fx.config.insert("fake.stateExtra".into(), extra);
+            }
+            fx.config.insert("fake.loadedFile".into(), name);
+            let refused = fx.config.contains_key("fake.refusePresetFile");
+            s.undo_dirty = true;
+            return !refused;
+        }
         let at = fx_of(s, owner, index).and_then(|fx| fx.presets.iter().position(|p| p.name == name));
         at.is_some_and(|at| load_preset(s, owner, index, at))
     })

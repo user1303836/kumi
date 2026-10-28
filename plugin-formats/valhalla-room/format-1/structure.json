@@ -1,0 +1,84 @@
+{
+  "plugin": "valhalla-room",
+  "format": "format-1",
+  "about": "Normalized Valhalla sound controls in XML root attributes. Numeric edits require the verified intervals below. Raw XML attributes are preserved read-only and not duplicated here. Individual endpoint reload evidence is in range-verification.json.",
+  "paths": "exact",
+  "files": {
+    "preset": {
+      "extension": ".vpreset",
+      "layers": [
+        "native XML"
+      ],
+      "constants": {
+        "root": "ValhallaRoom"
+      }
+    },
+    "state": {
+      "layers": [
+        "VST3 Comp chunk",
+        "optional VstW compatibility bank",
+        "VC2! + little-endian XML byte length + XML + NUL + preserved opaque JUCE private data"
+      ],
+      "constants": {
+        "xml_magic": "VC2!",
+        "root": "ValhallaRoom"
+      }
+    }
+  },
+  "opaque": [
+    "state"
+  ],
+  "fields": {
+    "": {"type":"map","in":["state","preset"],"status":"guessed"},
+    "root": {"type":"text","in":["state","preset"],"status":"guessed"},
+    "parameters": {"type":"map","in":["state","preset"],"status":"guessed"},
+    "parameters/mix": {"type":"float","status":"guessed","default":1.0,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/predelay": {"type":"float","status":"guessed","default":0.01999999955296516,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/decay": {"type":"float","status":"guessed","default":0.01901901885867119,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/HiCut": {"type":"float","status":"guessed","default":0.5302013158798218,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/earlyLateMix": {"type":"float","status":"guessed","default":0.5,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/lateSize": {"type":"float","status":"guessed","default":0.5,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/lateCross": {"type":"float","status":"guessed","default":1.0,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/lateModRate": {"type":"float","status":"guessed","default":0.09090909361839294,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/lateModDepth": {"type":"float","status":"guessed","default":0.5,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/RTBassMultiply": {"type":"float","status":"guessed","default":0.3333333432674408,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/RTXover": {"type":"float","status":"guessed","default":0.09090909361839294,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/RTHighMultiply": {"type":"float","status":"guessed","default":0.444444477558136,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/RTHighXover": {"type":"float","status":"guessed","default":0.5302013158798218,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/earlySize": {"type":"float","status":"guessed","default":0.02902902849018574,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/earlyCross": {"type":"float","status":"guessed","default":0.1000000014901161,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/earlyModRate": {"type":"float","status":"guessed","default":0.09090909361839294,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/earlyModDepth": {"type":"float","status":"guessed","default":0.0,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/earlySend": {"type":"float","status":"guessed","default":0.0,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/diffusion": {"type":"float","status":"guessed","default":1.0,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/type": {"type":"float","status":"guessed","default":0.0833333358168602,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/space": {"type":"float","status":"guessed","default":0.0,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/LoCut": {"type":"float","status":"guessed","default":0.0,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "state": {"type":"map","in":["state","preset"],"status":"guessed"},
+    "name": {"type":"text","in":["state","preset"],"status":"guessed"}
+  },
+  "parameters": {
+    "mix [VST3 48]": {"field":"parameters/mix","status":"verified"},
+    "predelay [VST3 49]": {"field":"parameters/predelay","status":"verified"},
+    "decay [VST3 50]": {"field":"parameters/decay","status":"verified"},
+    "HiCut [VST3 51]": {"field":"parameters/HiCut","status":"verified"},
+    "earlyLateMix [VST3 52]": {"field":"parameters/earlyLateMix","status":"verified"},
+    "lateSize [VST3 53]": {"field":"parameters/lateSize","status":"verified"},
+    "lateCross [VST3 54]": {"field":"parameters/lateCross","status":"verified"},
+    "lateModRate [VST3 55]": {"field":"parameters/lateModRate","status":"verified"},
+    "lateModDepth [VST3 56]": {"field":"parameters/lateModDepth","status":"verified"},
+    "RTBassMultiply [VST3 57]": {"field":"parameters/RTBassMultiply","status":"verified"},
+    "RTXover [VST3 1567]": {"field":"parameters/RTXover","status":"verified"},
+    "RTHighMultiply [VST3 1568]": {"field":"parameters/RTHighMultiply","status":"verified"},
+    "RTHighXover [VST3 1569]": {"field":"parameters/RTHighXover","status":"verified"},
+    "earlySize [VST3 1570]": {"field":"parameters/earlySize","status":"verified"},
+    "earlyCross [VST3 1571]": {"field":"parameters/earlyCross","status":"verified"},
+    "earlyModRate [VST3 1572]": {"field":"parameters/earlyModRate","status":"verified"},
+    "earlyModDepth [VST3 1573]": {"field":"parameters/earlyModDepth","status":"verified"},
+    "earlySend [VST3 1574]": {"field":"parameters/earlySend","status":"verified"},
+    "diffusion [VST3 1575]": {"field":"parameters/diffusion","status":"verified"},
+    "type [VST3 1576]": {"field":"parameters/type","status":"verified"},
+    "space [VST3 1598]": {"field":"parameters/space","status":"verified"},
+    "LoCut [VST3 1599]": {"field":"parameters/LoCut","status":"verified"}
+  }
+}

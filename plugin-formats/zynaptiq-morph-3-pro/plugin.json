@@ -1,0 +1,38 @@
+{
+  "plugin": "zynaptiq-morph-3-pro",
+  "name": "MORPH 3 PRO",
+  "vendor": "Zynaptiq",
+  "kind": "effect",
+  "ids": {
+    "vst3": []
+  },
+  "presets": {
+    "extensions": [
+      ".preset",
+      ".vstpreset"
+    ],
+    "windows": [
+      {
+        "path": "C:/Program Files/Zynaptiq/MORPH 3 PRO/MORPH 3 PRO data/Presets",
+        "holds": "installed native presets",
+        "status": "verified"
+      }
+    ]
+  },
+  "formats": [
+    "format-1"
+  ],
+  "notes": [
+    "Only VST3 integration is supported. Native presets hold physical parameter values, not normalized VST3 values.",
+    "Unknown custom properties, DSP state and UI fields are preserved.",
+    "Installed VST3 could not be initialized by the verification host. Native XML parsing is available; component creation and loading are not verified for this product/version. No class ID is guessed."
+  ],
+  "family": "zynaptiq",
+  "roles": [
+    "morphing"
+  ],
+  "binaries": [
+    "MORPH 3 PRO DualMonoIn VST3.vst3",
+    "MORPH 3 PRO VST3.vst3"
+  ]
+}

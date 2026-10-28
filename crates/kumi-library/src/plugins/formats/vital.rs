@@ -15,6 +15,10 @@ use serde_json::{Map, Value};
 use super::tree::Node;
 use super::FormatError;
 
+// Vital embeds sample and wavetable audio in JSON strings. Keep its established
+// byte allowance while sharing the stricter node and nesting budgets.
+const MAX_VITAL_BYTES: usize = 64 * 1024 * 1024;
+
 /// A preset, or the state a host saved.
 #[derive(Debug, Clone, PartialEq)]
 pub struct VitalPreset {
@@ -24,7 +28,8 @@ pub struct VitalPreset {
 impl VitalPreset {
     /// A `.vital` file.
     pub fn read(bytes: &[u8]) -> Result<VitalPreset, FormatError> {
-        let json: Value = serde_json::from_slice(bytes).map_err(|error| FormatError::new(format!("Vital preset isn't JSON: {error}")))?;
+        let json = super::bounded_json::parse_with_limit(bytes, MAX_VITAL_BYTES)
+            .map_err(|error| FormatError::new(format!("Vital preset: {error}")))?;
         check(json)
     }
 
@@ -32,8 +37,8 @@ impl VitalPreset {
     /// follows the NUL is the framework's, not Vital's.
     pub fn read_state(bytes: &[u8]) -> Result<VitalPreset, FormatError> {
         let end = bytes.iter().position(|b| *b == 0).unwrap_or(bytes.len());
-        let json: Value =
-            serde_json::from_slice(&bytes[..end]).map_err(|error| FormatError::new(format!("Vital state isn't JSON: {error}")))?;
+        let json = super::bounded_json::parse_with_limit(&bytes[..end], MAX_VITAL_BYTES)
+            .map_err(|error| FormatError::new(format!("Vital state: {error}")))?;
         check(json)
     }
 
@@ -169,5 +174,14 @@ mod tests {
         assert!(VitalPreset::read(&bytes).is_err(), "a preset file has no NUL");
         assert!(VitalPreset::read(b"{\"synth_version\":\"1.0.7\"}").is_err());
         assert_eq!(pcm16("AAD/fw==").unwrap(), [0, 32767]);
+    }
+
+    #[test]
+    fn embedded_audio_retains_the_existing_byte_allowance_with_a_bounded_tree() {
+        let audio = "A".repeat(super::super::MAX_DECODED_BYTES + 1);
+        let bytes = serde_json::to_vec(&json!({"settings":{"sample":{"samples":audio}}})).unwrap();
+        assert!(VitalPreset::read(&bytes).is_ok());
+        let many = format!("{{\"settings\":{{\"values\":[{}0]}}}}", "0,".repeat(super::super::MAX_DECODED_ITEMS));
+        assert!(VitalPreset::read(many.as_bytes()).unwrap_err().to_string().contains("item budget"));
     }
 }

@@ -12,7 +12,8 @@ use kumi_library::plugins::formats::vital::VitalPreset;
 use kumi_library::plugins::formats::vstpreset::{vst2_chunk, VstPreset};
 
 fn fixture(plugin: &str, name: &str) -> Vec<u8> {
-    let path = kumi_testkit::workspace_path("plugin-formats").join(plugin).join("format-1/fixtures").join(name);
+    let source = builtin(plugin).unwrap().info.format_directory();
+    let path = kumi_testkit::workspace_path("plugin-formats").join(source).join("fixtures").join(name);
     std::fs::read(&path).unwrap_or_else(|error| panic!("{}: {error}", path.display()))
 }
 
@@ -59,7 +60,20 @@ fn fits(plugin: &str, tree: &Node) {
 
 #[test]
 fn the_shipped_formats_parse_and_agree_with_the_readers() {
-    assert_eq!(builtins().len(), 3);
+    let shipped: std::collections::BTreeSet<_> = std::fs::read_dir(kumi_testkit::workspace_path("plugin-formats"))
+        .unwrap()
+        .map(Result::unwrap)
+        .filter(|entry| entry.path().join("plugin.json").is_file())
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        .collect();
+    let registered: std::collections::BTreeSet<_> = builtins().iter().map(|format| format.info.plugin.clone()).collect();
+    let catalog: Vec<String> =
+        serde_json::from_slice(&std::fs::read(kumi_testkit::workspace_path("plugin-formats/catalog.json")).unwrap()).unwrap();
+    let manifest: std::collections::BTreeSet<_> = catalog.iter().cloned().collect();
+    assert_eq!(manifest.len(), catalog.len(), "duplicate catalog product");
+    assert_eq!(manifest, shipped, "the build catalog must cover every product directory");
+    assert_eq!(registered.len(), builtins().len(), "duplicate registered plug-in");
+    assert_eq!(registered, shipped, "every shipped plug-in format must be registered");
     for format in builtins() {
         let plugin = &format.info.plugin;
         assert_eq!(&format.structure.plugin, plugin);

@@ -76,8 +76,19 @@ impl McpEndpoint for Fixture {
         }
         let index = self.calls.get();
         let actual = json!({"name":name,"args":args});
-        let expected = &self.case["calls"][index];
-        eq(&actual, expected, &format!("{} dispatch {index}", self.case["label"]));
+        let mut expected = self.case["calls"][index].clone();
+        // Goals now read the immutable product name and enabled state before reusing a limiter.
+        // Adapt only that exact read projection; keep the frozen oracle's data, mutations and
+        // every other dispatch unchanged. The rename/bypass cases have their own regression test.
+        let current_fields = json!(["ref", "parentRef", "name", "className", "classDisplayName", "enabled"]);
+        if name == "live_discover"
+            && actual["args"]["kind"] == "device"
+            && expected["args"]["fields"] == json!(["ref", "parentRef", "name", "className"])
+            && actual["args"]["fields"] == current_fields
+        {
+            expected["args"]["fields"] = current_fields;
+        }
+        eq(&actual, &expected, &format!("{} dispatch {index}", self.case["label"]));
         self.calls.set(index + 1);
         // A file that goes away just as this call is answered (moved or deleted while Kumi works).
         if let Some(gone) = self.case["config"]["removeAt"].as_object().filter(|at| at["call"].as_u64() == Some(index as u64)) {

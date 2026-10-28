@@ -1176,7 +1176,16 @@ local function plugin_device_object(instrument)
       -- (a program sets the plug-in's parameters: the mock moves the first to the program's number)
       if plugin.params[1] and value > 0 then plugin.params[1].value = math.min(plugin.params[1].max or 1, value / 10) end
     end,
-    active_preset_data = function(value) write(plugin, "preset_data", value) end,
+    active_preset_data = function(value)
+      if plugin.ignore_preset_data == value then return end
+      if plugin.reject_preset_data == value then
+        -- A plug-in that accepted part of a component/controller update before rejecting the rest.
+        plugin.preset_data = "partial state"
+        error("plug-in rejected state")
+      end
+      if plugin.normalize_preset_data then value = plugin.normalize_preset_data(value) end
+      write(plugin, "preset_data", value)
+    end,
   })
 end
 

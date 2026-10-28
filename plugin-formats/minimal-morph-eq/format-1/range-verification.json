@@ -1,0 +1,21 @@
+{
+  "plugin": "minimal-morph-eq",
+  "version": "1.5.0",
+  "binarySha256": "141901ed1d87ab2d0f0c1b5b0437c49e0ec3637256ff7c84d63efcb7754e79db",
+  "method": "Restore the initial component, set one public VST3 parameter, capture its XML value, then reload only that field into the initial component. Saved value and host readback must match at both normalized endpoints and 0.25. Bounds are supported intervals in this product version; no survey extrema are used. Raw XML and mappings without this proof remain read-only.",
+  "points": [
+    0,
+    1,
+    0.25
+  ],
+  "fields": {
+    "parameters/MKUMorphEQNode_Main_InputGain": {"parameterId":437048003,"stored":[-60.0,12.0,-42.0],"readback":[0.0,1.0,0.25]},
+    "parameters/MKUMorphEQNode_Main_OutputGain": {"parameterId":172870406,"stored":[-60.0,12.0,-42.0],"readback":[0.0,1.0,0.25]},
+    "parameters/MKUMorphEQNode_Main_WetDry": {"parameterId":34897483,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/MKUMorphEQNode_Main_Morph": {"parameterId":684924514,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/MKUMorphEQNode_Main_Offset": {"parameterId":1953899129,"stored":[-0.5,0.5,-0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/MKUMorphEQNode_Main_Pinch": {"parameterId":687512084,"stored":[-1.0,1.0,-0.5],"readback":[0.0,1.0,0.25]},
+    "parameters/MKUMorphEQNode_Main_Spread": {"parameterId":2077994841,"stored":[-1.0,1.0,-0.5],"readback":[0.0,1.0,0.25]},
+    "parameters/MKUMorphEQNode_Main_Scale": {"parameterId":690091684,"stored":[-2.0,2.0,-1.0],"readback":[0.0,1.0,0.25]}
+  }
+}

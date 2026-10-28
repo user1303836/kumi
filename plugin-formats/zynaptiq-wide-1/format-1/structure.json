@@ -1,0 +1,453 @@
+{
+  "plugin": "zynaptiq-wide-1",
+  "format": "format-1",
+  "about": "Zynaptiq Preset XML version 3 or 4. inputParams count and pN attributes hold scalar values. VST3 component state (verified on PUNCH 1 and UNMIX DRUMS) uses a u32 little-endian XML length including a terminating NUL, then the XML and NUL.",
+  "paths": "exact",
+  "files": {
+    "preset": {
+      "extension": ".preset",
+      "layers": [
+        "UTF-8 XML Preset; inputParams attributes p0 through p<count-1>; preserve all other elements"
+      ],
+      "constants": {}
+    },
+    "state": {
+      "layers": [
+        "u32 LE byte count including NUL; XML Preset; NUL"
+      ],
+      "constants": {}
+    }
+  },
+  "survey": {
+    "files": 46,
+    "parameterCounts": [
+      24
+    ],
+    "presetVersions": [
+      "4"
+    ],
+    "source": "Installed native preset files and shipped parameter-name metadata; no factory preset bodies copied.",
+    "verification": "Native documents inspected; installed-binary version and runtime acceptance remain unverified.",
+    "parameterLinks": "Guessed links associate names and indices from installed metadata; physical-unit mappings remain unverified."
+  },
+  "fields": {
+    "@progName": {
+      "type": "text",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "status": "guessed"
+    },
+    "inputParams/@p0": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "guessed",
+      "about": "bypass"
+    },
+    "inputParams/@p1": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        33.0,
+        100.0
+      ],
+      "status": "guessed",
+      "about": "kFxMix"
+    },
+    "inputParams/@p2": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "guessed",
+      "about": "kFxSolo"
+    },
+    "inputParams/@p3": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "guessed",
+      "about": "kOutputGain"
+    },
+    "inputParams/@p4": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "guessed",
+      "about": "kMono"
+    },
+    "inputParams/@p5": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "about": "kMonoMode"
+    },
+    "inputParams/@p6": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        3.0
+      ],
+      "status": "guessed",
+      "about": "kAlgorithmMode"
+    },
+    "inputParams/@p7": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "about": "kWidth"
+    },
+    "inputParams/@p8": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "about": "kBiasMode"
+    },
+    "inputParams/@p9": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -0.25,
+        1.0
+      ],
+      "status": "guessed",
+      "about": "kBias"
+    },
+    "inputParams/@p10": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        16.0
+      ],
+      "status": "guessed",
+      "about": "kBiasCurvePreset"
+    },
+    "inputParams/@p11": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -1.0,
+        1.0
+      ],
+      "status": "guessed",
+      "about": "kBand0"
+    },
+    "inputParams/@p12": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -1.0,
+        1.0
+      ],
+      "status": "guessed",
+      "about": "kBand1"
+    },
+    "inputParams/@p13": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -1.0,
+        1.0
+      ],
+      "status": "guessed",
+      "about": "kBand2"
+    },
+    "inputParams/@p14": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -0.4,
+        1.0
+      ],
+      "status": "guessed",
+      "about": "kBand3"
+    },
+    "inputParams/@p15": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -1.0,
+        0.6200000000000001
+      ],
+      "status": "guessed",
+      "about": "kBand4"
+    },
+    "inputParams/@p16": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -0.06999999999999995,
+        1.0
+      ],
+      "status": "guessed",
+      "about": "kBand5"
+    },
+    "inputParams/@p17": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -1.0,
+        0.7500000000000001
+      ],
+      "status": "guessed",
+      "about": "kBand6"
+    },
+    "inputParams/@p18": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -0.26,
+        1.0
+      ],
+      "status": "guessed",
+      "about": "kBand7"
+    },
+    "inputParams/@p19": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -1.0,
+        1.0
+      ],
+      "status": "guessed",
+      "about": "kBand8"
+    },
+    "inputParams/@p20": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        1.0,
+        2.0
+      ],
+      "status": "guessed",
+      "about": "kBiasBandWidth"
+    },
+    "inputParams/@p21": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "about": "kDecorrelate"
+    },
+    "inputParams/@p22": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "guessed",
+      "about": "kReserved0"
+    },
+    "inputParams/@p23": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "guessed",
+      "about": "kReserved1"
+    }
+  },
+  "parameters": {
+    "bypass": {
+      "field": "inputParams/@p0",
+      "status": "guessed"
+    },
+    "kFxMix": {
+      "field": "inputParams/@p1",
+      "status": "guessed"
+    },
+    "kFxSolo": {
+      "field": "inputParams/@p2",
+      "status": "guessed"
+    },
+    "kOutputGain": {
+      "field": "inputParams/@p3",
+      "status": "guessed"
+    },
+    "kMono": {
+      "field": "inputParams/@p4",
+      "status": "guessed"
+    },
+    "kMonoMode": {
+      "field": "inputParams/@p5",
+      "status": "guessed"
+    },
+    "kAlgorithmMode": {
+      "field": "inputParams/@p6",
+      "status": "guessed"
+    },
+    "kWidth": {
+      "field": "inputParams/@p7",
+      "status": "guessed"
+    },
+    "kBiasMode": {
+      "field": "inputParams/@p8",
+      "status": "guessed"
+    },
+    "kBias": {
+      "field": "inputParams/@p9",
+      "status": "guessed"
+    },
+    "kBiasCurvePreset": {
+      "field": "inputParams/@p10",
+      "status": "guessed"
+    },
+    "kBand0": {
+      "field": "inputParams/@p11",
+      "status": "guessed"
+    },
+    "kBand1": {
+      "field": "inputParams/@p12",
+      "status": "guessed"
+    },
+    "kBand2": {
+      "field": "inputParams/@p13",
+      "status": "guessed"
+    },
+    "kBand3": {
+      "field": "inputParams/@p14",
+      "status": "guessed"
+    },
+    "kBand4": {
+      "field": "inputParams/@p15",
+      "status": "guessed"
+    },
+    "kBand5": {
+      "field": "inputParams/@p16",
+      "status": "guessed"
+    },
+    "kBand6": {
+      "field": "inputParams/@p17",
+      "status": "guessed"
+    },
+    "kBand7": {
+      "field": "inputParams/@p18",
+      "status": "guessed"
+    },
+    "kBand8": {
+      "field": "inputParams/@p19",
+      "status": "guessed"
+    },
+    "kBiasBandWidth": {
+      "field": "inputParams/@p20",
+      "status": "guessed"
+    },
+    "kDecorrelate": {
+      "field": "inputParams/@p21",
+      "status": "guessed"
+    },
+    "kReserved0": {
+      "field": "inputParams/@p22",
+      "status": "guessed"
+    },
+    "kReserved1": {
+      "field": "inputParams/@p23",
+      "status": "guessed"
+    }
+  }
+}

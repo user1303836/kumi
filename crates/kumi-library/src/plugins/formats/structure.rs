@@ -77,6 +77,16 @@ pub struct PluginInfo {
     pub presets: PresetPlaces,
     /// Its format folders, oldest first ("format-1").
     pub formats: Vec<String>,
+    /// Shared format directory beneath plugin-formats, including a variant when
+    /// this product has different defaults or host identity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub format_source: Option<String>,
+    #[serde(default)]
+    pub family: String,
+    #[serde(default)]
+    pub roles: Vec<String>,
+    #[serde(default)]
+    pub binaries: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub notes: Vec<String>,
 }
@@ -95,7 +105,7 @@ pub struct FileKind {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Field {
-    /// Its kind ("float", "text", "map" …), or kinds joined by "|" when it takes more than one ("map|text").
+    /// Its kind ("float", "text", "map" ...), or kinds joined by "|" when it takes more than one ("map|text").
     #[serde(rename = "type")]
     pub kind: String,
     /// The kinds of file it appears in.
@@ -107,9 +117,22 @@ pub struct Field {
     /// The smallest and largest value the survey saw.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub seen: Option<[f64; 2]>,
-    /// The range the plug-in allows, when known.
+    /// The supported, verified numeric write interval; it may be deliberately
+    /// narrower than the plug-in's complete UI range.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub range: Option<[f64; 2]>,
+    /// Bounds have their own evidence; a guessed control label does not make a
+    /// host-reported numeric domain uncertain, or an observed value a bound.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub range_status: Option<Status>,
+    /// Products whose own binary supplied this field's numeric range evidence.
+    /// Shared schemas require this list so a parent-only addition cannot grant
+    /// numeric writes to every product inheriting that schema.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub range_products: Vec<String>,
+    /// Verified spacing of discrete values, starting at the lower bound.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub step: Option<f64>,
     /// Its value when the file leaves it out (Serum and Ozone write only what differs from it).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default: Option<f64>,
@@ -127,7 +150,7 @@ pub struct Field {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ParameterLink {
     pub field: String,
-    /// The numbers that fill the field path's "{n}"s, in order ([1] for "Env{n}/…" is Env1).
+    /// The numbers that fill the field path's "{n}"s, in order ([1] for "Env{n}/..." is Env1).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub at: Vec<u32>,
     pub status: Status,
@@ -148,6 +171,14 @@ pub struct Structure {
     #[serde(default, skip_serializing_if = "Value::is_null")]
     pub survey: Value,
     pub fields: BTreeMap<String, Field>,
+    /// Every numeric write needs explicit per-field product coverage when a
+    /// schema is shared by products with separately captured host evidence.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub range_scope_required: bool,
+    /// Preserved raw subtrees whose attributes are derived from the file rather
+    /// than duplicated in this control schema. Their descendants are read-only.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub opaque: Vec<String>,
     #[serde(default)]
     pub parameters: BTreeMap<String, ParameterLink>,
 }
@@ -162,6 +193,10 @@ pub struct VerifiedVersion {
     pub how: String,
     /// When (YYYY-MM-DD).
     pub checked: String,
+    /// Exact initialized binary whose public factory reported this version, for
+    /// products which ship neither moduleinfo nor OS version metadata.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub binary_sha256: Option<String>,
 }
 
 /// `verified.json`: the plug-in versions this format was checked against. Kumi writes only for these.
@@ -198,7 +233,7 @@ pub struct PluginFormat {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Check {
     pub unknown: BTreeSet<String>,
-    /// Path → (the structure's type, the tree's).
+    /// Path -> (the structure's type, the tree's).
     pub mismatched: BTreeMap<String, (String, String)>,
 }
 
@@ -219,6 +254,29 @@ pub struct Reading<'a> {
 impl Structure {
     pub fn field(&self, path: &str) -> Option<&Field> {
         self.fields.get(path)
+    }
+
+    /// Validate a numeric edit against this product's verified write interval.
+    pub fn validate_number(&self, path: &str, value: f64) -> Result<(), FormatError> {
+        let plugin = &self.plugin;
+        let field = self.field(path).ok_or_else(|| FormatError::new(format!("Unknown numeric field {plugin}/{path}")))?;
+        if (self.range_scope_required || !field.range_products.is_empty()) && !field.range_products.contains(plugin) {
+            return Err(FormatError::new(format!("{plugin}/{path} has no range evidence for this product")));
+        }
+        let [low, high] = field
+            .range
+            .filter(|_| field.range_status == Some(Status::Verified))
+            .ok_or_else(|| FormatError::new(format!("{plugin}/{path} has no verified writable range")))?;
+        if !value.is_finite() || !low.is_finite() || !high.is_finite() || low > high || value < low || value > high {
+            return Err(FormatError::new(format!("{plugin}/{path} must be between {low} and {high}")));
+        }
+        if let Some(step) = field.step {
+            let position = (value - low) / step;
+            if !step.is_finite() || step <= 0.0 || !position.is_finite() || (position - position.round()).abs() > 1e-6 {
+                return Err(FormatError::new(format!("{plugin}/{path} requires steps of {step} from {low}")));
+            }
+        }
+        Ok(())
     }
 
     /// The field a host parameter moves, by the parameter's name.
@@ -250,7 +308,12 @@ impl Structure {
     pub fn check(&self, tree: &Node) -> Check {
         let mut check = Check::default();
         tree.walk(self.paths, &mut |path, node| {
-            if path.is_empty() {
+            if path.is_empty()
+                || self
+                    .opaque
+                    .iter()
+                    .any(|prefix| path.strip_prefix(prefix).is_some_and(|rest| rest.starts_with('/') || rest.starts_with('[')))
+            {
                 return;
             }
             match self.fields.get(path) {
@@ -288,7 +351,7 @@ impl PluginFormat {
         let fail = |file: &str, error: serde_json::Error| FormatError::new(format!("{file}: {error}"));
         Ok(PluginFormat {
             info: serde_json::from_str(plugin).map_err(|e| fail("plugin.json", e))?,
-            structure: serde_json::from_str(structure).map_err(|e| fail("structure.json", e))?,
+            structure: serde_json::from_value(resolve_structure(structure, 0)?).map_err(|e| fail("structure.json", e))?,
             verified: serde_json::from_str(verified).map_err(|e| fail("verified.json", e))?,
         })
     }
@@ -300,20 +363,53 @@ impl PluginFormat {
     }
 }
 
-macro_rules! folder {
-    ($plugin:literal, $format:literal) => {
-        (
-            $plugin,
-            include_str!(concat!(env!("KUMI_WORKSPACE"), "/plugin-formats/", $plugin, "/plugin.json")),
-            include_str!(concat!(env!("KUMI_WORKSPACE"), "/plugin-formats/", $plugin, "/", $format, "/structure.json")),
-            include_str!(concat!(env!("KUMI_WORKSPACE"), "/plugin-formats/", $plugin, "/", $format, "/verified.json")),
-        )
-    };
+impl PluginInfo {
+    pub fn format_directory(&self) -> String {
+        self.format_source.clone().unwrap_or_else(|| format!("{}/{}", self.plugin, self.formats[0]))
+    }
 }
 
-/// The folders Kumi ships with, as text: plug-in, plugin.json, structure.json, verified.json.
-pub const BUILTIN_FILES: [(&str, &str, &str, &str); 3] =
-    [folder!("serum-2", "format-1"), folder!("vital", "format-1"), folder!("ozone-12", "format-1")];
+fn resolve_structure(text: &str, depth: usize) -> Result<Value, FormatError> {
+    if depth > 8 {
+        return Err(FormatError::new("format inheritance is cyclic or too deep"));
+    }
+    let mut patch: Value = serde_json::from_str(text).map_err(|error| FormatError::new(format!("structure.json: {error}")))?;
+    let parent = patch.as_object_mut().and_then(|object| object.remove("extends"));
+    let Some(parent) = parent else { return Ok(patch) };
+    let parent = parent.as_str().ok_or_else(|| FormatError::new("format parent must name a built-in product"))?;
+    let source = BUILTIN_FILES
+        .iter()
+        .find(|(plugin, _, _, _)| *plugin == parent)
+        .ok_or_else(|| FormatError::new(format!("unknown shared format {parent}")))?
+        .2;
+    let mut base = resolve_structure(source, depth + 1)?;
+    merge_format_patch(&mut base, &patch);
+    Ok(base)
+}
+
+/// JSON merge-patch semantics used for a shared schema's product differences.
+/// Null removes an inherited key; all identity and version metadata remains in
+/// the product's own plugin.json and verified.json.
+pub fn merge_format_patch(base: &mut Value, patch: &Value) {
+    if let Some(patch) = patch.as_object() {
+        if !base.is_object() {
+            *base = json!({});
+        }
+        let base = base.as_object_mut().unwrap();
+        for (key, value) in patch {
+            if value.is_null() {
+                base.remove(key);
+            } else {
+                merge_format_patch(base.entry(key.clone()).or_insert(Value::Null), value);
+            }
+        }
+    } else {
+        *base = patch.clone();
+    }
+}
+
+// Generated from the readable product folders, with JSON whitespace removed.
+include!(concat!(env!("OUT_DIR"), "/plugin_formats.rs"));
 
 static BUILTIN: LazyLock<Vec<PluginFormat>> = LazyLock::new(|| {
     BUILTIN_FILES
@@ -332,6 +428,11 @@ pub fn builtins() -> &'static [PluginFormat] {
 /// A shipped plug-in's format by its folder name ("serum-2").
 pub fn builtin(plugin: &str) -> Option<&'static PluginFormat> {
     BUILTIN.iter().find(|format| format.info.plugin == plugin)
+}
+
+/// Numeric writes require a proven domain. `seen` is deliberately never used.
+pub fn validate_number(plugin: &str, path: &str, value: f64) -> Result<(), FormatError> {
+    builtin(plugin).ok_or_else(|| FormatError::new(format!("Unknown plug-in {plugin}")))?.structure.validate_number(path, value)
 }
 
 /// A shipped plug-in's format by a plug-in ID a host reports.

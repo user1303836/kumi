@@ -8,6 +8,7 @@ pub mod flow;
 pub mod host;
 pub mod listening;
 pub mod mcp;
+mod preset_files;
 pub mod reaper;
 pub mod renoise;
 pub mod semantic;

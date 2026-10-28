@@ -27,6 +27,7 @@ pub mod phrases;
 pub mod plan;
 pub mod plan_stream;
 pub mod playbook;
+pub mod plugin_tools;
 pub mod presentation;
 pub mod project;
 pub mod recall;

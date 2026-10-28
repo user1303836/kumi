@@ -737,6 +737,7 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
     options.watch = Some(VideoDirectories { videos_dir: load_videos_dir(&io.env)?, tools_dir: tools_dir.clone() });
     options.web = true;
     options.library = Some(library.clone());
+    options.preset_dir = Some(std::path::Path::new(&crate::config::kumi_dir(&io.env)).join("presets"));
     options.music = Some(music.clone());
     options.jobs = Some(JobsOptions {
         worker_factory,

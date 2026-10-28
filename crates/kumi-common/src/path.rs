@@ -16,9 +16,47 @@ pub fn network_or_device(path: &str) -> bool {
     separator(rest.chars().next()) || (rest.starts_with("??") && separator(rest[2..].chars().next()))
 }
 
+/// Device components in a path opened on this host. Names such as `Aux` are
+/// ordinary files and folders on macOS and Linux.
+pub fn reserved_device(path: &str) -> bool {
+    cfg!(windows) && windows_reserved_device(path)
+}
+
+/// Windows DOS device components, including suffixes Win32 ignores. Portable
+/// generated names can use this explicitly even when authored on another OS.
+pub fn windows_reserved_device(path: &str) -> bool {
+    path.split(['/', '\\']).any(|part| {
+        let stem = part.split(['.', ':']).next().unwrap_or_default().trim_end_matches([' ', '.']).to_ascii_uppercase();
+        matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$")
+            || (stem.chars().count() == 4
+                && (stem.starts_with("COM") || stem.starts_with("LPT"))
+                && stem.ends_with(['1', '2', '3', '4', '5', '6', '7', '8', '9', '¹', '²', '³']))
+    })
+}
+
 #[cfg(test)]
 mod tests {
-    use super::network_or_device;
+    use super::{network_or_device, reserved_device, windows_reserved_device};
+
+    #[test]
+    fn device_components_are_refused_before_the_filesystem_is_queried() {
+        for path in ["COM3.vstpreset", r"C:\x\NUL", r"C:\x\aux .vstpreset", "/tmp/LPT¹.xml", "CONIN$:stream", "x/PRN.txt/y"] {
+            assert!(windows_reserved_device(path), "{path}");
+            assert_eq!(reserved_device(path), cfg!(windows), "{path}");
+        }
+        for path in ["C:/x/ordinary.vstpreset", "/tmp/COM10.xml", "CONCERT.vstpreset", "LPT0", "auxiliary.xml"] {
+            assert!(!windows_reserved_device(path), "{path}");
+            assert!(!reserved_device(path), "{path}");
+        }
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn unix_paths_and_program_names_do_not_inherit_dos_device_rules() {
+        for path in ["/Users/x/Presets/Aux/Glue.vstpreset", "/tmp/NUL", "Aux: Hall", "A: Bright Pad"] {
+            assert!(!reserved_device(path), "{path}");
+        }
+    }
     #[test]
     fn every_spelling_of_a_share_or_device_is_caught_and_local_paths_are_not() {
         for path in [

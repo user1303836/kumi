@@ -1,0 +1,44 @@
+{
+  "plugin": "superior-drummer-3",
+  "name": "Superior Drummer 3",
+  "vendor": "Toontrack",
+  "kind": "instrument",
+  "ids": {
+    "vst3": [
+      {
+        "id": "565354534433617375706572696F7220",
+        "name": "Superior Drummer 3",
+        "status": "verified"
+      }
+    ]
+  },
+  "presets": {
+    "extensions": [
+      ".sd3p",
+      ".vstpreset"
+    ],
+    "windows": [
+      {
+        "path": "~/Documents/Toontrack/Superior Drummer 3",
+        "holds": "user presets",
+        "status": "verified"
+      }
+    ]
+  },
+  "formats": [
+    "format-1"
+  ],
+  "notes": [
+    "Only VST3 integration is supported. Its component state uses the VstW compatibility wrapper; this does not enable VST2 loading.",
+    "Preset files contain kit references and mixer settings, not the referenced sample libraries. The installed library must resolve those references.",
+    "The init fixture is synthetic sampler state. The empty component fixture was captured from a newly initialized VST3 instance."
+  ],
+  "family": "superior-drummer",
+  "roles": [
+    "drums",
+    "sampler"
+  ],
+  "binaries": [
+    "Superior Drummer 3.vst3"
+  ]
+}

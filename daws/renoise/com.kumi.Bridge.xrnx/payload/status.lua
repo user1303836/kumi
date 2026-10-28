@@ -172,6 +172,7 @@ function M.identity(memory, bundle_path)
     project = M.project(memory),
     demo = M.demo(),
     apiVersion = renoise.API_VERSION,
+    presetFiles = json.array({ "vst3" }),
     heartbeatMs = wire.HEARTBEAT_MS,
     methods = json.array({ unpack(M.METHODS) }),
     events = json.array({ unpack(M.EVENTS) }),

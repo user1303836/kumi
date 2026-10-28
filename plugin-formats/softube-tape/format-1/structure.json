@@ -1,0 +1,350 @@
+{
+  "plugin": "softube-tape",
+  "format": "format-1",
+  "about": "UTF-8 JSON AssetType SoftubePresetFile, FileFormatVersion 1. PresetList entries identify the plugin and contain ParameterData Type Full, Parameters tuples [id, normalized value, optional name]. SharedData is retained unchanged.",
+  "paths": "exact",
+  "files": {
+    "preset": {
+      "extension": ".softubepreset",
+      "layers": [
+        "JSON SoftubePresetFile version 1",
+        "PresetList entries and SharedData"
+      ],
+      "constants": {
+        "FileFormatVersion": 1,
+        "nativePluginId": "nnfw"
+      }
+    }
+  },
+  "survey": {
+    "files": 1,
+    "presets": 28,
+    "source": "Installed bundle inspected for parameter names, IDs and observed numeric values only.",
+    "nativePresetVersionMarkers": [
+      "9.9.9"
+    ],
+    "observedBinaryVersion": "2.4.89",
+    "binaryVersionSource": "Installed PE ProductVersion; loading did not complete. Native bundle markers, including 9.9.9, are not installed-binary version evidence.",
+    "numericWrites": "Observed normalized 0..1 values do not establish legal write bounds; numeric edits remain closed without plug-in restore/readback verification."
+  },
+  "fields": {
+    "presets[]/name": {
+      "type": "text",
+      "in": [
+        "preset"
+      ],
+      "status": "guessed",
+      "about": "PresetName display label; not a file or resource path."
+    },
+    "presets[]/parameters/0": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "about": "Meter.",
+      "range_status": "guessed"
+    },
+    "presets[]/parameters/1": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "seen": [
+        0.255,
+        0.94
+      ],
+      "about": "Color Amount.",
+      "range_status": "guessed"
+    },
+    "presets[]/parameters/2": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "about": "Color Type.",
+      "range_status": "guessed"
+    },
+    "presets[]/parameters/3": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "about": "Tape Speed.",
+      "range_status": "guessed"
+    },
+    "presets[]/parameters/4": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "seen": [
+        0.545,
+        1.0
+      ],
+      "about": "Dry/Wet.",
+      "range_status": "guessed"
+    },
+    "presets[]/parameters/5": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "seen": [
+        0.0,
+        0.62
+      ],
+      "about": "Speed Stability.",
+      "range_status": "guessed"
+    },
+    "presets[]/parameters/6": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "seen": [
+        0.0,
+        0.695
+      ],
+      "about": "High Freq Trim.",
+      "range_status": "guessed"
+    },
+    "presets[]/parameters/7": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "seen": [
+        0.0,
+        0.65
+      ],
+      "about": "Crosstalk.",
+      "range_status": "guessed"
+    },
+    "presets[]/parameters/8": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "seen": [
+        0.393893,
+        1.0
+      ],
+      "about": "Input.",
+      "range_status": "guessed"
+    },
+    "presets[]/parameters/9": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "seen": [
+        0.364886,
+        0.798473
+      ],
+      "about": "Output.",
+      "range_status": "guessed"
+    },
+    "presets[]/parameters/10": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "about": "Noise.",
+      "range_status": "guessed"
+    },
+    "presets[]/parameters/11": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "seen": [
+        1.0,
+        1.0
+      ],
+      "about": "Playback.",
+      "range_status": "guessed"
+    },
+    "presets[]/parameters/12": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "about": "View.",
+      "range_status": "guessed"
+    },
+    "presets[]/parameters/13": {
+      "type": "float",
+      "in": [
+        "preset"
+      ],
+      "range": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "about": "Reserved.",
+      "range_status": "guessed"
+    }
+  },
+  "parameters": {
+    "Meter": {
+      "field": "presets[]/parameters/0",
+      "status": "guessed",
+      "note": "ID and label appear together in native tuples; no installed-host parameter-change verification."
+    },
+    "Color Amount": {
+      "field": "presets[]/parameters/1",
+      "status": "guessed",
+      "note": "ID and label appear together in native tuples; no installed-host parameter-change verification."
+    },
+    "Color Type": {
+      "field": "presets[]/parameters/2",
+      "status": "guessed",
+      "note": "ID and label appear together in native tuples; no installed-host parameter-change verification."
+    },
+    "Tape Speed": {
+      "field": "presets[]/parameters/3",
+      "status": "guessed",
+      "note": "ID and label appear together in native tuples; no installed-host parameter-change verification."
+    },
+    "Dry/Wet": {
+      "field": "presets[]/parameters/4",
+      "status": "guessed",
+      "note": "ID and label appear together in native tuples; no installed-host parameter-change verification."
+    },
+    "Speed Stability": {
+      "field": "presets[]/parameters/5",
+      "status": "guessed",
+      "note": "ID and label appear together in native tuples; no installed-host parameter-change verification."
+    },
+    "High Freq Trim": {
+      "field": "presets[]/parameters/6",
+      "status": "guessed",
+      "note": "ID and label appear together in native tuples; no installed-host parameter-change verification."
+    },
+    "Crosstalk": {
+      "field": "presets[]/parameters/7",
+      "status": "guessed",
+      "note": "ID and label appear together in native tuples; no installed-host parameter-change verification."
+    },
+    "Input": {
+      "field": "presets[]/parameters/8",
+      "status": "guessed",
+      "note": "ID and label appear together in native tuples; no installed-host parameter-change verification."
+    },
+    "Output": {
+      "field": "presets[]/parameters/9",
+      "status": "guessed",
+      "note": "ID and label appear together in native tuples; no installed-host parameter-change verification."
+    },
+    "Noise": {
+      "field": "presets[]/parameters/10",
+      "status": "guessed",
+      "note": "ID and label appear together in native tuples; no installed-host parameter-change verification."
+    },
+    "Playback": {
+      "field": "presets[]/parameters/11",
+      "status": "guessed",
+      "note": "ID and label appear together in native tuples; no installed-host parameter-change verification."
+    },
+    "View": {
+      "field": "presets[]/parameters/12",
+      "status": "guessed",
+      "note": "ID and label appear together in native tuples; no installed-host parameter-change verification."
+    },
+    "Reserved": {
+      "field": "presets[]/parameters/13",
+      "status": "guessed",
+      "note": "ID and label appear together in native tuples; no installed-host parameter-change verification."
+    }
+  }
+}

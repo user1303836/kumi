@@ -1,0 +1,2727 @@
+{
+  "plugin": "ozone-12",
+  "format": "format-1",
+  "version": "12.1.0.1440",
+  "platform": "windows-x86_64",
+  "checked": "2026-10-27",
+  "method": "One initialized native suite instance restored before each host parameter change, then IAudioProcessor flush and IComponent::getState readback. Only fields observed changing with their host Boolean parameter are writable. The hidden true-peak setting has separate component-state load evidence.",
+  "fields": {
+    "DSP State/DSP Elements/Equalizer/Bypass": {
+      "parameterId": 0,
+      "title": "EQ: Bypass",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Equalizer/Band 1 Enable": {
+      "parameterId": 34,
+      "title": "EQ: Stereo/Main Enable 1",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Equalizer/Band 2 Enable": {
+      "parameterId": 35,
+      "title": "EQ: Stereo/Main Enable 2",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Equalizer/Band 3 Enable": {
+      "parameterId": 36,
+      "title": "EQ: Stereo/Main Enable 3",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Equalizer/Band 4 Enable": {
+      "parameterId": 37,
+      "title": "EQ: Stereo/Main Enable 4",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Equalizer/Band 5 Enable": {
+      "parameterId": 38,
+      "title": "EQ: Stereo/Main Enable 5",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Equalizer/Band 6 Enable": {
+      "parameterId": 39,
+      "title": "EQ: Stereo/Main Enable 6",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Equalizer/Band 7 Enable": {
+      "parameterId": 40,
+      "title": "EQ: Stereo/Main Enable 7",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Equalizer/Band 8 Enable": {
+      "parameterId": 41,
+      "title": "EQ: Stereo/Main Enable 8",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Equalizer/Bypass Main": {
+      "parameterId": 50,
+      "title": "EQ: Stereo/Main Bypass",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Equalizer/Aux: Band 1 Enable": {
+      "parameterId": 83,
+      "title": "EQ: Aux Enable 1",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Equalizer/Aux: Band 2 Enable": {
+      "parameterId": 84,
+      "title": "EQ: Aux Enable 2",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Equalizer/Aux: Band 3 Enable": {
+      "parameterId": 85,
+      "title": "EQ: Aux Enable 3",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Equalizer/Aux: Band 4 Enable": {
+      "parameterId": 86,
+      "title": "EQ: Aux Enable 4",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Equalizer/Aux: Band 5 Enable": {
+      "parameterId": 87,
+      "title": "EQ: Aux Enable 5",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Equalizer/Aux: Band 6 Enable": {
+      "parameterId": 88,
+      "title": "EQ: Aux Enable 6",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Equalizer/Aux: Band 7 Enable": {
+      "parameterId": 89,
+      "title": "EQ: Aux Enable 7",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Equalizer/Aux: Band 8 Enable": {
+      "parameterId": 90,
+      "title": "EQ: Aux Enable 8",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Equalizer/Bypass Aux": {
+      "parameterId": 99,
+      "title": "EQ: Aux Bypass",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Global/Global Bypass": {
+      "parameterId": 100,
+      "title": "Global Bypass",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Stereo Imager/Bypass": {
+      "parameterId": 101,
+      "title": "IMG: Bypass",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Stereo Imager/Enable Stereoizer": {
+      "parameterId": 103,
+      "title": "IMG: Stereo/Main Enable Stereoizer",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Stereo Imager/Bypass Main": {
+      "parameterId": 110,
+      "title": "IMG: Stereo/Main Bypass",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Stereo Imager/Aux: Enable Stereoizer": {
+      "parameterId": 111,
+      "title": "IMG: Aux Enable Stereoizer",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Stereo Imager/Bypass Aux": {
+      "parameterId": 118,
+      "title": "IMG: Aux Bypass",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Maximizer/Bypass": {
+      "parameterId": 119,
+      "title": "MAX: Bypass",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Maximizer/Link Threshold and Margin": {
+      "parameterId": 122,
+      "title": "MAX: Link Input Gain and Output Level",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Maximizer/EnableSoftClipping": {
+      "parameterId": 125,
+      "title": "MAX: Soft Clip On/Off",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Maximizer/Stereo Link Amounts Linked": {
+      "parameterId": 131,
+      "title": "MAX: Link Stereo Amounts",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Post Equalizer/Bypass": {
+      "parameterId": 138,
+      "title": "EQ2: Bypass",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Post Equalizer/Band 1 Enable": {
+      "parameterId": 172,
+      "title": "EQ2: Stereo/Main Enable 1",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Post Equalizer/Band 2 Enable": {
+      "parameterId": 173,
+      "title": "EQ2: Stereo/Main Enable 2",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Post Equalizer/Band 3 Enable": {
+      "parameterId": 174,
+      "title": "EQ2: Stereo/Main Enable 3",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Post Equalizer/Band 4 Enable": {
+      "parameterId": 175,
+      "title": "EQ2: Stereo/Main Enable 4",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Post Equalizer/Band 5 Enable": {
+      "parameterId": 176,
+      "title": "EQ2: Stereo/Main Enable 5",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Post Equalizer/Band 6 Enable": {
+      "parameterId": 177,
+      "title": "EQ2: Stereo/Main Enable 6",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Post Equalizer/Band 7 Enable": {
+      "parameterId": 178,
+      "title": "EQ2: Stereo/Main Enable 7",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Post Equalizer/Band 8 Enable": {
+      "parameterId": 179,
+      "title": "EQ2: Stereo/Main Enable 8",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Post Equalizer/Bypass Main": {
+      "parameterId": 188,
+      "title": "EQ2: Stereo/Main Bypass",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Post Equalizer/Aux: Band 1 Enable": {
+      "parameterId": 221,
+      "title": "EQ2: Aux Enable 1",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Post Equalizer/Aux: Band 2 Enable": {
+      "parameterId": 222,
+      "title": "EQ2: Aux Enable 2",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Post Equalizer/Aux: Band 3 Enable": {
+      "parameterId": 223,
+      "title": "EQ2: Aux Enable 3",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Post Equalizer/Aux: Band 4 Enable": {
+      "parameterId": 224,
+      "title": "EQ2: Aux Enable 4",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Post Equalizer/Aux: Band 5 Enable": {
+      "parameterId": 225,
+      "title": "EQ2: Aux Enable 5",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Post Equalizer/Aux: Band 6 Enable": {
+      "parameterId": 226,
+      "title": "EQ2: Aux Enable 6",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Post Equalizer/Aux: Band 7 Enable": {
+      "parameterId": 227,
+      "title": "EQ2: Aux Enable 7",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Post Equalizer/Aux: Band 8 Enable": {
+      "parameterId": 228,
+      "title": "EQ2: Aux Enable 8",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Post Equalizer/Bypass Aux": {
+      "parameterId": 237,
+      "title": "EQ2: Aux Bypass",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Dynamics/Bypass": {
+      "parameterId": 238,
+      "title": "DYN: Bypass",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Dynamics/Bypass Main": {
+      "parameterId": 293,
+      "title": "DYN: Stereo/Main Bypass",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Dynamics/Bypass Aux": {
+      "parameterId": 348,
+      "title": "DYN: Aux Bypass",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Dynamic EQ/Bypass": {
+      "parameterId": 349,
+      "title": "DYNEQ: Bypass",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Dynamic EQ/Band 1 Enable": {
+      "parameterId": 355,
+      "title": "DYNEQ: Stereo/Main Enable 1",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Dynamic EQ/Band 1 Expansion Mode": {
+      "parameterId": 357,
+      "title": "DYNEQ: Stereo/Main Dyn Trigger Mode 1",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Dynamic EQ/Band 1 Auto Attack/Release": {
+      "parameterId": 362,
+      "title": "DYNEQ: Stereo/Main Auto Attack/Release 1",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Dynamic EQ/Band 2 Enable": {
+      "parameterId": 368,
+      "title": "DYNEQ: Stereo/Main Enable 2",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Dynamic EQ/Band 2 Expansion Mode": {
+      "parameterId": 370,
+      "title": "DYNEQ: Stereo/Main Dyn Trigger Mode 2",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Dynamic EQ/Band 2 Auto Attack/Release": {
+      "parameterId": 375,
+      "title": "DYNEQ: Stereo/Main Auto Attack/Release 2",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Dynamic EQ/Band 3 Enable": {
+      "parameterId": 381,
+      "title": "DYNEQ: Stereo/Main Enable 3",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Dynamic EQ/Band 3 Expansion Mode": {
+      "parameterId": 383,
+      "title": "DYNEQ: Stereo/Main Dyn Trigger Mode 3",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Dynamic EQ/Band 3 Auto Attack/Release": {
+      "parameterId": 388,
+      "title": "DYNEQ: Stereo/Main Auto Attack/Release 3",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Dynamic EQ/Band 4 Enable": {
+      "parameterId": 394,
+      "title": "DYNEQ: Stereo/Main Enable 4",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Dynamic EQ/Band 4 Expansion Mode": {
+      "parameterId": 396,
+      "title": "DYNEQ: Stereo/Main Dyn Trigger Mode 4",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Dynamic EQ/Band 4 Auto Attack/Release": {
+      "parameterId": 401,
+      "title": "DYNEQ: Stereo/Main Auto Attack/Release 4",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Dynamic EQ/Band 5 Enable": {
+      "parameterId": 407,
+      "title": "DYNEQ: Stereo/Main Enable 5",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Dynamic EQ/Band 5 Expansion Mode": {
+      "parameterId": 409,
+      "title": "DYNEQ: Stereo/Main Dyn Trigger Mode 5",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Dynamic EQ/Band 5 Auto Attack/Release": {
+      "parameterId": 414,
+      "title": "DYNEQ: Stereo/Main Auto Attack/Release 5",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Dynamic EQ/Band 6 Enable": {
+      "parameterId": 420,
+      "title": "DYNEQ: Stereo/Main Enable 6",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Dynamic EQ/Band 6 Expansion Mode": {
+      "parameterId": 422,
+      "title": "DYNEQ: Stereo/Main Dyn Trigger Mode 6",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Dynamic EQ/Band 6 Auto Attack/Release": {
+      "parameterId": 427,
+      "title": "DYNEQ: Stereo/Main Auto Attack/Release 6",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Dynamic EQ/Bypass Main": {
+      "parameterId": 428,
+      "title": "DYNEQ: Stereo/Main Bypass",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Dynamic EQ/Aux: Band 1 Enable": {
+      "parameterId": 434,
+      "title": "DYNEQ: Aux Enable 1",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Dynamic EQ/Aux: Band 1 Expansion Mode": {
+      "parameterId": 436,
+      "title": "DYNEQ: Aux Dyn Trigger Mode 1",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Dynamic EQ/Aux: Band 1 Auto Attack/Release": {
+      "parameterId": 441,
+      "title": "DYNEQ: Aux Auto Attack/Release 1",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Dynamic EQ/Aux: Band 2 Enable": {
+      "parameterId": 447,
+      "title": "DYNEQ: Aux Enable 2",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Dynamic EQ/Aux: Band 2 Expansion Mode": {
+      "parameterId": 449,
+      "title": "DYNEQ: Aux Dyn Trigger Mode 2",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Dynamic EQ/Aux: Band 2 Auto Attack/Release": {
+      "parameterId": 454,
+      "title": "DYNEQ: Aux Auto Attack/Release 2",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Dynamic EQ/Aux: Band 3 Enable": {
+      "parameterId": 460,
+      "title": "DYNEQ: Aux Enable 3",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Dynamic EQ/Aux: Band 3 Expansion Mode": {
+      "parameterId": 462,
+      "title": "DYNEQ: Aux Dyn Trigger Mode 3",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Dynamic EQ/Aux: Band 3 Auto Attack/Release": {
+      "parameterId": 467,
+      "title": "DYNEQ: Aux Auto Attack/Release 3",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Dynamic EQ/Aux: Band 4 Enable": {
+      "parameterId": 473,
+      "title": "DYNEQ: Aux Band Enable 4",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Dynamic EQ/Aux: Band 4 Expansion Mode": {
+      "parameterId": 475,
+      "title": "DYNEQ: Aux Dyn Trigger Mode 4",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Dynamic EQ/Aux: Band 4 Auto Attack/Release": {
+      "parameterId": 480,
+      "title": "DYNEQ: Aux Auto Attack/Release 4",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Dynamic EQ/Aux: Band 5 Enable": {
+      "parameterId": 486,
+      "title": "DYNEQ: Aux Enable 5",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Dynamic EQ/Aux: Band 5 Expansion Mode": {
+      "parameterId": 488,
+      "title": "DYNEQ: Aux Dyn Trigger Mode 5",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Dynamic EQ/Aux: Band 5 Auto Attack/Release": {
+      "parameterId": 493,
+      "title": "DYNEQ: Aux Auto Attack/Release 5",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Dynamic EQ/Aux: Band 6 Enable": {
+      "parameterId": 499,
+      "title": "DYNEQ: Aux Band Enable 6",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Dynamic EQ/Aux: Band 6 Expansion Mode": {
+      "parameterId": 501,
+      "title": "DYNEQ: Aux Dyn Trigger Mode 6",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Dynamic EQ/Aux: Band 6 Auto Attack/Release": {
+      "parameterId": 506,
+      "title": "DYNEQ: Aux Auto Attack/Release 6",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Dynamic EQ/Bypass Aux": {
+      "parameterId": 507,
+      "title": "DYNEQ: Aux Bypass",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Exciter/Bypass": {
+      "parameterId": 508,
+      "title": "EXC: Bypass",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Exciter/Bypass Main": {
+      "parameterId": 523,
+      "title": "EXC: Stereo/Main Bypass",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Exciter/Bypass Aux": {
+      "parameterId": 538,
+      "title": "EXC: Aux Bypass",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Vintage Compressor/Bypass": {
+      "parameterId": 539,
+      "title": "VCOMP: Bypass",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Vintage Compressor/Auto Gain Compensation": {
+      "parameterId": 546,
+      "title": "VCOMP: Stereo/Main Auto Gain",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Vintage Compressor/Bypass Main": {
+      "parameterId": 552,
+      "title": "VCOMP: Stereo/Main Bypass",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Vintage Compressor/Aux: Auto Gain Compensation": {
+      "parameterId": 559,
+      "title": "VCOMP: Aux Auto Gain",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Vintage Compressor/Bypass Aux": {
+      "parameterId": 565,
+      "title": "VCOMP: Aux Bypass",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Vintage EQ/Bypass": {
+      "parameterId": 566,
+      "title": "VEQ: Bypass",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Vintage EQ/Bypass Main": {
+      "parameterId": 581,
+      "title": "VEQ: Stereo/Main Bypass",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Vintage EQ/Bypass Aux": {
+      "parameterId": 596,
+      "title": "VEQ: Aux Bypass",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Vintage Limiter/Bypass": {
+      "parameterId": 597,
+      "title": "VLIM: Bypass",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Vintage Limiter/Link Threshold and Margin": {
+      "parameterId": 601,
+      "title": "VLIM: Link Threshold and Ceiling",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Vintage Tape/Bypass": {
+      "parameterId": 603,
+      "title": "VTAPE: Bypass",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Spectral Shaper/Bypass": {
+      "parameterId": 610,
+      "title": "SPSHPR: Bypass",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Spectral Shaper/BYPASS_MAIN": {
+      "parameterId": 616,
+      "title": "SPSHPR: Stereo/Main Bypass",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Spectral Shaper/BYPASS_AUX": {
+      "parameterId": 622,
+      "title": "SPSHPR: Aux Bypass",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Master Rebalance/Bypass": {
+      "parameterId": 623,
+      "title": "MREBAL: Bypass",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Match Equalizer/Bypass": {
+      "parameterId": 625,
+      "title": "MATCH EQ: Bypass",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Match Equalizer/Bypass Main": {
+      "parameterId": 628,
+      "title": "MATCH EQ: Stereo/Main Bypass",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Match Equalizer/Bypass Aux": {
+      "parameterId": 631,
+      "title": "MATCH EQ: Aux Bypass",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Low End Focus/Bypass": {
+      "parameterId": 632,
+      "title": "LEF: Bypass",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Low End Focus/BypassMain": {
+      "parameterId": 635,
+      "title": "LEF: Stereo/Main Bypass",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Low End Focus/BypassAux": {
+      "parameterId": 638,
+      "title": "LEF: Aux Bypass",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Impact/Bypass": {
+      "parameterId": 639,
+      "title": "IMP: Bypass",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Impact/MainAutoGainEnabled": {
+      "parameterId": 641,
+      "title": "IMP: Auto Gain On/Off",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Impact/BypassMain": {
+      "parameterId": 648,
+      "title": "IMP: Stereo/Main Bypass",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Impact/BypassAux": {
+      "parameterId": 655,
+      "title": "IMP: Aux Bypass",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Stabilizer/Bypass": {
+      "parameterId": 656,
+      "title": "STBL: Bypass",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Stabilizer/TameTransients": {
+      "parameterId": 657,
+      "title": "STBL: Tame Transients On/Off",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Stabilizer/BypassMain": {
+      "parameterId": 666,
+      "title": "STBL: Stereo/Main Bypass",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Stabilizer/BypassAux": {
+      "parameterId": 675,
+      "title": "STBL: Aux Bypass",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Clarity/Bypass": {
+      "parameterId": 676,
+      "title": "CLA: Bypass",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Clarity/BypassMain": {
+      "parameterId": 681,
+      "title": "CLA: Stereo/Main Bypass",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Clarity/BypassAux": {
+      "parameterId": 686,
+      "title": "CLA: Aux Bypass",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Bass Control/Bypass": {
+      "parameterId": 687,
+      "title": "BAS: Bypass",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Bass Control/BalancePower": {
+      "parameterId": 695,
+      "title": "BAS: Balance Bypass",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Bass Control/PunchPower": {
+      "parameterId": 696,
+      "title": "BAS: Punch Bypass",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Bass Control/SustainPowerPower": {
+      "parameterId": 697,
+      "title": "BAS: Sustain Power Bypass",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Bass Control/PeakControlPower": {
+      "parameterId": 698,
+      "title": "BAS: Peak Control Bypass",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Stem EQ/Bypass": {
+      "parameterId": 699,
+      "title": "STEMEQ: Bypass",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Stem EQ/Vocals Power": {
+      "parameterId": 701,
+      "title": "STEMEQ: Vocals Power",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Stem EQ/Vocals Band 1 Enable": {
+      "parameterId": 726,
+      "title": "STEMEQ: Vocals Enable 1",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Stem EQ/Vocals Band 2 Enable": {
+      "parameterId": 727,
+      "title": "STEMEQ: Vocals Enable 2",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Stem EQ/Vocals Band 3 Enable": {
+      "parameterId": 728,
+      "title": "STEMEQ: Vocals Enable 3",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Stem EQ/Vocals Band 4 Enable": {
+      "parameterId": 729,
+      "title": "STEMEQ: Vocals Enable 4",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Stem EQ/Vocals Band 5 Enable": {
+      "parameterId": 730,
+      "title": "STEMEQ: Vocals Enable 5",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Stem EQ/Vocals Band 6 Enable": {
+      "parameterId": 731,
+      "title": "STEMEQ: Vocals Enable 6",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Stem EQ/Vocals Band 7 Enable": {
+      "parameterId": 732,
+      "title": "STEMEQ: Vocals Enable 7",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Stem EQ/Vocals Band 8 Enable": {
+      "parameterId": 733,
+      "title": "STEMEQ: Vocals Enable 8",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Stem EQ/Bass Power": {
+      "parameterId": 743,
+      "title": "STEMEQ: Bass Power",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Stem EQ/Bass Band 1 Enable": {
+      "parameterId": 768,
+      "title": "STEMEQ: Bass Enable 1",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Stem EQ/Bass Band 2 Enable": {
+      "parameterId": 769,
+      "title": "STEMEQ: Bass Enable 2",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Stem EQ/Bass Band 3 Enable": {
+      "parameterId": 770,
+      "title": "STEMEQ: Bass Enable 3",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Stem EQ/Bass Band 4 Enable": {
+      "parameterId": 771,
+      "title": "STEMEQ: Bass Enable 4",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Stem EQ/Bass Band 5 Enable": {
+      "parameterId": 772,
+      "title": "STEMEQ: Bass Enable 5",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Stem EQ/Bass Band 6 Enable": {
+      "parameterId": 773,
+      "title": "STEMEQ: Bass Enable 6",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Stem EQ/Bass Band 7 Enable": {
+      "parameterId": 774,
+      "title": "STEMEQ: Bass Enable 7",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Stem EQ/Bass Band 8 Enable": {
+      "parameterId": 775,
+      "title": "STEMEQ: Bass Enable 8",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Stem EQ/Drums Power": {
+      "parameterId": 785,
+      "title": "STEMEQ: Drums Power",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Stem EQ/Drums Band 1 Enable": {
+      "parameterId": 810,
+      "title": "STEMEQ: Drums Enable 1",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Stem EQ/Drums Band 2 Enable": {
+      "parameterId": 811,
+      "title": "STEMEQ: Drums Enable 2",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Stem EQ/Drums Band 3 Enable": {
+      "parameterId": 812,
+      "title": "STEMEQ: Drums Enable 3",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Stem EQ/Drums Band 4 Enable": {
+      "parameterId": 813,
+      "title": "STEMEQ: Drums Enable 4",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Stem EQ/Drums Band 5 Enable": {
+      "parameterId": 814,
+      "title": "STEMEQ: Drums Enable 5",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Stem EQ/Drums Band 6 Enable": {
+      "parameterId": 815,
+      "title": "STEMEQ: Drums Enable 6",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Stem EQ/Drums Band 7 Enable": {
+      "parameterId": 816,
+      "title": "STEMEQ: Drums Enable 7",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Stem EQ/Drums Band 8 Enable": {
+      "parameterId": 817,
+      "title": "STEMEQ: Drums Enable 8",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Stem EQ/Other Power": {
+      "parameterId": 827,
+      "title": "STEMEQ: Other Power",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Stem EQ/Other Band 1 Enable": {
+      "parameterId": 852,
+      "title": "STEMEQ: Other Enable 1",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Stem EQ/Other Band 2 Enable": {
+      "parameterId": 853,
+      "title": "STEMEQ: Other Enable 2",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Stem EQ/Other Band 3 Enable": {
+      "parameterId": 854,
+      "title": "STEMEQ: Other Enable 3",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Stem EQ/Other Band 4 Enable": {
+      "parameterId": 855,
+      "title": "STEMEQ: Other Enable 4",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Stem EQ/Other Band 5 Enable": {
+      "parameterId": 856,
+      "title": "STEMEQ: Other Enable 5",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Stem EQ/Other Band 6 Enable": {
+      "parameterId": 857,
+      "title": "STEMEQ: Other Enable 6",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Stem EQ/Other Band 7 Enable": {
+      "parameterId": 858,
+      "title": "STEMEQ: Other Enable 7",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Stem EQ/Other Band 8 Enable": {
+      "parameterId": 859,
+      "title": "STEMEQ: Other Enable 8",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Unlimiter/Bypass": {
+      "parameterId": 868,
+      "title": "UNLIMITER: Bypass",
+      "classId": "5653545A424F5A4F7A6F6E6500000000",
+      "name": "Ozone 12",
+      "normalized": [
+        0,
+        1,
+        0.25
+      ],
+      "stored": [
+        false,
+        true,
+        false
+      ]
+    },
+    "DSP State/DSP Elements/Maximizer/Prevent Intersample Clipping": {
+      "method": "Fresh component state supplied through IComponent::setState then controller synchronization and IComponent::getState. Both Boolean values retained in the suite and standalone Maximizer.",
+      "states": [
+        {
+          "classId": "5653545A424F5A4F7A6F6E6500000000",
+          "name": "Ozone 12",
+          "requested": false,
+          "stored": false
+        },
+        {
+          "classId": "5653545A424F5A4F7A6F6E6500000000",
+          "name": "Ozone 12",
+          "requested": true,
+          "stored": true
+        },
+        {
+          "classId": "5653545A425A4D4F7A6F6E652050726F",
+          "name": "Ozone 12 Maximizer",
+          "requested": false,
+          "stored": false
+        },
+        {
+          "classId": "5653545A425A4D4F7A6F6E652050726F",
+          "name": "Ozone 12 Maximizer",
+          "requested": true,
+          "stored": true
+        }
+      ]
+    }
+  }
+}

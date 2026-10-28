@@ -951,6 +951,7 @@ local_test!(with_every_session_tool_on_only_a_few_go_with_every_request, {
         "find_presets",
         "my_sets",
         "live_manual",
+        "vst3",
     ] {
         assert!(deferred.contains(&name), "{name} waits behind find_tools: {deferred:?}");
     }
@@ -1159,7 +1160,7 @@ local_test!(memory_instructions_tools_and_forgetting, {
         assert!(created[0].instructions.contains("[p1] Prefers short reverbs"));
         created[0].tools.clone()
     };
-    assert_eq!(tools.iter().map(|t| t.name()).collect::<Vec<_>>(), ["remember", "forget"]);
+    assert_eq!(tools.iter().map(|t| t.name()).collect::<Vec<_>>(), ["remember", "forget", "vst3"]);
     tools[0]
         .execute(json!({"note":"The Reese is the main bass","about":"producer"}).as_object().unwrap().clone(), Signal::new())
         .await
@@ -3236,7 +3237,7 @@ local_test!(library_tools_preferences_status_and_forgetting_follow_session_lifec
     let tools = h.record.created.borrow()[0].tools.clone();
     assert_eq!(
         tools.iter().map(|t| t.name()).collect::<Vec<_>>(),
-        ["make_changes", "find_sounds", "find_presets", "my_sets", "live_manual"]
+        ["make_changes", "find_sounds", "find_presets", "my_sets", "live_manual", "vst3"]
     );
     assert!(h.record.created.borrow()[0].instructions.contains("Tempo: usually 124–126 BPM"));
     let sounds = tools.iter().find(|t| t.name() == "find_sounds").unwrap();

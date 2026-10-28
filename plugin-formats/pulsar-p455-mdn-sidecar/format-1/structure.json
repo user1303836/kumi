@@ -1,0 +1,115 @@
+{
+  "plugin": "pulsar-p455-mdn-sidecar",
+  "format": "format-1",
+  "about": "Pulsar Modular XML PARAM id/value records in physical units; omitted values mean zero. Numeric edits require the verified intervals below. Raw XML attributes are preserved read-only and not duplicated here. Individual endpoint reload evidence is in range-verification.json.",
+  "paths": "exact",
+  "files": {
+    "preset": {
+      "extension": ".P450Preset",
+      "layers": [
+        "VC2! + little-endian XML byte length + XML + NUL"
+      ],
+      "constants": {
+        "root": "P455"
+      }
+    },
+    "state": {
+      "layers": [
+        "VST3 Comp chunk",
+        "optional VstW compatibility bank",
+        "VC2! + little-endian XML byte length + XML + NUL + preserved opaque JUCE private data"
+      ],
+      "constants": {
+        "xml_magic": "VC2!",
+        "root": "P455"
+      }
+    }
+  },
+  "opaque": [
+    "state"
+  ],
+  "fields": {
+    "": {"type":"map","in":["state","preset"],"status":"guessed"},
+    "root": {"type":"text","in":["state","preset"],"status":"guessed"},
+    "parameters": {"type":"map","in":["state","preset"],"status":"guessed"},
+    "parameters/pm_p455_bias_sldr": {"type":"float","status":"guessed","default":0.0,"range":[-36.0,36.0],"range_status":"verified"},
+    "parameters/pm_p455_comp_attack_sldr": {"type":"float","status":"guessed","default":0.0,"range":[-10.0,10.0],"range_status":"verified"},
+    "parameters/pm_p455_comp_bypass_btn": {"type":"float","status":"guessed","default":0.0,"range":[0.0,1.0],"range_status":"verified"},
+    "parameters/pm_p455_comp_output_sldr": {"type":"float","status":"guessed","default":0.0,"range":[-12.0,12.0],"range_status":"verified"},
+    "parameters/pm_p455_comp_ratio_btn": {"type":"float","status":"guessed","default":0.0,"range":[0.0,1.0],"range_status":"verified"},
+    "parameters/pm_p455_comp_release_sldr": {"type":"float","status":"guessed","default":0.0,"range":[-10.0,10.0],"range_status":"verified"},
+    "parameters/pm_p455_comp_schp_btn": {"type":"float","status":"guessed","default":0.0,"range":[0.0,1.0],"range_status":"verified"},
+    "parameters/pm_p455_comp_threshold_sldr": {"type":"float","status":"guessed","default":0.0,"range":[-50.0,0.0],"range_status":"verified"},
+    "parameters/pm_p455_emu_lineamp_sldr": {"type":"float","status":"guessed","default":1.0,"range":[0.0,1.0],"range_status":"verified"},
+    "parameters/pm_p455_emu_lineampmode_sldr": {"type":"float","status":"guessed","default":0.0,"range":[0.0,1.0],"range_status":"verified"},
+    "parameters/pm_p455_emu_savlatte_sldr": {"type":"float","status":"guessed","default":0.0,"range":[0.0,1.0],"range_status":"verified"},
+    "parameters/pm_p455_emu_x2x8_sldr": {"type":"float","status":"guessed","default":0.0,"range":[0.0,1.0],"range_status":"verified"},
+    "parameters/pm_p455_eq_actv_btn": {"type":"float","status":"guessed","default":0.0,"range":[0.0,1.0],"range_status":"verified"},
+    "parameters/pm_p455_eq_gainx_sldr": {"type":"float","status":"guessed","default":2.0,"range":[0.0,2.0],"range_status":"verified"},
+    "parameters/pm_p455_eq_hfreq_sldr": {"type":"float","status":"guessed","default":0.0,"range":[0.0,6.0],"range_status":"verified"},
+    "parameters/pm_p455_eq_hgain_sldr": {"type":"float","status":"guessed","default":0.0,"range":[-5.0,5.0],"range_status":"verified"},
+    "parameters/pm_p455_eq_hpf_sldr": {"type":"float","status":"guessed","default":0.0,"range":[0.0,4.0],"range_status":"verified"},
+    "parameters/pm_p455_eq_lfreq_sldr": {"type":"float","status":"guessed","default":0.0,"range":[0.0,6.0],"range_status":"verified"},
+    "parameters/pm_p455_eq_lgain_sldr": {"type":"float","status":"guessed","default":0.0,"range":[-5.0,5.0],"range_status":"verified"},
+    "parameters/pm_p455_eq_lmfreq_sldr": {"type":"float","status":"guessed","default":0.0,"range":[0.0,6.0],"range_status":"verified"},
+    "parameters/pm_p455_eq_lmgain_sldr": {"type":"float","status":"guessed","default":0.0,"range":[-5.0,5.0],"range_status":"verified"},
+    "parameters/pm_p455_eq_lpf_sldr": {"type":"float","status":"guessed","default":4.0,"range":[0.0,4.0],"range_status":"verified"},
+    "parameters/pm_p455_eq_mhfreq_sldr": {"type":"float","status":"guessed","default":0.0,"range":[0.0,6.0],"range_status":"verified"},
+    "parameters/pm_p455_eq_mhgain_sldr": {"type":"float","status":"guessed","default":0.0,"range":[-5.0,5.0],"range_status":"verified"},
+    "parameters/pm_p455_eq_outgain_sldr": {"type":"float","status":"guessed","default":0.0,"range":[-12.0,12.0],"range_status":"verified"},
+    "parameters/pm_p455_eq_peakhighshelf_sldr": {"type":"float","status":"guessed","default":1.0,"range":[0.0,1.0],"range_status":"verified"},
+    "parameters/pm_p455_eq_peaklowshelf_sldr": {"type":"float","status":"guessed","default":1.0,"range":[0.0,1.0],"range_status":"verified"},
+    "parameters/pm_p455_infodump_btn": {"type":"float","status":"guessed","default":0.0,"range":[0.0,1.0],"range_status":"verified"},
+    "parameters/pm_p455_input_sldr": {"type":"float","status":"guessed","default":0.0,"range":[-12.0,12.0],"range_status":"verified"},
+    "parameters/pm_p455_linkout_btn": {"type":"float","status":"guessed","default":1.0,"range":[0.0,1.0],"range_status":"verified"},
+    "parameters/pm_p455_mainoutl_sldr": {"type":"float","status":"guessed","default":0.0,"range":[-12.0,12.0],"range_status":"verified"},
+    "parameters/pm_p455_mainoutr_sldr": {"type":"float","status":"guessed","default":0.0,"range":[-12.0,12.0],"range_status":"verified"},
+    "parameters/pm_p455_os_btn": {"type":"float","status":"guessed","default":1.0,"range":[0.0,1.0],"range_status":"verified"},
+    "parameters/pm_p455_phaseflip_btn": {"type":"float","status":"guessed","default":0.0,"range":[0.0,1.0],"range_status":"verified"},
+    "parameters/pm_p455_bypass_btn": {"type":"float","status":"guessed","default":0.0,"range":[0.0,1.0],"range_status":"verified","step":1.0},
+    "parameters/pm_p450_boostengine_sldr": {"type":"float","status":"guessed","default":0.0,"range":[0.0,1.0],"range_status":"verified"},
+    "parameters/pm_p455_punch_sldr": {"type":"float","status":"guessed","default":0.0,"range":[0.0,2.0],"range_status":"verified"},
+    "parameters/pm_p455_widener_sldr": {"type":"float","status":"guessed","default":0.0,"range":[0.0,1.0],"range_status":"verified"},
+    "state": {"type":"map","in":["state","preset"],"status":"guessed"}
+  },
+  "parameters": {
+    "BIAS [VST3 911741396]": {"field":"parameters/pm_p455_bias_sldr","status":"verified"},
+    "Attack [VST3 1917367751]": {"field":"parameters/pm_p455_comp_attack_sldr","status":"verified"},
+    "Comp Actv [VST3 1571404764]": {"field":"parameters/pm_p455_comp_bypass_btn","status":"verified"},
+    "Comp Out [VST3 1758549678]": {"field":"parameters/pm_p455_comp_output_sldr","status":"verified"},
+    "Ratio [VST3 1036198897]": {"field":"parameters/pm_p455_comp_ratio_btn","status":"verified"},
+    "Release [VST3 797950326]": {"field":"parameters/pm_p455_comp_release_sldr","status":"verified"},
+    "SC/HP [VST3 719833100]": {"field":"parameters/pm_p455_comp_schp_btn","status":"verified"},
+    "Threshold [VST3 981506514]": {"field":"parameters/pm_p455_comp_threshold_sldr","status":"verified"},
+    "TLA [VST3 1961286433]": {"field":"parameters/pm_p455_emu_lineamp_sldr","status":"verified"},
+    "TLA Mode [VST3 2008607198]": {"field":"parameters/pm_p455_emu_lineampmode_sldr","status":"verified"},
+    "Analog [VST3 2030823827]": {"field":"parameters/pm_p455_emu_savlatte_sldr","status":"verified"},
+    "Summing [VST3 90569153]": {"field":"parameters/pm_p455_emu_x2x8_sldr","status":"verified"},
+    "EQ ACTV [VST3 1091487131]": {"field":"parameters/pm_p455_eq_actv_btn","status":"verified"},
+    "EQ Mult. [VST3 1447247271]": {"field":"parameters/pm_p455_eq_gainx_sldr","status":"verified"},
+    "EQ H Freq [VST3 1858300928]": {"field":"parameters/pm_p455_eq_hfreq_sldr","status":"verified"},
+    "EQ H Gain [VST3 1804485465]": {"field":"parameters/pm_p455_eq_hgain_sldr","status":"verified"},
+    "HPF [VST3 784943042]": {"field":"parameters/pm_p455_eq_hpf_sldr","status":"verified"},
+    "EQ L Freq [VST3 1072246908]": {"field":"parameters/pm_p455_eq_lfreq_sldr","status":"verified"},
+    "EQ L Gain [VST3 1018431445]": {"field":"parameters/pm_p455_eq_lgain_sldr","status":"verified"},
+    "EQ LM Freq [VST3 1632564115]": {"field":"parameters/pm_p455_eq_lmfreq_sldr","status":"verified"},
+    "EQ LM Gain [VST3 1578748652]": {"field":"parameters/pm_p455_eq_lmgain_sldr","status":"verified"},
+    "LPF [VST3 1313733438]": {"field":"parameters/pm_p455_eq_lpf_sldr","status":"verified"},
+    "EQ MH Freq [VST3 818180281]": {"field":"parameters/pm_p455_eq_mhfreq_sldr","status":"verified"},
+    "EQ MH Gain [VST3 764364818]": {"field":"parameters/pm_p455_eq_mhgain_sldr","status":"verified"},
+    "EQ Trim Out [VST3 1437141171]": {"field":"parameters/pm_p455_eq_outgain_sldr","status":"verified"},
+    "EQ H Band [VST3 91549367]": {"field":"parameters/pm_p455_eq_peakhighshelf_sldr","status":"verified"},
+    "EQ L Band [VST3 1502301911]": {"field":"parameters/pm_p455_eq_peaklowshelf_sldr","status":"verified"},
+    "InfoDump [VST3 419188600]": {"field":"parameters/pm_p455_infodump_btn","status":"verified"},
+    "Input [VST3 1254079861]": {"field":"parameters/pm_p455_input_sldr","status":"verified"},
+    "Link Faders [VST3 1815466584]": {"field":"parameters/pm_p455_linkout_btn","status":"verified"},
+    "L Fader [VST3 1902745526]": {"field":"parameters/pm_p455_mainoutl_sldr","status":"verified"},
+    "R Fader [VST3 2074520432]": {"field":"parameters/pm_p455_mainoutr_sldr","status":"verified"},
+    "OS SW [VST3 366736250]": {"field":"parameters/pm_p455_os_btn","status":"verified"},
+    "Polarity Flip [VST3 80726508]": {"field":"parameters/pm_p455_phaseflip_btn","status":"verified"},
+    "Bypass [VST3 1494060030]": {"field":"parameters/pm_p455_bypass_btn","status":"verified"},
+    "Smooth [VST3 2009466143]": {"field":"parameters/pm_p450_boostengine_sldr","status":"verified"},
+    "Punch [VST3 1781805713]": {"field":"parameters/pm_p455_punch_sldr","status":"verified"},
+    "Widener [VST3 822515671]": {"field":"parameters/pm_p455_widener_sldr","status":"verified"}
+  }
+}

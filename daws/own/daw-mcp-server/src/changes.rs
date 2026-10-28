@@ -274,6 +274,9 @@ impl Journal {
             .map(str::to_owned)
             .or_else(|| record.display.get("title").and_then(Value::as_str).map(str::to_owned))
             .unwrap_or_else(|| record.kind.clone());
+        if title.chars().any(char::is_control) {
+            return Err(refuse("bad-params", "title must contain no control characters"));
+        }
         record.desc = Some(format!("Kumi: {title} ({})", record.nonce));
         record.state = State::Applying;
         let record = record.clone();
@@ -381,8 +384,11 @@ impl Journal {
             }
             State::Previewed | State::Applying => return Err(refuse("not-applied", "this change wasn't applied")),
         }
-        record.state = State::Undoing;
         let title = record.display.get("title").and_then(Value::as_str).map(str::to_owned).unwrap_or_else(|| record.kind.clone());
+        // A saved title may predate input validation or come from a producer's existing DAW name.
+        // Preserve recovery of that history while giving the native undo block a valid label.
+        let title: String = title.chars().map(|c| if c.is_control() { ' ' } else { c }).collect();
+        record.state = State::Undoing;
         let desc = format!("Kumi: undo {title} (k{})", token(seed));
         record.undo_desc = Some(desc.clone());
         Ok(Ok((record.clone(), desc)))
@@ -627,6 +633,30 @@ pub(crate) fn place(params: &mut Value, epoch: Option<&str>, layout: Option<u64>
 }
 
 impl crate::host::Host {
+    /// New preset-file fields must never be sent to an old bridge. In particular, an old REAPER accepts a file in its
+    /// named-preset argument without checking its class. Advertise the format explicitly rather than guessing versions.
+    async fn preset_file_bridge(&self, pick: &crate::host::Pick, kind: &str, input: &Value) -> Result<(), Value> {
+        let path = |field: &str| input[field].as_str().map(str::trim);
+        let vst3 = |value: Option<&str>| value.is_some_and(crate::preset_files::has_suffix);
+        let needed = match (self.daw(), kind) {
+            (daw_bridge::Daw::Reaper, "fx-preset") => {
+                input.get("path").is_some() || input.get("vst3Data").is_some() || vst3(path("preset"))
+            }
+            (daw_bridge::Daw::Renoise, "plugin-preset-data") => true,
+            (daw_bridge::Daw::Renoise, "device-preset-data") => vst3(path("path")) || input.get("vst3Data").is_some(),
+            _ => false,
+        };
+        if !needed {
+            return Ok(());
+        }
+        let status = self.call("status", json!({}), pick, CHANGE_TIMEOUT).await.map_err(|e| self.call_error(&e))?;
+        if !status["presetFiles"].as_array().is_some_and(|formats| formats.iter().any(|format| format == "vst3")) {
+            return Err(json!({"code":"bridge-update-required", "error":format!(
+                "The bridge running in {} cannot safely load VST3 preset files. Update Kumi's bridge and restart {} before loading this preset.", self.daw(), self.daw())}));
+        }
+        Ok(())
+    }
+
     /// `change_preview`: what a change would do, and the id and confirmation to apply it by. Nothing changes.
     pub async fn change_preview(&self, arguments: &Value) -> (Value, bool) {
         let pick = match crate::host::Pick::from_arguments(arguments) {
@@ -640,13 +670,46 @@ impl crate::host::Host {
         let Some(input) = arguments.get("input").filter(|input| input.is_object()) else {
             return (json!({"error": "input must be an object", "code": "bad-params"}), true);
         };
+        if matches!(kind.as_str(), "fx-preset" | "device-preset-data" | "plugin-preset-data")
+            && ["path", "preset"].into_iter().filter_map(|field| input[field].as_str()).any(|path| {
+                path.chars().any(char::is_control)
+                    || kumi_common::path::network_or_device(path.trim())
+                    || kumi_common::path::reserved_device(path)
+            })
+        {
+            return (
+                json!({"code":"bad-params", "error":"Preset names and paths must be local and contain no control characters or reserved devices."}),
+                true,
+            );
+        }
+        if self.daw() == daw_bridge::Daw::Reaper
+            && kind == "fx-preset"
+            && input["preset"]
+                .as_str()
+                .is_some_and(|name| crate::preset_files::file_program(name) && !crate::preset_files::has_suffix(name))
+        {
+            return (
+                json!({"code":"bad-params", "error":"A local preset file must use an absolute .vstpreset path, not a named program."}),
+                true,
+            );
+        }
         let layout = arguments.get("layout").and_then(Value::as_u64);
+        let pick = match self.pin(&pick).await {
+            Ok(pinned) => pinned,
+            Err(error) => return (self.call_error(&error), true),
+        };
+        if let Err(answer) = self.preset_file_bridge(&pick, &kind, input).await {
+            return (answer, true);
+        }
         // (M4 n-devices: a device's preset data from an .xrdp file in Renoise's library is read here; the tool writes it as
         // preset data given in full)
         // (the library's files are read off the runtime's workers)
         let read;
         let (daw, asked, given) = (self.daw(), kind.clone(), input.clone());
         let with_file = tokio::task::spawn_blocking(move || {
+            if let Some(result) = crate::preset_files::with_file(daw, &asked, &given) {
+                return Some(result.map_err(crate::renoise::presets::Refusal::Bad));
+            }
             crate::renoise::library_files::with_file(daw, &asked, &given, &crate::renoise::library_files::library_roots())
         })
         .await
@@ -662,10 +725,6 @@ impl crate::host::Host {
         // (M4 n-devices: the Doofer, Splitter and Notepad edits are made here from the device's preset data, and an
         // instrument's macro mappings added or removed from its file)
         // The instance the change is previewed in: its apply and undo go there.
-        let pick = match self.pin(&pick).await {
-            Ok(pinned) => pinned,
-            Err(error) => return (self.call_error(&error), true),
-        };
         if crate::renoise::presets::host_makes(self.daw(), &kind, input) {
             return self.preset_preview(&pick, &kind, input, arguments.get("epoch").and_then(Value::as_str), layout).await;
         }
@@ -699,6 +758,9 @@ impl crate::host::Host {
             Err(why) => return refusal(why),
         };
         if let Some(answer) = self.elsewhere(&record.instance) {
+            return self.journal().end_apply(&id, &key, Err((&answer, false)));
+        }
+        if let Err(answer) = self.preset_file_bridge(&record.instance, &record.kind, &record.input).await {
             return self.journal().end_apply(&id, &key, Err((&answer, false)));
         }
         let params = if crate::renoise::presets::host_makes(self.daw(), &record.kind, &record.input) {
@@ -744,6 +806,9 @@ impl crate::host::Host {
             Err(why) => return refusal(why),
         };
         if let Some(answer) = self.elsewhere(&record.instance) {
+            return self.journal().end_undo(&id, &key, Err(&answer));
+        }
+        if let Err(answer) = self.preset_file_bridge(&record.instance, &record.kind, &record.input).await {
             return self.journal().end_undo(&id, &key, Err(&answer));
         }
         let discard = arguments.get("discard") == Some(&Value::Bool(true));
@@ -934,6 +999,11 @@ impl crate::host::Host {
     /// `undo_step_begin` / `undo_step_end`: one DAW undo step around a plan's changes, where the DAW gives one. Its
     /// label carries a nonce, so the DAW's own undo of the plan names the plan's changes.
     pub async fn undo_step(&self, method: &str, arguments: &Value) -> (Value, bool) {
+        if method == "undo_step_begin"
+            && arguments.get("label").is_some_and(|value| value.as_str().is_none_or(|label| label.chars().any(char::is_control)))
+        {
+            return (json!({"code":"bad-params", "error":"label must be text without control characters"}), true);
+        }
         let (params, label, named) = match method {
             "undo_step_begin" => match text(arguments, "label") {
                 Ok(label) => {
@@ -947,7 +1017,11 @@ impl crate::host::Host {
                     let mut params = json!({"stepId": step});
                     // Named by what the plan did, as it closes (REAPER names a block when it ends it); the changes made in it
                     // are told by that name once the DAW confirms it.
-                    let named = arguments.get("label").and_then(Value::as_str).and_then(|label| self.journal().step_named(label));
+                    // A failed cosmetic rename must still close the native block and the journal's open step.
+                    let named = text(arguments, "label")
+                        .ok()
+                        .filter(|label| !label.chars().any(char::is_control))
+                        .and_then(|label| self.journal().step_named(label));
                     if let Some(named) = &named {
                         params["label"] = named.clone().into();
                     }
@@ -999,6 +1073,53 @@ mod tests {
     fn preview(journal: &Journal) -> Record {
         let answer = json!({"epoch": "e1", "target": {"ref": "r:track:{A}", "kind": "track"}, "prior": {"volumeDb": 0.0}, "fence": {"volumeDb": 0.0}, "display": {"title": "Bass volume −6 dB"}});
         journal.previewed("track-volume", &json!({"ref": "r:track:{A}", "volumeDb": -6.0}), &answer, None, Pick::default()).unwrap()
+    }
+
+    #[test]
+    fn new_control_titles_are_refused_and_old_history_remains_undoable() {
+        let journal = Journal::default();
+        let record = preview(&journal);
+        for title in ["Warm\0pad", "Warm\npad", "Warm\u{7f}pad"] {
+            assert_eq!(journal.begin_apply(&record.id, &record.confirmation, "a", Some(title)).unwrap_err().code, "bad-params");
+            assert_eq!(journal.get(&record.id).unwrap().state, State::Previewed);
+        }
+        journal.begin_apply(&record.id, &record.confirmation, "a", Some("Warm pad")).unwrap().unwrap();
+        journal.end_apply(&record.id, "a", Ok(&json!({"applied":{},"display":{"title":"Warm\0pad"},"undo":{}})));
+        let (_, desc) = journal.begin_undo(&record.id, "u").unwrap().unwrap();
+        assert!(desc.starts_with("Kumi: undo Warm pad (k"), "{desc}");
+        assert!(!desc.chars().any(char::is_control));
+        assert_eq!(journal.get(&record.id).unwrap().state, State::Undoing);
+    }
+
+    #[tokio::test]
+    async fn an_invalid_optional_closing_label_closes_the_host_journal_and_native_step() {
+        let home = tempfile::tempdir().unwrap();
+        let paths = daw_bridge::paths::BridgePaths::new(home.path(), daw_bridge::Daw::Reaper);
+        let secret = daw_bridge::files::ensure_secret(&paths.secret()).unwrap();
+        let script = crate::reaper::simulator::ReaperScript::new(3, 0);
+        let mut config = script.config(secret, "/lab/REAPER");
+        config.discovery_dir = Some(paths.discovery());
+        let _simulator = crate::simulator::Simulator::start(config).await.unwrap();
+        let host = crate::host::Host::new(daw_bridge::Daw::Reaper, home.path());
+        for label in [json!(7), json!(""), json!("Warm\0pad"), json!("Warm\npad"), json!("Warm\u{7f}pad")] {
+            let (begun, failed) = host.undo_step("undo_step_begin", &json!({"label":"Warm pad"})).await;
+            assert!(!failed, "{begun}");
+            let journal = host.journal();
+            let original = journal.inner.lock().unwrap().open_step.clone().unwrap();
+            let record = preview(journal);
+            journal.begin_apply(&record.id, &record.confirmation, "a", None).unwrap().unwrap();
+            journal.end_apply(&record.id, "a", Ok(&json!({"applied":{},"undo":{"inPlan":true,"covered":true}})));
+            let (closed, failed) = host.undo_step("undo_step_end", &json!({"stepId":begun["stepId"],"label":label})).await;
+            assert!(!failed, "{closed}");
+            assert_eq!(closed["desc"], original);
+            assert_eq!(closed["entry"], true);
+            assert_eq!(script.undo_history().last(), Some(&original));
+            assert!(journal.inner.lock().unwrap().open_step.is_none());
+            assert_eq!(journal.get(&record.id).unwrap().step_desc.as_deref(), Some(original.as_str()));
+            let after = preview(journal);
+            assert!(journal.begin_apply(&after.id, &after.confirmation, "a", None).unwrap().unwrap().step_desc.is_none());
+        }
+        host.close().await;
     }
 
     #[test]

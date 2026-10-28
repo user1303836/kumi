@@ -1,0 +1,17 @@
+{
+  "extends": "minimal-current",
+  "plugin": "minimal-eprom-memory-rites",
+  "version": "1.0.3",
+  "binarySha256": "0c79536f887cd4e657db9630ad5bbb91664cadb98ade87f8cdfd6fb6fa2adfe0",
+  "fields": {
+    "parameters/MKUSynthClickableEnvelopeNode_Mod_Slot_1_PhaseOffset": null,
+    "parameters/MKUSynthClickableEnvelopeNode_Mod_Slot_2_PhaseOffset": null,
+    "parameters/MKUSynthClickableEnvelopeNode_Mod_Slot_3_PhaseOffset": null,
+    "parameters/MKUSynthClickableEnvelopeNode_Mod_Slot_4_PhaseOffset": null,
+    "parameters/MKUSynthClickableEnvelopeNode_Mod_Slot_5_PhaseOffset": null,
+    "parameters/MKUSynthClickableEnvelopeNode_Mod_Slot_6_PhaseOffset": null,
+    "parameters/MKUSynthClickableEnvelopeNode_Mod_Slot_7_PhaseOffset": null,
+    "parameters/MKUSynthClickableEnvelopeNode_Mod_Slot_8_PhaseOffset": null,
+    "parameters/MKUSynthClickableEnvelopeNode_Mod_Slot_9_PhaseOffset": null
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "plugin": "minimal-fuse-compressor",
+  "version": "1.4.0",
+  "fixtureSha256": "62b04b646c4c00d7342b3be42f5955ab4fab45574254f3e2ba2242bc1042596b",
+  "sessionId": "all zeros",
+  "runtime": "Sanitized component restored in a fresh VST3 instance. Product root, source version and every mapped parameter matched after reload within native floating-point serialization precision.",
+  "parametersChecked": 13,
+  "maxRelativeErrorWithUnitFloor": 1.430511474609375e-06
+}

@@ -1,0 +1,121 @@
+{
+  "plugin": "minimal-rift",
+  "format": "format-1",
+  "about": "Minimal Audio full XML; parameters/<name> edits mapped_value in physical units. Numeric edits require the verified intervals below. Raw XML attributes are preserved read-only and not duplicated here. Individual endpoint reload evidence is in range-verification.json.",
+  "paths": "exact",
+  "files": {
+    "preset": {
+      "extension": ".xml",
+      "layers": [
+        "native XML"
+      ],
+      "constants": {
+        "root": "Rift"
+      }
+    },
+    "state": {
+      "layers": [
+        "VST3 Comp chunk",
+        "optional VstW compatibility bank",
+        "VC2! + little-endian XML byte length + XML + NUL + preserved opaque JUCE private data"
+      ],
+      "constants": {
+        "xml_magic": "VC2!",
+        "root": "Rift"
+      }
+    }
+  },
+  "opaque": [
+    "state"
+  ],
+  "fields": {
+    "": {"type":"map","in":["state","preset"],"status":"guessed"},
+    "root": {"type":"text","in":["state","preset"],"status":"guessed"},
+    "parameters": {"type":"map","in":["state","preset"],"status":"guessed"},
+    "parameters/MKUMorphingLFONode_Mod_1_MidiTrigger": {"type":"float","status":"guessed","default":0.0},
+    "parameters/MKUMorphingLFONode_Mod_1_Rate": {"type":"float","status":"guessed","default":9.0},
+    "parameters/MKUMorphingLFONode_Mod_1_Type": {"type":"float","status":"guessed","default":0.0},
+    "parameters/MKUMorphingLFONode_Mod_1_Randomize": {"type":"float","status":"guessed","default":0.0,"range":[0.0,1.0],"range_status":"verified"},
+    "parameters/MKUClickableEnvelopeNode_Mod_2_MidiTrigger": {"type":"float","status":"guessed","default":0.0},
+    "parameters/MKUClickableEnvelopeNode_Mod_2_Rate": {"type":"float","status":"guessed","default":9.0},
+    "parameters/MKUClickableEnvelopeNode_Mod_3_MidiTrigger": {"type":"float","status":"guessed","default":0.0},
+    "parameters/MKUClickableEnvelopeNode_Mod_3_Rate": {"type":"float","status":"guessed","default":9.0},
+    "parameters/MKUEnvelopeFollowerNode_Mod_4_Attack": {"type":"float","status":"guessed","default":0.02500000037252903,"range":[0.004999999888241291,1.0],"range_status":"verified"},
+    "parameters/MKUEnvelopeFollowerNode_Mod_4_Release": {"type":"float","status":"guessed","default":0.1000000014901161,"range":[0.004999999888241291,10.0],"range_status":"verified"},
+    "parameters/MKUEnvelopeFollowerNode_Mod_4_Gain": {"type":"float","status":"guessed","default":0.0,"range":[-72.0,24.0],"range_status":"verified"},
+    "parameters/MKUMacroNode_Mod_5_Macro": {"type":"float","status":"guessed","default":0.5,"range":[0.0,1.0],"range_status":"verified"},
+    "parameters/MKUMacroNode_Mod_6_Macro": {"type":"float","status":"guessed","default":0.5,"range":[0.0,1.0],"range_status":"verified"},
+    "parameters/MKURiftInputNode_Main_InputGain": {"type":"float","status":"guessed","default":3.0,"range":[-60.0,24.0],"range_status":"verified"},
+    "parameters/MKURiftProcessorNode_Main_Trim": {"type":"float","status":"guessed","default":0.0,"range":[0.0,12.0],"range_status":"verified"},
+    "parameters/MKURiftProcessorNode_Main_StageCount": {"type":"float","status":"guessed","default":0.0},
+    "parameters/MKURiftProcessorNode_Main_PosPolAlgoOption": {"type":"float","status":"guessed","default":0.0},
+    "parameters/MKURiftProcessorNode_Main_PosPolReduction": {"type":"float","status":"guessed","default":0.0,"range":[0.0,1.0],"range_status":"verified"},
+    "parameters/MKURiftProcessorNode_Main_Split": {"type":"float","status":"guessed","default":0.0,"range":[-1.0,1.0],"range_status":"verified"},
+    "parameters/MKURiftProcessorNode_Main_NegPolAlgoOption": {"type":"float","status":"guessed","default":0.0},
+    "parameters/MKURiftProcessorNode_Main_NegPolReduction": {"type":"float","status":"guessed","default":0.0,"range":[0.0,1.0],"range_status":"verified"},
+    "parameters/MKURiftProcessorNode_Main_CrossoverSmooth": {"type":"float","status":"guessed","default":0.0},
+    "parameters/MKURiftProcessorNode_Main_Mode": {"type":"float","status":"guessed","default":0.0,"range":[0.0,4.0],"range_status":"verified"},
+    "parameters/MKURiftProcessorNode_Main_LinkAmounts": {"type":"float","status":"guessed","default":0.0},
+    "parameters/MKURiftProcessorNode_Main_DELAY_DryWet": {"type":"float","status":"guessed","default":0.5,"range":[0.0,1.0],"range_status":"verified"},
+    "parameters/MKURiftProcessorNode_Main_DELAY_Time": {"type":"float","status":"guessed","default":60.0,"range":[12.0,108.0],"range_status":"verified"},
+    "parameters/MKURiftProcessorNode_Main_DELAY_Feedback": {"type":"float","status":"guessed","default":0.0,"range":[-1.25,1.25],"range_status":"verified"},
+    "parameters/MKURiftProcessorNode_Main_DELAY_Mode": {"type":"float","status":"guessed","default":0.0,"range":[0.0,1.0],"range_status":"verified"},
+    "parameters/MKURiftProcessorNode_Main_DELAY_Lowpass": {"type":"float","status":"guessed","default":5000.0,"range":[20.0,20000.0],"range_status":"verified"},
+    "parameters/MKURiftProcessorNode_Main_DELAY_Highpass": {"type":"float","status":"guessed","default":20.0,"range":[5.0,5000.0],"range_status":"verified"},
+    "parameters/MKURiftProcessorNode_Main_DELAY_Spread": {"type":"float","status":"guessed","default":0.0,"range":[-1.0,1.0],"range_status":"verified"},
+    "parameters/MKURiftProcessorNode_Main_DistortFeedback": {"type":"float","status":"guessed","default":0.0},
+    "parameters/MKURiftFilterNode_Main_DryWet": {"type":"float","status":"guessed","default":1.0,"range":[0.0,1.0],"range_status":"verified"},
+    "parameters/MKURiftFilterNode_Main_Cutoff": {"type":"float","status":"guessed","default":10000.0,"range":[20.0,20000.0],"range_status":"verified"},
+    "parameters/MKURiftFilterNode_Main_Resonance": {"type":"float","status":"guessed","default":0.9716500043869019,"range":[0.7070000171661377,6.0],"range_status":"verified"},
+    "parameters/MKURiftFilterNode_Main_Mode": {"type":"float","status":"guessed","default":6.0},
+    "parameters/MKURiftFilterNode_Main_Spread": {"type":"float","status":"guessed","default":0.0,"range":[-1.0,1.0],"range_status":"verified"},
+    "parameters/MKURiftFilterNode_Main_Morph": {"type":"float","status":"guessed","default":0.0,"range":[0.0,1.0],"range_status":"verified"},
+    "parameters/MKURiftOutputNode_Main_WetDry": {"type":"float","status":"guessed","default":1.0,"range":[0.0,1.0],"range_status":"verified"},
+    "parameters/MKURiftOutputNode_Main_OutputGain": {"type":"float","status":"guessed","default":0.0,"range":[-60.0,24.0],"range_status":"verified"},
+    "parameters/MKURiftOutputNode_Main_LimitingOption": {"type":"float","status":"guessed","default":1.0},
+    "state": {"type":"map","in":["state","preset"],"status":"guessed"}
+  },
+  "parameters": {
+    "LFO Midi Retrigger [VST3 128435379]": {"field":"parameters/MKUMorphingLFONode_Mod_1_MidiTrigger","status":"guessed"},
+    "LFO Rate [VST3 1159744260]": {"field":"parameters/MKUMorphingLFONode_Mod_1_Rate","status":"guessed"},
+    "LFO Shape [VST3 1159826782]": {"field":"parameters/MKUMorphingLFONode_Mod_1_Type","status":"guessed"},
+    "LFO Randomize [VST3 945754637]": {"field":"parameters/MKUMorphingLFONode_Mod_1_Randomize","status":"verified"},
+    "Curve 1 Midi Retrigger [VST3 1337817099]": {"field":"parameters/MKUClickableEnvelopeNode_Mod_2_MidiTrigger","status":"guessed"},
+    "Curve 1 Rate [VST3 2082941612]": {"field":"parameters/MKUClickableEnvelopeNode_Mod_2_Rate","status":"guessed"},
+    "Curve 2 Midi Retrigger [VST3 1044414092]": {"field":"parameters/MKUClickableEnvelopeNode_Mod_3_MidiTrigger","status":"guessed"},
+    "Curve 2 Rate [VST3 2111570763]": {"field":"parameters/MKUClickableEnvelopeNode_Mod_3_Rate","status":"guessed"},
+    "Follow Attack [VST3 1175699080]": {"field":"parameters/MKUEnvelopeFollowerNode_Mod_4_Attack","status":"verified"},
+    "Follow Release [VST3 1705402311]": {"field":"parameters/MKUEnvelopeFollowerNode_Mod_4_Release","status":"verified"},
+    "Follow Gain [VST3 1167862719]": {"field":"parameters/MKUEnvelopeFollowerNode_Mod_4_Gain","status":"verified"},
+    "Macro 1 [VST3 1932537277]": {"field":"parameters/MKUMacroNode_Mod_5_Macro","status":"verified"},
+    "Macro 2 [VST3 672557310]": {"field":"parameters/MKUMacroNode_Mod_6_Macro","status":"verified"},
+    "Distortion Drive [VST3 2142679954]": {"field":"parameters/MKURiftInputNode_Main_InputGain","status":"verified"},
+    "Distortion Trim [VST3 1786208801]": {"field":"parameters/MKURiftProcessorNode_Main_Trim","status":"verified"},
+    "Stages [VST3 1369571184]": {"field":"parameters/MKURiftProcessorNode_Main_StageCount","status":"guessed"},
+    "Positive Type [VST3 334726240]": {"field":"parameters/MKURiftProcessorNode_Main_PosPolAlgoOption","status":"guessed"},
+    "Distortion Positive Shape [VST3 679230395]": {"field":"parameters/MKURiftProcessorNode_Main_PosPolReduction","status":"verified"},
+    "Distortion Blend [VST3 1684401403]": {"field":"parameters/MKURiftProcessorNode_Main_Split","status":"verified"},
+    "Negative Type [VST3 936914596]": {"field":"parameters/MKURiftProcessorNode_Main_NegPolAlgoOption","status":"guessed"},
+    "Distortion Negative Shape [VST3 1945581815]": {"field":"parameters/MKURiftProcessorNode_Main_NegPolReduction","status":"verified"},
+    "Blend Mode [VST3 1180345475]": {"field":"parameters/MKURiftProcessorNode_Main_CrossoverSmooth","status":"guessed"},
+    "Stereo Mode [VST3 1785997218]": {"field":"parameters/MKURiftProcessorNode_Main_Mode","status":"verified"},
+    "Shape Link [VST3 1333705442]": {"field":"parameters/MKURiftProcessorNode_Main_LinkAmounts","status":"guessed"},
+    "Feedback Feedback Mix [VST3 1017509654]": {"field":"parameters/MKURiftProcessorNode_Main_DELAY_DryWet","status":"verified"},
+    "Feedback Frequency [VST3 1445100264]": {"field":"parameters/MKURiftProcessorNode_Main_DELAY_Time","status":"verified"},
+    "Feedback Feedback [VST3 699043360]": {"field":"parameters/MKURiftProcessorNode_Main_DELAY_Feedback","status":"verified"},
+    "Delay Mode [VST3 1444897214]": {"field":"parameters/MKURiftProcessorNode_Main_DELAY_Mode","status":"verified"},
+    "Feedback Lowpass [VST3 2048613226]": {"field":"parameters/MKURiftProcessorNode_Main_DELAY_Lowpass","status":"verified"},
+    "Feedback Highpass [VST3 1353597774]": {"field":"parameters/MKURiftProcessorNode_Main_DELAY_Highpass","status":"verified"},
+    "Feedback Spread [VST3 1444904654]": {"field":"parameters/MKURiftProcessorNode_Main_DELAY_Spread","status":"verified"},
+    "Feedback Distort [VST3 740636881]": {"field":"parameters/MKURiftProcessorNode_Main_DistortFeedback","status":"guessed"},
+    "Filter Filter Mix [VST3 1978511192]": {"field":"parameters/MKURiftFilterNode_Main_DryWet","status":"verified"},
+    "Filter Cutoff [VST3 1952526730]": {"field":"parameters/MKURiftFilterNode_Main_Cutoff","status":"verified"},
+    "Filter Resonance [VST3 939360657]": {"field":"parameters/MKURiftFilterNode_Main_Resonance","status":"verified"},
+    "Filter Type [VST3 1528578688]": {"field":"parameters/MKURiftFilterNode_Main_Mode","status":"guessed"},
+    "Filter Spread [VST3 258422544]": {"field":"parameters/MKURiftFilterNode_Main_Spread","status":"verified"},
+    "Filter Morph [VST3 141312971]": {"field":"parameters/MKURiftFilterNode_Main_Morph","status":"verified"},
+    "Global Dry Wet [VST3 1482039691]": {"field":"parameters/MKURiftOutputNode_Main_WetDry","status":"verified"},
+    "Global Output [VST3 1418448454]": {"field":"parameters/MKURiftOutputNode_Main_OutputGain","status":"verified"},
+    "Output Limiter [VST3 1734520002]": {"field":"parameters/MKURiftOutputNode_Main_LimitingOption","status":"guessed"}
+  }
+}

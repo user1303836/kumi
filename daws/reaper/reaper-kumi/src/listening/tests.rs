@@ -1920,6 +1920,38 @@ fn a_delivery_whose_files_arent_the_dry_runs_renders_nothing() {
 }
 
 #[test]
+fn a_delivery_stops_on_rejected_or_ignored_text_settings_before_rendering() {
+    for accepted in [false, true] {
+        for key in ["RENDER_FILE", "RENDER_PATTERN", "RENDER_FORMAT", "RENDER_FORMAT2"] {
+            let rig = Rig::new();
+            producer_settings();
+            let previous = rig.dir.path().join("previous");
+            std::fs::create_dir(&previous).unwrap();
+            let sentinel = previous.join("Verse.wav");
+            std::fs::write(&sentinel, b"producer audio").unwrap();
+            fake::with(|s| {
+                s.listening.texts.insert("RENDER_FILE".into(), previous.to_string_lossy().into_owned());
+                s.listening.texts.insert("RENDER_FORMAT".into(), "old-format".into());
+                s.listening.refuse_text_once = Some((key.into(), accepted));
+            });
+            let before = render_settings();
+            let folder = rig.dir.path().join("requested");
+            rig.ask(
+                "deliver_start",
+                json!({"jobId":"refused","pattern":"$region","folder":folder,"format":"wav","bits":16,"overwrite":true}),
+            )
+            .unwrap();
+            let ended = rig.until_ended("refused");
+            assert_eq!(ended["state"], "failed", "{key}/{accepted}: {ended}");
+            assert!(ended["error"].as_str().unwrap().contains(key), "{ended}");
+            assert!(fake::with(|s| s.listening.renders.is_empty()));
+            assert_eq!(std::fs::read(&sentinel).unwrap(), b"producer audio");
+            assert_eq!(render_settings(), before);
+        }
+    }
+}
+
+#[test]
 fn a_deliverys_settings_are_checked_before_anything_is_set() {
     let rig = Rig::new();
     let folder = rig.dir.path().join("game");
@@ -1928,6 +1960,9 @@ fn a_deliverys_settings_are_checked_before_anything_is_set() {
         json!({"source": "stems", "pattern": "$track", "folder": folder}),
         json!({"pattern": "../$region", "folder": folder}),
         json!({"pattern": "", "folder": folder}),
+        json!({"pattern":"$region\0","folder":folder,"overwrite":true}),
+        json!({"pattern":"$region","folder":format!("{}\0wrong",folder.display()),"overwrite":true}),
+        json!({"pattern":"$region","folder":format!("{}\nwrong",folder.display()),"overwrite":true}),
         json!({"pattern": "$region", "folder": "relative/folder"}),
         json!({"pattern": "$region", "folder": folder, "format": "wav", "bits": 20}),
         json!({"pattern": "$region", "folder": folder, "sampleRate": 12345}),

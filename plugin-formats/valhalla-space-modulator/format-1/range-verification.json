@@ -1,0 +1,19 @@
+{
+  "plugin": "valhalla-space-modulator",
+  "version": "1.1.6",
+  "binarySha256": "b64f1497b977cf2c3db0ee0ac68cd178e3200b4769190b606d4ab5fc371c2942",
+  "method": "Restore the initial component, set one public VST3 parameter, capture its XML value, then reload only that field into the initial component. Saved value and host readback must match at both normalized endpoints and 0.25. Bounds are supported intervals in this product version; no survey extrema are used. Raw XML and mappings without this proof remain read-only.",
+  "points": [
+    0,
+    1,
+    0.25
+  ],
+  "fields": {
+    "parameters/wetDry": {"parameterId":48,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/rate": {"parameterId":49,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/depth": {"parameterId":50,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/feedback": {"parameterId":51,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/manual": {"parameterId":52,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]},
+    "parameters/Mode": {"parameterId":53,"stored":[0.0,1.0,0.25],"readback":[0.0,1.0,0.25]}
+  }
+}

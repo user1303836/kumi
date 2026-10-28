@@ -1,0 +1,52 @@
+{
+  "plugin": "valhalla-space-modulator",
+  "format": "format-1",
+  "about": "Normalized Valhalla sound controls in XML root attributes. Numeric edits require the verified intervals below. Raw XML attributes are preserved read-only and not duplicated here. Individual endpoint reload evidence is in range-verification.json.",
+  "paths": "exact",
+  "files": {
+    "preset": {
+      "extension": ".vpreset",
+      "layers": [
+        "native XML"
+      ],
+      "constants": {
+        "root": "ValhallaSpaceModulator"
+      }
+    },
+    "state": {
+      "layers": [
+        "VST3 Comp chunk",
+        "optional VstW compatibility bank",
+        "VC2! + little-endian XML byte length + XML + NUL + preserved opaque JUCE private data"
+      ],
+      "constants": {
+        "xml_magic": "VC2!",
+        "root": "ValhallaSpaceModulator"
+      }
+    }
+  },
+  "opaque": [
+    "state"
+  ],
+  "fields": {
+    "": {"type":"map","in":["state","preset"],"status":"guessed"},
+    "root": {"type":"text","in":["state","preset"],"status":"guessed"},
+    "parameters": {"type":"map","in":["state","preset"],"status":"guessed"},
+    "parameters/wetDry": {"type":"float","status":"guessed","default":0.5,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/rate": {"type":"float","status":"guessed","default":0.6259999871253967,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/depth": {"type":"float","status":"guessed","default":0.5,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/feedback": {"type":"float","status":"guessed","default":0.5,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/manual": {"type":"float","status":"guessed","default":0.5,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "parameters/Mode": {"type":"float","status":"guessed","default":0.09090909361839294,"unit":"normalized","range":[0.0,1.0],"range_status":"verified"},
+    "state": {"type":"map","in":["state","preset"],"status":"guessed"},
+    "name": {"type":"text","in":["state","preset"],"status":"guessed"}
+  },
+  "parameters": {
+    "wetDry [VST3 48]": {"field":"parameters/wetDry","status":"verified"},
+    "rate [VST3 49]": {"field":"parameters/rate","status":"verified"},
+    "depth [VST3 50]": {"field":"parameters/depth","status":"verified"},
+    "feedback [VST3 51]": {"field":"parameters/feedback","status":"verified"},
+    "manual [VST3 52]": {"field":"parameters/manual","status":"verified"},
+    "Mode [VST3 53]": {"field":"parameters/Mode","status":"verified"}
+  }
+}

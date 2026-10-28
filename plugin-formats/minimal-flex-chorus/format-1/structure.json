@@ -1,0 +1,61 @@
+{
+  "plugin": "minimal-flex-chorus",
+  "format": "format-1",
+  "about": "Minimal Audio full XML; parameters/<name> edits mapped_value in physical units. Numeric edits require the verified intervals below. Raw XML attributes are preserved read-only and not duplicated here. Individual endpoint reload evidence is in range-verification.json.",
+  "paths": "exact",
+  "files": {
+    "preset": {
+      "extension": ".xml",
+      "layers": [
+        "native XML"
+      ],
+      "constants": {
+        "root": "FlexChorus"
+      }
+    },
+    "state": {
+      "layers": [
+        "VST3 Comp chunk",
+        "optional VstW compatibility bank",
+        "VC2! + little-endian XML byte length + XML + NUL + preserved opaque JUCE private data"
+      ],
+      "constants": {
+        "xml_magic": "VC2!",
+        "root": "FlexChorus"
+      }
+    }
+  },
+  "opaque": [
+    "state"
+  ],
+  "fields": {
+    "": {"type":"map","in":["state","preset"],"status":"guessed"},
+    "root": {"type":"text","in":["state","preset"],"status":"guessed"},
+    "parameters": {"type":"map","in":["state","preset"],"status":"guessed"},
+    "parameters/MKUFlexChorusNode_Main_InputGain": {"type":"float","status":"guessed","default":0.0,"range":[-60.0,12.0],"range_status":"verified"},
+    "parameters/MKUFlexChorusNode_Main_OutputGain": {"type":"float","status":"guessed","default":0.0,"range":[-60.0,12.0],"range_status":"verified"},
+    "parameters/MKUFlexChorusNode_Main_DryWet": {"type":"float","status":"guessed","default":0.5,"range":[0.0,1.0],"range_status":"verified"},
+    "parameters/MKUFlexChorusNode_Main_TimeNorm": {"type":"float","status":"guessed","default":0.5,"range":[0.0,1.0],"range_status":"verified"},
+    "parameters/MKUFlexChorusNode_Main_ModDepth": {"type":"float","status":"guessed","default":0.5,"range":[0.0,1.0],"range_status":"verified"},
+    "parameters/MKUFlexChorusNode_Main_ModRate": {"type":"float","status":"guessed","default":0.25,"range":[0.009999999776482582,20.0],"range_status":"verified"},
+    "parameters/MKUFlexChorusNode_Main_ModRandomize": {"type":"float","status":"guessed","default":0.0,"range":[0.0,1.0],"range_status":"verified"},
+    "parameters/MKUFlexChorusNode_Main_Width": {"type":"float","status":"guessed","default":1.0,"range":[0.0,1.0],"range_status":"verified"},
+    "parameters/MKUFlexChorusNode_Main_Feedback": {"type":"float","status":"guessed","default":0.0,"range":[0.0,0.9900000095367432],"range_status":"verified"},
+    "parameters/MKUFlexChorusNode_Main_HPFreq": {"type":"float","status":"guessed","default":160.0,"range":[20.0,2500.0],"range_status":"verified"},
+    "parameters/MKUFlexChorusNode_Main_LPFreq": {"type":"float","status":"guessed","default":5000.0,"range":[160.0,20000.0],"range_status":"verified"},
+    "state": {"type":"map","in":["state","preset"],"status":"guessed"}
+  },
+  "parameters": {
+    "Input [VST3 1061406346]": {"field":"parameters/MKUFlexChorusNode_Main_InputGain","status":"verified"},
+    "Output [VST3 200626207]": {"field":"parameters/MKUFlexChorusNode_Main_OutputGain","status":"verified"},
+    "Dry Wet [VST3 776085818]": {"field":"parameters/MKUFlexChorusNode_Main_DryWet","status":"verified"},
+    "Time [VST3 880417768]": {"field":"parameters/MKUFlexChorusNode_Main_TimeNorm","status":"verified"},
+    "Mod Depth [VST3 160766112]": {"field":"parameters/MKUFlexChorusNode_Main_ModDepth","status":"verified"},
+    "Rate [VST3 1875988323]": {"field":"parameters/MKUFlexChorusNode_Main_ModRate","status":"verified"},
+    "Randomize [VST3 164425998]": {"field":"parameters/MKUFlexChorusNode_Main_ModRandomize","status":"verified"},
+    "Width [VST3 1497041511]": {"field":"parameters/MKUFlexChorusNode_Main_Width","status":"verified"},
+    "Feedback [VST3 618970948]": {"field":"parameters/MKUFlexChorusNode_Main_Feedback","status":"verified"},
+    "Highpass [VST3 857709311]": {"field":"parameters/MKUFlexChorusNode_Main_HPFreq","status":"verified"},
+    "Lowpass [VST3 972225915]": {"field":"parameters/MKUFlexChorusNode_Main_LPFreq","status":"verified"}
+  }
+}

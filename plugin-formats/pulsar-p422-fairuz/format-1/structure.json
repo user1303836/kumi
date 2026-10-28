@@ -1,0 +1,121 @@
+{
+  "plugin": "pulsar-p422-fairuz",
+  "format": "format-1",
+  "about": "Pulsar Modular XML PARAM id/value records in physical units; omitted values mean zero. Numeric edits require the verified intervals below. Raw XML attributes are preserved read-only and not duplicated here. Individual endpoint reload evidence is in range-verification.json.",
+  "paths": "exact",
+  "files": {
+    "preset": {
+      "extension": ".P422Preset",
+      "layers": [
+        "VC2! + little-endian XML byte length + XML + NUL"
+      ],
+      "constants": {
+        "root": "P422"
+      }
+    },
+    "state": {
+      "layers": [
+        "VST3 Comp chunk",
+        "optional VstW compatibility bank",
+        "VC2! + little-endian XML byte length + XML + NUL + preserved opaque JUCE private data"
+      ],
+      "constants": {
+        "xml_magic": "VC2!",
+        "root": "P422"
+      }
+    }
+  },
+  "opaque": [
+    "state"
+  ],
+  "fields": {
+    "": {"type":"map","in":["state","preset"],"status":"guessed"},
+    "root": {"type":"text","in":["state","preset"],"status":"guessed"},
+    "parameters": {"type":"map","in":["state","preset"],"status":"guessed"},
+    "parameters/pm_p422_bypass_btn": {"type":"float","status":"guessed","default":0.0,"range":[0.0,1.0],"range_status":"verified","step":1.0},
+    "parameters/pm_p422_dualmono_btn": {"type":"float","status":"guessed","default":1.0,"range":[0.0,1.0],"range_status":"verified","step":1.0},
+    "parameters/pm_p422_eq1act_btn": {"type":"float","status":"guessed","default":1.0,"range":[0.0,1.0],"range_status":"verified","step":1.0},
+    "parameters/pm_p422_eq1freq_sldr": {"type":"float","status":"guessed","default":20.0,"range":[20.0,420.0],"range_status":"verified"},
+    "parameters/pm_p422_eq1gain_sldr": {"type":"float","status":"guessed","default":0.0,"range":[-12.0,12.0],"range_status":"verified"},
+    "parameters/pm_p422_eq2act_btn": {"type":"float","status":"guessed","default":1.0,"range":[0.0,1.0],"range_status":"verified","step":1.0},
+    "parameters/pm_p422_eq2freq_sldr": {"type":"float","status":"guessed","default":70.0,"range":[70.0,1000.0],"range_status":"verified"},
+    "parameters/pm_p422_eq2gain_sldr": {"type":"float","status":"guessed","default":0.0,"range":[-12.0,12.0],"range_status":"verified"},
+    "parameters/pm_p422_eq3act_btn": {"type":"float","status":"guessed","default":1.0,"range":[0.0,1.0],"range_status":"verified","step":1.0},
+    "parameters/pm_p422_eq3freq_sldr": {"type":"float","status":"guessed","default":800.0,"range":[800.0,11500.0],"range_status":"verified"},
+    "parameters/pm_p422_eq3gain_sldr": {"type":"float","status":"guessed","default":0.0,"range":[-12.0,12.0],"range_status":"verified"},
+    "parameters/pm_p422_eq4act_btn": {"type":"float","status":"guessed","default":1.0,"range":[0.0,1.0],"range_status":"verified","step":1.0},
+    "parameters/pm_p422_eq4freq_sldr": {"type":"float","status":"guessed","default":2500.0,"range":[2500.0,18500.0],"range_status":"verified"},
+    "parameters/pm_p422_eq4gain_sldr": {"type":"float","status":"guessed","default":0.0,"range":[-12.0,12.0],"range_status":"verified"},
+    "parameters/pm_p422_hammeractv_btn": {"type":"float","status":"guessed","default":0.0,"range":[0.0,1.0],"range_status":"verified","step":1.0},
+    "parameters/pm_p422_hbstp_btn": {"type":"float","status":"guessed","default":1.0,"range":[0.0,1.0],"range_status":"verified","step":1.0},
+    "parameters/pm_p422_hbtype_sldr": {"type":"float","status":"guessed","default":0.0,"range":[0.0,2.0],"range_status":"verified"},
+    "parameters/pm_p422_hpactv_btn": {"type":"float","status":"guessed","default":1.0,"range":[0.0,1.0],"range_status":"verified","step":1.0},
+    "parameters/pm_p422_hpf_sldr": {"type":"float","status":"guessed","default":1.0,"range":[0.0,12.0],"range_status":"verified"},
+    "parameters/pm_p422_hpfpos_btn": {"type":"float","status":"guessed","default":1.0,"range":[0.0,1.0],"range_status":"verified","step":1.0},
+    "parameters/pm_p422_hsactv_btn": {"type":"float","status":"guessed","default":1.0,"range":[0.0,1.0],"range_status":"verified","step":1.0},
+    "parameters/pm_p422_hsfreq_sldr": {"type":"float","status":"guessed","default":10000.0,"range":[60.0,18000.0],"range_status":"verified"},
+    "parameters/pm_p422_infodump_btn": {"type":"float","status":"guessed","default":0.0,"range":[0.0,1.0],"range_status":"verified","step":1.0},
+    "parameters/pm_p422_lbstp_btn": {"type":"float","status":"guessed","default":1.0,"range":[0.0,1.0],"range_status":"verified","step":1.0},
+    "parameters/pm_p422_lbtype_sldr": {"type":"float","status":"guessed","default":0.0,"range":[0.0,2.0],"range_status":"verified"},
+    "parameters/pm_p422_lmbstp_btn": {"type":"float","status":"guessed","default":1.0,"range":[0.0,1.0],"range_status":"verified","step":1.0},
+    "parameters/pm_p422_lmbtype_sldr": {"type":"float","status":"guessed","default":0.0,"range":[0.0,2.0],"range_status":"verified"},
+    "parameters/pm_p422_lpactv_btn": {"type":"float","status":"guessed","default":0.0,"range":[0.0,1.0],"range_status":"verified","step":1.0},
+    "parameters/pm_p422_lpf_btn": {"type":"float","status":"guessed","default":7.0,"range":[0.0,8.0],"range_status":"verified"},
+    "parameters/pm_p422_lsactv_btn": {"type":"float","status":"guessed","default":1.0,"range":[0.0,1.0],"range_status":"verified","step":1.0},
+    "parameters/pm_p422_lsfgain_sldr": {"type":"float","status":"guessed","default":0.0,"range":[-0.5,1.0],"range_status":"verified"},
+    "parameters/pm_p422_lsfreq_sldr": {"type":"float","status":"guessed","default":100.0,"range":[20.0,5000.0],"range_status":"verified"},
+    "parameters/pm_p422_lsgain_sldr": {"type":"float","status":"guessed","default":0.0,"range":[-0.5,1.0],"range_status":"verified"},
+    "parameters/pm_p422_mhbstp_btn": {"type":"float","status":"guessed","default":1.0,"range":[0.0,1.0],"range_status":"verified","step":1.0},
+    "parameters/pm_p422_mhbtype_sldr": {"type":"float","status":"guessed","default":0.0,"range":[0.0,2.0],"range_status":"verified"},
+    "parameters/pm_p422_mix_sldr": {"type":"float","status":"guessed","default":0.0,"range":[0.0,100.0],"range_status":"verified"},
+    "parameters/pm_p422_os_btn": {"type":"float","status":"guessed","default":0.0,"range":[0.0,1.0],"range_status":"verified","step":1.0},
+    "parameters/pm_p422_outgain_btn": {"type":"float","status":"guessed","default":0.0,"range":[-12.0,12.0],"range_status":"verified"},
+    "parameters/pm_p422_pol_btn": {"type":"float","status":"guessed","default":0.0,"range":[0.0,1.0],"range_status":"verified","step":1.0},
+    "parameters/pm_p422_trgain_btn": {"type":"float","status":"guessed","default":0.0,"range":[0.0,1.0],"range_status":"verified"},
+    "parameters/pm_p422_voicing_sldr": {"type":"float","status":"guessed","default":0.0,"range":[-100.0,100.0],"range_status":"verified"},
+    "state": {"type":"map","in":["state","preset"],"status":"guessed"}
+  },
+  "parameters": {
+    "Bypass [VST3 1987020894]": {"field":"parameters/pm_p422_bypass_btn","status":"verified"},
+    "Dual Mono [VST3 982043413]": {"field":"parameters/pm_p422_dualmono_btn","status":"verified"},
+    "LB SW [VST3 92202595]": {"field":"parameters/pm_p422_eq1act_btn","status":"verified"},
+    "LB Freq [VST3 569750082]": {"field":"parameters/pm_p422_eq1freq_sldr","status":"verified"},
+    "LB Gain [VST3 515934619]": {"field":"parameters/pm_p422_eq1gain_sldr","status":"verified"},
+    "LMB SW [VST3 1835012930]": {"field":"parameters/pm_p422_eq2act_btn","status":"verified"},
+    "LMB Freq [VST3 373236577]": {"field":"parameters/pm_p422_eq2freq_sldr","status":"verified"},
+    "LMB Gain [VST3 319421114]": {"field":"parameters/pm_p422_eq2gain_sldr","status":"verified"},
+    "HMB SW [VST3 1430339617]": {"field":"parameters/pm_p422_eq3act_btn","status":"verified"},
+    "HMB Freq [VST3 176723072]": {"field":"parameters/pm_p422_eq3freq_sldr","status":"verified"},
+    "HMB Gain [VST3 122907609]": {"field":"parameters/pm_p422_eq3gain_sldr","status":"verified"},
+    "HB SW [VST3 1025666304]": {"field":"parameters/pm_p422_eq4act_btn","status":"verified"},
+    "HB Freq [VST3 2127693215]": {"field":"parameters/pm_p422_eq4freq_sldr","status":"verified"},
+    "HB Gain [VST3 2073877752]": {"field":"parameters/pm_p422_eq4gain_sldr","status":"verified"},
+    "Hammer SW [VST3 270735328]": {"field":"parameters/pm_p422_hammeractv_btn","status":"verified"},
+    "HB Step SW [VST3 1037222169]": {"field":"parameters/pm_p422_hbstp_btn","status":"verified"},
+    "HB Type [VST3 971213849]": {"field":"parameters/pm_p422_hbtype_sldr","status":"verified"},
+    "HP SW [VST3 1329216674]": {"field":"parameters/pm_p422_hpactv_btn","status":"verified"},
+    "HP Freq [VST3 151968769]": {"field":"parameters/pm_p422_hpf_sldr","status":"verified"},
+    "HPF Pos [VST3 2107547052]": {"field":"parameters/pm_p422_hpfpos_btn","status":"verified"},
+    "HS SW [VST3 201820581]": {"field":"parameters/pm_p422_hsactv_btn","status":"verified"},
+    "HS Freq [VST3 1316183722]": {"field":"parameters/pm_p422_hsfreq_sldr","status":"verified"},
+    "Dump Info [VST3 1708176344]": {"field":"parameters/pm_p422_infodump_btn","status":"verified"},
+    "LB Step SW [VST3 249855261]": {"field":"parameters/pm_p422_lbstp_btn","status":"verified"},
+    "LB Type [VST3 225859357]": {"field":"parameters/pm_p422_lbtype_sldr","status":"verified"},
+    "LMB Step SW [VST3 428017668]": {"field":"parameters/pm_p422_lmbstp_btn","status":"verified"},
+    "LMB Type [VST3 1788724292]": {"field":"parameters/pm_p422_lmbtype_sldr","status":"verified"},
+    "LP SW [VST3 543162654]": {"field":"parameters/pm_p422_lpactv_btn","status":"verified"},
+    "LP Freq [VST3 1753785542]": {"field":"parameters/pm_p422_lpf_btn","status":"verified"},
+    "LS SW [VST3 1563250209]": {"field":"parameters/pm_p422_lsactv_btn","status":"verified"},
+    "LS Gain [VST3 295297057]": {"field":"parameters/pm_p422_lsfgain_sldr","status":"verified"},
+    "LS Freq [VST3 570829230]": {"field":"parameters/pm_p422_lsfreq_sldr","status":"verified"},
+    "HS Gain [VST3 517013767]": {"field":"parameters/pm_p422_lsgain_sldr","status":"verified"},
+    "HMB Step SW [VST3 678841886]": {"field":"parameters/pm_p422_mhbstp_btn","status":"verified"},
+    "HMB Type [VST3 165145566]": {"field":"parameters/pm_p422_mhbtype_sldr","status":"verified"},
+    "Mix [VST3 1021335747]": {"field":"parameters/pm_p422_mix_sldr","status":"verified"},
+    "OS [VST3 560668634]": {"field":"parameters/pm_p422_os_btn","status":"verified"},
+    "Main Out [VST3 232963121]": {"field":"parameters/pm_p422_outgain_btn","status":"verified"},
+    "Polarity [VST3 985744945]": {"field":"parameters/pm_p422_pol_btn","status":"verified"},
+    "Tremor Gain [VST3 1568207859]": {"field":"parameters/pm_p422_trgain_btn","status":"verified"},
+    "Voicing [VST3 1381549328]": {"field":"parameters/pm_p422_voicing_sldr","status":"verified"}
+  }
+}

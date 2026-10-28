@@ -48,12 +48,16 @@ impl XferFile {
 
     /// The file and its body's decoded bytes (the CBOR as Serum wrote it).
     pub fn read_with_body(bytes: &[u8]) -> Result<(XferFile, Vec<u8>), FormatError> {
+        if bytes.len() > MAX_DECODED_BYTES {
+            return Err(FormatError::new("Xfer file exceeds the byte budget"));
+        }
         if !is_xfer(bytes) {
             return Err(FormatError::new("not an Xfer file: no XferJson magic"));
         }
         let mut at = MAGIC.len();
         let header_len = read_u64(bytes, &mut at)?;
-        let header_len = usize::try_from(header_len).ok().filter(|n| *n <= bytes.len() - at).ok_or_else(|| short("header"))?;
+        let header_len =
+            usize::try_from(header_len).ok().filter(|n| *n <= 65_536 && *n <= bytes.len() - at).ok_or_else(|| short("header"))?;
         let header = bytes[at..at + header_len].to_vec();
         at += header_len;
         let decoded_len = read_u32(bytes, &mut at)? as usize;
@@ -77,7 +81,7 @@ impl XferFile {
     /// The header as JSON, any NUL padding left out.
     pub fn header_json(&self) -> Result<Json, FormatError> {
         let end = self.header.iter().rposition(|b| *b != 0).map_or(0, |i| i + 1);
-        serde_json::from_slice(&self.header[..end]).map_err(|error| FormatError::new(format!("Xfer header isn't JSON: {error}")))
+        super::bounded_json::parse(&self.header[..end]).map_err(|error| FormatError::new(format!("Xfer header: {error}")))
     }
 
     /// What the file is: its `fileType` ("SerumPreset", "SerumFX" …) or, for half a state, its `component`
@@ -93,6 +97,9 @@ impl XferFile {
             return Err(FormatError::new(format!("Xfer body encoding {} can't be written", self.encoding)));
         }
         let decoded = cbor::encode(&self.body);
+        if decoded.len() > MAX_DECODED_BYTES || self.header.len() > 65_536 {
+            return Err(FormatError::new("Xfer state exceeds the byte budget"));
+        }
         let encoded = ruzstd::encoding::compress_to_vec(decoded.as_slice(), ruzstd::encoding::CompressionLevel::Fastest);
         let header = with_hash(&self.header, &md5_hex(&encoded));
         let mut out = Vec::with_capacity(MAGIC.len() + 16 + header.len() + encoded.len());

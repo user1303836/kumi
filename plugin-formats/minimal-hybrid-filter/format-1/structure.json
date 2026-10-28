@@ -1,0 +1,61 @@
+{
+  "plugin": "minimal-hybrid-filter",
+  "format": "format-1",
+  "about": "Minimal Audio full XML; parameters/<name> edits mapped_value in physical units. Numeric edits require the verified intervals below. Raw XML attributes are preserved read-only and not duplicated here. Individual endpoint reload evidence is in range-verification.json.",
+  "paths": "exact",
+  "files": {
+    "preset": {
+      "extension": ".xml",
+      "layers": [
+        "native XML"
+      ],
+      "constants": {
+        "root": "HybridFilter"
+      }
+    },
+    "state": {
+      "layers": [
+        "VST3 Comp chunk",
+        "optional VstW compatibility bank",
+        "VC2! + little-endian XML byte length + XML + NUL + preserved opaque JUCE private data"
+      ],
+      "constants": {
+        "xml_magic": "VC2!",
+        "root": "HybridFilter"
+      }
+    }
+  },
+  "opaque": [
+    "state"
+  ],
+  "fields": {
+    "": {"type":"map","in":["state","preset"],"status":"guessed"},
+    "root": {"type":"text","in":["state","preset"],"status":"guessed"},
+    "parameters": {"type":"map","in":["state","preset"],"status":"guessed"},
+    "parameters/MKUHybridFilterNode_Main_InputGain": {"type":"float","status":"guessed","default":0.0,"range":[-60.0,12.0],"range_status":"verified"},
+    "parameters/MKUHybridFilterNode_Main_OutputGain": {"type":"float","status":"guessed","default":0.0,"range":[-60.0,12.0],"range_status":"verified"},
+    "parameters/MKUHybridFilterNode_Main_DryWet": {"type":"float","status":"guessed","default":1.0,"range":[0.0,1.0],"range_status":"verified"},
+    "parameters/MKUHybridFilterNode_Main_Cutoff": {"type":"float","status":"guessed","default":2500.0,"range":[20.0,20000.0],"range_status":"verified"},
+    "parameters/MKUHybridFilterNode_Main_NormResonance": {"type":"float","status":"guessed","default":0.25,"range":[0.0,1.0],"range_status":"verified"},
+    "parameters/MKUHybridFilterNode_Main_Spread": {"type":"float","status":"guessed","default":0.0,"range":[-1.0,1.0],"range_status":"verified"},
+    "parameters/MKUHybridFilterNode_Main_Morph": {"type":"float","status":"guessed","default":0.0,"range":[0.0,1.0],"range_status":"verified"},
+    "parameters/MKUHybridFilterNode_Main_AmpMod": {"type":"float","status":"guessed","default":0.0,"range":[0.0,1.0],"range_status":"verified"},
+    "parameters/MKUHybridFilterNode_Main_LowCrossoverFreq": {"type":"float","status":"guessed","default":160.0,"range":[20.0,20000.0],"range_status":"verified"},
+    "parameters/MKUHybridFilterNode_Main_CutoffFollow": {"type":"float","status":"guessed","default":0.0,"range":[-2.0,2.0],"range_status":"verified"},
+    "parameters/MKUHybridFilterNode_Main_MorphFollow": {"type":"float","status":"guessed","default":0.0,"range":[-2.0,2.0],"range_status":"verified"},
+    "state": {"type":"map","in":["state","preset"],"status":"guessed"}
+  },
+  "parameters": {
+    "Input [VST3 182091925]": {"field":"parameters/MKUHybridFilterNode_Main_InputGain","status":"verified"},
+    "Output [VST3 859166580]": {"field":"parameters/MKUHybridFilterNode_Main_OutputGain","status":"verified"},
+    "Dry Wet [VST3 237869839]": {"field":"parameters/MKUHybridFilterNode_Main_DryWet","status":"verified"},
+    "Cutoff [VST3 211885377]": {"field":"parameters/MKUHybridFilterNode_Main_Cutoff","status":"verified"},
+    "Resonance [VST3 393499678]": {"field":"parameters/MKUHybridFilterNode_Main_NormResonance","status":"verified"},
+    "Spread [VST3 665264839]": {"field":"parameters/MKUHybridFilterNode_Main_Spread","status":"verified"},
+    "Morph [VST3 154436916]": {"field":"parameters/MKUHybridFilterNode_Main_Morph","status":"verified"},
+    "Amp Mod [VST3 147087346]": {"field":"parameters/MKUHybridFilterNode_Main_AmpMod","status":"verified"},
+    "Low Band [VST3 929022732]": {"field":"parameters/MKUHybridFilterNode_Main_LowCrossoverFreq","status":"verified"},
+    "Cutoff Mod [VST3 1355714642]": {"field":"parameters/MKUHybridFilterNode_Main_CutoffFollow","status":"verified"},
+    "Morph Mod [VST3 730002949]": {"field":"parameters/MKUHybridFilterNode_Main_MorphFollow","status":"verified"}
+  }
+}

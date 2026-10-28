@@ -48,6 +48,7 @@ irm https://github.com/user1303836/kumi/releases/latest/download/install.ps1 | i
 - **照着教程做出声音。** 粘贴一个 YouTube 链接：Kumi 会观看视频，并在新轨道上搭建出其中展示的内容。
 - **修正混音。** 问一句“贝斯是不是太浑？”，Kumi 会聆听、找出打架的部分并修正，每次修改后都重新聆听。
 - **匹配参考曲。** 给它一首你喜欢的曲子：Kumi 会尝试几个版本，逐一与它对比打分，再精修最好的那个。
+- **创建插件预设并进行母带处理。** Kumi 使用内置 VST3 格式，并在原生设备之前检查合适的已安装插件。[支持的格式与限制](plugin-formats/README.md)。
 - **制作设备。** 描述一个 Max for Live 效果器或乐器，Kumi 就会把它做出来并放到你的轨道上。
 - **找到你的声音。** “像这个一样带点颗粒感的军鼓”“我常用的人声效果链”：Kumi 了解你的采样、预设和工程。
 - **把声音画成地图。** `/map` 把你的采样和歌曲排列出来，相似的彼此相邻；指向一个点就能试听。把喜欢的声音收进调色板，当你说“从我的调色板里找一个更暗的底鼓”时，Kumi 就从中挑选，也可以把整个调色板作为一套鼓组载入。
@@ -122,4 +123,4 @@ REAPER 7.82 和 Renoise 3.5.4 已在 macOS 上验证。在 Windows 和 Linux 上
 
 ## 许可证
 
-[MIT](LICENSE.md)。来自他人成果的部分，以及 Kumi 下载的模型，见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。Ableton Live 是 Ableton AG 的商标；Kumi 与 Ableton、Cockos（REAPER）和 Renoise 没有关联，也未获它们认可。
+[MIT](LICENSE.md)。来自他人成果的部分，以及 Kumi 下载的模型，见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。Ableton Live 是 Ableton AG 的商标；Kumi 与 Ableton、Cockos（REAPER）、Renoise 及兼容插件的制造商均无隶属、关联、赞助或背书关系；产品名称仅用于标识兼容软件。

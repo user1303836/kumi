@@ -1,0 +1,504 @@
+{
+  "plugin": "zynaptiq-wormhole",
+  "format": "format-1",
+  "about": "Zynaptiq Preset XML version 3 or 4. inputParams count and pN attributes hold scalar values. VST3 component state (verified on PUNCH 1 and UNMIX DRUMS) uses a u32 little-endian XML length including a terminating NUL, then the XML and NUL.",
+  "paths": "exact",
+  "files": {
+    "preset": {
+      "extension": ".preset",
+      "layers": [
+        "UTF-8 XML Preset; inputParams attributes p0 through p<count-1>; preserve all other elements"
+      ],
+      "constants": {}
+    },
+    "state": {
+      "layers": [
+        "u32 LE byte count including NUL; XML Preset; NUL"
+      ],
+      "constants": {}
+    }
+  },
+  "survey": {
+    "files": 209,
+    "parameterCounts": [
+      27
+    ],
+    "presetVersions": [
+      "4"
+    ],
+    "source": "Installed native preset files and shipped parameter-name metadata; no factory preset bodies copied.",
+    "verification": "Native documents inspected; installed-binary version and runtime acceptance remain unverified.",
+    "parameterLinks": "Guessed links associate names and indices from installed metadata; physical-unit mappings remain unverified."
+  },
+  "fields": {
+    "@progName": {
+      "type": "text",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "status": "guessed"
+    },
+    "inputParams/@p0": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "guessed",
+      "about": "bypass"
+    },
+    "inputParams/@p1": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.03,
+        1.0
+      ],
+      "status": "guessed",
+      "about": "mix"
+    },
+    "inputParams/@p2": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "about": "warpMix"
+    },
+    "inputParams/@p3": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.11,
+        1.0
+      ],
+      "status": "guessed",
+      "about": "warpDepth"
+    },
+    "inputParams/@p4": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -0.35403919219970703,
+        1.0
+      ],
+      "status": "guessed",
+      "about": "warpPoles"
+    },
+    "inputParams/@p5": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -1.0,
+        1.0
+      ],
+      "status": "guessed",
+      "about": "warpTilt"
+    },
+    "inputParams/@p6": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.1,
+        1.0
+      ],
+      "status": "guessed",
+      "about": "warpTiltFilter"
+    },
+    "inputParams/@p7": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "about": "tiltPrePost"
+    },
+    "inputParams/@p8": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "about": "revMix"
+    },
+    "inputParams/@p9": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "about": "revSize"
+    },
+    "inputParams/@p10": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "about": "revDamp"
+    },
+    "inputParams/@p11": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "about": "shiftMix"
+    },
+    "inputParams/@p12": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -48.0,
+        48.0
+      ],
+      "status": "guessed",
+      "about": "pitchShift"
+    },
+    "inputParams/@p13": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -4000.0,
+        4000.0
+      ],
+      "status": "guessed",
+      "about": "frqShift"
+    },
+    "inputParams/@p14": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -4000.0,
+        4000.0
+      ],
+      "status": "guessed",
+      "about": "frqShiftLinear"
+    },
+    "inputParams/@p15": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "about": "frqShiftMode"
+    },
+    "inputParams/@p16": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "about": "swapWarpShift"
+    },
+    "inputParams/@p17": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "about": "warpOn"
+    },
+    "inputParams/@p18": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "about": "shiftOn"
+    },
+    "inputParams/@p19": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "about": "reverbOn"
+    },
+    "inputParams/@p20": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -2.5,
+        24.0
+      ],
+      "status": "guessed",
+      "about": "wetGain"
+    },
+    "inputParams/@p21": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        3.0
+      ],
+      "status": "guessed",
+      "about": "pitchMode"
+    },
+    "inputParams/@p22": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        2.0
+      ],
+      "status": "guessed",
+      "about": "blendMode"
+    },
+    "inputParams/@p23": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -413.0,
+        500.0
+      ],
+      "status": "guessed",
+      "about": "delayTime"
+    },
+    "inputParams/@p24": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "about": "delayChannelInvert"
+    },
+    "inputParams/@p25": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "about": "fsDecayTime"
+    },
+    "inputParams/@p26": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        2.0
+      ],
+      "status": "guessed",
+      "about": "revRouting"
+    }
+  },
+  "parameters": {
+    "bypass": {
+      "field": "inputParams/@p0",
+      "status": "guessed"
+    },
+    "mix": {
+      "field": "inputParams/@p1",
+      "status": "guessed"
+    },
+    "warpMix": {
+      "field": "inputParams/@p2",
+      "status": "guessed"
+    },
+    "warpDepth": {
+      "field": "inputParams/@p3",
+      "status": "guessed"
+    },
+    "warpPoles": {
+      "field": "inputParams/@p4",
+      "status": "guessed"
+    },
+    "warpTilt": {
+      "field": "inputParams/@p5",
+      "status": "guessed"
+    },
+    "warpTiltFilter": {
+      "field": "inputParams/@p6",
+      "status": "guessed"
+    },
+    "tiltPrePost": {
+      "field": "inputParams/@p7",
+      "status": "guessed"
+    },
+    "revMix": {
+      "field": "inputParams/@p8",
+      "status": "guessed"
+    },
+    "revSize": {
+      "field": "inputParams/@p9",
+      "status": "guessed"
+    },
+    "revDamp": {
+      "field": "inputParams/@p10",
+      "status": "guessed"
+    },
+    "shiftMix": {
+      "field": "inputParams/@p11",
+      "status": "guessed"
+    },
+    "pitchShift": {
+      "field": "inputParams/@p12",
+      "status": "guessed"
+    },
+    "frqShift": {
+      "field": "inputParams/@p13",
+      "status": "guessed"
+    },
+    "frqShiftLinear": {
+      "field": "inputParams/@p14",
+      "status": "guessed"
+    },
+    "frqShiftMode": {
+      "field": "inputParams/@p15",
+      "status": "guessed"
+    },
+    "swapWarpShift": {
+      "field": "inputParams/@p16",
+      "status": "guessed"
+    },
+    "warpOn": {
+      "field": "inputParams/@p17",
+      "status": "guessed"
+    },
+    "shiftOn": {
+      "field": "inputParams/@p18",
+      "status": "guessed"
+    },
+    "reverbOn": {
+      "field": "inputParams/@p19",
+      "status": "guessed"
+    },
+    "wetGain": {
+      "field": "inputParams/@p20",
+      "status": "guessed"
+    },
+    "pitchMode": {
+      "field": "inputParams/@p21",
+      "status": "guessed"
+    },
+    "blendMode": {
+      "field": "inputParams/@p22",
+      "status": "guessed"
+    },
+    "delayTime": {
+      "field": "inputParams/@p23",
+      "status": "guessed"
+    },
+    "delayChannelInvert": {
+      "field": "inputParams/@p24",
+      "status": "guessed"
+    },
+    "fsDecayTime": {
+      "field": "inputParams/@p25",
+      "status": "guessed"
+    },
+    "revRouting": {
+      "field": "inputParams/@p26",
+      "status": "guessed"
+    }
+  }
+}

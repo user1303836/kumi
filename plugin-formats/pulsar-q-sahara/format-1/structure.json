@@ -1,0 +1,69 @@
+{
+  "plugin": "pulsar-q-sahara",
+  "format": "format-1",
+  "about": "Pulsar Modular XML PARAM id/value records in physical units; omitted values mean zero. Numeric edits require the verified intervals below. Raw XML attributes are preserved read-only and not duplicated here. Individual endpoint reload evidence is in range-verification.json.",
+  "paths": "exact",
+  "files": {
+    "preset": {
+      "extension": ".QSaharaPreset",
+      "layers": [
+        "VC2! + little-endian XML byte length + XML + NUL"
+      ],
+      "constants": {
+        "root": "QSHR"
+      }
+    },
+    "state": {
+      "layers": [
+        "VST3 Comp chunk",
+        "optional VstW compatibility bank",
+        "VC2! + little-endian XML byte length + XML + NUL + preserved opaque JUCE private data"
+      ],
+      "constants": {
+        "xml_magic": "VC2!",
+        "root": "QSHR"
+      }
+    }
+  },
+  "opaque": [
+    "state"
+  ],
+  "fields": {
+    "": {"type":"map","in":["state","preset"],"status":"guessed"},
+    "root": {"type":"text","in":["state","preset"],"status":"guessed"},
+    "parameters": {"type":"map","in":["state","preset"],"status":"guessed"},
+    "parameters/pm_qsahara_hammer_btn": {"type":"float","status":"guessed","default":0.0,"range":[0.0,1.0],"range_status":"verified"},
+    "parameters/pm_qsahara_sub_btn": {"type":"float","status":"guessed","default":0.0,"range":[0.0,1.0],"range_status":"verified"},
+    "parameters/pm_qshara_attack_sldr": {"type":"float","status":"guessed","default":0.0,"range":[-100.0,100.0],"range_status":"verified"},
+    "parameters/pm_qshara_bypass_btn": {"type":"float","status":"guessed","default":0.0,"range":[0.0,1.0],"range_status":"verified","step":1.0},
+    "parameters/pm_qshara_in_sldr": {"type":"float","status":"guessed","default":0.0,"range":[-24.0,24.0],"range_status":"verified"},
+    "parameters/pm_qshara_infodump_btn": {"type":"float","status":"guessed","default":0.0,"range":[0.0,1.0],"range_status":"verified"},
+    "parameters/pm_qshara_mix_sldr": {"type":"float","status":"guessed","default":0.0,"range":[0.0,100.0],"range_status":"verified"},
+    "parameters/pm_qshara_os_btn": {"type":"float","status":"guessed","default":0.0,"range":[0.0,1.0],"range_status":"verified"},
+    "parameters/pm_qshara_ostype_sldr": {"type":"float","status":"guessed","default":0.0,"range":[0.0,2.0],"range_status":"verified"},
+    "parameters/pm_qshara_out_sldr": {"type":"float","status":"guessed","default":0.0,"range":[-24.0,24.0],"range_status":"verified"},
+    "parameters/pm_qshara_phaseflip_btn": {"type":"float","status":"guessed","default":0.0,"range":[0.0,1.0],"range_status":"verified"},
+    "parameters/pm_qshara_ratio_sldr": {"type":"float","status":"guessed","default":2.0,"range":[0.0,6.0],"range_status":"verified"},
+    "parameters/pm_qshara_release_sldr": {"type":"float","status":"guessed","default":0.0,"range":[-100.0,100.0],"range_status":"verified"},
+    "parameters/pm_qshara_sc_btn": {"type":"float","status":"guessed","default":0.0,"range":[0.0,1.0],"range_status":"verified"},
+    "parameters/pm_qshara_schpf_freq_sldr": {"type":"float","status":"guessed","default":0.0,"range":[0.0,9.0],"range_status":"verified"},
+    "state": {"type":"map","in":["state","preset"],"status":"guessed"}
+  },
+  "parameters": {
+    "Hammer SW [VST3 1160903229]": {"field":"parameters/pm_qsahara_hammer_btn","status":"verified"},
+    "Sub SW [VST3 739444035]": {"field":"parameters/pm_qsahara_sub_btn","status":"verified"},
+    "Attack [VST3 1288692491]": {"field":"parameters/pm_qshara_attack_sldr","status":"verified"},
+    "Bypass [VST3 581293592]": {"field":"parameters/pm_qshara_bypass_btn","status":"verified"},
+    "IN [VST3 120845518]": {"field":"parameters/pm_qshara_in_sldr","status":"verified"},
+    "InfoDump [VST3 1571453714]": {"field":"parameters/pm_qshara_infodump_btn","status":"verified"},
+    "Mix [VST3 534957309]": {"field":"parameters/pm_qshara_mix_sldr","status":"verified"},
+    "OS SW [VST3 1427200660]": {"field":"parameters/pm_qshara_os_btn","status":"verified"},
+    "OS Type [VST3 1603820533]": {"field":"parameters/pm_qshara_ostype_sldr","status":"verified"},
+    "Out [VST3 1671203659]": {"field":"parameters/pm_qshara_out_sldr","status":"verified"},
+    "Phase Flip [VST3 1441206674]": {"field":"parameters/pm_qshara_phaseflip_btn","status":"verified"},
+    "Ratio [VST3 1067782126]": {"field":"parameters/pm_qshara_ratio_sldr","status":"verified"},
+    "Release [VST3 636370098]": {"field":"parameters/pm_qshara_release_sldr","status":"verified"},
+    "SC SW [VST3 1526940928]": {"field":"parameters/pm_qshara_sc_btn","status":"verified"},
+    "Sc/HPF [VST3 2013335402]": {"field":"parameters/pm_qshara_schpf_freq_sldr","status":"verified"}
+  }
+}

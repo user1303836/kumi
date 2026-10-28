@@ -31,17 +31,27 @@ impl VstPreset {
         }
         let version = i32::from_le_bytes(bytes[4..8].try_into().unwrap());
         let class_id = std::str::from_utf8(&bytes[8..40]).map_err(|_| fail("a class ID that isn't text"))?.to_string();
+        if !class_id.bytes().all(|b| b.is_ascii_hexdigit()) {
+            return Err(fail("a class ID that isn't 32 hexadecimal digits"));
+        }
         let list = usize::try_from(i64::from_le_bytes(bytes[40..48].try_into().unwrap())).map_err(|_| fail("a negative list offset"))?;
-        if bytes.get(list..list + 4) != Some(b"List".as_slice()) {
+        if list < 48 || bytes.get(list..list + 4) != Some(b"List".as_slice()) {
             return Err(fail("no chunk list where the header points"));
         }
         let count =
             bytes.get(list + 4..list + 8).map(|b| i32::from_le_bytes(b.try_into().unwrap())).ok_or_else(|| fail("a cut-off chunk list"))?;
-        let count =
-            usize::try_from(count).ok().filter(|n| list + 8 + n * 20 <= bytes.len()).ok_or_else(|| fail("more chunks than bytes"))?;
+        let count = usize::try_from(count)
+            .ok()
+            .filter(|n| *n <= 128 && list + 8 + n * 20 <= bytes.len())
+            .ok_or_else(|| fail("invalid chunk count"))?;
         let mut chunks = Vec::with_capacity(count);
+        let mut ids = std::collections::HashSet::new();
+        let mut ranges: Vec<std::ops::Range<usize>> = Vec::new();
         for i in 0..count {
             let entry = &bytes[list + 8 + i * 20..list + 8 + (i + 1) * 20];
+            if !entry[..4].iter().all(u8::is_ascii_graphic) || !ids.insert(&entry[..4]) {
+                return Err(fail("duplicate or invalid chunk IDs"));
+            }
             let id = String::from_utf8_lossy(&entry[..4]).into_owned();
             let offset = i64::from_le_bytes(entry[4..12].try_into().unwrap());
             let size = i64::from_le_bytes(entry[12..20].try_into().unwrap());
@@ -49,9 +59,13 @@ impl VstPreset {
                 .ok()
                 .zip(usize::try_from(size).ok())
                 .and_then(|(offset, size)| Some(offset..offset.checked_add(size)?))
-                .filter(|range| range.end <= list)
+                .filter(|range| range.start >= 48 && range.end <= list)
                 .ok_or_else(|| fail(&format!("chunk {id} runs outside the data")))?;
-            chunks.push((id, bytes[range].to_vec()));
+            if ranges.iter().any(|other| !range.is_empty() && !other.is_empty() && range.start < other.end && other.start < range.end) {
+                return Err(fail("overlapping chunks"));
+            }
+            chunks.push((id, bytes[range.clone()].to_vec()));
+            ranges.push(range);
         }
         Ok(VstPreset { version, class_id, chunks })
     }
@@ -180,5 +194,28 @@ mod tests {
             assert!(if len < 4 { cut == Ok(None) } else { cut.is_err() }, "cut at {len}: {cut:?}");
         }
         assert!(vst2_chunk(&state[..20]).is_err(), "VstW, its three words, CcnK and nothing after");
+    }
+
+    #[test]
+    fn rejects_ambiguous_chunks_before_they_reach_a_host() {
+        let preset = VstPreset {
+            version: 1,
+            class_id: "00112233445566778899AABBCCDDEEFF".into(),
+            chunks: vec![("Comp".into(), vec![1, 2]), ("Cont".into(), vec![3, 4])],
+        };
+        let bytes = preset.write();
+        let list = u64::from_le_bytes(bytes[40..48].try_into().unwrap()) as usize;
+        let mut invalid = bytes.clone();
+        invalid[list + 28..list + 32].copy_from_slice(b"Comp");
+        assert!(VstPreset::read(&invalid).is_err());
+        let mut invalid = bytes.clone();
+        invalid[list + 32..list + 40].copy_from_slice(&49u64.to_le_bytes());
+        assert!(VstPreset::read(&invalid).is_err());
+        let mut invalid = bytes.clone();
+        invalid[list + 12..list + 20].copy_from_slice(&0u64.to_le_bytes());
+        assert!(VstPreset::read(&invalid).is_err());
+        let mut invalid = bytes;
+        invalid[8] = b'?';
+        assert!(VstPreset::read(&invalid).is_err());
     }
 }

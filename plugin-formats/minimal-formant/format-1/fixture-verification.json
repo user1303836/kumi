@@ -1,0 +1,9 @@
+{
+  "plugin": "minimal-formant",
+  "version": "1.2.0",
+  "fixtureSha256": "54257059140ac7aeabba576a49a2aa21be0f70d170ff79d176ef3fa3c35dfc0b",
+  "sessionId": "all zeros",
+  "runtime": "Sanitized component restored in a fresh VST3 instance. Product root, source version and every mapped parameter matched after reload within native floating-point serialization precision.",
+  "parametersChecked": 3,
+  "maxRelativeErrorWithUnitFloor": 0.0
+}

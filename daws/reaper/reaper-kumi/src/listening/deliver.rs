@@ -233,6 +233,9 @@ pub fn spec(reaper: &Reaper, reads: &Reads, proj: Project, params: &Value) -> Re
     }
     let folder = match params.get("folder").and_then(Value::as_str) {
         Some(folder) => {
+            if folder.chars().any(char::is_control) {
+                return Err(bad("folder must contain no control characters"));
+            }
             let folder = PathBuf::from(folder);
             if !folder.is_absolute() {
                 return Err(bad("folder: a whole path"));
@@ -241,6 +244,9 @@ pub fn spec(reaper: &Reaper, reads: &Reads, proj: Project, params: &Value) -> Re
         }
         None => render_folder(reaper, proj).ok_or_else(|| failed("REAPER gives no folder for this project's renders: give folder"))?,
     };
+    if folder.to_string_lossy().chars().any(char::is_control) {
+        return Err(bad("folder must contain no control characters"));
+    }
     let expect = match params.get("expect") {
         None | Some(Value::Null) => None,
         Some(Value::Array(list)) => Some(list.iter().filter_map(Value::as_str).map(str::to_owned).collect()),
@@ -439,15 +445,22 @@ fn set(reaper: &Reaper, reads: &Reads, proj: Project, spec: &Spec, rows: Option<
         number("RENDER_TAILMS", spec.tail_ms as f64);
     }
     number("RENDER_ADDTOPROJ", 0.);
-    reaper.set_project_text(proj, "RENDER_FILE", &spec.folder.to_string_lossy());
-    reaper.set_project_text(proj, "RENDER_PATTERN", &spec.pattern);
+    let text = |key: &str, value: &str| {
+        if reaper.set_project_text(proj, key, value) && reaper.project_text_long(proj, key).as_deref() == Some(value) {
+            Ok(())
+        } else {
+            Err(failed(format!("REAPER refused {key}; nothing was rendered")))
+        }
+    };
+    text("RENDER_FILE", &spec.folder.to_string_lossy())?;
+    text("RENDER_PATTERN", &spec.pattern)?;
     if let Some(format) = &spec.format {
-        reaper.set_project_text(proj, "RENDER_FORMAT", format);
+        text("RENDER_FORMAT", format)?;
     }
     if !spec.dialog {
         number("RENDER_DITHER", 0.);
         number("RENDER_NORMALIZE", render::NO_POSTPROCESSING);
-        reaper.set_project_text(proj, "RENDER_FORMAT2", "");
+        text("RENDER_FORMAT2", "")?;
     }
     if let (Some(regions), Some(rows)) = (&spec.regions, rows) {
         rows.pick(regions, spec.source);

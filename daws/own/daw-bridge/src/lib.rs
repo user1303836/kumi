@@ -95,6 +95,7 @@ pub mod loopback;
 pub mod owner;
 pub mod paths;
 pub mod probe;
+pub mod vst3;
 pub mod wire;
 
 pub use daw::Daw;

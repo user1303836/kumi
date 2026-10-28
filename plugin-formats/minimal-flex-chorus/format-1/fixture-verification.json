@@ -1,0 +1,9 @@
+{
+  "plugin": "minimal-flex-chorus",
+  "version": "1.4.0",
+  "fixtureSha256": "a5805be9fe22acb01f1d2b0e6dabc71fa9a955ba1042c382f5b33b6fb518b07e",
+  "sessionId": "all zeros",
+  "runtime": "Sanitized component restored in a fresh VST3 instance. Product root, source version and every mapped parameter matched after reload within native floating-point serialization precision.",
+  "parametersChecked": 11,
+  "maxRelativeErrorWithUnitFloor": 1.430511474609375e-06
+}

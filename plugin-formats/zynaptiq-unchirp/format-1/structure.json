@@ -1,0 +1,470 @@
+{
+  "plugin": "zynaptiq-unchirp",
+  "format": "format-1",
+  "about": "Zynaptiq Preset XML version 3 or 4. inputParams count and pN attributes hold scalar values. VST3 component state (verified on PUNCH 1 and UNMIX DRUMS) uses a u32 little-endian XML length including a terminating NUL, then the XML and NUL.",
+  "paths": "exact",
+  "files": {
+    "preset": {
+      "extension": ".preset",
+      "layers": [
+        "UTF-8 XML Preset; inputParams attributes p0 through p<count-1>; preserve all other elements"
+      ],
+      "constants": {}
+    },
+    "state": {
+      "layers": [
+        "u32 LE byte count including NUL; XML Preset; NUL"
+      ],
+      "constants": {}
+    }
+  },
+  "survey": {
+    "files": 102,
+    "parameterCounts": [
+      25
+    ],
+    "presetVersions": [
+      "4"
+    ],
+    "source": "Installed native preset files and shipped parameter-name metadata; no factory preset bodies copied.",
+    "verification": "Native documents inspected; installed-binary version and runtime acceptance remain unverified.",
+    "parameterLinks": "Guessed links associate names and indices from installed metadata; physical-unit mappings remain unverified."
+  },
+  "fields": {
+    "@progName": {
+      "type": "text",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "status": "guessed"
+    },
+    "inputParams/@p0": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.0
+      ],
+      "status": "guessed",
+      "about": "bypass"
+    },
+    "inputParams/@p1": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.2890625,
+        1.0
+      ],
+      "status": "guessed",
+      "about": "DryWetMix"
+    },
+    "inputParams/@p2": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "about": "IoDifference"
+    },
+    "inputParams/@p3": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        -3.6226415094339615,
+        0.0
+      ],
+      "status": "guessed",
+      "about": "OutputGain"
+    },
+    "inputParams/@p4": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "about": "SideOnly"
+    },
+    "inputParams/@p5": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "about": "HdMode"
+    },
+    "inputParams/@p6": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "about": "Limit"
+    },
+    "inputParams/@p7": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        1.0,
+        4.0
+      ],
+      "status": "guessed",
+      "about": "CurveSelector"
+    },
+    "inputParams/@p8": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "about": "MusicalNoiseReduction"
+    },
+    "inputParams/@p9": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "about": "MusicalNoiseBandwidth"
+    },
+    "inputParams/@p10": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "about": "DechirpAmount"
+    },
+    "inputParams/@p11": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "about": "DechirpWindowLength"
+    },
+    "inputParams/@p12": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "about": "TransientSolo"
+    },
+    "inputParams/@p13": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "about": "TransientThreshold"
+    },
+    "inputParams/@p14": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "about": "OriginalTransientLevel"
+    },
+    "inputParams/@p15": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.6981132075471698
+      ],
+      "status": "guessed",
+      "about": "SyntheticTransientLevel"
+    },
+    "inputParams/@p16": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "about": "Warmth"
+    },
+    "inputParams/@p17": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "about": "SyncFrames"
+    },
+    "inputParams/@p18": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        0.7265625
+      ],
+      "status": "guessed",
+      "about": "TrebleBoostAmount"
+    },
+    "inputParams/@p19": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "about": "TrebleEnhanceExcite"
+    },
+    "inputParams/@p20": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "about": "MnRedBiasOnOff"
+    },
+    "inputParams/@p21": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "about": "DechirpAmtBiasOnOff"
+    },
+    "inputParams/@p22": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "about": "TransThrshBiasOnOff"
+    },
+    "inputParams/@p23": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "about": "SynthTransBiasOnOff"
+    },
+    "inputParams/@p24": {
+      "type": "float",
+      "in": [
+        "preset",
+        "state"
+      ],
+      "seen": [
+        0.0,
+        1.0
+      ],
+      "status": "guessed",
+      "about": "OrigTransBiasOnOff"
+    }
+  },
+  "parameters": {
+    "bypass": {
+      "field": "inputParams/@p0",
+      "status": "guessed"
+    },
+    "DryWetMix": {
+      "field": "inputParams/@p1",
+      "status": "guessed"
+    },
+    "IoDifference": {
+      "field": "inputParams/@p2",
+      "status": "guessed"
+    },
+    "OutputGain": {
+      "field": "inputParams/@p3",
+      "status": "guessed"
+    },
+    "SideOnly": {
+      "field": "inputParams/@p4",
+      "status": "guessed"
+    },
+    "HdMode": {
+      "field": "inputParams/@p5",
+      "status": "guessed"
+    },
+    "Limit": {
+      "field": "inputParams/@p6",
+      "status": "guessed"
+    },
+    "CurveSelector": {
+      "field": "inputParams/@p7",
+      "status": "guessed"
+    },
+    "MusicalNoiseReduction": {
+      "field": "inputParams/@p8",
+      "status": "guessed"
+    },
+    "MusicalNoiseBandwidth": {
+      "field": "inputParams/@p9",
+      "status": "guessed"
+    },
+    "DechirpAmount": {
+      "field": "inputParams/@p10",
+      "status": "guessed"
+    },
+    "DechirpWindowLength": {
+      "field": "inputParams/@p11",
+      "status": "guessed"
+    },
+    "TransientSolo": {
+      "field": "inputParams/@p12",
+      "status": "guessed"
+    },
+    "TransientThreshold": {
+      "field": "inputParams/@p13",
+      "status": "guessed"
+    },
+    "OriginalTransientLevel": {
+      "field": "inputParams/@p14",
+      "status": "guessed"
+    },
+    "SyntheticTransientLevel": {
+      "field": "inputParams/@p15",
+      "status": "guessed"
+    },
+    "Warmth": {
+      "field": "inputParams/@p16",
+      "status": "guessed"
+    },
+    "SyncFrames": {
+      "field": "inputParams/@p17",
+      "status": "guessed"
+    },
+    "TrebleBoostAmount": {
+      "field": "inputParams/@p18",
+      "status": "guessed"
+    },
+    "TrebleEnhanceExcite": {
+      "field": "inputParams/@p19",
+      "status": "guessed"
+    },
+    "MnRedBiasOnOff": {
+      "field": "inputParams/@p20",
+      "status": "guessed"
+    },
+    "DechirpAmtBiasOnOff": {
+      "field": "inputParams/@p21",
+      "status": "guessed"
+    },
+    "TransThrshBiasOnOff": {
+      "field": "inputParams/@p22",
+      "status": "guessed"
+    },
+    "SynthTransBiasOnOff": {
+      "field": "inputParams/@p23",
+      "status": "guessed"
+    },
+    "OrigTransBiasOnOff": {
+      "field": "inputParams/@p24",
+      "status": "guessed"
+    }
+  }
+}
