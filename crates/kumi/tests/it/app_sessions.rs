@@ -430,8 +430,8 @@ case!(daw_in_a_reaper_session_offers_only_the_daws_on_this_computer, async {
     assert!(offered.contains("[daw] Kumi works with REAPER, the only DAW it works with on this computer."), "{offered}");
 });
 
-/// `kumi` alone, as a producer runs it: Kumi works with the DAW open (Renoise), and when the producer quits it and opens
-/// REAPER, Kumi follows: it says so, and opens again with no DAW asked for, so the start chooses REAPER, the one open.
+// `kumi` alone, as a producer runs it: Kumi works with the DAW open (Renoise), and when the producer quits it and opens
+// REAPER, Kumi follows: it says so, and opens again with no DAW asked for, so the start chooses REAPER, the one open.
 case!(kumi_alone_follows_the_producer_to_the_daw_they_open, async {
     let script = RenoiseScript::new();
     let lab = AppLab::new(DawId::Renoise, Daw::Renoise, move |secret| script.config(secret, "/lab/Renoise")).await;

@@ -156,14 +156,11 @@ pub fn to_follow(current: DawId, env: &Env, running: &dyn Fn(&dyn DawProvider) -
 #[derive(Clone)]
 pub struct RunningDaws(pub Rc<dyn Fn() -> Vec<DawId>>);
 
-/// What Kumi says while no DAW is open and the producer works in several here: which to open, rather than how to make
-/// one answer. None with fewer than two (each DAW's own words say it).
-pub fn open_one_words(env: &Env, here: &dyn Fn(&dyn DawProvider) -> bool) -> Option<String> {
-    let names: Vec<&str> = providers()
-        .into_iter()
-        .filter(|provider| here(*provider) || provider.bridge_installed(env))
-        .map(|provider| provider.profile().words.app)
-        .collect();
+/// What Kumi says while no DAW is open and the producer works with it in several (their bridges are in): which to open,
+/// rather than how to make one answer. None with fewer than two (each DAW's own words say it).
+pub fn open_one_words(env: &Env) -> Option<String> {
+    let names: Vec<&str> =
+        providers().into_iter().filter(|provider| provider.bridge_installed(env)).map(|provider| provider.profile().words.app).collect();
     let (last, rest) = names.split_last()?;
     if rest.is_empty() {
         return None;

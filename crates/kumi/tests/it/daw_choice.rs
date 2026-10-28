@@ -317,20 +317,39 @@ fn kumi_follows_to_the_daw_opened_as_a_start_would_choose_it() {
     assert_eq!(follows(DawId::Reaper, &[DawId::Renoise]), Some(DawId::Renoise));
 }
 
-/// With no DAW open, a producer who works in several hears which to open, not how to make one answer; with one, its own
-/// words say it.
+/// Kumi's bridge in REAPER or Renoise, as its receipt says.
+fn own_bridge_in(env: &Env, daw: daw_bridge::Daw) {
+    let paths = daw_bridge::paths::BridgePaths::new(std::path::Path::new(&env["KUMI_HOME"]), daw);
+    std::fs::create_dir_all(&paths.root).unwrap();
+    let receipt = daw_bridge::lifecycle::Receipt {
+        schema: daw_bridge::lifecycle::RECEIPT_SCHEMA.into(),
+        daw: daw.id().into(),
+        status: "installed".into(),
+        target: paths.root.join("bridge").to_string_lossy().into_owned(),
+        reference: paths.root.join("bridge-reference.json").to_string_lossy().into_owned(),
+        generation: Some("g1".into()),
+        version: Some("1.0.0".into()),
+        sha256: None,
+        previous: vec![],
+        copies: vec![],
+        updated_ms: 0,
+        history: vec![],
+    };
+    std::fs::write(paths.receipt(), serde_json::to_string(&receipt).unwrap()).unwrap();
+}
+
+/// With no DAW open, a producer who works with Kumi in several DAWs hears which to open, not how to make one answer;
+/// with Kumi in one, its own words say it (another DAW only being installed changes nothing).
 #[test]
 fn with_no_daw_open_kumi_says_to_open_one_of_theirs() {
     use kumi::daw::open_one_words;
-    use kumi_types::daw::DawId;
     let (_dir, env) = live_and_renoise_home();
+    assert_eq!(open_one_words(&env), None, "Kumi in Live alone, Renoise here");
+    own_bridge_in(&env, daw_bridge::Daw::Renoise);
+    assert_eq!(open_one_words(&env).as_deref(), Some("No DAW is open yet: open Live or Renoise, and Kumi connects to the one you open."));
+    own_bridge_in(&env, daw_bridge::Daw::Reaper);
     assert_eq!(
-        open_one_words(&env, &open(&[DawId::Renoise])).as_deref(),
-        Some("No DAW is open yet: open Live or Renoise, and Kumi connects to the one you open.")
-    );
-    assert_eq!(
-        open_one_words(&env, &open(&[DawId::Reaper, DawId::Renoise])).as_deref(),
+        open_one_words(&env).as_deref(),
         Some("No DAW is open yet: open Live, REAPER or Renoise, and Kumi connects to the one you open.")
     );
-    assert_eq!(open_one_words(&env, &open(&[])), None, "Live alone");
 }
