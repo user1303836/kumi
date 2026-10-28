@@ -48,7 +48,10 @@ synthetic fixtures; they never require an installed plug-in, a running DAW or a 
   renaming. Their unverified controls cannot be edited. These outputs explicitly say that plug-in reload has not been verified; they are not passed
   to a VST3 loader as if they were component state. No factory templates are bundled.
 - In Live, `plugin prepare-preset` places the file in the User Library, then `load_device` loads the browser
-  item with its existing HISTORY and undo. Live's API does not replace arbitrary state in an existing
+  item with its existing HISTORY and undo. Pass the returned item ID unchanged: Live keeps `.vstpreset`
+  in these browser names. The bridge recognizes a loadable VST3 preset even when Live reports
+  `is_device = false`; other loadable files, such as clips and audio, remain outside this device loader.
+  Live's API does not replace arbitrary state in an existing
   instance: use exposed parameters or load a new instance for comparison.
   The saved User Library preset is retained when undo removes its loaded device.
 - In REAPER, `fx_preset` takes a `.vstpreset` path. In Renoise, `device_preset_data` loads an effect and

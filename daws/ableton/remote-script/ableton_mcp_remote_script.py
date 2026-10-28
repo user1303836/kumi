@@ -11654,6 +11654,14 @@ class LiveObjectMapper:
         authority = [path, uri if isinstance(uri, str) and uri else None]
         return f"browser-path:{hashlib.sha256(self._bounded_canonical(authority).encode()).hexdigest()}"
 
+    def _browser_is_device(self, item: Any, category: str, name: str) -> bool:
+        explicit = self._read_attr(item, "is_device")
+        loadable = self._read_attr(item, "is_loadable") is True
+        # Live 12 reports a VST3 preset as loadable but not as a device. Loading it still creates the
+        # plug-in. Keep generic loadable files (audio, clips, packs) outside the device-loading path.
+        vst3_preset = name.lower().endswith(".vstpreset") and self._read_attr(item, "is_folder") is not True
+        return explicit is True or (loadable and (vst3_preset or (explicit is None and category in self._DEVICE_BROWSER_CATEGORIES)))
+
     def _browser_category(self, browser: Any, name: str) -> Any:
         node = self._read_attr(browser, name)
         if name != "modulators" or (node is not None and self._items(self._read_attr(node, "children") or [])):
@@ -11717,8 +11725,7 @@ class LiveObjectMapper:
                 name = str(self._read_attr(child, "name") or "")
                 child_path = f"{path}/{name}"
                 if len(name) > 256 or len(child_path) > 256: continue
-                explicit_device = self._read_attr(child, "is_device"); is_loadable = self._read_attr(child, "is_loadable") is True
-                is_device = explicit_device is True or (explicit_device is None and category_name in self._DEVICE_BROWSER_CATEGORIES and is_loadable)
+                is_device = self._browser_is_device(child, category_name, name)
                 grandchildren = self._items(self._read_attr(child, "children") or [])
                 if not grandchildren or is_device:
                     if not needle or needle in name.lower() or needle in child_path.lower():
@@ -11771,7 +11778,7 @@ class LiveObjectMapper:
         elif repeat and len(again := lookup(repeat.group(1))) >= int(repeat.group(2)):
             item = again[int(repeat.group(2)) - 1]; path = repeat.group(1)
         else: raise ValueError("browser item identity is missing")
-        name = str(self._read_attr(item, "name") or ""); explicit_device = self._read_attr(item, "is_device"); is_device = explicit_device is True or (explicit_device is None and item_category in self._DEVICE_BROWSER_CATEGORIES and self._read_attr(item, "is_loadable") is True)
+        name = str(self._read_attr(item, "name") or ""); is_device = self._browser_is_device(item, item_category, name)
         return item, {"id": item_id, "objectIdentity": self._browser_item_identity(item_id, item), "name": name, "category": item_category, "path": path, "isDevice": is_device}
 
     def _browser_inspect(self, args: dict[str, Any]) -> dict[str, Any]:

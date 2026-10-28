@@ -117,7 +117,8 @@ pub fn prepare(input: &Path, library: &Path, name: &str) -> Result<PreparedPrese
     }
     Ok(PreparedPreset {
         file,
-        item: format!("user_library/Kumi/{folder}/{label}"),
+        // Live keeps the extension in a VST3 preset's Browser name (unlike its own device presets).
+        item: format!("user_library/Kumi/{folder}/{label}.vstpreset"),
         name: label,
         plugin: product.name.clone(),
         kind: format.info.kind.clone(),
@@ -136,6 +137,7 @@ mod tests {
         std::fs::write(&source, bytes).unwrap();
         let made = prepare(&source, temp.path(), "Kumi synth").unwrap();
         assert!(made.item.starts_with("user_library/Kumi/Instruments/"));
+        assert_eq!(made.item, format!("user_library/Kumi/Instruments/{}.vstpreset", made.name));
         assert_eq!(std::fs::read(&made.file).unwrap(), bytes);
         assert_eq!(prepare(&source, temp.path(), "Kumi synth").unwrap().file, made.file);
         std::fs::write(&made.file, b"someone else's preset").unwrap();
