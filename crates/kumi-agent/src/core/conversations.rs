@@ -1,13 +1,17 @@
 //! Each Set's kept conversations, on disk: `<place>/conversations/<id>.json`, with `<place>/current` naming the one
 //! the place carries on with. Beside a conversation, `<id>.meta` keeps the producer's name for it, its pin and what it
-//! was copied from, and `<id>.lock` says which Kumi has it open; an earlier Kumi reading the folder takes neither for a
-//! conversation. `conversation-index.json` lists every place's conversations, to find one by its id or name: it's
-//! read again from the files wherever they changed, and made again from them when it's gone.
+//! was copied from, `<id>.lock` says which Kumi has it open, and `<id>.jsonl` is its log (`session_log`); an earlier
+//! Kumi reading the folder takes none of them for a conversation. `conversation-index.json` lists every place's
+//! conversations, to find one by its id or name: it's read again from the files wherever they changed, and made again
+//! from them when it's gone.
 
 use crate::{
-    core::contracts::{
-        Claim, ConversationMatch, ConversationStore, ConversationSummary, CurrentConversation, FoundExchange, KernelCheckpoint,
-        SavedConversation, TranscriptRole,
+    core::{
+        contracts::{
+            Claim, ConversationMatch, ConversationStore, ConversationSummary, CurrentConversation, FoundExchange, KernelCheckpoint,
+            SavedConversation, TranscriptRole,
+        },
+        session_log::{log_name, read_log_file, ReadLog},
     },
     kernel::budget::{json_bytes, transcript_of},
 };
@@ -119,6 +123,10 @@ struct PlaceFile {
     name: String,
 }
 static CONVERSATION: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[0-9a-z]{6,24}$").unwrap());
+/// Whether a conversation can be kept under `id`.
+pub(crate) fn is_conversation_id(id: &str) -> bool {
+    CONVERSATION.is_match(id)
+}
 /// The Set's name in a baseline file: its first key `name`, which comes before the pages.
 static BASELINE_NAME: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"[{,]"name":("(?:[^"\\]|\\.)*")"#).unwrap());
 /// The most kept conversations a search reads, newest first.
@@ -519,22 +527,32 @@ impl FileConversationStore {
                 }
                 remove(kept.join(&name)).await?;
                 remove(kept.join(format!("{id}.meta"))).await?;
+                // A log that can't go now goes with a later look, as one left behind.
+                let _ = remove(kept.join(log_name(id))).await;
                 // Only a place to lock: one that can't go (a folder there, say) stays.
                 let _ = tokio::fs::remove_file(kept.join(format!("{id}.lock"))).await;
             }
         }
-        // A name or pin whose conversation went goes too: an earlier Kumi let it go, or moved it to its Set's place once
-        // the Set was saved (then the name and pin go after it).
+        // A name, pin or log whose conversation went goes too: an earlier Kumi let it go, or moved it to its Set's place
+        // once the Set was saved (then they go after it). A log a Kumi still has open stays: it's written beside its
+        // conversation, which follows it there.
         if let Ok(mut dir) = tokio::fs::read_dir(&kept).await {
             while let Ok(Some(entry)) = dir.next_entry().await {
                 let name = entry.file_name().to_string_lossy().into_owned();
-                let Some(id) = name.strip_suffix(".meta").filter(|id| CONVERSATION.is_match(id)) else { continue };
+                let beside = name.strip_suffix(".meta").map(|id| (id, false)).or_else(|| name.strip_suffix(".jsonl").map(|id| (id, true)));
+                let Some((id, log)) = beside.filter(|(id, _)| CONVERSATION.is_match(id)) else { continue };
                 if kept.join(format!("{id}.json")).exists() || now - modified_ms(&entry.path()).await < ORPHAN_MS {
+                    continue;
+                }
+                if log && (self.held.borrow().contains_key(&(place.to_owned(), id.to_owned())) || self.open_elsewhere(place, id)) {
                     continue;
                 }
                 match self.kept_elsewhere(place, id).await {
                     Some(there) if !there.join(&name).exists() => {
                         let _ = tokio::fs::rename(entry.path(), there.join(&name)).await;
+                    }
+                    _ if log => {
+                        let _ = remove(entry.path()).await;
                     }
                     _ => remove(entry.path()).await?,
                 }
@@ -614,6 +632,13 @@ impl FileConversationStore {
     #[doc(hidden)]
     pub fn without_file_locks(&self) {
         self.file_locks.set(false);
+    }
+    /// A kept conversation's log, as far as it reads; None without one this Kumi reads.
+    pub async fn log(&self, place: &str, id: &str) -> Option<ReadLog> {
+        if !CONVERSATION.is_match(id) {
+            return None;
+        }
+        read_log_file(&self.kept(place).ok()?.join(log_name(id))).await
     }
     fn place_of(&self, key: &str) -> Option<(String, String)> {
         key.split_once('/').map(|(place, id)| (place.to_owned(), id.to_owned()))
@@ -1161,6 +1186,7 @@ impl ConversationStore for FileConversationStore {
         let kept = self.kept(place)?;
         remove(&file).await?;
         remove(kept.join(format!("{id}.meta"))).await?;
+        let _ = remove(kept.join(log_name(id))).await;
         if !self.held.borrow().contains_key(&(place.to_owned(), id.to_owned())) {
             let _ = tokio::fs::remove_file(kept.join(format!("{id}.lock"))).await;
         }

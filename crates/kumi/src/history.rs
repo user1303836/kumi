@@ -17,7 +17,6 @@ static KEYS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
         r"(?<![A-Za-z0-9_])gh[pousr]_[A-Za-z0-9]{20,}",
         r"(?<![A-Za-z0-9_])xox[abprs]-[A-Za-z0-9-]{10,}",
         r"(?<![A-Za-z0-9_])eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}",
-        r"(?<![A-Za-z0-9_])(?=[A-Za-z0-9_-]*[0-9])(?=[A-Za-z0-9_-]*[A-Za-z])[A-Za-z0-9_-]{32,}",
     ]
     .into_iter()
     .map(|p| Regex::new(p).unwrap())
@@ -26,15 +25,70 @@ static KEYS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
 static LABELLED: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)(?<![A-Za-z0-9_])(api[_-]?key|token|secret|password)([\s\u{feff}]*[:=][\s\u{feff}]*)[^\s\u{feff}]+").unwrap()
 });
+/// The characters of a key without a known shape: letters and digits, and in what the producer types `_` and `-` too.
+fn joined(c: char) -> bool {
+    c.is_ascii_alphanumeric() || c == '_' || c == '-'
+}
+/// `text` with each run of `key` characters 32 or more long that holds a digit and a letter taken out whole: a key
+/// without a known shape. In one pass, as whole runs: a run's later starts see only part of it, so none of them is one
+/// where the run isn't.
+fn long_runs_out(text: &str, key: fn(char) -> bool) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut start = None;
+    let ended = |out: &mut String, run: &str| {
+        let shaped = run.len() >= 32 && run.bytes().any(|b| b.is_ascii_digit()) && run.bytes().any(|b| b.is_ascii_alphabetic());
+        out.push_str(if shaped { "[redacted]" } else { run });
+    };
+    for (at, c) in text.char_indices() {
+        match (key(c), start) {
+            (true, None) => start = Some(at),
+            (true, Some(_)) => {}
+            (false, Some(from)) => {
+                ended(&mut out, &text[from..at]);
+                start = None;
+                out.push(c);
+            }
+            (false, None) => out.push(c),
+        }
+    }
+    if let Some(from) = start {
+        ended(&mut out, &text[from..]);
+    }
+    out
+}
+/// `text` without anything shaped like a key, or set after a word that names one ("token: …"); a key without a known
+/// shape is a long run of `key` characters.
+fn without_keys(mut kept: String, key: fn(char) -> bool) -> String {
+    for pattern in KEYS.iter() {
+        kept = pattern.replace_all(&kept, "[redacted]").into_owned();
+    }
+    LABELLED.replace_all(&long_runs_out(&kept, key), "${1}${2}[redacted]").into_owned()
+}
 pub fn history_text(text: &str, secrets: &[String]) -> String {
     string::head(&redacted(text, secrets), MAX_ENTRY)
 }
 fn redacted(text: &str, secrets: &[String]) -> String {
-    let mut kept = sanitize_text(text, secrets);
-    for pattern in KEYS.iter() {
-        kept = pattern.replace_all(&kept, "[redacted]").into_owned();
+    string::trim(&without_keys(sanitize_text(text, secrets), joined)).to_string()
+}
+/// What a conversation's log keeps of its words: the input history's redaction, `secrets` (the keys this computer knows)
+/// then anything shaped like a key, with the words otherwise as they were (the screen cleans them as it draws them). A
+/// known key under 8 characters (a local model server's "none") is a word, not a secret, and a key without a known shape
+/// is a long run of letters and digits alone: names joined with `_` or `-` (a sample's, a preset's, a bounce's) are what
+/// the conversation is about.
+pub fn log_redactor(secrets: Vec<String>) -> impl Fn(&str) -> String {
+    let mut secrets: Vec<String> = secrets.into_iter().filter(|secret| string::utf16_len(secret) >= 8).collect();
+    // A longer key that holds a shorter one goes first, whole.
+    secrets.sort_by_key(|secret| std::cmp::Reverse(string::utf16_len(secret)));
+    secrets.dedup();
+    move |text| {
+        let mut kept = text.to_owned();
+        for secret in &secrets {
+            if kept.contains(secret.as_str()) {
+                kept = kept.replace(secret.as_str(), "[redacted]");
+            }
+        }
+        without_keys(kept, |c| c.is_ascii_alphanumeric())
     }
-    string::trim(&LABELLED.replace_all(&kept, "${1}${2}[redacted]")).to_string()
 }
 pub struct InputHistory {
     entries: Vec<String>,

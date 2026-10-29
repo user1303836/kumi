@@ -1046,9 +1046,10 @@ log, it stays on your computer and goes out only in a `kumi report`.
 ## Conversations and catching up
 
 Kumi keeps each Set's conversations in `~/.kumi/projects`, saved after every
-answer, each up to about 256 KB (the oldest exchanges drop off). Opening Kumi on
-a saved Set carries on its latest conversation, with its last 100 changes in
-HISTORY (without undo). `/new` starts afresh and keeps the last one. An unsaved
+answer, each up to about 256 KB (the oldest exchanges drop off). Beside each one,
+Kumi also keeps a log of what happened in it, up to 32 MB, with keys taken out of
+its words. Opening Kumi on a saved Set carries on its latest conversation, with
+its last 100 changes in HISTORY (without undo). `/new` starts afresh and keeps the last one. An unsaved
 Set's conversation moves to the Set's own folder when you first save it.
 
 - **Going back:** `/resume` (or `/conversations`) lists this Set's
