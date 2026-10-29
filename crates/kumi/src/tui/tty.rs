@@ -204,6 +204,16 @@ impl Tty {
         }
     }
 
+    /// Reads `bytes` as if they had just come in: what was read before the screen was Kumi's (while the terminal was
+    /// asked what it is), so keys typed meanwhile aren't lost and the answers among them are read as answers.
+    pub fn read_again(&self, bytes: &[u8]) {
+        if bytes.is_empty() || !self.is_active() {
+            return;
+        }
+        let text = self.inner.decoder.borrow_mut().write(bytes);
+        self.inner.parser.push(&text);
+    }
+
     /// Lends the terminal to a program Kumi runs in it (the producer's editor) until `run` is done. The screen and every
     /// mode Kumi set go back as they were, raw input too, and Kumi's reader stops reading, so the program gets every
     /// key. Nothing Kumi draws is written meanwhile; once it's taken back, the caller draws the whole screen again. A

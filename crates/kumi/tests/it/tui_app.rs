@@ -562,6 +562,16 @@ case!(dragged_files_go_with_the_next_message, async {
     h.has("/no/such/file.png");
     h.close().await;
 });
+case!(a_late_answer_from_the_terminal_is_never_typed_and_its_bel_is_no_ctrl_g, async {
+    let h = Harness::new(120, 36);
+    h.start().await;
+    h.connect();
+    h.type_text("\x1b]11;rgb:1e1e/1e1e/1e1e\x07\x1b[?62;22c").await;
+    h.type_text("draft\r").await;
+    assert!(h.calls().contains(&"submit:draft".into()), "{:?}", h.calls());
+    assert!(!has(&h.screen(), "Set VISUAL or EDITOR"));
+    h.close().await;
+});
 case!(a_paste_loses_what_doesnt_show_on_screen, async {
     let h = Harness::new(120, 36);
     h.start().await;

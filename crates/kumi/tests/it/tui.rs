@@ -5,11 +5,13 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use kumi::input::ByteListener;
-use kumi::tui::keys::{InputEvent, InputParser, Modifiers, MouseAction, MouseButton, WheelDirection};
+use kumi::tui::keys::{InputEvent, InputParser, Modifiers, MouseAction, MouseButton, Reply, WheelDirection};
 use kumi::tui::render::{Cursor, Renderer};
 use kumi::tui::scheduler::FrameScheduler;
 use kumi::tui::screen::{Rect, Screen};
-use kumi::tui::style::{detect_color_depth, hex, link_id, palette, sgr, style_key, to16, to256, ColorDepth, Rgb, Style, StyleTable};
+use kumi::tui::style::{
+    answered_color_depth, detect_color_depth, hex, link_id, palette, sgr, style_key, to16, to256, ColorDepth, Rgb, Style, StyleTable,
+};
 use kumi::tui::tty::{emergency_restorers, Tty, TtyInput, TtyOptions, TtyOutput, RESTORE};
 use kumi::tui::width::{cell_width, text_width, truncate};
 use kumi::tui::wrap::{wrap, Span};
@@ -701,10 +703,14 @@ async fn escape_deadline_starts_at_input_even_when_its_task_is_not_polled() {
 #[tokio::test(start_paused = true)]
 async fn a_terminals_reply_is_never_typed_and_alt_keys_still_are() {
     local(async {
-        // Kitty's graphics reply and a DCS report, whole or split across reads: nothing but what was typed after.
+        // Kitty's graphics reply and a DCS report, whole or split across reads: nothing typed but what was typed after.
+        // XTVERSION's report is read as the answer it is (`tui::probe` asks for it).
         assert_eq!(parse(&["\u{1b}_Gi=7;OK\u{1b}\\a"], 5.0).await, vec![text("a")]);
         assert_eq!(parse(&["\u{1b}_Gi=7;EN", "OENT:gone\u{1b}\\b"], 5.0).await, vec![text("b")]);
-        assert_eq!(parse(&["\u{1b}P>|kitty(0.40)\u{1b}\\c"], 5.0).await, vec![text("c")]);
+        assert_eq!(
+            parse(&["\u{1b}P>|kitty(0.40)\u{1b}\\c"], 5.0).await,
+            vec![InputEvent::Reply(Reply::Version("kitty(0.40)".into())), text("c")]
+        );
         assert_eq!(parse(&["\u{1b}P1+r544e\u{7}d"], 5.0).await, vec![text("d")]);
         // Alt and a letter are keys as before, Alt-_ then G typed fast too.
         assert_eq!(parse(&["\u{1b}_"], 5.0).await, vec![key("_", ALT)]);
@@ -963,6 +969,178 @@ async fn the_terminal_is_lent_to_a_program_and_taken_back_whole() {
     let taken = written.strip_prefix(&given).unwrap();
     assert!(taken.contains("\u{1b}[?1007l") && !taken.contains("\u{1b}[?1006h"), "{taken:?}");
     tty.restore(false);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_terminals_answers_are_read_as_answers_and_never_typed() {
+    local(async {
+        let answers = concat!(
+            "\u{1b}P>|ghostty 1.1.3\u{1b}\\",
+            "\u{1b}[?2026;2$y",
+            "\u{1b}[?1u",
+            "\u{1b}]10;rgb:dcdc/dcdc/dcdc\u{1b}\\",
+            "\u{1b}]11;rgb:1e/1e/1e\u{7}",
+            "\u{1b}[?62;22c",
+        );
+        assert_eq!(
+            parse(&[answers], 5.0).await,
+            [
+                Reply::Version("ghostty 1.1.3".into()),
+                Reply::Mode { mode: 2026, value: 2 },
+                Reply::KittyKeys(1),
+                Reply::Color { which: 10, rgb: Some([220, 220, 220]) },
+                Reply::Color { which: 11, rgb: Some([30, 30, 30]) },
+                Reply::Attributes("62;22".into()),
+            ]
+            .map(InputEvent::Reply)
+        );
+        // A late answer, split between reads, is never typed, and its BEL is never ctrl+g.
+        assert_eq!(
+            parse(&["x\u{1b}]11;rgb:ff", "ff/ffff/ffff\u{7}y"], 5.0).await,
+            [text("x"), InputEvent::Reply(Reply::Color { which: 11, rgb: Some([255, 255, 255]) }), text("y")]
+        );
+        // An answer Kumi didn't ask for is read and dropped; Alt-] on its own is still Alt-], after the Escape delay.
+        assert_eq!(parse(&["\u{1b}]4;1;rgb:00/00/00\u{1b}\\z"], 5.0).await, [text("z")]);
+        assert_eq!(parse(&["\u{1b}]"], 5.0).await, [key("]", Modifiers::ALT)]);
+        // An answer under way is waited for longer than the Escape delay between its reads (a slow SSH link), so its head
+        // isn't dropped and its tail typed; past that wait, what came of it is dropped, never typed.
+        let events = Rc::new(RefCell::new(Vec::new()));
+        let sink = Rc::clone(&events);
+        let parser = InputParser::with_escape_delay(Rc::new(move |event| sink.borrow_mut().push(event)), 5.0);
+        parser.push("\u{1b}]11;rgb:ff");
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        parser.push("ff/ffff/ffff\u{7}z");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        assert_eq!(events.take(), [InputEvent::Reply(Reply::Color { which: 11, rgb: Some([255, 255, 255]) }), text("z")]);
+        parser.push("\u{1b}P>|kit");
+        tokio::time::sleep(Duration::from_millis(600)).await;
+        assert!(events.take().is_empty());
+        parser.dispose();
+    })
+    .await;
+}
+
+/// A terminal that answers Kumi's questions as they're written: what's typed first, then its answers.
+struct Answering {
+    input: Rc<FakeInput>,
+    answers: &'static str,
+    written: RefCell<String>,
+}
+
+impl TtyOutput for Answering {
+    fn is_tty(&self) -> bool {
+        true
+    }
+    fn columns(&self) -> Option<i32> {
+        Some(100)
+    }
+    fn rows(&self) -> Option<i32> {
+        Some(30)
+    }
+    fn write(&self, data: &str) {
+        self.written.borrow_mut().push_str(data);
+        if data.contains("\u{1b}[c") {
+            self.input.write(self.answers);
+        }
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_terminal_is_asked_once_its_last_answer_ends_the_wait_and_keys_typed_meanwhile_are_kept() {
+    use kumi::tui::probe::{probe, Answers, QUERIES};
+    local(async {
+        let input = Rc::new(FakeInput { raw: Cell::new(false), listener: RefCell::new(None), discarded: Cell::new(0) });
+        let output = Rc::new(Answering {
+            input: input.clone(),
+            answers: "hi\u{1b}P>|kitty(0.35.2)\u{1b}\\\u{1b}[?1u\u{1b}]11;rgb:0000/0000/0000\u{1b}\\\u{1b}[?62c",
+            written: RefCell::default(),
+        });
+        let started = tokio::time::Instant::now();
+        let probed = probe(&(input.clone() as Rc<dyn TtyInput>), &(output.clone() as Rc<dyn TtyOutput>), Duration::from_secs(5)).await;
+        assert!(started.elapsed() < Duration::from_millis(100), "DA1's answer ended the wait");
+        assert_eq!(output.written.borrow().as_str(), QUERIES);
+        assert_eq!(
+            probed.answers,
+            Answers {
+                version: Some("kitty(0.35.2)".into()),
+                kitty_keys: true,
+                background: Some([0, 0, 0]),
+                complete: true,
+                ..Answers::default()
+            }
+        );
+        assert!(!input.is_raw() && input.listener.borrow().is_none(), "the terminal is put back as it was");
+        // Read again as the screen starts, what was typed is typed, and the answers aren't.
+        let events = Rc::new(RefCell::new(Vec::new()));
+        let tty = Tty::new(TtyOptions {
+            input: input.clone(),
+            output: Rc::new(FakeOutput { written: RefCell::new(String::new()), resize: RefCell::new(None) }),
+            on_input: Rc::new({
+                let events = Rc::clone(&events);
+                move |event| events.borrow_mut().push(event)
+            }),
+            on_resize: Rc::new(|| {}),
+            mouse: true,
+            farewell: String::new(),
+        });
+        tty.start().unwrap();
+        tty.read_again(&probed.read);
+        let typed: Vec<_> = events.borrow().iter().filter(|event| !matches!(event, InputEvent::Reply(_))).cloned().collect();
+        assert_eq!(typed, [text("hi")]);
+        tty.restore(false);
+        // A terminal that doesn't answer is waited for no longer than the budget, and taken at its environment's word.
+        let quiet = Rc::new(FakeInput { raw: Cell::new(false), listener: RefCell::new(None), discarded: Cell::new(0) });
+        let started = tokio::time::Instant::now();
+        let output: Rc<dyn TtyOutput> = Rc::new(FakeOutput { written: RefCell::new(String::new()), resize: RefCell::new(None) });
+        let probed = probe(&(quiet.clone() as Rc<dyn TtyInput>), &output, Duration::from_millis(250)).await;
+        assert!(started.elapsed() >= Duration::from_millis(250) && started.elapsed() < Duration::from_millis(300));
+        assert_eq!(probed.answers, Answers::default());
+        assert!(!quiet.is_raw());
+    })
+    .await;
+}
+
+#[test]
+fn what_the_terminal_says_of_itself_comes_before_its_environment() {
+    use kumi::tui::alerts::{detect_terminal_profile, NotifyChannel};
+    use kumi::tui::probe::Answers;
+    let env = |pairs: &[(&str, &str)]| pairs.iter().map(|(name, value)| (name.to_string(), value.to_string())).collect::<HashMap<_, _>>();
+    let said =
+        |version: &str| Answers { version: Some(version.into()), background: Some([30, 30, 30]), complete: true, ..Answers::default() };
+    // Ghostty over SSH: TERM_PROGRAM doesn't arrive, so its environment names no terminal.
+    let ssh = env(&[("TERM", "xterm-256color"), ("SSH_CONNECTION", "10.0.0.2 52000 10.0.0.9 22")]);
+    let before = detect_terminal_profile(&ssh, "linux");
+    assert!(!before.images && before.notify == NotifyChannel::None);
+    let after = before.answered(&said("ghostty 1.1.3"), &ssh, "linux");
+    assert!(after.images && after.progress && after.notify == NotifyChannel::Osc777);
+    assert!(after.hyperlinks && !detect_terminal_profile(&ssh, "linux").hyperlinks, "links Ghostty opens itself, over SSH too");
+    assert_eq!((after.version.as_deref(), after.background), (Some("ghostty 1.1.3"), Some([30, 30, 30])));
+    assert_eq!(answered_color_depth(ColorDepth::Colors256, Some("ghostty 1.1.3"), &ssh), ColorDepth::Truecolor);
+    let kitty = detect_terminal_profile(&ssh, "linux").answered(&said("kitty(0.35.2)"), &ssh, "linux");
+    assert!(kitty.images && kitty.notify == NotifyChannel::Osc99);
+    let iterm = detect_terminal_profile(&ssh, "linux").answered(&said("iTerm2 3.5.10"), &ssh, "linux");
+    assert!(!iterm.images && iterm.notify == NotifyChannel::Osc9);
+    // Its own selection is Option-drag, which the hint for copying says.
+    assert!(iterm.iterm && !detect_terminal_profile(&ssh, "linux").iterm);
+    // tmux answers for itself, even where its environment doesn't say tmux: no pictures, the system's notification,
+    // and the environment's colour depth.
+    let tmux = detect_terminal_profile(&ssh, "darwin").answered(&said("tmux 3.5a"), &ssh, "darwin");
+    assert!(tmux.tmux && !tmux.images && !tmux.progress && tmux.notify == NotifyChannel::AppleScript);
+    assert_eq!(answered_color_depth(ColorDepth::Colors256, Some("tmux 3.5a"), &ssh), ColorDepth::Colors256);
+    // Inside a multiplexer, what answers for the terminal outside turns no pictures on.
+    let screen = env(&[("TERM", "screen-256color")]);
+    assert!(!detect_terminal_profile(&screen, "linux").answered(&said("kitty(0.35.2)"), &screen, "linux").images);
+    // A name Kumi doesn't know, and no answer at all, leave the environment's word.
+    let local = env(&[("TERM_PROGRAM", "iTerm.app"), ("TERM", "xterm-256color")]);
+    let before = detect_terminal_profile(&local, "darwin");
+    let after = before.clone().answered(&said("SomeTerm 1.0"), &local, "darwin");
+    assert_eq!((after.notify, after.images, after.progress), (before.notify, before.images, before.progress));
+    assert_eq!(before.clone().answered(&Answers::default(), &local, "darwin"), before);
+    // A depth the environment forces stays; a terminal it keeps quiet stays quiet.
+    assert_eq!(answered_color_depth(ColorDepth::None, Some("kitty(0.35.2)"), &env(&[("NO_COLOR", "1")])), ColorDepth::None);
+    let dumb = env(&[("TERM", "dumb")]);
+    let after = detect_terminal_profile(&dumb, "linux").answered(&said("kitty(0.35.2)"), &dumb, "linux");
+    assert!(!after.status && !after.images && after.notify == NotifyChannel::None);
 }
 
 #[test]

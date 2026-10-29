@@ -182,6 +182,9 @@ pub struct TuiOptions {
     pub run_editor: Option<EditorRunner>,
     /// When the header says how full the model's context is (`contextMeter`).
     pub context_meter: ContextMeter,
+    /// What was read from the terminal before the screen was Kumi's, while it was asked what it is (`tui::probe`): read
+    /// again as the screen starts, so keys typed meanwhile go where they were typed.
+    pub typeahead: Vec<u8>,
 }
 /// When the header shows how full the answering model's context is: from half full (`auto`), always, or never.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -259,6 +262,7 @@ impl TuiOptions {
             editor: None,
             run_editor: None,
             context_meter: ContextMeter::Auto,
+            typeahead: Vec::new(),
         }
     }
 }
@@ -1120,6 +1124,7 @@ impl Terminal for TuiApp {
         if let Err(error) = self.0.tty.start() {
             return self.finish(1, Some(format!("Kumi couldn't start: {error}")));
         }
+        self.0.tty.read_again(&self.0.options.typeahead);
         let weak = Rc::downgrade(&self.0);
         self.0.options.input.on_end(Rc::new(move || {
             if let Some(a) = weak.upgrade() {

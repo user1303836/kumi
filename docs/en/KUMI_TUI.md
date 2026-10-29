@@ -394,8 +394,10 @@ terminal's symbols may not show (the old Windows console, the Linux console),
 Kumi uses two-letter badges instead of icons; `KUMI_ICONS=glyphs` or `badges`
 chooses. Changes' pictures show as images in kitty and Ghostty (with 24-bit
 colour, outside tmux), in braille and half-blocks elsewhere, and as words where
-symbols may not show; `KUMI_PICTURES=cells` keeps them in cells. Windows
-Terminal is recommended on Windows. Web and mail links in Kumi's answers can be
+symbols may not show; `KUMI_PICTURES=cells` keeps them in cells. As it
+starts, Kumi asks the terminal what it is (its answers turn pictures,
+notifications and links on over SSH); `KUMI_PROBE=off` keeps it from asking.
+Windows Terminal is recommended on Windows. Web and mail links in Kumi's answers can be
 clicked in iTerm2, Ghostty, WezTerm, kitty, Windows Terminal and VS Code's
 terminal (outside tmux; some want Cmd or Ctrl held), and there the address no
 longer follows the words, unless the words read as another address; elsewhere
@@ -435,9 +437,13 @@ lightened for display). Warning `#e7b45f`, error `#ee8479`, the beat light
 
 **Foundations**, built from terminal primitives with no UI framework:
 
-1. Terminal I/O (`tty.rs`): raw mode, the alternate screen, bracketed paste,
-   SGR mouse, focus events, the kitty keyboard protocol where offered; the
-   terminal is restored on exit, crashes and signals.
+1. Terminal I/O (`tty.rs`, `probe.rs`): raw mode, the alternate screen,
+   bracketed paste, SGR mouse, focus events, the kitty keyboard protocol where
+   offered; the terminal is restored on exit, crashes and signals. As the
+   screen starts, Kumi asks the terminal once what it is and what its colours
+   are, waiting at most a quarter of a second. Its answers choose pictures,
+   notifications and colour depth over SSH, where its name doesn't arrive in
+   the environment.
 2. Input (`keys.rs`): keys with modifiers (xterm and CSI u), pastes, mouse,
    sequences split across reads, and a lone Esc resolved by a short timeout.
    With the kitty protocol, a held key's repeats and its let-go are events of
