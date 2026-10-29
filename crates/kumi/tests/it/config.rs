@@ -508,6 +508,12 @@ fn export_and_import_take_a_conversation_a_format_and_a_file() {
         value(&["export", "--last", "--json", "--json", "--raw"], &env),
         json!({"mode": "export", "format": "json", "full": false, "raw": true})
     );
+    // The DAW asked for, whose words export and library say.
+    assert_eq!(value(&["--daw", "reaper", "library"], &env), json!({"mode": "library", "rebuild": false, "daw": "reaper"}));
+    assert_eq!(
+        value(&["--daw", "reaper", "export"], &env),
+        json!({"mode": "export", "format": "md", "full": false, "raw": false, "daw": "reaper"})
+    );
     for wrong in [
         &["export", "--md", "--html"][..],
         &["export", "-o"],
