@@ -59,7 +59,19 @@ impl TuiApp {
     /// A model call finished: its tokens, and the model that answered it, for the context meter.
     pub(super) fn called(&self, usage: Usage) {
         let answering = self.answering_model();
-        self.0.state.borrow_mut().last_call = Some((usage, answering));
+        self.0.state.borrow_mut().last_call = Some((usage, answering.clone()));
+        // A window not known yet (a local server's, a pinned model's, the fallback's provider's): its list, read once.
+        let Some((model, models)) = answering.zip(self.0.options.models.clone()) else { return };
+        let Some(provider) = model.split_once('/').map(|(provider, _)| provider.to_string()) else { return };
+        if models.context_window(&model).is_some() || !self.0.state.borrow_mut().windows_asked.insert(provider.clone()) {
+            return;
+        }
+        self.task(move |app| async move {
+            // (a list that can't be read leaves the meter off, said nowhere: the model still answers)
+            let _ = models.models(&provider, false).await;
+            app.0.scheduler.request();
+            Ok(())
+        });
     }
 
     /// The model answering now: the producer's fallback while it answers for their model, else their model.
@@ -146,6 +158,21 @@ fn tokens(n: f64) -> String {
 pub(super) fn thinking_label(thinking: &Thinking, now: f64, changes: usize) -> String {
     let seconds = ((now - thinking.since) / 1000.).floor().max(0.);
     let took = if seconds < 60. { format!("{seconds}s") } else { helpers::clock_of(now - thinking.since) };
-    let changed = if changes > 0 { format!(" · {changes} {}", if changes == 1 { "change" } else { "changes" }) } else { String::new() };
-    format!("thinking · {took}{changed}")
+    format!("{THINKING}{took}{}", changed(changes))
+}
+
+/// How NOW's thinking label begins: the terminal's status, which doesn't tick, says it as `working_label` does.
+pub(super) const THINKING: &str = "thinking · ";
+
+/// What NOW says while Kumi works with nothing more to say: "working", the answer's changes after it.
+pub(super) fn working_label(changes: usize) -> String {
+    format!("working{}", changed(changes))
+}
+
+fn changed(changes: usize) -> String {
+    if changes > 0 {
+        format!(" · {changes} {}", if changes == 1 { "change" } else { "changes" })
+    } else {
+        String::new()
+    }
 }

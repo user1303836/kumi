@@ -567,10 +567,8 @@ impl TuiApp {
                     )
                 } else if let Some(thinking) = thinking {
                     super::usage::thinking_label(thinking, now, state.turn_changes)
-                } else if state.turn_changes > 0 {
-                    format!("working · {} {}", state.turn_changes, if state.turn_changes == 1 { "change" } else { "changes" })
                 } else {
-                    "working".into()
+                    super::usage::working_label(state.turn_changes)
                 };
             // A provider asked Kumi to wait: say why and for how long (esc still stops).
             if let Some((reason, until)) = state.retry.as_ref().filter(|(_, until)| *until > now) {

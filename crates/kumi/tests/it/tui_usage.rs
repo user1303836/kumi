@@ -109,6 +109,12 @@ case!(the_context_meter_shows_from_half_full_or_as_set, async {
             Some(meter) => assert!(header.contains(meter), "{meter:?} in {header:?}"),
             None => assert!(!header.contains("context"), "{header:?}"),
         }
+        // Past 80%, in the warning colour; below it, dim.
+        if let Some(meter) = shown {
+            let [r, g, b] = if input > 160_000. { kumi::tui::style::palette::WARN } else { kumi::tui::style::palette::DIM };
+            let percent = &meter[meter.len() - 3..];
+            assert!(h.styles_of(percent)[0].starts_with(&format!("{r},{g},{b}|")), "{:?}", h.styles_of(percent));
+        }
         // A fresh conversation fills the context anew: the meter waits for its next call.
         h.emit(json!({"type":"turn-complete","result":{"stopReason":"completed"},"elapsedMs":900}));
         h.emit(json!({"type":"state","state":"idle"}));
@@ -155,5 +161,21 @@ case!(an_answer_on_a_subscription_ends_with_its_share_of_the_plan, async {
     // No tokens on a subscription: what share of the plan's window it took.
     h.has("4.0s · 3% of your plan");
     assert!(!has(&h.screen(), "18.4k"), "{}", h.screen().join("\n"));
+    h.close().await;
+});
+
+case!(a_window_not_known_yet_is_read_from_its_providers_list_once, async {
+    // A local server's list comes only when asked: the meter reads it once a call has finished, and shows.
+    let fake = models("anthropic/claude-sonnet-5-5");
+    fake.unread.borrow_mut().insert("anthropic".into());
+    let h = Harness::with(120, 36, Rc::new(Control::default()), |o| o.models = Some(fake.clone()));
+    h.start().await;
+    h.connect();
+    asked(&h, "tighten the hats").await;
+    h.emit(usage(165_000., 1_000.));
+    h.wait_for("context ▰▰▰▰▰▰▰▰▱▱ 83%").await;
+    h.emit(usage(170_000., 1_000.));
+    h.has("context ▰▰▰▰▰▰▰▰▰▱ 86%");
+    assert_eq!(fake.calls.borrow().iter().filter(|call| *call == "list:anthropic").count(), 1, "{:?}", fake.calls.borrow());
     h.close().await;
 });

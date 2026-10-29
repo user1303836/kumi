@@ -295,4 +295,7 @@ fn a_reasonings_headline_is_its_latest_title_or_its_last_line_without_markdown()
     assert_eq!(headline("The kick sits at 55 Hz.\nThe bass at 48 Hz,\n"), "The bass at 48 Hz,");
     assert_eq!(headline("## Planning the change\n- set the ratio"), "Planning the change");
     assert_eq!(headline("- **set** the `ratio`   to 4:1\n\n"), "set the ratio to 4:1");
+    // A sign isn't a list's mark.
+    assert_eq!(headline("-3 dB on the low shelf should do it"), "-3 dB on the low shelf should do it");
+    assert_eq!(headline("> - *quoted*, listed"), "*quoted*, listed");
 }

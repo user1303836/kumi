@@ -114,7 +114,16 @@ pub fn headline(reasoning: &str) -> String {
     let lines: Vec<&str> = reasoning.lines().map(str::trim).filter(|line| !line.is_empty()).collect();
     let titled = |line: &&&str| line.starts_with('#') || (line.len() > 4 && line.starts_with("**") && line.ends_with("**"));
     let Some(line) = lines.iter().rev().find(titled).or(lines.last()) else { return String::new() };
-    let plain = line.trim_start_matches(['#', '>', '-', '*', '+', ' ']).replace("**", "").replace("__", "").replace('`', "");
+    // A heading's marks, and a list's or a quote's when a space follows: a minus sign before a number stays.
+    let mut line = *line;
+    loop {
+        let marked = line.strip_prefix(['-', '*', '+', '>']).filter(|rest| rest.starts_with(' '));
+        match marked.or_else(|| line.starts_with('#').then(|| line.trim_start_matches('#'))) {
+            Some(rest) => line = rest.trim_start(),
+            None => break,
+        }
+    }
+    let plain = line.replace("**", "").replace("__", "").replace('`', "");
     plain.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]

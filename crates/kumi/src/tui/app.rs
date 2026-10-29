@@ -572,6 +572,8 @@ struct State {
     reasoning: String,
     /// The last model call's tokens, with the model that answered it: how full its context is.
     last_call: Option<(Usage, Option<String>)>,
+    /// The providers whose lists were read for a model's window, once each.
+    windows_asked: std::collections::HashSet<String>,
     /// The plan's window, as this answer began: what share of it the answer took.
     plan_before: Option<kumi_ai::providers::usage::PlanWindow>,
 }
@@ -707,6 +709,7 @@ impl State {
             replaying: false,
             reasoning: String::new(),
             last_call: None,
+            windows_asked: std::collections::HashSet::new(),
             plan_before: None,
         }
     }
