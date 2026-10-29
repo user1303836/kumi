@@ -443,7 +443,9 @@ case!(typing_streaming_steps_markdown, async {
     h.has("0.3s");
     h.emit(json!({"type":"turn-complete","result":{"stopReason":"completed"},"elapsedMs":3100}));
     h.emit(json!({"type":"state","state":"idle"}));
-    h.has("▾ 1 step · 3.1s");
+    // The steps fold under their count; the answer's time is on its own quiet line under it.
+    h.has("▾ 1 step");
+    assert!(h.screen().iter().any(|line| line.starts_with("   3.1s ")), "{}", h.screen().join("\n"));
     h.has("Ready");
     assert!(!has(&h.screen(), "live_discover"));
     h.type_text("what's on the bass?\r").await;

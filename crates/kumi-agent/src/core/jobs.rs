@@ -738,7 +738,7 @@ impl JobHandle {
                 KernelEvent::ModelSwitch { model, back, .. } => {
                     handle.doing(&if back { "back on its own model".to_string() } else { format!("carrying on with {model}") })
                 }
-                KernelEvent::Steer { .. } => {}
+                KernelEvent::Steer { .. } | KernelEvent::Reasoning { .. } | KernelEvent::Usage(_) => {}
             }
             Ok(())
         })

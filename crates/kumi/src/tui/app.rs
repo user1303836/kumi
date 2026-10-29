@@ -24,6 +24,7 @@ pub use setup::{waveform, WAVE_WIDTH};
 mod sharing;
 mod shown;
 mod toast;
+mod usage;
 
 use super::{
     alerts::{self, ProgramState, StatusReport, TerminalProfile},
@@ -178,6 +179,16 @@ pub struct TuiOptions {
     /// Runs `editor` on the draft's file while the terminal is lent to it, to its exit code; None runs it as a program.
     /// Tests give their own.
     pub run_editor: Option<EditorRunner>,
+    /// When the header says how full the model's context is (`contextMeter`).
+    pub context_meter: ContextMeter,
+}
+/// When the header shows how full the answering model's context is: from half full (`auto`), always, or never.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ContextMeter {
+    #[default]
+    Auto,
+    Always,
+    Off,
 }
 /// Runs the producer's editor on a file until it closes: its exit code, 0 when it closed well.
 pub type EditorRunner = Rc<dyn Fn(std::path::PathBuf) -> LocalBoxFuture<'static, std::io::Result<i32>>>;
@@ -246,6 +257,7 @@ impl TuiOptions {
             transcript_on_quit: true,
             editor: None,
             run_editor: None,
+            context_meter: ContextMeter::Auto,
         }
     }
 }
@@ -556,6 +568,12 @@ struct State {
     /// A conversation taken up is being shown again from its log: what happened then draws as it did, and nothing of
     /// the moment comes with it (no alert, sound or terminal status, no animation, no panel, nothing sent or carried on).
     replaying: bool,
+    /// The model's reasoning since it last spoke or ran a step: what the headline comes from.
+    reasoning: String,
+    /// The last model call's tokens, with the model that answered it: how full its context is.
+    last_call: Option<(Usage, Option<String>)>,
+    /// The plan's window, as this answer began: what share of it the answer took.
+    plan_before: Option<kumi_ai::providers::usage::PlanWindow>,
 }
 impl State {
     fn new(options: &TuiOptions) -> Self {
@@ -687,6 +705,9 @@ impl State {
             copied: None,
             reopening: false,
             replaying: false,
+            reasoning: String::new(),
+            last_call: None,
+            plan_before: None,
         }
     }
 }
@@ -1271,7 +1292,7 @@ fn head(text: &str, count: usize) -> String {
     String::from_utf16_lossy(&text.encode_utf16().take(count).collect::<Vec<_>>())
 }
 fn assistant(started_at: Option<f64>, status: AnswerStatus) -> Entry {
-    Entry::Assistant { text: String::new(), steps: vec![], status, elapsed_ms: None, started_at }
+    Entry::Assistant { text: String::new(), steps: vec![], status, elapsed_ms: None, started_at, thinking: None, footer: None }
 }
 /// An answer's steps still running, ended as failed. `timed`: each takes how long it ran until now (an answer shown
 /// again from a log has no time for a step it cut short: the log doesn't say when it ended).

@@ -220,6 +220,8 @@ fn types(events: &[KernelEvent]) -> Vec<&'static str> {
             KernelEvent::Steer { .. } => "steer",
             KernelEvent::Retry { .. } => "retry",
             KernelEvent::ModelSwitch { .. } => "model-switch",
+            KernelEvent::Reasoning { .. } => "reasoning",
+            KernelEvent::Usage(_) => "usage",
         })
         .collect()
 }

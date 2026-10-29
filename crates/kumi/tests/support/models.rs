@@ -135,6 +135,9 @@ impl ModelController for FakeModels {
             fast: info.as_ref().filter(|_| *self.fast.borrow()).and_then(|m| m.service_tiers.first()).cloned(),
         }
     }
+    fn context_window(&self, model: &str) -> Option<f64> {
+        self.info(model).and_then(|info| info.context)
+    }
     async fn providers(&self) -> Result<Vec<ProviderStatus>, RuntimeError> {
         Ok(table::offered()
             .into_iter()

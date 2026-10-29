@@ -122,6 +122,8 @@ fn original_repeated_step_scenario_folds_later_arrivals() {
         status: AnswerStatus::Running,
         started_at: Some(0.),
         elapsed_ms: None,
+        thinking: None,
+        footer: None,
         steps: vec![
             step("searched the web", Some(900.)),
             step("read a page", Some(1000.)),
@@ -152,6 +154,8 @@ fn original_running_and_resumed_steps_scenario() {
         status: AnswerStatus::Running,
         started_at: Some(0.),
         elapsed_ms: None,
+        thinking: None,
+        footer: None,
         steps: vec![
             step("read a page", Some(100.)),
             Step { state: StepState::Running, tool: Some("read_web".into()), started_at: Some(200.), ..step("read a page", None) },
@@ -164,6 +168,8 @@ fn original_running_and_resumed_steps_scenario() {
         status: AnswerStatus::Done,
         started_at: None,
         elapsed_ms: None,
+        thinking: None,
+        footer: None,
         steps: vec![step("looked at your Set", None), step("looked at your Set", None), step("made changes", None)],
     });
     let shown = lines(&mut t, 5.);
@@ -196,7 +202,15 @@ fn transcript_insertion_mutation_and_cached_layouts() {
 fn a_frames_layout_borrows_the_cached_rows_with_the_same_gaps() {
     let mut t = Transcript::default();
     // An answer that hasn't said anything yet has no rows: what follows it gets no gap before it.
-    let empty = || Entry::Assistant { text: "".into(), status: AnswerStatus::Done, started_at: None, elapsed_ms: None, steps: vec![] };
+    let empty = || Entry::Assistant {
+        text: "".into(),
+        status: AnswerStatus::Done,
+        started_at: None,
+        elapsed_ms: None,
+        steps: vec![],
+        thinking: None,
+        footer: None,
+    };
     t.add(empty());
     t.add(Entry::User { text: "a".into() });
     t.add(empty());
@@ -236,8 +250,18 @@ fn printed_for_the_scrollback_keeps_requests_answers_and_a_line_for_each_run_of_
         status: AnswerStatus::Done,
         elapsed_ms: Some(900.),
         started_at: None,
+        thinking: None,
+        footer: None,
     });
-    t.add(Entry::Assistant { text: String::new(), steps: vec![], status: AnswerStatus::Stopped, elapsed_ms: None, started_at: None });
+    t.add(Entry::Assistant {
+        text: String::new(),
+        steps: vec![],
+        status: AnswerStatus::Stopped,
+        elapsed_ms: None,
+        started_at: None,
+        thinking: None,
+        footer: None,
+    });
     let all = printed(&t.entries, PRINTED_MOST, false);
     assert_eq!(
         all,
@@ -258,4 +282,17 @@ fn printed_for_the_scrollback_keeps_requests_answers_and_a_line_for_each_run_of_
          \x1b[2m  + looked at your Set x2\x1b[22m\n\x1b[2m  x listened\x1b[22m\n\n\x1b[2mstopped\x1b[22m\n\n"
     );
     assert!(printed(&t.entries, 40, true).starts_with("\x1b[2m... the start of this conversation is left out here"));
+}
+
+#[test]
+fn a_reasonings_headline_is_its_latest_title_or_its_last_line_without_markdown() {
+    assert_eq!(headline(""), "");
+    assert_eq!(headline("\n\n  \n"), "");
+    assert_eq!(headline("**Weighing the kick**\n\nThe sub rings 60 ms past each hit."), "Weighing the kick");
+    // Each part of a summary begins with its own: the latest one's.
+    assert_eq!(headline("**Weighing the kick**\n\nThe sub rings.\n\n**Checking the `sidechain`**\n\nThe ratio"), "Checking the sidechain");
+    // Untitled, as a model's own thinking runs: its last line that says anything.
+    assert_eq!(headline("The kick sits at 55 Hz.\nThe bass at 48 Hz,\n"), "The bass at 48 Hz,");
+    assert_eq!(headline("## Planning the change\n- set the ratio"), "Planning the change");
+    assert_eq!(headline("- **set** the `ratio`   to 4:1\n\n"), "set the ratio to 4:1");
 }

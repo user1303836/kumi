@@ -1430,6 +1430,7 @@ Kumi keeps everything in `~/.kumi`. `~/.kumi/settings.json` holds:
 | `keepAwake` | `false`: the computer may sleep while Kumi works |
 | `answerAfter` | Seconds before Kumi takes its recommended answer when nobody's there (60); `0` never does |
 | `instantPhrases` | `false`: fixed phrases ("tempo 124", "mute drums") go to the model like any other message ([instant phrases](KUMI_TUI.md#instant-phrases)) |
+| `contextMeter` | The header's meter of how full the model's context is: `"auto"` (the default) from half full, `"always"`, or `"off"` |
 | `modelServers` | Model servers you name: `[{ "name", "baseURL", "apiKey", "format" }]` ([models on your computer](#models-on-your-computer)) |
 | `libraryFolders` | More folders for Kumi to learn sounds, presets and Sets from |
 | `musicFolders` | The folders of your own music Kumi learns your taste from (`/music add`); absent until you agree |
