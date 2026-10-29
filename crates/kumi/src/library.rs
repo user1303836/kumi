@@ -1,6 +1,7 @@
 //! Inspect and rebuild the producer's library.
 use crate::{
     config::{load_library_dir, load_projects_dir, load_settings_file, read_settings},
+    text::learned_sets,
     tui::tty::TtyOutput,
 };
 use kumi_common::{
@@ -68,7 +69,7 @@ pub fn progress_line(progress: &LearnProgress) -> String {
     match progress.phase {
         LearnPhase::Looking => format!("Looking through your folders{}…", at()),
         LearnPhase::Presets => format!("Presets: {} of {}", grouped(progress.presets.done), grouped(progress.presets.todo)),
-        LearnPhase::Sets => format!("Sets: {} of {}", grouped(progress.sets.done), grouped(progress.sets.todo)),
+        LearnPhase::Sets => format!("{}: {} of {}", learned_sets(true), grouped(progress.sets.done), grouped(progress.sets.todo)),
         LearnPhase::Sounds => format!("Sounds: {} of {}{}", grouped(progress.sounds.done), grouped(progress.sounds.todo), at()),
         LearnPhase::Tidying => "Tidying up…".into(),
         LearnPhase::Done => "Done.".into(),
@@ -128,7 +129,7 @@ pub async fn run_library(io: LibraryIo) -> Result<i32, RuntimeError> {
                 if out.is_tty() { "\n" } else { "" },
                 counted(result.sounds.known, "sound"),
                 counted(result.presets.known, "preset"),
-                counted(result.sets.known, "Set"),
+                counted(result.sets.known, &learned_sets(false)),
                 minutes(result.finished_at.map(|ms| ms as f64).unwrap_or_else(|| now()) - result.started_at as f64)
             ));
         }
@@ -158,7 +159,7 @@ pub async fn run_library(io: LibraryIo) -> Result<i32, RuntimeError> {
                     }
                 ),
                 format!("  Presets   {}", grouped(presets.len())),
-                format!("  Sets      {}", grouped(sets.len())),
+                format!("  {:<10}{}", learned_sets(true), grouped(sets.len())),
             ]);
             if let Some(learning) = state.as_ref().and_then(|s| s.learning.as_ref()) {
                 lines.push(format!(
@@ -189,7 +190,7 @@ pub async fn run_library(io: LibraryIo) -> Result<i32, RuntimeError> {
         }
         let taste = library.taste().await?;
         if !taste.is_empty() {
-            lines.extend(["".into(), "From your Sets (forget a line in Kumi's /memory)".into()]);
+            lines.extend(["".into(), format!("From your {} (forget a line in Kumi's /memory)", learned_sets(true))]);
             for line in taste {
                 lines.push(format!("  {}", line.line));
             }
