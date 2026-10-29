@@ -593,7 +593,8 @@ async fn busy_rejection_cancel_preserves_input_and_close_is_once() {
         .await;
 }
 /// A line that starts with a path, as a file dragged into the terminal gives, is a message, by the full-screen app's
-/// rule (#624): whether Kumi is idle, answering, getting ready or asking about another Set's conversation.
+/// rule (#624): whether Kumi is idle, answering, getting ready or asking about another Set's conversation. A lone `/`
+/// isn't: it opens the full-screen app's menu, so here it's pointed to /help.
 #[tokio::test]
 async fn a_line_that_starts_with_a_path_is_a_message_not_a_command() {
     tokio::task::LocalSet::new()
@@ -601,6 +602,7 @@ async fn a_line_that_starts_with_a_path_is_a_message_not_a_command() {
             let f = Fixture::new(false, true, None, None, None);
             flush().await;
             let submits = || f.control.calls.borrow().iter().filter(|c| c.starts_with("submit:")).cloned().collect::<Vec<_>>();
+            let unknown = || f.text().matches("Unknown command. Use /help.").count();
             f.input.write("/Users/me/Music/kick.wav make it punchier\n");
             flush().await;
             assert_eq!(submits(), ["submit:/Users/me/Music/kick.wav make it punchier"]);
@@ -608,6 +610,9 @@ async fn a_line_that_starts_with_a_path_is_a_message_not_a_command() {
             f.input.write("/Users/me/Music/hat.wav\n");
             flush().await;
             assert!(f.text().contains("[busy] Busy; cancel first. No second turn was submitted."), "{}", f.text());
+            f.input.write("/\n");
+            flush().await;
+            assert_eq!(unknown(), 1, "{}", f.text());
             f.control.hold.set(false);
             f.control.release();
             flush().await;
@@ -626,13 +631,18 @@ async fn a_line_that_starts_with_a_path_is_a_message_not_a_command() {
             f.input.write("/Users/me/Music/kick.wav\n");
             flush().await;
             assert_eq!(f.text().matches(question).count(), 2, "{}", f.text());
+            // A lone slash is answered as a command is, with the question still open.
+            f.input.write("/\n");
+            flush().await;
+            assert_eq!((f.text().matches(question).count(), unknown()), (2, 2), "{}", f.text());
             assert!(f.control.answers.borrow().is_empty());
             f.input.write("3\n");
             flush().await;
-            // A slash and a word is still a command: this one, which Kumi doesn't have, is the only unknown one here.
-            f.input.write("/kick make it punchier\n");
+            // A slash and a word is still a command, and so is a lone slash. Kumi has neither, and nothing else here
+            // was unknown.
+            f.input.write("/kick make it punchier\n/\n");
             flush().await;
-            assert_eq!(f.text().matches("Unknown command. Use /help.").count(), 1, "{}", f.text());
+            assert_eq!(unknown(), 4, "{}", f.text());
             assert_eq!(submits().len(), 2);
             f.quit().await;
         })

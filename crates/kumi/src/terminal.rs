@@ -135,6 +135,11 @@ const COMMANDS: [&str; 22] = [
     "/reconnect",
     "/new",
 ];
+/// A command by the full-screen app's rule ([`is_command`]), so a line that starts with a path (a file dragged in) is a
+/// message; or a lone `/`, which opens the menu there and never reaches the model, so here it's pointed to /help.
+fn command_like(line: &str) -> bool {
+    line == "/" || is_command(line)
+}
 fn help(daw: bool) -> String {
     format!("/help · /status · /undo · /stop · /refresh · /reconnect (connect to {app} again, keeping the conversation){daw} · /new [name] (start a fresh conversation; the last one is kept) · /resume [number, id or name] (list kept conversations, or go back to one; /conversations too) · /rename <name> · /fork [name] (carry on in a copy) · /export [md|html|json] (save this conversation; keys and paths taken out) · /share (save it as a web page) · /model [provider/model] · /effort [level|default] · /logout <provider> · /memory · /forget <id> · /note <id> <new words> · /pin <id> · /unpin <id> · /recipes{willington} · /update (get the newest Kumi) · /changelog (what's new in it) · /quit | Ctrl-C: cancel work; idle: exit. EOF exits. Sign in with: {kumi} login <provider>.", app = crate::daw::words().app, daw = if daw { " · /daw [name] (which DAW Kumi works with, or open Kumi again with another)" } else { "" }, kumi = *KUMI, willington = if crate::daw::current().id() == kumi_types::daw::DawId::Ableton { " · /willington (Willington's bindings on or off)" } else { "" })
 }
@@ -623,7 +628,7 @@ impl PlainTerminal {
         // The answer to Kumi's question about another Set's conversation: 1, 2 or 3. A command runs as usual, with the
         // question still open; anything else asks it again.
         let asking = self.0.state.borrow().asking.clone();
-        if let Some(question) = asking.filter(|_| !is_command(command)) {
+        if let Some(question) = asking.filter(|_| !command_like(command)) {
             let choice = match command {
                 "1" => SetChoice::Open,
                 "2" => SetChoice::Copy,
@@ -750,12 +755,12 @@ impl PlainTerminal {
         if self.busy() {
             // A command Kumi doesn't have is no turn: it's said so at once, as when Kumi isn't working.
             let verb = command.split(|c: char| c.is_whitespace() || c == '\u{feff}').find(|s| !s.is_empty()).unwrap_or("");
-            if is_command(command) && !COMMANDS.contains(&verb) {
+            if command_like(command) && !COMMANDS.contains(&verb) {
                 self.notice("Unknown command. Use /help.");
                 return Ok(());
             }
             let mut state = self.0.state.borrow_mut();
-            if !state.answering && !is_command(command) && state.queued.is_none() {
+            if !state.answering && !command_like(command) && state.queued.is_none() {
                 state.queued = Some(input.into());
                 drop(state);
                 self.notice("[waiting] Kumi is getting ready; your message goes as soon as it is.");
@@ -777,8 +782,7 @@ impl PlainTerminal {
         }
         Ok(())
     }
-    /// Answers `verb`, one of [`COMMANDS`] (any other command is unknown), or sends a turn. A line is a command by the
-    /// full-screen app's rule, [`is_command`], so one that starts with a path (a file dragged in) is a message.
+    /// Answers `verb`, one of [`COMMANDS`] (any other line [`command_like`] is unknown), or sends a turn.
     async fn command(&self, verb: &str, argument: Option<&str>, command: &str, input: &str) -> Result<(), RuntimeError> {
         let controller = &self.0.options.controller;
         let models = &self.0.options.models;
@@ -800,7 +804,7 @@ impl PlainTerminal {
  "/willington"=>{match self.0.options.willington.clone().and_then(|w|(w.on)().map(|on|(w,on))){Some((willington,on))=>match (willington.set)(!on).await{Ok(said)=>{self.notice(&format!("[willington] {said}"));controller.reconfigure().await?;},Err(error)=>self.notice(&format!("[willington] Kumi couldn't turn Willington's bindings {}: {error}",if on{"off"}else{"on"})),},None=>self.notice("Unknown command. Use /help."),}},
  "/login"=>self.notice(&format!("[login] Sign in from a shell: {} login <provider> (openai-codex, anthropic, openai, opencode). The full-screen app signs in here.",*KUMI)),
  "/logout"=>{if let Some(provider)=argument.and_then(ProviderId::parse){self.notice(&if models.sign_out(provider).await?{format!("[logout] Signed out of {}.",provider.as_str())}else{format!("[logout] There was no sign-in for {} to remove.",provider.as_str())});}else{self.notice(&format!("[logout] Use: /logout <provider> ({}).",table::rows().map(|row|row.id).collect::<Vec<_>>().join(", ")));}},
- _=>{if command=="/undo"{if let Some(change)=controller.undo(None).await?{self.notice(&if enum_name(change.state)=="undone"{format!("[undo] Undid: {}",change.title)}else{string::trim(&format!("[undo] Kept: {}. {}",change.title,change.note.unwrap_or_default())).into()});}}else if command=="/refresh"{controller.refresh().await?;}else if command=="/reconnect"&&controller.has_reconnect(){controller.reconnect().await?;}else if verb=="/new"{self.notice("── New conversation. Kumi won't use what's above ──");controller.new_conversation().await?;let name=string::trim(command.strip_prefix(verb).unwrap_or(""));if !name.is_empty(){if controller.has_conversations(){controller.rename_conversation(None,Some(name)).await?;}else{self.notice(&format!("[conversations] {}",crate::tui::app::not_kept()));}}}else if is_command(command){self.notice("Unknown command. Use /help.");}else if let Some(outcome)=self.instant(input).await{self.notice(&format!("[instant] {}",outcome.text));}else{self.0.state.borrow_mut().answering=true;let result=controller.submit(input,None).await;self.0.state.borrow_mut().answering=false;result?;}}
+ _=>{if command=="/undo"{if let Some(change)=controller.undo(None).await?{self.notice(&if enum_name(change.state)=="undone"{format!("[undo] Undid: {}",change.title)}else{string::trim(&format!("[undo] Kept: {}. {}",change.title,change.note.unwrap_or_default())).into()});}}else if command=="/refresh"{controller.refresh().await?;}else if command=="/reconnect"&&controller.has_reconnect(){controller.reconnect().await?;}else if verb=="/new"{self.notice("── New conversation. Kumi won't use what's above ──");controller.new_conversation().await?;let name=string::trim(command.strip_prefix(verb).unwrap_or(""));if !name.is_empty(){if controller.has_conversations(){controller.rename_conversation(None,Some(name)).await?;}else{self.notice(&format!("[conversations] {}",crate::tui::app::not_kept()));}}}else if command_like(command){self.notice("Unknown command. Use /help.");}else if let Some(outcome)=self.instant(input).await{self.notice(&format!("[instant] {}",outcome.text));}else{self.0.state.borrow_mut().answering=true;let result=controller.submit(input,None).await;self.0.state.borrow_mut().answering=false;result?;}}
  }
         Ok(())
     }
