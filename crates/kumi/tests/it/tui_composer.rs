@@ -1004,3 +1004,44 @@ case!(at_lists_what_it_names_and_the_one_chosen_goes_with_the_message, async {
     h.wait_until_hidden("track · the group").await;
     h.close().await;
 });
+
+// #706 review: what's named with @ isn't lost. A message naming something waits for the answer rather than being steered
+// in (steering takes words alone), and `@` doesn't open in a command's line (a command takes words).
+case!(a_message_naming_something_waits_for_the_answer_and_a_command_line_names_nothing, async {
+    let c = Rc::new(Control::default());
+    c.steer_enabled.set(true);
+    c.steer_result.set(true);
+    let rows = serde_json::json!([{
+        "label": "Drums",
+        "kind": "track",
+        "reference": {"kind": "daw", "node": {"trackRef": "1:track:0", "ref": "1:track:0", "node": "track", "name": "Drums", "trail": [], "siblings": [], "track": "Drums"}},
+    }]);
+    *c.extra.borrow_mut() = serde_json::json!({"references": rows});
+    let h = Harness::with(120, 36, c.clone(), |_| {});
+    h.start().await;
+    h.connect();
+    h.type_text("first\r").await;
+    h.emit(serde_json::json!({"type":"state","state":"running"}));
+    h.emit(serde_json::json!({"type":"tool-start","id":"t1","name":"search_web"}));
+    for typed in ["louder on ", "@", "d"] {
+        h.type_text(typed).await;
+    }
+    delay(5).await;
+    h.type_text("\t").await;
+    h.type_text("\r").await;
+    h.emit(serde_json::json!({"type":"tool-end","id":"t1","name":"search_web","isError":false,"elapsedMs":400}));
+    assert!(!h.calls().iter().any(|call| call.starts_with("steer:")), "{:?}", h.calls());
+    h.emit(serde_json::json!({"type":"turn-complete","result":{"stopReason":"completed"},"elapsedMs":900}));
+    h.emit(serde_json::json!({"type":"state","state":"idle"}));
+    delay(5).await;
+    assert!(h.calls().iter().any(|call| call.starts_with("references-sent:") && call.contains("Drums")), "{:?}", h.calls());
+    assert!(h.calls().contains(&"submit:louder on @Drums ".to_string()), "{:?}", h.calls());
+    // In a command's line, @ is a word: nothing is asked, and no list opens.
+    let asked = h.calls().iter().filter(|call| call.starts_with("references:")).count();
+    for typed in ["/goal make ", "@", "d"] {
+        h.type_text(typed).await;
+    }
+    delay(5).await;
+    assert_eq!(h.calls().iter().filter(|call| call.starts_with("references:")).count(), asked, "{:?}", h.calls());
+    h.close().await;
+});

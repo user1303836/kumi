@@ -196,9 +196,10 @@ impl TuiApp {
     /// The `@` being typed at the cursor: as what follows it changes, the session is asked what it names, and the newest
     /// answer is kept (an older one coming late is dropped). Gone once the cursor isn't in one.
     pub(super) fn follow_references(&self) {
+        // (not in a command's line: a command takes words, and what it names would be lost)
         let at = {
             let state = self.0.state.borrow();
-            if state.search.is_some() {
+            if state.search.is_some() || state.editor.text().starts_with('/') {
                 None
             } else {
                 state.editor.at_query()
@@ -1157,7 +1158,9 @@ impl TuiApp {
                     if state.current.is_none() && !state.pending_turn {
                         state.activity = "getting ready".into();
                     }
-                    if state.current.is_some() || state.pending_turn {
+                    // A message naming something with @ waits for the answer: steering takes words alone, and what it
+                    // names would be lost.
+                    if (state.current.is_some() || state.pending_turn) && words.references().is_empty() {
                         "now"
                     } else {
                         "after"
