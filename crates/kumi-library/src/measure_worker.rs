@@ -11,7 +11,7 @@ use std::{cell::Cell, io, path::PathBuf, process::Stdio, time::Duration};
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader, Lines},
     process::{Child, ChildStdin, ChildStdout, Command},
-    sync::Mutex,
+    sync::{watch, Mutex},
 };
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MeasureJob {
@@ -78,6 +78,18 @@ impl WorkerProgram {
         command.arg(format!("__{}", self.role));
         command
     }
+}
+/// Whether the worker `done` tells of (true once its process has ended) is gone within `ms`.
+pub async fn gone_within(done: &mut watch::Receiver<bool>, ms: u64) -> bool {
+    tokio::time::timeout(Duration::from_millis(ms), async {
+        while !*done.borrow() {
+            if done.changed().await.is_err() {
+                break;
+            }
+        }
+    })
+    .await
+    .is_ok()
 }
 /// `role`'s worker: the program `variable` names, else this kumi (beside a test binary, in Cargo's layout).
 pub fn worker_program(role: &'static str, variable: &str) -> WorkerProgram {

@@ -223,3 +223,81 @@ async fn closing_while_the_library_learns_stops_its_learner() {
         })
         .await;
 }
+
+/// A learner ended before it spoke can't let go of a lock it took, so closing the library does: a quit leaves nothing
+/// behind. A lock another process holds is theirs, and stays.
+#[cfg(unix)]
+#[tokio::test(flavor = "current_thread")]
+async fn closing_lets_go_of_the_lock_a_learner_was_ended_holding_and_only_that() {
+    use std::os::unix::fs::PermissionsExt;
+    let studio = Studio::new();
+    std::fs::create_dir_all(&studio.dir).unwrap();
+    let lock = studio.dir.join("learning.lock");
+    // A learner that takes the lock as one does (its pid, which `exec` keeps), then gets no further.
+    let locking = studio.home.path().join("locking-learner");
+    std::fs::write(
+        &locking,
+        format!("#!/bin/sh\nprintf '{{\"pid\":%s,\"at\":%s000}}' \"$$\" \"$(date +%s)\" > '{}'\nexec sleep 30\n", lock.display()),
+    )
+    .unwrap();
+    std::fs::set_permissions(&locking, std::fs::Permissions::from_mode(0o700)).unwrap();
+    // One that doesn't get as far as the lock.
+    let starting = studio.home.path().join("starting-learner");
+    std::fs::write(&starting, "#!/bin/sh\nexec sleep 30\n").unwrap();
+    std::fs::set_permissions(&starting, std::fs::Permissions::from_mode(0o700)).unwrap();
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            // Read by this test's process alone: each test is a process of its own.
+            std::env::set_var("KUMI_LIBRARY_LEARNER_BIN", &locking);
+            let library = studio_library(&studio);
+            library.start();
+            until(|| std::fs::read_to_string(&lock).is_ok_and(|held| held.ends_with('}'))).await;
+            library.close().await;
+            assert!(!lock.exists());
+            // Another's lock, while a learner of this library's is ended before it spoke.
+            std::fs::write(&lock, r#"{"pid":1,"at":0}"#).unwrap();
+            std::env::set_var("KUMI_LIBRARY_LEARNER_BIN", &starting);
+            let library = studio_library(&studio);
+            library.start();
+            until(|| library.status().state == kumi_types::contracts::LibraryState::Learning).await;
+            library.close().await;
+            assert_eq!(std::fs::read_to_string(&lock).unwrap(), r#"{"pid":1,"at":0}"#);
+        })
+        .await;
+}
+
+/// One still there after it's ended (here one that won't heed the end it's sent) keeps its lock: it could still write
+/// the library, and `still_running` holds the lock for it while it lives.
+#[cfg(unix)]
+#[tokio::test(flavor = "current_thread")]
+async fn a_learner_still_there_after_its_end_keeps_its_lock() {
+    use std::os::unix::fs::PermissionsExt;
+    let studio = Studio::new();
+    std::fs::create_dir_all(&studio.dir).unwrap();
+    let lock = studio.dir.join("learning.lock");
+    // It takes the lock as a learner does, then ignores the end it's sent (an ignored signal stays ignored past `exec`).
+    let stuck = studio.home.path().join("stuck-learner");
+    std::fs::write(
+        &stuck,
+        format!(
+            "#!/bin/sh\ntrap '' TERM\nprintf '{{\"pid\":%s,\"at\":%s000}}' \"$$\" \"$(date +%s)\" > '{}'\nexec sleep 30\n",
+            lock.display()
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&stuck, std::fs::Permissions::from_mode(0o700)).unwrap();
+    // Read by this test's process alone: each test is a process of its own.
+    std::env::set_var("KUMI_LIBRARY_LEARNER_BIN", &stuck);
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let library = studio_library(&studio);
+            library.start();
+            until(|| std::fs::read_to_string(&lock).is_ok_and(|held| held.ends_with('}'))).await;
+            library.close().await;
+            let held: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&lock).unwrap()).unwrap();
+            let pid = held["pid"].as_i64().unwrap() as libc::pid_t;
+            assert_eq!(unsafe { libc::kill(pid, 0) }, 0, "it's still there, its lock its own");
+            unsafe { libc::kill(pid, libc::SIGKILL) };
+        })
+        .await;
+}
