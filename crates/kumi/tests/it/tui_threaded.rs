@@ -478,3 +478,93 @@ async fn a_jobs_details_show_as_they_come_without_a_key() {
         })
         .await;
 }
+
+/// A session whose start takes a moment (its thread free meanwhile), which turns away a request while it starts, as the
+/// session does, and answers one once it has. `submits` counts the answers.
+struct Starting {
+    emit: Rc<dyn Fn(SessionEvent)>,
+    status: RefCell<SessionStatus>,
+    starting: Cell<bool>,
+    submits: Arc<AtomicUsize>,
+}
+
+#[async_trait(?Send)]
+impl SessionController for Starting {
+    async fn start(&self) -> Result<(), RuntimeError> {
+        self.starting.set(true);
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        (self.emit)(SessionEvent::State { state: TurnState::Running });
+        (self.emit)(SessionEvent::State { state: TurnState::Idle });
+        self.starting.set(false);
+        Ok(())
+    }
+    async fn submit(&self, _: &str, _: Option<PinnedNode>) -> Result<(), RuntimeError> {
+        if self.starting.get() {
+            return Err(RuntimeError::plain("Session is busy; cancel first"));
+        }
+        self.submits.fetch_add(1, Ordering::SeqCst);
+        self.status.borrow_mut().state = TurnState::Running;
+        (self.emit)(SessionEvent::State { state: TurnState::Running });
+        (self.emit)(SessionEvent::Kernel(KernelEvent::Text { text: "Lowered the bass by 3 dB.".into() }));
+        (self.emit)(SessionEvent::TurnComplete { result: TurnResult { stop_reason: StopReason::Completed, usage: None }, elapsed_ms: 1 });
+        self.status.borrow_mut().state = TurnState::Idle;
+        (self.emit)(SessionEvent::State { state: TurnState::Idle });
+        Ok(())
+    }
+    async fn refresh(&self) -> Result<(), RuntimeError> {
+        Ok(())
+    }
+    async fn new_conversation(&self) -> Result<(), RuntimeError> {
+        Ok(())
+    }
+    async fn cancel(&self) -> Result<(), RuntimeError> {
+        Ok(())
+    }
+    async fn close(&self) -> Result<(), RuntimeError> {
+        Ok(())
+    }
+    fn status(&self) -> SessionStatus {
+        self.status.borrow().clone()
+    }
+    async fn undo(&self, _: Option<&str>) -> Result<Option<ChangeRecord>, RuntimeError> {
+        Ok(None)
+    }
+}
+
+/// A message sent while the session starts, typed then or ahead of the screen, waits for the session and is answered,
+/// rather than going as a request the session turns away.
+#[tokio::test(flavor = "current_thread")]
+async fn a_message_sent_while_the_session_starts_waits_for_it() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            for ahead in [false, true] {
+                let submits = Arc::new(AtomicUsize::new(0));
+                let answered = submits.clone();
+                let build: Build = Box::new(move |emit| {
+                    async move {
+                        Ok(Built::new(Rc::new(Starting {
+                            emit,
+                            status: RefCell::new(idle()),
+                            starting: Cell::new(false),
+                            submits: answered,
+                        })))
+                    }
+                    .boxed_local()
+                });
+                let h = Harness::on(120, 36, Threaded::spawn(build).await.unwrap(), |options| {
+                    if ahead {
+                        options.typeahead = b"make the bass darker\r".to_vec();
+                    }
+                });
+                h.start().await;
+                if !ahead {
+                    h.input.write("make the bass darker\r");
+                }
+                until("the answer", || has(&h.screen(), "Lowered the bass by 3 dB.")).await;
+                assert_eq!(submits.load(Ordering::SeqCst), 1, "typed ahead: {ahead}");
+                assert!(!has(&h.screen(), "Session is busy"), "typed ahead: {ahead}\n{}", h.screen().join("\n"));
+                h.close().await;
+            }
+        })
+        .await;
+}

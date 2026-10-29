@@ -795,8 +795,11 @@ impl TuiApp {
             state.goal.is_some() || state.objective.is_some()
         };
         // A turn asked for and not answered is under way, though its Running may not have reached the screen yet (a session
-        // on a thread of its own says it a moment later).
-        let busy = self.busy() || self.0.state.borrow().turns_asked > 0;
+        // on a thread of its own says it a moment later), and so is the session's start.
+        let busy = self.busy() || {
+            let state = self.0.state.borrow();
+            state.turns_asked > 0 || state.starting
+        };
         let now = Now { busy, goal_running, can: self.can(), fronts: self.has().fronts };
         match commands::run(command, &now) {
             Effect::Quit => {
