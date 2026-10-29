@@ -1076,6 +1076,11 @@ async fn a_terminals_answers_are_read_as_answers_and_never_typed() {
             ]
             .map(InputEvent::Reply)
         );
+        // Its colours turned dark, then light (mode 2031's reports): read, never typed.
+        assert_eq!(
+            parse(&["\u{1b}[?997;1nx\u{1b}[?997;2n"], 5.0).await,
+            [InputEvent::Reply(Reply::Scheme { dark: true }), text("x"), InputEvent::Reply(Reply::Scheme { dark: false })]
+        );
         // A late answer, split between reads, is never typed, and its BEL is never ctrl+g.
         assert_eq!(
             parse(&["x\u{1b}]11;rgb:ff", "ff/ffff/ffff\u{7}y"], 5.0).await,
@@ -1257,6 +1262,8 @@ fn the_terminal_is_taken_over_and_always_given_back_even_twice() {
             && written.contains("\u{1b}[>3u"),
         "keys reported unambiguously, with repeats and let-gos"
     );
+    // Asked to say when its colours turn dark or light, for a theme that follows it; no longer, once Kumi has gone.
+    assert!(written.contains("\u{1b}[?2031h") && RESTORE.contains("\u{1b}[?2031l"), "{written:?}");
     assert_eq!((tty.size().columns, tty.size().rows), (100, 30));
     input.write("\u{1b}[A");
     output.emit_resize();

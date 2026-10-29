@@ -26,6 +26,7 @@ pub use setup::{waveform, WAVE_WIDTH};
 mod sharing;
 mod shown;
 mod take_back;
+mod theme;
 mod toast;
 mod usage;
 
@@ -189,8 +190,9 @@ pub struct TuiOptions {
     pub typeahead: Vec<u8>,
     /// What keys.json holds (other keys for Kumi's actions), or why it couldn't be read; None when there's no file.
     pub keys: Option<Result<serde_json::Value, String>>,
-    /// The colours the screen is drawn in (`theme`): dark, light or colour-blind.
-    pub theme: &'static super::style::Theme,
+    /// The colours the screen is drawn in (`theme`): dark, light or colour-blind; None follows the terminal (`system`),
+    /// light on a light background, and switches as the terminal says its colours changed.
+    pub theme: Option<&'static super::style::Theme>,
 }
 /// When the header shows how full the answering model's context is: from half full (`auto`), always, or never.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -278,7 +280,7 @@ impl TuiOptions {
             context_meter: ContextMeter::Auto,
             typeahead: Vec::new(),
             keys: None,
-            theme: &super::style::DARK,
+            theme: None,
         }
     }
 }
@@ -839,13 +841,13 @@ impl VoiceHost for AppVoice {
 impl TuiApp {
     pub fn new(options: TuiOptions) -> Self {
         Self(Rc::new_cyclic(|weak: &Weak<Inner>| {
-            // (before anything is drawn or mixed in it)
-            super::style::set_theme(options.theme);
             let depth = options.color_depth.unwrap_or_else(super::style::detect_color_depth_here);
             let icons = options.icons.unwrap_or_else(detect_icon_style_here);
             let w = weak.clone();
             let resize = weak.clone();
             let profile = options.terminal.clone().unwrap_or_else(away::detect_profile_here);
+            // The producer's theme, or the terminal's: before anything is drawn or mixed in it.
+            super::style::set_theme(options.theme.unwrap_or_else(|| super::style::for_background(profile.background)));
             super::markdown::set_terminal_opens_links(profile.hyperlinks);
             let graphics = options.graphics.unwrap_or_else(|| {
                 let cells_only = std::env::var("KUMI_PICTURES").is_ok_and(|value| value == "cells");

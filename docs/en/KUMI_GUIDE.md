@@ -1429,7 +1429,7 @@ Kumi keeps everything in `~/.kumi`. `~/.kumi/settings.json` holds:
 | `liveStatusBar` | `false`: no line in Live's (or Renoise's) status bar when Kumi finishes or needs you |
 | `keepAwake` | `false`: the computer may sleep while Kumi works |
 | `answerAfter` | Seconds before Kumi takes its recommended answer when nobody's there (60); `0` never does |
-| `theme` | `dark` (Kumi's own, the default), `light` (made for a light terminal) or `colorblind` (the dark one in colours that stay apart for red-green colour blindness) |
+| `theme` | `system` (the default: light or dark as the terminal's background is, turning with it where the terminal says its colours changed), `dark` (Kumi's own), `light` (made for a light terminal) or `colorblind` (the dark one in colours that stay apart for red-green colour blindness) |
 | `instantPhrases` | `false`: fixed phrases ("tempo 124", "mute drums") go to the model like any other message ([instant phrases](KUMI_TUI.md#instant-phrases)) |
 | `contextMeter` | The header's meter of how full the model's context is: `"auto"` (the default) from half full, `"always"`, or `"off"` |
 | `modelServers` | Model servers you name: `[{ "name", "baseURL", "apiKey", "format" }]` ([models on your computer](#models-on-your-computer)) |

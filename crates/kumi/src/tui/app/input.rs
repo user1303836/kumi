@@ -27,6 +27,11 @@ impl TuiApp {
             self.window_focus(focused);
             return;
         }
+        // An answer from the terminal: its colours turned dark or light, which a theme that follows it follows.
+        if let InputEvent::Reply(reply) = event {
+            self.terminal_replied(&reply);
+            return;
+        }
         // Keys pressed one after another (esc esc): the first, ended by whatever else the producer does (letting a key
         // go or moving the mouse does nothing). Only a key that reaches the box's keys can be the second.
         let pending = match event {

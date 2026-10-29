@@ -301,11 +301,12 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
         Some("off") => ContextMeter::Off,
         _ => ContextMeter::Auto,
     };
-    // ("system", or none set: dark until Kumi asks the terminal its background)
+    // ("system", or none set: the terminal's)
     let theme = match settings.theme.as_deref() {
-        Some("light") => &crate::tui::style::LIGHT,
-        Some("colorblind") => &crate::tui::style::COLOR_BLIND,
-        _ => &crate::tui::style::DARK,
+        Some("dark") => Some(&crate::tui::style::DARK),
+        Some("light") => Some(&crate::tui::style::LIGHT),
+        Some("colorblind") => Some(&crate::tui::style::COLOR_BLIND),
+        _ => None,
     };
     let projects_dir = load_projects_dir(&io.env)?;
     // Each Set's kept conversations, while Live may come in this session, or when the producer asked for one (then they

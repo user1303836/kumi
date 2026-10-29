@@ -308,8 +308,8 @@ pub const DARK: Theme = Theme {
 };
 
 /// For a light terminal, made for it rather than turned over: dark words on a warm paper white, each step of the greys
-/// as far apart as the dark theme's, and every colour deep enough to read on white (the accent a deeper mint, the
-/// warning amber rather than yellow).
+/// as far apart as the dark theme's, words at 4.5:1 or more on every ground as dark's are, and every colour deep enough
+/// to read on white (the accent a deeper mint, the warning amber rather than yellow).
 pub const LIGHT: Theme = Theme {
     name: "light",
     ground: [0xf7, 0xf7, 0xf4],
@@ -318,16 +318,16 @@ pub const LIGHT: Theme = Theme {
     selected: [0xcf, 0xe9, 0xdc],
     rule: [0xc3, 0xc7, 0xcc],
     track: [0xa9, 0xae, 0xb6],
-    faint: [0x73, 0x7a, 0x84],
-    dim: [0x54, 0x5b, 0x65],
+    faint: [0x63, 0x68, 0x71],
+    dim: [0x44, 0x4b, 0x54],
     text: [0x26, 0x2b, 0x31],
     bright: [0x0b, 0x0d, 0x10],
-    accent: [0x17, 0x89, 0x5a],
+    accent: [0x14, 0x76, 0x4e],
     pulse: [0xa8, 0xdc, 0xc2],
-    warn: [0xa8, 0x69, 0x0f],
+    warn: [0x92, 0x5b, 0x0d],
     beat: [0xd1, 0x9a, 0x00],
     offbeat: [0xe9, 0xdf, 0xb8],
-    error: [0xc2, 0x3b, 0x2e],
+    error: [0xbb, 0x39, 0x2c],
     note: [0x2a, 0x6f, 0xc4],
     technique: [0x74, 0x48, 0xc9],
     recipe: [0xb8, 0x45, 0x7a],
@@ -336,7 +336,8 @@ pub const LIGHT: Theme = Theme {
 };
 
 /// The dark theme with colours that stay apart for red-green colour blindness (from Okabe and Ito's set): the accent
-/// sky blue, the warning orange, the error vermilion, the kinds of memory bluish green, reddish purple, yellow and
+/// sky blue, the warning orange, the error vermilion (a little lighter, to read at 4.5:1), the kinds of memory bluish
+/// green, reddish purple, yellow and
 /// blue, and audio's icons yellow (MIDI's, an instrument's and a plug-in's follow the note, the lesson and the
 /// technique).
 pub const COLOR_BLIND: Theme = Theme {
@@ -347,7 +348,7 @@ pub const COLOR_BLIND: Theme = Theme {
     warn: [0xe6, 0x9f, 0x00],
     beat: [0xf0, 0xe4, 0x42],
     offbeat: [0x4d, 0x48, 0x20],
-    error: [0xd5, 0x5e, 0x00],
+    error: [0xd7, 0x65, 0x0b],
     note: [0x19, 0xb3, 0x8a],
     technique: [0xcc, 0x79, 0xa7],
     recipe: [0xf0, 0xe4, 0x42],
@@ -371,6 +372,14 @@ pub fn theme() -> &'static Theme {
 
 pub fn set_theme(theme: &'static Theme) {
     THEME.with(|current| current.set(theme));
+}
+
+/// The theme for a terminal's background (`system`): light on a light one, dark on a dark one or one not known.
+pub fn for_background(background: Option<Rgb>) -> &'static Theme {
+    match background {
+        Some(background) if contrast(background, [0, 0, 0]) > contrast(background, [0xff, 0xff, 0xff]) => &LIGHT,
+        _ => &DARK,
+    }
 }
 
 /// `process.platform`'s word for this system: "darwin", "linux", "win32" (or Rust's name elsewhere).
@@ -790,12 +799,36 @@ mod tests {
     }
 
     #[test]
+    fn every_themes_words_read_at_small_texts_contrast_on_each_of_its_grounds() {
+        // WCAG's 4.5:1 for small text: the greys words are written in, and the accent, the warning and the error, which
+        // are words too ("undo", "check Live"). Marks (memory's glyphs, icons, a track's chip) need 3:1, tested above.
+        for theme in THEMES {
+            let words = [theme.faint, theme.dim, theme.text, theme.bright, theme.accent, theme.warn, theme.error];
+            for (word, ground) in
+                words.into_iter().flat_map(|word| [theme.ground, theme.surface, theme.raised].map(|ground| (word, ground)))
+            {
+                assert!(contrast(word, ground) >= 4.5, "{} {word:?} on {ground:?}: {:.2}", theme.name, contrast(word, ground));
+            }
+        }
+        // And the steps between the light greys as far apart as dark's (dark's: 1.61 and 1.63).
+        assert!(contrast(LIGHT.faint, LIGHT.dim) >= 1.55 && contrast(LIGHT.dim, LIGHT.text) >= 1.55);
+    }
+
+    #[test]
+    fn a_terminals_background_chooses_light_or_dark() {
+        assert_eq!(for_background(Some([0xff, 0xff, 0xff])).name, "light");
+        assert_eq!(for_background(Some([0xfd, 0xf6, 0xe3])).name, "light");
+        assert_eq!(for_background(Some([0x1e, 0x1e, 0x1e])).name, "dark");
+        assert_eq!(for_background(Some([0x80, 0x80, 0x80])).name, "light");
+        assert_eq!(for_background(Some([0x70, 0x70, 0x70])).name, "dark");
+        assert_eq!(for_background(None).name, "dark");
+    }
+
+    #[test]
     fn the_light_theme_is_made_for_a_light_ground() {
         assert!(LIGHT.is_light() && !DARK.is_light() && !COLOR_BLIND.is_light());
-        // The words as far apart from the ground as the dark theme's are: the text near black, the faint still read.
+        // The words as far apart from the ground as the dark theme's are: the text near black.
         assert!(contrast(LIGHT.text, LIGHT.ground) >= 12., "{:.1}", contrast(LIGHT.text, LIGHT.ground));
-        assert!(contrast(LIGHT.dim, LIGHT.ground) >= 6., "{:.1}", contrast(LIGHT.dim, LIGHT.ground));
-        assert!(contrast(LIGHT.faint, LIGHT.ground) >= 4., "{:.1}", contrast(LIGHT.faint, LIGHT.ground));
         // Each step of the greys darker than the one under it, as each is lighter in the dark theme.
         let greys = [LIGHT.ground, LIGHT.surface, LIGHT.raised, LIGHT.rule, LIGHT.track, LIGHT.faint, LIGHT.dim, LIGHT.text, LIGHT.bright];
         let lightness = |rgb: Rgb| rgb.iter().map(|c| *c as u32).sum::<u32>();

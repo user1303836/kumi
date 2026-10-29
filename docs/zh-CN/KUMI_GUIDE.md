@@ -570,7 +570,7 @@ Kumi 把一切都保存在 `~/.kumi` 中。`~/.kumi/settings.json` 包含：
 | `liveStatusBar` | `false`：Kumi 完成或需要你时，不在 Live（或 Renoise）的状态栏显示一行 |
 | `keepAwake` | `false`：Kumi 工作时允许电脑休眠 |
 | `answerAfter` | 没人在时 Kumi 选择推荐答案之前的秒数（60）；`0` 表示从不 |
-| `theme` | `dark`（Kumi 自己的配色，默认）、`light`（为浅色终端而设计）或 `colorblind`（换成红绿色盲也能分清的颜色的 dark） |
+| `theme` | `system`（默认：按终端的背景选浅色或深色，终端告知配色变化时随之切换）、`dark`（Kumi 自己的配色）、`light`（为浅色终端而设计）或 `colorblind`（换成红绿色盲也能分清的颜色的 dark） |
 | `instantPhrases` | `false`：固定短语（"tempo 124"、"mute drums"）也像其他消息一样发给模型（[即时短语](KUMI_TUI.md#即时短语)） |
 | `contextMeter` | 顶栏上显示模型上下文用了多少的计量条：`"auto"`（默认）在用到一半以上时显示，`"always"` 始终显示，`"off"` 不显示 |
 | `modelServers` | 你命名的模型服务器：`[{ "name", "baseURL", "apiKey", "format" }]`（[你电脑上的模型](#你电脑上的模型)） |

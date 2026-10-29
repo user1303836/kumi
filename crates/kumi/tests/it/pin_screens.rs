@@ -1569,7 +1569,7 @@ scene!(answer_footer, |width, height| {
 
 /// The app in `theme`, started and connected to Night Drive.
 async fn open_in(width: i32, height: i32, theme: &'static kumi::tui::style::Theme) -> Harness {
-    let h = Harness::with(width, height, Rc::new(Control::default()), |o| o.theme = theme);
+    let h = Harness::with(width, height, Rc::new(Control::default()), |o| o.theme = Some(theme));
     h.start().await;
     h.connect();
     h
