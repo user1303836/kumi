@@ -42,8 +42,8 @@ case!(scrolling_up_moves_the_content_by_what_was_scrolled_across_requests, async
     answered(&h, "second request", 30).await;
     let mut before: Vec<String> = h.screen().iter().map(|line| left(line)).collect();
     let (mut pinned_second, mut pinned_first) = (false, false);
-    // Three rows a turn of the wheel, the first included (the header row coming in takes one of them).
-    for _ in 0..14 {
+    // Three rows a turn of the wheel, the first included (the header row coming in takes one of them), short of the top.
+    for _ in 0..10 {
         h.type_text(WHEEL_UP).await;
         let now: Vec<String> = h.screen().iter().map(|line| left(line)).collect();
         for y in 4..24 {

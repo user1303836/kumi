@@ -65,8 +65,7 @@ pub struct TranscriptView {
     anchor: Option<Anchor>,
     /// The newest entry when the view left the end: those after it are new below.
     seen: u64,
-    /// The last frame's first content row, its width and its height.
-    top: Option<(usize, usize)>,
+    /// The last frame's width and height.
     width: i32,
     height: usize,
 }
@@ -100,7 +99,7 @@ impl TranscriptView {
         let mut frame = Frame { header: None, lines: vec![], new_below: None, next: None };
         let count = transcript.entries.len();
         if count == 0 || height == 0 {
-            (self.anchor, self.top) = (None, None);
+            self.anchor = None;
             return frame;
         }
         let mut visited = vec![];
@@ -108,7 +107,6 @@ impl TranscriptView {
             self.anchor = None;
             // The last rows that fit, from the last entry up.
             let mut lines = VecDeque::with_capacity(height);
-            let mut top = (0, 0);
             let mut index = count;
             while index > 0 && lines.len() < height {
                 index -= 1;
@@ -116,10 +114,8 @@ impl TranscriptView {
                 let (len, rows) = block(transcript, index, width, now);
                 for row in (0..len).rev().take(height - lines.len()) {
                     lines.push_front(line(index, &rows, row));
-                    top = (index, row);
                 }
             }
-            self.top = Some(top);
             frame.lines = lines.into();
         }
         frame.next = visited.into_iter().filter_map(|index| transcript.change_of(index, now)).reduce(f64::min);
@@ -161,7 +157,6 @@ impl TranscriptView {
             return false;
         }
         self.anchor = Some(Anchor { entry: Rc::clone(&transcript.entries[index]), hint: index, row, width, height: len });
-        self.top = Some((index, row));
         frame.header = Some(self.pinned(transcript, index, row, now));
         frame.new_below = Some(transcript.entries.iter().filter(|entry| entry.id > self.seen).count());
         true
@@ -185,12 +180,12 @@ impl TranscriptView {
             Some((Some(index), row)) => (index, row, rows),
             Some((None, _)) => return,
             // At the end, only up leaves it; the header row coming in above moves the content down one row of the way.
-            None if rows > 0 => match self.top {
-                Some((index, row)) if index < transcript.entries.len() => {
+            None if rows > 0 => match self.end_top(transcript, now) {
+                Some((index, row)) => {
                     self.leave_end(transcript);
                     (index, row, rows - 1)
                 }
-                _ => return,
+                None => return,
             },
             None => return,
         };
@@ -221,11 +216,25 @@ impl TranscriptView {
 
     /// `entry`'s first row at the top: a click on the pinned request, and what search's jumps use.
     pub fn scroll_to(&mut self, transcript: &mut Transcript, entry: &EntryRef, now: f64) {
-        let Some(index) = transcript.find(entry, self.top.map_or(0, |(index, _)| index)) else { return };
+        let Some(index) = transcript.find(entry, self.anchor.as_ref().map_or(0, |anchor| anchor.hint)) else { return };
         if self.anchor.is_none() {
             self.leave_end(transcript);
         }
         self.anchor_at(transcript, index, usize::from(index > 0), now);
+    }
+
+    /// The top row at the end, at the last frame's size: from the transcript as it is now, which may have grown since that
+    /// frame was drawn.
+    fn end_top(&self, transcript: &mut Transcript, now: f64) -> Option<(usize, usize)> {
+        let (mut left, mut index, mut top) = (self.height, transcript.entries.len(), None);
+        while index > 0 && left > 0 {
+            index -= 1;
+            let (len, _) = block(transcript, index, self.width, now);
+            let taken = len.min(left);
+            top = Some((index, len - taken));
+            left -= taken;
+        }
+        top
     }
 
     fn leave_end(&mut self, transcript: &Transcript) {
