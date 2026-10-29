@@ -4,19 +4,20 @@
 //! the same bytes.
 use kumi_agent::core::{
     contracts::{
-        ActionEvent, ArrangementLoop, ArrangementStrip, CatchUp, ChainNode, ClipView, ClipViewNote, ConnectionState, ConversationNow,
-        ConversationSummary, DeviceNode, DeviceTree, DeviceType, DisconnectCause, FocusParameter, FocusTrack, KernelEvent, LessonAction,
-        LibraryEvent, LiveDetail, LiveFocus, LiveTransport, LiveView, Locator, Memory, MemoryEvent, MemoryNote, MemoryScope, MemoryView,
-        MusicEvent, PinKind, PinnedNode, PinnedTime, RecipeAction, RecipeEvent, SessionEvent, SessionSlot, SessionStatus, SessionStrip,
-        SetAsk, SetChoice, SlotClip, StopReason, TechniqueAction, TechniqueEvent, TechniqueSummary, TrackKind, TranscriptLine,
-        TranscriptRole, TurnResult, TurnState, WaitFor,
+        ActionEvent, ArrangementLoop, ArrangementStrip, Attachment, BodyRequest, CatchUp, ChainNode, ClipView, ClipViewNote,
+        ConnectionState, ConversationNow, ConversationSummary, DeviceNode, DeviceTree, DeviceType, DisconnectCause, FocusParameter,
+        FocusTrack, KernelEvent, LessonAction, LibraryEvent, LiveDetail, LiveFocus, LiveTransport, LiveView, Locator, Memory, MemoryEvent,
+        MemoryNote, MemoryScope, MemoryView, MusicEvent, NoteChange, Picked, PinKind, PinnedNode, PinnedTime, RecipeAction, RecipeEvent,
+        SessionEvent, SessionSlot, SessionStatus, SessionStrip, SetAsk, SetChoice, SlotClip, StopReason, TechniqueAction, TechniqueEvent,
+        TechniqueSummary, TrackKind, TranscriptLine, TranscriptRole, TurnResult, TurnState, WaitFor,
     },
     goal::{Best, GoalPhase, GoalStatus},
     goal_mode::{ObjectiveState, ObjectiveStatus, Verdict},
     jobs::{JobKind, JobState, JobStatus, WhenDone},
     loop_run::{LoopState, LoopStatus, LoopStop},
     match_run::{MatchState, MatchStatus, MatchStop},
-    palette::{PaletteFile, PaletteView},
+    palette::{Gathered, PaletteFile, PaletteView},
+    protocol::{op, Capabilities, Op},
 };
 use kumi_listening::{
     checklist::{Change as RowChange, Row},
@@ -769,6 +770,7 @@ fn events() -> Vec<SessionEvent> {
         }),
     });
     events.push(SessionEvent::Palette { palette: None });
+    events.push(SessionEvent::Aside { id: 2, text: "The kick and the bass share 60 Hz, so".into() });
     events.extend(
         [
             KernelEvent::Text { text: "Shortened the kick's decay.".into() },
@@ -855,6 +857,7 @@ fn variant(event: &SessionEvent) -> &'static str {
         SessionEvent::Job(_) => "Job",
         SessionEvent::CarryOn { .. } => "CarryOn",
         SessionEvent::Palette { .. } => "Palette",
+        SessionEvent::Aside { .. } => "Aside",
         SessionEvent::Kernel(event) => match event {
             KernelEvent::Text { .. } => "Kernel::Text",
             KernelEvent::ToolInput { .. } => "Kernel::ToolInput",
@@ -871,7 +874,7 @@ fn variant(event: &SessionEvent) -> &'static str {
     }
 }
 
-const VARIANTS: [&str; 44] = [
+const VARIANTS: [&str; 45] = [
     "Focus",
     "Pointed",
     "Change",
@@ -907,6 +910,7 @@ const VARIANTS: [&str; 44] = [
     "Job",
     "CarryOn",
     "Palette",
+    "Aside",
     "Kernel::Text",
     "Kernel::ToolInput",
     "Kernel::ToolStart",
@@ -1455,4 +1459,156 @@ fn older_and_later_pictures_still_read() {
     )
     .unwrap();
     assert_eq!(later, change("c2", ChangeFamily::Device, "Something new", ChangeState::Applied));
+}
+
+/// One of every request a front end makes: each optional field filled and left out, and each value of the enums they
+/// carry. (The protocol's tests send each of them too.)
+pub(crate) fn requests() -> Vec<Op> {
+    let pinned = pins().remove(0);
+    let mut requests: Vec<Op> = vec![
+        op::Start {}.into(),
+        op::Submit {
+            input: "make the kick punchier".into(),
+            pinned: Some(pinned.clone()),
+            attachments: vec![Attachment {
+                path: "/Users/me/Desktop/reference.png".into(),
+                name: "reference.png".into(),
+                media_type: "image/png".into(),
+                bytes: 48_210,
+            }],
+        }
+        .into(),
+        op::Submit { input: "louder".into(), pinned: None, attachments: vec![] }.into(),
+        op::Steer { text: "and leave the snare".into() }.into(),
+        op::Aside { id: 2, question: "why the low shelf?".into() }.into(),
+        op::StopAside { id: 2 }.into(),
+        op::Cancel {}.into(),
+        op::Close {}.into(),
+        op::Undo { id: Some("c3".into()) }.into(),
+        op::Undo { id: None }.into(),
+        op::Refresh {}.into(),
+        op::NewConversation {}.into(),
+        op::Reconnect {}.into(),
+        op::Reconfigure {}.into(),
+        op::Instant { text: "tempo 124".into() }.into(),
+        op::Pick { pick: Picked::Answer { question: "Which kick?".into(), options: vec!["808".into(), "909".into()], index: 1 } }.into(),
+        op::Pick { pick: Picked::Technique { name: "Parallel drum bus".into(), keep: true } }.into(),
+        op::Conversations {}.into(),
+        op::AllConversations {}.into(),
+        op::FindConversation { word: "kick".into() }.into(),
+        op::ResumeConversation { id: "01JB9Z6P1Q".into() }.into(),
+        op::RenameConversation { id: Some("01JB9Z6P1Q".into()), name: Some("Kick work".into()) }.into(),
+        op::RenameConversation { id: None, name: None }.into(),
+        op::PinConversation { id: "01JB9Z6P1Q".into(), pinned: true }.into(),
+        op::DeleteConversation { id: "01JB9Z6P1Q".into() }.into(),
+        op::ForkConversation { name: Some("Kick, darker".into()) }.into(),
+        op::ForkConversation { name: None }.into(),
+        op::ConversationNow {}.into(),
+        op::ConversationLines { id: "01JB9Z6P1Q".into() }.into(),
+        op::ConversationToExport {}.into(),
+        op::Memory {}.into(),
+        op::Remembered {}.into(),
+        op::Taste {}.into(),
+        op::ForgetTaste { id: "t2".into() }.into(),
+        op::Forget { id: "p3".into() }.into(),
+        op::ChangeNote { id: "p3".into(), change: NoteChange::Text("Likes the kick dry".into()) }.into(),
+        op::ChangeNote { id: "s1".into(), change: NoteChange::Pinned(true) }.into(),
+        op::Recipes {}.into(),
+        op::PinForRecipe { pin: pinned }.into(),
+        op::RunRecipe { name: "Drum bus".into(), with: serde_json::from_value(serde_json::json!({"track": "Drums"})).unwrap() }.into(),
+        op::ForgetRecipe { name: "Drum bus".into() }.into(),
+        op::Techniques {}.into(),
+        op::ForgetTechnique { id: "k1".into() }.into(),
+        op::AnswerTechnique { keep: false }.into(),
+        op::Lessons {}.into(),
+        op::ForgetLesson { id: "l4".into() }.into(),
+        op::Goal { text: Some("a kick that cuts through at -14 LUFS".into()) }.into(),
+        op::Goal { text: None }.into(),
+        op::StopGoal {}.into(),
+        op::StopLoop {}.into(),
+        op::StopDaw {}.into(),
+        op::DawMessage { text: "Kumi · done".into() }.into(),
+        op::DawRecording {}.into(),
+        op::StopJob { id: 3 }.into(),
+        op::RunJobAgain { id: 3 }.into(),
+        op::Background {}.into(),
+        op::CarryOn { job: 3 }.into(),
+        op::Palette {}.into(),
+        op::PaletteGather {
+            files: vec![
+                Gathered { path: "/Samples/Kicks/Kick 808.wav".into(), name: "Kick 808".into(), song: false, class: Some("kick".into()) },
+                Gathered { path: "/Music/Night Drive.wav".into(), name: "Night Drive".into(), song: true, class: None },
+            ],
+        }
+        .into(),
+        op::PaletteRemove { path: "/Samples/Kicks/Kick 808.wav".into(), size: 48_210, mtime: AT }.into(),
+        op::PaletteCommand { words: "use Drums".into() }.into(),
+    ];
+    requests.extend([SetChoice::Open, SetChoice::Copy, SetChoice::Cancel].map(|choice| op::AnswerSet { choice }.into()));
+    requests.extend(
+        [
+            BodyRequest::Tree { track_ref: "7:track:0".into() },
+            BodyRequest::Notes { item_ref: "7:clip_slot:0:2".into() },
+            BodyRequest::Grid { track_ref: "7:track:0".into(), index: 2.0 },
+            BodyRequest::Timeline,
+            BodyRequest::Tracker { item_ref: Some("pattern:3".into()) },
+            BodyRequest::Tracker { item_ref: None },
+            BodyRequest::Matrix,
+            BodyRequest::Keyzones { item_ref: "instrument:1".into() },
+            BodyRequest::Routing { track_ref: "track:2".into() },
+            BodyRequest::Mixer { track_ref: Some("track:2".into()) },
+            BodyRequest::Mixer { track_ref: None },
+        ]
+        .map(|request| op::FocusBody { request }.into()),
+    );
+    requests
+}
+
+#[test]
+fn every_request_keeps_its_wire_shape() {
+    let requests = requests();
+    // Every request in the protocol's table has one here: a request added later has to be.
+    let names: BTreeSet<&str> = requests.iter().map(Op::name).collect();
+    assert_eq!(names, Op::NAMES.iter().copied().collect::<BTreeSet<_>>(), "every request is pinned");
+    pinned::<Vec<Op>>("requests.json", &requests);
+}
+
+#[test]
+fn capabilities_keep_their_wire_shape() {
+    // Most of what a session can do, and some of it not (steering, jobs, palettes, an answer to a technique offered).
+    let capabilities = Capabilities {
+        attachments: true,
+        aside: true,
+        reconnect: true,
+        conversations: true,
+        resume_conversation: true,
+        watch: true,
+        memory: true,
+        library: true,
+        taste: true,
+        forget_taste: true,
+        forget: true,
+        change_note: true,
+        recipes: true,
+        instant: true,
+        run_recipe: true,
+        forget_recipe: true,
+        techniques: true,
+        forget_technique: true,
+        goal: true,
+        stop_goal: true,
+        stop_loop: true,
+        goal_status: true,
+        lessons: true,
+        forget_lesson: true,
+        stop_daw: true,
+        daw_message: true,
+        device_tree: true,
+        clip_view: true,
+        session_strip: true,
+        arrangement_strip: true,
+        reconfigure: true,
+        ..Capabilities::default()
+    };
+    pinned::<Capabilities>("capabilities.json", &capabilities);
 }

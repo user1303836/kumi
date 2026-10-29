@@ -1066,7 +1066,7 @@ impl TuiApp {
                     app.task(move |app| async move {
                         let forget = entry.borrow().forget.clone();
                         // A forget that failed is said as it failed (by the task), and the row still offers it.
-                        let gone = forget().await?;
+                        let gone = app.forget(forget).await?;
                         if !gone && !entry.borrow().forgotten {
                             app.0.state.borrow_mut().records.set_forgotten(&entry);
                             app.notice("That was already gone.", NoticeTone::Info);

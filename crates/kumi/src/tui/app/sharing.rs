@@ -1,7 +1,7 @@
 //! /export and /share: this conversation as a file in the folder Kumi was started in, never over another, with what
 //! `kumi report` takes out taken out.
 use super::*;
-use crate::export::{conversation_now, redactor_now, save_in, saved_words, Exported, COPY_MOST};
+use crate::export::{exported, redactor_now, save_in, saved_words, Exported, COPY_MOST};
 use kumi_agent::core::export::Format;
 use kumi_types::system;
 use std::path::PathBuf;
@@ -148,7 +148,8 @@ impl TuiApp {
     async fn exported(&self, format: Format) -> Option<Exported> {
         let secrets = self.0.state.borrow().secrets.clone();
         let redact = redactor_now(self.0.options.redact.as_ref(), &secrets).await;
-        match conversation_now(&*self.0.options.controller, format, &*redact).await {
+        let found = self.session().op(op::ConversationToExport {}).await.ok().flatten();
+        match exported(found, format, &*redact) {
             Ok(exported) => Some(exported),
             Err(why) => {
                 self.notice(&why, NoticeTone::Info);

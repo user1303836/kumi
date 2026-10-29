@@ -31,6 +31,7 @@ pub mod playbook;
 pub mod plugin_tools;
 pub mod presentation;
 pub mod project;
+pub mod protocol;
 pub mod recall;
 pub mod recipes;
 pub mod refs;

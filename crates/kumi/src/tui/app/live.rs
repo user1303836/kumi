@@ -12,7 +12,7 @@ pub(super) struct Beat {
 }
 impl TuiApp {
     pub(super) fn read_tree(&self, again: bool) {
-        if !self.0.options.controller.can_show(BodyKind::Tree) {
+        if !self.session().can_show(BodyKind::Tree) {
             return;
         }
         let reference = {
@@ -45,7 +45,7 @@ impl TuiApp {
             reference
         };
         self.task(move |app| async move {
-            let result = app.0.options.controller.focus_body(&BodyRequest::Tree { track_ref: reference }).await;
+            let result = app.session().op(op::FocusBody { request: BodyRequest::Tree { track_ref: reference } }).await;
             let again = {
                 let mut state = app.0.state.borrow_mut();
                 if let Ok(Some(FocusBody::Tree(tree))) = result {
@@ -69,7 +69,7 @@ impl TuiApp {
         });
     }
     pub(super) fn read_clip(&self, again: bool) {
-        if !self.0.options.controller.can_show(BodyKind::Notes) {
+        if !self.session().can_show(BodyKind::Notes) {
             return;
         }
         let reference = {
@@ -104,7 +104,7 @@ impl TuiApp {
             reference
         };
         self.task(move |app| async move {
-            let result = app.0.options.controller.focus_body(&BodyRequest::Notes { item_ref: reference }).await;
+            let result = app.session().op(op::FocusBody { request: BodyRequest::Notes { item_ref: reference } }).await;
             let again = {
                 let mut state = app.0.state.borrow_mut();
                 // A busy DAW answers nothing: what was shown stays.
@@ -181,14 +181,14 @@ impl TuiApp {
             state.strip.reading = true;
             (reference, scene)
         };
-        if !self.0.options.controller.can_show(kind) {
+        if !self.session().can_show(kind) {
             self.0.state.borrow_mut().strip.reading = false;
             return;
         }
         self.task(move |app| async move {
             let request =
                 if kind == BodyKind::Grid { BodyRequest::Grid { track_ref: reference, index: scene } } else { BodyRequest::Timeline };
-            if let Ok(body) = app.0.options.controller.focus_body(&request).await {
+            if let Ok(body) = app.session().op(op::FocusBody { request }).await {
                 let mut state = app.0.state.borrow_mut();
                 // A busy DAW answers nothing: what was shown stays.
                 let busy = state.focus.as_ref().is_some_and(|focus| focus.busy.is_some());
@@ -275,7 +275,7 @@ impl TuiApp {
             _ => return None,
         };
         drop(state);
-        self.0.options.controller.can_show(request.kind()).then_some(request)
+        self.session().can_show(request.kind()).then_some(request)
     }
     /// Reads that body again when what it's for changed (or `again`).
     pub(super) fn read_own(&self, again: bool) {
@@ -300,7 +300,7 @@ impl TuiApp {
             state.own.reading = true;
         }
         self.task(move |app| async move {
-            let result = app.0.options.controller.focus_body(&request).await;
+            let result = app.session().op(op::FocusBody { request }).await;
             let again = {
                 let mut state = app.0.state.borrow_mut();
                 // A read that brings nothing (refused: a busy DAW, Renoise while Kumi renders) leaves what was shown;

@@ -44,7 +44,7 @@ impl TuiApp {
             voice.cancel();
         }
         let hover = self.0.options.map_hover.as_ref().is_none_or(|hover| (hover.load)());
-        let gathers = self.0.options.controller.has_palette();
+        let gathers = self.can().palette;
         self.0.state.borrow_mut().map = Some(MapView::new(self.0.graphics, hover).gliding(self.0.options.map_glides).gathering(gathers));
         // The mouse's moves, reported while the map is open: a point plays as the mouse comes to it.
         self.0.tty.report_moves(true);
@@ -100,7 +100,7 @@ impl TuiApp {
             return;
         }
         let page = crate::map::Page::new(data);
-        let page = Arc::new(if self.0.options.controller.has_palette() { page.with_palette() } else { page });
+        let page = Arc::new(if self.can().palette { page.with_palette() } else { page });
         let app = Rc::downgrade(&self.0);
         let served = Served {
             points: Box::new({

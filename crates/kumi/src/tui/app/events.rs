@@ -337,6 +337,16 @@ impl TuiApp {
             SessionEvent::Job(status) => self.job_event(&status),
             SessionEvent::CarryOn { job, title } => self.carry_on_event(job, &title),
             SessionEvent::Palette { palette } => self.palette_event(palette),
+            // An aside's words as they're written, drawn at once.
+            SessionEvent::Aside { id, text } => {
+                let aside = self.0.state.borrow().asides.iter().find(|aside| aside.borrow().id == id).cloned();
+                if let Some(aside) = aside {
+                    let mut aside = aside.borrow_mut();
+                    let shown = aside.stream.push(&text);
+                    aside.answer.push_str(&shown);
+                }
+                self.0.scheduler.request();
+            }
             SessionEvent::Error { message: said, kind, provider } => {
                 {
                     let mut state = self.0.state.borrow_mut();
@@ -388,18 +398,7 @@ impl TuiApp {
                     &format!("{} {about}: {}", if replaced.is_some() { "Updated a note" } else { "Noted" }, note.text),
                 );
                 let key = format!("note:{}:{}{}", scope_key(scope), if pending { "pending:" } else { "" }, note.id);
-                let id = note.id;
-                let controller = self.0.options.controller.clone();
-                self.keep(
-                    key,
-                    MemoryKind::Note,
-                    &note.text,
-                    Rc::new(move || {
-                        let controller = controller.clone();
-                        let id = id.clone();
-                        async move { Ok(controller.forget(&id).await?.is_some()) }.boxed_local()
-                    }),
-                );
+                self.keep(key, MemoryKind::Note, &note.text, Forget::Note(note.id));
             }
             SessionEvent::Memory(MemoryEvent::Forgot { scope, note }) => {
                 self.memory_line(MemoryKind::Note, &format!("Forgot: {}", note.text));
@@ -421,17 +420,7 @@ impl TuiApp {
                                 if action == LessonAction::Updated { "Updated what I learned" } else { "Learned from this match" }
                             ),
                         );
-                        let controller = self.0.options.controller.clone();
-                        self.keep(
-                            key,
-                            MemoryKind::Lesson,
-                            &line,
-                            Rc::new(move || {
-                                let controller = controller.clone();
-                                let id = id.clone();
-                                async move { controller.forget_lesson(&id).await }.boxed_local()
-                            }),
-                        );
+                        self.keep(key, MemoryKind::Lesson, &line, Forget::Lesson(id));
                     }
                 }
             }
@@ -454,18 +443,7 @@ impl TuiApp {
                 let key = format!("technique:{}", technique.id);
                 match action {
                     TechniqueAction::Kept | TechniqueAction::Updated => {
-                        let id = technique.id.clone();
-                        let controller = self.0.options.controller.clone();
-                        self.keep(
-                            key,
-                            MemoryKind::Technique,
-                            name,
-                            Rc::new(move || {
-                                let controller = controller.clone();
-                                let id = id.clone();
-                                async move { controller.forget_technique(&id).await }.boxed_local()
-                            }),
-                        );
+                        self.keep(key, MemoryKind::Technique, name, Forget::Technique(technique.id.clone()));
                     }
                     TechniqueAction::Forgot => self.forgotten(&key),
                     TechniqueAction::Offered | TechniqueAction::Used => {}
@@ -485,18 +463,7 @@ impl TuiApp {
                 let key = format!("recipe:{}", name.to_lowercase());
                 match action {
                     RecipeAction::Saved | RecipeAction::Updated => {
-                        let forget = name.clone();
-                        let controller = self.0.options.controller.clone();
-                        self.keep(
-                            key,
-                            MemoryKind::Recipe,
-                            &name,
-                            Rc::new(move || {
-                                let controller = controller.clone();
-                                let name = forget.clone();
-                                async move { controller.forget_recipe(&name).await }.boxed_local()
-                            }),
-                        );
+                        self.keep(key, MemoryKind::Recipe, &name, Forget::Recipe(name.clone()));
                     }
                     RecipeAction::Forgotten => self.forgotten(&key),
                     RecipeAction::Running => {}
@@ -932,13 +899,7 @@ impl TuiApp {
         self.flash();
         self.0.scheduler.request();
     }
-    fn keep(
-        &self,
-        key: String,
-        what: MemoryKind,
-        title: &str,
-        forget: Rc<dyn Fn() -> LocalBoxFuture<'static, Result<bool, RuntimeError>>>,
-    ) {
+    fn keep(&self, key: String, what: MemoryKind, title: &str, forget: Forget) {
         let title = self.clean_line(title, 200);
         let mut state = self.0.state.borrow_mut();
         let kept = state.records.kept_mut();
@@ -948,6 +909,15 @@ impl TuiApp {
         kept.push(Rc::new(RefCell::new(Kept { key, what, title, forgotten: false, forget })));
         if kept.len() > 50 {
             kept.remove(0);
+        }
+    }
+    /// Forgets something Kumi kept, through the session: whether it was still there to forget.
+    pub(super) async fn forget(&self, forget: Forget) -> Result<bool, RuntimeError> {
+        match forget {
+            Forget::Note(id) => Ok(self.session().op(op::Forget { id }).await?.is_some()),
+            Forget::Lesson(id) => self.session().op(op::ForgetLesson { id }).await,
+            Forget::Technique(id) => self.session().op(op::ForgetTechnique { id }).await,
+            Forget::Recipe(name) => self.session().op(op::ForgetRecipe { name }).await,
         }
     }
     fn forgotten(&self, key: &str) {
@@ -965,16 +935,17 @@ impl TuiApp {
         self.0.scheduler.request();
     }
     fn steer_held(&self) {
-        if !self.0.options.controller.has_steer() {
+        if !self.can().steer {
             return;
         }
         let held = self.0.state.borrow().held.clone();
-        for (index, item) in held.iter().enumerate() {
+        for (index, item) in held.into_iter().enumerate() {
             if item.when == "now" && !item.taken {
-                let taken = self.0.options.controller.steer(&item.text);
-                if let Some(current) = self.0.state.borrow_mut().held.get_mut(index).filter(|h| h.text == item.text) {
-                    current.taken = taken;
-                }
+                self.when_answered(op::Steer { text: item.text.clone() }, move |app, taken| {
+                    if let Some(current) = app.0.state.borrow_mut().held.get_mut(index).filter(|h| h.text == item.text) {
+                        current.taken = taken.unwrap_or(false);
+                    }
+                });
             }
         }
     }
