@@ -60,6 +60,12 @@ the rest. A conversation carried on from last time goes above them. A fresh
 install shows none, and the model never sees them. `"whatsNew": false` in
 `~/.kumi/settings.json` turns them off.
 
+A conversation carried on comes back as you left it: its last 30 requests with
+their steps, pictures and listening rounds, and above them how many came before.
+HISTORY shows its changes, which Kumi can't undo after a restart (your DAW's own
+undo still can). A conversation kept by an older Kumi comes back as its words, as
+before.
+
 **Setup** comes first when a step is missing: signing in, Kumi's bridge in Live
 (missing, or older than Kumi's), and then the Control Surface. It lists the three
 steps, done ones in mint with what was chosen, and asks what the current one
