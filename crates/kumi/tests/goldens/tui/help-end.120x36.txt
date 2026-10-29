@@ -1,12 +1,14 @@
   Kumi  ·  Night Drive                                                                                          ● Live
 
                                                                                   FOCUS
-   Keys and commands                                                ↑ 72 more     Night Drive
+   Keys and commands                                                ↑ 70 more     Night Drive
                                                                                   Your selection will show here
-     ctrl+d              Quit, from an empty box while Kumi isn't working
-     /undo               Undo Kumi's last change; undo at the end of a
-                         HISTORY row takes back that one                          NOW
-                                                                                  Ready
+     ctrl+c              Stop Kumi; when it isn't working, clear the box (↑
+                         or ctrl+- brings the words back), then quit
+     ctrl+d              Quit, from an empty box while Kumi isn't working         NOW
+     /undo               Undo Kumi's last change; undo at the end of a            Ready
+                         HISTORY row takes back that one
+
    Commands
      /                   The commands as you type: ↑↓ choose, tab completes,
                          enter runs, esc closes
@@ -15,15 +17,13 @@
                          /new <name> names it
      /undo               Undo Kumi's last change
      /refresh            Read your Live Set again
-     /copy               Copy Kumi's last answer
-     /export             This conversation as a file: choose, or /export
-                         copy, md, html or json (for another Kumi)                HISTORY ────────────────────────────
-     /share              Save this conversation as a web page that opens          Nothing changed yet
+     /copy               Copy Kumi's last answer                                  HISTORY ────────────────────────────
+     /export             This conversation as a file: choose, or /export          Nothing changed yet
+                         copy, md, html or json (for another Kumi)
+     /share              Save this conversation as a web page that opens
                          anywhere, to send
      /loop               Listen, judge and adjust in rounds until the goal is
                          met: /loop <what>, then stop
-     /goal               Keep at one goal until it's met: /goal <what>, then
-                         resume, edit, pause, clear
      /status             What Kumi is connected to
      /changelog          What's new in Kumi
      /help               Keys and commands

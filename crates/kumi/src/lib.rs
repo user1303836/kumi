@@ -4,6 +4,7 @@ pub mod config;
 pub mod daw;
 pub mod doctor;
 pub mod export;
+pub mod has;
 pub mod history;
 pub mod input;
 pub mod install;

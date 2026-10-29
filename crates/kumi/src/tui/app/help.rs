@@ -7,8 +7,10 @@ use super::super::{
 };
 use super::draw_panel::Line;
 use super::drawing::{sp, st};
-use super::input::COMMANDS;
+use super::input::about;
 use super::*;
+use crate::has::Has;
+use kumi_agent::core::commands::COMMANDS;
 
 /// The widest the keys column gets: a key wider than this has what it does on the rows under it.
 const KEYS_MOST: i32 = 18;
@@ -21,23 +23,9 @@ pub(super) struct HelpSection {
     pub rows: Vec<(String, String)>,
 }
 
-/// What this session has that the help's keys depend on.
-#[derive(Clone, Copy, Default)]
-pub(super) struct HelpHas {
-    pub voice: bool,
-    pub attachments: bool,
-    pub jobs: bool,
-    pub palette: bool,
-    pub slots: bool,
-    /// Text copies as the mouse lets go of it (`copyOnSelect`).
-    pub copy_on_select: bool,
-    /// Kumi has the mouse (`mouse`); off, the terminal keeps it, and the wheel and Kumi's clicks aren't there.
-    pub mouse: bool,
-}
-
 /// The help's sections: the keys that work in this session (`has`), in the DAW's words (`app`), the pane's `tabs`, and
 /// the commands the `/` menu offers, each with what it says of itself.
-pub(super) fn help_sections(has: HelpHas, app: &str, tabs: &[String], commands: Vec<(String, String)>) -> Vec<HelpSection> {
+pub(super) fn help_sections(has: Has, app: &str, tabs: &[String], commands: Vec<(String, String)>) -> Vec<HelpSection> {
     let row = |keys: &str, does: &str| (keys.to_string(), does.to_string());
     let mut send = vec![
         row("enter", "Send. While Kumi works, it reads your message after the step under way"),
@@ -51,18 +39,18 @@ pub(super) fn help_sections(has: HelpHas, app: &str, tabs: &[String], commands: 
              box, esc goes back to your draft",
         ),
     ];
-    if has.voice {
+    if has.fronts.voice {
         send.push(row(
             "ctrl+t",
             "Talk instead of typing: press it again to stop, or hold it while you talk. What you said lands in the box; \
              enter stops and sends at once, and esc drops it",
         ));
     }
-    if has.attachments {
+    if has.can.attachments {
         send.push(row("ctrl+v", "Add the picture on the clipboard to your next message; files dragged in go with it too"));
         send.push(row("backspace", "In an empty box, take back the last file added"));
     }
-    if has.jobs {
+    if has.can.jobs {
         send.push((
             "ctrl+b".into(),
             format!("Move a slow step that doesn't use {app} (a video, pages) to the background, and carry on; in tmux, press it twice"),
@@ -107,7 +95,7 @@ pub(super) fn help_sections(has: HelpHas, app: &str, tabs: &[String], commands: 
         ),
         row(
             "enter",
-            if has.jobs {
+            if has.can.jobs {
                 "In the tabs: open a change's picture or a job; on what Kumi kept, forget it"
             } else {
                 "In the tabs: open a change's picture; on what Kumi kept, forget it"
@@ -116,10 +104,10 @@ pub(super) fn help_sections(has: HelpHas, app: &str, tabs: &[String], commands: 
         row("→  space", "On a change: open its picture; ← closes it"),
         row("u", "On a change with its picture open: undo it"),
     ];
-    if has.jobs {
+    if has.can.jobs {
         pane.push(row("x", "On a running job: stop it"));
     }
-    if has.palette {
+    if has.can.palette {
         pane.push(row("space  x", "On a sound in PALETTE: play it, or take it out"));
     }
     pane.extend([
@@ -135,7 +123,7 @@ pub(super) fn help_sections(has: HelpHas, app: &str, tabs: &[String], commands: 
             format!(
                 "undo or forget at a row's end; a change's words open its picture{}, a row in FOCUS's tree pins it, and a tab's \
                  name shows that tab",
-                if has.jobs { ", a job's open the job" } else { "" }
+                if has.can.jobs { ", a job's open the job" } else { "" }
             ),
         ));
     }
@@ -161,7 +149,7 @@ pub(super) fn help_sections(has: HelpHas, app: &str, tabs: &[String], commands: 
         row("ctrl+s", "Put the draft aside, with its files; in an empty box, bring it back"),
     ];
     let mut stop = vec![row("esc", "Stop Kumi's answer: the steps it finished stay, and waiting messages go back into the box")];
-    if has.slots {
+    if has.can.slots {
         stop.push(row("esc", "A /slots check under way stops first"));
     }
     stop.extend([
@@ -233,18 +221,8 @@ pub(super) fn help_rows(sections: &[HelpSection], width: i32) -> Vec<Vec<Span>> 
 impl TuiApp {
     /// What the help says in this session: the keys that work here, and the commands the `/` menu offers, in its words.
     pub(super) fn help_sections(&self) -> Vec<HelpSection> {
-        let can = self.can();
-        let has = HelpHas {
-            voice: self.0.voice.is_some(),
-            attachments: can.attachments,
-            jobs: can.jobs,
-            palette: can.palette,
-            slots: can.slots,
-            copy_on_select: self.0.options.copy_on_select,
-            mouse: self.0.options.mouse,
-        };
-        let commands =
-            COMMANDS.iter().filter(|command| self.offered(&can, command.name)).map(|command| (command.name.into(), command.about()));
+        let has = self.has();
+        let commands = COMMANDS.iter().filter(|command| has.offers(command)).map(|command| (command.name.into(), about(command)));
         // The tabs shift+tab goes through: those on the strip.
         let tabs: Vec<String> = self.0.tabs.titles().into_iter().map(|(_, title, _)| title).collect();
         help_sections(has, crate::daw::words().app, &tabs, commands.collect())
@@ -329,13 +307,23 @@ impl Overlay<TuiApp> for HelpPanel {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use kumi_agent::core::{commands::Fronts, protocol::Capabilities};
 
     /// The whole help, every key there, with text copying as the mouse lets go or not, and the mouse Kumi's or the
     /// terminal's.
     fn every_section_with(copy_on_select: bool, mouse: bool) -> Vec<HelpSection> {
-        let has = HelpHas { voice: true, attachments: true, jobs: true, palette: true, slots: true, copy_on_select, mouse };
+        let can = Capabilities { attachments: true, jobs: true, palette: true, slots: true, ..Default::default() };
+        let has = Has { can, fronts: Fronts { voice: true, ..Default::default() }, copy_on_select, mouse };
         let tabs = ["HISTORY", "GOAL", "JOBS", "PALETTE"].map(String::from);
-        help_sections(has, "Live", &tabs, COMMANDS.iter().map(|command| (command.name.to_string(), command.about.to_string())).collect())
+        help_sections(
+            has,
+            "Live",
+            &tabs,
+            COMMANDS
+                .iter()
+                .map(|command| (command.name.to_string(), command.about(&kumi_types::daw::DawProfile::ABLETON.words, true)))
+                .collect(),
+        )
     }
 
     fn every_section() -> Vec<HelpSection> {

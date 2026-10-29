@@ -894,6 +894,22 @@ impl TuiApp {
     fn can(&self) -> Capabilities {
         self.0.options.session.capabilities()
     }
+    /// What this session and this app have: what the `/` menu, the help and the keys offer.
+    fn has(&self) -> crate::has::Has {
+        let options = &self.0.options;
+        crate::has::Has {
+            can: self.can(),
+            fronts: kumi_agent::core::commands::Fronts {
+                models: options.models.is_some(),
+                voice: self.0.voice.is_some(),
+                updates: options.updates.is_some(),
+                switch_daw: options.switch_daw.is_some(),
+                willington: self.willington().is_some(),
+            },
+            mouse: options.mouse,
+            copy_on_select: options.copy_on_select,
+        }
+    }
     fn busy(&self) -> bool {
         matches!(self.session().status().state, TurnState::Running | TurnState::Cancelling)
     }

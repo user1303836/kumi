@@ -1,6 +1,7 @@
 // What kumi-types holds now, where the runtime's code has always named it.
 
 pub mod chop;
+pub mod commands;
 pub mod context;
 pub mod contracts;
 pub mod conversations;

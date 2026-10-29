@@ -1,8 +1,10 @@
   Kumi  ·  Night Drive                                                  ● Live
 
 
-   Keys and commands                                                ↑ 78 more
+   Keys and commands                                                ↑ 76 more
 
+   Commands
+     /                   The commands as you type: ↑↓ choose, tab completes,
                          enter runs, esc closes
      ?                   This help, from an empty box
      /new                Start a fresh conversation (the last one is kept);
@@ -16,8 +18,6 @@
                          anywhere, to send
      /loop               Listen, judge and adjust in rounds until the goal is
                          met: /loop <what>, then stop
-     /goal               Keep at one goal until it's met: /goal <what>, then
-                         resume, edit, pause, clear
      /status             What Kumi is connected to
      /changelog          What's new in Kumi
      /help               Keys and commands

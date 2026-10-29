@@ -1,5 +1,6 @@
 //! kumi-agent's integration tests, one module per file: one test binary for the crate, built and linked once.
 mod budget;
+mod commands;
 mod conversations;
 mod daw_neutral_guard;
 mod deferred_tools;
