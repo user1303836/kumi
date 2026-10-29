@@ -1375,3 +1375,28 @@ case!(the_help_pages_to_its_end_at_every_size, async {
         h.close().await;
     }
 });
+case!(with_the_mouse_off_the_help_leaves_out_the_wheel_and_kumis_clicks, async {
+    for mouse in [true, false] {
+        let h = Harness::with(120, 36, Rc::new(Control::default()), |o| o.mouse = mouse);
+        h.start().await;
+        h.connect();
+        h.type_text("?").await;
+        h.wait_for("Keys and commands").await;
+        let mut seen = h.screen().join("\n");
+        for page in 1.. {
+            h.type_text("\x1b[6~").await;
+            seen.push_str(&h.screen().join("\n"));
+            if help_scrolled(&h).1 == 0 {
+                break;
+            }
+            assert!(page < 12, "the help never ends");
+        }
+        // The terminal's own selection in place of Kumi's drag, and no wheel, shift+drag, clicks or ×.
+        let mouse_is = if mouse { "on" } else { "off" };
+        assert_eq!(seen.contains("The mouse is your terminal's"), !mouse, "with the mouse {mouse_is}");
+        for words in ["wheel", "shift+drag", "click", "×"] {
+            assert_eq!(seen.contains(words), mouse, "{words}, with the mouse {mouse_is}");
+        }
+        h.close().await;
+    }
+});

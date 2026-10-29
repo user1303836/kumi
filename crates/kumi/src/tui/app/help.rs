@@ -29,6 +29,8 @@ pub(super) struct HelpHas {
     pub slots: bool,
     /// Text copies as the mouse lets go of it (`copyOnSelect`).
     pub copy_on_select: bool,
+    /// Kumi has the mouse (`mouse`); off, the terminal keeps it, and the wheel and Kumi's clicks aren't there.
+    pub mouse: bool,
 }
 
 /// The help's sections: the keys that work in this session (`has`), in the DAW's words (`app`), the pane's `tabs`, and
@@ -59,11 +61,20 @@ pub(super) fn help_sections(has: HelpHas, app: &str, tabs: &[String], commands: 
             format!("Move a slow step that doesn't use {app} (a video, pages) to the background, and carry on; in tmux, press it twice"),
         ));
     }
-    let around = vec![
-        row("page up  page down", "Scroll the conversation; the mouse wheel too (over the tabs, it scrolls them)"),
+    let mut around = vec![
+        row(
+            "page up  page down",
+            if has.mouse {
+                "Scroll the conversation; the mouse wheel too (over the tabs, it scrolls them)"
+            } else {
+                "Scroll the conversation"
+            },
+        ),
         row("ctrl+home", "The start of the conversation"),
         row("ctrl+end", "Back to the latest"),
-        row(
+    ];
+    if has.mouse {
+        around.push(row(
             "drag",
             if has.copy_on_select {
                 "Copy text as you let go; double-click for a word, triple-click for a line"
@@ -71,10 +82,12 @@ pub(super) fn help_sections(has: HelpHas, app: &str, tabs: &[String], commands: 
                 "Select text (double-click for a word, triple-click for a line); ctrl+c or a right-click copies it, and esc \
                  clears it"
             },
-        ),
-        row("shift+drag", "Your terminal's own selection (option+drag in iTerm2)"),
-        row("ctrl+l", "Draw the screen again"),
-    ];
+        ));
+        around.push(row("shift+drag", "Your terminal's own selection (option+drag in iTerm2)"));
+    } else {
+        around.push(row("drag", "The mouse is your terminal's (\"mouse\": \"off\"), so its own selection copies"));
+    }
+    around.push(row("ctrl+l", "Draw the screen again"));
     let mut pane = vec![
         row(
             "ctrl+\\",
@@ -107,16 +120,18 @@ pub(super) fn help_sections(has: HelpHas, app: &str, tabs: &[String], commands: 
             "tab".to_string(),
             format!("Into the tree in FOCUS, at {app}'s selection: ↑↓ move, enter pins a row so what you ask is about it, esc or tab comes back"),
         ),
-        row("esc", "Unpin what's pinned (× beside it does too)"),
-        (
+        row("esc", if has.mouse { "Unpin what's pinned (× beside it does too)" } else { "Unpin what's pinned" }),
+    ]);
+    if has.mouse {
+        pane.push((
             "click".to_string(),
             format!(
                 "undo or forget at a row's end; a change's words open its picture{}, a row in FOCUS's tree pins it, and a tab's \
                  name shows that tab",
                 if has.jobs { ", a job's open the job" } else { "" }
             ),
-        ),
-    ]);
+        ));
+    }
     let edit = vec![
         row("← →", "Along the line; with alt or ctrl, a word at a time (alt+b, alt+f too)"),
         row("home  end", "The start or end of the line (ctrl+a, ctrl+e too)"),
@@ -139,7 +154,14 @@ pub(super) fn help_sections(has: HelpHas, app: &str, tabs: &[String], commands: 
     stop.extend([
         row("ctrl+c", "Stop Kumi; when it isn't working, clear the box (↑ or ctrl+- brings the words back), then quit"),
         row("ctrl+d", "Quit, from an empty box while Kumi isn't working"),
-        row("/undo", "Undo Kumi's last change; undo at the end of a HISTORY row takes back that one"),
+        row(
+            "/undo",
+            if has.mouse {
+                "Undo Kumi's last change; undo at the end of a HISTORY row takes back that one"
+            } else {
+                "Undo Kumi's last change"
+            },
+        ),
     ]);
     let mut listed = vec![
         row("/", "The commands as you type: ↑↓ choose, tab completes, enter runs, esc closes"),
@@ -206,6 +228,7 @@ impl TuiApp {
             palette: can.palette,
             slots: self.0.options.slots.is_some(),
             copy_on_select: self.0.options.copy_on_select,
+            mouse: self.0.options.mouse,
         };
         let commands =
             COMMANDS.iter().filter(|command| self.offered(&can, command.name)).map(|command| (command.name.into(), command.about()));
@@ -259,15 +282,26 @@ impl TuiApp {
 mod tests {
     use super::*;
 
-    /// The whole help, every key there, with text copying as the mouse lets go or not.
-    fn every_section_copying(copy_on_select: bool) -> Vec<HelpSection> {
-        let has = HelpHas { voice: true, attachments: true, jobs: true, palette: true, slots: true, copy_on_select };
+    /// The whole help, every key there, with text copying as the mouse lets go or not, and the mouse Kumi's or the
+    /// terminal's.
+    fn every_section_with(copy_on_select: bool, mouse: bool) -> Vec<HelpSection> {
+        let has = HelpHas { voice: true, attachments: true, jobs: true, palette: true, slots: true, copy_on_select, mouse };
         let tabs = ["HISTORY", "GOAL", "JOBS", "PALETTE"].map(String::from);
         help_sections(has, "Live", &tabs, COMMANDS.iter().map(|command| (command.name.to_string(), command.about.to_string())).collect())
     }
 
     fn every_section() -> Vec<HelpSection> {
-        every_section_copying(true)
+        every_section_with(true, true)
+    }
+
+    /// Every way the help can be: copying as the mouse lets go or not, and the mouse Kumi's or the terminal's.
+    fn every_help() -> Vec<Vec<HelpSection>> {
+        [(true, true), (false, true), (true, false), (false, false)].map(|(copying, mouse)| every_section_with(copying, mouse)).into()
+    }
+
+    /// The help's rows as text, a key and what it does on each line.
+    fn said(sections: &[HelpSection]) -> String {
+        sections.iter().flat_map(|section| &section.rows).map(|(keys, does)| format!("{keys}  {does}\n")).collect()
     }
 
     fn lines(rows: &[Vec<Span>]) -> Vec<String> {
@@ -276,10 +310,7 @@ mod tests {
 
     #[test]
     fn all_of_the_help_shows_at_any_width_and_no_row_runs_past_it() {
-        for (sections, width) in [every_section_copying(true), every_section_copying(false)]
-            .iter()
-            .flat_map(|sections| (5..=120).map(move |width| (sections, width)))
-        {
+        for (sections, width) in every_help().iter().flat_map(|sections| (5..=120).map(move |width| (sections, width))) {
             let lines = lines(&help_rows(&sections, width));
             for line in &lines {
                 assert!(text_width(line) <= width, "{line:?} is wider than {width}");
@@ -300,10 +331,27 @@ mod tests {
     }
 
     #[test]
+    fn the_wheel_and_kumis_clicks_are_left_out_while_the_mouse_is_the_terminals() {
+        for copying in [true, false] {
+            let off = said(&every_section_with(copying, false));
+            assert!(off.contains("drag  The mouse is your terminal's (\"mouse\": \"off\"), so its own selection copies\n"), "{off}");
+            assert!(off.contains("page up  page down  Scroll the conversation\n") && off.contains("esc  Unpin what's pinned\n"), "{off}");
+            assert!(off.contains("/undo  Undo Kumi's last change\n"), "{off}");
+            for gone in ["wheel", "click", "shift+drag", "×", "HISTORY row", "as you let go", "right-click"] {
+                assert!(!off.contains(gone), "{gone}: {off}");
+            }
+        }
+        let on = said(&every_section());
+        for there in ["mouse wheel", "\nclick  undo or forget", "\nshift+drag  ", "(× beside it does too)", "HISTORY row", "as you let go"]
+        {
+            assert!(on.contains(there), "{there}: {on}");
+        }
+    }
+
+    #[test]
     fn words_stay_whole_and_what_a_key_does_lines_up_beside_it() {
-        let sections = every_section();
-        for width in [74, 96] {
-            let lines = lines(&help_rows(&sections, width));
+        for (sections, width) in every_help().iter().flat_map(|sections| [74, 96].map(move |width| (sections, width))) {
+            let lines = lines(&help_rows(sections, width));
             let joined = lines.join(" ").split_whitespace().collect::<Vec<_>>().join(" ");
             for (keys, does) in sections.iter().flat_map(|section| &section.rows) {
                 let does = does.split_whitespace().collect::<Vec<_>>().join(" ");
