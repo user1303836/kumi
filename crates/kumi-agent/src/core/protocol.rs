@@ -3,9 +3,9 @@
 //! change undone). The session sends its events ([`SessionEvent`]), and says what it can do ([`Capabilities`]). An `Op`
 //! is written as the session's events are, a field left out when it's None: `{"type":"undo"}`.
 //!
-//! A front end holds a [`SessionHandle`]. Today's is [`InProcess`]: the session in this process, behind
-//! [`SessionController`], whose methods its requests go to. A front end that asks only this way can have its session
-//! anywhere else.
+//! A front end holds a [`SessionHandle`]: [`InProcess`] for the session in this process, which answers each request
+//! itself ([`Session::answer`]), or the threaded one for a session on a thread of its own. A front end that asks only
+//! this way can have its session anywhere else.
 
 use std::{
     cell::RefCell,
@@ -23,6 +23,7 @@ use crate::core::contracts::*;
 use crate::core::jobs::{JobDetail, JobStatus};
 use crate::core::palette::{Gathered, PaletteListed, PaletteView};
 use crate::core::search_memory::SearchMemoryStatus;
+use crate::core::session::Session;
 use kumi_ai::{
     auth::openai_codex::DevicePrompt,
     control::{ChatGptSignIn, CurrentModel, DefaultModel, LocalStatus, ModelController, ProviderStatus},
@@ -110,54 +111,6 @@ pub struct Capabilities {
     pub take_back: bool,
 }
 
-impl Capabilities {
-    /// A controller's, from its `has_…` flags.
-    pub fn of(session: &dyn SessionController) -> Capabilities {
-        Capabilities {
-            attachments: session.has_attachments(),
-            steer: session.has_steer(),
-            aside: session.has_aside(),
-            reconnect: session.has_reconnect(),
-            conversations: session.has_conversations(),
-            resume_conversation: session.has_resume_conversation(),
-            watch: session.has_watch(),
-            memory: session.has_memory(),
-            library: session.has_library(),
-            taste: session.has_taste(),
-            forget_taste: session.has_forget_taste(),
-            forget: session.has_forget(),
-            change_note: session.has_change_note(),
-            recipes: session.has_recipes(),
-            instant: session.has_instant(),
-            run_recipe: session.has_run_recipe(),
-            forget_recipe: session.has_forget_recipe(),
-            techniques: session.has_techniques(),
-            forget_technique: session.has_forget_technique(),
-            answer_technique: session.has_answer_technique(),
-            goal: session.has_goal(),
-            stop_goal: session.has_stop_goal(),
-            stop_loop: session.has_stop_loop(),
-            goal_status: session.has_goal_status(),
-            lessons: session.has_lessons(),
-            forget_lesson: session.has_forget_lesson(),
-            stop_daw: session.has_stop_live(),
-            daw_message: session.has_daw_message(),
-            jobs: session.has_jobs(),
-            palette: session.has_palette(),
-            device_tree: session.has_device_tree(),
-            clip_view: session.has_clip_view(),
-            session_strip: session.has_session_strip(),
-            arrangement_strip: session.has_arrangement_strip(),
-            reconfigure: session.has_reconfigure(),
-            music: session.music().is_some(),
-            map: session.map_loader().is_some(),
-            slots: session.slots_context().is_some(),
-            models: session.model_controls().is_some(),
-            take_back: session.has_take_back(),
-        }
-    }
-}
-
 /// A request a front end makes, by its struct in [`op`]: it travels as an [`Op`], and its answer is a [`Reply`].
 pub trait Request: Into<Op> {
     type Reply;
@@ -184,6 +137,8 @@ pub struct ModelsView {
     pub fast: bool,
     /// The model that carries on while the chosen one's plan limit lasts or its provider is down.
     pub fallback: Option<String>,
+    /// The model servers on this computer, by id and name: a provider's name is a server's own.
+    pub servers: Vec<(String, String)>,
 }
 
 /// Each request: its struct in [`op`] (whose doc is the request's), its [`Op`] and [`Reply`] variants, and its
@@ -497,11 +452,11 @@ pub async fn music_view(music: &Rc<Music>) -> MusicView {
     MusicView { status: music.status(), agreed: music.agreed(), held: music.held(), found }
 }
 
-/// A session in this process, behind [`SessionController`]: each request goes to the method it was before the
-/// protocol, and the state it shows is read from it as it's asked for.
+/// A session in this process: each request goes to [`Session::answer`], and the state it shows is read from it as it's
+/// asked for.
 pub struct InProcess {
     this: Weak<InProcess>,
-    session: Rc<dyn SessionController>,
+    session: Rc<Session>,
     side: Rc<HandleSide>,
 }
 
@@ -622,7 +577,7 @@ pub fn tell_now(mut answering: LocalBoxFuture<'static, ()>) {
 /// The models as a front end shows them, from the session's model controls: None where there's no model to choose.
 pub fn models_view(models: Option<Rc<dyn ModelController>>) -> Option<ModelsView> {
     let models = models?;
-    Some(ModelsView { current: models.current(), fast: models.fast_enabled(), fallback: models.fallback() })
+    Some(ModelsView { current: models.current(), fast: models.fast_enabled(), fallback: models.fallback(), servers: models.server_names() })
 }
 
 /// A provider's name as the producer knows it: the session's model controls know a model server's own name; without
@@ -675,11 +630,19 @@ pub fn context_window(models: Option<Rc<dyn ModelController>>, model: &str) -> O
 }
 
 impl InProcess {
-    pub fn new(session: Rc<dyn SessionController>) -> Rc<InProcess> {
+    pub fn new(session: Rc<Session>) -> Rc<InProcess> {
         Rc::new_cyclic(|this| InProcess { this: this.clone(), session, side: HandleSide::new() })
     }
     async fn serve(&self, op: Op) -> Result<Reply, RuntimeError> {
-        let session = &self.session;
+        self.session.answer(op, &self.side).await
+    }
+}
+
+/// The session answers its requests itself.
+impl Session {
+    /// Answers `op`. Every request has its arm here, so a new one doesn't build until the session answers it.
+    pub async fn answer(&self, op: Op, side: &HandleSide) -> Result<Reply, RuntimeError> {
+        let session = self;
         Ok(match op {
             Op::Start(op::Start {}) => Reply::Start(session.start().await?),
             // Only a message with references takes the controller's way for them, so a session's calls stay as they were.
@@ -693,9 +656,9 @@ impl InProcess {
             Op::References(op::References { query, limit }) => Reply::References(session.references(&query, limit).await?),
             Op::Steer(op::Steer { text }) => Reply::Steer(session.steer(&text)),
             Op::Aside(op::Aside { id, question }) => {
-                Reply::Aside(self.side.aside(id, |on_text, signal| session.aside(&question, on_text, Some(signal))).await?)
+                Reply::Aside(side.aside(id, |on_text, signal| session.aside(&question, on_text, Some(signal))).await?)
             }
-            Op::StopAside(op::StopAside { id }) => Reply::StopAside(self.side.stop_aside(id)),
+            Op::StopAside(op::StopAside { id }) => Reply::StopAside(side.stop_aside(id)),
             Op::Cancel(op::Cancel {}) => Reply::Cancel(session.cancel().await?),
             Op::Close(op::Close {}) => Reply::Close(session.close().await?),
             Op::Undo(op::Undo { id }) => Reply::Undo(session.undo(id.as_deref()).await?),
@@ -771,8 +734,8 @@ impl InProcess {
                 let load = part(session.map_loader())?;
                 Reply::Map(load().await)
             }
-            Op::Slots(op::Slots { id, words }) => Reply::Slots(self.side.slots(id, &words, &*part(session.slots_context())?).await),
-            Op::StopSlots(op::StopSlots { id }) => Reply::StopSlots(self.side.stop_slots(id)),
+            Op::Slots(op::Slots { id, words }) => Reply::Slots(side.slots(id, &words, &*part(session.slots_context())?).await),
+            Op::StopSlots(op::StopSlots { id }) => Reply::StopSlots(side.stop_slots(id)),
             op @ (Op::Providers(_)
             | Op::LocalModels(_)
             | Op::ChooseDefault(_)
@@ -787,11 +750,11 @@ impl InProcess {
             | Op::MissingModel(_)) => {
                 // If this list and models_answer's ever part ways, a request the controls don't answer is "Not available", not a
                 // panic.
-                return models_answer(&op, session.model_controls(), &self.side)
+                return models_answer(&op, session.model_controls(), side)
                     .await
                     .unwrap_or_else(|| Err(RuntimeError::plain("Not available")));
             }
-            Op::StopSignIn(op::StopSignIn { id }) => Reply::StopSignIn(self.side.stop_sign_in(id)),
+            Op::StopSignIn(op::StopSignIn { id }) => Reply::StopSignIn(side.stop_sign_in(id)),
             Op::FocusBody(op::FocusBody { request }) => Reply::FocusBody(session.focus_body(&request).await?),
         })
     }
@@ -800,7 +763,7 @@ impl InProcess {
 #[async_trait(?Send)]
 impl SessionHandle for InProcess {
     fn capabilities(&self) -> Capabilities {
-        Capabilities::of(&*self.session)
+        self.session.capabilities()
     }
     fn can_show(&self, kind: BodyKind) -> bool {
         self.session.can_show(kind)

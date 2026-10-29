@@ -3,12 +3,12 @@
 //! and all. What crosses is the protocol's: requests go down; back up, in the order they happened, come the session's
 //! events, what its reads say now ([`Snapshot`]), each request's reply, and a panic. The front end's side hands a reply to
 //! whoever waits for it only once every event sent before it was handled, and the reads are sent before what changed
-//! them, so a front end sees what it would have with the session in its own thread ([`InProcess`]).
+//! them, so a front end sees what it would have with the session in its own thread ([`InProcess`](crate::core::protocol::InProcess)).
 
 use crate::core::{
     contracts::*,
     jobs::{JobDetail, JobStatus},
-    protocol::{Capabilities, InProcess, ModelsView, Op, Reply, SessionHandle},
+    protocol::{Capabilities, ModelsView, Op, Reply, SessionHandle},
     view::BodyKind,
 };
 use async_trait::async_trait;
@@ -26,15 +26,16 @@ use tokio::sync::{mpsc, oneshot, Notify};
 /// What builds the session on its thread, given where its events go: its stores, its factories, the session itself.
 pub type Build = Box<dyn FnOnce(Rc<dyn Fn(SessionEvent)>) -> LocalBoxFuture<'static, Result<Built, RuntimeError>> + Send>;
 
-/// The session built on its thread, and what the thread does as it ends, once the front end has let go and before
-/// what's still under way is given its grace (the background learning closed, say).
+/// The session built on its thread, reached through its handle there (`InProcess` for Kumi's own, a test's handle in a
+/// test), and what the thread does as it ends, once the front end has let go and before what's still under way is
+/// given its grace (the background learning closed, say).
 pub struct Built {
-    pub session: Rc<dyn SessionController>,
+    pub session: Rc<dyn SessionHandle>,
     pub ending: Option<LocalBoxFuture<'static, ()>>,
 }
 
 impl Built {
-    pub fn new(session: Rc<dyn SessionController>) -> Built {
+    pub fn new(session: Rc<dyn SessionHandle>) -> Built {
         Built { session, ending: None }
     }
 }
@@ -91,9 +92,9 @@ pub struct Snapshot {
 }
 
 impl Snapshot {
-    fn read(handle: &dyn SessionHandle, session: &dyn SessionController) -> Snapshot {
+    fn read(handle: &dyn SessionHandle) -> Snapshot {
         let models = handle.models();
-        let controls = session.model_controls();
+        let servers = models.as_ref().map(|view| view.servers.clone()).unwrap_or_default();
         let answering = models.iter().flat_map(|view| [view.current.model.clone(), view.fallback.clone()]).flatten();
         let windows = answering.filter_map(|model| Some((model.clone(), handle.context_window(&model)?))).collect();
         Snapshot {
@@ -105,7 +106,7 @@ impl Snapshot {
             can_background: handle.can_background(),
             shows: SHOWN.into_iter().filter(|kind| handle.can_show(*kind)).collect(),
             models,
-            servers: controls.map(|models| models.server_names()).unwrap_or_default(),
+            servers,
             windows,
         }
     }
@@ -183,8 +184,8 @@ pub fn session_panicked(info: &std::panic::PanicHookInfo) -> bool {
 /// The session's side: what it sends back, and what its reads said last.
 struct Core {
     back: mpsc::UnboundedSender<Back>,
-    /// The session and its handle in this thread, once built (what comes before goes once it's ready).
-    serving: RefCell<Option<(Rc<InProcess>, Rc<dyn SessionController>)>>,
+    /// The session's handle in this thread, once built (what comes before goes once it's ready).
+    serving: RefCell<Option<Rc<dyn SessionHandle>>>,
     early: RefCell<Vec<SessionEvent>>,
     last: RefCell<Option<Snapshot>>,
     watched: Cell<Option<u32>>,
@@ -196,8 +197,8 @@ struct Core {
 impl Core {
     /// The reads, sent first when they changed.
     fn reads_changed(&self) {
-        let Some((handle, session)) = self.serving.borrow().clone() else { return };
-        let now = Snapshot::read(&*handle, &*session);
+        let Some(handle) = self.serving.borrow().clone() else { return };
+        let now = Snapshot::read(&*handle);
         if self.last.borrow().as_ref() != Some(&now) {
             *self.last.borrow_mut() = Some(now.clone());
             let _ = self.back.send(Back::Snapshot(now));
@@ -231,7 +232,7 @@ impl Core {
         });
     }
     fn job_now(&self) {
-        let Some((handle, _)) = self.serving.borrow().clone() else { return };
+        let Some(handle) = self.serving.borrow().clone() else { return };
         let now = self.watched.get().and_then(|id| Some((id, handle.job(id)?)));
         if *self.last_job.borrow() != now {
             *self.last_job.borrow_mut() = now.clone();
@@ -283,20 +284,19 @@ fn serve(build: Build, mut down: mpsc::UnboundedReceiver<Down>, back: mpsc::Unbo
             let core = core.clone();
             Rc::new(move |event| core.event(event))
         };
-        let Built { session, ending } = match build(emit.clone()).await {
+        let Built { session: handle, ending } = match build(emit.clone()).await {
             Ok(built) => built,
             Err(error) => {
                 let _ = back.send(Back::Fatal(error.message()));
                 return;
             }
         };
-        let handle = InProcess::new(session.clone());
         // What the handle says of its own (an aside's words, a sign-in's code) goes back as the session's events do.
         handle.listen(emit);
-        let snapshot = Snapshot::read(&*handle, &*session);
+        let snapshot = Snapshot::read(&*handle);
         *core.last.borrow_mut() = Some(snapshot.clone());
         let _ = back.send(Back::Hello { capabilities: handle.capabilities(), snapshot });
-        *core.serving.borrow_mut() = Some((handle.clone(), session));
+        *core.serving.borrow_mut() = Some(handle.clone());
         for event in std::mem::take(&mut *core.early.borrow_mut()) {
             core.event(event);
         }

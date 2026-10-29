@@ -1,6 +1,6 @@
 //! Session ownership, cancellation, context refresh and conversation recovery.
 
-use crate::core::protocol::{size_words, too_long_words, MAX_MESSAGE as MAX_REQUEST};
+use crate::core::protocol::{size_words, too_long_words, Capabilities, MAX_MESSAGE as MAX_REQUEST};
 use crate::core::text::cut;
 use crate::core::{
     contracts::*,
@@ -2774,9 +2774,55 @@ impl StreamingCall for TechniqueStream {
     }
 }
 
-#[async_trait(?Send)]
-impl SessionController for Session {
-    async fn start(&self) -> Result<(), RuntimeError> {
+/// What the session does: its handle ([`InProcess`](crate::core::protocol::InProcess)) asks it for each request, and the
+/// app that built it reaches it directly (its own callbacks, the DAW's watch).
+impl Session {
+    /// What this session can do, which a front end reads once as it starts: what its menus and keys offer.
+    pub fn capabilities(&self) -> Capabilities {
+        Capabilities {
+            attachments: true,
+            steer: true,
+            aside: true,
+            reconnect: true,
+            conversations: self.0.options.conversations.is_some(),
+            resume_conversation: true,
+            watch: true,
+            memory: true,
+            library: self.0.options.library.is_some(),
+            taste: self.0.options.library.is_some(),
+            forget_taste: self.0.options.library.is_some(),
+            forget: true,
+            change_note: true,
+            recipes: true,
+            instant: true,
+            run_recipe: true,
+            forget_recipe: true,
+            techniques: true,
+            forget_technique: true,
+            answer_technique: self.0.learned.is_some(),
+            goal: true,
+            stop_goal: true,
+            stop_loop: true,
+            goal_status: true,
+            lessons: true,
+            forget_lesson: true,
+            stop_daw: true,
+            daw_message: true,
+            jobs: self.0.jobs.is_some(),
+            palette: self.0.palettes.is_some(),
+            device_tree: true,
+            clip_view: true,
+            session_strip: true,
+            arrangement_strip: true,
+            reconfigure: true,
+            music: self.music().is_some(),
+            map: self.map_loader().is_some(),
+            slots: self.slots_context().is_some(),
+            models: self.model_controls().is_some(),
+            take_back: self.0.options.log.is_some() && self.0.options.conversations.is_some(),
+        }
+    }
+    pub async fn start(&self) -> Result<(), RuntimeError> {
         if self.0.state.borrow().started {
             return Err(RuntimeError::plain("Session already started"));
         }
@@ -2796,16 +2842,13 @@ impl SessionController for Session {
         )?
         .await
     }
-    async fn submit(&self, input: &str, pinned: Option<PinnedNode>) -> Result<(), RuntimeError> {
+    pub async fn submit(&self, input: &str, pinned: Option<PinnedNode>) -> Result<(), RuntimeError> {
         self.submit_with(input, pinned, vec![]).await
     }
-    fn has_attachments(&self) -> bool {
-        true
-    }
-    async fn submit_with(&self, input: &str, pinned: Option<PinnedNode>, attachments: Vec<Attachment>) -> Result<(), RuntimeError> {
+    pub async fn submit_with(&self, input: &str, pinned: Option<PinnedNode>, attachments: Vec<Attachment>) -> Result<(), RuntimeError> {
         self.submit_with_references(input, pinned, attachments, vec![]).await
     }
-    async fn submit_with_references(
+    pub async fn submit_with_references(
         &self,
         input: &str,
         pinned: Option<PinnedNode>,
@@ -2857,7 +2900,7 @@ impl SessionController for Session {
         )?
         .await
     }
-    async fn references(&self, query: &str, limit: u32) -> Result<Vec<Candidate>, RuntimeError> {
+    pub async fn references(&self, query: &str, limit: u32) -> Result<Vec<Candidate>, RuntimeError> {
         // The list opens on `@` (an empty query): what it offers is read then, and ranked as the producer types on.
         let held = self.0.state.borrow_mut().referable.take().filter(|_| !query.is_empty());
         let mut referable = match held {
@@ -2868,10 +2911,7 @@ impl SessionController for Session {
         self.0.state.borrow_mut().referable = Some(referable);
         Ok(found)
     }
-    fn has_steer(&self) -> bool {
-        true
-    }
-    fn steer(&self, text: &str) -> bool {
+    pub fn steer(&self, text: &str) -> bool {
         let held = {
             let s = self.0.state.borrow();
             // A goal's self-check isn't the place for the producer's words: they wait for the next turn.
@@ -2899,10 +2939,7 @@ impl SessionController for Session {
         }
         steered
     }
-    fn has_aside(&self) -> bool {
-        true
-    }
-    async fn aside(&self, question: &str, on_text: OnText, signal: Option<Signal>) -> Result<String, RuntimeError> {
+    pub async fn aside(&self, question: &str, on_text: OnText, signal: Option<Signal>) -> Result<String, RuntimeError> {
         let held = {
             let s = self.0.state.borrow();
             if s.state == TurnState::Closed {
@@ -2916,7 +2953,7 @@ impl SessionController for Session {
         // A side question can run while a turn does; it isn't part of that turn's timing.
         timing::background(held.value.aside(question, signal.unwrap_or_default(), on_text)).await
     }
-    async fn refresh(&self) -> Result<(), RuntimeError> {
+    pub async fn refresh(&self) -> Result<(), RuntimeError> {
         if !self.0.state.borrow().started {
             return Err(RuntimeError::plain("Session is not started"));
         }
@@ -2935,7 +2972,7 @@ impl SessionController for Session {
         )?
         .await
     }
-    async fn new_conversation(&self) -> Result<(), RuntimeError> {
+    pub async fn new_conversation(&self) -> Result<(), RuntimeError> {
         self.perform(
             false,
             Phase::Refresh,
@@ -2985,10 +3022,7 @@ impl SessionController for Session {
         )?
         .await
     }
-    fn has_reconnect(&self) -> bool {
-        true
-    }
-    async fn reconnect(&self) -> Result<(), RuntimeError> {
+    pub async fn reconnect(&self) -> Result<(), RuntimeError> {
         self.perform(
             false,
             Phase::Start,
@@ -3018,10 +3052,7 @@ impl SessionController for Session {
         )?
         .await
     }
-    fn has_conversations(&self) -> bool {
-        self.0.options.conversations.is_some()
-    }
-    async fn conversations(&self) -> Result<Vec<ConversationSummary>, RuntimeError> {
+    pub async fn conversations(&self) -> Result<Vec<ConversationSummary>, RuntimeError> {
         let place = {
             let s = self.0.state.borrow();
             s.place.clone().or(s.project.clone()).unwrap_or(self.unsaved().into())
@@ -3032,10 +3063,7 @@ impl SessionController for Session {
             vec![]
         })
     }
-    fn has_resume_conversation(&self) -> bool {
-        true
-    }
-    async fn resume_conversation(&self, id: &str) -> Result<bool, RuntimeError> {
+    pub async fn resume_conversation(&self, id: &str) -> Result<bool, RuntimeError> {
         let Some(store) = self.0.options.conversations.clone() else {
             return Ok(false);
         };
@@ -3090,13 +3118,13 @@ impl SessionController for Session {
         self.go_to(Chosen { place, id: id.to_owned(), conversation, copy_of: None }, None).await?;
         Ok(true)
     }
-    async fn all_conversations(&self) -> Result<Vec<ConversationSummary>, RuntimeError> {
+    pub async fn all_conversations(&self) -> Result<Vec<ConversationSummary>, RuntimeError> {
         let Some(store) = &self.0.options.conversations else { return Ok(vec![]) };
         // This DAW's conversations (and imported ones): another DAW's go on in that DAW.
         let daw = self.0.options.profile.id.unwrap_or(DawId::Ableton);
         Ok(self.mark_going(store.all().await?.into_iter().filter(|row| kept_for(&row.place, daw)).collect()))
     }
-    async fn find_conversation(&self, word: &str) -> Result<ConversationMatch, RuntimeError> {
+    pub async fn find_conversation(&self, word: &str) -> Result<ConversationMatch, RuntimeError> {
         let Some(store) = &self.0.options.conversations else { return Ok(ConversationMatch::None) };
         let daw = self.0.options.profile.id.unwrap_or(DawId::Ableton);
         Ok(match store.find(word).await? {
@@ -3113,7 +3141,7 @@ impl SessionController for Session {
             other => other,
         })
     }
-    async fn rename_conversation(&self, id: Option<&str>, name: Option<&str>) -> Result<bool, RuntimeError> {
+    pub async fn rename_conversation(&self, id: Option<&str>, name: Option<&str>) -> Result<bool, RuntimeError> {
         let Some(store) = self.0.options.conversations.clone() else { return Ok(false) };
         let (place, now) = {
             let s = self.0.state.borrow();
@@ -3133,14 +3161,14 @@ impl SessionController for Session {
         };
         store.rename(&place, &id, name).await
     }
-    async fn pin_conversation(&self, id: &str, pinned: bool) -> Result<bool, RuntimeError> {
+    pub async fn pin_conversation(&self, id: &str, pinned: bool) -> Result<bool, RuntimeError> {
         let Some(store) = &self.0.options.conversations else { return Ok(false) };
         match store.find(id).await? {
             ConversationMatch::One(row) if row.id == id => store.pin(&row.place, id, pinned).await,
             _ => Ok(false),
         }
     }
-    async fn delete_conversation(&self, id: &str) -> Result<bool, RuntimeError> {
+    pub async fn delete_conversation(&self, id: &str) -> Result<bool, RuntimeError> {
         let Some(store) = &self.0.options.conversations else { return Ok(false) };
         if self.0.state.borrow().conversation_id == id {
             return Err(KumiError::new(FailureKind::Request, "That's the conversation going on now: /new first, then delete it.").into());
@@ -3150,13 +3178,13 @@ impl SessionController for Session {
             _ => Ok(false),
         }
     }
-    async fn fork_conversation(&self, name: Option<&str>) -> Result<Option<String>, RuntimeError> {
+    pub async fn fork_conversation(&self, name: Option<&str>) -> Result<Option<String>, RuntimeError> {
         self.fork(name, None).await
     }
-    async fn fork_conversation_before(&self, name: Option<&str>, before: i64) -> Result<Option<String>, RuntimeError> {
+    pub async fn fork_conversation_before(&self, name: Option<&str>, before: i64) -> Result<Option<String>, RuntimeError> {
         self.fork(name, Some(before)).await
     }
-    async fn answer_set(&self, choice: SetChoice) -> Result<(), RuntimeError> {
+    pub async fn answer_set(&self, choice: SetChoice) -> Result<(), RuntimeError> {
         let Some(wanted) = self.0.state.borrow().wanted.clone() else { return Ok(()) };
         // Answered: the question goes. Opening keeps the conversation waiting for its Set (asked, so not asked again here).
         match choice {
@@ -3229,7 +3257,7 @@ impl SessionController for Session {
             }
         }
     }
-    async fn conversation_now(&self) -> Option<ConversationNow> {
+    pub async fn conversation_now(&self) -> Option<ConversationNow> {
         // A chat that keeps none (without Live, started without -c or -r) has nothing to say of one.
         self.0.options.conversations.as_ref()?;
         let (place, id, touched, first, name) = {
@@ -3253,12 +3281,12 @@ impl SessionController for Session {
             id,
         })
     }
-    async fn conversation_lines(&self, id: &str) -> Result<Vec<TranscriptLine>, RuntimeError> {
+    pub async fn conversation_lines(&self, id: &str) -> Result<Vec<TranscriptLine>, RuntimeError> {
         let Some(store) = &self.0.options.conversations else { return Ok(vec![]) };
         let ConversationMatch::One(row) = store.find(id).await? else { return Ok(vec![]) };
         Ok(store.load(&row.place, id).await?.map(|kept| transcript_of(&kept.checkpoint.messages)).unwrap_or_default())
     }
-    async fn conversation_to_export(&self) -> Option<ConversationToExport> {
+    pub async fn conversation_to_export(&self) -> Option<ConversationToExport> {
         let saving = self.0.saving.borrow().clone();
         let _ = saving.await;
         let (place, id, name, settled, first, turns, changes, set, words) = {
@@ -3316,10 +3344,7 @@ impl SessionController for Session {
             words,
         })
     }
-    fn has_watch(&self) -> bool {
-        true
-    }
-    fn watch(&self, event: WatchEvent) {
+    pub fn watch(&self, event: WatchEvent) {
         let mut change = match event {
             WatchEvent::Audition(event) => {
                 let run = self.0.state.borrow().matching.clone();
@@ -3413,7 +3438,7 @@ impl SessionController for Session {
             }
         }
     }
-    async fn undo(&self, id: Option<&str>) -> Result<Option<ChangeRecord>, RuntimeError> {
+    pub async fn undo(&self, id: Option<&str>) -> Result<Option<ChangeRecord>, RuntimeError> {
         if !self.0.state.borrow().started {
             return Err(RuntimeError::plain("Session is not started"));
         }
@@ -3450,10 +3475,7 @@ impl SessionController for Session {
         }
         Ok(result)
     }
-    fn has_take_back(&self) -> bool {
-        self.0.options.log.is_some() && self.0.options.conversations.is_some()
-    }
-    async fn take_back_plan(&self) -> Result<Vec<Requested>, RuntimeError> {
+    pub async fn take_back_plan(&self) -> Result<Vec<Requested>, RuntimeError> {
         let (_, spans) = self.story().await?;
         let s = self.0.state.borrow();
         Ok(spans
@@ -3466,7 +3488,7 @@ impl SessionController for Session {
             })
             .collect())
     }
-    async fn take_back(&self, to: i64) -> Result<TakenBack, RuntimeError> {
+    pub async fn take_back(&self, to: i64) -> Result<TakenBack, RuntimeError> {
         if !self.0.state.borrow().started {
             return Err(RuntimeError::plain("Session is not started"));
         }
@@ -3538,46 +3560,37 @@ impl SessionController for Session {
         }
         Ok(TakenBack { requests, words, undone, failed })
     }
-    fn has_library(&self) -> bool {
-        self.0.options.library.is_some()
-    }
-    fn library(&self) -> Option<LibraryStatus> {
+    pub fn library(&self) -> Option<LibraryStatus> {
         self.0.options.library.as_ref().map(|library| library.status())
     }
-    async fn remembered(&self) -> Option<crate::core::search_memory::SearchMemoryStatus> {
+    pub async fn remembered(&self) -> Option<crate::core::search_memory::SearchMemoryStatus> {
         self.0.search_memory.as_ref()?.status().await.ok()
     }
-    fn settings_memory(&self) -> Option<Rc<dyn kumi_listening::heard_settings::SettingsMemory>> {
+    pub fn settings_memory(&self) -> Option<Rc<dyn kumi_listening::heard_settings::SettingsMemory>> {
         self.0.search_memory.clone().map(|memory| memory as Rc<dyn kumi_listening::heard_settings::SettingsMemory>)
     }
-    fn music(&self) -> Option<Rc<kumi_listening::music::learning::Music>> {
+    pub fn music(&self) -> Option<Rc<kumi_listening::music::learning::Music>> {
         self.0.options.music.clone()
     }
-    fn slots_context(&self) -> Option<Rc<kumi_listening::slots::SlotsContext>> {
+    pub fn slots_context(&self) -> Option<Rc<kumi_listening::slots::SlotsContext>> {
         self.0.options.slots.clone()
     }
-    fn map_loader(&self) -> Option<kumi_library::map::LoadMap> {
+    pub fn map_loader(&self) -> Option<kumi_library::map::LoadMap> {
         self.0.options.map.clone()
     }
-    fn model_controls(&self) -> Option<Rc<dyn kumi_ai::control::ModelController>> {
+    pub fn model_controls(&self) -> Option<Rc<dyn kumi_ai::control::ModelController>> {
         self.0.options.models.clone()
     }
-    fn open_set(&self) -> Option<String> {
+    pub fn open_set(&self) -> Option<String> {
         self.0.state.borrow().integration.as_ref().and_then(|integration| integration.open_set())
     }
-    fn has_taste(&self) -> bool {
-        self.0.options.library.is_some()
-    }
-    async fn taste(&self) -> Result<Vec<KeptLine>, RuntimeError> {
+    pub async fn taste(&self) -> Result<Vec<KeptLine>, RuntimeError> {
         match &self.0.options.library {
             Some(library) => Ok(library.taste().await?.into_iter().map(|line| KeptLine { id: line.id, line: line.line }).collect()),
             None => Ok(vec![]),
         }
     }
-    fn has_forget_taste(&self) -> bool {
-        self.0.options.library.is_some()
-    }
-    async fn forget_taste(&self, id: &str) -> Result<bool, RuntimeError> {
+    pub async fn forget_taste(&self, id: &str) -> Result<bool, RuntimeError> {
         let forgot = match &self.0.options.library {
             Some(library) => library.forget_taste(id).await?,
             None => false,
@@ -3585,10 +3598,7 @@ impl SessionController for Session {
         self.changed_system(forgot);
         Ok(forgot)
     }
-    fn has_memory(&self) -> bool {
-        true
-    }
-    async fn memory(&self) -> Result<Option<MemoryView>, RuntimeError> {
+    pub async fn memory(&self) -> Result<Option<MemoryView>, RuntimeError> {
         let Some(store) = &self.0.options.memory else {
             return Ok(None);
         };
@@ -3602,26 +3612,17 @@ impl SessionController for Session {
             saved: project.is_some(),
         }))
     }
-    fn has_forget(&self) -> bool {
-        true
-    }
-    async fn forget(&self, id: &str) -> Result<Option<MemoryNote>, RuntimeError> {
+    pub async fn forget(&self, id: &str) -> Result<Option<MemoryNote>, RuntimeError> {
         let forgot = if let Some(notes) = &self.0.notes { notes.forget(id).await? } else { None };
         self.changed_system(forgot.is_some());
         Ok(forgot)
     }
-    fn has_change_note(&self) -> bool {
-        true
-    }
-    async fn change_note(&self, id: &str, change: NoteChange) -> Result<Option<MemoryNote>, RuntimeError> {
+    pub async fn change_note(&self, id: &str, change: NoteChange) -> Result<Option<MemoryNote>, RuntimeError> {
         let changed = if let Some(notes) = &self.0.notes { notes.change(id, change).await? } else { None };
         self.changed_system(changed.is_some());
         Ok(changed)
     }
-    fn has_recipes(&self) -> bool {
-        true
-    }
-    async fn recipes(&self) -> Result<Vec<RecipeSummary>, RuntimeError> {
+    pub async fn recipes(&self) -> Result<Vec<RecipeSummary>, RuntimeError> {
         let Some(store) = &self.0.options.recipes else {
             return Ok(vec![]);
         };
@@ -3643,17 +3644,11 @@ impl SessionController for Session {
             })
             .collect())
     }
-    fn pin_for_recipe(&self, pin: &PinnedNode) -> Option<PinnedNode> {
+    pub fn pin_for_recipe(&self, pin: &PinnedNode) -> Option<PinnedNode> {
         let integration = self.0.state.borrow().integration.clone();
         integration.map_or_else(|| Some(pin.clone()), |integration| integration.pin_for_recipe(pin))
     }
-    fn has_run_recipe(&self) -> bool {
-        true
-    }
-    fn has_instant(&self) -> bool {
-        true
-    }
-    async fn instant(&self, text: &str) -> Result<Option<InstantOutcome>, RuntimeError> {
+    pub async fn instant(&self, text: &str) -> Result<Option<InstantOutcome>, RuntimeError> {
         let Some(intent) = crate::core::phrases::parse(text) else { return Ok(None) };
         let integration = self.0.state.borrow().integration.clone();
         if !self.0.state.borrow().started || !integration.as_ref().is_some_and(|integration| integration.has_instant()) {
@@ -3683,7 +3678,7 @@ impl SessionController for Session {
         let done = outcome.borrow_mut().take();
         Ok(done)
     }
-    async fn run_recipe(&self, name: &str, with: JsonObject) -> Result<RecipeOutcome, RuntimeError> {
+    pub async fn run_recipe(&self, name: &str, with: JsonObject) -> Result<RecipeOutcome, RuntimeError> {
         if !self.0.state.borrow().started {
             return Err(RuntimeError::plain("Session is not started"));
         }
@@ -3718,10 +3713,7 @@ impl SessionController for Session {
             .unwrap_or(RecipeOutcome { text: "it didn't finish; anything it changed is in HISTORY.".into(), is_error: true });
         Ok(result)
     }
-    fn has_forget_recipe(&self) -> bool {
-        true
-    }
-    async fn forget_recipe(&self, name: &str) -> Result<bool, RuntimeError> {
+    pub async fn forget_recipe(&self, name: &str) -> Result<bool, RuntimeError> {
         let Some(store) = &self.0.options.recipes else {
             return Ok(false);
         };
@@ -3737,10 +3729,7 @@ impl SessionController for Session {
         self.emit(SessionEvent::Recipe(RecipeEvent { action: RecipeAction::Forgotten, name: recipe.name, steps: recipe.steps.len() }));
         Ok(true)
     }
-    fn has_techniques(&self) -> bool {
-        true
-    }
-    async fn techniques(&self) -> Result<Vec<TechniqueSummary>, RuntimeError> {
+    pub async fn techniques(&self) -> Result<Vec<TechniqueSummary>, RuntimeError> {
         let Some(learned) = &self.0.learned else {
             return Ok(vec![]);
         };
@@ -3757,32 +3746,23 @@ impl SessionController for Session {
             })
             .collect())
     }
-    fn has_forget_technique(&self) -> bool {
-        true
-    }
-    async fn forget_technique(&self, id: &str) -> Result<bool, RuntimeError> {
+    pub async fn forget_technique(&self, id: &str) -> Result<bool, RuntimeError> {
         let forgot = if let Some(l) = &self.0.learned { l.forget(id).await?.is_some() } else { false };
         self.changed_system(forgot);
         Ok(forgot)
     }
-    fn has_answer_technique(&self) -> bool {
-        self.0.learned.is_some()
-    }
-    async fn answer_technique(&self, keep: bool) -> Result<bool, RuntimeError> {
+    pub async fn answer_technique(&self, keep: bool) -> Result<bool, RuntimeError> {
         match &self.0.learned {
             Some(l) => l.drafts.answer(keep).await,
             None => Ok(false),
         }
     }
-    fn picked(&self, pick: Picked) {
+    pub fn picked(&self, pick: Picked) {
         if let Some(taste) = &self.0.taste {
             taste.picked(&pick);
         }
     }
-    fn has_goal(&self) -> bool {
-        true
-    }
-    async fn goal(&self, text: Option<&str>) -> Result<(), RuntimeError> {
+    pub async fn goal(&self, text: Option<&str>) -> Result<(), RuntimeError> {
         let words = text.map(trim).filter(|s| !s.is_empty()).map(str::to_owned);
         {
             let s = self.0.state.borrow();
@@ -3841,20 +3821,14 @@ impl SessionController for Session {
             }
         }
     }
-    fn has_stop_goal(&self) -> bool {
-        true
-    }
-    async fn stop_goal(&self) -> Result<bool, RuntimeError> {
+    pub async fn stop_goal(&self) -> Result<bool, RuntimeError> {
         // The objective first; with none, a sound-match search stops the same way.
         if self.stop_objective().await? {
             return Ok(true);
         }
         self.stop_goal_inner().await
     }
-    fn has_stop_loop(&self) -> bool {
-        true
-    }
-    async fn stop_loop(&self) -> Result<bool, RuntimeError> {
+    pub async fn stop_loop(&self) -> Result<bool, RuntimeError> {
         // A running judged loop (a goal's too) stops as Esc stops it, first; a sound-match search, running or paused,
         // ends for good.
         let running = {
@@ -3869,16 +3843,10 @@ impl SessionController for Session {
         }
         self.stop_goal_inner().await
     }
-    fn has_goal_status(&self) -> bool {
-        true
-    }
-    fn goal_status(&self) -> Option<GoalStatus> {
+    pub fn goal_status(&self) -> Option<GoalStatus> {
         self.0.state.borrow().goal_status.clone()
     }
-    fn has_lessons(&self) -> bool {
-        true
-    }
-    async fn lessons(&self) -> Result<Vec<LessonEntry>, RuntimeError> {
+    pub async fn lessons(&self) -> Result<Vec<LessonEntry>, RuntimeError> {
         Ok(self
             .playbook_serial(|s| async move { s.list().await }.boxed_local())
             .await
@@ -3888,10 +3856,7 @@ impl SessionController for Session {
             .map(|l| LessonEntry { line: crate::core::playbook::lesson_line(&l), id: l.id, at: l.at })
             .collect())
     }
-    fn has_forget_lesson(&self) -> bool {
-        true
-    }
-    async fn forget_lesson(&self, id: &str) -> Result<bool, RuntimeError> {
+    pub async fn forget_lesson(&self, id: &str) -> Result<bool, RuntimeError> {
         let this = self.clone();
         let id = id.to_owned();
         Ok(self
@@ -3908,10 +3873,7 @@ impl SessionController for Session {
             .await
             .unwrap_or(false))
     }
-    fn has_stop_live(&self) -> bool {
-        true
-    }
-    async fn stop_live(&self) -> Result<bool, RuntimeError> {
+    pub async fn stop_live(&self) -> Result<bool, RuntimeError> {
         let integration = self.0.state.borrow().integration.clone();
         let stopped = if let Some(i) = integration.filter(|i| i.has_stop_live()) {
             i.stop_live(abort::timeout(self.0.options.timeout_ms.unwrap_or(30_000))).await.unwrap_or(false)
@@ -3923,68 +3885,59 @@ impl SessionController for Session {
         }
         Ok(stopped)
     }
-    fn answering_fallback(&self) -> Option<String> {
+    pub fn answering_fallback(&self) -> Option<String> {
         self.0.state.borrow().kernel.as_ref().and_then(|held| held.value.answering_fallback())
     }
-    fn has_daw_message(&self) -> bool {
-        true
-    }
-    async fn daw_message(&self, text: &str) -> Result<bool, RuntimeError> {
+    pub async fn daw_message(&self, text: &str) -> Result<bool, RuntimeError> {
         let integration = self.0.state.borrow().integration.clone();
         match integration.filter(|i| i.has_show_message()) {
             Some(i) => i.show_message(text, abort::timeout(5_000)).await,
             None => Ok(false),
         }
     }
-    async fn daw_recording(&self) -> Result<Option<bool>, RuntimeError> {
+    pub async fn daw_recording(&self) -> Result<Option<bool>, RuntimeError> {
         let integration = self.0.state.borrow().integration.clone();
         match integration {
             Some(i) => i.recording(abort::timeout(5_000)).await,
             None => Ok(None),
         }
     }
-    fn has_palette(&self) -> bool {
-        self.0.palettes.is_some()
-    }
-    async fn palette(&self) -> Result<Option<crate::core::palette::PaletteView>, RuntimeError> {
+    pub async fn palette(&self) -> Result<Option<crate::core::palette::PaletteView>, RuntimeError> {
         match &self.0.palettes {
             Some(palettes) => palettes.view().await,
             None => Ok(None),
         }
     }
-    async fn palette_gather(&self, files: Vec<crate::core::palette::Gathered>) -> Result<String, RuntimeError> {
+    pub async fn palette_gather(&self, files: Vec<crate::core::palette::Gathered>) -> Result<String, RuntimeError> {
         let palettes = self.0.palettes.clone().ok_or_else(|| RuntimeError::plain("Kumi keeps no palettes here."))?;
         Ok(palettes.gather(files).await?.words())
     }
-    async fn palette_remove(&self, path: &str, size: i64, mtime: i64) -> Result<bool, RuntimeError> {
+    pub async fn palette_remove(&self, path: &str, size: i64, mtime: i64) -> Result<bool, RuntimeError> {
         match self.0.palettes.clone() {
             Some(palettes) => palettes.remove(path, size, mtime).await,
             None => Ok(false),
         }
     }
-    async fn palette_command(&self, words: &str) -> Result<String, RuntimeError> {
+    pub async fn palette_command(&self, words: &str) -> Result<String, RuntimeError> {
         let palettes = self.0.palettes.clone().ok_or_else(|| RuntimeError::plain("Kumi keeps no palettes here."))?;
         palettes.command(words).await
     }
-    async fn palette_names(&self) -> Result<Vec<crate::core::palette::PaletteListed>, RuntimeError> {
+    pub async fn palette_names(&self) -> Result<Vec<crate::core::palette::PaletteListed>, RuntimeError> {
         match self.0.palettes.clone() {
             Some(palettes) => palettes.listed().await,
             None => Ok(vec![]),
         }
     }
-    fn has_jobs(&self) -> bool {
-        self.0.jobs.is_some()
-    }
-    fn jobs(&self) -> Vec<crate::core::jobs::JobStatus> {
+    pub fn jobs(&self) -> Vec<crate::core::jobs::JobStatus> {
         self.0.jobs.as_ref().map(|jobs| jobs.list()).unwrap_or_default()
     }
-    fn job(&self, id: u32) -> Option<crate::core::jobs::JobDetail> {
+    pub fn job(&self, id: u32) -> Option<crate::core::jobs::JobDetail> {
         self.0.jobs.as_ref().and_then(|jobs| jobs.detail(id))
     }
-    fn stop_job(&self, id: u32) -> bool {
+    pub fn stop_job(&self, id: u32) -> bool {
         self.0.jobs.as_ref().is_some_and(|jobs| jobs.stop(id))
     }
-    fn run_job_again(&self, id: u32) -> Result<u32, String> {
+    pub fn run_job_again(&self, id: u32) -> Result<u32, String> {
         let jobs = self.0.jobs.clone().ok_or("Kumi can't run background jobs here.")?;
         let spec = jobs
             .spec(id)
@@ -3995,49 +3948,31 @@ impl SessionController for Session {
         jobs.forget(id);
         Ok(again)
     }
-    fn background(&self) -> Result<u32, String> {
-        Session::background(self)
-    }
-    fn carry_on(&self, job: u32) -> bool {
-        Session::carry_on(self, job)
-    }
-    fn can_background(&self) -> bool {
+    pub fn can_background(&self) -> bool {
         self.0.state.borrow().foreground.iter().any(|step| step.waiting())
     }
-    fn has_device_tree(&self) -> bool {
-        true
-    }
-    async fn device_tree(&self, track_ref: &str) -> Result<Option<DeviceTree>, RuntimeError> {
+    pub async fn device_tree(&self, track_ref: &str) -> Result<Option<DeviceTree>, RuntimeError> {
         let i = {
             let s = self.0.state.borrow();
             s.integration.clone().filter(|i| s.connection == ConnectionState::Connected && i.has_device_tree())
         };
         Ok(if let Some(i) = i { i.device_tree(track_ref, abort::timeout(10_000)).await.ok().flatten() } else { None })
     }
-    fn has_clip_view(&self) -> bool {
-        true
-    }
-    async fn clip_view(&self, slot_ref: &str) -> Result<Option<ClipView>, RuntimeError> {
+    pub async fn clip_view(&self, slot_ref: &str) -> Result<Option<ClipView>, RuntimeError> {
         let i = {
             let s = self.0.state.borrow();
             s.integration.clone().filter(|i| s.connection == ConnectionState::Connected && i.has_clip_view())
         };
         Ok(if let Some(i) = i { i.clip_view(slot_ref, abort::timeout(10_000)).await.ok().flatten() } else { None })
     }
-    fn has_session_strip(&self) -> bool {
-        true
-    }
-    async fn session_strip(&self, track_ref: &str, scene: f64) -> Result<Option<SessionStrip>, RuntimeError> {
+    pub async fn session_strip(&self, track_ref: &str, scene: f64) -> Result<Option<SessionStrip>, RuntimeError> {
         let i = {
             let s = self.0.state.borrow();
             s.integration.clone().filter(|i| s.connection == ConnectionState::Connected && i.has_session_strip())
         };
         Ok(if let Some(i) = i { i.session_strip(track_ref, scene, abort::timeout(10_000)).await.ok().flatten() } else { None })
     }
-    fn has_arrangement_strip(&self) -> bool {
-        true
-    }
-    fn can_show(&self, kind: BodyKind) -> bool {
+    pub fn can_show(&self, kind: BodyKind) -> bool {
         match kind {
             // Live's four, as the session always offered them.
             BodyKind::Tree | BodyKind::Notes | BodyKind::Grid | BodyKind::Timeline => true,
@@ -4045,21 +3980,21 @@ impl SessionController for Session {
             _ => self.0.state.borrow().integration.as_ref().is_some_and(|i| i.can_show(kind)),
         }
     }
-    async fn arrangement_strip(&self) -> Result<Option<ArrangementStrip>, RuntimeError> {
+    pub async fn arrangement_strip(&self) -> Result<Option<ArrangementStrip>, RuntimeError> {
         let i = {
             let s = self.0.state.borrow();
             s.integration.clone().filter(|i| s.connection == ConnectionState::Connected && i.has_arrangement_strip())
         };
         Ok(if let Some(i) = i { i.arrangement_strip(abort::timeout(10_000)).await.ok().flatten() } else { None })
     }
-    async fn focus_body(&self, request: &BodyRequest) -> Result<Option<FocusBody>, RuntimeError> {
+    pub async fn focus_body(&self, request: &BodyRequest) -> Result<Option<FocusBody>, RuntimeError> {
         let i = {
             let s = self.0.state.borrow();
             s.integration.clone().filter(|i| s.connection == ConnectionState::Connected && i.can_show(request.kind()))
         };
         Ok(if let Some(i) = i { i.focus_body(request, abort::timeout(10_000)).await.ok().flatten() } else { None })
     }
-    async fn cancel(&self) -> Result<(), RuntimeError> {
+    pub async fn cancel(&self) -> Result<(), RuntimeError> {
         let op = self.0.state.borrow().active.clone();
         if let Some(op) = op {
             op.signal.cancel();
@@ -4067,10 +4002,7 @@ impl SessionController for Session {
         }
         Ok(())
     }
-    fn has_reconfigure(&self) -> bool {
-        true
-    }
-    async fn reconfigure(&self) -> Result<(), RuntimeError> {
+    pub async fn reconfigure(&self) -> Result<(), RuntimeError> {
         let mut s = self.0.state.borrow_mut();
         if s.state == TurnState::Closed {
             return Err(RuntimeError::plain("Session is closed"));
@@ -4078,7 +4010,7 @@ impl SessionController for Session {
         s.rebuild = true;
         Ok(())
     }
-    async fn close(&self) -> Result<(), RuntimeError> {
+    pub async fn close(&self) -> Result<(), RuntimeError> {
         let closing = self.0.state.borrow().closing.clone();
         if let Some(closing) = closing {
             return closing.await;
@@ -4146,7 +4078,7 @@ impl SessionController for Session {
         });
         closing.await
     }
-    fn status(&self) -> SessionStatus {
+    pub fn status(&self) -> SessionStatus {
         let s = self.0.state.borrow();
         SessionStatus {
             state: s.state,
