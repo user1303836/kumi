@@ -184,6 +184,7 @@ python3 scripts/release.py --go     # リリース
 - **バージョン**は次のパッチです。`--minor` か `--version X.Y.Z` で別のものを選べます。
 - **`--go` を付けると**、`release/vX.Y.Z` に "Kumi X.Y.Z: the changelog, READMEs and versions" をコミットします。ルートの `package.json`、`crates/kumi-types/src/version.rs`、`kumi`、`kumi-common`、`kumi-types` の Cargo マニフェスト、`Cargo.lock` のバージョン（パッケージングのテストがこれらが等しいことを確認します）と、変わった場合はブリッジのバージョン、3 つの README の Status の行、3 つの `KUMI_CHANGES.md` の「Bridge versions」の下にある同梱するブリッジの行、`CHANGELOG.md` の `## X.Y.Z — date` の項目です。続いてプルリクエスト "Kumi X.Y.Z" を開き、その CI を待たずに管理者のバイパスで "Kumi X.Y.Z (#PR)" としてマージし、マージコミットに `vX.Y.Z` のタグを付けてプッシュし、リリースノート付きの下書きのリリースを作ります（`--summary` でノートの冒頭に一文を加えられます）。
 - **タグの Installer の実行**が、macOS、Linux、Windows の Intel と ARM 向けのネイティブバンドルをビルドし、インストールと移行をテストし、ターゲットごとのバンドル（`.tar.gz` と `.tar.xz`）とマニフェスト、互換用の `kumi.tar.gz`、`kumi-release.json`、`SHA256SUMS`、インストーラーを添付し、`release.py` がノートを書いていて（ノートの最後に `<!-- kumi:release-notes -->` があります）、インストーラーが両方添付されている場合はリリースを公開します。そうして初めて、インストーラー、`kumi update`、更新確認がそのリリースを認識します。手でプッシュした「ノートは後で」のタグなど、ほかの下書きは、だれかが公開するまで下書きのままです。
+- **Discord**：リリースを公開した実行は、続けてそのノートをアナウンスチャンネルに投稿します。投稿にはリポジトリのシークレット `DISCORD_RELEASES_WEBHOOK` の Webhook を使います（`scripts/discord_release.py`）。シークレットがなければ何も投稿せず、投稿に失敗してもリリースは失敗になりません。公開済みのリリースのノートは、「Release notes to Discord」ワークフローで手動でも投稿できます。
 
 **ネイティブリリースのローカルでの準備**（コミット済みの変更がない状態で）：
 

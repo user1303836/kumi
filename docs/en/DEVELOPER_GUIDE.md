@@ -350,6 +350,11 @@ python3 scripts/release.py --go     # the release
   installers are attached. Only then do the installers, `kumi update` and the
   update check see it. Any other draft, such as a tag pushed by hand with notes
   to come, stays a draft until someone publishes it.
+- **Discord:** the run that publishes a release then posts its notes to the
+  announcement channel, through the webhook in the repository secret
+  `DISCORD_RELEASES_WEBHOOK` (`scripts/discord_release.py`). Without the secret
+  nothing is posted, and a failed post doesn't fail the release. The "Release
+  notes to Discord" workflow posts a published release's notes by hand.
 
 **Local native release staging**, from a clean commit:
 

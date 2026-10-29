@@ -45,7 +45,7 @@ scripts/                    dev.py, areas.toml, moves.toml; release.py and packa
 docs/{en,ja,zh-CN}/         user docs in three languages
 install.sh, install.ps1     the installers
 .config/nextest.toml        CI's test sets: ci, ci-os, extended
-.github/workflows/          CI, Extended, Installer, Network, Willington files, Caches
+.github/workflows/          CI, Extended, Installer, Network, Willington files, Caches, Release notes to Discord
 ```
 
 Why it's shaped this way (keep it so):
