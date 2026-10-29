@@ -65,7 +65,7 @@ impl TuiApp {
                 .tty
                 .hand_over(async {
                     // Kumi's own writes wait while the terminal is lent; this one is meant for it.
-                    app.0.options.output.write(&format!("{text}\n— Any key goes back to Kumi —"));
+                    app.0.options.output.write(&format!("{text}\n— Any key goes back to Kumi —\n"));
                     app.0.tty.wait_for_key().await;
                 })
                 .await;
@@ -212,8 +212,10 @@ impl Overlay<TuiApp> for DetailsPanel {
     }
 
     /// In the conversation's place, from under the header down to the box.
-    fn draw(&mut self, _: &TuiApp, screen: &mut Screen, area: Area) -> Option<Cursor> {
+    fn draw(&mut self, app: &TuiApp, screen: &mut Screen, area: Area) -> Option<Cursor> {
         let rect = Rect::new(0, 2, area.left, (area.box_top - 3).max(1));
+        // What's under it can't be clicked, dragged over to copy, or scrolled by the wheel through it.
+        app.cover(rect);
         self.width = (rect.width - 5).max(1);
         self.height = (rect.height - i32::from(self.details.as_ref().is_some_and(|details| !details.query.is_empty()))).max(1) as usize;
         match self.details.as_mut() {

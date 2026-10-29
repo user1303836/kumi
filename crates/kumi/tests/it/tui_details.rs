@@ -148,3 +148,20 @@ case!(the_turn_under_way_shows_its_steps_under_the_saved_part, async {
     assert!(lines[under + 1].contains("▸ "), "{}", lines.join("\n"));
     h.close().await;
 });
+
+case!(what_the_view_covers_cant_be_clicked_through_it, async {
+    // At 80 columns the drawer sits under the conversation, NOW's undo in it; the view covers both.
+    let h = Harness::new(80, 30);
+    h.start().await;
+    h.connect();
+    h.emit(json!({"type":"change","change":{"id":"c1","family":"mixer","title":"Bass width 100% → 140%","state":"applied","at":1}}));
+    let lines = h.screen();
+    let row = lines.iter().position(|line| line.trim_end().ends_with("undo")).expect("NOW's undo");
+    let column = lines[row][..lines[row].rfind("undo").unwrap()].chars().count();
+    opened(&h).await;
+    h.type_text(&format!("\x1b[<0;{};{}M\x1b[<0;{};{}m", column + 1, row + 1, column + 1, row + 1)).await;
+    delay(30).await;
+    assert!(!h.calls().iter().any(|call| call.starts_with("undo")), "a click through the view: {:?}", h.calls());
+    h.has("The pad sits back now.");
+    h.close().await;
+});

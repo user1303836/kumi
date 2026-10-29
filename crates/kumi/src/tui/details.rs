@@ -119,14 +119,22 @@ impl Builder {
         }
     }
 
-    /// A step's input or result: its first lines, then how many more.
+    /// A step's input or result: its first [`STEP_LINES`] rows as they wrap (a long line of JSON counts by its rows), then
+    /// how many lines there are past them, the one cut short among them.
     fn lines_of(&mut self, text: &str) {
         let lines: Vec<&str> = text.lines().collect();
-        for line in lines.iter().take(STEP_LINES) {
-            self.line(&[span(*line, palette::FAINT)], None, 4);
-        }
-        if lines.len() > STEP_LINES {
-            self.line(&[span(format!("… {} more lines", lines.len() - STEP_LINES), palette::FAINT)], None, 4);
+        let mut shown = 0;
+        for (index, line) in lines.iter().enumerate() {
+            for (at, (spans, carry)) in wrap_carried(&[span(*line, palette::FAINT)], (self.width - 4).max(1)).into_iter().enumerate() {
+                if shown == STEP_LINES {
+                    let more = lines.len() - index;
+                    let word = if more == 1 { "line" } else { "lines" };
+                    self.line(&[span(format!("… {more} more {word}"), palette::FAINT)], None, 4);
+                    return;
+                }
+                self.row(spans, None, carry.filter(|_| at > 0), 4);
+                shown += 1;
+            }
         }
     }
 
@@ -185,6 +193,9 @@ impl Details {
             let mut changes = false;
             for part in &self.parts {
                 builder.part(part, &mut changes);
+            }
+            if self.parts.is_empty() && self.under_way.is_empty() {
+                builder.line(&[span("There's nothing to show yet: ask Kumi something first.", palette::FAINT)], None, 0);
             }
             if !self.under_way.is_empty() {
                 builder.gap();
@@ -383,6 +394,14 @@ mod tests {
         let rows = texts(&mut details, 60);
         assert!(rows.contains(&"    line 12".to_string()) && !rows.iter().any(|row| row.trim() == "line 13"), "{rows:#?}");
         assert!(rows.contains(&"    … 8 more lines".to_string()), "{rows:#?}");
+        // A result on one long line counts by the rows it wraps to.
+        let long = format!("{{{}}}", (0..200).map(|n| format!("\"key{n}\":{n}")).collect::<Vec<_>>().join(","));
+        let mut one_line = Details::new(vec![Part::Step { label: "read it".into(), input: None, result: Some(long) }], vec![]);
+        let cut = texts(&mut one_line, 40);
+        assert_eq!(cut.len(), 1 + STEP_LINES + 1, "{cut:#?}");
+        assert_eq!(cut.last().unwrap(), "    … 1 more line");
+        // Nothing to show says so.
+        assert_eq!(texts(&mut Details::new(vec![], vec![]), 80), ["There's nothing to show yet: ask Kumi something first."]);
         assert!(rows.contains(&"Under way".to_string()) && rows.contains(&"▸ looking at Pad".to_string()), "{rows:#?}");
         for (forward, request) in [(true, "make the bass wider"), (true, "and the pad"), (false, "make the bass wider")] {
             details.next_request(forward, 60);

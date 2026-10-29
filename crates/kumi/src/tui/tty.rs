@@ -114,9 +114,9 @@ struct Inner {
     moves: Cell<bool>,
     /// Lent to a program Kumi runs in it ([`Tty::hand_over`]), and not yet given back for good.
     lent: Cell<bool>,
-    /// Given back for good while lent (Kumi closing): what waits for a key in the lent terminal stops waiting. With
-    /// nothing waiting (the editor has the terminal), the wake stays stored; harmless, as the terminal is never lent
-    /// again and a wait then returns at once, but nothing else should wait on it.
+    /// Given back for good while lent (Kumi closing): what waits for a key in the lent terminal stops waiting. Only a
+    /// wait under way is woken (a wait starts and polls it without yielding, so none misses it), and nothing is kept for
+    /// later: the terminal is never lent again, so a later wait returns at once.
     closed: tokio::sync::Notify,
     parser: InputParser,
     decoder: RefCell<Utf8Decoder>,
@@ -328,7 +328,7 @@ impl Inner {
         // Lent to a program: its screen and modes are given back already, and aren't taken again when it's done.
         let lent = self.lent.replace(false);
         if lent {
-            self.closed.notify_one();
+            self.closed.notify_waiters();
         }
         // Given back by the crash path and not taken again: what it didn't undo is still Kumi's to undo.
         let active = self.active.swap(false, Ordering::SeqCst);
