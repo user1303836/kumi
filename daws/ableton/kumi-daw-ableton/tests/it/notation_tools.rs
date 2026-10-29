@@ -45,7 +45,7 @@ impl McpEndpoint for Live {
         let parent = args.get("parent").and_then(Value::as_str).unwrap_or("");
         let pad = |name: &str, note: u8| json!({"name":name,"note":note,"chains":[{"name":name}]});
         Ok(match args["kind"].as_str().unwrap() {
-            "device" if args.get("filters").is_some() => reply(
+            "device" if args.get("filter").is_some() => reply(
                 "device",
                 json!([{"ref":"7:device:0:0","drumPads":[pad("Kick 808", 36), pad("Snare", 38), {"name":"Pad 3","note":39,"chains":[]}]}]),
             ),

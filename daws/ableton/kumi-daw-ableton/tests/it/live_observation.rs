@@ -127,7 +127,7 @@ fn eq(actual: &Value, expected: &Value, label: &str) {
     assert_eq!(stringify(&canonical(actual)), stringify(&canonical(expected)), "{label}");
 }
 fn observation(value: Observation) -> Value {
-    let mut row = json!({"key":value.key,"label":value.label,"context":value.context,"instructions":value.instructions,"tools":[]})
+    let mut row = json!({"key":value.key,"label":value.label,"context":value.context,"instructions":crate::pads_in_order::legacy(&value.instructions),"tools":[]})
         .as_object()
         .unwrap()
         .clone();

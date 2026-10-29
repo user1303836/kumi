@@ -109,7 +109,101 @@ pub fn parse(text: &str) -> Option<u8> {
 pub(super) fn normalized(name: &str) -> String {
     name.chars().filter(char::is_ascii_alphanumeric).map(|c| c.to_ascii_lowercase()).collect()
 }
-/// The pitch a lane name plays: the track's pad by that name (or the one pad it begins), else General MIDI's drum.
+/// The drums a kit's lanes name by General MIDI's names, which a pad's name can say it holds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Drum {
+    Kick,
+    Rim,
+    Snare,
+    Clap,
+    ClosedHat,
+    PedalHat,
+    OpenHat,
+    Tom,
+    Crash,
+    Ride,
+}
+
+impl Drum {
+    /// The drum on General MIDI's key.
+    fn at(pitch: u8) -> Option<Drum> {
+        Some(match pitch {
+            35 | 36 => Drum::Kick,
+            37 => Drum::Rim,
+            38 | 40 => Drum::Snare,
+            39 => Drum::Clap,
+            42 => Drum::ClosedHat,
+            44 => Drum::PedalHat,
+            46 => Drum::OpenHat,
+            41 | 43 | 45 | 47 | 48 | 50 => Drum::Tom,
+            49 | 52 | 55 | 57 => Drum::Crash,
+            51 | 53 | 59 => Drum::Ride,
+            _ => return None,
+        })
+    }
+    fn words(self) -> &'static str {
+        match self {
+            Drum::Kick => "kick",
+            Drum::Rim => "rim",
+            Drum::Snare => "snare",
+            Drum::Clap => "clap",
+            Drum::ClosedHat => "closed hat",
+            Drum::PedalHat => "pedal hat",
+            Drum::OpenHat => "open hat",
+            Drum::Tom => "tom",
+            Drum::Crash => "crash",
+            Drum::Ride => "ride",
+        }
+    }
+    /// What a pad holds, by its name's words ("Kick 909", "909hh", "HH Open", "SD Tight", "Claps"): none when it doesn't
+    /// say. Words part at spaces and signs, and where letters meet digits ("909hh" is 909 and hh).
+    fn held_by(name: &str) -> Option<Drum> {
+        let lower = name.to_lowercase();
+        let mut words: Vec<String> = vec![];
+        for part in lower.split(|c: char| !c.is_alphanumeric()).filter(|part| !part.is_empty()) {
+            let mut word = String::new();
+            for c in part.chars() {
+                if word.chars().last().is_some_and(|last| last.is_ascii_digit() != c.is_ascii_digit()) {
+                    words.push(std::mem::take(&mut word));
+                }
+                word.push(c);
+            }
+            words.push(word);
+        }
+        let says = |parts: &[&str], whole: &[&str]| {
+            parts.iter().any(|part| lower.contains(part)) || words.iter().any(|word| whole.contains(&word.as_str()))
+        };
+        Some(if says(&["kick", "kik", "bassdrum", "bass drum"], &["bd"]) {
+            Drum::Kick
+        } else if says(&["clap"], &["cp", "clp"]) {
+            Drum::Clap
+        } else if says(&["rim", "sidestick", "side stick"], &[]) {
+            Drum::Rim
+        } else if says(&["snare"], &["sd", "snr"]) {
+            Drum::Snare
+        } else if says(&["hat", "closed", "open", "pedal"], &["hh", "chh", "ch", "ohh", "oh", "ph"]) {
+            if says(&["pedal"], &["ph"]) {
+                Drum::PedalHat
+            } else if says(&["open"], &["ohh", "oh", "ohat"]) {
+                Drum::OpenHat
+            } else {
+                Drum::ClosedHat
+            }
+        } else if says(&["crash", "china", "splash"], &[]) {
+            Drum::Crash
+        } else if says(&["ride"], &[]) {
+            Drum::Ride
+        } else if says(&["tom"], &[]) {
+            Drum::Tom
+        } else {
+            return None;
+        })
+    }
+}
+
+/// The pitch a lane name plays: the track's pad by that name (or the one pad it begins); for General MIDI's name of a
+/// drum, the one pad whose name says it holds that drum, wherever the kit has it; else General MIDI's key, unless a pad
+/// there holds another drum.
 pub fn drum_pitch(lane: &str, pads: &[(String, u8)]) -> Result<u8, String> {
     let wanted = normalized(lane);
     if let Some((_, pitch)) = pads.iter().find(|(name, _)| normalized(name) == wanted) {
@@ -124,10 +218,32 @@ pub fn drum_pitch(lane: &str, pads: &[(String, u8)]) -> Result<u8, String> {
         }
         [] => {}
     }
-    if let Some((_, pitch)) = GENERAL_MIDI.iter().find(|(name, _)| *name == wanted) {
-        return Ok(*pitch);
-    }
     let named: Vec<&str> = pads.iter().map(|(name, _)| name.as_str()).take(16).collect();
+    if let Some((_, key)) = GENERAL_MIDI.iter().find(|(name, _)| *name == wanted) {
+        if let Some(drum) = Drum::at(*key) {
+            let holding: Vec<&(String, u8)> = pads.iter().filter(|(name, _)| Drum::held_by(name) == Some(drum)).collect();
+            match holding[..] {
+                [(_, pitch)] => return Ok(*pitch),
+                // (several: the one on General MIDI's key, as a kit laid out on them has it)
+                [_, _, ..] => {
+                    return holding.iter().find(|(_, pitch)| pitch == key).map(|(_, pitch)| *pitch).ok_or_else(|| {
+                        let them: Vec<&str> = holding.iter().map(|(name, _)| name.as_str()).collect();
+                        format!("more than one pad holds a {}: name one of them ({}) or a pitch (C1 or 36)", drum.words(), them.join(", "))
+                    })
+                }
+                [] => {}
+            }
+            if let Some((other, _)) = pads.iter().find(|(name, at)| at == key && Drum::held_by(name).is_some_and(|held| held != drum)) {
+                return Err(format!(
+                    "no pad holds a {}, and “{other}” is on General MIDI's {}: name one of the pads ({}) or a pitch (C1 or 36)",
+                    drum.words(),
+                    self::name(*key),
+                    named.join(", ")
+                ));
+            }
+        }
+        return Ok(*key);
+    }
     Err(if named.is_empty() {
         format!("there's no drum called “{lane}”: name a pitch (C1 or 36) or a General MIDI drum (kick, snare, clap, hat, openhat…)")
     } else {
@@ -177,5 +293,29 @@ mod tests {
         assert_eq!((drum_pitch("clap", &pads), drum_pitch("Open Hat", &[])), (Ok(39), Ok(46)), "General MIDI's");
         assert!(drum_pitch("zap", &[]).is_err());
         assert_eq!((drum_name(36, &pads), drum_name(42, &[]), drum_name(90, &[])), ("kick808".into(), "hat".into(), "F#5".into()));
+    }
+
+    #[test]
+    fn a_general_midi_drum_finds_the_pad_that_holds_one_wherever_the_kit_has_it() {
+        let pads = |kit: &[(&str, u8)]| kit.iter().map(|(name, pitch)| (name.to_string(), *pitch)).collect::<Vec<_>>();
+        // A kit laid out in order, as Kumi makes one: four sounds on C1 to D#1.
+        let kit = pads(&[("Kick 909", 36), ("Claps", 37), ("909hh", 38), ("VEH3 Open", 39)]);
+        for (lane, pitch) in [("kick", 36), ("clap", 37), ("hat", 38), ("hihat", 38), ("openhat", 39), ("oh", 39)] {
+            assert_eq!(drum_pitch(lane, &kit), Ok(pitch), "{lane}");
+        }
+        // No pad holds a snare, and General MIDI's key (D1) is the hat's: said, not played on the hat.
+        let snare = drum_pitch("snare", &kit).unwrap_err();
+        assert!(snare.contains("no pad holds a snare") && snare.contains("909hh"), "{snare}");
+        // General MIDI's key where no pad on it holds another drum: a crash past the kit.
+        assert_eq!(drum_pitch("crash", &kit), Ok(49));
+        // Two closed hats: the one on General MIDI's key; with neither there, Kumi asks which.
+        assert_eq!(drum_pitch("hat", &pads(&[("HH Tight", 37), ("VEH3 Closed", 42)])), Ok(42));
+        let two = drum_pitch("hat", &pads(&[("909hh", 38), ("VEH3 Closed", 39)])).unwrap_err();
+        assert!(two.contains("more than one pad holds a closed hat") && two.contains("909hh, VEH3 Closed"), "{two}");
+        // A kit on General MIDI's keys plays as before.
+        let gm = pads(&[("Kick", 36), ("Snare", 38), ("Clap", 39), ("Hihat Closed", 42), ("Hihat Open", 46)]);
+        for (lane, pitch) in [("kick", 36), ("snare", 38), ("clap", 39), ("hat", 42), ("openhat", 46), ("ride", 51)] {
+            assert_eq!(drum_pitch(lane, &gm), Ok(pitch), "{lane}");
+        }
     }
 }

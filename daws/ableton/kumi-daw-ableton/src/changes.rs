@@ -66,6 +66,50 @@ pub trait ChangeContext {
     async fn value_for(&self, _parameter_ref: &str, _text: &str) -> Result<Result<f64, String>, RuntimeError> {
         unreachable!("optional valueFor")
     }
+    /// The pads a Drum Rack shows, by its ref: None when they can't be read.
+    async fn drum_pads(&self, _device_ref: &str) -> Option<Vec<DrumPad>> {
+        None
+    }
+}
+pub use super::notes::DrumPad;
+/// The notes for `wanted` samples loaded onto a Drum Rack without one: its next empty pads in the order Live lays them
+/// out, row by row from its first (C1, C#1, D1, D#1, then E1 above on a new rack), past the notes `given` to the others.
+pub fn free_pads(pads: &[DrumPad], given: &[u8], wanted: usize) -> Result<Vec<u8>, String> {
+    if pads.is_empty() {
+        return Err("deviceRef shows no pads: samples go onto a Drum Rack's pads (load_device \"instruments/Drum Rack\" first)".into());
+    }
+    let mut free: Vec<u8> = pads.iter().filter(|pad| !pad.holds && !given.contains(&pad.note)).map(|pad| pad.note).collect();
+    free.sort_unstable();
+    if free.len() < wanted {
+        let lowest = pads.iter().map(|pad| pad.note).min().unwrap_or_default();
+        let highest = pads.iter().map(|pad| pad.note).max().unwrap_or_default();
+        return Err(format!(
+            "The Drum Rack shows {} pads ({} to {}) and {} of them are empty, for {}: put the rest on another Drum Rack, or \
+             ask the producer to scroll its pads in Live to empty ones.",
+            pads.len(),
+            note_name(lowest as f64),
+            note_name(highest as f64),
+            free.len(),
+            if wanted == 1 { "1 sample".to_owned() } else { format!("{wanted} samples") }
+        ));
+    }
+    free.truncate(wanted);
+    Ok(free)
+}
+/// The notes of pads loaded onto the rack `input` names, as `asked`: each given one as it is, and those left out the
+/// rack's next empty pads (`free_pads`, read now). Without a rack named, as given: the bridge says what's missing.
+async fn pad_notes(input: &JsonObject, asked: &[Option<&Value>], context: &dyn ChangeContext) -> Result<Vec<Value>, String> {
+    let left_out = |note: &Option<&Value>| note.is_none_or(|note| note.is_null());
+    let rack = input.get("deviceRef").and_then(Value::as_str);
+    let (Some(rack), true) = (rack, asked.iter().any(left_out)) else {
+        return Ok(asked.iter().map(|note| fallback(*note)).collect());
+    };
+    let given: Vec<u8> = asked.iter().filter_map(|note| note.and_then(Value::as_u64)).filter_map(|note| u8::try_from(note).ok()).collect();
+    let Some(pads) = context.drum_pads(rack).await else {
+        return Err("Kumi couldn't read the Drum Rack's pads: give each sample its note (36, C1, is the first pad).".into());
+    };
+    let mut free = free_pads(&pads, &given, asked.iter().filter(|note| left_out(note)).count())?.into_iter();
+    Ok(asked.iter().map(|note| if left_out(note) { json!(free.next()) } else { fallback(*note) }).collect())
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -338,7 +382,11 @@ impl ChangeKind {
                 let mut out = if self.tool == "load_sample" {
                     json!({"action":"insert","trackRef":fallback(input.get("trackRef")),"deviceName":"Simpler","filePath":found.path,"allowedRoot":found.folder})
                 } else {
-                    json!({"action":"load-sample","deviceRef":fallback(input.get("deviceRef")),"note":fallback(input.get("note")),"filePath":found.path,"allowedRoot":found.folder})
+                    let notes = match pad_notes(input, &[input.get("note")], context).await {
+                        Ok(notes) => notes,
+                        Err(why) => return Ok(Err(why)),
+                    };
+                    json!({"action":"load-sample","deviceRef":fallback(input.get("deviceRef")),"note":notes[0],"filePath":found.path,"allowedRoot":found.folder})
                 };
                 if self.tool == "load_sample_to_pad" && input.get("instrument").and_then(Value::as_str) == Some("Drum Sampler") {
                     out["instrument"] = json!("Drum Sampler");
@@ -360,6 +408,14 @@ impl ChangeKind {
                         out["instrument"] = json!("Drum Sampler");
                     }
                     pads.push(out);
+                }
+                let asked: Vec<Option<&Value>> = array(input.get("pads")).iter().map(|pad| record(Some(pad)).get("note")).collect();
+                let notes = match pad_notes(input, &asked, context).await {
+                    Ok(notes) => notes,
+                    Err(why) => return Ok(Err(why)),
+                };
+                for (pad, note) in pads.iter_mut().zip(notes) {
+                    pad["note"] = note;
                 }
                 json!({"action":"load-samples","deviceRef":fallback(input.get("deviceRef")),"pads":pads})
             }

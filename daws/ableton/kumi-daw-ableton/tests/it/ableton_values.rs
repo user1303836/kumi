@@ -89,7 +89,7 @@ fn discovery_validates_results_identity_epochs_fields_and_page_keys() {
 #[test]
 fn host_scripts_and_instruction_assets_preserve_source_bytes() {
     let data = oracle();
-    assert_eq!(hash(context::INSTRUCTIONS), data["assets"]["instructions"]);
+    assert_eq!(hash(&crate::pads_in_order::legacy(context::INSTRUCTIONS)), data["assets"]["instructions"]);
     assert_eq!(hash(DISPLAY_MAP_SCRIPT), data["assets"]["display"]);
     assert_eq!(*context::FIELDS, data["assets"]["fields"].as_object().unwrap().clone());
     assert_eq!(*context::PARENTS, data["assets"]["parents"].as_object().unwrap().clone());

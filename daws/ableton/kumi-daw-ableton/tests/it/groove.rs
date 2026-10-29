@@ -122,7 +122,7 @@ impl McpEndpoint for Live {
                     json!({"ref":"7:track:2","name":"Drum stem"}),
                 ]),
             ),
-            "device" if args.get("filters").is_some() => {
+            "device" if args.get("filter").is_some() => {
                 page("device", json!([{"ref":"7:device:0:0","drumPads":[pad("Kick", 36), pad("Snare", 38), pad("Hihat", 42)]}]))
             }
             "device" if parent == "7:track:0" || parent == "7:track:1" => {

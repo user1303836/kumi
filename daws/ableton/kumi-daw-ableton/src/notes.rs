@@ -212,12 +212,37 @@ pub async fn drum_rack(connection: &LiveConnection, track: &str, signal: &Signal
         .into_iter()
         .find(|row| row.get("canHaveDrumPads") == Some(&json!(true)))
         .and_then(|row| row.get("ref").and_then(Value::as_str).map(str::to_owned))?;
-    let Ok(rack) = read(json!({"kind":"device","filters":{"ref":rack},"fields":["drumPads"],"limit":1})).await else { return Some(vec![]) };
-    let pads = rows(&rack).into_iter().next().and_then(|row| row.get("drumPads").and_then(Value::as_array).cloned()).unwrap_or_default();
+    let pads = drum_pads(connection, &rack, signal).await.unwrap_or_default();
+    Some(pads.into_iter().filter(|pad| pad.holds).map(|pad| (pad.name, pad.note)).collect())
+}
+
+/// A Drum Rack pad as Live shows it: its note, its name, and whether it holds something.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DrumPad {
+    pub note: u8,
+    pub name: String,
+    pub holds: bool,
+}
+
+/// The pads a Drum Rack shows (the 16 Live gives scripts: C1 to D#2 on a new rack), by its ref (the model's short one,
+/// or long). None when the read fails; no pads when it isn't a Drum Rack.
+pub async fn drum_pads(connection: &LiveConnection, rack: &str, signal: &Signal) -> Option<Vec<DrumPad>> {
+    let rack = connection.references.borrow().lengthen(&json!({"ref": rack}))["ref"].as_str().unwrap_or(rack).to_owned();
+    let args = json!({"kind":"device","filter":{"ref":rack},"fields":["drumPads"],"limit":1});
+    let read = views::pages(connection, args.as_object().cloned().unwrap_or_default(), signal.clone()).await.ok()?;
+    if read.is_error == Some(true) {
+        return None;
+    }
+    let pads = rows(&read).into_iter().next().and_then(|row| row.get("drumPads").and_then(Value::as_array).cloned()).unwrap_or_default();
     Some(
         pads.iter()
-            .filter(|pad| pad.get("chains").and_then(Value::as_array).is_some_and(|chains| !chains.is_empty()))
-            .filter_map(|pad| Some((pad.get("name")?.as_str()?.to_owned(), u8::try_from(pad.get("note")?.as_u64()?).ok()?)))
+            .filter_map(|pad| {
+                Some(DrumPad {
+                    note: u8::try_from(pad.get("note")?.as_u64()?).ok()?,
+                    name: pad.get("name").and_then(Value::as_str).unwrap_or_default().to_owned(),
+                    holds: pad.get("chains").and_then(Value::as_array).is_some_and(|chains| !chains.is_empty()),
+                })
+            })
             .collect(),
     )
 }

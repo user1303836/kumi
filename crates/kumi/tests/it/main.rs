@@ -12,6 +12,7 @@ mod daw_neutral_guard;
 mod daw_words;
 mod daws_doc;
 mod doctor;
+mod drum_kits;
 mod export;
 mod fake_daw_session;
 mod focus_fill;

@@ -11,6 +11,8 @@ struct Context {
     calls: RefCell<Vec<Value>>,
     parameters: Vec<ParameterRange>,
     display: bool,
+    /// The pads a Drum Rack shows: none read, when there are none.
+    pads: Option<Vec<DrumPad>>,
 }
 #[async_trait(?Send)]
 impl ChangeContext for Context {
@@ -39,6 +41,10 @@ impl ChangeContext for Context {
         self.calls.borrow_mut().push(json!(["valueFor", reference, text]));
         Ok(if text == "-6 dB" { Ok(0.625) } else { Err("unplaceable".into()) })
     }
+    async fn drum_pads(&self, device: &str) -> Option<Vec<DrumPad>> {
+        self.calls.borrow_mut().push(json!(["drumPads", device]));
+        self.pads.clone()
+    }
 }
 fn kind(case: &Value) -> &'static ChangeKind {
     CHANGES.iter().find(|k| k.tool == case["tool"]).unwrap()
@@ -51,6 +57,7 @@ async fn change_preparation_and_parameter_explanations_match_complete_source_res
             calls: RefCell::new(vec![]),
             parameters: serde_json::from_value(data["parameters"].clone()).unwrap(),
             display: case["display"].as_bool().unwrap(),
+            pads: None,
         };
         let result = match kind(case).prepare(case["input"].as_object().unwrap(), &context).await.unwrap() {
             Ok(value) => Value::Object(value),
@@ -64,6 +71,7 @@ async fn change_preparation_and_parameter_explanations_match_complete_source_res
             calls: RefCell::new(vec![]),
             parameters: serde_json::from_value(data["parameters"].clone()).unwrap(),
             display: false,
+            pads: None,
         };
         assert_eq!(
             serde_json::to_value(
@@ -95,7 +103,7 @@ fn change_schemas_outputs_permanence_and_human_messages_match_source() {
         assert_eq!(serde_json::to_value(hex_color(&case["value"])).unwrap(), case["color"]);
         assert_eq!(format_number(value, None), case["format"]);
     }
-    assert_eq!(serde_json::to_value(&*CHANGES).unwrap(), data["kinds"]);
+    assert_eq!(crate::pads_in_order::legacy_json(&serde_json::to_value(&*CHANGES).unwrap()), data["kinds"]);
     assert_eq!(*SAMPLE_INPUT, data["sampleInput"].as_object().unwrap().clone());
     assert_eq!(*REFERENCE_FIELDS, serde_json::from_value::<Vec<String>>(data["referenceFields"].clone()).unwrap());
     assert_eq!(
@@ -269,4 +277,48 @@ fn native_titles_use_visible_targets_and_only_changed_scene_settings() {
         .title,
         "Changed pressure on C3 at bar 2 in Bass"
     );
+}
+
+/// A kit's samples given no note fill the rack's empty pads in order, row by row from its first (C1, C#1, D1, D#1, then
+/// E1 above on a new rack): past the pads that hold something and the notes given to the others.
+#[tokio::test]
+async fn samples_given_no_note_fill_the_racks_next_empty_pads_in_order() {
+    let change = |tool: &str| CHANGES.iter().find(|kind| kind.tool == tool).unwrap();
+    let rack = |shown: std::ops::Range<u8>, holding: &[u8]| {
+        Some(shown.map(|note| DrumPad { note, name: format!("Pad {note}"), holds: holding.contains(&note) }).collect::<Vec<_>>())
+    };
+    let context = |pads| Context { calls: RefCell::new(vec![]), parameters: vec![], display: false, pads };
+    let one = |input: Value, context: Context| async move {
+        let prepared = change("load_sample_to_pad").prepare(input.as_object().unwrap(), &context).await.unwrap();
+        (prepared.map(|out| out["note"].clone()), context.calls.into_inner())
+    };
+    let kick = json!({"deviceRef": "d1", "sample": "/samples/Kick.wav"});
+    // One sample: the rack's first empty pad (C1 on a new rack; D1 past two that hold sounds; the first a scrolled
+    // rack shows).
+    assert_eq!(one(kick.clone(), context(rack(36..52, &[]))).await.0, Ok(json!(36)));
+    assert_eq!(one(kick.clone(), context(rack(36..52, &[36, 37]))).await.0, Ok(json!(38)));
+    assert_eq!(one(kick.clone(), context(rack(52..68, &[]))).await.0, Ok(json!(52)));
+    // A note given is the producer's pad, read from nothing.
+    let (given, calls) = one(json!({"deviceRef": "d1", "sample": "/samples/Kick.wav", "note": 42}), context(rack(36..52, &[]))).await;
+    assert_eq!((given, calls), (Ok(json!(42)), vec![json!(["sample", "/samples/Kick.wav"])]));
+    // A full rack, or one Kumi can't read: said.
+    let full = one(kick.clone(), context(rack(36..52, &(36..52).collect::<Vec<_>>()))).await.0.unwrap_err();
+    assert!(full.contains("0 of them are empty, for 1 sample:") && full.contains("C1 to D#2"), "{full}");
+    assert!(one(kick, context(None)).await.0.unwrap_err().contains("couldn't read the Drum Rack's pads"));
+    // A kit, loaded as one change: the pads read once, its samples on C1 to D#1 in the order given; a note given
+    // keeps its pad, and the others go round it.
+    let kit = |pads: Value, context: Context| async move {
+        let input = json!({"deviceRef": "d1", "pads": pads});
+        let prepared = change("load_samples_to_pads").prepare(input.as_object().unwrap(), &context).await.unwrap().unwrap();
+        let notes: Vec<Value> = prepared["pads"].as_array().unwrap().iter().map(|pad| pad["note"].clone()).collect();
+        let reads = context.calls.into_inner().into_iter().filter(|call| call[0] == "drumPads").count();
+        (notes, reads)
+    };
+    let four = json!([{"sample": "/samples/Kick.wav"}, {"sample": "/samples/Clap.wav"}, {"sample": "/samples/Hat.wav"}, {"sample": "/samples/Open.wav"}]);
+    assert_eq!(kit(four, context(rack(36..52, &[]))).await, (vec![json!(36), json!(37), json!(38), json!(39)], 1));
+    let round = json!([{"sample": "/samples/Kick.wav"}, {"sample": "/samples/Clap.wav", "note": 37}, {"sample": "/samples/Hat.wav"}]);
+    assert_eq!(kit(round, context(rack(36..52, &[36]))).await, (vec![json!(38), json!(37), json!(39)], 1));
+    // Every note given: nothing read.
+    let named = json!([{"sample": "/samples/Kick.wav", "note": 36}, {"sample": "/samples/Snare.wav", "note": 38}]);
+    assert_eq!(kit(named, context(None)).await, (vec![json!(36), json!(38)], 0));
 }
