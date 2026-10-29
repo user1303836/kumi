@@ -112,6 +112,12 @@ pub struct Control {
     pub export: RefCell<Option<ConversationToExport>>,
     /// The session's palette (with "palette" set, the session keeps palettes).
     pub palette: RefCell<Option<kumi_agent::core::palette::PaletteView>>,
+    /// The producer's own music, for /music.
+    pub music: RefCell<Option<Rc<kumi_listening::music::learning::Music>>>,
+    /// What /slots reads and swaps.
+    pub slots: RefCell<Option<Rc<kumi_listening::slots::SlotsContext>>>,
+    /// What /map reads its data with.
+    pub map: RefCell<Option<kumi::map::LoadMap>>,
 }
 impl Default for Control {
     fn default() -> Self {
@@ -138,10 +144,19 @@ impl Default for Control {
             own_refused: Cell::default(),
             export: RefCell::default(),
             palette: RefCell::default(),
+            music: RefCell::default(),
+            slots: RefCell::default(),
+            map: RefCell::default(),
         }
     }
 }
 impl Control {
+    /// A session whose /map reads its data with `load`.
+    pub fn mapped(load: kumi::map::LoadMap) -> Rc<Control> {
+        let control = Rc::new(Control::default());
+        *control.map.borrow_mut() = Some(load);
+        control
+    }
     pub fn set(&self, key: &str, value: Value) {
         self.extra.borrow_mut()[key] = value;
     }
@@ -552,6 +567,15 @@ impl SessionController for Control {
     }
     fn library(&self) -> Option<LibraryStatus> {
         self.library.borrow().clone()
+    }
+    fn music(&self) -> Option<Rc<kumi_listening::music::learning::Music>> {
+        self.music.borrow().clone()
+    }
+    fn slots_context(&self) -> Option<Rc<kumi_listening::slots::SlotsContext>> {
+        self.slots.borrow().clone()
+    }
+    fn map_loader(&self) -> Option<kumi::map::LoadMap> {
+        self.map.borrow().clone()
     }
     fn has_device_tree(&self) -> bool {
         self.tree.borrow().is_some()

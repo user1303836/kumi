@@ -147,7 +147,7 @@ fn marker(lines: &[String]) -> (usize, usize) {
 }
 
 case!(the_map_opens_full_screen_in_braille_and_esc_brings_the_conversation_back, async {
-    let h = Harness::with(160, 40, Rc::new(Control::default()), |o| o.map = Some(loader(fixture(12, 8))));
+    let h = Harness::with(160, 40, Control::mapped(loader(fixture(12, 8))), |_| {});
     h.start().await;
     h.connect();
     h.type_text("/map\r").await;
@@ -165,7 +165,7 @@ case!(the_map_opens_full_screen_in_braille_and_esc_brings_the_conversation_back,
 });
 
 case!(an_arrow_moves_to_a_point_that_way_and_zooming_in_names_the_points, async {
-    let h = Harness::with(160, 40, Rc::new(Control::default()), |o| o.map = Some(loader(fixture(12, 8))));
+    let h = Harness::with(160, 40, Control::mapped(loader(fixture(12, 8))), |_| {});
     h.start().await;
     h.connect();
     h.type_text("/map\r").await;
@@ -193,10 +193,7 @@ case!(an_arrow_moves_to_a_point_that_way_and_zooming_in_names_the_points, async 
 });
 
 case!(on_a_terminal_with_images_the_points_are_one_image_under_the_names, async {
-    let h = Harness::with(160, 40, Rc::new(Control::default()), |o| {
-        o.graphics = Some(Graphics::Kitty);
-        o.map = Some(loader(fixture(12, 8)));
-    });
+    let h = Harness::with(160, 40, Control::mapped(loader(fixture(12, 8))), |o| o.graphics = Some(Graphics::Kitty));
     h.start().await;
     h.connect();
     h.type_text("/map\r").await;
@@ -223,10 +220,7 @@ case!(on_a_terminal_with_images_the_points_are_one_image_under_the_names, async 
 });
 
 case!(a_console_without_pictures_lists_the_groups_with_counts_and_examples, async {
-    let h = Harness::with(160, 40, Rc::new(Control::default()), |o| {
-        o.graphics = Some(Graphics::Words);
-        o.map = Some(loader(fixture(12, 8)));
-    });
+    let h = Harness::with(160, 40, Control::mapped(loader(fixture(12, 8))), |o| o.graphics = Some(Graphics::Words));
     h.start().await;
     h.connect();
     h.type_text("/map\r").await;
@@ -239,7 +233,7 @@ case!(a_console_without_pictures_lists_the_groups_with_counts_and_examples, asyn
 });
 
 case!(enter_on_the_map_asks_kumi_nothing, async {
-    let h = Harness::with(160, 40, Rc::new(Control::default()), |o| o.map = Some(loader(fixture(12, 8))));
+    let h = Harness::with(160, 40, Control::mapped(loader(fixture(12, 8))), |_| {});
     h.start().await;
     h.connect();
     h.type_text("/map\r").await;
@@ -259,7 +253,8 @@ case!(enter_on_the_map_asks_kumi_nothing, async {
 case!(enter_puts_the_point_chosen_into_the_palette_and_x_then_enter_the_points_picked, async {
     let control = Rc::new(Control::default());
     control.set("palette", serde_json::json!(true));
-    let h = Harness::with(160, 40, control, |o| o.map = Some(loader(fixture(12, 8))));
+    *control.map.borrow_mut() = Some(loader(fixture(12, 8)));
+    let h = Harness::with(160, 40, control, |_| {});
     h.start().await;
     h.connect();
     h.type_text("/map\r").await;
@@ -313,7 +308,7 @@ async fn linked(opened: &str) -> String {
 }
 
 case!(map_open_serves_the_map_to_the_browser_whose_actions_fill_the_input_box, async {
-    let h = Harness::with(160, 40, Rc::new(Control::default()), |o| o.map = Some(loader(fixture(12, 8))));
+    let h = Harness::with(160, 40, Control::mapped(loader(fixture(12, 8))), |_| {});
     h.start().await;
     h.connect();
     h.type_text("/map open\r").await;
@@ -363,8 +358,7 @@ case!(map_open_serves_the_map_to_the_browser_whose_actions_fill_the_input_box, a
 });
 
 case!(over_ssh_map_open_says_how_to_reach_the_map_and_opens_no_browser_there, async {
-    let h = Harness::with(160, 40, Rc::new(Control::default()), |o| {
-        o.map = Some(loader(fixture(2, 1)));
+    let h = Harness::with(160, 40, Control::mapped(loader(fixture(2, 1))), |o| {
         o.remote = true;
     });
     h.start().await;
@@ -452,8 +446,7 @@ async fn given(started: &Rc<RefCell<Vec<usize>>>, count: usize) {
 case!(space_plays_the_point_chosen_and_again_stops_it, async {
     let dir = tempfile::tempdir().unwrap();
     let (started, playing) = (Rc::new(RefCell::new(vec![])), Rc::new(RefCell::new(false)));
-    let h = Harness::with(160, 40, Rc::new(Control::default()), |o| {
-        o.map = Some(loader(sounding(dir.path(), fixture(2, 1))));
+    let h = Harness::with(160, 40, Control::mapped(loader(sounding(dir.path(), fixture(2, 1)))), |o| {
         o.player = Some(Rc::new(Player::with_opener(kept(&started, &playing))));
     });
     h.start().await;
@@ -475,8 +468,7 @@ case!(a_point_plays_as_the_mouse_comes_to_it_and_stops_as_the_mouse_leaves, asyn
     let dir = tempfile::tempdir().unwrap();
     let (started, playing) = (Rc::new(RefCell::new(vec![])), Rc::new(RefCell::new(false)));
     let remembered = Rc::new(Cell::new(None));
-    let h = Harness::with(160, 40, Rc::new(Control::default()), |o| {
-        o.map = Some(loader(sounding(dir.path(), fixture(2, 1))));
+    let h = Harness::with(160, 40, Control::mapped(loader(sounding(dir.path(), fixture(2, 1)))), |o| {
         o.player = Some(Rc::new(Player::with_opener(kept(&started, &playing))));
         let saved = remembered.clone();
         o.map_hover = Some(MapHover { load: Rc::new(|| true), save: Rc::new(move |on| saved.set(Some(on))) });
@@ -525,8 +517,7 @@ case!(a_point_plays_as_the_mouse_comes_to_it_and_stops_as_the_mouse_leaves, asyn
 case!(space_over_a_hovers_preview_plays_the_point_whole, async {
     let dir = tempfile::tempdir().unwrap();
     let (started, playing) = (Rc::new(RefCell::new(vec![])), Rc::new(RefCell::new(false)));
-    let h = Harness::with(160, 40, Rc::new(Control::default()), |o| {
-        o.map = Some(loader(sounding_for(dir.path(), fixture(2, 1), 3.)));
+    let h = Harness::with(160, 40, Control::mapped(loader(sounding_for(dir.path(), fixture(2, 1), 3.))), |o| {
         o.player = Some(Rc::new(Player::with_opener(kept(&started, &playing))));
         o.map_hover = Some(MapHover { load: Rc::new(|| true), save: Rc::new(|_| {}) });
     });
@@ -565,8 +556,7 @@ case!(space_over_a_hovers_preview_plays_the_point_whole, async {
 });
 
 case!(hover_plays_stay_off_when_that_was_remembered, async {
-    let h = Harness::with(160, 40, Rc::new(Control::default()), |o| {
-        o.map = Some(loader(fixture(2, 1)));
+    let h = Harness::with(160, 40, Control::mapped(loader(fixture(2, 1))), |o| {
         o.map_hover = Some(MapHover { load: Rc::new(|| false), save: Rc::new(|_| {}) });
     });
     h.start().await;
@@ -722,7 +712,7 @@ fn asks_which(h: &Harness) {
 }
 
 case!(a_question_kumi_asks_while_the_map_is_open_shows_in_its_place_and_the_map_comes_back_after, async {
-    let h = Harness::with(160, 40, Rc::new(Control::default()), |o| o.map = Some(loader(fixture(12, 8))));
+    let h = Harness::with(160, 40, Control::mapped(loader(fixture(12, 8))), |_| {});
     h.start().await;
     h.connect();
     h.type_text("add a reverb\r").await;
@@ -742,7 +732,7 @@ case!(a_question_kumi_asks_while_the_map_is_open_shows_in_its_place_and_the_map_
 });
 
 case!(an_action_from_the_browser_while_kumi_offers_answers_takes_their_place_and_enter_sends_it, async {
-    let h = Harness::with(160, 40, Rc::new(Control::default()), |o| o.map = Some(loader(fixture(12, 8))));
+    let h = Harness::with(160, 40, Control::mapped(loader(fixture(12, 8))), |_| {});
     h.start().await;
     h.connect();
     h.type_text("/map open\r").await;
@@ -764,7 +754,7 @@ case!(an_action_from_the_browser_while_kumi_offers_answers_takes_their_place_and
 });
 
 case!(a_jobs_answer_waits_while_the_producer_is_in_the_map, async {
-    let h = Harness::with(160, 40, Rc::new(Control::default()), |o| o.map = Some(loader(fixture(12, 8))));
+    let h = Harness::with(160, 40, Control::mapped(loader(fixture(12, 8))), |_| {});
     h.start().await;
     h.connect();
     h.type_text("/map\r").await;
@@ -792,7 +782,7 @@ case!(map_close_while_the_browsers_map_is_still_read_opens_none, async {
             .boxed_local()
         })
     };
-    let h = Harness::with(160, 40, Rc::new(Control::default()), |o| o.map = Some(load));
+    let h = Harness::with(160, 40, Control::mapped(load), |_| {});
     h.start().await;
     h.connect();
     h.type_text("/map open\r").await;
@@ -842,8 +832,7 @@ fn timed(dir: &std::path::Path, tail: std::time::Duration) -> Harness {
     for point in data.songs.points.iter_mut() {
         point.path = dir.join("not there.wav").to_str().unwrap().to_string();
     }
-    Harness::with(160, 40, Rc::new(Control::default()), move |o| {
-        o.map = Some(loader(data));
+    Harness::with(160, 40, Control::mapped(loader(data)), move |o| {
         let ends = Rc::new(std::cell::Cell::new(None));
         o.player =
             Some(Rc::new(Player::with_opener(Box::new(move || Ok(Box::new(Timed { ends: ends.clone(), tail }) as Box<dyn Output>)))));
@@ -892,10 +881,9 @@ case!(the_browsers_map_closes_when_the_music_it_shows_is_forgotten_or_its_folder
         kumi_listening::music::learning::MusicOptions::new(folder.path().join("kumi/music"), Some(vec![songs.clone()]), Default::default());
     (options.fork, options.delay_ms) = (false, 3_600_000);
     let music = kumi_listening::music::learning::create_music(options);
-    let h = Harness::with(160, 40, Rc::new(Control::default()), |o| {
-        o.map = Some(loader(fixture(2, 1)));
-        o.music = Some(music.clone());
-    });
+    let control = Control::mapped(loader(fixture(2, 1)));
+    *control.music.borrow_mut() = Some(music.clone());
+    let h = Harness::with(160, 40, control, |_| {});
     h.start().await;
     h.connect();
     let served = |h: &Harness, at: usize| served_at(&h.browsed.borrow()[at]).0;

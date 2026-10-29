@@ -3,7 +3,7 @@
 //! opens; the terminal's map draws it. Its types are kumi-library's (`kumi_library::map`), so the session's protocol can
 //! carry them.
 
-use futures::{future::LocalBoxFuture, FutureExt};
+use futures::FutureExt;
 use kumi_library::{
     map::{read_sounds_map, sounds_on_map_by_turns, MapSound},
     Library, SoundClass, CLASSES,
@@ -16,7 +16,7 @@ use kumi_listening::music::{
 };
 use std::{collections::HashMap, path::PathBuf, rc::Rc};
 
-pub use kumi_library::map::{Group, Kind, Layer, MapData, Point};
+pub use kumi_library::map::{Group, Kind, Layer, LoadMap, MapData, Point};
 
 /// How many points stand for a group.
 const EXAMPLES: usize = 3;
@@ -406,9 +406,6 @@ impl Page {
         Some(asked(kind, point, *action))
     }
 }
-
-/// How /map reads its data, each time it opens.
-pub type LoadMap = Rc<dyn Fn() -> LocalBoxFuture<'static, MapData>>;
 
 /// The map from this computer: the library's sounds (as this session's DAW is offered them) where the layout put
 /// them, and the songs and styles in music.db.

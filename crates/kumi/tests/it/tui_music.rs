@@ -106,7 +106,9 @@ async fn music_is_shown_added_paused_and_forgotten() {
             (options.places, options.fork, options.delay_ms) = (Some(vec![songs.clone()]), false, 3_600_000);
             options.style = Some(Rc::new(Plain) as Rc<dyn Style>);
             let music = create_music(options);
-            let h = Harness::with(160, 40, Rc::new(Control::default()), |options| options.music = Some(music.clone()));
+            let control = Rc::new(Control::default());
+            *control.music.borrow_mut() = Some(music.clone());
+            let h = Harness::with(160, 40, control, |_| {});
             h.start().await;
             h.connect();
             h.type_text("/mus").await;

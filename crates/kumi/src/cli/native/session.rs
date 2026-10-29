@@ -754,6 +754,10 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
     options.library = Some(library.clone());
     options.preset_dir = Some(std::path::Path::new(&crate::config::kumi_dir(&io.env)).join("presets"));
     options.music = Some(music.clone());
+    // /slots and /map, which the session answers: which model does each listening job, and the library's sounds and
+    // the songs on their maps, read each time /map opens.
+    options.slots = Some(slots_context);
+    options.map = Some(crate::map::loader(library.clone(), load_library_dir(&io.env)?.into(), music.clone()));
     options.jobs = Some(JobsOptions {
         worker_factory,
         max: settings.max_jobs.map(|n| n as usize).unwrap_or(DEFAULT_MAX_JOBS),
@@ -936,10 +940,7 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
         options.ask_daw = ask_daw;
         options.pick_daw = pick_daw;
         options.willington = provider.toggle(&io.env);
-        options.slots = Some(slots_context);
-        options.music = Some(music.clone());
-        // /map: the library's sounds and the songs, read each time it opens; Space plays through Kumi's player.
-        options.map = Some(crate::map::loader(library.clone(), load_library_dir(&io.env)?.into(), music.clone()));
+        // /map's points play through Kumi's player (Space).
         options.player = Some(Rc::new(kumi_media::audio::player::Player::new()));
         options.voice = Some(Rc::new(create_voice_control(VoiceControlOptions {
             env: Some(io.env.clone()),

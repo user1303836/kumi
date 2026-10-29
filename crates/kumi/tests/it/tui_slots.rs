@@ -18,7 +18,9 @@ async fn slots_are_shown_swapped_and_taken_back() {
                 env: Default::default(),
                 profile: None,
             });
-            let h = Harness::with(140, 40, Rc::new(Control::default()), |options| options.slots = Some(context));
+            let control = Rc::new(Control::default());
+            *control.slots.borrow_mut() = Some(context);
+            let h = Harness::with(140, 40, control, |_| {});
             h.start().await;
             h.connect();
             h.type_text("/sl").await;
