@@ -80,7 +80,7 @@ impl TuiApp {
         }
         let typed = matches!(event, InputEvent::Text { .. });
         match event {
-            InputEvent::Paste { text } if self.0.options.controller.has_attachments() && attach::pasted_files(&text).is_some() => {
+            InputEvent::Paste { text } if self.can().attachments && attach::pasted_files(&text).is_some() => {
                 // Files dragged in arrive as their paths: they go with the next message instead.
                 let files: Vec<Attachment> =
                     attach::pasted_files(&text).unwrap_or_default().iter().filter_map(|path| attach::attachment(path)).collect();
@@ -319,11 +319,11 @@ impl TuiApp {
             }
             return;
         }
-        if ctrl && name == "b" && self.0.options.controller.has_jobs() {
+        if ctrl && name == "b" && self.can().jobs {
             self.background_now();
             return;
         }
-        if ctrl && name == "v" && self.0.options.controller.has_attachments() {
+        if ctrl && name == "v" && self.can().attachments {
             self.paste_picture();
             return;
         }
@@ -502,30 +502,30 @@ impl TuiApp {
         if state.menu_dismissed || !text.starts_with('/') || text.chars().any(|c| string::trim(&c.to_string()).is_empty()) {
             return vec![];
         }
-        let c = &self.0.options.controller;
+        let c = self.can();
         let matches: Vec<_> = COMMANDS
             .iter()
             .filter(|cmd| {
                 cmd.name.starts_with(&text)
                     && match cmd.name {
                         "/model" | "/effort" | "/fast" | "/login" | "/logout" => self.0.options.models.is_some(),
-                        "/memory" => c.has_memory(),
-                        "/note" => c.has_change_note(),
-                        "/recipes" => c.has_recipes(),
-                        "/recipe" => c.has_run_recipe(),
-                        "/jobs" => c.has_jobs(),
-                        "/conversations" | "/resume" | "/rename" | "/fork" => c.has_conversations(),
-                        "/reconnect" => c.has_reconnect(),
-                        "/stop" => c.has_stop_live(),
+                        "/memory" => c.memory,
+                        "/note" => c.change_note,
+                        "/recipes" => c.recipes,
+                        "/recipe" => c.run_recipe,
+                        "/jobs" => c.jobs,
+                        "/conversations" | "/resume" | "/rename" | "/fork" => c.conversations,
+                        "/reconnect" => c.reconnect,
+                        "/stop" => c.stop_daw,
                         "/update" => self.0.options.updates.is_some(),
                         "/daw" => self.0.options.switch_daw.is_some(),
-                        "/btw" => c.has_aside(),
+                        "/btw" => c.aside,
                         "/voice" => self.0.voice.is_some(),
                         "/willington" => self.willington().is_some(),
                         "/slots" => self.0.options.slots.is_some(),
                         "/music" => self.0.options.music.is_some(),
                         "/map" => self.0.options.map.is_some(),
-                        "/palette" => c.has_palette(),
+                        "/palette" => c.palette,
                         _ => true,
                     }
             })
@@ -564,7 +564,7 @@ impl TuiApp {
         if command.is_empty() {
             return Ok(());
         }
-        let controller = &self.0.options.controller;
+        let session = self.session();
         if let Some(history) = &self.0.options.history {
             history.borrow_mut().add(&raw);
         }
@@ -592,7 +592,7 @@ impl TuiApp {
             }
             return Ok(());
         }
-        if command == "/jobs" && controller.has_jobs() {
+        if command == "/jobs" && self.can().jobs {
             self.clear_editor();
             self.open_jobs();
             return Ok(());
@@ -636,7 +636,7 @@ impl TuiApp {
             }
             return Ok(());
         }
-        for (cmd, available) in [("/recipes", controller.has_recipes()), ("/memory", controller.has_memory())] {
+        for (cmd, available) in [("/recipes", self.can().recipes), ("/memory", self.can().memory)] {
             if command == cmd && available {
                 self.clear_editor();
                 let result = match cmd {
@@ -650,7 +650,7 @@ impl TuiApp {
             }
         }
         // A chat that keeps no conversations says so, rather than send these to the model as words.
-        if !controller.has_conversations()
+        if !self.can().conversations
             && ["/resume", "/conversations", "/rename", "/fork"].into_iter().any(|verb| argument(command, verb).is_some())
         {
             self.clear_editor();
@@ -659,10 +659,10 @@ impl TuiApp {
         }
         // A kept conversation: the list, or the one an id, the start of one, or a name gives (several: the list of them).
         if let Some(word) =
-            argument(command, "/resume").or_else(|| argument(command, "/conversations")).filter(|_| controller.has_conversations())
+            argument(command, "/resume").or_else(|| argument(command, "/conversations")).filter(|_| self.can().conversations)
         {
             self.clear_editor();
-            let found = if word.is_empty() { None } else { Some(controller.find_conversation(&word).await?) };
+            let found = if word.is_empty() { None } else { Some(session.op(op::FindConversation { word: word.to_string() }).await?) };
             let result = match found {
                 None => self.open_conversations(None).await,
                 Some(ConversationMatch::One(row)) if row.current => {
@@ -690,19 +690,19 @@ impl TuiApp {
         }
         // A name for this conversation, or (from the list) a kept one: /rename <id> <name>. Alone, the name it has now, to
         // change in the box.
-        if let Some(words) = argument(command, "/rename").filter(|_| controller.has_conversations()) {
+        if let Some(words) = argument(command, "/rename").filter(|_| self.can().conversations) {
             if words.is_empty() {
-                let title = controller.conversation_now().await.map(|now| now.title).unwrap_or_default();
+                let title = session.op(op::ConversationNow {}).await?.map(|now| now.title).unwrap_or_default();
                 self.0.state.borrow_mut().editor.set(&format!("/rename {title}"));
                 self.0.scheduler.request();
                 return Ok(());
             }
             self.clear_editor();
             let (first, rest) = words.split_once(' ').map(|(a, b)| (a, string::trim(b))).unwrap_or((words.as_str(), ""));
-            let kept =
-                !rest.is_empty() && matches!(controller.find_conversation(first).await?, ConversationMatch::One(row) if row.id == first);
+            let kept = !rest.is_empty()
+                && matches!(session.op(op::FindConversation { word: first.into() }).await?, ConversationMatch::One(row) if row.id == first);
             let (id, name) = if kept { (Some(first), rest) } else { (None, words.as_str()) };
-            if controller.rename_conversation(id, Some(name)).await? {
+            if session.op(op::RenameConversation { id: id.map(Into::into), name: Some(name.into()) }).await? {
                 self.notice(&format!("Named “{}”.", self.clean(name, 60)), NoticeTone::Info);
             } else {
                 self.notice("That conversation isn't kept any more.", NoticeTone::Info);
@@ -710,20 +710,20 @@ impl TuiApp {
             return Ok(());
         }
         // Carry on in a copy of this conversation, named or not; the original stays.
-        if let Some(name) = argument(command, "/fork").filter(|_| controller.has_conversations()) {
+        if let Some(name) = argument(command, "/fork").filter(|_| self.can().conversations) {
             self.clear_editor();
             if self.busy() {
                 self.notice("Kumi is still working: fork once it's done, or press esc to stop it.", NoticeTone::Info);
                 return Ok(());
             }
-            if controller.fork_conversation((!name.is_empty()).then_some(name.as_str())).await?.is_none() {
+            if session.op(op::ForkConversation { name: (!name.is_empty()).then(|| name.clone()) }).await?.is_none() {
                 self.notice("Nothing to fork yet: ask something first.", NoticeTone::Info);
             }
             return Ok(());
         }
         // A recipe with its blanks filled runs straight away, with no model call; a line that can't run yet
         // stays to be fixed.
-        if (command == "/recipe" || command.starts_with("/recipe ")) && controller.has_run_recipe() {
+        if (command == "/recipe" || command.starts_with("/recipe ")) && self.can().run_recipe {
             let (name, with) = match panels::recipe_command(command) {
                 Ok(parsed) => parsed,
                 Err(how) => {
@@ -731,7 +731,7 @@ impl TuiApp {
                     return Ok(());
                 }
             };
-            let recipes = controller.recipes().await?;
+            let recipes = session.op(op::Recipes {}).await?;
             let lower = name.to_lowercase();
             let Some(recipe) = recipes.iter().find(|r| r.name == name).or_else(|| recipes.iter().find(|r| r.name.to_lowercase() == lower))
             else {
@@ -752,12 +752,12 @@ impl TuiApp {
             return Ok(());
         }
         // A note's new words, from /memory's "Change the words", go straight to the note: no model call.
-        if (command == "/note" || command.starts_with("/note ")) && controller.has_change_note() {
+        if (command == "/note" || command.starts_with("/note ")) && self.can().change_note {
             let Some((id, words)) = panels::note_command(command) else {
                 self.notice("Give the note's id and its new words: /note p3 Prefers short reverbs on drums", NoticeTone::Info);
                 return Ok(());
             };
-            match controller.change_note(&id, NoteChange::Text(words)).await {
+            match session.op(op::ChangeNote { id: id.clone(), change: NoteChange::Text(words) }).await {
                 Ok(Some(_)) => {
                     self.clear_editor();
                     self.notice(&format!("Changed note {id}."), NoticeTone::Info);
@@ -767,7 +767,7 @@ impl TuiApp {
             }
             return Ok(());
         }
-        if command == "/stop" && controller.has_stop_live() {
+        if command == "/stop" && self.can().stop_daw {
             self.clear_editor();
             if self.0.state.borrow().connection != ConnectionState::Connected {
                 self.notice(
@@ -777,9 +777,9 @@ impl TuiApp {
                 return Ok(());
             }
             if self.busy() {
-                let _ = controller.cancel().await;
+                let _ = session.op(op::Cancel {}).await;
             }
-            if !controller.stop_live().await? {
+            if !session.op(op::StopDaw {}).await? {
                 self.notice(
                     &format!("Kumi couldn't stop {0} just now; press space in {0} to stop it.", crate::daw::words().app),
                     NoticeTone::Warn,
@@ -854,15 +854,15 @@ impl TuiApp {
             self.map_command(load, &command["/map".len()..]).await;
             return Ok(());
         }
-        if controller.has_palette() && (command == "/palette" || command.starts_with("/palette ")) {
+        if self.can().palette && (command == "/palette" || command.starts_with("/palette ")) {
             self.clear_editor();
             self.palette_command(&command["/palette".len()..]).await;
             return Ok(());
         }
         if command == "/status" {
             self.clear_editor();
-            let status = controller.status();
-            let library = controller.library().or_else(|| self.0.state.borrow().library.clone());
+            let status = session.status();
+            let library = session.library().or_else(|| self.0.state.borrow().library.clone());
             let library = library_line(library.as_ref());
             let state = if status.state == TurnState::Idle { "Ready".into() } else { enum_name(&status.state) };
             let turns = if let Some(max) = status.max_turns.filter(|n| *n != 0) {
@@ -898,15 +898,15 @@ impl TuiApp {
                     NoticeTone::Info,
                 );
             }
-            if let Some(line) = remembered_line(controller.remembered().await) {
+            if let Some(line) = remembered_line(session.op(op::Remembered {}).await?) {
                 self.notice(&line, NoticeTone::Info);
             }
-            if let Some(now) = controller.conversation_now().await {
+            if let Some(now) = session.op(op::ConversationNow {}).await? {
                 self.notice(&conversation_line(&now, |text| self.clean(text, 60)), NoticeTone::Info);
             }
             return Ok(());
         }
-        if (command == "/btw" || command.starts_with("/btw ")) && controller.has_aside() {
+        if (command == "/btw" || command.starts_with("/btw ")) && self.can().aside {
             self.clear_editor();
             let question = string::trim(&command[4..]);
             if !question.is_empty() {
@@ -953,9 +953,9 @@ impl TuiApp {
             }
             return Ok(());
         }
-        if matches!(goal_word.as_deref(), Some("stop" | "end" | "clear" | "cancel" | "done")) && controller.has_stop_goal() {
+        if matches!(goal_word.as_deref(), Some("stop" | "end" | "clear" | "cancel" | "done")) && self.can().stop_goal {
             self.clear_editor();
-            if !controller.stop_goal().await? {
+            if !session.op(op::StopGoal {}).await? {
                 self.notice("There's no goal to stop.", NoticeTone::Info);
             }
             return Ok(());
@@ -963,7 +963,7 @@ impl TuiApp {
         // A loop ends as Esc ends it; a sound-match search ends for good (paused ones too) and keeps its best.
         if matches!(loop_word.as_deref(), Some("stop" | "end" | "cancel")) {
             self.clear_editor();
-            if !(controller.has_stop_loop() && controller.stop_loop().await?) {
+            if !(self.can().stop_loop && session.op(op::StopLoop {}).await?) {
                 if self.busy() {
                     self.cancel();
                 } else {
@@ -995,7 +995,7 @@ impl TuiApp {
             );
             return Ok(());
         }
-        if (command == "/goal" || command.starts_with("/goal ")) && controller.has_goal() {
+        if (command == "/goal" || command.starts_with("/goal ")) && self.can().goal {
             self.clear_editor();
             let text = string::trim(&command[5..]);
             let clean = string::trim(&self.clean(&raw, usize::MAX)).to_string();
@@ -1009,7 +1009,7 @@ impl TuiApp {
             }
             self.0.tabs.show("goal");
             self.0.scheduler.request();
-            if let Err(error) = controller.goal((!text.is_empty()).then_some(text)).await {
+            if let Err(error) = session.op(op::Goal { text: (!text.is_empty()).then(|| text.to_string()) }).await {
                 self.0.state.borrow_mut().pending_turn = false;
                 if !self.0.state.borrow().closing {
                     self.error(&error);
@@ -1053,7 +1053,7 @@ impl TuiApp {
                     self.0.state.borrow_mut().willington_off = on;
                     self.notice(said, NoticeTone::Info);
                     // The bridge picks the switch up within a second; the model, from the next message.
-                    controller.reconfigure().await?;
+                    session.op(op::Reconfigure {}).await?;
                 }
                 Err(error) => self.notice(
                     &format!("Kumi couldn't turn Willington's bindings {}: {error}", if on { "off" } else { "on" }),
@@ -1067,7 +1067,7 @@ impl TuiApp {
         self.0.state.borrow_mut().scroll = 0;
         let result = if command == "/refresh" {
             self.0.state.borrow_mut().activity = "reading your Set".into();
-            controller.refresh().await
+            session.op(op::Refresh {}).await
         } else if let Some(name) = argument(command, "/new") {
             {
                 let mut state = self.0.state.borrow_mut();
@@ -1078,19 +1078,19 @@ impl TuiApp {
                 state.current = None;
                 state.watching = false;
             }
-            let started = controller.new_conversation().await;
+            let started = session.op(op::NewConversation {}).await;
             // Its name, kept with it from its first save.
             if started.is_ok() && !name.is_empty() {
-                if controller.has_conversations() {
-                    controller.rename_conversation(None, Some(&name)).await?;
+                if self.can().conversations {
+                    session.op(op::RenameConversation { id: None, name: Some(name.clone()) }).await?;
                 } else {
                     self.notice(&super::not_kept(), NoticeTone::Info);
                 }
             }
             started
-        } else if command == "/reconnect" && controller.has_reconnect() {
+        } else if command == "/reconnect" && self.can().reconnect {
             self.0.state.borrow_mut().activity = format!("connecting to {}", crate::daw::words().app);
-            let result = controller.reconnect().await;
+            let result = session.op(op::Reconnect {}).await;
             // REAPER's and Renoise's integrations retire their rows as they close, each in its DAW's words.
             if result.is_ok() && crate::daw::current().id() == kumi_types::daw::DawId::Ableton {
                 for change in self.0.state.borrow_mut().records.changes_mut() {
@@ -1189,9 +1189,8 @@ impl TuiApp {
     /// answer says what changed, marked instant, and the change is in HISTORY with its undo. Anything else, or a phrase
     /// Kumi can't run as asked (a track it can't tell for sure), goes to the model as written.
     async fn instant(&self, raw: &str) -> bool {
-        let controller = self.0.options.controller.clone();
         if !self.0.options.instant
-            || !controller.has_instant()
+            || !self.can().instant
             || !self.0.state.borrow().attachments.is_empty()
             || kumi_agent::core::phrases::parse(raw).is_none()
         {
@@ -1204,7 +1203,7 @@ impl TuiApp {
             state.activity = "changing".into();
         }
         self.0.scheduler.request();
-        let outcome = controller.instant(raw).await;
+        let outcome = self.session().op(op::Instant { text: raw.into() }).await;
         self.0.state.borrow_mut().instant_running = false;
         let Ok(Some(outcome)) = outcome else { return false };
         let text = string::trim(&self.clean(&outcome.text, 2000)).to_string();
@@ -1232,11 +1231,7 @@ impl TuiApp {
             (state.pinned.as_ref().map(|p| p.pin.clone()), std::mem::take(&mut state.attachments))
         };
         self.0.scheduler.request();
-        let sent = if attachments.is_empty() {
-            self.0.options.controller.submit(raw, pinned).await
-        } else {
-            self.0.options.controller.submit_with(raw, pinned, attachments.clone()).await
-        };
+        let sent = self.session().op(op::Submit { input: raw.into(), pinned, attachments: attachments.clone() }).await;
         if let Err(error) = sent {
             // Files that didn't go stay, to change or send again.
             let mut state = self.0.state.borrow_mut();
@@ -1254,11 +1249,18 @@ impl TuiApp {
         true
     }
     fn ask(&self, question: &str) {
+        let id = {
+            let mut state = self.0.state.borrow_mut();
+            state.next_aside += 1;
+            state.next_aside - 1
+        };
         let aside = Rc::new(RefCell::new(Aside {
+            id,
             question: self.clean(question, usize::MAX),
             answer: String::new(),
+            stream: StreamingText::new(&self.0.state.borrow().secrets),
             state: "asking",
-            abort: Signal::new(),
+            stopped: false,
         }));
         {
             let mut state = self.0.state.borrow_mut();
@@ -1270,28 +1272,12 @@ impl TuiApp {
         }
         let question = question.to_string();
         self.task(move |app| async move {
-            let stream = Rc::new(RefCell::new(StreamingText::new(&app.0.state.borrow().secrets)));
-            let writer = stream.clone();
-            let answer = aside.clone();
-            let scheduler = app.0.scheduler.clone();
-            let signal = aside.borrow().abort.clone();
-            let result = app
-                .0
-                .options
-                .controller
-                .aside(
-                    &question,
-                    Rc::new(move |text| {
-                        answer.borrow_mut().answer.push_str(&writer.borrow_mut().push(&text));
-                        scheduler.request();
-                    }),
-                    Some(signal.clone()),
-                )
-                .await;
+            // Its words come as `aside` events while it's answered.
+            let result = app.session().op(op::Aside { id, question }).await;
             match result {
                 Ok(answer) => {
-                    let tail = stream.borrow_mut().finish();
                     let mut aside = aside.borrow_mut();
+                    let tail = aside.stream.finish();
                     aside.answer.push_str(&tail);
                     if string::trim(&aside.answer).is_empty() {
                         aside.answer = app.clean(&answer, usize::MAX);
@@ -1301,7 +1287,7 @@ impl TuiApp {
                 Err(error) => {
                     let mut aside = aside.borrow_mut();
                     aside.state = "failed";
-                    if !signal.is_cancelled() {
+                    if !aside.stopped {
                         aside.answer = safe_error_message(Some(&error.message()), &app.0.state.borrow().secrets);
                     }
                 }
@@ -1367,7 +1353,7 @@ impl TuiApp {
             state.activity = "undoing".into();
         }
         self.0.scheduler.request();
-        match self.0.options.controller.undo(id).await {
+        match self.session().op(op::Undo { id: id.map(Into::into) }).await {
             Ok(Some(change)) => {
                 if change.state == ChangeState::Undone {
                     self.notice(&format!("Undid: {}", change.title), NoticeTone::Info);

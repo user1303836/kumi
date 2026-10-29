@@ -55,8 +55,7 @@ impl TuiApp {
 
     /// /palette and its words: the session answers, in words.
     pub(super) async fn palette_command(&self, words: &str) {
-        let controller = self.0.options.controller.clone();
-        match controller.palette_command(words.trim()).await {
+        match self.session().op(op::PaletteCommand { words: words.trim().into() }).await {
             Ok(said) => self.notice(&said, NoticeTone::Info),
             Err(error) => self.notice(&error.to_string(), NoticeTone::Warn),
         }
@@ -65,11 +64,10 @@ impl TuiApp {
     /// Files gathered on the map or in the browser's map, into the session's palette: what happened, in words (None when
     /// this Kumi keeps no palettes).
     pub(super) async fn palette_gather(&self, files: Vec<Gathered>) -> Option<Result<String, String>> {
-        let controller = self.0.options.controller.clone();
-        if !controller.has_palette() || files.is_empty() {
+        if !self.can().palette || files.is_empty() {
             return None;
         }
-        Some(controller.palette_gather(files).await.map_err(|error| error.to_string()))
+        Some(self.session().op(op::PaletteGather { files }).await.map_err(|error| error.to_string()))
     }
 
     /// A row a file (its name, and its class or a song's style at the right), then a row that asks Kumi to load the
@@ -131,8 +129,7 @@ impl TuiApp {
                 let Some(app) = app.upgrade() else { return };
                 let (app, path) = (TuiApp(app), path.clone());
                 tokio::task::spawn_local(async move {
-                    let controller = app.0.options.controller.clone();
-                    if let Err(error) = controller.palette_remove(&path, size, mtime).await {
+                    if let Err(error) = app.session().op(op::PaletteRemove { path, size, mtime }).await {
                         app.notice(&error.to_string(), NoticeTone::Warn);
                     }
                 });

@@ -281,19 +281,18 @@ impl TuiApp {
             if !app.looking_away().await {
                 return Ok(());
             }
-            let controller = app.0.options.controller.clone();
             // The DAW's line goes beside the notification: a busy DAW doesn't hold the notification up.
-            if settings.live_status_bar && !alert.live.is_empty() && controller.has_daw_message() {
-                let (controller, line) = (controller.clone(), alert.live.clone());
+            if settings.live_status_bar && !alert.live.is_empty() && app.can().daw_message {
+                let (app, text) = (app.clone(), alert.live.clone());
                 tokio::task::spawn_local(async move {
-                    let _ = controller.daw_message(&line).await;
+                    let _ = app.session().op(op::DawMessage { text }).await;
                 });
             }
             if !settings.notifications || channel == NotifyChannel::None {
                 return Ok(());
             }
             // No notification, and no bell, over a take being recorded.
-            if controller.daw_recording().await.ok().flatten() == Some(true) {
+            if app.session().op(op::DawRecording {}).await.ok().flatten() == Some(true) {
                 let mut state = app.0.state.borrow_mut();
                 let in_front = state.focus_reported && state.window_focused;
                 if !in_front && !state.closing && state.alert_timer.is_none() {

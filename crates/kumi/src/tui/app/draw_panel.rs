@@ -182,7 +182,7 @@ impl TuiApp {
                     }
                 }
             }
-            Panel::Job { id, scroll } => match self.0.options.controller.job(*id) {
+            Panel::Job { id, scroll } => match self.session().job(*id) {
                 None => lines.push(Line::new(format!("Job {id} is gone."), st::FAINT)),
                 Some(detail) => {
                     let rows = self.job_lines(&detail, inner);
