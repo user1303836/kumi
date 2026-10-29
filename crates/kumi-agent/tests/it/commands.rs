@@ -1,7 +1,7 @@
 //! The command table, as the full-screen app read lines before it had one: what each line asks for (the order of its old
 //! `submit()`, rows C1–C41 of the review's inventory), and what the `/` menu finds for what's typed.
 use kumi_agent::core::{
-    commands::{is_command, matching, named, run, Effect, Fronts, Now, Why, COMMANDS},
+    commands::{is_command, matching, named, run, By, Effect, Found, Fronts, Now, Why, COMMANDS},
     protocol::Capabilities,
 };
 use std::collections::BTreeSet;
@@ -227,8 +227,8 @@ fn goal_is_offered_only_where_kumi_keeps_goals() {
     assert_eq!(run("/goal a punchier kick", &nothing()), Effect::Unknown { name: "/goal".into() });
 }
 
-fn names(found: Vec<&kumi_agent::core::commands::Command>) -> Vec<&'static str> {
-    found.into_iter().map(|command| command.name).collect()
+fn names(found: Vec<Found>) -> Vec<&'static str> {
+    found.into_iter().map(|found| found.command.name).collect()
 }
 
 #[test]
@@ -266,4 +266,26 @@ fn the_menu_offers_only_what_this_session_and_front_end_have() {
     for absent in ["/jobs", "/model", "/memory", "/goal", "/slots", "/voice", "/resume", "/conversations"] {
         assert!(!found.contains(&absent), "{absent}");
     }
+}
+
+#[test]
+fn the_menu_says_how_it_found_each_command_so_enter_runs_only_what_was_named() {
+    let all = |_: &kumi_agent::core::commands::Command| true;
+    let by =
+        |typed: &str| matching(typed, &[], all).into_iter().map(|found| (found.command.name, found.by, found.named())).collect::<Vec<_>>();
+    assert_eq!(by("/undo"), [("/undo", By::Typed, true)]);
+    assert_eq!(by("/und"), [("/undo", By::Name, true)]);
+    // Found by what it does, not by what was typed: Enter mustn't run it unchosen (/history isn't /undo).
+    assert_eq!(by("/history"), [("/undo", By::Words, false)]);
+    assert_eq!(by("/speed"), [("/fast", By::Words, false)]);
+}
+
+#[test]
+fn common_words_find_no_command() {
+    let all = |_: &kumi_agent::core::commands::Command| true;
+    for typed in ["/the", "/and", "/your", "/this", "/with", "/kumi", "/what", "/then"] {
+        assert!(matching(typed, &[], all).is_empty(), "{typed}: {:?}", names(matching(typed, &[], all)));
+    }
+    // A word that starts like a common one still finds what says it: /thi finds /effort ("thinks").
+    assert_eq!(names(matching("/thi", &[], all)), ["/effort"]);
 }

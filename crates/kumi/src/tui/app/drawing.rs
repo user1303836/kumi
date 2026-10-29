@@ -14,7 +14,7 @@ use super::super::{
 use super::drawer::{drawer_fits, PANE_COLUMNS};
 use super::*;
 use crate::text::library_line;
-use kumi_agent::core::commands::Command;
+use kumi_agent::core::commands::Found;
 use kumi_ai::failure::reset_words;
 use kumi_common::time::since;
 pub(super) mod st {
@@ -678,7 +678,7 @@ impl TuiApp {
             vec![(format!("{} isn't connected", crate::daw::words().app), st::DIM)]
         }
     }
-    fn draw_composer(&self, screen: &mut Screen, box_: Rect, layout: &EditorLayout, visible: i32, menu: &[&'static Command]) -> Cursor {
+    fn draw_composer(&self, screen: &mut Screen, box_: Rect, layout: &EditorLayout, visible: i32, menu: &[Found]) -> Cursor {
         screen.fill(box_, &st::RAISED);
         let x = box_.x + 2;
         let width = (box_.width - 4).max(1);
@@ -747,7 +747,7 @@ impl TuiApp {
         }
         Cursor { x: x + layout.cursor_column, y: box_.y + 1 + layout.cursor_row as i32 - first }
     }
-    fn draw_menu(&self, screen: &mut Screen, box_top: i32, left: i32, items: &[&'static Command]) {
+    fn draw_menu(&self, screen: &mut Screen, box_top: i32, left: i32, items: &[Found]) {
         if items.is_empty() {
             return;
         }
@@ -780,9 +780,9 @@ impl TuiApp {
             if chosen {
                 screen.fill(Rect::new(1, y, width, 1), &st::SELECTED);
             }
-            screen.put(3, y, item.name, &if chosen { st::ACCENT } else { st::TEXT });
+            screen.put(3, y, item.command.name, &if chosen { st::ACCENT } else { st::TEXT });
             if chosen {
-                screen.put(about, y, &truncate(&super::input::about(item), (room - about).max(1)), &st::BRIGHT);
+                screen.put(about, y, &truncate(&super::input::about(item.command), (room - about).max(1)), &st::BRIGHT);
             }
             if let Some(more) = more {
                 screen.put(width - text_width(&more), y, &more, &st::FAINT);

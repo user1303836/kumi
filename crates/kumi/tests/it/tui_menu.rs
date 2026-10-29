@@ -62,3 +62,39 @@ async fn a_menu_taller_than_the_room_shows_a_window_around_the_one_chosen() {
         })
         .await;
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_command_found_by_what_it_does_goes_in_the_box_before_enter_runs_it() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = Harness::new(120, 36);
+            h.start().await;
+            h.connect();
+            // /history names no command: Enter puts /undo's name in the box, and undoes nothing yet.
+            h.type_text("/history\r").await;
+            h.has("/undo");
+            assert!(!has(&h.screen(), "There's nothing of Kumi's to undo."), "{}", h.screen().join("\n"));
+            // Enter again runs what the box says now.
+            h.type_text("\r").await;
+            h.has("There's nothing of Kumi's to undo.");
+            h.close().await;
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_command_found_by_what_it_does_runs_once_chosen() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = Harness::new(120, 36);
+            h.start().await;
+            h.connect();
+            // Chosen with ↓, it's the producer's choice: Enter runs it.
+            h.type_text("/history").await;
+            h.type_text("\x1b[B").await;
+            h.type_text("\r").await;
+            h.has("There's nothing of Kumi's to undo.");
+            h.close().await;
+        })
+        .await;
+}

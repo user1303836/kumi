@@ -404,6 +404,9 @@ struct State {
     page: i32,
     menu_index: usize,
     menu_dismissed: bool,
+    /// The box's words when ↑↓ last chose in the `/` menu: a command found only by the words of what it does runs on
+    /// Enter once it's chosen.
+    menu_chosen: Option<String>,
     started: bool,
     closing: bool,
     cancelling: bool,
@@ -587,6 +590,7 @@ impl State {
             page: 10,
             menu_index: 0,
             menu_dismissed: false,
+            menu_chosen: None,
             started: false,
             closing: false,
             cancelling: false,

@@ -10,7 +10,7 @@ use super::toast::TOAST_MS;
 use super::*;
 use crate::text::{library_line, remembered_line};
 use base64::Engine;
-use kumi_agent::core::commands::{self, Command, Effect, Now, Why};
+use kumi_agent::core::commands::{self, Command, Effect, Found, Now, Why};
 use std::task::{Context, Poll};
 
 impl TuiApp {
@@ -455,19 +455,27 @@ impl TuiApp {
         if !menu.is_empty() && matches!(name, "up" | "down") {
             let mut state = self.0.state.borrow_mut();
             state.menu_index = (state.menu_index + if name == "up" { menu.len() - 1 } else { 1 }) % menu.len();
+            state.menu_chosen = Some(state.editor.text().to_string());
             return;
         }
         if !menu.is_empty() && name == "tab" {
             let mut state = self.0.state.borrow_mut();
             let index = state.menu_index;
-            state.editor.set(menu[index].name);
+            state.editor.set(menu[index].command.name);
             return;
         }
         if name == "enter" && !alt && !shift {
             if !menu.is_empty() {
                 let mut state = self.0.state.borrow_mut();
-                let index = state.menu_index;
-                state.editor.set(menu[index].name);
+                let found = menu[state.menu_index];
+                let typed = state.editor.text().to_string();
+                let chosen = state.menu_chosen.as_deref() == Some(typed.as_str());
+                state.editor.set(found.command.name);
+                // A command found only by the words of what it does is none the producer named: Enter puts its name in the
+                // box, as tab does, unless they chose it with ↑↓.
+                if !found.named() && !chosen {
+                    return;
+                }
             }
             self.submit_task();
             return;
@@ -595,7 +603,7 @@ impl TuiApp {
             self.0.renderer.borrow_mut().invalidate();
         }
     }
-    pub(super) fn menu(&self) -> Vec<&'static Command> {
+    pub(super) fn menu(&self) -> Vec<Found> {
         let text = {
             let state = self.0.state.borrow();
             let text = state.editor.text().to_string();
@@ -615,6 +623,10 @@ impl TuiApp {
         let mut state = self.0.state.borrow_mut();
         if state.menu_index >= matches.len() {
             state.menu_index = 0;
+        }
+        // A choice made with ↑↓ holds for the words it was made for.
+        if state.menu_chosen.as_deref().is_some_and(|chosen| chosen != text) {
+            state.menu_chosen = None;
         }
         matches
     }

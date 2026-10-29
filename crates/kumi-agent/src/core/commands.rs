@@ -168,11 +168,80 @@ pub fn subcommand(command: &str, name: &str) -> Option<String> {
 /// the commands that start with it and not every one that says "see".
 const WORD_LEAST: usize = 3;
 
-/// The commands the menu shows for what's typed (`/` and the start of a name). Those whose name begins with it come
-/// first, then those another name of theirs begins with, then those a word of what they do (or are found by) begins
-/// with. Within each, the ones used lately come first (`recent`, latest first), then the table's order; one typed in
-/// full comes before them all.
-pub fn matching(typed: &str, recent: &[&str], offered: impl Fn(&Command) -> bool) -> Vec<&'static Command> {
+/// Words too common in what the commands do for the menu to find one by: most of the table says them.
+const COMMON: &[&str] = &[
+    "about",
+    "again",
+    "and",
+    "another",
+    "any",
+    "are",
+    "does",
+    "each",
+    "for",
+    "from",
+    "how",
+    "instead",
+    "into",
+    "its",
+    "keeping",
+    "kumi",
+    "like",
+    "more",
+    "now",
+    "once",
+    "one",
+    "out",
+    "own",
+    "same",
+    "something",
+    "that",
+    "the",
+    "then",
+    "this",
+    "until",
+    "what",
+    "when",
+    "which",
+    "with",
+    "without",
+    "works",
+    "you",
+    "your",
+];
+
+/// How what's typed found a command in the menu.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum By {
+    /// Typed in full.
+    Typed,
+    /// Its name begins with what's typed.
+    Name,
+    /// Another name of it does.
+    Alias,
+    /// A word of what it does (or of `finds`) does. The producer didn't name it, so Enter doesn't run it unchosen.
+    Words,
+}
+
+/// A command the menu shows, and how what's typed found it.
+#[derive(Clone, Copy)]
+pub struct Found {
+    pub command: &'static Command,
+    pub by: By,
+}
+
+impl Found {
+    /// Whether what's typed names it (in full, or the start of a name), so Enter may run it as it stands.
+    pub fn named(&self) -> bool {
+        self.by != By::Words
+    }
+}
+
+/// The commands the menu shows for what's typed (`/` and the start of a name), each with how it was found. Those whose
+/// name begins with it come first, then those another name of theirs begins with, then those a word of what they do
+/// (or are found by) begins with, common words aside. Within each, the ones used lately come first (`recent`, latest
+/// first), then the table's order; one typed in full comes before them all.
+pub fn matching(typed: &str, recent: &[&str], offered: impl Fn(&Command) -> bool) -> Vec<Found> {
     let Some(word) = typed.strip_prefix('/') else { return vec![] };
     let word = word.to_lowercase();
     let says = |command: &Command| {
@@ -182,31 +251,33 @@ pub fn matching(typed: &str, recent: &[&str], offered: impl Fn(&Command) -> bool
                 .replace("{app}", "")
                 .replace("{place}", "")
                 .split(|c: char| !c.is_alphanumeric())
-                .chain(command.finds.iter().copied())
-                .any(|said| said.to_lowercase().starts_with(&word))
+                .map(str::to_lowercase)
+                .filter(|said| !COMMON.contains(&said.as_str()))
+                .chain(command.finds.iter().map(|find| find.to_string()))
+                .any(|said| said.starts_with(&word))
     };
-    let tier = |command: &Command| -> Option<u8> {
+    let by = |command: &Command| -> Option<By> {
         if command.name == typed {
-            Some(0)
+            Some(By::Typed)
         } else if command.name.starts_with(typed) {
-            Some(1)
+            Some(By::Name)
         } else if command.aliases.iter().any(|alias| alias.starts_with(typed)) {
-            Some(2)
+            Some(By::Alias)
         } else if says(command) {
-            Some(3)
+            Some(By::Words)
         } else {
             None
         }
     };
     let lately = |command: &Command| recent.iter().position(|used| *used == command.name).unwrap_or(usize::MAX);
-    let mut found: Vec<(u8, usize, usize, &'static Command)> = COMMANDS
+    let mut found: Vec<(By, usize, usize, &'static Command)> = COMMANDS
         .iter()
         .enumerate()
         .filter(|(_, command)| offered(command))
-        .filter_map(|(at, command)| tier(command).map(|tier| (tier, lately(command), at, command)))
+        .filter_map(|(at, command)| by(command).map(|by| (by, lately(command), at, command)))
         .collect();
-    found.sort_by_key(|(tier, lately, at, _)| (*tier, *lately, *at));
-    found.into_iter().map(|(_, _, _, command)| command).collect()
+    found.sort_by_key(|(by, lately, at, _)| (*by, *lately, *at));
+    found.into_iter().map(|(by, _, _, command)| Found { command, by }).collect()
 }
 
 /// What the front end knows as a line is read.
