@@ -921,7 +921,7 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
         if !options.remote {
             options.copy = Some(Rc::new(login::copy_to_clipboard));
         }
-        options.editor = crate::tui::external_editor::editor_command(|name| io.env.get(name).cloned(), cfg!(windows));
+        options.editor = crate::tui::external_editor::editor_command(|name| io.env.get(name).cloned());
         options.reach = Some({
             let env = io.env.clone();
             Rc::new(move || {
@@ -1019,6 +1019,24 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
     } else {
         None
     });
+    // SIGQUIT (ctrl+\ where the terminal isn't raw): Kumi closes as for SIGTERM, but not while the terminal is lent to
+    // the producer's editor, whose key it was.
+    #[cfg(unix)]
+    let quit = SignalTask(if io.signals {
+        let ui = ui.clone();
+        let mut signal =
+            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::quit()).map_err(|e| RuntimeError::plain(e.to_string()))?;
+        Some(tokio::task::spawn_local(async move {
+            while signal.recv().await.is_some() {
+                if !ui.lent() {
+                    ui.close().await;
+                    break;
+                }
+            }
+        }))
+    } else {
+        None
+    });
     let running = ui.run();
     // Following the producer to the DAW they open: one listing a look, made off the screen's thread, or a test's answer.
     let following = follows.then(|| {
@@ -1104,6 +1122,8 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
     drop(interrupt);
     #[cfg(unix)]
     drop(terminate);
+    #[cfg(unix)]
+    drop(quit);
     library.close().await;
     music.close().await;
     catalog.abort();

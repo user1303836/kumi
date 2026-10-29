@@ -3,15 +3,10 @@
 use std::path::{Path, PathBuf};
 use std::process::ExitStatus;
 
-/// The editor to run: VISUAL, then EDITOR, as the shell's own tools choose; Notepad on Windows when neither is set, and
-/// none elsewhere.
-pub fn editor_command(get: impl Fn(&str) -> Option<String>, windows: bool) -> Option<String> {
-    ["VISUAL", "EDITOR"]
-        .into_iter()
-        .filter_map(get)
-        .map(|command| command.trim().to_string())
-        .find(|command| !command.is_empty())
-        .or_else(|| windows.then(|| "notepad".to_string()))
+/// The editor to run: VISUAL, then EDITOR, as the shell's own tools choose; none when neither is set. Not Notepad on
+/// Windows unasked: Windows 11's returns at once when a window of it is open, and the draft would come back unchanged.
+pub fn editor_command(get: impl Fn(&str) -> Option<String>) -> Option<String> {
+    ["VISUAL", "EDITOR"].into_iter().filter_map(get).map(|command| command.trim().to_string()).find(|command| !command.is_empty())
 }
 
 /// A command line's words the way Windows splits them: at spaces, but not inside double quotes, which go.

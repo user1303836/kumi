@@ -650,6 +650,8 @@ async fn an_animation_draws_at_its_own_pace_and_a_request_is_still_drawn_within_
 struct FakeInput {
     raw: Cell<bool>,
     listener: RefCell<Option<ByteListener>>,
+    /// How often what was waiting to be read was dropped.
+    discarded: Cell<usize>,
 }
 
 impl FakeInput {
@@ -677,6 +679,9 @@ impl TtyInput for FakeInput {
     }
     fn pause(&self) {
         *self.listener.borrow_mut() = None;
+    }
+    fn discard_pending(&self) {
+        self.discarded.set(self.discarded.get() + 1);
     }
 }
 
@@ -718,7 +723,7 @@ impl TtyOutput for FakeOutput {
 
 #[tokio::test(flavor = "current_thread")]
 async fn the_terminal_is_lent_to_a_program_and_taken_back_whole() {
-    let input = Rc::new(FakeInput { raw: Cell::new(false), listener: RefCell::new(None) });
+    let input = Rc::new(FakeInput { raw: Cell::new(false), listener: RefCell::new(None), discarded: Cell::new(0) });
     let output = Rc::new(FakeOutput { written: RefCell::new(String::new()), resize: RefCell::new(None) });
     let events = Rc::new(RefCell::new(Vec::new()));
     let farewell = "\u{1b}]9;4;0\u{7}";
@@ -752,6 +757,7 @@ async fn the_terminal_is_lent_to_a_program_and_taken_back_whole() {
     let taken = written.strip_prefix(RESTORE).unwrap();
     assert!(taken.starts_with("\u{1b}[?1049h") && taken.contains("\u{1b}[>3u") && taken.contains("\u{1b}[?1006h"), "{taken:?}");
     assert!(input.is_raw() && tty.is_active() && !tty.lent());
+    assert_eq!(input.discarded.get(), 1, "what was typed meanwhile was the program's");
     input.write("\u{1b}[A");
     assert_eq!(events.borrow().clone(), vec![key("up", NONE)]);
     // Kumi closing while it's lent gives the terminal back for good: the farewell goes, and the screen isn't taken again.
@@ -763,7 +769,7 @@ async fn the_terminal_is_lent_to_a_program_and_taken_back_whole() {
 
 #[test]
 fn the_terminal_is_taken_over_and_always_given_back_even_twice() {
-    let input = Rc::new(FakeInput { raw: Cell::new(false), listener: RefCell::new(None) });
+    let input = Rc::new(FakeInput { raw: Cell::new(false), listener: RefCell::new(None), discarded: Cell::new(0) });
     let output = Rc::new(FakeOutput { written: RefCell::new(String::new()), resize: RefCell::new(None) });
     let events = Rc::new(RefCell::new(Vec::new()));
     let resized = Rc::new(Cell::new(0));

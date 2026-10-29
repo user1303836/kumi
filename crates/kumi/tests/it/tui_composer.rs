@@ -1,6 +1,7 @@
 //! The composer: undo, the kill ring, history kept from ctrl+c, and typing that stays fast after a long paste.
 #[path = "../support/tui_app.rs"]
 mod support;
+use kumi::terminal::Terminal;
 use kumi::tui::{editor::Editor, width::graphemes};
 use std::{
     rc::Rc,
@@ -369,16 +370,19 @@ case!(ctrl_g_lends_the_terminal_to_the_editor_and_takes_the_draft_back, async {
     use futures::FutureExt;
     use std::{cell::RefCell, path::PathBuf};
     let seen = Rc::new(RefCell::new(Vec::<(PathBuf, String)>::new()));
-    let works = Rc::new(std::cell::Cell::new(true));
+    // What the editor does: exits with this code, after saving new words or not.
+    let ends = Rc::new(std::cell::Cell::new((0, true)));
     let h = Harness::with(120, 36, Rc::new(Control::default()), |o| {
         o.editor = Some("fake-editor".into());
-        let (seen, works) = (seen.clone(), works.clone());
+        let (seen, ends) = (seen.clone(), ends.clone());
         o.run_editor = Some(Rc::new(move |path: PathBuf| {
-            let (seen, works) = (seen.clone(), works.get());
+            let (seen, (code, saves)) = (seen.clone(), ends.get());
             async move {
                 seen.borrow_mut().push((path.clone(), std::fs::read_to_string(&path)?));
-                std::fs::write(&path, "tighten the hats\nand the snare\n")?;
-                Ok(works)
+                if saves {
+                    std::fs::write(&path, "tighten the hats\nand the snare\n")?;
+                }
+                Ok(code)
             }
             .boxed_local()
         }));
@@ -402,11 +406,90 @@ case!(ctrl_g_lends_the_terminal_to_the_editor_and_takes_the_draft_back, async {
     h.type_text("\x1f").await;
     assert!(has(&composer(&h), "tighten") && !has(&composer(&h), "and the snare"));
     // An editor that ends with an error leaves the draft as it was.
-    works.set(false);
+    ends.set((1, true));
     h.type_text("\x07").await;
     h.wait_for("ended with an error").await;
     assert!(has(&composer(&h), "tighten") && !has(&composer(&h), "and the snare"));
+    // One that closes at once with the draft unchanged opened a window and didn't wait for it.
+    ends.set((0, false));
+    h.type_text("\x07").await;
+    h.wait_for("closed at once").await;
+    h.has("code --wait");
+    // One the shell can't find is named, with how to choose another.
+    ends.set((127, false));
+    h.type_text("\x07").await;
+    h.wait_for("Kumi couldn't run fake-editor").await;
+    assert!(has(&composer(&h), "tighten") && !has(&composer(&h), "and the snare"));
     h.close().await;
+});
+
+case!(enter_on_a_search_and_ctrl_g_keep_the_draft_up_set_aside, async {
+    use futures::FutureExt;
+    let (_tmp, history) = with_history(&["an earlier message"]);
+    let h = Harness::with(120, 36, Rc::new(Control::default()), |o| {
+        o.history = Some(history);
+        o.editor = Some("fake-editor".into());
+        o.run_editor = Some(Rc::new(|path: std::path::PathBuf| {
+            async move {
+                std::fs::write(&path, "edited")?;
+                Ok(0)
+            }
+            .boxed_local()
+        }));
+    });
+    h.start().await;
+    h.connect();
+    h.type_text("my draft").await;
+    // ↑ sets the draft aside; a message found and used goes in over it, and ctrl+- brings the draft back.
+    h.type_text("\x1b[A").await;
+    assert!(has(&composer(&h), "an earlier message"));
+    h.type_text("\x12").await;
+    h.type_text("\r").await;
+    assert!(has(&composer(&h), "an earlier message") && !has(&composer(&h), "search:"));
+    h.type_text("\x1f").await;
+    assert!(has(&composer(&h), "my draft"));
+    // The same for what the editor saves.
+    h.type_text("\x1b[A").await;
+    h.type_text("\x07").await;
+    h.wait_for("edited").await;
+    h.type_text("\x1f").await;
+    assert!(has(&composer(&h), "my draft"));
+    h.close().await;
+});
+
+case!(kumi_waits_for_the_editor_a_search_and_a_draft_put_aside_before_following_a_daw, async {
+    use futures::FutureExt;
+    use kumi_types::daw::DawId;
+    let gate = kumi_common::abort::Signal::new();
+    let release = gate.clone();
+    let h = Harness::with(120, 36, Rc::new(Control::default()), move |o| {
+        o.follow_daw = Some(Rc::new(|_| {}));
+        o.editor = Some("fake-editor".into());
+        o.run_editor = Some(Rc::new(move |_| {
+            let gate = gate.clone();
+            async move {
+                gate.cancelled().await;
+                Ok(0)
+            }
+            .boxed_local()
+        }));
+    });
+    let done = h.app.run();
+    delay(5).await;
+    // ctrl+g on an empty box: following now would close Kumi under the editor, and lose the draft's file.
+    h.type_text("\x07").await;
+    assert!(!h.app.follow_daw(DawId::Renoise), "the editor is open: not yet");
+    release.cancel();
+    delay(20).await;
+    h.type_text("\x12").await;
+    assert!(!h.app.follow_daw(DawId::Renoise), "a search: not yet");
+    h.type_text("\x1b").await;
+    h.type_text("an idea\x13").await;
+    assert!(!h.app.follow_daw(DawId::Renoise), "a draft put aside: not yet");
+    h.type_text("\x13").await;
+    h.type_text("\x15").await;
+    assert!(h.app.follow_daw(DawId::Renoise));
+    assert_eq!(done.await, 0);
 });
 
 case!(ctrl_g_without_an_editor_says_how_to_choose_one, async {
@@ -454,10 +537,9 @@ fn the_editor_is_visual_then_editor_and_found_the_way_windows_finds_programs() {
     let env = |pairs: &'static [(&'static str, &'static str)]| {
         move |name: &str| pairs.iter().find(|(key, _)| *key == name).map(|(_, value)| value.to_string())
     };
-    assert_eq!(editor_command(env(&[("VISUAL", "code --wait"), ("EDITOR", "vim")]), false).as_deref(), Some("code --wait"));
-    assert_eq!(editor_command(env(&[("VISUAL", " "), ("EDITOR", "nano")]), false).as_deref(), Some("nano"));
-    assert_eq!(editor_command(env(&[]), false), None);
-    assert_eq!(editor_command(env(&[]), true).as_deref(), Some("notepad"));
+    assert_eq!(editor_command(env(&[("VISUAL", "code --wait"), ("EDITOR", "vim")])).as_deref(), Some("code --wait"));
+    assert_eq!(editor_command(env(&[("VISUAL", " "), ("EDITOR", "nano")])).as_deref(), Some("nano"));
+    assert_eq!(editor_command(env(&[])), None);
     assert_eq!(
         words(r#""C:\Program Files\Notepad++\notepad++.exe" -multiInst  -nosession"#),
         [r"C:\Program Files\Notepad++\notepad++.exe", "-multiInst", "-nosession"]

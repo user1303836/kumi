@@ -216,6 +216,9 @@ impl Tty {
         let result = run.await;
         if inner.lent.replace(false) {
             let _ = inner.options.input.set_raw_mode(true);
+            // Keys typed meanwhile (beside a window of its own) were the program's, as is a reply to what it asked the
+            // terminal: one ending in BEL would read as ctrl+g.
+            inner.options.input.discard_pending();
             self.listen();
             inner.active.store(true, Ordering::SeqCst);
             inner.options.output.write(&inner.entering());
@@ -561,6 +564,22 @@ impl TtyInput for Stdin {
 
     fn on_error(&self, listener: ErrorListener) {
         self.inner.errors.borrow_mut().push(listener);
+    }
+
+    fn discard_pending(&self) {
+        #[cfg(unix)]
+        // SAFETY: tcflush only reads the descriptor; stdin is open for the process's life.
+        unsafe {
+            libc::tcflush(libc::STDIN_FILENO, libc::TCIFLUSH);
+        }
+        #[cfg(windows)]
+        {
+            use windows_sys::Win32::System::Console::{FlushConsoleInputBuffer, GetStdHandle, STD_INPUT_HANDLE};
+            // SAFETY: GetStdHandle returns the process's own input handle, or one FlushConsoleInputBuffer refuses.
+            unsafe {
+                FlushConsoleInputBuffer(GetStdHandle(STD_INPUT_HANDLE));
+            }
+        }
     }
 
     fn emergency_raw_mode(&self) -> Option<RawModeRestorer> {

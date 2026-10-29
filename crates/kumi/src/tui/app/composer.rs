@@ -9,6 +9,7 @@ use super::super::{
 };
 use super::drawing::st;
 use super::*;
+use std::time::{Duration, Instant};
 
 /// ctrl+r: the words looked for, and the earlier message found with them, by its place in the input history.
 pub(super) struct Search {
@@ -26,15 +27,29 @@ const LOOKING: &str = "search: ";
 pub(super) const SEARCH_HINT: &str = "ctrl+r older · enter uses it · esc goes back";
 pub(super) const STASH_HINT: &str = "ctrl+s brings back what you put aside";
 
+/// An editor that closes sooner than this, leaving the draft unchanged, likely opened a window and didn't wait for it.
+const AT_ONCE: Duration = Duration::from_secs(1);
+
 /// The newest message before `before` with `query` in it, in any case, other than `skip` (the one shown already).
 fn find(entries: &[String], query: &str, before: usize, skip: Option<&str>) -> Option<usize> {
     let query = query.to_lowercase();
     (0..before.min(entries.len())).rev().find(|&at| Some(entries[at].as_str()) != skip && entries[at].to_lowercase().contains(&query))
 }
 
+/// Looking back through what was sent ends, as ↓ past the newest ends it: the draft set aside comes back.
+fn back_to_draft(state: &mut State) {
+    if let Some((_, draft)) = state.recall.take() {
+        state.editor.restore(draft);
+    }
+}
+
 impl TuiApp {
-    fn sent(&self) -> Vec<String> {
-        self.0.options.history.as_ref().map(|history| history.borrow().entries().to_vec()).unwrap_or_default()
+    /// What was sent, oldest first, for `look` to go through without copying it.
+    fn with_sent<T>(&self, look: impl FnOnce(&[String]) -> T) -> T {
+        match &self.0.options.history {
+            Some(history) => look(history.borrow().entries()),
+            None => look(&[]),
+        }
     }
 
     pub(super) fn searching(&self) -> bool {
@@ -44,24 +59,22 @@ impl TuiApp {
     /// ctrl+r: starts looking back through what was sent, newest first; while looking, the next earlier message with the
     /// words typed. The draft stays as it is until a message found is used.
     pub(super) fn search_back(&self) {
-        let sent = self.sent();
         let state = &mut *self.0.state.borrow_mut();
-        match &mut state.search {
+        self.with_sent(|sent| match &mut state.search {
             Some(search) => {
                 if let Some(at) = search.found {
-                    search.found = find(&sent, &search.query, at, Some(&sent[at])).or(Some(at));
+                    search.found = find(sent, &search.query, at, Some(&sent[at])).or(Some(at));
                 }
             }
-            None => state.search = Some(Search { query: String::new(), found: find(&sent, "", sent.len(), None) }),
-        }
+            None => state.search = Some(Search { query: String::new(), found: find(sent, "", sent.len(), None) }),
+        });
     }
 
     /// Typed or pasted while looking: the words to find, found again from the newest.
     pub(super) fn search_type(&self, text: &str) {
-        let sent = self.sent();
         if let Some(search) = &mut self.0.state.borrow_mut().search {
             search.query.push_str(text);
-            search.found = find(&sent, &search.query, sent.len(), None);
+            search.found = self.with_sent(|sent| find(sent, &search.query, sent.len(), None));
         }
     }
 
@@ -73,12 +86,11 @@ impl TuiApp {
         match (name, mods.ctrl, mods.alt) {
             ("r", true, false) => self.search_back(),
             ("backspace", false, false) => {
-                let sent = self.sent();
                 if let Some(search) = &mut self.0.state.borrow_mut().search {
                     let mut letters = graphemes(&search.query);
                     letters.pop();
                     search.query = letters.concat();
-                    search.found = find(&sent, &search.query, sent.len(), None);
+                    search.found = self.with_sent(|sent| find(sent, &search.query, sent.len(), None));
                 }
             }
             ("enter" | "tab", _, _) => self.search_end(true),
@@ -93,12 +105,11 @@ impl TuiApp {
 
     /// Stops looking. `take`: the message found goes into the box, one step ctrl+- takes back; else the draft stays.
     fn search_end(&self, take: bool) {
-        let sent = self.sent();
-        let mut state = self.0.state.borrow_mut();
+        let state = &mut *self.0.state.borrow_mut();
         let Some(search) = state.search.take() else { return };
-        if let Some(found) = search.found.filter(|_| take).and_then(|at| sent.get(at)) {
-            state.editor.set(found);
-            state.recall = None;
+        if let Some(found) = search.found.filter(|_| take).and_then(|at| self.with_sent(|sent| sent.get(at).cloned())) {
+            back_to_draft(state);
+            state.editor.set(&found);
             state.menu_dismissed = true;
         }
     }
@@ -117,7 +128,7 @@ impl TuiApp {
         }
         let first = format!("{LOOKING}{}", query.concat());
         let mut rows = vec![first.clone()];
-        match search.found.and_then(|at| self.sent().get(at).cloned()) {
+        match search.found.and_then(|at| self.with_sent(|sent| sent.get(at).cloned())) {
             Some(found) => {
                 let mut shown = Editor::new();
                 shown.set(&found);
@@ -167,30 +178,41 @@ impl TuiApp {
         self.task(move |app| async move {
             let path = file.path().to_path_buf();
             let run = app.0.options.run_editor.clone();
+            let started = Instant::now();
             let closed = app
                 .0
                 .tty
                 .hand_over(async {
                     match run {
                         Some(run) => run(path.clone()).await,
-                        None => external_editor::run(&editor, &path).await.map(|status| status.success()),
+                        None => external_editor::run(&editor, &path).await.map(|status| status.code().unwrap_or(-1)),
                     }
                 })
                 .await;
+            let at_once = started.elapsed() < AT_ONCE;
             let saved = std::fs::read_to_string(&path);
             drop(file);
             app.taken_back();
             match (closed, saved) {
-                (Ok(true), Ok(saved)) => {
+                (Ok(0), Ok(saved)) if at_once && saved == draft => app.notice(
+                    &format!("{editor} closed at once, so the draft is as it was. An editor that opens a window needs to wait for it: code --wait, say."),
+                    NoticeTone::Info,
+                ),
+                (Ok(0), Ok(saved)) => {
                     // An editor ends a file with a new line; the draft didn't have one.
                     let saved = saved.strip_suffix('\n').map(|text| text.strip_suffix('\r').unwrap_or(text)).unwrap_or(&saved);
-                    let mut state = app.0.state.borrow_mut();
+                    let state = &mut *app.0.state.borrow_mut();
+                    back_to_draft(state);
                     state.editor.set(&sanitize_text(saved, &[]));
-                    state.recall = None;
                     state.menu_dismissed = true;
                 }
-                (Ok(true), Err(error)) => app.notice(&format!("Kumi couldn't read the draft back: {error}"), NoticeTone::Warn),
-                (Ok(false), _) => app.notice(&format!("{editor} ended with an error, so the draft is as it was."), NoticeTone::Info),
+                (Ok(0), Err(error)) => app.notice(&format!("Kumi couldn't read the draft back: {error}"), NoticeTone::Warn),
+                // The shell's words for a command it can't find, or can't run.
+                (Ok(127 | 126), _) => app.notice(
+                    &format!("Kumi couldn't run {editor}. Set VISUAL or EDITOR to an editor this computer has (export EDITOR=nano, say)."),
+                    NoticeTone::Warn,
+                ),
+                (Ok(_), _) => app.notice(&format!("{editor} ended with an error, so the draft is as it was."), NoticeTone::Info),
                 (Err(error), _) => app.notice(&format!("Kumi couldn't open {editor}: {error}"), NoticeTone::Warn),
             }
             app.0.scheduler.request();
