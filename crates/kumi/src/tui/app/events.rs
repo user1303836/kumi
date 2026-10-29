@@ -615,19 +615,7 @@ impl TuiApp {
             // No goal here (none set, or another Set is open): the GOAL tab stops showing the last one.
             SessionEvent::ObjectiveCleared => self.0.state.borrow_mut().objective = None,
             // Requests taken back: what's shown is the conversation as it now stands, without them.
-            SessionEvent::TakenBack { replay, .. } => {
-                {
-                    let mut state = self.0.state.borrow_mut();
-                    state.transcript.clear();
-                    state.current = None;
-                    state.selection = None;
-                    state.view.follow();
-                }
-                if let Some(replay) = replay {
-                    self.shown_again(replay);
-                }
-                self.0.scheduler.request();
-            }
+            SessionEvent::TakenBack { replay, .. } | SessionEvent::Forked { replay, .. } => self.shown_anew(replay),
             SessionEvent::Loop(status) => {
                 let running = status.state == LoopState::Running;
                 if running {
@@ -935,6 +923,21 @@ impl TuiApp {
     }
     fn replaying(&self) -> bool {
         self.0.state.borrow().replaying
+    }
+    /// The conversation as it now stands, in place of what was shown: requests taken back, or a copy carried on in from
+    /// before one (None: nothing of it to show).
+    fn shown_anew(&self, replay: Option<Replay>) {
+        {
+            let mut state = self.0.state.borrow_mut();
+            state.transcript.clear();
+            state.current = None;
+            state.selection = None;
+            state.view.follow();
+        }
+        if let Some(replay) = replay {
+            self.shown_again(replay);
+        }
+        self.0.scheduler.request();
     }
     /// A conversation shown again from its log: how many earlier messages aren't shown, the words of those from before
     /// its log began, then its last requests as they happened.

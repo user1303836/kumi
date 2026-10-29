@@ -157,7 +157,7 @@ case!(esc_esc_lists_the_requests_newest_first_and_takes_one_back_once_its_confir
     // Chosen, it says what Kumi undoes, and nothing's undone until that's confirmed.
     h.type_text("\r").await;
     h.wait_for("Take back “and a bit darker”?").await;
-    h.has("Undoes 1 change; its words go back in the box");
+    h.has("Undoes 1 change; its words come back");
     assert!(!h.calls().iter().any(|call| call.starts_with("take-back:")), "{:?}", h.calls());
     h.type_text("\r").await;
     h.wait_for_call("take-back:3").await;
@@ -272,5 +272,37 @@ case!(esc_esc_is_two_escs_in_a_row_that_do_nothing_else_from_an_empty_box, async
     assert!(!opened(&h));
     h.type_text("\x1b").await;
     h.wait_for("Take a request back").await;
+    h.close().await;
+});
+
+case!(esc_esc_carries_on_in_a_copy_from_before_a_request_and_leaves_the_daw_as_it_is, async {
+    let h = two_requests().await;
+    // As the session does it: the screen is shown the copy as it stands.
+    h.control.set(
+        "forked-event",
+        json!({"type":"forked","from":"mv66me0m3fa91c","replay":{"before":0,"lines":asked(2, "make the bass wider", "Widened it.")}}),
+    );
+    esc_esc(&h).await;
+    h.wait_for("Take a request back").await;
+    // The newest has one before it, so its question offers a copy.
+    h.type_text("\r").await;
+    h.wait_for("Take back “and a bit darker”?").await;
+    h.has("Carry on from here in a copy");
+    h.has("Leaves your DAW and the original alone");
+    h.type_text("\x1b[B\r").await;
+    h.wait_for_call("fork-before:3").await;
+    assert!(!h.calls().iter().any(|call| call.starts_with("take-back:")), "{:?}", h.calls());
+    let shown = h.screen();
+    assert!(!has(&shown, "Lowered the filter."), "{shown:#?}");
+    h.has("Widened it.");
+    // Gone from what's shown, its words are in the box.
+    h.has("and a bit darker");
+    // The oldest has nothing before it to carry on from.
+    h.type_text("\x15").await;
+    esc_esc(&h).await;
+    h.wait_for("Take a request back").await;
+    h.type_text("\x1b[B\r").await;
+    h.wait_for("Take back “make the bass wider” and the request after it?").await;
+    assert!(!has(&h.screen(), "Carry on from here in a copy"));
     h.close().await;
 });
