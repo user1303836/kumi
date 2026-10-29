@@ -3,6 +3,27 @@
 Kumi's releases. The Ableton bridge (`crates/ableton-mcp-server`) is versioned on its own;
 each Kumi release names the bridge it ships with.
 
+## 1.24.16 — 2026-10-29
+
+Ships with bridge 1.0.101, as 1.24.15 did.
+
+- `kumi -p "<request>"` runs one request and prints its answer, for scripts: `--json` prints every
+  event, and the exit code says how it ended.
+- A track, device or parameter whose name hides text can still be changed by name, in every DAW.
+- A note whose velocity alone changed shows as changed in place in an exported page, not as a moved
+  note.
+- A long track or device name in what Kumi says changed since last time no longer ends in a broken
+  character.
+- Dragging across text in Kumi's window copies it as you let go, a double-click copies a word and a
+  triple-click a line, and lines Kumi wrapped come out whole.
+- Quitting Kumi leaves the conversation in your terminal's scrollback; `"transcriptOnQuit": false` in
+  settings.json turns that off.
+- `"mouse": "off"` in settings.json leaves the mouse to your terminal or tmux, for their own selection
+  and copying.
+
+Tested with Live 12.4 on macOS. On Windows, installing and updating are tested; using Kumi with Live
+there is still new.
+
 ## 1.24.15 — 2026-10-29
 
 Ships with bridge 1.0.101, as 1.24.14 did.
