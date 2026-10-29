@@ -150,6 +150,7 @@ impl TuiApp {
             .or_else(|| is(Scope::List, top.downcast_ref::<super::panels::PickPanel>().is_some()))
             .or_else(|| is(Scope::KeyBox, top.downcast_ref::<super::panels::KeyPanel>().is_some()))
             .or_else(|| is(Scope::ChatGpt, top.downcast_ref::<super::panels::ChatGptPanel>().is_some()))
+            .or_else(|| top.downcast_ref::<super::details::DetailsPanel>().map(|details| details.scope()))
     }
     /// Where the keyboard is outside the panels, innermost first, as key() tries them.
     fn keyboard_scope(&self) -> Scope {

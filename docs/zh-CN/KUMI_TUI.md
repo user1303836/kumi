@@ -215,7 +215,7 @@ Kumi 占据整个终端窗口，并在 Kumi 关闭、崩溃或被停止时把窗
 | 位置 | 动作与 Kumi 自己的按键 |
 | --- | --- |
 | 输入框 | `composer.send`（enter）、`composer.send-after`（Kumi 工作时的 tab）、`composer.take-back-waiting`（alt+↑）、`composer.new-line`（ctrl+j、alt+enter、shift+enter）、`composer.up`、`composer.down`、`composer.left`、`composer.right`、`composer.word-left`（alt+←、ctrl+←、alt+b）、`composer.word-right`（alt+→、ctrl+→、alt+f）、`composer.line-start`（home、ctrl+a）、`composer.line-end`（end、ctrl+e）、`composer.backspace`、`composer.take-back-file`（输入框为空时的 backspace）、`composer.delete`（delete、ctrl+d）、`composer.cut-word`（ctrl+w、alt+backspace、ctrl+backspace）、`composer.cut-to-end`（ctrl+k）、`composer.cut-to-start`（ctrl+u）、`composer.yank`（ctrl+y）、`composer.yank-earlier`（alt+y）、`composer.undo`（ctrl+-、ctrl+_）、`composer.history-search`（ctrl+r）、`composer.editor`（ctrl+g）、`composer.stash`（ctrl+s） |
-| Kumi | `app.stop`（esc）、`app.interrupt`（ctrl+c）、`app.quit`（ctrl+d）、`app.background`（ctrl+b）、`app.paste-picture`（ctrl+v）、`app.redraw`（ctrl+l）、`app.help`（没有自己的按键：`?`）、`voice.talk`（ctrl+t）、`conversation.page-up`、`conversation.page-down`、`conversation.start`（ctrl+home）、`conversation.latest`（ctrl+end） |
+| Kumi | `app.stop`（esc）、`app.interrupt`（ctrl+c）、`app.quit`（ctrl+d）、`app.background`（ctrl+b）、`app.paste-picture`（ctrl+v）、`app.redraw`（ctrl+l）、`app.help`（没有自己的按键：`?`）、`voice.talk`（ctrl+t）、`conversation.page-up`、`conversation.page-down`、`conversation.start`（ctrl+home）、`conversation.latest`（ctrl+end）、`conversation.details`（ctrl+o） |
 | 窗格 | `pane.toggle`（ctrl+\\）、`pane.tabs`（shift+tab）、`pane.tree`（tab）；标签页里有 `tabs.up`、`tabs.down`、`tabs.page-up`、`tabs.page-down`、`tabs.open`（enter）、`tabs.next`（shift+tab）、`tabs.leave`（esc、tab）；设备树里有 `tree.up`、`tree.down`、`tree.pin`（enter）、`tree.leave`（esc、tab） |
 | `/` 菜单 | `menu.up`、`menu.down`、`menu.complete`（tab）、`menu.run`（enter）、`menu.close`（esc） |
 | 回看（ctrl+r） | `search.back`（ctrl+r）、`search.erase`（backspace）、`search.take`（enter、tab）、`search.cancel`（esc、ctrl+c） |
@@ -227,6 +227,7 @@ Kumi 占据整个终端窗口，并在 Kumi 关闭、崩溃或被停止时把窗
 | 列表 | `list.up`、`list.down`（↓、tab）、`list.next-tab`（有标签页的列表里的 tab）、`list.erase`（backspace）、`list.choose`（enter）、`list.choose-other`（ctrl+f）、`list.close`（esc、ctrl+c） |
 | 密钥输入框 | `key.check`（enter）、`key.erase`（backspace）、`key.clear`（ctrl+u）、`key.cancel`（esc、ctrl+c） |
 | ChatGPT 登录 | `chatgpt.copy`（c）、`chatgpt.by-code`（d）、`chatgpt.by-browser`（b）、`chatgpt.cancel`（esc、ctrl+c） |
+| 对话详情（ctrl+o） | `details.up`、`details.down`、`details.page-up`、`details.page-down`、`details.top`（home）、`details.end`（end）、`details.search`（/）、`details.next-match`（n）、`details.previous-match`（N）、`details.next-request`（}）、`details.previous-request`（{）、`details.print`（[）、`details.edit`（v）、`details.close`（esc、q、ctrl+c、ctrl+o）；输入搜索时有 `details.search-erase`（backspace）、`details.search-keep`（enter）、`details.search-drop`（esc） |
 
 ## 纯文本模式
 

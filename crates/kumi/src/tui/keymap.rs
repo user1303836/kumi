@@ -217,6 +217,10 @@ pub enum Scope {
     List,
     KeyBox,
     ChatGpt,
+    /// The conversation in detail (ctrl+o).
+    Details,
+    /// While a search is typed in the detailed view.
+    DetailsSearch,
 }
 
 impl Scope {
@@ -235,13 +239,23 @@ impl Scope {
         Scope::List,
         Scope::KeyBox,
         Scope::ChatGpt,
+        Scope::Details,
+        Scope::DetailsSearch,
     ];
 
     /// Where what's typed is words (or goes on to the box): a character bound there would stop it being typed.
     pub fn types(self) -> bool {
         matches!(
             self,
-            Scope::Box | Scope::Menu | Scope::Tree | Scope::Voice | Scope::Search | Scope::Selection | Scope::List | Scope::KeyBox
+            Scope::Box
+                | Scope::Menu
+                | Scope::Tree
+                | Scope::Voice
+                | Scope::Search
+                | Scope::Selection
+                | Scope::List
+                | Scope::KeyBox
+                | Scope::DetailsSearch
         )
     }
 
@@ -261,6 +275,8 @@ impl Scope {
             Scope::List => "in a list",
             Scope::KeyBox => "in a key's box",
             Scope::ChatGpt => "in ChatGPT's sign-in",
+            Scope::Details => "in the detailed view",
+            Scope::DetailsSearch => "while searching the detailed view",
         }
     }
 }
@@ -279,7 +295,7 @@ const fn act(id: &'static str, scopes: &'static [Scope], keys: &'static [&'stati
     Action { id, scopes, keys, does }
 }
 
-use Scope::{Aside, Box as InBox, ChatGpt, Help, Job, KeyBox, List, Menu, Search, Selection, Tabs, Tree, Voice};
+use Scope::{Aside, Box as InBox, ChatGpt, Details, DetailsSearch, Help, Job, KeyBox, List, Menu, Search, Selection, Tabs, Tree, Voice};
 
 /// Every action, in the order their keys are tried where they share one: an action listed first has the key first, and
 /// lets it go on when what it does doesn't apply.
@@ -288,7 +304,7 @@ pub const ACTIONS: &[Action] = &[
     // the selection go first.
     act(
         "voice.talk",
-        &[InBox, Menu, Tabs, Tree, Voice, Search, Help, Aside, Job, List, KeyBox, ChatGpt],
+        &[InBox, Menu, Tabs, Tree, Voice, Search, Help, Aside, Job, List, KeyBox, ChatGpt, Details, DetailsSearch],
         &["ctrl+shift?+t"],
         "Talk instead of typing: press it again to stop, or hold it while you talk",
     ),
@@ -430,6 +446,30 @@ pub const ACTIONS: &[Action] = &[
     act("chatgpt.copy", &[ChatGpt], &["shift?+c"], "Copy the link, or the code"),
     act("chatgpt.by-code", &[ChatGpt], &["shift?+d"], "Sign in with a code instead of the browser"),
     act("chatgpt.by-browser", &[ChatGpt], &["shift?+b"], "Sign in with the browser again"),
+    // The conversation in detail. While a search is typed, backspace, enter and esc are the search's, and esc doesn't
+    // close the view.
+    act("details.search-erase", &[DetailsSearch], &["any+backspace"], "Take back the last character searched for"),
+    act("details.search-keep", &[DetailsSearch], &["any+enter"], "Keep the search, and go back to the view's keys"),
+    act("details.search-drop", &[DetailsSearch], &["any+escape"], "Drop the search"),
+    act(
+        "details.close",
+        &[Details, DetailsSearch],
+        &["any+escape", "ctrl+alt?+shift?+c", "ctrl+alt?+shift?+o", "q"],
+        "Close the detailed view",
+    ),
+    act("details.up", &[Details, DetailsSearch], &["any+up"], "Scroll up a row"),
+    act("details.down", &[Details, DetailsSearch], &["any+down"], "Scroll down a row"),
+    act("details.page-up", &[Details, DetailsSearch], &["any+pageup"], "Scroll up a page"),
+    act("details.page-down", &[Details, DetailsSearch], &["any+pagedown"], "Scroll down a page"),
+    act("details.top", &[Details, DetailsSearch], &["any+home"], "The start of the conversation"),
+    act("details.end", &[Details, DetailsSearch], &["any+end"], "The end of the conversation"),
+    act("details.search", &[Details], &["/"], "Search the conversation: type the words, enter keeps them"),
+    act("details.next-match", &[Details], &["n"], "The next place the words are"),
+    act("details.previous-match", &[Details], &["shift+n"], "The place before"),
+    act("details.next-request", &[Details], &["}"], "The next request"),
+    act("details.previous-request", &[Details], &["{"], "The request before"),
+    act("details.print", &[Details], &["["], "Print it into the terminal's scrollback"),
+    act("details.edit", &[Details], &["v"], "Open it in your editor"),
 ];
 
 /// The action called `id`.

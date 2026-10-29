@@ -364,7 +364,7 @@ it):
 | Where | Actions, with Kumi's own keys |
 | --- | --- |
 | The box | `composer.send` (enter), `composer.send-after` (tab, while Kumi works), `composer.take-back-waiting` (alt+↑), `composer.new-line` (ctrl+j, alt+enter, shift+enter), `composer.up`, `composer.down`, `composer.left`, `composer.right`, `composer.word-left` (alt+←, ctrl+←, alt+b), `composer.word-right` (alt+→, ctrl+→, alt+f), `composer.line-start` (home, ctrl+a), `composer.line-end` (end, ctrl+e), `composer.backspace`, `composer.take-back-file` (backspace, in an empty box), `composer.delete` (delete, ctrl+d), `composer.cut-word` (ctrl+w, alt+backspace, ctrl+backspace), `composer.cut-to-end` (ctrl+k), `composer.cut-to-start` (ctrl+u), `composer.yank` (ctrl+y), `composer.yank-earlier` (alt+y), `composer.undo` (ctrl+-, ctrl+_), `composer.history-search` (ctrl+r), `composer.editor` (ctrl+g), `composer.stash` (ctrl+s) |
-| Kumi | `app.stop` (esc), `app.interrupt` (ctrl+c), `app.quit` (ctrl+d), `app.background` (ctrl+b), `app.paste-picture` (ctrl+v), `app.redraw` (ctrl+l), `app.help` (none of its own: `?`), `voice.talk` (ctrl+t), `conversation.page-up`, `conversation.page-down`, `conversation.start` (ctrl+home), `conversation.latest` (ctrl+end) |
+| Kumi | `app.stop` (esc), `app.interrupt` (ctrl+c), `app.quit` (ctrl+d), `app.background` (ctrl+b), `app.paste-picture` (ctrl+v), `app.redraw` (ctrl+l), `app.help` (none of its own: `?`), `voice.talk` (ctrl+t), `conversation.page-up`, `conversation.page-down`, `conversation.start` (ctrl+home), `conversation.latest` (ctrl+end), `conversation.details` (ctrl+o) |
 | The pane | `pane.toggle` (ctrl+\\), `pane.tabs` (shift+tab), `pane.tree` (tab); in the tabs, `tabs.up`, `tabs.down`, `tabs.page-up`, `tabs.page-down`, `tabs.open` (enter), `tabs.next` (shift+tab), `tabs.leave` (esc, tab); in the tree, `tree.up`, `tree.down`, `tree.pin` (enter), `tree.leave` (esc, tab) |
 | The `/` menu | `menu.up`, `menu.down`, `menu.complete` (tab), `menu.run` (enter), `menu.close` (esc) |
 | Looking back (ctrl+r) | `search.back` (ctrl+r), `search.erase` (backspace), `search.take` (enter, tab), `search.cancel` (esc, ctrl+c) |
@@ -376,6 +376,7 @@ it):
 | A list | `list.up`, `list.down` (↓, tab), `list.next-tab` (tab, where the list has tabs), `list.erase` (backspace), `list.choose` (enter), `list.choose-other` (ctrl+f), `list.close` (esc, ctrl+c) |
 | The key box | `key.check` (enter), `key.erase` (backspace), `key.clear` (ctrl+u), `key.cancel` (esc, ctrl+c) |
 | ChatGPT's sign-in | `chatgpt.copy` (c), `chatgpt.by-code` (d), `chatgpt.by-browser` (b), `chatgpt.cancel` (esc, ctrl+c) |
+| The conversation in detail (ctrl+o) | `details.up`, `details.down`, `details.page-up`, `details.page-down`, `details.top` (home), `details.end` (end), `details.search` (/), `details.next-match` (n), `details.previous-match` (N), `details.next-request` (}), `details.previous-request` ({), `details.print` ([), `details.edit` (v), `details.close` (esc, q, ctrl+c, ctrl+o); while a search is typed, `details.search-erase` (backspace), `details.search-keep` (enter), `details.search-drop` (esc) |
 
 ## Plain mode
 

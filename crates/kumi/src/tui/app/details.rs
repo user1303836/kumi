@@ -6,7 +6,6 @@
 use super::super::{
     details::{words_of, AnswerMeta, Details},
     external_editor,
-    keys::Modifiers,
     overlay::{Area, Handled, Overlay},
     render::Cursor,
 };
@@ -138,89 +137,103 @@ impl TuiApp {
 }
 
 impl DetailsPanel {
-    /// A key typed: into the search while it's being typed; otherwise the view's own (true when it closes the view).
-    fn typed(&mut self, app: &TuiApp, typed: char) -> bool {
-        let (width, height) = (self.width, self.height);
-        let Some(details) = self.details.as_mut() else { return typed == 'q' };
+    /// Where its keys are read: while a search is typed, backspace, enter and esc are the search's.
+    pub(super) fn scope(&self) -> Scope {
         if self.searching {
+            Scope::DetailsSearch
+        } else {
+            Scope::Details
+        }
+    }
+
+    /// Does what the first of a key's actions (`ids`) that applies does: Some(true) when that closes the view, None when
+    /// none applied. With nothing to show yet, only closing applies.
+    fn act(&mut self, app: &TuiApp, ids: Vec<&'static str>) -> Option<bool> {
+        let (width, height) = (self.width, self.height);
+        for id in ids {
+            if id == "details.close" {
+                return Some(true);
+            }
+            let Some(details) = self.details.as_mut() else { continue };
+            match id {
+                // Enter keeps the search; esc drops it.
+                "details.search-erase" | "details.search-keep" | "details.search-drop" => {
+                    let mut query = details.query.clone();
+                    match id {
+                        "details.search-erase" => {
+                            query.pop();
+                        }
+                        "details.search-keep" => {
+                            self.searching = false;
+                            return Some(false);
+                        }
+                        _ => {
+                            self.searching = false;
+                            query.clear();
+                        }
+                    }
+                    details.search(&query, width);
+                    details.show_match(width, height);
+                }
+                "details.up" | "details.down" | "details.page-up" | "details.page-down" | "details.top" | "details.end" => {
+                    let page = height.saturating_sub(1).max(1) as i32;
+                    let rows = match id {
+                        "details.up" => -1,
+                        "details.down" => 1,
+                        "details.page-up" => -page,
+                        "details.page-down" => page,
+                        "details.top" => i32::MIN / 2,
+                        _ => i32::MAX / 2,
+                    };
+                    details.scroll(rows, width, height);
+                }
+                "details.search" => {
+                    self.searching = true;
+                    details.search("", width);
+                }
+                "details.next-match" | "details.previous-match" => details.next_match(id == "details.next-match", width, height),
+                "details.next-request" | "details.previous-request" => details.next_request(id == "details.next-request", width),
+                "details.print" => app.print_details(details.printed(app.0.tty.size().columns - 1)),
+                "details.edit" => app.edit_details(self.markdown.clone()),
+                _ => continue,
+            }
+            return Some(false);
+        }
+        None
+    }
+
+    /// A character typed into the search while it's being typed.
+    fn search_typed(&mut self, typed: char) {
+        let (width, height) = (self.width, self.height);
+        if let Some(details) = self.details.as_mut() {
             let query = format!("{}{typed}", details.query);
             details.search(&query, width);
             details.show_match(width, height);
-            return false;
         }
-        match typed {
-            'q' => return true,
-            '/' => {
-                self.searching = true;
-                details.search("", width);
-            }
-            'n' | 'N' => details.next_match(typed == 'n', width, height),
-            '}' | '{' => details.next_request(typed == '}', width),
-            '[' => app.print_details(details.printed(app.0.tty.size().columns - 1)),
-            'v' => app.edit_details(self.markdown.clone()),
-            _ => {}
-        }
-        false
-    }
-
-    /// Backspace, enter and esc while the search is typed: enter keeps it, esc drops it.
-    fn search_key(&mut self, name: &str) {
-        let (width, height) = (self.width, self.height);
-        let Some(details) = self.details.as_mut() else { return };
-        let mut query = details.query.clone();
-        match name {
-            "backspace" => {
-                query.pop();
-            }
-            "enter" => {
-                self.searching = false;
-                return;
-            }
-            _ => {
-                self.searching = false;
-                query.clear();
-            }
-        }
-        details.search(&query, width);
-        details.show_match(width, height);
-    }
-
-    /// The arrows, the pages, home and end.
-    fn scroll_key(&mut self, name: &str) {
-        let (width, height) = (self.width, self.height);
-        let Some(details) = self.details.as_mut() else { return };
-        let page = height.saturating_sub(1).max(1) as i32;
-        let rows = match name {
-            "up" => -1,
-            "down" => 1,
-            "pageup" => -page,
-            "pagedown" => page,
-            "home" => i32::MIN / 2,
-            "end" => i32::MAX / 2,
-            _ => return,
-        };
-        details.scroll(rows, width, height);
     }
 }
 
 impl Overlay<TuiApp> for DetailsPanel {
-    /// The view's keys; while searching, what's typed goes into the search (enter keeps it, esc drops it).
+    /// The view's keys (keys.json can say others); while searching, what's typed goes into the search (enter keeps it,
+    /// esc drops it).
     fn handle(&mut self, app: &TuiApp, event: InputEvent) -> Handled {
-        let closing = |name: &str, mods: Modifiers| name == "escape" || (mods.ctrl && matches!(name, "c" | "o"));
         match event {
-            InputEvent::Key { ref name, .. } if self.searching && matches!(name.as_str(), "backspace" | "enter" | "escape") => {
-                self.search_key(name);
-                Handled::Kept
-            }
-            InputEvent::Key { ref name, mods, .. } if closing(name, mods) => Handled::Close,
-            InputEvent::Key { ref name, .. } => {
-                self.scroll_key(name);
+            InputEvent::Key { .. } => {
+                let ids = app.actions(self.scope(), &event);
+                if self.act(app, ids) == Some(true) {
+                    return Handled::Close;
+                }
                 Handled::Kept
             }
             // Typed fast, or by a test, a run of keys comes as one text: each is taken in turn.
             InputEvent::Text { ref text } => {
                 for typed in text.chars() {
-                    if self.typed(app, typed) {
+                    if self.searching {
+                        self.search_typed(typed);
+                        continue;
+                    }
+                    let ids = app.actions(Scope::Details, &InputEvent::text(&typed.to_string()));
+                    if self.act(app, ids) == Some(true) {
                         return Handled::Close;
                     }
                 }
@@ -228,7 +241,7 @@ impl Overlay<TuiApp> for DetailsPanel {
             }
             InputEvent::Paste { ref text } if self.searching => {
                 for typed in sanitize_text(text, &[]).replace('\n', " ").chars() {
-                    self.typed(app, typed);
+                    self.search_typed(typed);
                 }
                 Handled::Kept
             }

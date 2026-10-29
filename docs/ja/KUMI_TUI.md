@@ -215,7 +215,7 @@ REAPER と Renoise でも画面は同じで（[つなぎ方](KUMI_GUIDE.md#reape
 | 場所 | アクションと Kumi 自身のキー |
 | --- | --- |
 | 入力欄 | `composer.send`（enter）、`composer.send-after`（Kumi の作業中の tab）、`composer.take-back-waiting`（alt+↑）、`composer.new-line`（ctrl+j、alt+enter、shift+enter）、`composer.up`、`composer.down`、`composer.left`、`composer.right`、`composer.word-left`（alt+←、ctrl+←、alt+b）、`composer.word-right`（alt+→、ctrl+→、alt+f）、`composer.line-start`（home、ctrl+a）、`composer.line-end`（end、ctrl+e）、`composer.backspace`、`composer.take-back-file`（空の入力欄での backspace）、`composer.delete`（delete、ctrl+d）、`composer.cut-word`（ctrl+w、alt+backspace、ctrl+backspace）、`composer.cut-to-end`（ctrl+k）、`composer.cut-to-start`（ctrl+u）、`composer.yank`（ctrl+y）、`composer.yank-earlier`（alt+y）、`composer.undo`（ctrl+-、ctrl+_）、`composer.history-search`（ctrl+r）、`composer.editor`（ctrl+g）、`composer.stash`（ctrl+s） |
-| Kumi | `app.stop`（esc）、`app.interrupt`（ctrl+c）、`app.quit`（ctrl+d）、`app.background`（ctrl+b）、`app.paste-picture`（ctrl+v）、`app.redraw`（ctrl+l）、`app.help`（自身のキーはなし：`?`）、`voice.talk`（ctrl+t）、`conversation.page-up`、`conversation.page-down`、`conversation.start`（ctrl+home）、`conversation.latest`（ctrl+end） |
+| Kumi | `app.stop`（esc）、`app.interrupt`（ctrl+c）、`app.quit`（ctrl+d）、`app.background`（ctrl+b）、`app.paste-picture`（ctrl+v）、`app.redraw`（ctrl+l）、`app.help`（自身のキーはなし：`?`）、`voice.talk`（ctrl+t）、`conversation.page-up`、`conversation.page-down`、`conversation.start`（ctrl+home）、`conversation.latest`（ctrl+end）、`conversation.details`（ctrl+o） |
 | ペイン | `pane.toggle`（ctrl+\\）、`pane.tabs`（shift+tab）、`pane.tree`（tab）。タブでは `tabs.up`、`tabs.down`、`tabs.page-up`、`tabs.page-down`、`tabs.open`（enter）、`tabs.next`（shift+tab）、`tabs.leave`（esc、tab）。ツリーでは `tree.up`、`tree.down`、`tree.pin`（enter）、`tree.leave`（esc、tab） |
 | `/` メニュー | `menu.up`、`menu.down`、`menu.complete`（tab）、`menu.run`（enter）、`menu.close`（esc） |
 | 振り返り（ctrl+r） | `search.back`（ctrl+r）、`search.erase`（backspace）、`search.take`（enter、tab）、`search.cancel`（esc、ctrl+c） |
@@ -227,6 +227,7 @@ REAPER と Renoise でも画面は同じで（[つなぎ方](KUMI_GUIDE.md#reape
 | 一覧 | `list.up`、`list.down`（↓、tab）、`list.next-tab`（タブがある一覧の tab）、`list.erase`（backspace）、`list.choose`（enter）、`list.choose-other`（ctrl+f）、`list.close`（esc、ctrl+c） |
 | キーの入力欄 | `key.check`（enter）、`key.erase`（backspace）、`key.clear`（ctrl+u）、`key.cancel`（esc、ctrl+c） |
 | ChatGPT のサインイン | `chatgpt.copy`（c）、`chatgpt.by-code`（d）、`chatgpt.by-browser`（b）、`chatgpt.cancel`（esc、ctrl+c） |
+| 会話の詳細（ctrl+o） | `details.up`、`details.down`、`details.page-up`、`details.page-down`、`details.top`（home）、`details.end`（end）、`details.search`（/）、`details.next-match`（n）、`details.previous-match`（N）、`details.next-request`（}）、`details.previous-request`（{）、`details.print`（[）、`details.edit`（v）、`details.close`（esc、q、ctrl+c、ctrl+o）。検索を入力している間は `details.search-erase`（backspace）、`details.search-keep`（enter）、`details.search-drop`（esc） |
 
 ## プレーンモード
 
