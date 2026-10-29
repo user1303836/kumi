@@ -44,6 +44,8 @@ impl Answers {
             Reply::Color { which: 10, rgb } => self.foreground = rgb.or(self.foreground),
             Reply::Color { rgb, .. } => self.background = rgb.or(self.background),
             Reply::Attributes(_) => self.complete = true,
+            // (asked for by nothing here: once the screen is Kumi's, a theme that follows the terminal reads it)
+            Reply::Scheme { .. } => {}
         }
     }
 }

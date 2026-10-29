@@ -21,6 +21,11 @@ pub fn is_command(text: &str) -> bool {
 
 pub fn chip_color(color: Option<&str>) -> Rgb {
     let Some(rgb) = color.and_then(|s| hex(s).ok()) else { return palette::DIM };
+    let theme = crate::tui::style::theme();
+    if theme.is_light() {
+        // (on a light ground, a pale colour deepened instead, so it reads)
+        return theme.legible(rgb);
+    }
     let luminance = (0.2126 * rgb[0] as f64 + 0.7152 * rgb[1] as f64 + 0.0722 * rgb[2] as f64) / 255.;
     if luminance >= 0.3 {
         rgb
@@ -233,6 +238,9 @@ pub(super) fn elapsed(ms: f64) -> String {
 }
 #[allow(dead_code)]
 pub(super) fn mix_rgb(from: Rgb, to: Rgb, amount: f64) -> Rgb {
+    // (between the theme's colours for them)
+    let theme = crate::tui::style::theme();
+    let (from, to) = (theme.of(from), theme.of(to));
     std::array::from_fn(|i| number::round(from[i] as f64 + (to[i] as f64 - from[i] as f64) * amount) as u8)
 }
 #[allow(dead_code)]

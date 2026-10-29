@@ -516,6 +516,9 @@ fn nearest_lists(points: &[Point]) -> Vec<u32> {
 }
 
 fn mix(under: Rgb, over: Rgb, share: f64) -> Rgb {
+    // (between the theme's colours for them: its ground, under a point)
+    let theme = super::style::theme();
+    let (under, over) = (theme.of(under), theme.of(over));
     std::array::from_fn(|c| (under[c] as f64 + (over[c] as f64 - under[c] as f64) * share).round() as u8)
 }
 
@@ -712,6 +715,8 @@ pub struct MapView {
     /// Bumped whenever what the picture shows changes: pan, zoom, filter, a new map.
     version: u64,
     picture: Option<Picture>,
+    /// Each map's classes' or styles' colours as its data has them, which the theme draws in its own (`rethemed`).
+    colors_read: [Vec<Rgb>; 2],
     /// Where the map was drawn last: a click is read against it.
     area: Rect,
     /// Whether Enter puts points into the session's palette (the session keeps palettes), and the palette's files (their
@@ -754,6 +759,7 @@ impl MapView {
             glide: None,
             version: 0,
             picture: None,
+            colors_read: [vec![], vec![]],
             area: Rect::default(),
             gathers: false,
             palette: HashSet::new(),
@@ -899,12 +905,30 @@ impl MapView {
     /// songs' map comes first when there are no sounds on one yet.
     pub fn loaded(&mut self, ready: Ready) {
         let Ready { data, fits } = ready;
+        // The classes' and styles' colours as read, for each theme's own (`rethemed`).
+        self.colors_read = [&data.sounds, &data.songs].map(|layer| layer.groups.iter().map(|group| group.color).collect());
         self.views = vec![View::new(&data.sounds, fits[0].aspect), View::new(&data.songs, fits[1].aspect)];
         self.fits = fits.into();
         self.tab = usize::from(data.sounds.points.is_empty() && !data.songs.points.is_empty());
         self.data = Some(Rc::new(data));
         self.version += 1;
         self.mark_palette();
+        self.rethemed();
+    }
+
+    /// Each class's and style's colour as it reads on the theme's ground (on light, one too pale deepened), from the
+    /// colours as read: as the map's data comes, and again as the theme changes while it's open.
+    pub fn rethemed(&mut self) {
+        let Some(data) = self.data.as_mut() else { return };
+        let data = Rc::make_mut(data);
+        let theme = super::style::theme();
+        for (layer, read) in [&mut data.sounds, &mut data.songs].into_iter().zip(&self.colors_read) {
+            for (group, color) in layer.groups.iter_mut().zip(read) {
+                group.color = theme.legible(*color);
+            }
+        }
+        self.picture = None;
+        self.version += 1;
     }
 
     /// The zoom and centre the map on show is drawn at now: its view's, or partway along a glide to it.

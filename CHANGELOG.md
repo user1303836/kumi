@@ -3,6 +3,20 @@
 Kumi's releases. The Ableton bridge (`crates/ableton-mcp-server`) is versioned on its own;
 each Kumi release names the bridge it ships with.
 
+## 1.24.23 — 2026-10-29
+
+Ships with bridge 1.0.101, as 1.24.22 did.
+
+- Kumi's keys can be changed in `~/.kumi/keys.json`: give an action other keys, or none, and Kumi says
+  as it starts what it couldn't use.
+- In Esc Esc's list, "Carry on from here in a copy" goes on from before any request in a copy of the
+  conversation, leaving your DAW and the original as they are.
+- Plain mode (`KUMI_UI=plain`) has `/btw`, `/goal`, `/loop`, `/jobs`, `/slots` and `/music`, and says
+  which commands are only in the full-screen app.
+
+Tested with Live 12.4 on macOS. On Windows, installing and updating are tested; using Kumi with Live
+there is still new.
+
 ## 1.24.22 — 2026-10-29
 
 Ships with bridge 1.0.101, as 1.24.21 did.
