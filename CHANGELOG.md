@@ -3,6 +3,21 @@
 Kumi's releases. The Ableton bridge (`crates/ableton-mcp-server`) is versioned on its own;
 each Kumi release names the bridge it ships with.
 
+## 1.24.26 — 2026-10-29
+
+Ships with bridge 1.0.101, as 1.24.25 did.
+
+- A track, device, sound, palette or technique named with @ and cut with Ctrl-W, Ctrl-K or Ctrl-U
+  comes back still named when Ctrl-Y puts it back, so Kumi is told exactly that one.
+- Words cut along with a long paste come back beside its [pasted 41 lines] chip with Ctrl-Y, not
+  inside it.
+- With REAPER or Renoise, `kumi export`, `kumi doctor`, `kumi library`, `/refresh` and `/memory` say
+  your project or song, or "Live Sets" for what Kumi learned from your Live Sets, instead of Live's
+  "Set".
+
+Tested with Live 12.4 on macOS. On Windows, installing and updating are tested; using Kumi with Live
+there is still new.
+
 ## 1.24.25 — 2026-10-29
 
 Ships with bridge 1.0.101, as 1.24.24 did.
