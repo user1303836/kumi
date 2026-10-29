@@ -599,6 +599,20 @@ local_test!(busy_turn_still_stops_at_hard_limit, {
     assert!(h.error("this answer had run for"));
     h.session.close().await.unwrap();
 });
+local_test!(a_message_up_to_256_kib_is_sent_and_a_longer_one_is_told_its_size, {
+    let h = harness(None, |_| {});
+    h.session.start().await.unwrap();
+    // 2,048 lines of 128 bytes: the most one message takes.
+    let most = format!("{}{}", format!("{}\n", "x".repeat(127)).repeat(2047), "x".repeat(128));
+    assert_eq!(most.len(), 256 * 1024);
+    h.session.submit(&most, None).await.unwrap();
+    assert!(h.record.calls.borrow()[0].contains(&most));
+    let refused = h.session.submit(&format!("{most}x"), None).await.unwrap_err().to_string();
+    assert!(refused.contains("This message is 257 KB, and one message takes up to 256 KB: send part of it."), "{refused}");
+    assert!(h.session.submit(" \n", None).await.unwrap_err().to_string().contains("Enter a nonempty prompt"));
+    assert_eq!(h.record.calls.borrow().len(), 1);
+    h.session.close().await.unwrap();
+});
 local_test!(refresh_failure_never_calls_inference_or_exposes_private_errors, {
     let h = harness(None, |_| {});
     h.session.start().await.unwrap();
@@ -745,7 +759,7 @@ local_test!(default_session_has_no_turn_limit_and_validates_prompts, {
     assert!(h.session.submit("x", None).await.is_err());
     h.session.start().await.unwrap();
     assert!(h.session.submit(" \u{feff}", None).await.is_err());
-    assert!(h.session.submit(&"x".repeat(16385), None).await.is_err());
+    assert!(h.session.submit(&"x".repeat(256 * 1024 + 1), None).await.is_err());
     for n in 0..30 {
         h.session.submit(&n.to_string(), None).await.unwrap();
     }

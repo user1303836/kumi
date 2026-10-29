@@ -1310,7 +1310,7 @@ had changed (in `~/.kumi/bridges/<daw>/changed`) always stay.
 
 | What | Limit |
 | --- | --- |
-| A message you send | 16 KiB |
+| A message you send | 256 KiB |
 | One answer | 200 model steps; stops after 10 minutes without progress, or 60 minutes in all (longer for matching and goals; waiting for a plan's limit doesn't count) |
 | Retries | Up to 3 for a busy or failing provider, before any output of that step was shown, waiting as long as it asks; a plan's limit up to 6 hours; no connection, for as long as the answer may run |
 | A request to the bridge | 65 seconds |

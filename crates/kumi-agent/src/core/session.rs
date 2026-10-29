@@ -475,6 +475,10 @@ const PICTURES: &[&str] = &["image/png", "image/jpeg", "image/gif", "image/webp"
 const MAX_PICTURE: u64 = 3 * 1024 * 1024 + 768 * 1024;
 const MAX_PICTURES: u64 = 20 * 1024 * 1024;
 const MAX_ATTACHMENTS: usize = 10;
+/// The most a message the producer sends holds, in bytes: a paste of 2,000 lines (a log, a lyric sheet) fits. With the
+/// observation and the answer's reads it still fits the kernel's default budget (400 KB), which clears earlier exchanges
+/// to make room, and a saved conversation keeps it with its answer (the last exchange, up to 1 MB).
+const MAX_REQUEST: usize = 256 * 1024;
 
 fn size_words(bytes: u64) -> String {
     if bytes >= 1024 * 1024 {
@@ -2439,8 +2443,15 @@ impl SessionController for Session {
             if !s.started {
                 return Err(RuntimeError::plain("Session is not started"));
             }
-            if trim(input).is_empty() || input.len() > 16 * 1024 {
-                return Err(RuntimeError::plain("Enter a nonempty prompt of at most 16 KiB"));
+            if trim(input).is_empty() {
+                return Err(RuntimeError::plain("Enter a nonempty prompt"));
+            }
+            if input.len() > MAX_REQUEST {
+                return Err(refused(format!(
+                    "This message is {}, and one message takes up to {}: send part of it.",
+                    size_words(input.len() as u64),
+                    size_words(MAX_REQUEST as u64)
+                )));
             }
             if self.0.options.max_turns.is_some_and(|max| s.turns >= max) {
                 return Err(RuntimeError::plain("Conversation limit reached; use /new"));
