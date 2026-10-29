@@ -1,7 +1,7 @@
   Kumi  ·  Night Drive                                                  ● Live
 
 
-   Keys and commands                                                ↓ 59 more
+   Keys and commands                                                ↓ 60 more
 
    Send and steer
      enter               Send. While Kumi works, it reads your message after

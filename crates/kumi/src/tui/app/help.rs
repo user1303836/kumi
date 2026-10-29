@@ -26,6 +26,7 @@ pub(super) struct HelpHas {
     pub attachments: bool,
     pub jobs: bool,
     pub palette: bool,
+    pub slots: bool,
 }
 
 /// The help's sections: the keys that work in this session (`has`), in the DAW's words (`app`), the pane's `tabs`, and
@@ -43,7 +44,7 @@ pub(super) fn help_sections(has: HelpHas, app: &str, tabs: &[String], commands: 
         send.push(row(
             "ctrl+t",
             "Talk instead of typing: press it again to stop, or hold it while you talk. What you said lands in the box; \
-             enter stops and sends at once",
+             enter stops and sends at once, and esc drops it",
         ));
     }
     if has.attachments {
@@ -65,7 +66,10 @@ pub(super) fn help_sections(has: HelpHas, app: &str, tabs: &[String], commands: 
         row("ctrl+l", "Draw the screen again"),
     ];
     let mut pane = vec![
-        ("shift+tab".to_string(), format!("Into the tabs ({}), then on to the next: ↑↓ move, esc or tab comes back", tabs.join(", "))),
+        (
+            "shift+tab".to_string(),
+            format!("Into the tabs ({}), then on to the next: ↑↓ and page up/down move, esc or tab comes back", tabs.join(", ")),
+        ),
         row(
             "enter",
             if has.jobs {
@@ -89,7 +93,14 @@ pub(super) fn help_sections(has: HelpHas, app: &str, tabs: &[String], commands: 
             format!("Into the tree in FOCUS, at {app}'s selection: ↑↓ move, enter pins a row so what you ask is about it, esc or tab comes back"),
         ),
         row("esc", "Unpin what's pinned (× beside it does too)"),
-        row("click", "undo or forget at a row's end; a change's words open its picture, and a tab's name shows that tab"),
+        (
+            "click".to_string(),
+            format!(
+                "undo or forget at a row's end; a change's words open its picture{}, a row in FOCUS's tree pins it, and a tab's \
+                 name shows that tab",
+                if has.jobs { ", a job's open the job" } else { "" }
+            ),
+        ),
     ]);
     let edit = vec![
         row("← →", "Along the line; with alt or ctrl, a word at a time (alt+b, alt+f too)"),
@@ -99,12 +110,15 @@ pub(super) fn help_sections(has: HelpHas, app: &str, tabs: &[String], commands: 
         row("ctrl+k", "Delete to the end of the line"),
         row("ctrl+u", "Delete to the start of the line"),
     ];
-    let stop = vec![
-        row("esc", "Stop Kumi's answer: the steps it finished stay, and waiting messages go back into the box"),
+    let mut stop = vec![row("esc", "Stop Kumi's answer: the steps it finished stay, and waiting messages go back into the box")];
+    if has.slots {
+        stop.push(row("esc", "A /slots check under way stops first"));
+    }
+    stop.extend([
         row("ctrl+c", "Stop Kumi; when it isn't working, clear the box, then quit"),
         row("ctrl+d", "Quit, from an empty box while Kumi isn't working"),
         row("/undo", "Undo Kumi's last change; undo at the end of a HISTORY row takes back that one"),
-    ];
+    ]);
     let mut listed = vec![
         row("/", "The commands as you type: ↑↓ choose, tab completes, enter runs, esc closes"),
         row("?", "This help, from an empty box"),
@@ -163,7 +177,13 @@ impl TuiApp {
     /// What the help says in this session: the keys that work here, and the commands the `/` menu offers, in its words.
     pub(super) fn help_sections(&self) -> Vec<HelpSection> {
         let can = self.can();
-        let has = HelpHas { voice: self.0.voice.is_some(), attachments: can.attachments, jobs: can.jobs, palette: can.palette };
+        let has = HelpHas {
+            voice: self.0.voice.is_some(),
+            attachments: can.attachments,
+            jobs: can.jobs,
+            palette: can.palette,
+            slots: self.0.options.slots.is_some(),
+        };
         let commands =
             COMMANDS.iter().filter(|command| self.offered(&can, command.name)).map(|command| (command.name.into(), command.about()));
         help_sections(has, crate::daw::words().app, &self.0.tabs.titles(), commands.collect())
@@ -177,11 +197,11 @@ impl TuiApp {
         drop(state);
         self.0.scheduler.request();
     }
-    /// Keys in the help: ↑↓, the pages, home and end scroll it; esc, enter, space, `q`, `?` and ctrl+c close it; `/`
-    /// closes it and starts a command.
+    /// Keys in the help: ↑↓, the pages, home and end scroll it; esc, enter, `?` and ctrl+c close it. Anything else typed
+    /// or pasted closes it and goes into the box, so none of what the producer goes on to type is lost.
     pub(super) fn help_input(&self, panel: &PanelRef, event: InputEvent) {
         match event {
-            InputEvent::Key { name, mods, .. } => {
+            InputEvent::Key { ref name, mods, .. } => {
                 if matches!(name.as_str(), "escape" | "enter") || (mods.ctrl && name == "c") {
                     self.close_panel();
                     return;
@@ -200,10 +220,10 @@ impl TuiApp {
                     .clamp(0, *most);
                 }
             }
-            InputEvent::Text { text } if matches!(text.as_str(), " " | "?" | "q" | "Q") => self.close_panel(),
-            InputEvent::Text { text } if text.starts_with('/') => {
+            InputEvent::Text { ref text } if text == "?" => self.close_panel(),
+            InputEvent::Text { .. } | InputEvent::Paste { .. } => {
                 self.close_panel();
-                self.on_input(InputEvent::Text { text });
+                self.on_input(event);
             }
             _ => {}
         }
@@ -215,7 +235,7 @@ mod tests {
     use super::*;
 
     fn every_section() -> Vec<HelpSection> {
-        let has = HelpHas { voice: true, attachments: true, jobs: true, palette: true };
+        let has = HelpHas { voice: true, attachments: true, jobs: true, palette: true, slots: true };
         let tabs = ["HISTORY", "GOAL", "JOBS", "PALETTE"].map(String::from);
         help_sections(has, "Live", &tabs, COMMANDS.iter().map(|command| (command.name.to_string(), command.about.to_string())).collect())
     }

@@ -276,7 +276,7 @@ its undo. They're in English for now.
 | Ctrl-T | Talk instead of typing: press it again to stop, or hold it while you talk. What you said lands in the box at the cursor; Enter stops and sends at once, Esc drops it |
 | Ctrl-V | Add the picture on the clipboard (a screenshot, say) to your next message; files dragged into the window are added the same way |
 | Backspace, in an empty box | Take back the last file added |
-| `?`, in an empty box | The keys and commands, as `/help` shows them; anywhere else, a question mark |
+| `?`, in an empty box | The keys and commands, as `/help` shows them; anywhere else, a question mark. To start a message with one, type a space first, or paste it |
 
 **Stopping and moving around**
 
@@ -317,8 +317,8 @@ with a code instead of the browser, and `b` goes back to the browser. In the
 `/btw` panel, ↑↓ and Page Up/Down scroll, ←→ go through earlier answers, `c`
 copies, and Esc, Enter or Space closes it. In a job's details, ↑↓ scroll, `x`
 stops it, `r` runs it again, `c` copies its report, and Esc closes them.
-In the help, ↑↓, Page Up/Down, Home and End scroll, `/` starts a command, and
-Esc, Enter, Space, `q` or `?` closes it.
+In the help, ↑↓, Page Up/Down, Home and End scroll, and Esc, Enter or `?`
+closes it; typing or pasting closes it too, and what you type goes into the box.
 
 ## Plain mode
 

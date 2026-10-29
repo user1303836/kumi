@@ -95,23 +95,11 @@ impl TuiApp {
                 if self.0.tabs.inside()
                     && text.chars().count() == 1
                     && self.0.tabs.key(&if text == " " { "space".to_string() } else { text.to_lowercase() }) => {}
-            // W3-1's key, until the key registry (W3-3) takes it. `?` arrives as typed text, which key() never sees: on
-            // an empty box it opens the help, and anywhere else it types itself.
+            // The help's typed key, in a block of its own until keys have a registry. `?` arrives as typed text, which
+            // key() never sees: on an empty box it opens the help, and anywhere else it types itself.
             InputEvent::Text { text } if text == "?" && self.0.state.borrow().editor.is_empty() => self.open_help(),
-            // End of W3-1's key.
-            InputEvent::Text { text } | InputEvent::Paste { text } => {
-                self.0.tabs.leave();
-                let mut state = self.0.state.borrow_mut();
-                state.tree_cursor = None;
-                // A run of typing is one step to undo; a paste is one of its own.
-                let clean = sanitize_text(&text, &[]);
-                if typed {
-                    state.editor.type_text(&clean);
-                } else {
-                    state.editor.insert(&clean);
-                }
-                state.menu_dismissed = false;
-            }
+            // End of the help's typed key.
+            InputEvent::Text { text } | InputEvent::Paste { text } => self.type_into_box(&text, typed),
             InputEvent::Key { name, mods, .. } => self.key(&name, mods),
             InputEvent::Mouse { action: MouseAction::Wheel, direction, x, y, .. } => {
                 let area = self.0.state.borrow().tabs_area;
@@ -134,6 +122,19 @@ impl TuiApp {
         // The producer may have finished what they were in the middle of: a job's answer can start.
         self.maybe_carry_on();
         self.0.scheduler.request();
+    }
+    /// Words typed or pasted into the box, at the cursor. A run of typing is one step to undo; a paste is one of its own.
+    pub(super) fn type_into_box(&self, text: &str, typed: bool) {
+        self.0.tabs.leave();
+        let mut state = self.0.state.borrow_mut();
+        state.tree_cursor = None;
+        let clean = sanitize_text(text, &[]);
+        if typed {
+            state.editor.type_text(&clean);
+        } else {
+            state.editor.insert(&clean);
+        }
+        state.menu_dismissed = false;
     }
     /// Plain dragging selects text even when mouse reporting is needed for scrolling and buttons.
     fn selection_input(&self, event: &InputEvent) -> bool {

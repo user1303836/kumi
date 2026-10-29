@@ -23,15 +23,15 @@
      ctrl+l              Draw the screen again                                                                      Nothing changed yet
 
    The pane
-     shift+tab           Into the tabs (HISTORY), then on to the next: ↑↓ move, esc or tab comes
-                         back
+     shift+tab           Into the tabs (HISTORY), then on to the next: ↑↓ and page up/down move,
+                         esc or tab comes back
      enter               In the tabs: open a change's picture; on what Kumi kept, forget it
      →  space            On a change: open its picture; ← closes it
      u                   On a change with its picture open: undo it
      tab                 Into the tree in FOCUS, at Live's selection: ↑↓ move, enter pins a row so
                          what you ask is about it, esc or tab comes back
      esc                 Unpin what's pinned (× beside it does too)
-     click               undo or forget at a row's end; a change's words open its picture, and a
+     click               undo or forget at a row's end; a change's words open its picture, a row in
 
 
 

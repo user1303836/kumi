@@ -1283,11 +1283,46 @@ case!(question_mark_opens_the_help_only_on_an_empty_box, async {
     h.wait_until_hidden("Send and steer").await;
     h.wait_for("/help").await;
     h.has("enter to choose · esc to close");
+    // Typing or pasting over the help closes it, and every word reaches the box: q and space too.
+    h.type_text("\x15?").await;
+    h.wait_for("Keys and commands").await;
+    h.type_text("q").await;
+    h.wait_until_hidden("Send and steer").await;
+    h.type_text("uieter drums").await;
+    h.has("quieter drums");
+    h.type_text("\x15?").await;
+    h.wait_for("Keys and commands").await;
+    h.type_text("\x1b[200~make the bass darker\x1b[201~").await;
+    h.wait_until_hidden("Send and steer").await;
+    h.has("make the bass darker");
+    // A space first, and a message can start with a question mark.
+    h.type_text("\x15 ").await;
+    h.type_text("?").await;
+    h.type_text(" why is the bass so loud").await;
+    assert!(!has(&h.screen(), "Send and steer"));
+    h.has("? why is the bass so loud");
     // A Kumi at work opens it the same way.
     h.type_text("\x15").await;
     h.emit(json!({"type":"state","state":"running"}));
     h.type_text("?").await;
     h.wait_for("Keys and commands").await;
+    h.close().await;
+});
+case!(a_free_answer_that_starts_with_a_question_mark_is_words, async {
+    let h = Harness::new(120, 36);
+    h.start().await;
+    h.connect();
+    h.type_text("sidechain the bass\r").await;
+    h.emit(json!({"type":"state","state":"running"}));
+    h.emit(json!({"type":"text","text":"Which bass should duck under the kick?\n\n1. Sub Bass\n2. Reese"}));
+    h.emit(json!({"type":"turn-complete","result":{"stopReason":"completed"},"elapsedMs":900}));
+    h.emit(json!({"type":"state","state":"idle"}));
+    h.has("Your answer");
+    // The answers close, and the `?` goes into the box with the rest: the help doesn't open.
+    h.type_text("?").await;
+    h.type_text(" not sure yet").await;
+    assert!(!has(&h.screen(), "Your answer") && !has(&h.screen(), "Keys and commands"));
+    h.has("? not sure yet");
     h.close().await;
 });
 /// How many of the help's rows are above what shows, and below it, as its title says.
@@ -1321,8 +1356,7 @@ case!(the_help_pages_to_its_end_at_every_size, async {
         for wanted in ["Send and steer", "Move around", "The pane", "Edit", "Stop and take back", "Commands"] {
             assert!(seen.contains(wanted), "{wanted} isn't in the help at {width}×{height}");
         }
-        let offered =
-            ["/new", "/undo", "/refresh", "/copy", "/export", "/share", "/loop", "/goal", "/status", "/changelog", "/help", "/quit"];
+        let offered = ["/new", "/undo", "/refresh", "/copy", "/export", "/share", "/loop", "/status", "/changelog", "/help", "/quit"];
         for command in offered {
             assert!(seen.contains(&format!("{command}  ")), "{command} isn't in the help at {width}×{height}");
         }

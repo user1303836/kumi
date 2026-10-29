@@ -1,7 +1,7 @@
   Kumi  ·  Night Drive                                                                                          ● Live
 
                                                                                   FOCUS
-   Keys and commands                                                ↑ 53 more     Night Drive
+   Keys and commands                                                ↑ 54 more     Night Drive
                                                                                   Your selection will show here
      ctrl+d              Quit, from an empty box while Kumi isn't working
      /undo               Undo Kumi's last change; undo at the end of a
