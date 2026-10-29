@@ -18,6 +18,7 @@ use kumi_agent::core::{
     match_run::{MatchState, MatchStatus, MatchStop},
     palette::{Gathered, PaletteFile, PaletteView},
     protocol::{op, Capabilities, Op},
+    session_log::{LogHeader, LogLine, LogRequest, Replay},
 };
 use kumi_listening::{
     checklist::{Change as RowChange, Row},
@@ -390,8 +391,25 @@ fn events() -> Vec<SessionEvent> {
         changes: Some(vec![change("c1", ChangeFamily::Parameter, "Decay 400 → 250 ms", ChangeState::Expired)]),
         chosen: Some(true),
         unreadable: Some(false),
+        replay: None,
     });
-    events.push(SessionEvent::Resumed { saved_at: AT, lines: vec![], changes: None, chosen: None, unreadable: Some(true) });
+    events.push(SessionEvent::Resumed { saved_at: AT, lines: vec![], changes: None, chosen: None, unreadable: Some(true), replay: None });
+    // Taken up with its log: the words from before it began, then its last requests as they happened.
+    events.push(SessionEvent::Resumed {
+        saved_at: AT,
+        lines: vec![TranscriptLine { role: TranscriptRole::User, text: "make the kick punchier".into(), tools: None }],
+        changes: None,
+        chosen: None,
+        unreadable: None,
+        replay: Some(Replay {
+            before: 3,
+            earlier: vec![TranscriptLine { role: TranscriptRole::User, text: "make the kick punchier".into(), tools: None }],
+            lines: vec![
+                LogLine::Request(LogRequest { at: AT, text: "and the snare".into(), files: vec!["snare.wav".into()], pinned: None }),
+                LogLine::Event { at: AT + 1, event: SessionEvent::Kernel(KernelEvent::Text { text: "Tightened the snare.".into() }) },
+            ],
+        }),
+    });
     events.push(SessionEvent::SetAsked {
         ask: Some(SetAsk {
             id: "mgj6k3cw0a0b0c".into(),
@@ -771,6 +789,7 @@ fn events() -> Vec<SessionEvent> {
     });
     events.push(SessionEvent::Palette { palette: None });
     events.push(SessionEvent::Aside { id: 2, text: "The kick and the bass share 60 Hz, so".into() });
+    events.push(SessionEvent::SlotsProgress { id: 3, line: "Fetching the stem model: 12 of 80 MB".into() });
     events.extend(
         [
             KernelEvent::Text { text: "Shortened the kick's decay.".into() },
@@ -858,6 +877,7 @@ fn variant(event: &SessionEvent) -> &'static str {
         SessionEvent::CarryOn { .. } => "CarryOn",
         SessionEvent::Palette { .. } => "Palette",
         SessionEvent::Aside { .. } => "Aside",
+        SessionEvent::SlotsProgress { .. } => "SlotsProgress",
         SessionEvent::Kernel(event) => match event {
             KernelEvent::Text { .. } => "Kernel::Text",
             KernelEvent::ToolInput { .. } => "Kernel::ToolInput",
@@ -874,7 +894,7 @@ fn variant(event: &SessionEvent) -> &'static str {
     }
 }
 
-const VARIANTS: [&str; 45] = [
+const VARIANTS: [&str; 46] = [
     "Focus",
     "Pointed",
     "Change",
@@ -911,6 +931,7 @@ const VARIANTS: [&str; 45] = [
     "CarryOn",
     "Palette",
     "Aside",
+    "SlotsProgress",
     "Kernel::Text",
     "Kernel::ToolInput",
     "Kernel::ToolStart",
@@ -928,6 +949,49 @@ fn every_session_event_keeps_its_wire_shape() {
     let variants: BTreeSet<&str> = events.iter().map(variant).collect();
     assert_eq!(variants, BTreeSet::from(VARIANTS), "every session event is pinned");
     pinned::<Vec<SessionEvent>>("session-events.json", &events);
+}
+
+/// A conversation's log is saved data that this Kumi and later ones read back, line by line: a line that no longer reads
+/// is skipped, so each kind keeps its shape (a header with and without the conversation it copies, a request with and
+/// without its files and what it pointed at, an event, a model message and a save).
+#[test]
+fn every_line_of_a_conversations_log_keeps_its_shape() {
+    let header = |from: Option<&str>| {
+        LogLine::Header(LogHeader {
+            v: 1,
+            id: "mv66me0m3fa91c".into(),
+            at: AT,
+            kumi: "1.25.0".into(),
+            before: 12,
+            from: from.map(Into::into),
+        })
+    };
+    let lines = vec![
+        header(None),
+        header(Some("mv66me0m3fa91b")),
+        LogLine::Request(LogRequest { at: AT + 1, text: "make the bass wider".into(), files: vec![], pinned: None }),
+        LogLine::Request(LogRequest {
+            at: AT + 2,
+            text: "and this one darker".into(),
+            files: vec!["bass.wav".into()],
+            pinned: Some(pins()[0].clone()),
+        }),
+        LogLine::Event { at: AT + 3, event: SessionEvent::Kernel(KernelEvent::Text { text: "Widened it.".into() }) },
+        LogLine::Message { at: AT + 4, message: serde_json::json!({"role":"assistant","content":[{"type":"text","text":"Widened it."}]}) },
+        LogLine::Saved { at: AT + 5, saved_at: AT + 4, turns: 2 },
+    ];
+    let kinds: BTreeSet<&str> = lines
+        .iter()
+        .map(|line| match line {
+            LogLine::Header(_) => "header",
+            LogLine::Request(_) => "request",
+            LogLine::Event { .. } => "event",
+            LogLine::Message { .. } => "message",
+            LogLine::Saved { .. } => "saved",
+        })
+        .collect();
+    assert_eq!(kinds.len(), 5, "every kind of line is pinned");
+    pinned::<Vec<LogLine>>("log-lines.json", &lines);
 }
 
 /// The views FOCUS draws, as the integration hands them to the app, and the connection's states and causes.
@@ -1543,6 +1607,15 @@ pub(crate) fn requests() -> Vec<Op> {
         .into(),
         op::PaletteRemove { path: "/Samples/Kicks/Kick 808.wav".into(), size: 48_210, mtime: AT }.into(),
         op::PaletteCommand { words: "use Drums".into() }.into(),
+        op::Music {}.into(),
+        op::MusicFolders {}.into(),
+        op::LearnMusic { folders: vec!["~/Music/Bounces".into()] }.into(),
+        op::SetMusicFolders { folders: vec![] }.into(),
+        op::HoldMusic { held: true }.into(),
+        op::ForgetMusic {}.into(),
+        op::Map {}.into(),
+        op::Slots { id: 3, words: "listening off".into() }.into(),
+        op::StopSlots { id: 3 }.into(),
     ];
     requests.extend([SetChoice::Open, SetChoice::Copy, SetChoice::Cancel].map(|choice| op::AnswerSet { choice }.into()));
     requests.extend(
@@ -1575,7 +1648,8 @@ fn every_request_keeps_its_wire_shape() {
 
 #[test]
 fn capabilities_keep_their_wire_shape() {
-    // Most of what a session can do, and some of it not (steering, jobs, palettes, an answer to a technique offered).
+    // Most of what a session can do, and some of it not (steering, jobs, palettes, an answer to a technique offered,
+    // /slots).
     let capabilities = Capabilities {
         attachments: true,
         aside: true,
@@ -1608,6 +1682,8 @@ fn capabilities_keep_their_wire_shape() {
         session_strip: true,
         arrangement_strip: true,
         reconfigure: true,
+        music: true,
+        map: true,
         ..Capabilities::default()
     };
     pinned::<Capabilities>("capabilities.json", &capabilities);

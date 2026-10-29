@@ -1,6 +1,7 @@
 //! The session's protocol in this process: each request reaches the controller's method it was and answers in its own
-//! type, an aside's words come as events with its id and stopping it stops it, and a request nobody waits for runs at
-//! once as far as it goes.
+//! type, an aside's words come as events with its id and stopping it stops it, a request nobody waits for runs at once
+//! as far as it goes, and /music's, /map's and /slots' are answered from the session's own music, map and slots (a /slots
+//! fetch says what it's doing, and a stop ends it, even one that comes first).
 use async_trait::async_trait;
 use kumi_agent::core::{
     contracts::*,
@@ -421,10 +422,24 @@ impl SessionController for Reached {
         self.reach("reconfigure");
         Ok(())
     }
+    // Asked for, and absent: what's answered from them isn't available.
+    fn music(&self) -> Option<Rc<kumi_listening::music::learning::Music>> {
+        self.reach("music");
+        None
+    }
+    fn slots_context(&self) -> Option<Rc<kumi_listening::slots::SlotsContext>> {
+        self.reach("slots_context");
+        None
+    }
+    fn map_loader(&self) -> Option<kumi_library::map::LoadMap> {
+        self.reach("map_loader");
+        None
+    }
 }
 
 /// The controller's method each request was before the protocol, with the arguments that share a type in the order it
-/// takes them; None for the handle's own (stopping an aside stops the signal it gave it).
+/// takes them; the part it's answered from for /music's, /map's and /slots' (the producer's music, the map's loader,
+/// the slots' context); None for the handle's own (stopping an aside stops the signal it gave it).
 fn method(request: &Op) -> Option<String> {
     Some(
         match request {
@@ -486,6 +501,12 @@ fn method(request: &Op) -> Option<String> {
             Op::PaletteGather(_) => "palette_gather",
             Op::PaletteRemove(op::PaletteRemove { path, size, mtime }) => return Some(format!("palette_remove:{path}:{size}:{mtime}")),
             Op::PaletteCommand(_) => "palette_command",
+            Op::Music(_) | Op::MusicFolders(_) | Op::LearnMusic(_) | Op::SetMusicFolders(_) | Op::HoldMusic(_) | Op::ForgetMusic(_) => {
+                "music"
+            }
+            Op::Map(_) => "map_loader",
+            Op::Slots(_) => "slots_context",
+            Op::StopSlots(_) => return None,
             Op::FocusBody(_) => "focus_body",
         }
         .into(),
@@ -500,7 +521,151 @@ async fn every_request_reaches_the_method_it_was() {
     for request in crate::pin_wire::requests() {
         let (name, wanted) = (request.name(), method(&request));
         reached.0.borrow_mut().clear();
-        session.send(request).await.unwrap_or_else(|error| panic!("{name}: {error}"));
-        assert_eq!(*reached.0.borrow(), wanted.into_iter().collect::<Vec<_>>(), "{name}");
+        let answered = session.send(request).await;
+        assert_eq!(*reached.0.borrow(), wanted.iter().cloned().collect::<Vec<_>>(), "{name}");
+        // Each is answered, but what's answered from a part this session hasn't (its music, its map, its slots).
+        let from_a_part = wanted.as_deref().is_some_and(|method| ["music", "map_loader", "slots_context"].contains(&method));
+        match (answered, from_a_part) {
+            (Err(error), true) => assert_eq!(error.message(), "Not available", "{name}"),
+            (Ok(_), true) => panic!("{name}: answered without its part"),
+            (Err(error), false) => panic!("{name}: {error}"),
+            (Ok(_), false) => {}
+        }
     }
+}
+
+/// A session with the producer's music, a map and /slots, and nothing else.
+struct Parts {
+    music: Rc<kumi_listening::music::learning::Music>,
+    slots: Rc<kumi_listening::slots::SlotsContext>,
+    map: kumi_library::map::LoadMap,
+}
+
+#[async_trait(?Send)]
+impl SessionController for Parts {
+    async fn start(&self) -> Result<(), RuntimeError> {
+        Ok(())
+    }
+    async fn submit(&self, _: &str, _: Option<PinnedNode>) -> Result<(), RuntimeError> {
+        Ok(())
+    }
+    async fn refresh(&self) -> Result<(), RuntimeError> {
+        Ok(())
+    }
+    async fn new_conversation(&self) -> Result<(), RuntimeError> {
+        Ok(())
+    }
+    async fn cancel(&self) -> Result<(), RuntimeError> {
+        Ok(())
+    }
+    async fn close(&self) -> Result<(), RuntimeError> {
+        Ok(())
+    }
+    fn status(&self) -> SessionStatus {
+        SessionStatus { state: TurnState::Idle, connection: ConnectionState::Connected, turns: 0, max_turns: None, observation: None }
+    }
+    async fn undo(&self, _: Option<&str>) -> Result<Option<ChangeRecord>, RuntimeError> {
+        Ok(None)
+    }
+    fn music(&self) -> Option<Rc<kumi_listening::music::learning::Music>> {
+        Some(self.music.clone())
+    }
+    fn slots_context(&self) -> Option<Rc<kumi_listening::slots::SlotsContext>> {
+        Some(self.slots.clone())
+    }
+    fn map_loader(&self) -> Option<kumi_library::map::LoadMap> {
+        Some(self.map.clone())
+    }
+}
+
+/// A session in this process with only the producer's music (nowhere to find songs, nothing learned while a test runs),
+/// a map that says it has nothing on it yet, and /slots, all kept in `folder`.
+fn with_parts(folder: &std::path::Path) -> (Rc<kumi_listening::music::learning::Music>, Rc<dyn SessionHandle>) {
+    use futures::FutureExt;
+    use kumi_library::map::{Kind, Layer, MapData};
+    use kumi_listening::{music::learning, slots};
+    let mut options = learning::MusicOptions::new(folder.join("music"), None, Default::default());
+    (options.places, options.fork, options.delay_ms) = (Some(vec![]), false, 3_600_000);
+    let music = learning::create_music(options);
+    let store = kumi_ai::auth::store::open_credential_store(folder.join("auth.json"));
+    let slots =
+        Rc::new(slots::SlotsContext { file: slots::file_in(folder), store: Rc::new(store), env: Default::default(), profile: None });
+    let map: kumi_library::map::LoadMap = Rc::new(|| {
+        async { MapData { sounds: Layer::empty(Kind::Sounds, "No sounds yet."), songs: Layer::empty(Kind::Songs, "No songs yet.") } }
+            .boxed_local()
+    });
+    let session: Rc<dyn SessionHandle> = InProcess::new(Rc::new(Parts { music: music.clone(), slots, map }));
+    (music, session)
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn music_the_map_and_slots_are_answered_from_the_sessions_own() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let folder = tempfile::tempdir().unwrap();
+            let (music, session) = with_parts(folder.path());
+            let can = session.capabilities();
+            assert!(can.music && can.map && can.slots);
+            // /music: nothing agreed, held or found yet; paused once asked.
+            let view = session.op(op::Music {}).await.unwrap();
+            assert!(!view.agreed && !view.held && view.found.is_none(), "{view:?}");
+            assert!(session.op(op::MusicFolders {}).await.unwrap().is_empty());
+            session.op(op::HoldMusic { held: true }).await.unwrap();
+            assert!(music.held() && session.op(op::Music {}).await.unwrap().held);
+            // /map: what its loader reads.
+            assert_eq!(session.op(op::Map {}).await.unwrap().sounds.empty.as_deref(), Some("No sounds yet."));
+            // /slots: the slots, a line each.
+            let said = session.op(op::Slots { id: 1, words: String::new() }).await.unwrap();
+            assert!(matches!(&said, kumi_listening::slots::Said::Slots { lines, .. } if !lines.is_empty()), "{said:?}");
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_slots_fetch_says_what_it_does_and_a_stop_ends_it_even_one_that_came_first() {
+    use kumi_listening::slots::Said;
+    use std::time::Duration;
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let folder = tempfile::tempdir().unwrap();
+            // Kumi's models folder is here: what a link fetches would be kept in it.
+            std::env::set_var("KUMI_HOME", folder.path());
+            // A server on this computer that takes the connection and never answers: the fetch waits until it's stopped.
+            let silent = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            let link = format!("https://127.0.0.1:{}/clap.onnx", silent.local_addr().unwrap().port());
+            let words = format!("embeddings {link}");
+            let (_, session) = with_parts(folder.path());
+            let heard = Rc::new(RefCell::new(Vec::new()));
+            session.listen({
+                let heard = heard.clone();
+                Rc::new(move |event| {
+                    if let SessionEvent::SlotsProgress { id, line } = event {
+                        heard.borrow_mut().push((id, line));
+                    }
+                })
+            });
+            let stopped = |said: &Said| matches!(said, Said::Refused(why) if why.ends_with(": stopped"));
+            // Stopped while it fetches, which it said it was doing.
+            let fetching = tokio::task::spawn_local({
+                let (session, words) = (session.clone(), words.clone());
+                async move { session.op(op::Slots { id: 1, words }).await }
+            });
+            for _ in 0..1_000 {
+                if !heard.borrow().is_empty() {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+            assert_eq!(*heard.borrow(), [(1, format!("Fetching {link} (Esc stops it)…"))]);
+            session.op(op::StopSlots { id: 1 }).await.unwrap();
+            let said = tokio::time::timeout(Duration::from_secs(5), fetching).await.expect("stopped").unwrap().unwrap();
+            assert!(stopped(&said), "{said:?}");
+            // A stop that comes before its request starts still stops it, as the fetch begins.
+            session.op(op::StopSlots { id: 2 }).await.unwrap();
+            let said =
+                tokio::time::timeout(Duration::from_secs(5), session.op(op::Slots { id: 2, words })).await.expect("stopped").unwrap();
+            assert!(stopped(&said), "{said:?}");
+            drop(silent);
+        })
+        .await;
 }

@@ -60,6 +60,12 @@ the rest. A conversation carried on from last time goes above them. A fresh
 install shows none, and the model never sees them. `"whatsNew": false` in
 `~/.kumi/settings.json` turns them off.
 
+A conversation carried on comes back as you left it: its last 30 requests with
+their steps, pictures and listening rounds, and above them how many earlier
+messages aren't shown. HISTORY shows its changes, which Kumi can't undo after a
+restart (your DAW's own undo still can). A conversation kept by an older Kumi
+comes back as its words, as before.
+
 **Setup** comes first when a step is missing: signing in, Kumi's bridge in Live
 (missing, or older than Kumi's), and then the Control Surface. It lists the three
 steps, done ones in mint with what was chosen, and asks what the current one
@@ -220,7 +226,7 @@ message, not a command.
 | `/voice` | Talking instead of typing: start or stop, "Send when you stop", the language you speak and the microphone |
 | `/update` | Get the newest Kumi: it asks, closes, updates and opens again with the same conversation |
 | `/changelog` | What's new in Kumi: every note since the version you updated from, or the latest three releases, and where the whole history is |
-| `/help` | The keys and commands, as a note in the conversation |
+| `/help` | The keys and commands, in sections, in a panel that scrolls; `?` on an empty box opens it too |
 | `/quit` | Close Kumi |
 
 `/new`, `/reconnect`, `/refresh` and `/undo` work only while Kumi isn't
@@ -273,9 +279,13 @@ its undo. They're in English for now.
 | Ctrl-K / Ctrl-U | Cut to the end / start of the line |
 | Ctrl-Y | Put back what you cut last (cuts in a row, like Ctrl-W twice, come back together); Alt-Y right after swaps it for the cut before |
 | Ctrl-- (Ctrl-_) | Undo in the box: a run of typing or deleting, a paste, a cut or what you dictated at a time. Where Ctrl-- zooms the terminal out (Windows Terminal, GNOME Terminal, Konsole), use Ctrl-_, that is Ctrl-Shift-- |
+| Ctrl-R | Look back through what you sent for the words you type: Ctrl-R again finds an earlier one, Enter puts it in the box, Esc goes back to your draft |
+| Ctrl-G | Open the draft in your own editor, the one VISUAL or EDITOR names (one that opens a window has to wait for it: `code --wait`). What you save comes back into the box, and Ctrl-- takes it back |
+| Ctrl-S | Put the draft aside, with its files; Ctrl-S in an empty box brings it back (with words in the box, they change places) |
 | Ctrl-T | Talk instead of typing: press it again to stop, or hold it while you talk. What you said lands in the box at the cursor; Enter stops and sends at once, Esc drops it |
 | Ctrl-V | Add the picture on the clipboard (a screenshot, say) to your next message; files dragged into the window are added the same way |
 | Backspace, in an empty box | Take back the last file added |
+| `?`, in an empty box | The keys and commands, as `/help` shows them; anywhere else, a question mark. To start a message with one, type a space first, or paste it |
 
 **Stopping and moving around**
 
@@ -316,6 +326,8 @@ with a code instead of the browser, and `b` goes back to the browser. In the
 `/btw` panel, ↑↓ and Page Up/Down scroll, ←→ go through earlier answers, `c`
 copies, and Esc, Enter or Space closes it. In a job's details, ↑↓ scroll, `x`
 stops it, `r` runs it again, `c` copies its report, and Esc closes them.
+In the help, ↑↓, Page Up/Down, Home and End scroll, and Esc, Enter or `?`
+closes it; typing or pasting closes it too, and what you type goes into the box.
 
 ## Plain mode
 

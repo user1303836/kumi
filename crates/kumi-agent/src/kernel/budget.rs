@@ -311,7 +311,8 @@ fn bytes(messages: &[Message]) -> usize {
     messages.len() + 1 + messages.iter().map(bytes_of).sum::<usize>()
 }
 
-fn bytes_of(message: &Message) -> usize {
+/// One message's bytes as the budget counts them, each image at what it costs a model ([`IMAGE_BYTES`]).
+pub(crate) fn bytes_of(message: &Message) -> usize {
     let images = raw_images(message);
     let value = if images > 0 {
         let mut measured = message.clone();

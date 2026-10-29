@@ -1,36 +1,36 @@
   Kumi  ·  Night Drive                                                                                          ● Live
 
-   enter sends · ctrl+j or alt+enter starts a new line · ctrl+t talks instead     FOCUS
-   of typing: press it again to stop, or hold it while you talk, and what you     Night Drive
-   said lands in the box (enter stops and sends at once); /voice chooses the      Your selection will show here
-   language and the microphone · ↑ and ↓ go through what you sent before ·
-   while Kumi works, enter sends a message it reads after the step under way,
-   tab one for after the answer, and alt+↑ takes the last waiting one back ·      NOW
-   /btw asks something on the side without interrupting · ctrl+b moves a slow     Ready
-   step that doesn't use Live (a video, pages) to the background (press it
-   twice in tmux), and /jobs shows, stops or reruns background jobs · esc
-   stops Kumi · page up/down or the mouse wheel scroll, ctrl+home goes to the
-   start and ctrl+end back · click undo in HISTORY, or /undo, to take back a
-   change · /new starts a fresh conversation, /resume goes back to one kept
-   (this Set's, or any Set's by its id or name), /rename names this one, and
-   /fork carries on in a copy · /reconnect connects to Live again, keeping the
-   conversation · /copy copies the last answer, /export copies or saves the
-   whole conversation, and /share saves it as a web page to send; drag across
-   text to copy it, double-click for a word or triple-click for a line
-   (Shift-drag, or Option in iTerm2, uses terminal selection) · /model and        HISTORY ────────────────────────────
-   /effort choose the model and how hard it thinks, and /fast turns on its        Nothing changed yet
-   faster tier when it has one; /willington turns Willington's bindings (macro
-   mapping and more) on or off; /slots shows which model does each listening
-   job (stems, transcription, listening, embeddings), swaps one in plain words
-   after a quick test, and /slots back <job> takes a swap back; /music shows
-   your own music, which Kumi learns your taste from on this computer, and
-   adds or removes a folder, pauses or forgets it; /map draws your sounds and
-   songs as a map to move around, where space or the mouse plays a point, and
-   /map open shows it in your browser; /login and /logout sign in and out ·
-   /memory shows what Kumi remembers (notes, techniques, reci
+                                                                                  FOCUS
+   Keys and commands                                                ↓ 72 more     Night Drive
+                                                                                  Your selection will show here
+   Send and steer
+     enter               Send. While Kumi works, it reads your message after
+                         the step under way                                       NOW
+     tab                 While Kumi works: send it after the answer instead;      Ready
+                         it waits above the box
+     alt+↑               Take the last waiting message back into the box
+     ctrl+j  alt+enter   A new line (shift+enter too, where the terminal
+                         tells it apart)
+     ↑ ↓                 The box's lines, then what you sent before
+     ctrl+r              Look back through what you sent for the words you
+                         type: ctrl+r again finds an earlier one, enter puts
+                         it in the box, esc goes back to your draft
+     ctrl+v              Add the picture on the clipboard to your next
+                         message; files dragged in go with it too
+     backspace           In an empty box, take back the last file added           HISTORY ────────────────────────────
+                                                                                  Nothing changed yet
+   Move around
+     page up  page down  Scroll the conversation; the mouse wheel too (over
+                         the tabs, it scrolls them)
+     ctrl+home           The start of the conversation
+     ctrl+end            Back to the latest
+     drag                Copy text as you let go; double-click for a word,
+                         triple-click for a line
+     shift+drag          Your terminal's own selection (option+drag in
+                         iTerm2)
 
 
 
    Ask Kumi about your Set
-                                                                enter to send
+                                                  ↑↓ to scroll · esc to close
 

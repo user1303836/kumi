@@ -1,12 +1,14 @@
 mod helpers;
 pub use helpers::*;
 mod away;
+mod composer;
 pub use away::{AwaySettings, FrontApp, NotifierRunner};
 mod draw_live;
 mod draw_panel;
 mod drawer;
 mod drawing;
 mod events;
+mod help;
 mod input;
 mod jobs;
 mod live;
@@ -121,12 +123,6 @@ pub struct TuiOptions {
     pub connect_live: Option<ConnectDaw>,
     /// /willington, where Kumi's bridge can carry Willington.
     pub willington: Option<kumi_daw::provider::Toggle>,
-    /// /slots: which model does each listening job, swapped and taken back.
-    pub slots: Option<Rc<kumi_listening::slots::SlotsContext>>,
-    /// /music: the producer's own music, which Kumi learns their taste from.
-    pub music: Option<Rc<kumi_listening::music::learning::Music>>,
-    /// /map: reads the producer's sounds and songs on their maps, each time it opens.
-    pub map: Option<crate::map::LoadMap>,
     /// What plays a point of the map.
     pub player: Option<Rc<kumi_media::audio::player::Player>>,
     /// Whether the map's points play as the mouse comes to them, remembered; they do when None.
@@ -135,6 +131,8 @@ pub struct TuiOptions {
     pub whats_new: Option<crate::whats_new::News>,
     /// How this terminal shows Kumi's status and notifications; read from the environment when None.
     pub terminal: Option<TerminalProfile>,
+    /// Every cell written in each frame that changes (the `fullRepaint` setting); the terminal's own way when None.
+    pub full_repaint: Option<bool>,
     /// What the producer chose about being told while away from Kumi's window.
     pub away: AwaySettings,
     /// Runs the program that shows a desktop notification, for a terminal without its own; None runs it.
@@ -174,7 +172,15 @@ pub struct TuiOptions {
     pub mouse: bool,
     /// Quitting prints the conversation into the terminal's scrollback (`transcriptOnQuit`).
     pub transcript_on_quit: bool,
+    /// The producer's editor, which ctrl+g opens the draft in ([`crate::tui::external_editor::editor_command`]); None
+    /// where there's none.
+    pub editor: Option<String>,
+    /// Runs `editor` on the draft's file while the terminal is lent to it, to its exit code; None runs it as a program.
+    /// Tests give their own.
+    pub run_editor: Option<EditorRunner>,
 }
+/// Runs the producer's editor on a file until it closes: its exit code, 0 when it closed well.
+pub type EditorRunner = Rc<dyn Fn(std::path::PathBuf) -> LocalBoxFuture<'static, std::io::Result<i32>>>;
 /// The DAW's part of first-run setup: the setup shows it when Kumi's bridge isn't in the DAW yet, or is older
 /// than Kumi's.
 pub struct ConnectDaw {
@@ -215,13 +221,11 @@ impl TuiOptions {
             voice: None,
             connect_live: None,
             willington: None,
-            slots: None,
-            music: None,
-            map: None,
             player: None,
             map_hover: None,
             whats_new: None,
             terminal: None,
+            full_repaint: None,
             away: AwaySettings::default(),
             run_notifier: None,
             alert_gap_ms: None,
@@ -240,6 +244,8 @@ impl TuiOptions {
             copy_on_select: true,
             mouse: true,
             transcript_on_quit: true,
+            editor: None,
+            run_editor: None,
         }
     }
 }
@@ -276,6 +282,13 @@ enum Panel {
     Job {
         id: u32,
         scroll: i32,
+    },
+    /// The keys and commands, scrolled `scroll` rows down: `shown` rows fit when it was last drawn, and it scrolls
+    /// `most` rows at most.
+    Help {
+        scroll: i32,
+        shown: i32,
+        most: i32,
     },
 }
 struct Aside {
@@ -430,6 +443,8 @@ struct State {
     asides: Vec<Rc<RefCell<Aside>>>,
     /// The id the next aside takes.
     next_aside: u32,
+    /// The id the next /slots request takes.
+    next_slots: u32,
     transport: Option<Transport>,
     activity: String,
     panel: Option<PanelRef>,
@@ -454,6 +469,10 @@ struct State {
     turn_changes: usize,
     /// Which earlier message ↑ shows, and the draft set aside meanwhile.
     recall: Option<(usize, Draft)>,
+    /// ctrl+r: an earlier message being looked for.
+    search: Option<composer::Search>,
+    /// ctrl+s: a draft put aside, with its files.
+    stash: Option<composer::Stash>,
     last_sent: Option<String>,
     tree: Option<DeviceTree>,
     /// Bumped whenever `tree` is read again: its rows are made again only then, or for another focus.
@@ -483,8 +502,8 @@ struct State {
     flash_timers: Vec<JoinHandle<()>>,
     /// First-run setup, shown in place of the session until it's done or put off.
     setup: Option<setup::Setup>,
-    /// A /slots swap's fetch or check under way: Esc stops it.
-    slots_check: Option<Rc<kumi_common::abort::Controller>>,
+    /// A /slots swap's fetch or check under way, by its request's id: Esc stops it.
+    slots_check: Option<u32>,
     /// Whether Kumi's window is in front, as the terminal says when that changes (assumed until it does), and
     /// since when it isn't.
     window_focused: bool,
@@ -534,6 +553,9 @@ struct State {
     copied: Option<(String, f64)>,
     /// Kumi is closing to open again at once (with another DAW, or updated), where the conversation carries on.
     reopening: bool,
+    /// A conversation taken up is being shown again from its log: what happened then draws as it did, and nothing of
+    /// the moment comes with it (no alert, sound or terminal status, no animation, no panel, nothing sent or carried on).
+    replaying: bool,
 }
 impl State {
     fn new(options: &TuiOptions) -> Self {
@@ -594,6 +616,7 @@ impl State {
             last_stop: None,
             asides: vec![],
             next_aside: 1,
+            next_slots: 1,
             transport: None,
             activity: format!("connecting to {}", crate::daw::words().app),
             panel: None,
@@ -610,6 +633,8 @@ impl State {
             busy_since: 0.,
             turn_changes: 0,
             recall: None,
+            search: None,
+            stash: None,
             last_sent: None,
             tree: None,
             tree_revision: 0,
@@ -661,6 +686,7 @@ impl State {
             clicks: None,
             copied: None,
             reopening: false,
+            replaying: false,
         }
     }
 }
@@ -841,11 +867,16 @@ impl TuiApp {
             let tabs = TabPanel::new(tabs, active.as_deref(), options.panel_tab.as_ref().map(|p| p.save.clone()));
             let voice = options.voice.as_ref().map(|v| VoiceInput::new(v.clone(), Rc::new(AppVoice(weak.clone()))));
             let (done, _) = watch::channel(None);
+            // Links open where an OSC is safe to send, as the status is.
+            let renderer = Renderer::new(depth)
+                .full_repaint(options.full_repaint.unwrap_or(profile.repaint))
+                .erasing(profile.erase)
+                .linking(profile.status);
             Inner {
                 state: RefCell::new(State::new(&options)),
                 options,
                 tty,
-                renderer: RefCell::new(Renderer::new(depth)),
+                renderer: RefCell::new(renderer),
                 screen: RefCell::new(None),
                 marks: RefCell::default(),
                 scheduler,
@@ -1158,7 +1189,8 @@ impl Terminal for TuiApp {
         self.0.scheduler.request();
     }
     fn interrupt(&self) {
-        if self.0.state.borrow().closing {
+        // While the terminal is lent to the producer's editor, ctrl+c is the editor's.
+        if self.0.state.borrow().closing || self.0.tty.lent() {
             return;
         }
         if self.busy() {
@@ -1170,11 +1202,14 @@ impl Terminal for TuiApp {
     fn close(&self) -> LocalBoxFuture<'static, i32> {
         self.finish(0, None)
     }
+    fn lent(&self) -> bool {
+        self.0.tty.lent()
+    }
     fn follow_daw(&self, daw: kumi_types::daw::DawId) -> bool {
         let Some(follow) = self.0.options.follow_daw.clone() else { return false };
-        // Nothing the producer is in the middle of: an answer, setup, a panel or question, the map, what they typed or
-        // attached, a background job.
-        let waiting = {
+        // Nothing the producer is in the middle of: an answer, setup, a panel or question, the map, what they typed,
+        // attached or put aside, a search, their editor, a background job.
+        let waiting = self.0.tty.lent() || {
             let state = self.0.state.borrow();
             state.closing
                 || state.setup.is_some()
@@ -1184,6 +1219,8 @@ impl Terminal for TuiApp {
                 || state.map.is_some()
                 || !state.editor.is_empty()
                 || !state.attachments.is_empty()
+                || state.stash.is_some()
+                || state.search.is_some()
                 || state.jobs.values().any(|job| !job.state.ended())
         };
         if waiting || self.busy() {
@@ -1236,14 +1273,18 @@ fn head(text: &str, count: usize) -> String {
 fn assistant(started_at: Option<f64>, status: AnswerStatus) -> Entry {
     Entry::Assistant { text: String::new(), steps: vec![], status, elapsed_ms: None, started_at }
 }
-fn end_steps(entry: &EntryRef) {
+/// An answer's steps still running, ended as failed. `timed`: each takes how long it ran until now (an answer shown
+/// again from a log has no time for a step it cut short: the log doesn't say when it ended).
+fn end_steps(entry: &EntryRef, timed: bool) {
     if let Entry::Assistant { steps, .. } = &mut *entry.borrow_mut() {
         let now = perf_now();
         for step in steps {
             if step.state == StepState::Running {
                 step.state = StepState::Error;
                 step.ended_at = Some(now);
-                step.ms = step.started_at.map(|at| number::round(now - at)).or(step.ms);
+                if timed {
+                    step.ms = step.started_at.map(|at| number::round(now - at)).or(step.ms);
+                }
                 step.doing = None;
             }
         }

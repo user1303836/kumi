@@ -131,6 +131,14 @@ async fn tui_states(daw: DawId, label: &str, focuses: Vec<(serde_json::Value, Op
         h.type_text(&format!("{command}\r")).await;
         settle(&h).await;
         found.screen(command, &h);
+        // The help scrolls: each page of it, to its end.
+        if command == "/help" {
+            for _ in 0..12 {
+                h.type_text("\x1b[6~").await;
+                settle(&h).await;
+                found.screen(command, &h);
+            }
+        }
         // A list with tabs: the other one too.
         h.type_text("\t").await;
         settle(&h).await;

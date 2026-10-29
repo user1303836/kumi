@@ -10,6 +10,7 @@ use crate::core::{
     taste_log::kept_request,
     techniques::{waiting_note, NEGATIVE, POSITIVE},
 };
+use crate::kernel::agent::no_room;
 use kumi_common::js::number::{round, to_string};
 use kumi_listening::heard_settings::{SearchKind, SettingsHeard, SettingsMemory};
 use std::collections::HashMap;
@@ -281,6 +282,13 @@ impl Session {
         let prompt = if brief.is_empty() { text } else { format!("{text}\n\n{brief}") };
         let showing = !pictures.is_empty();
         let result = match self.ask(&op, &prompt, &snapshot.context, None, pictures, &note).await {
+            // A request the model has no room for was never sent: its words go back where the producer wrote them.
+            Err(RuntimeError::Kumi(error)) if no_room(&error) => {
+                if let Some(text) = op.input.clone() {
+                    self.emit(SessionEvent::Resend { text });
+                }
+                return Err(error.into());
+            }
             // A model that can't see pictures refuses the request: say so, and what to do.
             Err(RuntimeError::Kumi(error)) if showing && error.kind == FailureKind::Request => {
                 return Err(KumiError {

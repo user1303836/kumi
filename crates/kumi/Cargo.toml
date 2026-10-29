@@ -50,6 +50,8 @@ reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
+# The private file the draft goes to while the producer's editor has it (ctrl+g).
+tempfile.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
@@ -75,5 +77,4 @@ kumi-web.workspace = true
 uuid.workspace = true
 kumi-testkit.workspace = true
 tokio = { workspace = true, features = ["test-util"] }
-tempfile.workspace = true
 daw-mcp-server = { path = "../../daws/own/daw-mcp-server" }

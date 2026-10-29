@@ -912,7 +912,8 @@ pub enum SessionEvent {
     },
     /// A kept conversation continues (`lines` are its recent exchanges): the Set's own, one chosen in
     /// /conversations (`chosen`), or one this model couldn't continue (`unreadable`, shown only).
-    /// `changes` are its HISTORY, which Kumi can't undo any more.
+    /// `changes` are its HISTORY, which Kumi can't undo any more. `replay` is what its log holds of its last requests,
+    /// to show them again as they happened; without one (kept before there were logs), the screen shows `lines`.
     Resumed {
         saved_at: i64,
         lines: Vec<TranscriptLine>,
@@ -922,6 +923,8 @@ pub enum SessionEvent {
         chosen: Option<bool>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         unreadable: Option<bool>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        replay: Option<crate::core::session_log::Replay>,
     },
     /// The conversation the producer chose belongs to another Set: open it there, carry on here in a copy, or leave it.
     /// `ask` None: the question is no longer open.
@@ -929,7 +932,8 @@ pub enum SessionEvent {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         ask: Option<SetAsk>,
     },
-    /// Live is back after stopping a request: the app offers to send `text` again.
+    /// A request that didn't go: Live stopped it and is back, or it was too long to send. The app puts `text` back, to
+    /// send again or in part.
     Resend {
         text: String,
     },
@@ -1015,6 +1019,11 @@ pub enum SessionEvent {
     Aside {
         id: u32,
         text: String,
+    },
+    /// What a /slots fetch or check under way says (the protocol's `slots` request with this `id`).
+    SlotsProgress {
+        id: u32,
+        line: String,
     },
     #[serde(untagged)]
     Kernel(KernelEvent),
@@ -1375,6 +1384,16 @@ pub struct InstantOutcome {
     pub is_error: bool,
 }
 
+/// What /music shows: what Kumi knows of the producer's music and how learning it goes, whether they agreed it learns
+/// it, whether they paused it, and (before they add a folder) the usual place Kumi found songs in.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MusicView {
+    pub status: kumi_listening::music::learning::MusicStatus,
+    pub agreed: bool,
+    pub held: bool,
+    pub found: Option<kumi_listening::music::folders::Found>,
+}
+
 /// Optional methods (`steer?()` and so on) have a `has_…` flag, false by default, that says whether
 /// this controller offers them; their default bodies answer as an absent method's caller would read.
 #[async_trait(?Send)]
@@ -1527,6 +1546,18 @@ pub trait SessionController {
     /// What Kumi remembers of searches, for a DAW's listening to hand what it hears to and start from: None without its
     /// database.
     fn settings_memory(&self) -> Option<Rc<dyn kumi_listening::heard_settings::SettingsMemory>> {
+        None
+    }
+    /// The producer's own music, which /music shows and changes (the protocol answers its requests from it).
+    fn music(&self) -> Option<Rc<kumi_listening::music::learning::Music>> {
+        None
+    }
+    /// What /slots reads and swaps: which model does each listening job.
+    fn slots_context(&self) -> Option<Rc<kumi_listening::slots::SlotsContext>> {
+        None
+    }
+    /// What reads /map's data (the producer's sounds and songs on their maps), each time it opens.
+    fn map_loader(&self) -> Option<kumi_library::map::LoadMap> {
         None
     }
     /// The saved Set open in the DAW, by its file, once the session has read it.

@@ -7,8 +7,8 @@ use std::rc::Rc;
 use async_trait::async_trait;
 use futures::stream::{self, StreamExt};
 use kumi_agent::core::contracts::StopReason;
-use kumi_agent::kernel::agent::{create_agent_kernel, AgentKernelOptions};
-use kumi_ai::binding::{LanguageModel, ModelBinding};
+use kumi_agent::kernel::agent::{create_agent_kernel, no_room, AgentKernelOptions};
+use kumi_ai::binding::{budget_for, LanguageModel, ModelBinding};
 use kumi_ai::error::LanguageModelError;
 use kumi_ai::types::{CallOptions, FinishReason, FinishReasonUnified, Message, StreamPart, StreamParts, Usage};
 use kumi_common::abort::{Controller, Signal};
@@ -128,6 +128,51 @@ impl LanguageModel for Answers {
         ])
         .boxed_local())
     }
+}
+
+/// A model whose window is small, as a local one's can be: a request past the room it has is refused before it's sent,
+/// saying how much room there is, and isn't sent when it comes again either. The conversation goes on without it (#663).
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn a_request_past_a_small_models_room_is_refused_unsent_and_the_conversation_goes_on() {
+    let model = Rc::new(Answers { calls: Cell::new(0) });
+    let binding = ModelBinding {
+        id: "test/small".into(),
+        model: model.clone(),
+        prepare: Box::new(|request| CallOptions { prompt: request.messages, tools: Some(request.tools), ..CallOptions::default() }),
+        // A window of 8,192 tokens, 2,048 of them kept for the answer: about 18 KB of conversation.
+        budget: Some(Box::new(|fixed| budget_for(8192.0, fixed as f64, 2048.0))),
+    };
+    let kernel = create_agent_kernel(AgentKernelOptions {
+        conversation: None,
+        binding,
+        instructions: "be brief".into(),
+        tools: vec![],
+        signal: signal(),
+        checkpoint: None,
+        max_steps: None,
+        budget: None,
+    })
+    .unwrap();
+    let paste = "x".repeat(20_000);
+    for _ in 0..2 {
+        let error = kernel.run(&paste, signal(), Rc::new(|_| Ok(()))).await.unwrap_err();
+        assert!(error.kumi().is_some_and(no_room), "the session knows it wasn't sent: {error:?}");
+        let refused = error.to_string();
+        assert!(
+            refused.contains("test/small has room for about 17 KB at once, and this message comes to 20 KB with what Kumi reads of your Set: send part of it, or choose a model with more room with /model."),
+            "{refused}"
+        );
+        assert_eq!(model.calls.get(), 0, "the model is never sent it");
+    }
+    kernel.run("make the bass wider", signal(), Rc::new(|_| Ok(()))).await.unwrap();
+    assert_eq!(model.calls.get(), 1);
+    let kept: Vec<Value> = kernel.checkpoint().unwrap().messages.iter().map(|message| serde_json::to_value(message).unwrap()).collect();
+    assert_eq!(kept.len(), 2, "the refused request isn't kept: {kept:?}");
+    assert_eq!(kept[0]["content"][0]["text"], "make the bass wider");
+    // A side question has its own limit, said the same way.
+    let refused = kernel.aside(&"x".repeat(16 * 1024 + 1), signal(), Rc::new(|_| {})).await.unwrap_err().to_string();
+    assert!(refused.contains("This side question is 17 KB, and one takes up to 16 KB: ask a shorter one."), "{refused}");
+    kernel.close().await;
 }
 
 /// What the session log keeps of each turn: the messages it settled, once. A run that settles none (stopped before it

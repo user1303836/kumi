@@ -9,7 +9,7 @@ use kumi::tui::keys::{InputEvent, InputParser, Modifiers, MouseAction, MouseButt
 use kumi::tui::render::{Cursor, Renderer};
 use kumi::tui::scheduler::FrameScheduler;
 use kumi::tui::screen::{Rect, Screen};
-use kumi::tui::style::{detect_color_depth, hex, palette, sgr, style_key, to16, to256, ColorDepth, Rgb, Style, StyleTable};
+use kumi::tui::style::{detect_color_depth, hex, link_id, palette, sgr, style_key, to16, to256, ColorDepth, Rgb, Style, StyleTable};
 use kumi::tui::tty::{emergency_restorers, Tty, TtyInput, TtyOptions, TtyOutput, RESTORE};
 use kumi::tui::width::{cell_width, text_width, truncate};
 use kumi::tui::wrap::{wrap, Span};
@@ -26,7 +26,7 @@ fn same_as_screen(vt: &VirtualTerminal, screen: &Screen) {
     for y in 0..screen.height {
         for x in 0..screen.width {
             let cell = screen.at(x, y);
-            assert_eq!(vt.chars[y as usize][x as usize], if cell.width == 0 { "" } else { cell.char }, "char at {x},{y}");
+            assert_eq!(vt.chars[y as usize][x as usize], if cell.width == 0 { "" } else { cell.char.as_str() }, "char at {x},{y}");
             assert_eq!(vt.styles[y as usize][x as usize], style_key(&cell.style), "style at {x},{y}");
         }
     }
@@ -363,6 +363,183 @@ fn the_renderers_output_reproduces_every_frame_exactly_redrawing_only_what_chang
 }
 
 #[test]
+fn moved_bands_erased_blanks_and_links_reproduce_every_frame_exactly_and_full_repaint_writes_every_cell() {
+    let mut seed = 11.0f64;
+    let mut random = move || {
+        seed = (seed * 1103515245.0 + 12345.0) % 2147483648.0;
+        seed / 2147483648.0
+    };
+    let words = ["kick", "主旋律", "🎹", "Bass", "EQ Eight", "シンセ", "e\u{301}", "━━━", "·"];
+    let colours: [Rgb; 4] = [palette::GROUND, palette::SURFACE, palette::ACCENT, palette::TEXT];
+    let (width, height) = (30, 12);
+    for full_repaint in [false, true] {
+        let table = Rc::new(StyleTable::new());
+        let mut renderer = Renderer::new(ColorDepth::Truecolor).full_repaint(full_repaint);
+        let mut vt = VirtualTerminal::new(width, height);
+        let mut screen = Screen::with_table(width, height, Rc::clone(&table));
+        screen.fill(screen.bounds(), &Style::bg(palette::GROUND));
+        vt.write(&renderer.frame(&screen, None));
+        same_as_screen(&vt, &screen);
+        let (mut scrolled, mut erased) = (0, 0);
+        for _round in 0..400 {
+            let mut next = Screen::with_table(width, height, Rc::clone(&table));
+            next.copy_from(&screen);
+            let pick = |random: &mut dyn FnMut() -> f64, count: usize| (random() * count as f64).floor() as usize;
+            if random() < 0.4 {
+                // A band moves up, as the conversation does while text streams in under it: new rows come in at its foot.
+                let (top, bottom, by) = (pick(&mut random, 4), height as usize - pick(&mut random, 3), 1 + pick(&mut random, 3));
+                if top + by < bottom {
+                    let cells = |row: usize| row * width as usize;
+                    next.codes.copy_within(cells(top + by)..cells(bottom), cells(top));
+                    next.widths.copy_within(cells(top + by)..cells(bottom), cells(top));
+                    next.styles.copy_within(cells(top + by)..cells(bottom), cells(top));
+                    for y in (bottom - by) as i32..bottom as i32 {
+                        next.fill(Rect::new(0, y, width, 1), &Style::bg(palette::GROUND));
+                        let word = words[pick(&mut random, words.len())];
+                        next.put(1 + pick(&mut random, 8) as i32, y, word, &Style::fg(colours[pick(&mut random, 4)]));
+                    }
+                }
+            }
+            for _change in 0..pick(&mut random, 4) {
+                let (x, y) = (pick(&mut random, width as usize + 2) as i32 - 1, pick(&mut random, height as usize) as i32);
+                let roll = random();
+                if roll < 0.25 {
+                    // A long run of blanks: a row cut short, or a gap in it.
+                    let bg = colours[pick(&mut random, 2)];
+                    next.fill(Rect::new(x, y, 8 + pick(&mut random, 24) as i32, 1), &Style::bg(bg));
+                } else if roll < 0.35 {
+                    let style = Style { underline: true, ..Style::fg(palette::ACCENT) }
+                        .linked(["https://kumi-agent.com/a", "https://kumi-agent.com/b"][pick(&mut random, 2)]);
+                    next.put(x, y, words[pick(&mut random, words.len())], &style);
+                } else if roll < 0.45 {
+                    // Blanks an erase doesn't leave: in a text colour, underlined, inverse.
+                    let kinds = [
+                        Style::fg(palette::TEXT),
+                        Style { underline: true, ..Style::default() },
+                        Style { inverse: true, ..Style::default() },
+                    ];
+                    let style = Style { bg: Some(palette::SURFACE), ..kinds[pick(&mut random, 3)] };
+                    next.put(x, y, &" ".repeat(8 + pick(&mut random, 12)), &style);
+                } else {
+                    let bg = (random() < 0.3).then(|| colours[pick(&mut random, 4)]);
+                    let style = Style { fg: Some(colours[pick(&mut random, 4)]), bg, bold: random() < 0.2, ..Style::default() };
+                    next.put(x, y, words[pick(&mut random, words.len())], &style);
+                }
+            }
+            let output = renderer.frame(&next, None);
+            scrolled += usize::from(output.contains("M\u{1b}[r"));
+            erased += usize::from(output.contains("\u{1b}[K") || output.contains("X\u{1b}"));
+            vt.write(&output);
+            same_as_screen(&vt, &next);
+            // A link opened in a frame is closed before it ends.
+            assert!(output.rfind("\u{1b}]8;").is_none_or(|at| output[at..].starts_with("\u{1b}]8;;")), "{output:?}");
+            screen = next;
+        }
+        if full_repaint {
+            assert_eq!((scrolled, erased), (0, 0), "every cell written, none moved or erased");
+        } else {
+            assert!(scrolled > 30 && erased > 30, "moved {scrolled} times, erased {erased}");
+        }
+        assert_eq!(renderer.frame(&screen, None), "", "an unchanged frame writes nothing");
+    }
+}
+
+#[test]
+fn text_streaming_under_a_header_moves_its_band_and_writes_only_the_row_that_came_in() {
+    let table = Rc::new(StyleTable::new());
+    let mut renderer = Renderer::new(ColorDepth::Truecolor);
+    let (width, height) = (60, 20);
+    let frame = |first: i32| {
+        let mut screen = Screen::with_table(width, height, Rc::clone(&table));
+        screen.fill(screen.bounds(), &Style::bg(palette::GROUND));
+        screen.put(1, 0, "Kumi · the header", &Style::fg(palette::BRIGHT));
+        for y in 2..17 {
+            screen.put(2, y, &format!("line {} of the answer", first + y), &Style::fg(palette::TEXT));
+        }
+        screen.put(1, 18, "› the box", &Style::fg(palette::DIM));
+        screen
+    };
+    let mut vt = VirtualTerminal::new(width, height);
+    vt.write(&renderer.frame(&frame(0), None));
+    for first in 1..6 {
+        let next = frame(first);
+        let output = renderer.frame(&next, None);
+        vt.write(&output);
+        same_as_screen(&vt, &next);
+        // The row coming in comes in on the band's background, set before the move.
+        assert!(output.contains("\u{1b}[0;48;2;14;15;18m\u{1b}[3;17r\u{1b}[3;1H\u{1b}[1M\u{1b}[r"), "{output:?}");
+        assert_eq!(output.matches("line ").count(), 1, "only the row that came in: {output:?}");
+        assert!(output.len() < 200, "{} bytes", output.len());
+    }
+    // Moved by more than a row at once, and with a row above the band changed too.
+    let mut next = frame(9);
+    next.put(1, 0, "Kumi · working", &Style::fg(palette::BRIGHT));
+    let output = renderer.frame(&next, None);
+    vt.write(&output);
+    same_as_screen(&vt, &next);
+    assert!(output.contains("\u{1b}[4M"), "{output:?}");
+    // Where blanks aren't erased in the colours set, the rows come in on the terminal's own.
+    let mut plain = Renderer::new(ColorDepth::Truecolor).erasing(false);
+    let mut vt = VirtualTerminal::new(width, height);
+    vt.write(&plain.frame(&frame(0), None));
+    let output = plain.frame(&frame(1), None);
+    vt.write(&output);
+    same_as_screen(&vt, &frame(1));
+    assert!(output.contains("\u{1b}[0m\u{1b}[3;17r"), "{output:?}");
+}
+
+#[test]
+fn a_row_cut_short_is_erased_to_its_end_and_a_gap_in_one_go_but_blanks_that_show_are_written() {
+    let table = Rc::new(StyleTable::new());
+    let mut renderer = Renderer::new(ColorDepth::Truecolor);
+    let (width, height) = (40, 3);
+    let mut vt = VirtualTerminal::new(width, height);
+    let mut screen = Screen::with_table(width, height, Rc::clone(&table));
+    screen.fill(screen.bounds(), &Style::bg(palette::GROUND));
+    for y in 0..height {
+        screen.put(0, y, &"x".repeat(width as usize), &Style { bg: Some(palette::GROUND), ..Style::fg(palette::TEXT) });
+    }
+    vt.write(&renderer.frame(&screen, None));
+    let mut next = Screen::with_table(width, height, Rc::clone(&table));
+    next.copy_from(&screen);
+    next.fill(Rect::new(5, 0, width - 5, 1), &Style::bg(palette::GROUND));
+    next.fill(Rect::new(10, 1, 20, 1), &Style::bg(palette::SURFACE));
+    next.put(10, 2, &" ".repeat(20), &Style { underline: true, ..Style::bg(palette::GROUND) });
+    let output = renderer.frame(&next, None);
+    vt.write(&output);
+    same_as_screen(&vt, &next);
+    assert!(output.contains("\u{1b}[1;6H\u{1b}[0;48;2;14;15;18m\u{1b}[K"), "the row's end, erased: {output:?}");
+    assert!(output.contains("\u{1b}[20X"), "the gap, erased: {output:?}");
+    assert!(output.contains(&format!("{}\u{1b}[0m", " ".repeat(20))), "underlined blanks, written: {output:?}");
+    // Where the terminal erases in its own colours, blanks are written.
+    let mut plain = Renderer::new(ColorDepth::Truecolor).erasing(false);
+    plain.frame(&screen, None);
+    let output = plain.frame(&next, None);
+    assert!(!output.contains("\u{1b}[K") && !output.contains("X"), "{output:?}");
+}
+
+#[test]
+fn linked_text_opens_its_address_and_the_link_closes_after_it() {
+    let mut renderer = Renderer::new(ColorDepth::Truecolor);
+    let mut screen = Screen::new(40, 2);
+    let url = "https://kumi-agent.com/docs?a=1&b=2";
+    let x = screen.put(1, 0, "the manual", &Style { underline: true, ..Style::fg(palette::ACCENT) }.linked(url));
+    screen.put(x, 0, " after", &Style::fg(palette::TEXT));
+    screen.put(1, 1, "例え", &Style::fg(palette::TEXT).linked("https://例え.jp/a b"));
+    let output = renderer.frame(&screen, None);
+    let opened = format!("\u{1b}]8;id=k{};{url}\u{1b}\\", link_id(url));
+    let at = output.find(&opened).expect("the link opens");
+    assert!(output[at..].find("the manual").unwrap() < output[at..].find("\u{1b}]8;;\u{1b}\\").unwrap(), "{output:?}");
+    assert!(output.contains(";https://%E4%BE%8B%E3%81%88.jp/a%20b\u{1b}\\"), "an address past ASCII, percent-encoded: {output:?}");
+    let mut vt = VirtualTerminal::new(40, 2);
+    vt.write(&output);
+    assert!(vt.styles[0][1].ends_with(&format!("|{url}")) && vt.styles[0][10].ends_with(&format!("|{url}")));
+    assert!(!vt.styles[0][11].contains("https"), "{}", vt.styles[0][11]);
+    let mut plain = Renderer::new(ColorDepth::Truecolor).linking(false);
+    assert!(!plain.frame(&screen, None).contains("\u{1b}]8"));
+}
+
+#[test]
 fn the_renderer_places_the_cursor_for_input_methods_and_redraws_everything_after_a_resize() {
     let mut renderer = Renderer::new(ColorDepth::Truecolor);
     let mut screen = Screen::new(10, 3);
@@ -650,6 +827,8 @@ async fn an_animation_draws_at_its_own_pace_and_a_request_is_still_drawn_within_
 struct FakeInput {
     raw: Cell<bool>,
     listener: RefCell<Option<ByteListener>>,
+    /// How often what was waiting to be read was dropped.
+    discarded: Cell<usize>,
 }
 
 impl FakeInput {
@@ -677,6 +856,9 @@ impl TtyInput for FakeInput {
     }
     fn pause(&self) {
         *self.listener.borrow_mut() = None;
+    }
+    fn discard_pending(&self) {
+        self.discarded.set(self.discarded.get() + 1);
     }
 }
 
@@ -716,9 +898,76 @@ impl TtyOutput for FakeOutput {
     }
 }
 
+#[tokio::test(flavor = "current_thread")]
+async fn the_terminal_is_lent_to_a_program_and_taken_back_whole() {
+    let input = Rc::new(FakeInput { raw: Cell::new(false), listener: RefCell::new(None), discarded: Cell::new(0) });
+    let output = Rc::new(FakeOutput { written: RefCell::new(String::new()), resize: RefCell::new(None) });
+    let events = Rc::new(RefCell::new(Vec::new()));
+    let farewell = "\u{1b}]9;4;0\u{7}";
+    let tty = Tty::new(TtyOptions {
+        input: input.clone(),
+        output: output.clone(),
+        on_input: Rc::new({
+            let events = Rc::clone(&events);
+            move |event| events.borrow_mut().push(event)
+        }),
+        on_resize: Rc::new(|| {}),
+        mouse: true,
+        farewell: farewell.into(),
+    });
+    tty.start().unwrap();
+    output.written.borrow_mut().clear();
+    let ran = tty
+        .hand_over(async {
+            // The program finds the terminal as Kumi found it: every mode off, input not raw, and Kumi not reading it.
+            assert_eq!(output.written.borrow().as_str(), RESTORE, "the farewell stays: Kumi is still running");
+            assert!(!input.is_raw());
+            input.write("x");
+            assert!(tty.lent() && !tty.is_active());
+            tty.write("a frame drawn meanwhile");
+            "edited"
+        })
+        .await;
+    assert_eq!(ran, "edited");
+    assert!(events.borrow().is_empty(), "the program's keys never reach Kumi");
+    let written = output.written.borrow().clone();
+    let taken = written.strip_prefix(RESTORE).unwrap();
+    assert!(taken.starts_with("\u{1b}[?1049h") && taken.contains("\u{1b}[>3u") && taken.contains("\u{1b}[?1006h"), "{taken:?}");
+    assert!(input.is_raw() && tty.is_active() && !tty.lent());
+    assert_eq!(input.discarded.get(), 1, "what was typed meanwhile was the program's");
+    input.write("\u{1b}[A");
+    assert_eq!(events.borrow().clone(), vec![key("up", NONE)]);
+    // Kumi closing while it's lent gives the terminal back for good: the farewell goes, and the screen isn't taken again.
+    output.written.borrow_mut().clear();
+    tty.hand_over(async { tty.restore(false) }).await;
+    assert_eq!(output.written.borrow().clone(), format!("{RESTORE}{farewell}"));
+    assert!(!tty.is_active() && !tty.lent() && !input.is_raw());
+
+    // With the mouse left to the terminal, the wheel's keys Kumi turned off are the program's again while it runs, and
+    // off again once the terminal is taken back.
+    let input = Rc::new(FakeInput { raw: Cell::new(false), listener: RefCell::new(None), discarded: Cell::new(0) });
+    let output = Rc::new(FakeOutput { written: RefCell::new(String::new()), resize: RefCell::new(None) });
+    let tty = Tty::new(TtyOptions {
+        input: input.clone(),
+        output: output.clone(),
+        on_input: Rc::new(|_| {}),
+        on_resize: Rc::new(|| {}),
+        mouse: false,
+        farewell: String::new(),
+    });
+    tty.start().unwrap();
+    output.written.borrow_mut().clear();
+    let given = format!("{RESTORE}\u{1b}[?1007h");
+    tty.hand_over(async { assert_eq!(output.written.borrow().as_str(), given) }).await;
+    let written = output.written.borrow().clone();
+    let taken = written.strip_prefix(&given).unwrap();
+    assert!(taken.contains("\u{1b}[?1007l") && !taken.contains("\u{1b}[?1006h"), "{taken:?}");
+    tty.restore(false);
+}
+
 #[test]
 fn the_terminal_is_taken_over_and_always_given_back_even_twice() {
-    let input = Rc::new(FakeInput { raw: Cell::new(false), listener: RefCell::new(None) });
+    let input = Rc::new(FakeInput { raw: Cell::new(false), listener: RefCell::new(None), discarded: Cell::new(0) });
     let output = Rc::new(FakeOutput { written: RefCell::new(String::new()), resize: RefCell::new(None) });
     let events = Rc::new(RefCell::new(Vec::new()));
     let resized = Rc::new(Cell::new(0));

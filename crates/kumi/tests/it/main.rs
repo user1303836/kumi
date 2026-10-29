@@ -79,6 +79,7 @@ mod tui_music;
 mod tui_own_bodies;
 mod tui_palette;
 mod tui_pictures;
+mod tui_replay;
 mod tui_setup;
 mod tui_slots;
 mod tui_view;
