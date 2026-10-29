@@ -1379,9 +1379,10 @@ says which need which.
   yours goes with the request. `"modelCatalog": false` stops it.
 
 Track, clip and device names, tool results and web pages are data for Kumi,
-never instructions. Kumi keeps its files in `~/.kumi`, readable only by you;
-sign-ins are in `~/.kumi/auth.json`. Terminal scrollback and your provider's
-own retention are separate.
+never instructions. Words they hide in characters that don't show on screen
+reach the model as `[hidden text removed]`. Kumi keeps its files in `~/.kumi`,
+readable only by you; sign-ins are in `~/.kumi/auth.json`. Terminal scrollback
+and your provider's own retention are separate.
 
 ## Proxies and school or office networks
 
