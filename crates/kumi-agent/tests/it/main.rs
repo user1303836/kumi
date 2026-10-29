@@ -20,6 +20,7 @@ mod mcp;
 mod memory;
 mod palette;
 mod pin_wire;
+mod protocol;
 mod providers;
 mod recall;
 mod recipes;

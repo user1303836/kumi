@@ -880,7 +880,8 @@ pub struct ActionEvent {
 }
 
 /// What the producer picked with a key among the options Kumi offered.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "kebab-case", rename_all_fields = "camelCase")]
 pub enum Picked {
     /// One of the options Kumi's answer ended on: the question, the options, and the one picked (from 0).
     Answer { question: String, options: Vec<String>, index: usize },
@@ -1005,6 +1006,11 @@ pub enum SessionEvent {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         palette: Option<crate::core::palette::PaletteView>,
     },
+    /// Words of a side question's answer as they're written (the protocol's `aside` request with this `id`).
+    Aside {
+        id: u32,
+        text: String,
+    },
     #[serde(untagged)]
     Kernel(KernelEvent),
     #[serde(untagged)]
@@ -1091,7 +1097,8 @@ pub struct MemoryNote {
 }
 
 /// What the producer changes about a note in /memory, without the model.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub enum NoteChange {
     Text(String),
     Pinned(bool),
