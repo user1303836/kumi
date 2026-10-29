@@ -200,6 +200,34 @@ Kumi 占据整个终端窗口，并在 Kumi 关闭、崩溃或被停止时把窗
 
 **面板**（`/model`、`/effort`、`/login`、`/memory` 等）：↑↓ 移动，Enter 选择，Esc 关闭；在 `/model`、`/memory`、`/resume` 和 `/recipes` 中，输入文字可筛选列表。在 `/model` 中，ctrl+f 设定备用模型。在 `/resume` 中，Tab 在 This Set 和 All Sets 之间切换，ctrl+f 可重命名、置顶、删除所选对话或复制它的 ID。对话属于其他工程时，Kumi 会询问：在 Live 中打开它的工程（推荐）、在这里作为副本继续，或取消（Esc）。**Your answer**（以带编号选项的问题结尾的回答）：按编号再按 Enter 即可回答。Kumi 推荐的选项带有标记，并一开始就被选中；没有人在时（运行过 `/goal`、`/loop` 或匹配，或 Kumi 的窗口已在其他窗口后面 2 分钟），倒计时结束后 Kumi 会选它（“Taking 2 (recommended) in 60 s · any key cancels”）。在密钥输入框中，粘贴密钥后按 Enter；Kumi 会向提供方验证它，无法连接提供方时则不经验证直接保存。在 ChatGPT 登录面板中，`c` 复制链接（或代码），`d` 改用代码登录而不用浏览器，`b` 改回浏览器。在 `/btw` 面板中，↑↓、Page Up/Down 和鼠标滚轮滚动，←→ 翻看之前的回答，`c` 复制，Esc、Enter 或 Space 关闭面板。在任务详情中，↑↓ 和滚轮滚动，`x` 停止任务，`r` 重新运行，`c` 复制报告，Esc 关闭。在帮助中，↑↓、Page Up/Down、Home、End 和滚轮滚动，Esc、Enter 或 `?` 关闭它；输入或粘贴文字也会关闭它，输入的内容会进入输入框。设置 `"mouse": "off"` 时，滚轮不会滚动其中任何一个。
 
+**自定义按键。** `~/.kumi/keys.json` 可以给 Kumi 的动作换上别的按键（`KUMI_KEYS_FILE` 可指定文件的其他位置）：
+
+```json
+{ "composer.undo": ["ctrl+z"], "app.background": ["ctrl+b", "f5"], "pane.toggle": [] }
+```
+
+- 每个动作的列表会取代它原来的按键，空列表则让它不再有按键。按键写作 `ctrl`、`alt`（或 `option`）、`shift` 加上名称：`enter`、`tab`、`esc`、`backspace`、`delete`、`insert`、`up` 或 `↑`（其他方向键同理）、`home`、`end`、`pageup`、`pagedown`、`space`、`f1` 到 `f12`，或单个字符（`ctrl+-`、`ctrl++`）。用空格隔开的两个键（`esc esc`）表示先后按下。
+- 多个动作共用一个键时，先试 keys.json 里的，再按一贯的顺序试 Kumi 自己的。
+- 在输入文字的地方（输入框、列表、`/` 菜单），单个字符不能作为按键，在那里它会被当作文字输入。输入框为空时，`?` 总是打开帮助；也可以给 `app.help` 再加按键（`f1`）。
+- 启动时，Kumi 会把用不上的内容说一次：不认识的动作、读不懂的按键、输入文字处的单个字符、keys.json 给了同一个键的两个动作，以及排在 Kumi 自身按键之前的键。
+- 帮助（`/help`、`?`）按 keys.json 显示按键。地图和设置的按键还不是动作。
+
+| 位置 | 动作与 Kumi 自己的按键 |
+| --- | --- |
+| 输入框 | `composer.send`（enter）、`composer.send-after`（Kumi 工作时的 tab）、`composer.take-back-waiting`（alt+↑）、`composer.new-line`（ctrl+j、alt+enter、shift+enter）、`composer.up`、`composer.down`、`composer.left`、`composer.right`、`composer.word-left`（alt+←、ctrl+←、alt+b）、`composer.word-right`（alt+→、ctrl+→、alt+f）、`composer.line-start`（home、ctrl+a）、`composer.line-end`（end、ctrl+e）、`composer.backspace`、`composer.take-back-file`（输入框为空时的 backspace）、`composer.delete`（delete、ctrl+d）、`composer.cut-word`（ctrl+w、alt+backspace、ctrl+backspace）、`composer.cut-to-end`（ctrl+k）、`composer.cut-to-start`（ctrl+u）、`composer.yank`（ctrl+y）、`composer.yank-earlier`（alt+y）、`composer.undo`（ctrl+-、ctrl+_）、`composer.history-search`（ctrl+r）、`composer.editor`（ctrl+g）、`composer.stash`（ctrl+s） |
+| Kumi | `app.stop`（esc）、`app.interrupt`（ctrl+c）、`app.quit`（ctrl+d）、`app.background`（ctrl+b）、`app.paste-picture`（ctrl+v）、`app.redraw`（ctrl+l）、`app.help`（没有自己的按键：`?`）、`voice.talk`（ctrl+t）、`conversation.page-up`、`conversation.page-down`、`conversation.start`（ctrl+home）、`conversation.latest`（ctrl+end） |
+| 窗格 | `pane.toggle`（ctrl+\\）、`pane.tabs`（shift+tab）、`pane.tree`（tab）；标签页里有 `tabs.up`、`tabs.down`、`tabs.page-up`、`tabs.page-down`、`tabs.open`（enter）、`tabs.next`（shift+tab）、`tabs.leave`（esc、tab）；设备树里有 `tree.up`、`tree.down`、`tree.pin`（enter）、`tree.leave`（esc、tab） |
+| `/` 菜单 | `menu.up`、`menu.down`、`menu.complete`（tab）、`menu.run`（enter）、`menu.close`（esc） |
+| 回看（ctrl+r） | `search.back`（ctrl+r）、`search.erase`（backspace）、`search.take`（enter、tab）、`search.cancel`（esc、ctrl+c） |
+| 聆听时 | `voice.send`（enter）、`voice.drop`（esc、ctrl+c） |
+| 选中的文字 | `selection.copy`（ctrl+c）、`selection.clear`（esc） |
+| 帮助 | `help.up`、`help.down`、`help.page-up`、`help.page-down`、`help.top`（home）、`help.end`（end）、`help.close`（esc、enter、ctrl+c、`?`） |
+| 旁问回答（`/btw`） | `aside.up`、`aside.down`、`aside.page-up`、`aside.page-down`、`aside.earlier`（←）、`aside.later`（→）、`aside.copy`（c）、`aside.close`（esc、enter、space、ctrl+c） |
+| 任务详情 | `job.up`、`job.down`、`job.page-up`、`job.page-down`、`job.stop`（x）、`job.again`（r）、`job.copy`（c）、`job.close`（esc、enter、space、ctrl+c） |
+| 列表 | `list.up`、`list.down`（↓、tab）、`list.next-tab`（有标签页的列表里的 tab）、`list.erase`（backspace）、`list.choose`（enter）、`list.choose-other`（ctrl+f）、`list.close`（esc、ctrl+c） |
+| 密钥输入框 | `key.check`（enter）、`key.erase`（backspace）、`key.clear`（ctrl+u）、`key.cancel`（esc、ctrl+c） |
+| ChatGPT 登录 | `chatgpt.copy`（c）、`chatgpt.by-code`（d）、`chatgpt.by-browser`（b）、`chatgpt.cancel`（esc、ctrl+c） |
+
 ## 纯文本模式
 
 设置 `KUMI_UI=plain`，或者输入或输出经过管道时，Kumi 会改用逐行显示的纯文本界面，适合屏幕阅读器和日志。它支持 `/help`、`/status`、`/undo`、`/stop`、`/refresh`、`/reconnect`、`/new [name]`、`/resume [编号、ID 或名称]`（以及 `/conversations`）、`/rename <name>`、`/fork [name]`、`/export [md|html|json]`、`/share`（都会保存文件并告诉你位置）、`/daw [name]`、`/model [provider/model]`、`/effort [level|default]`、`/fast`、`/logout <provider>`、`/memory`、`/forget <id>`、`/note <id> <new words>`、`/pin <id>`、`/unpin <id>`、`/recipes`、`/willington`、`/update`、`/changelog` 和 `/quit`，但没有 `/btw`、`/goal`、`/loop`、`/slots`、`/music`、`/map`、`/jobs`、`/takeback` 或 `/copy`。`/resume` 先为本工程的对话编号，再为其他工程的对话编号；Kumi 关于其他工程对话的提问用 1、2 或 3 回答（等待回答时命令照常可用，输入其他内容会再问一次）。后台任务开始和结束时会告诉你，你的请求所需要的任务会在 Kumi 空闲时接着进行。请在 shell 中用 `kumi login` 登录。Ctrl-C 停止回答，空闲时则退出。

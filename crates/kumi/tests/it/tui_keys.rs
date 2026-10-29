@@ -184,3 +184,16 @@ case!(a_panels_key_that_doesnt_apply_lets_the_next_have_it, async {
     h.wait_until_hidden("btw ·").await;
     h.close().await;
 });
+
+#[test]
+fn every_action_is_in_the_keys_docs_in_each_language() {
+    for (language, doc) in [
+        ("en", include_str!("../../../../docs/en/KUMI_TUI.md")),
+        ("ja", include_str!("../../../../docs/ja/KUMI_TUI.md")),
+        ("zh-CN", include_str!("../../../../docs/zh-CN/KUMI_TUI.md")),
+    ] {
+        for action in kumi::tui::keymap::ACTIONS {
+            assert!(doc.contains(&format!("`{}`", action.id)), "{} isn't in {language}'s KUMI_TUI.md", action.id);
+        }
+    }
+}
