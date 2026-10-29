@@ -798,6 +798,15 @@ fn events() -> Vec<SessionEvent> {
         }),
     });
     events.push(SessionEvent::Palette { palette: None });
+    events.push(SessionEvent::TakenBack {
+        requests: 2,
+        replay: Some(Replay {
+            before: 0,
+            earlier: vec![],
+            lines: vec![LogLine::Request(LogRequest { at: AT, text: "make the kick punchier".into(), files: vec![], pinned: None })],
+        }),
+    });
+    events.push(SessionEvent::TakenBack { requests: 1, replay: None });
     events.push(SessionEvent::Aside { id: 2, text: "The kick and the bass share 60 Hz, so".into() });
     events.push(SessionEvent::SlotsProgress { id: 3, line: "Fetching the stem model: 12 of 80 MB".into() });
     events.push(SessionEvent::SignIn { id: 4, url: Some("https://auth.openai.com/authorize?state=kumi".into()), code: None });
@@ -897,6 +906,7 @@ fn variant(event: &SessionEvent) -> &'static str {
         SessionEvent::Job(_) => "Job",
         SessionEvent::CarryOn { .. } => "CarryOn",
         SessionEvent::Palette { .. } => "Palette",
+        SessionEvent::TakenBack { .. } => "TakenBack",
         SessionEvent::Aside { .. } => "Aside",
         SessionEvent::SlotsProgress { .. } => "SlotsProgress",
         SessionEvent::SignIn { .. } => "SignIn",
@@ -918,7 +928,7 @@ fn variant(event: &SessionEvent) -> &'static str {
     }
 }
 
-const VARIANTS: [&str; 49] = [
+const VARIANTS: [&str; 50] = [
     "Focus",
     "Pointed",
     "Change",
@@ -954,6 +964,7 @@ const VARIANTS: [&str; 49] = [
     "Job",
     "CarryOn",
     "Palette",
+    "TakenBack",
     "Aside",
     "SlotsProgress",
     "SignIn",
@@ -980,7 +991,7 @@ fn every_session_event_keeps_its_wire_shape() {
 
 /// A conversation's log is saved data that this Kumi and later ones read back, line by line: a line that no longer reads
 /// is skipped, so each kind keeps its shape (a header with and without the conversation it copies, a request with and
-/// without its files and what it pointed at, an event, a model message and a save).
+/// without its files and what it pointed at, an event, a model message, a save and requests taken back).
 #[test]
 fn every_line_of_a_conversations_log_keeps_its_shape() {
     let header = |from: Option<&str>| {
@@ -1006,6 +1017,7 @@ fn every_line_of_a_conversations_log_keeps_its_shape() {
         LogLine::Event { at: AT + 3, event: SessionEvent::Kernel(KernelEvent::Text { text: "Widened it.".into() }) },
         LogLine::Message { at: AT + 4, message: serde_json::json!({"role":"assistant","content":[{"type":"text","text":"Widened it."}]}) },
         LogLine::Saved { at: AT + 5, saved_at: AT + 4, turns: 2 },
+        LogLine::TakenBack { at: AT + 6, to: AT + 2 },
     ];
     let kinds: BTreeSet<&str> = lines
         .iter()
@@ -1015,9 +1027,10 @@ fn every_line_of_a_conversations_log_keeps_its_shape() {
             LogLine::Event { .. } => "event",
             LogLine::Message { .. } => "message",
             LogLine::Saved { .. } => "saved",
+            LogLine::TakenBack { .. } => "taken-back",
         })
         .collect();
-    assert_eq!(kinds.len(), 5, "every kind of line is pinned");
+    assert_eq!(kinds.len(), 6, "every kind of line is pinned");
     pinned::<Vec<LogLine>>("log-lines.json", &lines);
 }
 
@@ -1592,6 +1605,8 @@ pub(crate) fn requests() -> Vec<Op> {
         op::Close {}.into(),
         op::Undo { id: Some("c3".into()) }.into(),
         op::Undo { id: None }.into(),
+        op::TakeBackPlan {}.into(),
+        op::TakeBack { to: AT + 4 }.into(),
         op::Refresh {}.into(),
         op::NewConversation {}.into(),
         op::Reconnect {}.into(),
@@ -1742,6 +1757,7 @@ fn capabilities_keep_their_wire_shape() {
         music: true,
         map: true,
         models: true,
+        take_back: true,
         ..Capabilities::default()
     };
     pinned::<Capabilities>("capabilities.json", &capabilities);

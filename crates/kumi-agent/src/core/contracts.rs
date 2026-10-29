@@ -1049,6 +1049,14 @@ pub enum SessionEvent {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         palette: Option<crate::core::palette::PaletteView>,
     },
+    /// The producer took requests back: `requests` is how many (the conversation's last ones), and `replay` the
+    /// conversation as it now stands, to show again as a conversation taken up shows its log (None: nothing of it is
+    /// left to show). The log has its own line for it.
+    TakenBack {
+        requests: u32,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        replay: Option<crate::core::session_log::Replay>,
+    },
     /// Words of a side question's answer as they're written (the protocol's `aside` request with this `id`).
     Aside {
         id: u32,
@@ -1420,6 +1428,29 @@ pub struct RecipeOutcome {
     pub is_error: bool,
 }
 
+/// One of the producer's requests in the conversation, for taking it back: when it was asked (which names it), their
+/// words, and the changes Kumi made answering it, each as HISTORY holds it now.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Requested {
+    pub at: i64,
+    pub words: String,
+    pub changes: Vec<ChangeRecord>,
+}
+
+/// What taking requests back did: how many of the conversation's requests went (the last ones), the words of the
+/// earliest of them to edit and send again, the changes undone, and the one whose undo failed, which stopped it there.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TakenBack {
+    pub requests: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub words: Option<String>,
+    pub undone: Vec<ChangeRecord>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failed: Option<ChangeRecord>,
+}
+
 /// A fixed phrase run with no model call ("tempo 124"): what changed, in words, as Kumi says it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct InstantOutcome {
@@ -1584,6 +1615,21 @@ pub trait SessionController {
     /// Resolves with the change as it now stands, or None when there was nothing to undo (an
     /// error event says why).
     async fn undo(&self, id: Option<&str>) -> Result<Option<ChangeRecord>, RuntimeError>;
+    fn has_take_back(&self) -> bool {
+        false
+    }
+    /// The conversation's requests that can be taken back, newest first.
+    async fn take_back_plan(&self) -> Result<Vec<Requested>, RuntimeError> {
+        Ok(vec![])
+    }
+    /// Take back the request asked at `to` and each after it; not during a turn. Their changes are undone newest first,
+    /// through Kumi's own records, until an undo fails, and the conversation goes back to just before the earliest of
+    /// them whose changes all went (a change that can't be undone, as the plan shows, is left as it is). An error when no
+    /// request standing was asked at `to`.
+    async fn take_back(&self, to: i64) -> Result<TakenBack, RuntimeError> {
+        let _ = to;
+        Err(RuntimeError::plain("Nothing can be taken back here."))
+    }
     fn has_memory(&self) -> bool {
         false
     }

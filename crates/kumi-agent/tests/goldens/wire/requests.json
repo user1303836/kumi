@@ -108,6 +108,13 @@
     "type": "undo"
   },
   {
+    "type": "take-back-plan"
+  },
+  {
+    "type": "take-back",
+    "to": 1760000000004
+  },
+  {
     "type": "refresh"
   },
   {

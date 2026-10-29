@@ -211,6 +211,7 @@ message, not a command.
 | `/reconnect` | Connect to Live again over a fresh bridge, keeping the conversation (earlier changes lose Kumi's undo) |
 | `/daw [name]` | Which DAW Kumi works with; `/daw live`, `/daw reaper` or `/daw renoise` closes Kumi and opens it again with that one. Shown once you work in REAPER or Renoise, or have Kumi's bridge in one |
 | `/undo` | Undo Kumi's latest change |
+| `/takeback [n]` | Take back your last request (or your last n): Kumi undoes their changes in your DAW, newest first, through its own records, and the conversation goes back to just before them, with the request's words in the box to change and send again. A change from before Kumi last started stays as it is; if an undo fails (you changed it since, say), Kumi stops there and says which |
 | `/stop` | Stop Live: clips, the transport and recording. Also stops Kumi's answer |
 | `/refresh` | Read the Set again without asking the model |
 | `/copy` | Copy Kumi's last answer to the clipboard |
@@ -237,8 +238,8 @@ message, not a command.
 | `/help` | The keys and commands, in sections, in a panel that scrolls; `?` on an empty box opens it too |
 | `/quit` | Close Kumi |
 
-`/new`, `/reconnect`, `/refresh` and `/undo` work only while Kumi isn't
-answering; during an answer, Kumi says so and leaves things as they are.
+`/new`, `/reconnect`, `/refresh`, `/undo` and `/takeback` work only while Kumi
+isn't answering; during an answer, Kumi says so and leaves things as they are.
 
 ## Instant phrases
 
@@ -351,7 +352,7 @@ instead, which suits screen readers and logs. It has `/help`, `/status`,
 `/model [provider/model]`, `/effort [level|default]`, `/fast`, `/logout <provider>`,
 `/memory`, `/forget <id>`, `/note <id> <new words>`, `/pin <id>`, `/unpin <id>`,
 `/recipes`, `/willington`, `/update`, `/changelog` and `/quit`, but no `/btw`,
-`/goal`, `/loop`, `/slots`, `/music`, `/map`, `/jobs` or `/copy`. `/resume` numbers this Set's
+`/goal`, `/loop`, `/slots`, `/music`, `/map`, `/jobs`, `/takeback` or `/copy`. `/resume` numbers this Set's
 conversations, then other Sets'; Kumi's question about another Set's
 conversation takes 1, 2 or 3 (commands still run while it waits, and other
 words ask it again). It says when a background job

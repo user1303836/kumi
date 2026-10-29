@@ -80,6 +80,7 @@ pub struct Capabilities {
     pub slots: bool,
     /// Choosing a model and signing in (/model, /effort, /fast, /login, /logout).
     pub models: bool,
+    pub take_back: bool,
 }
 
 impl Capabilities {
@@ -125,6 +126,7 @@ impl Capabilities {
             map: session.map_loader().is_some(),
             slots: session.slots_context().is_some(),
             models: session.model_controls().is_some(),
+            take_back: session.has_take_back(),
         }
     }
 }
@@ -245,6 +247,11 @@ requests! {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         id: Option<String>,
     } -> Option<ChangeRecord>;
+    /// The conversation's requests that can be taken back, newest first, each with its changes as HISTORY has them.
+    TakeBackPlan {} -> Vec<Requested>;
+    /// Take back the request asked at `to` (its `at`) and each after it, undoing their changes newest first until an
+    /// undo fails; not during a turn.
+    TakeBack { to: i64 } -> TakenBack;
     Refresh {} -> ();
     /// Start afresh; this conversation stays kept.
     NewConversation {} -> ();
@@ -524,6 +531,8 @@ impl InProcess {
             Op::Cancel(op::Cancel {}) => Reply::Cancel(session.cancel().await?),
             Op::Close(op::Close {}) => Reply::Close(session.close().await?),
             Op::Undo(op::Undo { id }) => Reply::Undo(session.undo(id.as_deref()).await?),
+            Op::TakeBackPlan(op::TakeBackPlan {}) => Reply::TakeBackPlan(session.take_back_plan().await?),
+            Op::TakeBack(op::TakeBack { to }) => Reply::TakeBack(session.take_back(to).await?),
             Op::Refresh(op::Refresh {}) => Reply::Refresh(session.refresh().await?),
             Op::NewConversation(op::NewConversation {}) => Reply::NewConversation(session.new_conversation().await?),
             Op::Reconnect(op::Reconnect {}) => Reply::Reconnect(session.reconnect().await?),

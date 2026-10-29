@@ -305,6 +305,14 @@ impl SessionController for Reached {
         self.reach("undo");
         Ok(None)
     }
+    async fn take_back_plan(&self) -> Result<Vec<Requested>, RuntimeError> {
+        self.reach("take_back_plan");
+        Ok(vec![])
+    }
+    async fn take_back(&self, _: i64) -> Result<TakenBack, RuntimeError> {
+        self.reach("take_back");
+        Ok(TakenBack { requests: 0, words: None, undone: vec![], failed: None })
+    }
     async fn memory(&self) -> Result<Option<MemoryView>, RuntimeError> {
         self.reach("memory");
         Ok(None)
@@ -472,6 +480,8 @@ fn method(request: &Op) -> Option<String> {
             Op::Cancel(_) => "cancel",
             Op::Close(_) => "close",
             Op::Undo(_) => "undo",
+            Op::TakeBackPlan(_) => "take_back_plan",
+            Op::TakeBack(_) => "take_back",
             Op::Refresh(_) => "refresh",
             Op::NewConversation(_) => "new_conversation",
             Op::Reconnect(_) => "reconnect",

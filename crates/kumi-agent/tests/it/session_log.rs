@@ -10,7 +10,10 @@ use kumi_agent::{
             TurnState,
         },
         conversations::create_conversation_store,
-        session_log::{log_name, read_log, replay_of, replay_reading, LogLine, ReadLog, Replay, SessionLog, MAX_LOG_BYTES, REPLAYED},
+        session_log::{
+            log_name, messages_before, read_log, replay_of, replay_reading, story_of, LogLine, ReadLog, Replay, SessionLog, MAX_LOG_BYTES,
+            REPLAYED,
+        },
     },
     kernel::budget::OBSERVATION_MARKER,
 };
@@ -88,6 +91,7 @@ fn kind(line: &LogLine) -> &'static str {
         LogLine::Event { .. } => "event",
         LogLine::Message { .. } => "message",
         LogLine::Saved { .. } => "saved",
+        LogLine::TakenBack { .. } => "taken-back",
     }
 }
 
@@ -739,4 +743,141 @@ async fn a_conversation_taken_up_shows_its_log_as_it_was_before_this_run_wrote_i
         log.close().await;
     })
     .await;
+}
+
+fn changed(id: &str, at: i64, state: &str) -> LogLine {
+    told(SessionEvent::Change {
+        change: serde_json::from_value(json!({"id":id,"family":"tempo","title":format!("Tempo {id}"),"state":state,"at":at})).unwrap(),
+    })
+}
+
+fn asked_at(at: i64, text: &str) -> LogLine {
+    LogLine::Request(kumi_agent::core::session_log::LogRequest { at, text: text.into(), files: vec![], pinned: None })
+}
+
+#[test]
+fn a_conversation_as_it_stands_leaves_out_what_was_taken_back() {
+    // Kept before its log with one exchange; then three requests, the last two taken back, then one more.
+    let lines = vec![
+        message("user", "old"),
+        message("assistant", "done"),
+        asked_at(10, "make the bass wider"),
+        changed("c1", 11, "applied"),
+        message("user", "make the bass wider"),
+        asked_at(20, "and darker"),
+        changed("c2", 21, "applied"),
+        changed("c2", 21, "undone"),
+        message("user", "and darker"),
+        asked_at(30, "and brighter"),
+        message("user", "and brighter"),
+        LogLine::TakenBack { at: 40, to: 20 },
+        asked_at(50, "a bit wider still"),
+        changed("c1", 51, "applied"),
+        message("user", "a bit wider still"),
+    ];
+    let log = read_log(&written(1, &lines)).unwrap();
+    let (had, spans) = story_of(&log);
+    assert_eq!(had, [json!({"role":"user","content":"old"}), json!({"role":"assistant","content":"done"})]);
+    let words: Vec<&str> = spans.iter().map(|span| span.request.text.as_str()).collect();
+    assert_eq!(words, ["make the bass wider", "a bit wider still"]);
+    // Each request's changes as the log last told them; an id another run gave is another change.
+    assert_eq!(spans[0].changes.iter().map(|change| (change.id.as_str(), change.at)).collect::<Vec<_>>(), [("c1", 11)]);
+    assert_eq!(spans[1].changes.iter().map(|change| (change.id.as_str(), change.at)).collect::<Vec<_>>(), [("c1", 51)]);
+    // Its messages just before a request: what it had, and what each request before it settled.
+    let before = messages_before(&had, &spans, 50).unwrap();
+    let said: Vec<&str> = before.iter().map(|message| message["content"].as_str().unwrap()).collect();
+    assert_eq!(said, ["old", "done", "make the bass wider"]);
+    assert_eq!(messages_before(&had, &spans, 10).unwrap().len(), 2);
+    assert!(messages_before(&had, &spans, 20).is_none(), "taken back");
+    // Shown again, what was taken back isn't, nor counted among the earlier messages.
+    let replay = replay_of(&written(1, &lines), REPLAYED).unwrap();
+    assert_eq!(asked(&replay), ["make the bass wider", "a bit wider still"]);
+    assert!(!replay
+        .lines
+        .iter()
+        .any(|line| matches!(line, LogLine::Event { event: SessionEvent::Change { change }, .. } if change.id == "c2")));
+    let replay = replay_of(&written(1, &lines), 1).unwrap();
+    assert_eq!((asked(&replay), replay.before), (vec!["a bit wider still".to_string()], 1 + 1));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn requests_taken_back_are_marked_in_the_log_as_it_is_now() {
+    local(async {
+        let dir = tempfile::tempdir().unwrap();
+        let store = create_conversation_store(dir.path());
+        store.save(A, ID, &said("make the bass wider", 7)).await.unwrap();
+        let log = SessionLog::new(dir.path(), Places::LIVE, same());
+        log.open(A, ID, Some(&said("make the bass wider", 7)), None);
+        log.request("and darker", vec![], None, 1, None);
+        log.event(&notice("Darker."));
+        // The log as it is now, everything given so far in it.
+        let now = read_log(&log.as_now().await.expect("its log")).unwrap();
+        let to = now.lines.iter().find_map(|line| match line {
+            LogLine::Request(request) => Some(request.at),
+            _ => None,
+        });
+        log.taken_back(to.unwrap());
+        log.close().await;
+        let read = read(&log_file(dir.path(), A, ID));
+        assert!(matches!(read.lines.last(), Some(LogLine::TakenBack { to: marked, .. }) if Some(*marked) == to));
+        assert!(story_of(&read).1.is_empty());
+        // A conversation not kept yet has no log to read.
+        let fresh = SessionLog::new(dir.path(), Places::LIVE, same());
+        fresh.open(A, "mv66me0m0fresh", None, None);
+        assert!(fresh.as_now().await.is_none());
+        fresh.close().await;
+    })
+    .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_conversation_taken_back_to_nothing_begins_its_log_again_with_nothing_from_before() {
+    local(async {
+        let dir = tempfile::tempdir().unwrap();
+        let store = create_conversation_store(dir.path());
+        // Taken up after a restart: its log begins with what was kept, a request and its answer.
+        let asked = [json!({"role":"user","content":"make the bass wider"}), json!({"role":"assistant","content":"Widened."})];
+        store.save(A, ID, &kept(&asked, 1, 7)).await.unwrap();
+        let log = SessionLog::new(dir.path(), Places::LIVE, same());
+        log.open(A, ID, Some(&kept(&asked, 1, 7)), None);
+        log.event(&notice("Before."));
+        // Taken back to nothing: the log lets go of its file, which the store deletes with the conversation.
+        log.emptied();
+        log.written().await;
+        store.delete(A, ID).await.unwrap();
+        // What comes next waits for the conversation's next first save: no line makes the log again from what it had.
+        log.request("sketch a groove", vec![], None, 0, None);
+        log.event(&notice("After."));
+        log.written().await;
+        assert!(!log_file(dir.path(), A, ID).exists());
+        store.save(A, ID, &said("sketch a groove", 9)).await.unwrap();
+        log.saved(ID, 9, 1, None);
+        log.close().await;
+        let read = read(&log_file(dir.path(), A, ID));
+        assert_eq!((read.header.before, kinds(&read)), (0, vec!["request", "event", "saved"]));
+        assert_eq!(notices(&read), ["After."]);
+    })
+    .await;
+}
+
+#[test]
+fn a_change_told_again_later_stays_with_the_request_that_made_it() {
+    use kumi_types::contracts::ChangeState;
+    let lines = vec![
+        asked_at(10, "make the bass wider"),
+        changed("c1", 11, "unsure"),
+        asked_at(20, "and darker"),
+        // Confirmed after the next request began, as a late picture or an /undo would be told.
+        changed("c1", 11, "applied"),
+        changed("c2", 21, "applied"),
+        asked_at(30, "and brighter"),
+        changed("c3", 31, "applied"),
+        LogLine::TakenBack { at: 40, to: 30 },
+        // The change of the request taken back, told again after: still that request's.
+        changed("c3", 31, "undone"),
+    ];
+    let (_, spans) = story_of(&read_log(&written(0, &lines)).unwrap());
+    let changes: Vec<Vec<(&str, ChangeState)>> =
+        spans.iter().map(|span| span.changes.iter().map(|change| (change.id.as_str(), change.state)).collect()).collect();
+    assert_eq!(changes, [vec![("c1", ChangeState::Applied)], vec![("c2", ChangeState::Applied)]]);
 }

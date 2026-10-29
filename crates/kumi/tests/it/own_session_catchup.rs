@@ -48,7 +48,7 @@ fn finish(unified: FinishReasonUnified) -> StreamPart {
     StreamPart::Finish { usage, finish_reason: FinishReason { unified, raw: Some(raw) }, provider_metadata: None }
 }
 
-fn answer(words: &str) -> Vec<StreamPart> {
+pub(crate) fn answer(words: &str) -> Vec<StreamPart> {
     vec![
         StreamPart::TextStart { id: "t".into(), provider_metadata: None },
         StreamPart::TextDelta { id: "t".into(), delta: words.into(), provider_metadata: None },
@@ -57,7 +57,7 @@ fn answer(words: &str) -> Vec<StreamPart> {
     ]
 }
 
-fn call(name: &str, input: Value) -> Vec<StreamPart> {
+pub(crate) fn call(name: &str, input: Value) -> Vec<StreamPart> {
     vec![
         StreamPart::ToolCall(ToolCall {
             tool_call_id: format!("call_{name}_{}", input.to_string().len()),
@@ -71,12 +71,12 @@ fn call(name: &str, input: Value) -> Vec<StreamPart> {
     ]
 }
 
-type Step = Box<dyn Fn(&Recorded) -> Vec<StreamPart>>;
+pub(crate) type Step = Box<dyn Fn(&Recorded) -> Vec<StreamPart>>;
 
 #[derive(Default)]
-struct Recorded {
-    requests: RefCell<Vec<String>>,
-    script: RefCell<VecDeque<Step>>,
+pub(crate) struct Recorded {
+    pub(crate) requests: RefCell<Vec<String>>,
+    pub(crate) script: RefCell<VecDeque<Step>>,
 }
 
 struct Scripted(Rc<Recorded>);
@@ -90,7 +90,7 @@ impl LanguageModel for Scripted {
     }
 }
 
-fn recording(into: Rc<Recorded>) -> KernelFactory {
+pub(crate) fn recording(into: Rc<Recorded>) -> KernelFactory {
     Rc::new(move |options: KernelOptions| {
         let into = into.clone();
         async move {
@@ -192,7 +192,7 @@ fn tool_answer(request: &str, key: &str) -> Option<Value> {
     walk(&serde_json::from_str(request).ok()?, key)
 }
 
-async fn simulator(config: SimulatorConfig, paths: &BridgePaths) -> Simulator {
+pub(crate) async fn simulator(config: SimulatorConfig, paths: &BridgePaths) -> Simulator {
     let mut config = config;
     config.discovery_dir = Some(paths.discovery());
     Simulator::start(config).await.unwrap()

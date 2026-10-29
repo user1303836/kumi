@@ -82,6 +82,13 @@ struct Record {
     /// What `@` offers from the project, and how often it was asked.
     offered: RefCell<Vec<Candidate>>,
     offers: Cell<usize>,
+    /// The changes Kumi made, for their undo.
+    made: RefCell<Vec<ChangeRecord>>,
+    /// The changes the integration was asked to undo, in order, and those it can't (the producer moved them since).
+    undone: RefCell<Vec<String>>,
+    kept: RefCell<Vec<String>>,
+    /// What hears of a change undone, as the app's callback from the integration: the session and the screen.
+    on_change: RefCell<Option<Rc<dyn Fn(ChangeRecord)>>>,
 }
 struct TestKernel {
     record: Rc<Record>,
@@ -233,6 +240,28 @@ impl Integration for TestIntegration {
             return Err(RuntimeError::Aborted);
         }
         Ok(self.record.goal_rig.borrow().clone().ok_or_else(|| "no rig".into()))
+    }
+    fn has_undo(&self) -> bool {
+        true
+    }
+    /// A change Kumi made, undone as asked, and told as the DAW's integration tells it; one the producer moved since
+    /// is kept, and says why.
+    async fn undo(&self, id: Option<&str>, _: Signal) -> Result<ChangeRecord, RuntimeError> {
+        let id = id.unwrap_or("last").to_string();
+        self.record.undone.borrow_mut().push(id.clone());
+        let made = self.record.made.borrow().iter().rev().find(|change| change.id == id).cloned();
+        let mut change = made.ok_or_else(|| RuntimeError::plain("Kumi made no such change."))?;
+        if self.record.kept.borrow().contains(&id) {
+            change.state = ChangeState::Kept;
+            change.note = Some("You changed it since Kumi set it, so Kumi left it.".into());
+        } else {
+            change.state = ChangeState::Undone;
+        }
+        let told = self.record.on_change.borrow().clone();
+        if let Some(told) = told {
+            told(change.clone());
+        }
+        Ok(change)
     }
     fn has_stop_live(&self) -> bool {
         true
@@ -1371,6 +1400,227 @@ local_test!(a_change_shown_again_can_be_undone_only_in_the_session_that_made_it,
     assert!(earlier[0].id.ends_with(":c1"), "{}", earlier[0].id);
     assert_eq!(earlier[0].note.as_deref(), Some("From an earlier session, so Kumi can't undo it now."));
     two.session.close().await.unwrap();
+});
+/// A session that keeps its conversations, with their logs, in `dir`, whose answer to each request makes the changes
+/// `made` gives for its words. A change is told as the app tells one from the integration (the session watches it, and
+/// the screen hears of it through the log in front of it), and so is an undo of one.
+fn takes_back(
+    dir: &std::path::Path,
+    made: fn(&str) -> Vec<ChangeRecord>,
+) -> (Harness, Rc<kumi_agent::core::conversations::FileConversationStore>) {
+    use kumi_agent::core::session_log::SessionLog;
+    let store = create_conversation_store(dir);
+    let log = SessionLog::new(dir, kumi_types::place::Places::LIVE, Rc::new(|text: &str| text.to_owned()));
+    let holder: Rc<RefCell<Option<Rc<dyn Fn(ChangeRecord)>>>> = Rc::default();
+    let tell = holder.clone();
+    let run: Run = Rc::new(move |input, _, emit| {
+        let tell = tell.borrow().clone().unwrap();
+        async move {
+            for change in made(input.split(OBSERVATION_MARKER).next().unwrap()) {
+                tell(change);
+            }
+            emit(KernelEvent::Text { text: "Done.".into() })?;
+            Ok(complete())
+        }
+        .boxed_local()
+    });
+    let h = harness(Some(run), |o| {
+        o.conversations = Some(store.clone());
+        o.on_event = SessionLog::tee(&log, o.on_event.clone());
+        o.log = Some(log.clone());
+    });
+    let (session, record) = (h.session.clone(), h.record.clone());
+    let told: Rc<dyn Fn(ChangeRecord)> = Rc::new(move |change: ChangeRecord| {
+        if change.state == ChangeState::Applied {
+            record.made.borrow_mut().push(change.clone());
+        }
+        session.watch(WatchEvent::Change(change.clone()));
+        log.event(&SessionEvent::Change { change });
+    });
+    *holder.borrow_mut() = Some(told.clone());
+    *h.record.on_change.borrow_mut() = Some(told);
+    (h, store)
+}
+fn asked_in(lines: &[kumi_agent::core::session_log::LogLine]) -> Vec<String> {
+    lines
+        .iter()
+        .filter_map(|line| match line {
+            kumi_agent::core::session_log::LogLine::Request(request) => Some(request.text.clone()),
+            _ => None,
+        })
+        .collect()
+}
+local_test!(taking_requests_back_undoes_their_changes_newest_first_and_carries_on_from_before_them, {
+    use kumi_agent::core::session_log::LogLine;
+    const SET: &str = "abababababababababababababababab";
+    let dir = tempfile::tempdir().unwrap();
+    let (h, store) = takes_back(dir.path(), |asked| match asked {
+        "make the bass wider" => vec![change("c1", "applied", 1)],
+        "and darker" => vec![change("c2", "applied", 2), change("c3", "applied", 3)],
+        _ => vec![],
+    });
+    project(&h, SET);
+    h.session.start().await.unwrap();
+    for asked in ["make the bass wider", "and darker", "and brighter"] {
+        h.session.submit(asked, None).await.unwrap();
+    }
+    saved(store.as_ref(), SET, 3).await;
+    // Newest first, each with its changes as HISTORY has them.
+    let plan = h.session.take_back_plan().await.unwrap();
+    let listed: Vec<(&str, usize)> = plan.iter().map(|asked| (asked.words.as_str(), asked.changes.len())).collect();
+    assert_eq!(listed, [("and brighter", 0), ("and darker", 2), ("make the bass wider", 1)]);
+    assert!(plan[1].changes.iter().all(|change| change.state == ChangeState::Applied));
+    // Taken back to just before "and darker": its changes and every later request's, newest first.
+    let taken = h.session.take_back(plan[1].at).await.unwrap();
+    assert_eq!((taken.requests, taken.words.as_deref(), taken.failed.is_none()), (2, Some("and darker"), true));
+    assert_eq!(taken.undone.iter().map(|change| change.id.as_str()).collect::<Vec<_>>(), ["c3", "c2"]);
+    assert_eq!(*h.record.undone.borrow(), ["c3", "c2"]);
+    // The screen is told, with the conversation as it now stands.
+    let told = h.events.borrow().iter().rev().find_map(|event| match event {
+        SessionEvent::TakenBack { requests, replay } => Some((*requests, replay.clone())),
+        _ => None,
+    });
+    let (requests, replay) = told.expect("the screen is told");
+    assert_eq!((requests, asked_in(&replay.expect("what stands").lines)), (2, vec!["make the bass wider".to_string()]));
+    // The model carries on from before them: the next answer's kernel has the first request alone.
+    h.session.submit("a bit wider still", None).await.unwrap();
+    let last = h.record.created.borrow().len() - 1;
+    assert_eq!(h.words(last).unwrap(), ["make the bass wider"]);
+    h.session.close().await.unwrap();
+    // What's kept is what stands; the log keeps what was taken back too, marked.
+    let kept = saved(store.as_ref(), SET, 2).await;
+    let words: Vec<&str> = kept.conversation.checkpoint.messages.iter().map(|message| message["content"].as_str().unwrap()).collect();
+    assert_eq!(words, ["make the bass wider", "a bit wider still"]);
+    let read = store.log(SET, &kept.id).await.expect("its log");
+    assert_eq!(asked_in(&read.lines), ["make the bass wider", "and darker", "and brighter", "a bit wider still"]);
+    assert!(read.lines.iter().any(|line| matches!(line, LogLine::TakenBack { to, .. } if *to == plan[1].at)));
+});
+local_test!(taking_requests_back_stops_at_the_first_undo_that_fails, {
+    const SET: &str = "acacacacacacacacacacacacacacacac";
+    let dir = tempfile::tempdir().unwrap();
+    let (h, store) = takes_back(dir.path(), |asked| match asked {
+        "make the bass wider" => vec![change("c1", "applied", 1)],
+        "and darker" => vec![change("c2", "applied", 2)],
+        _ => vec![],
+    });
+    project(&h, SET);
+    h.session.start().await.unwrap();
+    for asked in ["make the bass wider", "and darker"] {
+        h.session.submit(asked, None).await.unwrap();
+    }
+    saved(store.as_ref(), SET, 2).await;
+    // The producer moved what the first request changed since: Kumi can't undo that one.
+    h.record.kept.borrow_mut().push("c1".into());
+    let plan = h.session.take_back_plan().await.unwrap();
+    let taken = h.session.take_back(plan[1].at).await.unwrap();
+    // "and darker" went with its change; the first request stays, with the change Kumi couldn't undo, which says why.
+    assert_eq!((taken.requests, taken.words.as_deref()), (1, Some("and darker")));
+    assert_eq!(taken.undone.iter().map(|change| change.id.as_str()).collect::<Vec<_>>(), ["c2"]);
+    let failed = taken.failed.expect("the undo that failed");
+    assert_eq!((failed.id.as_str(), failed.state, failed.note.is_some()), ("c1", ChangeState::Kept, true));
+    let left = h.session.take_back_plan().await.unwrap();
+    assert_eq!(left.iter().map(|asked| asked.words.as_str()).collect::<Vec<_>>(), ["make the bass wider"]);
+    // A request already taken back can't be again.
+    let stale = h.session.take_back(plan[0].at).await.unwrap_err();
+    assert!(stale.message().contains("isn't in this conversation any more"), "{}", stale.message());
+    h.session.close().await.unwrap();
+});
+local_test!(a_change_from_an_earlier_session_stays_as_it_is_when_its_request_is_taken_back, {
+    const SET: &str = "adadadadadadadadadadadadadadadad";
+    let dir = tempfile::tempdir().unwrap();
+    let (one, store) = takes_back(dir.path(), |asked| match asked {
+        "make the bass wider" => vec![change("c1", "applied", 1)],
+        _ => vec![],
+    });
+    project(&one, SET);
+    one.session.start().await.unwrap();
+    one.session.submit("make the bass wider", None).await.unwrap();
+    one.session.close().await.unwrap();
+    saved(store.as_ref(), SET, 1).await;
+    // In the next session it's from an earlier one: listed as Kumi can't undo it, and nothing's asked of the DAW.
+    let (two, _) = takes_back(dir.path(), |_| vec![]);
+    project(&two, SET);
+    two.session.start().await.unwrap();
+    let plan = two.session.take_back_plan().await.unwrap();
+    assert_eq!(plan[0].changes.iter().map(|change| change.state).collect::<Vec<_>>(), [ChangeState::Expired]);
+    let taken = two.session.take_back(plan[0].at).await.unwrap();
+    assert_eq!((taken.requests, taken.undone.len(), taken.failed.is_none()), (1, 0, true));
+    assert!(two.record.undone.borrow().is_empty());
+    two.session.close().await.unwrap();
+});
+local_test!(a_conversation_taken_back_to_nothing_isnt_kept_and_comes_back_as_what_came_after, {
+    const SET: &str = "aeaeaeaeaeaeaeaeaeaeaeaeaeaeaeae";
+    let dir = tempfile::tempdir().unwrap();
+    let (one, store) = takes_back(dir.path(), |_| vec![]);
+    project(&one, SET);
+    one.session.start().await.unwrap();
+    one.session.submit("make the bass wider", None).await.unwrap();
+    saved(store.as_ref(), SET, 1).await;
+    // Its only request taken back: nothing of it is kept, as a conversation never kept.
+    let plan = one.session.take_back_plan().await.unwrap();
+    assert_eq!(one.session.take_back(plan[0].at).await.unwrap().requests, 1);
+    assert!(store.current(SET).await.unwrap().is_none());
+    // The next request keeps it again, with a log from there.
+    one.session.submit("sketch a groove", None).await.unwrap();
+    let kept = saved(store.as_ref(), SET, 1).await;
+    one.session.close().await.unwrap();
+    assert_eq!(asked_in(&store.log(SET, &kept.id).await.expect("its log").lines), ["sketch a groove"]);
+    // Taken up after a restart, it carries on with that alone.
+    let (two, _) = takes_back(dir.path(), |_| vec![]);
+    project(&two, SET);
+    two.session.start().await.unwrap();
+    assert_eq!(two.words(0).unwrap(), ["sketch a groove"]);
+    two.session.close().await.unwrap();
+});
+local_test!(a_conversation_taken_up_after_a_restart_and_taken_back_to_nothing_keeps_nothing_of_it_in_its_next_log, {
+    use kumi_agent::core::session_log::LogLine;
+    const SET: &str = "afafafafafafafafafafafafafafafaf";
+    let dir = tempfile::tempdir().unwrap();
+    let (one, store) = takes_back(dir.path(), |_| vec![]);
+    project(&one, SET);
+    one.session.start().await.unwrap();
+    one.session.submit("make the bass wider", None).await.unwrap();
+    saved(store.as_ref(), SET, 1).await;
+    one.session.close().await.unwrap();
+    // Taken up after a restart (its log goes on from what was kept), then its only request is taken back.
+    let (two, store) = takes_back(dir.path(), |_| vec![]);
+    project(&two, SET);
+    two.session.start().await.unwrap();
+    assert_eq!(two.words(0).unwrap(), ["make the bass wider"]);
+    let plan = two.session.take_back_plan().await.unwrap();
+    assert_eq!(two.session.take_back(plan[0].at).await.unwrap().requests, 1);
+    assert!(store.current(SET).await.unwrap().is_none());
+    // The next request's log begins with it, with nothing of the request taken back.
+    two.session.submit("sketch a groove", None).await.unwrap();
+    let kept = saved(store.as_ref(), SET, 1).await;
+    two.session.close().await.unwrap();
+    let log = store.log(SET, &kept.id).await.expect("its log");
+    let said: Vec<String> = log
+        .lines
+        .iter()
+        .filter_map(|line| match line {
+            LogLine::Message { message, .. } => Some(message.to_string()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!((log.header.before, asked_in(&log.lines)), (0, vec!["sketch a groove".to_owned()]));
+    assert!(said.iter().all(|message| !message.contains("make the bass wider")), "{said:?}");
+    // Taken up again after another restart, it shows that alone.
+    let (three, _) = takes_back(dir.path(), |_| vec![]);
+    project(&three, SET);
+    three.session.start().await.unwrap();
+    let shown: Vec<String> = three
+        .events
+        .borrow()
+        .iter()
+        .find_map(|e| match e {
+            SessionEvent::Resumed { lines, .. } => Some(lines.iter().map(|line| line.text.clone()).collect()),
+            _ => None,
+        })
+        .expect("taken up");
+    assert_eq!(shown.first().map(String::as_str), Some("sketch a groove"), "{shown:?}");
+    assert!(shown.iter().all(|line| !line.contains("make the bass wider")), "{shown:?}");
+    three.session.close().await.unwrap();
 });
 local_test!(earlier_process_changes_expire_without_pictures_and_same_process_keeps_undo, {
     let dir = tempfile::tempdir().unwrap();

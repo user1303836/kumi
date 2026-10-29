@@ -48,6 +48,7 @@ fn everything() -> Now {
         map: true,
         slots: true,
         models: true,
+        take_back: true,
     };
     let fronts = Fronts { voice: true, updates: true, switch_daw: true, willington: true };
     Now { busy: false, goal_running: false, can, fronts }
@@ -72,7 +73,7 @@ fn every_command_has_a_name_of_its_own() {
         }
         assert_eq!(named(command.name).map(|found| found.name), Some(command.name));
     }
-    assert_eq!(COMMANDS.len(), 37);
+    assert_eq!(COMMANDS.len(), 38);
 }
 
 #[test]
@@ -122,6 +123,8 @@ fn each_command_reads_as_its_own_with_its_words() {
         ("/loop", Effect::Loop),
         ("/loop match the reference", Effect::Loop),
         ("/undo", Effect::Undo),
+        ("/takeback", Effect::TakeBack { words: String::new() }),
+        ("/takeback 3", Effect::TakeBack { words: "3".into() }),
         ("/copy", Effect::Copy),
         ("/export", Effect::Export { words: String::new() }),
         ("/export md", Effect::Export { words: "md".into() }),
@@ -193,9 +196,19 @@ fn while_kumi_works_the_rest_wait_for_it_and_these_run() {
     ] {
         assert!(!matches!(run(line, &now), Effect::Refused(_)), "{line} runs while Kumi works");
     }
-    for line in
-        ["/goal a punchier kick", "/loop again", "/undo", "/copy", "/export md", "/share", "/willington", "/refresh", "/new", "/reconnect"]
-    {
+    for line in [
+        "/goal a punchier kick",
+        "/loop again",
+        "/undo",
+        "/takeback",
+        "/copy",
+        "/export md",
+        "/share",
+        "/willington",
+        "/refresh",
+        "/new",
+        "/reconnect",
+    ] {
         let verb = line.split_whitespace().next().unwrap();
         assert_eq!(run(line, &now), Effect::Refused(Why::Busy { verb: verb.into() }), "{line}");
     }

@@ -5,7 +5,7 @@ use super::super::{
 };
 use super::*;
 use crate::text::web_words;
-use kumi_agent::core::session_log::LogLine;
+use kumi_agent::core::session_log::{LogLine, Replay};
 use kumi_ai::failure::reset_words;
 use kumi_common::time::since;
 use kumi_types::errors::FailureKind;
@@ -233,15 +233,7 @@ impl TuiApp {
                 // With its log, its last requests come back as they happened (the words of those from before its log
                 // began first); without one, its words.
                 match replay {
-                    Some(replay) => {
-                        match replay.before {
-                            0 => {}
-                            1 => self.notice("1 earlier message isn't shown.", NoticeTone::Info),
-                            n => self.notice(&format!("{n} earlier messages aren't shown."), NoticeTone::Info),
-                        }
-                        self.resumed_words(replay.earlier);
-                        self.replayed(replay.lines);
-                    }
+                    Some(replay) => self.shown_again(replay),
                     None => self.resumed_words(lines),
                 }
                 let mut state = self.0.state.borrow_mut();
@@ -616,6 +608,20 @@ impl TuiApp {
             }
             // No goal here (none set, or another Set is open): the GOAL tab stops showing the last one.
             SessionEvent::ObjectiveCleared => self.0.state.borrow_mut().objective = None,
+            // Requests taken back: what's shown is the conversation as it now stands, without them.
+            SessionEvent::TakenBack { replay, .. } => {
+                {
+                    let mut state = self.0.state.borrow_mut();
+                    state.transcript.clear();
+                    state.current = None;
+                    state.selection = None;
+                    state.view.follow();
+                }
+                if let Some(replay) = replay {
+                    self.shown_again(replay);
+                }
+                self.0.scheduler.request();
+            }
             SessionEvent::Loop(status) => {
                 let running = status.state == LoopState::Running;
                 if running {
@@ -919,6 +925,17 @@ impl TuiApp {
     fn replaying(&self) -> bool {
         self.0.state.borrow().replaying
     }
+    /// A conversation shown again from its log: how many earlier messages aren't shown, the words of those from before
+    /// its log began, then its last requests as they happened.
+    fn shown_again(&self, replay: Replay) {
+        match replay.before {
+            0 => {}
+            1 => self.notice("1 earlier message isn't shown.", NoticeTone::Info),
+            n => self.notice(&format!("{n} earlier messages aren't shown."), NoticeTone::Info),
+        }
+        self.resumed_words(replay.earlier);
+        self.replayed(replay.lines);
+    }
     /// A kept conversation's words, as a conversation without a log comes back: what the producer asked, and each
     /// answer with the steps its tools took.
     fn resumed_words(&self, lines: Vec<TranscriptLine>) {
@@ -986,7 +1003,7 @@ impl TuiApp {
                     state.pending_turn = true;
                 }
                 LogLine::Event { event, .. } => self.event(event),
-                LogLine::Header(_) | LogLine::Message { .. } | LogLine::Saved { .. } => {}
+                LogLine::Header(_) | LogLine::Message { .. } | LogLine::Saved { .. } | LogLine::TakenBack { .. } => {}
             }
         }
         let mut state = self.0.state.borrow_mut();
