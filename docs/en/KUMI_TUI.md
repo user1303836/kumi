@@ -306,6 +306,7 @@ its undo. They're in English for now.
 | Ctrl-D | Quit, when idle with an empty box |
 | Page Up / Page Down, mouse wheel | Scroll the conversation (the wheel over the tabs scrolls the tab); it stays put while new text arrives. Scrolled up, the top row keeps the request whose answer you're reading (a click goes back to it), and the bottom row counts what came in below |
 | Ctrl-Home / Ctrl-End | The start of the conversation / back to the latest |
+| Ctrl-O | The conversation in detail: each request, what each step was given and gave back (as the full export shows them, steps cut to 12 lines), each answer, and the turn under way. In it, `/` searches (Enter keeps the search, Esc drops it), `n` and `N` go from match to match, `{` and `}` from request to request, `[` prints it into the terminal's scrollback until a key, `v` opens it in your editor (`VISUAL` or `EDITOR`), and `q`, Esc or Ctrl-O closes it |
 | Ctrl-L | Redraw the screen |
 
 **The Live pane**
