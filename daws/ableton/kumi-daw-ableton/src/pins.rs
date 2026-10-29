@@ -1,6 +1,11 @@
 //! Things pointed at in Live or Kumi, validated against the current connection and device tree.
-use super::{more_changes::bars, references::References};
+use super::{
+    more_changes::bars,
+    references::References,
+    set_model::{DeviceNode as ModelDevice, SetModel, TrackNode},
+};
 use kumi_agent::core::contracts::*;
+use kumi_agent::core::references::{Candidate, CandidateKind};
 use kumi_common::js::{json::stringify, number::to_string};
 use kumi_types::contracts::*;
 use regex::Regex;
@@ -171,6 +176,129 @@ pub fn pin_context(pin: &PinnedNode, epoch: Option<f64>, tree: Option<&DeviceTre
         json!("The producer pointed at this in Kumi: \"this\", \"this device\" or \"this group\" in their message means it."),
     );
     row
+}
+/// What the message names with `@` in the Set, told as a pin is, after the words it was named by. A ref of this epoch
+/// is where it was. One from before is found again: a track by its name among the Set's (`model`), a device or chain
+/// in `tree`, its track's device tree read now. Else it's told by its name, to be found before it's acted on.
+pub fn reference_context(
+    reference: &PinnedNode,
+    epoch: Option<f64>,
+    tree: Option<&DeviceTree>,
+    model: &SetModel,
+    book: &mut References,
+) -> JsonObject {
+    let kind = serde_json::to_value(reference.node).unwrap();
+    let kind = kind.as_str().unwrap().to_owned();
+    let now = epoch.map(to_string).unwrap_or_else(|| "undefined".into());
+    let on = reference.track.as_deref().filter(|track| !track.is_empty() && reference.node != PinKind::Track);
+    let named = || {
+        let on = on.map(|track| format!(" on “{track}”")).unwrap_or_default();
+        json!({
+            "gone": format!(
+                "The producer named “{}”{on} with @, and Live's references changed since in a way Kumi couldn't follow: find it by its name before acting on it, and say so.",
+                reference.name
+            ),
+            "name": reference.name,
+            "kind": kind,
+        })
+        .as_object()
+        .unwrap()
+        .clone()
+    };
+    let told = if reference.r#ref.starts_with(&format!("{now}:")) {
+        book.refs.insert(reference.r#ref.clone(), kind.clone());
+        base(reference, book.short_ref(&reference.r#ref), &reference.trail, true)
+    } else if reference.node == PinKind::Track {
+        match model.tracks_named(&reference.name).as_slice() {
+            [track] => {
+                book.refs.insert(track.reference.clone(), kind.clone());
+                base(reference, book.short_ref(&track.reference), &[], true)
+            }
+            _ => named(),
+        }
+    } else {
+        // As a FOCUS pin is found again: in its track's tree as it is now.
+        let found = pin_context(&PinnedNode { live: None, ..reference.clone() }, epoch, tree, book);
+        if found.contains_key("gone") {
+            named()
+        } else {
+            let mut found = found;
+            found.remove("nextTo");
+            found.remove("note");
+            found
+        }
+    };
+    let mut row = JsonObject::new();
+    row.insert("said".into(), json!(format!("@{}", reference.name)));
+    row.extend(told);
+    row
+}
+/// What `@` offers of the Set, from its model as the last look built it (no read of its own): each track, the selected
+/// one first, then what's on it: its devices, and its racks' chains and their devices, named as FOCUS's tree pins them.
+pub fn candidates(model: &SetModel, selected: Option<&str>) -> Vec<Candidate> {
+    let mut tracks: Vec<&TrackNode> = model.tracks.iter().collect();
+    tracks.sort_by_key(|track| Some(track.name.as_str()) != selected);
+    let mut offered = Vec::new();
+    for track in tracks {
+        offered.push(offered_node(track, &track.reference, PinKind::Track, &track.name, &[], &[], None));
+        on_track(track, &track.devices, &[], &mut offered);
+    }
+    offered
+}
+fn on_track(track: &TrackNode, devices: &[ModelDevice], trail: &[String], offered: &mut Vec<Candidate>) {
+    let names: Vec<String> = devices.iter().map(|device| device.name.clone()).collect();
+    for device in devices {
+        let siblings: Vec<String> = names.iter().filter(|name| **name != device.name).cloned().collect();
+        offered.push(offered_node(
+            track,
+            &device.reference,
+            PinKind::Device,
+            &device.name,
+            trail,
+            &siblings,
+            Some(format!("on {}", track.name)),
+        ));
+        for chain in &device.chains {
+            let inside: Vec<String> = trail.iter().cloned().chain([device.name.clone()]).collect();
+            let detail = Some(format!("in {} on {}", device.name, track.name));
+            offered.push(offered_node(track, &chain.reference, PinKind::Chain, &chain.name, &inside, &[], detail));
+            let deeper: Vec<String> = inside.iter().cloned().chain([chain.name.clone()]).collect();
+            on_track(track, &chain.devices, &deeper, offered);
+        }
+    }
+}
+fn offered_node(
+    track: &TrackNode,
+    reference: &str,
+    node: PinKind,
+    name: &str,
+    trail: &[String],
+    siblings: &[String],
+    detail: Option<String>,
+) -> Candidate {
+    let kind = match node {
+        PinKind::Track => CandidateKind::Track,
+        _ => CandidateKind::Device,
+    };
+    Candidate {
+        label: name.to_owned(),
+        kind,
+        detail,
+        reference: Reference::Daw {
+            node: PinnedNode {
+                track_ref: track.reference.clone(),
+                r#ref: reference.to_owned(),
+                node,
+                name: name.to_owned(),
+                trail: trail.to_vec(),
+                siblings: siblings.to_vec(),
+                track: Some(track.name.clone()),
+                live: None,
+                time: None,
+                layout: None,
+            },
+        },
+    }
 }
 fn base(pin: &PinnedNode, reference: String, trail: &[String], include_track: bool) -> JsonObject {
     let mut row = JsonObject::new();
