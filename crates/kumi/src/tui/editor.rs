@@ -1,7 +1,7 @@
 //! The input box: text and cursor, the steps undo takes back, and what the cutting keys cut. Positions count graphemes,
 //! so the cursor never splits a character.
 
-use super::width::{cell_width, graphemes};
+use super::width::{cell_width, graphemes, text_width};
 
 /// How many steps undo keeps, and how much text they may hold between them (each step keeps the whole text).
 const STEPS: usize = 100;
@@ -9,6 +9,14 @@ const STEP_BYTES: usize = 4 << 20;
 /// How many cuts ctrl+y and alt+y can bring back, and how much text they may hold between them.
 const KILLS: usize = 10;
 const KILL_BYTES: usize = 4 << 20;
+/// A paste longer than this many lines, or characters, goes in as one chip.
+const CHIP_LINES: usize = 10;
+const CHIP_CHARACTERS: usize = 1000;
+/// The character the first chip stands as in the text: Unicode's last private use plane, which pasted text doesn't use
+/// (icon fonts take the plane before it).
+const CHIP: u32 = 0x10_0000;
+/// How much of a chip's first line the conversation shows beside it.
+const CHIP_FIRST_LINE: usize = 60;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct EditorLayout {
@@ -37,13 +45,21 @@ enum Run {
     Deleting,
 }
 
-/// A draft set aside, with its cursor and its steps, while the producer looks back through what they sent.
+/// A long paste, kept whole as one character of the box: what was pasted, and what the box shows for it.
+#[derive(Clone, Debug)]
+struct Chip {
+    text: String,
+    label: String,
+}
+
+/// A draft set aside, with its cursor, its steps and its chips, while the producer looks back through what they sent.
 #[derive(Clone, Debug, Default)]
 pub struct Draft {
     chars: Vec<String>,
     position: usize,
     steps: Vec<Step>,
     bytes: usize,
+    chips: Vec<Chip>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -62,6 +78,9 @@ pub struct Editor {
     killing: bool,
     /// The cut ctrl+y (or alt+y) has just put in, which alt+y may swap.
     yanked: Option<usize>,
+    /// The draft's long pastes, by the character each stands as (`CHIP` onwards): kept while the draft is, since a step
+    /// undo takes back may hold one.
+    chips: Vec<Chip>,
 }
 
 fn is_space(grapheme: &str) -> bool {
@@ -103,7 +122,39 @@ impl Editor {
         self.position = 0;
         self.steps.clear();
         self.bytes = 0;
+        self.chips.clear();
         self.moved();
+    }
+
+    /// A paste: one longer than 10 lines or 1,000 characters goes in as one chip, `[pasted 41 lines]`, which backspace
+    /// takes out whole and which is sent as all it holds; a shorter one as its text. One step either way.
+    pub fn paste(&mut self, text: &str) {
+        if text.is_empty() {
+            return;
+        }
+        self.change(None);
+        self.put_pasted(text);
+    }
+
+    /// The text with each chip's whole paste in its place: what's sent.
+    pub fn expanded(&self) -> String {
+        self.whole(&self.chars)
+    }
+
+    /// The text with each chip as its label and the start of its first line: what the conversation shows.
+    pub fn shown(&self) -> String {
+        self.chars
+            .iter()
+            .map(|grapheme| match self.chip(grapheme) {
+                Some((chip, rest)) => {
+                    let first = chip.text.lines().map(str::trim).find(|line| !line.is_empty()).unwrap_or("");
+                    let start: String = first.chars().take(CHIP_FIRST_LINE).collect();
+                    let more = if start.len() < first.len() { "…" } else { "" };
+                    format!("{} {start}{more}{rest}", chip.label)
+                }
+                None => grapheme.clone(),
+            })
+            .collect()
     }
 
     /// Empties the box as a step undo can take back.
@@ -210,7 +261,7 @@ impl Editor {
             return false;
         };
         self.change(None);
-        self.put(&cut);
+        self.put_pasted(&cut);
         self.yanked = Some(self.kills.len() - 1);
         true
     }
@@ -229,7 +280,7 @@ impl Editor {
         self.chars = graphemes(&text).into_iter().map(str::to_string).collect();
         self.position = position;
         let cut = self.kills[at].clone();
-        self.put(&cut);
+        self.put_pasted(&cut);
         self.yanked = Some(at);
         true
     }
@@ -254,6 +305,7 @@ impl Editor {
             position: self.position,
             steps: std::mem::take(&mut self.steps),
             bytes: std::mem::take(&mut self.bytes),
+            chips: std::mem::take(&mut self.chips),
         };
         self.position = self.chars.len();
         self.moved();
@@ -265,6 +317,7 @@ impl Editor {
         self.position = draft.position;
         self.steps = draft.steps;
         self.bytes = draft.bytes;
+        self.chips = draft.chips;
         self.moved();
     }
 
@@ -324,7 +377,8 @@ impl Editor {
         let joins = self.killing;
         let forward = start == self.position;
         self.change(None);
-        let cut = self.chars[start..end].concat();
+        // A chip is cut as all it holds: the ring outlives the draft its chips belong to.
+        let cut = self.whole(&self.chars[start..end]);
         self.splice(start, end, "");
         match self.kills.last_mut() {
             Some(last) if joins => {
@@ -345,6 +399,42 @@ impl Editor {
     /// Puts `text` in at the cursor and moves past it.
     fn put(&mut self, text: &str) {
         self.splice(self.position, self.position, text);
+    }
+
+    /// Puts a paste in at the cursor: as one chip when it's long (see `paste`).
+    fn put_pasted(&mut self, text: &str) {
+        let (lines, characters) = (text.lines().count(), text.chars().count());
+        let mark = char::from_u32(CHIP + self.chips.len() as u32).filter(|mark| (*mark as u32) <= 0x10_fffd);
+        match mark.filter(|_| lines > CHIP_LINES || characters > CHIP_CHARACTERS) {
+            Some(mark) => {
+                let label = if lines > 1 { format!("[pasted {lines} lines]") } else { format!("[pasted {characters} characters]") };
+                self.chips.push(Chip { text: text.to_string(), label });
+                self.put(&mark.to_string());
+            }
+            None => self.put(text),
+        }
+    }
+
+    /// The chip a character of the box stands for, and what was typed after it in the same character (a mark).
+    fn chip<'a>(&'a self, grapheme: &'a str) -> Option<(&'a Chip, &'a str)> {
+        let first = grapheme.chars().next()?;
+        let at = (first as u32).checked_sub(CHIP)? as usize;
+        self.chips.get(at).map(|chip| (chip, &grapheme[first.len_utf8()..]))
+    }
+
+    /// Characters of the box with each chip's whole paste in its place.
+    fn whole(&self, graphemes: &[String]) -> String {
+        let mut text = String::new();
+        for grapheme in graphemes {
+            match self.chip(grapheme) {
+                Some((chip, rest)) => {
+                    text.push_str(&chip.text);
+                    text.push_str(rest);
+                }
+                None => text.push_str(grapheme),
+            }
+        }
+        text
     }
 
     /// Replaces characters `from..to` with `text`, leaving the cursor just after it. The text stays split into the
@@ -407,13 +497,17 @@ impl Editor {
                 column = 0;
                 continue;
             }
-            let cells = cell_width(character);
+            // A chip shows as its label.
+            let (shown, cells) = match self.chip(character) {
+                Some((chip, _)) => (chip.label.as_str(), text_width(&chip.label)),
+                None => (character.as_str(), cell_width(character)),
+            };
             if column + cells > width {
                 rows.push(String::new());
                 column = 0;
             }
             places.push(Place { row: rows.len() - 1, column });
-            rows.last_mut().expect("a row").push_str(character);
+            rows.last_mut().expect("a row").push_str(shown);
             column += cells;
         }
         if column >= width {

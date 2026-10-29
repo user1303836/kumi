@@ -143,7 +143,8 @@ impl TuiApp {
         if typed {
             state.editor.type_text(&clean);
         } else {
-            state.editor.insert(&clean);
+            // A long paste goes in as one chip.
+            state.editor.paste(&clean);
         }
         state.menu_dismissed = false;
     }
@@ -662,10 +663,12 @@ impl TuiApp {
     /// The composer's words as they leave it, cleaned again as one text: what each keystroke or paste added was cleaned
     /// alone, and a run of variation selectors split between two reads is only one run here.
     fn composed(&self) -> String {
-        sanitize_text(&self.0.state.borrow().editor.text(), &[])
+        sanitize_text(&self.0.state.borrow().editor.expanded(), &[])
     }
     pub(super) async fn submit(&self) -> Result<(), RuntimeError> {
         let raw = self.composed();
+        // The conversation shows a long paste as its chip and the start of its first line; the model gets all of it.
+        let shown = self.0.state.borrow().editor.shown();
         let command = string::trim(&raw);
         if command.is_empty() {
             return Ok(());
@@ -1217,7 +1220,7 @@ impl TuiApp {
             );
             Ok(())
         } else {
-            let text = string::trim(&self.clean(&raw, usize::MAX)).to_string();
+            let text = string::trim(&self.clean(&shown, usize::MAX)).to_string();
             {
                 let mut state = self.0.state.borrow_mut();
                 state.transcript.add(Entry::User { text });
@@ -1247,7 +1250,7 @@ impl TuiApp {
     fn erase_draft(&self) {
         let (text, shown) = {
             let state = self.0.state.borrow();
-            (state.editor.text(), state.recall.as_ref().map(|(index, _)| *index))
+            (state.editor.expanded(), state.recall.as_ref().map(|(index, _)| *index))
         };
         if let Some(history) = &self.0.options.history {
             let unchanged = shown.is_some_and(|index| history.borrow().entries().get(index) == Some(&text));

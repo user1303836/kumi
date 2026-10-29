@@ -119,13 +119,13 @@ fn the_kill_ring_holds_at_most_four_megabytes_of_cuts() {
         e.set(&format!("{name}{long}"));
         e.kill_to_start();
     }
-    // Three cuts would hold 4.5 MB: the oldest goes.
+    // Three cuts would hold 4.5 MB: the oldest goes. (Each comes back as a chip, as a long paste does.)
     assert!(e.yank());
-    assert!(e.text().starts_with("three"));
+    assert!(e.expanded().starts_with("three"));
     assert!(e.yank_earlier());
-    assert!(e.text().starts_with("two"));
+    assert!(e.expanded().starts_with("two"));
     assert!(e.yank_earlier());
-    assert!(e.text().starts_with("three"), "one was let go");
+    assert!(e.expanded().starts_with("three"), "one was let go");
 }
 
 #[test]
@@ -581,3 +581,79 @@ async fn the_editor_is_found_through_pathext_and_runs_on_the_file() {
     assert!(status.success());
     assert_eq!(std::fs::read_to_string(&file).unwrap().trim(), "edited");
 }
+
+#[test]
+fn a_long_paste_is_one_chip_that_goes_out_whole_and_is_sent_whole() {
+    let mut e = Editor::new();
+    let log: String = (1..=41).map(|i| format!("line {i} of the log\n")).collect();
+    typed(&mut e, "look at this: ");
+    e.paste(&log);
+    typed(&mut e, " thanks");
+    assert_eq!(e.expanded(), format!("look at this: {log} thanks"));
+    assert_eq!(e.shown(), "look at this: [pasted 41 lines] line 1 of the log thanks");
+    // The box shows the chip's label, and the cursor counts it.
+    let layout = e.layout(80);
+    assert_eq!(layout.rows, ["look at this: [pasted 41 lines] thanks"]);
+    assert_eq!(layout.cursor_column, 38);
+    // Backspace takes the chip out whole; undo brings it back.
+    for _ in 0..8 {
+        e.backspace();
+    }
+    assert_eq!(e.expanded(), "look at this: ");
+    assert!(e.undo());
+    assert_eq!(e.expanded(), format!("look at this: {log} thanks"));
+    // A short paste is its text; one long line is a chip of characters.
+    let mut e = Editor::new();
+    e.paste("two\nlines");
+    assert_eq!(e.shown(), "two\nlines");
+    e.paste(&"x".repeat(1200));
+    assert_eq!(e.layout(200).rows, ["two", "lines[pasted 1200 characters]"]);
+    // Cut, a chip goes onto the ring as all it holds, and comes back as a chip.
+    e.kill_to_start();
+    assert_eq!(e.expanded(), "two\n");
+    assert!(e.yank());
+    assert_eq!(e.expanded(), format!("two\nlines{}", "x".repeat(1200)));
+    assert_eq!(e.layout(200).rows, ["two", "[pasted 1205 characters]"]);
+    // Set aside and brought back, a draft keeps its chips.
+    let draft = e.show("an earlier message");
+    assert_eq!(e.expanded(), "an earlier message");
+    e.restore(draft);
+    assert_eq!(e.expanded(), format!("two\nlines{}", "x".repeat(1200)));
+    // Sent, the next draft starts with no chips.
+    e.clear();
+    e.paste("short");
+    assert_eq!(e.shown(), "short");
+}
+
+#[test]
+fn a_two_thousand_line_paste_is_one_chip_and_typing_after_it_stays_fast() {
+    let mut e = Editor::new();
+    let paste: String = (0..2000).map(|i| format!("{i}: the bass sits under the kick\n")).collect();
+    e.paste(&paste);
+    assert_eq!(e.layout(80).rows, ["[pasted 2000 lines]"]);
+    let started = Instant::now();
+    typed(&mut e, &"a".repeat(100));
+    let took = started.elapsed();
+    assert!(took < Duration::from_millis(16), "{took:?}");
+    assert_eq!(e.expanded(), paste + &"a".repeat(100));
+}
+
+case!(a_long_paste_shows_as_a_chip_and_is_sent_whole, async {
+    let h = Harness::new(120, 36);
+    h.start().await;
+    h.connect();
+    let log: String = (1..=41).map(|i| format!("error {i}: the bus clipped\n")).collect();
+    h.type_text("why is this happening ").await;
+    h.type_text(&format!("\x1b[200~{log}\x1b[201~")).await;
+    assert!(has(&composer(&h), "why is this happening [pasted 41 lines]"));
+    // Backspace takes the chip out whole; ctrl+- brings it back.
+    h.type_text("\x7f").await;
+    assert!(!has(&composer(&h), "[pasted"));
+    h.type_text("\x1f").await;
+    assert!(has(&composer(&h), "[pasted 41 lines]"));
+    h.type_text("\r").await;
+    // The model gets all of it; the conversation shows the chip and the start of its first line.
+    assert!(h.calls().contains(&format!("submit:why is this happening {log}")), "{:?}", h.calls());
+    h.has("why is this happening [pasted 41 lines] error 1: the bus clipped");
+    h.close().await;
+});
