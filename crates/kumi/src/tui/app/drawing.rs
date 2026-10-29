@@ -781,11 +781,19 @@ impl TuiApp {
                 .iter()
                 .map(|item| (item.candidate.label.as_str(), Some(item.candidate.about.clone()).filter(|about| !about.is_empty())))
                 .collect(),
+            // What `@` names: its name, then what it is in the DAW's words and where it is.
+            Menu::References { rows, .. } => rows
+                .iter()
+                .map(|row| {
+                    let detail = row.detail.as_deref().map(|detail| format!(" · {detail}")).unwrap_or_default();
+                    (row.label.as_str(), Some(format!("{}{detail}", kind_word(row.kind))))
+                })
+                .collect(),
         };
-        let words = matches!(menu, Menu::Words { .. });
+        let words = matches!(menu, Menu::Words { .. } | Menu::References { .. });
         let longest = match menu {
             Menu::Commands(_) => kumi_agent::core::commands::COMMANDS.iter().map(|c| c.name.len()).max().unwrap_or(0) as i32,
-            Menu::Words { .. } => rows.iter().map(|(label, _)| text_width(label)).max().unwrap_or(0).min(28),
+            Menu::Words { .. } | Menu::References { .. } => rows.iter().map(|(label, _)| text_width(label)).max().unwrap_or(0).min(28),
         };
         let about = 3 + longest + 2;
         let area = Rect::new(1, top - 1, width, shown as i32 + 1);
@@ -813,5 +821,26 @@ impl TuiApp {
                 screen.put(width - text_width(&more), y, &more, &st::FAINT);
             }
         }
+    }
+}
+
+/// What a thing `@` names is, in the DAW's words: its devices are "FX" in REAPER and "DSP" in Renoise.
+fn kind_word(kind: kumi_agent::core::references::CandidateKind) -> String {
+    use kumi_agent::core::references::CandidateKind;
+    match kind {
+        CandidateKind::Track => "track".into(),
+        CandidateKind::Device => {
+            let word = (crate::daw::view().heading)(kumi_agent::core::view::BodyKind::Tree);
+            if word.chars().all(|letter| letter.is_uppercase()) {
+                word.into()
+            } else {
+                word.to_lowercase()
+            }
+        }
+        CandidateKind::Instrument => "instrument".into(),
+        CandidateKind::Clip => "clip".into(),
+        CandidateKind::Sample => "sound".into(),
+        CandidateKind::Palette => "palette".into(),
+        CandidateKind::Technique => "technique".into(),
     }
 }

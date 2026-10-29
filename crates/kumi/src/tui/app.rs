@@ -298,6 +298,12 @@ struct Aside {
     /// The producer stopped it (closing its panel, or quitting).
     stopped: bool,
 }
+/// `@` being typed at the cursor: what follows it (`query`), the ask it was sent in, and what the session answered.
+struct Naming {
+    query: String,
+    asked: u64,
+    rows: Vec<kumi_agent::core::references::Candidate>,
+}
 #[derive(Clone)]
 struct Held {
     /// What the session gets: each chip's whole paste in its place.
@@ -445,8 +451,8 @@ struct State {
     menu_chosen: Option<String>,
     /// The words the line's command takes for the word being typed, once read (the menu asks once).
     offers: complete::Offers,
-    /// Which list the `/` menu shows (none: the commands; else the line before the word whose candidates it lists): a new
-    /// one starts at its first row.
+    /// Which list the menu shows (none: the commands; else the line before the word whose candidates it lists, or for
+    /// `@`'s, where its `@` is): a new one starts at its first row.
     menu_list: Option<String>,
     started: bool,
     closing: bool,
@@ -494,6 +500,10 @@ struct State {
     search: Option<composer::Search>,
     /// ctrl+s: a draft put aside, with its files.
     stash: Option<composer::Stash>,
+    /// `@` being typed at the cursor: what follows it, and what the session last said it names.
+    references: Option<Naming>,
+    /// How many times the session was asked what `@` names: an answer to an older ask is dropped.
+    reference_asks: u64,
     last_sent: Option<String>,
     /// The last message sent, as the box held it: the session handing it back puts its chips back too.
     last_words: Option<Composed>,
@@ -679,6 +689,8 @@ impl State {
             recall: None,
             search: None,
             stash: None,
+            references: None,
+            reference_asks: 0,
             last_sent: None,
             last_words: None,
             sending_held: None,

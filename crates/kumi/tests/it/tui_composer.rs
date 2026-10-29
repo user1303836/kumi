@@ -868,3 +868,139 @@ case!(a_held_message_handed_back_by_the_session_comes_back_once, async {
     assert!(!has(&rows, "error 2"), "{rows:?}");
     h.close().await;
 });
+
+fn drums() -> kumi_agent::core::contracts::Reference {
+    use kumi_agent::core::contracts::{PinKind, PinnedNode, Reference};
+    Reference::Daw {
+        node: PinnedNode {
+            track_ref: "1:track:0".into(),
+            r#ref: "1:track:0".into(),
+            node: PinKind::Track,
+            name: "Drums".into(),
+            trail: vec![],
+            siblings: vec![],
+            track: Some("Drums".into()),
+            live: None,
+            time: None,
+            layout: None,
+        },
+    }
+}
+
+// W5-5: what's named with @ goes into the box as one chip, `@Drums` and a space after it, in place of the @ and what
+// was typed after it. Backspace takes it out whole, undo brings the words back, and the message carries the reference.
+#[test]
+fn a_reference_is_one_chip_in_the_box_and_goes_with_the_message() {
+    let mut box_ = Editor::new();
+    typed(&mut box_, "make @dr");
+    assert_eq!(box_.at_query(), Some((3, "dr".to_string())));
+    box_.insert_reference(3, "@Drums", drums());
+    assert_eq!(box_.layout(80).rows, ["make @Drums "]);
+    assert_eq!(box_.expanded(), "make @Drums ");
+    assert_eq!(box_.shown(), "make @Drums ");
+    assert_eq!(box_.references(), [drums()]);
+    assert_eq!(box_.at_query(), None, "the chip ends what's being named");
+    // Kept with a held message, it comes back a chip, still naming Drums.
+    let held = box_.composed();
+    assert_eq!(held.references(), [drums()]);
+    let mut other = Editor::new();
+    other.put_back(&[held.clone()]);
+    assert_eq!(other.references(), [drums()]);
+    // Brought back by ↑, it's words: to be named again, and fresh.
+    let words = held.without_references();
+    assert!(words.references().is_empty() && words.expanded() == "make @Drums " && !words.has_chips());
+    // Backspace takes the space, then the chip whole; undo brings it back.
+    box_.backspace();
+    box_.backspace();
+    assert_eq!(box_.expanded(), "make ");
+    assert!(box_.references().is_empty());
+    assert!(box_.undo());
+    assert_eq!(box_.references(), [drums()]);
+}
+
+#[test]
+fn an_at_names_something_only_at_the_start_or_after_a_space() {
+    let at = |text: &str| {
+        let mut box_ = Editor::new();
+        typed(&mut box_, text);
+        box_.at_query()
+    };
+    assert_eq!(at("@"), Some((1, String::new())));
+    assert_eq!(at("send @Big"), Some((4, "Big".to_string())));
+    assert_eq!(at("mail me@home"), None, "an address isn't a reference");
+    assert_eq!(at("@drums and"), None, "a space ends it");
+}
+
+// W5-5: while @ is being typed, the session is asked what it names as what follows it changes, once each.
+case!(typing_an_at_asks_the_session_what_it_names_as_the_words_change, async {
+    let h = Harness::new(120, 36);
+    h.start().await;
+    h.connect();
+    for typed in ["send ", "@", "d", "r"] {
+        h.type_text(typed).await;
+    }
+    delay(5).await;
+    let asked: Vec<String> = h.calls().into_iter().filter(|call| call.starts_with("references:")).collect();
+    assert_eq!(asked, ["references:", "references:d", "references:dr"]);
+    // A space ends it: nothing more is asked.
+    h.type_text(" now").await;
+    delay(5).await;
+    assert_eq!(h.calls().iter().filter(|call| call.starts_with("references:")).count(), 3, "{:?}", h.calls());
+    h.close().await;
+});
+
+// W5-5: @ lists what it names, as the session ranked it, with what each is and where. Tab puts the one chosen in as a
+// chip, `@Drums`, and the message goes with exactly that reference; Enter on the list puts one in without sending; esc
+// closes the list.
+case!(at_lists_what_it_names_and_the_one_chosen_goes_with_the_message, async {
+    let c = Rc::new(Control::default());
+    let row = |label: &str, at: &str, detail: Option<&str>| {
+        let mut row = serde_json::json!({
+            "label": label,
+            "kind": "track",
+            "reference": {"kind": "daw", "node": {"trackRef": at, "ref": at, "node": "track", "name": label, "trail": [], "siblings": [], "track": label}},
+        });
+        if let Some(detail) = detail {
+            row["detail"] = serde_json::json!(detail);
+        }
+        row
+    };
+    *c.extra.borrow_mut() =
+        serde_json::json!({"references": [row("Drums", "1:track:0", None), row("Drum Bus", "1:track:1", Some("the group"))]});
+    let h = Harness::with(120, 36, c.clone(), |_| {});
+    h.start().await;
+    h.connect();
+    for typed in ["send ", "@", "d", "r"] {
+        h.type_text(typed).await;
+    }
+    delay(5).await;
+    h.has("track · the group");
+    h.type_text("\t").await;
+    assert!(has(&composer(&h), "send @Drums "), "{:?}", composer(&h));
+    h.type_text("louder\r").await;
+    let sent: Vec<String> = h.calls().into_iter().filter(|call| call.starts_with("references-sent:")).collect();
+    assert_eq!(sent.len(), 1, "{:?}", h.calls());
+    assert!(sent[0].contains("\"name\":\"Drums\"") && !sent[0].contains("Drum Bus"), "{}", sent[0]);
+    assert!(h.calls().contains(&"submit:send @Drums louder".to_string()), "{:?}", h.calls());
+    // Enter on the list puts the one chosen in, and sends nothing yet.
+    for typed in ["@", "d"] {
+        h.type_text(typed).await;
+    }
+    delay(5).await;
+    h.type_text("\x1b[B").await;
+    h.type_text("\r").await;
+    assert!(has(&composer(&h), "@Drum Bus "), "{:?}", composer(&h));
+    assert_eq!(h.calls().iter().filter(|call| call.starts_with("submit:")).count(), 1, "{:?}", h.calls());
+    // Another @ is a list of its own, and starts at its first row.
+    h.type_text("@").await;
+    delay(5).await;
+    h.type_text("\t").await;
+    assert!(has(&composer(&h), "@Drum Bus @Drums "), "{:?}", composer(&h));
+    // Esc closes the list.
+    h.type_text("@").await;
+    delay(5).await;
+    h.has("track · the group");
+    h.type_text("\x1b").await;
+    h.wait_until_hidden("track · the group").await;
+    h.close().await;
+});

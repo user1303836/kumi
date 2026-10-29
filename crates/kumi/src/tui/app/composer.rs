@@ -193,10 +193,18 @@ impl TuiApp {
                 (Ok(0), Ok(saved)) => {
                     // An editor ends a file with a new line; the draft didn't have one.
                     let saved = saved.strip_suffix('\n').map(|text| text.strip_suffix('\r').unwrap_or(text)).unwrap_or(&saved);
-                    let state = &mut *app.0.state.borrow_mut();
-                    back_to_draft(state);
-                    state.editor.set(&sanitize_text(saved, &[]));
-                    state.menu_dismissed = true;
+                    let named = {
+                        let state = &mut *app.0.state.borrow_mut();
+                        let named = !state.editor.references().is_empty();
+                        back_to_draft(state);
+                        state.editor.set(&sanitize_text(saved, &[]));
+                        state.menu_dismissed = true;
+                        named
+                    };
+                    // What the draft named with @ went to the editor as words, and comes back so.
+                    if named {
+                        app.notice("What you named with @ came back from the editor as words: name it again with @ to send it exactly.", NoticeTone::Info);
+                    }
                 }
                 (Ok(0), Err(error)) => app.notice(&format!("Kumi couldn't read the draft back: {error}"), NoticeTone::Warn),
                 // The shell's words for a command it can't find, or can't run.

@@ -14,8 +14,18 @@ use kumi_agent::core::commands::{self, Command, Effect, Now, Why};
 use kumi_agent::core::protocol::{too_long_words, MAX_MESSAGE};
 use std::task::{Context, Poll};
 
+/// What the menu chose, into the box: the line as it now reads, or a chip for what `@` names.
+fn put_in(editor: &mut Editor, insert: super::complete::Insert) {
+    match insert {
+        super::complete::Insert::Text(line) => editor.set(&line),
+        super::complete::Insert::Chip { count, label, reference } => editor.insert_reference(count, &label, reference),
+    }
+}
+
 /// How many messages sent with chips are kept, by their history entry, for ↑ to bring back as chips.
 const SENT_WORDS_KEPT: usize = 20;
+/// How many things `@` lists at most, best first.
+const REFERENCE_ROWS: u32 = 50;
 
 impl TuiApp {
     pub(super) fn on_input(&self, event: InputEvent) {
@@ -146,6 +156,7 @@ impl TuiApp {
         }
         // The producer may have finished what they were in the middle of: a job's answer can start.
         self.maybe_carry_on();
+        self.follow_references();
         self.0.scheduler.request();
     }
     /// Whether a key is voice.talk's where the keyboard is: in the panel open, or where it is outside the panels.
@@ -181,6 +192,41 @@ impl TuiApp {
         } else {
             Scope::Box
         }
+    }
+    /// The `@` being typed at the cursor: as what follows it changes, the session is asked what it names, and the newest
+    /// answer is kept (an older one coming late is dropped). Gone once the cursor isn't in one.
+    pub(super) fn follow_references(&self) {
+        let at = {
+            let state = self.0.state.borrow();
+            if state.search.is_some() {
+                None
+            } else {
+                state.editor.at_query()
+            }
+        };
+        let Some((_, query)) = at else {
+            self.0.state.borrow_mut().references = None;
+            return;
+        };
+        let asked = {
+            let mut state = self.0.state.borrow_mut();
+            if state.references.as_ref().is_some_and(|named| named.query == query) {
+                return;
+            }
+            state.reference_asks += 1;
+            let asked = state.reference_asks;
+            let rows = state.references.take().map(|named| named.rows).unwrap_or_default();
+            state.references = Some(Naming { query: query.clone(), asked, rows });
+            asked
+        };
+        self.task(move |app| async move {
+            let rows = app.session().op(op::References { query, limit: REFERENCE_ROWS }).await.unwrap_or_default();
+            if let Some(named) = app.0.state.borrow_mut().references.as_mut().filter(|named| named.asked == asked) {
+                named.rows = rows;
+            }
+            app.0.scheduler.request();
+            Ok(())
+        });
     }
     /// Words typed or pasted into the box, at the cursor. A run of typing is one step to undo; a paste is one of its own.
     pub(super) fn type_into_box(&self, text: &str, typed: bool) {
@@ -429,7 +475,7 @@ impl TuiApp {
                 let menu = self.menu();
                 let mut state = self.0.state.borrow_mut();
                 let fill = menu.fill(state.menu_index);
-                state.editor.set(&fill);
+                put_in(&mut state.editor, fill);
             }
             "menu.run" => {
                 let menu = self.menu();
@@ -439,8 +485,8 @@ impl TuiApp {
                     let chosen = state.menu_chosen.as_deref() == Some(typed.as_str());
                     // What the producer didn't name (a command found by what it does, a word only partly typed) Enter puts
                     // in the box, as tab does, unless they chose it with ↑↓.
-                    let (line, runs) = menu.enter(state.menu_index, &typed, chosen);
-                    state.editor.set(&line);
+                    let (insert, runs) = menu.enter(state.menu_index, &typed, chosen);
+                    put_in(&mut state.editor, insert);
                     if !runs {
                         return true;
                     }
@@ -705,12 +751,17 @@ impl TuiApp {
             return;
         }
         let Some(entry) = history.borrow().entries().last().cloned() else { return };
+        // What it named with @ comes back as words, to be named again, and fresh.
+        let words = words.without_references();
+        if !words.has_chips() {
+            return;
+        }
         let mut state = self.0.state.borrow_mut();
         state.sent_words.retain(|(kept, _)| *kept != entry);
         if state.sent_words.len() >= SENT_WORDS_KEPT {
             state.sent_words.remove(0);
         }
-        state.sent_words.push((entry, words.clone()));
+        state.sent_words.push((entry, words));
     }
     /// Whether a message is past what the session takes at once: then it's said so, and the box keeps it.
     fn too_long(&self, raw: &str) -> bool {
@@ -1301,7 +1352,7 @@ impl TuiApp {
                 if self.instant(&raw).await {
                     return Ok(());
                 }
-                self.send(&raw).await;
+                self.send_naming(&raw, words.references()).await;
                 return Ok(());
             }
         }
@@ -1416,6 +1467,10 @@ impl TuiApp {
         true
     }
     pub(super) async fn send(&self, raw: &str) -> bool {
+        self.send_naming(raw, vec![]).await
+    }
+    /// `send`, with what the message names with `@`.
+    pub(super) async fn send_naming(&self, raw: &str, references: Vec<Reference>) -> bool {
         let (pinned, attachments) = {
             let mut state = self.0.state.borrow_mut();
             if state.closing {
@@ -1426,7 +1481,7 @@ impl TuiApp {
             (state.pinned.as_ref().map(|p| p.pin.clone()), std::mem::take(&mut state.attachments))
         };
         self.0.scheduler.request();
-        let sent = self.session().op(op::Submit { input: raw.into(), pinned, attachments: attachments.clone(), references: vec![] }).await;
+        let sent = self.session().op(op::Submit { input: raw.into(), pinned, attachments: attachments.clone(), references }).await;
         if let Err(error) = sent {
             // Files that didn't go stay, to change or send again.
             let mut state = self.0.state.borrow_mut();

@@ -1,17 +1,17 @@
   Kumi  ·  Night Drive                                                                                          ● Live
 
                                                                                   FOCUS
-   Keys and commands                                                ↑ 74 more     Night Drive
+   Keys and commands                                                ↑ 77 more     Night Drive
                                                                                   Your selection will show here
-     ctrl+c              Stop Kumi; when it isn't working, clear the box (↑
-                         or ctrl+- brings the words back), then quit
-     ctrl+d              Quit, from an empty box while Kumi isn't working         NOW
-     /undo               Undo Kumi's last change; undo at the end of a            Ready
+     /undo               Undo Kumi's last change; undo at the end of a
                          HISTORY row takes back that one
-
-   Commands
+                                                                                  NOW
+   Commands                                                                       Ready
      /                   Commands and their words: ↑↓ choose, tab completes,
                          enter runs, esc closes
+     @                   Name a track, a device, a sound, a palette or a
+                         technique exactly: ↑↓ choose, tab or enter puts it
+                         in, esc closes
      ?                   This help, from an empty box
      /new                Start a fresh conversation (the last one is kept);
                          /new <name> names it
