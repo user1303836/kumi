@@ -785,7 +785,8 @@ impl InProcess {
             | Op::SignOut(_)
             | Op::SignInChatgpt(_)
             | Op::MissingModel(_)) => {
-                // Should this list and models_answer's part, a request the controls don't answer is "Not available": no panic.
+                // If this list and models_answer's ever part ways, a request the controls don't answer is "Not available", not a
+                // panic.
                 return models_answer(&op, session.model_controls(), &self.side)
                     .await
                     .unwrap_or_else(|| Err(RuntimeError::plain("Not available")));
