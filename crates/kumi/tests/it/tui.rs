@@ -466,7 +466,8 @@ fn text_streaming_under_a_header_moves_its_band_and_writes_only_the_row_that_cam
         let output = renderer.frame(&next, None);
         vt.write(&output);
         same_as_screen(&vt, &next);
-        assert!(output.contains("\u{1b}[3;17r\u{1b}[3;1H\u{1b}[1M\u{1b}[r"), "{output:?}");
+        // The row coming in comes in on the band's background, set before the move.
+        assert!(output.contains("\u{1b}[0;48;2;14;15;18m\u{1b}[3;17r\u{1b}[3;1H\u{1b}[1M\u{1b}[r"), "{output:?}");
         assert_eq!(output.matches("line ").count(), 1, "only the row that came in: {output:?}");
         assert!(output.len() < 200, "{} bytes", output.len());
     }
@@ -477,6 +478,14 @@ fn text_streaming_under_a_header_moves_its_band_and_writes_only_the_row_that_cam
     vt.write(&output);
     same_as_screen(&vt, &next);
     assert!(output.contains("\u{1b}[4M"), "{output:?}");
+    // Where blanks aren't erased in the colours set, the rows come in on the terminal's own.
+    let mut plain = Renderer::new(ColorDepth::Truecolor).erasing(false);
+    let mut vt = VirtualTerminal::new(width, height);
+    vt.write(&plain.frame(&frame(0), None));
+    let output = plain.frame(&frame(1), None);
+    vt.write(&output);
+    same_as_screen(&vt, &frame(1));
+    assert!(output.contains("\u{1b}[0m\u{1b}[3;17r"), "{output:?}");
 }
 
 #[test]

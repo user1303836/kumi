@@ -42,9 +42,9 @@ struct Frame {
 }
 
 impl Frame {
-    /// Rows `top` to `bottom` moved up `by`, as the terminal moves them: the rows they leave are blank, in the
-    /// terminal's own colours.
-    fn scroll(&mut self, top: usize, bottom: usize, by: usize) {
+    /// Rows `top` to `bottom` moved up `by`, as the terminal moves them: the rows they leave are blank, in style `fill`
+    /// (a background, or the terminal's own colours).
+    fn scroll(&mut self, top: usize, bottom: usize, by: usize, fill: u32) {
         let width = self.width as usize;
         let (from, to, left) = (top * width, bottom * width, (bottom - by) * width);
         self.codes.copy_within(from + by * width..to, from);
@@ -52,7 +52,7 @@ impl Frame {
         self.styles.copy_within(from + by * width..to, from);
         self.codes[left..to].fill(BLANK);
         self.widths[left..to].fill(1);
-        self.styles[left..to].fill(0);
+        self.styles[left..to].fill(fill);
         self.hashes.copy_within(top + by..bottom, top);
         for y in bottom - by..bottom {
             let row = y * width..(y + 1) * width;
@@ -122,13 +122,19 @@ impl Renderer {
             .collect();
         let mut pen =
             Pen { out: String::new(), table: &screen.table, depth: self.depth, links: self.links, at: None, style: None, link: 0 };
+        let erase = self.erase && !self.full_repaint;
         let kept = self.previous.as_mut().filter(|_| !fresh);
         let mut same = vec![false; height];
         if let Some(previous) = kept {
             if !self.full_repaint {
                 if let Some((top, bottom, by)) = shift(&previous.hashes, &hashes) {
-                    pen.scroll(top, bottom, by);
-                    previous.scroll(top, bottom, by);
+                    // The rows coming in are blank in the background set, so where blanks are erased in it, they come
+                    // in on the band's own (the first cell coming in), not the terminal's, in case the terminal shows
+                    // them before they're written.
+                    let first = screen.styles[(bottom - by) * width];
+                    let fill = if erase && pen.erasable(first) { first } else { 0 };
+                    pen.scroll(top, bottom, by, fill);
+                    previous.scroll(top, bottom, by, fill);
                 }
             }
             for (y, same) in same.iter_mut().enumerate() {
@@ -140,7 +146,6 @@ impl Renderer {
         }
         // What the terminal shows to write over: nothing after a resize, or where every cell is written.
         let shown = self.previous.as_ref().filter(|_| !fresh && !self.full_repaint);
-        let erase = self.erase && !self.full_repaint;
         for y in 0..height {
             if shown.is_some() && same[y] {
                 continue;
@@ -274,11 +279,11 @@ impl Pen<'_> {
     }
 
     /// Rows `top` to `bottom` moved up `by` in the terminal: a scrolling region, `by` lines deleted at its top (DL), and
-    /// the region taken away. DL rather than SU: every terminal Kumi runs in deletes lines, where some ignore SU.
-    fn scroll(&mut self, top: usize, bottom: usize, by: usize) {
-        // The rows coming in at the region's foot are blank in the colours set: the terminal's own, then.
-        self.out.push_str(RESET);
+    /// the region taken away. DL rather than SU: every terminal Kumi runs in deletes lines, where some ignore SU. The
+    /// rows coming in at the region's foot are blank in style `fill`, set first.
+    fn scroll(&mut self, top: usize, bottom: usize, by: usize, fill: u32) {
         self.style = None;
+        self.style(fill);
         let _ = write!(self.out, "\u{1b}[{};{bottom}r\u{1b}[{};1H\u{1b}[{by}M\u{1b}[r", top + 1, top + 1);
         // Taking the region away puts the cursor home.
         self.at = Some((0, 0));

@@ -1321,6 +1321,9 @@ case!(input_history_new_conversation_and_frame_budget, async {
         let time = times.iter().sum::<std::time::Duration>() / times.len() as u32;
         let most = bytes.iter().max().unwrap();
         eprintln!("a streamed line {pane}: {mean} bytes a frame on average, {most} at most; drawn in {time:?} on average");
+        // With room over what a line costs (about 200 bytes without the pane, 2,100 beside it), so a change that writes
+        // far more fails here; the time is only said, as it depends on the machine.
+        assert!(mean < if start == 0 { 2_700 } else { 600 }, "{mean} bytes a frame {pane}");
         h.has(&format!("(line {})", start + 39));
     }
     h.close().await;
