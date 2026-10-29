@@ -676,6 +676,11 @@ impl TuiApp {
         let busy = self.busy();
         // What the producer just did took, said for a moment in the hint's place.
         let toast = self.toasted(perf_now());
+        // The top overlay's own words, while one is open: asked before the state is borrowed, which an overlay may read.
+        // A list's own words stay over a toast: a countdown to Kumi's pick can't wait for it to go.
+        let top = self.0.state.borrow().overlays.top();
+        let overlay_hint = top.as_ref().map(|top| top.borrow().hint(self));
+        let toast = toast.filter(|_| !top.is_some_and(|top| top.borrow().hint_stays(self)));
         let state = self.0.state.borrow();
         if state.search.is_some() {
             let shown: Vec<String> = layout.rows.iter().skip(first as usize).take(visible as usize).cloned().collect();
@@ -696,11 +701,6 @@ impl TuiApp {
                 screen.put_in(x, box_.y + 1 + index as i32, row, &st::BRIGHT, box_);
             }
         }
-        // The top overlay's own words, while one is open.
-        let top = state.overlays.top();
-        let overlay_hint = top.as_ref().map(|top| top.borrow().hint(self));
-        // A list's own words stay over a toast: a countdown to Kumi's pick can't wait for it to go.
-        let toast = toast.filter(|_| !top.is_some_and(|top| top.borrow().hint_stays(self)));
         let hint = toast.as_ref().map(|(text, _)| text.as_str()).or(overlay_hint.as_deref()).unwrap_or_else(|| {
             if state.search.is_some() {
                 super::composer::SEARCH_HINT
