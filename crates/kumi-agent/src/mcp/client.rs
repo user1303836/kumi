@@ -12,12 +12,12 @@ use std::rc::{Rc, Weak};
 use std::sync::LazyLock;
 use std::time::Duration;
 
+use crate::core::text::cut;
 use async_trait::async_trait;
 use futures::future::{LocalBoxFuture, Shared};
 use futures::FutureExt;
 use kumi_common::abort::{Signal, SignalExt};
 use kumi_common::js::json::stringify;
-use kumi_common::js::string::head;
 use regex::Regex;
 use serde::Serialize;
 use serde_json::{json, Value};
@@ -1129,7 +1129,7 @@ impl McpEndpoint for Endpoint {
             Err(RequestFailure::Mcp(error)) if !signal.aborted() && error.code == ErrorCode::INVALID_PARAMS => {
                 let stripped = MCP_ERROR_PREFIX.replace(&error.message, "");
                 let cleaned: String = stripped.chars().map(|c| if (c as u32) <= 0x1f || c == '\x7f' { ' ' } else { c }).collect();
-                let reason = head(&cleaned, 300);
+                let reason = cut(&cleaned, 300).to_owned();
                 Ok(CallToolResult {
                     is_error: Some(true),
                     content: vec![ContentBlock::text(format!("The bridge rejected the arguments: {reason}"))],

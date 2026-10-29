@@ -25,6 +25,7 @@ use crate::core::contracts::{
     Kernel, KernelCheckpoint, KernelEmit, KernelEvent, OnText, Picture, StopReason, TranscriptLine, TurnResult, WaitFor,
 };
 use crate::core::hidden::{named_value, remember_text, unhidden, unhidden_owned};
+use crate::core::text::cut;
 use crate::kernel::budget::{bytes_of, fit_for, fit_measured, opening, put_away_images, transcript_of, PutAway, OBSERVATION_MARKER};
 use crate::kernel::deferred::{self, Shelf, CALL_TOOL};
 use kumi_ai::binding::{ContextBudget, DEFAULT_BUDGET};
@@ -1202,7 +1203,7 @@ impl Turn {
             Some(Err(why)) => {
                 let named = input.as_ref().and_then(|input| input.get("name")).and_then(Value::as_str);
                 let name = if call.tool_name == CALL_TOOL {
-                    named.map(|name| head(name, 64)).unwrap_or_else(|| CALL_TOOL.into())
+                    named.map(|name| cut(name, 64).to_owned()).unwrap_or_else(|| CALL_TOOL.into())
                 } else {
                     call.tool_name.clone()
                 };
@@ -1216,7 +1217,7 @@ impl Turn {
                     input: input.clone(),
                     target: Target::Refused(format!(
                         "Unknown tool {}; use only the supplied tools{}.",
-                        quote(&head(&call.tool_name, 64)),
+                        quote(cut(&call.tool_name, 64)),
                         if self.inner.shelf.is_some() { " (find_tools lists the others)" } else { "" }
                     )),
                 },
@@ -1261,7 +1262,7 @@ impl Turn {
                 };
                 match until_aborted(work, &self.abort).await {
                     Ok(result) => {
-                        reply = result.reply.map(|words| head(trim(&words), MAX_REPLY));
+                        reply = result.reply.map(|words| cut(trim(&words), MAX_REPLY).to_owned());
                         Outcome { text: capped(result.text), is_error: result.is_error, images: result.images }
                     }
                     Err(_) if self.abort.is_cancelled() => {
@@ -1269,7 +1270,7 @@ impl Turn {
                         self.timed(&prepared.name, started, alone);
                         return Ran::Stopped;
                     }
-                    Err(error) => Outcome { text: head(&error.to_string(), MAX_TOOL_ERROR), is_error: true, images: Vec::new() },
+                    Err(error) => Outcome { text: cut(&error.to_string(), MAX_TOOL_ERROR).to_owned(), is_error: true, images: Vec::new() },
                 }
             }
         };
@@ -1371,7 +1372,7 @@ const PLAIN_PART: usize = 4 * 1024;
 /// name {input}]", each result as "[name returned: …]" (from the producer's side), reasoning and
 /// replay metadata left out.
 pub fn plain_words(messages: &[Message]) -> Vec<Message> {
-    let clip = |text: &str| if utf16_len(text) > PLAIN_PART { format!("{}…", head(text, PLAIN_PART)) } else { text.to_string() };
+    let clip = |text: &str| if utf16_len(text) > PLAIN_PART { format!("{}…", cut(text, PLAIN_PART)) } else { text.to_string() };
     let said = |assistant: bool, text: String| -> Vec<Message> {
         if trim(&text).is_empty() {
             Vec::new()
@@ -1765,7 +1766,7 @@ fn tool_output(outcome: Outcome) -> ToolResultOutput {
     let mut value = vec![ToolResultContentItem::Text { text: outcome.text, provider_options: None }];
     for image in images {
         if let Some(caption) = image.caption.as_deref().filter(|caption| !caption.is_empty()) {
-            value.push(ToolResultContentItem::Text { text: head(&unhidden(caption), 1000), provider_options: None });
+            value.push(ToolResultContentItem::Text { text: cut(&unhidden(caption), 1000).to_owned(), provider_options: None });
         }
         // A copy, as a plain byte array: a Buffer would measure (and save) as a list of numbers.
         value.push(ToolResultContentItem::File {

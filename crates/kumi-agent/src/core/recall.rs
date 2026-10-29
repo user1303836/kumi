@@ -1,6 +1,7 @@
 //! Finding what was said and done before: earlier conversations in every Set, and the techniques
 //! and recipes Kumi kept, by their words. Local and quick: no model call and no embeddings.
 
+use crate::core::text::cut;
 use crate::core::{
     contracts::{ConversationStore, FoundExchange},
     recipes::RecipeStore,
@@ -9,10 +10,7 @@ use crate::core::{
 use async_trait::async_trait;
 use kumi_common::{
     abort::Signal,
-    js::{
-        json::stringify,
-        string::{head, utf16_len},
-    },
+    js::{json::stringify, string::utf16_len},
     time::{iso_string, now_ms, since},
 };
 use kumi_types::{
@@ -190,7 +188,7 @@ pub(crate) fn plain(text: &str, most: usize) -> String {
             run.to_string()
         }
     });
-    head(&text, most)
+    cut(&text, most).to_owned()
 }
 
 fn matched(words: &[String], text: &str) -> usize {
@@ -349,7 +347,7 @@ impl KernelTool for Recall {
         lines.push("</earlier_conversations_untrusted>".into());
         let text = lines.join("\n");
         Ok(ToolResult::text(if utf16_len(&text) > MAX_TEXT {
-            format!("{}\n</earlier_conversations_untrusted>", head(&text, MAX_TEXT - 40))
+            format!("{}\n</earlier_conversations_untrusted>", cut(&text, MAX_TEXT - 40))
         } else {
             text
         }))

@@ -8,8 +8,9 @@
 use kumi_types::daw::DawProfile;
 use std::borrow::Cow;
 
+use crate::core::text::cut;
 use kumi_common::js::json::{stringify, write_into};
-use kumi_common::js::string::{head, trim, utf16_len};
+use kumi_common::js::string::{trim, utf16_len};
 use serde_json::Value;
 use std::cell::RefCell;
 
@@ -473,7 +474,7 @@ fn clear_until(messages: &[Message], end: usize, observations: bool, cleared_not
                                 return part.clone();
                             }
                             touched = true;
-                            let kept = if small { value } else { format!("{}{cleared_note}", head(&value, HEAD)) };
+                            let kept = if small { value } else { format!("{}{cleared_note}", cut(&value, HEAD)) };
                             let mut result = result.clone();
                             result.output = match output {
                                 ToolResultOutput::Content { .. } => ToolResultOutput::Text { value: kept, provider_options: None },
@@ -582,7 +583,7 @@ fn asks_in(messages: &[Message]) -> Vec<String> {
             // A loop's or goal's request without Kumi's framing; Kumi's own notes ("[Kumi…") aren't the producer's.
             if let Some(said) = crate::core::export::asked(words) {
                 let line = said.split_whitespace().collect::<Vec<_>>().join(" ");
-                asks.push(if utf16_len(&line) > ASK { format!("{}…", head(&line, ASK)) } else { line });
+                asks.push(if utf16_len(&line) > ASK { format!("{}…", cut(&line, ASK)) } else { line });
             }
         }
     }
@@ -868,5 +869,31 @@ mod tests {
         let (again, measured_again) = fit_measured(&DawProfile::ABLETON, &history, Some(measured), &turn, &budget);
         assert!(!again.changed());
         assert_eq!(measured_again, measured);
+    }
+
+    /// What a cleared result keeps of its opening, and a request a shortened conversation lists, are cut between
+    /// characters, never through one (#675).
+    #[test]
+    fn a_cleared_result_and_a_listed_request_are_cut_between_characters() {
+        let a = |n: usize| "a".repeat(n);
+        let result = Message::Tool {
+            content: vec![ToolPart::ToolResult(ToolResultPart {
+                tool_call_id: "x".into(),
+                tool_name: "read".into(),
+                output: ToolResultOutput::Text { value: format!("{}🎹{}", a(HEAD - 1), a(2 * SMALL)), provider_options: None },
+                provider_options: None,
+            })],
+            provider_options: None,
+        };
+        let cleared = clear_until(&[result], 1, true, " [cleared]").unwrap();
+        let Message::Tool { content, .. } = &cleared[0] else { panic!("{cleared:?}") };
+        let ToolPart::ToolResult(part) = &content[0] else { panic!("{content:?}") };
+        let ToolResultOutput::Text { value, .. } = &part.output else { panic!("{:?}", part.output) };
+        assert_eq!(value, &format!("{} [cleared]", a(HEAD - 1)));
+        let asked = Message::User {
+            content: vec![UserPart::Text(TextPart { text: format!("{}🎹 and more", a(ASK - 1)), provider_options: None })],
+            provider_options: None,
+        };
+        assert_eq!(asks_in(&[asked]), [format!("{}…", a(ASK - 1))]);
     }
 }

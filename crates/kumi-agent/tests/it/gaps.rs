@@ -43,3 +43,16 @@ async fn note_gap_logs_missing_capabilities_privately_and_bounded_and_never_a_se
     assert_eq!(lines.len(), 500);
     assert!(lines.last().unwrap().contains("the last one"));
 }
+
+/// A gap's long words are kept cut between characters, never through one (#675). (Words of "é", which no secret is
+/// made of.)
+#[tokio::test]
+async fn a_gaps_long_words_are_kept_cut_between_characters() {
+    let directory = tempfile::tempdir().unwrap();
+    let file = directory.path().join("gaps.jsonl");
+    let tools = gap_tools(&file, None);
+    let missing = format!("{}🎹 and more", "é".repeat(299));
+    tools[0].execute(json!({"missing": missing}).as_object().unwrap().clone(), abort::never()).await.unwrap();
+    let entry: Value = serde_json::from_str(std::fs::read_to_string(&file).unwrap().trim()).unwrap();
+    assert_eq!(entry["missing"], "é".repeat(299));
+}

@@ -5,6 +5,7 @@
 //! conversations, to find one by its id or name: it's read again from the files wherever they changed, and made again
 //! from them when it's gone.
 
+use crate::core::text::cut;
 use crate::{
     core::{
         contracts::{
@@ -18,7 +19,7 @@ use crate::{
 use async_trait::async_trait;
 use kumi_common::js::{
     json::stringify,
-    string::{head, trim, utf16_len},
+    string::{trim, utf16_len},
 };
 use kumi_types::daw::DawId;
 use kumi_types::place::{Place, Places};
@@ -196,7 +197,7 @@ pub fn title(name: Option<&str>, first: &str) -> String {
     let words: String = words.chars().filter(|c| !crate::core::export::invisible(*c)).collect();
     let line = crate::core::recall::plain(&words, MAX_TITLE + 1);
     if utf16_len(&line) > MAX_TITLE {
-        format!("{}…", trim(&head(&line, MAX_TITLE - 1)))
+        format!("{}…", trim(cut(&line, MAX_TITLE - 1)))
     } else {
         line
     }
@@ -253,7 +254,7 @@ impl Meta {
 fn clean_name(name: &str) -> Option<String> {
     let line =
         name.chars().map(|c| if c.is_control() { ' ' } else { c }).collect::<String>().split_whitespace().collect::<Vec<_>>().join(" ");
-    let line = head(&line, MAX_TITLE);
+    let line = cut(&line, MAX_TITLE);
     (!trim(&line).is_empty()).then(|| trim(&line).to_owned())
 }
 async fn read_meta(file: &Path) -> Meta {
@@ -722,7 +723,7 @@ impl FileConversationStore {
                 key.clone(),
                 Entry {
                     saved_at: value.saved_at,
-                    first: value.first.unwrap_or_else(|| said.first().map(|l| head(&l.text, 200)).unwrap_or_default()),
+                    first: value.first.unwrap_or_else(|| said.first().map(|l| cut(&l.text, 200).to_owned()).unwrap_or_default()),
                     turns: value.turns.unwrap_or(said.len() as u32),
                     created: created_of(&id, value.saved_at),
                     name: meta.name,
@@ -968,7 +969,7 @@ impl ConversationStore for FileConversationStore {
                 .as_ref()
                 .filter(|c| !c.is_empty())
                 .map(|c| c[c.len().saturating_sub(MAX_KEPT_CHANGES)..].to_vec()),
-            first: Some(head(conversation.first.as_deref().or_else(|| said.first().map(|l| l.text.as_str())).unwrap_or(""), 200)),
+            first: Some(cut(conversation.first.as_deref().or_else(|| said.first().map(|l| l.text.as_str())).unwrap_or(""), 200).to_owned()),
             turns: Some(conversation.turns.unwrap_or(0).max(said.len() as u32)),
         };
         self.file(place, id)?;

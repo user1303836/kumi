@@ -74,3 +74,10 @@ async fn shallow_validation_matches_the_reference_and_corrupt_files_are_ignored(
     std::fs::write(&file, "broken").unwrap();
     assert!(store.load("Set").await.unwrap().is_none());
 }
+
+/// A goal check's next step, from an answer with no clear verdict, is cut between characters, never through one (#675).
+#[test]
+fn a_goal_checks_next_step_is_cut_between_characters() {
+    let check = kumi_agent::core::goal_mode::read_audit(&format!("{}🎹 and more", "a".repeat(199)));
+    assert_eq!(check.next, Some("a".repeat(199)));
+}

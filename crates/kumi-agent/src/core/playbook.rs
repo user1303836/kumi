@@ -1,4 +1,5 @@
 //! Lessons from matching sounds, with the scores that support them, kept privately between runs.
+use crate::core::text::cut;
 use crate::core::{goal::Best, match_run::MatchRun};
 use async_trait::async_trait;
 use kumi_common::js::{
@@ -95,7 +96,7 @@ pub(crate) fn lessons_file(lessons: &[Lesson]) -> String {
 fn text(value: &str, max: usize) -> String {
     let cleaned: String = value.chars().map(|c| if c <= '\u{1f}' || c == '<' || c == '>' { ' ' } else { c }).collect();
     // Trimmed again after the cut, so cleaning what was cleaned changes nothing.
-    string::trim(&string::head(string::trim(&cleaned), max)).to_string()
+    string::trim(cut(string::trim(&cleaned), max)).to_string()
 }
 fn score(value: &Value) -> Option<f64> {
     value.as_f64().filter(|v| v.is_finite()).map(|v| round(v).clamp(0.0, 100.0))
@@ -245,14 +246,15 @@ pub fn lesson_from(run: &MatchRun, at: f64) -> Option<Lesson> {
     if moves.len() > 12 {
         moves.drain(..moves.len() - 12);
     }
-    let matched = string::head(
+    let matched = cut(
         &format!(
             "{}{}",
             matched_from(&run.request),
             run.reference.as_ref().filter(|s| !s.is_empty()).map(|r| format!(" ({r})")).unwrap_or_default()
         ),
         160,
-    );
+    )
+    .to_owned();
     Some(Lesson { id: lesson_id(), at, matched, winner: best.label.clone(), from: first, to: best.score, moves, reaction: None })
 }
 pub struct GoalLeader<'a> {
@@ -284,11 +286,12 @@ pub fn lesson_from_goal(
     Some(Lesson {
         id: lesson_id(),
         at,
-        matched: string::head(
+        matched: cut(
             &format!("{}{}", matched_from(goal), reference.filter(|s| !s.is_empty()).map(|r| format!(" ({r})")).unwrap_or_default()),
             160,
-        ),
-        winner: string::head(&format!("{} ({})", leader.label, leader.chain), 60),
+        )
+        .to_owned(),
+        winner: cut(&format!("{} ({})", leader.label, leader.chain), 60).to_owned(),
         from: round(first),
         to: round(leader.score),
         moves,

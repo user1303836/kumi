@@ -1,4 +1,5 @@
 //! Capabilities the producer needed that Kumi or Live does not offer, logged locally for developers.
+use crate::core::text::cut;
 use crate::core::{store_client::StoreClient, store_import::parse_gaps};
 use async_trait::async_trait;
 use kumi_common::{
@@ -41,7 +42,7 @@ fn clean(value: Option<&Value>) -> String {
         .chars()
         .map(|c| if c <= '\u{1f}' || ('\u{7f}'..='\u{9f}').contains(&c) || c == '\u{feff}' { ' ' } else { c })
         .collect();
-    string::trim(&string::head(&text.split_whitespace().collect::<Vec<_>>().join(" "), 300)).to_string()
+    string::trim(cut(&text.split_whitespace().collect::<Vec<_>>().join(" "), 300)).to_string()
 }
 /// The gap tool, logging to Kumi's database when there is one, otherwise to `file`.
 pub fn gap_tools(file: impl Into<PathBuf>, store: Option<StoreClient>) -> Vec<Rc<dyn KernelTool>> {

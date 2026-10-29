@@ -2,6 +2,7 @@
 //! only when the producer says yes, and read back when a request leaves the approach open.
 
 use crate::core::contracts::{TechniqueAction, TechniqueEvent, TechniqueSummary};
+use crate::core::text::cut;
 use async_trait::async_trait;
 use futures::{
     future::{LocalBoxFuture, Shared},
@@ -135,7 +136,7 @@ fn clean(value: &Value, max: usize) -> String {
         .map(|c| if matches!(c, '\x00'..='\x09' | '\x0b'..='\x1f' | '\u{7f}'..='\u{9f}') { ' ' } else { c })
         .collect();
     // Trimmed again after the cut, so cleaning what was cleaned changes nothing.
-    string::trim(&string::head(string::trim(&SPACES.replace_all(&raw, " ")), max)).to_string()
+    string::trim(cut(string::trim(&SPACES.replace_all(&raw, " ")), max)).to_string()
 }
 /// The producer's request as a technique keeps it: one line, cut short, and nothing that reads as orders.
 fn request_of(text: &str) -> Option<String> {
@@ -342,9 +343,9 @@ pub fn technique_instructions_for(profile: &DawProfile, techniques: &[Technique]
             line.push_str(&format!(" (from {})", shown(title)));
         }
         if let Some(request) = &t.request {
-            let cut = string::head(request, LISTED_REQUEST);
-            let more = if cut.len() < request.len() { "…" } else { "" };
-            line.push_str(&format!("; kept from a request: “{}{more}”", shown(&cut)));
+            let kept = cut(request, LISTED_REQUEST);
+            let more = if kept.len() < request.len() { "…" } else { "" };
+            line.push_str(&format!("; kept from a request: “{}{more}”", shown(kept)));
         }
         if t.undone > 0.0 {
             line.push_str(&if t.undone == 1.0 {
@@ -817,15 +818,12 @@ impl KernelTool for TechniqueTool {
             return Ok(if self.service.forget(id.into()).await?.is_some() {
                 quiet(json!({"forgot":id}))
             } else {
-                ToolResult::error(format!("There's no technique {}.", string::head(id, 8)))
+                ToolResult::error(format!("There's no technique {}.", cut(id, 8)))
             });
         }
         if action == "read" {
             let Some(read) = self.service.store.list().await?.into_iter().find(|t| t.id == id) else {
-                return Ok(ToolResult::error(format!(
-                    "There's no technique {}; the instructions list the ones kept.",
-                    string::head(id, 8)
-                )));
+                return Ok(ToolResult::error(format!("There's no technique {}; the instructions list the ones kept.", cut(id, 8))));
             };
             self.drafts.read(&read.id);
             (self.service.on_event)(TechniqueEvent { action: TechniqueAction::Used, technique: summary(&read) });

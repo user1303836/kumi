@@ -894,3 +894,10 @@ async fn a_log_goes_with_its_conversation_and_one_left_behind_follows_it_or_goes
     assert!(!unsaved.join(log_name("mv66me0m0moved")).exists());
     assert!(store.log(A, "mv66me0m0moved").await.is_some());
 }
+
+/// A long title is cut between characters, never through one (#675).
+#[test]
+fn a_long_title_is_cut_between_characters() {
+    let a = |n: usize| "a".repeat(n);
+    assert_eq!(kumi_agent::core::conversations::title(None, &format!("{}🎹{}", a(58), a(10))), format!("{}…", a(58)));
+}
