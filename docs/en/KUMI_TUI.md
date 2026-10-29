@@ -257,7 +257,7 @@ its undo. They're in English for now.
 | Ctrl-W, Alt-Backspace, Ctrl-Backspace | Cut the word before the cursor |
 | Ctrl-K / Ctrl-U | Cut to the end / start of the line |
 | Ctrl-Y | Put back what you cut last (cuts in a row, like Ctrl-W twice, come back together); Alt-Y right after swaps it for the cut before |
-| Ctrl-- (Ctrl-_) | Undo in the box: a run of typing or deleting, a paste, a cut or what you dictated at a time |
+| Ctrl-- (Ctrl-_) | Undo in the box: a run of typing or deleting, a paste, a cut or what you dictated at a time. Where Ctrl-- zooms the terminal out (Windows Terminal, GNOME Terminal, Konsole), use Ctrl-_, that is Ctrl-Shift-- |
 | Ctrl-T | Talk instead of typing: press it again to stop, or hold it while you talk. What you said lands in the box at the cursor; Enter stops and sends at once, Esc drops it |
 | Ctrl-V | Add the picture on the clipboard (a screenshot, say) to your next message; files dragged into the window are added the same way |
 | Backspace, in an empty box | Take back the last file added |

@@ -27,14 +27,19 @@ static LABELLED: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)(?<![A-Za-z0-9_])(api[_-]?key|token|secret|password)([\s\u{feff}]*[:=][\s\u{feff}]*)[^\s\u{feff}]+").unwrap()
 });
 pub fn history_text(text: &str, secrets: &[String]) -> String {
+    string::head(&redacted(text, secrets), MAX_ENTRY)
+}
+fn redacted(text: &str, secrets: &[String]) -> String {
     let mut kept = sanitize_text(text, secrets);
     for pattern in KEYS.iter() {
         kept = pattern.replace_all(&kept, "[redacted]").into_owned();
     }
-    string::head(string::trim(&LABELLED.replace_all(&kept, "${1}${2}[redacted]")), MAX_ENTRY)
+    string::trim(&LABELLED.replace_all(&kept, "${1}${2}[redacted]")).to_string()
 }
 pub struct InputHistory {
     entries: Vec<String>,
+    /// Whether each entry is in the file: a draft cleared with ctrl+c is kept only while Kumi runs.
+    saved: Vec<bool>,
     file: Option<PathBuf>,
     secrets: Vec<String>,
     lines: usize,
@@ -56,7 +61,7 @@ pub fn open_input_history(file: Option<PathBuf>, secrets: Vec<String>) -> InputH
         entries.drain(..entries.len() - MAX_ENTRIES);
     }
     let lines = entries.len();
-    InputHistory { entries, file, secrets, lines }
+    InputHistory { saved: vec![true; entries.len()], entries, file, secrets, lines }
 }
 impl InputHistory {
     pub fn entries(&self) -> &[String] {
@@ -64,17 +69,31 @@ impl InputHistory {
     }
     pub fn add(&mut self, text: &str) {
         let kept = history_text(text, &self.secrets);
-        if kept.is_empty() || self.entries.last() == Some(&kept) {
+        if !self.push(&kept, true) {
             return;
-        }
-        self.entries.push(kept.clone());
-        if self.entries.len() > MAX_ENTRIES {
-            self.entries.drain(..self.entries.len() - MAX_ENTRIES);
         }
         let Some(file) = self.file.clone() else {
             return;
         };
         let _ = self.write(&file, &kept);
+    }
+    /// A draft cleared without being sent: among the entries while Kumi runs, whole, but never written to the file.
+    pub fn keep(&mut self, text: &str) {
+        let kept = redacted(text, &self.secrets);
+        self.push(&kept, false);
+    }
+    fn push(&mut self, kept: &str, saved: bool) -> bool {
+        if kept.is_empty() || self.entries.last().is_some_and(|last| last == kept) {
+            return false;
+        }
+        self.entries.push(kept.to_string());
+        self.saved.push(saved);
+        if self.entries.len() > MAX_ENTRIES {
+            let over = self.entries.len() - MAX_ENTRIES;
+            self.entries.drain(..over);
+            self.saved.drain(..over);
+        }
+        true
     }
     fn write(&mut self, file: &Path, kept: &str) -> std::io::Result<()> {
         let folder = file.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new("."));
@@ -102,8 +121,9 @@ impl InputHistory {
         }
         let mut handle = options.open(file)?;
         if compact {
-            handle.write_all(format!("{}\n", self.entries.iter().map(|s| json::quote(s)).collect::<Vec<_>>().join("\n")).as_bytes())?;
-            self.lines = self.entries.len();
+            let saved: Vec<_> = self.entries.iter().zip(&self.saved).filter(|(_, saved)| **saved).map(|(s, _)| json::quote(s)).collect();
+            handle.write_all(format!("{}\n", saved.join("\n")).as_bytes())?;
+            self.lines = saved.len();
         } else {
             handle.write_all(format!("{}\n", json::quote(kept)).as_bytes())?;
         }

@@ -110,6 +110,24 @@ fn cuts_join_until_something_else_happens_and_ctrl_y_and_alt_y_bring_them_back()
 }
 
 #[test]
+fn the_kill_ring_holds_at_most_four_megabytes_of_cuts() {
+    let mut e = Editor::new();
+    // 1.5 MB each, in three-byte characters, so there are fewer to segment.
+    let long = "猫".repeat(500_000);
+    for name in ["one", "two", "three"] {
+        e.set(&format!("{name}{long}"));
+        e.kill_to_start();
+    }
+    // Three cuts would hold 4.5 MB: the oldest goes.
+    assert!(e.yank());
+    assert!(e.text().starts_with("three"));
+    assert!(e.yank_earlier());
+    assert!(e.text().starts_with("two"));
+    assert!(e.yank_earlier());
+    assert!(e.text().starts_with("three"), "one was let go");
+}
+
+#[test]
 fn a_draft_set_aside_for_an_earlier_message_comes_back_with_its_steps() {
     let mut e = Editor::new();
     typed(&mut e, "half a");
@@ -221,7 +239,8 @@ case!(undo_yank_and_ctrl_c_in_the_composer, async {
     use kumi::history::open_input_history;
     use std::cell::RefCell;
     let tmp = tempfile::tempdir().unwrap();
-    let history = Rc::new(RefCell::new(open_input_history(Some(tmp.path().join("input-history")), vec![])));
+    let file = tmp.path().join("input-history");
+    let history = Rc::new(RefCell::new(open_input_history(Some(file.clone()), vec![])));
     let h = Harness::with(120, 36, Rc::new(Control::default()), |o| o.history = Some(history));
     h.start().await;
     h.connect();
@@ -250,6 +269,8 @@ case!(undo_yank_and_ctrl_c_in_the_composer, async {
     h.type_text("\x03").await;
     assert!(!has(&h.screen(), "more the snare"));
     assert!(!h.calls().contains(&"close".into()));
+    // Kept while Kumi runs, never written to the history's file.
+    assert!(!std::fs::read_to_string(&file).unwrap_or_default().contains("more the snare"));
     h.type_text("\x1b[A").await;
     h.has("more the snare");
     h.type_text("\x1b[B").await;

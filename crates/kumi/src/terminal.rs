@@ -543,8 +543,10 @@ impl PlainTerminal {
                     self.edit(|p| p.editor.delete());
                 }
             }
-            // Cleaned as the full-screen composer cleans it, so no terminal control in a paste is echoed back.
-            InputEvent::Text { text } | InputEvent::Paste { text } => self.edit(|p| p.editor.insert(&sanitize_text(&text, &[]))),
+            // Cleaned as the full-screen composer cleans it, so no terminal control in a paste is echoed back. Typing is a
+            // run, so the line's editor keeps one step for it, not one for each key.
+            InputEvent::Text { text } => self.edit(|p| p.editor.type_text(&sanitize_text(&text, &[]))),
+            InputEvent::Paste { text } => self.edit(|p| p.editor.insert(&sanitize_text(&text, &[]))),
             InputEvent::Key { name, mods, .. } => self.edit(|p| match (name.as_str(), mods.ctrl, mods.alt) {
                 ("left", false, false) => p.editor.left(),
                 ("right", false, false) => p.editor.right(),

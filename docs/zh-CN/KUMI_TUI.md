@@ -155,7 +155,7 @@ Kumi 占据整个终端窗口，并在 Kumi 关闭、崩溃或被停止时把窗
 | Ctrl-W、Alt-Backspace、Ctrl-Backspace | 剪切光标前的词 |
 | Ctrl-K / Ctrl-U | 剪切到行尾 / 行首 |
 | Ctrl-Y | 放回最后剪切的内容（连续剪切的，比如按两次 Ctrl-W，会一起放回）；紧接着按 Alt-Y 换成再前一次剪切的内容 |
-| Ctrl-- (Ctrl-_) | 在输入框中撤销：一段连续的输入或删除、一次粘贴、一次剪切或一次口述的内容，每次撤销一项 |
+| Ctrl-- (Ctrl-_) | 在输入框中撤销：一段连续的输入或删除、一次粘贴、一次剪切或一次口述的内容，每次撤销一项。在 Ctrl-- 会缩小终端显示的环境中（Windows Terminal、GNOME Terminal、Konsole），请改用 Ctrl-_（即 Ctrl-Shift--） |
 | Ctrl-T | 用说话代替打字：再按一次停止，或按住说话。你说的话会出现在光标处；Enter 立即停止并发送，Esc 放弃 |
 | Ctrl-V | 把剪贴板中的图片（比如截图）添加到下一条消息；拖进窗口的文件也会这样添加 |
 | 输入框为空时按 Backspace | 撤回最后添加的文件 |

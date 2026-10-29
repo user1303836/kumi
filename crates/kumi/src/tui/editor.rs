@@ -6,8 +6,9 @@ use super::width::{cell_width, graphemes};
 /// How many steps undo keeps, and how much text they may hold between them (each step keeps the whole text).
 const STEPS: usize = 100;
 const STEP_BYTES: usize = 4 << 20;
-/// How many cuts ctrl+y and alt+y can bring back.
+/// How many cuts ctrl+y and alt+y can bring back, and how much text they may hold between them.
 const KILLS: usize = 10;
+const KILL_BYTES: usize = 4 << 20;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct EditorLayout {
@@ -333,12 +334,10 @@ impl Editor {
                     last.insert_str(0, &cut);
                 }
             }
-            _ => {
-                self.kills.push(cut);
-                if self.kills.len() > KILLS {
-                    self.kills.remove(0);
-                }
-            }
+            _ => self.kills.push(cut),
+        }
+        while self.kills.len() > KILLS || (self.kills.len() > 1 && self.kills.iter().map(String::len).sum::<usize>() > KILL_BYTES) {
+            self.kills.remove(0);
         }
         self.killing = true;
     }

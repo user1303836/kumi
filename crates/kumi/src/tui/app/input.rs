@@ -1116,8 +1116,9 @@ impl TuiApp {
     fn clear_editor(&self) {
         self.0.state.borrow_mut().editor.clear();
     }
-    /// ctrl+c on words not sent: they go into the history first, so ↑ brings them back, and the box empties as a step
-    /// ctrl+- takes back. An earlier message ↑ is showing, unchanged, is in the history already.
+    /// ctrl+c on words not sent: they're kept among the history's entries while Kumi runs, whole and never written to its
+    /// file, so ↑ brings them back, and the box empties as a step ctrl+- takes back. An earlier message ↑ is showing,
+    /// unchanged, is in the history already.
     fn erase_draft(&self) {
         let (text, shown) = {
             let state = self.0.state.borrow();
@@ -1126,7 +1127,7 @@ impl TuiApp {
         if let Some(history) = &self.0.options.history {
             let unchanged = shown.is_some_and(|index| history.borrow().entries().get(index) == Some(&text));
             if !unchanged {
-                history.borrow_mut().add(&text);
+                history.borrow_mut().keep(&text);
             }
         }
         self.0.state.borrow_mut().editor.erase();
