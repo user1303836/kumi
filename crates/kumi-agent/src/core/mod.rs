@@ -13,6 +13,7 @@ pub mod fold;
 pub mod gaps;
 pub mod goal;
 pub mod goal_mode;
+pub mod hidden;
 pub mod history;
 pub mod jam;
 pub mod jobs;
