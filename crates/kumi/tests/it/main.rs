@@ -82,6 +82,7 @@ mod tui_pictures;
 mod tui_replay;
 mod tui_setup;
 mod tui_slots;
+mod tui_usage;
 mod tui_view;
 mod update;
 mod voice_input;

@@ -10,6 +10,7 @@ pub mod keys;
 pub mod logo;
 pub mod map;
 pub mod markdown;
+pub mod overlay;
 pub mod picker;
 pub mod pictures;
 pub mod render;

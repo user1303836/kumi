@@ -169,17 +169,18 @@ impl TuiApp {
         if files != 0 {
             self.draw_attachments(&mut screen, 3, box_top - under - 2 - chip, left - 6);
         }
-        let no_panel = self.0.state.borrow().panel.is_none();
+        let open = self.0.state.borrow().overlays.all();
         let menu = self.menu();
-        if waiting != 0 && no_panel && menu.is_empty() {
+        if waiting != 0 && open.is_empty() && menu.is_empty() {
             self.draw_held(&mut screen, 3, box_top - under - 1 - chip - files - waiting, left - 6, waiting);
         }
         let mut cursor = Some(self.draw_composer(&mut screen, Rect::new(1, box_top, left - 2, box_height), &layout, visible, &menu));
-        let panel = self.0.state.borrow().panel.clone();
-        if let Some(panel) = panel {
-            cursor = self.draw_panel(&mut screen, &panel, box_top, left);
-        } else {
+        if open.is_empty() {
             self.draw_menu(&mut screen, box_top, left, &menu);
+        }
+        // What's open over the conversation, bottom first: the top one's cursor is the one that shows.
+        for overlay in open {
+            cursor = overlay.borrow_mut().draw(self, &mut screen, Area { box_top, left });
         }
         if self.0.state.borrow().closing {
             cursor = None;
@@ -295,6 +296,15 @@ impl TuiApp {
                         end = at - 3;
                     }
                 }
+            }
+        }
+        // How full the answering model's context is, past half (`contextMeter`), where there's room for it.
+        if let Some(meter) = self.context_meter() {
+            let named = x + set_name.as_ref().map(|n| text_width(n).min(16) + 5).unwrap_or(0);
+            let at = end - meter.iter().map(|span| text_width(&span.text)).sum::<i32>();
+            if at - named >= 2 {
+                spans(screen, at, 0, &meter, None);
+                end = at - 3;
             }
         }
         if let Some(name) = set_name.filter(|s| !s.is_empty()) {
@@ -507,12 +517,14 @@ impl TuiApp {
             // A steady dot: NOW's glyph already shows Kumi is at work.
             let dot = Some(st::ACCENT);
             let entry = state.current.as_ref().map(|e| e.borrow());
-            let (steps, started) = if let Some(Entry::Assistant { steps, started_at, .. }) = entry.as_deref() {
-                (steps.as_slice(), *started_at)
+            let (steps, started, thinking) = if let Some(Entry::Assistant { steps, started_at, thinking, .. }) = entry.as_deref() {
+                (steps.as_slice(), *started_at, thinking.as_ref())
             } else {
-                (&[][..], None)
+                (&[][..], None, None)
             };
             let running = steps.last().filter(|s| s.state == StepState::Running);
+            // Thinking between steps, with a headline: "thinking · 31s", the headline beneath.
+            let thinking = thinking.filter(|_| running.is_none());
             let label =
                 if let Some(goal) = state.goal.as_ref().filter(|g| matches!(g.status.state, GoalPhase::Running | GoalPhase::Starting)) {
                     format!(
@@ -554,10 +566,10 @@ impl TuiApp {
                             .unwrap_or_default(),
                         helpers::clock_of(now - matching.since)
                     )
-                } else if state.turn_changes > 0 {
-                    format!("working · {} {}", state.turn_changes, if state.turn_changes == 1 { "change" } else { "changes" })
+                } else if let Some(thinking) = thinking {
+                    super::usage::thinking_label(thinking, now, state.turn_changes)
                 } else {
-                    "working".into()
+                    super::usage::working_label(state.turn_changes)
                 };
             // A provider asked Kumi to wait: say why and for how long (esc still stops).
             if let Some((reason, until)) = state.retry.as_ref().filter(|(_, until)| *until > now) {
@@ -627,13 +639,13 @@ impl TuiApp {
                     activity: Some((Activity::Code, state.planning_since)),
                 };
             }
-            return NowLine {
-                dot,
-                label,
-                detail: if state.current.is_some() { "thinking".into() } else { state.activity.clone() },
-                style: st::DIM,
-                activity: Some((Activity::Think, steps.last().and_then(|s| s.ended_at).or(started).unwrap_or(state.busy_since))),
+            let detail = match thinking {
+                Some(thinking) => thinking.headline.clone(),
+                None if state.current.is_some() => "thinking".into(),
+                None => state.activity.clone(),
             };
+            let since = thinking.map(|t| t.since).or_else(|| steps.last().and_then(|s| s.ended_at)).or(started).unwrap_or(state.busy_since);
+            return NowLine { dot, label, detail, style: st::DIM, activity: Some((Activity::Think, since)) };
         }
         if let Some(flash) = flash.filter(|_| !action.is_some_and(|a| a.at > state.last_change.as_ref().unwrap().1)) {
             // A fixed phrase's change, made with no model call.
@@ -675,6 +687,11 @@ impl TuiApp {
         let busy = self.busy();
         // What the producer just did took, said for a moment in the hint's place.
         let toast = self.toasted(perf_now());
+        // The top overlay's own words, while one is open: asked before the state is borrowed, which an overlay may read.
+        // A list's own words stay over a toast: a countdown to Kumi's pick can't wait for it to go.
+        let top = self.0.state.borrow().overlays.top();
+        let overlay_hint = top.as_ref().map(|top| top.borrow().hint(self));
+        let toast = toast.filter(|_| !top.is_some_and(|top| top.borrow().hint_stays(self)));
         let state = self.0.state.borrow();
         if state.search.is_some() {
             let shown: Vec<String> = layout.rows.iter().skip(first as usize).take(visible as usize).cloned().collect();
@@ -695,33 +712,7 @@ impl TuiApp {
                 screen.put_in(x, box_.y + 1 + index as i32, row, &st::BRIGHT, box_);
             }
         }
-        // A list's own words when it has them (a countdown to Kumi's pick, another way to choose).
-        let own_hint = state.panel.as_ref().and_then(|p| match &*p.borrow() {
-            Panel::Pick { picker, .. } => picker.borrow().options.hint.clone(),
-            _ => None,
-        });
-        // A list's own words stay over a toast: a countdown to Kumi's pick can't wait for it to go.
-        let toast = toast.filter(|_| own_hint.is_none());
-        let panel_hint = state.panel.as_ref().map(|p| match &*p.borrow() {
-            _ if own_hint.is_some() => own_hint.as_deref().unwrap_or(""),
-            Panel::Btw { .. } => "↑↓ to scroll · c copies · esc to close",
-            Panel::Job { .. } => "↑↓ to scroll · x stops it · r runs it again · c copies · esc to close",
-            Panel::Help { .. } => "↑↓ to scroll · esc to close",
-            Panel::Pick { picker, .. } if picker.borrow().options.answers => {
-                "a number, then enter answers · or type your own · esc to close"
-            }
-            Panel::Pick { .. } => "↑↓ to move · enter to choose · esc to close",
-            Panel::Key { .. } => "enter to save · esc to cancel",
-            Panel::ChatGpt { by_code: true, .. } => "c copies the code · b uses the browser · esc to cancel",
-            Panel::ChatGpt { url, .. } => {
-                if url.is_some() {
-                    "c copies the link · d uses a code · esc to cancel"
-                } else {
-                    "esc to cancel"
-                }
-            }
-        });
-        let hint = toast.as_ref().map(|(text, _)| text.as_str()).or(panel_hint).unwrap_or_else(|| {
+        let hint = toast.as_ref().map(|(text, _)| text.as_str()).or(overlay_hint.as_deref()).unwrap_or_else(|| {
             if state.search.is_some() {
                 super::composer::SEARCH_HINT
             } else if !menu.is_empty() {

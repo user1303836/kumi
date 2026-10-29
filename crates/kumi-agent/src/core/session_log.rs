@@ -278,7 +278,11 @@ fn told(event: &SessionEvent) -> bool {
             | KernelEvent::ToolEnd { .. }
             | KernelEvent::Steer { .. }
             | KernelEvent::Retry { .. }
-            | KernelEvent::ModelSwitch { .. } => true,
+            | KernelEvent::ModelSwitch { .. }
+            // (each call's tokens: on resume, how full the conversation's context is)
+            | KernelEvent::Usage(_) => true,
+            // (what the model thinks is the screen's while it thinks, never the conversation's)
+            KernelEvent::Reasoning { .. } => false,
         },
     }
 }

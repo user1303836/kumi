@@ -571,6 +571,7 @@ Kumi 把一切都保存在 `~/.kumi` 中。`~/.kumi/settings.json` 包含：
 | `keepAwake` | `false`：Kumi 工作时允许电脑休眠 |
 | `answerAfter` | 没人在时 Kumi 选择推荐答案之前的秒数（60）；`0` 表示从不 |
 | `instantPhrases` | `false`：固定短语（"tempo 124"、"mute drums"）也像其他消息一样发给模型（[即时短语](KUMI_TUI.md#即时短语)） |
+| `contextMeter` | 顶栏上显示模型上下文用了多少的计量条：`"auto"`（默认）在用到一半以上时显示，`"always"` 始终显示，`"off"` 不显示 |
 | `modelServers` | 你命名的模型服务器：`[{ "name", "baseURL", "apiKey", "format" }]`（[你电脑上的模型](#你电脑上的模型)） |
 | `libraryFolders` | 供 Kumi 学习声音、预设和工程的其他文件夹 |
 | `musicFolders` | Kumi 用来学习你口味的、你自己的音乐文件夹（`/music add`）；在你同意之前不存在 |

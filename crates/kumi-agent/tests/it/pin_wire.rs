@@ -808,6 +808,8 @@ fn events() -> Vec<SessionEvent> {
             },
             KernelEvent::ModelSwitch { model: "openai/gpt-5.5".into(), reason: "the plan's limit".into(), back: false },
             KernelEvent::ModelSwitch { model: "openai/gpt-5.4".into(), reason: "it's back".into(), back: true },
+            KernelEvent::Reasoning { text: "**Weighing the kick's 55 Hz against the bass**\n\n".into() },
+            KernelEvent::Usage(usage()),
         ]
         .map(SessionEvent::Kernel),
     );
@@ -886,6 +888,8 @@ fn variant(event: &SessionEvent) -> &'static str {
             KernelEvent::Steer { .. } => "Kernel::Steer",
             KernelEvent::Retry { .. } => "Kernel::Retry",
             KernelEvent::ModelSwitch { .. } => "Kernel::ModelSwitch",
+            KernelEvent::Reasoning { .. } => "Kernel::Reasoning",
+            KernelEvent::Usage(_) => "Kernel::Usage",
         },
         SessionEvent::Memory(event) => match event {
             MemoryEvent::Remembered { .. } => "Memory::Remembered",
@@ -894,7 +898,7 @@ fn variant(event: &SessionEvent) -> &'static str {
     }
 }
 
-const VARIANTS: [&str; 46] = [
+const VARIANTS: [&str; 48] = [
     "Focus",
     "Pointed",
     "Change",
@@ -939,6 +943,8 @@ const VARIANTS: [&str; 46] = [
     "Kernel::Steer",
     "Kernel::Retry",
     "Kernel::ModelSwitch",
+    "Kernel::Reasoning",
+    "Kernel::Usage",
     "Memory::Remembered",
     "Memory::Forgot",
 ];

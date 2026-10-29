@@ -14,7 +14,7 @@ use kumi_agent::{
     },
     kernel::budget::OBSERVATION_MARKER,
 };
-use kumi_types::place::Places;
+use kumi_types::{contracts::Usage, place::Places};
 use serde_json::{json, Value};
 use std::{
     cell::RefCell,
@@ -555,10 +555,12 @@ async fn the_log_tells_what_happened_not_how_things_are_now() {
             SessionEvent::SetAsked { ask: None },
             SessionEvent::Resend { text: "make it wider".into() },
             SessionEvent::Aside { id: 1, text: "It's at -6 dB.".into() },
+            SessionEvent::Kernel(KernelEvent::Reasoning { text: "**Weighing the kick**".into() }),
             SessionEvent::Resumed { saved_at: 7, lines: vec![], changes: None, chosen: None, unreadable: None, replay: None },
         ];
         let story = [
             SessionEvent::State { state: TurnState::Running },
+            SessionEvent::Kernel(KernelEvent::Usage(Usage { input_tokens: 1200., output_tokens: 80., ..Default::default() })),
             notice("The open Set changed."),
             SessionEvent::Error { message: "Kumi stopped.".into(), kind: None, provider: None },
             completed(),

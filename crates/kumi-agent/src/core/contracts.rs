@@ -21,6 +21,14 @@ pub enum KernelEvent {
     Text {
         text: String,
     },
+    /// A piece of the model's reasoning summary, as it streams: the app shows its latest line as a headline while the
+    /// model thinks. It's never the answer: not in the answer's text, nor in what the model reads again.
+    Reasoning {
+        text: String,
+    },
+    /// One model call's own tokens, once it finished (a turn's add up in its result): the app's context meter, for the
+    /// model that answered.
+    Usage(Usage),
     /// The model began writing a call (a plan, say); "tool-start" follows once it runs.
     ToolInput {
         id: String,

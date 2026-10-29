@@ -3,26 +3,26 @@
    add a hi-hat groove                                                            FOCUS
                                                                                   Night Drive
    Added a 16th-note hi-hat groove on Drums.                                      Your selection will show here
+   2.1s
 
-   ── Back to your conversation from 3 hours ago ─────────────────────────────
-                                                                                  NOW
-   make the bass wider                                                            Ready
+   ── Back to your conversation from 3 hours ago ─────────────────────────────    NOW
+                                                                                  Ready
+   make the bass wider
 
    Widened it to 140%, keeping the sub mono.
 
-   ▾ 2 steps · 2.1s
+   ▾ 2 steps
    │ ✓ looked at your Set                    0.4s
    │ ✓ made changes                          0.9s
+   2.1s · 1 change
 
    and a bit darker
-
-   Lowered the filter to 800 Hz.
                                                                                   HISTORY 2 ──────────────────────────
-   ▾ 1 step · 1.6s                                                                ○ Operator · Filter Freq     no undo
-   │ ✓ made changes                          0.7s                                   1.20 kHz → 800 Hz
-                                                                                  ○ Bass width 100% → 140%     no undo
-
-
+   Lowered the filter to 800 Hz.                                                  ○ Operator · Filter Freq     no undo
+                                                                                    1.20 kHz → 800 Hz
+   ▾ 1 step                                                                       ○ Bass width 100% → 140%     no undo
+   │ ✓ made changes                          0.7s
+   1.6s · 1 change
 
 
 

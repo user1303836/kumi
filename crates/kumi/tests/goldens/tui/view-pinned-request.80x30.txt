@@ -1,7 +1,6 @@
   Kumi  ·  Night Drive                                                  ● Live
 
    why does the low end sound muddy
-   Line 50 of what to try for it.
    Line 51 of what to try for it.
    Line 52 of what to try for it.
    Line 53 of what to try for it.
@@ -21,6 +20,7 @@
    Line 67 of what to try for it.
    Line 68 of what to try for it.
    Line 69 of what to try for it.
+   Line 70 of what to try for it.
                                                        newer below · page down
   NOW   FOCUS   HISTORY ───────────────────────────────────────── ctrl+\ opens
 

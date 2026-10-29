@@ -209,17 +209,20 @@ fn collect() -> (Rc<RefCell<Vec<KernelEvent>>>, KernelEmit) {
         }),
     )
 }
+/// The events' kinds, in order: the turn's flow, without what each model call thought and used (the kernel's own tests
+/// have those).
 fn types(events: &[KernelEvent]) -> Vec<&'static str> {
     events
         .iter()
-        .map(|event| match event {
-            KernelEvent::Text { .. } => "text",
-            KernelEvent::ToolInput { .. } => "tool-input",
-            KernelEvent::ToolStart { .. } => "tool-start",
-            KernelEvent::ToolEnd { .. } => "tool-end",
-            KernelEvent::Steer { .. } => "steer",
-            KernelEvent::Retry { .. } => "retry",
-            KernelEvent::ModelSwitch { .. } => "model-switch",
+        .filter_map(|event| match event {
+            KernelEvent::Text { .. } => Some("text"),
+            KernelEvent::ToolInput { .. } => Some("tool-input"),
+            KernelEvent::ToolStart { .. } => Some("tool-start"),
+            KernelEvent::ToolEnd { .. } => Some("tool-end"),
+            KernelEvent::Steer { .. } => Some("steer"),
+            KernelEvent::Retry { .. } => Some("retry"),
+            KernelEvent::ModelSwitch { .. } => Some("model-switch"),
+            KernelEvent::Reasoning { .. } | KernelEvent::Usage(_) => None,
         })
         .collect()
 }
@@ -320,9 +323,14 @@ async fn streams_text_reports_summed_usage_and_settles_the_turn_into_history() {
         );
         let (events, emit) = collect();
         let result = h.kernel.run("hi", signal(), emit).await.unwrap();
-        assert_eq!(*events.borrow(), vec![KernelEvent::Text { text: "hel".into() }, KernelEvent::Text { text: "lo".into() }]);
+        // The call's own tokens as it finished, then the turn's sum in its result.
+        let used = Usage { input_tokens: 3.0, output_tokens: 2.0, cache_read_tokens: 1.0, cache_write_tokens: 0.0 };
+        assert_eq!(
+            *events.borrow(),
+            vec![KernelEvent::Text { text: "hel".into() }, KernelEvent::Text { text: "lo".into() }, KernelEvent::Usage(used.clone())]
+        );
         assert_eq!(result.stop_reason, StopReason::Completed);
-        assert_eq!(result.usage, Some(Usage { input_tokens: 3.0, output_tokens: 2.0, cache_read_tokens: 1.0, cache_write_tokens: 0.0 }));
+        assert_eq!(result.usage, Some(used));
         assert_eq!(h.messages(), vec![user("hi"), assistant("hello")]);
         h.kernel.close().await;
     })
@@ -493,7 +501,9 @@ async fn cancellation_mid_stream_returns_promptly_discards_the_turn_and_the_next
         assert!(h.messages().is_empty());
         let (events, emit) = collect();
         assert_eq!(h.kernel.run("again", signal(), emit).await.unwrap().stop_reason, StopReason::Completed);
-        assert_eq!(*events.borrow(), vec![KernelEvent::Text { text: "recovered".into() }]);
+        // Only its answer, each call's tokens aside.
+        assert_eq!(types(&events.borrow()), ["text"]);
+        assert_eq!(texts(&events.borrow()), ["recovered"]);
         assert_eq!(h.request(1).prompt.len(), 1, "cancelled turn must not be replayed");
         h.kernel.close().await;
     })

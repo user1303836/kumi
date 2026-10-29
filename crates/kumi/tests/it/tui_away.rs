@@ -527,3 +527,21 @@ case!(nobody_there_kumi_takes_its_recommended_answer_after_the_countdown_and_any
         no_countdown(AwaySettings { answer_after: 0, ..AwaySettings::default() }, true)
     );
 });
+
+case!(a_think_leaves_the_status_steady_while_its_time_runs_and_its_headline_streams, async {
+    let h = away(NotifyChannel::None);
+    h.start().await;
+    h.connect();
+    h.type_text("make the kick punch through the bass\r").await;
+    h.emit(json!({"type":"state","state":"running"}));
+    h.emit(json!({"type":"reasoning","text":"**Weighing the kick**"}));
+    until("the think's words", || reports(&h).last().is_some_and(|(_, words)| words == "working · thinking")).await;
+    let count = reports(&h).len();
+    // A second goes by and the headline moves on: NOW says so, the status doesn't change.
+    delay(1300).await;
+    h.emit(json!({"type":"reasoning","text":"\n\n**Checking the sidechain**"}));
+    h.has("Checking the sidechain");
+    delay(1100).await;
+    assert_eq!(reports(&h).len(), count, "nothing ticks: {:?}", reports(&h));
+    h.close().await;
+});
