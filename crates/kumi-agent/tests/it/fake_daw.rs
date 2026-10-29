@@ -775,3 +775,25 @@ async fn the_shared_undo_change_never_discards_unless_its_daw_says_so() {
     assert_eq!((undone.is_error, undone.reply), (false, None), "{}", undone.text);
     assert_eq!(*daw.history.host.discards.borrow(), [false, true]);
 }
+
+/// A change id an error says back is cut between characters, never through one (#675).
+#[tokio::test]
+async fn a_change_id_an_error_says_back_is_cut_between_characters() {
+    let daw = FakeDaw::<false>::new(Answers { plan_steps: false, stops: false, reachable: true, batches: false, copies: false });
+    let undone = daw.history.undo(&format!("{}🎹", "c".repeat(31)), Signal::new(), false).await.unwrap();
+    assert_eq!(undone.text, format!("There's no change {} in this session.", "c".repeat(31)));
+}
+
+/// The tool name a plan's refusal says back is cut between characters, never through one (#675).
+#[tokio::test]
+async fn the_tool_name_a_plans_refusal_says_back_is_cut_between_characters() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let daw = FakeDaw::<false>::new(Answers { plan_steps: false, stops: false, reachable: true, batches: false, copies: false });
+            let plan = steps(json!([{"tool": format!("{}🎹", "a".repeat(63)), "input": {}}]));
+            let result = make_changes(&daw, plan, Signal::new()).await.unwrap();
+            assert!(result.text.contains(&format!("{} isn't one of Kumi's change tools", "a".repeat(63))), "{}", result.text);
+            assert!(!result.text.contains('\u{FFFD}'), "{}", result.text);
+        })
+        .await;
+}

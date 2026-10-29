@@ -170,4 +170,12 @@ mod tests {
             "track:3 Bass (sequencer, in track:5) · 3 devices"
         );
     }
+
+    /// A long track or device name in a folded line is cut between characters, never through one (#675).
+    #[test]
+    fn a_long_name_in_a_folded_line_is_cut_between_characters() {
+        let a = |n: usize| "a".repeat(n);
+        let track = json!({"ref": "track:1", "name": format!("{}🎹 Bass", a(59)), "devices": [{"name": format!("{}🎹 EQ", a(39))}]});
+        assert_eq!(track_line(track.as_object().unwrap(), true), format!("track:1 {} · {}", a(59), a(39)));
+    }
 }

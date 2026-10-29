@@ -44,6 +44,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
   if (args.action === "notify") { changed = true; await server.sendToolListChanged(); }
   if (args.action === "error") return { isError: true, content: [{ type: "text", text: "fixture failure" }], structuredContent: { fixture: true, reason: "expected-error" } };
   if (args.action === "invalid-params") throw new McpError(ErrorCode.InvalidParams, "trackRef is required");
+  if (args.action === "invalid-params-long") throw new McpError(ErrorCode.InvalidParams, "a".repeat(299) + "\u{1F3B9} and more");
   if (args.action === "oversized") return { content: [{ type: "text", text: "x".repeat(70 * 1024) }] };
   if (args.action === "frame") return { content: [{ type: "text", text: "x".repeat(65 * 1024 * 1024) }] };
   if (args.action === "large") return { content: [{ type: "text", text: "x".repeat(5 * 1024 * 1024) }] };

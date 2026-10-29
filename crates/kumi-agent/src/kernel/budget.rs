@@ -870,4 +870,30 @@ mod tests {
         assert!(!again.changed());
         assert_eq!(measured_again, measured);
     }
+
+    /// What a cleared result keeps of its opening, and a request a shortened conversation lists, are cut between
+    /// characters, never through one (#675).
+    #[test]
+    fn a_cleared_result_and_a_listed_request_are_cut_between_characters() {
+        let a = |n: usize| "a".repeat(n);
+        let result = Message::Tool {
+            content: vec![ToolPart::ToolResult(ToolResultPart {
+                tool_call_id: "x".into(),
+                tool_name: "read".into(),
+                output: ToolResultOutput::Text { value: format!("{}🎹{}", a(HEAD - 1), a(2 * SMALL)), provider_options: None },
+                provider_options: None,
+            })],
+            provider_options: None,
+        };
+        let cleared = clear_until(&[result], 1, true, " [cleared]").unwrap();
+        let Message::Tool { content, .. } = &cleared[0] else { panic!("{cleared:?}") };
+        let ToolPart::ToolResult(part) = &content[0] else { panic!("{content:?}") };
+        let ToolResultOutput::Text { value, .. } = &part.output else { panic!("{:?}", part.output) };
+        assert_eq!(value, &format!("{} [cleared]", a(HEAD - 1)));
+        let asked = Message::User {
+            content: vec![UserPart::Text(TextPart { text: format!("{}🎹 and more", a(ASK - 1)), provider_options: None })],
+            provider_options: None,
+        };
+        assert_eq!(asks_in(&[asked]), [format!("{}…", a(ASK - 1))]);
+    }
 }

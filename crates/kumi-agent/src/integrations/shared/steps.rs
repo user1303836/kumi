@@ -132,4 +132,11 @@ mod tests {
         // Parentheses that never close: the clause ends at the first, as Live's does.
         assert_eq!(own_step_line("odd", "Make a thing (or two; more", schema), "odd: Make a thing (ref)");
     }
+
+    /// A long description in a step's line is cut between characters, never through one (#675).
+    #[test]
+    fn a_long_description_is_cut_between_characters() {
+        let a = |n: usize| "a".repeat(n);
+        assert_eq!(step_line("edit", &format!("{}🎹 more", a(71)), &JsonObject::new()), format!("edit: {}…", a(71)));
+    }
 }

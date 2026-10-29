@@ -585,4 +585,13 @@ mod tests {
         assert_eq!(stable.refs.keys().collect::<Vec<_>>(), ["track:0", "track:1", "track:2"]);
         assert_eq!(stable.lengthen(&json!({"ref": "track:3"}))["ref"], "track:2");
     }
+
+    /// A track's long name is kept cut between characters, never through one (#675).
+    #[test]
+    fn a_tracks_long_name_is_kept_cut_between_characters() {
+        let mut book = Book::<Simple<false>>::default();
+        let row = json!({"ref": "track:0", "name": format!("{}🎹 Keys", "a".repeat(255))}).as_object().cloned().unwrap();
+        book.register_rows("track", &[row], &JsonObject::new(), None).unwrap();
+        assert_eq!(book.known["track:0"].name, "a".repeat(255));
+    }
 }

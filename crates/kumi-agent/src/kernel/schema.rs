@@ -390,4 +390,12 @@ mod tests {
         let schema = json!({"type": "string", "pattern": "(unclosed"});
         assert_eq!(problem(&schema, &json!("anything")), None);
     }
+
+    /// A long value an error shows is cut between characters, never through one (#675).
+    #[test]
+    fn a_long_value_an_error_shows_is_cut_between_characters() {
+        let input = json!({"track": "track:3", "beats": 8, "focus": format!("{}🎹", "a".repeat(39))});
+        let said = format!("`focus` must be one of \"tone\", \"section\", not \"{}\".", "a".repeat(39));
+        assert_eq!(problem(&schema(), &input), Some(said));
+    }
 }

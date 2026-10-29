@@ -835,3 +835,16 @@ impl JobStore for FileJobStore {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A job's row line and a report cut short end between characters, never through one (#675).
+    #[test]
+    fn a_rows_line_and_a_cut_report_end_between_characters() {
+        let a = |n: usize| "a".repeat(n);
+        assert_eq!(first_line(&format!("{}🎹 more", a(159))), a(159));
+        assert_eq!(bounded(&format!("{}🎹{}", a(83), a(100)), 100), format!("{}… (cut short)", a(83)));
+    }
+}
