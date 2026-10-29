@@ -46,7 +46,10 @@ case!(a_long_think_shows_its_headline_in_now_and_on_its_row_until_the_answer_spe
     let copied = Rc::new(RefCell::new(Vec::<String>::new()));
     let copy = copied.clone();
     let h = Harness::with(120, 36, Rc::new(Control::default()), move |o| {
-        o.copy = Some(Rc::new(move |text| copy.borrow_mut().push(text.into())));
+        o.copy = Some(Rc::new(move |text| {
+            copy.borrow_mut().push(text.into());
+            true
+        }));
     });
     h.start().await;
     h.connect();
