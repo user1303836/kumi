@@ -12,6 +12,8 @@
 //! - `{"kind":"message","at":…,"message":{…}}`: each model message an answer settled into the conversation, as it went
 //!   in (the checkpoint keeps only what the budget leaves of them).
 //! - `{"kind":"saved","at":…,"savedAt":…,"turns":…}`: the checkpoint was kept as of `savedAt`.
+//! - `{"kind":"taken-back","at":…,"to":…}`: the producer took requests back, the one asked at `to` and each after it. Their
+//!   lines stay for what happened; the conversation from here leaves them out.
 //!
 //! Readers skip kinds they don't know and lines that don't read: the last one may be cut short by a crash, and that's
 //! never an error. The words in it (requests, answers, notices, errors) pass the redactor the app gives, which takes keys
@@ -30,7 +32,7 @@ use crate::{
     },
     kernel::budget::{transcript_of, OBSERVATION_MARKER},
 };
-use kumi_types::place::Places;
+use kumi_types::{contracts::ChangeRecord, place::Places};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
@@ -93,6 +95,7 @@ pub enum LogLine {
     Event { at: i64, event: SessionEvent },
     Message { at: i64, message: Value },
     Saved { at: i64, saved_at: i64, turns: u32 },
+    TakenBack { at: i64, to: i64 },
 }
 
 /// A log as read: its header, then every later line that reads, in order.
@@ -129,6 +132,53 @@ fn line_in(line: &[u8]) -> Option<LogLine> {
     }
 }
 
+/// A request a conversation's log holds that wasn't taken back: as the producer asked it, the changes made answering it
+/// (each as the log last told it) and the model's messages its answers settled.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Span {
+    pub request: LogRequest,
+    pub changes: Vec<ChangeRecord>,
+    pub messages: Vec<Value>,
+}
+
+/// The conversation a log holds as it stands: the messages it had before its first request (those the log began
+/// with), and each request since that wasn't taken back, oldest first.
+pub fn story_of(log: &ReadLog) -> (Vec<Value>, Vec<Span>) {
+    let (mut had, mut spans) = (vec![], Vec::<Span>::new());
+    for line in &log.lines {
+        match line {
+            LogLine::Request(request) => spans.push(Span { request: request.clone(), changes: vec![], messages: vec![] }),
+            LogLine::Message { message, .. } => match spans.last_mut() {
+                Some(span) => span.messages.push(message.clone()),
+                None => had.push(message.clone()),
+            },
+            // (an id is this Kumi process's: one from another run is another change)
+            LogLine::Event { event: SessionEvent::Change { change }, .. } => {
+                if let Some(span) = spans.last_mut() {
+                    match span.changes.iter_mut().find(|kept| kept.id == change.id && kept.at == change.at) {
+                        Some(kept) => *kept = change.clone(),
+                        None => span.changes.push(change.clone()),
+                    }
+                }
+            }
+            LogLine::TakenBack { to, .. } => {
+                if let Some(at) = spans.iter().position(|span| span.request.at == *to) {
+                    spans.truncate(at);
+                }
+            }
+            _ => {}
+        }
+    }
+    (had, spans)
+}
+
+/// The conversation's messages just before the request asked at `to`, out of `story_of`'s: those it had before its
+/// log's first request, and those each request before it settled. None when no request standing was asked then.
+pub fn messages_before(had: &[Value], spans: &[Span], to: i64) -> Option<Vec<Value>> {
+    let at = spans.iter().position(|span| span.request.at == to)?;
+    Some(had.iter().chain(spans[..at].iter().flat_map(|span| &span.messages)).cloned().collect())
+}
+
 /// The log at `file`; None when there's none, or it isn't one this Kumi reads.
 pub async fn read_log_file(file: &Path) -> Option<ReadLog> {
     read_log(&tokio::fs::read(file).await.ok()?)
@@ -156,14 +206,17 @@ pub struct Replay {
 
 /// Where a request's line or an event's begins in a log (the writer puts `kind` first).
 static SHOWN: std::sync::LazyLock<regex::bytes::Regex> =
-    std::sync::LazyLock::new(|| regex::bytes::Regex::new(r#"(?m)^\{"kind":"(?:request|event)","#).unwrap());
+    std::sync::LazyLock::new(|| regex::bytes::Regex::new(r#"(?m)^\{"kind":"(?:request|event|taken-back)","#).unwrap());
+const REQUEST: &[u8] = br#"{"kind":"request","#;
+const TAKEN_BACK: &[u8] = br#"{"kind":"taken-back","#;
 const MESSAGE: &[u8] = br#"{"kind":"message","#;
 
 /// What of a log (`bytes`, read as `read_log` reads them) a conversation taken up shows again: its requests and events
 /// from the `most`th request from the end (all of them, when there are fewer). The model's messages and the saves are
-/// the kernel's, not the screen's, and an earlier run's close isn't the conversation's. Only what's shown is read: each
-/// request (they're few and short), the events from the first request shown, and the messages the log began with only
-/// while there's room for their words. None when `bytes` aren't a log this Kumi reads.
+/// the kernel's, not the screen's, an earlier run's close isn't the conversation's, and requests taken back aren't the
+/// conversation's any more. Only what's shown is read: each request and each taking back (they're few and short), the
+/// events from the first request shown, and the messages the log began with only while there's room for their words.
+/// None when `bytes` aren't a log this Kumi reads.
 pub fn replay_of(bytes: &[u8], most: usize) -> Option<Replay> {
     replay_reading(bytes, most, &mut line_in)
 }
@@ -179,18 +232,29 @@ pub fn replay_reading(bytes: &[u8], most: usize, read: &mut dyn FnMut(&[u8]) -> 
             &line[..memchr::memchr(b'\n', line).unwrap_or(line.len())]
         })
         .collect();
-    let mut requests = vec![];
+    // The requests that stand, by where they are and when they were asked; and the lines taken back with them.
+    let (mut requests, mut gone) = (Vec::<(usize, i64)>::new(), Vec::<std::ops::Range<usize>>::new());
     for (n, line) in starts.iter().enumerate() {
-        if line.starts_with(br#"{"kind":"request","#) && matches!(read(line), Some(LogLine::Request(_))) {
-            requests.push(n);
+        if line.starts_with(REQUEST) {
+            if let Some(LogLine::Request(request)) = read(line) {
+                requests.push((n, request.at));
+            }
+        } else if line.starts_with(TAKEN_BACK) {
+            if let Some(LogLine::TakenBack { to, .. }) = read(line) {
+                if let Some(at) = requests.iter().position(|(_, asked)| *asked == to) {
+                    gone.push(requests[at].0..n);
+                    requests.truncate(at);
+                }
+            }
         }
     }
+    let standing = |n: &usize| !gone.iter().any(|range| range.contains(n)) && !starts[*n].starts_with(TAKEN_BACK);
     let left_out = requests.len().saturating_sub(most);
-    let start = if left_out > 0 { requests[left_out] } else { 0 };
-    let steered = starts[..start].iter().filter(|line| steers(line)).count();
-    let lines: Vec<LogLine> = starts[start..]
-        .iter()
-        .filter_map(|line| read(line))
+    let start = if left_out > 0 { requests[left_out].0 } else { 0 };
+    let steered = (0..start).filter(standing).filter(|n| steers(starts[*n])).count();
+    let lines: Vec<LogLine> = (start..starts.len())
+        .filter(standing)
+        .filter_map(|n| read(starts[n]))
         .filter(|line| !matches!(line, LogLine::Event { event: SessionEvent::State { state: TurnState::Closed }, .. }))
         .collect();
     // What the conversation had when its log began: the messages right after the header, before anything happened.
@@ -227,7 +291,7 @@ fn now() -> i64 {
 /// conversation taken up; so is the account of the conversation a session gives when it takes one up, the log being
 /// that conversation itself; what the screen only offers (a Set's question, a request to send again) isn't history; nor
 /// is a side question's answer, which never enters the conversation, or what a /slots check or a sign-in says as it
-/// goes.
+/// goes. Requests taken back have a line of their own.
 fn told(event: &SessionEvent) -> bool {
     match event {
         SessionEvent::Focus { .. }
@@ -245,7 +309,8 @@ fn told(event: &SessionEvent) -> bool {
         | SessionEvent::Palette { .. }
         | SessionEvent::Aside { .. }
         | SessionEvent::SlotsProgress { .. }
-        | SessionEvent::SignIn { .. } => false,
+        | SessionEvent::SignIn { .. }
+        | SessionEvent::TakenBack { .. } => false,
         SessionEvent::Change { .. }
         | SessionEvent::CatchUp { .. }
         | SessionEvent::State { .. }
@@ -565,6 +630,23 @@ impl SessionLog {
         let mut bytes = Vec::new();
         tokio::fs::File::open(&file).await.ok()?.take(had).read_to_end(&mut bytes).await.ok()?;
         Some(bytes)
+    }
+
+    /// The log of the conversation going on as it is now, once everything given so far is in it: what a request taken
+    /// back reads. None without one (a conversation not kept yet).
+    pub async fn as_now(&self) -> Option<Vec<u8>> {
+        self.written().await;
+        let (folder, id) = self.going.borrow().clone()?;
+        tokio::fs::read(folder.join(log_name(&id))).await.ok()
+    }
+
+    /// The producer took requests back: the one asked at `to`, and each after it.
+    pub fn taken_back(&self, to: i64) {
+        if !self.open_now() {
+            return;
+        }
+        self.line(&LogLine::TakenBack { at: now(), to });
+        self.send(Job::Sync);
     }
 
     /// What's been said goes to the disk, and nothing more is written: the session is closing.

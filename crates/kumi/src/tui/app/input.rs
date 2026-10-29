@@ -1491,6 +1491,77 @@ impl TuiApp {
         self.0.state.borrow_mut().undoing = false;
         self.0.scheduler.request();
     }
+    /// /takeback: the producer's last request taken back, or their last `words` of them. Kumi undoes their changes newest
+    /// first and puts the earliest one's words back in the box.
+    pub(super) async fn take_back(&self, words: &str) {
+        if self.0.state.borrow().closing || self.0.state.borrow().undoing {
+            return;
+        }
+        if !self.can().take_back {
+            self.notice("Kumi can't take requests back here: this conversation isn't kept.", NoticeTone::Info);
+            return;
+        }
+        if self.busy() {
+            self.notice("Kumi is still working. Press esc to stop it first, then take it back.", NoticeTone::Info);
+            return;
+        }
+        let Some(count) = (if words.is_empty() { Some(1) } else { words.parse::<usize>().ok().filter(|n| *n > 0) }) else {
+            self.notice("/takeback takes back your last request, and /takeback 3 your last three.", NoticeTone::Info);
+            return;
+        };
+        {
+            let mut state = self.0.state.borrow_mut();
+            state.undoing = true;
+            state.activity = "taking it back".into();
+        }
+        self.0.scheduler.request();
+        let taken = match self.session().op(op::TakeBackPlan {}).await {
+            // Newest first: the earliest of the last `count`, or the first of all when there are fewer.
+            Ok(requests) => match requests.get(count.min(requests.len()).saturating_sub(1)) {
+                Some(earliest) => self.session().op(op::TakeBack { to: earliest.at }).await.map(Some),
+                None => Ok(None),
+            },
+            Err(error) => Err(error),
+        };
+        match taken {
+            Ok(Some(taken)) => self.taken_back(taken),
+            Ok(None) => self.notice("There's no request of yours to take back yet.", NoticeTone::Info),
+            Err(error) => {
+                if !self.0.state.borrow().closing {
+                    self.error(&error);
+                }
+            }
+        }
+        self.0.state.borrow_mut().undoing = false;
+        self.0.scheduler.request();
+    }
+    /// What taking requests back did, in words, with the earliest one's words back in the box.
+    fn taken_back(&self, taken: TakenBack) {
+        let many = |n: usize, one: &str, more: &str| if n == 1 { format!("1 {one}") } else { format!("{n} {more}") };
+        let undid = (!taken.undone.is_empty()).then(|| many(taken.undone.len(), "change", "changes"));
+        let mut said = vec![];
+        match (taken.requests, undid) {
+            (0, None) => {}
+            (0, Some(undid)) => said.push(format!("Undid {undid}.")),
+            (n, undid) => said.push(format!(
+                "Took back {}{}.",
+                if n == 1 { "your last request".to_string() } else { format!("your last {n} requests") },
+                undid.map(|undid| format!(" and undid {undid}")).unwrap_or_default()
+            )),
+        }
+        if let Some(failed) = &taken.failed {
+            said.push(
+                string::trim(&format!("Kumi couldn't undo {} and stopped there. {}", failed.title, failed.note.as_deref().unwrap_or("")))
+                    .to_string(),
+            );
+        }
+        if let Some(words) = taken.words.filter(|words| !words.is_empty()) {
+            self.0.state.borrow_mut().editor.set(&words);
+            said.push("Its words are back in the box to change and send again.".into());
+        }
+        let tone = if taken.failed.is_some() { NoticeTone::Warn } else { NoticeTone::Info };
+        self.notice(&said.join(" "), tone);
+    }
     pub(super) fn scroll_by(&self, lines: i32) {
         let mut state = self.0.state.borrow_mut();
         let State { view, transcript, .. } = &mut *state;

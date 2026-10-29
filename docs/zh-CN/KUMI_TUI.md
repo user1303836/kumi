@@ -100,6 +100,7 @@ Kumi 占据整个终端窗口，并在 Kumi 关闭、崩溃或被停止时把窗
 | `/reconnect` | 通过新的桥接重新连接 Live，保留对话（之前的修改将失去 Kumi 的撤销） |
 | `/daw [name]` | 显示 Kumi 正在使用哪个 DAW；`/daw live`、`/daw reaper` 或 `/daw renoise` 会关闭 Kumi，并用那个 DAW 重新打开。在你使用 REAPER 或 Renoise，或其中之一装有 Kumi 的桥接后显示 |
 | `/undo` | 撤销 Kumi 最近一次修改 |
+| `/takeback [n]` | 收回你最后一个请求（或最后 n 个）：Kumi 根据自己的记录，从最新的开始在 DAW 中撤销它们的更改，对话回到这些请求之前，请求的文字会回到输入框，可以修改后重新发送。Kumi 上次启动之前的更改保持原样；如果某次撤销失败（比如你之后改动过它），Kumi 会停在那里并说明是哪一个 |
 | `/stop` | 停止 Live：片段、走带和录音。同时停止 Kumi 的回答 |
 | `/refresh` | 重新读取工程，不询问模型 |
 | `/copy` | 把 Kumi 的上一个回答复制到剪贴板 |
@@ -126,7 +127,7 @@ Kumi 占据整个终端窗口，并在 Kumi 关闭、崩溃或被停止时把窗
 | `/help` | 按键和命令，分节显示在可滚动的面板中；在空输入框中按 `?` 也能打开 |
 | `/quit` | 关闭 Kumi |
 
-`/new`、`/reconnect`、`/refresh` 和 `/undo` 只在 Kumi 没有在回答时有效；在回答过程中使用时，Kumi 会说明这一点，并保持原状。
+`/new`、`/reconnect`、`/refresh`、`/undo` 和 `/takeback` 只在 Kumi 没有在回答时有效；在回答过程中使用时，Kumi 会说明这一点，并保持原状。
 
 ## 即时短语
 
@@ -200,7 +201,7 @@ Kumi 占据整个终端窗口，并在 Kumi 关闭、崩溃或被停止时把窗
 
 ## 纯文本模式
 
-设置 `KUMI_UI=plain`，或者输入或输出经过管道时，Kumi 会改用逐行显示的纯文本界面，适合屏幕阅读器和日志。它支持 `/help`、`/status`、`/undo`、`/stop`、`/refresh`、`/reconnect`、`/new [name]`、`/resume [编号、ID 或名称]`（以及 `/conversations`）、`/rename <name>`、`/fork [name]`、`/export [md|html|json]`、`/share`（都会保存文件并告诉你位置）、`/daw [name]`、`/model [provider/model]`、`/effort [level|default]`、`/fast`、`/logout <provider>`、`/memory`、`/forget <id>`、`/note <id> <new words>`、`/pin <id>`、`/unpin <id>`、`/recipes`、`/willington`、`/update`、`/changelog` 和 `/quit`，但没有 `/btw`、`/goal`、`/loop`、`/slots`、`/music`、`/map`、`/jobs` 或 `/copy`。`/resume` 先为本工程的对话编号，再为其他工程的对话编号；Kumi 关于其他工程对话的提问用 1、2 或 3 回答（等待回答时命令照常可用，输入其他内容会再问一次）。后台任务开始和结束时会告诉你，你的请求所需要的任务会在 Kumi 空闲时接着进行。请在 shell 中用 `kumi login` 登录。Ctrl-C 停止回答，空闲时则退出。
+设置 `KUMI_UI=plain`，或者输入或输出经过管道时，Kumi 会改用逐行显示的纯文本界面，适合屏幕阅读器和日志。它支持 `/help`、`/status`、`/undo`、`/stop`、`/refresh`、`/reconnect`、`/new [name]`、`/resume [编号、ID 或名称]`（以及 `/conversations`）、`/rename <name>`、`/fork [name]`、`/export [md|html|json]`、`/share`（都会保存文件并告诉你位置）、`/daw [name]`、`/model [provider/model]`、`/effort [level|default]`、`/fast`、`/logout <provider>`、`/memory`、`/forget <id>`、`/note <id> <new words>`、`/pin <id>`、`/unpin <id>`、`/recipes`、`/willington`、`/update`、`/changelog` 和 `/quit`，但没有 `/btw`、`/goal`、`/loop`、`/slots`、`/music`、`/map`、`/jobs`、`/takeback` 或 `/copy`。`/resume` 先为本工程的对话编号，再为其他工程的对话编号；Kumi 关于其他工程对话的提问用 1、2 或 3 回答（等待回答时命令照常可用，输入其他内容会再问一次）。后台任务开始和结束时会告诉你，你的请求所需要的任务会在 Kumi 空闲时接着进行。请在 shell 中用 `kumi login` 登录。Ctrl-C 停止回答，空闲时则退出。
 
 ## 离开 Kumi 时
 

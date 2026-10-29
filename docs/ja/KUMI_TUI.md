@@ -100,6 +100,7 @@ REAPER と Renoise でも画面は同じで（[つなぎ方](KUMI_GUIDE.md#reape
 | `/reconnect` | 新しいブリッジで Live に接続し直す。会話はそのまま（それ以前の変更は Kumi の undo を失う） |
 | `/daw [name]` | Kumi がどの DAW を使っているかを表示する。`/daw live`、`/daw reaper`、`/daw renoise` で Kumi を閉じ、その DAW でまた開く。REAPER か Renoise で作業しているとき、またはどちらかに Kumi のブリッジが入っているときに表示される |
 | `/undo` | Kumi の最新の変更を取り消す |
+| `/takeback [n]` | 最後の依頼（または最後の n 件）を取り消す：Kumi が自分の記録をもとに、その変更を新しい順に DAW で元に戻し、会話はその依頼の直前に戻ります。依頼の言葉は入力欄に戻るので、直して送り直せます。Kumi が前回起動する前の変更はそのまま残ります。取り消しに失敗したとき（その後あなたが変えたときなど）は、そこで止まり、どの変更かを伝えます |
 | `/stop` | Live を止める：クリップ、トランスポート、録音。Kumi の答えも止める |
 | `/refresh` | モデルに尋ねずに Set を読み直す |
 | `/copy` | Kumi の最後の答えをクリップボードにコピーする |
@@ -126,7 +127,7 @@ REAPER と Renoise でも画面は同じで（[つなぎ方](KUMI_GUIDE.md#reape
 | `/help` | キーとコマンドを、セクションに分けてスクロールするパネルで表示する。空の入力欄で `?` を押しても開く |
 | `/quit` | Kumi を閉じる |
 
-`/new`、`/reconnect`、`/refresh`、`/undo` は Kumi が答えていないときだけ使えます。答えの途中では、Kumi はそう伝え、何も変えません。
+`/new`、`/reconnect`、`/refresh`、`/undo`、`/takeback` は Kumi が答えていないときだけ使えます。答えの途中では、Kumi はそう伝え、何も変えません。
 
 ## 即時フレーズ
 
@@ -200,7 +201,7 @@ REAPER と Renoise でも画面は同じで（[つなぎ方](KUMI_GUIDE.md#reape
 
 ## プレーンモード
 
-`KUMI_UI=plain`、またはパイプを通した入力や出力では、代わりに一行ずつのプレーンなインターフェースになり、スクリーンリーダーやログに向いています。使えるのは `/help`、`/status`、`/undo`、`/stop`、`/refresh`、`/reconnect`、`/new [name]`、`/resume [番号、ID または名前]`（と `/conversations`）、`/rename <name>`、`/fork [name]`、`/export [md|html|json]`、`/share`（どちらもファイルを保存し、場所を伝えます）、`/daw [name]`、`/model [provider/model]`、`/effort [level|default]`、`/fast`、`/logout <provider>`、`/memory`、`/forget <id>`、`/note <id> <new words>`、`/pin <id>`、`/unpin <id>`、`/recipes`、`/willington`、`/update`、`/changelog`、`/quit` で、`/btw`、`/goal`、`/loop`、`/slots`、`/music`、`/map`、`/jobs`、`/copy` はありません。`/resume` はこの Set の会話、次にほかの Set の会話に番号を付けます。別の Set の会話についての Kumi の質問には 1、2、3 で答えます（答えを待つ間もコマンドは使え、ほかの言葉にはもう一度質問します）。バックグラウンドジョブが始まったときと終わったときは知らせ、あなたの依頼に必要なジョブは Kumi が何もしていないときに続きを進めます。サインインはシェルから `kumi login` で行います。Ctrl-C は答えを止め、Kumi が何もしていないときは終了します。
+`KUMI_UI=plain`、またはパイプを通した入力や出力では、代わりに一行ずつのプレーンなインターフェースになり、スクリーンリーダーやログに向いています。使えるのは `/help`、`/status`、`/undo`、`/stop`、`/refresh`、`/reconnect`、`/new [name]`、`/resume [番号、ID または名前]`（と `/conversations`）、`/rename <name>`、`/fork [name]`、`/export [md|html|json]`、`/share`（どちらもファイルを保存し、場所を伝えます）、`/daw [name]`、`/model [provider/model]`、`/effort [level|default]`、`/fast`、`/logout <provider>`、`/memory`、`/forget <id>`、`/note <id> <new words>`、`/pin <id>`、`/unpin <id>`、`/recipes`、`/willington`、`/update`、`/changelog`、`/quit` で、`/btw`、`/goal`、`/loop`、`/slots`、`/music`、`/map`、`/jobs`、`/takeback`、`/copy` はありません。`/resume` はこの Set の会話、次にほかの Set の会話に番号を付けます。別の Set の会話についての Kumi の質問には 1、2、3 で答えます（答えを待つ間もコマンドは使え、ほかの言葉にはもう一度質問します）。バックグラウンドジョブが始まったときと終わったときは知らせ、あなたの依頼に必要なジョブは Kumi が何もしていないときに続きを進めます。サインインはシェルから `kumi login` で行います。Ctrl-C は答えを止め、Kumi が何もしていないときは終了します。
 
 ## Kumi から離れているとき
 

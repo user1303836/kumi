@@ -251,6 +251,21 @@ impl SessionController for Control {
         }
         Ok(c)
     }
+    fn has_take_back(&self) -> bool {
+        self.enabled("take-back")
+    }
+    async fn take_back_plan(&self) -> Result<Vec<Requested>, RuntimeError> {
+        self.call("take-back-plan");
+        Ok(self.get("take-back").unwrap_or_default())
+    }
+    /// As the session takes requests back: the screen hears of it (`taken-back-event`), then the answer (`taken-back`).
+    async fn take_back(&self, to: i64) -> Result<TakenBack, RuntimeError> {
+        self.call(format!("take-back:{to}"));
+        if let Some(event) = self.get::<SessionEvent>("taken-back-event") {
+            self.emit(event);
+        }
+        self.get("taken-back").ok_or_else(|| RuntimeError::plain("Nothing to take back."))
+    }
 
     fn has_reconnect(&self) -> bool {
         self.enabled("reconnect")

@@ -10,7 +10,7 @@ use crate::core::{
     recipes::{recipe_instructions, recipe_tools_for, RecipeStore, RecipeToolsOptions, RUN_RECIPE_TOOL},
     references::{with_references, Candidate, CandidateKind, Listed, Referable},
     search_memory::SearchMemory,
-    session_log::{replay_of, LogLine, Replay, SessionLog, REPLAYED},
+    session_log::{messages_before, read_log, replay_of, story_of, LogLine, Replay, SessionLog, Span, REPLAYED},
     store_client::StoreClient,
     taste_log::{TasteLog, UndoneBy, Whereabouts},
     techniques::{
@@ -1249,6 +1249,11 @@ impl Session {
     /// before logs.
     async fn replay(&self) -> Option<Replay> {
         let log = self.0.options.log.as_ref()?.as_opened().await?;
+        self.shown_again(log).await
+    }
+    /// What `log` shows again of its conversation: its last requests as they happened, each change in them as HISTORY
+    /// holds it now. None with nothing in it to show.
+    async fn shown_again(&self, log: Vec<u8>) -> Option<Replay> {
         // Read off the thread that takes keys: a long log is megabytes, mostly lines a replay never reads.
         let mut replay = tokio::task::spawn_blocking(move || replay_of(&log, REPLAYED)).await.ok()??;
         if replay.earlier.is_empty() && !replay.lines.iter().any(|line| matches!(line, LogLine::Request(_))) {
@@ -1261,6 +1266,61 @@ impl Session {
             }
         }
         Some(replay)
+    }
+    /// The conversation going on as its log holds it now: what it had before the log's first request, and each request
+    /// since that stands. Nothing without a log yet (a conversation not kept yet).
+    async fn story(&self) -> Result<(Vec<Value>, Vec<Span>), RuntimeError> {
+        let Some(bytes) = (match &self.0.options.log {
+            Some(log) => log.as_now().await,
+            None => None,
+        }) else {
+            return Ok((vec![], vec![]));
+        };
+        // Read off the thread that takes keys: a long log is megabytes.
+        let story = tokio::task::spawn_blocking(move || read_log(&bytes).map(|log| story_of(&log)))
+            .await
+            .map_err(|error| RuntimeError::plain(error.to_string()))?;
+        Ok(story.unwrap_or_default())
+    }
+    /// The conversation goes back to just before the request asked at `to`, `requests` of its requests taken back: the
+    /// kernel carries on from `messages` (the log's, whole, rather than what the budget left of them in the checkpoint),
+    /// the log marks what went, and the conversation is kept so.
+    async fn go_back(&self, to: i64, messages: Vec<Value>, requests: u32) -> Result<(), RuntimeError> {
+        let held = self.0.state.borrow().kernel.clone();
+        let (base, key) = match held.as_ref().filter(|held| held.value.has_checkpoint()) {
+            Some(held) => (held.value.checkpoint()?, held.key.clone()),
+            None => {
+                let s = self.0.state.borrow();
+                let settled = s.settled.clone().ok_or_else(|| RuntimeError::plain("Nothing in this conversation to go back to."))?;
+                (KernelCheckpoint::clone(&settled.checkpoint), settled.key)
+            }
+        };
+        let checkpoint = Rc::new(KernelCheckpoint { messages, ..base });
+        {
+            let mut s = self.0.state.borrow_mut();
+            // The next kernel carries on from it, as after another model.
+            s.switched = Some(Settled { checkpoint: checkpoint.clone(), key: key.clone() });
+            s.conversation_turns = s.conversation_turns.saturating_sub(requests);
+            if !transcript_of(&checkpoint.messages).iter().any(|line| line.role == TranscriptRole::User) {
+                s.conversation_first = None;
+            }
+            s.touched = true;
+        }
+        self.drop_kernel().await?;
+        if let Some(log) = &self.0.options.log {
+            log.taken_back(to);
+        }
+        self.keep_conversation(checkpoint, key, false);
+        let shown = match &self.0.options.log {
+            Some(log) => log.as_now().await,
+            None => None,
+        };
+        let replay = match shown {
+            Some(shown) => self.shown_again(shown).await,
+            None => None,
+        };
+        self.emit(SessionEvent::TakenBack { requests, replay });
+        Ok(())
     }
     /// An id for a new conversation: none kept has it, in any Set.
     async fn fresh_id(&self) -> String {
@@ -1941,11 +2001,14 @@ impl Session {
         let Ok(checkpoint) = held.value.checkpoint() else {
             return;
         };
-        let checkpoint = Rc::new(checkpoint);
+        self.keep_conversation(Rc::new(checkpoint), held.key, turn);
+    }
+    /// The conversation kept as `checkpoint` holds it (the Set's, by `key`), a request more when it's a `turn`'s.
+    fn keep_conversation(&self, checkpoint: Rc<KernelCheckpoint>, key: String, turn: bool) {
         let empty = checkpoint.messages.is_empty();
         let (place, id, conversation, name, from) = {
             let mut s = self.0.state.borrow_mut();
-            s.settled = Some(Settled { checkpoint: checkpoint.clone(), key: held.key });
+            s.settled = Some(Settled { checkpoint: checkpoint.clone(), key });
             s.as_kept = false;
             if turn {
                 s.conversation_turns += 1;
@@ -3302,6 +3365,94 @@ impl SessionController for Session {
             }
         }
         Ok(result)
+    }
+    fn has_take_back(&self) -> bool {
+        self.0.options.log.is_some() && self.0.options.conversations.is_some()
+    }
+    async fn take_back_plan(&self) -> Result<Vec<Requested>, RuntimeError> {
+        let (_, spans) = self.story().await?;
+        let s = self.0.state.borrow();
+        Ok(spans
+            .into_iter()
+            .rev()
+            .map(|span| Requested {
+                at: span.request.at,
+                words: span.request.text,
+                changes: span.changes.into_iter().map(|change| taken_up(&s.conversation_id, &s.seen, change)).collect(),
+            })
+            .collect())
+    }
+    async fn take_back(&self, to: i64) -> Result<TakenBack, RuntimeError> {
+        if !self.0.state.borrow().started {
+            return Err(RuntimeError::plain("Session is not started"));
+        }
+        let (had, spans) = self.story().await?;
+        let first = spans
+            .iter()
+            .position(|span| span.request.at == to)
+            .ok_or_else(|| KumiError::new(FailureKind::Request, "That request isn't in this conversation any more."))?;
+        // Newest first, each request's changes this session can still undo; what can't be undone stays as it is.
+        let plan: Vec<(usize, Vec<ChangeRecord>)> = {
+            let s = self.0.state.borrow();
+            (first..spans.len())
+                .rev()
+                .map(|n| {
+                    let changes = spans[n].changes.iter().rev().map(|change| taken_up(&s.conversation_id, &s.seen, change.clone()));
+                    (n, changes.filter(|change| change.state == ChangeState::Applied).collect())
+                })
+                .collect()
+        };
+        // What was undone, the undo that failed, and the earliest request whose changes all went.
+        let outcome = Rc::new(RefCell::new((Vec::<ChangeRecord>::new(), None::<ChangeRecord>, spans.len())));
+        let put = outcome.clone();
+        self.perform(
+            false,
+            Phase::Undo,
+            Box::new(move |this, op| {
+                async move {
+                    let integration = this.0.state.borrow().integration.clone().filter(|i| i.has_undo());
+                    for (n, changes) in plan {
+                        for change in changes {
+                            let undone = match &integration {
+                                Some(integration) => integration.undo(Some(&change.id), op.signal.clone()).await,
+                                None => Err(RuntimeError::plain("Kumi can't undo anything here now.")),
+                            };
+                            match undone {
+                                Ok(record) if record.state == ChangeState::Undone => put.borrow_mut().0.push(record),
+                                Ok(record) => {
+                                    put.borrow_mut().1 = Some(record);
+                                    return Ok(None);
+                                }
+                                Err(error) => {
+                                    put.borrow_mut().1 = Some(ChangeRecord { note: Some(error.message()), ..change });
+                                    return Ok(None);
+                                }
+                            }
+                        }
+                        put.borrow_mut().2 = n;
+                    }
+                    Ok(None)
+                }
+                .boxed_local()
+            }),
+            None,
+            None,
+        )?
+        .await?;
+        let (undone, failed, earliest) = outcome.borrow().clone();
+        if let Some(taste) = &self.0.taste {
+            for record in &undone {
+                taste.undone(&record.id, UndoneBy::Producer);
+            }
+        }
+        let requests = (spans.len() - earliest) as u32;
+        let words = (requests > 0).then(|| spans[earliest].request.text.clone());
+        if requests > 0 {
+            let at = spans[earliest].request.at;
+            let messages = messages_before(&had, &spans, at).unwrap_or_default();
+            self.go_back(at, messages, requests).await?;
+        }
+        Ok(TakenBack { requests, words, undone, failed })
     }
     fn has_library(&self) -> bool {
         self.0.options.library.is_some()

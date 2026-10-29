@@ -798,6 +798,15 @@ fn events() -> Vec<SessionEvent> {
         }),
     });
     events.push(SessionEvent::Palette { palette: None });
+    events.push(SessionEvent::TakenBack {
+        requests: 2,
+        replay: Some(Replay {
+            before: 0,
+            earlier: vec![],
+            lines: vec![LogLine::Request(LogRequest { at: AT, text: "make the kick punchier".into(), files: vec![], pinned: None })],
+        }),
+    });
+    events.push(SessionEvent::TakenBack { requests: 1, replay: None });
     events.push(SessionEvent::Aside { id: 2, text: "The kick and the bass share 60 Hz, so".into() });
     events.push(SessionEvent::SlotsProgress { id: 3, line: "Fetching the stem model: 12 of 80 MB".into() });
     events.push(SessionEvent::SignIn { id: 4, url: Some("https://auth.openai.com/authorize?state=kumi".into()), code: None });
@@ -897,6 +906,7 @@ fn variant(event: &SessionEvent) -> &'static str {
         SessionEvent::Job(_) => "Job",
         SessionEvent::CarryOn { .. } => "CarryOn",
         SessionEvent::Palette { .. } => "Palette",
+        SessionEvent::TakenBack { .. } => "TakenBack",
         SessionEvent::Aside { .. } => "Aside",
         SessionEvent::SlotsProgress { .. } => "SlotsProgress",
         SessionEvent::SignIn { .. } => "SignIn",
@@ -918,7 +928,7 @@ fn variant(event: &SessionEvent) -> &'static str {
     }
 }
 
-const VARIANTS: [&str; 49] = [
+const VARIANTS: [&str; 50] = [
     "Focus",
     "Pointed",
     "Change",
@@ -954,6 +964,7 @@ const VARIANTS: [&str; 49] = [
     "Job",
     "CarryOn",
     "Palette",
+    "TakenBack",
     "Aside",
     "SlotsProgress",
     "SignIn",
@@ -1592,6 +1603,8 @@ pub(crate) fn requests() -> Vec<Op> {
         op::Close {}.into(),
         op::Undo { id: Some("c3".into()) }.into(),
         op::Undo { id: None }.into(),
+        op::TakeBackPlan {}.into(),
+        op::TakeBack { to: AT + 4 }.into(),
         op::Refresh {}.into(),
         op::NewConversation {}.into(),
         op::Reconnect {}.into(),
@@ -1742,6 +1755,7 @@ fn capabilities_keep_their_wire_shape() {
         music: true,
         map: true,
         models: true,
+        take_back: true,
         ..Capabilities::default()
     };
     pinned::<Capabilities>("capabilities.json", &capabilities);
