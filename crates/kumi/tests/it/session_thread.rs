@@ -29,6 +29,8 @@ struct Input {
     raw: Cell<bool>,
     data: RefCell<Option<ByteListener>>,
     end: RefCell<Option<Rc<dyn Fn()>>>,
+    /// Read already as Kumi starts reading: handed over as it resumes, as a reader thread's pump can.
+    ahead: RefCell<Vec<u8>>,
 }
 impl TerminalInput for Input {
     fn is_tty(&self) -> bool {
@@ -42,7 +44,11 @@ impl TerminalInput for Input {
         Ok(())
     }
     fn resume(&self, listener: ByteListener) {
-        *self.data.borrow_mut() = Some(listener);
+        *self.data.borrow_mut() = Some(listener.clone());
+        let ahead = std::mem::take(&mut *self.ahead.borrow_mut());
+        if !ahead.is_empty() {
+            listener(&ahead);
+        }
     }
     fn pause(&self) {
         self.data.borrow_mut().take();
@@ -245,27 +251,19 @@ async fn the_full_screen_has_written_and_let_go_of_everything_once_it_ends() {
             };
             until("the screen reads keys", || input.data.borrow().is_some()).await;
             // The screen takes keys before the session has started, as it always has: a request sent while it's starting
-            // is turned away as busy, so it's sent again until the model is asked.
-            for _ in 0..100 {
+            // is turned away as busy, and only then is it sent again.
+            let refused = || out.0.borrow().matches("Session is busy").count();
+            for _ in 0..20 {
+                let before = refused();
                 input.write("Note how I start a track.\r");
-                for _ in 0..50 {
-                    if asked.load(Ordering::SeqCst) > 0 {
-                        break;
-                    }
-                    tokio::time::sleep(Duration::from_millis(4)).await;
-                }
+                until("the request taken or turned away", || asked.load(Ordering::SeqCst) > 0 || refused() > before).await;
                 if asked.load(Ordering::SeqCst) > 0 {
                     break;
                 }
             }
-            // (a request sent again while the first was taken goes to the answer under way, which may ask once more)
-            for _ in 0..2500 {
-                if asked.load(Ordering::SeqCst) >= 2 && screen().contains("Kept it.") {
-                    break;
-                }
-                tokio::time::sleep(Duration::from_millis(4)).await;
-            }
-            assert!(screen().contains("Kept it."), "asked {} times:\n{}", asked.load(Ordering::SeqCst), screen());
+            until("the answer", || asked.load(Ordering::SeqCst) == 2 && screen().contains("Kept it.")).await;
+            // Kumi idle again (its answer done), so ctrl+c quits rather than stops it.
+            until("Kumi idle", || screen().contains("Ready")).await;
             input.write("\x03\x03");
             let code = tokio::time::timeout(Duration::from_secs(30), running).await.expect("Kumi ends").unwrap();
             assert_eq!(code, 0, "{}\nstderr: {}", screen(), err.0.borrow());
@@ -303,6 +301,29 @@ async fn plain_mode_has_written_and_let_go_of_everything_once_it_ends() {
             assert_eq!(notes, [NOTE]);
             assert!(!locks.is_empty(), "the conversation was kept");
             assert!(locks.iter().all(|(_, free)| *free), "still held once Kumi ended: {locks:?}");
+        })
+        .await;
+}
+
+/// Plain mode, a line read already as it starts reading (handed over as its reader resumes, before the session was asked
+/// to start): it waits for the session, rather than going ahead of its Start.
+#[tokio::test(flavor = "current_thread")]
+async fn plain_mode_answers_a_line_read_before_its_session_was_asked_to_start() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let asked = Arc::new(AtomicUsize::new(0));
+            let (folder, mut env) = home(&noting_server(asked.clone()).await);
+            env.insert("KUMI_UI".into(), "plain".into());
+            let input = Rc::new(Input { ahead: RefCell::new(b"Note how I start a track.\n".to_vec()), ..Default::default() });
+            let (out, err) = (Rc::new(Output::default()), Rc::new(Output::default()));
+            let running = tokio::task::spawn_local(kumi(env, input.clone(), out.clone(), err.clone(), &["--inference-only", "-c"]));
+            until("the answer", || asked.load(Ordering::SeqCst) >= 2 && out.0.borrow().contains("Kept it.")).await;
+            let said = format!("{}{}", out.0.borrow(), err.0.borrow());
+            assert!(!said.contains("Session is"), "{said}");
+            input.end();
+            let code = tokio::time::timeout(Duration::from_secs(30), running).await.expect("Kumi ends").unwrap();
+            assert_eq!(code, 0, "{said}");
+            assert_eq!(left(folder.path()).0, [NOTE]);
         })
         .await;
 }

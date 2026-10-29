@@ -321,7 +321,7 @@ struct State {
     first_text_ms: Option<f64>,
     queued: Option<String>,
     answering: bool,
-    /// The session's Start is asked, and it hasn't gone idle after it yet.
+    /// The session is starting: from before the first line is read until it first goes idle, or Start is answered.
     starting: bool,
     output_failed: bool,
     text: StreamingText,
@@ -1433,6 +1433,9 @@ impl Terminal for PlainTerminal {
                 self.notice(&format!("[{}] {}", words.tag, words.off_at_start));
             }
         }
+        // Starting from before the first line is read (the reader may hand over lines it read already as it resumes): a
+        // line meanwhile waits for the session, rather than going ahead of its Start.
+        self.0.state.borrow_mut().starting = true;
         let weak = Rc::downgrade(&self.0);
         active.resume(Rc::new(move |bytes| {
             if let Some(inner) = weak.upgrade() {
@@ -1465,7 +1468,6 @@ impl Terminal for PlainTerminal {
         let this = self.clone();
         tokio::task::spawn_local(async move {
             if !this.0.state.borrow().closing {
-                this.0.state.borrow_mut().starting = true;
                 let started = this.session().op(op::Start {}).await;
                 this.0.state.borrow_mut().starting = false;
                 if let Err(error) = started {
@@ -1474,6 +1476,18 @@ impl Terminal for PlainTerminal {
                         this.finish(1).await;
                     }
                     return;
+                }
+                // A line kept while it started goes now, if the session's first Idle didn't send it already.
+                let queued = {
+                    let mut state = this.0.state.borrow_mut();
+                    if state.answering {
+                        None
+                    } else {
+                        state.queued.take()
+                    }
+                };
+                if let Some(line) = queued {
+                    this.spawn_submit(line);
                 }
                 // `kumi -r`: the kept conversations to choose from (those the words fit, given words).
                 if let Some(words) = this.0.options.choose_conversation.clone() {
