@@ -18,7 +18,7 @@
                          them)
      ctrl+home           The start of the conversation
      ctrl+end            Back to the latest
-     drag                Select text: ctrl+c or a right-click copies it, and esc lets it go
+     drag                Copy text as you let go; double-click for a word, triple-click for a line
      shift+drag          Your terminal's own selection (option+drag in iTerm2)                                      HISTORY ──────────────────────────────────
      ctrl+l              Draw the screen again                                                                      Nothing changed yet
 

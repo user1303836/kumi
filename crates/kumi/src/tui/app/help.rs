@@ -27,6 +27,8 @@ pub(super) struct HelpHas {
     pub jobs: bool,
     pub palette: bool,
     pub slots: bool,
+    /// Text copies as the mouse lets go of it (`copyOnSelect`).
+    pub copy_on_select: bool,
 }
 
 /// The help's sections: the keys that work in this session (`has`), in the DAW's words (`app`), the pane's `tabs`, and
@@ -61,7 +63,15 @@ pub(super) fn help_sections(has: HelpHas, app: &str, tabs: &[String], commands: 
         row("page up  page down", "Scroll the conversation; the mouse wheel too (over the tabs, it scrolls them)"),
         row("ctrl+home", "The start of the conversation"),
         row("ctrl+end", "Back to the latest"),
-        row("drag", "Select text: ctrl+c or a right-click copies it, and esc lets it go"),
+        row(
+            "drag",
+            if has.copy_on_select {
+                "Copy text as you let go; double-click for a word, triple-click for a line"
+            } else {
+                "Select text (double-click for a word, triple-click for a line); ctrl+c or a right-click copies it, and esc \
+                 clears it"
+            },
+        ),
         row("shift+drag", "Your terminal's own selection (option+drag in iTerm2)"),
         row("ctrl+l", "Draw the screen again"),
     ];
@@ -195,6 +205,7 @@ impl TuiApp {
             jobs: can.jobs,
             palette: can.palette,
             slots: self.0.options.slots.is_some(),
+            copy_on_select: self.0.options.copy_on_select,
         };
         let commands =
             COMMANDS.iter().filter(|command| self.offered(&can, command.name)).map(|command| (command.name.into(), command.about()));
@@ -248,10 +259,15 @@ impl TuiApp {
 mod tests {
     use super::*;
 
-    fn every_section() -> Vec<HelpSection> {
-        let has = HelpHas { voice: true, attachments: true, jobs: true, palette: true, slots: true };
+    /// The whole help, every key there, with text copying as the mouse lets go or not.
+    fn every_section_copying(copy_on_select: bool) -> Vec<HelpSection> {
+        let has = HelpHas { voice: true, attachments: true, jobs: true, palette: true, slots: true, copy_on_select };
         let tabs = ["HISTORY", "GOAL", "JOBS", "PALETTE"].map(String::from);
         help_sections(has, "Live", &tabs, COMMANDS.iter().map(|command| (command.name.to_string(), command.about.to_string())).collect())
+    }
+
+    fn every_section() -> Vec<HelpSection> {
+        every_section_copying(true)
     }
 
     fn lines(rows: &[Vec<Span>]) -> Vec<String> {
@@ -260,8 +276,10 @@ mod tests {
 
     #[test]
     fn all_of_the_help_shows_at_any_width_and_no_row_runs_past_it() {
-        let sections = every_section();
-        for width in 5..=120 {
+        for (sections, width) in [every_section_copying(true), every_section_copying(false)]
+            .iter()
+            .flat_map(|sections| (5..=120).map(move |width| (sections, width)))
+        {
             let lines = lines(&help_rows(&sections, width));
             for line in &lines {
                 assert!(text_width(line) <= width, "{line:?} is wider than {width}");
@@ -269,7 +287,7 @@ mod tests {
             // Every character of every heading, key and description, in order: words wider than a row are split.
             let shown: String = lines.concat().chars().filter(|c| !c.is_whitespace()).collect();
             let mut from = 0;
-            for section in &sections {
+            for section in sections {
                 let wanted = std::iter::once(section.title.to_string())
                     .chain(section.rows.iter().flat_map(|(keys, does)| [keys.clone(), does.clone()]));
                 for wanted in wanted {

@@ -21,7 +21,7 @@
                          the tabs, it scrolls them)
      ctrl+home           The start of the conversation
      ctrl+end            Back to the latest
-     drag                Select text: ctrl+c or a right-click copies it, and
+     drag                Copy text as you let go; double-click for a word,
 
 
 
