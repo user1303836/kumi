@@ -172,7 +172,7 @@ impl TuiApp {
                     return false;
                 }
                 if let Some(screen) = self.0.screen.borrow().as_ref().filter(|s| s.width > 0 && s.height > 0) {
-                    let (pane, left) = Self::layout_for(screen.width);
+                    let (pane, left) = self.layout(screen.width);
                     let area = if pane == 0 || self.setup_active() {
                         screen.bounds()
                     } else if *x < left {
@@ -222,10 +222,19 @@ impl TuiApp {
                 }
             }
         }
+        // ---- W6-2 · the pane: ctrl+\ opens and closes the drawer, or puts the pane away and back (pane.toggle; into the
+        // key registry with W3-3) ----
+        if ctrl && !alt && name == "\\" {
+            self.toggle_pane();
+            return;
+        }
+        // ---- end W6-2 ----
         let menu = self.menu();
         let width = self.input_width();
         if name == "tab" && shift && !ctrl && !alt && menu.is_empty() {
             self.0.state.borrow_mut().tree_cursor = None;
+            // (W6-2: the pane shows the tabs the keyboard goes into, the drawer open on them)
+            self.open_pane(super::drawer::DrawerTab::Tabs);
             if self.0.tabs.inside() {
                 self.0.tabs.next();
             } else {
@@ -287,6 +296,8 @@ impl TuiApp {
                     .is_some_and(|t| state.focus.as_ref().and_then(|f| f.chain_ref.as_ref().or(f.track_ref.as_ref())) == Some(&t.track_ref))
             };
             if eligible {
+                // (W6-2: the drawer open on FOCUS, where the keyboard goes)
+                self.open_pane(super::drawer::DrawerTab::Focus);
                 self.0.state.borrow_mut().tree_cursor = Some(0);
                 let shown = self.tree_shown();
                 self.0.state.borrow_mut().tree_cursor = shown.map(|rows| rows.iter().position(|r| r.role == TreeRole::Focus).unwrap_or(0));
@@ -1377,11 +1388,19 @@ impl TuiApp {
         state.scroll = state.scroll.saturating_add(lines).max(0);
     }
     pub(super) fn layout_for(columns: i32) -> (i32, i32) {
-        let pane = if columns >= 100 { ((columns as f64 * 0.34).floor() as i32).clamp(36, 46) } else { 0 };
+        let pane = if columns >= super::drawer::PANE_COLUMNS { ((columns as f64 * 0.34).floor() as i32).clamp(36, 46) } else { 0 };
         (pane, columns - pane)
     }
+    /// The side pane's width and the conversation's at this many columns: none for the pane once put away (ctrl+\).
+    pub(super) fn layout(&self, columns: i32) -> (i32, i32) {
+        if self.0.state.borrow().pane_away {
+            (0, columns)
+        } else {
+            Self::layout_for(columns)
+        }
+    }
     pub(super) fn input_width(&self) -> i32 {
-        (Self::layout_for(self.0.tty.size().columns).1 - 6).max(1)
+        (self.layout(self.0.tty.size().columns).1 - 6).max(1)
     }
 }
 /// A command's words after its name (`/rename Night drive`): empty when there are none, None when the line isn't it.

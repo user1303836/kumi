@@ -4,12 +4,6 @@
 
 
 
-                         ██                          ▀▀
-                         ██ ▄█▀  ██  ██  ██▀▀██▀▀█▄  ██
-                         ██▀█▄   ██  ██  ██  ██  ██  ██
-                         ▀▀  ▀▀   ▀▀▀▀▀  ▀▀  ▀▀  ▀▀  ▀▀
-
-                         ░▒▓████████████████████████▓▒░
 
                             Kumi can see Night Drive.
 
@@ -21,8 +15,14 @@
      Kumi keeps each song's conversations: /conversations goes back to one.
 
 
-  Night Drive
+
+  NOW   FOCUS   HISTORY 1 ────────────────────────────────────── ctrl+\ closes
   ✓ “Pad” settings: volume −3 dB, transpose 12, loop forward              undo
+    ███████████▏── Volume −6 dB → −3 dB
+    Transpose 0 → 12
+    Loop off → forward
+
+
 
 
    Ask Kumi about your song

@@ -1,7 +1,8 @@
 //! The right pane's lower half: tabs in a fixed corner, each tab's rows right under its name. A tab is a
 //! module that says its title, an optional count, and its rows for a width; the panel owns the strip,
 //! which tab is showing, each tab's scroll and the keyboard's place, and draws the window of rows with
-//! a quiet "n more" at the ends. HISTORY is the first tab; later ones only need to be registered.
+//! a quiet "n more" at the ends. HISTORY is the first tab; later ones only need to be registered. Below 100 columns
+//! the drawer puts the same tabs on a strip of its own, after NOW and FOCUS, over the rows.
 
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
@@ -67,6 +68,8 @@ struct State {
     cursor: Option<i32>,
     last_rows: Rc<[TabRow]>,
     last_height: i32,
+    /// Counts the times a tab was asked for (by a click, a key or Kumi), shown already or not.
+    asked: u64,
 }
 
 struct Inner {
@@ -99,6 +102,7 @@ impl TabPanel {
                     cursor: None,
                     last_rows: Rc::default(),
                     last_height: 1,
+                    asked: 0,
                 }),
             }),
         }
@@ -130,7 +134,11 @@ impl TabPanel {
     pub fn show(&self, id: &str) {
         {
             let mut state = self.inner.state.borrow_mut();
-            if !self.inner.tabs.iter().any(|tab| tab.id() == id && tab.shown()) || id == state.active {
+            if !self.inner.tabs.iter().any(|tab| tab.id() == id && tab.shown()) {
+                return;
+            }
+            state.asked += 1;
+            if id == state.active {
                 return;
             }
             state.active = id.to_string();
@@ -139,6 +147,21 @@ impl TabPanel {
         if let Some(on_switch) = &self.inner.on_switch {
             on_switch(id);
         }
+    }
+
+    /// How many times a tab was asked for: a drawer that holds the tabs under other things turns to them when it moves.
+    pub fn asked(&self) -> u64 {
+        self.inner.state.borrow().asked
+    }
+
+    /// The tabs on the strip, in order: each one's id, title and count.
+    pub fn titles(&self) -> Vec<(String, String, Option<i64>)> {
+        self.inner
+            .tabs
+            .iter()
+            .filter(|tab| tab.shown())
+            .map(|tab| (tab.id().to_string(), tab.title().to_string(), tab.badge().filter(|count| *count != 0)))
+            .collect()
     }
 
     pub fn next(&self) {
@@ -231,7 +254,6 @@ impl TabPanel {
         let dim = Style::fg(palette::DIM);
         let accent = Style::fg(palette::ACCENT);
         let rule = Style::fg(palette::RULE);
-        let cursor_band = Style::bg(palette::SELECTED);
         let active = self.active_id();
         let mut x = area.x;
         for (index, tab) in self.inner.tabs.iter().filter(|tab| tab.shown()).enumerate() {
@@ -252,9 +274,18 @@ impl TabPanel {
         if x + 1 < area.x + area.width {
             screen.put(x + 1, area.y, &"─".repeat((area.x + area.width - x - 1) as usize), &rule);
         }
+        self.draw_rows(screen, Rect { x: area.x, y: area.y + 1, width: area.width, height: area.height - 1 }, hits);
+    }
+
+    /// The active tab's rows filling the area, with a quiet "n more" at the ends; a strip of its own drawn elsewhere
+    /// (the drawer's) shows which tab this is.
+    pub fn draw_rows(&self, screen: &mut Screen, area: Rect, hits: &mut Vec<Hit>) {
+        let faint = Style::fg(palette::FAINT);
+        let cursor_band = Style::bg(palette::SELECTED);
+        let active = self.active_id();
         let tab = self.inner.tabs.iter().find(|tab| tab.id() == active).expect("the active tab");
         let rows = tab.rows(area.width);
-        let height = (area.height - 1).max(1);
+        let height = area.height.max(1);
         let total = rows.len() as i32;
         let mut state = self.inner.state.borrow_mut();
         // Rows that arrive at the top while scrolled down keep the view where it was. Rows of a thing stay put by it:
@@ -286,7 +317,7 @@ impl TabPanel {
         state.last_rows = rows.clone();
         state.last_height = height;
         if rows.is_empty() {
-            screen.put(area.x, area.y + 1, &truncate(tab.empty().unwrap_or("Nothing here yet"), area.width), &faint);
+            screen.put(area.x, area.y, &truncate(tab.empty().unwrap_or("Nothing here yet"), area.width), &faint);
             return;
         }
         let scroll = state.scrolls.get(&active).copied().unwrap_or(0).clamp(0, (total - height).max(0));
@@ -295,10 +326,6 @@ impl TabPanel {
         drop(state);
         let above = scroll;
         let below = (total - scroll - height).max(0);
-        // The ends say how much more there is, on a row of their own, counting things rather than rows.
-        let first = if above > 0 { 1 } else { 0 };
-        let last = if below > 0 { 1 } else { 0 };
-        let shown = &rows[(scroll + first) as usize..((scroll + height - last).max(scroll + first) as usize).min(rows.len())];
         let things = |hidden: &[&TabRow]| -> usize {
             hidden
                 .iter()
@@ -308,14 +335,24 @@ impl TabPanel {
                 .collect::<HashSet<String>>()
                 .len()
         };
-        let visible: HashSet<&str> = shown.iter().filter_map(|row| row.item.as_deref()).collect();
-        let outside = |row: &&TabRow| row.item.as_deref().is_none_or(|item| !visible.contains(item));
-        let hidden_above: Vec<&TabRow> = rows[..(scroll + first) as usize].iter().filter(outside).collect();
-        let hidden_below: Vec<&TabRow> =
-            rows[((scroll + height - last).max(0) as usize).min(rows.len())..].iter().filter(outside).collect();
-        let mut y = area.y + 1;
+        // The ends say how much more there is, on a row of their own, counting things rather than rows. Past an end with
+        // no other thing beyond it (only more of one in view: an open change's picture), that row shows the next one.
+        let ends = |first: i32, last: i32| {
+            let shown = &rows[(scroll + first) as usize..((scroll + height - last).max(scroll + first) as usize).min(rows.len())];
+            let visible: HashSet<&str> = shown.iter().filter_map(|row| row.item.as_deref()).collect();
+            let outside = |row: &&TabRow| row.item.as_deref().is_none_or(|item| !visible.contains(item));
+            let hidden_above: Vec<&TabRow> = rows[..(scroll + first) as usize].iter().filter(outside).collect();
+            let hidden_below: Vec<&TabRow> =
+                rows[((scroll + height - last).max(0) as usize).min(rows.len())..].iter().filter(outside).collect();
+            (shown, things(&hidden_above), things(&hidden_below))
+        };
+        let (first, last) = (i32::from(above > 0), i32::from(below > 0));
+        let (_, more_above, more_below) = ends(first, last);
+        let (first, last) = (if more_above > 0 { first } else { 0 }, if more_below > 0 { last } else { 0 });
+        let (shown, more_above, more_below) = ends(first, last);
+        let mut y = area.y;
         if first > 0 {
-            screen.put(area.x, y, &format!("↑ {} more", things(&hidden_above)), &faint);
+            screen.put(area.x, y, &format!("↑ {more_above} more"), &faint);
             y += 1;
         }
         for (offset, row) in shown.iter().enumerate() {
@@ -350,7 +387,7 @@ impl TabPanel {
             y += 1;
         }
         if last > 0 {
-            screen.put(area.x, y, &format!("↓ {} more", things(&hidden_below)), &faint);
+            screen.put(area.x, y, &format!("↓ {more_below} more"), &faint);
         }
     }
 }
@@ -381,6 +418,48 @@ mod tests {
         fn shown(&self) -> bool {
             self.shown.get()
         }
+    }
+
+    /// A change whose picture is open, in eight rows, then (with `older`) a change before it.
+    struct Opened {
+        older: bool,
+    }
+
+    impl Tab for Opened {
+        fn id(&self) -> &str {
+            "history"
+        }
+        fn title(&self) -> &str {
+            "HISTORY"
+        }
+        fn rows(&self, _: i32) -> Rc<[TabRow]> {
+            let row = |text: String, item: &str| TabRow {
+                spans: vec![Span::styled(text, Style::default())],
+                item: Some(item.into()),
+                ..Default::default()
+            };
+            let older = self.older.then(|| row("older".into(), "c0"));
+            [row("change".into(), "c1")].into_iter().chain((0..8).map(|n| row(format!("picture {n}"), "c1"))).chain(older).collect()
+        }
+    }
+
+    #[test]
+    fn an_end_with_only_more_of_what_shows_past_it_shows_its_next_row_not_a_count_of_none() {
+        let draw = |panel: &TabPanel| {
+            let mut screen = Screen::new(20, 5);
+            panel.draw_rows(&mut screen, Rect::new(0, 0, 20, 5), &mut vec![]);
+            screen.lines()
+        };
+        let alone = TabPanel::new(vec![Rc::new(Opened { older: false })], None, None);
+        let lines = draw(&alone);
+        assert!(lines[0].starts_with("change") && lines[4].starts_with("picture 3"), "{lines:?}");
+        // Scrolled into the picture: no ends at all.
+        alone.scroll_by(3);
+        let lines = draw(&alone);
+        assert!(lines[0].starts_with("picture 2") && lines[4].starts_with("picture 6"), "{lines:?}");
+        // Another change past it is counted.
+        let lines = draw(&TabPanel::new(vec![Rc::new(Opened { older: true })], None, None));
+        assert!(lines[3].starts_with("picture 2") && lines[4].starts_with("↓ 1 more"), "{lines:?}");
     }
 
     #[test]

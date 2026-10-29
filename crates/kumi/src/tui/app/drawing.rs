@@ -9,6 +9,7 @@ use super::super::{
     width::{text_width, truncate},
     wrap::Span,
 };
+use super::drawer::{drawer_fits, PANE_COLUMNS};
 use super::input::Command;
 use super::*;
 use crate::text::library_line;
@@ -69,7 +70,14 @@ impl TuiApp {
             .unwrap_or_else(|| Screen::with_table(columns, rows, self.0.table.clone()));
         // Every cell painted over: nothing of the last frame stays.
         screen.fill(screen.bounds(), &st::GROUND);
-        self.0.state.borrow_mut().hits.clear();
+        {
+            let mut state = self.0.state.borrow_mut();
+            state.hits.clear();
+            // (set again by whatever draws the tabs this frame)
+            state.tabs_area = None;
+        }
+        // What landed since the last frame opens the drawer where it's on screen.
+        self.follow_drawer(columns >= 24 && drawer_fits(columns, rows) && !self.setup_active() && !self.map_shown());
         if columns < 24 || rows < 8 {
             // No pane to keep fresh here, nor during setup or beside the dock below.
             self.keep_tree_fresh(None);
@@ -89,13 +97,24 @@ impl TuiApp {
             self.present(screen, cursor);
             return;
         }
-        let (pane, left) = Self::layout_for(columns);
+        let (pane, left) = self.layout(columns);
         self.draw_header(&mut screen, columns);
         let layout = self.0.state.borrow().editor.layout((left - 6).max(1));
         let visible = layout.rows.len().min(5) as i32;
         let box_height = visible + 2;
         let box_top = rows - 1 - box_height;
-        let dock = if pane != 0 { 0 } else { 2 };
+        // Below 100 columns the pane is the drawer under the conversation, or the two-line strip without the rows for
+        // it; put away, the strip goes and the drawer stays folded to its row.
+        let drawer = drawer_fits(columns, rows);
+        let dock = if columns >= PANE_COLUMNS {
+            0
+        } else if drawer {
+            self.drawer_height(rows)
+        } else if self.0.state.borrow().pane_away {
+            0
+        } else {
+            2
+        };
         let (chip, files, waiting) = {
             let state = self.0.state.borrow();
             (i32::from(state.pinned.is_some()), i32::from(!state.attachments.is_empty()), state.held.len().min(3) as i32)
@@ -105,6 +124,8 @@ impl TuiApp {
         self.draw_conversation(&mut screen, area);
         if pane != 0 {
             self.draw_pane(&mut screen, Rect::new(left, 1, pane, rows - 1));
+        } else if drawer {
+            self.draw_drawer(&mut screen, Rect::new(0, box_top - dock - 1, columns, dock));
         } else {
             self.keep_tree_fresh(None);
             self.draw_dock(&mut screen, Rect::new(0, box_top - dock - 1, columns, dock));
@@ -386,6 +407,10 @@ impl TuiApp {
         state.records.changes().iter().find(|c| &c.id == id).cloned()
     }
     pub(super) fn now_line(&self) -> NowLine {
+        self.now_said(true)
+    }
+    /// NOW's line; without `flash`, the change that just landed isn't said (the drawer shows it on a row of its own).
+    pub(super) fn now_said(&self, flash: bool) -> NowLine {
         let turn = self.0.options.controller.status().state;
         let state = self.0.state.borrow();
         let simple = |detail: &str, style: Style| NowLine { dot: None, label: String::new(), detail: detail.into(), style, activity: None };
@@ -399,7 +424,7 @@ impl TuiApp {
         let flash = state
             .last_change
             .as_ref()
-            .filter(|(_, at)| now - at < CHANGE_FLASH_MS)
+            .filter(|(_, at)| flash && now - at < CHANGE_FLASH_MS)
             .and_then(|(id, _)| state.records.changes().iter().find(|c| &c.id == id));
         let action = state.last_action.as_ref().filter(|a| now - a.at < CHANGE_FLASH_MS);
         if turn == TurnState::Running {

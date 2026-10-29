@@ -70,9 +70,22 @@ later, and the session follows in the same window. While ChatGPT's sign-in waits
 the browser again. On
 Linux, setup only signs in. A Kumi that's set up starts straight into the session.
 
-Below 100 columns the Live pane folds into a two-line strip above the input box
-(where you are and what Kumi is doing, then the last change with its undo).
-Below 24×8 Kumi asks for a bigger window.
+Below 100 columns (a window beside your DAW) the pane is a **drawer** under the
+conversation: a row of tabs (NOW, FOCUS, HISTORY and the others) over the tab it
+shows, 6 to 10 rows by the window's height.
+
+- A change Kumi makes opens it to NOW: what Kumi is doing, the change with its
+  undo, and its picture. A goal opens it to GOAL. What Kumi opened folds back to
+  its row of tabs after 10 seconds with nothing new.
+- Click a tab to open it there; Shift-Tab and Tab open it on the tabs and on
+  FOCUS's tree as they go into them. What you open stays open until you close
+  it. It never takes the keyboard from the input box.
+- Ctrl-\\ opens and closes it. Once you close it, Kumi leaves it closed until
+  you open it again.
+
+Below 24 rows the pane is a two-line strip above the input box instead (where
+you are and what Kumi is doing, then the last change with its undo). Below 24×8
+Kumi asks for a bigger window.
 
 ## REAPER and Renoise
 
@@ -278,6 +291,7 @@ its undo. They're in English for now.
 
 | Key | Action |
 | --- | --- |
+| Ctrl-\\ | Below 100 columns, open or close the drawer; at full width, put the right pane away (the conversation takes the whole window) or bring it back; below 24 rows, the same for the two-line strip |
 | Tab, when idle | Into FOCUS's device tree, at Live's selection: ↑↓ move, Enter points at the row, Esc or Tab goes back to typing |
 | Shift-Tab | Into the tabs (again for the next tab): ↑↓ and Page Up/Down move. On a change, Enter, → or Space opens its picture, Enter or ← closes it, and `u` undoes it while it's open; on a kept item, Enter forgets it; on a JOBS row, Enter opens the job and `x` stops it. Esc or Tab goes back |
 | Mouse | Click **undo** or **forget** at a row's end, a change's words to open its picture (a job's to open the job), a tab's name, or a device in the tree to point at it; click the pin to unpin. Drag across text to highlight it; Ctrl-C or right-click copies it, and Esc clears the selection. The selected view stays still while Kumi works. Shift-drag (Option in iTerm2) still uses the terminal's selection |

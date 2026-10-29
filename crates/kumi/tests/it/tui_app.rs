@@ -202,9 +202,9 @@ case!(narrow_resize_paste_and_scroll, async {
     let h = Harness::new(80, 24);
     h.start().await;
     h.connect();
-    assert!(!has(&h.screen(), "HISTORY"));
-    assert!(!has(&h.screen(), "FOCUS"));
-    assert!(has(&h.screen()[15..], "Night Drive"));
+    // No side pane: the drawer under the conversation, folded to its row of tabs.
+    assert!(!has(&h.screen(), "Your selection will show here"));
+    assert!(h.screen()[15..].iter().any(|line| line.starts_with("  NOW   FOCUS   HISTORY")));
     h.has("Ask Kumi about your Set");
     h.resize(90, 28);
     delay(10).await;
@@ -281,7 +281,8 @@ case!(a_paste_loses_what_doesnt_show_on_screen, async {
     h.close().await;
 });
 case!(failure_disconnect_focus, async {
-    for (w, rows) in [(120, 36), (80, 24)] {
+    // (below 24 rows, the two-line strip; tui_drawer has FOCUS in the drawer)
+    for (w, rows) in [(120, 36), (80, 23)] {
         let h = Harness::new(w, rows);
         h.start().await;
         h.connect();

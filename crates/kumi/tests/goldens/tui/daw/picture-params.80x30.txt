@@ -4,12 +4,6 @@
 
 
 
-                         ██                          ▀▀
-                         ██ ▄█▀  ██  ██  ██▀▀██▀▀█▄  ██
-                         ██▀█▄   ██  ██  ██  ██  ██  ██
-                         ▀▀  ▀▀   ▀▀▀▀▀  ▀▀  ▀▀  ▀▀  ▀▀
-
-                         ░▒▓████████████████████████▓▒░
 
                             Kumi can see Night Drive.
 
@@ -21,8 +15,14 @@
     Kumi keeps each project's conversations: /conversations goes back to one.
 
 
-  Night Drive
+
+  NOW   FOCUS   HISTORY 1 ────────────────────────────────────── ctrl+\ closes
   ✓ ReaEQ 3 parameters on “Kick”                                          undo
+    ██──▏───────── Freq-Band 1 220.0 Hz → 120.0 Hz
+    █████──▏────── Gain-Band 1 0.0 dB → −3.5 dB
+    ███████████─── BW-Band 2 1.00 → 3.00
+
+
 
 
    Ask Kumi about your project

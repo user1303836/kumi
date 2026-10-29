@@ -378,7 +378,7 @@ fn text(lines: &[String]) -> String {
 
 /// The sizes a body is kept at: the narrowest has the narrowest FOCUS (100 columns); the last is the plain mode.
 const BODY_SHOTS: &[(i32, i32, bool)] = &[(120, 36, false), (160, 40, false), (100, 30, false), (120, 36, true)];
-/// A picture's: also below 100 columns, where the last change sits in the dock with its picture beside it.
+/// A picture's: also below 100 columns, where the drawer under the conversation opens HISTORY to it.
 const PICTURE_SHOTS: &[(i32, i32, bool)] = &[(120, 36, false), (160, 40, false), (100, 30, false), (80, 30, false), (120, 36, true)];
 
 /// One scene at each of `shots`: the app for `daw`, started and connected; `drive` sets it up and leaves the screen to keep.

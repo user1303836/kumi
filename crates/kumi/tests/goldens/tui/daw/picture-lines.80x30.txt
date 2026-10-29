@@ -4,12 +4,6 @@
 
 
 
-                         ██                          ▀▀
-                         ██ ▄█▀  ██  ██  ██▀▀██▀▀█▄  ██
-                         ██▀█▄   ██  ██  ██  ██  ██  ██
-                         ▀▀  ▀▀   ▀▀▀▀▀  ▀▀  ▀▀  ▀▀  ▀▀
-
-                         ░▒▓████████████████████████▓▒░
 
                             Kumi can see Night Drive.
 
@@ -21,8 +15,14 @@
      Kumi keeps each song's conversations: /conversations goes back to one.
 
 
-  Night Drive
+
+  NOW   FOCUS   HISTORY 1 ────────────────────────────────────── ctrl+\ closes
   ✓ Wrote 3 lines in “Drop” on “Bass”                                     undo
+     00 --- .. .. .. .. .... → C-4 01 80 .. .. 0A10
+     08 E-4 01 40 .. .. → OFF .. .. .. ..
+     12 --- .. .. .. .. → G-4 01 60 .. ..
+
+
 
 
    Ask Kumi about your song

@@ -4,12 +4,6 @@
 
 
 
-                         ██                          ▀▀
-                         ██ ▄█▀  ██  ██  ██▀▀██▀▀█▄  ██
-                         ██▀█▄   ██  ██  ██  ██  ██  ██
-                         ▀▀  ▀▀   ▀▀▀▀▀  ▀▀  ▀▀  ▀▀  ▀▀
-
-                         ░▒▓████████████████████████▓▒░
 
                             Kumi can see Night Drive.
 
@@ -21,8 +15,14 @@
     Kumi keeps each project's conversations: /conversations goes back to one.
 
 
-  Night Drive
-  ✓ Changed 3 notes in “Bass take”                       ▀▀▀▀    ▀▀  ▀▀▀▀ undo
+
+  NOW   FOCUS   HISTORY 1 ────────────────────────────────────── ctrl+\ closes
+  ✓ Changed 3 notes in “Bass take”                                        undo
+                                                           ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+                                                           ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+
+                                         ▀▀▀▀▀▀▀▀▀▀
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀                  ▀▀▀▀▀▀▀▀▀▀
 
 
    Ask Kumi about your project

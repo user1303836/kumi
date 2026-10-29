@@ -71,14 +71,18 @@ struct Shot {
     styles: Option<String>,
 }
 
-/// One scene at each size: the body opens a harness, drives it and gives back its screen.
+/// One scene at each size (120×36 and 160×40 unless it names its own): the body opens a harness, drives it and gives
+/// back its screen.
 macro_rules! scene {
     ($name:ident, |$width:ident, $height:ident| $body:block) => {
+        scene!($name, SIZES, |$width, $height| $body);
+    };
+    ($name:ident, $sizes:expr, |$width:ident, $height:ident| $body:block) => {
         #[tokio::test(flavor = "current_thread")]
         async fn $name() {
             tokio::task::LocalSet::new()
                 .run_until(async {
-                    for ($width, $height) in SIZES {
+                    for ($width, $height) in $sizes {
                         let shot: Shot = $body;
                         let name = format!("{}.{}x{}", stringify!($name).replace('_', "-"), $width, $height);
                         golden(&format!("{name}.txt"), &text(&shot.lines));
@@ -1303,5 +1307,102 @@ scene!(dashboard_matching_done, |width, height| {
     h.emit(json!({"type":"match","state":"done","check":6,"first":58,"best":{"label":"Low shelf +3 dB","score":81},"elapsedMs":65_000,"roundsLeft":0,"stop":"reached"}));
     h.emit(json!({"type":"turn-complete","result":{"stopReason":"completed"},"elapsedMs":65_000}));
     h.emit(json!({"type":"state","state":"idle"}));
+    finish(h).await
+});
+
+// The drawer: below 100 columns, the pane under the conversation, at the width of a terminal beside the DAW.
+
+const DRAWER_SIZES: [(i32, i32); 2] = [(80, 30), (90, 40)];
+
+/// A click on one of the drawer's tabs.
+async fn drawer_tab(h: &Harness, tab: &str) {
+    let lines = h.screen();
+    let row = lines.iter().position(|line| line.starts_with("  NOW   FOCUS")).expect("the drawer's tabs");
+    h.type_text(&click(&lines, row, tab)).await;
+}
+
+scene!(drawer_folded, DRAWER_SIZES, |width, height| {
+    let h = open(width, height, Rc::new(Control::default())).await;
+    finish_styled(h).await
+});
+
+scene!(drawer_now, DRAWER_SIZES, |width, height| {
+    let h = open(width, height, Rc::new(Control::default())).await;
+    let note = |start: f64, pitch: f64, duration: f64| json!([start, pitch, duration, 100.0]);
+    h.emit(change(
+        "c1",
+        "clip",
+        "Chords · 3 notes moved, 1 added",
+        json!({"track":{"name":"Keys","color":"#5ec1f7"},"picture":{"kind":"notes","length":8.0,
+            "before":[note(0.,60.,2.),note(2.,62.,2.),note(4.,64.,2.)],
+            "after":[note(0.,60.,1.),note(1.,67.,1.),note(2.,65.,2.),note(4.,64.,4.)]}}),
+    ));
+    finish_styled(h).await
+});
+
+scene!(drawer_focus, DRAWER_SIZES, |width, height| {
+    let c = Rc::new(Control::default());
+    *c.tree.borrow_mut() = Some(serde_json::from_value(drum_tree()).unwrap());
+    let h = open(width, height, c).await;
+    h.emit(json!({"type":"focus","focus":{"track":{"name":"Drums","color":"#ff5c5c","kind":"midi"},"trackRef":"3:track:0","device":"Drum Sampler","chain":"Kick","detail":"Device","view":"Session"}}));
+    h.wait_for_call("tree:3:track:0").await;
+    drawer_tab(&h, "FOCUS").await;
+    h.wait_for("FOCUS · Device").await;
+    finish(h).await
+});
+
+scene!(drawer_history, DRAWER_SIZES, |width, height| {
+    let h = open(width, height, Rc::new(Control::default())).await;
+    let state = |id: &str, family: &str, title: &str, state: &str, extra: Value| {
+        let mut change = change(id, family, title, extra);
+        change["change"]["state"] = json!(state);
+        change
+    };
+    for change in [
+        state("c1", "tempo", "Tempo 120 → 124 BPM", "applied", json!({"from":120.0,"to":124.0})),
+        state("c2", "mixer", "Bass width 100% → 140%", "applied", json!({"track":{"name":"Bass","color":"#f59a3c"}})),
+        state("c3", "rename", "Renamed 2-MIDI to Lead", "undone", json!({})),
+        state("c4", "parameter", "Tried 3 pads against the reference", "heard", json!({"score":82.0})),
+    ] {
+        h.emit(change);
+    }
+    drawer_tab(&h, "HISTORY").await;
+    finish(h).await
+});
+
+scene!(drawer_goal, DRAWER_SIZES, |width, height| {
+    let c = Rc::new(Control::default());
+    c.set("goal", json!(true));
+    let h = open(width, height, c).await;
+    // A goal turns the tabs to GOAL: the drawer opens on it.
+    h.type_text("/goal make my pad sound like ~/ref.wav\r").await;
+    h.wait_for_call("goal:make my pad sound like ~/ref.wav").await;
+    h.emit(json!({"type":"state","state":"running"}));
+    h.emit(json!({"type":"goal","state":"running","goal":"make my pad sound like ~/ref.wav","generation":12,"rendered":36,"trend":[58,58,61,64,64,70,71,71,74,76,76,81],"first":58,"best":{"label":"Collision","score":81},"leader":"Collision · Collision → Delay → Limiter","idea":"Tried a Collision with parallel delays.","elapsedMs":185_020,"candidates":3}));
+    finish_steady(h, &["thinking"]).await
+});
+
+scene!(drawer_jobs, DRAWER_SIZES, |width, height| {
+    let c = Rc::new(Control::default());
+    c.set("jobs", json!(true));
+    let h = open(width, height, c).await;
+    for job in jobs() {
+        h.emit(job);
+    }
+    // Into the tabs, then on to JOBS: the drawer opens on them.
+    h.type_text("\x1b[Z").await;
+    h.type_text("\x1b[Z").await;
+    h.wait_for("watching a video").await;
+    finish_steady(h, &["Tape loop tutorial"]).await
+});
+
+scene!(drawer_palette, DRAWER_SIZES, |width, height| {
+    let c = Rc::new(Control::default());
+    c.set("palette", json!(true));
+    let h = open(width, height, c).await;
+    let file = |path: &str, name: &str, class: &str| json!({"path":path,"size":10,"mtime":20,"name":name,"song":false,"class":class});
+    h.emit(json!({"type":"palette","palette":{"id":"p1","name":"Drums","reach":0,"files":[
+        file("/s/Kick 1.wav","Kick 1","kick"),file("/s/Hat 2.wav","Hat 2","hat"),file("/s/Snare 3.wav","Snare 3","snare")]}}));
+    drawer_tab(&h, "PALETTE").await;
     finish(h).await
 });

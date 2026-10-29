@@ -1,0 +1,40 @@
+  Kumi  ·  Night Drive                                                            ● Live
+
+   /goal make my pad sound like ~/ref.wav
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  NOW   FOCUS   HISTORY   GOAL ──────────────────────────── ● goal · 81% · gen 12 · 3:05
+  make my pad sound like ~/ref.wav
+  searching · gen 12 · 36 heard · 3 candidates · 3:05
+  81% from 58%  ▁▁▂▃▃▅▅▅▆▆▆█
+  best  Collision · Collision → Delay → Limiter
+  tried  Tried a Collision with parallel delays.
+
+
+
+
+
+
+   Tell Kumi more while it works
+                                                                            esc to stop
+
