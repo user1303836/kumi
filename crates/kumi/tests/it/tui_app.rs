@@ -1001,17 +1001,40 @@ case!(input_history_new_conversation_and_frame_budget, async {
 case!(whole_screens_match_source, async {
     let cases: Vec<serde_json::Value> = serde_json::from_str(&kumi_testkit::oracle("kumi/screens.json")).unwrap();
     for case in cases {
-        let h = Harness::new(case["width"].as_i64().unwrap() as i32, case["height"].as_i64().unwrap() as i32);
+        let (width, height) = (case["width"].as_i64().unwrap() as i32, case["height"].as_i64().unwrap() as i32);
+        let h = Harness::new(width, height);
         h.start().await;
         for event in case["events"].as_array().unwrap() {
             h.emit(event.clone());
         }
         let actual = h.screen();
-        let expected: Vec<String> = serde_json::from_value(case["expected"].clone()).unwrap();
-        assert_eq!(actual, expected, "{} {}×{}", case["name"], case["width"], case["height"]);
+        // W6-2 changed these on purpose: below 100 columns with 24 rows or more, the pane is the drawer under the
+        // conversation, where the source drew a two-line strip. The same events' screens are goldens of their own.
+        if width < 100 && height >= 24 {
+            drawer_golden(&format!("{}.{width}x{height}.txt", case["name"].as_str().unwrap()), &actual);
+        } else {
+            let expected: Vec<String> = serde_json::from_value(case["expected"].clone()).unwrap();
+            assert_eq!(actual, expected, "{} {}×{}", case["name"], case["width"], case["height"]);
+        }
         h.close().await;
     }
 });
+
+/// A source screen the drawer draws in place of the strip, kept in tests/goldens/tui/drawer-source (trailing spaces
+/// trimmed; `KUMI_BLESS=1` writes it again).
+fn drawer_golden(name: &str, lines: &[String]) {
+    let file = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/goldens/tui/drawer-source").join(name);
+    let actual = lines.iter().map(|line| line.trim_end()).collect::<Vec<_>>().join("\n") + "\n";
+    if std::env::var_os("KUMI_BLESS").is_some() {
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        std::fs::write(&file, &actual).unwrap();
+        return;
+    }
+    let expected = std::fs::read_to_string(&file)
+        .unwrap_or_else(|_| panic!("{} is missing: run this test with KUMI_BLESS=1", file.display()))
+        .replace("\r\n", "\n");
+    assert_eq!(actual, expected, "{} changed: check it, then run this test with KUMI_BLESS=1", file.display());
+}
 
 #[tokio::test(flavor = "current_thread")]
 async fn quitting_right_after_a_change_leaves_nothing_running() {
