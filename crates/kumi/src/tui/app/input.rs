@@ -97,7 +97,10 @@ impl TuiApp {
                     && self.0.tabs.key(&if text == " " { "space".to_string() } else { text.to_lowercase() }) => {}
             // The help's typed key, in a block of its own until keys have a registry. `?` arrives as typed text, which
             // key() never sees: on an empty box it opens the help, and anywhere else it types itself.
-            InputEvent::Text { text } if text == "?" && self.0.state.borrow().editor.is_empty() => self.open_help(),
+            // (while looking back through what was sent, `?` is a character to find)
+            InputEvent::Text { text } if text == "?" && self.0.state.borrow().editor.is_empty() && self.0.state.borrow().search.is_none() => {
+                self.open_help()
+            }
             // End of the help's typed key.
             InputEvent::Text { text } | InputEvent::Paste { text } => self.type_into_box(&text, typed),
             InputEvent::Key { name, mods, .. } => self.key(&name, mods),
@@ -129,6 +132,12 @@ impl TuiApp {
         let mut state = self.0.state.borrow_mut();
         state.tree_cursor = None;
         let clean = sanitize_text(text, &[]);
+        // While looking back through what was sent, they're what to find.
+        if state.search.is_some() {
+            drop(state);
+            self.search_type(&clean);
+            return;
+        }
         if typed {
             state.editor.type_text(&clean);
         } else {
@@ -301,6 +310,22 @@ impl TuiApp {
                 }
             }
         }
+        // W5-3's keys, until W3-3's key registry takes them over: composer.history-search (ctrl+r, and the keys while
+        // looking), composer.editor (ctrl+g) and composer.stash (ctrl+s).
+        if self.search_key(name, mods) {
+            return;
+        }
+        if ctrl && !alt && matches!(name, "r" | "g" | "s") {
+            self.0.tabs.leave();
+            self.0.state.borrow_mut().tree_cursor = None;
+            match name {
+                "r" => self.search_back(),
+                "g" => self.edit_draft(),
+                _ => self.stash(),
+            }
+            return;
+        }
+        // End of W5-3's keys.
         // ---- W6-2 · the pane: ctrl+\ opens and closes the drawer, or puts the pane away and back (pane.toggle; into the
         // key registry with W3-3) ----
         if ctrl && !alt && name == "\\" {
@@ -575,7 +600,11 @@ impl TuiApp {
     pub(super) fn menu(&self) -> Vec<&'static Command> {
         let mut state = self.0.state.borrow_mut();
         let text = state.editor.text();
-        if state.menu_dismissed || !text.starts_with('/') || text.chars().any(|c| string::trim(&c.to_string()).is_empty()) {
+        if state.menu_dismissed
+            || state.search.is_some()
+            || !text.starts_with('/')
+            || text.chars().any(|c| string::trim(&c.to_string()).is_empty())
+        {
             return vec![];
         }
         let can = self.can();

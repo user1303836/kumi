@@ -310,3 +310,192 @@ case!(undo_yank_and_ctrl_c_in_the_composer, async {
     assert!(has(&composer(&h), "a new draft"));
     h.close().await;
 });
+
+/// The input box's rows at the bottom of a 120 × 36 screen.
+fn composer(h: &Harness) -> Vec<String> {
+    let lines = h.screen();
+    lines[lines.len() - 4..].to_vec()
+}
+
+fn with_history(entries: &[&str]) -> (tempfile::TempDir, Rc<std::cell::RefCell<kumi::history::InputHistory>>) {
+    let tmp = tempfile::tempdir().unwrap();
+    let mut history = kumi::history::open_input_history(Some(tmp.path().join("input-history")), vec![]);
+    for entry in entries {
+        history.add(entry);
+    }
+    (tmp, Rc::new(std::cell::RefCell::new(history)))
+}
+
+case!(ctrl_r_finds_what_was_sent_and_esc_keeps_the_draft, async {
+    let (_tmp, history) = with_history(&["make the kick punchier", "add reverb to the snare", "make the kick shorter"]);
+    let h = Harness::with(120, 36, Rc::new(Control::default()), |o| o.history = Some(history));
+    h.start().await;
+    h.connect();
+    h.type_text("my draft").await;
+    // Looking starts at the newest; words narrow it; ctrl+r again goes older, and stays on the oldest found.
+    h.type_text("\x12").await;
+    assert!(has(&composer(&h), "search:") && has(&composer(&h), "make the kick shorter"));
+    h.has("ctrl+r older · enter uses it · esc goes back");
+    h.type_text("kick").await;
+    assert!(has(&composer(&h), "search: kick") && has(&composer(&h), "make the kick shorter"));
+    h.type_text("\x12").await;
+    assert!(has(&composer(&h), "make the kick punchier"));
+    h.type_text("\x12").await;
+    assert!(has(&composer(&h), "make the kick punchier"));
+    h.type_text("zz").await;
+    assert!(has(&composer(&h), "Nothing sent has these words"));
+    h.type_text("\x7f\x7f").await;
+    assert!(has(&composer(&h), "make the kick shorter"));
+    // esc goes back to the draft as it was.
+    h.type_text("\x1b").await;
+    h.wait_until_hidden("search:").await;
+    assert!(has(&composer(&h), "my draft"));
+    // enter puts what's found in the box, a step ctrl+- takes back; nothing is sent.
+    h.type_text("\x12").await;
+    h.type_text("snare").await;
+    h.type_text("\r").await;
+    assert!(has(&composer(&h), "add reverb to the snare") && !has(&composer(&h), "search:"));
+    assert!(!h.calls().iter().any(|call| call.starts_with("submit")));
+    h.type_text("\x1f").await;
+    assert!(has(&composer(&h), "my draft"));
+    // A command looked for doesn't open the menu while looking.
+    h.type_text("\x15/").await;
+    h.type_text("\x12").await;
+    assert!(!has(&h.screen(), "Start a fresh conversation"));
+    h.close().await;
+});
+
+case!(ctrl_g_lends_the_terminal_to_the_editor_and_takes_the_draft_back, async {
+    use futures::FutureExt;
+    use std::{cell::RefCell, path::PathBuf};
+    let seen = Rc::new(RefCell::new(Vec::<(PathBuf, String)>::new()));
+    let works = Rc::new(std::cell::Cell::new(true));
+    let h = Harness::with(120, 36, Rc::new(Control::default()), |o| {
+        o.editor = Some("fake-editor".into());
+        let (seen, works) = (seen.clone(), works.clone());
+        o.run_editor = Some(Rc::new(move |path: PathBuf| {
+            let (seen, works) = (seen.clone(), works.get());
+            async move {
+                seen.borrow_mut().push((path.clone(), std::fs::read_to_string(&path)?));
+                std::fs::write(&path, "tighten the hats\nand the snare\n")?;
+                Ok(works)
+            }
+            .boxed_local()
+        }));
+    });
+    h.start().await;
+    h.connect();
+    h.type_text("tighten").await;
+    let before = h.output.text.borrow().len();
+    h.type_text("\x07").await;
+    h.wait_for("and the snare").await;
+    assert!(has(&composer(&h), "tighten the hats"));
+    // The editor had the draft, on a file that's gone once it's read back.
+    let (path, draft) = seen.borrow()[0].clone();
+    assert_eq!(draft, "tighten");
+    assert!(!path.exists());
+    // The terminal went back as Kumi found it while the editor had it, then Kumi took it again.
+    let written = h.output.text.borrow()[before..].to_string();
+    let lent = written.find(kumi::tui::tty::RESTORE).expect("given back");
+    assert!(written[lent..].contains("\x1b[?1049h"));
+    // What came back is one step: ctrl+- brings the draft back.
+    h.type_text("\x1f").await;
+    assert!(has(&composer(&h), "tighten") && !has(&composer(&h), "and the snare"));
+    // An editor that ends with an error leaves the draft as it was.
+    works.set(false);
+    h.type_text("\x07").await;
+    h.wait_for("ended with an error").await;
+    assert!(has(&composer(&h), "tighten") && !has(&composer(&h), "and the snare"));
+    h.close().await;
+});
+
+case!(ctrl_g_without_an_editor_says_how_to_choose_one, async {
+    let h = Harness::new(120, 36);
+    h.start().await;
+    h.connect();
+    h.type_text("a draft\x07").await;
+    h.has("Set VISUAL or EDITOR to your editor");
+    h.close().await;
+});
+
+case!(ctrl_s_puts_the_draft_aside_with_its_files_and_brings_it_back, async {
+    let dir = tempfile::tempdir().unwrap();
+    let picture = dir.path().join("Screen Shot.png");
+    std::fs::write(&picture, vec![1u8; 1500]).unwrap();
+    let h = Harness::new(120, 36);
+    h.start().await;
+    h.connect();
+    h.type_text(&format!("\x1b[200~'{}'\x1b[201~", picture.display())).await;
+    h.type_text("half a thought").await;
+    h.has("with Screen Shot.png");
+    h.type_text("\x13").await;
+    assert!(!has(&composer(&h), "half a thought"));
+    assert!(!has(&h.screen(), "with Screen Shot.png"));
+    h.has("ctrl+s brings back what you put aside");
+    // With words in the box, the two change places.
+    h.type_text("something else").await;
+    h.type_text("\x13").await;
+    assert!(has(&composer(&h), "half a thought"));
+    h.has("with Screen Shot.png");
+    h.type_text("\x15\x7f").await;
+    assert!(!has(&h.screen(), "with Screen Shot.png"));
+    h.type_text("\x13").await;
+    assert!(has(&composer(&h), "something else"));
+    // The draft comes back with its steps.
+    h.type_text("\x1f").await;
+    assert!(!has(&composer(&h), "something else"));
+    h.close().await;
+});
+
+#[test]
+fn the_editor_is_visual_then_editor_and_found_the_way_windows_finds_programs() {
+    use kumi::tui::external_editor::{editor_command, resolve, words};
+    use std::path::PathBuf;
+    let env = |pairs: &'static [(&'static str, &'static str)]| {
+        move |name: &str| pairs.iter().find(|(key, _)| *key == name).map(|(_, value)| value.to_string())
+    };
+    assert_eq!(editor_command(env(&[("VISUAL", "code --wait"), ("EDITOR", "vim")]), false).as_deref(), Some("code --wait"));
+    assert_eq!(editor_command(env(&[("VISUAL", " "), ("EDITOR", "nano")]), false).as_deref(), Some("nano"));
+    assert_eq!(editor_command(env(&[]), false), None);
+    assert_eq!(editor_command(env(&[]), true).as_deref(), Some("notepad"));
+    assert_eq!(
+        words(r#""C:\Program Files\Notepad++\notepad++.exe" -multiInst  -nosession"#),
+        [r"C:\Program Files\Notepad++\notepad++.exe", "-multiInst", "-nosession"]
+    );
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("code.cmd"), "").unwrap();
+    let path = format!("{};{}", dir.path().join("nothing here").display(), dir.path().display());
+    assert_eq!(resolve("code", &path, ".COM;.EXE;.BAT;.CMD"), dir.path().join("code.cmd"));
+    assert_eq!(resolve("notepad.exe", &path, ".EXE"), PathBuf::from("notepad.exe"));
+    assert_eq!(resolve("vim", &path, ".EXE"), PathBuf::from("vim"));
+}
+
+#[cfg(unix)]
+#[tokio::test(flavor = "current_thread")]
+async fn the_editor_runs_through_the_shell_with_its_arguments_and_the_file_last() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = tempfile::tempdir().unwrap();
+    // A space in its name, quoted in the command, as it would be in EDITOR.
+    let script = dir.path().join("my editor");
+    std::fs::write(&script, "#!/bin/sh\nprintf '%s then' \"$1\" > \"$2\"\n").unwrap();
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let file = dir.path().join("draft.md");
+    std::fs::write(&file, "").unwrap();
+    let status = kumi::tui::external_editor::run(&format!("'{}' tighten", script.display()), &file).await.unwrap();
+    assert!(status.success());
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), "tighten then");
+}
+
+#[cfg(windows)]
+#[tokio::test(flavor = "current_thread")]
+async fn the_editor_is_found_through_pathext_and_runs_on_the_file() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("fake-editor.cmd"), "@echo edited> %1\r\n").unwrap();
+    // Each test runs in a process of its own: the PATH it finds the editor on is this one's.
+    std::env::set_var("PATH", format!("{};{}", dir.path().display(), std::env::var("PATH").unwrap_or_default()));
+    let file = dir.path().join("draft.md");
+    std::fs::write(&file, "").unwrap();
+    let status = kumi::tui::external_editor::run("fake-editor", &file).await.unwrap();
+    assert!(status.success());
+    assert_eq!(std::fs::read_to_string(&file).unwrap().trim(), "edited");
+}

@@ -716,6 +716,51 @@ impl TtyOutput for FakeOutput {
     }
 }
 
+#[tokio::test(flavor = "current_thread")]
+async fn the_terminal_is_lent_to_a_program_and_taken_back_whole() {
+    let input = Rc::new(FakeInput { raw: Cell::new(false), listener: RefCell::new(None) });
+    let output = Rc::new(FakeOutput { written: RefCell::new(String::new()), resize: RefCell::new(None) });
+    let events = Rc::new(RefCell::new(Vec::new()));
+    let farewell = "\u{1b}]9;4;0\u{7}";
+    let tty = Tty::new(TtyOptions {
+        input: input.clone(),
+        output: output.clone(),
+        on_input: Rc::new({
+            let events = Rc::clone(&events);
+            move |event| events.borrow_mut().push(event)
+        }),
+        on_resize: Rc::new(|| {}),
+        mouse: true,
+        farewell: farewell.into(),
+    });
+    tty.start().unwrap();
+    output.written.borrow_mut().clear();
+    let ran = tty
+        .hand_over(async {
+            // The program finds the terminal as Kumi found it: every mode off, input not raw, and Kumi not reading it.
+            assert_eq!(output.written.borrow().as_str(), RESTORE, "the farewell stays: Kumi is still running");
+            assert!(!input.is_raw());
+            input.write("x");
+            assert!(tty.lent() && !tty.is_active());
+            tty.write("a frame drawn meanwhile");
+            "edited"
+        })
+        .await;
+    assert_eq!(ran, "edited");
+    assert!(events.borrow().is_empty(), "the program's keys never reach Kumi");
+    let written = output.written.borrow().clone();
+    let taken = written.strip_prefix(RESTORE).unwrap();
+    assert!(taken.starts_with("\u{1b}[?1049h") && taken.contains("\u{1b}[>3u") && taken.contains("\u{1b}[?1006h"), "{taken:?}");
+    assert!(input.is_raw() && tty.is_active() && !tty.lent());
+    input.write("\u{1b}[A");
+    assert_eq!(events.borrow().clone(), vec![key("up", NONE)]);
+    // Kumi closing while it's lent gives the terminal back for good: the farewell goes, and the screen isn't taken again.
+    output.written.borrow_mut().clear();
+    tty.hand_over(async { tty.restore(false) }).await;
+    assert_eq!(output.written.borrow().clone(), format!("{RESTORE}{farewell}"));
+    assert!(!tty.is_active() && !tty.lent() && !input.is_raw());
+}
+
 #[test]
 fn the_terminal_is_taken_over_and_always_given_back_even_twice() {
     let input = Rc::new(FakeInput { raw: Cell::new(false), listener: RefCell::new(None) });

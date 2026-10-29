@@ -921,6 +921,7 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
         if !options.remote {
             options.copy = Some(Rc::new(login::copy_to_clipboard));
         }
+        options.editor = crate::tui::external_editor::editor_command(|name| io.env.get(name).cloned(), cfg!(windows));
         options.reach = Some({
             let env = io.env.clone();
             Rc::new(move || {
