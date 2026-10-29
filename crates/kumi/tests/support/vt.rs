@@ -1,6 +1,7 @@
-//! A minimal terminal, enough of xterm to replay Kumi's renderer output in tests.
+//! A minimal terminal, enough of xterm to replay Kumi's renderer output in tests: cursor moves, colours, erasing in
+//! the colours set, a scrolling region and links.
 
-use kumi::tui::style::{style_key, Rgb, Style};
+use kumi::tui::style::{link_id, style_key, Rgb, Style};
 use kumi::tui::width::{cell_width, graphemes};
 use kumi_common::js;
 
@@ -13,6 +14,9 @@ pub struct VirtualTerminal {
     pub y: i32,
     pub cursor_visible: bool,
     style: Style,
+    /// The scrolling region's rows, from `top` up to `bottom`.
+    top: i32,
+    bottom: i32,
 }
 
 impl VirtualTerminal {
@@ -26,6 +30,8 @@ impl VirtualTerminal {
             y: 0,
             cursor_visible: true,
             style: Style::default(),
+            top: 0,
+            bottom: height,
         }
     }
 
@@ -50,9 +56,15 @@ impl VirtualTerminal {
                     let st = data[index..].find("\u{1b}\\").map(|at| index + at + 2);
                     index = st.unwrap_or(bytes.len()).min(bytes.len());
                 } else if bytes.get(index + 1) == Some(&b']') {
-                    let bell = data[index..].find('\u{7}').map(|at| index + at + 1);
-                    let st = data[index..].find("\u{1b}\\").map(|at| index + at + 2);
-                    index = [bell, st].into_iter().flatten().min().unwrap_or(bytes.len()).min(bytes.len());
+                    let bell = data[index..].find('\u{7}').map(|at| (index + at, index + at + 1));
+                    let st = data[index..].find("\u{1b}\\").map(|at| (index + at, index + at + 2));
+                    let (end, next) = [bell, st].into_iter().flatten().min().unwrap_or((bytes.len(), bytes.len()));
+                    // A link (OSC 8): `8;params;address`, an empty address closing it.
+                    if let Some(link) = data[index + 2..end].strip_prefix("8;") {
+                        let address = link.split_once(';').map_or("", |(_, address)| address);
+                        self.style.link = if address.is_empty() { 0 } else { link_id(address) };
+                    }
+                    index = next.min(bytes.len());
                 } else {
                     index += 1 + data[index + 1..].chars().next().map_or(1, char::len_utf8);
                 }
@@ -88,15 +100,54 @@ impl VirtualTerminal {
             self.y = js::number::parse(row).unwrap_or(f64::NAN) as i32 - 1;
             self.x = js::number::parse(column).unwrap_or(f64::NAN) as i32 - 1;
         } else if final_byte == 'J' && params == "2" {
-            let blank = style_key(&self.style.bg.map_or_else(Style::default, Style::bg));
-            for y in 0..self.height as usize {
-                for x in 0..self.width as usize {
-                    self.chars[y][x] = " ".to_string();
-                    self.styles[y][x] = blank.clone();
-                }
+            for y in 0..self.height {
+                self.erase(y, 0, self.width);
+            }
+        } else if final_byte == 'K' {
+            let (x, width) = (self.x.min(self.width - 1), self.width);
+            match params {
+                "1" => self.erase(self.y, 0, x + 1),
+                "2" => self.erase(self.y, 0, width),
+                _ => self.erase(self.y, x, width),
+            }
+        } else if final_byte == 'X' {
+            let count = js::number::parse(params).map_or(1, |count| (count as i32).max(1));
+            let x = self.x.min(self.width - 1);
+            self.erase(self.y, x, (x + count).min(self.width));
+        } else if final_byte == 'r' {
+            let mut parts = params.split(';').map(|part| js::number::parse(part).map(|n| n as i32));
+            let top = parts.next().flatten().unwrap_or(1).max(1);
+            let bottom = parts.next().flatten().unwrap_or(self.height).min(self.height);
+            if top < bottom {
+                (self.top, self.bottom) = (top - 1, bottom);
+                (self.x, self.y) = (0, 0);
+            }
+        } else if final_byte == 'S' {
+            let count = js::number::parse(params).map_or(1, |count| (count as i32).max(1));
+            for _ in 0..count.min(self.bottom - self.top) {
+                let (top, bottom) = (self.top as usize, self.bottom as usize);
+                self.chars[top..bottom].rotate_left(1);
+                self.styles[top..bottom].rotate_left(1);
+                self.erase(self.bottom - 1, 0, self.width);
             }
         } else if final_byte == 'm' {
             self.sgr(params);
+        }
+    }
+
+    /// Cells `from` to `to` of row `y` blank, in the background set (as xterm erases). A wide character cut by either
+    /// end goes blank whole.
+    fn erase(&mut self, y: i32, from: i32, to: i32) {
+        if y < 0 || y >= self.height || from >= to {
+            return;
+        }
+        let blank = style_key(&self.style.bg.map_or_else(Style::default, Style::bg));
+        let row = y as usize;
+        let from = if from > 0 && self.chars[row][from as usize].is_empty() { from - 1 } else { from };
+        let to = if to < self.width && self.chars[row][to as usize].is_empty() { to + 1 } else { to };
+        for x in from as usize..to as usize {
+            self.chars[row][x] = " ".to_string();
+            self.styles[row][x] = blank.clone();
         }
     }
 
@@ -107,7 +158,8 @@ impl VirtualTerminal {
         while index < codes.len() {
             let code = at(index);
             if code == Some(0.0) {
-                self.style = Style::default();
+                // A link stays open through a reset of colours, as it does in a terminal.
+                self.style = Style { link: self.style.link, ..Style::default() };
             } else if code == Some(1.0) {
                 self.style.bold = true;
             } else if code == Some(2.0) {

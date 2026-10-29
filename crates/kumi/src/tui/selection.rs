@@ -117,18 +117,18 @@ impl Selection {
         if text.trim().is_empty() {
             return None;
         }
-        if !wordy(text) {
+        if !wordy(&text) {
             return Some((at, at));
         }
         let mut first = at;
-        while let Some(before) = self.step(first, false).filter(|cell| wordy(self.char_at(*cell))) {
+        while let Some(before) = self.step(first, false).filter(|cell| wordy(&self.char_at(*cell))) {
             first = before;
         }
         let mut last = at;
-        while let Some(after) = self.step(last, true).filter(|cell| wordy(self.char_at(*cell))) {
+        while let Some(after) = self.step(last, true).filter(|cell| wordy(&self.char_at(*cell))) {
             last = after;
         }
-        while last != first && matches!(self.char_at(last), "." | ":" | "?") {
+        while last != first && matches!(self.char_at(last).as_str(), "." | ":" | "?") {
             last = self.step(last, false).unwrap_or(first);
         }
         Some((first, last))
@@ -191,8 +191,10 @@ impl Selection {
         (y * self.screen.width + x) as usize
     }
 
-    fn char_at(&self, cell: Cell) -> &str {
-        &self.screen.chars[self.index(cell)]
+    fn char_at(&self, cell: Cell) -> String {
+        let mut text = String::new();
+        self.screen.push_grapheme(self.index(cell), &mut text);
+        text
     }
 
     fn width_at(&self, cell: Cell) -> u8 {
@@ -226,7 +228,7 @@ impl Selection {
             for x in left..right {
                 let at = self.index((y, x));
                 if self.screen.widths[at] != 0 {
-                    line.push_str(&self.screen.chars[at]);
+                    self.screen.push_grapheme(at, &mut line);
                 }
                 if x < keep {
                     kept = line.len();
