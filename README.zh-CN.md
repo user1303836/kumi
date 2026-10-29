@@ -41,7 +41,7 @@ irm https://github.com/user1303836/kumi/releases/latest/download/install.ps1 | i
 之后，打开终端并输入 `kumi`，再打开你的 DAW（Live、REAPER 或 Renoise，在 Kumi 之前或之后打开都可以）：Kumi 会连接到开着的那个。
 
 > [!NOTE]
-> Kumi 在终端窗口中运行，但你不需要会任何命令。运行完安装的那一行，剩下的就是聊天。拖动选中文字后，按 Ctrl-C 即可复制。
+> Kumi 在终端窗口中运行，但你不需要会任何命令。运行完安装的那一行，剩下的就是聊天。拖过文字即可复制，双击可复制一个词。
 
 ## 你可以让 Kumi 做什么
 

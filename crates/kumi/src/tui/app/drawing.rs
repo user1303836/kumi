@@ -4,6 +4,7 @@ use super::super::{
     logo::*,
     render::Cursor,
     screen::Screen,
+    selection::TextRow,
     style::{palette, Style},
     transcript::{doing_label, LiveRow, Row},
     width::{text_width, truncate},
@@ -68,11 +69,13 @@ impl TuiApp {
         let mut screen = kept
             .filter(|kept| kept.width == columns && kept.height == rows && Rc::ptr_eq(&kept.table, &self.0.table))
             .unwrap_or_else(|| Screen::with_table(columns, rows, self.0.table.clone()));
-        // Every cell painted over: nothing of the last frame stays.
+        // Every cell painted over: nothing of the last frame stays, nor what was recorded of it.
         screen.fill(screen.bounds(), &st::GROUND);
         {
             let mut state = self.0.state.borrow_mut();
             state.hits.clear();
+            state.text_rows.clear();
+            state.select_areas.clear();
             // (set again by whatever draws the tabs, or the drawer, this frame)
             state.tabs_area = None;
             state.drawer.area = None;
@@ -88,6 +91,7 @@ impl TuiApp {
         }
         if self.setup_active() {
             self.keep_tree_fresh(None);
+            self.0.state.borrow_mut().select_areas.push(screen.bounds());
             let cursor = self.draw_setup(&mut screen, columns, rows).filter(|_| !self.0.state.borrow().closing);
             self.present(screen, cursor);
             return;
@@ -121,7 +125,15 @@ impl TuiApp {
             (i32::from(state.pinned.is_some()), i32::from(!state.attachments.is_empty()), state.held.len().min(3) as i32)
         };
         let area = Rect::new(0, 2, left, (box_top - dock - 3 - chip - files - waiting).max(1));
-        self.0.state.borrow_mut().page = (area.height - 2).max(1);
+        {
+            let mut state = self.0.state.borrow_mut();
+            state.page = (area.height - 2).max(1);
+            // Where a drag selects: the conversation side down to the composer, the composer, and the pane.
+            state.select_areas = vec![Rect::new(0, 0, left, box_top), Rect::new(0, box_top, left, rows - box_top)];
+            if pane != 0 {
+                state.select_areas.push(Rect::new(left, 0, pane, rows));
+            }
+        }
         self.draw_conversation(&mut screen, area);
         // The drawer goes right under the conversation, so what goes with the next message (waiting messages, files,
         // the pin) stays by the box, as it does beside the side pane; the strip sits between them and the box.
@@ -170,11 +182,17 @@ impl TuiApp {
             if state.selection.as_ref().is_some_and(|s| s.screen.width != screen.width || s.screen.height != screen.height) {
                 state.selection = None;
             }
+            // Copied as the button comes up, a selection on screen is one still being dragged.
+            let words = if self.0.options.copy_on_select {
+                "Selecting · view paused · let go to copy · Esc cancels"
+            } else {
+                "Selected · view paused · Ctrl+C/right-click copies · Esc resumes"
+            };
             state.selection.as_ref().filter(|s| s.moved).map(|s| {
                 let mut painted = s.painted();
                 let footer = Rect::new(0, painted.height - 1, painted.width, 1);
                 painted.fill(footer, &st::RAISED);
-                painted.put(1, footer.y, "Selected · view paused · Ctrl+C/right-click copies · Esc resumes", &st::DIM);
+                painted.put(1, footer.y, words, &st::DIM);
                 (painted, s.screen.clone())
             })
         };
@@ -298,16 +316,29 @@ impl TuiApp {
             state.scroll = state.scroll.min((total - area.height).max(0));
             ((total - area.height - state.scroll).max(0) as usize, state.scroll)
         };
+        let mut text_rows = Vec::with_capacity(area.height.max(0) as usize);
         for (index, row) in rows.iter().skip(start).take(area.height.max(0) as usize).enumerate() {
-            self.draw_row(screen, row, x, area.y + index as i32, width, area, now);
+            let y = area.y + index as i32;
+            let end = self.draw_row(screen, row, x, y, width, area, now);
+            // Where its text lies, for a copy: past the lead a wrapped row repeats, and joined to the row above when
+            // that's on screen too.
+            text_rows.push(TextRow {
+                y,
+                start: x + row.carry.map_or(0, |carry| carry.lead),
+                end,
+                carries: row.carry.filter(|_| index > 0).map(|carry| carry.space),
+            });
         }
         if scroll > 0 {
             let hint = "newer below · page down";
             screen.fill(Rect::new(area.x, area.y + area.height - 1, area.width, 1), &st::GROUND);
             screen.put(area.x + area.width - 2 - text_width(hint), area.y + area.height - 1, hint, &st::FAINT);
+            text_rows.retain(|row| row.y != area.y + area.height - 1);
         }
+        self.0.state.borrow_mut().text_rows = text_rows;
     }
-    fn draw_row(&self, screen: &mut Screen, row: &Row, x: i32, y: i32, width: i32, clip: Rect, now: f64) {
+    /// Draws a conversation row; returns the column after its text, before the time at its end.
+    fn draw_row(&self, screen: &mut Screen, row: &Row, x: i32, y: i32, width: i32, clip: Rect, now: f64) -> i32 {
         if let Some(band) = &row.band {
             screen.fill(Rect::new(x - 1, y, band.width.min(width + 2), 1), &Style::bg(band.bg));
         }
@@ -347,6 +378,7 @@ impl TuiApp {
                 screen.put_in(at, y, &trailing.text, &trailing.style, clip);
             }
         }
+        column
     }
     fn draw_welcome(&self, screen: &mut Screen, x: i32, y: i32, width: i32, height: i32) {
         let state = self.0.state.borrow();
@@ -607,6 +639,8 @@ impl TuiApp {
         let first = (layout.cursor_row as i32 - visible + 1).min(layout.rows.len() as i32 - visible).max(0);
         let voice = self.0.voice.as_ref().and_then(|v| v.view(perf_now()));
         let busy = self.busy();
+        // What the producer just did took, said for a moment in the hint's place.
+        let toast = self.toasted(perf_now());
         let state = self.0.state.borrow();
         if state.editor.is_empty() {
             let placeholder = voice.as_ref().map(|v| v.placeholder.clone()).unwrap_or_else(|| {
@@ -629,6 +663,8 @@ impl TuiApp {
             Panel::Pick { picker, .. } => picker.borrow().options.hint.clone(),
             _ => None,
         });
+        // A list's own words stay over a toast: a countdown to Kumi's pick can't wait for it to go.
+        let toast = toast.filter(|_| own_hint.is_none());
         let panel_hint = state.panel.as_ref().map(|p| match &*p.borrow() {
             _ if own_hint.is_some() => own_hint.as_deref().unwrap_or(""),
             Panel::Btw { .. } => "↑↓ to scroll · c copies · esc to close",
@@ -647,7 +683,7 @@ impl TuiApp {
                 }
             }
         });
-        let hint = panel_hint.unwrap_or_else(|| {
+        let hint = toast.as_ref().map(|(text, _)| text.as_str()).or(panel_hint).unwrap_or_else(|| {
             if !menu.is_empty() {
                 "enter to choose · esc to close"
             } else if let Some(voice) = &voice {
@@ -668,9 +704,13 @@ impl TuiApp {
         });
         let bottom = box_.y + box_.height - 1;
         let used = voice.as_ref().map(|v| spans(screen, x, bottom, &v.status, Some(box_))).unwrap_or(x);
-        let at = box_.x + box_.width - 2 - text_width(hint);
-        if text_width(hint) + 2 < width && at > used + 1 {
-            screen.put(at, bottom, hint, &st::FAINT);
+        let right = box_.x + box_.width - 2;
+        if let Some((_, tone)) = &toast {
+            // A toast that doesn't fit is cut short; a hint that doesn't is left out.
+            let text = truncate(hint, right - used - 2);
+            screen.put(right - text_width(&text), bottom, &text, if *tone == NoticeTone::Warn { &st::WARN } else { &st::ACCENT });
+        } else if text_width(hint) + 2 < width && right - text_width(hint) > used + 1 {
+            screen.put(right - text_width(hint), bottom, hint, &st::FAINT);
         }
         Cursor { x: x + layout.cursor_column, y: box_.y + 1 + layout.cursor_row as i32 - first }
     }

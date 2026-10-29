@@ -251,8 +251,8 @@ pub async fn reach_sign_in(env: &Env, fetch: Option<Rc<dyn Fetch>>) -> Option<St
 }
 
 /// Text onto this computer's clipboard with its own tool (pbcopy, clip, wl-copy or xclip), for terminals that don't
-/// take the terminal's way (OSC 52). Quietly nothing where none is there.
-pub fn copy_to_clipboard(text: &str) {
+/// take the terminal's way (OSC 52). Says whether a tool took it: none may be there.
+pub fn copy_to_clipboard(text: &str) -> bool {
     use std::io::Write;
     let tools: &[(&str, &[&str])] = match system::platform() {
         "darwin" => &[("pbcopy", &[])],
@@ -268,14 +268,15 @@ pub fn copy_to_clipboard(text: &str) {
             command.creation_flags(0x0800_0000);
         }
         let Ok(mut child) = command.spawn() else { continue };
-        if let Some(mut input) = child.stdin.take() {
-            let _ = input.write_all(&clipboard_bytes(text, tool == &"clip"));
-        }
+        let taken = child.stdin.take().is_some_and(|mut input| input.write_all(&clipboard_bytes(text, tool == &"clip")).is_ok());
         std::thread::spawn(move || {
             let _ = child.wait();
         });
-        return;
+        if taken {
+            return true;
+        }
     }
+    false
 }
 
 fn clipboard_bytes(text: &str, windows: bool) -> Vec<u8> {

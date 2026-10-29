@@ -9,18 +9,25 @@ use kumi_common::js;
 
 use super::style::{palette, Rgb, Style};
 use super::width::{graphemes, text_width};
-use super::wrap::{wrap, Span};
+use super::wrap::{wrap_carried, Carry, Span};
 
 #[derive(Clone, Debug)]
 pub struct MarkdownRow {
     pub spans: Vec<Span>,
     /// Background band for code blocks.
     pub bg: Option<Rgb>,
+    /// How the row carries on the one above, where wrapping broke a line.
+    pub carry: Option<Carry>,
 }
 
 impl MarkdownRow {
     fn plain(spans: Vec<Span>) -> MarkdownRow {
-        MarkdownRow { spans, bg: None }
+        MarkdownRow { spans, bg: None, carry: None }
+    }
+
+    /// A line of text, wrapped to `width`.
+    fn wrapped(spans: &[Span], width: i32) -> impl Iterator<Item = MarkdownRow> {
+        wrap_carried(spans, width).into_iter().map(|(spans, carry)| MarkdownRow { spans, bg: None, carry })
     }
 }
 
@@ -70,12 +77,13 @@ pub fn inline(text: &str, base: &Rc<Style>) -> Vec<Span> {
 /// Wrap spans to `width`, putting `first` before the first line and `rest` before the others.
 fn hanging(spans: &[Span], width: i32, first: Span, rest: &str) -> Vec<MarkdownRow> {
     let indent = text_width(&first.text);
-    wrap(spans, (width - indent).max(1))
+    wrap_carried(spans, (width - indent).max(1))
         .into_iter()
         .enumerate()
-        .map(|(index, line)| {
+        .map(|(index, (line, carry))| {
             let lead = if index == 0 { first.clone() } else { Span::new(rest, &first.style) };
-            MarkdownRow::plain(std::iter::once(lead).chain(line).collect())
+            let carry = carry.map(|carry| Carry { lead: text_width(&lead.text), ..carry });
+            MarkdownRow { spans: std::iter::once(lead).chain(line).collect(), bg: None, carry }
         })
         .collect()
 }
@@ -88,14 +96,23 @@ fn code_rows(line: &str, width: i32, style: &Rc<Style>) -> Vec<MarkdownRow> {
     for grapheme in graphemes(line) {
         let cells = text_width(grapheme);
         if used + cells > width && !current.is_empty() {
-            rows.push(MarkdownRow { spans: vec![Span::new(std::mem::take(&mut current), style)], bg: Some(palette::RAISED) });
+            rows.push(code_row(std::mem::take(&mut current), style, !rows.is_empty()));
             used = 0;
         }
         current.push_str(grapheme);
         used += cells;
     }
-    rows.push(MarkdownRow { spans: vec![Span::new(current, style)], bg: Some(palette::RAISED) });
+    rows.push(code_row(current, style, !rows.is_empty()));
     rows
+}
+
+/// A row of code; one that carries on the line before it joins it with nothing, its spaces being the code's own.
+fn code_row(text: String, style: &Rc<Style>, carries: bool) -> MarkdownRow {
+    MarkdownRow {
+        spans: vec![Span::new(text, style)],
+        bg: Some(palette::RAISED),
+        carry: carries.then_some(Carry { lead: 0, space: false }),
+    }
 }
 
 static OPENING: LazyLock<regex::Regex> = LazyLock::new(|| regex::Regex::new(r"^\s*(`{3,}|~{3,})").unwrap());
@@ -213,7 +230,7 @@ impl<'a> Lines<'a> {
         }
         if let Some(heading) = HEADING.captures(line) {
             let style = Rc::new(Style { fg: Some(palette::BRIGHT), bold: true, ..**base });
-            self.rows.extend(wrap(&inline(&heading[2], &style), limit).into_iter().map(MarkdownRow::plain));
+            self.rows.extend(MarkdownRow::wrapped(&inline(&heading[2], &style), limit));
             return;
         }
         if RULE.is_match(line).unwrap_or(false) {
@@ -237,9 +254,9 @@ impl<'a> Lines<'a> {
             if TABLE_RULE.is_match(line) {
                 return;
             }
-            self.rows.extend(wrap(&[Span::new(js::string::trim(line), base)], limit).into_iter().map(MarkdownRow::plain));
+            self.rows.extend(MarkdownRow::wrapped(&[Span::new(js::string::trim(line), base)], limit));
             return;
         }
-        self.rows.extend(wrap(&inline(line, base), limit).into_iter().map(MarkdownRow::plain));
+        self.rows.extend(MarkdownRow::wrapped(&inline(line, base), limit));
     }
 }

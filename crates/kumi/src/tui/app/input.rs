@@ -1,8 +1,12 @@
 use super::super::{
+    alerts::NotifyChannel,
     attach,
     keys::{Modifiers, MouseAction, MouseButton, WheelDirection},
+    selection::{Selection, Unit},
     tree::TreeRole,
+    width::truncate,
 };
+use super::toast::TOAST_MS;
 use super::*;
 use crate::text::{library_line, remembered_line};
 use base64::Engine;
@@ -130,18 +134,36 @@ impl TuiApp {
     }
     /// Plain dragging selects text even when mouse reporting is needed for scrolling and buttons.
     fn selection_input(&self, event: &InputEvent) -> bool {
+        // Anything else the producer does ends the moment just after a copy.
+        let copy_key = |name: &str, mods: &Modifiers| name == "escape" || (name == "c" && mods.ctrl && !mods.alt);
+        if matches!(event, InputEvent::Key { name, mods, .. } if !copy_key(name, mods))
+            || matches!(event, InputEvent::Text { .. } | InputEvent::Paste { .. })
+            || matches!(event, InputEvent::Mouse { action: MouseAction::Press | MouseAction::Wheel, .. })
+        {
+            self.0.state.borrow_mut().copied = None;
+        }
         match event {
             InputEvent::Key { name, mods, .. } if name == "c" && mods.ctrl && !mods.alt => {
                 let text = self.0.state.borrow().selection.as_ref().filter(|s| s.moved).map(|s| s.text());
                 if let Some(text) = text {
                     self.0.state.borrow_mut().selection = None;
+                    self.copy_selection(&text);
+                    return true;
+                }
+                // Many terminals' copy key, just after a copy: it copies again, and doesn't stop Kumi, clear the box or
+                // quit.
+                if let Some(text) = self.just_copied() {
                     self.copy_text(&text);
-                    self.selection_copied();
                     return true;
                 }
             }
             InputEvent::Key { name, .. } if name == "escape" => {
                 if self.0.state.borrow_mut().selection.take().is_some_and(|s| s.moved) {
+                    return true;
+                }
+                // Just after a copy, Esc takes its toast away; it doesn't stop Kumi.
+                if self.just_copied().is_some() {
+                    self.end_toast();
                     return true;
                 }
             }
@@ -152,47 +174,34 @@ impl TuiApp {
                 }
             }
             InputEvent::Mouse { action: MouseAction::Release, button: MouseButton::Left, x, y, .. } => {
-                let mut state = self.0.state.borrow_mut();
-                if let Some(selection) = state.selection.as_mut().filter(|s| s.dragging) {
+                let copy = {
+                    let mut state = self.0.state.borrow_mut();
+                    let Some(selection) = state.selection.as_mut().filter(|s| s.dragging) else { return false };
                     selection.update(*x, *y);
                     selection.dragging = false;
                     if !selection.moved {
                         state.selection = None;
-                    }
-                    return true;
-                }
-            }
-            InputEvent::Mouse { action: MouseAction::Press, button: MouseButton::Left, x, y, .. } => {
-                let was_selected = self.0.state.borrow_mut().selection.take().is_some_and(|s| s.moved);
-                // A click on an existing selection only dismisses it; the live view may have changed underneath it.
-                if was_selected {
-                    return true;
-                }
-                if self.0.state.borrow().hits.iter().any(|h| *y == h.y && *x >= h.x && *x < h.x + h.width) {
-                    return false;
-                }
-                if let Some(screen) = self.0.screen.borrow().as_ref().filter(|s| s.width > 0 && s.height > 0) {
-                    let (pane, left) = self.layout(screen.width);
-                    // (W6-2: below 100 columns the drawer keeps its own, as the side pane does)
-                    let area = if let Some(area) = self.drawer_drag(*y, screen.bounds()).filter(|_| !self.setup_active()) {
-                        area
-                    } else if pane == 0 || self.setup_active() {
-                        screen.bounds()
-                    } else if *x < left {
-                        Rect::new(0, 0, left, screen.height)
+                        None
+                    } else if self.0.options.copy_on_select {
+                        // Copied as the button comes up; the view goes on at once.
+                        state.selection.take().map(|s| s.text())
                     } else {
-                        Rect::new(left, 0, pane, screen.height)
-                    };
-                    self.0.state.borrow_mut().selection = Some(super::super::selection::Selection::new(screen.clone(), area, *x, *y));
-                    return true;
+                        None
+                    }
+                };
+                if let Some(text) = copy {
+                    if self.copy_selection(&text) {
+                        self.0.state.borrow_mut().copied = Some((text, perf_now() + TOAST_MS));
+                    }
                 }
+                return true;
             }
+            InputEvent::Mouse { action: MouseAction::Press, button: MouseButton::Left, x, y, .. } => return self.press(*x, *y),
             InputEvent::Mouse { action: MouseAction::Press, button: MouseButton::Right, .. } => {
                 let text = self.0.state.borrow().selection.as_ref().filter(|s| s.moved).map(|s| s.text());
                 if let Some(text) = text {
                     self.0.state.borrow_mut().selection = None;
-                    self.copy_text(&text);
-                    self.selection_copied();
+                    self.copy_selection(&text);
                     return true;
                 }
             }
@@ -205,6 +214,67 @@ impl TuiApp {
             _ => {}
         }
         false
+    }
+    /// A left press: a double click takes the word under it and a triple click the line (presses on one cell, each
+    /// within CLICK_MS of the last); a single one starts a drag, or only puts away the selection on screen. Presses on
+    /// what a click works (undo, a tab, the pin) stay clicks.
+    fn press(&self, x: i32, y: i32) -> bool {
+        let count = {
+            let mut state = self.0.state.borrow_mut();
+            let now = perf_now();
+            let count = match state.clicks {
+                Some((at, cx, cy, count)) if now - at <= CLICK_MS && (cx, cy) == (x, y) => count % 3 + 1,
+                _ => 1,
+            };
+            state.clicks = Some((now, x, y, count));
+            count
+        };
+        let hit = self.0.state.borrow().hits.iter().any(|h| y == h.y && x >= h.x && x < h.x + h.width);
+        if count > 1 && !hit {
+            let unit = if count == 2 { Unit::Word } else { Unit::Line };
+            // From the frame the producer sees: the selection's own, still on screen, or the last one drawn.
+            let kept = self.0.state.borrow_mut().selection.take();
+            let selection = match kept {
+                Some(selection) => selection.again(x, y, unit),
+                None => self.select(x, y, unit),
+            };
+            self.0.state.borrow_mut().selection = selection;
+            return true;
+        }
+        // A click on an existing selection only dismisses it; the live view may have changed underneath it.
+        if self.0.state.borrow_mut().selection.take().is_some_and(|s| s.moved) {
+            return true;
+        }
+        if hit {
+            return false;
+        }
+        let selection = self.select(x, y, Unit::Cell);
+        let started = selection.is_some();
+        self.0.state.borrow_mut().selection = selection;
+        started
+    }
+    /// A selection from a press at (x, y) on the last frame drawn, inside the area it fell in.
+    fn select(&self, x: i32, y: i32, unit: Unit) -> Option<Selection> {
+        let screen = self.0.screen.borrow();
+        let screen = screen.as_ref().filter(|s| s.width > 0 && s.height > 0)?;
+        let state = self.0.state.borrow();
+        let area = *state.select_areas.iter().find(|a| x >= a.x && x < a.x + a.width && y >= a.y && y < a.y + a.height)?;
+        Selection::new(screen.clone(), &state.text_rows, area, x, y, unit)
+    }
+    /// What letting go of a drag copied, if that was just now: it's taken, so only the next key finds it.
+    fn just_copied(&self) -> Option<String> {
+        let (text, until) = self.0.state.borrow_mut().copied.take()?;
+        (perf_now() < until).then_some(text)
+    }
+    /// A selection onto the clipboard, said for a moment in the composer's hint row. A selection of blanks copies
+    /// nothing, and says so by saying nothing.
+    fn copy_selection(&self, text: &str) -> bool {
+        if text.trim().is_empty() {
+            return false;
+        }
+        let here = self.copy_text(text);
+        self.toast(&copied_words(text, here, self.0.profile.notify == NotifyChannel::Osc9), NoticeTone::Info);
+        true
     }
     fn key(&self, name: &str, mods: Modifiers) {
         let Modifiers { ctrl, alt, shift } = mods;
@@ -576,7 +646,7 @@ impl TuiApp {
         }
         if command == "/help" {
             self.clear_editor();
-            self.notice(&help(self.0.options.switch_daw.is_some()), NoticeTone::Info);
+            self.notice(&help(self.0.options.switch_daw.is_some(), self.0.options.copy_on_select), NoticeTone::Info);
             return Ok(());
         }
         if command == "/changelog" {
@@ -1300,17 +1370,10 @@ impl TuiApp {
     }
     /// Text onto the clipboard: through the terminal (OSC 52, which reaches the producer's clipboard over SSH too), and
     /// with this computer's own tool where Kumi runs in front of the producer, for terminals that don't take OSC 52.
-    pub(super) fn copy_text(&self, text: &str) {
+    /// Says whether this computer's tool took it; the terminal never says.
+    pub(super) fn copy_text(&self, text: &str) -> bool {
         self.0.tty.write(&format!("\x1b]52;c;{}\x07", base64::engine::general_purpose::STANDARD.encode(text)));
-        if let Some(copy) = &self.0.options.copy {
-            copy(text);
-        }
-    }
-    fn selection_copied(&self) {
-        self.notice(
-            "Copied selected text. If it didn't arrive, hold Shift and drag (Option in iTerm2) to use your terminal's selection.",
-            NoticeTone::Info,
-        );
+        self.0.options.copy.as_ref().is_some_and(|copy| copy(text))
     }
     fn copy_last_answer(&self) {
         let answer = self.0.state.borrow().transcript.entries.iter().rev().find_map(|e| {
@@ -1394,6 +1457,19 @@ impl TuiApp {
         (self.layout(self.0.tty.size().columns).1 - 6).max(1)
     }
 }
+/// How soon a press on the same cell counts with the one before: a double or a triple click.
+const CLICK_MS: f64 = 400.;
+/// What a toast says of a copy: the words, when they're on one line, else how many lines. Where only the terminal
+/// took them (over SSH, or with no clipboard tool here), they arrive only if it allows it, so it says how to use the
+/// terminal's own selection instead (Option-drag in iTerm2).
+fn copied_words(text: &str, here: bool, iterm: bool) -> String {
+    let lines = text.lines().count();
+    if here {
+        return if lines > 1 { format!("Copied {lines} lines") } else { format!("Copied “{}”", truncate(text.trim(), 40)) };
+    }
+    let what = if lines > 1 { format!(" {lines} lines") } else { String::new() };
+    format!("Copied{what} if the terminal allows it · or {}-drag", if iterm { "option" } else { "shift" })
+}
 /// A command's words after its name (`/rename Night drive`): empty when there are none, None when the line isn't it.
 pub(super) fn argument(command: &str, name: &str) -> Option<String> {
     let rest = command.strip_prefix(name)?;
@@ -1422,8 +1498,13 @@ impl Command {
 }
 
 /// Keys and commands, in the DAW's words (Live's, as it always said them, for Live).
-pub(super) fn help(daw: bool) -> String {
+pub(super) fn help(daw: bool, copy_on_select: bool) -> String {
     let words = crate::daw::words();
+    let copying = if copy_on_select {
+        "drag across text to copy it, double-click for a word or triple-click for a line"
+    } else {
+        "drag across text (double-click for a word, triple-click for a line), then Ctrl+C or right-click copies it and Esc clears it"
+    };
     let daw = if daw { " · /daw says which DAW Kumi works with, and /daw <name> opens Kumi again with another" } else { "" };
     let (app, place, places) = (words.app, words.place, words.places);
     // Willington's bindings are Live's.
@@ -1433,7 +1514,7 @@ pub(super) fn help(daw: bool) -> String {
         ""
     };
     format!(
-        "enter sends · ctrl+j or alt+enter starts a new line · ctrl+t talks instead of typing: press it again to stop, or hold it while you talk, and what you said lands in the box (enter stops and sends at once); /voice chooses the language and the microphone · ↑ and ↓ go through what you sent before · while Kumi works, enter sends a message it reads after the step under way, tab one for after the answer, and alt+↑ takes the last waiting one back · /btw asks something on the side without interrupting · ctrl+b moves a slow step that doesn't use {app} (a video, pages) to the background (press it twice in tmux), and /jobs shows, stops or reruns background jobs · esc stops Kumi · page up/down or the mouse wheel scroll, ctrl+home goes to the start and ctrl+end back · click undo in HISTORY, or /undo, to take back a change · /new starts a fresh conversation, /resume goes back to one kept (this {place}'s, or any {place}'s by its id or name), /rename names this one, and /fork carries on in a copy · /reconnect connects to {app} again, keeping the conversation{daw} · /copy copies the last answer, /export copies or saves the whole conversation, and /share saves it as a web page to send; drag to select text, then Ctrl+C or right-click copies it; Esc clears the selection (Shift-drag, or Option in iTerm2, uses terminal selection) · /model and /effort choose the model and how hard it thinks, and /fast turns on its faster tier when it has one;{willington} /slots shows which model does each listening job (stems, transcription, listening, embeddings), swaps one in plain words after a quick test, and /slots back <job> takes a swap back; /music shows your own music, which Kumi learns your taste from on this computer, and adds or removes a folder, pauses or forgets it; /map draws your sounds and songs as a map to move around, where space or the mouse plays a point, and /map open shows it in your browser; /login and /logout sign in and out · /memory shows what Kumi remembers (notes, techniques, recipes and what it learned from your {places}), and forget in MEMORY drops one; /recipes your saved ways of working · /update gets the newest Kumi, and /changelog says what's new in it · drag files in, or ctrl+v a picture, to send them with your next message (backspace in an empty box takes the last one back) · ctrl+c clears the box, then quits · type / for commands"
+        "enter sends · ctrl+j or alt+enter starts a new line · ctrl+t talks instead of typing: press it again to stop, or hold it while you talk, and what you said lands in the box (enter stops and sends at once); /voice chooses the language and the microphone · ↑ and ↓ go through what you sent before · while Kumi works, enter sends a message it reads after the step under way, tab one for after the answer, and alt+↑ takes the last waiting one back · /btw asks something on the side without interrupting · ctrl+b moves a slow step that doesn't use {app} (a video, pages) to the background (press it twice in tmux), and /jobs shows, stops or reruns background jobs · esc stops Kumi · page up/down or the mouse wheel scroll, ctrl+home goes to the start and ctrl+end back · click undo in HISTORY, or /undo, to take back a change · /new starts a fresh conversation, /resume goes back to one kept (this {place}'s, or any {place}'s by its id or name), /rename names this one, and /fork carries on in a copy · /reconnect connects to {app} again, keeping the conversation{daw} · /copy copies the last answer, /export copies or saves the whole conversation, and /share saves it as a web page to send; {copying} (Shift-drag, or Option in iTerm2, uses terminal selection) · /model and /effort choose the model and how hard it thinks, and /fast turns on its faster tier when it has one;{willington} /slots shows which model does each listening job (stems, transcription, listening, embeddings), swaps one in plain words after a quick test, and /slots back <job> takes a swap back; /music shows your own music, which Kumi learns your taste from on this computer, and adds or removes a folder, pauses or forgets it; /map draws your sounds and songs as a map to move around, where space or the mouse plays a point, and /map open shows it in your browser; /login and /logout sign in and out · /memory shows what Kumi remembers (notes, techniques, recipes and what it learned from your {places}), and forget in MEMORY drops one; /recipes your saved ways of working · /update gets the newest Kumi, and /changelog says what's new in it · drag files in, or ctrl+v a picture, to send them with your next message (backspace in an empty box takes the last one back) · ctrl+c clears the box, then quits · type / for commands"
     )
 }
 pub(super) const COMMANDS: &[Command] = &[

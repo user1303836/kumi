@@ -21,6 +21,7 @@ pub use music::{music_lines, parse_music, MusicAsked, MUSIC_FOOTER};
 pub use setup::{waveform, WAVE_WIDTH};
 mod sharing;
 mod shown;
+mod toast;
 
 use super::{
     alerts::{self, ProgramState, StatusReport, TerminalProfile},
@@ -154,8 +155,9 @@ pub struct TuiOptions {
     pub remote: bool,
     /// How the producer runs Kumi from a shell ("kumi"), where Kumi's words name one of its commands.
     pub command: String,
-    /// Puts text on this computer's clipboard with its own tool, for terminals that don't take the terminal's way.
-    pub copy: Option<Rc<dyn Fn(&str)>>,
+    /// Puts text on this computer's clipboard with its own tool, for terminals that don't take the terminal's way; says
+    /// whether a tool took it.
+    pub copy: Option<Rc<dyn Fn(&str) -> bool>>,
     /// The producer chooses a kept conversation as Kumi starts (`kumi -r`): the list opens with this typed in it.
     pub choose_conversation: Option<String>,
     /// What /export and /share take out: `kumi report`'s redactor, made at each export. None takes out what `secrets`
@@ -165,6 +167,9 @@ pub struct TuiOptions {
     pub reveal: Option<Rc<dyn Fn(&std::path::Path)>>,
     /// Where /export and /share save; None saves in the folder Kumi was started in.
     pub folder: Option<std::path::PathBuf>,
+    /// Text dragged across is copied as the mouse button comes up (`copyOnSelect`); otherwise Ctrl-C or right-click
+    /// copies it.
+    pub copy_on_select: bool,
 }
 /// The DAW's part of first-run setup: the setup shows it when Kumi's bridge isn't in the DAW yet, or is older
 /// than Kumi's.
@@ -228,6 +233,7 @@ impl TuiOptions {
             redact: None,
             reveal: None,
             folder: None,
+            copy_on_select: true,
         }
     }
 }
@@ -509,6 +515,17 @@ struct State {
     pane_away: bool,
     /// Below 100 columns: the drawer under the conversation.
     drawer: drawer::Drawer,
+    /// A few words in the composer's hint row for a moment ("Copied 3 lines").
+    toast: Option<toast::Toast>,
+    /// The last frame's conversation rows (a copy joins the rows it wrapped and leaves out its margin), and the areas a
+    /// drag selects in, each pane and the composer apart.
+    text_rows: Vec<super::selection::TextRow>,
+    select_areas: Vec<Rect>,
+    /// The last left press: when, where, and how many came one after another on that cell (a double or triple click).
+    clicks: Option<(f64, i32, i32, u8)>,
+    /// What letting go of a drag copied, while its toast shows and nothing else came: the next Ctrl-C copies it again
+    /// and the next Esc only takes the toast away, instead of stopping Kumi, clearing the box or quitting.
+    copied: Option<(String, f64)>,
 }
 impl State {
     fn new(options: &TuiOptions) -> Self {
@@ -631,6 +648,11 @@ impl State {
             palette_rows: None,
             pane_away: false,
             drawer: drawer::Drawer::default(),
+            toast: None,
+            text_rows: vec![],
+            select_areas: vec![],
+            clicks: None,
+            copied: None,
         }
     }
 }

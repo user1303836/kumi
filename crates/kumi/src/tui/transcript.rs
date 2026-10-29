@@ -4,7 +4,7 @@ use super::{
     markdown::{render_markdown_with, MarkdownCache},
     style::{palette, Rgb, Style},
     width::text_width,
-    wrap::{wrap, Span},
+    wrap::{wrap_carried, Carry, Span},
 };
 use kumi_common::js::number;
 use serde::{Deserialize, Serialize};
@@ -206,6 +206,8 @@ pub struct Row {
     pub band: Option<Band>,
     pub trailing: Option<Span>,
     pub live: Option<LiveRow>,
+    /// How the row carries on the one above, where wrapping broke a line: copying joins them.
+    pub carry: Option<Carry>,
 }
 thread_local! {static STYLES:RefCell<HashMap<Rgb,Rc<Style>>>=RefCell::new(HashMap::new());}
 fn style(color: Rgb) -> Rc<Style> {
@@ -218,7 +220,15 @@ fn row(spans: Vec<Span>) -> Row {
     Row { spans, ..Default::default() }
 }
 fn wrapped(spans: &[Span], width: i32) -> Vec<Row> {
-    wrap(spans, width).into_iter().map(row).collect()
+    wrap_carried(spans, width).into_iter().map(|(spans, carry)| Row { spans, carry, ..Default::default() }).collect()
+}
+/// Text wrapped to `width` after a lead of two cells: `first` on the first row, two spaces in `rest` on the rows that
+/// carry it on.
+fn led(spans: &[Span], width: i32, first: Span, rest: Rgb) -> impl Iterator<Item = Row> {
+    wrap_carried(spans, (width - 2).max(1)).into_iter().enumerate().map(move |(index, (mut spans, carry))| {
+        spans.insert(0, if index == 0 { first.clone() } else { span("  ", rest) });
+        Row { spans, carry: carry.map(|carry| Carry { lead: 2, ..carry }), ..Default::default() }
+    })
 }
 fn seconds(ms: f64) -> String {
     format!("{}s", number::to_fixed(ms / 1000., 1))
@@ -360,25 +370,20 @@ pub fn entry_rows_with(entry: &Entry, width: i32, now: f64, markdown: &mut Markd
     let inner = width.max(1);
     match entry {
         Entry::User { text } => {
-            let lines = wrap(&[span(text, palette::BRIGHT)], inner);
+            let lines = wrap_carried(&[span(text, palette::BRIGHT)], inner);
             let band =
-                lines.iter().map(|line| text_width(&line.iter().map(|s| s.text.as_str()).collect::<String>())).max().unwrap_or(0) + 2;
+                lines.iter().map(|(line, _)| text_width(&line.iter().map(|s| s.text.as_str()).collect::<String>())).max().unwrap_or(0) + 2;
             lines
                 .into_iter()
-                .map(|spans| Row { spans, band: Some(Band { bg: palette::RAISED, width: band }), ..Default::default() })
+                .map(|(spans, carry)| Row { spans, band: Some(Band { bg: palette::RAISED, width: band }), carry, ..Default::default() })
                 .collect()
         }
         Entry::Notice { text, tone } => {
             wrapped(&[span(text, if *tone == NoticeTone::Warn { palette::WARN } else { palette::FAINT })], inner)
         }
-        Entry::Memory { what, text } => wrap(&[span(text, palette::DIM)], (inner - 2).max(1))
-            .into_iter()
-            .enumerate()
-            .map(|(i, mut spans)| {
-                spans.insert(0, if i == 0 { span(format!("{} ", what.glyph()), what.color()) } else { span("  ", palette::DIM) });
-                row(spans)
-            })
-            .collect(),
+        Entry::Memory { what, text } => {
+            led(&[span(text, palette::DIM)], inner, span(format!("{} ", what.glyph()), what.color()), palette::DIM).collect()
+        }
         Entry::News { title, items, footer } => {
             let mut rows = wrapped(
                 &[
@@ -389,10 +394,7 @@ pub fn entry_rows_with(entry: &Entry, width: i32, now: f64, markdown: &mut Markd
                 inner,
             );
             for item in items {
-                rows.extend(wrap(&[span(item, palette::DIM)], (inner - 2).max(1)).into_iter().enumerate().map(|(index, mut spans)| {
-                    spans.insert(0, span(if index == 0 { "· " } else { "  " }, palette::FAINT));
-                    row(spans)
-                }));
+                rows.extend(led(&[span(item, palette::DIM)], inner, span("· ", palette::FAINT), palette::FAINT));
             }
             if let Some(footer) = footer {
                 rows.extend(wrapped(&[span(footer, palette::FAINT)], inner));
@@ -400,28 +402,10 @@ pub fn entry_rows_with(entry: &Entry, width: i32, now: f64, markdown: &mut Markd
             rows
         }
         Entry::Job { done, head, line } => {
-            let mut rows: Vec<Row> = wrap(&[span(head, palette::TEXT)], (inner - 2).max(1))
-                .into_iter()
-                .enumerate()
-                .map(|(i, mut spans)| {
-                    spans.insert(
-                        0,
-                        if i > 0 {
-                            span("  ", palette::DIM)
-                        } else if *done {
-                            span("✓ ", palette::ACCENT)
-                        } else {
-                            span("✗ ", palette::WARN)
-                        },
-                    );
-                    row(spans)
-                })
-                .collect();
+            let mark = if *done { span("✓ ", palette::ACCENT) } else { span("✗ ", palette::WARN) };
+            let mut rows: Vec<Row> = led(&[span(head, palette::TEXT)], inner, mark, palette::DIM).collect();
             if let Some(line) = line.as_ref().filter(|line| !line.is_empty()) {
-                rows.extend(wrap(&[span(line, palette::DIM)], (inner - 2).max(1)).into_iter().map(|mut spans| {
-                    spans.insert(0, span("  ", palette::DIM));
-                    row(spans)
-                }));
+                rows.extend(led(&[span(line, palette::DIM)], inner, span("  ", palette::DIM), palette::DIM));
             }
             rows
         }
@@ -464,7 +448,12 @@ pub fn entry_rows_with(entry: &Entry, width: i32, now: f64, markdown: &mut Markd
             let mut rows = vec![];
             if !text.is_empty() {
                 for r in render_markdown_with(text.trim_end_matches('\n'), inner, &style(palette::TEXT), markdown) {
-                    rows.push(Row { spans: r.spans, band: r.bg.map(|bg| Band { bg, width: inner + 2 }), ..Default::default() });
+                    rows.push(Row {
+                        spans: r.spans,
+                        band: r.bg.map(|bg| Band { bg, width: inner + 2 }),
+                        carry: r.carry,
+                        ..Default::default()
+                    });
                 }
             }
             if !steps.is_empty() {

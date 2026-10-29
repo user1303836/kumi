@@ -377,6 +377,24 @@ pub struct Settings {
     /// false: Kumi doesn't fetch models.dev's catalog of models; the copy it has stays in use.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model_catalog: Option<bool>,
+    /// "off": Kumi leaves the mouse to the terminal, whose own selection and scrolling then work; "on" otherwise.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mouse: Option<String>,
+    /// false: text dragged across in Kumi's window is copied by Ctrl-C or right-click, not as the button comes up.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub copy_on_select: Option<bool>,
+    /// false: quitting doesn't print the conversation into the terminal's scrollback.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub transcript_on_quit: Option<bool>,
+    /// "dark" or "light"; the terminal's own background chooses ("system") otherwise.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub theme: Option<String>,
+    /// "always" or "off": when the header shows how full the model's context is; "auto" shows it past half.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub context_meter: Option<String>,
+    /// Whether every frame is drawn whole; the terminal decides when none is set (Windows Terminal draws whole).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub full_repaint: Option<bool>,
 }
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -480,10 +498,16 @@ pub fn read_settings(file: &str) -> Settings {
         music_offered: (music["musicOffered"] == true).then_some(true),
         model_catalog: (value["modelCatalog"] == false).then_some(false),
         model_servers,
+        mouse: (value["mouse"] == "off").then(|| "off".to_string()),
+        copy_on_select: (value["copyOnSelect"] == false).then_some(false),
+        transcript_on_quit: (value["transcriptOnQuit"] == false).then_some(false),
+        theme: value["theme"].as_str().filter(|theme| ["dark", "light"].contains(theme)).map(str::to_string),
+        context_meter: value["contextMeter"].as_str().filter(|meter| ["always", "off"].contains(meter)).map(str::to_string),
+        full_repaint: value["fullRepaint"].as_bool(),
     }
 }
 /// The settings this Kumi reads: any other key in the file is a newer Kumi's, kept as it is when this one writes.
-const KNOWN_SETTINGS: [&str; 22] = [
+const KNOWN_SETTINGS: &[&str] = &[
     "model",
     "effort",
     "fast",
@@ -506,6 +530,12 @@ const KNOWN_SETTINGS: [&str; 22] = [
     "musicFolders",
     "musicOffered",
     "modelCatalog",
+    "mouse",
+    "copyOnSelect",
+    "transcriptOnQuit",
+    "theme",
+    "contextMeter",
+    "fullRepaint",
 ];
 /// The longest wait before Kumi answers for the producer: an hour.
 const MAX_ANSWER_AFTER: u64 = 3600;
@@ -614,6 +644,23 @@ pub fn write_settings(file: &str, next: &Value) -> Result<(), RuntimeError> {
     }
     if kept("modelCatalog") == Some(&Value::Bool(false)) {
         settings.insert("modelCatalog".into(), json!(false));
+    }
+    // The terminal's settings: as `next` sets them, else as the file has them, even a value this Kumi can't read (a
+    // newer Kumi's, back after a rollback); none is written as the one Kumi takes when it's left out. fullRepaint has
+    // no such value: left out, the terminal decides, so either one stays.
+    for (key, default) in [
+        ("mouse", Some(json!("on"))),
+        ("copyOnSelect", Some(json!(true))),
+        ("transcriptOnQuit", Some(json!(true))),
+        ("theme", Some(json!("system"))),
+        ("contextMeter", Some(json!("auto"))),
+        ("fullRepaint", None),
+    ] {
+        if let Some(value) = next.get(key).or_else(|| raw.as_ref().and_then(|raw| raw.get(key))) {
+            if !value.is_null() && Some(value) != default.as_ref() {
+                settings.insert(key.into(), value.clone());
+            }
+        }
     }
     // A newer Kumi's settings stay, so going back to this one and forward again loses none of them.
     if let Some(Value::Object(raw)) = &raw {

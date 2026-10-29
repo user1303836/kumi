@@ -590,7 +590,12 @@ case!(the_browser_link_shows_whole_edge_to_edge_and_c_copies_it_both_ways, async
     let copied = Rc::new(RefCell::new(vec![]));
     let h = setup(44, unsigned(), Some((Some(MISSING), FakeLive::new(false))), {
         let copied = copied.clone();
-        move |o| o.copy = Some(Rc::new(move |text: &str| copied.borrow_mut().push(text.to_string())))
+        move |o| {
+            o.copy = Some(Rc::new(move |text: &str| {
+                copied.borrow_mut().push(text.to_string());
+                true
+            }))
+        }
     });
     h.start().await;
     h.wait_for("How do you want to sign in?").await;
