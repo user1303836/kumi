@@ -250,6 +250,7 @@ impl TuiApp {
                 let mut earlier: Vec<ChangeRecord> = changes
                     .unwrap_or_default()
                     .into_iter()
+                    .map(kept)
                     .filter(|c| !state.records.changes().iter().any(|known| known.id == c.id))
                     .collect();
                 if !earlier.is_empty() {
@@ -294,6 +295,7 @@ impl TuiApp {
                 self.0.state.borrow_mut().catch_up = Some(catch);
             }
             SessionEvent::Change { change } => {
+                let change = kept(change);
                 let (new, refresh) = {
                     let mut state = self.0.state.borrow_mut();
                     if let Some(index) = state.records.changes().iter().position(|c| c.id == change.id) {
@@ -1022,6 +1024,11 @@ impl TuiApp {
             Ok(())
         });
     }
+}
+/// A change as its saved record keeps it (a notes picture's numbers to 3 decimals), so one shown as it's made and one a
+/// carried-on conversation brings back from disk read the same: a note restated with fewer decimals stays the note it was.
+fn kept(change: ChangeRecord) -> ChangeRecord {
+    ChangeRecord { picture: change.picture.map(ChangePicture::as_kept), ..change }
 }
 /// A memory's scope as the keys of what Kumi kept name it ("note:producer:p3").
 fn scope_key(scope: MemoryScope) -> &'static str {
