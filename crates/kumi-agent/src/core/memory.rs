@@ -1,6 +1,7 @@
 //! Notes kept between conversations, in the producer's words, about the producer and each saved Set.
 
 use crate::core::contracts::{Memory, MemoryEvent, MemoryNote, MemoryScope, MemoryStore, NoteChange, Remembering};
+use crate::core::text::cut;
 use async_trait::async_trait;
 use kumi_common::{
     abort::Signal,
@@ -32,7 +33,7 @@ static SPACE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[\s\u{feff}]+").un
 fn clean(text: &str) -> String {
     let controls: String = text.chars().map(|c| if c <= '\u{1f}' || ('\u{7f}'..='\u{9f}').contains(&c) { ' ' } else { c }).collect();
     // Trimmed again after the cut, so cleaning what was cleaned changes nothing.
-    string::head(SPACE.replace_all(&controls, " ").trim(), MAX_NOTE).trim().to_string()
+    cut(SPACE.replace_all(&controls, " ").trim(), MAX_NOTE).trim().to_string()
 }
 // Whether a note reads like an instruction to Kumi or carries a secret (kumi-types, which the library asks too).
 use kumi_types::notes::suspect_note;
@@ -225,7 +226,7 @@ pub fn memory_instructions_for(profile: &DawProfile, memory: &Memory, set_name: 
     if !memory.set.is_empty() {
         lines.push(format!(
             "About this {place}{}:",
-            set_name.filter(|s| !s.is_empty()).map(|s| format!(" ({})", string::head(s, 120))).unwrap_or_default()
+            set_name.filter(|s| !s.is_empty()).map(|s| format!(" ({})", cut(s, 120))).unwrap_or_default()
         ));
         lines.extend(memory.set.iter().map(|n| format!("- [{}] {}", n.id, n.text)));
     }
@@ -319,7 +320,7 @@ impl State {
             }
             Remembering::NoSuchNote => Ok(ToolResult::error(format!(
                 "There's no note {} about {}; leave replaces out to add one.",
-                string::head(replaces.unwrap_or(""), 16),
+                cut(replaces.unwrap_or(""), 16),
                 if scope == MemoryScope::Set { format!("this {}", self.profile.words.place) } else { "the producer".into() }
             ))),
             Remembering::AllPinned => Ok(ToolResult::error(format!(
@@ -460,7 +461,7 @@ impl KernelTool for NoteTool {
             Ok(if self.state.forget(id).await?.is_some() {
                 quiet(json!({"forgot":id}))
             } else {
-                ToolResult::error(format!("There's no note {}.", string::head(id, 16)))
+                ToolResult::error(format!("There's no note {}.", cut(id, 16)))
             })
         }
     }

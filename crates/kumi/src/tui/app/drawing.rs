@@ -7,6 +7,7 @@ use super::super::{
     selection::{Marks, TextRow},
     style::{palette, Style},
     transcript::{doing_label, LiveRow, Row},
+    transcript_view::Header,
     width::{text_width, truncate},
     wrap::Span,
 };
@@ -308,47 +309,65 @@ impl TuiApp {
         let x = area.x + 3;
         let width = (area.width - 5).max(1);
         let now = perf_now();
-        let (rows, next) = {
+        let frame = {
             let mut state = self.0.state.borrow_mut();
-            let rows = state.transcript.layout(width, now);
-            let next = state.transcript.change_at(now);
-            (rows, next)
+            let State { view, transcript, .. } = &mut *state;
+            view.frame(transcript, width, area.height.max(0) as usize, now)
         };
-        if let Some(next) = next {
+        if let Some(next) = frame.next {
             self.wake_at(next, now);
         }
-        if rows.is_empty() {
+        if frame.lines.is_empty() {
             self.draw_welcome(screen, x, area.y + 2, width, area.height - 2);
             return;
         }
-        let (start, scroll) = {
-            let mut state = self.0.state.borrow_mut();
-            let total = rows.len() as i32;
-            if state.scroll > 0 && total != state.last_total {
-                state.scroll = state.scroll.saturating_add(total - state.last_total).max(0);
-            }
-            state.last_total = total;
-            state.scroll = state.scroll.min((total - area.height).max(0));
-            ((total - area.height - state.scroll).max(0) as usize, state.scroll)
-        };
+        // Scrolled up, the top row is the header's, and the content starts under it.
+        let top = area.y + i32::from(frame.header.is_some());
         let mut text_rows = Vec::with_capacity(area.height.max(0) as usize);
-        for (index, row) in rows.iter().skip(start).take(area.height.max(0) as usize).enumerate() {
-            let y = area.y + index as i32;
-            let end = self.draw_row(screen, row, x, y, width, area, now);
+        for (index, line) in frame.lines.iter().enumerate() {
+            let y = top + index as i32;
+            let row = line.row();
+            let end = row.map_or(x, |row| self.draw_row(screen, row, x, y, width, area, now));
             // Where its text lies, for a copy: past the lead a wrapped row repeats, and joined to the row above when
             // that's on screen too.
+            let carry = row.and_then(|row| row.carry);
             text_rows.push(TextRow {
                 y,
-                start: x + row.carry.map_or(0, |carry| carry.lead),
+                start: x + carry.map_or(0, |carry| carry.lead),
                 end,
-                carries: row.carry.filter(|_| index > 0).map(|carry| carry.space),
+                carries: carry.filter(|_| index > 0).map(|carry| carry.space),
             });
         }
-        if scroll > 0 {
-            let hint = "newer below · page down";
-            screen.fill(Rect::new(area.x, area.y + area.height - 1, area.width, 1), &st::GROUND);
-            screen.put(area.x + area.width - 2 - text_width(hint), area.y + area.height - 1, hint, &st::FAINT);
-            text_rows.retain(|row| row.y != area.y + area.height - 1);
+        if let Some(Header::Pinned { entry, rows, .. }) = &frame.header {
+            // The request whose answer is in view, its first line at the top; a click goes back to it.
+            if let Some(first) = rows.first() {
+                let end = self.draw_row(screen, first, x, area.y, width, area, now);
+                if rows.len() > 1 {
+                    screen.put_in(end, area.y, "…", &Style::fg(palette::BRIGHT), area);
+                }
+                let entry = Rc::clone(entry);
+                self.hit(area.x, area.y, area.width, move |app| {
+                    let mut state = app.0.state.borrow_mut();
+                    let State { view, transcript, .. } = &mut *state;
+                    view.scroll_to(transcript, &entry, perf_now());
+                    drop(state);
+                    app.0.scheduler.request();
+                });
+            }
+        }
+        if let Some(new) = frame.new_below {
+            // Today's faint hint while nothing's come in since you scrolled up; what came in, in the accent, if it did.
+            let y = area.y + area.height - 1;
+            let (chip, style) = if new == 0 {
+                ("newer below · page down".to_string(), st::FAINT)
+            } else {
+                let full = format!("{new} new below · page down · ctrl+end");
+                let chip = if text_width(&full) + 4 <= area.width { full } else { format!("{new} new below · ctrl+end") };
+                (chip, Style::fg(palette::ACCENT))
+            };
+            screen.fill(Rect::new(area.x, y, area.width, 1), &st::GROUND);
+            screen.put(area.x + area.width - 2 - text_width(&chip), y, &chip, &style);
+            text_rows.retain(|row| row.y != y);
         }
         self.0.state.borrow_mut().text_rows = text_rows;
     }

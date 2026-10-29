@@ -1458,3 +1458,33 @@ scene!(drawer_waiting, DRAWER_SIZES, |width, height| {
     h.wait_for("at the next step").await;
     finish_steady(h, &["thinking"]).await
 });
+
+/// The conversation scrolled up, at the widths its layout changes at: the side pane, a wider window, the drawer.
+const VIEW_SIZES: [(i32, i32); 3] = [(120, 36), (160, 40), (80, 30)];
+
+/// A request, sent and answered with `lines` numbered lines.
+async fn answered(h: &Harness, request: &str, lines: usize) {
+    h.type_text(&format!("{request}\r")).await;
+    h.emit(json!({"type":"state","state":"running"}));
+    let answer: String = (1..=lines).map(|line| format!("Line {line} of what to try for it.\n")).collect();
+    h.emit(json!({"type":"text","text":answer}));
+    h.emit(json!({"type":"turn-complete","result":{"stopReason":"completed"},"elapsedMs":900}));
+    h.emit(json!({"type":"state","state":"idle"}));
+}
+
+scene!(view_pinned_request, VIEW_SIZES, |width, height| {
+    let h = open(width, height, Rc::new(Control::default())).await;
+    answered(&h, "why does the low end sound muddy", 90).await;
+    h.type_text("\x1b[5~").await;
+    finish_styled(h).await
+});
+
+scene!(view_new_below, VIEW_SIZES, |width, height| {
+    let h = open(width, height, Rc::new(Control::default())).await;
+    answered(&h, "why does the low end sound muddy", 90).await;
+    h.type_text("\x1b[5~").await;
+    for note in ["Bass width 100% → 140%", "Kept a note about the kick", "Night Drive saved"] {
+        h.emit(json!({"type":"notice","message":note}));
+    }
+    finish_styled(h).await
+});

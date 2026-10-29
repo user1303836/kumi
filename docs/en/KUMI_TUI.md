@@ -296,7 +296,7 @@ its undo. They're in English for now.
 | Ctrl-C | Stop Kumi's answer; when idle, clear the box (↑ or Ctrl-- brings the words back); with an empty box, quit |
 | Ctrl-B | Move the answer's slow step that doesn't use Live (a video, pages, the manual, your library) to the background as a job; the answer carries on. In tmux, press Ctrl-B twice |
 | Ctrl-D | Quit, when idle with an empty box |
-| Page Up / Page Down, mouse wheel | Scroll the conversation (the wheel over the tabs scrolls the tab); it stays put while new text arrives |
+| Page Up / Page Down, mouse wheel | Scroll the conversation (the wheel over the tabs scrolls the tab); it stays put while new text arrives. Scrolled up, the top row keeps the request whose answer you're reading (a click goes back to it), and the bottom row counts what came in below |
 | Ctrl-Home / Ctrl-End | The start of the conversation / back to the latest |
 | Ctrl-L | Redraw the screen |
 
