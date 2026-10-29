@@ -11,7 +11,7 @@ use crate::core::store_client::StoreClient;
 use async_trait::async_trait;
 use kumi_common::time::now_ms;
 use kumi_layout::{closer, distance};
-use kumi_library::{search::SoundIndex, Library};
+use kumi_library::{search::SoundIndex, tools::LibraryAccess, Library};
 use kumi_store::palettes::{self, Item, ItemKind, Palette};
 use kumi_types::{daw::DawId, errors::RuntimeError};
 use serde::{Deserialize, Serialize};
@@ -35,6 +35,9 @@ pub trait PaletteLibrary {
     fn indexes_built(&self) -> u64;
     /// How many of the producer's projects use each sound, by its path (none where Kumi doesn't read their projects).
     async fn used(&self) -> HashMap<String, usize>;
+    /// The library's folders as a session with this DAW is offered them: what's between one and a sound (a pack, its
+    /// kind's folder) is the sound's to be found by, and what's above one isn't.
+    async fn folders(&self) -> Vec<String>;
 }
 
 /// The producer's library, for palettes: its sounds as a session with this DAW is offered them (Live's when none is
@@ -59,6 +62,9 @@ impl PaletteLibrary for LibrarySounds {
             return HashMap::new();
         }
         self.0.samples_in_sets().await
+    }
+    async fn folders(&self) -> Vec<String> {
+        self.0.folders_in(self.1).await
     }
 }
 
@@ -196,6 +202,14 @@ impl Palettes {
             current: RefCell::new(None),
             on_change,
             heard: RefCell::new(None),
+        }
+    }
+
+    /// The library's folders, as the palette tool's search reads where a sound is: none without a library.
+    pub async fn folders(&self) -> Vec<String> {
+        match &self.library {
+            Some(library) => library.folders().await,
+            None => Vec::new(),
         }
     }
 
