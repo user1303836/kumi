@@ -128,7 +128,7 @@ impl Busy {
 #[async_trait(?Send)]
 impl SessionHandle for Busy {
     fn capabilities(&self) -> Capabilities {
-        Capabilities { ..Capabilities::default() }
+        Capabilities::default()
     }
     fn status(&self) -> SessionStatus {
         Busy::status(self)
@@ -636,8 +636,8 @@ struct Starting {
     submits: Arc<AtomicUsize>,
 }
 
-#[async_trait(?Send)]
-impl SessionController for Starting {
+/// What the session does, asked through its handle below.
+impl Starting {
     async fn start(&self) -> Result<(), RuntimeError> {
         self.starting.set(true);
         tokio::time::sleep(Duration::from_millis(300)).await;
@@ -681,6 +681,26 @@ impl SessionController for Starting {
     async fn undo(&self, _: Option<&str>) -> Result<Option<ChangeRecord>, RuntimeError> {
         Ok(None)
     }
+}
+
+#[async_trait(?Send)]
+impl SessionHandle for Starting {
+    fn capabilities(&self) -> Capabilities {
+        Capabilities::default()
+    }
+    fn status(&self) -> SessionStatus {
+        Starting::status(self)
+    }
+    fn jobs(&self) -> Vec<JobStatus> {
+        vec![]
+    }
+    fn job(&self, _: u32) -> Option<JobDetail> {
+        None
+    }
+    async fn send(&self, op: Op) -> Result<Reply, RuntimeError> {
+        answered!(self, op, {})
+    }
+    alike!();
 }
 
 /// A message sent while the session starts, typed then or ahead of the screen, waits for the session and is answered,
