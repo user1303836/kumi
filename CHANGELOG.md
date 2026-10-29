@@ -3,6 +3,20 @@
 Kumi's releases. The Ableton bridge (`crates/ableton-mcp-server`) is versioned on its own;
 each Kumi release names the bridge it ships with.
 
+## 1.24.27 — 2026-10-29
+
+Ships with bridge 1.0.101, as 1.24.26 did.
+
+- The hints under the box, in the panels, in the map and in setup, and Kumi's notices, name the keys
+  you give in keys.json.
+- While Kumi answers, the row under the box says a message naming something with @ is sent after the
+  answer, as it is, instead of "enter sends now".
+- The screen keeps up while Kumi works: what you type and scroll no longer waits on Kumi's answer, its
+  look at your project or its learning of your library.
+
+Tested with Live 12.4 on macOS. On Windows, installing and updating are tested; using Kumi with Live
+there is still new.
+
 ## 1.24.26 — 2026-10-29
 
 Ships with bridge 1.0.101, as 1.24.25 did.
