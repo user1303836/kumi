@@ -5,7 +5,7 @@ use super::super::{
     render::Cursor,
     width::graphemes,
 };
-use super::draw_panel::Line;
+use super::draw_panel::{say, Line};
 use super::drawing::{sp, st};
 use super::*;
 use crate::{
@@ -760,14 +760,12 @@ impl TuiApp {
             return;
         };
         let abort = Signal::new();
-        let panel = self.open_overlay(Panel::ChatGpt { url: None, code: None, by_code, abort: abort.clone(), then });
+        let panel = self.open_overlay(ChatGptPanel { url: None, code: None, by_code, abort: abort.clone(), then });
         let weak = Rc::downgrade(&self.0);
         let shown = panel.clone();
         let how = if by_code {
             let on_code = Rc::new(move |prompt: kumi_ai::auth::openai_codex::DevicePrompt| {
-                if let Panel::ChatGpt { code, .. } = &mut *shown.borrow_mut() {
-                    *code = Some(prompt);
-                }
+                shown.borrow_mut().code = Some(prompt);
                 if let Some(a) = weak.upgrade() {
                     a.scheduler.request();
                 }
@@ -775,9 +773,7 @@ impl TuiApp {
             ChatGptSignIn::Device { signal: abort.clone(), on_code }
         } else {
             let on_url = Rc::new(move |url: String| {
-                if let Panel::ChatGpt { url: at, .. } = &mut *shown.borrow_mut() {
-                    *at = Some(url.clone());
-                }
+                shown.borrow_mut().url = Some(url.clone());
                 if let Some(a) = weak.upgrade() {
                     if let Some(open) = &a.options.open_browser {
                         open(&url);
@@ -793,7 +789,7 @@ impl TuiApp {
                 Ok(()) => {
                     if app.0.state.borrow_mut().overlays.remove(&panel) {
                         app.notice("Signed in to ChatGPT.", NoticeTone::Info);
-                        let then = if let Panel::ChatGpt { then, .. } = &*panel.borrow() { then.clone() } else { None };
+                        let then = panel.borrow().then.clone();
                         if let Some(then) = then {
                             if let Err(error) = then().await {
                                 if !abort.is_cancelled() && !app.0.state.borrow().closing {
@@ -1314,9 +1310,14 @@ impl TuiApp {
     pub(super) fn answers_open(&self) -> bool {
         self.top_panel(|panel| matches!(panel, Panel::Pick { picker, .. } if picker.borrow().options.answers)).unwrap_or(false)
     }
+    /// Whether the top overlay is a `T`.
+    pub(super) fn top_is<T: Overlay<TuiApp>>(&self) -> bool {
+        let top = self.0.state.borrow().overlays.top();
+        top.is_some_and(|top| top.borrow().downcast_ref::<T>().is_some())
+    }
     /// Whether a sign-in is the top overlay: a key's box, or ChatGPT's.
     pub(super) fn signing_in(&self) -> bool {
-        self.top_panel(|panel| matches!(panel, Panel::Key { .. } | Panel::ChatGpt { .. })).unwrap_or(false)
+        self.top_panel(|panel| matches!(panel, Panel::Key { .. })).unwrap_or(false) || self.top_is::<ChatGptPanel>()
     }
     /// Opens `overlay` over the conversation in place of the top one, which isn't told it closed: a panel opening over
     /// another has always replaced it.
@@ -1440,21 +1441,6 @@ impl TuiApp {
             _ => return Handled::Kept,
         };
         match panel {
-            Panel::ChatGpt { url, code, by_code, .. } if text.to_lowercase() == "c" => {
-                let copied =
-                    if *by_code { code.as_ref().map(|code| ("code", code.code.clone())) } else { url.clone().map(|url| ("link", url)) };
-                if let Some((what, text)) = copied {
-                    self.copy_text(&text);
-                    self.notice(&format!("Copied the sign-in {what}."), NoticeTone::Info);
-                }
-            }
-            // No browser here after all, or no code (over SSH, where the browser's link can still be forwarded): the other
-            // way, with what was to follow the sign-in, in this one's place.
-            Panel::ChatGpt { by_code, abort, then, .. } if text.to_lowercase() == if *by_code { "b" } else { "d" } => {
-                let (then, by_code) = (then.take(), !*by_code);
-                abort.cancel();
-                self.sign_in_chatgpt(by_code, then);
-            }
             Panel::Pick { picker, .. } => {
                 if picker.borrow().options.answers {
                     // A number picks its option and Enter sends it; typing on ("2 dB quieter") takes the number
@@ -2307,7 +2293,7 @@ fn as_panel<R>(overlay: &Shared<TuiApp>, change: impl FnOnce(&mut Panel) -> R) -
 impl Overlay<TuiApp> for Panel {
     fn handle(&mut self, app: &TuiApp, event: InputEvent) -> Handled {
         match self {
-            Panel::Pick { .. } | Panel::Key { .. } | Panel::ChatGpt { .. } => app.panel_key(self, event),
+            Panel::Pick { .. } | Panel::Key { .. } => app.panel_key(self, event),
         }
     }
     fn draw(&mut self, app: &TuiApp, screen: &mut Screen, area: Area) -> Option<Cursor> {
@@ -2322,7 +2308,6 @@ impl Overlay<TuiApp> for Panel {
     }
     fn closed(&mut self, _: &TuiApp) {
         match self {
-            Panel::ChatGpt { abort, .. } => abort.cancel(),
             Panel::Key { secret, .. } => secret.clear(),
             Panel::Pick { .. } => {}
         }
@@ -2330,7 +2315,7 @@ impl Overlay<TuiApp> for Panel {
     fn busy(&self, _: &TuiApp) -> bool {
         match self {
             Panel::Pick { .. } => false,
-            Panel::Key { .. } | Panel::ChatGpt { .. } => true,
+            Panel::Key { .. } => true,
         }
     }
 }
@@ -2422,5 +2407,87 @@ impl Overlay<TuiApp> for AsidePanel {
     /// While its answer is still being written.
     fn busy(&self, app: &TuiApp) -> bool {
         app.0.state.borrow().asides.get(self.at).is_some_and(|aside| aside.borrow().state == "asking")
+    }
+}
+
+/// ChatGPT's sign-in, open over the conversation: in this computer's browser (`url`, once it's known), or `by_code`, with
+/// a code entered in a browser anywhere.
+pub(super) struct ChatGptPanel {
+    pub url: Option<String>,
+    pub code: Option<kumi_ai::auth::openai_codex::DevicePrompt>,
+    pub by_code: bool,
+    abort: Signal,
+    then: Option<Action>,
+}
+impl Overlay<TuiApp> for ChatGptPanel {
+    /// c copies the link (or the code); d signs in with a code instead, b with the browser again.
+    fn handle(&mut self, app: &TuiApp, event: InputEvent) -> Handled {
+        let text = match &event {
+            InputEvent::Key { name, mods, .. } => {
+                return if name == "escape" || (mods.ctrl && name == "c") { Handled::Close } else { Handled::Kept };
+            }
+            InputEvent::Text { text } | InputEvent::Paste { text } => text.to_lowercase(),
+            _ => return Handled::Kept,
+        };
+        if text == "c" {
+            let copied = if self.by_code {
+                self.code.as_ref().map(|code| ("code", code.code.clone()))
+            } else {
+                self.url.clone().map(|url| ("link", url))
+            };
+            if let Some((what, text)) = copied {
+                app.copy_text(&text);
+                app.notice(&format!("Copied the sign-in {what}."), NoticeTone::Info);
+            }
+        } else if text == if self.by_code { "b" } else { "d" } {
+            // No browser here after all, or no code (over SSH, where the browser's link can still be forwarded): the
+            // other way, with what was to follow the sign-in, in this one's place.
+            let (then, by_code) = (self.then.take(), !self.by_code);
+            self.abort.cancel();
+            app.sign_in_chatgpt(by_code, then);
+        }
+        Handled::Kept
+    }
+    fn draw(&mut self, app: &TuiApp, screen: &mut Screen, area: Area) -> Option<Cursor> {
+        let width = 76.min(area.left - 2);
+        let (inner, space) = (width - 4, area.box_top - 5);
+        let mut lines: Vec<Line> = vec![];
+        if self.by_code {
+            lines.push(Line::new("Sign in to ChatGPT", st::TITLE));
+            if let Some(code) = &self.code {
+                say(&mut lines, &format!("In a browser on any device, open {} and enter this code:", code.url), st::DIM, inner);
+                lines.push(Line::new(code.code.clone(), st::BRIGHT));
+                lines.push(Line::new("Waiting for the code…", st::FAINT));
+            } else {
+                say(&mut lines, "Asking ChatGPT for a sign-in code…", st::DIM, inner);
+            }
+        } else {
+            lines.push(Line::new("Sign in to ChatGPT", st::TITLE));
+            if let Some(url) = &self.url {
+                say(&mut lines, "Finish in your browser. If it didn't open, open this link (c copies it):", st::DIM, inner);
+                for part in helpers::chunk(url, inner.max(1) as usize).into_iter().take((space - 5).max(1) as usize) {
+                    lines.push(Line::new(part, st::ACCENT));
+                }
+                lines.push(Line::new("Waiting for the browser… No browser here? d uses a code.", st::FAINT));
+            } else {
+                say(&mut lines, "Starting the sign-in…", st::DIM, inner);
+            }
+        }
+        app.draw_lines(screen, area.box_top, width, &lines, None)
+    }
+    fn hint(&self, _: &TuiApp) -> String {
+        match (self.by_code, &self.url) {
+            (true, _) => "c copies the code · b uses the browser · esc to cancel",
+            (false, Some(_)) => "c copies the link · d uses a code · esc to cancel",
+            (false, None) => "esc to cancel",
+        }
+        .into()
+    }
+    /// The sign-in under way stops.
+    fn closed(&mut self, _: &TuiApp) {
+        self.abort.cancel();
+    }
+    fn busy(&self, _: &TuiApp) -> bool {
+        true
     }
 }

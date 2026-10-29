@@ -11,6 +11,7 @@ use super::super::{
     wrap::wrap,
 };
 use super::drawing::{sp, st};
+use super::panels::ChatGptPanel;
 use super::*;
 use kumi_ai::providers::{table, SignIn};
 use kumi_common::abort;
@@ -966,7 +967,8 @@ impl TuiApp {
         // A sign-in open over the setup shows in it, in its words.
         let top = state.overlays.top();
         let top = top.as_ref().map(|top| top.borrow());
-        let panel = top.as_ref().and_then(|top| top.downcast_ref::<Panel>());
+        let key = top.as_ref().and_then(|top| top.downcast_ref::<Panel>());
+        let chatgpt = top.as_ref().and_then(|top| top.downcast_ref::<ChatGptPanel>());
         let mut y = 1;
         screen.put(x, y, "kumi", &st::TITLE);
         let version = KUMI_VERSION;
@@ -992,12 +994,11 @@ impl TuiApp {
             names.extend(enable.map(|enable| (Step::Surface, enable.label)));
         }
         let column = if width >= 40 { 20 } else { 17 };
-        let signing = panel.and_then(|p| match p {
-            Panel::Key { checking, .. } => Some(if *checking { "checking the key…" } else { "paste a key" }),
-            Panel::ChatGpt { by_code: true, .. } => Some("waiting for the code"),
-            Panel::ChatGpt { .. } => Some("waiting for the browser"),
+        let signing = match (key, chatgpt) {
+            (Some(Panel::Key { checking, .. }), _) => Some(if *checking { "checking the key…" } else { "paste a key" }),
+            (_, Some(chatgpt)) => Some(if chatgpt.by_code { "waiting for the code" } else { "waiting for the browser" }),
             _ => None,
-        });
+        };
         for (step, name) in &names {
             let done = match step {
                 Step::Sign => setup.signed.clone(),
@@ -1047,11 +1048,8 @@ impl TuiApp {
             return None;
         }
         let shown = setup.step == Step::Sign && signing.is_some();
-        let panel_kind = panel.filter(|_| shown).and_then(|p| match p {
-            Panel::ChatGpt { by_code, .. } => Some(*by_code),
-            _ => None,
-        });
-        if let Some(panel) = panel.filter(|_| shown) {
+        let panel_kind = chatgpt.filter(|_| shown).map(|chatgpt| chatgpt.by_code);
+        if let Some(panel) = key.filter(|_| shown) {
             match panel {
                 Panel::Key { provider, secret, checking, status, .. } => {
                     let info = provider.row();
@@ -1082,7 +1080,11 @@ impl TuiApp {
                         st::FAINT,
                     );
                 }
-                Panel::ChatGpt { by_code: true, code, .. } => match code {
+                _ => {}
+            }
+        } else if let Some(chatgpt) = chatgpt.filter(|_| shown) {
+            if chatgpt.by_code {
+                match &chatgpt.code {
                     Some(code) => {
                         say(screen, &mut y, &format!("In a browser on any device, open {} and enter this code:", code.url), st::TEXT);
                         y += 1;
@@ -1093,24 +1095,22 @@ impl TuiApp {
                         say(screen, &mut y, "Kumi signs in once it's entered. No code? b uses the browser instead.", st::DIM);
                     }
                     None => say(screen, &mut y, "Asking ChatGPT for a sign-in code…", st::TEXT),
-                },
-                Panel::ChatGpt { url, .. } => {
-                    say(screen, &mut y, "Finish signing in in your browser.", st::TEXT);
-                    if let Some(url) = url {
-                        y += 1;
-                        say(screen, &mut y, "If it didn't open, open this link (c copies it):", st::DIM);
-                        // All of it, edge to edge with nothing beside it, so a selection copies the whole link.
-                        for part in helpers::chunk(url, columns.max(1) as usize) {
-                            if y < rows - 2 {
-                                screen.put(0, y, &part, &st::ACCENT);
-                            }
-                            y += 1;
+                }
+            } else {
+                say(screen, &mut y, "Finish signing in in your browser.", st::TEXT);
+                if let Some(url) = &chatgpt.url {
+                    y += 1;
+                    say(screen, &mut y, "If it didn't open, open this link (c copies it):", st::DIM);
+                    // All of it, edge to edge with nothing beside it, so a selection copies the whole link.
+                    for part in helpers::chunk(url, columns.max(1) as usize) {
+                        if y < rows - 2 {
+                            screen.put(0, y, &part, &st::ACCENT);
                         }
                         y += 1;
-                        say(screen, &mut y, "No browser here? d uses a code.", st::DIM);
                     }
+                    y += 1;
+                    say(screen, &mut y, "No browser here? d uses a code.", st::DIM);
                 }
-                _ => {}
             }
         } else {
             for text in &setup.say {

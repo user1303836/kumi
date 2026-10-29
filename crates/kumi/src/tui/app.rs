@@ -265,15 +265,6 @@ enum Panel {
         status: Option<(String, NoticeTone)>,
         then: Option<Action>,
     },
-    /// ChatGPT's sign-in: in this computer's browser (`url`, once it's known), or `by_code`, with a code entered in
-    /// a browser anywhere.
-    ChatGpt {
-        url: Option<String>,
-        code: Option<kumi_ai::auth::openai_codex::DevicePrompt>,
-        by_code: bool,
-        abort: Signal,
-        then: Option<Action>,
-    },
 }
 struct Aside {
     /// The session's id for it, which its words come in by.

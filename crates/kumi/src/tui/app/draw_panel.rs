@@ -24,7 +24,8 @@ impl Line {
         Self { text: text.into(), style, detail: None, right: None, band: false, spans: None, indent: 0, label_width: 0 }
     }
 }
-fn say(lines: &mut Vec<Line>, text: &str, style: Style, width: i32) {
+/// `text` wrapped to `width`, as lines in `style`.
+pub(super) fn say(lines: &mut Vec<Line>, text: &str, style: Style, width: i32) {
     for row in wrap(&[sp(text, style)], width) {
         let text = row.into_iter().map(|s| s.text).collect::<String>();
         lines.push(Line::new(string::trim_end(&text), style));
@@ -151,28 +152,6 @@ impl TuiApp {
                     inner,
                 );
             }
-            Panel::ChatGpt { by_code: true, code, .. } => {
-                lines.push(Line::new("Sign in to ChatGPT", st::TITLE));
-                if let Some(code) = code {
-                    say(&mut lines, &format!("In a browser on any device, open {} and enter this code:", code.url), st::DIM, inner);
-                    lines.push(Line::new(code.code.clone(), st::BRIGHT));
-                    lines.push(Line::new("Waiting for the code…", st::FAINT));
-                } else {
-                    say(&mut lines, "Asking ChatGPT for a sign-in code…", st::DIM, inner);
-                }
-            }
-            Panel::ChatGpt { url, .. } => {
-                lines.push(Line::new("Sign in to ChatGPT", st::TITLE));
-                if let Some(url) = url {
-                    say(&mut lines, "Finish in your browser. If it didn't open, open this link (c copies it):", st::DIM, inner);
-                    for part in helpers::chunk(url, inner.max(1) as usize).into_iter().take((space - 5).max(1) as usize) {
-                        lines.push(Line::new(part, st::ACCENT));
-                    }
-                    lines.push(Line::new("Waiting for the browser… No browser here? d uses a code.", st::FAINT));
-                } else {
-                    say(&mut lines, "Starting the sign-in…", st::DIM, inner);
-                }
-            }
         }
         self.draw_lines(screen, box_top, width, &lines, cursor_at)
     }
@@ -239,8 +218,5 @@ pub(super) fn panel_hint(panel: &Panel) -> String {
             })
         }
         Panel::Key { .. } => "enter to save · esc to cancel".into(),
-        Panel::ChatGpt { by_code: true, .. } => "c copies the code · b uses the browser · esc to cancel".into(),
-        Panel::ChatGpt { url: Some(_), .. } => "c copies the link · d uses a code · esc to cancel".into(),
-        Panel::ChatGpt { .. } => "esc to cancel".into(),
     }
 }
