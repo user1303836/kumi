@@ -1357,16 +1357,17 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
     };
     terminal.borrow_mut().take();
     let mut code = code;
-    if let Some(why) = fatal.borrow_mut().take() {
+    let fatal = fatal.borrow_mut().take();
+    if let Some(why) = &fatal {
         // (-p said it already, as its request's error, unless the request had ended)
         if print.is_none() || code != crate::print::FAILED {
             io.err.write(&format!("Kumi's session stopped: {why}\n"));
         }
         code = 1;
     }
-    if !drained {
-        io.err.write("Kumi shutdown left a live handle; terminating this Kumi process.\n");
-        code = 1;
+    // Something the session's thread left running is said by the shutdown, with what this thread leaves (once).
+    if !drained && fatal.is_none() {
+        io.left_running.set(true);
     }
     if let Some((daw, asked)) = daw_after.get() {
         let mut again = io.clone();
@@ -1681,6 +1682,70 @@ mod watch_tests {
         assert!(restart >= std::time::Duration::from_millis(200), "REAPER, open beside Live, followed {restart:?} after Live went");
         let opened = handed(vec![]).await;
         assert!(opened < std::time::Duration::from_millis(200), "REAPER, opened since, followed {opened:?} after Live went");
+    }
+
+    /// A session that, as it reconnects, reads where its integration starts from (`shared`), as an integration on the
+    /// session's own thread would.
+    struct Bridged {
+        shared: Arc<Mutex<Option<String>>>,
+        read: RefCell<Vec<Option<String>>>,
+    }
+    #[async_trait(?Send)]
+    impl SessionController for Bridged {
+        async fn start(&self) -> Result<(), RuntimeError> {
+            Ok(())
+        }
+        async fn submit(&self, _: &str, _: Option<PinnedNode>) -> Result<(), RuntimeError> {
+            Ok(())
+        }
+        async fn refresh(&self) -> Result<(), RuntimeError> {
+            Ok(())
+        }
+        async fn new_conversation(&self) -> Result<(), RuntimeError> {
+            Ok(())
+        }
+        async fn cancel(&self) -> Result<(), RuntimeError> {
+            Ok(())
+        }
+        async fn close(&self) -> Result<(), RuntimeError> {
+            Ok(())
+        }
+        fn status(&self) -> SessionStatus {
+            SessionStatus { state: TurnState::Idle, connection: ConnectionState::Connected, turns: 0, max_turns: None, observation: None }
+        }
+        async fn undo(&self, _: Option<&str>) -> Result<Option<ChangeRecord>, RuntimeError> {
+            Ok(None)
+        }
+        fn open_set(&self) -> Option<String> {
+            Some("/Sets/Night Drive.als".into())
+        }
+        fn has_reconnect(&self) -> bool {
+            true
+        }
+        async fn reconnect(&self) -> Result<(), RuntimeError> {
+            self.read.borrow_mut().push(self.shared.lock().unwrap().clone());
+            Ok(())
+        }
+    }
+
+    /// The DAW's first-run setup, with the session reached through its handle: the bridge setup found is where the
+    /// session's integration starts from before it reconnects, and what's open is read through the handle.
+    #[tokio::test(flavor = "current_thread")]
+    async fn setup_hands_the_session_the_bridge_it_found_before_it_reconnects() {
+        let shared = Arc::new(Mutex::new(None));
+        let fake = Rc::new(Bridged { shared: shared.clone(), read: RefCell::default() });
+        let session: Rc<dyn SessionHandle> = InProcess::new(fake.clone());
+        let bridge = Rc::new(RefCell::new(None));
+        let setup = SessionForSetup { session: Rc::downgrade(&session), bridge: bridge.clone(), shared };
+        *bridge.borrow_mut() = Some("/found/bridge.json".to_string());
+        setup.reconnect().await.unwrap();
+        assert_eq!(*fake.read.borrow(), [Some("/found/bridge.json".to_string())]);
+        assert_eq!(setup.open_set().as_deref(), Some("/Sets/Night Drive.als"));
+        assert_eq!(setup.status().connection, ConnectionState::Connected);
+        // The session gone: setup hears so.
+        drop(session);
+        assert!(setup.reconnect().await.is_err());
+        assert_eq!(setup.status().state, TurnState::Closed);
     }
 
     #[tokio::test(flavor = "current_thread")]

@@ -42,6 +42,8 @@ impl Built {
 /// How long what's still under way as the session's thread ends is given (a save, the log's last lines): as long as
 /// the front end's thread gives its own (`kumi`'s shutdown).
 const GRACE: Duration = Duration::from_secs(2);
+/// How long what the session does as it ends may take: the library's and the music's learners get 1.5 s each to stop.
+const ENDING: Duration = Duration::from_millis(3_500);
 
 /// Every kind of body FOCUS shows, for which of them the session can show.
 const SHOWN: [BodyKind; 9] = [
@@ -299,9 +301,9 @@ fn serve(build: Build, mut down: mpsc::UnboundedReceiver<Down>, back: mpsc::Unbo
                 }
             }
         }
-        // The front end has let go: what the session does as it ends, while it's whole.
+        // The front end has let go: what the session does as it ends, while it's whole (and never longer than it may).
         if let Some(ending) = ending {
-            ending.await;
+            let _ = tokio::time::timeout(ENDING, ending).await;
         }
         // Then the session goes (it holds where its events go, which holds this side: let go of it here, or neither
         // would ever drop).
@@ -384,13 +386,15 @@ impl Threaded {
         }
     }
     /// Lets the session's thread end: what the session does as it ends is done, and what's still under way has its
-    /// grace, before this returns. Whether everything finished in time. Requests after it say the session has ended.
+    /// grace, before this returns. Whether everything finished in time: not when the thread ended without saying (a
+    /// panic as it ended), or is still going past both. Requests after it say the session has ended.
     pub async fn close_thread(&self) -> bool {
         self.closing.set(true);
         self.down.borrow_mut().take();
         let thread_end = self.thread_end.borrow_mut().take();
         match thread_end {
-            Some(thread_end) => thread_end.await.unwrap_or(false),
+            // (a moment over both, for the thread's own last steps)
+            Some(thread_end) => matches!(tokio::time::timeout(ENDING + GRACE + Duration::from_millis(500), thread_end).await, Ok(Ok(true))),
             None => true,
         }
     }

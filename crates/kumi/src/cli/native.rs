@@ -50,6 +50,8 @@ pub struct CliIo {
     /// ask for this, and one with stand-ins (`Answers`) always does.
     pub threaded: bool,
     exit_after_reopen: Rc<Cell<bool>>,
+    /// The session's thread still had something running past its grace as it ended: the shutdown says so, once.
+    left_running: Rc<Cell<bool>>,
 }
 impl CliIo {
     pub fn new(input: Rc<dyn TerminalInput>, out: Rc<dyn TtyOutput>, err: Rc<dyn TtyOutput>, env: Env) -> Self {
@@ -65,6 +67,7 @@ impl CliIo {
             daws_here: None,
             threaded: false,
             exit_after_reopen: Rc::new(Cell::new(false)),
+            left_running: Rc::new(Cell::new(false)),
         }
     }
     pub fn installed(&self) -> bool {
@@ -529,9 +532,10 @@ pub fn main_with(answers: impl Into<Answers>) -> i32 {
     }
     let err = io.err.clone();
     let explicit_exit = io.exit_after_reopen.clone();
+    let left_running = io.left_running.clone();
     let local = tokio::task::LocalSet::new();
     let code = local.block_on(&runtime, run(io, answers));
-    shutdown::finish(runtime, local, code, explicit_exit.get(), err.as_ref())
+    shutdown::finish(runtime, local, code, explicit_exit.get(), left_running.get(), err.as_ref())
 }
 
 #[cfg(test)]

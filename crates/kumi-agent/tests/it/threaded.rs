@@ -34,6 +34,8 @@ struct Ways {
     says_as_built: bool,
     /// Set by what it does as its thread ends.
     ending: Option<Arc<AtomicBool>>,
+    /// Its close leaves a task settling a moment longer, which sets this as it finishes.
+    settles: Option<Arc<AtomicBool>>,
     /// Its close never finishes.
     close_hangs: bool,
     /// Set as it's dropped: its thread is ending.
@@ -97,6 +99,12 @@ impl SessionController for Answers {
     async fn close(&self) -> Result<(), RuntimeError> {
         if self.ways.close_hangs {
             std::future::pending::<()>().await;
+        }
+        if let Some(settled) = self.ways.settles.clone() {
+            tokio::task::spawn_local(async move {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                settled.store(true, Ordering::SeqCst);
+            });
         }
         Ok(())
     }
@@ -408,6 +416,20 @@ async fn what_the_session_said_before_anything_listened_comes_first() {
         let seen = seen.borrow();
         assert!(matches!(seen.first(), Some(SessionEvent::Notice { message }) if message == "built"), "{seen:?}");
         assert!(matches!(seen.last(), Some(SessionEvent::State { state: TurnState::Idle })), "{seen:?}");
+    })
+    .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn what_a_close_leaves_settling_finishes_before_the_thread_ends() {
+    local(async {
+        let settled = Arc::new(AtomicBool::new(false));
+        let threaded = Threaded::spawn(answers(Ways { settles: Some(settled.clone()), ..Default::default() })).await.unwrap();
+        let session: Rc<dyn SessionHandle> = threaded.clone();
+        session.op(op::Close {}).await.unwrap();
+        assert!(!settled.load(Ordering::SeqCst), "still settling as close answers");
+        assert!(threaded.close_thread().await, "it finished within its grace");
+        assert!(settled.load(Ordering::SeqCst), "the thread ended only once it had");
     })
     .await;
 }
