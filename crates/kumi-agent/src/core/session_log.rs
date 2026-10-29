@@ -130,7 +130,8 @@ fn now() -> i64 {
 /// Whether an event is part of the conversation's story. How things are now (FOCUS, the transport, the link, the
 /// library and music being learned, what a tool is doing this second, the palette shown) is read afresh by a
 /// conversation taken up; so is the account of the conversation a session gives when it takes one up, the log being
-/// that conversation itself; and what the screen only offers (a Set's question, a request to send again) isn't history.
+/// that conversation itself; what the screen only offers (a Set's question, a request to send again) isn't history; nor
+/// is a side question's answer, which never enters the conversation.
 fn told(event: &SessionEvent) -> bool {
     match event {
         SessionEvent::Focus { .. }
@@ -145,7 +146,8 @@ fn told(event: &SessionEvent) -> bool {
         | SessionEvent::Doing { .. }
         | SessionEvent::Transport { .. }
         | SessionEvent::Watching { .. }
-        | SessionEvent::Palette { .. } => false,
+        | SessionEvent::Palette { .. }
+        | SessionEvent::Aside { .. } => false,
         SessionEvent::Change { .. }
         | SessionEvent::CatchUp { .. }
         | SessionEvent::State { .. }

@@ -554,6 +554,7 @@ async fn the_log_tells_what_happened_not_how_things_are_now() {
             SessionEvent::Palette { palette: None },
             SessionEvent::SetAsked { ask: None },
             SessionEvent::Resend { text: "make it wider".into() },
+            SessionEvent::Aside { id: 1, text: "It's at -6 dB.".into() },
             SessionEvent::Resumed { saved_at: 7, lines: vec![], changes: None, chosen: None, unreadable: None },
         ];
         let story = [
