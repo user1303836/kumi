@@ -229,7 +229,7 @@ REAPER と Renoise でも画面は同じで（[つなぎ方](KUMI_GUIDE.md#reape
 | ChatGPT のサインイン | `chatgpt.copy`（c）、`chatgpt.by-code`（d）、`chatgpt.by-browser`（b）、`chatgpt.cancel`（esc、ctrl+c） |
 | 会話の詳細（ctrl+o） | `details.up`、`details.down`、`details.page-up`、`details.page-down`、`details.top`（home）、`details.end`（end）、`details.search`（/）、`details.next-match`（n）、`details.previous-match`（N）、`details.next-request`（}）、`details.previous-request`（{）、`details.print`（[）、`details.edit`（v）、`details.close`（esc、q、ctrl+c、ctrl+o）。検索を入力している間は `details.search-erase`（backspace）、`details.search-keep`（enter）、`details.search-drop`（esc） |
 | 地図（`/map`） | `map.up`、`map.down`、`map.left`、`map.right`（矢印）、`map.pan-up`、`map.pan-down`、`map.pan-left`、`map.pan-right`（shift と矢印）、`map.zoom-in`（`+`、`=`）、`map.zoom-out`（`-`、`_`）、`map.play`（space）、`map.hover`（h）、`map.pick`（x）、`map.pick-all`（a）、`map.grow`（g）、`map.gather`（enter）、`map.filter`（`/`）、`map.switch`（tab）、`map.let-go`（esc）、`map.close`（esc、q、ctrl+c）。フィルターの入力中は `map.filter-erase`（backspace）、`map.filter-keep`（enter）、`map.filter-drop`（esc） |
-| セットアップ | `setup.up`、`setup.down`（↓、tab）、`setup.choose`（enter）、`setup.later`（esc）、`setup.quit`（ctrl+c、ctrl+d） |
+| セットアップ | `setup.up`（↑）、`setup.down`（↓、tab）、`setup.choose`（enter）、`setup.later`（esc）、`setup.quit`（ctrl+c、ctrl+d） |
 
 ## プレーンモード
 

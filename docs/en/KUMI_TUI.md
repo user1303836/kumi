@@ -381,7 +381,7 @@ it):
 | ChatGPT's sign-in | `chatgpt.copy` (c), `chatgpt.by-code` (d), `chatgpt.by-browser` (b), `chatgpt.cancel` (esc, ctrl+c) |
 | The conversation in detail (ctrl+o) | `details.up`, `details.down`, `details.page-up`, `details.page-down`, `details.top` (home), `details.end` (end), `details.search` (/), `details.next-match` (n), `details.previous-match` (N), `details.next-request` (}), `details.previous-request` ({), `details.print` ([), `details.edit` (v), `details.close` (esc, q, ctrl+c, ctrl+o); while a search is typed, `details.search-erase` (backspace), `details.search-keep` (enter), `details.search-drop` (esc) |
 | The map (`/map`) | `map.up`, `map.down`, `map.left`, `map.right` (the arrows), `map.pan-up`, `map.pan-down`, `map.pan-left`, `map.pan-right` (shift and the arrows), `map.zoom-in` (`+`, `=`), `map.zoom-out` (`-`, `_`), `map.play` (space), `map.hover` (h), `map.pick` (x), `map.pick-all` (a), `map.grow` (g), `map.gather` (enter), `map.filter` (`/`), `map.switch` (tab), `map.let-go` (esc), `map.close` (esc, q, ctrl+c); while its filter is typed, `map.filter-erase` (backspace), `map.filter-keep` (enter), `map.filter-drop` (esc) |
-| Setup | `setup.up`, `setup.down` (↓, tab), `setup.choose` (enter), `setup.later` (esc), `setup.quit` (ctrl+c, ctrl+d) |
+| Setup | `setup.up` (↑), `setup.down` (↓, tab), `setup.choose` (enter), `setup.later` (esc), `setup.quit` (ctrl+c, ctrl+d) |
 
 ## Plain mode
 
