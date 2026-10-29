@@ -527,6 +527,18 @@ async fn typed_and_pasted_text_loses_what_doesnt_show_on_screen() {
             assert!(!f.text().contains("\x1b[2J"), "{:?}", f.text());
             f.input.write("/quit\r");
             f.quit().await;
+            // Lines that come through a pipe (`pbpaste | kumi`), or from a terminal whose output goes to `tee`.
+            for f in [
+                Fixture::new(false, false, None, None, None),
+                Fixture::with(true, false, None, None, None, |o| o.output = Rc::new(Out::default())),
+            ] {
+                flush().await;
+                f.input.write(&format!("Fix the snare{hidden}\u{2060}\n"));
+                flush().await;
+                let calls = f.control.calls.borrow().clone();
+                assert!(calls.contains(&"submit:Fix the snare".into()), "{calls:?}");
+                f.quit().await;
+            }
         })
         .await;
 }

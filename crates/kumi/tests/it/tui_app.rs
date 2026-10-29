@@ -273,6 +273,11 @@ case!(a_paste_loses_what_doesnt_show_on_screen, async {
     h.has("Tighten the hats");
     h.type_text("\r").await;
     assert!(h.calls().contains(&"submit:Tighten the hats".into()), "{:?}", h.calls());
+    // A run of variation selectors arriving in two pieces is still one run when the message leaves.
+    h.type_text("\x1b[200~Then the snare 😀\u{fe00}\u{fe01}\x1b[201~").await;
+    h.type_text("\x1b[200~\u{fe02}\u{e0101} too\x1b[201~").await;
+    h.type_text("\r").await;
+    assert!(h.calls().contains(&"submit:Then the snare 😀\u{fe00} too".into()), "{:?}", h.calls());
     h.close().await;
 });
 case!(failure_disconnect_focus, async {

@@ -19,6 +19,8 @@ pub struct StreamingText {
     secrets: Vec<String>,
     /// Each secret as a pattern: its UTF-16 units and their KMP prefix function.
     patterns: Vec<Pattern>,
+    /// The last character kept was a variation selector, so the next one in a row is dropped.
+    selector: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -67,19 +69,21 @@ impl Pattern {
     }
 }
 
-/// What takes no room on screen but still reaches the model: zero-width and direction marks, the invisible operators
-/// (U+2060–U+2064), the byte-order mark and Unicode's tag characters (U+E0000–U+E007F), which can spell out instructions
-/// hidden in copied text. Tags also make the England, Scotland and Wales flags, which become a plain black flag.
+/// What takes no room on screen but still reaches the model: zero-width characters, direction marks, the invisible
+/// operators and format controls (U+2060–U+206F), the byte-order mark and Unicode's tag characters (U+E0000–U+E007F),
+/// which can spell out instructions hidden in copied text. Tags also make the England, Scotland and Wales flags, which
+/// become a plain black flag.
 fn is_invisible(character: char) -> bool {
     matches!(
         character,
-        '\u{200b}'..='\u{200f}'
-            | '\u{202a}'..='\u{202e}'
-            | '\u{2060}'..='\u{2064}'
-            | '\u{2066}'..='\u{2069}'
-            | '\u{feff}'
-            | '\u{e0000}'..='\u{e007f}'
+        '\u{61c}' | '\u{200b}'..='\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2060}'..='\u{206f}' | '\u{feff}' | '\u{e0000}'..='\u{e007f}'
     )
+}
+
+/// Unicode's variation selectors. One after a character chooses its form (❤️, a kanji's in a name); real text never has
+/// two in a row, but a run of them behind one emoji can carry a hidden message, a byte for each.
+fn is_selector(character: char) -> bool {
+    matches!(character, '\u{180b}'..='\u{180d}' | '\u{180f}' | '\u{fe00}'..='\u{fe0f}' | '\u{e0100}'..='\u{e01ef}')
 }
 
 impl Default for StreamingText {
@@ -95,6 +99,7 @@ impl StreamingText {
             pending: String::new(),
             secrets: secrets.to_vec(),
             patterns: secrets.iter().map(|secret| Pattern::new(secret)).collect(),
+            selector: false,
         }
     }
 
@@ -160,10 +165,16 @@ impl StreamingText {
             }
             if character == '\n' {
                 clean.push(character);
+                self.selector = false;
             } else if character == '\t' {
                 clean.push_str("    ");
+                self.selector = false;
             } else if code >= 0x20 && !(0x7f..=0x9f).contains(&code) && !is_invisible(character) {
-                clean.push(character);
+                let selector = is_selector(character);
+                if !(selector && self.selector) {
+                    clean.push(character);
+                    self.selector = selector;
+                }
             }
         }
         self.pending.push_str(&clean);
@@ -190,6 +201,7 @@ impl StreamingText {
     pub fn discard(&mut self) {
         self.pending.clear();
         self.state = State::Text;
+        self.selector = false;
     }
 }
 

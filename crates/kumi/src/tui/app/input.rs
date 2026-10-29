@@ -257,7 +257,7 @@ impl TuiApp {
             self.0.state.borrow_mut().tree_cursor = None;
         }
         if name == "tab" && menu.is_empty() && !ctrl && !alt && self.busy() {
-            let raw = self.0.state.borrow().editor.text();
+            let raw = self.composed();
             if !raw.is_empty() && !is_command(string::trim(&raw)) {
                 if let Some(history) = &self.0.options.history {
                     history.borrow_mut().add(&raw);
@@ -517,8 +517,13 @@ impl TuiApp {
             tokio::task::spawn_local(future);
         }
     }
+    /// The composer's words as they leave it, cleaned again as one text: what each keystroke or paste added was cleaned
+    /// alone, and a run of variation selectors split between two reads is only one run here.
+    fn composed(&self) -> String {
+        sanitize_text(&self.0.state.borrow().editor.text(), &[])
+    }
     pub(super) async fn submit(&self) -> Result<(), RuntimeError> {
-        let raw = self.0.state.borrow().editor.text();
+        let raw = self.composed();
         let command = string::trim(&raw);
         if command.is_empty() {
             return Ok(());
