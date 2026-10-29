@@ -263,6 +263,17 @@ pub struct MixSend {
 }
 
 impl ChangePicture {
+    /// The picture as a saved record keeps it: a notes picture's numbers to 3 decimals, as `compact_notes` writes them.
+    /// One shown as it's made then reads as the same one read back from disk, and a note restated with fewer decimals
+    /// (Live's triplet start 2.6666666666666665 against a patch's 2.6667) is the note it was.
+    pub fn as_kept(mut self) -> ChangePicture {
+        if let ChangePicture::Notes { before, after, .. } = &mut self {
+            for note in before.iter_mut().chain(after.iter_mut()) {
+                *note = compact_notes::kept(note);
+            }
+        }
+        self
+    }
     /// The picture within its bounds: lists capped, names and texts cut, numbers finite, and thinned until its JSON
     /// is at most [`MAX_BYTES`]. None when nothing drawable is left.
     pub fn bounded(self) -> Option<ChangePicture> {
@@ -539,8 +550,23 @@ mod compact_notes {
     use serde::{Deserialize, Deserializer, Serializer};
     use serde_json::Value;
 
+    /// A note's number as it's written: to 3 decimals.
+    fn three_places(n: f64) -> f64 {
+        (n * 1000.).round() / 1000.
+    }
+
+    /// A note as it's written, each number to 3 decimals: what reading it back gives.
+    pub(super) fn kept(note: &ClipNote) -> ClipNote {
+        ClipNote {
+            start: three_places(note.start),
+            pitch: three_places(note.pitch),
+            duration: three_places(note.duration),
+            velocity: three_places(note.velocity),
+        }
+    }
+
     fn number(n: f64) -> Value {
-        let rounded = (n * 1000.).round() / 1000.;
+        let rounded = three_places(n);
         if rounded.fract() == 0. && rounded.abs() < 1e15 {
             Value::from(rounded as i64)
         } else {
@@ -739,6 +765,25 @@ mod tests {
 
     fn note(start: f64) -> ClipNote {
         ClipNote { pitch: 60. + (start as i64 % 12) as f64, start, duration: 0.25, velocity: 100. }
+    }
+
+    #[test]
+    fn a_kept_notes_picture_is_the_one_read_back_from_disk() {
+        let made = ChangePicture::Notes {
+            length: 4.,
+            before: vec![ClipNote { start: 2.6666666666666665, pitch: 36., duration: 0.3333333333333333, velocity: 90.25049 }],
+            after: vec![ClipNote { start: 2.6667, pitch: 36., duration: 0.3333, velocity: 110. }],
+            partial: false,
+        };
+        let read_back: ChangePicture = serde_json::from_value(serde_json::to_value(&made).unwrap()).unwrap();
+        assert_eq!(made.clone().as_kept(), read_back);
+        // A triplet's start as Live keeps it and as a patch restates it: the same note, once kept.
+        let ChangePicture::Notes { before, after, .. } = made.as_kept() else { unreachable!() };
+        assert_eq!((before[0].start, before[0].duration), (after[0].start, after[0].duration));
+        assert_eq!(before[0].velocity, 90.25);
+        // Another kind of picture keeps its numbers as they are.
+        let values = ChangePicture::Values { values: vec![] };
+        assert_eq!(values.clone().as_kept(), values);
     }
 
     #[test]
