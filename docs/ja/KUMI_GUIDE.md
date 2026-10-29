@@ -581,6 +581,8 @@ Kumi はすべてを `~/.kumi` に保存します。`~/.kumi/settings.json` に�
 | `conversations` | `keepDays`：会話を最後に使ってから残しておく日数。各 Set の最新 20 件はこれとは別に残る（90。外すと 90 日と最後に設定した値のうち長いほう）。`0` ですべて残す |
 | `modelCatalog` | `false`：models.dev のモデルのカタログを取得せず、手元の写しを使い続ける（[モデルの選択](#サインインとモデルの選択)） |
 | `copyOnSelect` | `false`：Kumi のウィンドウでドラッグしたテキストは、離したときにはコピーされず、Ctrl-C か右クリックでコピーするまで選択されたまま |
+| `mouse` | `"off"`：マウスをターミナル（または tmux）に任せ、ターミナル自身の選択とコピーを使う。Page Up と Page Down でスクロールする |
+| `transcriptOnQuit` | `false`：終了するときに会話をターミナルのスクロールバックに出力しない |
 
 `~/.kumi/slots.json` には、入れ替えたモデルスロットが保存されます（`/slots`）。`~/.kumi/probes` には、各ノブが何をしたかがデバイスとトラックごとに、`~/.kumi/models` にはモデルランタイムと Kumi 自身のモデルが、`~/.kumi/cache/models-catalog.json` には models.dev のカタログの最新の写しが保存されます。四つとも `KUMI_HOME` に従います。
 

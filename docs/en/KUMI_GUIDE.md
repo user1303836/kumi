@@ -1440,6 +1440,8 @@ Kumi keeps everything in `~/.kumi`. `~/.kumi/settings.json` holds:
 | `conversations` | `keepDays`: days a conversation is kept after it was last used, beyond each Set's 20 newest (90; once taken out, the longer of 90 and the value last set); `0` keeps all |
 | `modelCatalog` | `false`: Kumi doesn't fetch models.dev's catalog of models; the copy it has stays in use ([choosing a model](#sign-in-and-choose-a-model)) |
 | `copyOnSelect` | `false`: text you drag across in Kumi's window stays selected until Ctrl-C or right-click copies it, instead of copying as you let go |
+| `mouse` | `"off"`: Kumi leaves the mouse to the terminal (or tmux), whose own selection and copying then work; Page Up and Page Down scroll |
+| `transcriptOnQuit` | `false`: quitting doesn't print the conversation into the terminal's scrollback |
 
 `~/.kumi/slots.json` keeps the model slots you swapped (`/slots`),
 `~/.kumi/probes` what each knob was heard to do, by device and track, and

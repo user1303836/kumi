@@ -34,7 +34,7 @@ use super::{
     screen::{Rect, Screen},
     style::{ColorDepth, StyleTable},
     tabs::{Hit, Tab, TabPanel, TabRow},
-    transcript::{AnswerStatus, Entry, EntryRef, MemoryKind, NoticeTone, StepState, Transcript},
+    transcript::{printed, AnswerStatus, Entry, EntryRef, MemoryKind, NoticeTone, StepState, Transcript, PRINTED_MOST},
     tree::TreeRow,
     tty::{Tty, TtyInput, TtyOptions, TtyOutput},
     voice::{VoiceController, VoiceHost, VoiceInput},
@@ -170,6 +170,10 @@ pub struct TuiOptions {
     /// Text dragged across is copied as the mouse button comes up (`copyOnSelect`); otherwise Ctrl-C or right-click
     /// copies it.
     pub copy_on_select: bool,
+    /// Kumi reports the mouse (`mouse`): off, the terminal keeps it, for its own selection and scrolling.
+    pub mouse: bool,
+    /// Quitting prints the conversation into the terminal's scrollback (`transcriptOnQuit`).
+    pub transcript_on_quit: bool,
 }
 /// The DAW's part of first-run setup: the setup shows it when Kumi's bridge isn't in the DAW yet, or is older
 /// than Kumi's.
@@ -234,6 +238,8 @@ impl TuiOptions {
             reveal: None,
             folder: None,
             copy_on_select: true,
+            mouse: true,
+            transcript_on_quit: true,
         }
     }
 }
@@ -785,7 +791,7 @@ impl TuiApp {
             let tty = Tty::new(TtyOptions {
                 input: options.input.clone(),
                 output: options.output.clone(),
-                mouse: true,
+                mouse: options.mouse,
                 farewell,
                 on_input: Rc::new(move |event| {
                     if let Some(a) = w.upgrade() {
@@ -932,6 +938,7 @@ impl TuiApp {
         .boxed_local()
     }
     fn finish(&self, code: i32, message: Option<String>) -> LocalBoxFuture<'static, i32> {
+        let printing;
         {
             let mut state = self.0.state.borrow_mut();
             if state.closing {
@@ -946,6 +953,8 @@ impl TuiApp {
             state.closing = true;
             state.suppress = true;
             state.stream.discard();
+            // The producer quitting, not Kumi closing to open again with another DAW or failing to start.
+            printing = self.0.options.transcript_on_quit && message.is_none();
             let flashes = std::mem::take(&mut state.flash_timers);
             let timers = [state.tree_refresh.take(), state.wake_timer.take(), state.beat_timer.take(), state.status_timer.take()];
             let alerting = [state.alert_timer.take(), state.answer_countdown.take()];
@@ -1002,6 +1011,14 @@ impl TuiApp {
             app.0.tty.write(&images);
             app.0.tty.restore(false);
             if !app.0.output_failed.get() {
+                // The conversation into the terminal's scrollback before the goodbye, with what /export takes out taken
+                // out.
+                let text = if printing { printed(&app.0.state.borrow().transcript.entries, PRINTED_MOST) } else { String::new() };
+                if !text.is_empty() {
+                    let secrets = app.0.state.borrow().secrets.clone();
+                    let redact = crate::export::redactor_now(app.0.options.redact.as_ref(), &secrets).await;
+                    app.0.options.output.write(&redact(&text));
+                }
                 let farewell = message.unwrap_or_else(farewell);
                 app.0.options.output.write(&format!("{}\n", app.clean(&farewell, usize::MAX)));
                 // The conversation this run had or took up, by the id that brings it back.

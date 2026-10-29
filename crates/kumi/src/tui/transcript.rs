@@ -856,6 +856,60 @@ impl Transcript {
     }
 }
 
+/// The most of the conversation printed into the terminal's scrollback as Kumi quits.
+pub const PRINTED_MOST: usize = 200 * 1024;
+
+/// The conversation as the terminal's scrollback keeps it once Kumi quits: each request, each answer as it was written,
+/// and a dim line for each run of alike steps, as the conversation folds them. The terminal wraps the lines, so its own
+/// selection copies them whole. Past `most` bytes, only the end is kept, from a line's start, after a line that says so.
+pub fn printed(entries: &[EntryRef], most: usize) -> String {
+    let mut out = String::new();
+    for entry in entries {
+        match &*entry.borrow() {
+            Entry::User { text } => {
+                for (index, line) in text.trim_end().lines().enumerate() {
+                    out.push_str(&format!("\x1b[1m{}{line}\x1b[22m\n", if index == 0 { "› " } else { "  " }));
+                }
+            }
+            Entry::Assistant { text, steps, status, .. } => {
+                if !text.trim().is_empty() {
+                    out.push_str(&format!("{}\n", text.trim_end()));
+                }
+                let mut start = 0;
+                while start < steps.len() {
+                    let mut end = start + 1;
+                    while end < steps.len() && alike(&steps[start], &steps[end]) {
+                        end += 1;
+                    }
+                    let step = &steps[start];
+                    let glyph = match step.state {
+                        StepState::Done => "✓",
+                        StepState::Error => "×",
+                        StepState::Running => "…",
+                    };
+                    let count = if end - start > 1 { format!(" ×{}", end - start) } else { String::new() };
+                    out.push_str(&format!("\x1b[2m  {glyph} {}{count}\x1b[22m\n", step.label));
+                    start = end;
+                }
+                match status {
+                    AnswerStatus::Stopped => out.push_str("\x1b[2mstopped\x1b[22m\n"),
+                    AnswerStatus::Failed if text.trim().is_empty() => out.push_str("\x1b[2mKumi couldn't answer that.\x1b[22m\n"),
+                    _ => {}
+                }
+            }
+            _ => continue,
+        }
+        out.push('\n');
+    }
+    if out.len() <= most {
+        return out;
+    }
+    // From the first line that starts inside the last `most` bytes (a line break is never inside a character).
+    let from = out.len() - most;
+    let from = out.as_bytes()[from..].iter().position(|byte| *byte == b'\n').map_or(out.len(), |at| from + at + 1);
+    format!("\x1b[2m… the start of this conversation is left out here\x1b[22m\n\n{}", &out[from..])
+}
+
 /// A step's words in the transcript, as Kumi and the DAW show its tool: "looked at your Set".
 pub fn step_label(tool: &str) -> String {
     kumi_agent::core::presentation::step_label(crate::daw::presentation(), crate::daw::profile(), tool)
