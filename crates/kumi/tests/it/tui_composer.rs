@@ -485,7 +485,7 @@ case!(kumi_waits_for_the_editor_a_search_and_a_draft_put_aside_before_following_
     delay(20).await;
     h.type_text("\x12").await;
     assert!(!h.app.follow_daw(DawId::Renoise), "a search: not yet");
-    h.type_text("\x1b").await;
+    h.escape().await;
     h.type_text("an idea\x13").await;
     assert!(!h.app.follow_daw(DawId::Renoise), "a draft put aside: not yet");
     h.type_text("\x13").await;

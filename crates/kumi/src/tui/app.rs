@@ -984,6 +984,12 @@ impl TuiApp {
     pub fn transcript_layout_count(&self) -> usize {
         self.0.state.borrow().transcript.laid_out
     }
+    /// Whether typed bytes wait to be read as a key, for the tests: an Escape typed alone is a key once its delay passes,
+    /// and the next key typed before then would be read with it, as that key with alt.
+    #[doc(hidden)]
+    pub fn keys_waiting(&self) -> bool {
+        self.0.tty.keys_waiting()
+    }
     /// What's in the input box, for the menu's tests (tab puts a word in).
     #[doc(hidden)]
     pub fn draft(&self) -> String {

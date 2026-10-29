@@ -344,7 +344,7 @@ case!(keys_json_gives_setups_actions_other_keys_letters_too, async {
     h.wait_for("waiting for you to quit Live").await;
     assert!(rows(&h).lines().any(|l| l == "  l later"), "the hint:\n{}", rows(&h));
     // Esc doesn't leave it for later now; l does.
-    h.type_text("\x1b").await;
+    h.escape().await;
     assert!(!said(&h).contains("Kumi chats without Live for now"), "esc left it");
     h.type_text("l").await;
     h.wait_for("Kumi chats without Live for now, and offers to connect it next time.").await;

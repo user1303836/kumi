@@ -137,7 +137,7 @@ async fn tui_states(daw: DawId, label: &str, focuses: Vec<(serde_json::Value, Op
         h.type_text("\x1b[B").await;
         found.screen("command menu", &h);
     }
-    h.type_text("\x1b").await;
+    h.escape().await;
     h.type_text("\x7f").await;
     for command in ["/help", "/status", "/conversations", "/memory", "/recipes", "/jobs"] {
         h.type_text(&format!("{command}\r")).await;
