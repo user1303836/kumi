@@ -2,6 +2,7 @@
 //! Fake models shared by the plain terminal and full-screen app tests.
 use async_trait::async_trait;
 use kumi::models::{ChatGptSignIn, CurrentModel, DefaultModel, LocalStatus, ModelController, ProviderStatus};
+use kumi_agent::core::protocol::{op, part, HandleSide, Op, Reply};
 use kumi_ai::{
     auth::openai_codex::DevicePrompt,
     providers::{
@@ -16,6 +17,46 @@ use std::{
     collections::{HashMap, HashSet},
     rc::Rc,
 };
+/// Whether a session's model controls answer `op`: [`answer`] does, for a test's session.
+pub fn answers(op: &Op) -> bool {
+    matches!(
+        op,
+        Op::Providers(_)
+            | Op::LocalModels(_)
+            | Op::ChooseDefault(_)
+            | Op::Models(_)
+            | Op::ChooseModel(_)
+            | Op::SetEffort(_)
+            | Op::SetFast(_)
+            | Op::SetFallback(_)
+            | Op::SaveKey(_)
+            | Op::SignOut(_)
+            | Op::SignInChatgpt(_)
+            | Op::MissingModel(_)
+    )
+}
+
+/// A request a session's model controls answer (one [`answers`] says they do), as `InProcess` routes it: "Not available"
+/// for a session with none.
+pub async fn answer(op: Op, models: Option<Rc<dyn ModelController>>, side: &HandleSide) -> Result<Reply, RuntimeError> {
+    let models = part(models)?;
+    Ok(match op {
+        Op::Providers(_) => Reply::Providers(models.providers().await?),
+        Op::LocalModels(_) => Reply::LocalModels(models.local().await),
+        Op::ChooseDefault(_) => Reply::ChooseDefault(models.choose_default().await?),
+        Op::Models(op::Models { provider, refresh }) => Reply::Models(models.models(&provider, refresh).await?),
+        Op::ChooseModel(op::ChooseModel { model }) => Reply::ChooseModel(models.choose(&model).await?),
+        Op::SetEffort(op::SetEffort { effort }) => Reply::SetEffort(models.set_effort(effort).await?),
+        Op::SetFast(op::SetFast { on }) => Reply::SetFast(models.set_fast(on).await?),
+        Op::SetFallback(op::SetFallback { model }) => Reply::SetFallback(models.set_fallback(model.as_deref()).await?),
+        Op::SaveKey(op::SaveKey { provider, key }) => Reply::SaveKey(models.save_key(provider, &key.0, None).await?),
+        Op::SignOut(op::SignOut { provider }) => Reply::SignOut(models.sign_out(provider).await?),
+        Op::SignInChatgpt(op::SignInChatgpt { id, by_code }) => Reply::SignInChatgpt(side.sign_in_chatgpt(id, by_code, &*models).await?),
+        Op::MissingModel(_) => Reply::MissingModel(kumi_ai::control::missing_model(&*models).await),
+        op => return Err(RuntimeError::plain(format!("The model controls don't answer {op:?}."))),
+    })
+}
+
 /// The browser sign-in's link: longer than a narrow window, as a real one is.
 pub const CHATGPT_LINK: &str =
     "https://auth.example.test/oauth/authorize?response_type=code&client=kumi&redirect_uri=http%3A%2F%2Flocalhost%3A1455%2Fauth%2Fcallback&state=fixture";

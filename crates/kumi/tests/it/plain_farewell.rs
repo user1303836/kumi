@@ -1,14 +1,24 @@
 //! The plain terminal's goodbye is always its last line: a /status still working out its conversation when /quit
 //! comes says its second line first, and nothing is said after the goodbye.
+#[path = "../support/absent.rs"]
+mod absent;
 #[path = "../support/models.rs"]
 mod models;
 use async_trait::async_trait;
+use futures::FutureExt;
 use kumi::{
     input::{ByteListener, TerminalInput},
     terminal::{create_terminal, Terminal, TerminalOptions},
     tui::tty::TtyOutput,
 };
-use kumi_agent::core::{contracts::*, protocol::InProcess};
+use kumi_agent::core::{
+    contracts::*,
+    jobs::{JobDetail, JobStatus},
+    protocol::{
+        cloud_provider, context_window, models_view, provider_name, Capabilities, HandleSide, ModelsView, Op, Reply, SessionHandle,
+    },
+};
+use kumi_ai::providers::ProviderId;
 use kumi_types::contracts::*;
 use kumi_types::errors::RuntimeError;
 use models::FakeModels;
@@ -70,15 +80,21 @@ impl TtyOutput for Out {
 }
 /// A session whose first look at its conversation (the one /status asks for) waits until it's let go; later ones
 /// answer at once.
-#[derive(Default)]
 struct Control {
     asked: Cell<usize>,
     gate: Notify,
     /// The session's models, which plain mode reaches through it.
     models: Rc<FakeModels>,
+    /// What's said between replies.
+    side: Rc<HandleSide>,
 }
-#[async_trait(?Send)]
-impl SessionController for Control {
+impl Default for Control {
+    fn default() -> Self {
+        Self { asked: Cell::new(0), gate: Notify::new(), models: Rc::default(), side: HandleSide::new() }
+    }
+}
+/// What the test's session does, asked through its handle below.
+impl Control {
     async fn start(&self) -> Result<(), RuntimeError> {
         Ok(())
     }
@@ -114,6 +130,73 @@ impl SessionController for Control {
         Some(ConversationNow { id: "now001".into(), title: "Bass ideas".into(), kept: true, touched: true })
     }
 }
+/// The test's session as plain mode reaches it: its own requests through its methods above, what its models answer as
+/// `InProcess` answers them, and what it has nothing for as a session without it does.
+#[async_trait(?Send)]
+impl SessionHandle for Control {
+    fn capabilities(&self) -> Capabilities {
+        Capabilities { models: true, ..Capabilities::default() }
+    }
+    fn can_show(&self, _: BodyKind) -> bool {
+        false
+    }
+    fn status(&self) -> SessionStatus {
+        Control::status(self)
+    }
+    fn answering_fallback(&self) -> Option<String> {
+        None
+    }
+    fn library(&self) -> Option<LibraryStatus> {
+        None
+    }
+    fn open_set(&self) -> Option<String> {
+        None
+    }
+    fn jobs(&self) -> Vec<JobStatus> {
+        vec![]
+    }
+    fn job(&self, _: u32) -> Option<JobDetail> {
+        None
+    }
+    fn can_background(&self) -> bool {
+        false
+    }
+    fn models(&self) -> Option<ModelsView> {
+        models_view(self.model_controls())
+    }
+    fn provider_name(&self, id: &str) -> String {
+        provider_name(self.model_controls(), id)
+    }
+    fn cloud_provider(&self, id: &str) -> Option<ProviderId> {
+        cloud_provider(self.model_controls(), id)
+    }
+    fn context_window(&self, model: &str) -> Option<f64> {
+        context_window(self.model_controls(), model)
+    }
+    fn listen(&self, on_event: Rc<dyn Fn(SessionEvent)>) {
+        self.side.listen(on_event);
+    }
+    async fn send(&self, op: Op) -> Result<Reply, RuntimeError> {
+        if models::answers(&op) {
+            return models::answer(op, self.model_controls(), &self.side).await;
+        }
+        Ok(match op {
+            Op::Start(_) => Reply::Start(self.start().await?),
+            Op::Submit(op) => Reply::Submit(self.submit(&op.input, op.pinned).await?),
+            Op::Refresh(_) => Reply::Refresh(self.refresh().await?),
+            Op::NewConversation(_) => Reply::NewConversation(self.new_conversation().await?),
+            Op::Cancel(_) => Reply::Cancel(self.cancel().await?),
+            Op::Close(_) => Reply::Close(self.close().await?),
+            Op::Undo(op) => Reply::Undo(self.undo(op.id.as_deref()).await?),
+            Op::ConversationNow(_) => Reply::ConversationNow(self.conversation_now().await),
+            op => return absent::answer(op),
+        })
+    }
+    // Nothing is told to this session but what it answers at once: all of it goes now, as InProcess's would.
+    fn tell(&self, op: Op) {
+        let _ = self.send(op).now_or_never();
+    }
+}
 
 async fn flush() {
     for _ in 0..16 {
@@ -125,7 +208,7 @@ async fn flush() {
 async fn status_then_quit(let_go_first: bool) -> String {
     let (input, out) = (Rc::new(Input::default()), Rc::new(Out::default()));
     let control = Rc::new(Control { models: FakeModels::chosen(), ..Control::default() });
-    let options = TerminalOptions::new(InProcess::new(control.clone()), input.clone(), out.clone(), "inference-only");
+    let options = TerminalOptions::new(control.clone(), input.clone(), out.clone(), "inference-only");
     let terminal = create_terminal(options);
     drop(terminal.run());
     flush().await;
