@@ -35,12 +35,15 @@ fn has_control(grapheme: &str) -> bool {
 }
 
 /// The character, width and style at a cell; continuation cells have width 0.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct CellAt<'a> {
-    pub char: &'a str,
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CellAt {
+    pub char: String,
     pub width: u8,
     pub style: Style,
 }
+
+/// A blank cell's grapheme, as the table numbers it.
+pub const BLANK: u32 = ' ' as u32;
 
 /// A wide character (CJK, most emoji) fills its own cell plus the next one, which is
 /// kept as an empty continuation cell of width 0. Overwriting either half of a wide
@@ -50,7 +53,8 @@ pub struct Screen {
     pub width: i32,
     pub height: i32,
     pub table: Rc<StyleTable>,
-    pub chars: Vec<String>,
+    /// Each cell's grapheme, as the table numbers it (`StyleTable::grapheme`).
+    pub codes: Vec<u32>,
     pub widths: Vec<u8>,
     pub styles: Vec<u32>,
 }
@@ -63,7 +67,7 @@ impl Screen {
     /// A screen whose style ids come from `table`: frames sharing a table can be compared cell by cell.
     pub fn with_table(width: i32, height: i32, table: Rc<StyleTable>) -> Screen {
         let size = (width * height).max(0) as usize;
-        Screen { width, height, table, chars: vec![" ".to_string(); size], widths: vec![1; size], styles: vec![0; size] }
+        Screen { width, height, table, codes: vec![BLANK; size], widths: vec![1; size], styles: vec![0; size] }
     }
 
     pub fn bounds(&self) -> Rect {
@@ -76,7 +80,7 @@ impl Screen {
         let area = intersect(rect, self.bounds());
         for y in area.y..area.y + area.height {
             for x in area.x..area.x + area.width {
-                self.set(x, y, " ", 1, id);
+                self.set(x, y, BLANK, 1, id);
             }
         }
     }
@@ -123,9 +127,16 @@ impl Screen {
     }
 
     /// The character, width and style id at (x, y); continuation cells have width 0.
-    pub fn at(&self, x: i32, y: i32) -> CellAt<'_> {
+    pub fn at(&self, x: i32, y: i32) -> CellAt {
         let index = (y * self.width + x) as usize;
-        CellAt { char: &self.chars[index], width: self.widths[index], style: self.table.style(self.styles[index]) }
+        let mut char = String::new();
+        self.push_grapheme(index, &mut char);
+        CellAt { char, width: self.widths[index], style: self.table.style(self.styles[index]) }
+    }
+
+    /// The grapheme of the cell at `index`, onto `out`.
+    pub fn push_grapheme(&self, index: usize, out: &mut String) {
+        self.table.push_grapheme(self.codes[index], out);
     }
 
     /// The visible text of each row; for tests and debugging.
@@ -136,7 +147,7 @@ impl Screen {
             for x in 0..self.width.max(0) {
                 let index = (y * self.width + x) as usize;
                 if self.widths[index] != 0 {
-                    row.push_str(&self.chars[index]);
+                    self.push_grapheme(index, &mut row);
                 }
             }
             rows.push(row);
@@ -146,7 +157,7 @@ impl Screen {
 
     /// Take another screen's cells (the same size); for tests that build on the last frame.
     pub fn copy_from(&mut self, other: &Screen) {
-        self.chars.clone_from(&other.chars);
+        self.codes.clone_from(&other.codes);
         self.widths.clone_from(&other.widths);
         self.styles.clone_from(&other.styles);
     }
@@ -158,25 +169,24 @@ impl Screen {
             Some(bg) if style.bg.is_none() => self.table.id(&Style { bg: Some(bg), ..*style }),
             _ => self.table.id(style),
         };
-        self.set(x, y, character, cells, id);
+        let code = self.table.grapheme(character);
+        self.set(x, y, code, cells, id);
         if cells == 2 {
-            self.set(x + 1, y, "", 0, id);
+            self.set(x + 1, y, 0, 0, id);
         }
     }
 
-    fn set(&mut self, x: i32, y: i32, character: &str, cells: i32, id: u32) {
+    fn set(&mut self, x: i32, y: i32, code: u32, cells: i32, id: u32) {
         let index = (y * self.width + x) as usize;
         if cells != 0 && self.widths[index] == 0 && x > 0 && self.widths[index - 1] == 2 {
-            self.chars[index - 1].replace_range(.., " ");
+            self.codes[index - 1] = BLANK;
             self.widths[index - 1] = 1;
         }
         if cells != 2 && self.widths[index] == 2 && x + 1 < self.width {
-            self.chars[index + 1].replace_range(.., " ");
+            self.codes[index + 1] = BLANK;
             self.widths[index + 1] = 1;
         }
-        if self.chars[index] != character {
-            self.chars[index].replace_range(.., character);
-        }
+        self.codes[index] = code;
         self.widths[index] = cells as u8;
         self.styles[index] = id;
     }

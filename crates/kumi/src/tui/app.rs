@@ -137,6 +137,8 @@ pub struct TuiOptions {
     pub whats_new: Option<crate::whats_new::News>,
     /// How this terminal shows Kumi's status and notifications; read from the environment when None.
     pub terminal: Option<TerminalProfile>,
+    /// Every cell written in each frame that changes (the `fullRepaint` setting); the terminal's own way when None.
+    pub full_repaint: Option<bool>,
     /// What the producer chose about being told while away from Kumi's window.
     pub away: AwaySettings,
     /// Runs the program that shows a desktop notification, for a terminal without its own; None runs it.
@@ -232,6 +234,7 @@ impl TuiOptions {
             map_hover: None,
             whats_new: None,
             terminal: None,
+            full_repaint: None,
             away: AwaySettings::default(),
             run_notifier: None,
             alert_gap_ms: None,
@@ -557,6 +560,9 @@ struct State {
     copied: Option<(String, f64)>,
     /// Kumi is closing to open again at once (with another DAW, or updated), where the conversation carries on.
     reopening: bool,
+    /// A conversation taken up is being shown again from its log: what happened then draws as it did, and nothing of
+    /// the moment comes with it (no alert, sound or terminal status, no animation, no panel, nothing sent or carried on).
+    replaying: bool,
 }
 impl State {
     fn new(options: &TuiOptions) -> Self {
@@ -687,6 +693,7 @@ impl State {
             clicks: None,
             copied: None,
             reopening: false,
+            replaying: false,
         }
     }
 }
@@ -867,11 +874,16 @@ impl TuiApp {
             let tabs = TabPanel::new(tabs, active.as_deref(), options.panel_tab.as_ref().map(|p| p.save.clone()));
             let voice = options.voice.as_ref().map(|v| VoiceInput::new(v.clone(), Rc::new(AppVoice(weak.clone()))));
             let (done, _) = watch::channel(None);
+            // Links open where an OSC is safe to send, as the status is.
+            let renderer = Renderer::new(depth)
+                .full_repaint(options.full_repaint.unwrap_or(profile.repaint))
+                .erasing(profile.erase)
+                .linking(profile.status);
             Inner {
                 state: RefCell::new(State::new(&options)),
                 options,
                 tty,
-                renderer: RefCell::new(Renderer::new(depth)),
+                renderer: RefCell::new(renderer),
                 screen: RefCell::new(None),
                 marks: RefCell::default(),
                 scheduler,
@@ -1268,14 +1280,18 @@ fn head(text: &str, count: usize) -> String {
 fn assistant(started_at: Option<f64>, status: AnswerStatus) -> Entry {
     Entry::Assistant { text: String::new(), steps: vec![], status, elapsed_ms: None, started_at }
 }
-fn end_steps(entry: &EntryRef) {
+/// An answer's steps still running, ended as failed. `timed`: each takes how long it ran until now (an answer shown
+/// again from a log has no time for a step it cut short: the log doesn't say when it ended).
+fn end_steps(entry: &EntryRef, timed: bool) {
     if let Entry::Assistant { steps, .. } = &mut *entry.borrow_mut() {
         let now = perf_now();
         for step in steps {
             if step.state == StepState::Running {
                 step.state = StepState::Error;
                 step.ended_at = Some(now);
-                step.ms = step.started_at.map(|at| number::round(now - at)).or(step.ms);
+                if timed {
+                    step.ms = step.started_at.map(|at| number::round(now - at)).or(step.ms);
+                }
                 step.doing = None;
             }
         }

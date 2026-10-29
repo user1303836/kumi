@@ -181,15 +181,7 @@ case!(a_job_has_its_own_status_record_and_its_end_tells_a_producer_whos_away, as
     let control = Rc::new(Control::default());
     control.set("jobs", json!(true));
     let h = Harness::with(140, 40, control, |o| {
-        o.terminal = Some(TerminalProfile {
-            status: true,
-            progress: false,
-            notify: NotifyChannel::Osc777,
-            tmux: false,
-            app_id: None,
-            images: false,
-            iterm: false,
-        });
+        o.terminal = Some(TerminalProfile { status: true, notify: NotifyChannel::Osc777, ..TerminalProfile::quiet() });
         o.alert_gap_ms = Some(60.);
     });
     h.start().await;

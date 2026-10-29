@@ -2,6 +2,7 @@
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
+use std::rc::Rc;
 use std::sync::LazyLock;
 
 use regex::Regex;
@@ -19,18 +20,48 @@ pub struct Style {
     pub italic: bool,
     pub underline: bool,
     pub inverse: bool,
+    /// The address the text opens where the terminal allows (OSC 8), by `link_id`; 0 for none.
+    pub link: u32,
 }
 
 impl Style {
     /// A style of a foreground colour only.
     pub const fn fg(rgb: Rgb) -> Style {
-        Style { fg: Some(rgb), bg: None, bold: false, dim: false, italic: false, underline: false, inverse: false }
+        Style { fg: Some(rgb), bg: None, bold: false, dim: false, italic: false, underline: false, inverse: false, link: 0 }
     }
 
     /// A style of a background colour only.
     pub const fn bg(rgb: Rgb) -> Style {
-        Style { fg: None, bg: Some(rgb), bold: false, dim: false, italic: false, underline: false, inverse: false }
+        Style { fg: None, bg: Some(rgb), bold: false, dim: false, italic: false, underline: false, inverse: false, link: 0 }
     }
+
+    /// This style, its text opening `url`.
+    pub fn linked(self, url: &str) -> Style {
+        Style { link: link_id(url), ..self }
+    }
+}
+
+thread_local! {
+    /// The addresses linked text opens, numbered from 1 so a style can carry one and stay a copy.
+    static LINKS: RefCell<(Vec<Rc<str>>, HashMap<Rc<str>, u32>)> = RefCell::default();
+}
+
+/// The number styles carry `url` by; the same address always has the same one.
+pub fn link_id(url: &str) -> u32 {
+    LINKS.with_borrow_mut(|(urls, ids)| {
+        if let Some(id) = ids.get(url) {
+            return *id;
+        }
+        let url: Rc<str> = url.into();
+        urls.push(Rc::clone(&url));
+        ids.insert(url, urls.len() as u32);
+        urls.len() as u32
+    })
+}
+
+/// The address link `id` opens; None for 0.
+pub fn link_url(id: u32) -> Option<Rc<str>> {
+    LINKS.with_borrow(|(urls, _)| id.checked_sub(1).and_then(|index| urls.get(index as usize).cloned()))
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -230,29 +261,37 @@ pub fn detect_color_depth(env: &HashMap<String, String>, platform: &str, release
     ColorDepth::Colors16
 }
 
-/// A stable key for comparing styles.
+/// A stable key for comparing styles; a link adds its address.
 pub fn style_key(style: &Style) -> String {
     let color = |rgb: Option<Rgb>| rgb.map_or_else(|| "-".to_string(), |rgb| format!("{},{},{}", rgb[0], rgb[1], rgb[2]));
     let flag = |on: bool| if on { 1 } else { 0 };
     format!(
-        "{}|{}|{}{}{}{}{}",
+        "{}|{}|{}{}{}{}{}{}",
         color(style.fg),
         color(style.bg),
         flag(style.bold),
         flag(style.dim),
         flag(style.italic),
         flag(style.underline),
-        flag(style.inverse)
+        flag(style.inverse),
+        link_url(style.link).map_or_else(String::new, |url| format!("|{url}"))
     )
 }
 
-/// Interns styles so screen cells can hold a small number; id 0 is the terminal default.
+/// Where cluster numbers start: past every character's code.
+const CLUSTERS: u32 = 0x11_0000;
+
+/// Interns styles so screen cells can hold a small number; id 0 is the terminal default. Graphemes are numbered here
+/// too: a lone character by its own code, a cluster of them (a letter and its marks, an emoji sequence, a picture's
+/// placeholder) by its place in the table, past every character's.
 #[derive(Debug)]
 pub struct StyleTable {
     ids: RefCell<HashMap<Style, u32>>,
     styles: RefCell<Vec<Style>>,
     /// The style asked for last, with its id: a row's cells mostly share one, and a frame asks per cell.
     last: Cell<(Style, u32)>,
+    clusters: RefCell<Vec<Rc<str>>>,
+    cluster_ids: RefCell<HashMap<Rc<str>, u32>>,
 }
 
 impl Default for StyleTable {
@@ -267,6 +306,8 @@ impl StyleTable {
             ids: RefCell::new(HashMap::from([(Style::default(), 0)])),
             styles: RefCell::new(vec![Style::default()]),
             last: Cell::new((Style::default(), 0)),
+            clusters: RefCell::default(),
+            cluster_ids: RefCell::default(),
         }
     }
 
@@ -289,6 +330,35 @@ impl StyleTable {
 
     pub fn style(&self, id: u32) -> Style {
         self.styles.borrow().get(id as usize).copied().unwrap_or_default()
+    }
+
+    /// The number a cell holds for `grapheme`; 0 for none (a wide character's second cell).
+    pub fn grapheme(&self, grapheme: &str) -> u32 {
+        let mut characters = grapheme.chars();
+        match (characters.next(), characters.next()) {
+            (None, _) => 0,
+            (Some(character), None) => character as u32,
+            _ => {
+                if let Some(id) = self.cluster_ids.borrow().get(grapheme) {
+                    return *id;
+                }
+                let mut clusters = self.clusters.borrow_mut();
+                let cluster: Rc<str> = grapheme.into();
+                let id = CLUSTERS + clusters.len() as u32;
+                clusters.push(Rc::clone(&cluster));
+                self.cluster_ids.borrow_mut().insert(cluster, id);
+                id
+            }
+        }
+    }
+
+    /// The grapheme numbered `code`, onto `out`.
+    pub fn push_grapheme(&self, code: u32, out: &mut String) {
+        if code >= CLUSTERS {
+            out.push_str(&self.clusters.borrow()[(code - CLUSTERS) as usize]);
+        } else if let Some(character) = char::from_u32(code).filter(|_| code != 0) {
+            out.push(character);
+        }
     }
 }
 

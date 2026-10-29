@@ -8,7 +8,7 @@ use crate::core::{
     recall::{recall_tool_for, RecallOptions},
     recipes::{recipe_instructions, recipe_tools_for, RecipeStore, RecipeToolsOptions, RUN_RECIPE_TOOL},
     search_memory::SearchMemory,
-    session_log::SessionLog,
+    session_log::{replay_of, LogLine, Replay, SessionLog, REPLAYED},
     store_client::StoreClient,
     taste_log::{TasteLog, UndoneBy, Whereabouts},
     techniques::{
@@ -460,6 +460,26 @@ fn loop_budget(until: Option<i64>) -> crate::core::loop_run::LoopBudget {
 fn ready() -> Done {
     async { Ok(()) }.boxed_local().shared()
 }
+/// A change kept with conversation `id`, as Kumi takes the conversation up: one this session saw, as it saw it last; any
+/// other named with its conversation. Kumi can't undo a change from an earlier session; one the DAW never confirmed
+/// stays unconfirmed.
+fn taken_up(id: &str, seen: &indexmap::IndexMap<String, ChangeRecord>, mut change: ChangeRecord) -> ChangeRecord {
+    if let Some(ours) = seen.get(&change.id).filter(|c| c.at == change.at) {
+        return ours.clone();
+    }
+    if !change.id.contains(':') {
+        change.id = format!("{id}:{}", change.id);
+    }
+    match change.state {
+        ChangeState::Applied => {
+            change.state = ChangeState::Expired;
+            change.note = Some("From an earlier session, so Kumi can't undo it now.".into());
+        }
+        ChangeState::Unsure => change.note = Some("From an earlier session, and never confirmed: check it.".into()),
+        _ => {}
+    }
+    change
+}
 fn span(ms: u64) -> String {
     let (n, unit) = if ms >= 60_000 {
         (((ms as f64 / 60_000.0) + 0.5).floor() as u64, "minute")
@@ -475,6 +495,10 @@ const PICTURES: &[&str] = &["image/png", "image/jpeg", "image/gif", "image/webp"
 const MAX_PICTURE: u64 = 3 * 1024 * 1024 + 768 * 1024;
 const MAX_PICTURES: u64 = 20 * 1024 * 1024;
 const MAX_ATTACHMENTS: usize = 10;
+/// The most a message the producer sends holds, in bytes: a paste of 2,000 lines (a log, a lyric sheet) fits. With the
+/// observation and the answer's reads it still fits the kernel's default budget (400 KB), which clears earlier exchanges
+/// to make room, and a saved conversation keeps it with its answer (the last exchange, up to 1 MB).
+const MAX_REQUEST: usize = 256 * 1024;
 
 fn size_words(bytes: u64) -> String {
     if bytes >= 1024 * 1024 {
@@ -1201,25 +1225,27 @@ impl Session {
             .and_then(|c| c.changes.clone())
             .unwrap_or_default()
             .into_iter()
-            .map(|mut change| {
-                if let Some(ours) = s.seen.get(&change.id).filter(|c| c.at == change.at) {
-                    return ours.clone();
-                }
-                if !change.id.contains(':') {
-                    change.id = format!("{id}:{}", change.id);
-                }
-                // Kumi can't undo a change from an earlier session; one the DAW never confirmed stays unconfirmed.
-                match change.state {
-                    ChangeState::Applied => {
-                        change.state = ChangeState::Expired;
-                        change.note = Some("From an earlier session, so Kumi can't undo it now.".into());
-                    }
-                    ChangeState::Unsure => change.note = Some("From an earlier session, and never confirmed: check it.".into()),
-                    _ => {}
-                }
-                change
-            })
+            .map(|change| taken_up(&id, &s.seen, change))
             .collect();
+    }
+    /// What a kept conversation taken up shows again of its log: its last requests as they happened, each change in them
+    /// as HISTORY holds it now. None without a log as it was opened (one behind what's kept, which an earlier Kumi carried
+    /// on since, began again from it), or with nothing in it to show: then the screen shows the conversation's words, as
+    /// before logs.
+    async fn replay(&self) -> Option<Replay> {
+        let log = self.0.options.log.as_ref()?.as_opened().await?;
+        // Read off the thread that takes keys: a long log is megabytes, mostly lines a replay never reads.
+        let mut replay = tokio::task::spawn_blocking(move || replay_of(&log, REPLAYED)).await.ok()??;
+        if replay.earlier.is_empty() && !replay.lines.iter().any(|line| matches!(line, LogLine::Request(_))) {
+            return None;
+        }
+        let s = self.0.state.borrow();
+        for line in &mut replay.lines {
+            if let LogLine::Event { event: SessionEvent::Change { change }, .. } = line {
+                *change = taken_up(&s.conversation_id, &s.seen, change.clone());
+            }
+        }
+        Some(replay)
     }
     /// An id for a new conversation: none kept has it, in any Set.
     async fn fresh_id(&self) -> String {
@@ -1796,6 +1822,7 @@ impl Session {
                     changes: None,
                     chosen: None,
                     unreadable: Some(true),
+                    replay: None,
                 });
                 self.notice("Kumi couldn't continue that conversation with this model, so it's shown above and a fresh one starts here.");
             } else {
@@ -1828,12 +1855,14 @@ impl Session {
                         let s = self.0.state.borrow();
                         s.changes.iter().filter(|c| !s.seen.get(&c.id).is_some_and(|ours| ours.at == c.at)).cloned().collect::<Vec<_>>()
                     };
+                    let replay = self.replay().await;
                     self.emit(SessionEvent::Resumed {
                         saved_at: kept.saved_at,
                         lines: value.transcript(),
                         changes: (!earlier.is_empty()).then_some(earlier),
                         chosen: picked.then_some(true),
                         unreadable: None,
+                        replay,
                     });
                     self.other_model(&kept, value.as_ref());
                 }
@@ -2439,8 +2468,18 @@ impl SessionController for Session {
             if !s.started {
                 return Err(RuntimeError::plain("Session is not started"));
             }
-            if trim(input).is_empty() || input.len() > 16 * 1024 {
-                return Err(RuntimeError::plain("Enter a nonempty prompt of at most 16 KiB"));
+            if trim(input).is_empty() {
+                return Err(RuntimeError::plain("Enter a nonempty prompt"));
+            }
+            if input.len() > MAX_REQUEST {
+                // Its words go back where the producer wrote them, to send part of.
+                drop(s);
+                self.emit(SessionEvent::Resend { text: input.to_owned() });
+                return Err(refused(format!(
+                    "This message is {}, and one message takes up to {}: send part of it.",
+                    size_words(input.len() as u64),
+                    size_words(MAX_REQUEST as u64)
+                )));
             }
             if self.0.options.max_turns.is_some_and(|max| s.turns >= max) {
                 return Err(RuntimeError::plain("Conversation limit reached; use /new"));
@@ -3367,6 +3406,15 @@ impl SessionController for Session {
                     let mut s = self.0.state.borrow_mut();
                     s.turns += 1;
                     s.interrupted = None;
+                }
+                // A goal set is the producer's request, as they said it; one picked up again starts a turn without one.
+                if let Some(log) = &self.0.options.log {
+                    let (turns, had) = {
+                        let s = self.0.state.borrow();
+                        (s.conversation_turns, s.settled.as_ref().map(|settled| settled.checkpoint.clone()))
+                    };
+                    let said = text.map(trim).filter(|words| !words.is_empty()).map(|words| format!("/goal {words}")).unwrap_or_default();
+                    log.request(&said, vec![], None, turns, had);
                 }
                 // Offered again after Live comes back, it carries the goal on (its turns and budget kept).
                 let input = "/goal resume".to_string();

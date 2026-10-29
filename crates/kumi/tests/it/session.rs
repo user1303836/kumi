@@ -599,6 +599,42 @@ local_test!(busy_turn_still_stops_at_hard_limit, {
     assert!(h.error("this answer had run for"));
     h.session.close().await.unwrap();
 });
+local_test!(a_message_up_to_256_kib_is_sent_and_a_longer_one_is_told_its_size, {
+    let h = harness(None, |_| {});
+    h.session.start().await.unwrap();
+    // 2,048 lines of 128 bytes: the most one message takes.
+    let most = format!("{}{}", format!("{}\n", "x".repeat(127)).repeat(2047), "x".repeat(128));
+    assert_eq!(most.len(), 256 * 1024);
+    h.session.submit(&most, None).await.unwrap();
+    assert!(h.record.calls.borrow()[0].contains(&most));
+    let over = format!("{most}x");
+    let refused = h.session.submit(&over, None).await.unwrap_err().to_string();
+    assert!(refused.contains("This message is 257 KB, and one message takes up to 256 KB: send part of it."), "{refused}");
+    // Its words go back in the box, to send part of.
+    assert!(h.events.borrow().iter().any(|e| matches!(e, SessionEvent::Resend { text } if *text == over)));
+    assert!(h.session.submit(" \n", None).await.unwrap_err().to_string().contains("Enter a nonempty prompt"));
+    assert_eq!(h.record.calls.borrow().len(), 1);
+    h.session.close().await.unwrap();
+});
+local_test!(a_message_the_model_has_no_room_for_goes_back_in_the_box_without_the_pictures_advice, {
+    const REFUSED: &str = "test/small has room for about 17 KB at once, and this message comes to 20 KB with what Kumi reads of your Set: send part of it, or choose a model with more room with /model.";
+    let run: Run = Rc::new(|_, _, _| async { Err(KumiError::new(FailureKind::Request, REFUSED).into()) }.boxed_local());
+    let h = harness(Some(run), |_| {});
+    h.session.start().await.unwrap();
+    h.session.submit("what's wrong in this log", None).await.unwrap();
+    assert!(h.error(REFUSED));
+    assert!(h.events.borrow().iter().any(|e| matches!(e, SessionEvent::Resend { text } if text == "what's wrong in this log")));
+    // With a picture it's still the room, not the picture, that's said.
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("synth.png");
+    std::fs::write(&path, vec![7u8; 1500]).unwrap();
+    let picture =
+        Attachment { path: path.to_string_lossy().into_owned(), name: "synth.png".into(), media_type: "image/png".into(), bytes: 1500 };
+    h.session.submit_with("make this", None, vec![picture]).await.unwrap();
+    assert!(!h.error("may not take pictures"));
+    assert!(h.events.borrow().iter().any(|e| matches!(e, SessionEvent::Resend { text } if text.starts_with("make this"))));
+    h.session.close().await.unwrap();
+});
 local_test!(refresh_failure_never_calls_inference_or_exposes_private_errors, {
     let h = harness(None, |_| {});
     h.session.start().await.unwrap();
@@ -745,7 +781,7 @@ local_test!(default_session_has_no_turn_limit_and_validates_prompts, {
     assert!(h.session.submit("x", None).await.is_err());
     h.session.start().await.unwrap();
     assert!(h.session.submit(" \u{feff}", None).await.is_err());
-    assert!(h.session.submit(&"x".repeat(16385), None).await.is_err());
+    assert!(h.session.submit(&"x".repeat(256 * 1024 + 1), None).await.is_err());
     for n in 0..30 {
         h.session.submit(&n.to_string(), None).await.unwrap();
     }
@@ -1151,6 +1187,64 @@ local_test!(a_steered_conversation_keeps_its_log_when_its_taken_up_again, {
     assert_eq!(after.header, before.header);
     assert_eq!(after.lines[..before.lines.len()], before.lines[..]);
 });
+local_test!(a_conversation_taken_up_with_its_log_shows_its_requests_again_and_one_its_log_is_behind_its_words, {
+    use kumi_agent::core::session_log::{LogLine, SessionLog};
+    const SET: &str = "cccccccccccccccccccccccccccccccc";
+    let dir = tempfile::tempdir().unwrap();
+    let store = create_conversation_store(dir.path());
+    let logged = |o: &mut SessionOptions| {
+        let log = SessionLog::new(dir.path(), kumi_types::place::Places::LIVE, Rc::new(|text: &str| text.to_owned()));
+        o.conversations = Some(store.clone());
+        o.on_event = SessionLog::tee(&log, o.on_event.clone());
+        o.log = Some(log);
+    };
+    let replayed = |h: &Harness| {
+        h.events.borrow().iter().find_map(|event| match event {
+            SessionEvent::Resumed { replay, lines, .. } => Some((replay.clone(), lines.len())),
+            _ => None,
+        })
+    };
+    let one = harness(None, logged);
+    project(&one, SET);
+    one.session.start().await.unwrap();
+    one.session.submit("make the bass wider", None).await.unwrap();
+    one.session.submit("and darker", None).await.unwrap();
+    one.session.close().await.unwrap();
+    saved(store.as_ref(), SET, 2).await;
+    // Taken up again: both requests come back as they happened, each answer's words with them.
+    let two = harness(None, logged);
+    project(&two, SET);
+    two.session.start().await.unwrap();
+    let (replay, _) = replayed(&two).expect("taken up");
+    let replay = replay.expect("its log, shown again");
+    let asked: Vec<&str> = replay
+        .lines
+        .iter()
+        .filter_map(|line| match line {
+            LogLine::Request(request) => Some(request.text.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(asked, ["make the bass wider", "and darker"]);
+    let answered = replay
+        .lines
+        .iter()
+        .filter(|line| matches!(line, LogLine::Event { event: SessionEvent::Kernel(KernelEvent::Text { text }), .. } if text == "answer"))
+        .count();
+    assert_eq!((answered, replay.before), (2, 0));
+    two.session.close().await.unwrap();
+    // An earlier Kumi carried it on since, without the log: its words come back instead, as before there were logs.
+    let mut kept = store.current(SET).await.unwrap().unwrap();
+    kept.conversation.checkpoint.messages.push(json!({"role":"user","content":"and wider, from 1.24"}));
+    kept.conversation.saved_at += 60_000;
+    store.save(SET, &kept.id, &kept.conversation).await.unwrap();
+    let three = harness(None, logged);
+    project(&three, SET);
+    three.session.start().await.unwrap();
+    let (replay, lines) = replayed(&three).expect("taken up");
+    assert!(replay.is_none() && lines == 3, "{replay:?}");
+    three.session.close().await.unwrap();
+});
 local_test!(unreadable_kept_history_is_shown_and_retained, {
     let dir = tempfile::tempdir().unwrap();
     let store = create_conversation_store(dir.path());
@@ -1201,6 +1295,68 @@ fn change(id: &str, state: &str, at: i64) -> ChangeRecord {
     )
     .unwrap()
 }
+local_test!(a_change_shown_again_can_be_undone_only_in_the_session_that_made_it, {
+    use kumi_agent::core::session_log::{LogLine, SessionLog};
+    const E: &str = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
+    const F: &str = "ffffffffffffffffffffffffffffffff";
+    let dir = tempfile::tempdir().unwrap();
+    let store = create_conversation_store(dir.path());
+    let logged = |o: &mut SessionOptions| {
+        let log = SessionLog::new(dir.path(), kumi_types::place::Places::LIVE, Rc::new(|text: &str| text.to_owned()));
+        o.conversations = Some(store.clone());
+        o.on_event = SessionLog::tee(&log, o.on_event.clone());
+        o.log = Some(log);
+    };
+    // The changes the last conversation taken up shows again.
+    let replayed = |h: &Harness| -> Vec<ChangeRecord> {
+        let events = h.events.borrow();
+        let replay = events.iter().rev().find_map(|event| match event {
+            SessionEvent::Resumed { replay: Some(replay), .. } => Some(replay.clone()),
+            _ => None,
+        });
+        let lines = replay.expect("a conversation shown again").lines;
+        lines
+            .into_iter()
+            .filter_map(|line| match line {
+                LogLine::Event { event: SessionEvent::Change { change }, .. } => Some(change),
+                _ => None,
+            })
+            .collect()
+    };
+    let log = SessionLog::new(dir.path(), kumi_types::place::Places::LIVE, Rc::new(|text: &str| text.to_owned()));
+    let one = harness(None, |o| {
+        o.conversations = Some(store.clone());
+        o.on_event = SessionLog::tee(&log, o.on_event.clone());
+        o.log = Some(log.clone());
+    });
+    project(&one, E);
+    one.session.start().await.unwrap();
+    // A change, as the app has one from the integration: the session watches it, and the screen is told (through the
+    // log in front of it).
+    one.session.watch(WatchEvent::Change(change("c1", "applied", 1)));
+    log.event(&SessionEvent::Change { change: change("c1", "applied", 1) });
+    one.session.submit("turn bass down", None).await.unwrap();
+    saved(store.as_ref(), E, 1).await;
+    project(&one, F);
+    one.session.submit("hello F", None).await.unwrap();
+    saved(store.as_ref(), F, 1).await;
+    // Back to it in the session that made the change: its record still works, as HISTORY has it.
+    project(&one, E);
+    one.session.submit("back to E", None).await.unwrap();
+    let again = replayed(&one);
+    assert_eq!(again.iter().map(|c| (c.id.as_str(), c.state)).collect::<Vec<_>>(), [("c1", ChangeState::Applied)]);
+    one.session.close().await.unwrap();
+    // Taken up by a new session, it can't be undone, and says why.
+    let two = harness(None, logged);
+    project(&two, E);
+    two.session.start().await.unwrap();
+    let earlier = replayed(&two);
+    assert_eq!(earlier.len(), 1, "{earlier:?}");
+    assert_eq!(earlier[0].state, ChangeState::Expired);
+    assert!(earlier[0].id.ends_with(":c1"), "{}", earlier[0].id);
+    assert_eq!(earlier[0].note.as_deref(), Some("From an earlier session, so Kumi can't undo it now."));
+    two.session.close().await.unwrap();
+});
 local_test!(earlier_process_changes_expire_without_pictures_and_same_process_keeps_undo, {
     let dir = tempfile::tempdir().unwrap();
     let store = create_conversation_store(dir.path());

@@ -27,12 +27,28 @@ pub struct TerminalProfile {
     pub images: bool,
     /// iTerm2, inside tmux too (its `LC_TERMINAL` comes over SSH): its own selection is Option-drag, not Shift-drag.
     pub iterm: bool,
+    /// Blanks can be erased in the colours set (EL, ECH): everywhere but GNU screen, which erases in its own unless
+    /// told `bce on`.
+    pub erase: bool,
+    /// Every cell is written in each frame that changes, unless the `fullRepaint` setting says otherwise: Windows
+    /// Terminal.
+    pub repaint: bool,
 }
 
 impl TerminalProfile {
     /// Nothing at all: no status, no notification. Tests start from this.
     pub fn quiet() -> Self {
-        Self { status: false, progress: false, notify: NotifyChannel::None, tmux: false, app_id: None, images: false, iterm: false }
+        Self {
+            status: false,
+            progress: false,
+            notify: NotifyChannel::None,
+            tmux: false,
+            app_id: None,
+            images: false,
+            iterm: false,
+            erase: true,
+            repaint: false,
+        }
     }
 }
 
@@ -110,7 +126,19 @@ pub fn detect_terminal_profile(env: &HashMap<String, String>, platform: &str) ->
     let own_ghostty = ghostty && (term.is_empty() || term == "xterm-ghostty" || term.starts_with("xterm-256") || term == "xterm");
     let multiplexed = tmux || !get("ZELLIJ").is_empty() || term.starts_with("screen") || term.starts_with("tmux");
     let images = !multiplexed && (own_kitty || own_ghostty);
-    TerminalProfile { status: true, progress: !tmux && (windows_terminal || conemu || ghostty), notify, tmux, app_id, images, iterm }
+    // GNU screen names its session in STY; tmux, inside it or around it, erases in the colours set itself.
+    let screen = !get("STY").is_empty() && !tmux;
+    TerminalProfile {
+        status: true,
+        progress: !tmux && (windows_terminal || conemu || ghostty),
+        notify,
+        tmux,
+        app_id,
+        images,
+        iterm,
+        erase: !screen,
+        repaint: windows_terminal,
+    }
 }
 
 fn on_path(name: &str, env: &HashMap<String, String>) -> bool {
@@ -342,6 +370,8 @@ mod tests {
                 app_id: Some("com.mitchellh.ghostty".into()),
                 images: true,
                 iterm: false,
+                erase: true,
+                repaint: false,
             }
         );
         assert_eq!(profile(&[("TERM_PROGRAM", "WezTerm")], "linux").notify, NotifyChannel::Osc777);
@@ -367,7 +397,9 @@ mod tests {
                 tmux: false,
                 app_id: None,
                 images: false,
-                iterm: false
+                iterm: false,
+                erase: true,
+                repaint: true,
             }
         );
         assert!(!profile(&[("TERM_PROGRAM", "iTerm.app")], "darwin").progress);
@@ -391,6 +423,14 @@ mod tests {
     }
 
     #[test]
+    fn gnu_screen_alone_gets_blanks_written_rather_than_erased() {
+        let erase = |pairs: &[(&str, &str)]| detect_terminal_profile(&env(pairs), "linux").erase;
+        assert!(!erase(&[("STY", "4242.pts-0.studio"), ("TERM", "screen-256color")]));
+        assert!(erase(&[("STY", "4242.pts-0.studio"), ("TMUX", "/tmp/tmux-1000/default,1,0"), ("TERM", "tmux-256color")]));
+        assert!(erase(&[("TERM", "xterm-256color")]));
+    }
+
+    #[test]
     fn consoles_that_would_print_the_sequences_get_none() {
         assert_eq!(detect_terminal_profile(&env(&[("TERM", "linux")]), "linux"), TerminalProfile::quiet());
         assert_eq!(detect_terminal_profile(&env(&[("TERM", "dumb")]), "darwin"), TerminalProfile::quiet());
@@ -409,7 +449,9 @@ mod tests {
                 tmux: true,
                 app_id: None,
                 images: false,
-                iterm: false
+                iterm: false,
+                erase: true,
+                repaint: false,
             }
         );
         assert_eq!(
