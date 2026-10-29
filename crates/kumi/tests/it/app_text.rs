@@ -36,6 +36,8 @@ fn tag_characters_and_invisible_operators_are_dropped() {
     assert_eq!(sanitize_text("a\u{2060}b\u{2061}c\u{2062}d\u{2063}e\u{2064}f", &[]), "abcdef");
     // The reserved U+2065, the old format controls after the isolates, and the Arabic letter mark.
     assert_eq!(sanitize_text("a\u{2065}b\u{206a}\u{206b}\u{206c}\u{206d}\u{206e}\u{206f}c\u{61c}d", &[]), "abcd");
+    // And the rest of Unicode's default-ignorables: a soft hyphen, the grapheme joiner, Hangul fillers, a musical beam.
+    assert_eq!(sanitize_text("a\u{ad}b\u{34f}c\u{3164}d\u{ffa0}e\u{180e}f\u{1d173}g\u{e01f0}h", &[]), "abcdefgh");
     // England's flag is a black flag and tags; the black flag stays.
     assert_eq!(sanitize_text("\u{1f3f4}\u{e0067}\u{e0062}\u{e0065}\u{e006e}\u{e0067}\u{e007f}", &[]), "\u{1f3f4}");
     // Their neighbours stay: a variation selector choosing a kanji's form, a visible space, a flag made another way.
@@ -53,8 +55,11 @@ fn a_variation_selector_after_another_is_dropped() {
     // One after each character is how real text uses them: ❤️, a kanji's form, Mongolian's free variation selectors.
     assert_eq!(sanitize_text("❤\u{fe0f}葛\u{e0100}ᠠ\u{180b}", &[]), "❤\u{fe0f}葛\u{e0100}ᠠ\u{180b}");
     assert_eq!(sanitize_text("ᠠ\u{180b}\u{180c}\u{180d}\u{180f}", &[]), "ᠠ\u{180b}");
-    // A selector is counted after the last character kept: a hidden one between them doesn't reset the run.
+    // A selector is counted after the last character kept: a hidden one between them doesn't reset the run, not even
+    // the grapheme joiner, which a terminal draws as nothing.
     assert_eq!(sanitize_text("😀\u{fe00}\u{200b}\u{fe01}x", &[]), "😀\u{fe00}x");
+    let joined: String = (0..20).map(|i| format!("{}\u{34f}", char::from_u32(0xfe00 + i % 16).unwrap())).collect();
+    assert_eq!(sanitize_text(&format!("😀{joined}"), &[]), "😀\u{fe00}");
     // A run split across chunks is still one run.
     let mut text = StreamingText::new(&[]);
     assert_eq!(text.push("😀\u{fe00}\u{fe01}"), "😀\u{fe00}");

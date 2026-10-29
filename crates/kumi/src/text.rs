@@ -1,4 +1,4 @@
-use kumi_agent::core::search_memory::SearchMemoryStatus;
+use kumi_agent::core::{export::invisible, search_memory::SearchMemoryStatus};
 use kumi_common::js;
 use kumi_types::contracts::{LibraryState, LibraryStatus, WebAction, WebEvent, WebWhere};
 
@@ -69,15 +69,12 @@ impl Pattern {
     }
 }
 
-/// What takes no room on screen but still reaches the model: zero-width characters, direction marks, the invisible
-/// operators and format controls (U+2060–U+206F), the byte-order mark and Unicode's tag characters (U+E0000–U+E007F),
-/// which can spell out instructions hidden in copied text. Tags also make the England, Scotland and Wales flags, which
-/// become a plain black flag.
+/// What takes no room on screen but still reaches the model: Unicode's default-ignorable code points (zero-width
+/// characters, direction marks, the byte-order mark, fillers, and the tag characters that can spell out instructions
+/// hidden in copied text), less the variation selectors, which have a rule of their own. Tags also make the England,
+/// Scotland and Wales flags, which become a plain black flag. None comes before U+00AD, so plain text is quick.
 fn is_invisible(character: char) -> bool {
-    matches!(
-        character,
-        '\u{61c}' | '\u{200b}'..='\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2060}'..='\u{206f}' | '\u{feff}' | '\u{e0000}'..='\u{e007f}'
-    )
+    character >= '\u{ad}' && invisible(character) && !is_selector(character)
 }
 
 /// Unicode's variation selectors. One after a character chooses its form (❤️, a kanji's in a name); real text never has
@@ -487,5 +484,19 @@ mod tests {
             }
         );
         assert_eq!(web_words(&WebEvent { url: None, title: String::new(), ..read.clone() }, &clean).title, "");
+    }
+
+    /// Unicode's own sets, as the regex crate's tables have them (`tui::width` measures the same default-ignorables as
+    /// taking no room), code point by code point: the lists can't drift from them.
+    #[test]
+    fn invisible_is_every_default_ignorable_but_the_variation_selectors() {
+        let ignorable = regex::Regex::new(r"^\p{Default_Ignorable_Code_Point}$").unwrap();
+        let selector = regex::Regex::new(r"^\p{Variation_Selector}$").unwrap();
+        let mut buffer = [0u8; 4];
+        for character in (0..=0x10ffff).filter_map(char::from_u32) {
+            let text = character.encode_utf8(&mut buffer);
+            assert_eq!(is_selector(character), selector.is_match(text), "U+{:04X}", character as u32);
+            assert_eq!(is_invisible(character), ignorable.is_match(text) && !is_selector(character), "U+{:04X}", character as u32);
+        }
     }
 }
