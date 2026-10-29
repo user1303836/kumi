@@ -22,7 +22,7 @@ impl TuiApp {
     /// (answers to pick at a turn's end, a question) shows in its place until it's done with, and the map then comes back.
     pub(super) fn map_shown(&self) -> bool {
         let state = self.0.state.borrow();
-        state.map.is_some() && state.panel.is_none()
+        state.map.is_some() && state.overlays.is_empty()
     }
 
     /// /map opens the map, and reads it (the session has the library and the music); /map open shows it in the browser,
@@ -231,14 +231,7 @@ impl TuiApp {
     /// Words for the producer to send, in the input box in place of what's there. Answers Kumi offered give way, so
     /// Enter sends these words.
     pub fn put_in_box(&self, words: &str) {
-        let answers = self
-            .0
-            .state
-            .borrow()
-            .panel
-            .as_ref()
-            .is_some_and(|panel| matches!(&*panel.borrow(), Panel::Pick { picker, .. } if picker.borrow().options.answers));
-        if answers {
+        if self.answers_open() {
             self.close_panel();
         }
         let mut state = self.0.state.borrow_mut();

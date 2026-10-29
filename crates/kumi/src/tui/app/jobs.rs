@@ -3,10 +3,12 @@ use super::super::alerts::{self, ProgramState, StatusReport};
 use super::super::{
     activity::{activity_glyph, activity_of},
     markdown::render_markdown,
+    render::Cursor,
     transcript::doing_label,
     width::truncate,
     wrap::Span,
 };
+use super::draw_panel::Line;
 use super::drawing::{sp, st};
 use super::panels::{inert, item, noted};
 use super::*;
@@ -224,7 +226,7 @@ impl TuiApp {
             let quiet = !state.closing
                 && !state.pending_turn
                 && !state.cancelling
-                && state.panel.is_none()
+                && state.overlays.is_empty()
                 && state.editor.is_empty()
                 && state.held.is_empty()
                 && state.setup.is_none()
@@ -344,8 +346,7 @@ impl TuiApp {
     }
 
     pub(super) fn open_job(&self, id: u32) {
-        self.0.state.borrow_mut().panel = Some(Rc::new(RefCell::new(Panel::Job { id, scroll: 0 })));
-        self.0.scheduler.request();
+        self.open_overlay(JobPanel { id, scroll: 0 });
     }
 
     pub(super) fn stop_job(&self, id: u32) {
@@ -482,29 +483,26 @@ impl TuiApp {
     }
 
     /// Keys on a job's overlay: scroll, x stops it, r runs it again, c copies its report, Esc closes.
-    pub(super) fn job_panel_input(&self, panel: &PanelRef, event: InputEvent) {
-        let Panel::Job { id, .. } = &*panel.borrow() else { return };
+    fn job_panel_input(&self, panel: &mut JobPanel, event: InputEvent) -> Handled {
+        let JobPanel { id, scroll } = panel;
         let id = *id;
         match event {
             InputEvent::Key { name, mods, .. } => {
                 if matches!(name.as_str(), "escape" | "enter") || (mods.ctrl && name == "c") {
-                    self.close_panel();
-                    return;
+                    return Handled::Close;
                 }
-                if let Panel::Job { scroll, .. } = &mut *panel.borrow_mut() {
-                    match name.as_str() {
-                        "up" | "pageup" => *scroll = (*scroll - if name == "up" { 1 } else { 5 }).max(0),
-                        "down" | "pagedown" => *scroll += if name == "down" { 1 } else { 5 },
-                        _ => {}
-                    }
+                match name.as_str() {
+                    "up" | "pageup" => *scroll = (*scroll - if name == "up" { 1 } else { 5 }).max(0),
+                    "down" | "pagedown" => *scroll += if name == "down" { 1 } else { 5 },
+                    _ => {}
                 }
             }
             InputEvent::Text { text } => match text.to_lowercase().as_str() {
-                " " => self.close_panel(),
+                " " => return Handled::Close,
                 "x" => self.stop_job(id),
                 "r" if self.session().jobs().iter().any(|s| s.id == id && s.state.ended()) => {
-                    self.close_panel();
                     self.run_job_again(id);
+                    return Handled::Close;
                 }
                 "c" => {
                     let report = self.session().job(id).and_then(|detail| detail.report).unwrap_or_default();
@@ -517,6 +515,64 @@ impl TuiApp {
             },
             _ => {}
         }
-        self.0.scheduler.request();
+        Handled::Kept
+    }
+}
+
+/// A background job's steps and report, open over the conversation, scrolled `scroll` rows down.
+pub(super) struct JobPanel {
+    id: u32,
+    scroll: i32,
+}
+impl Overlay<TuiApp> for JobPanel {
+    fn handle(&mut self, app: &TuiApp, event: InputEvent) -> Handled {
+        app.job_panel_input(self, event)
+    }
+    fn draw(&mut self, app: &TuiApp, screen: &mut Screen, area: Area) -> Option<Cursor> {
+        let width = 76.min(area.left - 2);
+        let (inner, space) = (width - 4, area.box_top - 5);
+        let mut lines: Vec<Line> = vec![];
+        let (id, scroll) = (self.id, &mut self.scroll);
+        match app.session().job(id) {
+            None => lines.push(Line::new(format!("Job {id} is gone."), st::FAINT)),
+            Some(detail) => {
+                let rows = app.job_lines(&detail, inner);
+                let mut rows = rows.into_iter();
+                if let Some((spans, right)) = rows.next() {
+                    let mut title = Line::new("", st::TITLE);
+                    title.spans = Some(spans);
+                    title.right = right;
+                    lines.push(title);
+                }
+                let body: Vec<_> = rows.collect();
+                let room = (space - 4).clamp(3, 18);
+                *scroll = (*scroll).min(body.len() as i32 - room).max(0);
+                let shown = &body[*scroll as usize..(*scroll as usize + room as usize).min(body.len())];
+                for (index, (spans, right)) in shown.iter().enumerate() {
+                    let more = if index == 0 && *scroll > 0 {
+                        Some(format!("↑ {} more", *scroll))
+                    } else if index == shown.len() - 1 && *scroll + room < body.len() as i32 {
+                        Some(format!("↓ {} more", body.len() as i32 - *scroll - room))
+                    } else {
+                        None
+                    };
+                    let mut line = Line::new("", st::TEXT);
+                    line.spans = Some(spans.clone());
+                    line.right = more.map(|s| sp(s, st::FAINT)).or_else(|| right.clone());
+                    lines.push(line);
+                }
+                if detail.status.state == JobState::Running {
+                    app.0.scheduler.request_animation();
+                }
+            }
+        }
+        app.draw_lines(screen, area.box_top, width, &lines, None)
+    }
+    fn hint(&self, _: &TuiApp) -> String {
+        "↑↓ to scroll · x stops it · r runs it again · c copies · esc to close".into()
+    }
+    fn scroll(&mut self, _: &TuiApp, rows: i32) -> bool {
+        self.scroll = (self.scroll + rows).max(0);
+        true
     }
 }

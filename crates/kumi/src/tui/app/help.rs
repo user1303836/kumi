@@ -1,9 +1,11 @@
 //! The help: every key and command, in sections, opened by /help or by `?` on an empty box. Each row is a key with what
 //! it does beside it, wrapped to the panel's width so all of it shows at any size; ↑↓, the pages, home and end scroll it.
 use super::super::{
+    render::Cursor,
     width::text_width,
     wrap::{wrap, Span},
 };
+use super::draw_panel::Line;
 use super::drawing::{sp, st};
 use super::input::COMMANDS;
 use super::*;
@@ -250,42 +252,77 @@ impl TuiApp {
     /// Opens the help: /help, or `?` on an empty box.
     pub(super) fn open_help(&self) {
         self.0.tabs.leave();
-        let mut state = self.0.state.borrow_mut();
-        state.tree_cursor = None;
-        state.panel = Some(Rc::new(RefCell::new(Panel::Help { scroll: 0, shown: 1, most: 0 })));
-        drop(state);
-        self.0.scheduler.request();
+        self.0.state.borrow_mut().tree_cursor = None;
+        self.open_overlay(HelpPanel { scroll: 0, shown: 1, most: 0 });
     }
-    /// Keys in the help: ↑↓, the pages, home and end scroll it; esc, enter, `?` and ctrl+c close it. Anything else typed
-    /// or pasted closes it and goes into the box, so none of what the producer goes on to type is lost.
-    pub(super) fn help_input(&self, panel: &PanelRef, event: InputEvent) {
+}
+
+/// The help, open over the conversation: scrolled `scroll` rows down; `shown` rows fit when it was last drawn, and it
+/// scrolls `most` rows at most.
+pub(super) struct HelpPanel {
+    scroll: i32,
+    shown: i32,
+    most: i32,
+}
+impl Overlay<TuiApp> for HelpPanel {
+    /// ↑↓, the pages, home and end scroll it; esc, enter, `?` and ctrl+c close it. Anything else typed or pasted closes
+    /// it and goes into the box, so none of what the producer goes on to type is lost.
+    fn handle(&mut self, _: &TuiApp, event: InputEvent) -> Handled {
         match event {
             InputEvent::Key { ref name, mods, .. } => {
                 if matches!(name.as_str(), "escape" | "enter") || (mods.ctrl && name == "c") {
-                    self.close_panel();
-                    return;
+                    return Handled::Close;
                 }
-                if let Panel::Help { scroll, shown, most } = &mut *panel.borrow_mut() {
-                    let page = (*shown - 1).max(1);
-                    *scroll = match name.as_str() {
-                        "up" => *scroll - 1,
-                        "down" => *scroll + 1,
-                        "pageup" => *scroll - page,
-                        "pagedown" => *scroll + page,
-                        "home" => 0,
-                        "end" => *most,
-                        _ => *scroll,
-                    }
-                    .clamp(0, *most);
+                let page = (self.shown - 1).max(1);
+                self.scroll = match name.as_str() {
+                    "up" => self.scroll - 1,
+                    "down" => self.scroll + 1,
+                    "pageup" => self.scroll - page,
+                    "pagedown" => self.scroll + page,
+                    "home" => 0,
+                    "end" => self.most,
+                    _ => self.scroll,
                 }
+                .clamp(0, self.most);
+                Handled::Kept
             }
-            InputEvent::Text { ref text } if text == "?" => self.close_panel(),
-            InputEvent::Text { .. } | InputEvent::Paste { .. } => {
-                self.close_panel();
-                self.on_input(event);
-            }
-            _ => {}
+            InputEvent::Text { ref text } if text == "?" => Handled::Close,
+            InputEvent::Text { .. } | InputEvent::Paste { .. } => Handled::Pass(event),
+            _ => Handled::Kept,
         }
+    }
+    /// Its title, then the rows that fit from under the header down to the box. How far it has scrolled is said beside
+    /// the title, so no row loses its end to it. It's read rather than chosen from, so it takes more of a wide window
+    /// than other panels, and less of it wraps.
+    fn draw(&mut self, app: &TuiApp, screen: &mut Screen, area: Area) -> Option<Cursor> {
+        let width = 100.min(area.left - 2);
+        let rows = help_rows(&app.help_sections(), width - 4);
+        let room = (area.box_top - 5 - 2).max(3);
+        (self.shown, self.most) = (room.min(rows.len() as i32), (rows.len() as i32 - room).max(0));
+        self.scroll = self.scroll.clamp(0, self.most);
+        let (above, below) = (self.scroll, self.most - self.scroll);
+        let mut title = Line::new("Keys and commands", st::TITLE);
+        title.right = match (above > 0, below > 0) {
+            (true, true) => Some(format!("↑ {above} · ↓ {below} more")),
+            (true, false) => Some(format!("↑ {above} more")),
+            (false, true) => Some(format!("↓ {below} more")),
+            (false, false) => None,
+        }
+        .map(|more| sp(more, st::FAINT));
+        let mut lines = vec![title];
+        for row in rows.into_iter().skip(self.scroll as usize).take(room as usize) {
+            let mut line = Line::new("", st::TEXT);
+            line.spans = Some(row);
+            lines.push(line);
+        }
+        app.draw_lines(screen, area.box_top, width, &lines, None)
+    }
+    fn hint(&self, _: &TuiApp) -> String {
+        "↑↓ to scroll · esc to close".into()
+    }
+    fn scroll(&mut self, _: &TuiApp, rows: i32) -> bool {
+        self.scroll = (self.scroll + rows).clamp(0, self.most);
+        true
     }
 }
 

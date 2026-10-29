@@ -331,11 +331,13 @@ window has been behind another for 2 minutes), Kumi takes it after a countdown
 Enter; Kumi checks it with the provider, or saves it unchecked when the provider
 can't be reached. In the ChatGPT sign-in panel, `c` copies the link (or the code), `d` signs in
 with a code instead of the browser, and `b` goes back to the browser. In the
-`/btw` panel, ↑↓ and Page Up/Down scroll, ←→ go through earlier answers, `c`
-copies, and Esc, Enter or Space closes it. In a job's details, ↑↓ scroll, `x`
-stops it, `r` runs it again, `c` copies its report, and Esc closes them.
-In the help, ↑↓, Page Up/Down, Home and End scroll, and Esc, Enter or `?`
-closes it; typing or pasting closes it too, and what you type goes into the box.
+`/btw` panel, ↑↓, Page Up/Down and the mouse wheel scroll, ←→ go through
+earlier answers, `c` copies, and Esc, Enter or Space closes it. In a job's
+details, ↑↓ and the wheel scroll, `x` stops it, `r` runs it again, `c` copies
+its report, and Esc closes them. In the help, ↑↓, Page Up/Down, Home, End and
+the wheel scroll, and Esc, Enter or `?` closes it; typing or pasting closes it
+too, and what you type goes into the box. With `"mouse": "off"`, the wheel
+scrolls none of these.
 
 ## Plain mode
 

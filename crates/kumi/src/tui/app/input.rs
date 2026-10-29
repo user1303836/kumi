@@ -5,6 +5,7 @@ use super::super::{
     tree::TreeRole,
     width::truncate,
 };
+use super::panels::AsidePanel;
 use super::toast::TOAST_MS;
 use super::*;
 use crate::text::{library_line, remembered_line};
@@ -31,8 +32,7 @@ impl TuiApp {
         }
         if self.setup_active() {
             // A sign-in under way takes its own keys; its esc goes back to the setup's choices.
-            let signing =
-                self.0.state.borrow().panel.as_ref().is_some_and(|p| matches!(&*p.borrow(), Panel::Key { .. } | Panel::ChatGpt { .. }));
+            let signing = self.signing_in();
             match event {
                 InputEvent::Key { .. } | InputEvent::Text { .. } | InputEvent::Paste { .. } if signing => self.panel_input(event),
                 InputEvent::Key { name, mods, .. } => self.setup_key(&name, mods),
@@ -45,13 +45,8 @@ impl TuiApp {
             self.map_input(event);
             return;
         }
-        let panel = self.0.state.borrow().panel.clone();
-        let busy_panel = panel.as_ref().is_some_and(|p| match &*p.borrow() {
-            Panel::Pick { .. } => false,
-            Panel::Btw { at, .. } => self.0.state.borrow().asides.get(*at).is_some_and(|a| a.borrow().state == "asking"),
-            Panel::Job { .. } | Panel::Help { .. } => false,
-            _ => true,
-        });
+        let panel = self.0.state.borrow().overlays.top();
+        let busy_panel = panel.as_ref().is_some_and(|top| top.borrow().busy(self));
         if let Some(voice) = &self.0.voice {
             match &event {
                 InputEvent::Key { name, mods, repeat } if name == "t" && mods.ctrl && !mods.alt && !busy_panel => {
@@ -111,7 +106,7 @@ impl TuiApp {
                 let up = direction == Some(WheelDirection::Up);
                 if area.is_some_and(|a| x >= a.x - 2 && x < a.x + a.width + 2 && y >= a.y && y < a.y + a.height) {
                     self.0.tabs.scroll_by(if up { -3 } else { 3 });
-                } else {
+                } else if !self.scroll_overlay(if up { -3 } else { 3 }) {
                     self.scroll_by(if up { 3 } else { -3 });
                 }
             }
@@ -1022,7 +1017,7 @@ impl TuiApp {
             } else {
                 let len = self.0.state.borrow().asides.len();
                 if len > 0 {
-                    self.0.state.borrow_mut().panel = Some(Rc::new(RefCell::new(Panel::Btw { at: len - 1, scroll: 0 })));
+                    self.open_overlay(AsidePanel { at: len - 1, scroll: 0 });
                 } else {
                     self.notice("Ask on the side with /btw and your question: Kumi answers from the conversation so far, without stopping what it's doing.",NoticeTone::Info);
                 }
@@ -1374,14 +1369,15 @@ impl TuiApp {
             state: "asking",
             stopped: false,
         }));
-        {
+        let at = {
             let mut state = self.0.state.borrow_mut();
             state.asides.push(aside.clone());
             if state.asides.len() > 20 {
                 state.asides.remove(0);
             }
-            state.panel = Some(Rc::new(RefCell::new(Panel::Btw { at: state.asides.len() - 1, scroll: 0 })));
-        }
+            state.asides.len() - 1
+        };
+        self.open_overlay(AsidePanel { at, scroll: 0 });
         let question = question.to_string();
         self.task(move |app| async move {
             // Its words come as `aside` events while it's answered.

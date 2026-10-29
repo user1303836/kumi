@@ -11,6 +11,7 @@ use super::super::{
     wrap::wrap,
 };
 use super::drawing::{sp, st};
+use super::panels::{ChatGptPanel, KeyPanel};
 use super::*;
 use kumi_ai::providers::{table, SignIn};
 use kumi_common::abort;
@@ -532,7 +533,7 @@ impl TuiApp {
                 done = &mut rx => break done.is_ok(),
                 _ = tokio::time::sleep(Duration::from_millis(50)) => {
                     // A sign-in's `then` runs before anything else once its panel closes.
-                    if self.0.state.borrow().panel.is_none() || self.closing() {
+                    if self.0.state.borrow().overlays.is_empty() || self.closing() {
                         break rx.try_recv().is_ok();
                     }
                 }
@@ -963,7 +964,11 @@ impl TuiApp {
         let width = (columns - 4).min(60);
         let state = self.0.state.borrow();
         let setup = state.setup.as_ref()?;
-        let panel = state.panel.clone();
+        // A sign-in open over the setup shows in it, in its words.
+        let top = state.overlays.top();
+        let top = top.as_ref().map(|top| top.borrow());
+        let key = top.as_ref().and_then(|top| top.downcast_ref::<KeyPanel>());
+        let chatgpt = top.as_ref().and_then(|top| top.downcast_ref::<ChatGptPanel>());
         let mut y = 1;
         screen.put(x, y, "kumi", &st::TITLE);
         let version = KUMI_VERSION;
@@ -989,12 +994,11 @@ impl TuiApp {
             names.extend(enable.map(|enable| (Step::Surface, enable.label)));
         }
         let column = if width >= 40 { 20 } else { 17 };
-        let signing = panel.as_ref().and_then(|p| match &*p.borrow() {
-            Panel::Key { checking, .. } => Some(if *checking { "checking the key…" } else { "paste a key" }),
-            Panel::ChatGpt { by_code: true, .. } => Some("waiting for the code"),
-            Panel::ChatGpt { .. } => Some("waiting for the browser"),
+        let signing = match (key, chatgpt) {
+            (Some(key), _) => Some(if key.checking { "checking the key…" } else { "paste a key" }),
+            (_, Some(chatgpt)) => Some(if chatgpt.by_code { "waiting for the code" } else { "waiting for the browser" }),
             _ => None,
-        });
+        };
         for (step, name) in &names {
             let done = match step {
                 Step::Sign => setup.signed.clone(),
@@ -1044,42 +1048,33 @@ impl TuiApp {
             return None;
         }
         let shown = setup.step == Step::Sign && signing.is_some();
-        let panel_kind = panel.as_ref().filter(|_| shown).and_then(|p| match &*p.borrow() {
-            Panel::ChatGpt { by_code, .. } => Some(*by_code),
-            _ => None,
-        });
-        if let Some(panel) = panel.filter(|_| shown) {
-            match &*panel.borrow() {
-                Panel::Key { provider, secret, checking, status, .. } => {
-                    let info = provider.row();
-                    say(screen, &mut y, &format!("Paste your {} API key. It stays hidden, even here.", info.name), st::TEXT);
-                    y += 1;
-                    let count = secret.encode_utf16().count();
-                    let dots = "•".repeat(count.min((width - 16).max(8) as usize));
-                    screen.put(x, y, &dots, &st::BRIGHT);
-                    if count > 0 {
-                        let tally = format!("{count} characters");
-                        if width > text_width(&dots) + text_width(&tally) + 2 {
-                            screen.put(x + width - text_width(&tally), y, &tally, &st::FAINT);
-                        }
-                    }
-                    if !*checking {
-                        cursor = Some(Cursor { x: x + text_width(&dots), y });
-                    }
-                    y += 2;
-                    if let Some((text, tone)) = status {
-                        say(screen, &mut y, text, if *tone == NoticeTone::Warn { st::WARN } else { st::DIM });
-                    } else if let Some(page) = info.key_page {
-                        say(screen, &mut y, &format!("Make one at {page}."), st::DIM);
-                    }
-                    say(
-                        screen,
-                        &mut y,
-                        &format!("Kumi checks it with {}, then keeps it in ~/.kumi, readable only by you.", info.name),
-                        st::FAINT,
-                    );
+        let panel_kind = chatgpt.filter(|_| shown).map(|chatgpt| chatgpt.by_code);
+        if let Some(KeyPanel { provider, secret, checking, status, .. }) = key.filter(|_| shown) {
+            let info = provider.row();
+            say(screen, &mut y, &format!("Paste your {} API key. It stays hidden, even here.", info.name), st::TEXT);
+            y += 1;
+            let count = secret.encode_utf16().count();
+            let dots = "•".repeat(count.min((width - 16).max(8) as usize));
+            screen.put(x, y, &dots, &st::BRIGHT);
+            if count > 0 {
+                let tally = format!("{count} characters");
+                if width > text_width(&dots) + text_width(&tally) + 2 {
+                    screen.put(x + width - text_width(&tally), y, &tally, &st::FAINT);
                 }
-                Panel::ChatGpt { by_code: true, code, .. } => match code {
+            }
+            if !*checking {
+                cursor = Some(Cursor { x: x + text_width(&dots), y });
+            }
+            y += 2;
+            if let Some((text, tone)) = status {
+                say(screen, &mut y, text, if *tone == NoticeTone::Warn { st::WARN } else { st::DIM });
+            } else if let Some(page) = info.key_page {
+                say(screen, &mut y, &format!("Make one at {page}."), st::DIM);
+            }
+            say(screen, &mut y, &format!("Kumi checks it with {}, then keeps it in ~/.kumi, readable only by you.", info.name), st::FAINT);
+        } else if let Some(chatgpt) = chatgpt.filter(|_| shown) {
+            if chatgpt.by_code {
+                match &chatgpt.code {
                     Some(code) => {
                         say(screen, &mut y, &format!("In a browser on any device, open {} and enter this code:", code.url), st::TEXT);
                         y += 1;
@@ -1090,24 +1085,22 @@ impl TuiApp {
                         say(screen, &mut y, "Kumi signs in once it's entered. No code? b uses the browser instead.", st::DIM);
                     }
                     None => say(screen, &mut y, "Asking ChatGPT for a sign-in code…", st::TEXT),
-                },
-                Panel::ChatGpt { url, .. } => {
-                    say(screen, &mut y, "Finish signing in in your browser.", st::TEXT);
-                    if let Some(url) = url {
-                        y += 1;
-                        say(screen, &mut y, "If it didn't open, open this link (c copies it):", st::DIM);
-                        // All of it, edge to edge with nothing beside it, so a selection copies the whole link.
-                        for part in helpers::chunk(url, columns.max(1) as usize) {
-                            if y < rows - 2 {
-                                screen.put(0, y, &part, &st::ACCENT);
-                            }
-                            y += 1;
+                }
+            } else {
+                say(screen, &mut y, "Finish signing in in your browser.", st::TEXT);
+                if let Some(url) = &chatgpt.url {
+                    y += 1;
+                    say(screen, &mut y, "If it didn't open, open this link (c copies it):", st::DIM);
+                    // All of it, edge to edge with nothing beside it, so a selection copies the whole link.
+                    for part in helpers::chunk(url, columns.max(1) as usize) {
+                        if y < rows - 2 {
+                            screen.put(0, y, &part, &st::ACCENT);
                         }
                         y += 1;
-                        say(screen, &mut y, "No browser here? d uses a code.", st::DIM);
                     }
+                    y += 1;
+                    say(screen, &mut y, "No browser here? d uses a code.", st::DIM);
                 }
-                _ => {}
             }
         } else {
             for text in &setup.say {

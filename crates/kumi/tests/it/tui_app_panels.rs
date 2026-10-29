@@ -1400,3 +1400,20 @@ case!(with_the_mouse_off_the_help_leaves_out_the_wheel_and_kumis_clicks, async {
         h.close().await;
     }
 });
+case!(the_wheel_scrolls_the_panel_open_over_the_conversation, async {
+    let h = Harness::new(120, 36);
+    h.start().await;
+    h.connect();
+    h.type_text("?").await;
+    h.wait_for("Keys and commands").await;
+    let (_, most) = help_scrolled(&h);
+    // Down a notch over the help, three rows; up again to the top.
+    h.type_text("\x1b[<65;20;10M").await;
+    assert_eq!(help_scrolled(&h), (3, most - 3));
+    h.type_text("\x1b[<64;20;10M").await;
+    assert_eq!(help_scrolled(&h), (0, most));
+    // Up past the top stays there.
+    h.type_text("\x1b[<64;20;10M").await;
+    assert_eq!(help_scrolled(&h), (0, most));
+    h.close().await;
+});
