@@ -1,12 +1,14 @@
 //! Kumi's model clients. What `@ai-sdk/provider` and the `@ai-sdk/*` provider packages gave the TypeScript: the
 //! LanguageModelV4 types (`types`), `APICallError` (`error`), and the providers' wire bindings
 //! (`anthropic`, `openai_responses`, `openai_compatible`), with SSE and HTTP helpers. Beside them: what the agent asks
-//! of a model (`binding`), the providers and their models (`providers`), signing in (`auth`), the models Kumi runs
-//! itself (`models`), where a turn's time went (`timing`), and how a failed call is told and retried (`failure`).
+//! of a model (`binding`), the app's model controls (`control`), the providers and their models (`providers`), signing
+//! in (`auth`), the models Kumi runs itself (`models`), where a turn's time went (`timing`), and how a failed call is
+//! told and retried (`failure`).
 
 pub mod anthropic;
 pub mod auth;
 pub mod binding;
+pub mod control;
 // A model call's error (kumi-net, which classifies why a call got no answer), as ai's own.
 pub use kumi_net::error;
 pub mod failure;

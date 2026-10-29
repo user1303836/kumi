@@ -1,6 +1,7 @@
 //! Where the library's sounds sit on a map: x and y in [0, 1] for each sound by its path, as the layout last made them
 //! from the sounds' vectors, kept in sounds-map.json in the library's folder. /map draws them, joined with what the
-//! library knows of each sound.
+//! library knows of each sound. What /map draws is here too (`MapData`: the sounds' map and the songs'), as plain data
+//! the app fills.
 
 use super::{
     classify::{SoundClass, SoundKind},
@@ -97,4 +98,64 @@ fn on_map(index: &SoundIndex, rows: &HashMap<&str, usize>, (path, x, y): &(Strin
         kind: entry.kind,
         seconds: entry.seconds,
     })
+}
+
+/// The two maps.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Kind {
+    Sounds,
+    Songs,
+}
+
+/// Both maps, as read when /map opened.
+#[derive(Clone, Debug)]
+pub struct MapData {
+    pub sounds: Layer,
+    pub songs: Layer,
+}
+
+/// One map: its points, their groups, and the folders and tags the points name by number.
+#[derive(Clone, Debug)]
+pub struct Layer {
+    pub kind: Kind,
+    pub points: Vec<Point>,
+    pub groups: Vec<Group>,
+    pub places: Vec<String>,
+    pub tags: Vec<String>,
+    /// Why there's nothing on it yet, said to the producer.
+    pub empty: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Point {
+    /// What a page asks for it by: a sound's place in its layer, a song's id in music.db.
+    pub id: i64,
+    pub x: f32,
+    pub y: f32,
+    pub group: u16,
+    pub name: String,
+    /// Its folder, by its number in the layer's places.
+    pub place: u32,
+    /// What else the filter reads (a sound's class and kind, a song's genre tags), by its number in the layer's tags.
+    pub tags: u32,
+    pub path: String,
+    /// What of it plays: from where, and for how long (seconds).
+    pub from: f32,
+    pub seconds: f32,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Group {
+    /// What the legend and the filter call it: a class ("kick"), or a style ("c1 · dark rainy").
+    pub name: String,
+    pub color: [u8; 3],
+    pub count: usize,
+    /// Points that stand for it (a style's own examples, else those nearest its middle), by their place in the layer.
+    pub examples: Vec<u32>,
+}
+
+impl Layer {
+    pub fn empty(kind: Kind, why: &str) -> Layer {
+        Layer { kind, points: vec![], groups: vec![], places: vec![], tags: vec![], empty: Some(why.into()) }
+    }
 }
