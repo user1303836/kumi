@@ -765,6 +765,27 @@ async fn the_terminal_is_lent_to_a_program_and_taken_back_whole() {
     tty.hand_over(async { tty.restore(false) }).await;
     assert_eq!(output.written.borrow().clone(), format!("{RESTORE}{farewell}"));
     assert!(!tty.is_active() && !tty.lent() && !input.is_raw());
+
+    // With the mouse left to the terminal, the wheel's keys Kumi turned off are the program's again while it runs, and
+    // off again once the terminal is taken back.
+    let input = Rc::new(FakeInput { raw: Cell::new(false), listener: RefCell::new(None), discarded: Cell::new(0) });
+    let output = Rc::new(FakeOutput { written: RefCell::new(String::new()), resize: RefCell::new(None) });
+    let tty = Tty::new(TtyOptions {
+        input: input.clone(),
+        output: output.clone(),
+        on_input: Rc::new(|_| {}),
+        on_resize: Rc::new(|| {}),
+        mouse: false,
+        farewell: String::new(),
+    });
+    tty.start().unwrap();
+    output.written.borrow_mut().clear();
+    let given = format!("{RESTORE}\u{1b}[?1007h");
+    tty.hand_over(async { assert_eq!(output.written.borrow().as_str(), given) }).await;
+    let written = output.written.borrow().clone();
+    let taken = written.strip_prefix(&given).unwrap();
+    assert!(taken.contains("\u{1b}[?1007l") && !taken.contains("\u{1b}[?1006h"), "{taken:?}");
+    tty.restore(false);
 }
 
 #[test]

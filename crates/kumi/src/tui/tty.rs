@@ -74,6 +74,11 @@ const MOUSE_MOVES_OFF: &str = "\u{1b}[?1003l";
 // again as it leaves, as those terminals have it.
 const WHEEL_KEYS_OFF: &str = "\u{1b}[?1007l";
 const WHEEL_KEYS_ON: &str = "\u{1b}[?1007h";
+/// What gives the terminal back as Kumi found it: every mode it set off, and the wheel's keys on again where it turned
+/// them off (the mouse left to the terminal).
+fn leaving(mouse: bool) -> String {
+    format!("{RESTORE}{}", if mouse { "" } else { WHEEL_KEYS_ON })
+}
 pub const RESTORE: &str =
     "\u{1b}[?2026l\u{1b}[0m\u{1b}[<u\u{1b}[?1003l\u{1b}[?1006l\u{1b}[?1002l\u{1b}[?1000l\u{1b}[?1004l\u{1b}[?2004l\u{1b}[?7h\u{1b}[?25h\u{1b}[?1049l";
 
@@ -98,7 +103,7 @@ pub struct Size {
 
 struct Inner {
     options: TtyOptions,
-    /// The farewell, then RESTORE.
+    /// The farewell, then what gives the terminal back ([`leaving`]): written on quitting, and by the crash path.
     restore: String,
     active: Arc<AtomicBool>,
     /// The crash path gave the terminal back: a panic, which Kumi may have caught (a worker's) and lived on.
@@ -123,7 +128,7 @@ impl Tty {
         let parser = InputParser::new(Rc::clone(&options.on_input));
         Tty {
             inner: Rc::new(Inner {
-                restore: format!("{}{RESTORE}{}", options.farewell, if options.mouse { "" } else { WHEEL_KEYS_ON }),
+                restore: format!("{}{}", options.farewell, leaving(options.mouse)),
                 options,
                 active: Arc::new(AtomicBool::new(false)),
                 taken: Arc::new(AtomicBool::new(false)),
@@ -210,7 +215,7 @@ impl Tty {
         }
         inner.lent.set(true);
         inner.parser.dispose();
-        inner.options.output.write(RESTORE);
+        inner.options.output.write(&leaving(inner.options.mouse));
         inner.options.input.pause();
         let _ = inner.options.input.set_raw_mode(inner.was_raw.get());
         let result = run.await;
