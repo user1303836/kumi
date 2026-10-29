@@ -332,9 +332,10 @@ Kumi 1.24.10 to 1.24.14 with Renoise tool 1.0.6, 1.24.0 to 1.24.9 with 1.0.5, 1.
 Kumi runs full screen: the conversation on the left, a Live pane on the right
 and the input box at the bottom. FOCUS follows what you touch in Live, NOW shows
 what Kumi is doing, and HISTORY lists every change with its undo. Below 100
-columns the Live pane folds into a strip above the input box. `KUMI_UI=plain`,
-or piping the output, gives plain line-by-line output instead, which suits
-screen readers. [Commands, keys and screens](KUMI_TUI.md) has the details.
+columns the pane is a drawer under the conversation, which opens to each change
+Kumi makes, and Ctrl-\\ opens and closes it. `KUMI_UI=plain`, or piping the
+output, gives plain line-by-line output instead, which suits screen readers.
+[Commands, keys and screens](KUMI_TUI.md) has the details.
 
 Try "Describe the open Set: tracks, tempo and transport", then ask which devices
 are on a track. Ask for a change, such as "Set the tempo to 124 and rename

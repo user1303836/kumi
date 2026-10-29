@@ -4,12 +4,6 @@
 
 
 
-                         ██                          ▀▀
-                         ██ ▄█▀  ██  ██  ██▀▀██▀▀█▄  ██
-                         ██▀█▄   ██  ██  ██  ██  ██  ██
-                         ▀▀  ▀▀   ▀▀▀▀▀  ▀▀  ▀▀  ▀▀  ▀▀
-
-                         ░▒▓████████████████████████▓▒░
 
                             Kumi can see Night Drive.
 
@@ -21,8 +15,14 @@
     Kumi keeps each project's conversations: /conversations goes back to one.
 
 
-  Night Drive
+
+  NOW   FOCUS   HISTORY 1 ────────────────────────────────────── ctrl+\ closes
   ✓ Send “Drums” → “Reverb” −6 dB                                         undo
+    Drums → Reverb
+      ███████████─── Volume −12 dB → −6 dB
+      Taps post-fader → pre-fader
+
+
 
 
    Ask Kumi about your project

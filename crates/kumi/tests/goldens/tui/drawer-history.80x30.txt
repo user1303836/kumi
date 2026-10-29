@@ -1,0 +1,30 @@
+  Kumi  ·  Night Drive                                                  ● Live
+
+
+
+
+
+
+                            Kumi can see Night Drive.
+
+                                       Try
+                             “What's on this track?”
+                             “Set the tempo to 124”
+                       “Why might my low end sound muddy?”
+
+      Kumi keeps each Set's conversations: /conversations goes back to one.
+
+
+
+  NOW   FOCUS   HISTORY 4 ────────────────────────────────────── ctrl+\ closes
+  ♪ Tried 3 pads against the reference                                     82%
+  ○ Renamed 2-MIDI to Lead                                              undone
+  ■ Bass width 100% → 140%                                                undo
+  ✓ Tempo 120 → 124 BPM                                                   undo
+
+
+
+
+   Ask Kumi about your Set
+                                                                enter to send
+

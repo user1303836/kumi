@@ -4,6 +4,7 @@ mod away;
 pub use away::{AwaySettings, FrontApp, NotifierRunner};
 mod draw_live;
 mod draw_panel;
+mod drawer;
 mod drawing;
 mod events;
 mod input;
@@ -485,6 +486,11 @@ struct State {
     /// the width they were made for, until it changes.
     palette: Option<kumi_agent::core::palette::PaletteView>,
     palette_rows: Option<(i32, Rc<[TabRow]>)>,
+    /// The producer put the pane away (ctrl+\): no side pane at full width, no strip below 24 rows, and the drawer left
+    /// folded until they open it.
+    pane_away: bool,
+    /// Below 100 columns: the drawer under the conversation.
+    drawer: drawer::Drawer,
 }
 impl State {
     fn new(options: &TuiOptions) -> Self {
@@ -604,6 +610,8 @@ impl State {
             job_status_sent: std::collections::BTreeMap::new(),
             palette: None,
             palette_rows: None,
+            pane_away: false,
+            drawer: drawer::Drawer::default(),
         }
     }
 }

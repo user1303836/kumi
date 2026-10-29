@@ -10,6 +10,30 @@ use super::super::{
 };
 use super::drawing::{sp, spans, st};
 use super::*;
+/// What FOCUS drew: the DAW's word for its body (" · Device"), why the DAW may be stale (" · Live is busy: …"), and the
+/// rows the body took; no rows when FOCUS says only where the producer is.
+pub(super) struct FocusDrawn {
+    pub heading: Option<String>,
+    pub busy: Option<String>,
+    pub rows: Option<i32>,
+}
+/// How tall FOCUS's body may be: in the pane, so many rows for the device tree and for a DAW's own body; in the drawer,
+/// all of it in so many rows, whatever heads it (the tree's track, a tracker's title and track names).
+pub(super) enum FocusRoom {
+    Pane { tree: i32, own: i32 },
+    Rows(i32),
+}
+impl FocusRoom {
+    fn most(&self, kind: BodyKind) -> i32 {
+        match (self, kind) {
+            (FocusRoom::Pane { tree, .. }, BodyKind::Tree) => *tree,
+            (FocusRoom::Pane { own, .. }, _) => *own,
+            (FocusRoom::Rows(rows), BodyKind::Tree) => rows - 1,
+            (FocusRoom::Rows(rows), BodyKind::Tracker) => rows - 2,
+            (FocusRoom::Rows(rows), _) => *rows,
+        }
+    }
+}
 impl TuiApp {
     fn click<F: Fn(TuiApp) + 'static>(&self, f: F) -> Rc<dyn Fn()> {
         let weak = Rc::downgrade(&self.0);
@@ -19,7 +43,7 @@ impl TuiApp {
             }
         })
     }
-    fn hit<F: Fn(TuiApp) + 'static>(&self, x: i32, y: i32, width: i32, f: F) {
+    pub(super) fn hit<F: Fn(TuiApp) + 'static>(&self, x: i32, y: i32, width: i32, f: F) {
         let action = self.click(f);
         self.0.state.borrow_mut().hits.push(Hit { x, y, width, action });
     }
@@ -68,6 +92,59 @@ impl TuiApp {
         let x = area.x + 2;
         let width = area.width - 4;
         screen.put(x, area.y + 1, &truncate("FOCUS", width), &st::LABEL);
+        let bottom = Self::bottom_height(area.height);
+        let room = FocusRoom::Pane { tree: (area.height - bottom - 10).clamp(2, 12), own: (area.height - bottom - 8).clamp(3, 16) };
+        let focus = self.draw_focus(screen, x, area.y + 2, width, room);
+        if let Some(said) = &focus.busy {
+            screen.put(x + 5, area.y + 1, &truncate(said, (width - 5).max(1)), &st::WARN);
+        } else if let Some(heading) = &focus.heading {
+            screen.put(x + 5, area.y + 1, heading, &st::FAINT);
+        }
+        let now_at = focus.rows.map_or(6, |rows| 4 + rows);
+        screen.put(x, area.y + now_at, &truncate("NOW", width), &st::LABEL);
+        let now = self.now_line();
+        if let Some(dot) = now.dot {
+            let label = format!(" {}", now.label);
+            let at = x + width - text_width(&label) - 1;
+            screen.put(at, area.y + now_at, "●", &dot);
+            screen.put(at + 1, area.y + now_at, &label, &st::DIM);
+        }
+        if let Some((kind, since)) = now.activity {
+            // One glyph turning beside steady words, as on a step's row: enough to show Kumi is at work.
+            let glyph = activity_glyph(kind, perf_now() - since, self.0.icons == IconStyle::Badges);
+            screen.put(x, area.y + now_at + 1, &glyph.text, &glyph.style);
+            screen.put(x + 2, area.y + now_at + 1, &truncate(&now.detail, (width - 2).max(1)), &now.style);
+        } else {
+            screen.put(x, area.y + now_at + 1, &truncate(&now.detail, width), &now.style);
+        }
+        if let Some(change) = self.flashing() {
+            // A new clip, a device's place and a colour keep their own pictures; curves, lanes, values and levels are
+            // drawn from the change's picture.
+            let own = change.clip.is_some() || change.devices.is_some() || change.colors.is_some();
+            let drawn = (!own).then(|| self.change_drawn(&change, width.max(4) as usize, 2)).flatten().map(|(drawn, _)| {
+                if drawn.rows.is_empty() {
+                    drawn.lines
+                } else {
+                    drawn.rows
+                }
+            });
+            let cells = || (self.0.graphics != Graphics::Words).then(|| change_picture(&change, width, self.0.depth)).flatten();
+            if let Some(picture) = drawn.filter(|rows| !rows.is_empty()).or_else(cells) {
+                for (row, line) in picture.iter().take(2).enumerate() {
+                    spans(screen, x, area.y + now_at + 2 + row as i32, line, None);
+                }
+            }
+        }
+        let top = area.y + area.height - bottom;
+        let tabs_area = Rect::new(x, top, width, bottom - 1);
+        self.0.state.borrow_mut().tabs_area = Some(tabs_area);
+        let mut hits = vec![];
+        self.0.tabs.draw(screen, tabs_area, &mut hits);
+        self.0.state.borrow_mut().hits.extend(hits);
+    }
+    /// FOCUS's body, as the pane and the drawer show it: drawn at (x, y) in `width`, as tall as `room` lets the device
+    /// tree and a DAW's own body be, and read again as the DAW changes while it shows.
+    pub(super) fn draw_focus(&self, screen: &mut Screen, x: i32, y: i32, width: i32, room: FocusRoom) -> FocusDrawn {
         let rows = self.tree_shown();
         let clip = if rows.is_none() { self.clip_shown() } else { None };
         let own = if rows.is_none() && clip.is_none() { self.own_shown() } else { None };
@@ -108,88 +185,42 @@ impl TuiApp {
         });
         // Each body's heading is the DAW's word for it.
         let heading = |kind| format!(" · {}", (crate::daw::view().heading)(kind));
-        let mut now_at = 6;
-        if let Some(rows) = rows {
-            screen.put(x + 5, area.y + 1, &heading(BodyKind::Tree), &st::FAINT);
-            now_at =
-                4 + self.draw_tree(screen, x, area.y + 2, width, &rows, (area.height - Self::bottom_height(area.height) - 10).clamp(2, 12));
+        let (heading, rows) = if let Some(rows) = rows {
+            (Some(heading(BodyKind::Tree)), Some(self.draw_tree(screen, x, y, width, &rows, room.most(BodyKind::Tree))))
         } else if let Some(clip) = clip {
-            screen.put(x + 5, area.y + 1, &heading(BodyKind::Notes), &st::FAINT);
-            now_at = 4 + self.draw_notes(screen, x, area.y + 2, width, &clip);
+            (Some(heading(BodyKind::Notes)), Some(self.draw_notes(screen, x, y, width, &clip)))
         } else if let Some(grid) = grid {
-            screen.put(x + 5, area.y + 1, &heading(BodyKind::Grid), &st::FAINT);
-            now_at = 4 + self.draw_grid(screen, x, area.y + 2, width, &grid);
+            (Some(heading(BodyKind::Grid)), Some(self.draw_grid(screen, x, y, width, &grid)))
         } else if let Some(own) = own {
-            let most = (area.height - Self::bottom_height(area.height) - 8).clamp(3, 16);
+            let most = |kind| room.most(kind);
             let (kind, drawn) = match &own {
-                FocusBody::Tracker(grid) => (BodyKind::Tracker, self.draw_tracker(screen, x, area.y + 2, width, grid, most)),
-                FocusBody::Matrix(matrix) => (BodyKind::Matrix, self.draw_matrix(screen, x, area.y + 2, width, matrix, most)),
-                FocusBody::Keyzones(map) => (BodyKind::Keyzones, self.draw_keyzones(screen, x, area.y + 2, width, map, most)),
-                FocusBody::Routing(routing) => (BodyKind::Routing, self.draw_routing(screen, x, area.y + 2, width, routing, most)),
-                FocusBody::Mixer(mixer) => (BodyKind::Mixer, self.draw_mixer(screen, x, area.y + 2, width, mixer, most)),
+                FocusBody::Tracker(grid) => (BodyKind::Tracker, self.draw_tracker(screen, x, y, width, grid, most(BodyKind::Tracker))),
+                FocusBody::Matrix(matrix) => (BodyKind::Matrix, self.draw_matrix(screen, x, y, width, matrix, most(BodyKind::Matrix))),
+                FocusBody::Keyzones(map) => (BodyKind::Keyzones, self.draw_keyzones(screen, x, y, width, map, most(BodyKind::Keyzones))),
+                FocusBody::Routing(routing) => {
+                    (BodyKind::Routing, self.draw_routing(screen, x, y, width, routing, most(BodyKind::Routing)))
+                }
+                FocusBody::Mixer(mixer) => (BodyKind::Mixer, self.draw_mixer(screen, x, y, width, mixer, most(BodyKind::Mixer))),
                 _ => (BodyKind::Routing, 0),
             };
             // (a tracker grid that isn't a pattern, Renoise's phrase, says its own word)
             let named =
                 if let FocusBody::Tracker(TrackerGrid { heading: Some(word), .. }) = &own { Some(format!(" · {word}")) } else { None };
-            screen.put(x + 5, area.y + 1, &named.unwrap_or_else(|| heading(kind)), &st::FAINT);
-            now_at = 4 + drawn;
+            (Some(named.unwrap_or_else(|| heading(kind))), Some(drawn))
         } else if let Some(timeline) = timeline {
-            screen.put(x + 5, area.y + 1, &heading(BodyKind::Timeline), &st::FAINT);
-            now_at = 4 + self.draw_timeline(screen, x, area.y + 2, width, &timeline);
-        } else if !self.draw_focus_path(screen, x, area.y + 2, width, true) {
-            for (index, (text, style)) in self.focus_lines().iter().enumerate() {
-                screen.put(x, area.y + 2 + index as i32, &truncate(text, width), style);
+            (Some(heading(BodyKind::Timeline)), Some(self.draw_timeline(screen, x, y, width, &timeline)))
+        } else {
+            if !self.draw_focus_path(screen, x, y, width, true) {
+                for (index, (text, style)) in self.focus_lines().iter().enumerate() {
+                    screen.put(x, y + index as i32, &truncate(text, width), style);
+                }
             }
-        }
+            (None, None)
+        };
         // A busy DAW (a dialog is open): FOCUS keeps what it showed, and says why it may be stale.
         let busy = self.0.state.borrow().focus.as_ref().and_then(|focus| focus.busy.clone());
-        if let Some(why) = busy {
-            screen.fill(Rect::new(x + 5, area.y + 1, (width - 5).max(1), 1), &st::SURFACE);
-            let said = format!(" · {} is busy: {why}", crate::daw::words().app);
-            screen.put(x + 5, area.y + 1, &truncate(&said, (width - 5).max(1)), &st::WARN);
-        }
-        screen.put(x, area.y + now_at, &truncate("NOW", width), &st::LABEL);
-        let now = self.now_line();
-        if let Some(dot) = now.dot {
-            let label = format!(" {}", now.label);
-            let at = x + width - text_width(&label) - 1;
-            screen.put(at, area.y + now_at, "●", &dot);
-            screen.put(at + 1, area.y + now_at, &label, &st::DIM);
-        }
-        if let Some((kind, since)) = now.activity {
-            // One glyph turning beside steady words, as on a step's row: enough to show Kumi is at work.
-            let glyph = activity_glyph(kind, perf_now() - since, self.0.icons == IconStyle::Badges);
-            screen.put(x, area.y + now_at + 1, &glyph.text, &glyph.style);
-            screen.put(x + 2, area.y + now_at + 1, &truncate(&now.detail, (width - 2).max(1)), &now.style);
-        } else {
-            screen.put(x, area.y + now_at + 1, &truncate(&now.detail, width), &now.style);
-        }
-        if let Some(change) = self.flashing() {
-            // A new clip, a device's place and a colour keep their own pictures; curves, lanes, values and levels are
-            // drawn from the change's picture.
-            let own = change.clip.is_some() || change.devices.is_some() || change.colors.is_some();
-            let drawn = (!own).then(|| self.change_drawn(&change, width.max(4) as usize, 2)).flatten().map(|(drawn, _)| {
-                if drawn.rows.is_empty() {
-                    drawn.lines
-                } else {
-                    drawn.rows
-                }
-            });
-            let cells = || (self.0.graphics != Graphics::Words).then(|| change_picture(&change, width, self.0.depth)).flatten();
-            if let Some(picture) = drawn.filter(|rows| !rows.is_empty()).or_else(cells) {
-                for (row, line) in picture.iter().take(2).enumerate() {
-                    spans(screen, x, area.y + now_at + 2 + row as i32, line, None);
-                }
-            }
-        }
-        let bottom = Self::bottom_height(area.height);
-        let top = area.y + area.height - bottom;
-        let tabs_area = Rect::new(x, top, width, bottom - 1);
-        self.0.state.borrow_mut().tabs_area = Some(tabs_area);
-        let mut hits = vec![];
-        self.0.tabs.draw(screen, tabs_area, &mut hits);
-        self.0.state.borrow_mut().hits.extend(hits);
+        let busy = busy.map(|why| format!(" · {} is busy: {why}", crate::daw::words().app));
+        FocusDrawn { heading, busy, rows }
     }
     fn bottom_height(pane: i32) -> i32 {
         ((pane as f64 / 2.).floor() as i32).max(7).min((pane - 8).max(1))
@@ -1068,49 +1099,11 @@ impl TuiApp {
             rows.push(TabRow { item: Some("kept end".into()), ..Default::default() });
         }
         for change in changes.iter().rev() {
-            let heard = change.state == ChangeState::Heard;
-            let action = if heard {
-                change.score.map(|n| format!("{}%", number::to_string(n))).unwrap_or_else(|| "heard".into())
-            } else {
-                match change.state {
-                    ChangeState::Applied => "undo".into(),
-                    ChangeState::Undone => "undone".into(),
-                    ChangeState::Kept => "kept".into(),
-                    ChangeState::Expired => "no undo".into(),
-                    _ => format!("check {}", crate::daw::words().app),
-                }
-            };
-            let action_style = if heard {
-                st::DIM
-            } else if change.state == ChangeState::Applied {
-                st::ACCENT
-            } else if matches!(change.state, ChangeState::Undone | ChangeState::Expired) {
-                st::FAINT
-            } else {
-                st::WARN
-            };
-            let title_style = if heard {
-                st::DIM
-            } else if matches!(change.state, ChangeState::Undone | ChangeState::Expired) {
-                st::FAINT
-            } else {
-                st::TEXT
-            };
-            let lines = wrap(&[sp(&change.title, title_style)], (width - text_width(&action) - 3).max(1))
+            let (marker, title_style, action) = change_marks(change);
+            let lines = wrap(&[sp(&change.title, title_style)], (width - text_width(&action.text) - 3).max(1))
                 .into_iter()
                 .map(|s| s.into_iter().map(|s| s.text).collect::<String>())
                 .collect::<Vec<_>>();
-            let marker = if heard {
-                sp("♪ ", st::FAINT)
-            } else if matches!(change.state, ChangeState::Undone | ChangeState::Expired) {
-                sp("○ ", st::FAINT)
-            } else if change.state == ChangeState::Unsure {
-                sp("● ", st::WARN)
-            } else if let Some(track) = &change.track {
-                sp("■ ", Style::fg(chip_color(track.color.as_deref())))
-            } else {
-                sp("✓ ", st::ACCENT)
-            };
             let undo = if change.state == ChangeState::Applied {
                 let id = change.id.clone();
                 Some(self.click(move |app| {
@@ -1146,7 +1139,7 @@ impl TuiApp {
             let item = Some(change.id.clone());
             rows.push(TabRow {
                 spans: vec![marker, sp(lines.first().map(String::as_str).unwrap_or(""), title_style)],
-                right: Some(sp(action, action_style)),
+                right: Some(action),
                 item: item.clone(),
                 action: undo.clone(),
                 open: Some(toggle.clone()),
@@ -1309,6 +1302,51 @@ impl TuiApp {
         }
         rows
     }
+}
+
+/// How HISTORY marks a change: its glyph (the track's chip where it has one), its title's style, and the word at its
+/// end (undo, undone, a match's score…) in that word's style.
+pub(super) fn change_marks(change: &ChangeRecord) -> (super::super::wrap::Span, Style, super::super::wrap::Span) {
+    let heard = change.state == ChangeState::Heard;
+    let action = if heard {
+        change.score.map(|n| format!("{}%", number::to_string(n))).unwrap_or_else(|| "heard".into())
+    } else {
+        match change.state {
+            ChangeState::Applied => "undo".into(),
+            ChangeState::Undone => "undone".into(),
+            ChangeState::Kept => "kept".into(),
+            ChangeState::Expired => "no undo".into(),
+            _ => format!("check {}", crate::daw::words().app),
+        }
+    };
+    let action_style = if heard {
+        st::DIM
+    } else if change.state == ChangeState::Applied {
+        st::ACCENT
+    } else if matches!(change.state, ChangeState::Undone | ChangeState::Expired) {
+        st::FAINT
+    } else {
+        st::WARN
+    };
+    let title_style = if heard {
+        st::DIM
+    } else if matches!(change.state, ChangeState::Undone | ChangeState::Expired) {
+        st::FAINT
+    } else {
+        st::TEXT
+    };
+    let marker = if heard {
+        sp("♪ ", st::FAINT)
+    } else if matches!(change.state, ChangeState::Undone | ChangeState::Expired) {
+        sp("○ ", st::FAINT)
+    } else if change.state == ChangeState::Unsure {
+        sp("● ", st::WARN)
+    } else if let Some(track) = &change.track {
+        sp("■ ", Style::fg(chip_color(track.color.as_deref())))
+    } else {
+        sp("✓ ", st::ACCENT)
+    };
+    (marker, title_style, sp(action, action_style))
 }
 
 /// A plug-in's name without what REAPER writes around it: its format ("VST3: ") and its maker ("(Cockos)").

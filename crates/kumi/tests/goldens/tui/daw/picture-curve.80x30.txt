@@ -4,12 +4,6 @@
 
 
 
-                         ██                          ▀▀
-                         ██ ▄█▀  ██  ██  ██▀▀██▀▀█▄  ██
-                         ██▀█▄   ██  ██  ██  ██  ██  ██
-                         ▀▀  ▀▀   ▀▀▀▀▀  ▀▀  ▀▀  ▀▀  ▀▀
-
-                         ░▒▓████████████████████████▓▒░
 
                             Kumi can see Night Drive.
 
@@ -21,8 +15,14 @@
     Kumi keeps each project's conversations: /conversations goes back to one.
 
 
-  Night Drive
-  ✓ Added 3 points to “Pad”'s Volume envelope            ⠒⠒⠒⠒⠒⠒⠛⠛⠛⠛⠒⠒⠒⠒⠒⠒ undo
+
+  NOW   FOCUS   HISTORY 1 ────────────────────────────────────── ctrl+\ closes
+  ✓ Added 3 points to “Pad”'s Volume envelope                             undo
+
+    ⠤⠤⢤⣤⣤⣤⣤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⢤⣤⣤⡤⠤⠤⠴⠶⠶⠮⠭⠭⠭⠵⠶⠶⠶⠶⠤⠤⠤⠤⢤⣤⣤⣤⣤⠤⠤⠤⠤⠤⠤⠤⣤⣤⣤⣤⣤⣤⣤⣤⣤⠤⠤⠤⠤⠤
+           ⠉⠉⠉⠉⠉⠒⠒⠒⠒⠢⠤⠤⠤⠔⠒⠒⠊⠉⠉⠁                          ⠉⠉⠉⠉⠉⠉⠉
+
+
 
 
    Ask Kumi about your project

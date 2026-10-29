@@ -1,5 +1,5 @@
-//! Changes' pictures in HISTORY (a row opens to show it), NOW and the narrow dock; images only where the terminal
-//! shows them.
+//! Changes' pictures in HISTORY (a row opens to show it), NOW, the drawer's NOW and the narrow dock; images only where
+//! the terminal shows them.
 #[path = "../support/tui_app.rs"]
 mod support;
 use kumi::tui::pictures::Graphics;
@@ -107,7 +107,8 @@ case!(a_curve_that_comes_after_its_change_is_drawn_again, async {
 });
 
 case!(the_narrow_dock_shows_the_last_changes_picture_in_a_row, async {
-    let h = Harness::new(80, 30);
+    // (the two-line strip, below 24 rows)
+    let h = Harness::new(80, 23);
     h.start().await;
     h.connect();
     h.emit(eq_change("c1", -4.));
@@ -115,6 +116,20 @@ case!(the_narrow_dock_shows_the_last_changes_picture_in_a_row, async {
     let row = lines.iter().position(|line| line.contains("✓ EQ Eight")).expect("the dock's last change");
     assert!(braille(&lines[row..=row]), "{}", lines[row]);
     assert!(lines[row].contains("undo"));
+    h.close().await;
+});
+
+case!(the_drawers_now_shows_the_last_changes_picture_under_it, async {
+    let h = Harness::new(80, 30);
+    h.start().await;
+    h.connect();
+    h.emit(eq_change("c1", -4.));
+    let lines = h.screen();
+    let row = lines.iter().position(|line| line.contains("✓ EQ Eight")).expect("NOW's last change");
+    assert!(lines[row].trim_end().ends_with("undo") && !braille(&lines[row..=row]), "{}", lines[row]);
+    // The curve under it, as tall as the drawer holds (its 7 rows: the tabs, NOW, the change, then 4), then what moved.
+    assert!(braille(&lines[row + 1..row + 4]), "{}", lines.join("\n"));
+    assert!(lines[row + 4].contains("3 Gain A 0.00 dB → -4.00 dB"), "{}", lines.join("\n"));
     h.close().await;
 });
 
