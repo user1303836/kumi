@@ -158,10 +158,15 @@ fn local_choice(running: &[(String, String)]) -> Choice {
     choice(if here { "On this computer" } else { "Your model servers" }, &format!("{} · no sign-in", named.join(" or ")), "local")
 }
 
-const CHOOSE_HINT: &str = "↑↓ choose · enter select · esc later";
-/// The browser's sign-in link, copied whole, or a code for a browser on another device.
-const BROWSER_HINT: &str = "c copies the link · d uses a code · esc back";
-const CODE_HINT: &str = "c copies the code · b uses the browser · esc back";
+const CHOOSE_HINT: &[(&[&str], &str)] =
+    &[(&["setup.up", "setup.down"], "choose"), (&["setup.choose"], "select"), (&["setup.later"], "later")];
+/// The browser's sign-in link, copied whole, or a code for a browser on another device: ChatGPT's sign-in's keys.
+const BROWSER_HINT: &[(&[&str], &str)] =
+    &[(&["chatgpt.copy"], "copies the link"), (&["chatgpt.by-code"], "uses a code"), (&["chatgpt.cancel"], "back")];
+const CODE_HINT: &[(&[&str], &str)] =
+    &[(&["chatgpt.copy"], "copies the code"), (&["chatgpt.by-browser"], "uses the browser"), (&["chatgpt.cancel"], "back")];
+/// A step that waits: esc leaves it for later.
+const LATER_HINT: &[(&[&str], &str)] = &[(&["setup.later"], "later")];
 /// How often the sign-in step looks again for models on this computer while the producer chooses.
 const LOCAL_LOOK: Duration = Duration::from_secs(3);
 /// Where the Set is that Kumi's restart closed, when Kumi didn't know it to open it again.
@@ -390,12 +395,13 @@ impl TuiApp {
         }
         let (tx, rx) = oneshot::channel();
         let status = status.to_string();
+        let hint = self.keys_hint(CHOOSE_HINT);
         self.setup_show(move |s| {
             s.status = status;
             s.say = say;
             s.choices = choices;
             s.chosen = 0;
-            s.hint = CHOOSE_HINT.into();
+            s.hint = hint;
             s.waiting = false;
             s.answer = Some(tx);
         });
@@ -520,12 +526,14 @@ impl TuiApp {
             }
         });
         let browser = provider.row().sign_in != SignIn::ApiKey;
+        // The key's box takes its keys.
+        let hint = self.keys_hint(if browser { BROWSER_HINT } else { &[(&["key.check"], "check"), (&["key.cancel"], "back")] });
         self.setup_show(move |s| {
             s.choices.clear();
             s.say.clear();
             s.status = if browser { "waiting for the browser" } else { "paste a key" }.into();
             s.waiting = browser;
-            s.hint = if browser { BROWSER_HINT } else { "enter check · esc back" }.into();
+            s.hint = hint;
         });
         self.sign_in(provider, Some(then));
         let signed = loop {
@@ -713,6 +721,7 @@ impl TuiApp {
             return false;
         }
         let stop = self.setup_wait();
+        let hint = self.keys_hint(LATER_HINT);
         self.setup_show(|s| {
             s.status = format!("opening {daw}…");
             s.say = vec![if made.is_empty() {
@@ -720,7 +729,7 @@ impl TuiApp {
             } else {
                 format!("{made} If it shows a dialog, answer it.")
             }];
-            s.hint = "esc later".into();
+            s.hint = hint;
             s.waiting = true;
         });
         if !live.start(Some(app), None).await {
@@ -748,11 +757,12 @@ impl TuiApp {
             let yourself = refused
                 .clone()
                 .unwrap_or_else(|| format!("Quit {app} when you're ready. Kumi then puts its bridge in place and opens {app} again."));
+            let hint = self.keys_hint(LATER_HINT);
             self.setup_show(move |s| {
                 s.status = if asked { format!("waiting for {app} to close") } else { format!("waiting for you to quit {app}") };
                 s.say = vec![if asked { format!("Answer {app} if it asks about saving.") } else { yourself }];
                 s.choices.clear();
-                s.hint = "esc later".into();
+                s.hint = hint;
                 s.waiting = true;
             });
             if !asked {
@@ -829,11 +839,12 @@ impl TuiApp {
     async fn setup_surface(&self, live: Rc<dyn DawSetup>, app: Option<String>, enable: EnableStep) -> bool {
         let stop = self.setup_wait();
         let note = self.0.state.borrow().setup.as_ref().and_then(|s| s.set_note.clone());
+        let hint = self.keys_hint(LATER_HINT);
         self.setup_show(move |s| {
             s.step = Step::Surface;
             s.status = enable.waiting.into();
             s.say = std::iter::once(enable.say.to_string()).chain(note).collect();
-            s.hint = "esc later".into();
+            s.hint = hint;
             s.waiting = true;
         });
         let mut more = live.settings_menu().map(|menu| format!("{menu} If {} shows a dialog, answer it first.", crate::daw::words().app));
@@ -1088,7 +1099,12 @@ impl TuiApp {
                             screen.put(x, y, &code.code, &st::BRIGHT);
                         }
                         y += 2;
-                        say(screen, &mut y, "Kumi signs in once it's entered. No code? b uses the browser instead.", st::DIM);
+                        let words = self.key_words(
+                            "chatgpt.by-browser",
+                            "Kumi signs in once it's entered. No code? {} uses the browser instead.",
+                            "Kumi signs in once it's entered.",
+                        );
+                        say(screen, &mut y, &words, st::DIM);
                     }
                     None => say(screen, &mut y, "Asking ChatGPT for a sign-in code…", st::TEXT),
                 }
@@ -1096,7 +1112,12 @@ impl TuiApp {
                 say(screen, &mut y, "Finish signing in in your browser.", st::TEXT);
                 if let Some(url) = &chatgpt.url {
                     y += 1;
-                    say(screen, &mut y, "If it didn't open, open this link (c copies it):", st::DIM);
+                    let words = self.key_words(
+                        "chatgpt.copy",
+                        "If it didn't open, open this link ({} copies it):",
+                        "If it didn't open, open this link:",
+                    );
+                    say(screen, &mut y, &words, st::DIM);
                     // All of it, edge to edge with nothing beside it, so a selection copies the whole link.
                     for part in helpers::chunk(url, columns.max(1) as usize) {
                         if y < rows - 2 {
@@ -1104,8 +1125,11 @@ impl TuiApp {
                         }
                         y += 1;
                     }
-                    y += 1;
-                    say(screen, &mut y, "No browser here? d uses a code.", st::DIM);
+                    let words = self.key_words("chatgpt.by-code", "No browser here? {} uses a code.", "");
+                    if !words.is_empty() {
+                        y += 1;
+                        say(screen, &mut y, &words, st::DIM);
+                    }
                 }
             }
         } else {
@@ -1145,12 +1169,12 @@ impl TuiApp {
         }
         // A ChatGPT sign-in's keys follow how it signs in, which d changes.
         let hint = match panel_kind {
-            Some(true) => CODE_HINT,
-            Some(false) => BROWSER_HINT,
-            None => setup.hint.as_str(),
+            Some(true) => self.keys_hint(CODE_HINT),
+            Some(false) => self.keys_hint(BROWSER_HINT),
+            None => setup.hint.clone(),
         };
         if !hint.is_empty() && y + 1 < rows {
-            screen.put(x, y + 1, &truncate(hint, width), &st::FAINT);
+            screen.put(x, y + 1, &truncate(&hint, width), &st::FAINT);
         }
         cursor
     }

@@ -35,7 +35,7 @@ use super::{
     alerts::{self, ProgramState, StatusReport, TerminalProfile},
     editor::{Composed, Draft, Editor},
     icons::{detect_icon_style_here, IconKind, IconStyle},
-    keymap::{Chord, Keymap, Scope, AGAIN_MS},
+    keymap::{capitalized, Chord, Keymap, Scope, AGAIN_MS},
     keys::InputEvent,
     overlay::{Area, Handled, Overlay, Overlays, Shared},
     picker::{Picker, PickerItem},
@@ -860,6 +860,9 @@ impl VoiceHost for AppVoice {
     fn names(&self) -> Vec<String> {
         self.0.upgrade().map(|a| TuiApp(a).spoken_names()).unwrap_or_default()
     }
+    fn hint(&self, parts: &[(&[&str], &str)]) -> String {
+        self.0.upgrade().map(|a| TuiApp(a).keys_hint(parts)).unwrap_or_default()
+    }
     fn redraw(&self) {
         if let Some(a) = self.0.upgrade() {
             a.scheduler.request();
@@ -934,6 +937,11 @@ impl TuiApp {
                     TuiApp(a).event(event);
                 }
             }));
+            let (keymap, keys_said) = match &options.keys {
+                Some(Ok(file)) => Keymap::new(Some(file)),
+                Some(Err(why)) => (Keymap::default(), vec![why.clone()]),
+                None => Keymap::new(None),
+            };
             let can = options.session.capabilities();
             let mut tabs: Vec<Rc<dyn Tab>> =
                 vec![Rc::new(AppTab { app: weak.clone(), id: "history", title: "HISTORY", empty: "Nothing changed yet" })];
@@ -944,17 +952,16 @@ impl TuiApp {
                 tabs.push(Rc::new(jobs::JobsTab { app: weak.clone() }));
             }
             if can.palette {
-                tabs.push(Rc::new(palette::PaletteTab { app: weak.clone() }));
+                let gathers = keymap.key("map.gather").map(|key| format!(" and press {}", capitalized(&key))).unwrap_or_default();
+                tabs.push(Rc::new(palette::PaletteTab {
+                    app: weak.clone(),
+                    empty: format!("Nothing in it yet: pick sounds on /map{gathers}"),
+                }));
             }
             tabs.extend(options.tabs.clone());
             let active = options.panel_tab.as_ref().and_then(|p| (p.load)());
             let tabs = TabPanel::new(tabs, active.as_deref(), options.panel_tab.as_ref().map(|p| p.save.clone()));
             let voice = options.voice.as_ref().map(|v| VoiceInput::new(v.clone(), Rc::new(AppVoice(weak.clone()))));
-            let (keymap, keys_said) = match &options.keys {
-                Some(Ok(file)) => Keymap::new(Some(file)),
-                Some(Err(why)) => (Keymap::default(), vec![why.clone()]),
-                None => Keymap::new(None),
-            };
             let (done, _) = watch::channel(None);
             // Links open where an OSC is safe to send, as the status is.
             let renderer = Renderer::new(depth)
@@ -1018,6 +1025,14 @@ impl TuiApp {
             mouse: options.mouse,
             copy_on_select: options.copy_on_select,
         }
+    }
+    /// A hint whose keys are as the keymap has them (`Keymap::hint`).
+    fn keys_hint(&self, parts: &[(&[&str], &str)]) -> String {
+        self.0.keymap.hint(parts)
+    }
+    /// Words that name action `id`'s key as the keymap has it (`Keymap::with_key`).
+    fn key_words(&self, id: &str, words: &str, without: &str) -> String {
+        self.0.keymap.with_key(id, words, without)
     }
     /// The actions an input is in `scope`, in the order they're tried: none for a paste, the mouse or a key bound to
     /// nothing there.

@@ -368,8 +368,8 @@ it):
   box always opens the help, and `app.help` can have keys as well (`f1`).
 - Kumi says once, as it starts, what it couldn't use: an action it doesn't know, a key it can't read, a character
   where words are typed, two actions keys.json gives one key, and the keys it puts ahead of Kumi's own.
-- The help (`/help`, `?`) shows the keys as keys.json has them; the hints under the box, in the panels, in the
-  map and in setup still name Kumi's own keys.
+- The help (`/help`, `?`), the hints under the box, in the panels, in the map and in setup, and Kumi's notices
+  name the keys as keys.json has them.
 
 | Where | Actions, with Kumi's own keys |
 | --- | --- |

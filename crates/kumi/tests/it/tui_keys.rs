@@ -185,6 +185,25 @@ case!(a_panels_key_that_doesnt_apply_lets_the_next_have_it, async {
     h.close().await;
 });
 
+case!(the_hints_name_the_keys_keys_json_gives, async {
+    let file = json!({ "app.stop": ["f9"], "composer.send": ["ctrl+enter"], "menu.close": [] });
+    let h = Harness::with(120, 36, Rc::new(Control::default()), |o| o.keys = Some(Ok(file)));
+    h.start().await;
+    h.connect();
+    h.wait_for("ctrl+enter to send").await;
+    // The menu's hint leaves out closing it: menu.close has no keys.
+    h.type_text("/he").await;
+    h.wait_for("enter to choose").await;
+    assert!(!has(&h.screen(), "to close"), "{:?}", h.screen());
+    h.type_text("\x15").await;
+    h.emit(json!({"type":"state","state":"running"}));
+    h.wait_for("f9 to stop").await;
+    // So do the notices. (Ctrl+enter sends, the menu's open or not.)
+    h.type_text("/undo\x1b[13;5u").await;
+    h.wait_for("Kumi is still working: /undo once it's done, or press f9 to stop it first.").await;
+    h.close().await;
+});
+
 case!(keys_one_after_another_take_their_second_key_before_what_it_does_alone, async {
     let file = json!({ "app.help": ["ctrl+x ctrl+e"] });
     let h = Harness::with(120, 36, Rc::new(Control::default()), |o| o.keys = Some(Ok(file)));

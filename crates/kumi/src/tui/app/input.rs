@@ -942,7 +942,12 @@ impl TuiApp {
             Effect::Fork { name } => {
                 self.clear_editor();
                 if self.busy() {
-                    self.notice("Kumi is still working: fork once it's done, or press esc to stop it.", NoticeTone::Info);
+                    let words = self.key_words(
+                        "app.stop",
+                        "Kumi is still working: fork once it's done, or press {} to stop it.",
+                        "Kumi is still working: fork once it's done.",
+                    );
+                    self.notice(&words, NoticeTone::Info);
                     return Ok(());
                 }
                 if session.op(op::ForkConversation { name: (!name.is_empty()).then(|| name.clone()), before: None }).await?.is_none() {
@@ -972,7 +977,13 @@ impl TuiApp {
                 }
                 // The line stays in the box while Kumi works, to run once it's done.
                 if self.busy() {
-                    self.notice("Kumi is still working: press enter again once it's done, or esc to stop it.", NoticeTone::Info);
+                    let again = self.key_words("composer.send", "press {} again", "send it again");
+                    let words = self.key_words(
+                        "app.stop",
+                        &format!("Kumi is still working: {again} once it's done, or {{}} to stop it."),
+                        &format!("Kumi is still working: {again} once it's done."),
+                    );
+                    self.notice(&words, NoticeTone::Info);
                     return Ok(());
                 }
                 self.clear_editor();
@@ -1020,7 +1031,12 @@ impl TuiApp {
                 match crate::daw::daw_command(&command["/daw".len()..]) {
                     crate::daw::DawCommand::Say(words) => self.notice(&words, NoticeTone::Info),
                     crate::daw::DawCommand::Switch(_, _) if self.busy() => {
-                        self.notice("Kumi is working; /daw once it's done (esc stops it).", NoticeTone::Info);
+                        let words = self.key_words(
+                            "app.stop",
+                            "Kumi is working; /daw once it's done ({} stops it).",
+                            "Kumi is working; /daw once it's done.",
+                        );
+                        self.notice(&words, NoticeTone::Info);
                     }
                     crate::daw::DawCommand::Switch(daw, words) => {
                         self.notice(&words, NoticeTone::Info);
@@ -1044,7 +1060,11 @@ impl TuiApp {
                 if self.0.state.borrow().slots_check.is_some()
                     && kumi_listening::slots::parse(&words) != Ok(kumi_listening::slots::Asked::Show)
                 {
-                    self.notice("Kumi is still trying a model for /slots: wait for it, or Esc stops it.", NoticeTone::Info);
+                    let words = match self.0.keymap.key("app.stop") {
+                        Some(key) => format!("Kumi is still trying a model for /slots: wait for it, or {} stops it.", capitalized(&key)),
+                        None => "Kumi is still trying a model for /slots: wait for it.".into(),
+                    };
+                    self.notice(&words, NoticeTone::Info);
                     return Ok(());
                 }
                 // Its own stop, Esc: a model's download takes as long as it takes (a listening model's check has its own
@@ -1210,7 +1230,12 @@ impl TuiApp {
                 return Ok(());
             }
             Effect::Refused(Why::Busy { verb }) => {
-                self.notice(&format!("Kumi is still working: {} once it's done, or press esc to stop it first.", verb), NoticeTone::Info);
+                let words = self.key_words(
+                    "app.stop",
+                    &format!("Kumi is still working: {verb} once it's done, or press {{}} to stop it first."),
+                    &format!("Kumi is still working: {verb} once it's done."),
+                );
+                self.notice(&words, NoticeTone::Info);
                 return Ok(());
             }
             Effect::Goal => {
@@ -1595,7 +1620,12 @@ impl TuiApp {
             return;
         }
         if self.busy() {
-            self.notice("Kumi is still working. Press esc to stop it first, then undo.", NoticeTone::Info);
+            let words = self.key_words(
+                "app.stop",
+                "Kumi is still working. Press {} to stop it first, then undo.",
+                "Kumi is still working: undo once it's done.",
+            );
+            self.notice(&words, NoticeTone::Info);
             return;
         }
         if id.is_none() && !self.0.state.borrow().records.changes().iter().any(|c| c.state == ChangeState::Applied) {

@@ -1,6 +1,7 @@
 use super::super::{
     activity::{activity_glyph, activity_of, shimmer, Activity},
     editor::EditorLayout,
+    keymap::capitalized,
     logo::*,
     render::Cursor,
     screen::Screen,
@@ -187,6 +188,18 @@ impl TuiApp {
         }
         self.present(screen, cursor);
     }
+    /// The bar over selected text, its keys as the keymap has them. Copied as the button comes up, a selection on
+    /// screen is one still being dragged.
+    fn selection_words(&self) -> String {
+        let key = |id: &str| self.0.keymap.key(id).map(|key| capitalized(&key));
+        let clear = |words: &str| key("selection.clear").map(|key| format!(" · {key} {words}")).unwrap_or_default();
+        if self.0.options.copy_on_select {
+            format!("Selecting · view paused · let go to copy{}", clear("cancels"))
+        } else {
+            let copy = key("selection.copy").map(|key| format!("{key}/")).unwrap_or_default();
+            format!("Selected · view paused · {copy}right-click copies{}", clear("resumes"))
+        }
+    }
     /// The frame out to the terminal; its screen is kept to draw the next one on.
     fn present(&self, screen: Screen, cursor: Option<Cursor>) {
         let (selected, drawn) = {
@@ -194,17 +207,11 @@ impl TuiApp {
             if state.selection.as_ref().is_some_and(|s| s.screen.width != screen.width || s.screen.height != screen.height) {
                 state.selection = None;
             }
-            // Copied as the button comes up, a selection on screen is one still being dragged.
-            let words = if self.0.options.copy_on_select {
-                "Selecting · view paused · let go to copy · Esc cancels"
-            } else {
-                "Selected · view paused · Ctrl+C/right-click copies · Esc resumes"
-            };
             let selected = state.selection.as_ref().filter(|s| s.moved).map(|s| {
                 let mut painted = s.painted();
                 let footer = Rect::new(0, painted.height - 1, painted.width, 1);
                 painted.fill(footer, &st::RAISED);
-                painted.put(1, footer.y, words, &st::DIM);
+                painted.put(1, footer.y, &self.selection_words(), &st::DIM);
                 (painted, s.screen.clone(), s.marks.clone())
             });
             let drawn = Marks { rows: std::mem::take(&mut state.text_rows), areas: std::mem::take(&mut state.select_areas) };
@@ -722,38 +729,41 @@ impl TuiApp {
                 screen.put_in(x, box_.y + 1 + index as i32, row, &st::BRIGHT, box_);
             }
         }
-        let hint = toast.as_ref().map(|(text, _)| text.as_str()).or(overlay_hint.as_deref()).unwrap_or_else(|| {
-            if state.search.is_some() {
-                super::composer::SEARCH_HINT
-            } else if !menu.is_empty() {
-                "enter to choose · esc to close"
-            } else if let Some(voice) = &voice {
-                &voice.hint
-            } else if busy && !state.editor.is_empty() && !is_command(string::trim(&state.editor.text())) {
-                if state.current.is_some() || state.pending_turn {
-                    "enter sends now · tab after · esc stops"
-                } else {
-                    "enter sends when ready"
-                }
-            } else if busy {
-                "esc to stop"
-            } else if state.stash.is_some() && state.editor.is_empty() && state.attachments.is_empty() {
-                super::composer::STASH_HINT
-            } else if self.0.voice.is_some() && state.editor.is_empty() {
-                "ctrl+t to talk"
+        // The box's own hints say its keys as the keymap has them.
+        let hint = if let Some((text, _)) = &toast {
+            text.clone()
+        } else if let Some(hint) = overlay_hint {
+            hint
+        } else if state.search.is_some() {
+            self.keys_hint(super::composer::SEARCH_HINT)
+        } else if !menu.is_empty() {
+            self.keys_hint(&[(&["menu.run"], "to choose"), (&["menu.close"], "to close")])
+        } else if let Some(voice) = &voice {
+            voice.hint.clone()
+        } else if busy && !state.editor.is_empty() && !is_command(string::trim(&state.editor.text())) {
+            if state.current.is_some() || state.pending_turn {
+                self.keys_hint(&[(&["composer.send"], "sends now"), (&["composer.send-after"], "after"), (&["app.stop"], "stops")])
             } else {
-                "enter to send"
+                self.keys_hint(&[(&["composer.send"], "sends when ready")])
             }
-        });
+        } else if busy {
+            self.keys_hint(&[(&["app.stop"], "to stop")])
+        } else if state.stash.is_some() && state.editor.is_empty() && state.attachments.is_empty() {
+            self.keys_hint(super::composer::STASH_HINT)
+        } else if self.0.voice.is_some() && state.editor.is_empty() {
+            self.keys_hint(&[(&["voice.talk"], "to talk")])
+        } else {
+            self.keys_hint(&[(&["composer.send"], "to send")])
+        };
         let bottom = box_.y + box_.height - 1;
         let used = voice.as_ref().map(|v| spans(screen, x, bottom, &v.status, Some(box_))).unwrap_or(x);
         let right = box_.x + box_.width - 2;
         if let Some((_, tone)) = &toast {
             // A toast that doesn't fit is cut short; a hint that doesn't is left out.
-            let text = truncate(hint, right - used - 2);
+            let text = truncate(&hint, right - used - 2);
             screen.put(right - text_width(&text), bottom, &text, if *tone == NoticeTone::Warn { &st::WARN } else { &st::ACCENT });
-        } else if text_width(hint) + 2 < width && right - text_width(hint) > used + 1 {
-            screen.put(right - text_width(hint), bottom, hint, &st::FAINT);
+        } else if text_width(&hint) + 2 < width && right - text_width(&hint) > used + 1 {
+            screen.put(right - text_width(&hint), bottom, &hint, &st::FAINT);
         }
         Cursor { x: x + layout.cursor_column, y: box_.y + 1 + layout.cursor_row as i32 - first }
     }

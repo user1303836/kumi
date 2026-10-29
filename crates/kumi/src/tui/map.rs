@@ -14,6 +14,7 @@ use std::collections::{BTreeSet, HashSet};
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
+use super::keymap::Keymap;
 use super::pictures::{cells, kitty, scene::Shape, Graphics, Raster, Scene};
 use super::render::Cursor;
 use super::screen::{Rect, Screen};
@@ -738,6 +739,8 @@ pub struct MapView {
     capped: Option<usize>,
     /// Each point's NEAREST_KEPT nearest on each map (u32::MAX for none), worked out the first time g wants them.
     nearest: [Option<Rc<Vec<u32>>>; 2],
+    /// The keys the footer names: Kumi's own, or the app's (`keyed`).
+    keymap: Keymap,
 }
 
 impl MapView {
@@ -771,7 +774,14 @@ impl MapView {
             told: None,
             capped: None,
             nearest: [None, None],
+            keymap: Keymap::default(),
         }
+    }
+
+    /// The same map, its footer naming the keys `keymap` has.
+    pub fn keyed(mut self, keymap: &Keymap) -> MapView {
+        self.keymap = keymap.clone();
+        self
     }
 
     /// The same map, Enter putting points into the session's palette.
@@ -1312,7 +1322,12 @@ impl MapView {
         }
         let (columns, rows) = (screen.width, screen.height);
         if columns < 40 || rows < 12 {
-            screen.put(1, 0, &truncate("Make this window bigger for the map (esc closes it)", columns - 2), &Style::fg(palette::DIM));
+            let words = self.keymap.with_key(
+                "map.close",
+                "Make this window bigger for the map ({} closes it)",
+                "Make this window bigger for the map",
+            );
+            screen.put(1, 0, &truncate(&words, columns - 2), &Style::fg(palette::DIM));
             return None;
         }
         self.area = Rect::new(1, 2, columns - 2, rows - 5);
@@ -1620,32 +1635,60 @@ impl MapView {
         }
     }
 
-    /// The keys, or the filter being typed (with the cursor).
+    /// The keys, or the filter being typed (with the cursor): as the keymap has them, Kumi's own arrows and zoom keys
+    /// written in words ("arrows", "+ −").
     fn draw_keys(&self, screen: &mut Screen) -> Option<Cursor> {
         let y = screen.height - 1;
         if let Some(prompt) = &self.prompt {
             let x = screen.put(1, y, "/ ", &Style::fg(palette::ACCENT));
             let end = screen.put(x, y, &truncate(prompt, screen.width - x - 30), &Style::fg(palette::BRIGHT));
-            screen.put(end + 2, y, "enter keeps it · esc leaves it", &Style::fg(palette::FAINT));
+            let keys = self.keymap.hint(&[(&["map.filter-keep"], "keeps it"), (&["map.filter-drop"], "leaves it")]);
+            screen.put(end + 2, y, &keys, &Style::fg(palette::FAINT));
             return Some(Cursor { x: end, y });
         }
         let other = if self.tab == 0 { "songs" } else { "sounds" };
         let picked = self.views.get(self.tab).map_or(0, |view| view.picked.len());
-        let keys = if self.graphics == Graphics::Words {
-            let gathers = if self.gathers { "enter adds to the palette · " } else { "" };
-            format!("up and down choose · space plays · {gathers}/ filters · tab {other} · esc closes")
+        let gather: (&[&str], &str, &str) = (&["map.gather"], "", "adds to the palette");
+        let mut parts: Vec<(&[&str], &str, &str)> = vec![];
+        let (adds, hover);
+        if self.graphics == Graphics::Words {
+            parts.push((&["map.up", "map.down"], "up and down", "choose"));
+            parts.push((&["map.play"], "", "plays"));
+            if self.gathers {
+                parts.push(gather);
+            }
+            parts.push((&["map.filter"], "", "filters"));
+            parts.push((&["map.switch"], "", other));
+            parts.push((&["map.close"], "", "closes"));
         } else if picked > 0 && self.gathers {
-            format!(
-                "enter adds {} to the palette · drag picks (ctrl adds) · x picks · a all · g grows · esc lets go",
-                if picked == 1 { "1 point".into() } else { format!("{} points", grouped(picked)) }
-            )
+            adds = format!("adds {} to the palette", if picked == 1 { "1 point".into() } else { format!("{} points", grouped(picked)) });
+            parts.push((&["map.gather"], "", &adds));
+            parts.push((&[], "", "drag picks (ctrl adds)"));
+            parts.push((&["map.pick"], "", "picks"));
+            parts.push((&["map.pick-all"], "", "all"));
+            parts.push((&["map.grow"], "", "grows"));
+            parts.push((&["map.let-go"], "", "lets go"));
         } else {
-            let hover = if self.hover { "plays" } else { "quiet" };
-            let gathers = if self.gathers { "drag or x picks · enter adds to the palette · " } else { "" };
-            format!(
-                "arrows move · shift+arrows pan · + − zoom · {gathers}/ filters · space plays · h hover {hover} · tab {other} · esc closes"
-            )
-        };
+            hover = format!("hover {}", if self.hover { "plays" } else { "quiet" });
+            parts.push((&["map.up", "map.down", "map.left", "map.right"], "arrows", "move"));
+            parts.push((&["map.pan-up", "map.pan-down", "map.pan-left", "map.pan-right"], "shift+arrows", "pan"));
+            parts.push((&["map.zoom-in", "map.zoom-out"], "+ −", "zoom"));
+            if self.gathers {
+                // A drag picks whatever x is.
+                parts.push(if self.keymap.key("map.pick").is_some() {
+                    (&["map.pick"], "", "drag or {} picks")
+                } else {
+                    (&[], "", "drag picks")
+                });
+                parts.push(gather);
+            }
+            parts.push((&["map.filter"], "", "filters"));
+            parts.push((&["map.play"], "", "plays"));
+            parts.push((&["map.hover"], "", &hover));
+            parts.push((&["map.switch"], "", other));
+            parts.push((&["map.close"], "", "closes"));
+        }
+        let keys = self.keymap.hint_written(&parts);
         screen.put(1, y, &truncate(&keys, screen.width - 2), &Style::fg(palette::FAINT));
         None
     }
@@ -2070,6 +2113,29 @@ mod tests {
         plain.draw(&mut screen, &mut |_, _, _, _| 0);
         assert_eq!(plain.on_key("enter", false), Asked::Nothing);
         assert!(!screen.lines()[29].contains("palette"), "{}", screen.lines()[29]);
+    }
+
+    #[test]
+    fn the_keys_under_the_map_are_the_keymaps_with_kumis_own_arrows_in_words() {
+        let points: Vec<(f32, f32, u16)> = (0..9).map(|n| (0.1 + n as f32 * 0.1, 0.5, (n % 2) as u16)).collect();
+        let footer = |map: &mut MapView| {
+            let mut screen = Screen::new(200, 30);
+            map.draw(&mut screen, &mut |_, _, _, _| 0);
+            screen.lines()[29].trim().to_string()
+        };
+        assert_eq!(
+            footer(&mut gathering(&points)),
+            "arrows move · shift+arrows pan · + − zoom · drag or x picks · enter adds to the palette · / filters · space plays · \
+             h hover plays · tab songs · esc closes"
+        );
+        // keys.json's keys say themselves; a drag still picks with x given none.
+        let (keymap, _) =
+            Keymap::new(Some(&serde_json::json!({ "map.left": ["h"], "map.hover": ["v"], "map.pick": [], "map.close": ["f10"] })));
+        assert_eq!(
+            footer(&mut gathering(&points).keyed(&keymap)),
+            "↑ ↓ h → move · shift+arrows pan · + − zoom · drag picks · enter adds to the palette · / filters · space plays · \
+             v hover plays · tab songs · f10 closes"
+        );
     }
 
     #[test]
