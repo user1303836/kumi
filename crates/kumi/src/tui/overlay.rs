@@ -27,7 +27,7 @@ pub struct Area {
 /// One overlay, for an app of type `App`.
 ///
 /// `handle` and `draw` run while the stack holds this overlay mutably borrowed. So neither may reach the stack's top
-/// one again before it returns (in Kumi's app: close_panel, top_panel, answers_open, signing_in, same_picker,
+/// one again before it returns (in Kumi's app: close_panel, top_as, top_is, answers_open, signing_in, same_picker,
 /// put_in_box): an overlay that's done says so with `Handled::Close` or `Handled::Pass`, and work that needs it later
 /// runs in a task, after it returns.
 pub trait Overlay<App>: Any {
