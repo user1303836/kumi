@@ -86,8 +86,10 @@ pub fn local_zone() -> FixedOffset {
 /// curve, a compressor's, notes, a lane), else a new clip's notes, where a device went, the colours it moved between or
 /// the value it moved from and to. None when there's nothing to draw.
 pub fn picture_of(change: &ChangeRecord) -> Option<String> {
+    // As its saved record keeps it, so a page written in the run that made the change draws what one written after a
+    // restart does: a note restated with fewer decimals is the note it was.
     if let Some(picture) = &change.picture {
-        return svg_of(picture);
+        return svg_of(&picture.clone().as_kept());
     }
     if let Some(clip) = &change.clip {
         return svg_of(&ChangePicture::Notes { length: clip.length, before: vec![], after: clip.notes.clone(), partial: false });
