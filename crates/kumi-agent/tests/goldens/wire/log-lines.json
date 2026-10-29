@@ -1,0 +1,75 @@
+[
+  {
+    "kind": "header",
+    "v": 1,
+    "id": "mv66me0m3fa91c",
+    "at": 1760000000000,
+    "kumi": "1.25.0",
+    "before": 12
+  },
+  {
+    "kind": "header",
+    "v": 1,
+    "id": "mv66me0m3fa91c",
+    "at": 1760000000000,
+    "kumi": "1.25.0",
+    "before": 12,
+    "from": "mv66me0m3fa91b"
+  },
+  {
+    "kind": "request",
+    "at": 1760000000001,
+    "text": "make the bass wider"
+  },
+  {
+    "kind": "request",
+    "at": 1760000000002,
+    "text": "and this one darker",
+    "files": [
+      "bass.wav"
+    ],
+    "pinned": {
+      "trackRef": "7:track:0",
+      "ref": "7:device:0:0:0:0",
+      "node": "device",
+      "name": "Simpler",
+      "trail": [
+        "Drum Rack",
+        "Kick"
+      ],
+      "siblings": [
+        "Saturator",
+        "EQ Eight"
+      ],
+      "track": "Drums",
+      "live": true
+    }
+  },
+  {
+    "kind": "event",
+    "at": 1760000000003,
+    "event": {
+      "type": "text",
+      "text": "Widened it."
+    }
+  },
+  {
+    "kind": "message",
+    "at": 1760000000004,
+    "message": {
+      "role": "assistant",
+      "content": [
+        {
+          "type": "text",
+          "text": "Widened it."
+        }
+      ]
+    }
+  },
+  {
+    "kind": "saved",
+    "at": 1760000000005,
+    "savedAt": 1760000000004,
+    "turns": 2
+  }
+]

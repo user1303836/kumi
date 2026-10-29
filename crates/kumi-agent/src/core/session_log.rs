@@ -22,10 +22,13 @@
 
 use crate::{
     core::{
-        contracts::{KernelCheckpoint, KernelEvent, PinnedNode, SavedConversation, SessionEvent},
+        contracts::{
+            KernelCheckpoint, KernelEvent, MemoryEvent, PinnedNode, SavedConversation, SessionEvent, TranscriptLine, TranscriptRole,
+            TurnState,
+        },
         conversations::{is_conversation_id, write_privately},
     },
-    kernel::budget::OBSERVATION_MARKER,
+    kernel::budget::{transcript_of, OBSERVATION_MARKER},
 };
 use kumi_types::place::Places;
 use serde::{Deserialize, Serialize};
@@ -103,24 +106,116 @@ pub struct ReadLog {
 /// after the last newline is a line cut short and is left out; a line that doesn't read, or is of a kind this Kumi
 /// doesn't know, is skipped.
 pub fn read_log(bytes: &[u8]) -> Option<ReadLog> {
+    let (header, after) = header_of(bytes)?;
+    Some(ReadLog { header, lines: after.split(|b| *b == b'\n').filter_map(line_in).collect() })
+}
+
+/// A log's header, and its whole lines after it (what comes after the last newline is a line cut short, and is left
+/// out); None when `bytes` aren't a log this Kumi reads.
+fn header_of(bytes: &[u8]) -> Option<(LogHeader, &[u8])> {
     let whole = &bytes[..bytes.iter().rposition(|b| *b == b'\n')? + 1];
-    let mut lines = whole.split(|b| *b == b'\n');
-    let header = match serde_json::from_slice::<LogLine>(lines.next()?).ok()? {
-        LogLine::Header(header) if (1..=LOG_VERSION).contains(&header.v) => header,
-        _ => return None,
-    };
-    let lines = lines
-        .filter_map(|line| match serde_json::from_slice::<LogLine>(line) {
-            Ok(LogLine::Header(_)) | Err(_) => None,
-            Ok(line) => Some(line),
-        })
-        .collect();
-    Some(ReadLog { header, lines })
+    let first = memchr::memchr(b'\n', whole)?;
+    match serde_json::from_slice::<LogLine>(&whole[..first]).ok()? {
+        LogLine::Header(header) if (1..=LOG_VERSION).contains(&header.v) => Some((header, &whole[first + 1..])),
+        _ => None,
+    }
+}
+
+/// A line after the header, read: None for one that doesn't read, or is of a kind this Kumi doesn't know.
+fn line_in(line: &[u8]) -> Option<LogLine> {
+    match serde_json::from_slice::<LogLine>(line) {
+        Ok(LogLine::Header(_)) | Err(_) => None,
+        Ok(line) => Some(line),
+    }
 }
 
 /// The log at `file`; None when there's none, or it isn't one this Kumi reads.
 pub async fn read_log_file(file: &Path) -> Option<ReadLog> {
     read_log(&tokio::fs::read(file).await.ok()?)
+}
+
+/// The most requests a conversation taken up shows again.
+pub const REPLAYED: usize = 30;
+
+/// What a conversation taken up shows of its log: its last requests with everything that happened in them, and before
+/// them, while there's room, the words of the requests it had when its log began (an earlier Kumi's).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Replay {
+    /// How many of the producer's messages aren't shown: the requests and steers the log holds before its last 30
+    /// requests, and those from before the log began that there wasn't room for (as the checkpoint counted them, which
+    /// is each user line: a steer's, and a send-back's from a match or a loop, too).
+    pub before: u32,
+    /// The words of the requests the conversation had when its log began, and their answers, as far as there's room: no
+    /// more of them happened than that, as far as the log knows.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub earlier: Vec<TranscriptLine>,
+    /// The log's requests and the conversation's events from the first request shown, in order.
+    pub lines: Vec<LogLine>,
+}
+
+/// Where a request's line or an event's begins in a log (the writer puts `kind` first).
+static SHOWN: std::sync::LazyLock<regex::bytes::Regex> =
+    std::sync::LazyLock::new(|| regex::bytes::Regex::new(r#"(?m)^\{"kind":"(?:request|event)","#).unwrap());
+const MESSAGE: &[u8] = br#"{"kind":"message","#;
+
+/// What of a log (`bytes`, read as `read_log` reads them) a conversation taken up shows again: its requests and events
+/// from the `most`th request from the end (all of them, when there are fewer). The model's messages and the saves are
+/// the kernel's, not the screen's, and an earlier run's close isn't the conversation's. Only what's shown is read: each
+/// request (they're few and short), the events from the first request shown, and the messages the log began with only
+/// while there's room for their words. None when `bytes` aren't a log this Kumi reads.
+pub fn replay_of(bytes: &[u8], most: usize) -> Option<Replay> {
+    replay_reading(bytes, most, &mut line_in)
+}
+
+/// `replay_of`, reading each line it reads with `read`: a test counts them.
+#[doc(hidden)]
+pub fn replay_reading(bytes: &[u8], most: usize, read: &mut dyn FnMut(&[u8]) -> Option<LogLine>) -> Option<Replay> {
+    let (header, after) = header_of(bytes)?;
+    let starts: Vec<&[u8]> = SHOWN
+        .find_iter(after)
+        .map(|found| {
+            let line = &after[found.start()..];
+            &line[..memchr::memchr(b'\n', line).unwrap_or(line.len())]
+        })
+        .collect();
+    let mut requests = vec![];
+    for (n, line) in starts.iter().enumerate() {
+        if line.starts_with(br#"{"kind":"request","#) && matches!(read(line), Some(LogLine::Request(_))) {
+            requests.push(n);
+        }
+    }
+    let left_out = requests.len().saturating_sub(most);
+    let start = if left_out > 0 { requests[left_out] } else { 0 };
+    let steered = starts[..start].iter().filter(|line| steers(line)).count();
+    let lines: Vec<LogLine> = starts[start..]
+        .iter()
+        .filter_map(|line| read(line))
+        .filter(|line| !matches!(line, LogLine::Event { event: SessionEvent::State { state: TurnState::Closed }, .. }))
+        .collect();
+    // What the conversation had when its log began: the messages right after the header, before anything happened.
+    let room = most.saturating_sub(requests.len());
+    let mut had = vec![];
+    let mut rest = after;
+    while room > 0 && rest.starts_with(MESSAGE) {
+        let end = memchr::memchr(b'\n', rest).map_or(rest.len(), |end| end + 1);
+        if let Some(LogLine::Message { message, .. }) = read(&rest[..end]) {
+            had.push(message);
+        }
+        rest = &rest[end..];
+    }
+    let words = transcript_of(&had);
+    let asked: Vec<usize> = words.iter().enumerate().filter(|(_, line)| line.role == TranscriptRole::User).map(|(n, _)| n).collect();
+    let shown = asked.len().min(room);
+    let earlier = if shown == 0 { vec![] } else { words[asked[asked.len() - shown]..].to_vec() };
+    Some(Replay { before: header.before.saturating_sub(shown as u32) + (left_out + steered) as u32, earlier, lines })
+}
+
+/// Whether an event's line is a steer's: the producer's words to an answer under way.
+fn steers(line: &[u8]) -> bool {
+    let Some(rest) = line.strip_prefix(br#"{"kind":"event","at":"#) else { return false };
+    let at = rest.iter().take_while(|b| b.is_ascii_digit() || **b == b'-').count();
+    rest[at..].starts_with(br#","event":{"type":"steer","#)
 }
 
 fn now() -> i64 {
@@ -169,9 +264,21 @@ fn told(event: &SessionEvent) -> bool {
         | SessionEvent::Technique(_)
         | SessionEvent::Action(_)
         | SessionEvent::Job(_)
-        | SessionEvent::CarryOn { .. }
-        | SessionEvent::Kernel(_)
-        | SessionEvent::Memory(_) => true,
+        | SessionEvent::CarryOn { .. } => true,
+        // Each kind by name, so one added later is decided on, not taken in by a catch-all: a stream of deltas
+        // (words aside, which go as one event) would be a line each.
+        SessionEvent::Memory(event) => match event {
+            MemoryEvent::Remembered { .. } | MemoryEvent::Forgot { .. } => true,
+        },
+        SessionEvent::Kernel(event) => match event {
+            KernelEvent::Text { .. }
+            | KernelEvent::ToolInput { .. }
+            | KernelEvent::ToolStart { .. }
+            | KernelEvent::ToolEnd { .. }
+            | KernelEvent::Steer { .. }
+            | KernelEvent::Retry { .. }
+            | KernelEvent::ModelSwitch { .. } => true,
+        },
     }
 }
 
@@ -273,6 +380,8 @@ pub struct SessionLog {
     words: RefCell<Option<(i64, String)>>,
     closed: Cell<bool>,
     cap: Rc<Cell<u64>>,
+    /// The log of the conversation going on, and how much of it there was when it was opened (none: there was none).
+    opened: Rc<RefCell<Option<(PathBuf, u64)>>>,
     jobs: RefCell<Option<mpsc::UnboundedSender<Job>>>,
 }
 
@@ -287,6 +396,7 @@ impl SessionLog {
             words: RefCell::default(),
             closed: Cell::new(false),
             cap: Rc::new(Cell::new(MAX_LOG_BYTES)),
+            opened: Rc::default(),
             jobs: RefCell::default(),
         })
     }
@@ -316,7 +426,7 @@ impl SessionLog {
         let jobs = jobs.get_or_insert_with(|| {
             let (send, receive) = mpsc::unbounded_channel();
             let kit = Kit { redact: self.redact.clone(), cap: self.cap.clone() };
-            tokio::task::spawn_local(write(receive, Writer { kit, log: None, left: vec![] }));
+            tokio::task::spawn_local(write(receive, Writer { kit, log: None, left: vec![], opened: self.opened.clone() }));
             send
         });
         let _ = jobs.send(job);
@@ -436,6 +546,20 @@ impl SessionLog {
         }
     }
 
+    /// The log of the conversation going on as it was when it was opened, before anything this run wrote in it: what the
+    /// conversation shows again as it's taken up (`replay_of` reads it). None without one (a conversation new, or kept
+    /// before there were logs).
+    pub async fn as_opened(&self) -> Option<Vec<u8>> {
+        self.written().await;
+        let (file, had) = self.opened.borrow().clone()?;
+        if had == 0 {
+            return None;
+        }
+        let mut bytes = Vec::new();
+        tokio::fs::File::open(&file).await.ok()?.take(had).read_to_end(&mut bytes).await.ok()?;
+        Some(bytes)
+    }
+
     /// What's been said goes to the disk, and nothing more is written: the session is closing.
     pub async fn close(&self) {
         if self.closed.replace(true) {
@@ -464,6 +588,8 @@ struct Writer {
     /// The conversations left last, the newest last: a save of one that lands after it was left (a /new straight after
     /// an answer) still goes in its log, or begins it with the lines that waited for it.
     left: Vec<Log>,
+    /// The log opened last, and how much of it there was then.
+    opened: Rc<RefCell<Option<(PathBuf, u64)>>>,
 }
 
 /// A conversation's log as it's written.
@@ -541,7 +667,8 @@ async fn write(mut jobs: mpsc::UnboundedReceiver<Job>, mut writer: Writer) {
                 };
                 let kit = &writer.kit;
                 let log = writer.log.insert(log);
-                log.start(kit).await;
+                let had = log.start(kit).await;
+                *writer.opened.borrow_mut() = Some((log.file(), had.unwrap_or(0)));
             }
             Job::Request { line, begin } => {
                 if let Some(log) = writer.log.as_mut() {
@@ -622,15 +749,15 @@ impl Log {
     }
 
     /// A log that waited begins, once its conversation is kept: one there already (an earlier session's) goes on,
-    /// unless it's behind what's kept; otherwise it's made.
-    async fn start(&mut self, kit: &Kit) {
+    /// unless it's behind what's kept; otherwise it's made. The size of the one that went on, when one did.
+    async fn start(&mut self, kit: &Kit) -> Option<u64> {
         if !matches!(self.state, Written::Waiting(_)) {
-            return;
+            return None;
         }
         if !tokio::fs::try_exists(self.folder.join(format!("{}.json", self.id))).await.unwrap_or(false) {
-            return;
+            return None;
         }
-        let Written::Waiting(waiting) = std::mem::replace(&mut self.state, Written::Theirs) else { return };
+        let Written::Waiting(waiting) = std::mem::replace(&mut self.state, Written::Theirs) else { return None };
         let file = self.file();
         match found(&file).await {
             Ok(Found::Ours { size, torn, at }) => {
@@ -642,16 +769,26 @@ impl Log {
                 };
                 if behind {
                     self.make(kit, waiting).await;
-                    return;
+                    return None;
                 }
                 self.state = Written::Appending { size, torn };
                 self.put(kit, split(waiting)).await;
+                Some(size)
             }
-            Ok(Found::Theirs) => {}
-            Ok(Found::Unreadable) => self.make(kit, waiting).await,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => self.make(kit, waiting).await,
+            Ok(Found::Theirs) => None,
+            Ok(Found::Unreadable) => {
+                self.make(kit, waiting).await;
+                None
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                self.make(kit, waiting).await;
+                None
+            }
             // Not to be read now (its permissions, a scanner holding it): left as it is, the lines wait for the next save.
-            Err(_) => self.state = Written::Waiting(waiting),
+            Err(_) => {
+                self.state = Written::Waiting(waiting);
+                None
+            }
         }
     }
 

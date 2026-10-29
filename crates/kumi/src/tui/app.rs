@@ -542,6 +542,9 @@ struct State {
     copied: Option<(String, f64)>,
     /// Kumi is closing to open again at once (with another DAW, or updated), where the conversation carries on.
     reopening: bool,
+    /// A conversation taken up is being shown again from its log: what happened then draws as it did, and nothing of
+    /// the moment comes with it (no alert, sound or terminal status, no animation, no panel, nothing sent or carried on).
+    replaying: bool,
 }
 impl State {
     fn new(options: &TuiOptions) -> Self {
@@ -670,6 +673,7 @@ impl State {
             clicks: None,
             copied: None,
             reopening: false,
+            replaying: false,
         }
     }
 }
@@ -1245,14 +1249,18 @@ fn head(text: &str, count: usize) -> String {
 fn assistant(started_at: Option<f64>, status: AnswerStatus) -> Entry {
     Entry::Assistant { text: String::new(), steps: vec![], status, elapsed_ms: None, started_at }
 }
-fn end_steps(entry: &EntryRef) {
+/// An answer's steps still running, ended as failed. `timed`: each takes how long it ran until now (an answer shown
+/// again from a log has no time for a step it cut short: the log doesn't say when it ended).
+fn end_steps(entry: &EntryRef, timed: bool) {
     if let Entry::Assistant { steps, .. } = &mut *entry.borrow_mut() {
         let now = perf_now();
         for step in steps {
             if step.state == StepState::Running {
                 step.state = StepState::Error;
                 step.ended_at = Some(now);
-                step.ms = step.started_at.map(|at| number::round(now - at)).or(step.ms);
+                if timed {
+                    step.ms = step.started_at.map(|at| number::round(now - at)).or(step.ms);
+                }
                 step.doing = None;
             }
         }
