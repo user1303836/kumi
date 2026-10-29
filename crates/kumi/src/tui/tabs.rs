@@ -131,6 +131,11 @@ impl TabPanel {
         self.inner.state.borrow().cursor.is_some()
     }
 
+    /// Every tab's title in the strip's order, those waiting off it too (the help names them).
+    pub fn titles(&self) -> Vec<String> {
+        self.inner.tabs.iter().map(|tab| tab.title().to_string()).collect()
+    }
+
     /// The keyboard's row in the active tab, while the keyboard is in the panel.
     pub fn cursor(&self) -> Option<i32> {
         self.inner.state.borrow().cursor

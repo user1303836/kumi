@@ -684,6 +684,7 @@ impl TuiApp {
             _ if own_hint.is_some() => own_hint.as_deref().unwrap_or(""),
             Panel::Btw { .. } => "↑↓ to scroll · c copies · esc to close",
             Panel::Job { .. } => "↑↓ to scroll · x stops it · r runs it again · c copies · esc to close",
+            Panel::Help { .. } => "↑↓ to scroll · esc to close",
             Panel::Pick { picker, .. } if picker.borrow().options.answers => {
                 "a number, then enter answers · or type your own · esc to close"
             }

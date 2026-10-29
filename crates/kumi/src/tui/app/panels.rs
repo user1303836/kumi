@@ -1345,6 +1345,10 @@ impl TuiApp {
             self.job_panel_input(&panel, event);
             return;
         }
+        if matches!(&*panel.borrow(), Panel::Help { .. }) {
+            self.help_input(&panel, event);
+            return;
+        }
         if let InputEvent::Key { name, mods, .. } = &event {
             if name == "escape" || (mods.ctrl && name == "c") {
                 let declined = self.closing_offer(&panel);

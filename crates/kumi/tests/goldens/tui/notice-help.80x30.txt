@@ -1,0 +1,30 @@
+  Kumi  ·  Night Drive                                                  ● Live
+
+
+   Keys and commands                                                ↓ 59 more
+
+   Send and steer
+     enter               Send. While Kumi works, it reads your message after
+                         the step under way
+     tab                 While Kumi works: send it after the answer instead;
+                         it waits above the box
+     alt+↑               Take the last waiting message back into the box
+     ctrl+j  alt+enter   A new line (shift+enter too, where the terminal
+                         tells it apart)
+     ↑ ↓                 The box's lines, then what you sent before
+     ctrl+v              Add the picture on the clipboard to your next
+                         message; files dragged in go with it too
+     backspace           In an empty box, take back the last file added
+
+   Move around
+     page up  page down  Scroll the conversation; the mouse wheel too (over
+                         the tabs, it scrolls them)
+     ctrl+home           The start of the conversation
+     ctrl+end            Back to the latest
+     drag                Select text: ctrl+c or a right-click copies it, and
+
+
+
+   Ask Kumi about your Set
+                                                  ↑↓ to scroll · esc to close
+

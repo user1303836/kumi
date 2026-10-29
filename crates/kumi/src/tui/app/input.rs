@@ -49,7 +49,7 @@ impl TuiApp {
         let busy_panel = panel.as_ref().is_some_and(|p| match &*p.borrow() {
             Panel::Pick { .. } => false,
             Panel::Btw { at, .. } => self.0.state.borrow().asides.get(*at).is_some_and(|a| a.borrow().state == "asking"),
-            Panel::Job { .. } => false,
+            Panel::Job { .. } | Panel::Help { .. } => false,
             _ => true,
         });
         if let Some(voice) = &self.0.voice {
@@ -95,6 +95,10 @@ impl TuiApp {
                 if self.0.tabs.inside()
                     && text.chars().count() == 1
                     && self.0.tabs.key(&if text == " " { "space".to_string() } else { text.to_lowercase() }) => {}
+            // W3-1's key, until the key registry (W3-3) takes it. `?` arrives as typed text, which key() never sees: on
+            // an empty box it opens the help, and anywhere else it types itself.
+            InputEvent::Text { text } if text == "?" && self.0.state.borrow().editor.is_empty() => self.open_help(),
+            // End of W3-1's key.
             InputEvent::Text { text } | InputEvent::Paste { text } => {
                 self.0.tabs.leave();
                 let mut state = self.0.state.borrow_mut();
@@ -573,34 +577,8 @@ impl TuiApp {
         if state.menu_dismissed || !text.starts_with('/') || text.chars().any(|c| string::trim(&c.to_string()).is_empty()) {
             return vec![];
         }
-        let c = self.can();
-        let matches: Vec<_> = COMMANDS
-            .iter()
-            .filter(|cmd| {
-                cmd.name.starts_with(&text)
-                    && match cmd.name {
-                        "/model" | "/effort" | "/fast" | "/login" | "/logout" => self.0.options.models.is_some(),
-                        "/memory" => c.memory,
-                        "/note" => c.change_note,
-                        "/recipes" => c.recipes,
-                        "/recipe" => c.run_recipe,
-                        "/jobs" => c.jobs,
-                        "/conversations" | "/resume" | "/rename" | "/fork" => c.conversations,
-                        "/reconnect" => c.reconnect,
-                        "/stop" => c.stop_daw,
-                        "/update" => self.0.options.updates.is_some(),
-                        "/daw" => self.0.options.switch_daw.is_some(),
-                        "/btw" => c.aside,
-                        "/voice" => self.0.voice.is_some(),
-                        "/willington" => self.willington().is_some(),
-                        "/slots" => self.0.options.slots.is_some(),
-                        "/music" => self.0.options.music.is_some(),
-                        "/map" => self.0.options.map.is_some(),
-                        "/palette" => c.palette,
-                        _ => true,
-                    }
-            })
-            .collect();
+        let can = self.can();
+        let matches: Vec<_> = COMMANDS.iter().filter(|cmd| cmd.name.starts_with(&text) && self.offered(&can, cmd.name)).collect();
         // A command typed in full comes first, even when it begins a longer one (/recipe, /recipes).
         let mut matches = matches;
         if let Some(at) = matches.iter().position(|cmd| cmd.name == text) {
@@ -611,6 +589,31 @@ impl TuiApp {
             state.menu_index = 0;
         }
         matches
+    }
+    /// Whether the `/` menu and the help offer a command: one that needs something only where this session has it
+    /// (`can`, what the session can do).
+    pub(super) fn offered(&self, can: &Capabilities, name: &str) -> bool {
+        match name {
+            "/model" | "/effort" | "/fast" | "/login" | "/logout" => self.0.options.models.is_some(),
+            "/memory" => can.memory,
+            "/note" => can.change_note,
+            "/recipes" => can.recipes,
+            "/recipe" => can.run_recipe,
+            "/jobs" => can.jobs,
+            "/conversations" | "/resume" | "/rename" | "/fork" => can.conversations,
+            "/reconnect" => can.reconnect,
+            "/stop" => can.stop_daw,
+            "/update" => self.0.options.updates.is_some(),
+            "/daw" => self.0.options.switch_daw.is_some(),
+            "/btw" => can.aside,
+            "/voice" => self.0.voice.is_some(),
+            "/willington" => self.willington().is_some(),
+            "/slots" => self.0.options.slots.is_some(),
+            "/music" => self.0.options.music.is_some(),
+            "/map" => self.0.options.map.is_some(),
+            "/palette" => can.palette,
+            _ => true,
+        }
     }
     pub(super) fn submit_task(&self) {
         let app = self.clone();
@@ -647,8 +650,7 @@ impl TuiApp {
         }
         if command == "/help" {
             self.clear_editor();
-            let options = &self.0.options;
-            self.notice(&help(options.switch_daw.is_some(), options.copy_on_select, options.mouse), NoticeTone::Info);
+            self.open_help();
             return Ok(());
         }
         if command == "/changelog" {
@@ -1499,32 +1501,6 @@ impl Command {
     }
 }
 
-/// Keys and commands, in the DAW's words (Live's, as it always said them, for Live).
-pub(super) fn help(daw: bool, copy_on_select: bool, mouse: bool) -> String {
-    let words = crate::daw::words();
-    // With the mouse left to the terminal, its wheel and Kumi's clicks aren't there either.
-    let scroll = if mouse { "page up/down or the mouse wheel scroll" } else { "page up/down scroll" };
-    let undo = if mouse { "click undo in HISTORY, or /undo, to take back a change" } else { "/undo takes back a change" };
-    let plays = if mouse { "space or the mouse plays a point" } else { "space plays a point" };
-    let copying = if !mouse {
-        "the mouse is your terminal's (\"mouse\": \"off\"), so its own selection copies"
-    } else if copy_on_select {
-        "drag across text to copy it, double-click for a word or triple-click for a line (Shift-drag, or Option in iTerm2, uses terminal selection)"
-    } else {
-        "drag across text (double-click for a word, triple-click for a line), then Ctrl+C or right-click copies it and Esc clears it (Shift-drag, or Option in iTerm2, uses terminal selection)"
-    };
-    let daw = if daw { " · /daw says which DAW Kumi works with, and /daw <name> opens Kumi again with another" } else { "" };
-    let (app, place, places) = (words.app, words.place, words.places);
-    // Willington's bindings are Live's.
-    let willington = if crate::daw::current().id() == kumi_types::daw::DawId::Ableton {
-        " /willington turns Willington's bindings (macro mapping and more) on or off;"
-    } else {
-        ""
-    };
-    format!(
-        "enter sends · ctrl+j or alt+enter starts a new line · ctrl+t talks instead of typing: press it again to stop, or hold it while you talk, and what you said lands in the box (enter stops and sends at once); /voice chooses the language and the microphone · ↑ and ↓ go through what you sent before · while Kumi works, enter sends a message it reads after the step under way, tab one for after the answer, and alt+↑ takes the last waiting one back · /btw asks something on the side without interrupting · ctrl+b moves a slow step that doesn't use {app} (a video, pages) to the background (press it twice in tmux), and /jobs shows, stops or reruns background jobs · esc stops Kumi · {scroll}, ctrl+home goes to the start and ctrl+end back · {undo} · /new starts a fresh conversation, /resume goes back to one kept (this {place}'s, or any {place}'s by its id or name), /rename names this one, and /fork carries on in a copy · /reconnect connects to {app} again, keeping the conversation{daw} · /copy copies the last answer, /export copies or saves the whole conversation, and /share saves it as a web page to send; {copying} · /model and /effort choose the model and how hard it thinks, and /fast turns on its faster tier when it has one;{willington} /slots shows which model does each listening job (stems, transcription, listening, embeddings), swaps one in plain words after a quick test, and /slots back <job> takes a swap back; /music shows your own music, which Kumi learns your taste from on this computer, and adds or removes a folder, pauses or forgets it; /map draws your sounds and songs as a map to move around, where {plays}, and /map open shows it in your browser; /login and /logout sign in and out · /memory shows what Kumi remembers (notes, techniques, recipes and what it learned from your {places}), and forget in MEMORY drops one; /recipes your saved ways of working · /update gets the newest Kumi, and /changelog says what's new in it · drag files in, or ctrl+v a picture, to send them with your next message (backspace in an empty box takes the last one back) · ctrl+c clears the box, then quits · type / for commands"
-    )
-}
 pub(super) const COMMANDS: &[Command] = &[
     Command { name: "/new", about: "Start a fresh conversation (the last one is kept); /new <name> names it" },
     Command { name: "/btw", about: "Ask something on the side, without interrupting Kumi" },
@@ -1570,17 +1546,4 @@ pub(super) const COMMANDS: &[Command] = &[
 fn subcommand(command: &str, name: &str) -> Option<String> {
     let rest = command.strip_prefix(name)?;
     (rest.is_empty() || rest.starts_with(char::is_whitespace)).then(|| kumi_agent::core::goal_mode::command_word(rest))
-}
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn help_leaves_the_wheel_and_the_clicks_out_while_the_mouse_is_the_terminals() {
-        let off = super::help(false, true, false);
-        assert!(off.contains("its own selection copies"), "{off}");
-        for gone in ["drag across text", "mouse wheel", "click undo", "or the mouse plays"] {
-            assert!(!off.contains(gone), "{gone}: {off}");
-        }
-        let on = super::help(false, true, true);
-        assert!(on.contains("drag across text to copy it") && on.contains("mouse wheel") && on.contains("click undo"), "{on}");
-    }
 }
