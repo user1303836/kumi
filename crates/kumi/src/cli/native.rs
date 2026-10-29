@@ -39,6 +39,9 @@ pub struct CliIo {
     pub env: Env,
     pub args: Vec<String>,
     pub signals: bool,
+    /// The process's own terminal, which the full screen asks what it is as it starts (`tui::probe`); tests' terminals
+    /// aren't asked.
+    pub probe: bool,
     /// Opens Kumi again with these arguments, in place of starting the program (tests).
     pub reopen: Option<Rc<dyn Fn(Vec<String>) -> LocalBoxFuture<'static, i32>>>,
     /// Which DAWs are on this computer, for /daw to offer (tests); else the DAWs' own detection says.
@@ -54,6 +57,7 @@ impl CliIo {
             env,
             args: vec![],
             signals: false,
+            probe: false,
             reopen: None,
             daws_here: None,
             exit_after_reopen: Rc::new(Cell::new(false)),
@@ -509,6 +513,7 @@ pub fn main_with(answers: impl Into<Answers>) -> i32 {
     );
     io.args = kumi_common::env::args().skip(1).collect();
     io.signals = true;
+    io.probe = true;
     if let Ok(executable) = std::env::current_exe() {
         if let Err(error) = install::ensure_native_launcher(&io.env, &executable) {
             io.err.write(&format!("Kumi: could not update its launcher: {error}\n"));

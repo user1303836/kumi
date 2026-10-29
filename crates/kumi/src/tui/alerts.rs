@@ -1,8 +1,8 @@
 //! Telling the producer what Kumi is doing while they look elsewhere: the terminal's program status
 //! (OSC 7501, and OSC 9;4 progress where the terminal draws that) and a desktop notification. Which
-//! sequences go out depends on the terminal, chosen once from the environment
-//! ([`detect_terminal_profile`]): Kumi never asks the terminal, since a reply would reach the input as
-//! keys (`ESC ]` is Alt-]).
+//! sequences go out depends on the terminal: chosen from the environment ([`detect_terminal_profile`]),
+//! then from what the terminal says of itself when Kumi asks it as the full screen starts
+//! ([`TerminalProfile::answered`], `tui::probe`). Its answers are read as answers, never as keys.
 
 use std::collections::HashMap;
 
@@ -36,6 +36,15 @@ pub struct TerminalProfile {
     /// The terminal opens a link's words itself (OSC 8), so an answer's addresses needn't follow them: iTerm2, Ghostty,
     /// WezTerm, kitty, Windows Terminal and VS Code's terminal, outside a multiplexer.
     pub hyperlinks: bool,
+    /// What the terminal said of itself when Kumi asked, as it started: its name and version (`ghostty 1.1.3`).
+    pub version: Option<String>,
+    /// Whether it draws a frame at once (mode 2026); None when it didn't say.
+    pub sync: Option<bool>,
+    /// Whether it speaks the kitty keyboard protocol.
+    pub kitty_keys: bool,
+    /// Its text's colour and its background, where it said: a theme follows the background.
+    pub foreground: Option<super::style::Rgb>,
+    pub background: Option<super::style::Rgb>,
 }
 
 impl TerminalProfile {
@@ -52,7 +61,70 @@ impl TerminalProfile {
             erase: true,
             repaint: false,
             hyperlinks: false,
+            version: None,
+            sync: None,
+            kitty_keys: false,
+            foreground: None,
+            background: None,
         }
+    }
+
+    /// What the terminal said of itself, over what its environment said. Over SSH, where `TERM_PROGRAM` doesn't
+    /// arrive, its name is what turns on kitty's pictures, its own notifications and the links it opens itself; inside tmux, tmux answers for itself,
+    /// and the terminal outside stays unknown. A terminal its environment keeps quiet stays quiet.
+    pub fn answered(mut self, answers: &super::probe::Answers, env: &HashMap<String, String>, platform: &str) -> TerminalProfile {
+        self.version = answers.version.clone();
+        self.sync = answers.sync;
+        self.kitty_keys = answers.kitty_keys;
+        self.foreground = answers.foreground;
+        self.background = answers.background;
+        let Some(name) = answers.version.as_deref().map(str::to_ascii_lowercase).filter(|_| self.status) else {
+            return self;
+        };
+        if name.starts_with("tmux") {
+            self.tmux = true;
+            self.images = false;
+            self.progress = false;
+            self.notify = system_notification(platform, env);
+            return self;
+        }
+        let get = |name: &str| env.get(name).map(String::as_str).unwrap_or("");
+        let term = get("TERM");
+        let multiplexed = self.tmux || !get("ZELLIJ").is_empty() || term.starts_with("screen") || term.starts_with("tmux");
+        // iTerm2's own selection is Option-drag, inside screen or Zellij too, as its LC_TERMINAL says over SSH.
+        if name.starts_with("iterm2") {
+            self.iterm = true;
+        }
+        // The terminals whose names Kumi knows, as their environment would name them: their notifications, whether they
+        // show kitty's images, whether they draw OSC 9;4 progress.
+        let (notify, images, progress) = if name.starts_with("kitty") {
+            (NotifyChannel::Osc99, true, false)
+        } else if name.starts_with("ghostty") {
+            (NotifyChannel::Osc777, true, true)
+        } else if name.starts_with("wezterm") || name.starts_with("foot") {
+            (NotifyChannel::Osc777, false, false)
+        } else if name.starts_with("iterm2") {
+            (NotifyChannel::Osc9, false, false)
+        } else {
+            return self;
+        };
+        if !multiplexed {
+            self.notify = notify;
+            self.images = self.images || images;
+            self.progress = self.progress || progress;
+            // Each of them opens a link's words itself (OSC 8).
+            self.hyperlinks = true;
+        }
+        self
+    }
+}
+
+/// The system's own notification, for a terminal Kumi can't reach one through (or that it doesn't know, inside tmux).
+fn system_notification(platform: &str, env: &HashMap<String, String>) -> NotifyChannel {
+    match platform {
+        "darwin" => NotifyChannel::AppleScript,
+        "linux" if on_path("notify-send", env) => NotifyChannel::NotifySend,
+        _ => NotifyChannel::None,
     }
 }
 
@@ -102,11 +174,7 @@ pub fn detect_terminal_profile(env: &HashMap<String, String>, platform: &str) ->
     // Inside tmux the terminal outside is unknown (tmux names itself in TERM_PROGRAM): the system's own
     // notification reaches the producer wherever that is.
     let notify = if tmux {
-        match platform {
-            "darwin" => NotifyChannel::AppleScript,
-            "linux" if on_path("notify-send", env) => NotifyChannel::NotifySend,
-            _ => NotifyChannel::None,
-        }
+        system_notification(platform, env)
     } else if ghostty || wezterm || foot {
         NotifyChannel::Osc777
     } else if iterm {
@@ -145,6 +213,7 @@ pub fn detect_terminal_profile(env: &HashMap<String, String>, platform: &str) ->
         erase: !screen,
         repaint: windows_terminal,
         hyperlinks,
+        ..TerminalProfile::quiet()
     }
 }
 
@@ -376,10 +445,8 @@ mod tests {
                 tmux: false,
                 app_id: Some("com.mitchellh.ghostty".into()),
                 images: true,
-                iterm: false,
-                erase: true,
-                repaint: false,
                 hyperlinks: true,
+                ..TerminalProfile::quiet()
             }
         );
         assert_eq!(profile(&[("TERM_PROGRAM", "WezTerm")], "linux").notify, NotifyChannel::Osc777);
@@ -402,13 +469,9 @@ mod tests {
                 status: true,
                 progress: true,
                 notify: NotifyChannel::Bell,
-                tmux: false,
-                app_id: None,
-                images: false,
-                iterm: false,
-                erase: true,
                 repaint: true,
                 hyperlinks: true,
+                ..TerminalProfile::quiet()
             }
         );
         assert!(!profile(&[("TERM_PROGRAM", "iTerm.app")], "darwin").progress);
@@ -465,21 +528,7 @@ mod tests {
     #[test]
     fn inside_tmux_the_system_notifies_and_sequences_pass_through() {
         let profile = detect_terminal_profile(&env(&[("TMUX", "/tmp/tmux-501/default,1,0"), ("TERM_PROGRAM", "tmux")]), "darwin");
-        assert_eq!(
-            profile,
-            TerminalProfile {
-                status: true,
-                progress: false,
-                notify: NotifyChannel::AppleScript,
-                tmux: true,
-                app_id: None,
-                images: false,
-                iterm: false,
-                erase: true,
-                repaint: false,
-                hyperlinks: false,
-            }
-        );
+        assert_eq!(profile, TerminalProfile { status: true, notify: NotifyChannel::AppleScript, tmux: true, ..TerminalProfile::quiet() });
         assert_eq!(
             tmux_wrap("\u{1b}]7501;state=idle:app=kumi\u{1b}\\"),
             "\u{1b}Ptmux;\u{1b}\u{1b}]7501;state=idle:app=kumi\u{1b}\u{1b}\\\u{1b}\\"
