@@ -1,0 +1,24 @@
+  Kumi  ·  Night Drive                                                  ● Live
+
+
+
+                            Kumi can see Night Drive.
+
+                                       Try
+                             “What's on this track?”
+                             “Set the tempo to 124”
+                       “Why might my low end sound muddy?”
+
+      Kumi keeps each Set's conversations: /conversations goes back to one.
+
+  NOW   FOCUS   HISTORY 1 ────────────────────────────────────── ctrl+\ closes
+  Ready
+  ✓ Changed the bass                                                      undo
+  Arpeggiator → Operator → Reverb → Echo → Utility
+
+
+
+
+   Ask Kumi about your Set
+                                                                enter to send
+
