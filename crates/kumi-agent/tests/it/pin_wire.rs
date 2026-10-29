@@ -954,7 +954,14 @@ fn every_session_event_keeps_its_wire_shape() {
 #[test]
 fn every_line_of_a_conversations_log_keeps_its_shape() {
     let header = |from: Option<&str>| {
-        LogLine::Header(LogHeader { v: 1, id: "mv66me0m3fa91c".into(), at: AT, kumi: "1.25.0".into(), before: 12, from: from.map(Into::into) })
+        LogLine::Header(LogHeader {
+            v: 1,
+            id: "mv66me0m3fa91c".into(),
+            at: AT,
+            kumi: "1.25.0".into(),
+            before: 12,
+            from: from.map(Into::into),
+        })
     };
     let lines = vec![
         header(None),
@@ -967,10 +974,7 @@ fn every_line_of_a_conversations_log_keeps_its_shape() {
             pinned: Some(pins()[0].clone()),
         }),
         LogLine::Event { at: AT + 3, event: SessionEvent::Kernel(KernelEvent::Text { text: "Widened it.".into() }) },
-        LogLine::Message {
-            at: AT + 4,
-            message: serde_json::json!({"role":"assistant","content":[{"type":"text","text":"Widened it."}]}),
-        },
+        LogLine::Message { at: AT + 4, message: serde_json::json!({"role":"assistant","content":[{"type":"text","text":"Widened it."}]}) },
         LogLine::Saved { at: AT + 5, saved_at: AT + 4, turns: 2 },
     ];
     let kinds: BTreeSet<&str> = lines

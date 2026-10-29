@@ -1287,10 +1287,18 @@ local_test!(a_change_shown_again_can_be_undone_only_in_the_session_that_made_it,
             })
             .collect()
     };
-    let one = harness(None, logged);
+    let log = SessionLog::new(dir.path(), kumi_types::place::Places::LIVE, Rc::new(|text: &str| text.to_owned()));
+    let one = harness(None, |o| {
+        o.conversations = Some(store.clone());
+        o.on_event = SessionLog::tee(&log, o.on_event.clone());
+        o.log = Some(log.clone());
+    });
     project(&one, E);
     one.session.start().await.unwrap();
+    // A change, as the app has one from the integration: the session watches it, and the screen is told (through the
+    // log in front of it).
     one.session.watch(WatchEvent::Change(change("c1", "applied", 1)));
+    log.event(&SessionEvent::Change { change: change("c1", "applied", 1) });
     one.session.submit("turn bass down", None).await.unwrap();
     saved(store.as_ref(), E, 1).await;
     project(&one, F);
