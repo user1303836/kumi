@@ -314,7 +314,10 @@ impl InputParser {
                 let used = escape(state, timed_out, events);
                 if used == 0 {
                     let parser = self.clone();
-                    let delay = Duration::from_secs_f64(self.inner.escape_delay_ms.max(0.0) / 1000.0);
+                    // A terminal's answer under way can come in reads further apart than the Escape delay (over SSH): it's
+                    // waited for longer, so its head isn't dropped and its tail typed.
+                    let wait = if answer_under_way(&state.buffer) { REPLY_WAIT_MS } else { 0.0 };
+                    let delay = Duration::from_secs_f64(self.inner.escape_delay_ms.max(wait).max(0.0) / 1000.0);
                     // Start the timeout when input arrives, as setTimeout does,
                     // even if the spawned task is first polled much later.
                     let timeout = tokio::time::sleep(delay);
@@ -367,6 +370,22 @@ fn key(events: &mut Vec<InputEvent>, name: &str, mods: Modifiers, event: i64) {
 }
 
 /// Characters consumed from an escape at the start of the buffer, or 0 to wait for more.
+/// How long a terminal's answer under way is waited for, at most, between its reads.
+const REPLY_WAIT_MS: f64 = 500.0;
+
+/// What starts only a terminal's answer, never a key: an OSC with its number (`ESC ] 11 ;`), a DCS report
+/// (`ESC P >|`, `ESC P 1 +`), a CSI with `?` (`ESC [ ?`), kitty's graphics reply (`ESC _ G i=`).
+fn answer_under_way(buffer: &str) -> bool {
+    let numbered = |text: &str| {
+        let digits = text.bytes().take_while(u8::is_ascii_digit).count();
+        digits > 0 && text[digits..].starts_with(';')
+    };
+    buffer.strip_prefix("\u{1b}]").is_some_and(numbered)
+        || buffer.strip_prefix("\u{1b}P").is_some_and(|text| text.starts_with('>') || text.starts_with(|c: char| c.is_ascii_digit()))
+        || buffer.starts_with("\u{1b}[?")
+        || buffer.strip_prefix("\u{1b}_G").is_some_and(|text| ["i=", "I=", "p=", ";"].iter().any(|start| text.starts_with(start)))
+}
+
 /// Where a string sequence's content ends and the sequence does: at ST (`ESC \`) or BEL, whichever comes first.
 fn terminated(buffer: &str) -> Option<(usize, usize)> {
     let st = buffer[2..].find("\u{1b}\\").map(|at| (2 + at, 2 + at + 2));

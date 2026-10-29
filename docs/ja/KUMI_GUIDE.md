@@ -620,6 +620,7 @@ Kumi はすべてを `~/.kumi` に保存します。`~/.kumi/settings.json` に�
 | `KUMI_UI=plain` | 全画面アプリの代わりに 1 行ずつのプレーンな出力。`kumi bridge`、`kumi update` などのコマンドも、処理中にスピナーを表示しません |
 | `KUMI_COLOR` | 検出が間違っているときの `truecolor`、`256`、`16`、`none`。`NO_COLOR` にも従う |
 | `KUMI_ICONS` | ターミナルの記号が正しく表示されないときの `glyphs` または `badges`（2 文字のアイコン） |
+| `KUMI_PROBE=off` | 起動時にターミナルの種類を問い合わせない。画像、通知、色は環境変数だけで決まる |
 | `KUMI_TRACE=1` | ブリッジ呼び出しごとにその名前を表示（引数や結果は表示しない） |
 
 インストーラーが読む設定：

@@ -900,10 +900,11 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
     } else if full_screen {
         let mut options = TuiOptions::new(session, io.input.clone(), io.out.clone(), mode);
         // What the terminal is, asked once as the screen starts: its answers come before what its environment says of
-        // it, which stays the fallback. A terminal its environment keeps quiet (the Linux console, a dumb one) isn't asked.
+        // it, which stays the fallback. A terminal its environment keeps quiet (the Linux console, a dumb one) isn't asked,
+        // nor one whose producer said not to (`KUMI_PROBE=off`).
         let platform = kumi_types::system::platform();
         let profile = crate::tui::alerts::detect_terminal_profile(&io.env, platform);
-        if io.probe && profile.status {
+        if io.probe && profile.status && io.env.get("KUMI_PROBE").map(String::as_str) != Some("off") {
             let probed = crate::tui::probe::probe(&io.input, &io.out, crate::tui::probe::BUDGET).await;
             let version = probed.answers.version.clone();
             options.terminal = Some(profile.answered(&probed.answers, &io.env, platform));

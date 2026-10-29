@@ -1487,6 +1487,7 @@ Environment variables (paths must be absolute):
 | `KUMI_UI=plain` | Plain line-by-line output instead of the full-screen app; `kumi bridge`, `kumi update` and the other commands show no spinner while they work |
 | `KUMI_COLOR` | `truecolor`, `256`, `16` or `none`, when detection gets it wrong; `NO_COLOR` is honoured |
 | `KUMI_ICONS` | `glyphs` or `badges` (two-letter icons), when the terminal's symbols look wrong |
+| `KUMI_PROBE=off` | Don't ask the terminal what it is as Kumi starts; its environment alone chooses pictures, notifications and colours |
 | `KUMI_TRACE=1` | Print the name of each bridge call (no arguments or results) |
 
 The installer reads:

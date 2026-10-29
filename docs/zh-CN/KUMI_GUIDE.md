@@ -620,6 +620,7 @@ Kumi 把一切都保存在 `~/.kumi` 中。`~/.kumi/settings.json` 包含：
 | `KUMI_UI=plain` | 用逐行的纯文本输出代替全屏应用；`kumi bridge`、`kumi update` 等命令在运行时也不显示加载动画 |
 | `KUMI_COLOR` | 颜色检测出错时设为 `truecolor`、`256`、`16` 或 `none`；也会遵循 `NO_COLOR` |
 | `KUMI_ICONS` | 终端里的符号显示不正常时设为 `glyphs` 或 `badges`（两个字母的图标） |
+| `KUMI_PROBE=off` | Kumi 启动时不询问终端是什么终端；图像、通知和颜色只按环境变量决定 |
 | `KUMI_TRACE=1` | 打印每次桥接调用的名称（不含参数和结果） |
 
 安装程序会读取：

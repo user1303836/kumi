@@ -1002,6 +1002,20 @@ async fn a_terminals_answers_are_read_as_answers_and_never_typed() {
         // An answer Kumi didn't ask for is read and dropped; Alt-] on its own is still Alt-], after the Escape delay.
         assert_eq!(parse(&["\u{1b}]4;1;rgb:00/00/00\u{1b}\\z"], 5.0).await, [text("z")]);
         assert_eq!(parse(&["\u{1b}]"], 5.0).await, [key("]", Modifiers::ALT)]);
+        // An answer under way is waited for longer than the Escape delay between its reads (a slow SSH link), so its head
+        // isn't dropped and its tail typed; past that wait, what came of it is dropped, never typed.
+        let events = Rc::new(RefCell::new(Vec::new()));
+        let sink = Rc::clone(&events);
+        let parser = InputParser::with_escape_delay(Rc::new(move |event| sink.borrow_mut().push(event)), 5.0);
+        parser.push("\u{1b}]11;rgb:ff");
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        parser.push("ff/ffff/ffff\u{7}z");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        assert_eq!(events.take(), [InputEvent::Reply(Reply::Color { which: 11, rgb: Some([255, 255, 255]) }), text("z")]);
+        parser.push("\u{1b}P>|kit");
+        tokio::time::sleep(Duration::from_millis(600)).await;
+        assert!(events.take().is_empty());
+        parser.dispose();
     })
     .await;
 }
@@ -1099,7 +1113,7 @@ fn what_the_terminal_says_of_itself_comes_before_its_environment() {
     assert!(!before.images && before.notify == NotifyChannel::None);
     let after = before.answered(&said("ghostty 1.1.3"), &ssh, "linux");
     assert!(after.images && after.progress && after.notify == NotifyChannel::Osc777);
-    assert!(after.hyperlinks && !before.hyperlinks, "links Ghostty opens itself, over SSH too");
+    assert!(after.hyperlinks && !detect_terminal_profile(&ssh, "linux").hyperlinks, "links Ghostty opens itself, over SSH too");
     assert_eq!((after.version.as_deref(), after.background), (Some("ghostty 1.1.3"), Some([30, 30, 30])));
     assert_eq!(answered_color_depth(ColorDepth::Colors256, Some("ghostty 1.1.3"), &ssh), ColorDepth::Truecolor);
     let kitty = detect_terminal_profile(&ssh, "linux").answered(&said("kitty(0.35.2)"), &ssh, "linux");

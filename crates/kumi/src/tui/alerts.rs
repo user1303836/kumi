@@ -463,7 +463,17 @@ mod tests {
         // Without notify-send on PATH, a Linux terminal of no known kind has nothing.
         assert_eq!(profile(&[("TERM", "xterm-256color"), ("PATH", "/nowhere")], "linux").notify, NotifyChannel::None);
         let windows = profile(&[("WT_SESSION", "1"), ("__CFBundleIdentifier", "ignored")], "win32");
-        assert_eq!(windows, TerminalProfile { status: true, progress: true, notify: NotifyChannel::Bell, repaint: true, hyperlinks: true, ..TerminalProfile::quiet() });
+        assert_eq!(
+            windows,
+            TerminalProfile {
+                status: true,
+                progress: true,
+                notify: NotifyChannel::Bell,
+                repaint: true,
+                hyperlinks: true,
+                ..TerminalProfile::quiet()
+            }
+        );
         assert!(!profile(&[("TERM_PROGRAM", "iTerm.app")], "darwin").progress);
     }
 
