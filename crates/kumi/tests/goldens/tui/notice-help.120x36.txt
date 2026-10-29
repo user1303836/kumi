@@ -15,8 +15,8 @@
    (this Set's, or any Set's by its id or name), /rename names this one, and
    /fork carries on in a copy · /reconnect connects to Live again, keeping the
    conversation · /copy copies the last answer, /export copies or saves the
-   whole conversation, and /share saves it as a web page to send; drag to
-   select text, then Ctrl+C or right-click copies it; Esc clears the selection
+   whole conversation, and /share saves it as a web page to send; drag across
+   text to copy it, double-click for a word or triple-click for a line
    (Shift-drag, or Option in iTerm2, uses terminal selection) · /model and        HISTORY ────────────────────────────
    /effort choose the model and how hard it thinks, and /fast turns on its        Nothing changed yet
    faster tier when it has one; /willington turns Willington's bindings (macro
@@ -27,7 +27,7 @@
    adds or removes a folder, pauses or forgets it; /map draws your sounds and
    songs as a map to move around, where space or the mouse plays a point, and
    /map open shows it in your browser; /login and /logout sign in and out ·
-   /memory shows what Kumi remembers (notes, techniques,
+   /memory shows what Kumi remembers (notes, techniques, reci
 
 
 

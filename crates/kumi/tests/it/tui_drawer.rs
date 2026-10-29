@@ -398,7 +398,10 @@ case!(a_drag_stays_above_the_drawer_or_in_it, async {
     let copied = Rc::new(RefCell::new(Vec::<String>::new()));
     let copy = copied.clone();
     let h = Harness::with(80, 30, Rc::new(Control::default()), move |o| {
-        o.copy = Some(Rc::new(move |text| copy.borrow_mut().push(text.into())));
+        o.copy = Some(Rc::new(move |text| {
+            copy.borrow_mut().push(text.into());
+            true
+        }));
     });
     h.start().await;
     h.connect();

@@ -44,8 +44,13 @@ case!(drag_select_and_copy_the_displayed_text_while_streaming, async {
     use std::cell::RefCell;
     let copied = Rc::new(RefCell::new(Vec::<String>::new()));
     let copy = copied.clone();
+    // With copyOnSelect off, the selection stays after letting go, for Ctrl+C.
     let h = Harness::with(120, 36, Rc::new(Control::default()), move |o| {
-        o.copy = Some(Rc::new(move |text| copy.borrow_mut().push(text.into())));
+        o.copy_on_select = false;
+        o.copy = Some(Rc::new(move |text| {
+            copy.borrow_mut().push(text.into());
+            true
+        }));
     });
     h.start().await;
     h.connect();
@@ -63,7 +68,8 @@ case!(drag_select_and_copy_the_displayed_text_while_streaming, async {
     h.has("view paused");
     h.type_text("\x03").await;
     assert_eq!(&*copied.borrow(), &["Select"]);
-    h.has("Copied selected text");
+    // Said in the composer's hint row for a moment, not in the conversation.
+    h.has("Copied “Select”");
     h.has("keep my draft");
     h.has("Another streamed line");
     assert!(!h.calls().contains(&"cancel".into()));
@@ -71,7 +77,7 @@ case!(drag_select_and_copy_the_displayed_text_while_streaming, async {
     h.close().await;
 });
 case!(escape_and_resize_clear_a_text_selection_without_cancelling, async {
-    let h = Harness::new(120, 36);
+    let h = Harness::with(120, 36, Rc::new(Control::default()), |o| o.copy_on_select = false);
     h.start().await;
     h.connect();
     h.type_text("Say something\r").await;
@@ -95,7 +101,11 @@ case!(right_click_copies_unicode_and_new_notices_leave_the_frozen_view, async {
     let copied = Rc::new(RefCell::new(Vec::<String>::new()));
     let copy = copied.clone();
     let h = Harness::with(120, 36, Rc::new(Control::default()), move |o| {
-        o.copy = Some(Rc::new(move |text| copy.borrow_mut().push(text.into())));
+        o.copy_on_select = false;
+        o.copy = Some(Rc::new(move |text| {
+            copy.borrow_mut().push(text.into());
+            true
+        }));
     });
     h.start().await;
     h.connect();
@@ -115,6 +125,189 @@ case!(right_click_copies_unicode_and_new_notices_leave_the_frozen_view, async {
     h.emit(json!({"type":"notice","message":"Choose the reference to compare."}));
     h.has("Choose the reference to compare.");
     assert!(!has(&h.screen(), "view paused"));
+    h.close().await;
+});
+/// A harness whose clipboard tool takes what's copied into `copied`.
+fn copying(copied: &Rc<std::cell::RefCell<Vec<String>>>) -> Harness {
+    let copy = copied.clone();
+    Harness::with(120, 36, Rc::new(Control::default()), move |o| {
+        o.copy = Some(Rc::new(move |text| {
+            copy.borrow_mut().push(text.into());
+            true
+        }))
+    })
+}
+/// The row and column where `text` shows.
+fn find(h: &Harness, text: &str) -> (usize, usize) {
+    let lines = h.screen();
+    let y = lines.iter().position(|line| line.contains(text)).unwrap_or_else(|| panic!("{text:?}:\n{}", lines.join("\n")));
+    (y, lines[y][..lines[y].find(text).unwrap()].chars().count())
+}
+case!(letting_go_of_a_drag_copies_it_and_the_view_goes_on, async {
+    let copied = Rc::new(std::cell::RefCell::new(Vec::<String>::new()));
+    let h = copying(&copied);
+    h.start().await;
+    h.connect();
+    h.type_text("Say something\r").await;
+    h.type_text("keep my draft").await;
+    h.emit(json!({"type":"state","state":"running"}));
+    h.emit(json!({"type":"text","text":"Select these words"}));
+    h.wait_for("Select these words").await;
+    let (y, x) = find(&h, "Select these words");
+    // While dragging, the view holds still and says letting go copies.
+    h.type_text(&format!("\x1b[<0;{};{}M\x1b[<32;{};{}M", x + 1, y + 1, x + 6, y + 1)).await;
+    h.emit(json!({"type":"text","text":"\nAnother streamed line"}));
+    assert!(!has(&h.screen(), "Another streamed line"));
+    h.has("let go to copy");
+    assert!(copied.borrow().is_empty());
+    // Let go: copied, said in the composer's hint row, and the view goes on.
+    h.type_text(&format!("\x1b[<0;{};{}m", x + 6, y + 1)).await;
+    assert_eq!(&*copied.borrow(), &["Select"]);
+    assert!(h.output.text.borrow().contains("\x1b]52;c;U2VsZWN0\x07"));
+    h.has("Copied “Select”");
+    h.has("Another streamed line");
+    assert!(!has(&h.screen(), "let go to copy"));
+    // Ctrl-C just after copies again (it's many terminals' copy key): it doesn't stop Kumi or clear the box.
+    h.type_text("\x03").await;
+    assert_eq!(&*copied.borrow(), &["Select", "Select"]);
+    assert!(!h.calls().contains(&"cancel".into()));
+    h.has("keep my draft");
+    // Only once: the next one stops Kumi as ever.
+    h.type_text("\x03").await;
+    h.wait_for_call("cancel").await;
+    h.close().await;
+});
+case!(esc_just_after_a_copy_stops_a_working_kumi_and_while_idle_only_takes_the_toast_away, async {
+    let copied = Rc::new(std::cell::RefCell::new(Vec::<String>::new()));
+    let h = copying(&copied);
+    h.start().await;
+    h.connect();
+    h.type_text("Say something\r").await;
+    h.emit(json!({"type":"state","state":"running"}));
+    h.emit(json!({"type":"text","text":"Select these words"}));
+    h.wait_for("Select these words").await;
+    let (y, x) = find(&h, "Select these words");
+    let drag = format!("\x1b[<0;{};{}M\x1b[<32;{};{}M\x1b[<0;{};{}m", x + 1, y + 1, x + 6, y + 1, x + 6, y + 1);
+    h.type_text(&drag).await;
+    h.has("Copied “Select”");
+    // While Kumi works, Esc is the stop key as ever: it stops Kumi and takes the toast with it.
+    h.type_text("\x1b").await;
+    h.wait_for_call("cancel").await;
+    h.wait_until_hidden("Copied “Select”").await;
+    // While it's idle, the first Esc just after a copy only takes the toast away.
+    h.emit(json!({"type":"state","state":"idle"}));
+    let (y, x) = find(&h, "Select these words");
+    let drag = format!("\x1b[<0;{};{}M\x1b[<32;{};{}M\x1b[<0;{};{}m", x + 1, y + 1, x + 6, y + 1, x + 6, y + 1);
+    h.type_text(&drag).await;
+    h.has("Copied “Select”");
+    let cancels = h.calls().iter().filter(|call| *call == "cancel").count();
+    h.type_text("\x1b").await;
+    h.wait_until_hidden("Copied “Select”").await;
+    assert_eq!(h.calls().iter().filter(|call| *call == "cancel").count(), cancels);
+    h.close().await;
+});
+case!(a_double_click_copies_a_word_and_a_triple_click_the_line_it_wrapped, async {
+    let copied = Rc::new(std::cell::RefCell::new(Vec::<String>::new()));
+    let h = copying(&copied);
+    h.start().await;
+    h.connect();
+    h.type_text("Say something\r").await;
+    let line = "Put Kick_01_final on the drum bus, then the low end sits around 120 Hz and the bass makes room below it.";
+    h.emit(json!({"type":"state","state":"running"}));
+    h.emit(json!({"type":"text","text":line}));
+    h.emit(json!({"type":"turn-complete","result":{"stopReason":"completed"},"elapsedMs":10}));
+    h.emit(json!({"type":"state","state":"idle"}));
+    h.wait_for("Kick_01_final").await;
+    let (y, x) = find(&h, "Kick_01_final");
+    let click = |x: usize, y: usize| format!("\x1b[<0;{};{}M\x1b[<0;{};{}m", x + 1, y + 1, x + 1, y + 1);
+    h.type_text(&click(x + 4, y).repeat(2)).await;
+    assert_eq!(&*copied.borrow(), &["Kick_01_final"]);
+    h.has("Copied “Kick_01_final”");
+    // The answer wrapped onto a second row: a triple click there takes the whole line as it was written.
+    let (below, _) = find(&h, "room below it.");
+    assert_eq!(below, y + 1, "the line wraps:\n{}", h.screen().join("\n"));
+    copied.borrow_mut().clear();
+    h.type_text(&click(10, below).repeat(3)).await;
+    assert_eq!(copied.borrow().last().map(String::as_str), Some(line));
+    h.has("Copied “Put Kick_01_final on the drum bus, then…”");
+    h.close().await;
+});
+case!(a_triple_click_while_text_streams_takes_the_line_it_was_on, async {
+    let copied = Rc::new(std::cell::RefCell::new(Vec::<String>::new()));
+    let h = copying(&copied);
+    h.start().await;
+    h.connect();
+    h.type_text("Say something\r").await;
+    let line = "Put Kick_01_final on the drum bus, then the low end sits around 120 Hz and the bass makes room below it.";
+    h.emit(json!({"type":"state","state":"running"}));
+    h.emit(json!({"type":"text","text":format!("{line}\n")}));
+    h.wait_for("room below it.").await;
+    let (y, _) = find(&h, "room below it.");
+    let (press, release) = (format!("\x1b[<0;11;{}M", y + 1), format!("\x1b[<0;11;{}m", y + 1));
+    // A click, and the second press: its word, on a frame held still.
+    h.type_text(&format!("{press}{release}{press}")).await;
+    // The answer goes on, and the rows move up under the held frame.
+    h.emit(json!({"type":"text","text":"Another line\nAnd another\n"}));
+    h.screen();
+    // The second release and the third click come in one read: the line is the one the held frame showed there.
+    h.type_text(&format!("{release}{press}{release}")).await;
+    assert_eq!(copied.borrow().last().map(String::as_str), Some(line));
+    h.close().await;
+});
+case!(a_drag_stays_out_of_the_composer_and_over_ssh_says_how_else_to_copy, async {
+    // No clipboard tool here (over SSH): only the terminal takes the copy.
+    let h = Harness::new(120, 36);
+    h.start().await;
+    h.connect();
+    h.type_text("Say something\r").await;
+    h.emit(json!({"type":"state","state":"running"}));
+    h.emit(json!({"type":"text","text":"First line\nSecond line"}));
+    h.emit(json!({"type":"turn-complete","result":{"stopReason":"completed"},"elapsedMs":10}));
+    h.emit(json!({"type":"state","state":"idle"}));
+    h.wait_for("Second line").await;
+    h.type_text("keep my draft").await;
+    let (y, x) = find(&h, "First line");
+    let (draft, _) = find(&h, "keep my draft");
+    // Dragged down into the composer, the selection stops at the conversation's last row.
+    h.type_text(&format!("\x1b[<0;{};{}M\x1b[<32;{};{}M\x1b[<0;{};{}m", x + 1, y + 1, 20, draft + 1, 20, draft + 1)).await;
+    let written = h.output.text.borrow().clone();
+    let copy = written.rsplit("\x1b]52;c;").next().and_then(|rest| rest.split('\x07').next()).unwrap();
+    use base64::Engine;
+    let copy = String::from_utf8(base64::engine::general_purpose::STANDARD.decode(copy).unwrap()).unwrap();
+    assert!(copy.starts_with("First line\nSecond line"), "{copy:?}");
+    assert!(!copy.contains("keep my draft"), "{copy:?}");
+    h.has("Copied 2 lines if the terminal allows it · or shift-drag");
+    h.close().await;
+});
+case!(a_copy_over_a_panel_takes_its_lines_not_the_conversation_under_them, async {
+    let copied = Rc::new(std::cell::RefCell::new(Vec::<String>::new()));
+    let control = Rc::new(Control::default());
+    control.set("aside", json!("Erbe-Verb's tail runs up to a minute."));
+    let copy = copied.clone();
+    let h = Harness::with(120, 36, control, move |o| {
+        o.copy = Some(Rc::new(move |text| {
+            copy.borrow_mut().push(text.into());
+            true
+        }))
+    });
+    h.start().await;
+    h.connect();
+    h.type_text("Say something\r").await;
+    // A list item wrapped over many rows, under where the panel opens: rows that carry on the one above, past a lead.
+    h.emit(json!({"type":"state","state":"running"}));
+    h.emit(json!({"type":"text","text":format!("- {}", "word ".repeat(150))}));
+    h.emit(json!({"type":"turn-complete","result":{"stopReason":"completed"},"elapsedMs":10}));
+    h.emit(json!({"type":"state","state":"idle"}));
+    h.wait_for("word word").await;
+    h.type_text("/btw how long can its tail be?\r").await;
+    h.wait_for("up to a minute").await;
+    let (y, x) = find(&h, "btw · how long can its tail be?");
+    let (below, _) = find(&h, "Erbe-Verb's tail runs up to a minute.");
+    let lines = h.screen();
+    let row = |y: usize, from: usize| lines[y].chars().skip(from).take(80 - from).collect::<String>().trim_end().to_string();
+    let expected = std::iter::once(row(y, x)).chain((y + 1..=below).map(|y| row(y, 0))).collect::<Vec<_>>().join("\n");
+    h.type_text(&format!("\x1b[<0;{};{}M\x1b[<32;{};{}M\x1b[<0;{};{}m", x + 1, y + 1, 79, below + 1, 79, below + 1)).await;
+    assert_eq!(copied.borrow().last(), Some(&expected));
     h.close().await;
 });
 case!(started_by_the_installer_the_farewell_says_how_to_start_kumi_next_time, async {

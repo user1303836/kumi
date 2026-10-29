@@ -26,7 +26,7 @@ const FOCUS_OUT: &str = "\x1b[O";
 const FOCUS_IN: &str = "\x1b[I";
 
 fn profile(notify: NotifyChannel) -> TerminalProfile {
-    TerminalProfile { status: true, progress: false, notify, tmux: false, app_id: None, images: false }
+    TerminalProfile { status: true, progress: false, notify, tmux: false, app_id: None, images: false, iterm: false }
 }
 
 fn away(notify: NotifyChannel) -> Harness {

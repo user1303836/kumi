@@ -296,7 +296,7 @@ its undo. They're in English for now.
 | Ctrl-\\ | Below 100 columns, open or close the drawer; at full width, put the right pane away (the conversation takes the whole window, and a line under the box says how it comes back) or bring it back; below 24 rows, the same for the two-line strip |
 | Tab, when idle | Into FOCUS's device tree, at Live's selection: ↑↓ move, Enter points at the row, Esc or Tab goes back to typing |
 | Shift-Tab | Into the tabs (again for the next tab): ↑↓ and Page Up/Down move. On a change, Enter, → or Space opens its picture, Enter or ← closes it, and `u` undoes it while it's open; on a kept item, Enter forgets it; on a JOBS row, Enter opens the job and `x` stops it. Esc or Tab goes back |
-| Mouse | Click **undo** or **forget** at a row's end, a change's words to open its picture (a job's to open the job), a tab's name, or a device in the tree to point at it; click the pin to unpin. Drag across text to highlight it; Ctrl-C or right-click copies it, and Esc clears the selection. The selected view stays still while Kumi works. Shift-drag (Option in iTerm2) still uses the terminal's selection |
+| Mouse | Click **undo** or **forget** at a row's end, a change's words to open its picture (a job's to open the job), a tab's name, or a device in the tree to point at it; click the pin to unpin. Drag across text to copy it as you let go; double-click copies a word and triple-click a line (lines Kumi wrapped come out whole). The view holds still while you drag, and "Copied" shows for a moment where the hints are. A Ctrl-C just then copies again rather than stopping Kumi or quitting, and an Esc while Kumi is idle only takes that line away. With `"copyOnSelect": false` in settings.json, the text stays selected until Ctrl-C or right-click copies it, and Esc clears it. Shift-drag (Option in iTerm2) uses the terminal's own selection, for when Kumi's copy can't reach your clipboard (over SSH, where the terminal doesn't allow it) |
 
 **Panels** (`/model`, `/effort`, `/login`, `/memory` and the others): ↑↓ move,
 Enter chooses, Esc closes; in `/model`, `/memory`, `/resume` and
@@ -375,7 +375,8 @@ symbols may not show; `KUMI_PICTURES=cells` keeps them in cells. Windows
 Terminal is recommended on Windows. In terminals without the
 kitty keyboard protocol, use Ctrl-J or Alt-Enter for a new line. Inside tmux,
 Kumi's status and notifications pass through with `set -g allow-passthrough on`,
-and focus reports need `set -g focus-events on`. Those terminals
+focus reports need `set -g focus-events on`, and over SSH Kumi's copies reach
+your clipboard with `set -g set-clipboard on`. Those terminals
 say when a held Ctrl-T is let go; elsewhere, Kumi stops listening once the key's
 repeats stop.
 

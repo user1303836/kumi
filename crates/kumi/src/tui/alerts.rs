@@ -25,12 +25,14 @@ pub struct TerminalProfile {
     pub app_id: Option<String>,
     /// Kitty's images through Unicode placeholders (changes' pictures): kitty and Ghostty, outside a multiplexer.
     pub images: bool,
+    /// iTerm2, inside tmux too (its `LC_TERMINAL` comes over SSH): its own selection is Option-drag, not Shift-drag.
+    pub iterm: bool,
 }
 
 impl TerminalProfile {
     /// Nothing at all: no status, no notification. Tests start from this.
     pub fn quiet() -> Self {
-        Self { status: false, progress: false, notify: NotifyChannel::None, tmux: false, app_id: None, images: false }
+        Self { status: false, progress: false, notify: NotifyChannel::None, tmux: false, app_id: None, images: false, iterm: false }
     }
 }
 
@@ -108,7 +110,7 @@ pub fn detect_terminal_profile(env: &HashMap<String, String>, platform: &str) ->
     let own_ghostty = ghostty && (term.is_empty() || term == "xterm-ghostty" || term.starts_with("xterm-256") || term == "xterm");
     let multiplexed = tmux || !get("ZELLIJ").is_empty() || term.starts_with("screen") || term.starts_with("tmux");
     let images = !multiplexed && (own_kitty || own_ghostty);
-    TerminalProfile { status: true, progress: !tmux && (windows_terminal || conemu || ghostty), notify, tmux, app_id, images }
+    TerminalProfile { status: true, progress: !tmux && (windows_terminal || conemu || ghostty), notify, tmux, app_id, images, iterm }
 }
 
 fn on_path(name: &str, env: &HashMap<String, String>) -> bool {
@@ -339,12 +341,17 @@ mod tests {
                 tmux: false,
                 app_id: Some("com.mitchellh.ghostty".into()),
                 images: true,
+                iterm: false,
             }
         );
         assert_eq!(profile(&[("TERM_PROGRAM", "WezTerm")], "linux").notify, NotifyChannel::Osc777);
         assert_eq!(profile(&[("TERM", "foot")], "linux").notify, NotifyChannel::Osc777);
         assert_eq!(profile(&[("TERM_PROGRAM", "iTerm.app")], "darwin").notify, NotifyChannel::Osc9);
         assert_eq!(profile(&[("LC_TERMINAL", "iTerm2")], "darwin").notify, NotifyChannel::Osc9);
+        // iTerm2 still, inside tmux over SSH, where its notifications take another way.
+        let tmux = profile(&[("LC_TERMINAL", "iTerm2"), ("TMUX", "/tmp/tmux-1000/default,1,0")], "linux");
+        assert!(tmux.iterm && tmux.notify != NotifyChannel::Osc9);
+        assert!(!profile(&[("TERM_PROGRAM", "ghostty")], "darwin").iterm);
         assert_eq!(profile(&[("TERM", "xterm-kitty")], "darwin").notify, NotifyChannel::Osc99);
         assert_eq!(profile(&[("TERM_PROGRAM", "Apple_Terminal")], "darwin").notify, NotifyChannel::AppleScript);
         assert_eq!(profile(&[("TERM_PROGRAM", "vscode")], "darwin").notify, NotifyChannel::AppleScript);
@@ -353,7 +360,15 @@ mod tests {
         let windows = profile(&[("WT_SESSION", "1"), ("__CFBundleIdentifier", "ignored")], "win32");
         assert_eq!(
             windows,
-            TerminalProfile { status: true, progress: true, notify: NotifyChannel::Bell, tmux: false, app_id: None, images: false }
+            TerminalProfile {
+                status: true,
+                progress: true,
+                notify: NotifyChannel::Bell,
+                tmux: false,
+                app_id: None,
+                images: false,
+                iterm: false
+            }
         );
         assert!(!profile(&[("TERM_PROGRAM", "iTerm.app")], "darwin").progress);
     }
@@ -387,7 +402,15 @@ mod tests {
         let profile = detect_terminal_profile(&env(&[("TMUX", "/tmp/tmux-501/default,1,0"), ("TERM_PROGRAM", "tmux")]), "darwin");
         assert_eq!(
             profile,
-            TerminalProfile { status: true, progress: false, notify: NotifyChannel::AppleScript, tmux: true, app_id: None, images: false }
+            TerminalProfile {
+                status: true,
+                progress: false,
+                notify: NotifyChannel::AppleScript,
+                tmux: true,
+                app_id: None,
+                images: false,
+                iterm: false
+            }
         );
         assert_eq!(
             tmux_wrap("\u{1b}]7501;state=idle:app=kumi\u{1b}\\"),

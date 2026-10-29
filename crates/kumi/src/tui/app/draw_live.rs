@@ -47,11 +47,18 @@ impl TuiApp {
         let action = self.click(f);
         self.0.state.borrow_mut().hits.push(Hit { x, y, width, action });
     }
-    /// A panel or menu drawn over `area` hides what's under it: what was there can't be clicked through it.
+    /// A panel or menu drawn over `area` hides what's under it: what was there can't be clicked through it, and a copy
+    /// there takes the panel's own cells, not the conversation's rows (nor joins the row below it to them).
     pub(super) fn cover(&self, area: Rect) {
         let under =
             |hit: &Hit| hit.y >= area.y && hit.y < area.y + area.height && hit.x < area.x + area.width && hit.x + hit.width > area.x;
-        self.0.state.borrow_mut().hits.retain(|hit| !under(hit));
+        let mut state = self.0.state.borrow_mut();
+        state.hits.retain(|hit| !under(hit));
+        let covered = area.y..area.y + area.height;
+        state.text_rows.retain(|row| !covered.contains(&row.y));
+        if let Some(below) = state.text_rows.iter_mut().find(|row| row.y == covered.end) {
+            below.carries = None;
+        }
     }
     fn draw_focus_path(&self, screen: &mut Screen, x: i32, y: i32, width: i32, with_context: bool) -> bool {
         let state = self.0.state.borrow();

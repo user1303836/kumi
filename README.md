@@ -41,7 +41,7 @@ Follow Kumi's guided setup.
 Next time, open a terminal and type `kumi`, then open your DAW (Live, REAPER or Renoise, before or after Kumi): Kumi connects to the one that's open.
 
 > [!NOTE]
-> Kumi runs in a terminal window, but you don't need to know any commands. After the install line, it's a chat. Drag across text to select it, then press Ctrl-C to copy.
+> Kumi runs in a terminal window, but you don't need to know any commands. After the install line, it's a chat. Drag across text to copy it, or double-click a word.
 
 ## What can I ask it?
 

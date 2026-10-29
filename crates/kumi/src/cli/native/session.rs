@@ -293,6 +293,7 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
     };
     let whats_new_on = settings.whats_new != Some(false);
     let instant = settings.instant_phrases != Some(false);
+    let copy_on_select = settings.copy_on_select != Some(false);
     let projects_dir = load_projects_dir(&io.env)?;
     // Each Set's kept conversations, while Live may come in this session, or when the producer asked for one (then they
     // go on saving where they're kept, Live or not).
@@ -896,6 +897,7 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
         options.whats_new = whats_new;
         options.away = away;
         options.instant = instant;
+        options.copy_on_select = copy_on_select;
         options.next_time = install::next_time(&io.env);
         options.connect_live = live_possible.then(|| ConnectDaw {
             why: connect_why,

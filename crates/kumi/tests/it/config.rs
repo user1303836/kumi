@@ -209,6 +209,56 @@ fn unattended_settings_round_trip_and_survive_other_writes() {
     assert_eq!(read_settings(&file).answer_after, None);
 }
 #[test]
+fn terminal_settings_round_trip_survive_other_writes_and_keep_a_newer_kumis_values() {
+    let folder = tempfile::tempdir().unwrap();
+    let file = folder.path().join("settings.json").to_string_lossy().into_owned();
+    let saved = || serde_json::from_str::<Value>(&std::fs::read_to_string(&file).unwrap()).unwrap();
+    let all =
+        json!({"mouse":"off","copyOnSelect":false,"transcriptOnQuit":false,"theme":"light","contextMeter":"always","fullRepaint":true});
+    write_settings(&file, &all).unwrap();
+    assert_eq!(saved(), all);
+    let settings = read_settings(&file);
+    assert_eq!((settings.mouse.as_deref(), settings.copy_on_select, settings.transcript_on_quit), (Some("off"), Some(false), Some(false)));
+    assert_eq!(
+        (settings.theme.as_deref(), settings.context_meter.as_deref(), settings.full_repaint),
+        (Some("light"), Some("always"), Some(true))
+    );
+    // Choosing a model, saving a tab, or writing back the whole of what was read keeps them.
+    write_settings(&file, &json!({"model":"openai/gpt-6-luna"})).unwrap();
+    let mut expected = all.clone();
+    expected["model"] = json!("openai/gpt-6-luna");
+    assert_eq!(saved(), expected);
+    write_settings(&file, &serde_json::to_value(read_settings(&file)).unwrap()).unwrap();
+    assert_eq!(saved(), expected);
+    // What Kumi takes when none is set isn't written, and null takes a setting away. fullRepaint has no such value (the
+    // terminal decides then), so false stays. (The model is written only as it's chosen.)
+    write_settings(
+        &file,
+        &json!({"mouse":"on","copyOnSelect":true,"transcriptOnQuit":true,"theme":"system","contextMeter":"auto","fullRepaint":false}),
+    )
+    .unwrap();
+    assert_eq!(saved(), json!({"fullRepaint":false}));
+    write_settings(&file, &json!({"fullRepaint":null})).unwrap();
+    assert_eq!(saved(), json!({}));
+    // A value this Kumi can't read (a newer Kumi's) counts as none set, and stays in the file through this Kumi's
+    // writes, the music answer's too, for when the newer Kumi is back.
+    let newer = json!({"mouse":"scroll","copyOnSelect":"auto","theme":"high-contrast","contextMeter":"compact"});
+    std::fs::write(&file, newer.to_string()).unwrap();
+    let settings = read_settings(&file);
+    assert_eq!((settings.mouse, settings.copy_on_select, settings.theme, settings.context_meter), (None, None, None, None));
+    write_settings(&file, &serde_json::to_value(read_settings(&file)).unwrap()).unwrap();
+    assert_eq!(saved(), newer);
+    write_music_settings(&file, Some(&["~/Music".to_string()]), None, true).unwrap();
+    let mut expected = newer.clone();
+    expected["musicFolders"] = json!(["~/Music"]);
+    expected["musicOffered"] = json!(true);
+    assert_eq!(saved(), expected);
+    // Read, anything but a setting's own values counts as none set.
+    std::fs::write(&file, json!({"mouse":false,"transcriptOnQuit":0,"theme":"Dark","fullRepaint":"yes"}).to_string()).unwrap();
+    let settings = read_settings(&file);
+    assert_eq!((settings.mouse, settings.transcript_on_quit, settings.theme, settings.full_repaint), (None, None, None, None));
+}
+#[test]
 fn background_job_settings_round_trip_and_survive_a_model_change() {
     let folder = tempfile::tempdir().unwrap();
     let file = folder.path().join("settings.json").to_string_lossy().into_owned();

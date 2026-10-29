@@ -251,30 +251,46 @@ pub async fn reach_sign_in(env: &Env, fetch: Option<Rc<dyn Fetch>>) -> Option<St
 }
 
 /// Text onto this computer's clipboard with its own tool (pbcopy, clip, wl-copy or xclip), for terminals that don't
-/// take the terminal's way (OSC 52). Quietly nothing where none is there.
-pub fn copy_to_clipboard(text: &str) {
+/// take the terminal's way (OSC 52). Says whether a tool took it: none may be there.
+pub fn copy_to_clipboard(text: &str) -> bool {
     use std::io::Write;
-    let tools: &[(&str, &[&str])] = match system::platform() {
-        "darwin" => &[("pbcopy", &[])],
-        "win32" => &[("clip", &[])],
-        _ => &[("wl-copy", &[]), ("xclip", &["-selection", "clipboard"]), ("xsel", &["--clipboard", "--input"])],
-    };
-    for (tool, args) in tools {
+    let set = |name: &str| std::env::var_os(name).is_some_and(|value| !value.is_empty());
+    for (tool, args) in clipboard_tools(system::platform(), set("WAYLAND_DISPLAY"), set("DISPLAY")) {
         let mut command = std::process::Command::new(tool);
-        command.args(*args).stdin(Stdio::piped()).stdout(Stdio::null()).stderr(Stdio::null());
+        command.args(args).stdin(Stdio::piped()).stdout(Stdio::null()).stderr(Stdio::null());
         #[cfg(windows)]
         {
             use std::os::windows::process::CommandExt;
             command.creation_flags(0x0800_0000);
         }
         let Ok(mut child) = command.spawn() else { continue };
-        if let Some(mut input) = child.stdin.take() {
-            let _ = input.write_all(&clipboard_bytes(text, tool == &"clip"));
-        }
+        let taken = child.stdin.take().is_some_and(|mut input| input.write_all(&clipboard_bytes(text, tool == "clip")).is_ok());
         std::thread::spawn(move || {
             let _ = child.wait();
         });
-        return;
+        if taken {
+            return true;
+        }
+    }
+    false
+}
+
+/// This system's clipboard tools. On Linux, the session's: wl-copy under Wayland, xclip or xsel with an X display, and
+/// none without either, where one would take the text and lose it (a wl-copy with no Wayland session exits after).
+fn clipboard_tools(platform: &str, wayland: bool, x11: bool) -> Vec<(&'static str, &'static [&'static str])> {
+    match platform {
+        "darwin" => vec![("pbcopy", &[])],
+        "win32" => vec![("clip", &[])],
+        _ => {
+            let mut tools = vec![];
+            if wayland {
+                tools.push(("wl-copy", &[][..]));
+            }
+            if x11 {
+                tools.extend([("xclip", &["-selection", "clipboard"][..]), ("xsel", &["--clipboard", "--input"][..])]);
+            }
+            tools
+        }
     }
 }
 
@@ -297,6 +313,18 @@ mod clipboard_tests {
         let units: Vec<u16> = bytes[2..].chunks_exact(2).map(|b| u16::from_le_bytes([b[0], b[1]])).collect();
         assert_eq!(String::from_utf16(&units).unwrap(), text);
         assert_eq!(super::clipboard_bytes(text, false), text.as_bytes());
+    }
+
+    #[test]
+    fn on_linux_the_clipboard_tool_is_the_sessions_and_none_without_one() {
+        let names =
+            |platform, wayland, x11| super::clipboard_tools(platform, wayland, x11).into_iter().map(|(tool, _)| tool).collect::<Vec<_>>();
+        assert_eq!(names("linux", true, false), ["wl-copy"]);
+        assert_eq!(names("linux", false, true), ["xclip", "xsel"]);
+        assert_eq!(names("linux", true, true), ["wl-copy", "xclip", "xsel"]);
+        assert!(names("linux", false, false).is_empty(), "no session: only the terminal's way");
+        assert_eq!(names("darwin", false, false), ["pbcopy"]);
+        assert_eq!(names("win32", false, false), ["clip"]);
     }
 }
 

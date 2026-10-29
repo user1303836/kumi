@@ -186,7 +186,7 @@ Kumi 占据整个终端窗口，并在 Kumi 关闭、崩溃或被停止时把窗
 | Ctrl-\\ | 不足 100 列时打开或关闭抽屉；全宽时收起右侧窗格（对话占满整个窗口，输入框下方的一行会说明如何放回）或把它放回来；不足 24 行时，对两行条带也是如此 |
 | Tab（空闲时） | 进入 FOCUS 的设备树，定位到 Live 的当前选择：↑↓ 移动，Enter 指向该行，Esc 或 Tab 回到输入 |
 | Shift-Tab | 进入标签页（再按一次切到下一个标签页）：↑↓ 和 Page Up/Down 移动。在修改上，Enter、→ 或空格展开它的图示，Enter 或 ← 收起，展开时按 `u` 撤销；在记住的内容上，Enter 执行 forget；在 JOBS 的行上，Enter 打开任务，按 `x` 停止。Esc 或 Tab 返回 |
-| 鼠标 | 点击行末的 **undo** 或 **forget**、修改的文字（展开图示）或任务的文字（打开任务）、标签页名称，或点击设备树中的设备以指向它；点击图钉取消固定。拖动文本即可选中，Ctrl-C 或右键复制，Esc 取消选择。选择期间显示保持不动，Kumi 继续工作。按住 Shift 拖动仍使用终端的选择功能（iTerm2 中为 Option） |
+| 鼠标 | 点击行末的 **undo** 或 **forget**、修改的文字（展开图示）或任务的文字（打开任务）、标签页名称，或点击设备树中的设备以指向它；点击图钉取消固定。拖过文本，松开时即复制；双击复制一个词，三击复制一行（Kumi 折行的行会完整复制）。拖动期间显示保持不动，提示处会短暂显示“Copied”。此时按 Ctrl-C 会再复制一次，而不会停止 Kumi 或退出；Kumi 空闲时按 Esc 只会让这一行消失。在 settings.json 中设置 `"copyOnSelect": false` 后，选中的文字会保留，Ctrl-C 或右键复制，Esc 取消选择。按住 Shift 拖动使用终端自己的选择功能（iTerm2 中为 Option），用于 Kumi 的复制到不了剪贴板时（例如通过 SSH 且终端不允许时） |
 
 **面板**（`/model`、`/effort`、`/login`、`/memory` 等）：↑↓ 移动，Enter 选择，Esc 关闭；在 `/model`、`/memory`、`/resume` 和 `/recipes` 中，输入文字可筛选列表。在 `/model` 中，ctrl+f 设定备用模型。在 `/resume` 中，Tab 在 This Set 和 All Sets 之间切换，ctrl+f 可重命名、置顶、删除所选对话或复制它的 ID。对话属于其他工程时，Kumi 会询问：在 Live 中打开它的工程（推荐）、在这里作为副本继续，或取消（Esc）。**Your answer**（以带编号选项的问题结尾的回答）：按编号再按 Enter 即可回答。Kumi 推荐的选项带有标记，并一开始就被选中；没有人在时（运行过 `/goal`、`/loop` 或匹配，或 Kumi 的窗口已在其他窗口后面 2 分钟），倒计时结束后 Kumi 会选它（“Taking 2 (recommended) in 60 s · any key cancels”）。在密钥输入框中，粘贴密钥后按 Enter；Kumi 会向提供方验证它，无法连接提供方时则不经验证直接保存。在 ChatGPT 登录面板中，`c` 复制链接（或代码），`d` 改用代码登录而不用浏览器，`b` 改回浏览器。在 `/btw` 面板中，↑↓ 和 Page Up/Down 滚动，←→ 翻看之前的回答，`c` 复制，Esc、Enter 或 Space 关闭面板。在任务详情中，↑↓ 滚动，`x` 停止任务，`r` 重新运行，`c` 复制报告，Esc 关闭。
 
@@ -208,7 +208,7 @@ Kumi 占据整个终端窗口，并在 Kumi 关闭、崩溃或被停止时把窗
 
 ## 终端
 
-Kumi 会检测终端能显示多少种颜色；`KUMI_COLOR`（`truecolor`、`256`、`16`、`none`）可覆盖检测结果，并且会遵循 `NO_COLOR`。在终端符号可能无法显示的地方（旧版 Windows 控制台、Linux 控制台），Kumi 用双字母徽标代替图标；可用 `KUMI_ICONS=glyphs` 或 `badges` 自行选择。修改的图示在 kitty 和 Ghostty 中（24 位色、不在 tmux 内）显示为图像，在其他终端中用盲文点字和半格方块绘出，在符号可能无法显示的地方则以文字呈现；`KUMI_PICTURES=cells` 可让图示始终用字符单元绘出。在 Windows 上推荐使用 Windows Terminal。在不支持 kitty 键盘协议的终端中，请用 Ctrl-J 或 Alt-Enter 换行。在 tmux 中，`set -g allow-passthrough on` 让 Kumi 的状态和通知能够透传，焦点报告需要 `set -g focus-events on`。支持该协议的终端会告知按住的 Ctrl-T 何时松开；在其他终端中，按键的重复停止时 Kumi 就停止聆听。
+Kumi 会检测终端能显示多少种颜色；`KUMI_COLOR`（`truecolor`、`256`、`16`、`none`）可覆盖检测结果，并且会遵循 `NO_COLOR`。在终端符号可能无法显示的地方（旧版 Windows 控制台、Linux 控制台），Kumi 用双字母徽标代替图标；可用 `KUMI_ICONS=glyphs` 或 `badges` 自行选择。修改的图示在 kitty 和 Ghostty 中（24 位色、不在 tmux 内）显示为图像，在其他终端中用盲文点字和半格方块绘出，在符号可能无法显示的地方则以文字呈现；`KUMI_PICTURES=cells` 可让图示始终用字符单元绘出。在 Windows 上推荐使用 Windows Terminal。在不支持 kitty 键盘协议的终端中，请用 Ctrl-J 或 Alt-Enter 换行。在 tmux 中，`set -g allow-passthrough on` 让 Kumi 的状态和通知能够透传，焦点报告需要 `set -g focus-events on`；通过 SSH 时，`set -g set-clipboard on` 让 Kumi 的复制能到达你的剪贴板。支持该协议的终端会告知按住的 Ctrl-T 何时松开；在其他终端中，按键的重复停止时 Kumi 就停止聆听。
 
 ## 设计说明
 
