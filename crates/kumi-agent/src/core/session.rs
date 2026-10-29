@@ -130,8 +130,13 @@ pub struct SessionOptions {
     pub library: Option<Rc<Library>>,
     /// Kumi-owned output folder for new plug-in presets; a private temporary folder when absent.
     pub preset_dir: Option<std::path::PathBuf>,
-    /// The producer's own music, when Kumi knows where it is: how learning it goes reaches the app.
+    /// The producer's own music, when Kumi knows where it is: how learning it goes reaches the app, and /music asks the
+    /// session about it.
     pub music: Option<Rc<kumi_listening::music::learning::Music>>,
+    /// /slots: which model does each listening job, swapped and taken back.
+    pub slots: Option<Rc<kumi_listening::slots::SlotsContext>>,
+    /// /map: what reads the producer's sounds and songs on their maps, each time it opens.
+    pub map: Option<kumi_library::map::LoadMap>,
     pub matching: bool,
     pub match_budget: Option<MatchBudget>,
     pub playbook: Option<Rc<dyn PlaybookStore>>,
@@ -181,6 +186,8 @@ impl SessionOptions {
             library: None,
             preset_dir: None,
             music: None,
+            slots: None,
+            map: None,
             matching: true,
             match_budget: None,
             playbook: None,
@@ -3110,6 +3117,15 @@ impl SessionController for Session {
     }
     fn settings_memory(&self) -> Option<Rc<dyn kumi_listening::heard_settings::SettingsMemory>> {
         self.0.search_memory.clone().map(|memory| memory as Rc<dyn kumi_listening::heard_settings::SettingsMemory>)
+    }
+    fn music(&self) -> Option<Rc<kumi_listening::music::learning::Music>> {
+        self.0.options.music.clone()
+    }
+    fn slots_context(&self) -> Option<Rc<kumi_listening::slots::SlotsContext>> {
+        self.0.options.slots.clone()
+    }
+    fn map_loader(&self) -> Option<kumi_library::map::LoadMap> {
+        self.0.options.map.clone()
     }
     fn open_set(&self) -> Option<String> {
         self.0.state.borrow().integration.as_ref().and_then(|integration| integration.open_set())

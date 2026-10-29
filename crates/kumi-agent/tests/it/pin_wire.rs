@@ -771,6 +771,7 @@ fn events() -> Vec<SessionEvent> {
     });
     events.push(SessionEvent::Palette { palette: None });
     events.push(SessionEvent::Aside { id: 2, text: "The kick and the bass share 60 Hz, so".into() });
+    events.push(SessionEvent::SlotsProgress { id: 3, line: "Fetching the stem model: 12 of 80 MB".into() });
     events.extend(
         [
             KernelEvent::Text { text: "Shortened the kick's decay.".into() },
@@ -858,6 +859,7 @@ fn variant(event: &SessionEvent) -> &'static str {
         SessionEvent::CarryOn { .. } => "CarryOn",
         SessionEvent::Palette { .. } => "Palette",
         SessionEvent::Aside { .. } => "Aside",
+        SessionEvent::SlotsProgress { .. } => "SlotsProgress",
         SessionEvent::Kernel(event) => match event {
             KernelEvent::Text { .. } => "Kernel::Text",
             KernelEvent::ToolInput { .. } => "Kernel::ToolInput",
@@ -874,7 +876,7 @@ fn variant(event: &SessionEvent) -> &'static str {
     }
 }
 
-const VARIANTS: [&str; 45] = [
+const VARIANTS: [&str; 46] = [
     "Focus",
     "Pointed",
     "Change",
@@ -911,6 +913,7 @@ const VARIANTS: [&str; 45] = [
     "CarryOn",
     "Palette",
     "Aside",
+    "SlotsProgress",
     "Kernel::Text",
     "Kernel::ToolInput",
     "Kernel::ToolStart",
@@ -1543,6 +1546,15 @@ pub(crate) fn requests() -> Vec<Op> {
         .into(),
         op::PaletteRemove { path: "/Samples/Kicks/Kick 808.wav".into(), size: 48_210, mtime: AT }.into(),
         op::PaletteCommand { words: "use Drums".into() }.into(),
+        op::Music {}.into(),
+        op::MusicFolders {}.into(),
+        op::LearnMusic { folders: vec!["~/Music/Bounces".into()] }.into(),
+        op::SetMusicFolders { folders: vec![] }.into(),
+        op::HoldMusic { held: true }.into(),
+        op::ForgetMusic {}.into(),
+        op::Map {}.into(),
+        op::Slots { id: 3, words: "listening off".into() }.into(),
+        op::StopSlots { id: 3 }.into(),
     ];
     requests.extend([SetChoice::Open, SetChoice::Copy, SetChoice::Cancel].map(|choice| op::AnswerSet { choice }.into()));
     requests.extend(
@@ -1575,7 +1587,8 @@ fn every_request_keeps_its_wire_shape() {
 
 #[test]
 fn capabilities_keep_their_wire_shape() {
-    // Most of what a session can do, and some of it not (steering, jobs, palettes, an answer to a technique offered).
+    // Most of what a session can do, and some of it not (steering, jobs, palettes, an answer to a technique offered,
+    // /slots).
     let capabilities = Capabilities {
         attachments: true,
         aside: true,
@@ -1608,6 +1621,8 @@ fn capabilities_keep_their_wire_shape() {
         session_strip: true,
         arrangement_strip: true,
         reconfigure: true,
+        music: true,
+        map: true,
         ..Capabilities::default()
     };
     pinned::<Capabilities>("capabilities.json", &capabilities);

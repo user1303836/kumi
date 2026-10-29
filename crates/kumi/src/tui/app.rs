@@ -122,12 +122,6 @@ pub struct TuiOptions {
     pub connect_live: Option<ConnectDaw>,
     /// /willington, where Kumi's bridge can carry Willington.
     pub willington: Option<kumi_daw::provider::Toggle>,
-    /// /slots: which model does each listening job, swapped and taken back.
-    pub slots: Option<Rc<kumi_listening::slots::SlotsContext>>,
-    /// /music: the producer's own music, which Kumi learns their taste from.
-    pub music: Option<Rc<kumi_listening::music::learning::Music>>,
-    /// /map: reads the producer's sounds and songs on their maps, each time it opens.
-    pub map: Option<crate::map::LoadMap>,
     /// What plays a point of the map.
     pub player: Option<Rc<kumi_media::audio::player::Player>>,
     /// Whether the map's points play as the mouse comes to them, remembered; they do when None.
@@ -216,9 +210,6 @@ impl TuiOptions {
             voice: None,
             connect_live: None,
             willington: None,
-            slots: None,
-            music: None,
-            map: None,
             player: None,
             map_hover: None,
             whats_new: None,
@@ -438,6 +429,8 @@ struct State {
     asides: Vec<Rc<RefCell<Aside>>>,
     /// The id the next aside takes.
     next_aside: u32,
+    /// The id the next /slots request takes.
+    next_slots: u32,
     transport: Option<Transport>,
     activity: String,
     panel: Option<PanelRef>,
@@ -491,8 +484,8 @@ struct State {
     flash_timers: Vec<JoinHandle<()>>,
     /// First-run setup, shown in place of the session until it's done or put off.
     setup: Option<setup::Setup>,
-    /// A /slots swap's fetch or check under way: Esc stops it.
-    slots_check: Option<Rc<kumi_common::abort::Controller>>,
+    /// A /slots swap's fetch or check under way, by its request's id: Esc stops it.
+    slots_check: Option<u32>,
     /// Whether Kumi's window is in front, as the terminal says when that changes (assumed until it does), and
     /// since when it isn't.
     window_focused: bool,
@@ -603,6 +596,7 @@ impl State {
             last_stop: None,
             asides: vec![],
             next_aside: 1,
+            next_slots: 1,
             transport: None,
             activity: format!("connecting to {}", crate::daw::words().app),
             panel: None,

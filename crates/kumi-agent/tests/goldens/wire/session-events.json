@@ -1925,6 +1925,11 @@
     "text": "The kick and the bass share 60 Hz, so"
   },
   {
+    "type": "slots-progress",
+    "id": 3,
+    "line": "Fetching the stem model: 12 of 80 MB"
+  },
+  {
     "type": "text",
     "text": "Shortened the kick's decay."
   },

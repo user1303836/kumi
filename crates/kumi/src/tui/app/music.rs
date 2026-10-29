@@ -4,8 +4,8 @@
 use super::*;
 use kumi_common::time::since;
 use kumi_listening::music::{
-    folders::{self, Found},
-    learning::{Music, MusicState, MusicStatus, FORGETTING},
+    folders::Found,
+    learning::{MusicState, MusicStatus, FORGETTING},
     tool::{about, grouped, tilde},
 };
 
@@ -87,18 +87,16 @@ pub fn music_lines(status: &MusicStatus, agreed: bool, held: bool, found: Option
 }
 
 impl TuiApp {
-    /// /music and its words.
-    pub(super) async fn music_command(&self, music: Rc<Music>, words: &str) {
+    /// /music and its words, asked of the session, which has the producer's music.
+    pub(super) async fn music_command(&self, words: &str) {
+        let session = self.session();
         match parse_music(words) {
             MusicAsked::Show => {
-                let found = match music.folders().is_empty() {
-                    true => {
-                        let (places, skip) = (music.places(), music.skipping());
-                        tokio::task::spawn_blocking(move || folders::found_in(places, &skip())).await.ok().flatten()
-                    }
-                    false => None,
+                let view = match session.op(op::Music {}).await {
+                    Ok(view) => view,
+                    Err(error) => return self.notice(&error.to_string(), NoticeTone::Warn),
                 };
-                let items = music_lines(&music.status(), music.agreed(), music.held(), found.as_ref(), kumi_common::time::now_ms() as f64);
+                let items = music_lines(&view.status, view.agreed, view.held, view.found.as_ref(), kumi_common::time::now_ms() as f64);
                 self.0.state.borrow_mut().transcript.add(Entry::News {
                     title: "Your music".into(),
                     items,
@@ -113,7 +111,10 @@ impl TuiApp {
                     self.notice(&format!("There's no folder {} on this computer.", self.clean(&folder, 200)), NoticeTone::Warn);
                     return;
                 };
-                let mut wanted = music.folders();
+                let mut wanted = match session.op(op::MusicFolders {}).await {
+                    Ok(folders) => folders,
+                    Err(error) => return self.notice(&error.to_string(), NoticeTone::Warn),
+                };
                 if wanted.iter().any(|known| {
                     *known == folder
                         || kumi_library::sources::expand_folder(known, &kumi_library::sources::homedir()).as_deref() == Some(&path)
@@ -122,19 +123,23 @@ impl TuiApp {
                     return;
                 }
                 wanted.push(folder);
-                match music.learn(wanted) {
-                    Ok(()) => self.notice(
+                match session.op(op::LearnMusic { folders: wanted }).await {
+                    Ok(Ok(())) => self.notice(
                         &format!("Kumi learns your music in {} too, in the background (/music shows how far it's got).", tilde(&path)),
                         NoticeTone::Info,
                     ),
-                    Err(why) if why == FORGETTING => self.notice(&why, NoticeTone::Warn),
-                    Err(why) => self.notice(&format!("Kumi couldn't keep that in its settings: {why}"), NoticeTone::Warn),
+                    Ok(Err(why)) if why == FORGETTING => self.notice(&why, NoticeTone::Warn),
+                    Ok(Err(why)) => self.notice(&format!("Kumi couldn't keep that in its settings: {why}"), NoticeTone::Warn),
+                    Err(error) => self.notice(&error.to_string(), NoticeTone::Warn),
                 }
             }
             MusicAsked::Remove(folder) => {
                 let home = kumi_library::sources::homedir();
                 let path = kumi_library::sources::expand_folder(&folder, &home);
-                let known = music.folders();
+                let known = match session.op(op::MusicFolders {}).await {
+                    Ok(folders) => folders,
+                    Err(error) => return self.notice(&error.to_string(), NoticeTone::Warn),
+                };
                 let kept: Vec<String> = known
                     .iter()
                     .filter(|known| **known != folder && kumi_library::sources::expand_folder(known, &home) != path)
@@ -147,25 +152,26 @@ impl TuiApp {
                     );
                     return;
                 }
-                match music.set_folders(Some(kept)) {
-                    Ok(()) => {
+                match session.op(op::SetMusicFolders { folders: kept }).await {
+                    Ok(Ok(())) => {
                         self.notice(
                             &format!("Kumi no longer learns from {}; what it heard there is set aside as gone.", self.clean(&folder, 200)),
                             NoticeTone::Info,
                         );
                         self.music_changed_under_map_page();
                     }
-                    Err(why) => self.notice(&format!("Kumi couldn't keep that in its settings: {why}"), NoticeTone::Warn),
+                    Ok(Err(why)) => self.notice(&format!("Kumi couldn't keep that in its settings: {why}"), NoticeTone::Warn),
+                    Err(error) => self.notice(&error.to_string(), NoticeTone::Warn),
                 }
             }
-            MusicAsked::Pause => {
-                music.hold(true);
-                self.notice("Learning your music is paused: /music resume goes on.", NoticeTone::Info);
-            }
-            MusicAsked::Resume => {
-                music.hold(false);
-                self.notice("Learning your music again, in the background.", NoticeTone::Info);
-            }
+            MusicAsked::Pause => match session.op(op::HoldMusic { held: true }).await {
+                Ok(()) => self.notice("Learning your music is paused: /music resume goes on.", NoticeTone::Info),
+                Err(error) => self.notice(&error.to_string(), NoticeTone::Warn),
+            },
+            MusicAsked::Resume => match session.op(op::HoldMusic { held: false }).await {
+                Ok(()) => self.notice("Learning your music again, in the background.", NoticeTone::Info),
+                Err(error) => self.notice(&error.to_string(), NoticeTone::Warn),
+            },
             MusicAsked::Forget => {
                 let items = vec![
                     PickerItem {
@@ -175,22 +181,18 @@ impl TuiApp {
                     PickerItem::new("Keep it", "keep"),
                 ];
                 let title = "Forget what Kumi learned of your music? It stops learning until you add a folder again.";
-                self.pick(Picker::new(title, items), move |app, item| {
-                    let music = music.clone();
-                    async move {
-                        app.close_panel();
-                        if item.value.as_deref() == Some("forget") {
-                            match music.forget().await {
-                                Ok(()) => app.notice(
-                                    "Forgot your music. Kumi learns none of it until you add a folder (/music add).",
-                                    NoticeTone::Info,
-                                ),
-                                Err(why) => app.notice(&why, NoticeTone::Warn),
-                            }
-                            app.music_changed_under_map_page();
+                self.pick(Picker::new(title, items), move |app, item| async move {
+                    app.close_panel();
+                    if item.value.as_deref() == Some("forget") {
+                        match app.session().op(op::ForgetMusic {}).await {
+                            Ok(Ok(())) => app
+                                .notice("Forgot your music. Kumi learns none of it until you add a folder (/music add).", NoticeTone::Info),
+                            Ok(Err(why)) => app.notice(&why, NoticeTone::Warn),
+                            Err(error) => app.notice(&error.to_string(), NoticeTone::Warn),
                         }
-                        Ok(())
+                        app.music_changed_under_map_page();
                     }
+                    Ok(())
                 });
             }
             MusicAsked::Unknown => {

@@ -295,6 +295,41 @@
     "words": "use Drums"
   },
   {
+    "type": "music"
+  },
+  {
+    "type": "music-folders"
+  },
+  {
+    "type": "learn-music",
+    "folders": [
+      "~/Music/Bounces"
+    ]
+  },
+  {
+    "type": "set-music-folders",
+    "folders": []
+  },
+  {
+    "type": "hold-music",
+    "held": true
+  },
+  {
+    "type": "forget-music"
+  },
+  {
+    "type": "map"
+  },
+  {
+    "type": "slots",
+    "id": 3,
+    "words": "listening off"
+  },
+  {
+    "type": "stop-slots",
+    "id": 3
+  },
+  {
     "type": "answer-set",
     "choice": "open"
   },

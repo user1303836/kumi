@@ -349,6 +349,8 @@ impl TuiApp {
                 }
                 self.0.scheduler.request();
             }
+            // What a /slots fetch or check under way says.
+            SessionEvent::SlotsProgress { line, .. } => self.notice(&line, NoticeTone::Info),
             SessionEvent::Error { message: said, kind, provider } => {
                 {
                     let mut state = self.0.state.borrow_mut();
