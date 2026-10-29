@@ -4,6 +4,7 @@ pub mod app;
 pub mod attach;
 pub mod choices;
 pub mod editor;
+pub mod external_editor;
 pub mod icons;
 pub mod keys;
 pub mod logo;

@@ -1,6 +1,7 @@
 mod helpers;
 pub use helpers::*;
 mod away;
+mod composer;
 pub use away::{AwaySettings, FrontApp, NotifierRunner};
 mod draw_live;
 mod draw_panel;
@@ -171,7 +172,15 @@ pub struct TuiOptions {
     pub mouse: bool,
     /// Quitting prints the conversation into the terminal's scrollback (`transcriptOnQuit`).
     pub transcript_on_quit: bool,
+    /// The producer's editor, which ctrl+g opens the draft in ([`crate::tui::external_editor::editor_command`]); None
+    /// where there's none.
+    pub editor: Option<String>,
+    /// Runs `editor` on the draft's file while the terminal is lent to it, to its exit code; None runs it as a program.
+    /// Tests give their own.
+    pub run_editor: Option<EditorRunner>,
 }
+/// Runs the producer's editor on a file until it closes: its exit code, 0 when it closed well.
+pub type EditorRunner = Rc<dyn Fn(std::path::PathBuf) -> LocalBoxFuture<'static, std::io::Result<i32>>>;
 /// The DAW's part of first-run setup: the setup shows it when Kumi's bridge isn't in the DAW yet, or is older
 /// than Kumi's.
 pub struct ConnectDaw {
@@ -235,6 +244,8 @@ impl TuiOptions {
             copy_on_select: true,
             mouse: true,
             transcript_on_quit: true,
+            editor: None,
+            run_editor: None,
         }
     }
 }
@@ -458,6 +469,10 @@ struct State {
     turn_changes: usize,
     /// Which earlier message ↑ shows, and the draft set aside meanwhile.
     recall: Option<(usize, Draft)>,
+    /// ctrl+r: an earlier message being looked for.
+    search: Option<composer::Search>,
+    /// ctrl+s: a draft put aside, with its files.
+    stash: Option<composer::Stash>,
     last_sent: Option<String>,
     tree: Option<DeviceTree>,
     /// Bumped whenever `tree` is read again: its rows are made again only then, or for another focus.
@@ -619,6 +634,8 @@ impl State {
             busy_since: 0.,
             turn_changes: 0,
             recall: None,
+            search: None,
+            stash: None,
             last_sent: None,
             tree: None,
             tree_revision: 0,
@@ -1173,7 +1190,8 @@ impl Terminal for TuiApp {
         self.0.scheduler.request();
     }
     fn interrupt(&self) {
-        if self.0.state.borrow().closing {
+        // While the terminal is lent to the producer's editor, ctrl+c is the editor's.
+        if self.0.state.borrow().closing || self.0.tty.lent() {
             return;
         }
         if self.busy() {
@@ -1185,11 +1203,14 @@ impl Terminal for TuiApp {
     fn close(&self) -> LocalBoxFuture<'static, i32> {
         self.finish(0, None)
     }
+    fn lent(&self) -> bool {
+        self.0.tty.lent()
+    }
     fn follow_daw(&self, daw: kumi_types::daw::DawId) -> bool {
         let Some(follow) = self.0.options.follow_daw.clone() else { return false };
-        // Nothing the producer is in the middle of: an answer, setup, a panel or question, the map, what they typed or
-        // attached, a background job.
-        let waiting = {
+        // Nothing the producer is in the middle of: an answer, setup, a panel or question, the map, what they typed,
+        // attached or put aside, a search, their editor, a background job.
+        let waiting = self.0.tty.lent() || {
             let state = self.0.state.borrow();
             state.closing
                 || state.setup.is_some()
@@ -1199,6 +1220,8 @@ impl Terminal for TuiApp {
                 || state.map.is_some()
                 || !state.editor.is_empty()
                 || !state.attachments.is_empty()
+                || state.stash.is_some()
+                || state.search.is_some()
                 || state.jobs.values().any(|job| !job.state.ended())
         };
         if waiting || self.busy() {

@@ -1,7 +1,7 @@
   Kumi  ·  Night Drive                                                                                                                                  ● Live
 
                                                                                                                     FOCUS
-   Keys and commands                                                                      ↓ 44 more                 Night Drive
+   Keys and commands                                                                      ↓ 49 more                 Night Drive
                                                                                                                     Your selection will show here
    Send and steer
      enter               Send. While Kumi works, it reads your message after the step under way
@@ -9,6 +9,8 @@
      alt+↑               Take the last waiting message back into the box                                            Ready
      ctrl+j  alt+enter   A new line (shift+enter too, where the terminal tells it apart)
      ↑ ↓                 The box's lines, then what you sent before
+     ctrl+r              Look back through what you sent for the words you type: ctrl+r again finds
+                         an earlier one, enter puts it in the box, esc goes back to your draft
      ctrl+v              Add the picture on the clipboard to your next message; files dragged in go
                          with it too
      backspace           In an empty box, take back the last file added
@@ -17,10 +19,10 @@
      page up  page down  Scroll the conversation; the mouse wheel too (over the tabs, it scrolls
                          them)
      ctrl+home           The start of the conversation
-     ctrl+end            Back to the latest
-     drag                Copy text as you let go; double-click for a word, triple-click for a line
-     shift+drag          Your terminal's own selection (option+drag in iTerm2)                                      HISTORY ──────────────────────────────────
-     ctrl+l              Draw the screen again                                                                      Nothing changed yet
+     ctrl+end            Back to the latest                                                                         HISTORY ──────────────────────────────────
+     drag                Copy text as you let go; double-click for a word, triple-click for a line                  Nothing changed yet
+     shift+drag          Your terminal's own selection (option+drag in iTerm2)
+     ctrl+l              Draw the screen again
 
    The pane
      ctrl+\              Below 100 columns, open or close the drawer; at full width, put the side
@@ -30,8 +32,6 @@
      enter               In the tabs: open a change's picture; on what Kumi kept, forget it
      →  space            On a change: open its picture; ← closes it
      u                   On a change with its picture open: undo it
-     tab                 Into the tree in FOCUS, at Live's selection: ↑↓ move, enter pins a row so
-                         what you ask is about it, esc or tab comes back
 
 
 

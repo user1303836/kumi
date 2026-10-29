@@ -104,7 +104,7 @@ impl TuiApp {
         }
         let (pane, left) = self.layout(columns);
         self.draw_header(&mut screen, columns);
-        let layout = self.0.state.borrow().editor.layout((left - 6).max(1));
+        let layout = self.composer_layout((left - 6).max(1));
         let visible = layout.rows.len().min(5) as i32;
         let box_height = visible + 2;
         let box_top = rows - 1 - box_height;
@@ -657,7 +657,10 @@ impl TuiApp {
         // What the producer just did took, said for a moment in the hint's place.
         let toast = self.toasted(perf_now());
         let state = self.0.state.borrow();
-        if state.editor.is_empty() {
+        if state.search.is_some() {
+            let shown: Vec<String> = layout.rows.iter().skip(first as usize).take(visible as usize).cloned().collect();
+            self.draw_search(screen, x, box_.y + 1, &shown, box_);
+        } else if state.editor.is_empty() {
             let placeholder = voice.as_ref().map(|v| v.placeholder.clone()).unwrap_or_else(|| {
                 if busy && (state.current.is_some() || state.pending_turn) {
                     "Tell Kumi more while it works".into()
@@ -700,7 +703,9 @@ impl TuiApp {
             }
         });
         let hint = toast.as_ref().map(|(text, _)| text.as_str()).or(panel_hint).unwrap_or_else(|| {
-            if !menu.is_empty() {
+            if state.search.is_some() {
+                super::composer::SEARCH_HINT
+            } else if !menu.is_empty() {
                 "enter to choose · esc to close"
             } else if let Some(voice) = &voice {
                 &voice.hint
@@ -712,6 +717,8 @@ impl TuiApp {
                 }
             } else if busy {
                 "esc to stop"
+            } else if state.stash.is_some() && state.editor.is_empty() && state.attachments.is_empty() {
+                super::composer::STASH_HINT
             } else if self.0.voice.is_some() && state.editor.is_empty() {
                 "ctrl+t to talk"
             } else {

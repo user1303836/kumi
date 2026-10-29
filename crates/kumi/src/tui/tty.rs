@@ -74,6 +74,11 @@ const MOUSE_MOVES_OFF: &str = "\u{1b}[?1003l";
 // again as it leaves, as those terminals have it.
 const WHEEL_KEYS_OFF: &str = "\u{1b}[?1007l";
 const WHEEL_KEYS_ON: &str = "\u{1b}[?1007h";
+/// What gives the terminal back as Kumi found it: every mode it set off, and the wheel's keys on again where it turned
+/// them off (the mouse left to the terminal).
+fn leaving(mouse: bool) -> String {
+    format!("{RESTORE}{}", if mouse { "" } else { WHEEL_KEYS_ON })
+}
 pub const RESTORE: &str =
     "\u{1b}[?2026l\u{1b}[0m\u{1b}[<u\u{1b}[?1003l\u{1b}[?1006l\u{1b}[?1002l\u{1b}[?1000l\u{1b}[?1004l\u{1b}[?2004l\u{1b}[?7h\u{1b}[?25h\u{1b}[?1049l";
 
@@ -98,7 +103,7 @@ pub struct Size {
 
 struct Inner {
     options: TtyOptions,
-    /// The farewell, then RESTORE.
+    /// The farewell, then what gives the terminal back ([`leaving`]): written on quitting, and by the crash path.
     restore: String,
     active: Arc<AtomicBool>,
     /// The crash path gave the terminal back: a panic, which Kumi may have caught (a worker's) and lived on.
@@ -107,6 +112,8 @@ struct Inner {
     /// The mouse's moves are asked for (`report_moves`): reported while the terminal is Kumi's, and again when it's
     /// taken back.
     moves: Cell<bool>,
+    /// Lent to a program Kumi runs in it ([`Tty::hand_over`]), and not yet given back for good.
+    lent: Cell<bool>,
     parser: InputParser,
     decoder: RefCell<Utf8Decoder>,
     emergency: Cell<Option<u64>>,
@@ -121,12 +128,13 @@ impl Tty {
         let parser = InputParser::new(Rc::clone(&options.on_input));
         Tty {
             inner: Rc::new(Inner {
-                restore: format!("{}{RESTORE}{}", options.farewell, if options.mouse { "" } else { WHEEL_KEYS_ON }),
+                restore: format!("{}{}", options.farewell, leaving(options.mouse)),
                 options,
                 active: Arc::new(AtomicBool::new(false)),
                 taken: Arc::new(AtomicBool::new(false)),
                 was_raw: Cell::new(false),
                 moves: Cell::new(false),
+                lent: Cell::new(false),
                 parser,
                 decoder: RefCell::new(Utf8Decoder::new()),
                 emergency: Cell::new(None),
@@ -152,13 +160,7 @@ impl Tty {
         let output = &inner.options.output;
         inner.was_raw.set(input.is_raw());
         input.set_raw_mode(true)?;
-        let weak: Weak<Inner> = Rc::downgrade(inner);
-        input.resume(Rc::new(move |chunk| {
-            if let Some(inner) = weak.upgrade() {
-                let text = inner.decoder.borrow_mut().write(chunk);
-                inner.parser.push(&text);
-            }
-        }));
+        self.listen();
         output.watch_resize(Rc::clone(&inner.options.on_resize));
         // Taken again by a new start, not by `recover`: the crash path's registration goes with the old one.
         if let Some(id) = inner.emergency.take() {
@@ -186,10 +188,53 @@ impl Tty {
         Ok(())
     }
 
+    fn listen(&self) {
+        let weak: Weak<Inner> = Rc::downgrade(&self.inner);
+        self.inner.options.input.resume(Rc::new(move |chunk| {
+            if let Some(inner) = weak.upgrade() {
+                let text = inner.decoder.borrow_mut().write(chunk);
+                inner.parser.push(&text);
+            }
+        }));
+    }
+
     pub fn write(&self, data: &str) {
         if self.is_active() && !data.is_empty() {
             self.inner.options.output.write(data);
         }
+    }
+
+    /// Lends the terminal to a program Kumi runs in it (the producer's editor) until `run` is done. The screen and every
+    /// mode Kumi set go back as they were, raw input too, and Kumi's reader stops reading, so the program gets every
+    /// key. Nothing Kumi draws is written meanwhile; once it's taken back, the caller draws the whole screen again. A
+    /// terminal given back for good meanwhile (Kumi closing) isn't taken again.
+    pub async fn hand_over<T>(&self, run: impl std::future::Future<Output = T>) -> T {
+        let inner = &self.inner;
+        if inner.lent.get() || !inner.active.swap(false, Ordering::SeqCst) {
+            return run.await;
+        }
+        inner.lent.set(true);
+        inner.parser.dispose();
+        inner.options.output.write(&leaving(inner.options.mouse));
+        inner.options.input.pause();
+        let _ = inner.options.input.set_raw_mode(inner.was_raw.get());
+        let result = run.await;
+        if inner.lent.replace(false) {
+            let _ = inner.options.input.set_raw_mode(true);
+            // Keys typed meanwhile (beside a window of its own) were the program's, as is a reply to what it asked the
+            // terminal: one ending in BEL would read as ctrl+g.
+            inner.options.input.discard_pending();
+            self.listen();
+            inner.active.store(true, Ordering::SeqCst);
+            inner.options.output.write(&inner.entering());
+        }
+        result
+    }
+
+    /// Whether the terminal is lent to a program Kumi runs ([`Tty::hand_over`]): its keys, ctrl+c too, are that
+    /// program's.
+    pub fn lent(&self) -> bool {
+        self.inner.lent.get()
     }
 
     /// Whether the terminal reports the mouse's moves (no button held) as well as its clicks: asked while the map is
@@ -235,10 +280,12 @@ impl Inner {
     }
 
     fn restore(&self, sync: bool) {
+        // Lent to a program: its screen and modes are given back already, and aren't taken again when it's done.
+        let lent = self.lent.replace(false);
         // Given back by the crash path and not taken again: what it didn't undo is still Kumi's to undo.
         let active = self.active.swap(false, Ordering::SeqCst);
         let taken = self.taken.swap(false, Ordering::SeqCst);
-        if !active && !taken {
+        if !active && !taken && !lent {
             return;
         }
         let input = &self.options.input;
@@ -253,6 +300,10 @@ impl Inner {
         // shell's prompt, or a farewell, would land on it).
         if active && !(sync && output.write_sync(&self.restore).is_some()) {
             output.write(&self.restore);
+        }
+        // What clears Kumi's status in the terminal still goes, without taking the screen from the program.
+        if lent && !self.options.farewell.is_empty() && !(sync && output.write_sync(&self.options.farewell).is_some()) {
+            output.write(&self.options.farewell);
         }
         input.pause();
         let _ = input.set_raw_mode(self.was_raw.get());
@@ -518,6 +569,22 @@ impl TtyInput for Stdin {
 
     fn on_error(&self, listener: ErrorListener) {
         self.inner.errors.borrow_mut().push(listener);
+    }
+
+    fn discard_pending(&self) {
+        #[cfg(unix)]
+        // SAFETY: tcflush only reads the descriptor; stdin is open for the process's life.
+        unsafe {
+            libc::tcflush(libc::STDIN_FILENO, libc::TCIFLUSH);
+        }
+        #[cfg(windows)]
+        {
+            use windows_sys::Win32::System::Console::{FlushConsoleInputBuffer, GetStdHandle, STD_INPUT_HANDLE};
+            // SAFETY: GetStdHandle returns the process's own input handle, or one FlushConsoleInputBuffer refuses.
+            unsafe {
+                FlushConsoleInputBuffer(GetStdHandle(STD_INPUT_HANDLE));
+            }
+        }
     }
 
     fn emergency_raw_mode(&self) -> Option<RawModeRestorer> {
