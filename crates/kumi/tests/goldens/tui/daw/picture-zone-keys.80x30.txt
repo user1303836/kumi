@@ -4,12 +4,6 @@
 
 
 
-                         ██                          ▀▀
-                         ██ ▄█▀  ██  ██  ██▀▀██▀▀█▄  ██
-                         ██▀█▄   ██  ██  ██  ██  ██  ██
-                         ▀▀  ▀▀   ▀▀▀▀▀  ▀▀  ▀▀  ▀▀  ▀▀
-
-                         ░▒▓████████████████████████▓▒░
 
                             Kumi can see Night Drive.
 
@@ -21,8 +15,14 @@
      Kumi keeps each song's conversations: /conversations goes back to one.
 
 
-  Night Drive
-  ✓ “Snare” keyzone: notes 60-71                         ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀ undo
+
+  NOW   FOCUS   HISTORY 1 ────────────────────────────────────── ctrl+\ closes
+  ✓ “Snare” keyzone: notes 60-71                                          undo
+
+
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+
 
 
    Ask Kumi about your song

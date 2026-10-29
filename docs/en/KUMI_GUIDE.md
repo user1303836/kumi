@@ -324,17 +324,18 @@ Kumi about this**), Live's own commands and Live's manual.
 
 **Versions.** Each Kumi release ships with an extension and a tool, which
 `kumi update` brings up to date ([updating](#updating-reporting-and-uninstalling)).
-Kumi 1.24.10 to 1.24.13 with REAPER extension 0.1.7, 1.24.0 to 1.24.9 with 0.1.6, 1.23.3 with 0.1.5, 1.23.2 with 0.1.4, 1.23.1 with 0.1.3, 1.21.2 to 1.23.0 with 0.1.2, 1.21.0 to 1.21.1 with 0.1.1, 1.20.0 with 0.1.0.
-Kumi 1.24.10 to 1.24.13 with Renoise tool 1.0.6, 1.24.0 to 1.24.9 with 1.0.5, 1.23.3 with 1.0.4, 1.23.2 with 1.0.3, 1.23.1 with 1.0.2, 1.21.0 to 1.23.0 with 1.0.1, 1.20.0 with 1.0.0.
+Kumi 1.24.10 to 1.24.14 with REAPER extension 0.1.7, 1.24.0 to 1.24.9 with 0.1.6, 1.23.3 with 0.1.5, 1.23.2 with 0.1.4, 1.23.1 with 0.1.3, 1.21.2 to 1.23.0 with 0.1.2, 1.21.0 to 1.21.1 with 0.1.1, 1.20.0 with 0.1.0.
+Kumi 1.24.10 to 1.24.14 with Renoise tool 1.0.6, 1.24.0 to 1.24.9 with 1.0.5, 1.23.3 with 1.0.4, 1.23.2 with 1.0.3, 1.23.1 with 1.0.2, 1.21.0 to 1.23.0 with 1.0.1, 1.20.0 with 1.0.0.
 
 ## Working with Kumi
 
 Kumi runs full screen: the conversation on the left, a Live pane on the right
 and the input box at the bottom. FOCUS follows what you touch in Live, NOW shows
 what Kumi is doing, and HISTORY lists every change with its undo. Below 100
-columns the Live pane folds into a strip above the input box. `KUMI_UI=plain`,
-or piping the output, gives plain line-by-line output instead, which suits
-screen readers. [Commands, keys and screens](KUMI_TUI.md) has the details.
+columns the pane is a drawer under the conversation, which opens to each change
+Kumi makes, and Ctrl-\\ opens and closes it. `KUMI_UI=plain`, or piping the
+output, gives plain line-by-line output instead, which suits screen readers.
+[Commands, keys and screens](KUMI_TUI.md) has the details.
 
 Try "Describe the open Set: tracks, tempo and transport", then ask which devices
 are on a track. Ask for a change, such as "Set the tempo to 124 and rename

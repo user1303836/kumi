@@ -4,12 +4,6 @@
 
 
 
-                         ██                          ▀▀
-                         ██ ▄█▀  ██  ██  ██▀▀██▀▀█▄  ██
-                         ██▀█▄   ██  ██  ██  ██  ██  ██
-                         ▀▀  ▀▀   ▀▀▀▀▀  ▀▀  ▀▀  ▀▀  ▀▀
-
-                         ░▒▓████████████████████████▓▒░
 
                             Kumi can see Night Drive.
 
@@ -21,8 +15,14 @@
      Kumi keeps each song's conversations: /conversations goes back to one.
 
 
-  Night Drive
+
+  NOW   FOCUS   HISTORY 1 ────────────────────────────────────── ctrl+\ closes
   ✓ Gainer on Bass Gain −6.021 dB                                         undo
+    ██───▏──────── Gain 0.000 dB → −6.021 dB
+
+
+
+
 
 
    Ask Kumi about your song

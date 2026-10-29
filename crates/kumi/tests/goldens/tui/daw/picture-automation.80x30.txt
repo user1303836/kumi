@@ -4,12 +4,6 @@
 
 
 
-                         ██                          ▀▀
-                         ██ ▄█▀  ██  ██  ██▀▀██▀▀█▄  ██
-                         ██▀█▄   ██  ██  ██  ██  ██  ██
-                         ▀▀  ▀▀   ▀▀▀▀▀  ▀▀  ▀▀  ▀▀  ▀▀
-
-                         ░▒▓████████████████████████▓▒░
 
                             Kumi can see Night Drive.
 
@@ -21,8 +15,14 @@
      Kumi keeps each song's conversations: /conversations goes back to one.
 
 
-  Night Drive
-  ✓ Automation of Filter Cutoff on “Bass” in “Drop”: 4…  ⣀⣀⠤⠤⠔⠒⠒⠒⠤⠤⠤⠤⠒⠒⠊⠉ undo
+
+  NOW   FOCUS   HISTORY 1 ────────────────────────────────────── ctrl+\ closes
+  ✓ Automation of Filter Cutoff on “Bass” in “Drop”: 4 points, linear     undo
+                                                                        ⣀⡠⠤⠒⠒⠉
+                           ⣀⡠⠤⠒⠒⠤⠤⢄⣀⣀⡀                           ⣀⣀⠤⠔⠒⠉⠉
+                     ⣀⡠⠤⠒⠊⠉          ⠈⠉⠉⠒⠒⠢⠤⠤⣀⣀⡀          ⢀⣀⠤⠤⠒⠊⠉
+               ⢀⣀⠤⠔⠊⠉                          ⠈⠉⠉⠑⠒⠒⠤⠤⠒⠒⠉⠁
+         ⢀⣀⠤⠔⠒⠉⠁
 
 
    Ask Kumi about your song

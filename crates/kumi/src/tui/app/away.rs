@@ -132,18 +132,16 @@ impl TuiApp {
         [label, detail].into_iter().filter(|part| !part.is_empty()).collect::<Vec<_>>().join(" · ")
     }
 
-    /// How far a run has got, 0–100, when Kumi knows: a /goal's turns against its budget.
+    /// How far a run has got, 0–100, when Kumi knows: a /goal's turns against its budget, or a /loop's rounds against
+    /// its budget's, which are the rounds it has judged and those it has left.
     fn progress(&self) -> Option<u8> {
         let state = self.0.state.borrow();
         let share = |done: f64, of: f64| (of > 0.).then(|| ((done / of) * 100.).clamp(0., 100.).round() as u8);
         if let Some(goal) = state.objective.as_ref().filter(|goal| goal.status.state == ObjectiveState::Running) {
             return share(goal.status.turns.into(), goal.status.turn_budget.into());
         }
-        // A /loop's rounds against its cap aren't shown yet (#625): its progress stays unknown.
-        if state.looping.is_some() {
-            return None;
-        }
-        None
+        let looping = &state.looping.as_ref()?.status;
+        share(looping.rounds.into(), f64::from(looping.rounds) + f64::from(looping.rounds_left))
     }
 
     /// Writes the status (after a frame) when it changed: a new state at once, new words or progress at most once a
