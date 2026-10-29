@@ -1533,7 +1533,7 @@ impl TuiApp {
                     .filter(|change| !matches!(change.state, ChangeState::Applied | ChangeState::Undone | ChangeState::Heard))
                     .cloned()
                     .collect();
-                self.taken_back(taken, left);
+                self.took_back(taken, left);
             }
             Ok(None) => self.notice("There's no request of yours to take back yet.", NoticeTone::Info),
             Err(error) => {
@@ -1546,7 +1546,7 @@ impl TuiApp {
         self.0.scheduler.request();
     }
     /// What taking requests back did, in words, with the earliest one's words back in the box.
-    fn taken_back(&self, taken: TakenBack, left: Vec<ChangeRecord>) {
+    fn took_back(&self, taken: TakenBack, left: Vec<ChangeRecord>) {
         let many = |n: usize, one: &str, more: &str| if n == 1 { format!("1 {one}") } else { format!("{n} {more}") };
         let undid = (!taken.undone.is_empty()).then(|| many(taken.undone.len(), "change", "changes"));
         let mut said = vec![];

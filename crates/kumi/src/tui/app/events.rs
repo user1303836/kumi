@@ -615,7 +615,7 @@ impl TuiApp {
                     state.transcript.clear();
                     state.current = None;
                     state.selection = None;
-                    state.scroll = 0;
+                    state.view.follow();
                 }
                 if let Some(replay) = replay {
                     self.shown_again(replay);
