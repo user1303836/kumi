@@ -704,6 +704,11 @@ impl SoundIndex {
     pub fn compared(&self) -> impl Iterator<Item = (usize, &[f32])> + '_ {
         (0..self.entries.len()).filter_map(|row| self.compared_at(row).map(|numbers| (row, numbers)))
     }
+    /// The sound in this row as the search names it: its file's name without the extension, that name lowercased as the
+    /// search matches it, and where it is ("Splice / Drums / 808").
+    pub fn named(&self, row: usize) -> Option<(&str, &str, &str)> {
+        self.prepared.get(row).map(|prepared| (prepared.name.as_str(), prepared.lower.as_str(), prepared.where_.as_str()))
+    }
     /// The numbers the search compares for the sound in this row: None when it isn't measured.
     pub fn compared_at(&self, row: usize) -> Option<&[f32]> {
         self.has_vector.get(row).is_some_and(|has| *has).then(|| &self.vectors[row * VECTOR_LENGTH..(row + 1) * VECTOR_LENGTH])

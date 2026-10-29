@@ -35,6 +35,7 @@ pub mod project;
 pub mod protocol;
 pub mod recall;
 pub mod recipes;
+pub mod references;
 pub mod refs;
 pub mod routing;
 pub mod scripts;

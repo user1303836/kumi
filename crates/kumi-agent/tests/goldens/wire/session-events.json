@@ -110,6 +110,18 @@
   {
     "type": "pointed",
     "pin": {
+      "trackRef": "",
+      "ref": "1:instrument:1",
+      "node": "instrument",
+      "name": "808 Kit",
+      "trail": [],
+      "siblings": [],
+      "layout": 4
+    }
+  },
+  {
+    "type": "pointed",
+    "pin": {
       "trackRef": "7:track:0",
       "ref": "7:chain:0:0:1",
       "node": "chain",

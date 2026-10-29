@@ -7,6 +7,7 @@ use crate::core::{
     memory::{memory_instructions_for, memory_tools_for, MemoryTools, MemoryToolsOptions},
     recall::{recall_tool_for, RecallOptions},
     recipes::{recipe_instructions, recipe_tools_for, RecipeStore, RecipeToolsOptions, RUN_RECIPE_TOOL},
+    references::{with_references, Candidate, CandidateKind, Listed, Referable},
     search_memory::SearchMemory,
     session_log::{replay_of, LogLine, Replay, SessionLog, REPLAYED},
     store_client::StoreClient,
@@ -412,6 +413,8 @@ struct State {
     carrying: jobs::Carrying,
     /// The Set whose kept jobs came back this session.
     jobs_place: Option<String>,
+    /// What `@` offers while the producer types after it: read as the list opens, kept until the next look.
+    referable: Option<Referable>,
 }
 struct Inner {
     options: SessionOptions,
@@ -936,6 +939,7 @@ pub fn create_session(options: SessionOptions) -> Result<Session, RuntimeError> 
                 carrying: Default::default(),
                 jobs_place: None,
                 noted: None,
+                referable: None,
             }),
         }
     })))
@@ -1980,12 +1984,140 @@ impl Session {
             });
         }
     }
+    /// What `@` offers now, in the order ties keep: the project's things as the integration last read them, the
+    /// palettes, the techniques, then the library's sounds, matched in their index.
+    async fn referable(&self) -> Referable {
+        let integration = self.0.state.borrow().integration.clone();
+        let mut short = match integration {
+            Some(integration) => integration.reference_candidates(Signal::new()).await.unwrap_or_default(),
+            None => vec![],
+        };
+        if let Some(palettes) = &self.0.palettes {
+            short.extend(palettes.all().await.unwrap_or_default().into_iter().map(|(palette, held)| Candidate {
+                label: palette.name.clone(),
+                kind: CandidateKind::Palette,
+                detail: Some(held),
+                reference: Reference::Palette { id: palette.id, name: palette.name },
+            }));
+        }
+        short.extend(self.techniques().await.unwrap_or_default().into_iter().map(|technique| Candidate {
+            label: technique.name.clone(),
+            kind: CandidateKind::Technique,
+            detail: None,
+            reference: Reference::Technique { id: technique.id, name: technique.name },
+        }));
+        let sounds = match &self.0.options.library {
+            Some(library) => library.sound_index_in(self.0.options.profile.id).await.ok(),
+            None => None,
+        };
+        Referable::new(short, sounds.map(|index| index as Rc<dyn Listed>))
+    }
+    /// The library's references as the turn's context names them, each read now: what a sound is, what a palette
+    /// holds, what a technique fits. One the library no longer has is said to be gone.
+    async fn library_references(&self, references: &[Reference]) -> Vec<Value> {
+        let mut sounds = None;
+        let mut techniques = None;
+        let mut entries = vec![];
+        for reference in references {
+            let mut entry = JsonObject::new();
+            let gone = |what: &str, name: &str| format!("The producer named “{name}” with @, and {what}: say so, and ask what they mean.");
+            match reference {
+                Reference::Daw { .. } => continue,
+                Reference::Sample { path, name } => {
+                    entry.insert("said".into(), json!(format!("@{name}")));
+                    entry.insert("sound".into(), json!(path));
+                    if sounds.is_none() {
+                        sounds = Some(match &self.0.options.library {
+                            Some(library) => library.sound_index_in(self.0.options.profile.id).await.ok(),
+                            None => None,
+                        });
+                    }
+                    let index = sounds.as_ref().and_then(Option::as_ref);
+                    match index.map(|index| index.entries.iter().find(|sound| sound.file.path == *path)) {
+                        Some(Some(sound)) => {
+                            for (key, value) in [
+                                ("seconds", sound.seconds.map(|seconds| json!(seconds))),
+                                ("kind", sound.kind.and_then(|kind| serde_json::to_value(kind).ok())),
+                                ("class", sound.class.and_then(|class| serde_json::to_value(class).ok())),
+                            ] {
+                                if let Some(value) = value {
+                                    entry.insert(key.into(), value);
+                                }
+                            }
+                        }
+                        Some(None) => {
+                            entry.insert("gone".into(), json!(gone("the library no longer has it", name)));
+                        }
+                        None => {}
+                    }
+                }
+                Reference::Palette { id, name } => {
+                    entry.insert("said".into(), json!(format!("@{name}")));
+                    entry.insert("palette".into(), json!(name));
+                    entry.insert("id".into(), json!(id));
+                    if let Some(palettes) = &self.0.palettes {
+                        match palettes.by_id(id).await {
+                            Ok(Some((palette, held))) => {
+                                entry.insert("palette".into(), json!(palette.name));
+                                entry.insert("holds".into(), json!(held));
+                            }
+                            Ok(None) => {
+                                entry.insert("gone".into(), json!(gone("it was forgotten since", name)));
+                            }
+                            Err(_) => {}
+                        }
+                    }
+                }
+                Reference::Technique { id, name } => {
+                    entry.insert("said".into(), json!(format!("@{name}")));
+                    entry.insert("technique".into(), json!(name));
+                    entry.insert("id".into(), json!(id));
+                    if techniques.is_none() && self.0.learned.is_some() {
+                        techniques = Some(self.techniques().await.ok());
+                    }
+                    if let Some(known) = techniques.as_ref().and_then(Option::as_ref) {
+                        match known.iter().find(|technique| technique.id == *id) {
+                            Some(technique) => {
+                                if let Some(fits) = technique.fits.lines().map(str::trim).find(|line| !line.is_empty()) {
+                                    entry.insert("fits".into(), json!(fits));
+                                }
+                            }
+                            None => {
+                                entry.insert("gone".into(), json!(gone("it was forgotten since", name)));
+                            }
+                        }
+                    }
+                }
+            }
+            entries.push(Value::Object(entry));
+        }
+        entries
+    }
     async fn observe(&self, op: &Operation, pinned: Option<PinnedNode>, continuing: bool) -> Result<Observation, RuntimeError> {
+        self.observe_naming(op, pinned, vec![], continuing).await
+    }
+    /// A look that checks what the message names with `@` in the project, as it checks the pin.
+    async fn observe_naming(
+        &self,
+        op: &Operation,
+        pinned: Option<PinnedNode>,
+        references: Vec<PinnedNode>,
+        continuing: bool,
+    ) -> Result<Observation, RuntimeError> {
         self.assert_current(op)?;
         let integration = self.0.state.borrow().integration.clone().ok_or_else(|| RuntimeError::plain("Integration not started"))?;
         op.phase.set(Phase::Refresh);
-        self.0.state.borrow_mut().observation = None;
-        let hints = (pinned.is_some() || continuing).then_some(ObserveHints { pinned, continuing: continuing.then_some(true) });
+        {
+            let mut s = self.0.state.borrow_mut();
+            s.observation = None;
+            // What `@` offers is read again after a look: the project may have changed under it.
+            s.referable = None;
+        }
+        let hints = (pinned.is_some() || continuing || !references.is_empty()).then_some(ObserveHints {
+            pinned,
+            continuing: continuing.then_some(true),
+            references,
+        });
         let snapshot = integration.observe(op.signal.clone(), hints).await?;
         self.assert_current(op)?;
         let other_set = {
@@ -2463,6 +2595,15 @@ impl SessionController for Session {
         true
     }
     async fn submit_with(&self, input: &str, pinned: Option<PinnedNode>, attachments: Vec<Attachment>) -> Result<(), RuntimeError> {
+        self.submit_with_references(input, pinned, attachments, vec![]).await
+    }
+    async fn submit_with_references(
+        &self,
+        input: &str,
+        pinned: Option<PinnedNode>,
+        attachments: Vec<Attachment>,
+        references: Vec<Reference>,
+    ) -> Result<(), RuntimeError> {
         let (text, pictures) = attached(input, &attachments).await?;
         {
             let mut s = self.0.state.borrow_mut();
@@ -2506,11 +2647,22 @@ impl SessionController for Session {
         self.perform(
             true,
             Phase::Refresh,
-            Box::new(move |this, op| async move { this.submit_turn(op, text, pinned, pictures).await }.boxed_local()),
+            Box::new(move |this, op| async move { this.submit_turn(op, text, pinned, pictures, references).await }.boxed_local()),
             None,
             Some(said),
         )?
         .await
+    }
+    async fn references(&self, query: &str, limit: u32) -> Result<Vec<Candidate>, RuntimeError> {
+        // The list opens on `@` (an empty query): what it offers is read then, and ranked as the producer types on.
+        let held = self.0.state.borrow_mut().referable.take().filter(|_| !query.is_empty());
+        let mut referable = match held {
+            Some(referable) => referable,
+            None => self.referable().await,
+        };
+        let found = referable.rank(query, if limit == 0 { 50 } else { limit as usize });
+        self.0.state.borrow_mut().referable = Some(referable);
+        Ok(found)
     }
     fn has_steer(&self) -> bool {
         true

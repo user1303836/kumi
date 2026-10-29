@@ -222,6 +222,7 @@ async fn every_oracle_case_names_the_set_as_its_label_did() {
                     let hints = config.get("hints").map(|h| ObserveHints {
                         pinned: h.get("pinned").map(|v| serde_json::from_value(v.clone()).unwrap()),
                         continuing: h["continuing"].as_bool(),
+                        ..ObserveHints::default()
                     });
                     let label = format!("{} turn {index}", case["label"]);
                     let result = observer.observe(endpoint.as_ref(), signal, hints).await;

@@ -50,6 +50,7 @@ fn pinned_value(pin: &PinnedNode, blank: &str) -> Option<String> {
     let kind = match pin.node {
         PinKind::Device => "device",
         PinKind::Chain => "chain",
+        PinKind::Instrument => "instrument",
         PinKind::Track => "track",
         PinKind::Clip => "clip",
         PinKind::Scene => "scene",

@@ -98,8 +98,8 @@ async fn each_request_reaches_the_method_it_was_and_answers_in_its_own_type() {
     let session: Rc<dyn SessionHandle> = InProcess::new(fake.clone());
     session.op(op::Start {}).await.unwrap();
     // A message with files goes as it did: with them, and without them otherwise.
-    session.op(op::Submit { input: "louder".into(), pinned: None, attachments: vec![] }).await.unwrap();
-    session.op(op::Submit { input: "like this".into(), pinned: None, attachments: vec![attachment()] }).await.unwrap();
+    session.op(op::Submit { input: "louder".into(), pinned: None, attachments: vec![], references: vec![] }).await.unwrap();
+    session.op(op::Submit { input: "like this".into(), pinned: None, attachments: vec![attachment()], references: vec![] }).await.unwrap();
     let undone: Option<ChangeRecord> = session.op(op::Undo { id: Some("c2".into()) }).await.unwrap();
     assert_eq!(undone, None);
     let stopping: bool = session.op(op::StopJob { id: 3 }).await.unwrap();
@@ -207,6 +207,20 @@ impl SessionController for Reached {
     async fn submit_with(&self, _: &str, _: Option<PinnedNode>, _: Vec<Attachment>) -> Result<(), RuntimeError> {
         self.reach("submit_with");
         Ok(())
+    }
+    async fn submit_with_references(
+        &self,
+        _: &str,
+        _: Option<PinnedNode>,
+        _: Vec<Attachment>,
+        _: Vec<Reference>,
+    ) -> Result<(), RuntimeError> {
+        self.reach("submit_with_references");
+        Ok(())
+    }
+    async fn references(&self, _: &str, _: u32) -> Result<Vec<kumi_agent::core::references::Candidate>, RuntimeError> {
+        self.reach("references");
+        Ok(vec![])
     }
     fn steer(&self, _: &str) -> bool {
         self.reach("steer");
@@ -444,8 +458,10 @@ fn method(request: &Op) -> Option<String> {
     Some(
         match request {
             Op::Start(_) => "start",
+            Op::Submit(op::Submit { references, .. }) if !references.is_empty() => "submit_with_references",
             Op::Submit(op::Submit { attachments, .. }) if attachments.is_empty() => "submit",
             Op::Submit(_) => "submit_with",
+            Op::References(_) => "references",
             Op::Steer(_) => "steer",
             Op::Aside(_) => "aside",
             Op::StopAside(_) => return None,

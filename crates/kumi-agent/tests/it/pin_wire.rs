@@ -8,8 +8,8 @@ use kumi_agent::core::{
         ConnectionState, ConversationNow, ConversationSummary, DeviceNode, DeviceTree, DeviceType, DisconnectCause, FocusParameter,
         FocusTrack, KernelEvent, LessonAction, LibraryEvent, LiveDetail, LiveFocus, LiveTransport, LiveView, Locator, Memory, MemoryEvent,
         MemoryNote, MemoryScope, MemoryView, MusicEvent, NoteChange, Picked, PinKind, PinnedNode, PinnedTime, RecipeAction, RecipeEvent,
-        SessionEvent, SessionSlot, SessionStatus, SessionStrip, SetAsk, SetChoice, SlotClip, StopReason, TechniqueAction, TechniqueEvent,
-        TechniqueSummary, TrackKind, TranscriptLine, TranscriptRole, TurnResult, TurnState, WaitFor,
+        Reference, SessionEvent, SessionSlot, SessionStatus, SessionStrip, SetAsk, SetChoice, SlotClip, StopReason, TechniqueAction,
+        TechniqueEvent, TechniqueSummary, TrackKind, TranscriptLine, TranscriptRole, TurnResult, TurnState, WaitFor,
     },
     goal::{Best, GoalPhase, GoalStatus},
     goal_mode::{ObjectiveState, ObjectiveStatus, Verdict},
@@ -122,8 +122,16 @@ const FAILURE_KINDS: [FailureKind; 12] = [
     FailureKind::Output,
 ];
 const NET_CAUSES: [NetCause; 5] = [NetCause::Dns, NetCause::Tls, NetCause::Proxy, NetCause::Timeout, NetCause::Offline];
-const PIN_KINDS: [PinKind; 7] =
-    [PinKind::Device, PinKind::Chain, PinKind::Track, PinKind::Clip, PinKind::Scene, PinKind::ClipSlot, PinKind::Selection];
+const PIN_KINDS: [PinKind; 8] = [
+    PinKind::Device,
+    PinKind::Instrument,
+    PinKind::Chain,
+    PinKind::Track,
+    PinKind::Clip,
+    PinKind::Scene,
+    PinKind::ClipSlot,
+    PinKind::Selection,
+];
 const TRACK_KINDS: [(TrackKind, &str); 5] = [
     (TrackKind::Midi, "Keys"),
     (TrackKind::Audio, "Vox"),
@@ -196,6 +204,8 @@ fn pins() -> Vec<PinnedNode> {
                 ..pin(kind, "7:device:0:0:0:0", "Simpler")
             },
             PinKind::Chain => PinnedNode { trail: vec!["Drum Rack".into()], ..pin(kind, "7:chain:0:0:1", "Snare") },
+            // Renoise's: on no track, its refs read at a layout.
+            PinKind::Instrument => PinnedNode { track_ref: String::new(), layout: Some(4), ..pin(kind, "1:instrument:1", "808 Kit") },
             PinKind::Track => PinnedNode { track: Some("Drums".into()), live: Some(true), ..pin(kind, "7:track:0", "Drums") },
             PinKind::Clip => PinnedNode { live: Some(false), ..pin(kind, "7:clip:0:1", "Bassline") },
             PinKind::Scene => PinnedNode { track_ref: String::new(), live: Some(true), ..pin(kind, "7:scene:1", "Verse") },
@@ -1546,9 +1556,24 @@ pub(crate) fn requests() -> Vec<Op> {
                 media_type: "image/png".into(),
                 bytes: 48_210,
             }],
+            references: vec![],
         }
         .into(),
-        op::Submit { input: "louder".into(), pinned: None, attachments: vec![] }.into(),
+        op::Submit { input: "louder".into(), pinned: None, attachments: vec![], references: vec![] }.into(),
+        // What the message names with `@`: one of each kind of reference.
+        op::Submit {
+            input: "send @Drums to @Big Hall like @Kick 808.wav, from @Warm Pads with @Sidechain pump".into(),
+            pinned: None,
+            attachments: vec![],
+            references: vec![
+                Reference::Daw { node: pinned.clone() },
+                Reference::Sample { path: "/Users/me/Samples/Kick 808.wav".into(), name: "Kick 808.wav".into() },
+                Reference::Palette { id: "p1".into(), name: "Warm Pads".into() },
+                Reference::Technique { id: "t1".into(), name: "Sidechain pump".into() },
+            ],
+        }
+        .into(),
+        op::References { query: "dru".into(), limit: 50 }.into(),
         op::Steer { text: "and leave the snare".into() }.into(),
         op::Aside { id: 2, question: "why the low shelf?".into() }.into(),
         op::StopAside { id: 2 }.into(),

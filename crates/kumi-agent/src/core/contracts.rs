@@ -544,6 +544,9 @@ pub struct ObserveHints {
     pub pinned: Option<PinnedNode>,
     /// The same answer goes on (a match run's next round): its counts carry on.
     pub continuing: Option<bool>,
+    /// What the message names with `@` in the project, in its order: each is checked and described as the pin is, and
+    /// one the project no longer has is said to be gone.
+    pub references: Vec<PinnedNode>,
 }
 
 /// Optional methods (`undo?()` and so on) have a `has_…` flag, which the profile's capabilities answer by default.
@@ -556,6 +559,12 @@ pub trait Integration {
     async fn start(&self, signal: Signal) -> Result<(), RuntimeError>;
     /// What's in Live now; `pinned` (what the producer pointed at) is checked against it and given to the model.
     async fn observe(&self, signal: Signal, hints: Option<ObserveHints>) -> Result<Observation, RuntimeError>;
+    /// What of the project the producer can name with `@`, from what was last read, with at most a bounded read more
+    /// (the devices of the tracks an observation widens). None by default.
+    async fn reference_candidates(&self, signal: Signal) -> Result<Vec<crate::core::references::Candidate>, RuntimeError> {
+        let _ = signal;
+        Ok(vec![])
+    }
     async fn close(&self) -> Result<(), RuntimeError>;
     /// Resolves once no tool call is still at work in the app (a stopped answer's, putting it back): a stopped answer
     /// ends only then, so the next one doesn't run beside it.
@@ -810,6 +819,8 @@ pub trait GoalRig {
 #[serde(rename_all = "kebab-case")]
 pub enum PinKind {
     Device,
+    /// Renoise's instruments: neither a track nor a device on one.
+    Instrument,
     Chain,
     Track,
     Clip,
@@ -852,6 +863,21 @@ pub struct PinnedNode {
     /// The layout its refs were read at, where refs are places (Renoise's): it's carried from there to where it is now.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub layout: Option<u64>,
+}
+
+/// What the producer named with `@` in a message: one exact thing, so the model never guesses which they mean. Unlike
+/// the pin, which stays "this" until it's let go, a reference belongs to the message it's in.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "kebab-case", rename_all_fields = "camelCase")]
+pub enum Reference {
+    /// Something in the project, named as a pin names it: its refs carry it to the DAW, which checks it.
+    Daw { node: PinnedNode },
+    /// A sound in the producer's library, by its path in the library's index.
+    Sample { path: String, name: String },
+    /// One of the producer's palettes.
+    Palette { id: String, name: String },
+    /// A technique Kumi remembers.
+    Technique { id: String, name: String },
 }
 
 /// `(state: ConnectionState, cause?: DisconnectCause) => void`.
@@ -1419,6 +1445,23 @@ pub trait SessionController {
         } else {
             Err(RuntimeError::plain("Kumi can't take files here."))
         }
+    }
+    /// `submit_with` for a message that names things with `@`: `references` says what each names, in the message's
+    /// order. A session that can't take them sends the words as they are.
+    async fn submit_with_references(
+        &self,
+        input: &str,
+        pinned: Option<PinnedNode>,
+        attachments: Vec<Attachment>,
+        references: Vec<Reference>,
+    ) -> Result<(), RuntimeError> {
+        let _ = references;
+        self.submit_with(input, pinned, attachments).await
+    }
+    /// What the producer can name with `@`, best first for `query` (what they typed after it): none by default.
+    async fn references(&self, query: &str, limit: u32) -> Result<Vec<crate::core::references::Candidate>, RuntimeError> {
+        let _ = (query, limit);
+        Ok(vec![])
     }
     fn has_steer(&self) -> bool {
         false
