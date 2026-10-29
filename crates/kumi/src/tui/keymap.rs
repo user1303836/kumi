@@ -124,6 +124,9 @@ impl Chord {
     }
 }
 
+/// How soon the second of keys pressed one after another (esc esc) comes after the first.
+pub const AGAIN_MS: f64 = 500.;
+
 /// Keys pressed one after another (esc esc), written with a space between.
 pub fn label(keys: &[Chord]) -> String {
     keys.iter().map(Chord::label).collect::<Vec<_>>().join(" ")
@@ -173,6 +176,22 @@ fn read(words: &str, loose: bool) -> Option<(Chord, Modifiers)> {
         }
     };
     Some((Chord { key, mods }, also))
+}
+
+/// A default's keys, one or two pressed one after another (`any+escape any+escape`), and the modifiers they may be held
+/// with besides.
+fn read_default(words: &str) -> Option<(Vec<Chord>, Modifiers)> {
+    let mut also = Modifiers::NONE;
+    let keys: Option<Vec<Chord>> = words
+        .split_whitespace()
+        .map(|word| {
+            read(word, true).map(|(chord, more)| {
+                also = more;
+                chord
+            })
+        })
+        .collect();
+    keys.filter(|keys| (1..=2).contains(&keys.len())).map(|keys| (keys, also))
 }
 
 /// Where a key is pressed. Each scope reads its keys apart: enter sends in the box and chooses in a list.
@@ -284,6 +303,13 @@ pub const ACTIONS: &[Action] = &[
     act("search.erase", &[Search], &["shift?+backspace"], "Take back the last character looked for"),
     act("search.take", &[Search], &["any+enter", "any+tab"], "Put the message found in the box"),
     act("search.cancel", &[Search], &["any+escape", "ctrl+alt?+shift?+c"], "Stop looking, and keep the draft"),
+    // From the box and the tree; the tabs it leaves.
+    act(
+        "conversation.details",
+        &[InBox, Tree],
+        &["ctrl+shift?+o"],
+        "The conversation in detail: search it, go from request to request, print it or open it in your editor",
+    ),
     // In the box. From the tabs or the tree they come back to the box first.
     act("composer.history-search", &[InBox], &["ctrl+shift?+r"], "Look back through what you sent for the words you type"),
     act("composer.editor", &[InBox], &["ctrl+shift?+g"], "Open the draft in your editor"),
@@ -324,6 +350,8 @@ pub const ACTIONS: &[Action] = &[
     // From an empty box while Kumi isn't working; otherwise ctrl+d deletes.
     act("app.quit", &[InBox], &["ctrl+alt?+shift?+d"], "Quit, from an empty box while Kumi isn't working"),
     act("app.stop", &[InBox], &["any+escape"], "Stop a /slots check, then Kumi's answer; when it isn't working, unpin"),
+    // Two escs that did nothing else, in an empty box.
+    act("app.take-back", &[InBox], &["any+escape any+escape"], "List your requests, to take one back"),
     act("composer.send", &[InBox], &["ctrl?+enter"], "Send; while Kumi works, it reads it after the step under way"),
     act("composer.new-line", &[InBox], &["ctrl+alt?+shift?+j", "alt+ctrl?+shift?+enter", "shift+ctrl?+enter"], "A new line"),
     // In an empty box with files added, any backspace takes the last one back first.
@@ -491,6 +519,11 @@ impl Keymap {
                                 continue;
                             }
                         };
+                        // Keys one after another are read only in the box.
+                        if keys.len() == 2 && !action.scopes.contains(&Scope::Box) {
+                            say(format!("keys.json gives {id} “{words}”, but keys one after another work only in the box"));
+                            continue;
+                        }
                         if let Some(scope) = action.scopes.iter().find(|scope| scope.types() && keys.iter().any(Chord::typed)) {
                             say(format!("keys.json gives {id} “{words}”, but that types itself {}", scope.words()));
                             continue;
@@ -511,9 +544,9 @@ impl Keymap {
         }
         let mut bindings = asked;
         for action in ACTIONS.iter().filter(|action| !rebound.contains(&action.id)) {
-            for (key, also) in action.keys.iter().filter_map(|key| read(key, true)) {
+            for (keys, also) in action.keys.iter().filter_map(|key| read_default(key)) {
                 for &scope in action.scopes {
-                    bindings.push(Binding { scope, id: action.id, keys: vec![key.clone()], also, asked: false });
+                    bindings.push(Binding { scope, id: action.id, keys: keys.clone(), also, asked: false });
                 }
             }
         }
@@ -700,7 +733,7 @@ mod tests {
         }
         // Every default key's label is a key again, the same one (a page key's label has a space, so it's written whole).
         for action in ACTIONS {
-            for (key, _) in action.keys.iter().filter_map(|key| read(key, true)) {
+            for key in action.keys.iter().filter_map(|key| read_default(key)).flat_map(|(keys, _)| keys) {
                 let written = key.label().replace("page up", "pageup").replace("page down", "pagedown");
                 assert_eq!(Chord::parse(&written), Some(key.clone()), "{}: {written}", action.id);
             }
@@ -718,7 +751,7 @@ mod tests {
             let (area, name) = action.id.split_once('.').unwrap_or_else(|| panic!("{} is area.name", action.id));
             assert!(!area.is_empty() && name.chars().all(|c| c.is_ascii_lowercase() || c == '-'), "{}", action.id);
             for key in action.keys {
-                assert!(read(key, true).is_some(), "{}: {key} doesn't read", action.id);
+                assert!(read_default(key).is_some(), "{}: {key} doesn't read", action.id);
             }
         }
         let (keymap, said) = Keymap::new(None);
@@ -864,9 +897,11 @@ mod tests {
 
     #[test]
     fn keys_pressed_one_after_another_wait_for_the_second() {
-        let (keymap, said) = with(json!({ "app.redraw": ["esc esc"] }));
-        assert!(said.is_empty(), "{said:?}");
+        // Kumi's own: esc esc takes a request back.
         let esc = chord("esc");
+        assert_eq!(Keymap::default().then(Scope::Box, &esc, &chord("shift+esc")), Some("app.take-back"));
+        let (keymap, said) = with(json!({ "app.redraw": ["esc esc"] }));
+        assert_eq!(said, ["keys.json gives esc esc to app.redraw in the box, ahead of app.take-back"]);
         assert!(keymap.starts(Scope::Box, &esc) && !keymap.starts(Scope::Help, &esc));
         assert_eq!(keymap.then(Scope::Box, &esc, &esc), Some("app.redraw"));
         assert_eq!(keymap.then(Scope::Box, &esc, &chord("enter")), None);

@@ -4,7 +4,6 @@
 use super::super::{
     editor::{Draft, Editor, EditorLayout},
     external_editor,
-    keys::Modifiers,
     width::{graphemes, text_width},
 };
 use super::drawing::st;
@@ -78,33 +77,18 @@ impl TuiApp {
         }
     }
 
-    /// A key while looking: true when it was the search's. Any other key uses the message found, then does what it does.
-    pub(super) fn search_key(&self, name: &str, mods: Modifiers) -> bool {
-        if !self.searching() {
-            return false;
+    /// Takes back the last character looked for, and finds again from the newest.
+    pub(super) fn search_erase(&self) {
+        if let Some(search) = &mut self.0.state.borrow_mut().search {
+            let mut letters = graphemes(&search.query);
+            letters.pop();
+            search.query = letters.concat();
+            search.found = self.with_sent(|sent| find(sent, &search.query, sent.len(), None));
         }
-        match (name, mods.ctrl, mods.alt) {
-            ("r", true, false) => self.search_back(),
-            ("backspace", false, false) => {
-                if let Some(search) = &mut self.0.state.borrow_mut().search {
-                    let mut letters = graphemes(&search.query);
-                    letters.pop();
-                    search.query = letters.concat();
-                    search.found = self.with_sent(|sent| find(sent, &search.query, sent.len(), None));
-                }
-            }
-            ("enter" | "tab", _, _) => self.search_end(true),
-            ("escape", _, _) | ("c", true, _) => self.search_end(false),
-            _ => {
-                self.search_end(true);
-                return false;
-            }
-        }
-        true
     }
 
     /// Stops looking. `take`: the message found goes into the box, one step ctrl+- takes back; else the draft stays.
-    fn search_end(&self, take: bool) {
+    pub(super) fn search_end(&self, take: bool) {
         let state = &mut *self.0.state.borrow_mut();
         let Some(search) = state.search.take() else { return };
         if let Some(found) = search.found.filter(|_| take).and_then(|at| self.with_sent(|sent| sent.get(at).cloned())) {

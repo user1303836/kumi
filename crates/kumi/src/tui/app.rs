@@ -33,7 +33,7 @@ use super::{
     alerts::{self, ProgramState, StatusReport, TerminalProfile},
     editor::{Composed, Draft, Editor},
     icons::{detect_icon_style_here, IconKind, IconStyle},
-    keymap::{Chord, Keymap, Scope},
+    keymap::{Chord, Keymap, Scope, AGAIN_MS},
     keys::InputEvent,
     overlay::{Area, Handled, Overlay, Overlays, Shared},
     picker::{Picker, PickerItem},
@@ -409,8 +409,9 @@ struct State {
     objective: Option<Timed<ObjectiveStatus>>,
     watching: bool,
     undoing: bool,
-    /// When an esc nothing took came, in an empty box with Kumi at rest: a second soon after takes a request back.
-    escaped: Option<f64>,
+    /// A key no action took that starts keys pressed one after another (esc esc), and when it came: the next, soon
+    /// after, may finish them.
+    pending: Option<(Chord, f64)>,
     hits: Vec<Hit>,
     tabs_area: Option<Rect>,
     selection: Option<super::selection::Selection>,
@@ -613,7 +614,7 @@ impl State {
             objective: None,
             watching: false,
             undoing: false,
-            escaped: None,
+            pending: None,
             hits: vec![],
             tabs_area: None,
             selection: None,
