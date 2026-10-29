@@ -87,6 +87,21 @@ fn is_space(grapheme: &str) -> bool {
     grapheme.chars().any(char::is_whitespace)
 }
 
+/// A character a chip stands as: Unicode's last private use plane.
+fn is_mark(character: char) -> bool {
+    ('\u{100000}'..='\u{10fffd}').contains(&character)
+}
+
+/// Text coming into the box, without the characters chips stand as, which typed or pasted text has no use for: any of
+/// them in the box is then a chip's own.
+fn incoming(text: &str) -> std::borrow::Cow<'_, str> {
+    if text.chars().any(is_mark) {
+        std::borrow::Cow::Owned(text.chars().filter(|character| !is_mark(*character)).collect())
+    } else {
+        std::borrow::Cow::Borrowed(text)
+    }
+}
+
 impl Editor {
     pub fn new() -> Editor {
         Editor::default()
@@ -106,7 +121,7 @@ impl Editor {
 
     /// Replaces the text, as one step, with the cursor at its end.
     pub fn set(&mut self, text: &str) {
-        let chars: Vec<String> = graphemes(text).into_iter().map(str::to_string).collect();
+        let chars: Vec<String> = graphemes(&incoming(text)).into_iter().map(str::to_string).collect();
         if chars == self.chars {
             self.moved();
         } else {
@@ -301,7 +316,7 @@ impl Editor {
     /// returned, to come back with `restore`.
     pub fn show(&mut self, text: &str) -> Draft {
         let draft = Draft {
-            chars: std::mem::replace(&mut self.chars, graphemes(text).into_iter().map(str::to_string).collect()),
+            chars: std::mem::replace(&mut self.chars, graphemes(&incoming(text)).into_iter().map(str::to_string).collect()),
             position: self.position,
             steps: std::mem::take(&mut self.steps),
             bytes: std::mem::take(&mut self.bytes),
@@ -398,7 +413,7 @@ impl Editor {
 
     /// Puts `text` in at the cursor and moves past it.
     fn put(&mut self, text: &str) {
-        self.splice(self.position, self.position, text);
+        self.splice(self.position, self.position, &incoming(text));
     }
 
     /// Puts a paste in at the cursor: as one chip when it's long (see `paste`).
@@ -409,7 +424,7 @@ impl Editor {
             Some(mark) => {
                 let label = if lines > 1 { format!("[pasted {lines} lines]") } else { format!("[pasted {characters} characters]") };
                 self.chips.push(Chip { text: text.to_string(), label });
-                self.put(&mark.to_string());
+                self.splice(self.position, self.position, &mark.to_string());
             }
             None => self.put(text),
         }

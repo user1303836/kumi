@@ -623,6 +623,13 @@ fn a_long_paste_is_one_chip_that_goes_out_whole_and_is_sent_whole() {
     e.clear();
     e.paste("short");
     assert_eq!(e.shown(), "short");
+    // A character from the plane chips stand as, typed, pasted or set, never reaches the box: no chip can be faked.
+    e.paste(&"y".repeat(1001));
+    typed(&mut e, "\u{100000}a");
+    e.paste("b\u{100001}c");
+    assert_eq!(e.shown(), format!("short[pasted 1001 characters] {}…abc", "y".repeat(60)));
+    e.set("\u{100000}set");
+    assert_eq!(e.expanded(), "set");
 }
 
 #[test]
