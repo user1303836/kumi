@@ -280,7 +280,8 @@ impl TuiApp {
             }
             SessionEvent::Resend { text } => {
                 let mut state = self.0.state.borrow_mut();
-                if state.editor.is_empty() {
+                // A held message's send puts it back itself when it fails.
+                if state.editor.is_empty() && state.sending_held.as_deref() != Some(text.as_str()) {
                     // The last message sent comes back as the box held it, its long pastes chips again.
                     let words = state.last_words.clone().filter(|_| state.last_sent.as_deref() == Some(text.as_str()));
                     match words {
@@ -1129,7 +1130,10 @@ impl TuiApp {
             state.transcript.add(Entry::User { text: words })
         };
         self.task(move |app| async move {
-            if app.send(&next.text).await || app.0.state.borrow().closing {
+            app.0.state.borrow_mut().sending_held = Some(next.text.clone());
+            let sent = app.send(&next.text).await;
+            app.0.state.borrow_mut().sending_held = None;
+            if sent || app.0.state.borrow().closing {
                 return Ok(());
             }
             let mut state = app.0.state.borrow_mut();

@@ -801,3 +801,70 @@ case!(a_paste_past_what_one_message_takes_says_so_and_stays_in_the_box, async {
     assert!(h.calls().contains(&"submit:short".to_string()), "{:?}", h.calls());
     h.close().await;
 });
+
+// #697 review: messages put back above a draft with a chip of its own keep theirs, numbered after the draft's, in
+// order; it's one step, which undo takes back with the draft's chip still its paste.
+#[test]
+fn messages_put_back_above_a_draft_with_its_own_chip_keep_theirs_in_order_and_undo_takes_them_back() {
+    let lines = |name: &str| (1..=11).map(|i| format!("{name} {i}\n")).collect::<String>();
+    let (a, b, c) = (lines("a"), lines("b"), lines("c"));
+    let mut held = Editor::new();
+    held.paste(&b);
+    let first = held.composed();
+    let mut held = Editor::new();
+    typed(&mut held, "see ");
+    held.paste(&c);
+    let second = held.composed();
+    let mut draft = Editor::new();
+    draft.paste(&a);
+    typed(&mut draft, "mine");
+    draft.put_back(&[first, second]);
+    assert_eq!(draft.expanded(), format!("{b}\nsee {c}\n{a}mine"));
+    assert_eq!(draft.layout(80).rows, ["[pasted 11 lines]", "see [pasted 11 lines]", "[pasted 11 lines]mine"]);
+    assert_eq!(draft.shown(), "[pasted 11 lines] b 1\nsee [pasted 11 lines] c 1\n[pasted 11 lines] a 1mine");
+    assert!(draft.undo());
+    assert_eq!(draft.expanded(), format!("{a}mine"));
+}
+
+// #697 review: a held paste taken back above a draft with a paste of its own sends both, in the box's order.
+case!(a_held_paste_taken_back_above_a_draft_with_its_own_sends_both_in_order, async {
+    let h = Harness::new(120, 36);
+    h.start().await;
+    h.connect();
+    let lines = |name: &str| (1..=11).map(|i| format!("{name} {i}\n")).collect::<String>();
+    let (a, b) = (lines("a"), lines("b"));
+    h.type_text("first\r").await;
+    h.emit(serde_json::json!({"type":"state","state":"running"}));
+    h.type_text(&format!("\x1b[200~{b}\x1b[201~")).await;
+    h.type_text("\t").await;
+    h.type_text(&format!("\x1b[200~{a}\x1b[201~")).await;
+    h.type_text("\x1b[1;3A").await;
+    let rows = composer(&h);
+    assert_eq!(rows.iter().filter(|row| row.contains("[pasted 11 lines]")).count(), 2, "{rows:?}");
+    h.emit(serde_json::json!({"type":"state","state":"idle"}));
+    h.type_text("\r").await;
+    assert!(h.calls().contains(&format!("submit:{b}\n{a}")), "{:?}", h.calls());
+    h.close().await;
+});
+
+// #697 review: a held message the session hands back while it's sent after the answer (too long for it, say) comes back
+// into the box once, as its chip.
+case!(a_held_message_handed_back_by_the_session_comes_back_once, async {
+    let c = Rc::new(Control::default());
+    let h = Harness::with(120, 36, c.clone(), |_| {});
+    h.start().await;
+    h.connect();
+    let log: String = (1..=41).map(|i| format!("error {i}: the bus clipped\n")).collect();
+    h.type_text("first\r").await;
+    h.emit(serde_json::json!({"type":"state","state":"running"}));
+    h.type_text(&format!("\x1b[200~{log}\x1b[201~")).await;
+    h.type_text("\t").await;
+    *c.extra.borrow_mut() = serde_json::json!({"submit-error": "Too long for the model", "submit-resend": true});
+    h.emit(serde_json::json!({"type":"turn-complete","result":{"stopReason":"completed"},"elapsedMs":900}));
+    h.emit(serde_json::json!({"type":"state","state":"idle"}));
+    delay(5).await;
+    let rows = composer(&h);
+    assert_eq!(rows.iter().filter(|row| row.contains("[pasted 41 lines]")).count(), 1, "{rows:?}");
+    assert!(!has(&rows, "error 2"), "{rows:?}");
+    h.close().await;
+});

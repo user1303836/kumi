@@ -12,10 +12,10 @@ use crate::text::{library_line, remembered_line};
 use base64::Engine;
 use kumi_agent::core::commands::{self, Command, Effect, Found, Now, Why};
 use kumi_agent::core::protocol::{too_long_words, MAX_MESSAGE};
+use std::task::{Context, Poll};
 
 /// How many messages sent with chips are kept, by their history entry, for ↑ to bring back as chips.
 const SENT_WORDS_KEPT: usize = 20;
-use std::task::{Context, Poll};
 
 impl TuiApp {
     pub(super) fn on_input(&self, event: InputEvent) {

@@ -62,11 +62,6 @@ pub struct Composed {
 }
 
 impl Composed {
-    /// Words without chips, as the session hands a message back.
-    pub fn plain(text: &str) -> Composed {
-        Composed { chars: graphemes(&incoming(text)).into_iter().map(str::to_string).collect(), chips: vec![] }
-    }
-
     pub fn is_empty(&self) -> bool {
         self.chars.is_empty()
     }
@@ -252,9 +247,33 @@ impl Editor {
         shown(&self.chars, &self.chips)
     }
 
-    /// The box's words, chips and all: what a message held or sent keeps, to come back as it was.
+    /// The box's words, chips and all: what a message held or sent keeps, to come back as it was. Only the chips its
+    /// words hold go with it (the box keeps those undo may bring back), numbered as they come.
     pub fn composed(&self) -> Composed {
-        Composed { chars: self.chars.clone(), chips: self.chips.clone() }
+        let mut kept: Vec<(usize, Chip)> = Vec::new();
+        let chars = self
+            .chars
+            .iter()
+            .map(|grapheme| {
+                let mut letters = grapheme.chars();
+                let Some(at) = letters.next().and_then(|first| (first as u32).checked_sub(CHIP)).map(|at| at as usize) else {
+                    return grapheme.clone();
+                };
+                let Some(chip) = self.chips.get(at) else { return grapheme.clone() };
+                let now = match kept.iter().position(|(was, _)| *was == at) {
+                    Some(now) => now,
+                    None => {
+                        kept.push((at, chip.clone()));
+                        kept.len() - 1
+                    }
+                };
+                match char::from_u32(CHIP + now as u32) {
+                    Some(mark) => format!("{mark}{}", letters.as_str()),
+                    None => grapheme.clone(),
+                }
+            })
+            .collect();
+        Composed { chars, chips: kept.into_iter().map(|(_, chip)| chip).collect() }
     }
 
     /// The box's words replaced by a message's, its chips chips again: one step undo takes back. The box's own chips stay

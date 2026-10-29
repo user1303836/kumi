@@ -469,6 +469,9 @@ struct State {
     last_sent: Option<String>,
     /// The last message sent, as the box held it: the session handing it back puts its chips back too.
     last_words: Option<Composed>,
+    /// A held message being sent after an answer: handed back by the session meanwhile, it's left to the send's own
+    /// failure to put back, so it comes back once.
+    sending_held: Option<String>,
     /// The messages sent this run with chips, by their history entry, newest last: ↑ brings them back as chips.
     sent_words: Vec<(String, Composed)>,
     tree: Option<DeviceTree>,
@@ -647,6 +650,7 @@ impl State {
             stash: None,
             last_sent: None,
             last_words: None,
+            sending_held: None,
             sent_words: Vec::new(),
             tree: None,
             tree_revision: 0,
