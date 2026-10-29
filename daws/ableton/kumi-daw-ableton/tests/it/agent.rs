@@ -501,7 +501,9 @@ async fn cancellation_mid_stream_returns_promptly_discards_the_turn_and_the_next
         assert!(h.messages().is_empty());
         let (events, emit) = collect();
         assert_eq!(h.kernel.run("again", signal(), emit).await.unwrap().stop_reason, StopReason::Completed);
-        assert_eq!(*events.borrow(), vec![KernelEvent::Text { text: "recovered".into() }]);
+        // Only its answer, each call's tokens aside.
+        assert_eq!(types(&events.borrow()), ["text"]);
+        assert_eq!(texts(&events.borrow()), ["recovered"]);
         assert_eq!(h.request(1).prompt.len(), 1, "cancelled turn must not be replayed");
         h.kernel.close().await;
     })
