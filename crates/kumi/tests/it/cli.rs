@@ -407,3 +407,124 @@ case!(continue_and_resume_take_up_a_kept_conversation_or_say_why_not, async {
         assert!(f.output().contains(&format!("Continue this conversation: cargo run -p kumi -- -r {id}")), "{}", f.output());
     }
 });
+
+/// A model server on this computer, as llama.cpp's or vLLM's answers: its one model, and every chat answered with
+/// `words`, a delta each.
+async fn model_server(words: &'static [&'static str]) -> String {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}/v1", listener.local_addr().unwrap());
+    tokio::spawn(async move {
+        loop {
+            let Ok((mut socket, _)) = listener.accept().await else { break };
+            tokio::spawn(async move {
+                // The request's head, then as much body as it says.
+                let (mut raw, mut buffer) = (Vec::new(), [0; 8192]);
+                let (head_end, length) = loop {
+                    let n = socket.read(&mut buffer).await.unwrap_or(0);
+                    if n == 0 {
+                        return;
+                    }
+                    raw.extend_from_slice(&buffer[..n]);
+                    if let Some(end) = raw.windows(4).position(|w| w == b"\r\n\r\n") {
+                        let head = String::from_utf8_lossy(&raw[..end]).to_ascii_lowercase();
+                        let length = head
+                            .lines()
+                            .find_map(|line| line.strip_prefix("content-length:").and_then(|n| n.trim().parse::<usize>().ok()))
+                            .unwrap_or(0);
+                        break (end + 4, length);
+                    }
+                };
+                while raw.len() < head_end + length {
+                    let n = socket.read(&mut buffer).await.unwrap_or(0);
+                    if n == 0 {
+                        return;
+                    }
+                    raw.extend_from_slice(&buffer[..n]);
+                }
+                let head = String::from_utf8_lossy(&raw[..head_end]).into_owned();
+                let (kind, body) = if head.split_whitespace().nth(1).is_some_and(|path| path.ends_with("/chat/completions")) {
+                    let mut body = String::new();
+                    for (at, word) in words.iter().enumerate() {
+                        let finish = if at + 1 == words.len() { json!("stop") } else { Value::Null };
+                        let chunk = json!({"id": "chatcmpl-1", "object": "chat.completion.chunk", "model": "tiny",
+                            "choices": [{"index": 0, "delta": {"content": word}, "finish_reason": finish}]});
+                        body.push_str(&format!("data: {chunk}\n\n"));
+                    }
+                    body.push_str("data: [DONE]\n\n");
+                    ("text/event-stream", body)
+                } else {
+                    ("application/json", json!({"object": "list", "data": [{"id": "tiny", "object": "model"}]}).to_string())
+                };
+                let response =
+                    format!("HTTP/1.1 200 OK\r\nContent-Type: {kind}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
+                let _ = socket.write_all(response.as_bytes()).await;
+            });
+        }
+    });
+    url
+}
+case!(print_answers_one_request_and_ends, async {
+    let f = Fixture::new(false);
+    let url = model_server(&["A low shelf ", "lifts or cuts ", "everything below it."]).await;
+    f.settings(json!({"model": "tiny-server/tiny", "modelServers": [{"name": "Tiny Server", "baseURL": url}],
+        "updateCheck": false, "modelCatalog": false, "libraryFolders": []}));
+    let ask = |json: bool| {
+        let mut args = vec!["-p", "What does a low shelf do?", "--inference-only"];
+        if json {
+            args.push("--json");
+        }
+        tokio::time::timeout(std::time::Duration::from_secs(30), run(f.io(&args), unused_factory()))
+    };
+    assert_eq!(ask(false).await.expect("kumi -p ends"), 0, "stdout: {}; stderr: {}", f.output(), f.err.0.borrow());
+    assert_eq!(f.output(), "A low shelf lifts or cuts everything below it.\n");
+    assert!(f.err.0.borrow().is_empty(), "{}", f.err.0.borrow());
+    // Each event the session sends, a JSON line each.
+    f.out.0.borrow_mut().clear();
+    assert_eq!(ask(true).await.expect("kumi -p --json ends"), 0, "stderr: {}", f.err.0.borrow());
+    let events: Vec<Value> = f.output().lines().map(|line| serde_json::from_str(line).unwrap()).collect();
+    let words: String = events.iter().filter(|e| e["type"] == "text").map(|e| e["text"].as_str().unwrap()).collect();
+    assert_eq!(words, "A low shelf lifts or cuts everything below it.");
+    let ends: Vec<&Value> = events.iter().filter(|e| e["type"] == "turn-complete").map(|e| &e["result"]["stopReason"]).collect();
+    assert_eq!(ends, [&json!("completed")]);
+});
+case!(print_says_what_went_wrong_and_how_to_use_it, async {
+    let f = Fixture::new(false);
+    f.settings(json!({"model": "anthropic/claude-sonnet-5-5", "updateCheck": false, "modelCatalog": false, "libraryFolders": []}));
+    assert_eq!(run(f.io(&["-p", "hello", "--inference-only"]), unused_factory()).await, 1);
+    assert_eq!(f.output(), "");
+    assert!(f.err.0.borrow().contains("Not signed in to Anthropic"), "{}", f.err.0.borrow());
+    for (args, said) in [
+        (&["-p"][..], "-p \"<request>\" [--json]"),
+        (&["-p", "hello", "-r"], "With -p, say which conversation"),
+        (&["--json"], "No option called --json"),
+    ] {
+        f.err.0.borrow_mut().clear();
+        assert_eq!(run(f.io(args), unused_factory()).await, 1, "{args:?}");
+        assert!(f.err.0.borrow().contains(said), "{args:?}: {}", f.err.0.borrow());
+    }
+});
+
+case!(print_answers_through_a_daws_bridge_too, async {
+    let mut f = Fixture::new(false);
+    let url = model_server(&["Done: ", "the kick is 2 dB louder."]).await;
+    let config = f.folder.path().join("bridge.json");
+    std::fs::write(&config, "{}").unwrap();
+    f.env.insert("KUMI_BRIDGE_CONFIG".into(), config.display().to_string());
+    f.settings(json!({"model": "tiny-server/tiny", "modelServers": [{"name": "Tiny Server", "baseURL": url}],
+        "updateCheck": false, "modelCatalog": false, "libraryFolders": []}));
+    // The DAW's integration as the app makes it, over a bridge that's here.
+    let made = Rc::new(Cell::new(false));
+    let mark = made.clone();
+    let factory = AbletonFactory(Rc::new(move |options: kumi_daw_ableton::AbletonOptions| {
+        mark.set(true);
+        assert!(options.bridge_config.is_some());
+        let connection = options.on_connection;
+        create_inference_only_integration(Rc::new(move |state| connection(state, None)))
+    }));
+    let args = ["-p", "make the kick louder", "--bridge-config", config.to_str().unwrap()];
+    let code = tokio::time::timeout(std::time::Duration::from_secs(30), run(f.io(&args), factory)).await.expect("kumi -p ends");
+    assert_eq!(code, 0, "stdout: {}; stderr: {}", f.output(), f.err.0.borrow());
+    assert!(made.get(), "the DAW's integration was made");
+    assert_eq!(f.output(), "Done: the kick is 2 dB louder.\n");
+});
