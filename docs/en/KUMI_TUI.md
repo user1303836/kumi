@@ -196,6 +196,11 @@ Run these as `kumi <command>`; from a copy of the repository, as
 ## Commands inside Kumi
 
 Type `/` for a menu of these: ↑↓ choose, Tab completes, Enter runs, Esc closes.
+After a command and a space, the menu offers its words: `/palette use` your
+palettes, `/resume` your kept conversations, `/slots listening` the models the
+slot takes, `/model` the models you can use, `/export` its formats. Tab puts the
+one chosen in; Enter runs only what you named, so a word only partly typed goes
+in first.
 A message that starts with a path (a file dragged into the terminal) is a
 message, not a command.
 
@@ -215,7 +220,7 @@ message, not a command.
 | `/stop` | Stop Live: clips, the transport and recording. Also stops Kumi's answer |
 | `/refresh` | Read the Set again without asking the model |
 | `/copy` | Copy Kumi's last answer to the clipboard |
-| `/model`, `/effort` | Choose the model (from each provider's own list, then the model servers on your computer: Ollama, LM Studio and those in settings.json; type to filter) and how hard it thinks; from your next message. In `/model`, ctrl+f makes the selected model your fallback (again clears it) |
+| `/model`, `/effort` | Choose the model (from each provider's own list, then the model servers on your computer: Ollama, LM Studio and those in settings.json; type to filter) and how hard it thinks; from your next message. In `/model`, ctrl+f makes the selected model your fallback (again clears it). `/model <id>` chooses one by its id, which Tab completes |
 | `/fast` | Turn on the model's faster tier when its provider lists one (ChatGPT's "Fast": quicker answers, more of your usage); `/fast` again turns it off. Shown as "· fast" beside the model |
 | `/willington` | Turn [Willington](WILLINGTON_INTEGRATION.md) on or off. Rack bindings are requested on supported builds; clip Follow Actions and native editing also require passing exact-library self-tests. Native editing is b5 macOS ARM64 only. Off until enabled; available when the bridge carries Willington. |
 | `/login`, `/logout` | Sign in (ChatGPT in the browser or with a code, or an API key shown only as dots) or out |

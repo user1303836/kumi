@@ -14,7 +14,6 @@ use super::super::{
 use super::drawer::{drawer_fits, PANE_COLUMNS};
 use super::*;
 use crate::text::library_line;
-use kumi_agent::core::commands::Found;
 use kumi_agent::core::protocol::{size_words, MAX_MESSAGE};
 use kumi_ai::failure::reset_words;
 use kumi_common::time::since;
@@ -679,7 +678,7 @@ impl TuiApp {
             vec![(format!("{} isn't connected", crate::daw::words().app), st::DIM)]
         }
     }
-    fn draw_composer(&self, screen: &mut Screen, box_: Rect, layout: &EditorLayout, visible: i32, menu: &[Found]) -> Cursor {
+    fn draw_composer(&self, screen: &mut Screen, box_: Rect, layout: &EditorLayout, visible: i32, menu: &super::complete::Menu) -> Cursor {
         screen.fill(box_, &st::RAISED);
         let x = box_.x + 2;
         let width = (box_.width - 4).max(1);
@@ -758,8 +757,9 @@ impl TuiApp {
         }
         Cursor { x: x + layout.cursor_column, y: box_.y + 1 + layout.cursor_row as i32 - first }
     }
-    fn draw_menu(&self, screen: &mut Screen, box_top: i32, left: i32, items: &[Found]) {
-        if items.is_empty() {
+    fn draw_menu(&self, screen: &mut Screen, box_top: i32, left: i32, menu: &super::complete::Menu) {
+        use super::complete::Menu;
+        if menu.is_empty() {
             return;
         }
         let width = 70.min(left - 2);
@@ -769,21 +769,35 @@ impl TuiApp {
         if fits == 0 {
             return;
         }
-        let selected = self.0.state.borrow().menu_index.min(items.len() - 1);
-        let shown = items.len().min(fits);
+        let selected = self.0.state.borrow().menu_index.min(menu.len() - 1);
+        let shown = menu.len().min(fits);
         let first = if selected < shown { 0 } else { selected + 1 - shown };
         let top = box_top - shown as i32 - 1;
-        let about = 3 + kumi_agent::core::commands::COMMANDS.iter().map(|c| c.name.len()).max().unwrap_or(0) as i32 + 2;
+        // Each row's name, and what it says beside it: a command's what it does, where it's the one chosen; a word's what
+        // it is, on every row (a conversation's when and where, a palette's sounds).
+        let rows: Vec<(&str, Option<String>)> = match menu {
+            Menu::Commands(found) => found.iter().map(|item| (item.command.name, Some(super::input::about(item.command)))).collect(),
+            Menu::Words { offered, .. } => offered
+                .iter()
+                .map(|item| (item.candidate.label.as_str(), Some(item.candidate.about.clone()).filter(|about| !about.is_empty())))
+                .collect(),
+        };
+        let words = matches!(menu, Menu::Words { .. });
+        let longest = match menu {
+            Menu::Commands(_) => kumi_agent::core::commands::COMMANDS.iter().map(|c| c.name.len()).max().unwrap_or(0) as i32,
+            Menu::Words { .. } => rows.iter().map(|(label, _)| text_width(label)).max().unwrap_or(0).min(28),
+        };
+        let about = 3 + longest + 2;
         let area = Rect::new(1, top - 1, width, shown as i32 + 1);
         screen.fill(area, &st::RAISED);
         self.cover(area);
-        for (row, (index, item)) in items.iter().enumerate().skip(first).take(shown).enumerate() {
+        for (row, (index, (label, said))) in rows.iter().enumerate().skip(first).take(shown).enumerate() {
             let y = top + row as i32;
             let chosen = index == selected;
             let more = if row == 0 && first > 0 {
                 Some(format!("↑ {first} more"))
-            } else if row == shown - 1 && first + shown < items.len() {
-                Some(format!("↓ {} more", items.len() - first - shown))
+            } else if row == shown - 1 && first + shown < menu.len() {
+                Some(format!("↓ {} more", menu.len() - first - shown))
             } else {
                 None
             };
@@ -791,9 +805,9 @@ impl TuiApp {
             if chosen {
                 screen.fill(Rect::new(1, y, width, 1), &st::SELECTED);
             }
-            screen.put(3, y, item.command.name, &if chosen { st::ACCENT } else { st::TEXT });
-            if chosen {
-                screen.put(about, y, &truncate(&super::input::about(item.command), (room - about).max(1)), &st::BRIGHT);
+            screen.put(3, y, &truncate(label, (about - 5).max(1)), &if chosen { st::ACCENT } else { st::TEXT });
+            if let Some(said) = said.as_ref().filter(|_| chosen || words) {
+                screen.put(about, y, &truncate(said, (room - about).max(1)), &if chosen { st::BRIGHT } else { st::FAINT });
             }
             if let Some(more) = more {
                 screen.put(width - text_width(&more), y, &more, &st::FAINT);

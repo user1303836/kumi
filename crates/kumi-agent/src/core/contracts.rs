@@ -1904,6 +1904,10 @@ pub trait SessionController {
         let _ = words;
         Err(absent())
     }
+    /// Every palette, the latest changed first: what `/palette use` offers.
+    async fn palette_names(&self) -> Result<Vec<crate::core::palette::PaletteListed>, RuntimeError> {
+        Ok(vec![])
+    }
     fn has_device_tree(&self) -> bool {
         false
     }
