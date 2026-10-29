@@ -200,11 +200,13 @@ fn a_star_inside_a_word_and_a_long_line_stay_text_and_cost_their_length() {
     assert_eq!(text(&render_markdown("2*3*4 and foo*bar* but *this*", 40, &base())), vec!["2*3*4 and foo*bar* but this"]);
     let rows = render_markdown("2*3*4 and foo*bar* but *this*", 40, &base());
     assert!(rows[0].spans.iter().any(|span| span.text == "this" && span.style.italic));
-    // Forty thousand markers that close nothing render in a moment.
-    let started = std::time::Instant::now();
-    let markers = "*a _b `c [d ".repeat(10_000);
-    let rows = render_markdown(&markers, 80, &base());
-    assert!(!rows.is_empty() && started.elapsed() < std::time::Duration::from_secs(5), "{:?}", started.elapsed());
+    // The shapes that have made Markdown parsers quadratic, ten thousand times each, render in a moment: markers that
+    // close nothing, open brackets and link labels, backtick runs of mixed lengths, angle brackets, and deep nesting.
+    for shape in ["*a _b `c [d ", "[", "[a](", "` `` ``` ", "<", "<a ", "> ", "- ", "> - "] {
+        let started = std::time::Instant::now();
+        let rows = render_markdown(&shape.repeat(10_000), 80, &base());
+        assert!(!rows.is_empty() && started.elapsed() < std::time::Duration::from_secs(5), "{shape:?}: {:?}", started.elapsed());
+    }
 }
 
 #[test]
@@ -219,4 +221,34 @@ fn wrapped_rows_say_how_they_carry_on_for_a_copy_to_join_them() {
         "{:?}",
         text(&rows)
     );
+}
+
+#[test]
+fn a_streamed_answer_with_a_held_table_renders_as_a_fresh_one_at_every_byte() {
+    // A two-row table held back while it streams, then a quote's `>` alone and a quoted line after it.
+    let whole = "x\n\n| a | b |\n|---|---|\n| 1 | 2 |\n| 3 | 4 |\n\n>\n> quoted\nafter";
+    let mut cache = MarkdownCache::default();
+    for end in 1..=whole.len() {
+        let streamed = render_markdown_with(&whole[..end], 24, &base(), &mut cache, true);
+        let fresh = render_markdown_with(&whole[..end], 24, &base(), &mut MarkdownCache::default(), true);
+        assert_eq!(rows_with_bands(&streamed), rows_with_bands(&fresh), "at {end} bytes");
+    }
+}
+
+#[test]
+fn an_open_code_block_keeps_its_complete_lines_while_it_streams() {
+    let lines: Vec<String> =
+        (0..60).map(|n| format!("let gain_{n} = {n};{}", if n % 7 == 0 { " // a longer line that splits" } else { "" })).collect();
+    let whole = format!("Here:\n\n```js\n{}\n```\nDone.", lines.join("\n"));
+    let mut cache = MarkdownCache::default();
+    let opened = whole.find("let gain_0").unwrap();
+    for end in 1..=whole.len() {
+        let streamed = render_markdown_with(&whole[..end], 30, &base(), &mut cache, true);
+        assert_eq!(rows_with_bands(&streamed), rows_with_bands(&render_markdown(&whole[..end], 30, &base())), "at {end} bytes");
+        // Inside the open block, what's kept reaches its last complete line: only the line still coming is read again.
+        let inside = end > opened && !whole[..end].ends_with("```") && whole[..end].matches("```").count() == 1;
+        if inside {
+            assert_eq!(cache.settled(), whole[..end].rfind('\n').unwrap() + 1, "at {end} bytes");
+        }
+    }
 }

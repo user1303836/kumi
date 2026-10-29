@@ -154,16 +154,21 @@ pub fn render_markdown(text: &str, width: i32, base: &Rc<Style>) -> Vec<Markdown
 
 /// The rows of a text that grows (an answer as it streams), its blocks rendered once they're done: the rows of the
 /// blocks before the last one in its complete lines are kept, since nothing after a block changes it, and only the
-/// rest is rendered again. A text that changed before that point, or another width, starts over. While `streaming`, a
-/// table at the end is held back, since a new row can change every column.
+/// rest is rendered again; so are a code block's complete lines while it's still open. A text that changed before that
+/// point, or another width, starts over. While `streaming`, a table at the end is held back, since a new row can change
+/// every column. A link's reference defined after a kept block isn't found in it: rare in answers, and a fresh render
+/// (after a resize) finds it.
 #[derive(Default)]
 pub struct MarkdownCache {
     width: i32,
-    /// How much of the text the kept rows cover: the blocks before the last one that began in its complete lines.
+    /// How much of the text the kept rows cover: the blocks before the last one that began in its complete lines, and
+    /// the complete lines of a code block still open after them.
     settled: usize,
     /// A hash of that much of the text, so a changed text is noticed.
     hash: u64,
     rows: Vec<MarkdownRow>,
+    /// The opening line of the code block the kept rows end inside: the rest is read after it.
+    fence: Option<String>,
 }
 
 impl MarkdownCache {
@@ -187,16 +192,30 @@ pub fn render_markdown_with(text: &str, width: i32, base: &Rc<Style>, cache: &mu
     if !kept {
         *cache = MarkdownCache { width, ..MarkdownCache::default() };
     }
+    // Inside a code block still open, the rest is read after the block's opening line, whose rows went with its first
+    // lines: an open block's lines are drawn once each, as they come.
+    let opener = cache.fence.clone().unwrap_or_default();
     let rest = &text[cache.settled..];
-    let rendered = Render::new(rest, width, base, streaming).run();
-    // The blocks before the last one that began in the complete lines are done: a later line can't change them.
-    let complete = rest.rfind('\n').map_or(0, |at| at + 1);
+    let source = if opener.is_empty() { std::borrow::Cow::Borrowed(rest) } else { std::borrow::Cow::Owned(format!("{opener}{rest}")) };
+    let rendered = Render::new(&source, width, base, streaming).run();
+    // The blocks before the last one that began in the complete lines are done: a later line can't change them. So are
+    // the complete lines of a code block still open at the end.
+    let complete = source.rfind('\n').map_or(0, |at| at + 1);
+    let keep = rendered.tops.iter().rev().find(|top| top.start < complete).map(|last| match &rendered.open {
+        Some(open) if open.start == last.start => {
+            // (not the blank row after its last newline, which is the next line's to come)
+            let row = open.lines.iter().find(|(start, _)| *start >= complete).map_or(open.end, |(_, row)| *row);
+            (complete, row, Some(open.opener.clone()))
+        }
+        _ => (last.chunk, last.row, None),
+    });
     let mut from = 0;
-    if let Some(last) = rendered.tops.iter().rev().find(|top| top.start < complete).filter(|last| last.chunk > 0) {
-        cache.rows.extend(rendered.rows[..last.row].iter().cloned());
-        cache.settled += last.chunk;
+    if let Some((at, row, fence)) = keep.filter(|(at, ..)| *at > opener.len()) {
+        cache.rows.extend(rendered.rows[..row].iter().cloned());
+        cache.settled += at - opener.len();
         cache.hash = hash_of(&text[..cache.settled]);
-        from = last.row;
+        cache.fence = fence;
+        from = row;
     }
     let mut rows = Vec::with_capacity(cache.rows.len() + rendered.rows.len() - from);
     rows.extend(cache.rows.iter().cloned());
@@ -221,6 +240,29 @@ struct Top {
 struct Rendered {
     rows: Vec<MarkdownRow>,
     tops: Vec<Top>,
+    /// A code block at the top level still open at the end of the text.
+    open: Option<OpenFence>,
+}
+
+/// A code block at the top level still open at the end: where it begins, its opening line, where each of its lines
+/// begins with the first row it took, and the row after its own.
+struct OpenFence {
+    start: usize,
+    opener: String,
+    lines: Vec<(usize, usize)>,
+    end: usize,
+}
+
+/// Whether `line` closes the code block `opener` opened: a run of its fence's mark at least as long, and nothing else.
+fn closes(opener: &str, line: &str) -> bool {
+    let fence = opener.trim_start_matches(' ');
+    let mark = fence.chars().next().unwrap_or('`');
+    let long = fence.chars().take_while(|c| *c == mark).count();
+    let line = line.trim_end_matches(['\n', '\r']);
+    let body = line.trim_start_matches(' ');
+    line.len() - body.len() <= 3
+        && body.chars().take_while(|c| *c == mark).count() >= long
+        && body.trim_start_matches(mark).trim().is_empty()
 }
 
 /// A table as it's read: its columns' alignments, its heads and its rows of cells.
@@ -260,6 +302,10 @@ struct Render<'a> {
     /// how many rows of cells it has.
     held: Option<(usize, usize, Vec<Span>, usize)>,
     tops: Vec<Top>,
+    /// A code block at the top level being drawn: its opening line, and where each of its lines begins with the first
+    /// row it took; kept as `open` when it's still open at the end.
+    fence: Option<(usize, Vec<(usize, usize)>)>,
+    open: Option<OpenFence>,
     /// How many blocks are open around the next event.
     depth: usize,
     /// The emphasis drawn as its own text: the events inside it are skipped.
@@ -289,6 +335,8 @@ impl<'a> Render<'a> {
             table: None,
             held: None,
             tops: vec![],
+            fence: None,
+            open: None,
             depth: 0,
             skip: 0..0,
         }
@@ -331,7 +379,7 @@ impl<'a> Render<'a> {
             let placeholder = MarkdownRow::plain(lead.into_iter().chain([Span::new(said, &self.faint)]).collect());
             self.rows.splice(row..row + count, [placeholder]);
         }
-        Rendered { rows: self.rows, tops: self.tops }
+        Rendered { rows: self.rows, tops: self.tops, open: self.open }
     }
 
     fn start(&mut self, tag: Tag<'_>, range: Range<usize>) {
@@ -343,6 +391,8 @@ impl<'a> Render<'a> {
             self.flush();
             self.top(range.start);
             self.depth += 1;
+            // A table drawn before is no longer the last block.
+            self.held = None;
         }
         match tag {
             Tag::Paragraph => {
@@ -365,7 +415,14 @@ impl<'a> Render<'a> {
                 };
                 self.around.push(Around::Item { marker, first: true });
             }
-            Tag::CodeBlock(_) | Tag::HtmlBlock => {
+            Tag::CodeBlock(kind) => {
+                self.leaf(range.start);
+                self.code_text = Some(String::new());
+                if self.depth == 1 && matches!(kind, pulldown_cmark::CodeBlockKind::Fenced(_)) {
+                    self.fence = Some((self.line_of(range.start), vec![]));
+                }
+            }
+            Tag::HtmlBlock => {
                 self.leaf(range.start);
                 self.code_text = Some(String::new());
             }
@@ -434,6 +491,16 @@ impl<'a> Render<'a> {
             TagEnd::CodeBlock => {
                 let code = self.code_text.take().unwrap_or_default();
                 self.code_rows(&code);
+                // At the top level and not closed: it runs to the end, and its complete lines are done.
+                if let Some((line, lines)) = self.fence.take() {
+                    let opener = &self.text[self.starts[line]..self.starts.get(line + 1).copied().unwrap_or(self.text.len())];
+                    let last = self.line_of(range.end.saturating_sub(1));
+                    let closing = &self.text[self.starts[last]..self.starts.get(last + 1).copied().unwrap_or(self.text.len())];
+                    if last == line || !closes(opener, closing) {
+                        let end = self.rows.len();
+                        self.open = Some(OpenFence { start: self.starts[line], opener: opener.to_string(), lines, end });
+                    }
+                }
                 self.after(range.end);
             }
             TagEnd::HtmlBlock => {
@@ -614,7 +681,13 @@ impl<'a> Render<'a> {
             return;
         }
         let room = (self.width - self.lead_width()).max(1);
-        for line in code.strip_suffix('\n').unwrap_or(code).split('\n') {
+        for (index, line) in code.strip_suffix('\n').unwrap_or(code).split('\n').enumerate() {
+            // A top-level fenced block's lines follow its opening line one for one.
+            if let Some((opener, lines)) = &mut self.fence {
+                if let Some(start) = self.starts.get(*opener + 1 + index) {
+                    lines.push((*start, self.rows.len()));
+                }
+            }
             let mut pieces = vec![String::new()];
             let mut used = 0;
             for grapheme in graphemes(line) {
