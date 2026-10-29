@@ -517,8 +517,8 @@ struct State {
     drawer: drawer::Drawer,
     /// A few words in the composer's hint row for a moment ("Copied 3 lines").
     toast: Option<toast::Toast>,
-    /// The last frame's conversation rows (a copy joins the rows it wrapped and leaves out its margin), and the areas a
-    /// drag selects in, each pane and the composer apart.
+    /// The conversation rows of the frame being drawn (a copy joins the rows it wrapped and leaves out its margin), and
+    /// the areas a drag selects in, each pane and the composer apart: kept with its screen once it's shown.
     text_rows: Vec<super::selection::TextRow>,
     select_areas: Vec<Rect>,
     /// The last left press: when, where, and how many came one after another on that cell (a double or triple click).
@@ -663,6 +663,9 @@ struct Inner {
     renderer: RefCell<Renderer>,
     /// The last frame's screen, drawn over again when the window keeps its size: no new cells each frame.
     screen: RefCell<Option<Screen>>,
+    /// What that screen's frame says of its cells (its conversation rows, the areas a drag selects in): a selection
+    /// starts from both.
+    marks: RefCell<super::selection::Marks>,
     scheduler: FrameScheduler,
     table: Rc<StyleTable>,
     icons: IconStyle,
@@ -836,6 +839,7 @@ impl TuiApp {
                 tty,
                 renderer: RefCell::new(Renderer::new(depth)),
                 screen: RefCell::new(None),
+                marks: RefCell::default(),
                 scheduler,
                 table: Rc::new(StyleTable::new()),
                 icons,

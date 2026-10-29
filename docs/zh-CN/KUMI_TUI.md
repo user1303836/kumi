@@ -207,7 +207,7 @@ Kumi 占据整个终端窗口，并在 Kumi 关闭、崩溃或被停止时把窗
 
 ## 终端
 
-Kumi 会检测终端能显示多少种颜色；`KUMI_COLOR`（`truecolor`、`256`、`16`、`none`）可覆盖检测结果，并且会遵循 `NO_COLOR`。在终端符号可能无法显示的地方（旧版 Windows 控制台、Linux 控制台），Kumi 用双字母徽标代替图标；可用 `KUMI_ICONS=glyphs` 或 `badges` 自行选择。修改的图示在 kitty 和 Ghostty 中（24 位色、不在 tmux 内）显示为图像，在其他终端中用盲文点字和半格方块绘出，在符号可能无法显示的地方则以文字呈现；`KUMI_PICTURES=cells` 可让图示始终用字符单元绘出。在 Windows 上推荐使用 Windows Terminal。在不支持 kitty 键盘协议的终端中，请用 Ctrl-J 或 Alt-Enter 换行。在 tmux 中，`set -g allow-passthrough on` 让 Kumi 的状态和通知能够透传，焦点报告需要 `set -g focus-events on`。支持该协议的终端会告知按住的 Ctrl-T 何时松开；在其他终端中，按键的重复停止时 Kumi 就停止聆听。
+Kumi 会检测终端能显示多少种颜色；`KUMI_COLOR`（`truecolor`、`256`、`16`、`none`）可覆盖检测结果，并且会遵循 `NO_COLOR`。在终端符号可能无法显示的地方（旧版 Windows 控制台、Linux 控制台），Kumi 用双字母徽标代替图标；可用 `KUMI_ICONS=glyphs` 或 `badges` 自行选择。修改的图示在 kitty 和 Ghostty 中（24 位色、不在 tmux 内）显示为图像，在其他终端中用盲文点字和半格方块绘出，在符号可能无法显示的地方则以文字呈现；`KUMI_PICTURES=cells` 可让图示始终用字符单元绘出。在 Windows 上推荐使用 Windows Terminal。在不支持 kitty 键盘协议的终端中，请用 Ctrl-J 或 Alt-Enter 换行。在 tmux 中，`set -g allow-passthrough on` 让 Kumi 的状态和通知能够透传，焦点报告需要 `set -g focus-events on`；通过 SSH 时，`set -g set-clipboard on` 让 Kumi 的复制能到达你的剪贴板。支持该协议的终端会告知按住的 Ctrl-T 何时松开；在其他终端中，按键的重复停止时 Kumi 就停止聆听。
 
 ## 设计说明
 

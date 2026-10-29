@@ -224,6 +224,28 @@ case!(a_double_click_copies_a_word_and_a_triple_click_the_line_it_wrapped, async
     h.has("Copied “Put Kick_01_final on the drum bus, then…”");
     h.close().await;
 });
+case!(a_triple_click_while_text_streams_takes_the_line_it_was_on, async {
+    let copied = Rc::new(std::cell::RefCell::new(Vec::<String>::new()));
+    let h = copying(&copied);
+    h.start().await;
+    h.connect();
+    h.type_text("Say something\r").await;
+    let line = "Put Kick_01_final on the drum bus, then the low end sits around 120 Hz and the bass makes room below it.";
+    h.emit(json!({"type":"state","state":"running"}));
+    h.emit(json!({"type":"text","text":format!("{line}\n")}));
+    h.wait_for("room below it.").await;
+    let (y, _) = find(&h, "room below it.");
+    let (press, release) = (format!("\x1b[<0;11;{}M", y + 1), format!("\x1b[<0;11;{}m", y + 1));
+    // A click, and the second press: its word, on a frame held still.
+    h.type_text(&format!("{press}{release}{press}")).await;
+    // The answer goes on, and the rows move up under the held frame.
+    h.emit(json!({"type":"text","text":"Another line\nAnd another\n"}));
+    h.screen();
+    // The second release and the third click come in one read: the line is the one the held frame showed there.
+    h.type_text(&format!("{release}{press}{release}")).await;
+    assert_eq!(copied.borrow().last().map(String::as_str), Some(line));
+    h.close().await;
+});
 case!(a_drag_stays_out_of_the_composer_and_over_ssh_says_how_else_to_copy, async {
     // No clipboard tool here (over SSH): only the terminal takes the copy.
     let h = Harness::new(120, 36);
@@ -247,6 +269,37 @@ case!(a_drag_stays_out_of_the_composer_and_over_ssh_says_how_else_to_copy, async
     assert!(copy.starts_with("First line\nSecond line"), "{copy:?}");
     assert!(!copy.contains("keep my draft"), "{copy:?}");
     h.has("Copied 2 lines if the terminal allows it · or shift-drag");
+    h.close().await;
+});
+case!(a_copy_over_a_panel_takes_its_lines_not_the_conversation_under_them, async {
+    let copied = Rc::new(std::cell::RefCell::new(Vec::<String>::new()));
+    let control = Rc::new(Control::default());
+    control.set("aside", json!("Erbe-Verb's tail runs up to a minute."));
+    let copy = copied.clone();
+    let h = Harness::with(120, 36, control, move |o| {
+        o.copy = Some(Rc::new(move |text| {
+            copy.borrow_mut().push(text.into());
+            true
+        }))
+    });
+    h.start().await;
+    h.connect();
+    h.type_text("Say something\r").await;
+    // A list item wrapped over many rows, under where the panel opens: rows that carry on the one above, past a lead.
+    h.emit(json!({"type":"state","state":"running"}));
+    h.emit(json!({"type":"text","text":format!("- {}", "word ".repeat(150))}));
+    h.emit(json!({"type":"turn-complete","result":{"stopReason":"completed"},"elapsedMs":10}));
+    h.emit(json!({"type":"state","state":"idle"}));
+    h.wait_for("word word").await;
+    h.type_text("/btw how long can its tail be?\r").await;
+    h.wait_for("up to a minute").await;
+    let (y, x) = find(&h, "btw · how long can its tail be?");
+    let (below, _) = find(&h, "Erbe-Verb's tail runs up to a minute.");
+    let lines = h.screen();
+    let row = |y: usize, from: usize| lines[y].chars().skip(from).take(80 - from).collect::<String>().trim_end().to_string();
+    let expected = std::iter::once(row(y, x)).chain((y + 1..=below).map(|y| row(y, 0))).collect::<Vec<_>>().join("\n");
+    h.type_text(&format!("\x1b[<0;{};{}M\x1b[<32;{};{}M\x1b[<0;{};{}m", x + 1, y + 1, 79, below + 1, 79, below + 1)).await;
+    assert_eq!(copied.borrow().last(), Some(&expected));
     h.close().await;
 });
 case!(started_by_the_installer_the_farewell_says_how_to_start_kumi_next_time, async {

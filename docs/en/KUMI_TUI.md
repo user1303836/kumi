@@ -374,7 +374,8 @@ symbols may not show; `KUMI_PICTURES=cells` keeps them in cells. Windows
 Terminal is recommended on Windows. In terminals without the
 kitty keyboard protocol, use Ctrl-J or Alt-Enter for a new line. Inside tmux,
 Kumi's status and notifications pass through with `set -g allow-passthrough on`,
-and focus reports need `set -g focus-events on`. Those terminals
+focus reports need `set -g focus-events on`, and over SSH Kumi's copies reach
+your clipboard with `set -g set-clipboard on`. Those terminals
 say when a held Ctrl-T is let go; elsewhere, Kumi stops listening once the key's
 repeats stop.
 

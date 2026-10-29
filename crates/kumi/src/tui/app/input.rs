@@ -1,5 +1,4 @@
 use super::super::{
-    alerts::NotifyChannel,
     attach,
     keys::{Modifiers, MouseAction, MouseButton, WheelDirection},
     selection::{Selection, Unit},
@@ -189,8 +188,9 @@ impl TuiApp {
                         None
                     }
                 };
+                // Ctrl-C and Esc just after are the copy's only where "Copied" says so.
                 if let Some(text) = copy {
-                    if self.copy_selection(&text) {
+                    if self.copy_selection(&text) && self.toast_shows() {
                         self.0.state.borrow_mut().copied = Some((text, perf_now() + TOAST_MS));
                     }
                 }
@@ -253,13 +253,11 @@ impl TuiApp {
         self.0.state.borrow_mut().selection = selection;
         started
     }
-    /// A selection from a press at (x, y) on the last frame drawn, inside the area it fell in.
+    /// A selection from a press at (x, y) on the frame on screen, with what it says of its cells.
     fn select(&self, x: i32, y: i32, unit: Unit) -> Option<Selection> {
         let screen = self.0.screen.borrow();
         let screen = screen.as_ref().filter(|s| s.width > 0 && s.height > 0)?;
-        let state = self.0.state.borrow();
-        let area = *state.select_areas.iter().find(|a| x >= a.x && x < a.x + a.width && y >= a.y && y < a.y + a.height)?;
-        Selection::new(screen.clone(), &state.text_rows, area, x, y, unit)
+        Selection::new(screen.clone(), self.0.marks.borrow().clone(), x, y, unit)
     }
     /// What letting go of a drag copied, if that was just now: it's taken, so only the next key finds it.
     fn just_copied(&self) -> Option<String> {
@@ -273,7 +271,7 @@ impl TuiApp {
             return false;
         }
         let here = self.copy_text(text);
-        self.toast(&copied_words(text, here, self.0.profile.notify == NotifyChannel::Osc9), NoticeTone::Info);
+        self.toast(&copied_words(text, here, self.0.profile.iterm), NoticeTone::Info);
         true
     }
     fn key(&self, name: &str, mods: Modifiers) {

@@ -188,6 +188,7 @@ case!(a_job_has_its_own_status_record_and_its_end_tells_a_producer_whos_away, as
             tmux: false,
             app_id: None,
             images: false,
+            iterm: false,
         });
         o.alert_gap_ms = Some(60.);
     });

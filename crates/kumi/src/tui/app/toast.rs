@@ -35,6 +35,16 @@ impl TuiApp {
         Some((text, tone))
     }
 
+    /// Whether a toast shows now: setup and the map draw no composer, and a list's own hint (a countdown to Kumi's pick)
+    /// keeps its row.
+    pub(super) fn toast_shows(&self) -> bool {
+        if self.setup_active() || self.map_shown() {
+            return false;
+        }
+        let state = self.0.state.borrow();
+        !state.panel.as_ref().is_some_and(|p| matches!(&*p.borrow(), Panel::Pick { picker, .. } if picker.borrow().options.hint.is_some()))
+    }
+
     /// Takes the toast away before its time.
     pub(super) fn end_toast(&self) {
         if self.0.state.borrow_mut().toast.take().is_some() {

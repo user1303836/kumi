@@ -4,7 +4,7 @@ use super::super::{
     logo::*,
     render::Cursor,
     screen::Screen,
-    selection::TextRow,
+    selection::{Marks, TextRow},
     style::{palette, Style},
     transcript::{doing_label, LiveRow, Row},
     width::{text_width, truncate},
@@ -177,7 +177,7 @@ impl TuiApp {
     }
     /// The frame out to the terminal; its screen is kept to draw the next one on.
     fn present(&self, screen: Screen, cursor: Option<Cursor>) {
-        let selected = {
+        let (selected, drawn) = {
             let mut state = self.0.state.borrow_mut();
             if state.selection.as_ref().is_some_and(|s| s.screen.width != screen.width || s.screen.height != screen.height) {
                 state.selection = None;
@@ -188,13 +188,15 @@ impl TuiApp {
             } else {
                 "Selected · view paused · Ctrl+C/right-click copies · Esc resumes"
             };
-            state.selection.as_ref().filter(|s| s.moved).map(|s| {
+            let selected = state.selection.as_ref().filter(|s| s.moved).map(|s| {
                 let mut painted = s.painted();
                 let footer = Rect::new(0, painted.height - 1, painted.width, 1);
                 painted.fill(footer, &st::RAISED);
                 painted.put(1, footer.y, words, &st::DIM);
-                (painted, s.screen.clone())
-            })
+                (painted, s.screen.clone(), s.marks.clone())
+            });
+            let drawn = Marks { rows: std::mem::take(&mut state.text_rows), areas: std::mem::take(&mut state.select_areas) };
+            (selected, drawn)
         };
         let frame = self
             .0
@@ -213,7 +215,10 @@ impl TuiApp {
                 self.0.tty.write(&frame);
             }
         }
-        *self.0.screen.borrow_mut() = Some(selected.map_or(screen, |(_, original)| original));
+        // The frame kept, with what it says of its cells: a selection's own while it shows, else the one just drawn.
+        let (kept, marks) = selected.map_or((screen, drawn), |(_, original, marks)| (original, marks));
+        *self.0.screen.borrow_mut() = Some(kept);
+        *self.0.marks.borrow_mut() = marks;
         // Between frames, the terminal's status follows what was drawn.
         if !self.0.state.borrow().closing {
             self.show_status();
