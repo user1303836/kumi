@@ -343,6 +343,43 @@ the wheel scroll, and Esc, Enter or `?` closes it; typing or pasting closes it
 too, and what you type goes into the box. With `"mouse": "off"`, the wheel
 scrolls none of these.
 
+**Your own keys.** `~/.kumi/keys.json` gives Kumi's actions other keys (`KUMI_KEYS_FILE` says another place for
+it):
+
+```json
+{ "composer.undo": ["ctrl+z"], "app.background": ["ctrl+b", "f5"], "pane.toggle": [] }
+```
+
+- An action's list replaces its keys, and an empty list takes them away. A key is `ctrl`, `alt` (or `option`) and
+  `shift` with a name: `enter`, `tab`, `esc`, `backspace`, `delete`, `insert`, `up` or `↑` (and the other arrows),
+  `home`, `end`, `pageup`, `pagedown`, `space`, `f1` to `f12`, or one character (`ctrl+-`, `ctrl++`). Two keys with a
+  space between (`esc esc`) are pressed one after the other: the first starts the pair only when nothing else in the
+  box takes it, the second comes within half a second, and pairs work only in the box.
+- Where actions share a key, keys.json's come first, then Kumi's own, in the order they always were.
+- A character can't be a key where words are typed (the box, a list, the `/` menu): it types itself there. `?` on an
+  empty box always opens the help, and `app.help` can have keys as well (`f1`).
+- Kumi says once, as it starts, what it couldn't use: an action it doesn't know, a key it can't read, a character
+  where words are typed, two actions keys.json gives one key, and the keys it puts ahead of Kumi's own.
+- The help (`/help`, `?`) shows the keys as keys.json has them; the hints under the box and in the panels still
+  name Kumi's own keys. The map's keys and setup's aren't actions yet.
+
+| Where | Actions, with Kumi's own keys |
+| --- | --- |
+| The box | `composer.send` (enter), `composer.send-after` (tab, while Kumi works), `composer.take-back-waiting` (alt+↑), `composer.new-line` (ctrl+j, alt+enter, shift+enter), `composer.up`, `composer.down`, `composer.left`, `composer.right`, `composer.word-left` (alt+←, ctrl+←, alt+b), `composer.word-right` (alt+→, ctrl+→, alt+f), `composer.line-start` (home, ctrl+a), `composer.line-end` (end, ctrl+e), `composer.backspace`, `composer.take-back-file` (backspace, in an empty box), `composer.delete` (delete, ctrl+d), `composer.cut-word` (ctrl+w, alt+backspace, ctrl+backspace), `composer.cut-to-end` (ctrl+k), `composer.cut-to-start` (ctrl+u), `composer.yank` (ctrl+y), `composer.yank-earlier` (alt+y), `composer.undo` (ctrl+-, ctrl+_), `composer.history-search` (ctrl+r), `composer.editor` (ctrl+g), `composer.stash` (ctrl+s) |
+| Kumi | `app.stop` (esc), `app.take-back` (esc esc, in an empty box), `app.interrupt` (ctrl+c), `app.quit` (ctrl+d), `app.background` (ctrl+b), `app.paste-picture` (ctrl+v), `app.redraw` (ctrl+l), `app.help` (none of its own: `?`), `voice.talk` (ctrl+t), `conversation.page-up`, `conversation.page-down`, `conversation.start` (ctrl+home), `conversation.latest` (ctrl+end), `conversation.details` (ctrl+o) |
+| The pane | `pane.toggle` (ctrl+\\), `pane.tabs` (shift+tab), `pane.tree` (tab); in the tabs, `tabs.up`, `tabs.down`, `tabs.page-up`, `tabs.page-down`, `tabs.open` (enter), `tabs.next` (shift+tab), `tabs.leave` (esc, tab); in the tree, `tree.up`, `tree.down`, `tree.pin` (enter), `tree.leave` (esc, tab) |
+| The `/` menu | `menu.up`, `menu.down`, `menu.complete` (tab), `menu.run` (enter), `menu.close` (esc) |
+| Looking back (ctrl+r) | `search.back` (ctrl+r), `search.erase` (backspace), `search.take` (enter, tab), `search.cancel` (esc, ctrl+c) |
+| While Kumi listens | `voice.send` (enter), `voice.drop` (esc, ctrl+c) |
+| Selected text | `selection.copy` (ctrl+c), `selection.clear` (esc) |
+| The help | `help.up`, `help.down`, `help.page-up`, `help.page-down`, `help.top` (home), `help.end` (end), `help.close` (esc, enter, ctrl+c, `?`) |
+| A side answer (`/btw`) | `aside.up`, `aside.down`, `aside.page-up`, `aside.page-down`, `aside.earlier` (←), `aside.later` (→), `aside.copy` (c), `aside.close` (esc, enter, space, ctrl+c) |
+| A job's details | `job.up`, `job.down`, `job.page-up`, `job.page-down`, `job.stop` (x), `job.again` (r), `job.copy` (c), `job.close` (esc, enter, space, ctrl+c) |
+| A list | `list.up`, `list.down` (↓, tab), `list.next-tab` (tab, where the list has tabs), `list.erase` (backspace), `list.choose` (enter), `list.choose-other` (ctrl+f), `list.close` (esc, ctrl+c) |
+| The key box | `key.check` (enter), `key.erase` (backspace), `key.clear` (ctrl+u), `key.cancel` (esc, ctrl+c) |
+| ChatGPT's sign-in | `chatgpt.copy` (c), `chatgpt.by-code` (d), `chatgpt.by-browser` (b), `chatgpt.cancel` (esc, ctrl+c) |
+| The conversation in detail (ctrl+o) | `details.up`, `details.down`, `details.page-up`, `details.page-down`, `details.top` (home), `details.end` (end), `details.search` (/), `details.next-match` (n), `details.previous-match` (N), `details.next-request` (}), `details.previous-request` ({), `details.print` ([), `details.edit` (v), `details.close` (esc, q, ctrl+c, ctrl+o); while a search is typed, `details.search-erase` (backspace), `details.search-keep` (enter), `details.search-drop` (esc) |
+
 ## Plain mode
 
 `KUMI_UI=plain`, or input or output through a pipe, gives a plain line-by-line interface

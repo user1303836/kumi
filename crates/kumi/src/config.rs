@@ -321,6 +321,7 @@ macro_rules! location {
 }
 location!(load_auth_file, "KUMI_AUTH_FILE", "auth.json");
 location!(load_settings_file, "KUMI_SETTINGS_FILE", "settings.json");
+location!(load_keys_file, "KUMI_KEYS_FILE", "keys.json");
 location!(load_db_file, "KUMI_DB_FILE", "kumi.db");
 location!(load_memory_file, "KUMI_MEMORY_FILE", "memory.json");
 location!(load_techniques_file, "KUMI_TECHNIQUES_FILE", "techniques.json");
@@ -499,6 +500,11 @@ fn folder_list(value: &Value) -> Vec<String> {
 }
 fn read_json(file: &str) -> Option<Value> {
     serde_json::from_str(&String::from_utf8_lossy(&std::fs::read(file).ok()?)).ok()
+}
+/// keys.json, the producer's own keys for Kumi's actions: none when there's no file, or why it isn't JSON.
+pub fn read_keys(file: &str) -> Option<Result<Value, String>> {
+    let text = String::from_utf8_lossy(&std::fs::read(file).ok()?).into_owned();
+    Some(serde_json::from_str(&text).map_err(|error| format!("keys.json isn't JSON Kumi can read ({error}), so Kumi keeps its own keys")))
 }
 pub fn read_settings(file: &str) -> Settings {
     let Some(value) = read_json(file) else { return Settings::default() };

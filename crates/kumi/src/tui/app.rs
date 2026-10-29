@@ -33,6 +33,7 @@ use super::{
     alerts::{self, ProgramState, StatusReport, TerminalProfile},
     editor::{Composed, Draft, Editor},
     icons::{detect_icon_style_here, IconKind, IconStyle},
+    keymap::{Chord, Keymap, Scope, AGAIN_MS},
     keys::InputEvent,
     overlay::{Area, Handled, Overlay, Overlays, Shared},
     picker::{Picker, PickerItem},
@@ -186,6 +187,8 @@ pub struct TuiOptions {
     /// What was read from the terminal before the screen was Kumi's, while it was asked what it is (`tui::probe`): read
     /// again as the screen starts, so keys typed meanwhile go where they were typed.
     pub typeahead: Vec<u8>,
+    /// What keys.json holds (other keys for Kumi's actions), or why it couldn't be read; None when there's no file.
+    pub keys: Option<Result<serde_json::Value, String>>,
 }
 /// When the header shows how full the answering model's context is: from half full (`auto`), always, or never.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -272,6 +275,7 @@ impl TuiOptions {
             run_editor: None,
             context_meter: ContextMeter::Auto,
             typeahead: Vec::new(),
+            keys: None,
         }
     }
 }
@@ -414,8 +418,9 @@ struct State {
     objective: Option<Timed<ObjectiveStatus>>,
     watching: bool,
     undoing: bool,
-    /// When an esc nothing took came, in an empty box with Kumi at rest: a second soon after takes a request back.
-    escaped: Option<f64>,
+    /// A key no action took that starts keys pressed one after another (esc esc), and when it came: the next, soon
+    /// after, may finish them.
+    pending: Option<(Chord, f64)>,
     hits: Vec<Hit>,
     tabs_area: Option<Rect>,
     selection: Option<super::selection::Selection>,
@@ -618,7 +623,7 @@ impl State {
             objective: None,
             watching: false,
             undoing: false,
-            escaped: None,
+            pending: None,
             hits: vec![],
             tabs_area: None,
             selection: None,
@@ -745,6 +750,10 @@ struct Inner {
     profile: TerminalProfile,
     /// How changes' pictures show on this terminal.
     graphics: super::pictures::Graphics,
+    /// What each key does, keys.json's over Kumi's own.
+    keymap: Keymap,
+    /// What Kumi couldn't use of keys.json, said as it starts.
+    keys_said: Vec<String>,
 }
 #[derive(Clone)]
 pub struct TuiApp(Rc<Inner>);
@@ -900,6 +909,11 @@ impl TuiApp {
             let active = options.panel_tab.as_ref().and_then(|p| (p.load)());
             let tabs = TabPanel::new(tabs, active.as_deref(), options.panel_tab.as_ref().map(|p| p.save.clone()));
             let voice = options.voice.as_ref().map(|v| VoiceInput::new(v.clone(), Rc::new(AppVoice(weak.clone()))));
+            let (keymap, keys_said) = match &options.keys {
+                Some(Ok(file)) => Keymap::new(Some(file)),
+                Some(Err(why)) => (Keymap::default(), vec![why.clone()]),
+                None => Keymap::new(None),
+            };
             let (done, _) = watch::channel(None);
             // Links open where an OSC is safe to send, as the status is.
             let renderer = Renderer::new(depth)
@@ -923,6 +937,8 @@ impl TuiApp {
                 output_failed: Cell::new(false),
                 profile,
                 graphics,
+                keymap,
+                keys_said,
             }
         }))
     }
@@ -956,6 +972,11 @@ impl TuiApp {
             mouse: options.mouse,
             copy_on_select: options.copy_on_select,
         }
+    }
+    /// The actions an input is in `scope`, in the order they're tried: none for a paste, the mouse or a key bound to
+    /// nothing there.
+    fn actions(&self, scope: Scope, event: &InputEvent) -> Vec<&'static str> {
+        Chord::of(event).map(|chord| self.0.keymap.actions(scope, &chord)).unwrap_or_default()
     }
     fn busy(&self) -> bool {
         matches!(self.session().status().state, TurnState::Running | TurnState::Cancelling)
@@ -1179,6 +1200,9 @@ impl Terminal for TuiApp {
         }));
         if let Some(notice) = &self.0.options.startup_notice {
             self.notice(notice, NoticeTone::Info);
+        }
+        for said in &self.0.keys_said {
+            self.notice(said, NoticeTone::Warn);
         }
         if let Some(news) = self.0.options.whats_new.clone() {
             let mut state = self.0.state.borrow_mut();

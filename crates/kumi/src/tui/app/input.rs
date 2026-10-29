@@ -27,11 +27,11 @@ impl TuiApp {
             self.window_focus(focused);
             return;
         }
-        // esc esc: when the first esc came, ended by whatever else the producer does (letting a key go or moving the
-        // mouse does nothing). Only an esc that reaches the box's keys can be the second.
-        let escaped = match event {
+        // Keys pressed one after another (esc esc): the first, ended by whatever else the producer does (letting a key
+        // go or moving the mouse does nothing). Only a key that reaches the box's keys can be the second.
+        let pending = match event {
             InputEvent::Release { .. } | InputEvent::Mouse { action: MouseAction::Move, .. } => None,
-            _ => self.0.state.borrow_mut().escaped.take(),
+            _ => self.0.state.borrow_mut().pending.take(),
         };
         // Someone's there: Kumi doesn't answer its own question for them.
         if matches!(event, InputEvent::Key { .. } | InputEvent::Text { .. } | InputEvent::Paste { .. } | InputEvent::Mouse { .. }) {
@@ -58,9 +58,10 @@ impl TuiApp {
         }
         let panel = self.0.state.borrow().overlays.top();
         let busy_panel = panel.as_ref().is_some_and(|top| top.borrow().busy(self));
+        // voice.talk (ctrl+t), wherever the keyboard is, unless what's open is in the middle of something.
         if let Some(voice) = &self.0.voice {
             match &event {
-                InputEvent::Key { name, mods, repeat } if name == "t" && mods.ctrl && !mods.alt && !busy_panel => {
+                InputEvent::Key { repeat, .. } if !busy_panel && self.talks(&event) => {
                     if panel.is_some() {
                         self.close_panel();
                     }
@@ -70,7 +71,7 @@ impl TuiApp {
                     self.0.scheduler.request();
                     return;
                 }
-                InputEvent::Release { name, mods } if name == "t" && mods.ctrl && !mods.alt && !busy_panel => {
+                InputEvent::Release { name, mods } if !busy_panel && self.talks(&InputEvent::key(name, *mods)) => {
                     voice.release();
                     self.0.scheduler.request();
                     return;
@@ -96,11 +97,9 @@ impl TuiApp {
                 self.0.tabs.leave();
                 self.add_attachments(files);
             }
-            // In the tabs, a typed character is the row's key: Space opens a change's picture, `u` undoes it.
-            InputEvent::Text { text }
-                if self.0.tabs.inside()
-                    && text.chars().count() == 1
-                    && self.0.tabs.key(&if text == " " { "space".to_string() } else { text.to_lowercase() }) => {}
+            // In the tabs, a typed character is a key: the tabs' own, then the row's (space opens a change's picture, `u`
+            // undoes it).
+            InputEvent::Text { .. } if self.0.tabs.inside() && Chord::of(&event).is_some_and(|chord| self.tabs_key(&chord)) => {}
             // The help's typed key, in a block of its own until keys have a registry. `?` arrives as typed text, which
             // key() never sees: on an empty box it opens the help, and anywhere else it types itself.
             // (while looking back through what was sent, `?` is a character to find)
@@ -112,7 +111,7 @@ impl TuiApp {
             // End of the help's typed key.
             InputEvent::Text { text } | InputEvent::Paste { text } => self.type_into_box(&text, typed),
             // (a key held down isn't pressed twice)
-            InputEvent::Key { name, mods, repeat } => self.key(&name, mods, escaped.filter(|_| !repeat)),
+            InputEvent::Key { name, mods, repeat } => self.key(&name, mods, pending.filter(|_| !repeat)),
             InputEvent::Mouse { action: MouseAction::Wheel, direction, x, y, .. } => {
                 let area = self.0.state.borrow().tabs_area;
                 let up = direction == Some(WheelDirection::Up);
@@ -134,6 +133,40 @@ impl TuiApp {
         // The producer may have finished what they were in the middle of: a job's answer can start.
         self.maybe_carry_on();
         self.0.scheduler.request();
+    }
+    /// Whether a key is voice.talk's where the keyboard is: in the panel open, or where it is outside the panels.
+    fn talks(&self, event: &InputEvent) -> bool {
+        let scope = self.top_scope().unwrap_or_else(|| self.keyboard_scope());
+        self.actions(scope, event).first() == Some(&"voice.talk")
+    }
+    /// The place of the panel open over the conversation, when one is.
+    fn top_scope(&self) -> Option<Scope> {
+        let top = self.0.state.borrow().overlays.top()?;
+        let top = top.borrow();
+        let is = |scope: Scope, here: bool| here.then_some(scope);
+        is(Scope::Help, top.downcast_ref::<super::help::HelpPanel>().is_some())
+            .or_else(|| is(Scope::Aside, top.downcast_ref::<AsidePanel>().is_some()))
+            .or_else(|| is(Scope::Job, top.downcast_ref::<super::jobs::JobPanel>().is_some()))
+            .or_else(|| is(Scope::List, top.downcast_ref::<super::panels::PickPanel>().is_some()))
+            .or_else(|| is(Scope::KeyBox, top.downcast_ref::<super::panels::KeyPanel>().is_some()))
+            .or_else(|| is(Scope::ChatGpt, top.downcast_ref::<super::panels::ChatGptPanel>().is_some()))
+            .or_else(|| top.downcast_ref::<super::details::DetailsPanel>().map(|details| details.scope()))
+    }
+    /// Where the keyboard is outside the panels, innermost first, as key() tries them.
+    fn keyboard_scope(&self) -> Scope {
+        if !self.menu().is_empty() {
+            Scope::Menu
+        } else if self.0.voice.as_ref().is_some_and(|voice| voice.active()) {
+            Scope::Voice
+        } else if self.searching() {
+            Scope::Search
+        } else if self.0.tabs.inside() {
+            Scope::Tabs
+        } else if self.0.state.borrow().tree_cursor.is_some() {
+            Scope::Tree
+        } else {
+            Scope::Box
+        }
     }
     /// Words typed or pasted into the box, at the cursor. A run of typing is one step to undo; a paste is one of its own.
     pub(super) fn type_into_box(&self, text: &str, typed: bool) {
@@ -157,42 +190,48 @@ impl TuiApp {
     }
     /// Plain dragging selects text even when mouse reporting is needed for scrolling and buttons.
     fn selection_input(&self, event: &InputEvent) -> bool {
-        // Anything else the producer does ends the moment just after a copy.
-        let copy_key = |name: &str, mods: &Modifiers| name == "escape" || (name == "c" && mods.ctrl && !mods.alt);
-        if matches!(event, InputEvent::Key { name, mods, .. } if !copy_key(name, mods))
+        // The selection's keys (ctrl+c and esc, or keys.json's). Anything else the producer does ends the moment just
+        // after a copy.
+        let keys = if matches!(event, InputEvent::Key { .. }) { self.actions(Scope::Selection, event) } else { vec![] };
+        if matches!(event, InputEvent::Key { .. }) && keys.is_empty()
             || matches!(event, InputEvent::Text { .. } | InputEvent::Paste { .. })
             || matches!(event, InputEvent::Mouse { action: MouseAction::Press | MouseAction::Wheel, .. })
         {
             self.0.state.borrow_mut().copied = None;
         }
-        match event {
-            InputEvent::Key { name, mods, .. } if name == "c" && mods.ctrl && !mods.alt => {
-                let text = self.0.state.borrow().selection.as_ref().filter(|s| s.moved).map(|s| s.text());
-                if let Some(text) = text {
-                    self.0.state.borrow_mut().selection = None;
-                    self.copy_selection(&text);
-                    return true;
-                }
-                // Many terminals' copy key, just after a copy: it copies again, and doesn't stop Kumi, clear the box or
-                // quit.
-                if let Some(text) = self.just_copied() {
-                    self.copy_text(&text);
-                    return true;
-                }
-            }
-            InputEvent::Key { name, .. } if name == "escape" => {
-                if self.0.state.borrow_mut().selection.take().is_some_and(|s| s.moved) {
-                    return true;
-                }
-                // Just after a copy, Esc takes its toast away. While Kumi works it stops it too, as ever; while it's idle,
-                // that's all it does (unpinning, or taking a request back, can wait for the next).
-                if self.just_copied().is_some() {
-                    self.end_toast();
-                    if !self.busy() {
+        for id in &keys {
+            match *id {
+                "selection.copy" => {
+                    let text = self.0.state.borrow().selection.as_ref().filter(|s| s.moved).map(|s| s.text());
+                    if let Some(text) = text {
+                        self.0.state.borrow_mut().selection = None;
+                        self.copy_selection(&text);
+                        return true;
+                    }
+                    // Many terminals' copy key, just after a copy: it copies again, and doesn't stop Kumi, clear the box
+                    // or quit.
+                    if let Some(text) = self.just_copied() {
+                        self.copy_text(&text);
                         return true;
                     }
                 }
+                "selection.clear" => {
+                    if self.0.state.borrow_mut().selection.take().is_some_and(|s| s.moved) {
+                        return true;
+                    }
+                    // Just after a copy, Esc takes its toast away. While Kumi works it stops it too, as ever; while it's
+                    // idle, that's all it does (unpinning, or taking a request back, can wait for the next).
+                    if self.just_copied().is_some() {
+                        self.end_toast();
+                        if !self.busy() {
+                            return true;
+                        }
+                    }
+                }
+                _ => {}
             }
+        }
+        match event {
             InputEvent::Mouse { action: MouseAction::Drag, button: MouseButton::Left, x, y, .. } => {
                 if let Some(selection) = self.0.state.borrow_mut().selection.as_mut().filter(|s| s.dragging) {
                     selection.update(*x, *y);
@@ -232,10 +271,8 @@ impl TuiApp {
                     return true;
                 }
             }
-            InputEvent::Key { .. }
-            | InputEvent::Text { .. }
-            | InputEvent::Paste { .. }
-            | InputEvent::Mouse { action: MouseAction::Wheel, .. } => {
+            InputEvent::Key { .. } if keys.is_empty() => self.0.state.borrow_mut().selection = None,
+            InputEvent::Text { .. } | InputEvent::Paste { .. } | InputEvent::Mouse { action: MouseAction::Wheel, .. } => {
                 self.0.state.borrow_mut().selection = None;
             }
             _ => {}
@@ -301,103 +338,182 @@ impl TuiApp {
         self.toast(&copied_words(text, here, self.0.profile.iterm), NoticeTone::Info);
         true
     }
-    /// A key the box and the conversation take, `escaped` when an esc that did nothing else came just before it.
-    fn key(&self, name: &str, mods: Modifiers, escaped: Option<f64>) {
-        let Modifiers { ctrl, alt, shift } = mods;
-        if let Some(voice) = &self.0.voice {
-            if voice.active() {
-                if (name == "escape" && self.menu().is_empty()) || (ctrl && name == "c") {
-                    voice.cancel();
-                    return;
-                }
-                if name == "enter"
-                    && !alt
-                    && !shift
-                    && self.menu().is_empty()
-                    && !is_command(string::trim(&self.0.state.borrow().editor.text()))
-                    && voice.enter()
-                {
-                    return;
-                }
+    /// A key outside the panels, tried in each place the keyboard is in, the innermost first: the / menu while it's
+    /// open, while Kumi listens, while looking back through what was sent, the tabs, FOCUS's tree, then the box. In each
+    /// place the key's actions are tried in turn. Falling out of the tabs or the tree leaves them, and a key the search
+    /// doesn't take stops it, with the message found, and goes on. A key no action took may be the second of keys
+    /// pressed one after another (`pending` is the first, when it came), or the first.
+    fn key(&self, name: &str, mods: Modifiers, pending: Option<(Chord, f64)>) {
+        let chord = Chord::new(name, mods);
+        // The second of keys pressed one after another comes before what the key does alone, when their action
+        // applies: ctrl+e finishes a pair ctrl+x ctrl+e, though alone it's the line's end.
+        let now = perf_now();
+        let first = pending.filter(|(_, at)| now - at <= AGAIN_MS).map(|(first, _)| first);
+        if let Some(id) = first.and_then(|first| self.0.keymap.then(Scope::Box, &first, &chord)) {
+            if self.act(id) {
+                return;
             }
         }
-        // W5-3's keys, until W3-3's key registry takes them over: composer.history-search (ctrl+r, and the keys while
-        // looking), composer.editor (ctrl+g) and composer.stash (ctrl+s).
-        if self.search_key(name, mods) {
+        if !self.menu().is_empty() && self.act_in(Scope::Menu, &chord) {
             return;
         }
-        // W4-4: ctrl+o, the conversation in detail (conversation.details in W3-3's registry).
-        if ctrl && !alt && name == "o" {
-            self.0.tabs.leave();
-            self.open_details();
+        if self.0.voice.as_ref().is_some_and(|voice| voice.active()) && self.act_in(Scope::Voice, &chord) {
             return;
         }
-        if ctrl && !alt && matches!(name, "r" | "g" | "s") {
-            self.0.tabs.leave();
-            self.0.state.borrow_mut().tree_cursor = None;
-            match name {
-                "r" => self.search_back(),
-                "g" => self.edit_draft(),
-                _ => self.stash(),
+        if self.searching() {
+            if self.act_in(Scope::Search, &chord) {
+                return;
             }
-            return;
-        }
-        // End of W5-3's keys.
-        // ---- W6-2 · the pane: ctrl+\ opens and closes the drawer, or puts the pane away and back (pane.toggle; into the
-        // key registry with W3-3) ----
-        if ctrl && !alt && name == "\\" {
-            self.toggle_pane();
-            return;
-        }
-        // ---- end W6-2 ----
-        let menu = self.menu();
-        let width = self.input_width();
-        if name == "tab" && shift && !ctrl && !alt && menu.is_empty() {
-            self.0.state.borrow_mut().tree_cursor = None;
-            // (W6-2: the pane shows the tabs the keyboard goes into, the drawer open on them)
-            self.open_pane(super::drawer::DrawerTab::Tabs);
-            if self.0.tabs.inside() {
-                self.0.tabs.next();
-            } else {
-                self.0.tabs.enter();
+            self.search_end(true);
+            // The box's words may make a command now: the menu has the key first, as it did.
+            if !self.menu().is_empty() && self.act_in(Scope::Menu, &chord) {
+                return;
             }
-            return;
         }
         if self.0.tabs.inside() {
-            if matches!(name, "escape" | "tab") {
-                self.0.tabs.leave();
-                return;
-            }
-            if !ctrl && !alt && self.0.tabs.key(name) {
+            if self.tabs_key(&chord) {
                 return;
             }
             self.0.tabs.leave();
         }
-        let cursor = self.0.state.borrow().tree_cursor;
-        if let Some(cursor) = cursor {
-            if let Some(rows) = self.tree_shown() {
-                if !ctrl && !alt && matches!(name, "up" | "down") {
-                    self.0.state.borrow_mut().tree_cursor =
-                        Some((cursor as i32 + if name == "up" { -1 } else { 1 }).clamp(0, rows.len() as i32 - 1) as usize);
-                    return;
-                }
-                if !ctrl && !alt && name == "enter" {
-                    self.pin(&rows[cursor.min(rows.len() - 1)]);
-                    self.0.state.borrow_mut().tree_cursor = None;
-                    return;
-                }
-                if matches!(name, "escape" | "tab") {
-                    self.0.state.borrow_mut().tree_cursor = None;
-                    return;
-                }
+        // The tree's own keys while it shows; the pane's (ctrl+\, shift+tab) either way, as they came first.
+        if self.0.state.borrow().tree_cursor.is_some() {
+            if self.act_in(Scope::Tree, &chord) {
+                return;
             }
             self.0.state.borrow_mut().tree_cursor = None;
         }
-        if name == "tab" && menu.is_empty() && !ctrl && !alt && self.busy() {
-            let raw = self.composed();
-            if !raw.is_empty() && !is_command(string::trim(&raw)) {
+        // A key nothing took that starts keys pressed one after another (esc esc) is kept for the next.
+        if !self.act_in(Scope::Box, &chord) && self.0.keymap.starts(Scope::Box, &chord) {
+            self.0.state.borrow_mut().pending = Some((chord, now));
+        }
+    }
+    /// The first of `chord`'s actions in `scope` that applies now does what it does: true when one did.
+    fn act_in(&self, scope: Scope, chord: &Chord) -> bool {
+        self.0.keymap.actions(scope, chord).into_iter().any(|id| self.act(id))
+    }
+    /// A key in the tabs: the tabs' own (moving, opening a row, leaving), then the row's (space opens a change's
+    /// picture, `u` undoes it).
+    fn tabs_key(&self, chord: &Chord) -> bool {
+        // The tabs' moves are actions of their own, so a row has only its own keys.
+        let moves = ["up", "down", "pageup", "pagedown", "enter"];
+        self.act_in(Scope::Tabs, chord)
+            || (!chord.mods.ctrl && !chord.mods.alt && !moves.contains(&chord.key.as_str()) && self.0.tabs.key(&chord.key))
+    }
+    /// Does what action `id` does, when it applies now: false lets the key go on to the next action.
+    fn act(&self, id: &str) -> bool {
+        match id {
+            // The / menu.
+            "menu.close" => self.0.state.borrow_mut().menu_dismissed = true,
+            "menu.up" | "menu.down" => {
+                let menu = self.menu();
+                let mut state = self.0.state.borrow_mut();
+                state.menu_index = (state.menu_index + if id == "menu.up" { menu.len() - 1 } else { 1 }) % menu.len();
+                state.menu_chosen = Some(state.editor.text().to_string());
+            }
+            "menu.complete" => {
+                let menu = self.menu();
+                let mut state = self.0.state.borrow_mut();
+                let index = state.menu_index;
+                state.editor.set(menu[index].command.name);
+            }
+            "menu.run" => {
+                let menu = self.menu();
+                {
+                    let mut state = self.0.state.borrow_mut();
+                    let found = menu[state.menu_index];
+                    let typed = state.editor.text().to_string();
+                    let chosen = state.menu_chosen.as_deref() == Some(typed.as_str());
+                    state.editor.set(found.command.name);
+                    // A command found only by the words of what it does is none the producer named: Enter puts its name in
+                    // the box, as tab does, unless they chose it with ↑↓.
+                    if !found.named() && !chosen {
+                        return true;
+                    }
+                }
+                self.submit_task();
+            }
+            // While Kumi listens. Enter sends what was heard, unless the box holds a command.
+            "voice.drop" => {
+                if let Some(voice) = &self.0.voice {
+                    voice.cancel();
+                }
+            }
+            "voice.send" => {
+                let command = is_command(string::trim(&self.0.state.borrow().editor.text()));
+                if command || !self.0.voice.as_ref().is_some_and(|voice| voice.enter()) {
+                    return false;
+                }
+            }
+            // While looking back through what was sent.
+            "search.back" => self.search_back(),
+            "search.erase" => self.search_erase(),
+            "search.take" => self.search_end(true),
+            "search.cancel" => self.search_end(false),
+            // The conversation in detail: from the tabs too, which it leaves, and from the tree, whose cursor it keeps.
+            "conversation.details" => {
+                self.0.tabs.leave();
+                self.open_details();
+            }
+            // Looking back, the draft in the producer's editor, and a draft put aside.
+            "composer.history-search" | "composer.editor" | "composer.stash" => {
+                self.0.tabs.leave();
+                self.0.state.borrow_mut().tree_cursor = None;
+                match id {
+                    "composer.history-search" => self.search_back(),
+                    "composer.editor" => self.edit_draft(),
+                    _ => self.stash(),
+                }
+            }
+            // The pane: the drawer, or the side pane at full width.
+            "pane.toggle" => self.toggle_pane(),
+            "pane.tabs" | "tabs.next" => {
+                self.0.state.borrow_mut().tree_cursor = None;
+                // The pane shows the tabs the keyboard goes into, the drawer open on them.
+                self.open_pane(super::drawer::DrawerTab::Tabs);
+                if self.0.tabs.inside() {
+                    self.0.tabs.next();
+                } else {
+                    self.0.tabs.enter();
+                }
+            }
+            // In the tabs.
+            "tabs.leave" => self.0.tabs.leave(),
+            "tabs.up" | "tabs.down" | "tabs.page-up" | "tabs.page-down" | "tabs.open" => {
+                let key = match id {
+                    "tabs.up" => "up",
+                    "tabs.down" => "down",
+                    "tabs.page-up" => "pageup",
+                    "tabs.page-down" => "pagedown",
+                    _ => "enter",
+                };
+                self.0.tabs.key(key);
+            }
+            // In FOCUS's tree.
+            "tree.up" | "tree.down" | "tree.pin" => {
+                let cursor = self.0.state.borrow().tree_cursor;
+                let (Some(cursor), Some(rows)) = (cursor, self.tree_shown()) else { return false };
+                if id == "tree.pin" {
+                    self.pin(&rows[cursor.min(rows.len() - 1)]);
+                    self.0.state.borrow_mut().tree_cursor = None;
+                } else {
+                    self.0.state.borrow_mut().tree_cursor =
+                        Some((cursor as i32 + if id == "tree.up" { -1 } else { 1 }).clamp(0, rows.len() as i32 - 1) as usize);
+                }
+            }
+            "tree.leave" if self.tree_shown().is_some() => self.0.state.borrow_mut().tree_cursor = None,
+            // Tab while Kumi works sends the box's words after the answer; otherwise it goes into FOCUS's tree.
+            "composer.send-after" => {
+                if !self.busy() {
+                    return false;
+                }
+                let raw = self.composed();
+                if raw.is_empty() || is_command(string::trim(&raw)) {
+                    return false;
+                }
+                // Past what the session takes at once, it stays in the box, said so.
                 if self.too_long(&raw) {
-                    return;
+                    return true;
                 }
                 let (shown, words) = {
                     let state = self.0.state.borrow();
@@ -409,225 +525,132 @@ impl TuiApp {
                 state.editor.clear();
                 drop(state);
                 self.hold(raw, shown, words, "after");
-                return;
             }
-        }
-        if name == "tab" && menu.is_empty() && !ctrl && !alt {
-            let eligible = {
-                let state = self.0.state.borrow();
-                // (the chain FOCUS shows: a take's FX chain where one is open, else the track's)
-                state
-                    .tree
-                    .as_ref()
-                    .is_some_and(|t| state.focus.as_ref().and_then(|f| f.chain_ref.as_ref().or(f.track_ref.as_ref())) == Some(&t.track_ref))
-            };
-            if eligible {
-                // (W6-2: the drawer open on FOCUS, where the keyboard goes)
-                self.open_pane(super::drawer::DrawerTab::Focus);
-                self.0.state.borrow_mut().tree_cursor = Some(0);
-                let shown = self.tree_shown();
-                self.0.state.borrow_mut().tree_cursor = shown.map(|rows| rows.iter().position(|r| r.role == TreeRole::Focus).unwrap_or(0));
-            } else {
-                self.0.state.borrow_mut().tree_cursor = None;
+            "pane.tree" => {
+                let eligible = {
+                    let state = self.0.state.borrow();
+                    // (the chain FOCUS shows: a take's FX chain where one is open, else the track's)
+                    state.tree.as_ref().is_some_and(|t| {
+                        state.focus.as_ref().and_then(|f| f.chain_ref.as_ref().or(f.track_ref.as_ref())) == Some(&t.track_ref)
+                    })
+                };
+                if eligible {
+                    // The drawer open on FOCUS, where the keyboard goes.
+                    self.open_pane(super::drawer::DrawerTab::Focus);
+                    self.0.state.borrow_mut().tree_cursor = Some(0);
+                    let shown = self.tree_shown();
+                    self.0.state.borrow_mut().tree_cursor =
+                        shown.map(|rows| rows.iter().position(|r| r.role == TreeRole::Focus).unwrap_or(0));
+                } else {
+                    self.0.state.borrow_mut().tree_cursor = None;
+                }
             }
-            return;
-        }
-        if ctrl && name == "c" {
-            if self.busy() {
-                self.cancel();
-            } else if !self.0.state.borrow().editor.is_empty() {
-                self.erase_draft();
-            } else {
-                drop(self.finish(0, None));
+            "app.interrupt" => {
+                if self.busy() {
+                    self.cancel();
+                } else if !self.0.state.borrow().editor.is_empty() {
+                    self.erase_draft();
+                } else {
+                    drop(self.finish(0, None));
+                }
             }
-            return;
-        }
-        if ctrl && name == "b" && self.can().jobs {
-            self.background_now();
-            return;
-        }
-        if ctrl && name == "v" && self.can().attachments {
-            self.paste_picture();
-            return;
-        }
-        if ctrl && name == "d" {
-            if self.0.state.borrow().editor.is_empty() && !self.busy() {
-                drop(self.finish(0, None));
-            } else {
-                self.0.state.borrow_mut().editor.delete();
-            }
-            return;
-        }
-        if name == "escape" {
-            let checking = self.0.state.borrow().slots_check.is_some();
-            if !menu.is_empty() {
-                self.0.state.borrow_mut().menu_dismissed = true;
-            } else if checking {
-                // A /slots fetch or check stops first.
+            "app.background" if self.can().jobs => self.background_now(),
+            "app.paste-picture" if self.can().attachments => self.paste_picture(),
+            // From an empty box while Kumi isn't working; otherwise ctrl+d deletes.
+            "app.quit" if self.0.state.borrow().editor.is_empty() && !self.busy() => drop(self.finish(0, None)),
+            "app.stop" => {
                 let check = self.0.state.borrow_mut().slots_check.take();
                 if let Some(id) = check {
+                    // A /slots fetch or check stops first.
                     self.session().tell(op::StopSlots { id }.into());
+                } else if self.busy() {
+                    self.cancel();
+                } else if self.0.state.borrow().pinned.is_some() {
+                    self.unpin();
+                } else {
+                    return false;
                 }
-            } else if self.busy() {
-                self.cancel();
-            } else if self.0.state.borrow().pinned.is_some() {
-                self.unpin();
-            } else {
-                // Only an esc that did nothing else is half of esc esc.
-                self.escaped(escaped);
             }
-            return;
-        }
-        if !menu.is_empty() && matches!(name, "up" | "down") {
-            let mut state = self.0.state.borrow_mut();
-            state.menu_index = (state.menu_index + if name == "up" { menu.len() - 1 } else { 1 }) % menu.len();
-            state.menu_chosen = Some(state.editor.text().to_string());
-            return;
-        }
-        if !menu.is_empty() && name == "tab" {
-            let mut state = self.0.state.borrow_mut();
-            let index = state.menu_index;
-            state.editor.set(menu[index].command.name);
-            return;
-        }
-        if name == "enter" && !alt && !shift {
-            if !menu.is_empty() {
+            "composer.send" => self.submit_task(),
+            "composer.new-line" => self.0.state.borrow_mut().editor.insert("\n"),
+            // In an empty box, backspace takes back the last file added first.
+            "composer.take-back-file" => {
                 let mut state = self.0.state.borrow_mut();
-                let found = menu[state.menu_index];
-                let typed = state.editor.text().to_string();
-                let chosen = state.menu_chosen.as_deref() == Some(typed.as_str());
-                state.editor.set(found.command.name);
-                // A command found only by the words of what it does is none the producer named: Enter puts its name in the
-                // box, as tab does, unless they chose it with ↑↓.
-                if !found.named() && !chosen {
-                    return;
+                if !(state.editor.is_empty() && state.attachments.pop().is_some()) {
+                    return false;
                 }
             }
-            self.submit_task();
-            return;
-        }
-        let mut state = self.0.state.borrow_mut();
-        if name == "enter" || (ctrl && name == "j") {
-            state.editor.insert("\n");
-            return;
-        }
-        if name == "backspace" && state.editor.is_empty() && state.attachments.pop().is_some() {
-            return;
-        }
-        if name == "backspace" {
-            if alt || ctrl {
-                state.editor.delete_word_left();
-            } else {
-                state.editor.backspace();
-            }
-            return;
-        }
-        if name == "delete" {
-            state.editor.delete();
-            return;
-        }
-        if name == "left" {
-            if alt || ctrl {
-                state.editor.word_left();
-            } else {
-                state.editor.left();
-            }
-            return;
-        }
-        if name == "right" {
-            if alt || ctrl {
-                state.editor.word_right();
-            } else {
-                state.editor.right();
-            }
-            return;
-        }
-        if alt && name == "b" {
-            state.editor.word_left();
-            return;
-        }
-        if alt && name == "f" {
-            state.editor.word_right();
-            return;
-        }
-        if alt && name == "up" {
-            if let Some(at) = state.held.iter().rposition(|h| !h.taken) {
-                // Back above the draft as the box held it, chips and all.
+            "composer.cut-word" => self.0.state.borrow_mut().editor.delete_word_left(),
+            "composer.backspace" => self.0.state.borrow_mut().editor.backspace(),
+            "composer.delete" => self.0.state.borrow_mut().editor.delete(),
+            "composer.word-left" => self.0.state.borrow_mut().editor.word_left(),
+            "composer.left" => self.0.state.borrow_mut().editor.left(),
+            "composer.word-right" => self.0.state.borrow_mut().editor.word_right(),
+            "composer.right" => self.0.state.borrow_mut().editor.right(),
+            // With nothing waiting, alt+↑ is ↑.
+            "composer.take-back-waiting" => {
+                let mut state = self.0.state.borrow_mut();
+                let Some(at) = state.held.iter().rposition(|h| !h.taken) else { return false };
                 let item = state.held.remove(at);
                 state.editor.put_back(&[item.words]);
                 state.recall = None;
-                return;
             }
-        }
-        if name == "up" {
-            let moved = state.editor.vertical(width, -1);
-            drop(state);
-            if !moved {
-                self.recall_older();
+            "composer.up" | "composer.down" => {
+                let width = self.input_width();
+                let up = id == "composer.up";
+                let moved = self.0.state.borrow_mut().editor.vertical(width, if up { -1 } else { 1 });
+                if !moved {
+                    if up {
+                        self.recall_older();
+                    } else {
+                        self.recall_newer();
+                    }
+                }
             }
-            return;
-        }
-        if name == "down" {
-            let moved = state.editor.vertical(width, 1);
-            drop(state);
-            if !moved {
-                self.recall_newer();
+            "conversation.start" => {
+                let mut state = self.0.state.borrow_mut();
+                let State { view, transcript, .. } = &mut *state;
+                view.to_start(transcript, perf_now());
             }
-            return;
+            "conversation.latest" => self.0.state.borrow_mut().view.follow(),
+            "composer.line-start" => self.0.state.borrow_mut().editor.home(),
+            "composer.line-end" => self.0.state.borrow_mut().editor.end(),
+            // Each says whether there was something to undo or put back; the key is theirs either way.
+            "composer.undo" => {
+                self.0.state.borrow_mut().editor.undo();
+            }
+            "composer.yank" => {
+                self.0.state.borrow_mut().editor.yank();
+            }
+            "composer.yank-earlier" => {
+                self.0.state.borrow_mut().editor.yank_earlier();
+            }
+            "composer.cut-to-end" => self.0.state.borrow_mut().editor.kill_to_end(),
+            "composer.cut-to-start" => self.0.state.borrow_mut().editor.kill_to_start(),
+            "conversation.page-up" | "conversation.page-down" => {
+                let mut state = self.0.state.borrow_mut();
+                let page = if id == "conversation.page-up" { state.page } else { -state.page };
+                let State { view, transcript, .. } = &mut *state;
+                view.scroll_by(transcript, page, perf_now());
+            }
+            "app.redraw" => self.0.renderer.borrow_mut().invalidate(),
+            "app.help" => self.open_help(),
+            // Keys pressed one after another, in an empty box where requests can be taken back. While esc has something
+            // to stop or unpin (a turn begun between the two), that comes first.
+            "app.take-back"
+                if self.0.state.borrow().editor.is_empty()
+                    && self.can().take_back
+                    && !self.busy()
+                    && self.0.state.borrow().slots_check.is_none()
+                    && self.0.state.borrow().pinned.is_none() =>
+            {
+                let app = self.clone();
+                tokio::task::spawn_local(async move { app.pick_take_back().await });
+            }
+            // voice.talk is taken as the key comes in, before any of these; without a voice it does nothing.
+            _ => return false,
         }
-        if ctrl && name == "home" {
-            let State { view, transcript, .. } = &mut *state;
-            view.to_start(transcript, perf_now());
-            return;
-        }
-        if ctrl && name == "end" {
-            state.view.follow();
-            return;
-        }
-        if name == "home" || (ctrl && name == "a") {
-            state.editor.home();
-            return;
-        }
-        if name == "end" || (ctrl && name == "e") {
-            state.editor.end();
-            return;
-        }
-        // W5-2's keys, until W3-3's key registry takes them over: composer.undo (ctrl+-, which legacy terminals send
-        // as ctrl+_), composer.yank (ctrl+y) and alt+y, which swaps what ctrl+y put in for the cut before it.
-        if ctrl && matches!(name, "-" | "_") {
-            state.editor.undo();
-            return;
-        }
-        if ctrl && name == "y" {
-            state.editor.yank();
-            return;
-        }
-        if alt && name == "y" {
-            state.editor.yank_earlier();
-            return;
-        }
-        // End of W5-2's keys.
-        if ctrl && name == "k" {
-            state.editor.kill_to_end();
-            return;
-        }
-        if ctrl && name == "u" {
-            state.editor.kill_to_start();
-            return;
-        }
-        if ctrl && name == "w" {
-            state.editor.delete_word_left();
-            return;
-        }
-        if name == "pageup" || name == "pagedown" {
-            let page = if name == "pageup" { state.page } else { -state.page };
-            let State { view, transcript, .. } = &mut *state;
-            view.scroll_by(transcript, page, perf_now());
-            return;
-        }
-        if ctrl && name == "l" {
-            self.0.renderer.borrow_mut().invalidate();
-        }
+        true
     }
     pub(super) fn menu(&self) -> Vec<Found> {
         let text = {

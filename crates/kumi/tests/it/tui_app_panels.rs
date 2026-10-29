@@ -1417,3 +1417,36 @@ case!(the_wheel_scrolls_the_panel_open_over_the_conversation, async {
     assert_eq!(help_scrolled(&h), (0, most));
     h.close().await;
 });
+case!(keys_json_gives_a_panel_other_keys_and_says_what_it_cant_use, async {
+    let file = json!({ "help.close": ["q"], "help.down": ["j"], "composer.undoo": ["ctrl+z"] });
+    let h = Harness::with(120, 36, Rc::new(Control::default()), |o| o.keys = Some(Ok(file)));
+    h.start().await;
+    h.connect();
+    // (the notice wraps at this width)
+    h.has("keys.json names “composer.undoo”, which isn't an action: did you mean");
+    h.type_text("?").await;
+    h.wait_for("Keys and commands").await;
+    let (_, most) = help_scrolled(&h);
+    // j scrolls the help a row, and esc, no longer one of its keys, leaves it open.
+    h.type_text("j").await;
+    assert_eq!(help_scrolled(&h), (1, most - 1));
+    h.type_text("\x1b").await;
+    h.has("Keys and commands");
+    // q closes it, and isn't typed into the box.
+    h.type_text("q").await;
+    h.wait_until_hidden("Keys and commands").await;
+    h.has("Ask Kumi about your Set");
+    h.close().await;
+});
+case!(a_keys_json_that_isnt_json_is_said_and_kumis_own_keys_stand, async {
+    let why = "keys.json isn't JSON Kumi can read (expected value at line 1 column 1), so Kumi keeps its own keys";
+    let h = Harness::with(120, 36, Rc::new(Control::default()), |o| o.keys = Some(Err(why.into())));
+    h.start().await;
+    h.connect();
+    h.has("keys.json isn't JSON Kumi can read (expected value at line 1 column 1)");
+    h.type_text("?").await;
+    h.wait_for("Keys and commands").await;
+    h.type_text("\x1b").await;
+    h.wait_until_hidden("Keys and commands").await;
+    h.close().await;
+});

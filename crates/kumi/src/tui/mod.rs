@@ -7,6 +7,7 @@ pub mod details;
 pub mod editor;
 pub mod external_editor;
 pub mod icons;
+pub mod keymap;
 pub mod keys;
 pub mod logo;
 pub mod map;
