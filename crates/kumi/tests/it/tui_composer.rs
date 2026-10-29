@@ -1045,3 +1045,84 @@ case!(a_message_naming_something_waits_for_the_answer_and_a_command_line_names_n
     assert_eq!(h.calls().iter().filter(|call| call.starts_with("references:")).count(), asked, "{:?}", h.calls());
     h.close().await;
 });
+
+/// The cell just past `text` on the screen, as (column, row): the lowest row that has it, in cells (a wide character
+/// takes two).
+fn end_of(h: &Harness, text: &str) -> (i32, i32) {
+    let lines = h.screen();
+    let (row, line) = lines.iter().enumerate().rev().find(|(_, line)| line.contains(text)).unwrap_or_else(|| panic!("{text:?}"));
+    let at = line.find(text).unwrap() + text.len();
+    (kumi::tui::width::text_width(&line[..at]), row as i32)
+}
+
+case!(an_input_method_opens_just_past_what_ctrl_r_looks_for, async {
+    let (_tmp, history) = with_history(&["make the kick punchier", "add reverb to the snare"]);
+    let h = Harness::with(120, 36, Rc::new(Control::default()), |o| o.history = Some(history));
+    h.start().await;
+    h.connect();
+    h.type_text("my draft").await;
+    // On the search row, just past the words looked for: not in the draft, nor in the message found under them.
+    h.type_text("\x12kick").await;
+    assert!(has(&composer(&h), "make the kick punchier"), "{:?}", composer(&h));
+    assert_eq!(h.cursor(), Some(end_of(&h, "search: kick")));
+    // Words too long for the row: the row shows their end, and the cursor stays just past it, on the row.
+    h.type_text(&" kick".repeat(30)).await;
+    let (x, y) = h.cursor().expect("shown");
+    let row = &h.screen()[y as usize];
+    assert!(row.contains("search: "), "{row:?}");
+    let before: String = kumi::tui::width::graphemes(row)
+        .into_iter()
+        .scan(0, |at, grapheme| {
+            *at += kumi::tui::width::text_width(grapheme);
+            Some((*at, grapheme))
+        })
+        .take_while(|(at, _)| *at <= x)
+        .map(|(_, grapheme)| grapheme)
+        .collect();
+    assert!(before.ends_with(" kick kick"), "{before:?}");
+    h.close().await;
+});
+
+case!(an_input_method_opens_just_past_a_paste_chip_and_the_words_around_it, async {
+    let h = Harness::new(120, 36);
+    h.start().await;
+    h.connect();
+    let log: String = (1..=41).map(|i| format!("line {i} of the log\n")).collect();
+    // After wide words, which take two cells each.
+    h.type_text("キックを見て: ").await;
+    h.type_text(&format!("\x1b[200~{log}\x1b[201~")).await;
+    // Just past the chip, where the next word goes.
+    assert_eq!(h.cursor(), Some(end_of(&h, "キックを見て: [pasted 41 lines]")));
+    h.type_text(" thanks").await;
+    assert_eq!(h.cursor(), Some(end_of(&h, "[pasted 41 lines] thanks")));
+    // Back over the words, just past the chip again; one more ←, before it: the chip is one place in the box.
+    h.type_text(&"\x1b[D".repeat(7)).await;
+    assert_eq!(h.cursor(), Some(end_of(&h, "キックを見て: [pasted 41 lines]")));
+    h.type_text("\x1b[D").await;
+    assert_eq!(h.cursor(), Some(end_of(&h, "キックを見て: ")));
+    h.close().await;
+});
+
+case!(an_input_method_opens_just_past_a_reference_chip_and_the_words_around_it, async {
+    let c = Rc::new(Control::default());
+    let drums = serde_json::json!({"label":"Drums","kind":"track","reference":{"kind":"daw","node":{"trackRef":"1:track:0","ref":"1:track:0","node":"track","name":"Drums","trail":[],"siblings":[],"track":"Drums"}}});
+    *c.extra.borrow_mut() = serde_json::json!({"references": [drums]});
+    let h = Harness::with(120, 36, c, |_| {});
+    h.start().await;
+    h.connect();
+    // After wide words, Drums chosen from the @ list: just past its chip and the space it brings.
+    for typed in ["キックと ", "@", "d"] {
+        h.type_text(typed).await;
+    }
+    delay(5).await;
+    h.type_text("\t").await;
+    assert_eq!(h.cursor(), Some(end_of(&h, "キックと @Drums ")));
+    h.type_text("louder").await;
+    assert_eq!(h.cursor(), Some(end_of(&h, "@Drums louder")));
+    // Back over the words and the space, just past the chip; one more ←, before it: the chip is one place in the box.
+    h.type_text(&"\x1b[D".repeat(7)).await;
+    assert_eq!(h.cursor(), Some(end_of(&h, "キックと @Drums")));
+    h.type_text("\x1b[D").await;
+    assert_eq!(h.cursor(), Some(end_of(&h, "キックと ")));
+    h.close().await;
+});
