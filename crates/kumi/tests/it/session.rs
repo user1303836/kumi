@@ -1622,6 +1622,62 @@ local_test!(a_conversation_taken_up_after_a_restart_and_taken_back_to_nothing_ke
     assert!(shown.iter().all(|line| !line.contains("make the bass wider")), "{shown:?}");
     three.session.close().await.unwrap();
 });
+local_test!(a_copy_from_before_a_request_carries_on_from_there_and_leaves_the_original_and_the_daw_as_they_are, {
+    const SET: &str = "a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2";
+    let dir = tempfile::tempdir().unwrap();
+    let (h, store) = takes_back(dir.path(), |asked| match asked {
+        "make the bass wider" => vec![change("c1", "applied", 1)],
+        "and darker" => vec![change("c2", "applied", 2)],
+        _ => vec![],
+    });
+    project(&h, SET);
+    h.session.start().await.unwrap();
+    for asked in ["make the bass wider", "and darker", "and brighter"] {
+        h.session.submit(asked, None).await.unwrap();
+    }
+    let original = saved(store.as_ref(), SET, 3).await;
+    // Newest first: "and darker" is the second.
+    let plan = h.session.take_back_plan().await.unwrap();
+    assert_eq!(plan[1].words, "and darker");
+    let copy = h.session.fork_conversation_before(None, plan[1].at).await.unwrap().expect("a copy");
+    assert_ne!(copy, original.id);
+    // Nothing in the DAW was undone.
+    assert!(h.record.undone.borrow().is_empty());
+    // The screen is shown the copy as it stands, the first request alone, and told what happened.
+    let forked = h.events.borrow().iter().find_map(|e| match e {
+        SessionEvent::Forked { from, replay } => Some((from.clone(), replay.clone())),
+        _ => None,
+    });
+    let (from, replay) = forked.expect("the copy shown");
+    assert_eq!((from, asked_in(&replay.expect("its replay").lines)), (original.id.clone(), vec!["make the bass wider".to_string()]));
+    assert!(h.notice("Carrying on in a copy from before “and darker”"));
+    // The copy is kept as the conversation stood then: one request, and its change alone.
+    let kept = store.load(SET, &copy).await.unwrap().expect("the copy kept");
+    assert_eq!(kept.turns, Some(1));
+    let ids: Vec<&str> = kept.changes.iter().flatten().map(|change| change.id.as_str()).collect();
+    assert_eq!(ids, ["c1"]);
+    // The next request carries on from the first request's messages, in the copy.
+    h.session.submit("make it wider still", None).await.unwrap();
+    let last = h.record.created.borrow().len() - 1;
+    assert_eq!(h.words(last).unwrap(), ["make the bass wider"]);
+    let mut kept = None;
+    for _ in 0..1000 {
+        kept = store.load(SET, &copy).await.unwrap().filter(|kept| kept.turns == Some(2));
+        if kept.is_some() {
+            break;
+        }
+        delay(2).await;
+    }
+    assert!(kept.is_some(), "the copy's next request kept");
+    h.session.close().await.unwrap();
+    assert_eq!(asked_in(&store.log(SET, &copy).await.expect("its log").lines), ["make the bass wider", "make it wider still"]);
+    // The original stays as it was.
+    assert_eq!(
+        asked_in(&store.log(SET, &original.id).await.expect("its log").lines),
+        ["make the bass wider", "and darker", "and brighter"]
+    );
+    assert_eq!(store.load(SET, &original.id).await.unwrap().expect("the original").turns, Some(3));
+});
 local_test!(earlier_process_changes_expire_without_pictures_and_same_process_keeps_undo, {
     let dir = tempfile::tempdir().unwrap();
     let store = create_conversation_store(dir.path());

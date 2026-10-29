@@ -1331,6 +1331,136 @@ impl Session {
         self.emit(SessionEvent::TakenBack { requests, replay });
         Ok(())
     }
+    /// A copy of the conversation going on, to carry on in; the original stays as it is. With `before` (a request's `at`)
+    /// the copy is the conversation as it stood just before that request: the log's messages from before it, whole, its
+    /// lines up to there, and the changes of the requests before it. Nothing in the DAW changes. The copy's id, or None
+    /// with nothing to copy.
+    async fn fork(&self, name: Option<&str>, before: Option<i64>) -> Result<Option<String>, RuntimeError> {
+        let Some(store) = self.0.options.conversations.clone() else { return Ok(None) };
+        let (held, settled, place, old, copied) = {
+            let s = self.0.state.borrow();
+            if s.active.is_some() {
+                return Err(KumiError::new(FailureKind::Request, "Kumi is still working: fork once it's done.").into());
+            }
+            let place = s.place.clone().unwrap_or(self.unsaved().into());
+            (s.kernel.clone(), s.settled.clone(), place, s.conversation_id.clone(), s.copied_from.clone())
+        };
+        let now_held = match held.filter(|held| held.value.has_checkpoint()) {
+            Some(held) => Some((held.value.checkpoint()?, held.key.clone())),
+            None => settled.map(|settled| (KernelCheckpoint::clone(&settled.checkpoint), settled.key)),
+        };
+        let Some((checkpoint, key)) = now_held.filter(|(checkpoint, _)| !checkpoint.messages.is_empty()) else { return Ok(None) };
+        let saving = self.0.saving.borrow().clone();
+        let _ = saving.await;
+        // From before a request: what the log has of the conversation then, and what the requests from there changed.
+        let from_before = match before {
+            None => None,
+            Some(at) => {
+                let (had, spans) = self.story().await?;
+                let gone = || KumiError::new(FailureKind::Request, "That request isn't there to carry on from any more.");
+                let index = spans.iter().position(|span| span.request.at == at).ok_or_else(gone)?;
+                let messages = messages_before(&had, &spans, at).ok_or_else(gone)?;
+                if messages.is_empty() {
+                    return Err(KumiError::new(FailureKind::Request, "Nothing came before that request: /new starts afresh.").into());
+                }
+                // By the ids the log has, and as the HISTORY lists them (one from an earlier session under its own).
+                let left: std::collections::HashSet<String> = {
+                    let s = self.0.state.borrow();
+                    spans[index..]
+                        .iter()
+                        .flat_map(|span| &span.changes)
+                        .flat_map(|change| [change.id.clone(), taken_up(&s.conversation_id, &s.seen, change.clone()).id])
+                        .collect()
+                };
+                Some((at, messages, (spans.len() - index) as u32, left, spans[index].request.text.clone()))
+            }
+        };
+        let id = store.new_id().await;
+        let conversation = {
+            let s = self.0.state.borrow();
+            match &from_before {
+                None => SavedConversation {
+                    saved_at: now(),
+                    checkpoint,
+                    turns: Some(s.conversation_turns),
+                    first: s.conversation_first.clone().filter(|s| !s.is_empty()),
+                    changes: (!s.changes.is_empty()).then(|| s.changes.clone()),
+                },
+                Some((_, messages, after, left, _)) => {
+                    let turns = s.conversation_turns.saturating_sub(*after);
+                    let changes: Vec<ChangeRecord> = s.changes.iter().filter(|change| !left.contains(&change.id)).cloned().collect();
+                    SavedConversation {
+                        saved_at: now(),
+                        checkpoint: KernelCheckpoint { messages: messages.clone(), ..checkpoint },
+                        turns: Some(turns),
+                        first: s.conversation_first.clone().filter(|s| !s.is_empty() && turns > 0),
+                        changes: (!changes.is_empty()).then_some(changes),
+                    }
+                }
+            }
+        };
+        // The original as it is now (as it was kept, when nothing's been asked since it was taken up), then the copy: the
+        // same words, changes and undo, a new id from here on.
+        if !self.0.state.borrow().as_kept {
+            self.save_conversation(false);
+        }
+        let saving = self.0.saving.borrow().clone();
+        let _ = saving.await;
+        // A copy with nothing kept yet stands for the conversation it copies: the fork comes from that one.
+        let source = copied.unwrap_or_else(|| old.clone());
+        store.create(&place, &id, &conversation, name, Some(&source)).await?;
+        store.release(&place, &old);
+        store.claim(&place, &id);
+        {
+            let mut s = self.0.state.borrow_mut();
+            s.conversation_id = id.clone();
+            s.conversation_name = None;
+            s.copied_from = None;
+            s.touched = true;
+            if from_before.is_some() {
+                // The next kernel carries on from the copy's messages, as after a take-back, and what's settled is the
+                // copy's (a fork or a take-back straight after starts from it).
+                let copied = Rc::new(conversation.checkpoint.clone());
+                s.settled = Some(Settled { checkpoint: copied.clone(), key: key.clone() });
+                s.switched = Some(Settled { checkpoint: copied, key });
+                s.conversation_turns = conversation.turns.unwrap_or(0);
+                s.conversation_first = conversation.first.clone();
+                s.changes = conversation.changes.clone().unwrap_or_default();
+            }
+        }
+        if from_before.is_some() {
+            self.drop_kernel().await?;
+        }
+        // The copy's log begins as the original's is now (up to the request, from before one), and is as up to date as the
+        // copy's checkpoint.
+        if let Some(log) = &self.0.options.log {
+            match &from_before {
+                Some((at, ..)) => log.open_before(&place, &id, &conversation, &source, *at),
+                None => log.open(&place, &id, Some(&conversation), Some(source.clone())),
+            }
+            log.saved(&id, conversation.saved_at, conversation.turns.unwrap_or(0), Some(source.clone()));
+        }
+        self.wanted_goes_on_as(&place, &old, &id);
+        match from_before {
+            None => self.notice(format!("Forked; the original stays as {source}.")),
+            Some((.., words)) => {
+                let shown = match &self.0.options.log {
+                    Some(log) => log.as_now().await,
+                    None => None,
+                };
+                let replay = match shown {
+                    Some(shown) => self.shown_again(shown).await,
+                    None => None,
+                };
+                self.emit(SessionEvent::Forked { from: source.clone(), replay });
+                let words = words.replace('\n', " ");
+                let shown = cut(&words, 40);
+                let more = if shown.len() < words.len() { "…" } else { "" };
+                self.notice(format!("Carrying on in a copy from before “{shown}{more}”; the original stays as {source}."));
+            }
+        }
+        Ok(Some(id))
+    }
     /// An id for a new conversation: none kept has it, in any Set.
     async fn fresh_id(&self) -> String {
         match &self.0.options.conversations {
@@ -3021,61 +3151,10 @@ impl SessionController for Session {
         }
     }
     async fn fork_conversation(&self, name: Option<&str>) -> Result<Option<String>, RuntimeError> {
-        let Some(store) = self.0.options.conversations.clone() else { return Ok(None) };
-        let (held, settled, place, old, copied) = {
-            let s = self.0.state.borrow();
-            if s.active.is_some() {
-                return Err(KumiError::new(FailureKind::Request, "Kumi is still working: fork once it's done.").into());
-            }
-            let place = s.place.clone().unwrap_or(self.unsaved().into());
-            (s.kernel.clone(), s.settled.clone(), place, s.conversation_id.clone(), s.copied_from.clone())
-        };
-        let checkpoint = held
-            .filter(|h| h.value.has_checkpoint())
-            .and_then(|h| h.value.checkpoint().ok())
-            .or(settled.map(|s| KernelCheckpoint::clone(&s.checkpoint)))
-            .filter(|checkpoint| !checkpoint.messages.is_empty());
-        let Some(checkpoint) = checkpoint else { return Ok(None) };
-        let saving = self.0.saving.borrow().clone();
-        let _ = saving.await;
-        let id = store.new_id().await;
-        let conversation = {
-            let s = self.0.state.borrow();
-            SavedConversation {
-                saved_at: now(),
-                checkpoint,
-                turns: Some(s.conversation_turns),
-                first: s.conversation_first.clone().filter(|s| !s.is_empty()),
-                changes: (!s.changes.is_empty()).then(|| s.changes.clone()),
-            }
-        };
-        // The original as it is now (as it was kept, when nothing's been asked since it was taken up), then the copy: the
-        // same words, changes and undo, a new id from here on.
-        if !self.0.state.borrow().as_kept {
-            self.save_conversation(false);
-        }
-        let saving = self.0.saving.borrow().clone();
-        let _ = saving.await;
-        // A copy with nothing kept yet stands for the conversation it copies: the fork comes from that one.
-        let source = copied.unwrap_or_else(|| old.clone());
-        store.create(&place, &id, &conversation, name, Some(&source)).await?;
-        store.release(&place, &old);
-        store.claim(&place, &id);
-        {
-            let mut s = self.0.state.borrow_mut();
-            s.conversation_id = id.clone();
-            s.conversation_name = None;
-            s.copied_from = None;
-            s.touched = true;
-        }
-        // The copy's log begins as the original's is now, and is as up to date as the copy's checkpoint.
-        if let Some(log) = &self.0.options.log {
-            log.open(&place, &id, Some(&conversation), Some(source.clone()));
-            log.saved(&id, conversation.saved_at, conversation.turns.unwrap_or(0), Some(source.clone()));
-        }
-        self.wanted_goes_on_as(&place, &old, &id);
-        self.notice(format!("Forked; the original stays as {source}."));
-        Ok(Some(id))
+        self.fork(name, None).await
+    }
+    async fn fork_conversation_before(&self, name: Option<&str>, before: i64) -> Result<Option<String>, RuntimeError> {
+        self.fork(name, Some(before)).await
     }
     async fn answer_set(&self, choice: SetChoice) -> Result<(), RuntimeError> {
         let Some(wanted) = self.0.state.borrow().wanted.clone() else { return Ok(()) };

@@ -831,6 +831,49 @@ async fn requests_taken_back_are_marked_in_the_log_as_it_is_now() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn a_copy_from_before_a_request_begins_with_the_originals_lines_up_to_it() {
+    local(async {
+        const COPY: &str = "mv66me0m9copy3";
+        let dir = tempfile::tempdir().unwrap();
+        let store = create_conversation_store(dir.path());
+        store.save(A, ID, &said("make the bass wider", 7)).await.unwrap();
+        let log = SessionLog::new(dir.path(), Places::LIVE, same());
+        log.open(A, ID, None, None);
+        for asked in ["make the bass wider", "and darker", "and brighter"] {
+            log.request(asked, vec![], None, 0, None);
+            log.event(&completed());
+            // (each request at a moment of its own, as they come)
+            tokio::time::sleep(std::time::Duration::from_millis(3)).await;
+        }
+        // A save's line can land after the next request's: this one's comes last.
+        log.saved(ID, 10, 3, None);
+        log.written().await;
+        let original = read(&log_file(dir.path(), A, ID));
+        let darker = original
+            .lines
+            .iter()
+            .find_map(|line| match line {
+                LogLine::Request(request) if request.text == "and darker" => Some(request.at),
+                _ => None,
+            })
+            .unwrap();
+        // Carried on in a copy from before "and darker": its log has the original's lines up to that request (not to a
+        // save, though none came before it), then its own save.
+        store.create(A, COPY, &said("make the bass wider", 11), None, Some(ID)).await.unwrap();
+        log.open_before(A, COPY, &said("make the bass wider", 11), ID, darker);
+        log.saved(COPY, 11, 1, Some(ID.into()));
+        log.close().await;
+        let copy = read(&log_file(dir.path(), A, COPY));
+        assert_eq!(copy.header.from.as_deref(), Some(ID));
+        assert_eq!(kinds(&copy), ["request", "event", "saved"]);
+        assert_eq!(copy.lines[..2], original.lines[..2]);
+        // The original's is as it was.
+        assert_eq!(read(&log_file(dir.path(), A, ID)).lines, original.lines);
+    })
+    .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn a_conversation_taken_back_to_nothing_begins_its_log_again_with_nothing_from_before() {
     local(async {
         let dir = tempfile::tempdir().unwrap();

@@ -299,7 +299,7 @@ fn now() -> i64 {
 /// conversation taken up; so is the account of the conversation a session gives when it takes one up, the log being
 /// that conversation itself; what the screen only offers (a Set's question, a request to send again) isn't history; nor
 /// is a side question's answer, which never enters the conversation, or what a /slots check or a sign-in says as it
-/// goes. Requests taken back have a line of their own.
+/// goes. Requests taken back have a line of their own, and a copy's log begins as its own copy.
 fn told(event: &SessionEvent) -> bool {
     match event {
         SessionEvent::Focus { .. }
@@ -318,7 +318,8 @@ fn told(event: &SessionEvent) -> bool {
         | SessionEvent::Aside { .. }
         | SessionEvent::SlotsProgress { .. }
         | SessionEvent::SignIn { .. }
-        | SessionEvent::TakenBack { .. } => false,
+        | SessionEvent::TakenBack { .. }
+        | SessionEvent::Forked { .. } => false,
         SessionEvent::Change { .. }
         | SessionEvent::CatchUp { .. }
         | SessionEvent::State { .. }
@@ -415,6 +416,9 @@ struct Begin {
     /// Its messages by then: its checkpoint as kept when it was taken up, or as it was at a request.
     had: Option<Rc<KernelCheckpoint>>,
     from: Option<String>,
+    /// For a copy from before one of the original's requests: that request's `at`. The copy takes the original's lines up
+    /// to it, rather than to its last save.
+    cut: Option<i64>,
     /// When the checkpoint of a conversation taken up was kept: a log whose last save is older, with no answer ended
     /// since, is behind it.
     kept_at: Option<i64>,
@@ -547,6 +551,16 @@ impl SessionLog {
     /// conversation's log as it is now. One whose log is behind it (an earlier Kumi carried it on without the log) begins
     /// its log again from what's kept.
     pub fn open(&self, place: &str, id: &str, kept: Option<&SavedConversation>, from: Option<String>) {
+        self.open_cut(place, id, kept, from, None);
+    }
+
+    /// The copy `id` in `place` of the conversation `from`, made from before its request asked at `before`, goes on from
+    /// here, `kept` as it was first kept: its log begins with the original's lines up to that request.
+    pub fn open_before(&self, place: &str, id: &str, kept: &SavedConversation, from: &str, before: i64) {
+        self.open_cut(place, id, Some(kept), Some(from.to_owned()), Some(before));
+    }
+
+    fn open_cut(&self, place: &str, id: &str, kept: Option<&SavedConversation>, from: Option<String>, cut: Option<i64>) {
         if self.closed.get() {
             return;
         }
@@ -563,6 +577,7 @@ impl SessionLog {
                 before: kept.and_then(|kept| kept.turns).unwrap_or(0),
                 had: kept.map(|kept| Rc::new(kept.checkpoint.clone())),
                 from,
+                cut,
                 kept_at: kept.map(|kept| kept.saved_at),
             };
             self.send(Job::Open { folder, id, begin });
@@ -591,7 +606,7 @@ impl SessionLog {
         }
         self.said();
         let line = line_of(&LogLine::Request(LogRequest { at: now(), text: (self.redact)(text), files, pinned }));
-        self.send(Job::Request { line, begin: Begin { before, had, from: None, kept_at: None } });
+        self.send(Job::Request { line, begin: Begin { before, had, from: None, cut: None, kept_at: None } });
     }
 
     /// What an answer settled into the conversation, message by message.
@@ -769,7 +784,7 @@ async fn write(mut jobs: mpsc::UnboundedReceiver<Job>, mut writer: Writer) {
                     }
                     None => {
                         let upto = match &begin.from {
-                            Some(from) if is_conversation_id(from) => upto(&folder.join(log_name(from))).await,
+                            Some(from) if is_conversation_id(from) => upto(&folder.join(log_name(from)), begin.cut).await,
                             _ => None,
                         };
                         Log { folder, id, begin, upto, state: Written::Waiting(vec![]), full: false, dirty: false }
@@ -858,7 +873,7 @@ impl Log {
     /// Taken back to nothing: a new conversation's log, its lines waiting for its first save, with nothing it had before
     /// (nor, for a copy, the original's lines).
     fn emptied(&mut self) {
-        self.begin = Begin { before: 0, had: None, from: None, kept_at: None };
+        self.begin = Begin { before: 0, had: None, from: None, cut: None, kept_at: None };
         self.upto = None;
         self.state = Written::Waiting(vec![]);
         self.full = false;
@@ -923,7 +938,7 @@ impl Log {
     async fn saved(&mut self, kit: &Kit, line: Vec<u8>, from: Option<String>) {
         if matches!(self.state, Written::Waiting(_)) && self.begin.from.is_none() {
             if let Some(from) = from.filter(|from| is_conversation_id(from)) {
-                self.upto = upto(&self.folder.join(log_name(&from))).await;
+                self.upto = upto(&self.folder.join(log_name(&from)), None).await;
                 self.begin.from = Some(from);
             }
         }
@@ -1183,9 +1198,11 @@ fn split(bytes: Vec<u8>) -> Vec<Vec<u8>> {
     bytes.split_inclusive(|b| *b == b'\n').map(<[u8]>::to_vec).collect()
 }
 
-/// What a copy beginning now would take of the original's log at `file`: up to the end of its last save. None without
-/// a save in it (nothing a copy's checkpoint holds that its own messages don't), or a log this Kumi reads.
-async fn upto(file: &Path) -> Option<Upto> {
+/// What a copy beginning now would take of the original's log at `file`: up to the end of its last save (what its
+/// checkpoint holds; None without one, when there's nothing its own messages don't), or, for a copy from before a request
+/// (`cut`, its `at`), everything before that request's line (its messages are those; None when it isn't there). None
+/// too for a log this Kumi doesn't read.
+async fn upto(file: &Path, cut: Option<i64>) -> Option<Upto> {
     let bytes = tokio::fs::read(file).await.ok()?;
     let first = bytes.iter().position(|b| *b == b'\n')?;
     let LogLine::Header(header) = serde_json::from_slice::<LogLine>(&bytes[..first]).ok()? else { return None };
@@ -1194,11 +1211,18 @@ async fn upto(file: &Path) -> Option<Upto> {
     }
     let mut end = None;
     let mut at = first + 1;
+    let request = cut.map(|cut| format!("{{\"kind\":\"request\",\"at\":{cut},"));
     for line in bytes[first + 1..].split_inclusive(|b| *b == b'\n') {
+        if request.as_ref().is_some_and(|request| line.starts_with(request.as_bytes())) {
+            return Some(Upto { end: at as u64, at: header.at });
+        }
         at += line.len();
         if line.starts_with(SAVED) && line.ends_with(b"\n") {
             end = Some(at);
         }
+    }
+    if cut.is_some() {
+        return None;
     }
     Some(Upto { end: end? as u64, at: header.at })
 }
