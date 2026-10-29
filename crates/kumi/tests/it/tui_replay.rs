@@ -134,6 +134,7 @@ case!(a_conversation_shown_again_tells_nothing_of_the_moment_it_happened, async 
             tmux: false,
             app_id: None,
             images: false,
+            iterm: false,
         });
         o.alert_gap_ms = Some(60.);
     });
