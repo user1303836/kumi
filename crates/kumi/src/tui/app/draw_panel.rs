@@ -1,6 +1,4 @@
 use super::super::{
-    activity::{activity_glyph, Activity},
-    markdown::render_markdown,
     picker::NoteTone,
     render::Cursor,
     screen::Screen,
@@ -126,62 +124,6 @@ impl TuiApp {
                     lines.push(line);
                 }
             }
-            Panel::Btw { at, scroll } => {
-                let (aside, len) = {
-                    let state = self.0.state.borrow();
-                    (state.asides.get(*at).cloned(), state.asides.len())
-                };
-                let mut title = Line::new(
-                    format!("btw · {}", aside.as_ref().map(|a| a.borrow().question.replace('\n', " ")).unwrap_or_default()),
-                    st::TITLE,
-                );
-                if len > 1 {
-                    title.right = Some(sp(format!("{} of {len} · ←→", *at + 1), st::FAINT));
-                }
-                lines.push(title);
-                if let Some(aside) = aside {
-                    let aside = aside.borrow();
-                    if string::trim(&aside.answer).is_empty() {
-                        let mut line = Line::new("", st::DIM);
-                        line.spans = Some(if aside.state == "asking" {
-                            vec![activity_glyph(Activity::Think, perf_now(), false), sp(" thinking it over…", st::DIM)]
-                        } else {
-                            vec![sp("No answer came back.", st::FAINT)]
-                        });
-                        lines.push(line);
-                    } else {
-                        let rows = render_markdown(
-                            string::trim(&aside.answer),
-                            inner,
-                            &Rc::new(if aside.state == "failed" { st::WARN } else { st::TEXT }),
-                        );
-                        let room = (space - 4).clamp(3, 16);
-                        *scroll = (*scroll).min(rows.len() as i32 - room).max(0);
-                        let shown = &rows[*scroll as usize..(*scroll as usize + room as usize).min(rows.len())];
-                        for (index, row) in shown.iter().enumerate() {
-                            let more = if index == 0 && *scroll > 0 {
-                                Some(format!("↑ {} more", *scroll))
-                            } else if index == shown.len() - 1 && *scroll + room < rows.len() as i32 {
-                                Some(format!("↓ {} more", rows.len() as i32 - *scroll - room))
-                            } else {
-                                None
-                            };
-                            let mut line = Line::new("", st::TEXT);
-                            line.spans = Some(row.spans.to_vec());
-                            line.right = more.map(|s| sp(s, st::FAINT));
-                            lines.push(line);
-                        }
-                        if aside.state == "asking" {
-                            let mut line = Line::new("", st::DIM);
-                            line.spans = Some(vec![activity_glyph(Activity::Think, perf_now(), false)]);
-                            lines.push(line);
-                        }
-                    }
-                    if aside.state == "asking" {
-                        self.0.scheduler.request_animation();
-                    }
-                }
-            }
             Panel::Key { provider, secret, checking, status, .. } => {
                 let info = provider.row();
                 lines.push(Line::new(format!("Sign in to {}", info.name), st::TITLE));
@@ -296,7 +238,6 @@ pub(super) fn panel_hint(panel: &Panel) -> String {
                 .into()
             })
         }
-        Panel::Btw { .. } => "↑↓ to scroll · c copies · esc to close".into(),
         Panel::Key { .. } => "enter to save · esc to cancel".into(),
         Panel::ChatGpt { by_code: true, .. } => "c copies the code · b uses the browser · esc to cancel".into(),
         Panel::ChatGpt { url: Some(_), .. } => "c copies the link · d uses a code · esc to cancel".into(),

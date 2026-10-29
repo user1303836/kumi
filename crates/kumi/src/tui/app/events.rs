@@ -845,7 +845,8 @@ impl TuiApp {
                         *elapsed_ms = Some(elapsed);
                         // An answer that ends asking the producer to pick: one key answers, unless they've already
                         // typed or queued something.
-                        if reason == StopReason::Completed && state.held.is_empty() && state.editor.is_empty() && state.overlays.is_empty() {
+                        if reason == StopReason::Completed && state.held.is_empty() && state.editor.is_empty() && state.overlays.is_empty()
+                        {
                             offered = choices(text);
                         }
                         answer = text.clone();

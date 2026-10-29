@@ -274,10 +274,6 @@ enum Panel {
         abort: Signal,
         then: Option<Action>,
     },
-    Btw {
-        at: usize,
-        scroll: i32,
-    },
 }
 struct Aside {
     /// The session's id for it, which its words come in by.

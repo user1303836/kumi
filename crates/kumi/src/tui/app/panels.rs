@@ -1,8 +1,12 @@
 use super::super::{
+    activity::{activity_glyph, Activity},
+    markdown::render_markdown,
     picker::{NoteTone, PickerOptions, PickerTabs},
     render::Cursor,
     width::graphemes,
 };
+use super::draw_panel::Line;
+use super::drawing::{sp, st};
 use super::*;
 use crate::{
     models::{ChatGptSignIn, LocalStatus, ProviderStatus},
@@ -1491,8 +1495,8 @@ impl TuiApp {
         }
         Handled::Kept
     }
-    fn aside_input(&self, panel: &mut Panel, event: InputEvent) -> Handled {
-        let Panel::Btw { at, scroll } = panel else { return Handled::Kept };
+    fn aside_input(&self, panel: &mut AsidePanel, event: InputEvent) -> Handled {
+        let AsidePanel { at, scroll } = panel;
         if let InputEvent::Key { name, mods, .. } = &event {
             if matches!(name.as_str(), "escape" | "enter") || (mods.ctrl && name == "c") {
                 return Handled::Close;
@@ -2303,7 +2307,6 @@ fn as_panel<R>(overlay: &Shared<TuiApp>, change: impl FnOnce(&mut Panel) -> R) -
 impl Overlay<TuiApp> for Panel {
     fn handle(&mut self, app: &TuiApp, event: InputEvent) -> Handled {
         match self {
-            Panel::Btw { .. } => app.aside_input(self, event),
             Panel::Pick { .. } | Panel::Key { .. } | Panel::ChatGpt { .. } => app.panel_key(self, event),
         }
     }
@@ -2317,30 +2320,107 @@ impl Overlay<TuiApp> for Panel {
     fn hint_stays(&self, _: &TuiApp) -> bool {
         matches!(self, Panel::Pick { picker, .. } if picker.borrow().options.hint.is_some())
     }
-    fn closed(&mut self, app: &TuiApp) {
+    fn closed(&mut self, _: &TuiApp) {
         match self {
             Panel::ChatGpt { abort, .. } => abort.cancel(),
             Panel::Key { secret, .. } => secret.clear(),
-            // A side question still being answered stops (unless Kumi, closing, stopped it already).
-            Panel::Btw { at, .. } => {
-                let aside = app.0.state.borrow().asides.get(*at).cloned();
-                if let Some(aside) = aside.filter(|aside| aside.borrow().state == "asking" && !aside.borrow().stopped) {
-                    let id = {
-                        let mut aside = aside.borrow_mut();
-                        aside.stopped = true;
-                        aside.id
-                    };
-                    app.session().tell(op::StopAside { id }.into());
-                }
-            }
             Panel::Pick { .. } => {}
         }
     }
-    fn busy(&self, app: &TuiApp) -> bool {
+    fn busy(&self, _: &TuiApp) -> bool {
         match self {
             Panel::Pick { .. } => false,
-            Panel::Btw { at, .. } => app.0.state.borrow().asides.get(*at).is_some_and(|aside| aside.borrow().state == "asking"),
             Panel::Key { .. } | Panel::ChatGpt { .. } => true,
         }
+    }
+}
+
+/// A side answer (/btw), open over the conversation: the `at`th of the asides, scrolled `scroll` rows down.
+pub(super) struct AsidePanel {
+    pub at: usize,
+    pub scroll: i32,
+}
+impl Overlay<TuiApp> for AsidePanel {
+    fn handle(&mut self, app: &TuiApp, event: InputEvent) -> Handled {
+        app.aside_input(self, event)
+    }
+    fn draw(&mut self, app: &TuiApp, screen: &mut Screen, area: Area) -> Option<Cursor> {
+        let width = 76.min(area.left - 2);
+        let (inner, space) = (width - 4, area.box_top - 5);
+        let mut lines: Vec<Line> = vec![];
+        let (at, scroll) = (self.at, &mut self.scroll);
+        let (aside, len) = {
+            let state = app.0.state.borrow();
+            (state.asides.get(at).cloned(), state.asides.len())
+        };
+        let mut title =
+            Line::new(format!("btw · {}", aside.as_ref().map(|a| a.borrow().question.replace('\n', " ")).unwrap_or_default()), st::TITLE);
+        if len > 1 {
+            title.right = Some(sp(format!("{} of {len} · ←→", at + 1), st::FAINT));
+        }
+        lines.push(title);
+        if let Some(aside) = aside {
+            let aside = aside.borrow();
+            if string::trim(&aside.answer).is_empty() {
+                let mut line = Line::new("", st::DIM);
+                line.spans = Some(if aside.state == "asking" {
+                    vec![activity_glyph(Activity::Think, perf_now(), false), sp(" thinking it over…", st::DIM)]
+                } else {
+                    vec![sp("No answer came back.", st::FAINT)]
+                });
+                lines.push(line);
+            } else {
+                let rows = render_markdown(
+                    string::trim(&aside.answer),
+                    inner,
+                    &Rc::new(if aside.state == "failed" { st::WARN } else { st::TEXT }),
+                );
+                let room = (space - 4).clamp(3, 16);
+                *scroll = (*scroll).min(rows.len() as i32 - room).max(0);
+                let shown = &rows[*scroll as usize..(*scroll as usize + room as usize).min(rows.len())];
+                for (index, row) in shown.iter().enumerate() {
+                    let more = if index == 0 && *scroll > 0 {
+                        Some(format!("↑ {} more", *scroll))
+                    } else if index == shown.len() - 1 && *scroll + room < rows.len() as i32 {
+                        Some(format!("↓ {} more", rows.len() as i32 - *scroll - room))
+                    } else {
+                        None
+                    };
+                    let mut line = Line::new("", st::TEXT);
+                    line.spans = Some(row.spans.to_vec());
+                    line.right = more.map(|s| sp(s, st::FAINT));
+                    lines.push(line);
+                }
+                if aside.state == "asking" {
+                    let mut line = Line::new("", st::DIM);
+                    line.spans = Some(vec![activity_glyph(Activity::Think, perf_now(), false)]);
+                    lines.push(line);
+                }
+            }
+            if aside.state == "asking" {
+                app.0.scheduler.request_animation();
+            }
+        }
+
+        app.draw_lines(screen, area.box_top, width, &lines, None)
+    }
+    fn hint(&self, _: &TuiApp) -> String {
+        "↑↓ to scroll · c copies · esc to close".into()
+    }
+    /// A side question still being answered stops (unless Kumi, closing, stopped it already).
+    fn closed(&mut self, app: &TuiApp) {
+        let aside = app.0.state.borrow().asides.get(self.at).cloned();
+        if let Some(aside) = aside.filter(|aside| aside.borrow().state == "asking" && !aside.borrow().stopped) {
+            let id = {
+                let mut aside = aside.borrow_mut();
+                aside.stopped = true;
+                aside.id
+            };
+            app.session().tell(op::StopAside { id }.into());
+        }
+    }
+    /// While its answer is still being written.
+    fn busy(&self, app: &TuiApp) -> bool {
+        app.0.state.borrow().asides.get(self.at).is_some_and(|aside| aside.borrow().state == "asking")
     }
 }
