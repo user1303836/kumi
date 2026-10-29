@@ -1,7 +1,7 @@
   Kumi  ·  Night Drive                                                                                                                                  ● Live
 
                                                                                                                     FOCUS
-   Keys and commands                                                                      ↑ 47 more                 Night Drive
+   Keys and commands                                                                      ↑ 50 more                 Night Drive
                                                                                                                     Your selection will show here
      ctrl+g              Open the draft in your own editor (VISUAL or EDITOR); what you save comes
                          back into the box, and ctrl+- takes it back

@@ -904,6 +904,51 @@ impl TtyOutput for FakeOutput {
     }
 }
 
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn a_key_in_the_lent_terminal_ends_the_wait_whole_and_kumi_closing_ends_it_too() {
+    let input = Rc::new(FakeInput { raw: Cell::new(false), listener: RefCell::new(None), discarded: Cell::new(0) });
+    let output = Rc::new(FakeOutput { written: RefCell::new(String::new()), resize: RefCell::new(None) });
+    let events = Rc::new(RefCell::new(Vec::new()));
+    let tty = Tty::new(TtyOptions {
+        input: input.clone(),
+        output: output.clone(),
+        on_input: Rc::new({
+            let events = Rc::clone(&events);
+            move |event| events.borrow_mut().push(event)
+        }),
+        on_resize: Rc::new(|| {}),
+        mouse: true,
+        farewell: String::new(),
+    });
+    tty.start().unwrap();
+    // Not lent: there's nothing to wait for.
+    tty.wait_for_key().await;
+    // Lent: an arrow's bytes, read in two, end the wait and go with it, raw as a program would read them.
+    tty.hand_over(async {
+        let wait = tty.wait_for_key();
+        tokio::pin!(wait);
+        assert!(futures::poll!(&mut wait).is_pending());
+        assert!(input.is_raw(), "the key is read raw");
+        input.write("\u{1b}[");
+        input.write("A");
+        wait.await;
+        assert!(!input.is_raw(), "raw mode as the program found it");
+    })
+    .await;
+    assert!(events.borrow().is_empty(), "the arrow was the wait's, not Kumi's");
+    assert!(input.discarded.get() >= 2, "what was typed before and after went too");
+    // Kumi closing while it waits ends the wait, and the terminal isn't taken again.
+    tty.hand_over(async {
+        let wait = tty.wait_for_key();
+        tokio::pin!(wait);
+        assert!(futures::poll!(&mut wait).is_pending());
+        tty.restore(false);
+        wait.await;
+    })
+    .await;
+    assert!(!tty.lent() && !tty.is_active() && !input.is_raw());
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn the_terminal_is_lent_to_a_program_and_taken_back_whole() {
     let input = Rc::new(FakeInput { raw: Cell::new(false), listener: RefCell::new(None), discarded: Cell::new(0) });

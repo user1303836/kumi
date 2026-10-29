@@ -1,7 +1,7 @@
   Kumi  ·  Night Drive                                                                                                                                  ● Live
 
                                                                                                                     FOCUS
-   Keys and commands                                                                      ↓ 47 more                 Night Drive
+   Keys and commands                                                                      ↓ 50 more                 Night Drive
                                                                                                                     Your selection will show here
    Send and steer
      enter               Send. While Kumi works, it reads your message after the step under way
@@ -20,7 +20,10 @@
                          them)
      ctrl+home           The start of the conversation
      ctrl+end            Back to the latest                                                                         HISTORY ──────────────────────────────────
-     drag                Copy text as you let go; double-click for a word, triple-click for a line                  Nothing changed yet
+     ctrl+o              The conversation in detail, with what each step was given and gave back: /                 Nothing changed yet
+                         searches it, { } go from request to request, [ prints it into the
+                         terminal's scrollback, v opens it in your editor
+     drag                Copy text as you let go; double-click for a word, triple-click for a line
      shift+drag          Your terminal's own selection (option+drag in iTerm2)
      ctrl+l              Draw the screen again
 
@@ -29,9 +32,6 @@
                          pane away or bring it back; below 24 rows, the same for the two-line strip
      shift+tab           Into the tabs (HISTORY), then on to the next: ↑↓ and page up/down move,
                          esc or tab comes back
-     enter               In the tabs: open a change's picture; on what Kumi kept, forget it
-     →  space            On a change: open its picture; ← closes it
-     u                   On a change with its picture open: undo it
 
 
 
