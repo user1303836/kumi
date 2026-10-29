@@ -610,12 +610,12 @@ fn a_long_paste_is_one_chip_that_goes_out_whole_and_is_sent_whole() {
     assert_eq!(e.shown(), "two\nlines");
     e.paste(&"x".repeat(1200));
     assert_eq!(e.layout(200).rows, ["two", "lines[pasted 1200 characters]"]);
-    // Cut, a chip goes onto the ring as all it holds, and comes back as a chip.
+    // Cut, a chip goes onto the ring with all it holds, and comes back the chip it was, beside the words cut with it.
     e.kill_to_start();
     assert_eq!(e.expanded(), "two\n");
     assert!(e.yank());
     assert_eq!(e.expanded(), format!("two\nlines{}", "x".repeat(1200)));
-    assert_eq!(e.layout(200).rows, ["two", "[pasted 1205 characters]"]);
+    assert_eq!(e.layout(200).rows, ["two", "lines[pasted 1200 characters]"]);
     // Set aside and brought back, a draft keeps its chips.
     let draft = e.show("an earlier message");
     assert_eq!(e.expanded(), "an earlier message");
@@ -917,6 +917,92 @@ fn a_reference_is_one_chip_in_the_box_and_goes_with_the_message() {
     assert!(box_.undo());
     assert_eq!(box_.references(), [drums()]);
 }
+
+fn warm() -> kumi_agent::core::contracts::Reference {
+    kumi_agent::core::contracts::Reference::Palette { id: "palette-1".into(), name: "Warm".into() }
+}
+
+// #707: a reference chip cut with ctrl+w, ctrl+u or ctrl+k goes onto the ring as a chip, so ctrl+y and alt+y put it
+// back still naming what it named, in its place among the words cut with it, even in the next draft.
+#[test]
+fn a_cut_reference_comes_back_as_the_chip_it_was() {
+    let mut box_ = Editor::new();
+    typed(&mut box_, "send @dr");
+    box_.insert_reference(3, "@Drums", drums());
+    // ctrl+w cuts the chip and the space after it; ctrl+y puts both back.
+    box_.delete_word_left();
+    assert_eq!(box_.expanded(), "send ");
+    assert!(box_.references().is_empty());
+    assert!(box_.yank());
+    assert_eq!(box_.layout(80).rows, ["send @Drums "]);
+    assert_eq!(box_.references(), [drums()]);
+    // ctrl+u then ctrl+k from between the words around it: one cut, and back as it was.
+    typed(&mut box_, "louder");
+    box_.word_left();
+    box_.kill_to_start();
+    box_.kill_to_end();
+    assert_eq!(box_.expanded(), "");
+    assert!(box_.yank());
+    assert_eq!((box_.expanded().as_str(), box_.references()), ("send @Drums louder", vec![drums()]));
+    // Undo takes the chip back out with the yank.
+    assert!(box_.undo());
+    assert!(box_.expanded().is_empty() && box_.references().is_empty());
+    // alt+y swaps it for the cut before, the first ctrl+w's chip, and round again.
+    assert!(box_.yank());
+    assert!(box_.yank_earlier());
+    assert_eq!((box_.expanded().as_str(), box_.references()), ("@Drums ", vec![drums()]));
+    assert!(box_.yank_earlier());
+    assert_eq!((box_.expanded().as_str(), box_.references()), ("send @Drums louder", vec![drums()]));
+    // Sent, the draft's chips go, and the ring keeps its own: the next draft puts the chip back.
+    let sent = box_.composed();
+    box_.clear();
+    assert!(box_.yank());
+    assert_eq!(box_.composed().references(), sent.references());
+    assert_eq!(box_.layout(80).rows, ["send @Drums louder"]);
+    // Two chips cut by ctrl+w twice come back in the order they were in, each naming its own.
+    let mut box_ = Editor::new();
+    typed(&mut box_, "@dr");
+    box_.insert_reference(3, "@Drums", drums());
+    typed(&mut box_, "@wa");
+    box_.insert_reference(3, "@Warm", warm());
+    box_.delete_word_left();
+    box_.delete_word_left();
+    assert!(box_.is_empty());
+    typed(&mut box_, "use ");
+    assert!(box_.yank());
+    assert_eq!(box_.layout(80).rows, ["use @Drums @Warm "]);
+    assert_eq!(box_.references(), [drums(), warm()]);
+}
+
+// #707: in the full TUI, a chip cut with ctrl+w and put back with ctrl+y goes with the message.
+case!(a_reference_cut_and_put_back_goes_with_the_message, async {
+    let c = Rc::new(Control::default());
+    let rows = serde_json::json!([{
+        "label": "Drums",
+        "kind": "track",
+        "reference": {"kind": "daw", "node": {"trackRef": "1:track:0", "ref": "1:track:0", "node": "track", "name": "Drums", "trail": [], "siblings": [], "track": "Drums"}},
+    }]);
+    *c.extra.borrow_mut() = serde_json::json!({"references": rows});
+    let h = Harness::with(120, 36, c.clone(), |_| {});
+    h.start().await;
+    h.connect();
+    for typed in ["send ", "@", "d"] {
+        h.type_text(typed).await;
+    }
+    delay(5).await;
+    h.type_text("\t").await;
+    assert!(has(&composer(&h), "send @Drums "), "{:?}", composer(&h));
+    // ctrl+w cuts the chip; ctrl+y puts it back.
+    h.type_text("\x17").await;
+    assert!(!has(&composer(&h), "@Drums"), "{:?}", composer(&h));
+    h.type_text("\x19").await;
+    h.type_text("louder\r").await;
+    let sent: Vec<String> = h.calls().into_iter().filter(|call| call.starts_with("references-sent:")).collect();
+    assert_eq!(sent.len(), 1, "{:?}", h.calls());
+    assert!(sent[0].contains("\"name\":\"Drums\""), "{}", sent[0]);
+    assert!(h.calls().contains(&"submit:send @Drums louder".to_string()), "{:?}", h.calls());
+    h.close().await;
+});
 
 #[test]
 fn an_at_names_something_only_at_the_start_or_after_a_space() {
