@@ -164,6 +164,7 @@ Run these as `kumi <command>`; from a copy of the repository, as
 | `kumi export [id or name \| --last] [--md \| --html \| --json] [--full] [--raw] [-o path]` | Save a kept conversation as Markdown (the default), a web page or a file for Kumi; without an id (or with `--last`), your latest. `--full` adds each step's input and result; `--raw` leaves keys and paths in |
 | `kumi import <file>` | Keep a conversation saved with `kumi export --json`, to carry on with `kumi -r` |
 | `kumi --inference-only` | Chat without a DAW |
+| `kumi -p "<request>" [--json]` (or `--print`) | Run one request, print its answer and end, for scripts. Anything that went wrong goes to stderr, and the exit code says how it ended: 0 answered, 1 failed, 3 stopped at its step limit, 130 stopped with ctrl+c. `--json` prints each event Kumi sends as a JSON line instead. A fixed phrase ("tempo 124") changes the DAW at once, with no model. With a DAW, the request goes into the open project's conversation, as in `kumi`. Works with `--inference-only`, `--daw`, `-c` and `-r <id or name>` |
 | `kumi --bridge-config <absolute path>` | Use your own bridge configuration |
 | `kumi login` | Sign in: asks whether with ChatGPT or an API key |
 | `kumi login <provider>` | Sign in to `openai-codex` (ChatGPT; `--device` without a browser, the default over SSH; `--browser` for the browser), or `anthropic`, `openai`, `opencode` or `opencode-go` with an API key |

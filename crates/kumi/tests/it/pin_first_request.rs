@@ -61,6 +61,7 @@ impl McpEndpoint for Bridge {
     }
     async fn call(&self, name: &str, args: JsonObject, signal: Signal) -> Result<CallToolResult, RuntimeError> {
         signal.check()?;
+        CALLED.with(|called| called.borrow_mut().push((name.to_owned(), Value::Object(args.clone()))));
         let key = format!("{name}:{}", args.get("kind").and_then(Value::as_str).unwrap_or(""));
         let reply = self.replies.get(&key).cloned().ok_or_else(|| RuntimeError::plain(format!("no reply for {key}")))?;
         Ok(serde_json::from_value(reply).unwrap())
@@ -77,6 +78,11 @@ impl McpEndpoint for Bridge {
     async fn close(&self) -> Result<(), RuntimeError> {
         Ok(())
     }
+}
+
+thread_local! {
+    /// What the bridge was asked, each tool and its arguments.
+    static CALLED: RefCell<Vec<(String, Value)>> = const { RefCell::new(Vec::new()) };
 }
 
 /// Which public-tools case the bridge plays.
@@ -551,4 +557,17 @@ local_test!(a_track_name_that_hides_words_reaches_the_model_marked_and_one_that_
     assert!(!read.chars().any(|c| ('\u{E0000}'..='\u{E0FFF}').contains(&c)), "{read}");
     assert!(read.contains(&format!("Bass{}", kumi_agent::core::hidden::HIDDEN)), "{read}");
     assert!(read.contains("👩‍🎤 Keys"), "{read}");
+});
+
+// A script the model writes naming a track as it read it, marked, reaches Live with the track's name as Live has it
+// (#641): the name the model gives back finds what it named.
+local_test!(a_script_naming_a_track_as_the_model_read_it_reaches_live_with_the_tracks_own_name, {
+    let shown = format!("Bass{}", kumi_agent::core::hidden::HIDDEN);
+    let code = format!("[t for t in song.tracks if t.name == \"{shown}\"]");
+    let script: Script = Rc::new(move |n| if n == 1 { call("run_python", json!({"code": code, "mode": "eval"})) } else { answer("Done.") });
+    let run = run(Setup { renamed: true, ..FULL }, script).await;
+    assert!(serde_json::to_string(&run.main.requests.borrow()[0].messages).unwrap().contains(&shown), "the model read the name marked");
+    let called = CALLED.with(|called| called.borrow().clone());
+    let (_, args) = called.iter().find(|(name, _)| name == "live_run_python").expect("the script reached Live");
+    assert_eq!(args["code"], format!("[t for t in song.tracks if t.name == \"Bass{}\"]", hidden_order()));
 });

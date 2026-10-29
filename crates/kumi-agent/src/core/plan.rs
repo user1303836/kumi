@@ -884,6 +884,8 @@ fn resolve(value: &Value, step: usize, made: &IndexMap<String, String>) -> Resul
             .filter(|s| !s.is_empty())
             .map(|s| json!(s))
             .ok_or_else(|| format!("step {step} refers to {s}, which no earlier step made")),
+        // A name the model gave as it was shown it, as the DAW has it: each step as the plan takes it, streamed or not.
+        Value::String(s) => Ok(Value::String(crate::core::hidden::named(s).into_owned())),
         Value::Array(a) => a.iter().map(|v| resolve(v, step, made)).collect::<Result<Vec<_>, _>>().map(Value::Array),
         Value::Object(o) => {
             o.iter().map(|(k, v)| Ok((k.clone(), resolve(v, step, made)?))).collect::<Result<JsonObject, String>>().map(Value::Object)

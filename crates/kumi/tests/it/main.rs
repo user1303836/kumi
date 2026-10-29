@@ -57,6 +57,7 @@ mod pin_plain;
 mod pin_screens;
 mod pin_startup;
 mod plain_farewell;
+mod print;
 mod report;
 mod session;
 mod spinner;

@@ -67,6 +67,7 @@ Kumi 占据整个终端窗口，并在 Kumi 关闭、崩溃或被停止时把窗
 | `kumi export [ID 或名称 \| --last] [--md \| --html \| --json] [--full] [--raw] [-o 路径]` | 将保存的对话存为 Markdown（默认）、网页或供 Kumi 使用的文件；不写 ID 或加 `--last` 时为最近的对话。`--full` 加上每个步骤的输入和结果，`--raw` 保留密钥和路径 |
 | `kumi import <文件>` | 导入用 `kumi export --json` 保存的对话，之后可用 `kumi -r` 继续 |
 | `kumi --inference-only` | 不连接 DAW，只聊天 |
+| `kumi -p "<请求>" [--json]`（或 `--print`） | 执行一个请求，输出回答后结束，供脚本使用。出错的信息输出到 stderr，退出码表示结果：0 已回答，1 失败，3 停在单次回答的步数上限，130 被 ctrl+c 停止。加 `--json` 则改为把 Kumi 发出的每个事件按行输出为 JSON。固定短语（如“tempo 124”）不经模型，立即修改 DAW。连接 DAW 时，请求会像 `kumi` 一样进入当前打开工程的对话。可与 `--inference-only`、`--daw`、`-c` 和 `-r <ID 或名称>` 一起使用 |
 | `kumi --bridge-config <absolute path>` | 使用你自己的桥接配置 |
 | `kumi login` | 登录：询问使用 ChatGPT 还是 API 密钥 |
 | `kumi login <provider>` | 登录 `openai-codex`（ChatGPT；没有浏览器时加 `--device`，通过 SSH 时默认如此；要用浏览器则加 `--browser`），或用 API 密钥登录 `anthropic`、`openai`、`opencode` 或 `opencode-go` |
