@@ -302,6 +302,7 @@ its undo. They're in English for now.
 | Key | Action |
 | --- | --- |
 | Esc | Close the `/` menu; otherwise stop Kumi's answer (the steps it finished stay, waiting messages go back into the box); otherwise unpin the pinned device |
+| Esc Esc | In an empty box while Kumi is idle, with nothing pinned: your requests, newest first, each with how many changes it made. Choose one to take it back with each one after it, as `/takeback` does; first Kumi lists the changes it can't undo, which stay as they are |
 | Ctrl-C | Stop Kumi's answer; when idle, clear the box (↑ or Ctrl-- brings the words back); with an empty box, quit |
 | Ctrl-B | Move the answer's slow step that doesn't use Live (a video, pages, the manual, your library) to the background as a job; the answer carries on. In tmux, press Ctrl-B twice |
 | Ctrl-D | Quit, when idle with an empty box |
