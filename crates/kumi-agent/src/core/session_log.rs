@@ -105,19 +105,27 @@ pub struct ReadLog {
 /// after the last newline is a line cut short and is left out; a line that doesn't read, or is of a kind this Kumi
 /// doesn't know, is skipped.
 pub fn read_log(bytes: &[u8]) -> Option<ReadLog> {
+    let (header, after) = header_of(bytes)?;
+    Some(ReadLog { header, lines: after.split(|b| *b == b'\n').filter_map(line_in).collect() })
+}
+
+/// A log's header, and its whole lines after it (what comes after the last newline is a line cut short, and is left
+/// out); None when `bytes` aren't a log this Kumi reads.
+fn header_of(bytes: &[u8]) -> Option<(LogHeader, &[u8])> {
     let whole = &bytes[..bytes.iter().rposition(|b| *b == b'\n')? + 1];
-    let mut lines = whole.split(|b| *b == b'\n');
-    let header = match serde_json::from_slice::<LogLine>(lines.next()?).ok()? {
-        LogLine::Header(header) if (1..=LOG_VERSION).contains(&header.v) => header,
-        _ => return None,
-    };
-    let lines = lines
-        .filter_map(|line| match serde_json::from_slice::<LogLine>(line) {
-            Ok(LogLine::Header(_)) | Err(_) => None,
-            Ok(line) => Some(line),
-        })
-        .collect();
-    Some(ReadLog { header, lines })
+    let first = memchr::memchr(b'\n', whole)?;
+    match serde_json::from_slice::<LogLine>(&whole[..first]).ok()? {
+        LogLine::Header(header) if (1..=LOG_VERSION).contains(&header.v) => Some((header, &whole[first + 1..])),
+        _ => None,
+    }
+}
+
+/// A line after the header, read: None for one that doesn't read, or is of a kind this Kumi doesn't know.
+fn line_in(line: &[u8]) -> Option<LogLine> {
+    match serde_json::from_slice::<LogLine>(line) {
+        Ok(LogLine::Header(_)) | Err(_) => None,
+        Ok(line) => Some(line),
+    }
 }
 
 /// The log at `file`; None when there's none, or it isn't one this Kumi reads.
@@ -133,8 +141,9 @@ pub const REPLAYED: usize = 30;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Replay {
-    /// How many of the conversation's requests aren't shown: those before the ones its log holds that there wasn't room
-    /// for, and those the log holds before its last 30.
+    /// How many of the producer's messages aren't shown: the requests and steers the log holds before its last 30
+    /// requests, and those from before the log began that there wasn't room for (as the checkpoint counted them, which
+    /// is each user line: a steer's, and a send-back's from a match or a loop, too).
     pub before: u32,
     /// The words of the requests the conversation had when its log began, and their answers, as far as there's room: no
     /// more of them happened than that, as far as the log knows.
@@ -144,40 +153,68 @@ pub struct Replay {
     pub lines: Vec<LogLine>,
 }
 
-/// What of `log` a conversation taken up shows again: its requests and events from the `most`th request from the end
-/// (all of them, when there are fewer). The model's messages and the saves are the kernel's, not the screen's, and an
-/// earlier run's close isn't the conversation's.
-pub fn replay_of(log: &ReadLog, most: usize) -> Replay {
-    let told: Vec<&LogLine> = log
-        .lines
-        .iter()
-        .filter(|line| match line {
-            LogLine::Request(_) => true,
-            LogLine::Event { event, .. } => !matches!(event, SessionEvent::State { state: TurnState::Closed }),
-            _ => false,
+/// Where a request's line or an event's begins in a log (the writer puts `kind` first).
+static SHOWN: std::sync::LazyLock<regex::bytes::Regex> =
+    std::sync::LazyLock::new(|| regex::bytes::Regex::new(r#"(?m)^\{"kind":"(?:request|event)","#).unwrap());
+const MESSAGE: &[u8] = br#"{"kind":"message","#;
+
+/// What of a log (`bytes`, read as `read_log` reads them) a conversation taken up shows again: its requests and events
+/// from the `most`th request from the end (all of them, when there are fewer). The model's messages and the saves are
+/// the kernel's, not the screen's, and an earlier run's close isn't the conversation's. Only what's shown is read: each
+/// request (they're few and short), the events from the first request shown, and the messages the log began with only
+/// while there's room for their words. None when `bytes` aren't a log this Kumi reads.
+pub fn replay_of(bytes: &[u8], most: usize) -> Option<Replay> {
+    replay_reading(bytes, most, &mut line_in)
+}
+
+/// `replay_of`, reading each line it reads with `read`: a test counts them.
+#[doc(hidden)]
+pub fn replay_reading(bytes: &[u8], most: usize, read: &mut dyn FnMut(&[u8]) -> Option<LogLine>) -> Option<Replay> {
+    let (header, after) = header_of(bytes)?;
+    let starts: Vec<&[u8]> = SHOWN
+        .find_iter(after)
+        .map(|found| {
+            let line = &after[found.start()..];
+            &line[..memchr::memchr(b'\n', line).unwrap_or(line.len())]
         })
         .collect();
-    let requests: Vec<usize> = told.iter().enumerate().filter(|(_, line)| matches!(line, LogLine::Request(_))).map(|(n, _)| n).collect();
+    let mut requests = vec![];
+    for (n, line) in starts.iter().enumerate() {
+        if line.starts_with(br#"{"kind":"request","#) && matches!(read(line), Some(LogLine::Request(_))) {
+            requests.push(n);
+        }
+    }
     let left_out = requests.len().saturating_sub(most);
     let start = if left_out > 0 { requests[left_out] } else { 0 };
-    // What the conversation had when its log began: the messages right after the header, before anything happened.
-    let had: Vec<Value> = log
-        .lines
+    let steered = starts[..start].iter().filter(|line| steers(line)).count();
+    let lines: Vec<LogLine> = starts[start..]
         .iter()
-        .map_while(|line| match line {
-            LogLine::Message { message, .. } => Some(message.clone()),
-            _ => None,
-        })
+        .filter_map(|line| read(line))
+        .filter(|line| !matches!(line, LogLine::Event { event: SessionEvent::State { state: TurnState::Closed }, .. }))
         .collect();
+    // What the conversation had when its log began: the messages right after the header, before anything happened.
+    let room = most.saturating_sub(requests.len());
+    let mut had = vec![];
+    let mut rest = after;
+    while room > 0 && rest.starts_with(MESSAGE) {
+        let end = memchr::memchr(b'\n', rest).map_or(rest.len(), |end| end + 1);
+        if let Some(LogLine::Message { message, .. }) = read(&rest[..end]) {
+            had.push(message);
+        }
+        rest = &rest[end..];
+    }
     let words = transcript_of(&had);
     let asked: Vec<usize> = words.iter().enumerate().filter(|(_, line)| line.role == TranscriptRole::User).map(|(n, _)| n).collect();
-    let shown = asked.len().min(most.saturating_sub(requests.len()));
+    let shown = asked.len().min(room);
     let earlier = if shown == 0 { vec![] } else { words[asked[asked.len() - shown]..].to_vec() };
-    Replay {
-        before: log.header.before.saturating_sub(shown as u32) + left_out as u32,
-        earlier,
-        lines: told[start..].iter().map(|line| (*line).clone()).collect(),
-    }
+    Some(Replay { before: header.before.saturating_sub(shown as u32) + (left_out + steered) as u32, earlier, lines })
+}
+
+/// Whether an event's line is a steer's: the producer's words to an answer under way.
+fn steers(line: &[u8]) -> bool {
+    let Some(rest) = line.strip_prefix(br#"{"kind":"event","at":"#) else { return false };
+    let at = rest.iter().take_while(|b| b.is_ascii_digit() || **b == b'-').count();
+    rest[at..].starts_with(br#","event":{"type":"steer","#)
 }
 
 fn now() -> i64 {
@@ -497,16 +534,17 @@ impl SessionLog {
     }
 
     /// The log of the conversation going on as it was when it was opened, before anything this run wrote in it: what the
-    /// conversation shows again as it's taken up. None without one (a conversation new, or kept before there were logs).
-    pub async fn as_opened(&self) -> Option<ReadLog> {
+    /// conversation shows again as it's taken up (`replay_of` reads it). None without one (a conversation new, or kept
+    /// before there were logs).
+    pub async fn as_opened(&self) -> Option<Vec<u8>> {
         self.written().await;
         let (file, had) = self.opened.borrow().clone()?;
         if had == 0 {
             return None;
         }
-        let mut bytes = tokio::fs::read(&file).await.ok()?;
-        bytes.truncate(usize::try_from(had).ok()?);
-        read_log(&bytes)
+        let mut bytes = Vec::new();
+        tokio::fs::File::open(&file).await.ok()?.take(had).read_to_end(&mut bytes).await.ok()?;
+        Some(bytes)
     }
 
     /// What's been said goes to the disk, and nothing more is written: the session is closing.

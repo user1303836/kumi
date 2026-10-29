@@ -1,5 +1,7 @@
 //! A conversation taken up comes back from its log as it was left: the screen it drew then, drawn again through the same
 //! handling, with nothing of the moment (no alert, terminal status, panel, held message or job carrying on).
+#[path = "../support/models.rs"]
+mod models;
 #[path = "../support/tui_app.rs"]
 mod support;
 use serde_json::{json, Value};
@@ -116,13 +118,15 @@ case!(requests_before_the_last_shown_are_counted_and_the_words_before_the_log_co
     .await;
     let shown = conversation(&h.screen());
     let at = |text: &str| shown.iter().position(|line| line.contains(text)).unwrap_or_else(|| panic!("{text}: {shown:#?}"));
-    assert!(at("12 earlier requests of this conversation aren't shown.") < at("sketch a groove"));
+    assert!(at("12 earlier messages aren't shown.") < at("sketch a groove"));
     assert!(at("Here's a start.") < at("make the bass wider"));
     h.close().await;
 });
 
 case!(a_conversation_shown_again_tells_nothing_of_the_moment_it_happened, async {
+    // With a model controller, as the app has: an error live would offer its fix.
     let h = Harness::with(120, 36, Rc::new(Control::default()), |o| {
+        o.models = Some(models::FakeModels::catalog());
         o.terminal = Some(kumi::tui::alerts::TerminalProfile {
             status: true,
             progress: false,
@@ -150,6 +154,14 @@ case!(a_conversation_shown_again_tells_nothing_of_the_moment_it_happened, async 
         event(json!({"type":"state","state":"running"})),
         event(json!({"type":"error","message":"Sign in to OpenAI again.","kind":"auth","provider":"openai"})),
         event(json!({"type":"state","state":"idle"})),
+        // An answer that got too long to show: Kumi stopped it then.
+        request("write it all out"),
+        event(json!({"type":"state","state":"running"})),
+        event(json!({"type":"text","text":"Here it is: "})),
+        event(json!({"type":"text","text":"x".repeat(4 * 1024 * 1024 + 1)})),
+        event(json!({"type":"text","text":"what came after the cap"})),
+        event(json!({"type":"turn-complete","result":{"stopReason":"cancelled"},"elapsedMs":9_000})),
+        event(json!({"type":"state","state":"idle"})),
         // A request the log ends in the middle of: Kumi stopped with it.
         request("now the hats"),
         event(json!({"type":"state","state":"running"})),
@@ -163,11 +175,109 @@ case!(a_conversation_shown_again_tells_nothing_of_the_moment_it_happened, async 
         assert!(!written.contains(said), "{said}: {written:?}");
     }
     assert!(h.notified.borrow().is_empty(), "{:?}", h.notified.borrow());
-    // No pick open for the answer that ended asking, and the one cut short ends stopped, not at work.
+    // No pick open for the answer that ended asking, no fix offered for the error, and the one cut short ends stopped,
+    // not at work.
     assert!(!shown.iter().any(|line| line.contains("1–2")), "{shown:#?}");
+    assert!(!has(&shown, "Sign in now"), "{shown:#?}");
+    // The answer that got too long stops where it did, and nothing live is stopped for it.
+    h.has("That answer got too long to show, so Kumi stopped it.");
+    assert!(!has(&shown, "what came after the cap"));
     h.has("Which kit?");
     h.has("Adding a");
     h.has("Ready");
-    assert!(!h.calls().iter().any(|call| call.starts_with("submit") || call.starts_with("carry")), "{:?}", h.calls());
+    assert!(!h.calls().iter().any(|call| call.starts_with("submit") || call.starts_with("carry") || call == "cancel"), "{:?}", h.calls());
+    // The same error now, live, offers its fix.
+    h.emit(json!({"type":"error","message":"Sign in to OpenAI again.","kind":"auth","provider":"openai"}));
+    h.has("Sign in now");
+    h.close().await;
+});
+
+case!(answers_shown_again_were_counted_by_the_session_that_answered_them, async {
+    // An API key's model, whose tokens /status counts.
+    let models = models::FakeModels::catalog();
+    *models.model.borrow_mut() = Some("anthropic/claude-sonnet-5-5".into());
+    models.signed_in.borrow_mut().insert(kumi_ai::providers::ProviderId::parse("anthropic").unwrap());
+    let h = Harness::with(240, 40, Rc::new(Control::default()), |o| o.models = Some(models));
+    h.start().await;
+    h.connect();
+    let usage = json!({"inputTokens":9000,"outputTokens":700,"cacheReadTokens":6000,"cacheWriteTokens":0});
+    let lines = vec![
+        request("make the bass wider"),
+        event(json!({"type":"state","state":"running"})),
+        event(json!({"type":"text","text":"Widened it."})),
+        event(json!({"type":"turn-complete","result":{"stopReason":"completed","usage":usage},"elapsedMs":900})),
+        event(json!({"type":"state","state":"idle"})),
+    ];
+    h.emit(resumed(&lines, json!({})));
+    h.type_text("/status\r").await;
+    assert!(!has(&h.screen(), "tokens in"), "{:#?}", h.screen());
+    // One answered in this session counts.
+    h.emit(json!({"type":"turn-complete","result":{"stopReason":"completed","usage":usage},"elapsedMs":900}));
+    h.type_text("/status\r").await;
+    h.has("this session: 9.0k tokens in (6.0k cached), 700 out");
+    h.close().await;
+});
+
+case!(an_answer_the_log_leaves_open_before_a_later_request_ends_there_stopped, async {
+    let h = taken_up(
+        &[
+            request("make the bass wider"),
+            event(json!({"type":"state","state":"running"})),
+            event(json!({"type":"tool-start","id":"t1","name":"live_discover"})),
+            event(json!({"type":"text","text":"Looking at the bass first."})),
+            // Kumi stopped there, without ending the answer; the next run's request follows.
+            request("and a bit darker"),
+            event(json!({"type":"state","state":"running"})),
+            event(json!({"type":"text","text":"Lowered the filter to 800 Hz."})),
+            event(json!({"type":"turn-complete","result":{"stopReason":"completed"},"elapsedMs":1300})),
+            event(json!({"type":"state","state":"idle"})),
+        ],
+        json!({}),
+    )
+    .await;
+    h.has("Lowered the filter to 800 Hz.");
+    h.has("stopped");
+    // The step it cut short has no time: the log doesn't say when it would have ended.
+    let shown = h.screen();
+    let step = shown.iter().find(|line| line.contains("looked at your Set")).unwrap_or_else(|| panic!("{shown:#?}"));
+    assert!(!step.contains("0.0s"), "{step}");
+    // Nothing is at work, so nothing is drawn again while nothing happens.
+    let drawn = h.output.text.borrow().len();
+    delay(150).await;
+    h.screen();
+    assert_eq!(h.output.text.borrow().len(), drawn, "something on screen is animating");
+    h.close().await;
+});
+
+case!(a_change_shown_again_undoes_where_its_record_still_can_and_opens_to_its_picture, async {
+    let tempo = |id: &str, state: &str| {
+        json!({"id":id,"family":"tempo","title":"Tempo 120 → 124 BPM","state":state,"at":2,"from":120.0,"to":124.0,
+            "picture":{"kind":"values","values":[{"name":"Tempo","from":120.0,"to":124.0,"min":20.0,"max":999.0,"fromText":"120 BPM","toText":"124 BPM"}]}})
+    };
+    // Taken up again in the session that made it, the change's record still works: HISTORY offers its undo.
+    let lines = vec![
+        request("a bit faster"),
+        event(json!({"type":"state","state":"running"})),
+        event(json!({"type":"change","change":tempo("c1","applied")})),
+        event(json!({"type":"turn-complete","result":{"stopReason":"completed"},"elapsedMs":800})),
+        event(json!({"type":"state","state":"idle"})),
+    ];
+    let h = taken_up(&lines, json!({})).await;
+    let shown = h.screen();
+    let history = shown.iter().position(|line| line.contains("HISTORY")).unwrap();
+    let row = history + shown[history..].iter().position(|line| line.contains("Tempo 120 → 124 BPM")).unwrap();
+    assert!(shown[row].contains("undo"), "{shown:#?}");
+    let mut undone = tempo("c1", "undone");
+    undone.as_object_mut().unwrap().remove("picture");
+    *h.control.undo.borrow_mut() = Some(serde_json::from_value(undone).unwrap());
+    h.type_text(&click(&shown, row, "undo")).await;
+    assert!(h.calls().contains(&"undo:c1".into()), "{:?}", h.calls());
+    h.close().await;
+    // From an earlier session it can't be undone, and it still opens to what it changed.
+    let h = taken_up(&[request("a bit faster"), event(json!({"type":"change","change":tempo("old001:c1","expired")}))], json!({})).await;
+    h.has("no undo");
+    h.type_text("\x1b[Z").await;
+    h.type_text("\r").await;
+    h.has("Tempo 120 BPM → 124 BPM");
     h.close().await;
 });

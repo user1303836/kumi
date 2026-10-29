@@ -95,7 +95,7 @@ impl TuiApp {
                                 if let Entry::Assistant { status, .. } = &mut *entry.borrow_mut() {
                                     *status = if state.failed { AnswerStatus::Failed } else { AnswerStatus::Stopped };
                                 }
-                                end_steps(&entry);
+                                end_steps(&entry, !state.replaying);
                                 state.transcript.touch(&entry);
                             }
                         }
@@ -221,9 +221,10 @@ impl TuiApp {
                 // began first); without one, its words.
                 match replay {
                     Some(replay) => {
-                        if replay.before > 0 {
-                            let (n, s) = (replay.before, if replay.before == 1 { "" } else { "s" });
-                            self.notice(&format!("{n} earlier request{s} of this conversation aren't shown."), NoticeTone::Info);
+                        match replay.before {
+                            0 => {}
+                            1 => self.notice("1 earlier message isn't shown.", NoticeTone::Info),
+                            n => self.notice(&format!("{n} earlier messages aren't shown."), NoticeTone::Info),
                         }
                         self.resumed_words(replay.earlier);
                         self.replayed(replay.lines);
@@ -349,7 +350,8 @@ impl TuiApp {
                     self.alert(&format!("Stopped: {message}"), &format!("Kumi · stopped · {message}"));
                 }
                 self.notice(&said, NoticeTone::Warn);
-                if let Some(kind) = kind {
+                // Shown again from a log, it was the producer's to deal with then: nothing is offered for it now.
+                if let Some(kind) = kind.filter(|_| !self.replaying()) {
                     self.offer_fix(kind, provider.as_deref());
                 }
             }
@@ -360,9 +362,18 @@ impl TuiApp {
                 }
                 state.bytes += text.len();
                 if state.bytes > 4 * 1024 * 1024 {
+                    // Shown again from a log, it was stopped then: what's shown of it stops here, as it did, and
+                    // nothing live is cancelled.
+                    let replaying = state.replaying;
+                    if replaying {
+                        state.suppress = true;
+                        state.stream.discard();
+                    }
                     drop(state);
                     self.notice("That answer got too long to show, so Kumi stopped it.", NoticeTone::Warn);
-                    self.cancel();
+                    if !replaying {
+                        self.cancel();
+                    }
                     return;
                 }
                 let text = state.stream.push(&text);
@@ -805,7 +816,8 @@ impl TuiApp {
                 let mut answer = String::new();
                 {
                     let mut state = self.0.state.borrow_mut();
-                    if let Some(usage) = &result.usage {
+                    // (an answer shown again from a log was counted by the session that answered it)
+                    if let Some(usage) = result.usage.as_ref().filter(|_| !state.replaying) {
                         state.used.input += usage.input_tokens;
                         state.used.output += usage.output_tokens;
                         state.used.cached += usage.cache_read_tokens;
@@ -836,7 +848,7 @@ impl TuiApp {
                         }
                         answer = text.clone();
                     }
-                    end_steps(&entry);
+                    end_steps(&entry, !state.replaying);
                     state.transcript.touch(&entry);
                 }
                 self.answer_ended(reason, elapsed, &answer, offered.as_ref().map(|(_, choices)| choices.len()));
@@ -926,6 +938,8 @@ impl TuiApp {
                 LogLine::Request(request) => {
                     let text = string::trim(&self.clean(&request.text, usize::MAX)).to_string();
                     let mut state = self.0.state.borrow_mut();
+                    // One the log leaves open before it (a run that stopped without ending it) ended there.
+                    stopped_there(&mut state);
                     if !text.is_empty() {
                         state.transcript.add(Entry::User { text });
                     }
@@ -936,13 +950,7 @@ impl TuiApp {
             }
         }
         let mut state = self.0.state.borrow_mut();
-        if let Some(entry) = state.current.take() {
-            if let Entry::Assistant { status, .. } = &mut *entry.borrow_mut() {
-                *status = AnswerStatus::Stopped;
-            }
-            end_steps(&entry);
-            state.transcript.touch(&entry);
-        }
+        stopped_there(&mut state);
         state.pending_turn = false;
         state.busy_since = 0.;
         state.suppress = false;
@@ -1100,5 +1108,16 @@ fn scope_key(scope: MemoryScope) -> &'static str {
     match scope {
         MemoryScope::Producer => "producer",
         MemoryScope::Set => "set",
+    }
+}
+/// An answer a log ends in the middle of (Kumi stopped with it), ended there: its steps cut short have no time, since
+/// the log doesn't say when they'd have ended.
+fn stopped_there(state: &mut State) {
+    if let Some(entry) = state.current.take() {
+        if let Entry::Assistant { status, .. } = &mut *entry.borrow_mut() {
+            *status = AnswerStatus::Stopped;
+        }
+        end_steps(&entry, false);
+        state.transcript.touch(&entry);
     }
 }

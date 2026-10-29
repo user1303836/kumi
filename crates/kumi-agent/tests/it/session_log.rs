@@ -10,7 +10,7 @@ use kumi_agent::{
             TurnState,
         },
         conversations::create_conversation_store,
-        session_log::{log_name, read_log, replay_of, LogLine, ReadLog, Replay, SessionLog, MAX_LOG_BYTES, REPLAYED},
+        session_log::{log_name, read_log, replay_of, replay_reading, LogLine, ReadLog, Replay, SessionLog, MAX_LOG_BYTES, REPLAYED},
     },
     kernel::budget::OBSERVATION_MARKER,
 };
@@ -605,6 +605,16 @@ fn header(before: u32) -> kumi_agent::core::session_log::LogHeader {
     kumi_agent::core::session_log::LogHeader { v: 1, id: ID.into(), at: 100, kumi: "1.25.0".into(), before, from: None }
 }
 
+/// A log as the writer writes it: a header with `before`, then these lines.
+fn written(before: u32, lines: &[LogLine]) -> Vec<u8> {
+    let mut bytes = vec![];
+    for line in std::iter::once(&LogLine::Header(header(before))).chain(lines) {
+        bytes.extend(serde_json::to_vec(line).unwrap());
+        bytes.push(b'\n');
+    }
+    bytes
+}
+
 fn asked(replay: &Replay) -> Vec<String> {
     replay
         .lines
@@ -629,7 +639,7 @@ fn a_conversation_taken_up_shows_its_last_requests_and_says_how_many_came_before
         lines.push(LogLine::Saved { at: 4, saved_at: n, turns: n as u32 });
     }
     lines.push(told(SessionEvent::State { state: TurnState::Closed }));
-    let replay = replay_of(&ReadLog { header: header(2), lines }, REPLAYED);
+    let replay = replay_of(&written(2, &lines), REPLAYED).unwrap();
     assert_eq!(asked(&replay), (5..35).map(|n| format!("request {n}")).collect::<Vec<_>>());
     assert_eq!((replay.before, replay.earlier.len()), (2 + 5, 0));
     assert_eq!(replay.lines.len(), 30 * 3);
@@ -652,7 +662,7 @@ fn the_requests_from_before_a_log_began_come_back_as_words_while_theres_room() {
         lines.push(request(&format!("new {n}")));
         lines.push(told(notice(&format!("answer {n}"))));
     }
-    let replay = replay_of(&ReadLog { header: header(5), lines: lines.clone() }, REPLAYED);
+    let replay = replay_of(&written(5, &lines), REPLAYED).unwrap();
     assert_eq!(asked(&replay), ["new 0", "new 1", "new 2"]);
     assert_eq!(
         replay.earlier.iter().map(|line| line.text.as_str()).collect::<Vec<_>>(),
@@ -660,14 +670,45 @@ fn the_requests_from_before_a_log_began_come_back_as_words_while_theres_room() {
     );
     assert_eq!(replay.before, 0);
     // Room for 4 in all: the last of the earlier ones, then the three since; the rest are counted.
-    let replay = replay_of(&ReadLog { header: header(5), lines: lines.clone() }, 4);
+    let replay = replay_of(&written(5, &lines), 4).unwrap();
     assert_eq!(replay.earlier.iter().map(|line| line.text.as_str()).collect::<Vec<_>>(), ["old 4", "done 4"]);
     assert_eq!(replay.before, 4);
     // The budget had let the earliest go before the log began: those are counted, not shown.
     let trimmed: Vec<LogLine> = lines[6..].to_vec();
-    let replay = replay_of(&ReadLog { header: header(5), lines: trimmed }, REPLAYED);
+    let replay = replay_of(&written(5, &trimmed), REPLAYED).unwrap();
     assert_eq!(replay.earlier.len(), 4);
     assert_eq!(replay.before, 3);
+}
+
+#[test]
+fn a_long_logs_replay_reads_only_what_it_shows_and_counts_the_steers_it_leaves_out() {
+    // Kept with one request before its log, then 40 more: each with its answer, 200 KB of the model's messages and a
+    // save, about 8 MB, nearly all of it messages. One of the requests left out was steered.
+    let big = "x".repeat(200 * 1024);
+    let mut lines = vec![message("user", "kept before")];
+    for n in 0..40 {
+        lines.push(request(&format!("request {n}")));
+        if n == 3 {
+            lines.push(told(SessionEvent::Kernel(KernelEvent::Steer { text: "and keep the sub mono".into() })));
+        }
+        lines.push(told(notice(&format!("answer {n}"))));
+        lines.push(message("assistant", &big));
+        lines.push(LogLine::Saved { at: 4, saved_at: n, turns: n as u32 });
+    }
+    let bytes = written(1, &lines);
+    assert!(bytes.len() > 8_000_000);
+    let mut read = vec![];
+    let replay = replay_reading(&bytes, REPLAYED, &mut |line| {
+        read.push(String::from_utf8_lossy(&line[..line.len().min(20)]).into_owned());
+        serde_json::from_slice::<LogLine>(line).ok().filter(|line| !matches!(line, LogLine::Header(_)))
+    })
+    .unwrap();
+    assert_eq!(asked(&replay), (10..40).map(|n| format!("request {n}")).collect::<Vec<_>>());
+    // The one from before the log, the ten requests left out and the steer in one of them.
+    assert_eq!((replay.before, replay.earlier.len()), (1 + 10 + 1, 0));
+    // Each request once to count it, then what's shown: no message and no save is read.
+    assert!(read.iter().all(|line| line.starts_with(r#"{"kind":"request""#) || line.starts_with(r#"{"kind":"event""#)), "{read:?}");
+    assert_eq!(read.len(), 40 + 30 * 2);
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -686,7 +727,7 @@ async fn a_conversation_taken_up_shows_its_log_as_it_was_before_this_run_wrote_i
         log.open(A, ID, Some(&said("make the bass wider", 7)), None);
         log.event(&notice("The open Set changed; continuing your conversation."));
         let opened = log.as_opened().await.expect("its log as it was");
-        assert_eq!(notices(&opened), ["Widened it."]);
+        assert_eq!(notices(&read_log(&opened).unwrap()), ["Widened it."]);
         // A new conversation, and one kept before there were logs, have none to show.
         log.open(A, "mv66me0m0newer", None, None);
         assert!(log.as_opened().await.is_none());

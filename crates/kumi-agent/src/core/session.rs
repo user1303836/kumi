@@ -1230,7 +1230,8 @@ impl Session {
     /// before logs.
     async fn replay(&self) -> Option<Replay> {
         let log = self.0.options.log.as_ref()?.as_opened().await?;
-        let mut replay = replay_of(&log, REPLAYED);
+        // Read off the thread that takes keys: a long log is megabytes, mostly lines a replay never reads.
+        let mut replay = tokio::task::spawn_blocking(move || replay_of(&log, REPLAYED)).await.ok()??;
         if replay.earlier.is_empty() && !replay.lines.iter().any(|line| matches!(line, LogLine::Request(_))) {
             return None;
         }
