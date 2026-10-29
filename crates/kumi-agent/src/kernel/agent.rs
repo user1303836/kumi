@@ -158,6 +158,8 @@ const MAX_TOOLS: usize = 128;
 const MAX_ALL_TOOLS: usize = 512;
 const MAX_INSTRUCTIONS: usize = 64 * 1024;
 const MAX_STEER: usize = 16 * 1024;
+/// How a request past the room the model has is told to go instead (see [`no_room`]).
+const NO_ROOM: &str = "send part of it, or choose a model with more room with /model.";
 const MAX_TOOL_ERROR: usize = 4 * 1024;
 /// The most of a tool's words one result carries, as the bridge's results are capped: past it the opening
 /// stays with a note saying how much was cut, so one huge result can't take a request past its budget.
@@ -343,6 +345,12 @@ impl Drop for TurnGuard {
     }
 }
 
+/// Whether `error` is a request past the room the model has, which the kernel turned down without sending it: the
+/// session gives the producer their words back.
+pub fn no_room(error: &KumiError) -> bool {
+    error.kind == FailureKind::Request && error.message.ends_with(NO_ROOM)
+}
+
 impl AgentKernel {
     pub async fn run(&self, input: &str, signal: Signal, emit: KernelEmit) -> Result<TurnResult, RuntimeError> {
         self.run_with(input, vec![], signal, emit).await
@@ -387,7 +395,7 @@ impl AgentKernel {
             return Err(KumiError::new(
                 FailureKind::Request,
                 format!(
-                    "{} has room for about {} KB at once, and this message comes to {} KB with what Kumi reads of your {}: send part of it, or choose a model with more room with /model.",
+                    "{} has room for about {} KB at once, and this message comes to {} KB with what Kumi reads of your {}: {NO_ROOM}",
                     self.answering(),
                     (room / 1024.0).floor(),
                     size.div_ceil(1024),

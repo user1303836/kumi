@@ -7,7 +7,7 @@ use std::rc::Rc;
 use async_trait::async_trait;
 use futures::stream::{self, StreamExt};
 use kumi_agent::core::contracts::StopReason;
-use kumi_agent::kernel::agent::{create_agent_kernel, AgentKernelOptions};
+use kumi_agent::kernel::agent::{create_agent_kernel, no_room, AgentKernelOptions};
 use kumi_ai::binding::{budget_for, LanguageModel, ModelBinding};
 use kumi_ai::error::LanguageModelError;
 use kumi_ai::types::{CallOptions, FinishReason, FinishReasonUnified, Message, StreamPart, StreamParts, Usage};
@@ -155,7 +155,9 @@ async fn a_request_past_a_small_models_room_is_refused_unsent_and_the_conversati
     .unwrap();
     let paste = "x".repeat(20_000);
     for _ in 0..2 {
-        let refused = kernel.run(&paste, signal(), Rc::new(|_| Ok(()))).await.unwrap_err().to_string();
+        let error = kernel.run(&paste, signal(), Rc::new(|_| Ok(()))).await.unwrap_err();
+        assert!(error.kumi().is_some_and(no_room), "the session knows it wasn't sent: {error:?}");
+        let refused = error.to_string();
         assert!(
             refused.contains("test/small has room for about 17 KB at once, and this message comes to 20 KB with what Kumi reads of your Set: send part of it, or choose a model with more room with /model."),
             "{refused}"

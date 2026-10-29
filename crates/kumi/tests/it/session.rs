@@ -616,6 +616,25 @@ local_test!(a_message_up_to_256_kib_is_sent_and_a_longer_one_is_told_its_size, {
     assert_eq!(h.record.calls.borrow().len(), 1);
     h.session.close().await.unwrap();
 });
+local_test!(a_message_the_model_has_no_room_for_goes_back_in_the_box_without_the_pictures_advice, {
+    const REFUSED: &str = "test/small has room for about 17 KB at once, and this message comes to 20 KB with what Kumi reads of your Set: send part of it, or choose a model with more room with /model.";
+    let run: Run = Rc::new(|_, _, _| async { Err(KumiError::new(FailureKind::Request, REFUSED).into()) }.boxed_local());
+    let h = harness(Some(run), |_| {});
+    h.session.start().await.unwrap();
+    h.session.submit("what's wrong in this log", None).await.unwrap();
+    assert!(h.error(REFUSED));
+    assert!(h.events.borrow().iter().any(|e| matches!(e, SessionEvent::Resend { text } if text == "what's wrong in this log")));
+    // With a picture it's still the room, not the picture, that's said.
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("synth.png");
+    std::fs::write(&path, vec![7u8; 1500]).unwrap();
+    let picture =
+        Attachment { path: path.to_string_lossy().into_owned(), name: "synth.png".into(), media_type: "image/png".into(), bytes: 1500 };
+    h.session.submit_with("make this", None, vec![picture]).await.unwrap();
+    assert!(!h.error("may not take pictures"));
+    assert!(h.events.borrow().iter().any(|e| matches!(e, SessionEvent::Resend { text } if text.starts_with("make this"))));
+    h.session.close().await.unwrap();
+});
 local_test!(refresh_failure_never_calls_inference_or_exposes_private_errors, {
     let h = harness(None, |_| {});
     h.session.start().await.unwrap();
