@@ -46,8 +46,9 @@ use crate::{
     text::{sanitize_text, StreamingText},
     update::UpdateControl,
 };
-use futures::{future::LocalBoxFuture, FutureExt};
+use futures::{future::LocalBoxFuture, task::noop_waker, FutureExt};
 use kumi_agent::core::contracts::*;
+use kumi_agent::core::protocol::{op, Capabilities, InProcess, Request, SessionHandle};
 use kumi_agent::core::{
     goal::{GoalPhase, GoalStatus},
     goal_mode::{ObjectiveState, ObjectiveStatus, Verdict},
@@ -69,6 +70,7 @@ use std::{
     cell::{Cell, RefCell},
     future::Future,
     rc::{Rc, Weak},
+    task::Context,
     time::Duration,
 };
 use tokio::{sync::watch, task::JoinHandle};
@@ -83,7 +85,8 @@ pub struct MapHover {
     pub save: Rc<dyn Fn(bool)>,
 }
 pub struct TuiOptions {
-    pub controller: Rc<dyn SessionController>,
+    /// The session, which the app reaches only through its protocol.
+    pub session: Rc<dyn SessionHandle>,
     pub input: Rc<dyn TtyInput>,
     pub output: Rc<dyn TtyOutput>,
     pub models: Option<Rc<dyn ModelController>>,
@@ -178,7 +181,7 @@ pub use ConnectDaw as ConnectLive;
 impl TuiOptions {
     pub fn new(controller: Rc<dyn SessionController>, input: Rc<dyn TtyInput>, output: Rc<dyn TtyOutput>, mode: impl Into<String>) -> Self {
         Self {
-            controller,
+            session: InProcess::new(controller),
             input,
             output,
             mode: mode.into(),
@@ -264,10 +267,15 @@ enum Panel {
     },
 }
 struct Aside {
+    /// The session's id for it, which its words come in by.
+    id: u32,
     question: String,
     answer: String,
+    /// Its words made safe to show, as they come.
+    stream: StreamingText,
     state: &'static str,
-    abort: Signal,
+    /// The producer stopped it (closing its panel, or quitting).
+    stopped: bool,
 }
 #[derive(Clone)]
 struct Held {
@@ -287,7 +295,15 @@ struct Kept {
     what: MemoryKind,
     title: String,
     forgotten: bool,
-    forget: Rc<dyn Fn() -> LocalBoxFuture<'static, Result<bool, RuntimeError>>>,
+    forget: Forget,
+}
+/// What forgetting something Kumi kept asks of the session.
+#[derive(Clone)]
+enum Forget {
+    Note(String),
+    Lesson(String),
+    Technique(String),
+    Recipe(String),
 }
 struct LastAction {
     title: String,
@@ -400,6 +416,8 @@ struct State {
     held: Vec<Held>,
     last_stop: Option<StopReason>,
     asides: Vec<Rc<RefCell<Aside>>>,
+    /// The id the next aside takes.
+    next_aside: u32,
     transport: Option<Transport>,
     activity: String,
     panel: Option<PanelRef>,
@@ -551,6 +569,7 @@ impl State {
             held: vec![],
             last_stop: None,
             asides: vec![],
+            next_aside: 1,
             transport: None,
             activity: format!("connecting to {}", crate::daw::words().app),
             panel: None,
@@ -765,15 +784,23 @@ impl TuiApp {
                 options.frame_ms.unwrap_or(16.),
                 options.animation_ms.unwrap_or(super::scheduler::ANIMATION_MS),
             );
+            // What the session says between its replies (an aside's words) comes in as its other events do.
+            let listener = weak.clone();
+            options.session.listen(Rc::new(move |event| {
+                if let Some(a) = listener.upgrade() {
+                    TuiApp(a).event(event);
+                }
+            }));
+            let can = options.session.capabilities();
             let mut tabs: Vec<Rc<dyn Tab>> =
                 vec![Rc::new(AppTab { app: weak.clone(), id: "history", title: "HISTORY", empty: "Nothing changed yet" })];
-            if options.controller.has_goal() {
+            if can.goal {
                 tabs.push(Rc::new(AppTab { app: weak.clone(), id: "goal", title: "GOAL", empty: "No goal yet: /goal and what to reach" }));
             }
-            if options.controller.has_jobs() {
+            if can.jobs {
                 tabs.push(Rc::new(jobs::JobsTab { app: weak.clone() }));
             }
-            if options.controller.has_palette() {
+            if can.palette {
                 tabs.push(Rc::new(palette::PaletteTab { app: weak.clone() }));
             }
             tabs.extend(options.tabs.clone());
@@ -808,8 +835,16 @@ impl TuiApp {
     pub fn transcript_layout_count(&self) -> usize {
         self.0.state.borrow().transcript.laid_out
     }
+    /// The session, which the app reaches only through its protocol.
+    fn session(&self) -> &dyn SessionHandle {
+        &*self.0.options.session
+    }
+    /// What the session can do.
+    fn can(&self) -> Capabilities {
+        self.0.options.session.capabilities()
+    }
     fn busy(&self) -> bool {
-        matches!(self.0.options.controller.status().state, TurnState::Running | TurnState::Cancelling)
+        matches!(self.session().status().state, TurnState::Running | TurnState::Cancelling)
     }
     fn clean(&self, text: &str, max: usize) -> String {
         head(&sanitize_text(text, &self.0.state.borrow().secrets), max)
@@ -839,6 +874,22 @@ impl TuiApp {
                 app.error(&error);
             }
         });
+    }
+    /// A request whose answer `then` takes: at once when the session has it at once (what a session in this process
+    /// does at once), or when it comes.
+    fn when_answered<R>(&self, request: R, then: impl FnOnce(&TuiApp, Result<R::Reply, RuntimeError>) + 'static)
+    where
+        R: Request + 'static,
+    {
+        let app = self.clone();
+        let mut asking = async move {
+            let reply = app.session().op(request).await;
+            then(&app, reply);
+        }
+        .boxed_local();
+        if asking.as_mut().poll(&mut Context::from_waker(&noop_waker())).is_pending() {
+            tokio::task::spawn_local(asking);
+        }
     }
     fn done(&self) -> LocalBoxFuture<'static, i32> {
         let mut receiver = self.0.done.subscribe();
@@ -888,8 +939,10 @@ impl TuiApp {
             // The browser's map stops answering as Kumi closes.
             state.map_page = None;
             for aside in &state.asides {
-                if aside.borrow().state == "asking" {
-                    aside.borrow().abort.cancel();
+                let mut aside = aside.borrow_mut();
+                if aside.state == "asking" {
+                    aside.stopped = true;
+                    self.session().tell(op::StopAside { id: aside.id }.into());
                 }
             }
         }
@@ -901,11 +954,9 @@ impl TuiApp {
         tokio::task::spawn_local(async move {
             let mut code = code;
             let mut message = message;
-            let result = tokio::time::timeout(
-                Duration::from_millis(app.0.options.close_timeout_ms.unwrap_or(6000)),
-                app.0.options.controller.close(),
-            )
-            .await;
+            let result =
+                tokio::time::timeout(Duration::from_millis(app.0.options.close_timeout_ms.unwrap_or(6000)), app.session().op(op::Close {}))
+                    .await;
             let error = match result {
                 Ok(Ok(())) => None,
                 Ok(Err(e)) => Some(e),
@@ -928,7 +979,7 @@ impl TuiApp {
                 let farewell = message.unwrap_or_else(farewell);
                 app.0.options.output.write(&format!("{}\n", app.clean(&farewell, usize::MAX)));
                 // The conversation this run had or took up, by the id that brings it back.
-                if let Some(now) = continue_hint(app.0.options.controller.conversation_now().await) {
+                if let Some(now) = continue_hint(app.session().op(op::ConversationNow {}).await.ok().flatten()) {
                     app.0.options.output.write(&format!("\x1b[2m{now}\x1b[22m\n"));
                 }
                 if let Some(next) = &app.0.options.next_time {
@@ -950,7 +1001,7 @@ impl TuiApp {
             state.stream.discard();
         }
         self.task(|app| async move {
-            let result = app.0.options.controller.cancel().await;
+            let result = app.session().op(op::Cancel {}).await;
             app.0.state.borrow_mut().cancelling = false;
             let running = app.running_jobs();
             if running > 0 {
@@ -1003,11 +1054,11 @@ impl Terminal for TuiApp {
         }
         // Said on the welcome screen, which a notice would replace; a conversation carried on says it below.
         self.0.state.borrow_mut().willington_off = self.0.options.willington.as_ref().is_some_and(|w| (w.on)() == Some(false));
-        self.0.state.borrow_mut().library = self.0.options.controller.library();
+        self.0.state.borrow_mut().library = self.session().library();
         self.0.scheduler.request();
         self.task(|app| async move {
             if !app.0.state.borrow().closing {
-                if let Err(error) = app.0.options.controller.start().await {
+                if let Err(error) = app.session().op(op::Start {}).await {
                     if !app.0.state.borrow().closing {
                         let message =
                             format!("Kumi couldn't start: {}", safe_error_message(Some(&error.message()), &app.0.state.borrow().secrets));

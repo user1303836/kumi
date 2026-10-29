@@ -229,7 +229,7 @@ impl TuiApp {
         };
         self.0.state.borrow_mut().carry.retain(|waiting| *waiting != id);
         self.task(move |app| async move {
-            if !app.0.options.controller.carry_on(id) && app.0.options.controller.jobs().iter().any(|s| s.id == id) {
+            if !app.session().op(op::CarryOn { job: id }).await.unwrap_or(false) && app.session().jobs().iter().any(|s| s.id == id) {
                 // Kumi was answering after all: it waits for the next quiet moment.
                 app.0.state.borrow_mut().carry.insert(0, id);
             }
@@ -342,26 +342,29 @@ impl TuiApp {
     }
 
     pub(super) fn stop_job(&self, id: u32) {
-        if self.0.options.controller.stop_job(id) {
-            self.notice(&format!("Stopping job {id}."), NoticeTone::Info);
-        }
+        self.when_answered(op::StopJob { id }, move |app, stopping| {
+            if stopping.unwrap_or(false) {
+                app.notice(&format!("Stopping job {id}."), NoticeTone::Info);
+            }
+        });
         self.0.scheduler.request();
     }
 
     fn run_job_again(&self, id: u32) {
-        match self.0.options.controller.run_job_again(id) {
-            Ok(again) => {
-                self.0.state.borrow_mut().jobs.remove(&id);
-                self.notice(&format!("Running it again as job {again}."), NoticeTone::Info);
+        self.when_answered(op::RunJobAgain { id }, move |app, again| match again {
+            Ok(Ok(again)) => {
+                app.0.state.borrow_mut().jobs.remove(&id);
+                app.notice(&format!("Running it again as job {again}."), NoticeTone::Info);
             }
-            Err(why) => self.notice(&why, NoticeTone::Warn),
-        }
+            Ok(Err(why)) => app.notice(&why, NoticeTone::Warn),
+            Err(error) => app.error(&error),
+        });
         self.0.scheduler.request();
     }
 
     /// /jobs: each job; Enter opens one, where x stops it and r runs it again.
     pub(super) fn open_jobs(&self) {
-        let jobs = self.0.options.controller.jobs();
+        let jobs = self.session().jobs();
         let items = if jobs.is_empty() {
             vec![inert(&format!(
                 "None yet: Kumi starts jobs for slow work that doesn't change {}, such as research or a tutorial",
@@ -409,13 +412,14 @@ impl TuiApp {
 
     /// Ctrl-b: what the answer is doing away from Live goes on in the background, and the answer carries on.
     pub(super) fn background_now(&self) {
-        match self.0.options.controller.background() {
-            Ok(id) => self.notice(
+        self.when_answered(op::Background {}, |app, moved| match moved {
+            Ok(Ok(id)) => app.notice(
                 &format!("Moved to the background as job {id}: the answer carries on, and its report comes when it's done."),
                 NoticeTone::Info,
             ),
-            Err(why) => self.notice(&why, NoticeTone::Info),
-        }
+            Ok(Err(why)) => app.notice(&why, NoticeTone::Info),
+            Err(error) => app.error(&error),
+        });
         self.0.scheduler.request();
     }
 
@@ -491,12 +495,12 @@ impl TuiApp {
             InputEvent::Text { text } => match text.to_lowercase().as_str() {
                 " " => self.close_panel(),
                 "x" => self.stop_job(id),
-                "r" if self.0.options.controller.jobs().iter().any(|s| s.id == id && s.state.ended()) => {
+                "r" if self.session().jobs().iter().any(|s| s.id == id && s.state.ended()) => {
                     self.close_panel();
                     self.run_job_again(id);
                 }
                 "c" => {
-                    let report = self.0.options.controller.job(id).and_then(|detail| detail.report).unwrap_or_default();
+                    let report = self.session().job(id).and_then(|detail| detail.report).unwrap_or_default();
                     if !report.is_empty() {
                         self.0.tty.write(&format!("\x1b]52;c;{}\x07", base64::engine::general_purpose::STANDARD.encode(report)));
                         self.notice(&format!("Copied job {id}'s report."), NoticeTone::Info);

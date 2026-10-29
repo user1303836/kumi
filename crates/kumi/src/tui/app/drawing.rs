@@ -250,7 +250,7 @@ impl TuiApp {
             let named = x + set_name.as_ref().map(|n| text_width(n).min(16) + 5).unwrap_or(0);
             if at - named >= 2 {
                 let chosen = self.0.options.models.as_ref().is_some_and(|m| m.current().model.is_some());
-                let fallback = self.0.options.controller.answering_fallback().is_some();
+                let fallback = self.session().answering_fallback().is_some();
                 screen.put(at, 0, &text, &if chosen && !fallback { st::FAINT } else { st::WARN });
                 end = at - 3;
                 // Near a plan's limit: how much is used and when it resets, before the model.
@@ -421,7 +421,7 @@ impl TuiApp {
     }
     /// NOW's line; without `flash`, the change that just landed isn't said (the drawer shows it on a row of its own).
     pub(super) fn now_said(&self, flash: bool) -> NowLine {
-        let turn = self.0.options.controller.status().state;
+        let turn = self.session().status().state;
         let state = self.0.state.borrow();
         let simple = |detail: &str, style: Style| NowLine { dot: None, label: String::new(), detail: detail.into(), style, activity: None };
         if state.closing {
@@ -539,7 +539,7 @@ impl TuiApp {
             if let Some(running) = running {
                 let mut detail = running.doing.clone().unwrap_or_else(|| doing_label(running.tool.as_deref(), &running.label));
                 // A long step away from Live can go on in the background while the producer carries on.
-                if running.started_at.is_some_and(|at| now - at >= BACKGROUND_HINT_MS) && self.0.options.controller.can_background() {
+                if running.started_at.is_some_and(|at| now - at >= BACKGROUND_HINT_MS) && self.session().can_background() {
                     // In tmux, ctrl-b is its prefix: twice sends it on.
                     let keys = if self.0.profile.tmux { "ctrl-b twice" } else { "ctrl-b" };
                     detail = format!("{detail} · {keys} keeps you working while this runs");

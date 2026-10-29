@@ -185,9 +185,14 @@ impl TuiApp {
         state.menu_dismissed = true;
     }
     pub(super) async fn open_memory(&self) -> Result<(), RuntimeError> {
-        let c = &self.0.options.controller;
-        let (memory, techniques, recipes, lessons, taste) =
-            futures::try_join!(c.memory(), c.techniques(), c.recipes(), c.lessons(), c.taste())?;
+        let s = self.session();
+        let (memory, techniques, recipes, lessons, taste) = futures::try_join!(
+            s.op(op::Memory {}),
+            s.op(op::Techniques {}),
+            s.op(op::Recipes {}),
+            s.op(op::Lessons {}),
+            s.op(op::Taste {})
+        )?;
         let Some(memory) = memory else {
             return Ok(());
         };
@@ -222,7 +227,7 @@ impl TuiApp {
         } else {
             items.extend(notes(&memory.memory.set));
         }
-        if c.has_techniques() {
+        if self.can().techniques {
             items.push(PickerItem::heading("Techniques"));
             if techniques.is_empty() {
                 items.push(inert("None yet: Kumi asks before it keeps one"));
@@ -241,7 +246,7 @@ impl TuiApp {
                 }));
             }
         }
-        if c.has_recipes() {
+        if self.can().recipes {
             items.push(PickerItem::heading("Recipes"));
             if recipes.is_empty() {
                 items.push(inert("None yet"));
@@ -253,7 +258,7 @@ impl TuiApp {
                 );
             }
         }
-        if c.has_lessons() {
+        if self.can().lessons {
             items.push(PickerItem::heading("What Kumi learned matching sounds"));
             if lessons.is_empty() {
                 items.push(inert("None yet: what won when Kumi matched a sound to a reference"));
@@ -267,7 +272,7 @@ impl TuiApp {
                 }));
             }
         }
-        if c.has_taste() {
+        if self.can().taste {
             let places = crate::daw::words().places;
             items.push(PickerItem::heading(format!("From your {places}")));
             if taste.is_empty() {
@@ -307,7 +312,7 @@ impl TuiApp {
                         }
                         return Ok(());
                     }
-                    if kind == "note" && app.0.options.controller.has_change_note() {
+                    if kind == "note" && app.can().change_note {
                         if let Some(note) = kept.iter().find(|n| n.id == id) {
                             app.note_actions(note.clone());
                         }
@@ -331,12 +336,12 @@ impl TuiApp {
                                 if answer.value.as_deref() != Some("yes") {
                                     return Ok(());
                                 }
-                                let c = &app.0.options.controller;
+                                let s = app.session();
                                 let gone = match kind.as_str() {
-                                    "technique" => c.forget_technique(&id).await?,
-                                    "lesson" => c.forget_lesson(&id).await?,
-                                    "taste" => c.forget_taste(&id).await?,
-                                    _ => c.forget(&id).await?.is_some(),
+                                    "technique" => s.op(op::ForgetTechnique { id: id.clone() }).await?,
+                                    "lesson" => s.op(op::ForgetLesson { id: id.clone() }).await?,
+                                    "taste" => s.op(op::ForgetTaste { id: id.clone() }).await?,
+                                    _ => s.op(op::Forget { id: id.clone() }).await?.is_some(),
                                 };
                                 if !gone {
                                     app.notice(
@@ -366,9 +371,8 @@ impl TuiApp {
     /// The kept conversations to go back to, this Set's and (under Tab) every Set's, which come first while no Set is
     /// known. Enter goes back to one; ctrl+f renames, pins or deletes it, or copies its id. `filter`: typed in already.
     pub(super) async fn open_conversations(&self, filter: Option<String>) -> Result<(), RuntimeError> {
-        let c = &self.0.options.controller;
-        let here = c.conversations().await?;
-        let all = c.all_conversations().await?;
+        let here = self.session().op(op::Conversations {}).await?;
+        let all = self.session().op(op::AllConversations {}).await?;
         let now = now_ms_f64();
         // A row's title is cut short enough to leave its Set (in All Sets) and its id room beside it, as far as they go.
         let row = |row: &ConversationSummary, every: bool| {
@@ -452,7 +456,7 @@ impl TuiApp {
             return;
         }
         self.0.state.borrow_mut().activity = "going back to it".into();
-        match self.0.options.controller.resume_conversation(&row.id).await {
+        match self.session().op(op::ResumeConversation { id: row.id.clone() }).await {
             Ok(false) => self.notice("That conversation isn't kept any more.", NoticeTone::Info),
             Err(error) => self.error(&error),
             _ => {}
@@ -461,7 +465,7 @@ impl TuiApp {
     /// What else to do with a kept conversation: go back to it, rename, pin or delete it, or copy its id, under a look at
     /// how it ended.
     async fn conversation_actions(&self, row: ConversationSummary) -> Result<(), RuntimeError> {
-        let lines = self.0.options.controller.conversation_lines(&row.id).await.unwrap_or_default();
+        let lines = self.session().op(op::ConversationLines { id: row.id.clone() }).await.unwrap_or_default();
         let mut items = vec![];
         let last = |role: TranscriptRole| lines.iter().rev().find(|l| l.role == role && !l.text.is_empty());
         if let Some(asked) = last(TranscriptRole::User) {
@@ -489,14 +493,13 @@ impl TuiApp {
             let row = row.clone();
             async move {
                 app.close_panel();
-                let c = &app.0.options.controller;
                 match answer.value.as_deref() {
                     Some("back") => app.go_back_to(&row).await,
                     Some("rename") => {
                         app.0.state.borrow_mut().editor.set(&format!("/rename {} {}", row.id, row.name.as_deref().unwrap_or(&row.title())));
                         app.0.scheduler.request();
                     }
-                    Some("pin") => match c.pin_conversation(&row.id, !row.pinned).await? {
+                    Some("pin") => match app.session().op(op::PinConversation { id: row.id.clone(), pinned: !row.pinned }).await? {
                         true if !row.pinned => app.notice("Pinned: Kumi keeps it however old it gets.", NoticeTone::Info),
                         true => app.notice("Unpinned.", NoticeTone::Info),
                         false => app.notice("That conversation isn't kept any more.", NoticeTone::Info),
@@ -524,7 +527,7 @@ impl TuiApp {
                     if answer.value.as_deref() != Some("yes") {
                         return Ok(());
                     }
-                    match app.0.options.controller.delete_conversation(&id).await {
+                    match app.session().op(op::DeleteConversation { id: id.clone() }).await {
                         Ok(true) => app.notice("Deleted.", NoticeTone::Info),
                         Ok(false) => app.notice("That conversation was already gone.", NoticeTone::Info),
                         Err(error) => app.error(&error),
@@ -573,12 +576,12 @@ impl TuiApp {
             };
             app.0.state.borrow_mut().activity =
                 if choice == SetChoice::Copy { "carrying it on here".into() } else { format!("opening the {}", crate::daw::words().place) };
-            app.0.options.controller.answer_set(choice).await
+            app.session().op(op::AnswerSet { choice }).await
         });
         self.0.state.borrow_mut().set_ask = Some(picker);
     }
     pub(super) async fn open_recipes(&self) -> Result<(), RuntimeError> {
-        let recipes = self.0.options.controller.recipes().await?;
+        let recipes = self.session().op(op::Recipes {}).await?;
         let now = now_ms_f64();
         let items = if recipes.is_empty() {
             vec![inert(&format!("None yet: ask Kumi to save a way of working, or say “watch me” and do it in {}", crate::daw::words().app))]
@@ -637,21 +640,23 @@ impl TuiApp {
                 let note = note.clone();
                 async move {
                     app.close_panel();
-                    let c = &app.0.options.controller;
+                    let s = app.session();
                     match answer.value.as_deref() {
                         Some("change") => {
                             app.0.state.borrow_mut().editor.set(&format!("/note {} {}", note.id, note.text));
                             app.0.scheduler.request();
                         }
-                        Some("pin") => match c.change_note(&note.id, NoteChange::Pinned(!note.pinned)).await? {
-                            Some(changed) if changed.pinned => {
-                                app.notice("Pinned: Kumi keeps this note even when its memory is full.", NoticeTone::Info)
+                        Some("pin") => {
+                            match s.op(op::ChangeNote { id: note.id.clone(), change: NoteChange::Pinned(!note.pinned) }).await? {
+                                Some(changed) if changed.pinned => {
+                                    app.notice("Pinned: Kumi keeps this note even when its memory is full.", NoticeTone::Info)
+                                }
+                                Some(_) => app.notice("Unpinned.", NoticeTone::Info),
+                                None => app.notice("That note was already gone.", NoticeTone::Info),
                             }
-                            Some(_) => app.notice("Unpinned.", NoticeTone::Info),
-                            None => app.notice("That note was already gone.", NoticeTone::Info),
-                        },
+                        }
                         Some("forget") => {
-                            if c.forget(&note.id).await?.is_none() {
+                            if s.op(op::Forget { id: note.id.clone() }).await?.is_none() {
                                 app.notice("That note was already gone.", NoticeTone::Info);
                             }
                         }
@@ -683,7 +688,7 @@ impl TuiApp {
                 async move {
                     app.close_panel();
                     if answer.value.as_deref() == Some("forget") {
-                        if !app.0.options.controller.forget_recipe(&recipe.name).await? {
+                        if !app.session().op(op::ForgetRecipe { name: recipe.name.clone() }).await? {
                             app.notice("That recipe was already gone.", NoticeTone::Info);
                         }
                         return Ok(());
@@ -696,7 +701,10 @@ impl TuiApp {
                         // it is; enter runs it with no model call. The cursor waits at the first one left empty.
                         // (as the DAW's integration carries it to now: a Renoise pin's places move with its tracks)
                         let pinned = app.0.state.borrow().pinned.as_ref().map(|p| p.pin.clone());
-                        let pinned = pinned.and_then(|pin| app.0.options.controller.pin_for_recipe(&pin));
+                        let pinned = match pinned {
+                            Some(pin) => app.session().op(op::PinForRecipe { pin }).await?,
+                            None => None,
+                        };
                         let (line, after) = recipe_line(&recipe, pinned.as_ref());
                         let mut state = app.0.state.borrow_mut();
                         state.editor.set(&line);
@@ -720,10 +728,9 @@ impl TuiApp {
             return;
         }
         self.0.state.borrow_mut().activity = format!("running “{}”", recipe.name);
-        if self.0.options.controller.has_run_recipe() {
-            let outcome = self.0.options.controller.run_recipe(&recipe.name, with).await.unwrap_or_else(|error| RecipeOutcome {
-                text: safe_error_message(Some(&error.message()), &self.0.state.borrow().secrets),
-                is_error: true,
+        if self.can().run_recipe {
+            let outcome = self.session().op(op::RunRecipe { name: recipe.name.clone(), with }).await.unwrap_or_else(|error| {
+                RecipeOutcome { text: safe_error_message(Some(&error.message()), &self.0.state.borrow().secrets), is_error: true }
             });
             self.notice(
                 &if outcome.is_error { format!("The recipe stopped: {}", outcome.text) } else { outcome.text },
@@ -1142,7 +1149,7 @@ impl TuiApp {
                 if item.chosen {
                     if let Some(index) = offered.1.iter().position(|choice| *choice == words) {
                         let (question, options) = (offered.0.clone(), offered.1.clone());
-                        app.0.options.controller.picked(Picked::Answer { question, options, index });
+                        app.session().tell(op::Pick { pick: Picked::Answer { question, options, index } }.into());
                     }
                 }
                 app.0.state.borrow_mut().editor.set(&words);
@@ -1203,7 +1210,7 @@ impl TuiApp {
                 .objective
                 .as_ref()
                 .is_some_and(|goal| goal.status.state == ObjectiveState::Paused && goal.status.verdict == Some(Verdict::Blocked));
-            let chosen = if goal_waits && app.0.options.controller.has_goal() {
+            let chosen = if goal_waits && app.can().goal {
                 app.close_panel();
                 app.0.state.borrow_mut().editor.set(&format!("/goal answer: {value}"));
                 app.submit().await
@@ -1249,7 +1256,7 @@ impl TuiApp {
                 .unwrap_or(false);
             !asked && state.held.is_empty() && state.editor.is_empty() && state.panel.is_none()
         };
-        if !free || !self.0.options.controller.has_answer_technique() {
+        if !free || !self.can().answer_technique {
             return false;
         }
         let items = vec![PickerItem::new("1. Yes, keep it", "yes"), PickerItem::new("2. No", "no")];
@@ -1266,9 +1273,9 @@ impl TuiApp {
                 let keep = item.value.as_deref() == Some("yes");
                 // 1 or 2 is the producer's answer; a bare Enter (no) is the default.
                 if item.chosen {
-                    app.0.options.controller.picked(Picked::Technique { name, keep });
+                    app.session().tell(op::Pick { pick: Picked::Technique { name, keep } }.into());
                 }
-                if !app.0.options.controller.answer_technique(keep).await? && keep {
+                if !app.session().op(op::AnswerTechnique { keep }).await? && keep {
                     app.notice("That technique isn't waiting any more: its build was undone or its tracks deleted.", NoticeTone::Info);
                 }
                 Ok(())
@@ -1305,10 +1312,14 @@ impl TuiApp {
                 Panel::ChatGpt { abort, .. } => abort.cancel(),
                 Panel::Key { secret, .. } => secret.clear(),
                 Panel::Btw { at, .. } => {
-                    if let Some(aside) = self.0.state.borrow().asides.get(*at) {
-                        if aside.borrow().state == "asking" {
-                            aside.borrow().abort.cancel();
-                        }
+                    let aside = self.0.state.borrow().asides.get(*at).cloned();
+                    if let Some(aside) = aside.filter(|aside| aside.borrow().state == "asking") {
+                        let id = {
+                            let mut aside = aside.borrow_mut();
+                            aside.stopped = true;
+                            aside.id
+                        };
+                        self.session().tell(op::StopAside { id }.into());
                     }
                 }
                 _ => {}
@@ -1340,10 +1351,10 @@ impl TuiApp {
                 let left = self.closing_set_ask(&panel);
                 self.close_panel();
                 if declined {
-                    self.task(|app| async move { app.0.options.controller.answer_technique(false).await.map(|_| ()) });
+                    self.task(|app| async move { app.session().op(op::AnswerTechnique { keep: false }).await.map(|_| ()) });
                 }
                 if left {
-                    self.task(|app| async move { app.0.options.controller.answer_set(SetChoice::Cancel).await });
+                    self.task(|app| async move { app.session().op(op::AnswerSet { choice: SetChoice::Cancel }).await });
                 }
                 return;
             }
@@ -1509,7 +1520,7 @@ impl TuiApp {
     pub(super) fn model_label(&self) -> Option<String> {
         let current = self.0.options.models.as_ref()?.current();
         // The fallback, while it answers for the producer's model.
-        if let Some(answering) = self.0.options.controller.answering_fallback() {
+        if let Some(answering) = self.session().answering_fallback() {
             let name = answering.split_once('/').map_or(answering.as_str(), |(_, name)| name).to_string();
             return Some(format!("{name} · fallback"));
         }
@@ -1522,7 +1533,7 @@ impl TuiApp {
     }
     /// How much of the plan behind the answering model is used, near its limit only: "plan 82% · resets 14:20".
     pub(super) fn plan_line(&self) -> Option<(String, bool)> {
-        let answering = self.0.options.controller.answering_fallback();
+        let answering = self.session().answering_fallback();
         let provider = match answering {
             Some(model) => model.split('/').next().map(str::to_string),
             None => self.0.options.models.as_ref()?.current().provider,

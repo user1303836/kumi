@@ -9,7 +9,7 @@ use std::rc::Rc;
 
 use chrono::{FixedOffset, Local, Offset};
 use futures::future::{FutureExt, LocalBoxFuture};
-use kumi_agent::core::contracts::{ConversationMatch, ConversationStore, ConversationSummary, SessionController};
+use kumi_agent::core::contracts::{ConversationMatch, ConversationStore, ConversationSummary, ConversationToExport, SessionController};
 use kumi_agent::core::conversations::FileConversationStore;
 use kumi_agent::core::export::{file_name, html, html_text, import, importable, json, markdown, Format, Options, Source, IMPORT_MAX_BYTES};
 use kumi_agent::gone_words;
@@ -352,7 +352,13 @@ pub async fn conversation_now(
     format: Format,
     redact: &dyn Fn(&str) -> String,
 ) -> Result<Exported, String> {
-    let found = controller.conversation_to_export().await.ok_or("There's nothing to export yet: ask Kumi something first.")?;
+    exported(controller.conversation_to_export().await, format, redact)
+}
+
+/// The conversation going on now (`found`, as the session gave it to export) in `format`, redacted; Err, in the
+/// producer's words, before there's anything to export.
+pub fn exported(found: Option<ConversationToExport>, format: Format, redact: &dyn Fn(&str) -> String) -> Result<Exported, String> {
+    let found = found.ok_or("There's nothing to export yet: ask Kumi something first.")?;
     let source = Source {
         id: &found.id,
         conversation: &found.conversation,

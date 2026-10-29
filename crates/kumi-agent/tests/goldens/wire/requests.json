@@ -1,0 +1,383 @@
+[
+  {
+    "type": "start"
+  },
+  {
+    "type": "submit",
+    "input": "make the kick punchier",
+    "pinned": {
+      "trackRef": "7:track:0",
+      "ref": "7:device:0:0:0:0",
+      "node": "device",
+      "name": "Simpler",
+      "trail": [
+        "Drum Rack",
+        "Kick"
+      ],
+      "siblings": [
+        "Saturator",
+        "EQ Eight"
+      ],
+      "track": "Drums",
+      "live": true
+    },
+    "attachments": [
+      {
+        "path": "/Users/me/Desktop/reference.png",
+        "name": "reference.png",
+        "mediaType": "image/png",
+        "bytes": 48210
+      }
+    ]
+  },
+  {
+    "type": "submit",
+    "input": "louder",
+    "attachments": []
+  },
+  {
+    "type": "steer",
+    "text": "and leave the snare"
+  },
+  {
+    "type": "aside",
+    "id": 2,
+    "question": "why the low shelf?"
+  },
+  {
+    "type": "stop-aside",
+    "id": 2
+  },
+  {
+    "type": "cancel"
+  },
+  {
+    "type": "close"
+  },
+  {
+    "type": "undo",
+    "id": "c3"
+  },
+  {
+    "type": "undo"
+  },
+  {
+    "type": "refresh"
+  },
+  {
+    "type": "new-conversation"
+  },
+  {
+    "type": "reconnect"
+  },
+  {
+    "type": "reconfigure"
+  },
+  {
+    "type": "instant",
+    "text": "tempo 124"
+  },
+  {
+    "type": "pick",
+    "pick": {
+      "type": "answer",
+      "question": "Which kick?",
+      "options": [
+        "808",
+        "909"
+      ],
+      "index": 1
+    }
+  },
+  {
+    "type": "pick",
+    "pick": {
+      "type": "technique",
+      "name": "Parallel drum bus",
+      "keep": true
+    }
+  },
+  {
+    "type": "conversations"
+  },
+  {
+    "type": "all-conversations"
+  },
+  {
+    "type": "find-conversation",
+    "word": "kick"
+  },
+  {
+    "type": "resume-conversation",
+    "id": "01JB9Z6P1Q"
+  },
+  {
+    "type": "rename-conversation",
+    "id": "01JB9Z6P1Q",
+    "name": "Kick work"
+  },
+  {
+    "type": "rename-conversation"
+  },
+  {
+    "type": "pin-conversation",
+    "id": "01JB9Z6P1Q",
+    "pinned": true
+  },
+  {
+    "type": "delete-conversation",
+    "id": "01JB9Z6P1Q"
+  },
+  {
+    "type": "fork-conversation",
+    "name": "Kick, darker"
+  },
+  {
+    "type": "fork-conversation"
+  },
+  {
+    "type": "conversation-now"
+  },
+  {
+    "type": "conversation-lines",
+    "id": "01JB9Z6P1Q"
+  },
+  {
+    "type": "conversation-to-export"
+  },
+  {
+    "type": "memory"
+  },
+  {
+    "type": "remembered"
+  },
+  {
+    "type": "taste"
+  },
+  {
+    "type": "forget-taste",
+    "id": "t2"
+  },
+  {
+    "type": "forget",
+    "id": "p3"
+  },
+  {
+    "type": "change-note",
+    "id": "p3",
+    "change": {
+      "text": "Likes the kick dry"
+    }
+  },
+  {
+    "type": "change-note",
+    "id": "s1",
+    "change": {
+      "pinned": true
+    }
+  },
+  {
+    "type": "recipes"
+  },
+  {
+    "type": "pin-for-recipe",
+    "pin": {
+      "trackRef": "7:track:0",
+      "ref": "7:device:0:0:0:0",
+      "node": "device",
+      "name": "Simpler",
+      "trail": [
+        "Drum Rack",
+        "Kick"
+      ],
+      "siblings": [
+        "Saturator",
+        "EQ Eight"
+      ],
+      "track": "Drums",
+      "live": true
+    }
+  },
+  {
+    "type": "run-recipe",
+    "name": "Drum bus",
+    "with": {
+      "track": "Drums"
+    }
+  },
+  {
+    "type": "forget-recipe",
+    "name": "Drum bus"
+  },
+  {
+    "type": "techniques"
+  },
+  {
+    "type": "forget-technique",
+    "id": "k1"
+  },
+  {
+    "type": "answer-technique",
+    "keep": false
+  },
+  {
+    "type": "lessons"
+  },
+  {
+    "type": "forget-lesson",
+    "id": "l4"
+  },
+  {
+    "type": "goal",
+    "text": "a kick that cuts through at -14 LUFS"
+  },
+  {
+    "type": "goal"
+  },
+  {
+    "type": "stop-goal"
+  },
+  {
+    "type": "stop-loop"
+  },
+  {
+    "type": "stop-daw"
+  },
+  {
+    "type": "daw-message",
+    "text": "Kumi · done"
+  },
+  {
+    "type": "daw-recording"
+  },
+  {
+    "type": "stop-job",
+    "id": 3
+  },
+  {
+    "type": "run-job-again",
+    "id": 3
+  },
+  {
+    "type": "background"
+  },
+  {
+    "type": "carry-on",
+    "job": 3
+  },
+  {
+    "type": "palette"
+  },
+  {
+    "type": "palette-gather",
+    "files": [
+      {
+        "path": "/Samples/Kicks/Kick 808.wav",
+        "name": "Kick 808",
+        "song": false,
+        "class": "kick"
+      },
+      {
+        "path": "/Music/Night Drive.wav",
+        "name": "Night Drive",
+        "song": true
+      }
+    ]
+  },
+  {
+    "type": "palette-remove",
+    "path": "/Samples/Kicks/Kick 808.wav",
+    "size": 48210,
+    "mtime": 1760000000000
+  },
+  {
+    "type": "palette-command",
+    "words": "use Drums"
+  },
+  {
+    "type": "answer-set",
+    "choice": "open"
+  },
+  {
+    "type": "answer-set",
+    "choice": "copy"
+  },
+  {
+    "type": "answer-set",
+    "choice": "cancel"
+  },
+  {
+    "type": "focus-body",
+    "request": {
+      "type": "tree",
+      "trackRef": "7:track:0"
+    }
+  },
+  {
+    "type": "focus-body",
+    "request": {
+      "type": "notes",
+      "itemRef": "7:clip_slot:0:2"
+    }
+  },
+  {
+    "type": "focus-body",
+    "request": {
+      "type": "grid",
+      "trackRef": "7:track:0",
+      "index": 2.0
+    }
+  },
+  {
+    "type": "focus-body",
+    "request": {
+      "type": "timeline"
+    }
+  },
+  {
+    "type": "focus-body",
+    "request": {
+      "type": "tracker",
+      "itemRef": "pattern:3"
+    }
+  },
+  {
+    "type": "focus-body",
+    "request": {
+      "type": "tracker"
+    }
+  },
+  {
+    "type": "focus-body",
+    "request": {
+      "type": "matrix"
+    }
+  },
+  {
+    "type": "focus-body",
+    "request": {
+      "type": "keyzones",
+      "itemRef": "instrument:1"
+    }
+  },
+  {
+    "type": "focus-body",
+    "request": {
+      "type": "routing",
+      "trackRef": "track:2"
+    }
+  },
+  {
+    "type": "focus-body",
+    "request": {
+      "type": "mixer",
+      "trackRef": "track:2"
+    }
+  },
+  {
+    "type": "focus-body",
+    "request": {
+      "type": "mixer"
+    }
+  }
+]

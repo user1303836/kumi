@@ -235,7 +235,8 @@ pub enum FocusBody {
 }
 
 /// The kind of a body FOCUS draws.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 #[non_exhaustive]
 pub enum BodyKind {
     Tree,
@@ -269,7 +270,8 @@ impl BodyKind {
 }
 
 /// A body to read: a track's tree, an item's notes, a track's grid around a section, the timeline.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "kebab-case", rename_all_fields = "camelCase")]
 #[non_exhaustive]
 pub enum BodyRequest {
     Tree {
@@ -285,6 +287,7 @@ pub enum BodyRequest {
     Timeline,
     /// A pattern (or phrase) by its reference; the one in the editor when None.
     Tracker {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         item_ref: Option<String>,
     },
     Matrix,
@@ -296,6 +299,7 @@ pub enum BodyRequest {
     },
     /// The mixer's strips around a track (the selected one when None).
     Mixer {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         track_ref: Option<String>,
     },
 }

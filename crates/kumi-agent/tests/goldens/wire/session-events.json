@@ -1920,6 +1920,11 @@
     "type": "palette"
   },
   {
+    "type": "aside",
+    "id": 2,
+    "text": "The kick and the bass share 60 Hz, so"
+  },
+  {
     "type": "text",
     "text": "Shortened the kick's decay."
   },
