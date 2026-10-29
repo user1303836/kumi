@@ -163,7 +163,8 @@ impl TuiApp {
             );
             return;
         };
-        let draft = self.0.state.borrow().editor.text();
+        // The editor gets each chip's whole paste.
+        let draft = self.0.state.borrow().editor.expanded();
         let file = tempfile::Builder::new().prefix("kumi-draft-").suffix(".md").tempfile().and_then(|file| {
             std::fs::write(file.path(), &draft)?;
             Ok(file)
