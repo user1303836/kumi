@@ -1,0 +1,29 @@
+# Posts a published release's notes to Discord's announcement channel by hand: one published before the webhook was
+# set, or one whose post failed. The tag's Installer run posts each new release itself, once it has published it.
+name: Release notes to Discord
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "The release's tag, such as v1.24.30"
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  post:
+    name: Post the release notes to Discord
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          sparse-checkout: scripts/discord_release.py
+          sparse-checkout-cone-mode: false
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+          DISCORD_RELEASES_WEBHOOK: ${{ secrets.DISCORD_RELEASES_WEBHOOK }}
+        run: python3 scripts/discord_release.py "$TAG"

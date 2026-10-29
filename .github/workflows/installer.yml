@@ -860,6 +860,7 @@ jobs:
       # published now, every install and migration having passed. Any other draft (notes to come, or written by hand)
       # stays a draft for whoever finishes it.
       - name: Publish the release when scripts/release.py wrote its notes
+        id: publish
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
@@ -881,6 +882,7 @@ jobs:
             done
             gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest=false
             echo "Published $TAG."
+            echo "published=true" >> "$GITHUB_OUTPUT"
           fi
           # Latest is the highest version published, so an older tag's build that finishes later doesn't take it back.
           # Set on every run, so a re-run finishes what a failed one left.
@@ -888,6 +890,24 @@ jobs:
           latest="$(grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' <<<"$tags" | sort -V | tail -n 1)"
           gh release edit "$latest" --repo "$GITHUB_REPOSITORY" --latest
           echo "The latest release is $latest."
+      # Its notes go to Discord's announcement channel once it's out. Only the run that published it posts, so a re-run
+      # doesn't post twice; without the secret nothing is posted, and a failed post doesn't fail the release (the
+      # "Release notes to Discord" workflow posts it by hand).
+      - name: Get the script that posts to Discord
+        if: steps.publish.outputs.published == 'true'
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          path: discord
+          sparse-checkout: scripts/discord_release.py
+          sparse-checkout-cone-mode: false
+      - name: Post the release notes to Discord
+        if: steps.publish.outputs.published == 'true'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          DISCORD_RELEASES_WEBHOOK: ${{ secrets.DISCORD_RELEASES_WEBHOOK }}
+        run: python3 discord/scripts/discord_release.py "$TAG"
 
   nightly-failed:
     # The nightly run is the only one before a tag that builds all six bundles with the release profile, REAPER's
