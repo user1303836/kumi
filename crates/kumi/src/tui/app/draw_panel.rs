@@ -33,7 +33,9 @@ fn say(lines: &mut Vec<Line>, text: &str, style: Style, width: i32) {
 }
 impl TuiApp {
     pub(super) fn draw_panel(&self, screen: &mut Screen, panel: &PanelRef, box_top: i32, left: i32) -> Option<Cursor> {
-        let width = 76.min(left - 2);
+        // The help is read rather than chosen from: it takes more of a wide window, so less of it wraps.
+        let widest = if matches!(&*panel.borrow(), Panel::Help { .. }) { 100 } else { 76 };
+        let width = widest.min(left - 2);
         let x = 3;
         let inner = width - 4;
         let space = box_top - 5;
@@ -167,7 +169,7 @@ impl TuiApp {
                                 None
                             };
                             let mut line = Line::new("", st::TEXT);
-                            line.spans = Some(row.spans.clone());
+                            line.spans = Some(row.spans.to_vec());
                             line.right = more.map(|s| sp(s, st::FAINT));
                             lines.push(line);
                         }
@@ -215,6 +217,29 @@ impl TuiApp {
                     }
                 }
             },
+            Panel::Help { scroll, shown, most } => {
+                let rows = super::help::help_rows(&self.help_sections(), inner);
+                // From under the header down to the box; how far it has scrolled is said beside the title, so no row
+                // loses its end to it.
+                let room = (space - 2).max(3);
+                (*shown, *most) = (room.min(rows.len() as i32), (rows.len() as i32 - room).max(0));
+                *scroll = (*scroll).clamp(0, *most);
+                let (above, below) = (*scroll, *most - *scroll);
+                let mut title = Line::new("Keys and commands", st::TITLE);
+                title.right = match (above > 0, below > 0) {
+                    (true, true) => Some(format!("↑ {above} · ↓ {below} more")),
+                    (true, false) => Some(format!("↑ {above} more")),
+                    (false, true) => Some(format!("↓ {below} more")),
+                    (false, false) => None,
+                }
+                .map(|more| sp(more, st::FAINT));
+                lines.push(title);
+                for row in rows.into_iter().skip(*scroll as usize).take(room as usize) {
+                    let mut line = Line::new("", st::TEXT);
+                    line.spans = Some(row);
+                    lines.push(line);
+                }
+            }
             Panel::Key { provider, secret, checking, status, .. } => {
                 let info = provider.row();
                 lines.push(Line::new(format!("Sign in to {}", info.name), st::TITLE));

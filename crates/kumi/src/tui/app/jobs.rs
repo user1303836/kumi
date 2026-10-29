@@ -82,12 +82,19 @@ impl TuiApp {
             let before = state.jobs.insert(status.id, status.clone());
             status.state.ended() && before.is_none_or(|before| !before.state.ended())
         };
-        self.job_status(status);
+        // Shown again from a log, a job's card comes back; its status in the terminal and its request carrying on don't.
+        let replaying = self.0.state.borrow().replaying;
+        if !replaying {
+            self.job_status(status);
+        }
         if ended {
             self.job_ended(status);
-            if status.when_done == kumi_agent::core::jobs::WhenDone::Continue && status.state != JobState::Interrupted {
+            if status.when_done == kumi_agent::core::jobs::WhenDone::Continue && status.state != JobState::Interrupted && !replaying {
                 self.0.state.borrow_mut().carry.push(status.id);
             }
+        }
+        if replaying {
+            return;
         }
         // Rows and the header's count tick while jobs run.
         let busy = self.busy();
@@ -463,7 +470,7 @@ impl TuiApp {
         if let Some(report) = detail.report.as_ref().filter(|r| !r.is_empty()) {
             lines.push((vec![], None));
             for row in render_markdown(&sanitize_text(report, &self.0.state.borrow().secrets), width.max(8), &Rc::new(st::TEXT)) {
-                lines.push((row.spans, None));
+                lines.push((row.spans.to_vec(), None));
             }
         } else if status.state.ended() {
             if let Some(line) = status.line.as_ref() {

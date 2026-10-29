@@ -1,7 +1,7 @@
-//! Whole screens of the full-screen app as Kumi 1.18.0 draws them for Live, at 120×36 and 160×40: FOCUS, NOW and
-//! HISTORY with each picture, the panels, the disconnect notices and the dashboards. Each screen is kept as plain text
-//! in tests/goldens/tui (one file per scene and size, trailing spaces trimmed), and FOCUS's scenes keep their colours
-//! too (`.styles.txt`, each row's runs of styles); `KUMI_BLESS=1` writes them again.
+//! Whole screens of the full-screen app as Kumi 1.18.0 draws them for Live, at 120×36 and 160×40 (the help at 80×30
+//! too): FOCUS, NOW and HISTORY with each picture, the panels, the disconnect notices and the dashboards. Each screen is
+//! kept as plain text in tests/goldens/tui (one file per scene and size, trailing spaces trimmed), and FOCUS's scenes
+//! keep their colours too (`.styles.txt`, each row's runs of styles); `KUMI_BLESS=1` writes them again.
 //!
 //! The same bytes on every machine and at any moment: times are given relative to now (saved 3 hours ago, a job
 //! started 65.02 s ago, a goal 185.02 s in), so the app's own clock only adds the milliseconds a scene takes; the
@@ -17,6 +17,8 @@ use std::{cell::Cell, rc::Rc};
 use support::*;
 
 const SIZES: [(i32, i32); 2] = [(120, 36), (160, 40)];
+/// The help is whole at 80 columns too, the width of a terminal beside the DAW.
+const HELP_SIZES: [(i32, i32); 3] = [(80, 30), (120, 36), (160, 40)];
 const HOUR: i64 = 3_600_000;
 
 fn golden(name: &str, actual: &str) {
@@ -873,10 +875,19 @@ scene!(panel_model_long, |width, height| {
     finish(h).await
 });
 
-scene!(notice_help, |width, height| {
+scene!(notice_help, HELP_SIZES, |width, height| {
     let h = open(width, height, Rc::new(Control::default())).await;
     h.type_text("/help\r").await;
     h.wait_for("ctrl+j").await;
+    finish(h).await
+});
+
+scene!(help_end, HELP_SIZES, |width, height| {
+    let h = open(width, height, Rc::new(Control::default())).await;
+    h.type_text("?").await;
+    h.wait_for("Keys and commands").await;
+    h.type_text("\x1b[F").await;
+    h.wait_for("/quit").await;
     finish(h).await
 });
 
@@ -935,15 +946,37 @@ scene!(catch_up_notices, |width, height| {
 });
 
 fn resumed(extra: Value) -> Value {
+    let width = json!({"id":"old001:c4","family":"mixer","title":"Bass width 100% → 140%","state":"expired","note":"From an earlier session, so Kumi can't undo it now.","at":1});
+    let filter = json!({"id":"old001:c5","family":"parameter","title":"Operator · Filter Freq 1.20 kHz → 800 Hz","state":"expired","note":"From an earlier session, so Kumi can't undo it now.","at":2});
+    let event = |event: Value| json!({"kind":"event","at":1,"event":event});
+    // What its log holds of it: each request, and what happened in its answer.
+    let replay = json!({"before":0,"lines":[
+        {"kind":"request","at":1,"text":"make the bass wider"},
+        event(json!({"type":"state","state":"running"})),
+        event(json!({"type":"tool-start","id":"t1","name":"live_discover"})),
+        event(json!({"type":"tool-end","id":"t1","name":"live_discover","isError":false,"elapsedMs":420})),
+        event(json!({"type":"tool-start","id":"t2","name":"make_changes"})),
+        event(json!({"type":"change","change":width})),
+        event(json!({"type":"tool-end","id":"t2","name":"make_changes","isError":false,"elapsedMs":900})),
+        event(json!({"type":"text","text":"Widened it to 140%, keeping the sub mono."})),
+        event(json!({"type":"turn-complete","result":{"stopReason":"completed"},"elapsedMs":2100})),
+        event(json!({"type":"state","state":"idle"})),
+        {"kind":"request","at":2,"text":"and a bit darker"},
+        event(json!({"type":"state","state":"running"})),
+        event(json!({"type":"tool-start","id":"t3","name":"make_changes"})),
+        event(json!({"type":"change","change":filter})),
+        event(json!({"type":"tool-end","id":"t3","name":"make_changes","isError":false,"elapsedMs":700})),
+        event(json!({"type":"text","text":"Lowered the filter to 800 Hz."})),
+        event(json!({"type":"turn-complete","result":{"stopReason":"completed"},"elapsedMs":1600})),
+        event(json!({"type":"state","state":"idle"}))]});
     let mut resumed = json!({"type":"resumed","savedAt":now_ms()-3*HOUR,
         "lines":[
             {"role":"user","text":"make the bass wider"},
             {"role":"assistant","text":"Widened it to 140%, keeping the sub mono.","tools":["live_discover","make_changes"]},
             {"role":"user","text":"and a bit darker"},
             {"role":"assistant","text":"Lowered the filter to 800 Hz."}],
-        "changes":[
-            {"id":"old001:c4","family":"mixer","title":"Bass width 100% → 140%","state":"expired","note":"From an earlier session, so Kumi can't undo it now.","at":1},
-            {"id":"old001:c5","family":"parameter","title":"Operator · Filter Freq 1.20 kHz → 800 Hz","state":"expired","note":"From an earlier session, so Kumi can't undo it now.","at":2}]});
+        "changes":[width, filter],
+        "replay":replay});
     for (key, value) in extra.as_object().unwrap() {
         resumed[key] = value.clone();
     }
@@ -970,7 +1003,8 @@ scene!(resumed_chosen, |width, height| {
 
 scene!(resumed_unreadable, |width, height| {
     let h = open(width, height, Rc::new(Control::default())).await;
-    h.emit(resumed(json!({"unreadable":true})));
+    // Shown only, as its words.
+    h.emit(resumed(json!({"unreadable":true,"replay":null})));
     finish(h).await
 });
 

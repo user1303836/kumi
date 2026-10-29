@@ -51,7 +51,7 @@ case!(missing_default_model_and_commands_over_picker, async {
     assert!(!has(&h.screen(), "Choose a model"));
     h.has("Start a fresh conversation (the last one is kept)");
     h.type_text("help\r").await;
-    h.has("enter sends · ctrl+j or alt+enter starts a new line");
+    h.has("ctrl+j  alt+enter");
     h.type_text("/model\r").await;
     h.type_text("gpt-6/").await;
     h.has("filter: gpt-6/");
@@ -1255,4 +1255,148 @@ case!(export_copies_or_saves_this_conversation_and_share_offers_the_page, async 
     h.type_text("\x1b[B\x1b[B\x1b[B\r").await;
     assert_eq!(exported_files(folder.path(), "html").len(), 2);
     h.close().await;
+});
+case!(question_mark_opens_the_help_only_on_an_empty_box, async {
+    let h = Harness::new(120, 36);
+    h.start().await;
+    h.connect();
+    // After words, it's a question mark.
+    h.type_text("is it in key?").await;
+    h.has("is it in key?");
+    assert!(!has(&h.screen(), "Keys and commands"));
+    // On an empty box it opens the help, and again closes it, leaving the box empty.
+    h.type_text("\x15?").await;
+    h.wait_for("Keys and commands").await;
+    h.has("↑↓ to scroll · esc to close");
+    h.type_text("?").await;
+    h.wait_until_hidden("Keys and commands").await;
+    h.has("Ask Kumi about your Set");
+    // /help opens it too, and esc closes it.
+    h.type_text("/help\r").await;
+    h.wait_for("Keys and commands").await;
+    h.type_text("\x1b").await;
+    h.wait_until_hidden("Keys and commands").await;
+    // `/` in the help closes it and starts a command (the menu says /help shows the keys and commands).
+    h.type_text("?").await;
+    h.wait_for("Keys and commands").await;
+    h.type_text("/he").await;
+    h.wait_until_hidden("Send and steer").await;
+    h.wait_for("/help").await;
+    h.has("enter to choose · esc to close");
+    // Typing or pasting over the help closes it, and every word reaches the box: q and space too.
+    h.type_text("\x15?").await;
+    h.wait_for("Keys and commands").await;
+    h.type_text("q").await;
+    h.wait_until_hidden("Send and steer").await;
+    h.type_text("uieter drums").await;
+    h.has("quieter drums");
+    h.type_text("\x15?").await;
+    h.wait_for("Keys and commands").await;
+    h.type_text("\x1b[200~make the bass darker\x1b[201~").await;
+    h.wait_until_hidden("Send and steer").await;
+    h.has("make the bass darker");
+    // A space first, and a message can start with a question mark.
+    h.type_text("\x15 ").await;
+    h.type_text("?").await;
+    h.type_text(" why is the bass so loud").await;
+    assert!(!has(&h.screen(), "Send and steer"));
+    h.has("? why is the bass so loud");
+    // A Kumi at work opens it the same way.
+    h.type_text("\x15").await;
+    h.emit(json!({"type":"state","state":"running"}));
+    h.type_text("?").await;
+    h.wait_for("Keys and commands").await;
+    h.close().await;
+});
+case!(a_free_answer_that_starts_with_a_question_mark_is_words, async {
+    let h = Harness::new(120, 36);
+    h.start().await;
+    h.connect();
+    h.type_text("sidechain the bass\r").await;
+    h.emit(json!({"type":"state","state":"running"}));
+    h.emit(json!({"type":"text","text":"Which bass should duck under the kick?\n\n1. Sub Bass\n2. Reese"}));
+    h.emit(json!({"type":"turn-complete","result":{"stopReason":"completed"},"elapsedMs":900}));
+    h.emit(json!({"type":"state","state":"idle"}));
+    h.has("Your answer");
+    // The answers close, and the `?` goes into the box with the rest: the help doesn't open.
+    h.type_text("?").await;
+    h.type_text(" not sure yet").await;
+    assert!(!has(&h.screen(), "Your answer") && !has(&h.screen(), "Keys and commands"));
+    h.has("? not sure yet");
+    h.close().await;
+});
+/// How many of the help's rows are above what shows, and below it, as its title says.
+fn help_scrolled(h: &Harness) -> (usize, usize) {
+    let counts = regex::Regex::new(r"Keys and commands *(?:↑ (\d+) · ↓ (\d+) more|↑ (\d+) more|↓ (\d+) more)?").unwrap();
+    let screen = h.screen().join("\n");
+    let found = counts.captures(&screen).expect("the help is open");
+    let count = |at: usize| found.get(at).map_or(0, |count| count.as_str().parse::<usize>().unwrap());
+    (count(1) + count(3), count(2) + count(4))
+}
+case!(the_help_pages_to_its_end_at_every_size, async {
+    for (width, height) in [(80, 30), (120, 36), (160, 40)] {
+        let h = Harness::new(width, height);
+        h.start().await;
+        h.connect();
+        h.type_text("?").await;
+        h.wait_for("Keys and commands").await;
+        let (above, most) = help_scrolled(&h);
+        assert!(above == 0 && most > 0, "{above} rows above and {most} below at {width}×{height}");
+        // Page by page to its end: every section, and the commands this session offers (each a row of its own).
+        let mut seen = h.screen().join("\n");
+        for page in 1.. {
+            h.type_text("\x1b[6~").await;
+            seen.push_str(&h.screen().join("\n"));
+            if help_scrolled(&h).1 == 0 {
+                break;
+            }
+            assert!(page < 12, "the help never ends at {width}×{height}");
+        }
+        assert_eq!(help_scrolled(&h), (most, 0), "at {width}×{height}");
+        for wanted in ["Send and steer", "Move around", "The pane", "Edit", "Stop and take back", "Commands"] {
+            assert!(seen.contains(wanted), "{wanted} isn't in the help at {width}×{height}");
+        }
+        let offered = ["/new", "/undo", "/refresh", "/copy", "/export", "/share", "/loop", "/status", "/changelog", "/help", "/quit"];
+        for command in offered {
+            assert!(seen.contains(&format!("{command}  ")), "{command} isn't in the help at {width}×{height}");
+        }
+        // Only what this session has: no models to choose, no side questions, no voice, no jobs.
+        for command in ["/model", "/btw", "/voice", "/jobs", "/memory", "/resume"] {
+            assert!(!seen.contains(&format!("{command}  ")), "{command} is in the help at {width}×{height}");
+        }
+        assert!(!seen.contains("ctrl+t  ") && !seen.contains("ctrl+b  "), "at {width}×{height}");
+        // Home goes back to the top, end to the end, and ↑ a row up.
+        h.type_text("\x1b[H").await;
+        assert_eq!(help_scrolled(&h), (0, most));
+        h.type_text("\x1b[F").await;
+        assert_eq!(help_scrolled(&h), (most, 0));
+        h.type_text("\x1b[A").await;
+        assert_eq!(help_scrolled(&h), (most - 1, 1));
+        h.close().await;
+    }
+});
+case!(with_the_mouse_off_the_help_leaves_out_the_wheel_and_kumis_clicks, async {
+    for mouse in [true, false] {
+        let h = Harness::with(120, 36, Rc::new(Control::default()), |o| o.mouse = mouse);
+        h.start().await;
+        h.connect();
+        h.type_text("?").await;
+        h.wait_for("Keys and commands").await;
+        let mut seen = h.screen().join("\n");
+        for page in 1.. {
+            h.type_text("\x1b[6~").await;
+            seen.push_str(&h.screen().join("\n"));
+            if help_scrolled(&h).1 == 0 {
+                break;
+            }
+            assert!(page < 12, "the help never ends");
+        }
+        // The terminal's own selection in place of Kumi's drag, and no wheel, shift+drag, clicks or ×.
+        let mouse_is = if mouse { "on" } else { "off" };
+        assert_eq!(seen.contains("The mouse is your terminal's"), !mouse, "with the mouse {mouse_is}");
+        for words in ["wheel", "shift+drag", "click", "×"] {
+            assert_eq!(seen.contains(words), mouse, "{words}, with the mouse {mouse_is}");
+        }
+        h.close().await;
+    }
 });

@@ -278,6 +278,43 @@
     "unreadable": true
   },
   {
+    "type": "resumed",
+    "savedAt": 1760000000000,
+    "lines": [
+      {
+        "role": "user",
+        "text": "make the kick punchier"
+      }
+    ],
+    "replay": {
+      "before": 3,
+      "earlier": [
+        {
+          "role": "user",
+          "text": "make the kick punchier"
+        }
+      ],
+      "lines": [
+        {
+          "kind": "request",
+          "at": 1760000000000,
+          "text": "and the snare",
+          "files": [
+            "snare.wav"
+          ]
+        },
+        {
+          "kind": "event",
+          "at": 1760000000001,
+          "event": {
+            "type": "text",
+            "text": "Tightened the snare."
+          }
+        }
+      ]
+    }
+  },
+  {
     "type": "set-asked",
     "ask": {
       "id": "mgj6k3cw0a0b0c",

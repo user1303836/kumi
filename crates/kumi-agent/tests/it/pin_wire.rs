@@ -18,6 +18,7 @@ use kumi_agent::core::{
     match_run::{MatchState, MatchStatus, MatchStop},
     palette::{Gathered, PaletteFile, PaletteView},
     protocol::{op, Capabilities, Op},
+    session_log::{LogHeader, LogLine, LogRequest, Replay},
 };
 use kumi_listening::{
     checklist::{Change as RowChange, Row},
@@ -390,8 +391,25 @@ fn events() -> Vec<SessionEvent> {
         changes: Some(vec![change("c1", ChangeFamily::Parameter, "Decay 400 → 250 ms", ChangeState::Expired)]),
         chosen: Some(true),
         unreadable: Some(false),
+        replay: None,
     });
-    events.push(SessionEvent::Resumed { saved_at: AT, lines: vec![], changes: None, chosen: None, unreadable: Some(true) });
+    events.push(SessionEvent::Resumed { saved_at: AT, lines: vec![], changes: None, chosen: None, unreadable: Some(true), replay: None });
+    // Taken up with its log: the words from before it began, then its last requests as they happened.
+    events.push(SessionEvent::Resumed {
+        saved_at: AT,
+        lines: vec![TranscriptLine { role: TranscriptRole::User, text: "make the kick punchier".into(), tools: None }],
+        changes: None,
+        chosen: None,
+        unreadable: None,
+        replay: Some(Replay {
+            before: 3,
+            earlier: vec![TranscriptLine { role: TranscriptRole::User, text: "make the kick punchier".into(), tools: None }],
+            lines: vec![
+                LogLine::Request(LogRequest { at: AT, text: "and the snare".into(), files: vec!["snare.wav".into()], pinned: None }),
+                LogLine::Event { at: AT + 1, event: SessionEvent::Kernel(KernelEvent::Text { text: "Tightened the snare.".into() }) },
+            ],
+        }),
+    });
     events.push(SessionEvent::SetAsked {
         ask: Some(SetAsk {
             id: "mgj6k3cw0a0b0c".into(),
@@ -928,6 +946,49 @@ fn every_session_event_keeps_its_wire_shape() {
     let variants: BTreeSet<&str> = events.iter().map(variant).collect();
     assert_eq!(variants, BTreeSet::from(VARIANTS), "every session event is pinned");
     pinned::<Vec<SessionEvent>>("session-events.json", &events);
+}
+
+/// A conversation's log is saved data that this Kumi and later ones read back, line by line: a line that no longer reads
+/// is skipped, so each kind keeps its shape (a header with and without the conversation it copies, a request with and
+/// without its files and what it pointed at, an event, a model message and a save).
+#[test]
+fn every_line_of_a_conversations_log_keeps_its_shape() {
+    let header = |from: Option<&str>| {
+        LogLine::Header(LogHeader {
+            v: 1,
+            id: "mv66me0m3fa91c".into(),
+            at: AT,
+            kumi: "1.25.0".into(),
+            before: 12,
+            from: from.map(Into::into),
+        })
+    };
+    let lines = vec![
+        header(None),
+        header(Some("mv66me0m3fa91b")),
+        LogLine::Request(LogRequest { at: AT + 1, text: "make the bass wider".into(), files: vec![], pinned: None }),
+        LogLine::Request(LogRequest {
+            at: AT + 2,
+            text: "and this one darker".into(),
+            files: vec!["bass.wav".into()],
+            pinned: Some(pins()[0].clone()),
+        }),
+        LogLine::Event { at: AT + 3, event: SessionEvent::Kernel(KernelEvent::Text { text: "Widened it.".into() }) },
+        LogLine::Message { at: AT + 4, message: serde_json::json!({"role":"assistant","content":[{"type":"text","text":"Widened it."}]}) },
+        LogLine::Saved { at: AT + 5, saved_at: AT + 4, turns: 2 },
+    ];
+    let kinds: BTreeSet<&str> = lines
+        .iter()
+        .map(|line| match line {
+            LogLine::Header(_) => "header",
+            LogLine::Request(_) => "request",
+            LogLine::Event { .. } => "event",
+            LogLine::Message { .. } => "message",
+            LogLine::Saved { .. } => "saved",
+        })
+        .collect();
+    assert_eq!(kinds.len(), 5, "every kind of line is pinned");
+    pinned::<Vec<LogLine>>("log-lines.json", &lines);
 }
 
 /// The views FOCUS draws, as the integration hands them to the app, and the connection's states and causes.
