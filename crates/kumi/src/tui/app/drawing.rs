@@ -741,7 +741,10 @@ impl TuiApp {
         } else if let Some(voice) = &voice {
             voice.hint.clone()
         } else if busy && !state.editor.is_empty() && !is_command(string::trim(&state.editor.text())) {
-            if state.current.is_some() || state.pending_turn {
+            // As submit has it, a message naming something with @ waits for the answer: steering takes words alone.
+            if (state.current.is_some() || state.pending_turn) && !state.editor.references().is_empty() {
+                self.keys_hint(&[(&["composer.send"], "sends after the answer"), (&["app.stop"], "stops")])
+            } else if state.current.is_some() || state.pending_turn {
                 self.keys_hint(&[(&["composer.send"], "sends now"), (&["composer.send-after"], "after"), (&["app.stop"], "stops")])
             } else {
                 self.keys_hint(&[(&["composer.send"], "sends when ready")])
