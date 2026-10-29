@@ -1,5 +1,6 @@
 #![allow(dead_code)]
 use async_trait::async_trait;
+use futures::FutureExt;
 use kumi::{
     input::{ByteListener, TerminalInput},
     terminal::Terminal,
@@ -12,14 +13,21 @@ use kumi::{
     },
 };
 use kumi_agent::core::contracts::*;
+use kumi_agent::core::protocol::{
+    cloud_provider, context_window, models_answer, models_view, music_view, op, part, provider_name, tell_now, Capabilities, HandleSide,
+    ModelsView, Op, Reply, SessionHandle,
+};
+use kumi_ai::providers::ProviderId;
 use kumi_types::contracts::*;
 use kumi_types::errors::RuntimeError;
 use serde_json::Value;
 use std::{
     cell::{Cell, RefCell},
-    rc::Rc,
+    rc::{Rc, Weak},
     time::Duration,
 };
+#[path = "absent.rs"]
+mod absent;
 #[path = "vt.rs"]
 pub mod vt;
 #[derive(Default)]
@@ -120,6 +128,10 @@ pub struct Control {
     pub map: RefCell<Option<kumi::map::LoadMap>>,
     /// The models to talk to, and the sign-ins.
     pub models: RefCell<Option<Rc<dyn kumi::models::ModelController>>>,
+    /// Itself, once the harness hands it to the screen: what a request told carries on with after `tell` returns.
+    this: RefCell<Weak<Control>>,
+    /// The handle's side, as a session's in this process has it: its asides', /slots' and sign-ins' events and stops.
+    side: Rc<HandleSide>,
 }
 impl Default for Control {
     fn default() -> Self {
@@ -150,6 +162,8 @@ impl Default for Control {
             slots: RefCell::default(),
             map: RefCell::default(),
             models: RefCell::default(),
+            this: RefCell::default(),
+            side: HandleSide::new(),
         }
     }
 }
@@ -191,8 +205,8 @@ impl Control {
         self.called.notify_one();
     }
 }
-#[async_trait(?Send)]
-impl SessionController for Control {
+/// What the fake session does with each request.
+impl Control {
     async fn start(&self) -> Result<(), RuntimeError> {
         self.call("start");
         Ok(())
@@ -229,9 +243,6 @@ impl SessionController for Control {
         self.call(format!("submit:{s}"));
         self.pins.borrow_mut().push(pin);
         Ok(())
-    }
-    fn has_attachments(&self) -> bool {
-        true
     }
     async fn submit_with(&self, s: &str, pin: Option<PinnedNode>, attachments: Vec<Attachment>) -> Result<(), RuntimeError> {
         if attachments.is_empty() {
@@ -277,9 +288,6 @@ impl SessionController for Control {
         self.state.set(TurnState::Closed);
         Ok(())
     }
-    fn status(&self) -> SessionStatus {
-        SessionStatus { state: self.state.get(), connection: ConnectionState::Connected, turns: 0, max_turns: Some(30), observation: None }
-    }
     async fn undo(&self, id: Option<&str>) -> Result<Option<ChangeRecord>, RuntimeError> {
         self.call(format!("undo:{}", id.unwrap_or("last")));
         let c = self.undo.borrow().clone();
@@ -287,9 +295,6 @@ impl SessionController for Control {
             self.emit(SessionEvent::Change { change });
         }
         Ok(c)
-    }
-    fn has_take_back(&self) -> bool {
-        self.enabled("take-back")
     }
     async fn take_back_plan(&self) -> Result<Vec<Requested>, RuntimeError> {
         self.call("take-back-plan");
@@ -304,15 +309,9 @@ impl SessionController for Control {
         self.get("taken-back").ok_or_else(|| RuntimeError::plain("Nothing to take back."))
     }
 
-    fn has_reconnect(&self) -> bool {
-        self.enabled("reconnect")
-    }
     async fn reconnect(&self) -> Result<(), RuntimeError> {
         self.call("reconnect");
         Ok(())
-    }
-    fn has_aside(&self) -> bool {
-        self.enabled("aside")
     }
     async fn aside(&self, question: &str, on_text: OnText, signal: Option<kumi_common::abort::Signal>) -> Result<String, RuntimeError> {
         self.call(format!("aside:{question}"));
@@ -328,35 +327,20 @@ impl SessionController for Control {
         }
         Ok(text)
     }
-    fn has_goal(&self) -> bool {
-        self.enabled("goal")
-    }
     async fn goal(&self, text: Option<&str>) -> Result<(), RuntimeError> {
         self.call(format!("goal:{}", text.unwrap_or("")));
         Ok(())
-    }
-    fn has_stop_goal(&self) -> bool {
-        self.enabled("goal")
     }
     async fn stop_goal(&self) -> Result<bool, RuntimeError> {
         self.call("stop-goal");
         Ok(true)
     }
-    fn has_stop_loop(&self) -> bool {
-        self.enabled("goal")
-    }
     async fn stop_loop(&self) -> Result<bool, RuntimeError> {
         self.call("stop-loop");
         Ok(true)
     }
-    fn has_recipes(&self) -> bool {
-        self.enabled("recipes")
-    }
     async fn recipes(&self) -> Result<Vec<RecipeSummary>, RuntimeError> {
         Ok(self.get("recipes").unwrap_or_default())
-    }
-    fn has_instant(&self) -> bool {
-        self.enabled("instant")
     }
     async fn instant(&self, text: &str) -> Result<Option<InstantOutcome>, RuntimeError> {
         self.call(format!("instant:{text}"));
@@ -365,15 +349,9 @@ impl SessionController for Control {
         self.emit(SessionEvent::Change { change: change.clone() });
         Ok(Some(InstantOutcome { text: change.title, is_error: false }))
     }
-    fn has_run_recipe(&self) -> bool {
-        self.enabled("recipes")
-    }
     async fn run_recipe(&self, name: &str, with: JsonObject) -> Result<RecipeOutcome, RuntimeError> {
         self.call(if with.is_empty() { format!("run-recipe:{name}") } else { format!("run-recipe:{name} {}", Value::Object(with)) });
         Ok(self.get("recipe-result").unwrap())
-    }
-    fn has_forget_recipe(&self) -> bool {
-        self.enabled("recipes")
     }
     async fn forget_recipe(&self, name: &str) -> Result<bool, RuntimeError> {
         self.call(format!("forget-recipe:{name}"));
@@ -383,21 +361,12 @@ impl SessionController for Control {
             None => Ok(true),
         }
     }
-    fn has_techniques(&self) -> bool {
-        self.enabled("techniques")
-    }
     async fn techniques(&self) -> Result<Vec<TechniqueSummary>, RuntimeError> {
         Ok(self.get("techniques").unwrap_or_default())
-    }
-    fn has_forget_technique(&self) -> bool {
-        self.enabled("techniques")
     }
     async fn forget_technique(&self, id: &str) -> Result<bool, RuntimeError> {
         self.call(format!("forget-technique:{id}"));
         Ok(true)
-    }
-    fn has_answer_technique(&self) -> bool {
-        self.enabled("techniques")
     }
     async fn answer_technique(&self, keep: bool) -> Result<bool, RuntimeError> {
         self.call(format!("answer-technique:{}", if keep { "yes" } else { "no" }));
@@ -409,28 +378,16 @@ impl SessionController for Control {
             Picked::Technique { name, keep } => format!("picked:technique:{name}:{}", if keep { "yes" } else { "no" }),
         });
     }
-    fn has_taste(&self) -> bool {
-        self.enabled("taste")
-    }
     async fn taste(&self) -> Result<Vec<KeptLine>, RuntimeError> {
         Ok(self.get("taste").unwrap_or_default())
-    }
-    fn has_forget_taste(&self) -> bool {
-        self.enabled("taste")
     }
     async fn forget_taste(&self, id: &str) -> Result<bool, RuntimeError> {
         self.call(format!("forget-taste:{id}"));
         Ok(true)
     }
-    fn has_forget(&self) -> bool {
-        self.memory.borrow().is_some()
-    }
     async fn forget(&self, id: &str) -> Result<Option<MemoryNote>, RuntimeError> {
         self.call(format!("forget:{id}"));
         Ok(self.get("forgot"))
-    }
-    fn has_change_note(&self) -> bool {
-        self.memory.borrow().is_some()
     }
     async fn change_note(&self, id: &str, change: NoteChange) -> Result<Option<MemoryNote>, RuntimeError> {
         self.call(format!("change-note:{id} {change:?}"));
@@ -445,21 +402,12 @@ impl SessionController for Control {
         }
         Ok(Some(note.clone()))
     }
-    fn answering_fallback(&self) -> Option<String> {
-        self.get::<String>("answering")
-    }
-    fn has_daw_message(&self) -> bool {
-        true
-    }
     async fn daw_message(&self, text: &str) -> Result<bool, RuntimeError> {
         self.call(&format!("daw-message:{text}"));
         Ok(true)
     }
     async fn daw_recording(&self) -> Result<Option<bool>, RuntimeError> {
         Ok(self.get::<bool>("recording"))
-    }
-    fn has_palette(&self) -> bool {
-        self.enabled("palette")
     }
     async fn palette(&self) -> Result<Option<kumi_agent::core::palette::PaletteView>, RuntimeError> {
         Ok(self.palette.borrow().clone())
@@ -513,15 +461,6 @@ impl SessionController for Control {
         self.call("palette-names");
         Ok(self.get::<Vec<kumi_agent::core::palette::PaletteListed>>("palettes").unwrap_or_default())
     }
-    fn has_jobs(&self) -> bool {
-        self.enabled("jobs")
-    }
-    fn jobs(&self) -> Vec<kumi_agent::core::jobs::JobStatus> {
-        self.get("jobs").unwrap_or_default()
-    }
-    fn job(&self, id: u32) -> Option<kumi_agent::core::jobs::JobDetail> {
-        self.get::<Vec<kumi_agent::core::jobs::JobDetail>>("job-details").unwrap_or_default().into_iter().find(|d| d.status.id == id)
-    }
     fn stop_job(&self, id: u32) -> bool {
         self.call(format!("stop-job:{id}"));
         true
@@ -534,15 +473,9 @@ impl SessionController for Control {
         self.call("background");
         self.get::<String>("background-refused").map_or(Ok(7), Err)
     }
-    fn can_background(&self) -> bool {
-        self.enabled("can-background")
-    }
     fn carry_on(&self, job: u32) -> bool {
         self.call(format!("carry-on:{job}"));
         true
-    }
-    fn has_stop_live(&self) -> bool {
-        self.stop.get()
     }
     async fn stop_live(&self) -> Result<bool, RuntimeError> {
         self.call("stop-live");
@@ -554,27 +487,15 @@ impl SessionController for Control {
         }
         Ok(success)
     }
-    fn has_steer(&self) -> bool {
-        self.steer_enabled.get()
-    }
     fn steer(&self, text: &str) -> bool {
         self.call(format!("steer:{text}"));
         self.steer_result.get()
     }
-    fn has_memory(&self) -> bool {
-        self.memory.borrow().is_some()
-    }
     async fn memory(&self) -> Result<Option<MemoryView>, RuntimeError> {
         Ok(self.memory.borrow().clone())
     }
-    fn has_conversations(&self) -> bool {
-        !self.conversations.borrow().is_empty()
-    }
     async fn conversations(&self) -> Result<Vec<ConversationSummary>, RuntimeError> {
         Ok(self.conversations.borrow().clone())
-    }
-    fn has_resume_conversation(&self) -> bool {
-        self.has_conversations()
     }
     async fn resume_conversation(&self, id: &str) -> Result<bool, RuntimeError> {
         self.call(format!("resume:{id}"));
@@ -635,11 +556,33 @@ impl SessionController for Control {
         self.call("export");
         self.export.borrow().clone()
     }
-    fn has_library(&self) -> bool {
-        self.library.borrow().is_some()
+    async fn device_tree(&self, s: &str) -> Result<Option<DeviceTree>, RuntimeError> {
+        self.call(format!("tree:{s}"));
+        Ok(self.tree.borrow().clone())
     }
-    fn library(&self) -> Option<LibraryStatus> {
-        self.library.borrow().clone()
+    async fn clip_view(&self, s: &str) -> Result<Option<ClipView>, RuntimeError> {
+        self.call(format!("clip:{s}"));
+        Ok(self.clip.borrow().clone())
+    }
+    async fn session_strip(&self, _track: &str, scene: f64) -> Result<Option<SessionStrip>, RuntimeError> {
+        self.call(format!("session:{scene}"));
+        Ok(self.session.borrow().clone())
+    }
+    async fn arrangement_strip(&self) -> Result<Option<ArrangementStrip>, RuntimeError> {
+        self.call("arrangement");
+        Ok(self.arrangement.borrow().clone())
+    }
+    async fn focus_body(&self, request: &BodyRequest) -> Result<Option<FocusBody>, RuntimeError> {
+        Ok(match request {
+            BodyRequest::Tree { track_ref } => self.device_tree(track_ref).await?.map(FocusBody::Tree),
+            BodyRequest::Notes { item_ref } => self.clip_view(item_ref).await?.map(FocusBody::Notes),
+            BodyRequest::Grid { track_ref, index } => self.session_strip(track_ref, *index).await?.map(FocusBody::Grid),
+            BodyRequest::Timeline => self.arrangement_strip().await?.map(FocusBody::Timeline),
+            other => {
+                self.call(format!("own:{other:?}"));
+                self.own.borrow().clone().filter(|own| own_kind(own) == other.kind() && !self.own_refused.get())
+            }
+        })
     }
     fn music(&self) -> Option<Rc<kumi_listening::music::learning::Music>> {
         self.music.borrow().clone()
@@ -653,54 +596,214 @@ impl SessionController for Control {
     fn model_controls(&self) -> Option<Rc<dyn kumi::models::ModelController>> {
         self.models.borrow().clone()
     }
-    fn has_device_tree(&self) -> bool {
-        self.tree.borrow().is_some()
+    /// Each request, to the method above that answered it before the protocol; what the fake has no method for, as a
+    /// session without it answers.
+    async fn serve(&self, op: Op) -> Result<Reply, RuntimeError> {
+        // The model requests, from the fake's models as a session's.
+        if let Some(answer) = models_answer(&op, self.model_controls(), &self.side).await {
+            return answer;
+        }
+        Ok(match op {
+            Op::Start(op::Start {}) => Reply::Start(self.start().await?),
+            // Only a message with references takes the way for them, as a session's.
+            Op::Submit(op::Submit { input, pinned, attachments, references }) => Reply::Submit(if !references.is_empty() {
+                self.submit_with_references(&input, pinned, attachments, references).await?
+            } else if attachments.is_empty() {
+                self.submit(&input, pinned).await?
+            } else {
+                self.submit_with(&input, pinned, attachments).await?
+            }),
+            Op::References(op::References { query, limit }) => Reply::References(self.references(&query, limit).await?),
+            Op::Steer(op::Steer { text }) => Reply::Steer(self.steer(&text)),
+            Op::Aside(op::Aside { id, question }) => {
+                Reply::Aside(self.side.aside(id, |on_text, signal| self.aside(&question, on_text, Some(signal))).await?)
+            }
+            Op::StopAside(op::StopAside { id }) => Reply::StopAside(self.side.stop_aside(id)),
+            Op::Cancel(op::Cancel {}) => Reply::Cancel(self.cancel().await?),
+            Op::Close(op::Close {}) => Reply::Close(self.close().await?),
+            Op::Undo(op::Undo { id }) => Reply::Undo(self.undo(id.as_deref()).await?),
+            Op::TakeBackPlan(op::TakeBackPlan {}) => Reply::TakeBackPlan(self.take_back_plan().await?),
+            Op::TakeBack(op::TakeBack { to }) => Reply::TakeBack(self.take_back(to).await?),
+            Op::Refresh(op::Refresh {}) => Reply::Refresh(self.refresh().await?),
+            Op::NewConversation(op::NewConversation {}) => Reply::NewConversation(self.new_conversation().await?),
+            Op::Reconnect(op::Reconnect {}) => Reply::Reconnect(self.reconnect().await?),
+            Op::Reconfigure(op::Reconfigure {}) => Reply::Reconfigure(self.reconfigure().await?),
+            Op::Instant(op::Instant { text }) => Reply::Instant(self.instant(&text).await?),
+            Op::Pick(op::Pick { pick }) => Reply::Pick(self.picked(pick)),
+            Op::Conversations(op::Conversations {}) => Reply::Conversations(self.conversations().await?),
+            Op::AllConversations(op::AllConversations {}) => Reply::AllConversations(self.all_conversations().await?),
+            Op::FindConversation(op::FindConversation { word }) => Reply::FindConversation(self.find_conversation(&word).await?),
+            Op::ResumeConversation(op::ResumeConversation { id }) => Reply::ResumeConversation(self.resume_conversation(&id).await?),
+            Op::RenameConversation(op::RenameConversation { id, name }) => {
+                Reply::RenameConversation(self.rename_conversation(id.as_deref(), name.as_deref()).await?)
+            }
+            Op::PinConversation(op::PinConversation { id, pinned }) => Reply::PinConversation(self.pin_conversation(&id, pinned).await?),
+            Op::DeleteConversation(op::DeleteConversation { id }) => Reply::DeleteConversation(self.delete_conversation(&id).await?),
+            Op::ForkConversation(op::ForkConversation { name, before }) => Reply::ForkConversation(match before {
+                Some(before) => self.fork_conversation_before(name.as_deref(), before).await?,
+                None => self.fork_conversation(name.as_deref()).await?,
+            }),
+            Op::AnswerSet(op::AnswerSet { choice }) => Reply::AnswerSet(self.answer_set(choice).await?),
+            Op::ConversationNow(op::ConversationNow {}) => Reply::ConversationNow(self.conversation_now().await),
+            Op::ConversationLines(op::ConversationLines { id }) => Reply::ConversationLines(self.conversation_lines(&id).await?),
+            Op::ConversationToExport(op::ConversationToExport {}) => Reply::ConversationToExport(self.conversation_to_export().await),
+            Op::Memory(op::Memory {}) => Reply::Memory(self.memory().await?),
+            Op::Taste(op::Taste {}) => Reply::Taste(self.taste().await?),
+            Op::ForgetTaste(op::ForgetTaste { id }) => Reply::ForgetTaste(self.forget_taste(&id).await?),
+            Op::Forget(op::Forget { id }) => Reply::Forget(self.forget(&id).await?),
+            Op::ChangeNote(op::ChangeNote { id, change }) => Reply::ChangeNote(self.change_note(&id, change).await?),
+            Op::Recipes(op::Recipes {}) => Reply::Recipes(self.recipes().await?),
+            Op::RunRecipe(op::RunRecipe { name, with }) => Reply::RunRecipe(self.run_recipe(&name, with).await?),
+            Op::ForgetRecipe(op::ForgetRecipe { name }) => Reply::ForgetRecipe(self.forget_recipe(&name).await?),
+            Op::Techniques(op::Techniques {}) => Reply::Techniques(self.techniques().await?),
+            Op::ForgetTechnique(op::ForgetTechnique { id }) => Reply::ForgetTechnique(self.forget_technique(&id).await?),
+            Op::AnswerTechnique(op::AnswerTechnique { keep }) => Reply::AnswerTechnique(self.answer_technique(keep).await?),
+            Op::Goal(op::Goal { text }) => Reply::Goal(self.goal(text.as_deref()).await?),
+            Op::StopGoal(op::StopGoal {}) => Reply::StopGoal(self.stop_goal().await?),
+            Op::StopLoop(op::StopLoop {}) => Reply::StopLoop(self.stop_loop().await?),
+            Op::StopDaw(op::StopDaw {}) => Reply::StopDaw(self.stop_live().await?),
+            Op::DawMessage(op::DawMessage { text }) => Reply::DawMessage(self.daw_message(&text).await?),
+            Op::DawRecording(op::DawRecording {}) => Reply::DawRecording(self.daw_recording().await?),
+            Op::StopJob(op::StopJob { id }) => Reply::StopJob(self.stop_job(id)),
+            Op::RunJobAgain(op::RunJobAgain { id }) => Reply::RunJobAgain(self.run_job_again(id)),
+            Op::Background(op::Background {}) => Reply::Background(self.background()),
+            Op::CarryOn(op::CarryOn { job }) => Reply::CarryOn(self.carry_on(job)),
+            Op::Palette(op::Palette {}) => Reply::Palette(self.palette().await?),
+            Op::PaletteGather(op::PaletteGather { files }) => Reply::PaletteGather(self.palette_gather(files).await?),
+            Op::PaletteRemove(op::PaletteRemove { path, size, mtime }) => {
+                Reply::PaletteRemove(self.palette_remove(&path, size, mtime).await?)
+            }
+            Op::PaletteCommand(op::PaletteCommand { words }) => Reply::PaletteCommand(self.palette_command(&words).await?),
+            Op::PaletteNames(op::PaletteNames {}) => Reply::PaletteNames(self.palette_names().await?),
+            Op::Music(op::Music {}) => Reply::Music(music_view(&part(self.music())?).await),
+            Op::MusicFolders(op::MusicFolders {}) => Reply::MusicFolders(part(self.music())?.folders()),
+            Op::LearnMusic(op::LearnMusic { folders }) => Reply::LearnMusic(part(self.music())?.learn(folders)),
+            Op::SetMusicFolders(op::SetMusicFolders { folders }) => Reply::SetMusicFolders(part(self.music())?.set_folders(Some(folders))),
+            Op::HoldMusic(op::HoldMusic { held }) => Reply::HoldMusic(part(self.music())?.hold(held)),
+            Op::ForgetMusic(op::ForgetMusic {}) => {
+                let music = part(self.music())?;
+                Reply::ForgetMusic(music.forget().await)
+            }
+            Op::Map(op::Map {}) => {
+                let load = part(self.map_loader())?;
+                Reply::Map(load().await)
+            }
+            Op::Slots(op::Slots { id, words }) => Reply::Slots(self.side.slots(id, &words, &*part(self.slots_context())?).await),
+            Op::StopSlots(op::StopSlots { id }) => Reply::StopSlots(self.side.stop_slots(id)),
+            Op::StopSignIn(op::StopSignIn { id }) => Reply::StopSignIn(self.side.stop_sign_in(id)),
+            Op::FocusBody(op::FocusBody { request }) => Reply::FocusBody(self.focus_body(&request).await?),
+            // The rest (searches' memory, lessons, a pin as a recipe takes it), as a session without them answers.
+            op => return absent::answer(op),
+        })
     }
-    async fn device_tree(&self, s: &str) -> Result<Option<DeviceTree>, RuntimeError> {
-        self.call(format!("tree:{s}"));
-        Ok(self.tree.borrow().clone())
-    }
-    fn has_clip_view(&self) -> bool {
-        self.clip.borrow().is_some()
-    }
-    async fn clip_view(&self, s: &str) -> Result<Option<ClipView>, RuntimeError> {
-        self.call(format!("clip:{s}"));
-        Ok(self.clip.borrow().clone())
-    }
-    fn has_session_strip(&self) -> bool {
-        self.session.borrow().is_some()
-    }
-    async fn session_strip(&self, _track: &str, scene: f64) -> Result<Option<SessionStrip>, RuntimeError> {
-        self.call(format!("session:{scene}"));
-        Ok(self.session.borrow().clone())
-    }
-    fn has_arrangement_strip(&self) -> bool {
-        self.arrangement.borrow().is_some()
-    }
-    async fn arrangement_strip(&self) -> Result<Option<ArrangementStrip>, RuntimeError> {
-        self.call("arrangement");
-        Ok(self.arrangement.borrow().clone())
+}
+/// The fake session as the screen reaches it: what it shows, read as it's asked for, and its requests.
+#[async_trait(?Send)]
+impl SessionHandle for Control {
+    fn capabilities(&self) -> Capabilities {
+        let memory = self.memory.borrow().is_some();
+        let conversations = !self.conversations.borrow().is_empty();
+        let (taste, recipes, techniques, goal) =
+            (self.enabled("taste"), self.enabled("recipes"), self.enabled("techniques"), self.enabled("goal"));
+        Capabilities {
+            attachments: true,
+            steer: self.steer_enabled.get(),
+            aside: self.enabled("aside"),
+            reconnect: self.enabled("reconnect"),
+            conversations,
+            resume_conversation: conversations,
+            memory,
+            library: self.library.borrow().is_some(),
+            taste,
+            forget_taste: taste,
+            forget: memory,
+            change_note: memory,
+            recipes,
+            instant: self.enabled("instant"),
+            run_recipe: recipes,
+            forget_recipe: recipes,
+            techniques,
+            forget_technique: techniques,
+            answer_technique: techniques,
+            goal,
+            stop_goal: goal,
+            stop_loop: goal,
+            stop_daw: self.stop.get(),
+            daw_message: true,
+            jobs: self.enabled("jobs"),
+            palette: self.enabled("palette"),
+            device_tree: self.tree.borrow().is_some(),
+            clip_view: self.clip.borrow().is_some(),
+            session_strip: self.session.borrow().is_some(),
+            arrangement_strip: self.arrangement.borrow().is_some(),
+            music: self.music.borrow().is_some(),
+            map: self.map.borrow().is_some(),
+            slots: self.slots.borrow().is_some(),
+            models: self.models.borrow().is_some(),
+            take_back: self.enabled("take-back"),
+            // Watching, the goal's numbers, lessons and reconfiguring: none.
+            ..Capabilities::default()
+        }
     }
     fn can_show(&self, kind: BodyKind) -> bool {
         match kind {
-            BodyKind::Tree => self.has_device_tree(),
-            BodyKind::Notes => self.has_clip_view(),
-            BodyKind::Grid => self.has_session_strip(),
-            BodyKind::Timeline => self.has_arrangement_strip(),
+            BodyKind::Tree => self.tree.borrow().is_some(),
+            BodyKind::Notes => self.clip.borrow().is_some(),
+            BodyKind::Grid => self.session.borrow().is_some(),
+            BodyKind::Timeline => self.arrangement.borrow().is_some(),
             other => self.own.borrow().as_ref().is_some_and(|own| own_kind(own) == other),
         }
     }
-    async fn focus_body(&self, request: &BodyRequest) -> Result<Option<FocusBody>, RuntimeError> {
-        Ok(match request {
-            BodyRequest::Tree { track_ref } => self.device_tree(track_ref).await?.map(FocusBody::Tree),
-            BodyRequest::Notes { item_ref } => self.clip_view(item_ref).await?.map(FocusBody::Notes),
-            BodyRequest::Grid { track_ref, index } => self.session_strip(track_ref, *index).await?.map(FocusBody::Grid),
-            BodyRequest::Timeline => self.arrangement_strip().await?.map(FocusBody::Timeline),
-            other => {
-                self.call(format!("own:{other:?}"));
-                self.own.borrow().clone().filter(|own| own_kind(own) == other.kind() && !self.own_refused.get())
+    fn status(&self) -> SessionStatus {
+        SessionStatus { state: self.state.get(), connection: ConnectionState::Connected, turns: 0, max_turns: Some(30), observation: None }
+    }
+    fn answering_fallback(&self) -> Option<String> {
+        self.get::<String>("answering")
+    }
+    fn library(&self) -> Option<LibraryStatus> {
+        self.library.borrow().clone()
+    }
+    fn open_set(&self) -> Option<String> {
+        None
+    }
+    fn jobs(&self) -> Vec<kumi_agent::core::jobs::JobStatus> {
+        self.get("jobs").unwrap_or_default()
+    }
+    fn job(&self, id: u32) -> Option<kumi_agent::core::jobs::JobDetail> {
+        self.get::<Vec<kumi_agent::core::jobs::JobDetail>>("job-details").unwrap_or_default().into_iter().find(|d| d.status.id == id)
+    }
+    fn can_background(&self) -> bool {
+        self.enabled("can-background")
+    }
+    fn models(&self) -> Option<ModelsView> {
+        models_view(self.model_controls())
+    }
+    fn provider_name(&self, id: &str) -> String {
+        provider_name(self.model_controls(), id)
+    }
+    fn cloud_provider(&self, id: &str) -> Option<ProviderId> {
+        cloud_provider(self.model_controls(), id)
+    }
+    fn context_window(&self, model: &str) -> Option<f64> {
+        context_window(self.model_controls(), model)
+    }
+    /// The screen hears the fake's own events and the handle's side's (asides', /slots' and sign-ins' words) alike; the
+    /// harness stops the fake's own as the screen closes, as it always has.
+    fn listen(&self, on_event: Rc<dyn Fn(SessionEvent)>) {
+        self.side.listen(on_event.clone());
+        *self.emit.borrow_mut() = Some(on_event);
+    }
+    async fn send(&self, op: Op) -> Result<Reply, RuntimeError> {
+        self.serve(op).await
+    }
+    fn tell(&self, op: Op) {
+        let Some(this) = self.this.borrow().upgrade() else { return };
+        tell_now(
+            async move {
+                let _ = this.serve(op).await;
             }
-        })
+            .boxed_local(),
+        );
     }
 }
 /// The kind of a DAW's own body.
@@ -737,14 +840,14 @@ impl Harness {
     }
     /// The screen on `session`, reached through its protocol alone (one on a thread of its own, say): the harness's
     /// `control` isn't that session, and nothing it emits reaches the screen.
-    pub fn on(w: i32, h: i32, session: Rc<dyn kumi_agent::core::protocol::SessionHandle>, configure: impl FnOnce(&mut TuiOptions)) -> Self {
+    pub fn on(w: i32, h: i32, session: Rc<dyn SessionHandle>, configure: impl FnOnce(&mut TuiOptions)) -> Self {
         Self::built(w, h, Rc::new(Control::default()), Some(session), configure)
     }
     fn built(
         w: i32,
         h: i32,
         control: Rc<Control>,
-        session: Option<Rc<dyn kumi_agent::core::protocol::SessionHandle>>,
+        session: Option<Rc<dyn SessionHandle>>,
         configure: impl FnOnce(&mut TuiOptions),
     ) -> Self {
         let input = Rc::new(Input::default());
@@ -757,11 +860,13 @@ impl Harness {
         });
         let browsed = Rc::new(RefCell::new(vec![]));
         let notified = Rc::new(RefCell::new(vec![]));
-        let on_its_own = session.is_some();
-        let mut opts = match session {
-            Some(session) => TuiOptions::with_session(session, input.clone(), output.clone(), "live"),
-            None => TuiOptions::new(control.clone(), input.clone(), output.clone(), "live"),
-        };
+        // The fake is the screen's session unless one was given: the screen listens to it, which is where what it emits
+        // goes.
+        let session = session.unwrap_or_else(|| {
+            *control.this.borrow_mut() = Rc::downgrade(&control);
+            control.clone()
+        });
+        let mut opts = TuiOptions::new(session, input.clone(), output.clone(), "live");
         // No status or notification unless a test asks: none of this machine's terminal.
         opts.terminal = Some(TerminalProfile::quiet());
         let n = notified.clone();
@@ -780,10 +885,6 @@ impl Harness {
         opts.open_browser = Some(Rc::new(move |s| b.borrow_mut().push(s.into())));
         configure(&mut opts);
         let app = TuiApp::new(opts);
-        if !on_its_own {
-            let a = app.clone();
-            *control.emit.borrow_mut() = Some(Rc::new(move |e| a.handle_event(e)));
-        }
         Self { input, output, control, app, browsed, notified, vt: RefCell::new(vt::VirtualTerminal::new(w, h)), consumed: Cell::new(0) }
     }
     pub async fn start(&self) {

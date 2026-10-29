@@ -58,7 +58,7 @@ use crate::{
 };
 use futures::{future::LocalBoxFuture, task::noop_waker, FutureExt};
 use kumi_agent::core::contracts::*;
-use kumi_agent::core::protocol::{op, Capabilities, InProcess, Request, SessionHandle};
+use kumi_agent::core::protocol::{op, Capabilities, Request, SessionHandle};
 use kumi_agent::core::{
     goal::{GoalPhase, GoalStatus},
     goal_mode::{ObjectiveState, ObjectiveStatus, Verdict},
@@ -218,16 +218,8 @@ pub struct ConnectDaw {
 /// The DAW's part of first-run setup, as the app and its tests have always named it.
 pub use ConnectDaw as ConnectLive;
 impl TuiOptions {
-    pub fn new(controller: Rc<dyn SessionController>, input: Rc<dyn TtyInput>, output: Rc<dyn TtyOutput>, mode: impl Into<String>) -> Self {
-        Self::with_session(InProcess::new(controller), input, output, mode)
-    }
     /// The screen for a session reached through `session`: one on a thread of its own, say.
-    pub fn with_session(
-        session: Rc<dyn SessionHandle>,
-        input: Rc<dyn TtyInput>,
-        output: Rc<dyn TtyOutput>,
-        mode: impl Into<String>,
-    ) -> Self {
+    pub fn new(session: Rc<dyn SessionHandle>, input: Rc<dyn TtyInput>, output: Rc<dyn TtyOutput>, mode: impl Into<String>) -> Self {
         Self {
             session,
             input,
