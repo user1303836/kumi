@@ -6,9 +6,12 @@ use super::{
     live_app,
 };
 use async_trait::async_trait;
-use kumi_agent::core::contracts::SessionController;
 use kumi_common::abort::Signal;
-use kumi_daw::{process::Run, provider::Installed, setup::DawSetup};
+use kumi_daw::{
+    process::Run,
+    provider::Installed,
+    setup::{DawSetup, SetupSession},
+};
 use kumi_types::system::Env;
 use std::{
     cell::RefCell,
@@ -24,7 +27,7 @@ pub(crate) struct LiveSide {
     /// (`--bridge-config`), so the one put in place doesn't replace it.
     pub(crate) bridge: Rc<RefCell<Option<String>>>,
     pub(crate) given: bool,
-    pub(crate) controller: Rc<RefCell<Option<Weak<dyn SessionController>>>>,
+    pub(crate) session: Rc<RefCell<Option<Weak<dyn SetupSession>>>>,
 }
 #[async_trait(?Send)]
 impl DawSetup for LiveSide {
@@ -53,7 +56,7 @@ impl DawSetup for LiveSide {
         }
         // The session may still be starting: a busy one is asked again shortly.
         for _ in 0..40 {
-            let session = self.controller.borrow().as_ref().and_then(Weak::upgrade);
+            let session = self.session.borrow().as_ref().and_then(Weak::upgrade);
             let Some(session) = session else { return };
             if session.reconnect().await.is_ok() {
                 return;
@@ -69,7 +72,7 @@ impl DawSetup for LiveSide {
         live_app::installed(&self.env, kumi_types::system::platform())
     }
     fn open_set(&self) -> Option<String> {
-        self.controller.borrow().as_ref().and_then(Weak::upgrade).and_then(|session| session.open_set())
+        self.session.borrow().as_ref().and_then(Weak::upgrade).and_then(|session| session.open_set())
     }
     fn here(&self) -> bool {
         live_here()
@@ -104,7 +107,7 @@ mod tests {
             run: kumi_daw::process::default_run(),
             bridge: Rc::new(RefCell::new(Some("/given/bridge-config.json".into()))),
             given,
-            controller: Rc::new(RefCell::new(None)),
+            session: Rc::new(RefCell::new(None)),
         };
         let given = side(true);
         given.connect().await;

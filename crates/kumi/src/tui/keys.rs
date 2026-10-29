@@ -268,6 +268,11 @@ impl InputParser {
         }
     }
 
+    /// Whether typed bytes wait to be read as a key: a lone Escape, until its delay passes (or what follows it comes).
+    pub fn waiting(&self) -> bool {
+        !self.inner.state.borrow().buffer.is_empty()
+    }
+
     /// Stop the pending Escape timer; call when input ends.
     pub fn dispose(&self) {
         cancel_timer(&mut self.inner.state.borrow_mut());

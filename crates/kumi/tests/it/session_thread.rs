@@ -254,17 +254,8 @@ async fn the_full_screen_has_written_and_let_go_of_everything_once_it_ends() {
                 term.borrow().lines().join("\n")
             };
             until("the screen reads keys", || input.data.borrow().is_some()).await;
-            // The screen takes keys before the session has started, as it always has: a request sent while it's starting
-            // is turned away as busy, and only then is it sent again.
-            let refused = || out.0.borrow().matches("Session is busy").count();
-            for _ in 0..20 {
-                let before = refused();
-                input.write("Note how I start a track.\r");
-                until("the request taken or turned away", || asked.load(Ordering::SeqCst) > 0 || refused() > before).await;
-                if asked.load(Ordering::SeqCst) > 0 {
-                    break;
-                }
-            }
+            // Sent at once, while the session is likely still starting: it waits for the session (#728).
+            input.write("Note how I start a track.\r");
             until("the answer", || asked.load(Ordering::SeqCst) == 2 && screen().contains("Kept it.")).await;
             // Kumi idle again (its answer done), so ctrl+c quits rather than stops it.
             until("Kumi idle", || screen().contains("Ready")).await;

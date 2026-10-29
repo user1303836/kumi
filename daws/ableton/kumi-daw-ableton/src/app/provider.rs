@@ -9,7 +9,6 @@ use super::{
 };
 use crate::AbletonOptions;
 use futures::{future::LocalBoxFuture, FutureExt};
-use kumi_agent::core::contracts::SessionController;
 use kumi_agent::core::{
     context::IntegrationContext,
     contracts::{ConnectionState, Integration},
@@ -24,7 +23,7 @@ use kumi_daw::{
         BridgeCommand, BridgeRollbackStep, BridgeState, DawProvider, DawSession, EnableStep, Installed, RemovedBridge, Toggle, ToggleWords,
         WatchWords,
     },
-    setup::DawSetup,
+    setup::{DawSetup, SetupSession},
 };
 use kumi_library::daws::LibrarySources;
 use kumi_types::errors::RuntimeError;
@@ -177,9 +176,9 @@ impl DawProvider for Ableton {
         env: &Env,
         bridge: Rc<RefCell<Option<String>>>,
         given: bool,
-        controller: Rc<RefCell<Option<Weak<dyn SessionController>>>>,
+        session: Rc<RefCell<Option<Weak<dyn SetupSession>>>>,
     ) -> Rc<dyn DawSetup> {
-        Rc::new(LiveSide { env: env.clone(), run: kumi_daw::process::default_run(), bridge, given, controller })
+        Rc::new(LiveSide { env: env.clone(), run: kumi_daw::process::default_run(), bridge, given, session })
     }
     fn doctor_checks<'a>(&'a self, io: &'a DawIo, node: &'a Check) -> LocalBoxFuture<'a, Vec<Check>> {
         super::doctor::bridge_checks(io, node).boxed_local()

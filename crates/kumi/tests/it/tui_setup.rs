@@ -344,7 +344,7 @@ case!(keys_json_gives_setups_actions_other_keys_letters_too, async {
     h.wait_for("waiting for you to quit Live").await;
     assert!(rows(&h).lines().any(|l| l == "  l later"), "the hint:\n{}", rows(&h));
     // Esc doesn't leave it for later now; l does.
-    h.type_text("\x1b").await;
+    h.escape().await;
     assert!(!said(&h).contains("Kumi chats without Live for now"), "esc left it");
     h.type_text("l").await;
     h.wait_for("Kumi chats without Live for now, and offers to connect it next time.").await;
@@ -1023,8 +1023,22 @@ case!(a_first_run_whose_daw_is_chosen_here_goes_on_with_its_setup, async {
 case!(an_own_daws_setup_hands_the_session_its_bridge_and_reconnects_it, async {
     // Review K1: once setup has put REAPER's extension in (its receipt is written), connecting hands the session the
     // bridge's reference and reconnects it, as Live's setup does, so the session connects without a restart.
-    use kumi_agent::core::contracts::SessionController;
-    use kumi_daw::provider::DawProvider;
+    use kumi_daw::{provider::DawProvider, setup::SetupSession};
+    /// The session as setup reaches it: it counts setup's reconnects.
+    #[derive(Default)]
+    struct Reached {
+        reconnects: std::cell::Cell<u32>,
+    }
+    #[async_trait::async_trait(?Send)]
+    impl SetupSession for Reached {
+        async fn reconnect(&self) -> Result<(), kumi_types::errors::RuntimeError> {
+            self.reconnects.set(self.reconnects.get() + 1);
+            Ok(())
+        }
+        fn open_set(&self) -> Option<String> {
+            None
+        }
+    }
     let home = tempfile::tempdir().unwrap();
     let kumi_home = home.path().join(".kumi");
     let env = kumi_types::system::Env::from([
@@ -1033,11 +1047,10 @@ case!(an_own_daws_setup_hands_the_session_its_bridge_and_reconnects_it, async {
         ("KUMI_REAPER_RESOURCE_DIR".into(), home.path().join("REAPER").display().to_string()),
     ]);
     let bridge: Rc<RefCell<Option<String>>> = Rc::default();
-    let control = Rc::new(Control::default());
-    let controller: Rc<RefCell<Option<std::rc::Weak<dyn SessionController>>>> = Rc::default();
-    let as_controller: Rc<dyn SessionController> = control.clone();
-    *controller.borrow_mut() = Some(Rc::downgrade(&as_controller));
-    let setup = kumi_daw_reaper::PROVIDER.setup(&env, bridge.clone(), false, controller.clone());
+    let reached = Rc::new(Reached::default());
+    let as_session: Rc<dyn SetupSession> = reached.clone();
+    let session: Rc<RefCell<Option<std::rc::Weak<dyn SetupSession>>>> = Rc::new(RefCell::new(Some(Rc::downgrade(&as_session))));
+    let setup = kumi_daw_reaper::PROVIDER.setup(&env, bridge.clone(), false, session.clone());
     // The extension in place: its receipt says where its reference is.
     let paths = daw_bridge::paths::BridgePaths::new(&kumi_home, daw_bridge::Daw::Reaper);
     std::fs::create_dir_all(paths.receipt().parent().unwrap()).unwrap();
@@ -1059,6 +1072,6 @@ case!(an_own_daws_setup_hands_the_session_its_bridge_and_reconnects_it, async {
     std::fs::write(paths.receipt(), serde_json::to_string(&receipt).unwrap()).unwrap();
     setup.connect().await;
     assert_eq!(bridge.borrow().as_deref(), Some(reference.as_str()), "the session finds REAPER through the bridge now");
-    assert!(control.calls.borrow().contains(&"reconnect".to_string()), "and reconnects: {:?}", control.calls.borrow());
-    drop(as_controller);
+    assert_eq!(reached.reconnects.get(), 1, "and reconnects it");
+    drop(as_session);
 });

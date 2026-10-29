@@ -13,7 +13,9 @@ use std::time::Duration;
 use chrono::{Datelike, Utc};
 use kumi_net::{self as net, proxy::Settings};
 use rcgen::{BasicConstraints, CertificateParams, DnType, ExtendedKeyUsagePurpose, IsCa, Issuer, KeyPair, KeyUsagePurpose};
-use rustls::pki_types::{PrivateKeyDer, PrivatePkcs8KeyDer};
+use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
+use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer, ServerName, UnixTime};
+use rustls::{DigitallySignedStruct, SignatureScheme};
 
 /// A name that never resolves (RFC 6761): it's reached through a proxy, or not at all.
 const UNRESOLVED: &str = "kumi-network.test";
@@ -263,13 +265,134 @@ async fn this_computer_is_reached_directly_and_socks_proxies_work() {
     assert_eq!(*asked.lock().unwrap(), ["kumi-socks.test"], "the proxy looked the name up");
 }
 
+/// The extension that says where a certificate's issuer can be fetched (authority information access), and its access
+/// method for the issuer itself (caIssuers): their object identifiers, as DER holds them.
+const AUTHORITY_INFORMATION_ACCESS: [u8; 8] = [0x2B, 0x06, 0x01, 0x05, 0x05, 0x07, 0x01, 0x01];
+const CA_ISSUERS: [u8; 8] = [0x2B, 0x06, 0x01, 0x05, 0x05, 0x07, 0x30, 0x02];
+
 /// Authority information access: where a certificate's issuer can be fetched, as one names it (caIssuers).
 fn issuer_at(url: &str) -> rcgen::CustomExtension {
-    let method = [0x06, 0x08, 0x2B, 0x06, 0x01, 0x05, 0x05, 0x07, 0x30, 0x02];
+    let method = [&[0x06, CA_ISSUERS.len() as u8][..], &CA_ISSUERS].concat();
     let location = [&[0x86, url.len() as u8][..], url.as_bytes()].concat();
     let description = [&[0x30, (method.len() + location.len()) as u8][..], &method, &location].concat();
     let content = [&[0x30, description.len() as u8][..], &description].concat();
     rcgen::CustomExtension::from_oid_content(&[1, 3, 6, 1, 5, 5, 7, 1, 1], content)
+}
+
+/// One DER element off the front of `bytes`: its tag, its contents and what follows it. None when its length doesn't
+/// fit in what's there.
+fn element(bytes: &[u8]) -> Option<(u8, &[u8], &[u8])> {
+    let (&tag, rest) = bytes.split_first()?;
+    let (&first, rest) = rest.split_first()?;
+    let (length, rest) = match first {
+        0x00..=0x7F => (usize::from(first), rest),
+        0x81..=0x84 => {
+            let (length, rest) = rest.split_at_checked(usize::from(first & 0x7F))?;
+            (length.iter().fold(0, |length, byte| length << 8 | usize::from(*byte)), rest)
+        }
+        _ => return None,
+    };
+    let (contents, rest) = rest.split_at_checked(length)?;
+    Some((tag, contents, rest))
+}
+
+/// The DER elements that fill `bytes` exactly, as (tag, contents): None when they don't.
+fn elements(mut bytes: &[u8]) -> Option<Vec<(u8, &[u8])>> {
+    let mut found = Vec::new();
+    while !bytes.is_empty() {
+        let (tag, contents, rest) = element(bytes)?;
+        found.push((tag, contents));
+        bytes = rest;
+    }
+    Some(found)
+}
+
+/// The address a certificate names for its issuer, read as a verifier reads it: element by element, each length
+/// checked, from the certificate to its authority information access and that extension's caIssuers location. None for
+/// a certificate whose extension a verifier would skip.
+fn named_issuer(certificate: &[u8]) -> Option<String> {
+    let [(0x30, certificate)] = elements(certificate)?[..] else { return None };
+    let (0x30, signed) = *elements(certificate)?.first()? else { return None };
+    // The extensions are the [3] of what's signed.
+    let (_, extensions) = elements(signed)?.into_iter().find(|(tag, _)| *tag == 0xA3)?;
+    let [(0x30, extensions)] = elements(extensions)?[..] else { return None };
+    for (_, extension) in elements(extensions)? {
+        // Its identifier, whether it's critical, and its value.
+        let ([(0x06, id), (0x04, value)] | [(0x06, id), (0x01, _), (0x04, value)]) = elements(extension)?[..] else { return None };
+        if id != AUTHORITY_INFORMATION_ACCESS {
+            continue;
+        }
+        let [(0x30, descriptions)] = elements(value)?[..] else { return None };
+        for (_, description) in elements(descriptions)? {
+            if let [(0x06, method), (0x86, location)] = elements(description)?[..] {
+                if method == CA_ISSUERS {
+                    return String::from_utf8(location.to_vec()).ok();
+                }
+            }
+        }
+    }
+    None
+}
+
+/// A certificate check that follows the issuer a certificate names, as the system's does on macOS: it asks that address
+/// and waits for the answer, then refuses.
+#[derive(Debug)]
+struct FollowsIssuer(Arc<rustls::crypto::CryptoProvider>);
+
+impl ServerCertVerifier for FollowsIssuer {
+    fn verify_server_cert(
+        &self,
+        end_entity: &CertificateDer<'_>,
+        _: &[CertificateDer<'_>],
+        _: &ServerName<'_>,
+        _: &[u8],
+        _: UnixTime,
+    ) -> Result<ServerCertVerified, rustls::Error> {
+        let address = named_issuer(end_entity);
+        if let Some((host, path)) = address.as_deref().and_then(|address| address.strip_prefix("http://")?.split_once('/')) {
+            if let Ok(mut stream) = TcpStream::connect(host) {
+                // An issuer's server that never answers fails the test rather than holding it.
+                let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
+                let _ = write!(stream, "GET /{path} HTTP/1.1\r\nhost: {host}\r\nconnection: close\r\n\r\n");
+                let _ = stream.read_to_end(&mut Vec::new());
+            }
+        }
+        Err(rustls::Error::InvalidCertificate(rustls::CertificateError::UnknownIssuer))
+    }
+
+    fn verify_tls12_signature(
+        &self,
+        message: &[u8],
+        certificate: &CertificateDer<'_>,
+        signature: &DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, rustls::Error> {
+        rustls::crypto::verify_tls12_signature(message, certificate, signature, &self.0.signature_verification_algorithms)
+    }
+
+    fn verify_tls13_signature(
+        &self,
+        message: &[u8],
+        certificate: &CertificateDer<'_>,
+        signature: &DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, rustls::Error> {
+        rustls::crypto::verify_tls13_signature(message, certificate, signature, &self.0.signature_verification_algorithms)
+    }
+
+    fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
+        self.0.signature_verification_algorithms.supported_schemes()
+    }
+}
+
+/// A client whose certificate check follows the issuer a certificate names ([`FollowsIssuer`]).
+fn following() -> reqwest::ClientBuilder {
+    let provider = Arc::new(rustls::crypto::ring::default_provider());
+    let config = rustls::ClientConfig::builder_with_provider(Arc::clone(&provider))
+        .with_protocol_versions(rustls::ALL_VERSIONS)
+        .unwrap()
+        .dangerous()
+        .with_custom_certificate_verifier(Arc::new(FollowsIssuer(provider)))
+        .with_no_client_auth();
+    reqwest::Client::builder().use_preconfigured_tls(config).no_proxy()
 }
 
 #[tokio::test]
@@ -305,18 +428,12 @@ async fn the_web_tools_certificate_check_fetches_nothing_a_certificate_names() {
     assert!(web.contains("invalid peer certificate: UnknownIssuer"), "{web}");
     std::thread::sleep(Duration::from_millis(500));
     assert!(fetched.lock().unwrap().is_empty(), "the web tool's check fetched {:?}", fetched.lock().unwrap());
-    // Kumi's own requests ask the system's check, which fetches it on macOS: what the web tool's mustn't.
-    let own = get(net::client(), &url).await.unwrap_err();
-    println!("Kumi's own: {own}\nfetched: {:?}", fetched.lock().unwrap());
-    if cfg!(target_os = "macos") {
-        for _ in 0..50 {
-            if !fetched.lock().unwrap().is_empty() {
-                break;
-            }
-            std::thread::sleep(Duration::from_millis(100));
-        }
-        assert_eq!(*fetched.lock().unwrap(), ["GET /issuer.crt HTTP/1.1"]);
-    }
+    // A check that follows what a certificate names asks that address, and has its answer, before its handshake ends:
+    // so the certificate names it, and the web tool's check didn't ask it. (The system's check, which Kumi's own
+    // requests ask, follows it on macOS, but within trustd's own 3 s, which a busy computer can miss: #729.)
+    let following = get(following(), &url).await.unwrap_err();
+    assert!(following.contains("invalid peer certificate: UnknownIssuer"), "{following}");
+    assert_eq!(*fetched.lock().unwrap(), ["GET /issuer.crt HTTP/1.1"]);
 }
 
 #[test]

@@ -187,7 +187,7 @@ case!(the_keys_into_the_pane_open_the_drawer_there_and_nothing_turns_it_under_th
     assert!(lines[row + 1].contains("Bass · 2 notes added") && lines[row + 2].contains("Chords · 3 notes moved"), "{}", lines.join("\n"));
     assert!(h.selected_line().is_some_and(|line| line.contains("Chords · 3 notes moved")));
     // Esc gives the keyboard back to the box; ctrl+\ then closes the drawer.
-    h.type_text("\x1b").await;
+    h.escape().await;
     h.type_text("\x1c").await;
     h.type_text("hello").await;
     let lines = h.screen();
@@ -275,7 +275,7 @@ case!(at_full_width_ctrl_backslash_puts_the_side_pane_away_and_brings_it_back, a
     // Shift-Tab, into the tabs, brings it back too.
     h.type_text("\x1b[Z").await;
     h.has("Your selection will show here");
-    h.type_text("\x1b").await;
+    h.escape().await;
     h.type_text("\x1c").await;
     h.type_text("\x1c").await;
     h.has("Your selection will show here");

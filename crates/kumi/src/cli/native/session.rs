@@ -26,10 +26,11 @@ use kumi_agent::{
     *,
 };
 use kumi_ai::auth::store::{open_credential_store, Credential, CredentialStore};
+use kumi_daw::setup::SetupSession;
 use kumi_library::{create_library, LibraryOptions};
 use kumi_listening::slots;
 use kumi_media::programs::{configure_programs, ProgramDefaults};
-use kumi_types::{contracts::ChangeRecord, errors::KumiError, errors::SetupFailure};
+use kumi_types::{errors::KumiError, errors::SetupFailure};
 use std::{
     cell::Cell,
     rc::Weak,
@@ -245,8 +246,7 @@ fn live_words() -> WatchWords {
     crate::daw::provider(kumi_types::daw::DawId::Ableton).expect("Live is registered").watch_words()
 }
 /// The session as the DAW's first-run setup reaches it, on this thread (the session may be on one of its own): setup puts
-/// the bridge it found where the session's integration starts from, and reconnects the session; it asks what's open,
-/// and how the session is. It asks nothing else of a session.
+/// the bridge it found where the session's integration starts from, and reconnects the session; and it asks what's open.
 struct SessionForSetup {
     session: Weak<dyn SessionHandle>,
     /// Where setup puts the bridge it found ...
@@ -255,58 +255,16 @@ struct SessionForSetup {
     shared: Arc<Mutex<Option<String>>>,
 }
 
-/// What setup never asks of the session: said in a debug build (and so in tests), answered as absent in a release.
-fn not_for_setup(asked: &str) -> RuntimeError {
-    debug_assert!(false, "the DAW's setup asked the session to {asked}");
-    RuntimeError::plain("Not available")
-}
-
 #[async_trait(?Send)]
-impl SessionController for SessionForSetup {
-    async fn start(&self) -> Result<(), RuntimeError> {
-        Err(not_for_setup("start"))
-    }
-    async fn submit(&self, _: &str, _: Option<PinnedNode>) -> Result<(), RuntimeError> {
-        Err(not_for_setup("answer"))
-    }
-    async fn refresh(&self) -> Result<(), RuntimeError> {
-        Err(not_for_setup("look at the project again"))
-    }
-    async fn new_conversation(&self) -> Result<(), RuntimeError> {
-        Err(not_for_setup("start a conversation"))
-    }
-    async fn cancel(&self) -> Result<(), RuntimeError> {
-        Err(not_for_setup("stop"))
-    }
-    async fn close(&self) -> Result<(), RuntimeError> {
-        Err(not_for_setup("close"))
-    }
-    fn status(&self) -> SessionStatus {
-        match self.session.upgrade() {
-            Some(session) => session.status(),
-            None => SessionStatus {
-                state: TurnState::Closed,
-                connection: ConnectionState::Disconnected,
-                turns: 0,
-                max_turns: None,
-                observation: None,
-            },
-        }
-    }
-    async fn undo(&self, _: Option<&str>) -> Result<Option<ChangeRecord>, RuntimeError> {
-        Err(not_for_setup("undo"))
-    }
-    fn open_set(&self) -> Option<String> {
-        self.session.upgrade()?.open_set()
-    }
-    fn has_reconnect(&self) -> bool {
-        true
-    }
+impl SetupSession for SessionForSetup {
     async fn reconnect(&self) -> Result<(), RuntimeError> {
         // The bridge setup found goes where the session's integration starts from, before it reconnects.
         *self.shared.lock().unwrap_or_else(PoisonError::into_inner) = self.bridge.borrow().clone();
         let session = self.session.upgrade().ok_or_else(|| RuntimeError::plain("Kumi's session has ended"))?;
         session.op(op::Reconnect {}).await
+    }
+    fn open_set(&self) -> Option<String> {
+        self.session.upgrade()?.open_set()
     }
 }
 
@@ -977,9 +935,9 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
         (InProcess::new(session), None, ending, notice)
     };
     // The DAW's first-run setup reaches the session as one of its own, on this thread.
-    let setup_session: Rc<dyn SessionController> =
+    let setup_session: Rc<dyn SetupSession> =
         Rc::new(SessionForSetup { session: Rc::downgrade(&session), bridge: live_config.clone(), shared: session_bridge });
-    let setup_controller = Rc::new(RefCell::new(Some(Rc::downgrade(&setup_session))));
+    let setup_reaches = Rc::new(RefCell::new(Some(Rc::downgrade(&setup_session))));
     // What the session says of the DAW's bridge: missing, or older than this Kumi's.
     let bridge = provider.bridge_state(&io.env, bridge_config.is_some(), bridge_missing, bundled.as_deref(), io.command());
     let bridge_notice = bridge.notice;
@@ -1129,7 +1087,7 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
         options.connect_live = live_possible.then(|| ConnectDaw {
             why: connect_why,
             bridge: bundled.clone().unwrap_or_default(),
-            live: provider.setup(&io.env, live_config.clone(), given, setup_controller.clone()),
+            live: provider.setup(&io.env, live_config.clone(), given, setup_reaches.clone()),
         });
         options.secrets = secrets.clone();
         options.history = Some(history);
@@ -1745,11 +1703,10 @@ mod watch_tests {
         setup.reconnect().await.unwrap();
         assert_eq!(*fake.read.borrow(), [Some("/found/bridge.json".to_string())]);
         assert_eq!(setup.open_set().as_deref(), Some("/Sets/Night Drive.als"));
-        assert_eq!(setup.status().connection, ConnectionState::Connected);
         // The session gone: setup hears so.
         drop(session);
         assert!(setup.reconnect().await.is_err());
-        assert_eq!(setup.status().state, TurnState::Closed);
+        assert_eq!(setup.open_set(), None);
     }
 
     #[tokio::test(flavor = "current_thread")]

@@ -152,6 +152,11 @@ impl Tty {
         }
     }
 
+    /// Whether typed bytes wait to be read as a key: a lone Escape, for its delay.
+    pub fn keys_waiting(&self) -> bool {
+        self.inner.parser.waiting()
+    }
+
     pub fn size(&self) -> Size {
         let (columns, rows) = self.inner.options.output.size().unwrap_or((80, 24));
         Size { columns: columns.max(1), rows: rows.max(1) }

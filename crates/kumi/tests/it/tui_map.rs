@@ -926,7 +926,7 @@ case!(keys_json_gives_the_maps_actions_other_keys, async {
     h.wait_for("c1 · dark rainy").await;
     // Nor do q and esc close the map: w does.
     h.type_text("q").await;
-    h.type_text("\x1b").await;
+    h.escape().await;
     assert!(has(&h.screen(), "Songs 24"), "closed by its own keys");
     h.type_text("w").await;
     h.wait_until_hidden("Songs 24").await;

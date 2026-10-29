@@ -1148,7 +1148,7 @@ impl TuiApp {
             }
         }
     }
-    fn after_busy(&self) {
+    pub(super) fn after_busy(&self) {
         if self.replaying() {
             return;
         }

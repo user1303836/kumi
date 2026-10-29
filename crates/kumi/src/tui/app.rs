@@ -467,6 +467,8 @@ struct State {
     /// one did.
     turns_asked: u32,
     idle_held: bool,
+    /// The session is starting: from before the first key is read until Start is answered.
+    starting: bool,
     held: Vec<Held>,
     last_stop: Option<StopReason>,
     asides: Vec<Rc<RefCell<Aside>>>,
@@ -676,6 +678,7 @@ impl State {
             pending_turn: false,
             turns_asked: 0,
             idle_held: false,
+            starting: false,
             held: vec![],
             last_stop: None,
             asides: vec![],
@@ -998,6 +1001,12 @@ impl TuiApp {
     pub fn transcript_layout_count(&self) -> usize {
         self.0.state.borrow().transcript.laid_out
     }
+    /// Whether typed bytes wait to be read as a key, for the tests: an Escape typed alone is a key once its delay passes,
+    /// and the next key typed before then would be read with it, as that key with alt.
+    #[doc(hidden)]
+    pub fn keys_waiting(&self) -> bool {
+        self.0.tty.keys_waiting()
+    }
     /// What's in the input box, for the menu's tests (tab puts a word in).
     #[doc(hidden)]
     pub fn draft(&self) -> String {
@@ -1241,6 +1250,9 @@ impl Terminal for TuiApp {
                 return self.done();
             }
             state.started = true;
+            // Starting from before the first key is read (what was typed ahead too), until Start is answered: a message
+            // meanwhile waits for the session, rather than going as a request it turns away.
+            state.starting = true;
         }
         if let Err(error) = self.0.tty.start() {
             return self.finish(1, Some(format!("Kumi couldn't start: {error}")));
@@ -1276,12 +1288,17 @@ impl Terminal for TuiApp {
         self.0.scheduler.request();
         self.task(|app| async move {
             if !app.0.state.borrow().closing {
-                if let Err(error) = app.session().op(op::Start {}).await {
+                let started = app.session().op(op::Start {}).await;
+                app.0.state.borrow_mut().starting = false;
+                if let Err(error) = started {
                     if !app.0.state.borrow().closing {
                         let message =
                             format!("Kumi couldn't start: {}", safe_error_message(Some(&error.message()), &app.0.state.borrow().secrets));
                         app.finish(1, Some(message)).await;
                     }
+                } else if !app.busy() && app.0.state.borrow().turns_asked == 0 {
+                    // A message held after the session's first Idle and before Start's answer goes now.
+                    app.after_busy();
                 }
             }
             Ok(())
