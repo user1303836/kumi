@@ -1214,14 +1214,13 @@ impl Terminal for TuiApp {
     fn follow_daw(&self, daw: kumi_types::daw::DawId) -> bool {
         let Some(follow) = self.0.options.follow_daw.clone() else { return false };
         // Nothing the producer is in the middle of: an answer, setup, a panel or question, the map, what they typed,
-        // attached or put aside, a search, their editor, a background job.
+        // attached or put aside, a search, their editor, a background job. A question asked with a list (the technique
+        // offer, the other Set's conversation) is its panel: it counts while that's open, however it closes.
         let waiting = self.0.tty.lent() || {
             let state = self.0.state.borrow();
             state.closing
                 || state.setup.is_some()
                 || !state.overlays.is_empty()
-                || state.offer.is_some()
-                || state.set_ask.is_some()
                 || state.map.is_some()
                 || !state.editor.is_empty()
                 || !state.attachments.is_empty()
