@@ -178,21 +178,6 @@ pub fn replay_of(log: &ReadLog, most: usize) -> Replay {
     }
 }
 
-/// Whether `log` is behind its conversation's checkpoint, kept with `turns` requests: something kept turns it never saw
-/// end (an earlier Kumi, after a rollback), so it misses what came then. What it holds is its last save's count, and an
-/// answer's end after it for each turn since (without a save, its count from when it began, and the ends since).
-pub fn behind(log: &ReadLog, turns: u32) -> bool {
-    let (mut known, mut ended) = (log.header.before, 0);
-    for line in &log.lines {
-        match line {
-            LogLine::Saved { turns, .. } => (known, ended) = (*turns, 0),
-            LogLine::Event { event: SessionEvent::TurnComplete { .. }, .. } => ended += 1,
-            _ => {}
-        }
-    }
-    turns > known + ended
-}
-
 fn now() -> i64 {
     kumi_common::time::now_ms()
 }

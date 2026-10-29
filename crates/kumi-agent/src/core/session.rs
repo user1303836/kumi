@@ -8,7 +8,7 @@ use crate::core::{
     recall::{recall_tool_for, RecallOptions},
     recipes::{recipe_instructions, recipe_tools_for, RecipeStore, RecipeToolsOptions, RUN_RECIPE_TOOL},
     search_memory::SearchMemory,
-    session_log::{behind, replay_of, LogLine, Replay, SessionLog, REPLAYED},
+    session_log::{replay_of, LogLine, Replay, SessionLog, REPLAYED},
     store_client::StoreClient,
     taste_log::{TasteLog, UndoneBy, Whereabouts},
     techniques::{
@@ -1225,13 +1225,11 @@ impl Session {
             .collect();
     }
     /// What a kept conversation taken up shows again of its log: its last requests as they happened, each change in them
-    /// as HISTORY holds it now. None without a log up to date with what's kept (an earlier Kumi carried the conversation
-    /// on since), or with nothing in it to show: then the screen shows the conversation's words, as before logs.
-    async fn replay(&self, kept: &SavedConversation) -> Option<Replay> {
+    /// as HISTORY holds it now. None without a log as it was opened (one behind what's kept, which an earlier Kumi carried
+    /// on since, began again from it), or with nothing in it to show: then the screen shows the conversation's words, as
+    /// before logs.
+    async fn replay(&self) -> Option<Replay> {
         let log = self.0.options.log.as_ref()?.as_opened().await?;
-        if behind(&log, kept.turns.unwrap_or(0)) {
-            return None;
-        }
         let mut replay = replay_of(&log, REPLAYED);
         if replay.earlier.is_empty() && !replay.lines.iter().any(|line| matches!(line, LogLine::Request(_))) {
             return None;
@@ -1852,7 +1850,7 @@ impl Session {
                         let s = self.0.state.borrow();
                         s.changes.iter().filter(|c| !s.seen.get(&c.id).is_some_and(|ours| ours.at == c.at)).cloned().collect::<Vec<_>>()
                     };
-                    let replay = self.replay(&kept).await;
+                    let replay = self.replay().await;
                     self.emit(SessionEvent::Resumed {
                         saved_at: kept.saved_at,
                         lines: value.transcript(),

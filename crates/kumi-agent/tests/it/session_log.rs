@@ -10,7 +10,7 @@ use kumi_agent::{
             TurnState,
         },
         conversations::create_conversation_store,
-        session_log::{behind, log_name, read_log, replay_of, LogLine, ReadLog, Replay, SessionLog, MAX_LOG_BYTES, REPLAYED},
+        session_log::{log_name, read_log, replay_of, LogLine, ReadLog, Replay, SessionLog, MAX_LOG_BYTES, REPLAYED},
     },
     kernel::budget::OBSERVATION_MARKER,
 };
@@ -670,22 +670,6 @@ fn the_requests_from_before_a_log_began_come_back_as_words_while_theres_room() {
     assert_eq!(replay.before, 3);
 }
 
-#[test]
-fn a_log_behind_its_checkpoint_is_one_an_earlier_kumi_carried_on_without() {
-    let saved = |turns: u32| LogLine::Saved { at: 5, saved_at: 500, turns };
-    let log = ReadLog { header: header(0), lines: vec![request("make it wider"), told(completed()), saved(1)] };
-    assert!(!behind(&log, 1));
-    assert!(behind(&log, 2));
-    // A turn whose save never reached the log (Kumi stopped right after it) is in it all the same: its end is.
-    let unsaved = ReadLog { lines: [log.lines.clone(), vec![request("and darker"), told(completed())]].concat(), ..log.clone() };
-    assert!(!behind(&unsaved, 2));
-    assert!(behind(&unsaved, 3));
-    // Without a save yet, what was kept when the log began is in it.
-    let fresh = ReadLog { header: header(1), lines: vec![message("user", "make it wider")] };
-    assert!(!behind(&fresh, 1));
-    assert!(behind(&fresh, 2));
-}
-
 #[tokio::test(flavor = "current_thread")]
 async fn a_conversation_taken_up_shows_its_log_as_it_was_before_this_run_wrote_in_it() {
     local(async {
@@ -693,21 +677,21 @@ async fn a_conversation_taken_up_shows_its_log_as_it_was_before_this_run_wrote_i
         let store = create_conversation_store(dir.path());
         store.save(A, ID, &said("make the bass wider", 7)).await.unwrap();
         let first = SessionLog::new(dir.path(), Places::LIVE, same());
-        first.open(A, ID, 1, None, None);
+        first.open(A, ID, Some(&said("make the bass wider", 7)), None);
         first.request("and wider", vec![], None, 1, None);
         first.event(&notice("Widened it."));
         first.close().await;
         // Taken up again: what the earlier run wrote, without what this one writes from here.
         let log = SessionLog::new(dir.path(), Places::LIVE, same());
-        log.open(A, ID, 2, None, None);
+        log.open(A, ID, Some(&said("make the bass wider", 7)), None);
         log.event(&notice("The open Set changed; continuing your conversation."));
         let opened = log.as_opened().await.expect("its log as it was");
         assert_eq!(notices(&opened), ["Widened it."]);
         // A new conversation, and one kept before there were logs, have none to show.
-        log.open(A, "mv66me0m0newer", 0, None, None);
+        log.open(A, "mv66me0m0newer", None, None);
         assert!(log.as_opened().await.is_none());
         store.save(A, "mv66me0m0older", &said("an old one", 8)).await.unwrap();
-        log.open(A, "mv66me0m0older", 1, had(&[json!({"role":"user","content":"an old one"})]), None);
+        log.open(A, "mv66me0m0older", Some(&said("an old one", 8)), None);
         assert!(log.as_opened().await.is_none());
         log.close().await;
     })

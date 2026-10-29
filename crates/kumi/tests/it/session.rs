@@ -1199,13 +1199,14 @@ local_test!(a_conversation_taken_up_with_its_log_shows_its_requests_again_and_on
     two.session.close().await.unwrap();
     // An earlier Kumi carried it on since, without the log: its words come back instead, as before there were logs.
     let mut kept = store.current(SET).await.unwrap().unwrap();
-    kept.conversation.turns = Some(5);
+    kept.conversation.checkpoint.messages.push(json!({"role":"user","content":"and wider, from 1.24"}));
+    kept.conversation.saved_at += 60_000;
     store.save(SET, &kept.id, &kept.conversation).await.unwrap();
     let three = harness(None, logged);
     project(&three, SET);
     three.session.start().await.unwrap();
     let (replay, lines) = replayed(&three).expect("taken up");
-    assert!(replay.is_none() && lines == 2, "{replay:?}");
+    assert!(replay.is_none() && lines == 3, "{replay:?}");
     three.session.close().await.unwrap();
 });
 local_test!(unreadable_kept_history_is_shown_and_retained, {
