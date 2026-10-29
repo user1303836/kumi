@@ -485,7 +485,7 @@ pub async fn export_command(
                 row
             }
             None => {
-                err.write("No conversation is kept yet: talk with Kumi about a Set first.\n");
+                err.write(&format!("No conversation is kept yet: talk with Kumi about a {} first.\n", crate::daw::words().place));
                 return Ok(1);
             }
         },

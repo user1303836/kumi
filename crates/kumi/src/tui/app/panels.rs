@@ -149,6 +149,16 @@ pub(super) fn recipe_blanks_problem(recipe: &RecipeSummary, with: &JsonObject) -
 }
 /// How long Kumi's window has to be behind another before Kumi answers its own question for the producer.
 const UNATTENDED_MS: f64 = 120_000.;
+/// Where the producer's taste is learned from: their Live Sets, the only projects the library learns it from (Kumi
+/// keeps it from the model outside Live). Outside Live they're named whole: "Live Sets".
+fn taste_sets() -> String {
+    let live = kumi_types::daw::DawProfile::ABLETON.words;
+    if crate::daw::current().id() == kumi_types::daw::DawId::Ableton {
+        live.places.to_string()
+    } else {
+        format!("{} {}", live.app, live.places)
+    }
+}
 pub(super) fn item(label: impl Into<String>, value: impl Into<String>, detail: impl Into<String>) -> PickerItem {
     let detail = detail.into();
     PickerItem { detail: (!detail.is_empty()).then_some(detail), ..PickerItem::new(label, value) }
@@ -289,8 +299,8 @@ impl TuiApp {
             }
         }
         if self.can().taste {
-            let places = crate::daw::words().places;
-            items.push(PickerItem::heading(format!("From your {places}")));
+            let sets = taste_sets();
+            items.push(PickerItem::heading(format!("From your {sets}")));
             if taste.is_empty() {
                 items.push(inert(
                     if self
@@ -301,9 +311,10 @@ impl TuiApp {
                         .as_ref()
                         .is_some_and(|l| matches!(l.state, LibraryState::Learning | LibraryState::Paused))
                     {
-                        format!("Learning your {places}…")
+                        format!("Learning your {sets}…")
                     } else {
-                        format!("Nothing yet: how you work, from your own {} {places}", crate::daw::words().app)
+                        let live = kumi_types::daw::DawProfile::ABLETON.words;
+                        format!("Nothing yet: how you work, from your own {} {}", live.app, live.places)
                     }
                     .as_str(),
                 ));
@@ -335,10 +346,10 @@ impl TuiApp {
                         return Ok(());
                     }
                     let title = match kind {
-                        "technique" => "Forget this technique?",
-                        "lesson" => "Forget this lesson?",
-                        "taste" => "Forget this, from your Sets?",
-                        _ => "Forget this note?",
+                        "technique" => "Forget this technique?".to_string(),
+                        "lesson" => "Forget this lesson?".to_string(),
+                        "taste" => format!("Forget this, from your {}?", taste_sets()),
+                        _ => "Forget this note?".to_string(),
                     };
                     let kind = kind.to_string();
                     let id = id.to_string();
@@ -372,7 +383,7 @@ impl TuiApp {
                                         NoticeTone::Info,
                                     );
                                 } else if kind == "taste" {
-                                    app.notice(&format!("Forgot, from your Sets: {label}"), NoticeTone::Info);
+                                    app.notice(&format!("Forgot, from your {}: {label}", taste_sets()), NoticeTone::Info);
                                 }
                                 Ok(())
                             }

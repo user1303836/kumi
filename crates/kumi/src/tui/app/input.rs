@@ -1230,7 +1230,7 @@ impl TuiApp {
             Effect::Refresh => {
                 self.ready_for_more();
                 let result = {
-                    self.0.state.borrow_mut().activity = "reading your Set".into();
+                    self.0.state.borrow_mut().activity = format!("reading your {}", crate::daw::words().place);
                     session.op(op::Refresh {}).await
                 };
                 self.settled(result);
