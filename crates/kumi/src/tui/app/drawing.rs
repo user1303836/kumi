@@ -56,7 +56,7 @@ pub(super) struct NowLine {
 }
 impl TuiApp {
     pub(super) fn draw(&self) {
-        // A panic Kumi caught (a worker's) gave the terminal back: take it again, and draw all of it.
+        // A panic caught on this thread (one of its tasks') gave the terminal back: take it again, and draw all of it.
         if self.0.tty.recover() {
             self.0.renderer.borrow_mut().invalidate();
             self.0.state.borrow_mut().status_sent = None;

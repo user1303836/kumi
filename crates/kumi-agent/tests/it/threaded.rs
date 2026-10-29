@@ -1,6 +1,7 @@
 //! A session on a thread of its own: a reply comes after every event sent before it, the reads are sent before what
 //! changed them, a session that can't start (or panics as it starts) says why, a panic later ends the front end with
-//! what it said, closing has its bound, the thread ends with its handle, and a stop before its aside still stops it.
+//! what it said, closing has its bound, the thread ends with its handle, a stop before its aside still stops it, and a
+//! job's details are read for the one watched alone, while it's watched.
 use async_trait::async_trait;
 use futures::FutureExt;
 use kumi_agent::core::{
@@ -15,7 +16,7 @@ use std::{
     cell::RefCell,
     rc::Rc,
     sync::{
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
         Arc,
     },
     time::Duration,
@@ -30,6 +31,8 @@ struct Ways {
     close_hangs: bool,
     /// Set as it's dropped: its thread is ending.
     gone: Option<Arc<AtomicBool>>,
+    /// How often a job's details were read.
+    job_reads: Option<Arc<AtomicUsize>>,
 }
 
 /// A session that answers a message with a turn's events, built on the session's thread.
@@ -107,6 +110,9 @@ impl SessionController for Answers {
         true
     }
     fn job(&self, id: u32) -> Option<JobDetail> {
+        if let Some(reads) = &self.ways.job_reads {
+            reads.fetch_add(1, Ordering::SeqCst);
+        }
         (id == 3).then(|| {
             serde_json::from_value(serde_json::json!({
                 "status": {"id": 3, "kind": "worker", "title": "Hear the mix", "state": "running", "whenDone": "tell",
@@ -290,6 +296,33 @@ async fn a_jobs_details_come_for_the_one_watched() {
             tokio::time::sleep(Duration::from_millis(2)).await;
         }
         panic!("the watched job's details never came");
+    })
+    .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_job_no_longer_shown_is_read_no_more() {
+    local(async {
+        let reads = Arc::new(AtomicUsize::new(0));
+        let session = spawned(Ways { job_reads: Some(reads.clone()), ..Default::default() }).await;
+        let submit = || session.op(op::Submit { input: "louder".into(), pinned: None, attachments: vec![], references: vec![] });
+        // Watched, it's read as it's asked for, then again after each batch of events and replies.
+        session.job(3);
+        submit().await.unwrap();
+        for _ in 0..500 {
+            if reads.load(Ordering::SeqCst) >= 2 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(2)).await;
+        }
+        assert!(reads.load(Ordering::SeqCst) >= 2, "read again after a turn while it's watched");
+        // Its panel closed: once what was under way is done, no batch reads it again.
+        session.unwatch_job();
+        submit().await.unwrap();
+        let before = reads.load(Ordering::SeqCst);
+        submit().await.unwrap();
+        submit().await.unwrap();
+        assert_eq!(reads.load(Ordering::SeqCst), before);
     })
     .await;
 }

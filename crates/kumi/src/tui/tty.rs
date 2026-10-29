@@ -106,7 +106,8 @@ struct Inner {
     /// The farewell, then what gives the terminal back ([`leaving`]): written on quitting, and by the crash path.
     restore: String,
     active: Arc<AtomicBool>,
-    /// The crash path gave the terminal back: a panic, which Kumi may have caught (a worker's) and lived on.
+    /// The crash path gave the terminal back: a panic on the screen's thread, which Kumi may have caught (one of its
+    /// tasks') and lived on.
     taken: Arc<AtomicBool>,
     was_raw: Cell<bool>,
     /// The mouse's moves are asked for (`report_moves`): reported while the terminal is Kumi's, and again when it's
@@ -300,9 +301,9 @@ impl Tty {
         self.inner.restore(sync);
     }
 
-    /// Takes the terminal again after a panic Kumi caught (a worker's): the crash path gave it back before the
-    /// panic's message was printed, in case the panic ended Kumi, and Kumi lived on. True when it did, so the caller
-    /// draws the whole screen again.
+    /// Takes the terminal again after a panic Kumi caught on the screen's thread (one of its tasks'): the crash path gave
+    /// it back before the panic's message was printed, in case the panic ended Kumi, and Kumi lived on. True when it
+    /// did, so the caller draws the whole screen again.
     pub fn recover(&self) -> bool {
         let inner = &self.inner;
         if !inner.taken.swap(false, Ordering::SeqCst) {
@@ -355,6 +356,7 @@ impl Inner {
         }
         input.pause();
         let _ = input.set_raw_mode(self.was_raw.get());
+        say_kept();
     }
 }
 
@@ -368,23 +370,30 @@ impl Drop for Inner {
 
 type Restorer = Arc<dyn Fn() + Send + Sync>;
 
-static RESTORERS: Mutex<Vec<(u64, Restorer)>> = Mutex::new(Vec::new());
+/// Each terminal waiting to be put back, with the thread that took it (the screen's).
+static RESTORERS: Mutex<Vec<(u64, std::thread::ThreadId, Restorer)>> = Mutex::new(Vec::new());
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 static HOOKS: Once = Once::new();
+/// What a panic on another thread said while a terminal was Kumi's: said once the terminal is given back.
+static KEPT: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
-fn restorers() -> std::sync::MutexGuard<'static, Vec<(u64, Restorer)>> {
+fn restorers() -> std::sync::MutexGuard<'static, Vec<(u64, std::thread::ThreadId, Restorer)>> {
     RESTORERS.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+fn kept() -> std::sync::MutexGuard<'static, Vec<String>> {
+    KEPT.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 fn register(restorer: Restorer) -> u64 {
     install_hooks();
     let id = NEXT_ID.fetch_add(1, Ordering::SeqCst);
-    restorers().push((id, restorer));
+    restorers().push((id, std::thread::current().id(), restorer));
     id
 }
 
 fn unregister(id: u64) {
-    restorers().retain(|(other, _)| *other != id);
+    restorers().retain(|(other, _, _)| *other != id);
 }
 
 /// How many terminals wait to be put back on exit or a crash; for tests.
@@ -393,9 +402,36 @@ pub fn emergency_restorers() -> usize {
 }
 
 fn run_restorers() {
-    let pending: Vec<Restorer> = restorers().iter().map(|(_, restorer)| Arc::clone(restorer)).collect();
+    let pending: Vec<Restorer> = restorers().iter().map(|(_, _, restorer)| Arc::clone(restorer)).collect();
     for restorer in pending {
         restorer();
+    }
+    say_kept();
+}
+
+/// Keeps what a panic said, as Rust's own hook says it, for once the terminal is given back.
+fn keep(info: &std::panic::PanicHookInfo) {
+    let thread = std::thread::current();
+    let said = info
+        .payload()
+        .downcast_ref::<&str>()
+        .map(|said| said.to_string())
+        .or_else(|| info.payload().downcast_ref::<String>().cloned())
+        .unwrap_or_else(|| "Box<dyn Any>".into());
+    let at = info.location().map(|at| format!(" at {at}")).unwrap_or_default();
+    let backtrace = std::backtrace::Backtrace::capture();
+    let trace = match backtrace.status() {
+        std::backtrace::BacktraceStatus::Captured => format!("stack backtrace:\n{backtrace}"),
+        _ => String::new(),
+    };
+    kept().push(format!("\nthread '{}' panicked{at}:\n{said}\n{trace}", thread.name().unwrap_or("<unnamed>")));
+}
+
+/// Says what other threads' panics said while the terminal was Kumi's, now that it's given back.
+fn say_kept() {
+    let said: String = std::mem::take(&mut *kept()).concat();
+    if !said.is_empty() {
+        let _ = std::io::Write::write_all(&mut std::io::stderr(), said.as_bytes());
     }
 }
 
@@ -423,6 +459,18 @@ fn install_hooks() {
             // A panic on the session's own thread ends the screen in order (the terminal given back, then what it
             // said), from the screen's thread: it isn't this thread's to restore.
             if kumi_agent::core::threaded::session_panicked(info) {
+                return;
+            }
+            // Another thread's panic while the screen's thread has the terminal (a blocking task's, which comes back to
+            // the task that waits on it as an error, and Kumi carries on): the screen stays as it is, and what the panic
+            // said is said once the terminal is given back.
+            let here = std::thread::current().id();
+            let elsewhere = {
+                let restorers = restorers();
+                !restorers.is_empty() && !restorers.iter().any(|(_, thread, _)| *thread == here)
+            };
+            if elsewhere {
+                keep(info);
                 return;
             }
             run_restorers();
@@ -898,12 +946,14 @@ mod vt_tests {
 mod tests {
     use super::*;
 
-    /// A panic on the session's own thread leaves the terminal alone: the screen's thread gives it back, in order, when
-    /// it hears the session ended. A panic anywhere else gives it back at once, as it always has.
+    /// Only the screen's thread gives the terminal back as it panics. A panic on the session's own thread is the
+    /// session's end, which the screen's thread hears and ends in order; any other thread's (a blocking task's, which
+    /// Kumi lives on after) leaves the screen as it is, and what it said is said once the terminal is given back.
     #[test]
-    fn a_panic_on_the_sessions_thread_leaves_the_terminal_to_the_screens_thread() {
+    fn only_the_screens_thread_gives_the_terminal_back_as_it_panics() {
         use futures::FutureExt;
         let restored = Arc::new(AtomicBool::new(false));
+        // Taken on this thread: the screen's.
         let id = register({
             let restored = restored.clone();
             Arc::new(move || restored.store(true, Ordering::SeqCst))
@@ -916,9 +966,16 @@ mod tests {
         let why = started.err().expect("the session didn't start").message();
         assert!(why.starts_with("no room for the store"), "{why}");
         assert!(!restored.load(Ordering::SeqCst), "the session's thread gave the terminal back");
-        // Any other thread's panic gives it back, as before.
-        let _ = std::thread::spawn(|| panic!("a worker's own panic")).join();
+        assert!(kept().is_empty(), "the session's panic is the screen's to say");
+        // A blocking task's panic, which comes back to the task waiting on it as an error.
+        let failed = runtime.block_on(async { tokio::task::spawn_blocking(|| panic!("a worker's own panic")).await.is_err() });
+        assert!(failed);
+        assert!(!restored.load(Ordering::SeqCst), "another thread's panic gave the terminal back");
+        assert!(kept().concat().contains("a worker's own panic"), "{:?}", kept());
+        // The screen's own thread's panic gives it back, and what was kept is said then.
+        assert!(std::panic::catch_unwind(|| panic!("the screen's own panic")).is_err());
         assert!(restored.load(Ordering::SeqCst));
+        assert!(kept().is_empty(), "{:?}", kept());
         unregister(id);
     }
 
@@ -1000,9 +1057,9 @@ mod tests {
         assert!(!tty.recover(), "nothing to take back before a crash");
         tty.start().unwrap();
         let registered = emergency_restorers();
-        // A worker's panic, caught: the crash path gives the terminal back before its message is printed.
-        let caught = std::thread::spawn(|| std::panic::catch_unwind(|| panic!("a worker's bug")).is_err()).join().unwrap();
-        assert!(caught);
+        // A panic on the screen's thread that Kumi catches (one of its tasks'): the crash path gives the terminal back
+        // before its message is printed.
+        assert!(std::panic::catch_unwind(|| panic!("a task's bug")).is_err());
         // Kumi's status in the terminal goes with it.
         assert!(terminal.crashed.lock().unwrap().ends_with(&format!("\u{1b}]7501;state=clear\u{1b}\\{RESTORE}")));
         assert!(!terminal.is_raw());
@@ -1021,7 +1078,7 @@ mod tests {
         tty.report_moves(true);
         tty.report_moves(true);
         assert_eq!(*terminal.written.borrow(), MOUSE_MOVES_ON);
-        let _ = std::thread::spawn(|| std::panic::catch_unwind(|| panic!("a third"))).join();
+        let _ = std::panic::catch_unwind(|| panic!("a third"));
         assert!(terminal.crashed.lock().unwrap().ends_with(RESTORE) && RESTORE.contains(MOUSE_MOVES_OFF), "given back without them");
         terminal.written.borrow_mut().clear();
         assert!(tty.recover());
@@ -1033,7 +1090,7 @@ mod tests {
         // again on quitting, which would put the cursor back over the message), and nothing stays registered.
         terminal.written.borrow_mut().clear();
         terminal.crashed.lock().unwrap().clear();
-        let _ = std::thread::spawn(|| std::panic::catch_unwind(|| panic!("another"))).join();
+        let _ = std::panic::catch_unwind(|| panic!("another"));
         assert!(!tty.is_active());
         assert!(terminal.crashed.lock().unwrap().ends_with(RESTORE));
         tty.restore(false);

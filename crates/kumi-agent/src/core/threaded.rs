@@ -205,10 +205,19 @@ impl Core {
 /// The session's thread: its own runtime, the session built, then its requests served until the handle goes.
 fn session_thread(build: Build, down: mpsc::UnboundedReceiver<Down>, back: mpsc::UnboundedSender<Back>) {
     PANICS.with(|panics| *panics.borrow_mut() = Some(back.clone()));
+    let _let_go = LetGo;
     serve(build, down, back);
-    // Let go of where a panic went while the thread is whole: the last sender's drop closes its channel, which wakes
-    // the screen's side through tokio's own thread-locals, and those are gone once the thread ends.
-    PANICS.with(|panics| panics.borrow_mut().take());
+}
+
+/// Lets go of where a panic went while the thread is whole, as `serve` returns or a panic unwinds it: the last sender's
+/// drop closes its channel, which wakes the screen's side through tokio's own thread-locals, and those are gone once
+/// the thread ends.
+struct LetGo;
+
+impl Drop for LetGo {
+    fn drop(&mut self) {
+        PANICS.with(|panics| panics.borrow_mut().take());
+    }
 }
 
 fn serve(build: Build, mut down: mpsc::UnboundedReceiver<Down>, back: mpsc::UnboundedSender<Back>) {
@@ -403,6 +412,13 @@ impl SessionHandle for Threaded {
             let _ = self.down.send(Down::Watch { job: Some(id) });
         }
         self.job.borrow().as_ref().filter(|(at, _)| *at == id).map(|(_, detail)| detail.clone())
+    }
+    /// Its thread stops reading them.
+    fn unwatch_job(&self) {
+        if self.watched.take().is_some() {
+            self.job.borrow_mut().take();
+            let _ = self.down.send(Down::Watch { job: None });
+        }
     }
     fn can_background(&self) -> bool {
         self.reads.borrow().can_background
