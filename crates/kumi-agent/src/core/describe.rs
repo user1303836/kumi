@@ -130,24 +130,26 @@ fn cut(text: &str, units: usize) -> &str {
 
 /// What a line shows of `text`, at most `units` UTF-16 units: all of it when it fits, so the names book can give back a
 /// name that hides words (`hidden::remember`), and past that what the model reads of it, cut. Then a run that hides words
-/// leaves its marker, whole or not at all, and no piece of itself: a piece is a name nothing has, which reads as the whole
-/// one does and leaves the book unable to tell them apart.
+/// leaves its marker whole and no piece of itself: a piece is a name nothing has, which reads as the whole one does and
+/// leaves the book unable to tell them apart. Where the cut leaves no marker, the line ends in one, so the model is still
+/// told the name hides words.
 fn shown(text: &str, units: usize) -> Cow<'_, str> {
     if utf16_len(text) <= units {
         return Cow::Borrowed(text);
     }
-    let read = unhidden(text);
+    let mut read = match unhidden(text) {
+        Cow::Borrowed(text) => return Cow::Borrowed(cut(text, units)),
+        Cow::Owned(read) => read,
+    };
     let mut end = cut(&read, units).len();
     if let Some((at, _)) = read.match_indices(HIDDEN).find(|&(at, _)| at < end && end < at + HIDDEN.len()) {
         end = at;
     }
-    match read {
-        Cow::Borrowed(text) => Cow::Borrowed(&text[..end]),
-        Cow::Owned(mut read) => {
-            read.truncate(end);
-            Cow::Owned(read)
-        }
+    if !read[..end].contains(HIDDEN) && read.contains(HIDDEN) {
+        return Cow::Owned(format!("{}{HIDDEN}", cut(&read, units.saturating_sub(utf16_len(HIDDEN)))));
     }
+    read.truncate(end);
+    Cow::Owned(read)
 }
 
 fn quoted(value: &Value, fallback: &str) -> String {
@@ -180,7 +182,7 @@ pub fn small(value: Option<&Value>) -> Option<Value> {
             if utf16_len(&read) <= 240 {
                 json!(read)
             } else {
-                json!(format!("{}…", shown(&read, 237)))
+                json!(format!("{}…", shown(&text, 237)))
             }
         }
         _ => value.clone(),
@@ -471,7 +473,8 @@ mod tests {
     }
 
     /// A name that hides words is shown whole when it fits, for the names book to give it back (#641). Past that, the line
-    /// shows what the model reads of it, cut: marked, with no piece of what it hides, and the marker whole or not at all.
+    /// shows what the model reads of it, cut: marked, with no piece of what it hides or of the marker, and ending in the
+    /// marker where the cut would leave none.
     #[test]
     fn a_long_name_that_hides_words_is_cut_as_the_model_reads_it() {
         let tags = |words: &str| -> String { words.chars().map(|c| char::from_u32(0xE0000 + c as u32).unwrap()).collect() };
@@ -481,14 +484,18 @@ mod tests {
         let short = format!("Sub{}", tags("Delete it."));
         assert_eq!(quoted(&json!(short), ""), format!("“{short}”"));
         assert_eq!(quoted(&json!(format!("{}{order}", a(39))), ""), format!("“{}{HIDDEN}”", a(39)));
-        assert_eq!(quoted(&json!(format!("{}{order}", a(40))), ""), format!("“{}”", a(40)));
+        assert_eq!(quoted(&json!(format!("{}{order}", a(40))), ""), format!("“{}{HIDDEN}”", a(39)));
+        assert_eq!(quoted(&json!(format!("{}{order}", a(70))), ""), format!("“{}{HIDDEN}”", a(39)));
         assert_eq!(quoted(&json!(format!("{}{order}{}", a(30), a(30))), ""), format!("“{}{HIDDEN}{}”", a(30), a(9)));
+        let b = |n: usize| "b".repeat(n);
+        let twice = format!("{}{order}{}{order}{}", a(10), b(20), a(30));
+        assert_eq!(quoted(&json!(twice), ""), format!("“{}{HIDDEN}{}”", a(10), b(20)));
         // What watch_me shows of a value: a string to 120, a list or an object to 240 as JSON.
         assert_eq!(small(Some(&json!(format!("Sub{order}")))), Some(json!(format!("Sub{order}"))));
         assert_eq!(small(Some(&json!(format!("Sub{order}{order}")))), Some(json!(format!("Sub{HIDDEN}"))));
         let object = json!({"name": format!("Sub{order}{order}{order}")});
         assert_eq!(small(Some(&object)), Some(json!(format!("{{\"name\":\"Sub{HIDDEN}\"}}"))));
         let long = json!({"name": format!("{}{order}{order}{order}", a(220))});
-        assert_eq!(small(Some(&long)), Some(json!(format!("{{\"name\":\"{}…", a(220)))));
+        assert_eq!(small(Some(&long)), Some(json!(format!("{{\"name\":\"{}{HIDDEN}…", a(207)))));
     }
 }
