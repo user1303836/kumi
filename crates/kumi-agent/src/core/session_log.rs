@@ -425,11 +425,14 @@ struct Begin {
 }
 
 /// What a copy takes of the original's log: its lines up to the end of its last save as the copy began, which is what
-/// the copy's checkpoint holds, from the log begun at `at` (one begun again since is another).
+/// the copy's checkpoint holds, from the log begun at `at` (one begun again since is another). A copy from before a
+/// request (`cut`) takes the lines before it, then those after that tell again of a change made before it (a late
+/// picture, a confirmation, an undo), so the copy shows it as it is now.
 #[derive(Debug, Clone, Copy)]
 struct Upto {
     end: u64,
     at: i64,
+    cut: bool,
 }
 
 /// What the writer is asked, in order.
@@ -1144,6 +1147,8 @@ async fn found(file: &Path) -> std::io::Result<Found> {
 }
 
 const SAVED: &[u8] = br#"{"kind":"saved","#;
+const EVENT: &[u8] = br#"{"kind":"event","#;
+const CHANGE: &[u8] = br#""event":{"type":"change""#;
 const COMPLETED: &[u8] = br#""event":{"type":"turn-complete""#;
 
 /// When a log's last save was kept (when the log began, without one), and whether an answer ended after it: one that
@@ -1214,7 +1219,7 @@ async fn upto(file: &Path, cut: Option<i64>) -> Option<Upto> {
     let request = cut.map(|cut| format!("{{\"kind\":\"request\",\"at\":{cut},"));
     for line in bytes[first + 1..].split_inclusive(|b| *b == b'\n') {
         if request.as_ref().is_some_and(|request| line.starts_with(request.as_bytes())) {
-            return Some(Upto { end: at as u64, at: header.at });
+            return Some(Upto { end: at as u64, at: header.at, cut: true });
         }
         at += line.len();
         if line.starts_with(SAVED) && line.ends_with(b"\n") {
@@ -1224,11 +1229,12 @@ async fn upto(file: &Path, cut: Option<i64>) -> Option<Upto> {
     if cut.is_some() {
         return None;
     }
-    Some(Upto { end: end? as u64, at: header.at })
+    Some(Upto { end: end? as u64, at: header.at, cut: false })
 }
 
 /// The lines of the original's log at `file` after its header, to `upto`'s end, with its count of requests from before
-/// it began: what a copy's log begins with. None when it's no longer that log (begun again since), or can't be read.
+/// it began: what a copy's log begins with. A copy from before a request has the later lines telling again of a change
+/// made before it after them. None when it's no longer that log (begun again since), or can't be read.
 async fn copy_of(file: &Path, upto: Upto) -> Option<(u32, Vec<u8>)> {
     let bytes = tokio::fs::read(file).await.ok()?;
     let first = bytes.iter().position(|b| *b == b'\n')?;
@@ -1237,5 +1243,26 @@ async fn copy_of(file: &Path, upto: Upto) -> Option<(u32, Vec<u8>)> {
     if header.at != upto.at || end > bytes.len() || end <= first {
         return None;
     }
-    Some((header.before, bytes[first + 1..end].to_vec()))
+    let mut lines = bytes[first + 1..end].to_vec();
+    if upto.cut {
+        let made: std::collections::HashSet<(String, i64)> =
+            lines.split_inclusive(|b| *b == b'\n').filter_map(change_in).map(|change| (change.id, change.at)).collect();
+        for line in bytes[end..].split_inclusive(|b| *b == b'\n').filter(|line| line.ends_with(b"\n")) {
+            if change_in(line).is_some_and(|change| made.contains(&(change.id, change.at))) {
+                lines.extend_from_slice(line);
+            }
+        }
+    }
+    Some((header.before, lines))
+}
+
+/// The change a log's line tells of, when it's a change's event.
+fn change_in(line: &[u8]) -> Option<ChangeRecord> {
+    if !line.starts_with(EVENT) || !line.windows(CHANGE.len()).any(|window| window == CHANGE) {
+        return None;
+    }
+    match serde_json::from_slice::<LogLine>(line).ok()? {
+        LogLine::Event { event: SessionEvent::Change { change }, .. } => Some(change),
+        _ => None,
+    }
 }
