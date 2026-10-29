@@ -784,7 +784,12 @@ impl InProcess {
             | Op::SaveKey(_)
             | Op::SignOut(_)
             | Op::SignInChatgpt(_)
-            | Op::MissingModel(_)) => return models_answer(&op, session.model_controls(), &self.side).await.expect("a model request"),
+            | Op::MissingModel(_)) => {
+                // Should this list and models_answer's part, a request the controls don't answer is "Not available": no panic.
+                return models_answer(&op, session.model_controls(), &self.side)
+                    .await
+                    .unwrap_or_else(|| Err(RuntimeError::plain("Not available")));
+            }
             Op::StopSignIn(op::StopSignIn { id }) => Reply::StopSignIn(self.side.stop_sign_in(id)),
             Op::FocusBody(op::FocusBody { request }) => Reply::FocusBody(session.focus_body(&request).await?),
         })
