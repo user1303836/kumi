@@ -169,6 +169,13 @@ pub(super) fn help_sections(has: Has, app: &str, tabs: &[String], commands: Vec<
             },
         ),
     ]);
+    if has.can.take_back {
+        stop.push(row(
+            "/takeback",
+            "Take back your last request (/takeback 3, your last three): Kumi undoes its changes, newest first, and its words \
+             come back to the box to change and send again",
+        ));
+    }
     let mut listed = vec![
         row("/", "The commands as you type: ↑↓ choose, tab completes, enter runs, esc closes"),
         row("?", "This help, from an empty box"),
@@ -317,7 +324,7 @@ mod tests {
     /// The whole help, every key there, with text copying as the mouse lets go or not, and the mouse Kumi's or the
     /// terminal's.
     fn every_section_with(copy_on_select: bool, mouse: bool) -> Vec<HelpSection> {
-        let can = Capabilities { attachments: true, jobs: true, palette: true, slots: true, ..Default::default() };
+        let can = Capabilities { attachments: true, jobs: true, palette: true, slots: true, take_back: true, ..Default::default() };
         let has = Has { can, fronts: Fronts { voice: true, ..Default::default() }, copy_on_select, mouse };
         let tabs = ["HISTORY", "GOAL", "JOBS", "PALETTE"].map(String::from);
         help_sections(
