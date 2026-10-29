@@ -114,7 +114,9 @@ struct Inner {
     moves: Cell<bool>,
     /// Lent to a program Kumi runs in it ([`Tty::hand_over`]), and not yet given back for good.
     lent: Cell<bool>,
-    /// Given back for good while lent (Kumi closing): what waits for a key in the lent terminal stops waiting.
+    /// Given back for good while lent (Kumi closing): what waits for a key in the lent terminal stops waiting. With
+    /// nothing waiting (the editor has the terminal), the wake stays stored; harmless, as the terminal is never lent
+    /// again and a wait then returns at once, but nothing else should wait on it.
     closed: tokio::sync::Notify,
     parser: InputParser,
     decoder: RefCell<Utf8Decoder>,
@@ -248,8 +250,10 @@ impl Tty {
     }
 
     /// While the terminal is lent ([`Tty::hand_over`]), waits for a key as a program run in it would, and drops it whole:
-    /// the rest of an arrow's or a function key's bytes, a moment behind the first, are dropped with it, and so is what
-    /// was typed before. Kumi closing meanwhile ends the wait; not lent, it returns at once.
+    /// the rest of an arrow's or a function key's bytes, a moment behind the first, are dropped with it. What was typed
+    /// before and is still in the terminal's own buffer is dropped first; bytes Kumi's reader had already taken before
+    /// the terminal was lent (rare) end the wait at once. Kumi closing meanwhile ends the wait; not lent, it returns at
+    /// once.
     pub async fn wait_for_key(&self) {
         let inner = &self.inner;
         if !inner.lent.get() {
