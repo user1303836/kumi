@@ -122,6 +122,15 @@ impl TerminalOptions {
 fn command_like(line: &str) -> bool {
     line == "/" || registry::is_command(line)
 }
+/// A session that can do everything, in a front end with every part: what each command in the table comes to, at most.
+fn all_on() -> Now {
+    let mut can = serde_json::to_value(Capabilities::default()).unwrap_or_default();
+    for value in can.as_object_mut().into_iter().flat_map(|can| can.values_mut()) {
+        *value = Value::Bool(true);
+    }
+    let fronts = Fronts { voice: true, updates: true, switch_daw: true, willington: true };
+    Now { busy: false, goal_running: false, can: serde_json::from_value(can).unwrap_or_default(), fronts }
+}
 /// What the full-screen app shows and plain mode can't: /help names them, and a line asking for one is told so.
 fn full_screen_only(effect: &Effect) -> bool {
     matches!(effect, Effect::Voice | Effect::Map | Effect::Palette | Effect::Copy | Effect::Recipe)
@@ -320,6 +329,8 @@ struct State {
     asking: Option<String>,
     /// Why the DAW answers late, while it does (a dialog is open), as its focus says.
     busy: Option<String>,
+    /// A /goal or a sound match is set: /goal while Kumi works says so, as the full-screen app shows it.
+    goal: bool,
 }
 struct Inner {
     options: TerminalOptions,
@@ -364,6 +375,7 @@ pub fn create_terminal(options: TerminalOptions) -> PlainTerminal {
             said: std::collections::HashMap::new(),
             asking: None,
             busy: None,
+            goal: false,
         }),
         parser: RefCell::new(None),
         keys: RefCell::new(None),
@@ -642,7 +654,10 @@ impl PlainTerminal {
         let argument = parts.next();
         // Plain mode's own commands, which the shared table doesn't have: a note pinned, unpinned or forgotten.
         let own = matches!(verb, "/pin" | "/unpin" | "/forget");
-        let effect = (!own).then(|| registry::run(command, &self.now()));
+        // The table answers for /model, /effort and /logout alone: plain mode reads their words itself (/model
+        // <provider>, /effort high, /logout <provider>), where the full-screen app chooses in a panel.
+        let asked = if matches!(verb, "/model" | "/effort" | "/logout") { verb } else { command };
+        let effect = (!own).then(|| registry::run(asked, &self.now()));
         if self.busy() {
             match effect {
                 // A message while Kumi gets ready waits, once; while it answers, it's said to wait.
@@ -714,7 +729,9 @@ impl PlainTerminal {
             switch_daw: options.switch_daw.is_some(),
             willington: options.willington.is_some(),
         };
-        Now { busy: self.busy(), goal_running: false, can: Capabilities::of(&*options.controller), fronts }
+        // Plain mode chooses models and signs in with its own controller, whatever the session says.
+        let can = Capabilities { models: true, ..Capabilities::of(&*options.controller) };
+        Now { busy: self.busy(), goal_running: self.0.state.borrow().goal, can, fronts }
     }
     /// Carries out what the shared table made of a line, as text; what only the full-screen app can show says so.
     async fn effect(&self, effect: Effect, verb: &str, argument: Option<&str>, command: &str, input: &str) -> Result<(), RuntimeError> {
@@ -879,6 +896,16 @@ impl PlainTerminal {
             Effect::Refused(Why::NotKept) => self.notice(&format!("[conversations] {}", crate::tui::app::not_kept())),
             Effect::Refused(Why::Busy { verb }) => {
                 self.notice(&format!("[busy] Kumi is working: {verb} once it's done (Ctrl-C stops it)."))
+            }
+            // A command the table has but this session or plain mode lacks: /stop says why, as plain mode always has, and
+            // the full-screen app's own are named as such; any other is unknown here.
+            Effect::Unknown { name } if name == "/stop" => {
+                self.notice(&format!("[stop] Kumi can't stop {} here.", crate::daw::words().app))
+            }
+            Effect::Unknown { name }
+                if registry::named(&name).is_some_and(|command| full_screen_only(&registry::run(command.name, &all_on()))) =>
+            {
+                self.notice(&format!("[plain] {name} isn't available in plain mode: the full-screen app has it."))
             }
             Effect::Unknown { .. } => self.notice("Unknown command. Use /help."),
         }
@@ -1340,6 +1367,8 @@ impl Terminal for PlainTerminal {
                     self.carry_on(id);
                 }
             }
+            "goal" | "objective" => self.0.state.borrow_mut().goal = true,
+            "objective-cleared" => self.0.state.borrow_mut().goal = false,
             "job" => {
                 if let SessionEvent::Job(status) = &event {
                     use kumi_agent::core::jobs::{JobState, WhenDone};
@@ -1904,19 +1933,9 @@ fn expired_rest(reason: &str, rest: &[String]) -> Option<String> {
 mod registry_tests {
     use super::*;
 
-    /// A session that can do everything, in a front end with every part: the table offers every command.
-    fn everything() -> Now {
-        let mut can = serde_json::to_value(Capabilities::default()).unwrap();
-        for value in can.as_object_mut().unwrap().values_mut() {
-            *value = Value::Bool(true);
-        }
-        let fronts = Fronts { voice: true, updates: true, switch_daw: true, willington: true };
-        Now { busy: false, goal_running: false, can: serde_json::from_value(can).unwrap(), fronts }
-    }
-
     #[test]
     fn plain_mode_runs_or_declines_every_command_in_the_shared_table() {
-        let now = everything();
+        let now = all_on();
         let mut declined = vec![];
         for command in registry::COMMANDS {
             let effect = registry::run(command.name, &now);
@@ -1937,7 +1956,7 @@ mod registry_tests {
             assert!(registry::named(own).is_none(), "{own} is plain mode's own");
         }
         // run() takes a lone `/` as words; plain mode catches it first (#629's rule).
-        assert_eq!(registry::run("/", &everything()), Effect::Message);
+        assert_eq!(registry::run("/", &all_on()), Effect::Message);
         assert!(command_like("/") && command_like("/help") && !command_like("/Users/me/Music/kick.wav make it punchier"));
     }
 }

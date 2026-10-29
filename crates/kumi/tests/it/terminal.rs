@@ -103,6 +103,8 @@ struct Control {
     /// A chat without Live, started without -c or -r: no conversation is kept.
     keeps_none: Cell<bool>,
     export: RefCell<Option<ConversationToExport>>,
+    slots: RefCell<Option<Rc<kumi_listening::slots::SlotsContext>>>,
+    music: RefCell<Option<Rc<kumi_listening::music::learning::Music>>>,
 }
 impl Default for Control {
     fn default() -> Self {
@@ -126,6 +128,8 @@ impl Default for Control {
             now: RefCell::new(None),
             keeps_none: Cell::new(false),
             export: RefCell::new(None),
+            slots: RefCell::new(None),
+            music: RefCell::new(None),
         }
     }
 }
@@ -325,6 +329,12 @@ impl SessionController for Control {
     }
     fn has_jobs(&self) -> bool {
         true
+    }
+    fn slots_context(&self) -> Option<Rc<kumi_listening::slots::SlotsContext>> {
+        self.slots.borrow().clone()
+    }
+    fn music(&self) -> Option<Rc<kumi_listening::music::learning::Music>> {
+        self.music.borrow().clone()
     }
 }
 struct Fixture {
@@ -786,7 +796,7 @@ async fn willington_is_said_off_at_the_start_and_switched_by_its_command() {
             assert!(!on.get());
             let text = f.text();
             assert!(text.contains("[willington] Willington bindings are OFF. /willington turns them on again."), "{text}");
-            assert!(text.contains("/willington (Willington's bindings on or off)"), "{text}");
+            assert!(text.contains("/willington (Willington's bindings in Live: macro mapping, zones)"), "{text}");
             f.quit().await;
             // Without Willington in the bridge: nothing at the start, and no such command.
             let f = Fixture::new(false, false, None, None, None);
@@ -1083,6 +1093,60 @@ async fn plain_mode_runs_the_tables_text_commands_and_names_the_full_screen_apps
             f.input.write("/loop make it louder\n");
             flush().await;
             assert!(f.control.calls.borrow().iter().any(|call| call == "submit:/loop make it louder"), "{:?}", f.control.calls.borrow());
+            // While Kumi works on a goal, /goal says one is running and how to pause or stop it; with none set, it waits.
+            f.control.state.set(TurnState::Running);
+            f.input.write("/goal\n");
+            flush().await;
+            assert!(f.text().contains("[busy] Kumi is working: /goal once it's done (Ctrl-C stops it)."), "{}", f.text());
+            f.emit(json!({"type": "objective", "objective": "make the bass punchier", "state": "running", "turns": 1, "turnBudget": 20, "elapsedMs": 0, "budgetMs": 600000, "measured": false}));
+            f.input.write("/goal\n");
+            flush().await;
+            assert!(f.text().contains("[goal] A goal is running: /goal pause or /goal stop."), "{}", f.text());
+            f.control.state.set(TurnState::Idle);
+            f.quit().await;
+        })
+        .await;
+}
+
+// /slots and /music print their lists as the full-screen app words them; changing your music is the app's.
+#[tokio::test(flavor = "current_thread")]
+async fn plain_mode_lists_the_listening_slots_and_your_music() {
+    use kumi_listening::music::learning::{create_music, MusicOptions};
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let folder = tempfile::tempdir().unwrap();
+            let f = Fixture::new(false, false, None, None, None);
+            flush().await;
+            f.input.write("/slots\n/music\n");
+            flush().await;
+            // Without them, the session has neither command.
+            assert_eq!(f.text().matches("Unknown command. Use /help.").count(), 2, "{}", f.text());
+            *f.control.slots.borrow_mut() = Some(Rc::new(kumi_listening::slots::SlotsContext {
+                file: kumi_listening::slots::file_in(folder.path()),
+                store: Rc::new(kumi_ai::auth::store::open_credential_store(folder.path().join("auth.json"))),
+                env: Default::default(),
+                profile: None,
+            }));
+            let mut options = MusicOptions::new(folder.path().join("kumi/music"), None, Default::default());
+            (options.places, options.fork, options.delay_ms) = (Some(vec![]), false, 3_600_000);
+            *f.control.music.borrow_mut() = Some(create_music(options));
+            f.input.write("/slots\n/music\n/music add /somewhere/Music\n");
+            for _ in 0..50 {
+                flush().await;
+                if f.text().contains("[music] Now:") && f.text().contains("[music] Adding") {
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            }
+            let text = f.text();
+            for want in [
+                "[slots] stems (a mix split into its parts): Live's own splitter",
+                "[music] Folders: none",
+                "[music] Now: off (Kumi asks before it learns your music)",
+                "[music] Adding, removing, pausing or forgetting your music is the full-screen app's; /music lists it here.",
+            ] {
+                assert!(text.contains(want), "{want}:\n{text}");
+            }
             f.quit().await;
         })
         .await;

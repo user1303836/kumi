@@ -231,7 +231,16 @@ REAPER と Renoise でも画面は同じで（[つなぎ方](KUMI_GUIDE.md#reape
 
 ## プレーンモード
 
-`KUMI_UI=plain`、またはパイプを通した入力や出力では、代わりに一行ずつのプレーンなインターフェースになり、スクリーンリーダーやログに向いています。使えるのは `/help`、`/status`、`/undo`、`/stop`、`/refresh`、`/reconnect`、`/new [name]`、`/resume [番号、ID または名前]`（と `/conversations`）、`/rename <name>`、`/fork [name]`、`/export [md|html|json]`、`/share`（どちらもファイルを保存し、場所を伝えます）、`/daw [name]`、`/model [provider/model]`、`/effort [level|default]`、`/fast`、`/logout <provider>`、`/memory`、`/forget <id>`、`/note <id> <new words>`、`/pin <id>`、`/unpin <id>`、`/recipes`、`/willington`、`/update`、`/changelog`、`/quit` で、`/btw`、`/goal`、`/loop`、`/slots`、`/music`、`/map`、`/jobs`、`/takeback`、`/copy` はありません。`/resume` はこの Set の会話、次にほかの Set の会話に番号を付けます。別の Set の会話についての Kumi の質問には 1、2、3 で答えます（答えを待つ間もコマンドは使え、ほかの言葉にはもう一度質問します）。バックグラウンドジョブが始まったときと終わったときは知らせ、あなたの依頼に必要なジョブは Kumi が何もしていないときに続きを進めます。サインインはシェルから `kumi login` で行います。Ctrl-C は答えを止め、Kumi が何もしていないときは終了します。
+`KUMI_UI=plain`、またはパイプを通した入力や出力では、代わりに一行ずつのプレーンなインターフェースになり、スクリーンリーダーやログに向いています。フルスクリーンのアプリのコマンドがテキストで使え、`/help` がこのセッションで使えるものを一覧にします。
+
+- `/btw <question>` は横から答え、`/goal` と `/loop` はフルスクリーンのアプリと同じように動きます。
+- `/jobs`、`/slots`、`/music` は一覧を表示します。音楽を変えるのはフルスクリーンのアプリで行います。
+- `/export [md|html|json]` と `/share` はどちらもファイルを保存し、場所を伝えます。
+- `/pin <id>`、`/unpin <id>`、`/forget <id>` で `/memory` のメモを残したり忘れさせたりします。
+- `/voice`、`/map`、`/palette`、`/copy`、`/recipe`、`/takeback` はフルスクリーンのアプリだけにあり、プレーンモードではそう伝えます。
+- `/resume` はこの Set の会話、次にほかの Set の会話に番号を付けます。別の Set の会話についての Kumi の質問には 1、2、3 で答えます（答えを待つ間もコマンドは使え、ほかの言葉にはもう一度質問します）。
+- バックグラウンドジョブが始まったときと終わったときは知らせ、あなたの依頼に必要なジョブは Kumi が何もしていないときに続きを進めます。
+- サインインはシェルから `kumi login` で行います。Ctrl-C は答えを止め、Kumi が何もしていないときは終了します。
 
 ## Kumi から離れているとき
 
