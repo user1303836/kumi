@@ -15,6 +15,7 @@ use super::*;
 use crate::tui::picker::{NoteTone, PickerOptions};
 use base64::Engine;
 use kumi_agent::core::jobs::{JobDetail, JobState, JobStatus, JobStepState};
+use std::time::{Duration, Instant};
 
 /// The JOBS tab: on the strip from the first job.
 pub(super) struct JobsTab {
@@ -346,7 +347,7 @@ impl TuiApp {
     }
 
     pub(super) fn open_job(&self, id: u32) {
-        self.open_overlay(JobPanel { id, scroll: 0 });
+        self.open_overlay(JobPanel { id, scroll: 0, waiting: None });
     }
 
     pub(super) fn stop_job(&self, id: u32) {
@@ -359,13 +360,20 @@ impl TuiApp {
     }
 
     fn run_job_again(&self, id: u32) {
-        self.when_answered(op::RunJobAgain { id }, move |app, again| match again {
-            Ok(Ok(again)) => {
-                app.0.state.borrow_mut().jobs.remove(&id);
-                app.notice(&format!("Running it again as job {again}."), NoticeTone::Info);
+        // Asked once until it's answered (a session on a thread of its own answers a moment later).
+        if !self.0.state.borrow_mut().running_again.insert(id) {
+            return;
+        }
+        self.when_answered(op::RunJobAgain { id }, move |app, again| {
+            app.0.state.borrow_mut().running_again.remove(&id);
+            match again {
+                Ok(Ok(again)) => {
+                    app.0.state.borrow_mut().jobs.remove(&id);
+                    app.notice(&format!("Running it again as job {again}."), NoticeTone::Info);
+                }
+                Ok(Err(why)) => app.notice(&why, NoticeTone::Warn),
+                Err(error) => app.error(&error),
             }
-            Ok(Err(why)) => app.notice(&why, NoticeTone::Warn),
-            Err(error) => app.error(&error),
         });
         self.0.scheduler.request();
     }
@@ -430,13 +438,20 @@ impl TuiApp {
 
     /// Ctrl-b: what the answer is doing away from Live goes on in the background, and the answer carries on.
     pub(super) fn background_now(&self) {
-        self.when_answered(op::Background {}, |app, moved| match moved {
-            Ok(Ok(id)) => app.notice(
-                &format!("Moved to the background as job {id}: the answer carries on, and its report comes when it's done."),
-                NoticeTone::Info,
-            ),
-            Ok(Err(why)) => app.notice(&why, NoticeTone::Info),
-            Err(error) => app.error(&error),
+        // Asked once until it's answered, as a job run again is.
+        if std::mem::replace(&mut self.0.state.borrow_mut().backgrounding, true) {
+            return;
+        }
+        self.when_answered(op::Background {}, |app, moved| {
+            app.0.state.borrow_mut().backgrounding = false;
+            match moved {
+                Ok(Ok(id)) => app.notice(
+                    &format!("Moved to the background as job {id}: the answer carries on, and its report comes when it's done."),
+                    NoticeTone::Info,
+                ),
+                Ok(Err(why)) => app.notice(&why, NoticeTone::Info),
+                Err(error) => app.error(&error),
+            }
         });
         self.0.scheduler.request();
     }
@@ -494,7 +509,7 @@ impl TuiApp {
 
     /// Keys on a job's overlay: scroll, x stops it, r runs it again, c copies its report, Esc closes.
     fn job_panel_input(&self, panel: &mut JobPanel, event: InputEvent) -> Handled {
-        let JobPanel { id, scroll } = panel;
+        let JobPanel { id, scroll, .. } = panel;
         let id = *id;
         // A key's actions in turn: one that doesn't apply (running again a job that hasn't ended) lets the next have it.
         for action in self.actions(Scope::Job, &event) {
@@ -528,7 +543,13 @@ impl TuiApp {
 pub(super) struct JobPanel {
     id: u32,
     scroll: i32,
+    /// Since when it has waited for the job's details (a session on a thread of its own sends them a moment after
+    /// they're first asked for): meanwhile it draws again at the animation's pace, for a while, so they show as they come.
+    waiting: Option<Instant>,
 }
+
+/// How long the job panel draws again on its own while the job's details are on their way.
+const DETAILS_WAIT: Duration = Duration::from_secs(2);
 impl Overlay<TuiApp> for JobPanel {
     fn handle(&mut self, app: &TuiApp, event: InputEvent) -> Handled {
         app.job_panel_input(self, event)
@@ -541,9 +562,21 @@ impl Overlay<TuiApp> for JobPanel {
         let (inner, space) = (width - 4, area.box_top - 5);
         let mut lines: Vec<Line> = vec![];
         let (id, scroll) = (self.id, &mut self.scroll);
-        match app.session().job(id) {
+        // A session on a thread of its own sends a job's details a moment after they're first asked for: until then, its
+        // line as JOBS has it.
+        let detail = app.session().job(id).map(|detail| (detail, true)).or_else(|| {
+            let status = app.session().jobs().into_iter().find(|status| status.id == id)?;
+            Some((JobDetail { status, asked: String::new(), steps: vec![], report: None }, false))
+        });
+        match &detail {
+            Some((_, false)) if self.waiting.get_or_insert_with(Instant::now).elapsed() < DETAILS_WAIT => {
+                app.0.scheduler.request_animation()
+            }
+            _ => self.waiting = None,
+        }
+        match detail {
             None => lines.push(Line::new(format!("Job {id} is gone."), st::FAINT)),
-            Some(detail) => {
+            Some((detail, whole)) => {
                 let rows = app.job_lines(&detail, inner);
                 let mut rows = rows.into_iter();
                 if let Some((spans, right)) = rows.next() {
@@ -552,7 +585,7 @@ impl Overlay<TuiApp> for JobPanel {
                     title.right = right;
                     lines.push(title);
                 }
-                let body: Vec<_> = rows.collect();
+                let body: Vec<_> = if whole { rows.collect() } else { vec![] };
                 let room = (space - 4).clamp(3, 18);
                 *scroll = (*scroll).min(body.len() as i32 - room).max(0);
                 let shown = &body[*scroll as usize..(*scroll as usize + room as usize).min(body.len())];

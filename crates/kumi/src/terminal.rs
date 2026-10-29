@@ -321,6 +321,8 @@ struct State {
     first_text_ms: Option<f64>,
     queued: Option<String>,
     answering: bool,
+    /// The session is starting: from before the first line is read until it first goes idle, or Start is answered.
+    starting: bool,
     output_failed: bool,
     text: StreamingText,
     presentation: Option<Presentation>,
@@ -383,6 +385,7 @@ pub fn create_terminal(options: TerminalOptions) -> PlainTerminal {
             first_text_ms: None,
             queued: None,
             answering: false,
+            starting: false,
             output_failed: false,
             text,
             presentation: None,
@@ -478,8 +481,14 @@ impl PlainTerminal {
         state.next_id += 1;
         state.next_id
     }
+    /// Kumi at work: what the session says, or a Start or turn of plain mode's own not answered yet, which a session on
+    /// a thread of its own says it's at a moment later.
     fn busy(&self) -> bool {
-        matches!(self.session().status().state, TurnState::Running | TurnState::Cancelling)
+        let asked = {
+            let state = self.0.state.borrow();
+            state.answering || state.starting
+        };
+        asked || matches!(self.session().status().state, TurnState::Running | TurnState::Cancelling)
     }
     fn prompt(&self) {
         let mut state = self.0.state.borrow_mut();
@@ -1424,6 +1433,9 @@ impl Terminal for PlainTerminal {
                 self.notice(&format!("[{}] {}", words.tag, words.off_at_start));
             }
         }
+        // Starting from before the first line is read (the reader may hand over lines it read already as it resumes): a
+        // line meanwhile waits for the session, rather than going ahead of its Start.
+        self.0.state.borrow_mut().starting = true;
         let weak = Rc::downgrade(&self.0);
         active.resume(Rc::new(move |bytes| {
             if let Some(inner) = weak.upgrade() {
@@ -1456,12 +1468,26 @@ impl Terminal for PlainTerminal {
         let this = self.clone();
         tokio::task::spawn_local(async move {
             if !this.0.state.borrow().closing {
-                if let Err(error) = this.session().op(op::Start {}).await {
+                let started = this.session().op(op::Start {}).await;
+                this.0.state.borrow_mut().starting = false;
+                if let Err(error) = started {
                     if !this.0.state.borrow().closing {
                         this.error(&error);
                         this.finish(1).await;
                     }
                     return;
+                }
+                // A line kept while it started goes now, if the session's first Idle didn't send it already.
+                let queued = {
+                    let mut state = this.0.state.borrow_mut();
+                    if state.answering {
+                        None
+                    } else {
+                        state.queued.take()
+                    }
+                };
+                if let Some(line) = queued {
+                    this.spawn_submit(line);
                 }
                 // `kumi -r`: the kept conversations to choose from (those the words fit, given words).
                 if let Some(words) = this.0.options.choose_conversation.clone() {
@@ -1484,6 +1510,11 @@ impl Terminal for PlainTerminal {
         match get("type") {
             "state" => {
                 let mut state = self.0.state.borrow_mut();
+                // Started once the session first goes idle, a moment before Start's answer can come: the line kept meanwhile
+                // goes now.
+                if get("state") == "idle" {
+                    state.starting = false;
+                }
                 let queued = if get("state") == "idle" && !state.answering { state.queued.take() } else { None };
                 if get("state") == "running" {
                     state.turns_begun += 1;
@@ -2003,6 +2034,7 @@ impl Terminal for PlainTerminal {
         }
     }
     fn interrupt(&self) {
+        let busy = self.busy();
         let mut state = self.0.state.borrow_mut();
         if state.closing {
             return;
@@ -2014,7 +2046,7 @@ impl Terminal for PlainTerminal {
             self.notice("[slots] Stopping the model Kumi was trying.");
             return;
         }
-        if !self.busy() {
+        if !busy {
             drop(state);
             drop(self.finish(0));
             return;

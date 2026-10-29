@@ -199,7 +199,7 @@ pub fn bundled() -> Arc<Catalog> {
     BUNDLED.clone()
 }
 thread_local! {
-    /// The newest copy Kumi has, on the thread Kumi's runtime keeps to (as a plan's windows are, `usage`).
+    /// The newest copy Kumi has, on the thread that lists and asks the models (the session's), which refreshes it.
     static CURRENT: RefCell<Option<Arc<Catalog>>> = const { RefCell::new(None) };
 }
 /// The catalog in use: the newest copy Kumi has, or the one it carries.

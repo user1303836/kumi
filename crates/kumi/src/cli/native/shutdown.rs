@@ -4,7 +4,16 @@ use tokio::{runtime::Runtime, task::LocalSet};
 
 const GRACE: Duration = Duration::from_secs(2);
 
-pub(super) fn finish(runtime: Runtime, local: LocalSet, mut code: i32, explicit_exit: bool, err: &dyn TtyOutput) -> i32 {
+/// `left_running`: the session's own thread still had something running past its grace as it ended, said once with
+/// what this thread leaves.
+pub(super) fn finish(
+    runtime: Runtime,
+    local: LocalSet,
+    mut code: i32,
+    explicit_exit: bool,
+    left_running: bool,
+    err: &dyn TtyOutput,
+) -> i32 {
     if explicit_exit {
         // The source explicitly exits after /update's replacement process finishes.
         drop(local);
@@ -15,7 +24,7 @@ pub(super) fn finish(runtime: Runtime, local: LocalSet, mut code: i32, explicit_
     // them as Node keeps pending I/O alive, bounded by the source CLI watchdog.
     let began = Instant::now();
     let drained = runtime.block_on(async { tokio::time::timeout(GRACE, local).await.is_ok() });
-    if !drained {
+    if !drained || left_running {
         err.write("Kumi shutdown left a live handle; terminating this Kumi process.\n");
         code = 1;
     }
@@ -122,7 +131,7 @@ mod tests {
                     checkpoint: None,
                     max_steps: None,
                     budget: None,
-                    tools: vec![Rc::new(Tool { entered: RefCell::new(Some(entered)), never: case == "deadline" })],
+                    tools: vec![Rc::new(Tool { entered: RefCell::new(Some(entered)), never: case == "deadline" || case == "both" })],
                     binding: ModelBinding {
                         id: "test/fixture".into(),
                         model: Rc::new(Model),
@@ -153,7 +162,8 @@ mod tests {
                 0
             }
         });
-        let code = finish(runtime, local, code, case == "update", &crate::tui::tty::Stdout::stderr());
+        let left_running = case == "session" || case == "both";
+        let code = finish(runtime, local, code, case == "update", left_running, &crate::tui::tty::Stdout::stderr());
         println!("[shutdown] exit:{code}");
         std::io::stdout().flush().unwrap();
         std::process::exit(code);
@@ -200,6 +210,18 @@ mod tests {
         assert!(String::from_utf8_lossy(&output.stderr).contains("Kumi shutdown left a live handle; terminating this Kumi process."));
         assert!(began.elapsed() >= Duration::from_secs(2));
         assert!(began.elapsed() < Duration::from_secs(10), "shutdown exceeded its bounded grace");
+    }
+
+    /// The session's thread left something running as it ended: said as this thread's would be, once, even when this
+    /// thread leaves something too.
+    #[test]
+    fn what_the_sessions_thread_left_running_is_said_once() {
+        let said = "Kumi shutdown left a live handle; terminating this Kumi process.";
+        for case in ["session", "both"] {
+            let output = probe(case);
+            assert_eq!(output.status.code(), Some(1), "{case}");
+            assert_eq!(String::from_utf8_lossy(&output.stderr).matches(said).count(), 1, "{case}");
+        }
     }
 
     #[test]

@@ -3,8 +3,8 @@
 //! the five-hour window, `…-secondary-…` for the weekly one, other families named by `x-<id>-primary-…`).
 //! API keys' per-minute request limits aren't a plan; a 429's Retry-After covers them.
 
-use std::cell::RefCell;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
+use std::sync::{Mutex, MutexGuard};
 
 use serde::{Deserialize, Serialize};
 
@@ -20,35 +20,35 @@ pub struct PlanWindow {
     pub resets_at_ms: Option<f64>,
 }
 
-thread_local! {
-    /// The latest windows each provider reported, on the thread Kumi's runtime keeps to.
-    static PLANS: RefCell<HashMap<String, Vec<PlanWindow>>> = RefCell::new(HashMap::new());
+/// The latest windows each provider reported, for the whole process: answers come in on the session's thread, and the
+/// screen reads them on its own.
+static PLANS: Mutex<BTreeMap<String, Vec<PlanWindow>>> = Mutex::new(BTreeMap::new());
+
+fn plans() -> MutexGuard<'static, BTreeMap<String, Vec<PlanWindow>>> {
+    PLANS.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 /// Keeps what a response's headers say of the plan behind `provider`; a response that says nothing changes nothing.
 pub fn record(provider: &str, headers: &BTreeMap<String, String>) {
     let windows = plan_windows(headers);
     if !windows.is_empty() {
-        PLANS.with(|plans| plans.borrow_mut().insert(provider.to_string(), windows));
+        plans().insert(provider.to_string(), windows);
     }
 }
 
 /// The window of `provider`'s plan nearest its limit, when it's used `threshold` percent or more.
 pub fn nearest(provider: &str, threshold: f64) -> Option<PlanWindow> {
-    PLANS.with(|plans| {
-        plans
-            .borrow()
-            .get(provider)?
-            .iter()
-            .filter(|window| window.used_percent >= threshold)
-            .max_by(|a, b| a.used_percent.total_cmp(&b.used_percent))
-            .cloned()
-    })
+    plans()
+        .get(provider)?
+        .iter()
+        .filter(|window| window.used_percent >= threshold)
+        .max_by(|a, b| a.used_percent.total_cmp(&b.used_percent))
+        .cloned()
 }
 
 /// Forgets every provider's windows (a new sign-in, tests).
 pub fn forget() {
-    PLANS.with(|plans| plans.borrow_mut().clear());
+    plans().clear();
 }
 
 /// The plan's windows in ChatGPT's headers: each family's primary and secondary window (a window counts once it

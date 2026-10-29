@@ -60,6 +60,7 @@ mod plain_farewell;
 mod print;
 mod report;
 mod session;
+mod session_thread;
 mod spinner;
 mod stdin_handoff;
 mod take_back_daws;

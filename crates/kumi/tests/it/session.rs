@@ -5232,3 +5232,70 @@ local_test!(what_at_offers_is_read_as_its_list_opens_and_again_after_a_look, {
         assert_eq!(h.record.offers.get(), 2, "read again after the look");
     }
 });
+
+/// A real session on a thread of its own, started, asked (an answer with a step), looked at again and closed through its
+/// handle. Its reads are read inside every event it says (the handle's snapshot), so a read needing a borrow the session
+/// held as it spoke would end it: none does, and at each change of state the reads say what the event did.
+#[tokio::test(flavor = "current_thread")]
+async fn a_real_session_on_a_thread_of_its_own_answers_through_its_handle() {
+    use kumi_agent::core::{
+        protocol::{op, SessionHandle},
+        threaded::{Build, Built, Threaded},
+    };
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let build: Build = Box::new(|emit| {
+                async move {
+                    let run: Run = Rc::new(|_, _, emit| {
+                        async move {
+                            emit(KernelEvent::Text { text: "hello".into() })?;
+                            emit(KernelEvent::ToolStart { id: "t1".into(), name: "read_fixture".into() })?;
+                            emit(KernelEvent::ToolEnd { id: "t1".into(), name: "read_fixture".into(), elapsed_ms: 3, is_error: false })?;
+                            Ok(TurnResult {
+                                usage: Some(Usage { input_tokens: 5., output_tokens: 2., ..Default::default() }),
+                                ..complete()
+                            })
+                        }
+                        .boxed_local()
+                    });
+                    let h = harness(Some(run), |options| options.on_event = emit);
+                    let session = Rc::new(h.session.clone());
+                    // What the harness keeps for its fakes lives as long as the session does.
+                    Ok(Built { session, ending: Some(async move { drop(h) }.boxed_local()) })
+                }
+                .boxed_local()
+            });
+            let threaded = Threaded::spawn(build).await.unwrap();
+            let ended = Rc::new(RefCell::new(None));
+            threaded.on_fatal({
+                let ended = ended.clone();
+                Rc::new(move |why| *ended.borrow_mut() = Some(why))
+            });
+            let session: Rc<dyn SessionHandle> = threaded.clone();
+            let (seen, states) = (Rc::new(RefCell::new(vec![])), Rc::new(RefCell::new(vec![])));
+            let weak = Rc::downgrade(&session);
+            session.listen({
+                let (seen, states) = (seen.clone(), states.clone());
+                Rc::new(move |event| {
+                    if let (SessionEvent::State { state }, Some(session)) = (&event, weak.upgrade()) {
+                        states.borrow_mut().push((*state, session.status().state));
+                    }
+                    seen.borrow_mut().push(event);
+                })
+            });
+            session.op(op::Start {}).await.unwrap();
+            session.op(op::Submit { input: "question".into(), pinned: None, attachments: vec![], references: vec![] }).await.unwrap();
+            assert_eq!(session.status().state, TurnState::Idle);
+            session.op(op::Refresh {}).await.unwrap();
+            session.op(op::Close {}).await.unwrap();
+            assert!(threaded.close_thread().await, "everything under way finished as its thread ended");
+            assert_eq!(*ended.borrow(), None, "the session's thread ended on its own");
+            let states = states.borrow();
+            assert!(states.iter().all(|(said, read)| said == read), "{states:?}");
+            assert!(states.iter().any(|(said, _)| *said == TurnState::Running), "{states:?}");
+            let seen = seen.borrow();
+            assert!(seen.iter().any(|e| matches!(e, SessionEvent::Kernel(KernelEvent::Text { text }) if text == "hello")), "{seen:?}");
+            assert!(seen.iter().any(|e| matches!(e, SessionEvent::TurnComplete { .. })), "{seen:?}");
+        })
+        .await;
+}
