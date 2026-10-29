@@ -16,7 +16,7 @@ use daw_bridge::{
 use futures::{future::LocalBoxFuture, FutureExt};
 use kumi_agent::core::{
     context::IntegrationContext,
-    contracts::{ConnectionState, Integration, SessionController},
+    contracts::{ConnectionState, Integration},
     presentation::ToolPresentation,
     view::ViewPresentation,
 };
@@ -28,7 +28,7 @@ use kumi_daw::{
         BridgeCommand, BridgeRollbackStep, BridgeState, DawProvider, DawSession, EnableStep, Installed, RemovedBridge, Toggle, ToggleWords,
         WatchWords,
     },
-    setup::DawSetup,
+    setup::{DawSetup, SetupSession},
 };
 use kumi_library::daws::LibrarySources;
 use kumi_types::{
@@ -389,9 +389,9 @@ impl DawProvider for Own {
         env: &Env,
         bridge: Rc<RefCell<Option<String>>>,
         given: bool,
-        controller: Rc<RefCell<Option<Weak<dyn SessionController>>>>,
+        session: Rc<RefCell<Option<Weak<dyn SetupSession>>>>,
     ) -> Rc<dyn DawSetup> {
-        Rc::new(OwnSetup { own: *self, env: env.clone(), bridge, given, controller, seen: RefCell::new(None) })
+        Rc::new(OwnSetup { own: *self, env: env.clone(), bridge, given, session, seen: RefCell::new(None) })
     }
     fn doctor_checks<'a>(&'a self, io: &'a DawIo, _node: &'a Check) -> LocalBoxFuture<'a, Vec<Check>> {
         if !self.present(&io.env) {
@@ -797,7 +797,7 @@ struct OwnSetup {
     bridge: Rc<RefCell<Option<String>>>,
     /// A bridge configuration given on the command line stays.
     given: bool,
-    controller: Rc<RefCell<Option<Weak<dyn SessionController>>>>,
+    session: Rc<RefCell<Option<Weak<dyn SetupSession>>>>,
     /// Where the bridge goes in the DAW as it was while it ran: the producer quits it before the bridge goes in, and a
     /// portable REAPER outside the folders Kumi looks in is found only while it runs.
     seen: RefCell<Option<Target>>,
@@ -912,7 +912,7 @@ impl DawSetup for OwnSetup {
             }
         }
         for _ in 0..40 {
-            let session = self.controller.borrow().as_ref().and_then(Weak::upgrade);
+            let session = self.session.borrow().as_ref().and_then(Weak::upgrade);
             let Some(session) = session else { return };
             if session.reconnect().await.is_ok() {
                 return;

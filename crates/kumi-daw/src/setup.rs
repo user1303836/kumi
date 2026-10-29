@@ -3,7 +3,18 @@
 use crate::provider::Installed;
 use async_trait::async_trait;
 use kumi_common::abort::Signal;
+use kumi_types::errors::RuntimeError;
 use std::time::Duration;
+
+/// The session as the DAW's side of setup reaches it: setup asks it only this.
+#[async_trait(?Send)]
+pub trait SetupSession {
+    /// Connect again, through the bridge just put in place: an error while it can't yet (it's still starting), so setup
+    /// asks again shortly.
+    async fn reconnect(&self) -> Result<(), RuntimeError>;
+    /// The saved project open in the DAW, by its file, once the session has read it.
+    fn open_set(&self) -> Option<String>;
+}
 
 /// The DAW's side of setup, which the app can't do on its own: the DAW the app, and Kumi's bridge in it. Its methods
 /// keep Live's names (the app's Live side and setup's tests implement them).

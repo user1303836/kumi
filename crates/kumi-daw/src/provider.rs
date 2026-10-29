@@ -4,12 +4,12 @@
 //! doctor's checks); its install, update, rollback and removal steps run through the app's ports ([`DawIo`]).
 use crate::check::{Check, Probe};
 use crate::io::{Answers, DawIo};
-use crate::setup::DawSetup;
+use crate::setup::{DawSetup, SetupSession};
 use futures::future::LocalBoxFuture;
 use kumi_agent::{
     core::{
         context::IntegrationContext,
-        contracts::{ConnectionState, Integration, SessionController},
+        contracts::{ConnectionState, Integration},
         presentation::ToolPresentation,
         view::ViewPresentation,
     },
@@ -215,7 +215,7 @@ pub trait DawProvider {
         env: &Env,
         bridge: Rc<RefCell<Option<String>>>,
         given: bool,
-        controller: Rc<RefCell<Option<Weak<dyn SessionController>>>>,
+        session: Rc<RefCell<Option<Weak<dyn SetupSession>>>>,
     ) -> Rc<dyn DawSetup>;
     /// The DAW's part of `kumi doctor`: its bridge, and whether Kumi reaches the DAW through it (`node` is the doctor's
     /// check of Kumi itself).
