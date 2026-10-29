@@ -197,7 +197,7 @@ case!(voice_panel_send_language_and_microphone, async {
     h.type_text("\x1b").await;
     h.wait_until_hidden("Listening…").await;
     h.type_text("/help\r").await;
-    h.has("ctrl+t talks instead");
+    h.has("Talk instead of typing");
     h.close().await;
 });
 case!(opening_the_map_while_listening_stops_listening, async {
