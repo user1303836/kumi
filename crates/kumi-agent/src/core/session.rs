@@ -1229,7 +1229,7 @@ impl Session {
     /// on since), or with nothing in it to show: then the screen shows the conversation's words, as before logs.
     async fn replay(&self, kept: &SavedConversation) -> Option<Replay> {
         let log = self.0.options.log.as_ref()?.as_opened().await?;
-        if behind(&log, kept.saved_at) {
+        if behind(&log, kept.turns.unwrap_or(0)) {
             return None;
         }
         let mut replay = replay_of(&log, REPLAYED);

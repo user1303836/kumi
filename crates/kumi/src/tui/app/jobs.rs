@@ -82,12 +82,19 @@ impl TuiApp {
             let before = state.jobs.insert(status.id, status.clone());
             status.state.ended() && before.is_none_or(|before| !before.state.ended())
         };
-        self.job_status(status);
+        // Shown again from a log, a job's card comes back; its status in the terminal and its request carrying on don't.
+        let replaying = self.0.state.borrow().replaying;
+        if !replaying {
+            self.job_status(status);
+        }
         if ended {
             self.job_ended(status);
-            if status.when_done == kumi_agent::core::jobs::WhenDone::Continue && status.state != JobState::Interrupted {
+            if status.when_done == kumi_agent::core::jobs::WhenDone::Continue && status.state != JobState::Interrupted && !replaying {
                 self.0.state.borrow_mut().carry.push(status.id);
             }
+        }
+        if replaying {
+            return;
         }
         // Rows and the header's count tick while jobs run.
         let busy = self.busy();

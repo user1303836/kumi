@@ -534,6 +534,9 @@ struct State {
     copied: Option<(String, f64)>,
     /// Kumi is closing to open again at once (with another DAW, or updated), where the conversation carries on.
     reopening: bool,
+    /// A conversation taken up is being shown again from its log: what happened then draws as it did, and nothing of
+    /// the moment comes with it (no alert, sound or terminal status, no animation, no panel, nothing sent or carried on).
+    replaying: bool,
 }
 impl State {
     fn new(options: &TuiOptions) -> Self {
@@ -662,6 +665,7 @@ impl State {
             clicks: None,
             copied: None,
             reopening: false,
+            replaying: false,
         }
     }
 }

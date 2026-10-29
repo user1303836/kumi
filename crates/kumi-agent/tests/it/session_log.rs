@@ -672,15 +672,18 @@ fn the_requests_from_before_a_log_began_come_back_as_words_while_theres_room() {
 
 #[test]
 fn a_log_behind_its_checkpoint_is_one_an_earlier_kumi_carried_on_without() {
-    let saved = |at: i64| LogLine::Saved { at: 5, saved_at: at, turns: 1 };
-    let log = ReadLog { header: header(0), lines: vec![request("make it wider"), saved(500)] };
-    assert!(!behind(&log, 500));
-    assert!(behind(&log, 600));
-    assert!(!behind(&log, 400));
-    // Without a save yet, what was kept before the log began is in it.
+    let saved = |turns: u32| LogLine::Saved { at: 5, saved_at: 500, turns };
+    let log = ReadLog { header: header(0), lines: vec![request("make it wider"), told(completed()), saved(1)] };
+    assert!(!behind(&log, 1));
+    assert!(behind(&log, 2));
+    // A turn whose save never reached the log (Kumi stopped right after it) is in it all the same: its end is.
+    let unsaved = ReadLog { lines: [log.lines.clone(), vec![request("and darker"), told(completed())]].concat(), ..log.clone() };
+    assert!(!behind(&unsaved, 2));
+    assert!(behind(&unsaved, 3));
+    // Without a save yet, what was kept when the log began is in it.
     let fresh = ReadLog { header: header(1), lines: vec![message("user", "make it wider")] };
-    assert!(!behind(&fresh, 90));
-    assert!(behind(&fresh, 101));
+    assert!(!behind(&fresh, 1));
+    assert!(behind(&fresh, 2));
 }
 
 #[tokio::test(flavor = "current_thread")]

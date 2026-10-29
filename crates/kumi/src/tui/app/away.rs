@@ -223,6 +223,10 @@ impl TuiApp {
     /// ~10 s (the newest of those that came meanwhile goes when it's over); the notification waits while the DAW
     /// records. Nothing while Kumi's window is in front.
     pub(super) fn alert(&self, body: &str, live: &str) {
+        // (nothing of a conversation shown again from its log is news)
+        if self.0.state.borrow().replaying {
+            return;
+        }
         let settings = &self.0.options.away;
         let notifying = settings.notifications && self.0.profile.notify != NotifyChannel::None;
         if !notifying && !settings.live_status_bar {
@@ -331,6 +335,10 @@ impl TuiApp {
 
     /// An answer that ended while the producer was away: done, a pick waiting, or one that stopped.
     pub(super) fn answer_ended(&self, reason: StopReason, elapsed_ms: f64, answer: &str, offered: Option<usize>) {
+        // An answer shown again from a log ended long ago: the terminal's status isn't about it.
+        if self.0.state.borrow().replaying {
+            return;
+        }
         let summary = summary_of(answer);
         match reason {
             StopReason::Completed => {
@@ -353,6 +361,9 @@ impl TuiApp {
 
     /// A run's end (a /goal, /loop or sound match) told once, in place of the answer's own "done".
     pub(super) fn run_ended(&self, body: &str, live: &str) {
+        if self.0.state.borrow().replaying {
+            return;
+        }
         self.0.state.borrow_mut().run_told = true;
         self.alert(body, live);
     }

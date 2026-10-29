@@ -1199,7 +1199,7 @@ local_test!(a_conversation_taken_up_with_its_log_shows_its_requests_again_and_on
     two.session.close().await.unwrap();
     // An earlier Kumi carried it on since, without the log: its words come back instead, as before there were logs.
     let mut kept = store.current(SET).await.unwrap().unwrap();
-    kept.conversation.saved_at += 60_000;
+    kept.conversation.turns = Some(5);
     store.save(SET, &kept.id, &kept.conversation).await.unwrap();
     let three = harness(None, logged);
     project(&three, SET);
