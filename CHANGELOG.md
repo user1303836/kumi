@@ -3,6 +3,20 @@
 Kumi's releases. The Ableton bridge (`crates/ableton-mcp-server`) is versioned on its own;
 each Kumi release names the bridge it ships with.
 
+## 1.24.15 — 2026-10-29
+
+Ships with bridge 1.0.101, as 1.24.14 did.
+
+- While a /loop runs, the terminal's progress bar and Kumi's status show how many of its rounds are
+  done.
+- Kumi's pane stays when its window is narrow: below 100 columns, NOW, FOCUS, HISTORY and the other
+  tabs sit in a drawer under the conversation that opens to each change Kumi makes, and Ctrl+\ opens
+  and closes it (in a wide window, it hides the side pane).
+- A note whose velocity alone changed no longer shows as moved, with a ghost, in HISTORY's picture.
+
+Tested with Live 12.4 on macOS. On Windows, installing and updating are tested; using Kumi with Live
+there is still new.
+
 ## 1.24.14 — 2026-10-28
 
 Ships with bridge 1.0.101, as 1.24.13 did.
