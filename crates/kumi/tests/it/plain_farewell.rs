@@ -15,7 +15,8 @@ use kumi_agent::core::{
     contracts::*,
     jobs::{JobDetail, JobStatus},
     protocol::{
-        cloud_provider, context_window, models_view, provider_name, Capabilities, HandleSide, ModelsView, Op, Reply, SessionHandle,
+        cloud_provider, context_window, models_answer, models_view, provider_name, tell_now, Capabilities, HandleSide, ModelsView, Op,
+        Reply, SessionHandle,
     },
 };
 use kumi_ai::providers::ProviderId;
@@ -87,10 +88,18 @@ struct Control {
     models: Rc<FakeModels>,
     /// What's said between replies.
     side: Rc<HandleSide>,
+    /// Itself, for a request told it to run on after `tell` returns, as InProcess's does.
+    this: RefCell<std::rc::Weak<Control>>,
 }
 impl Default for Control {
     fn default() -> Self {
-        Self { asked: Cell::new(0), gate: Notify::new(), models: Rc::default(), side: HandleSide::new() }
+        Self {
+            asked: Cell::new(0),
+            gate: Notify::new(),
+            models: Rc::default(),
+            side: HandleSide::new(),
+            this: RefCell::new(std::rc::Weak::new()),
+        }
     }
 }
 /// What the test's session does, asked through its handle below.
@@ -177,8 +186,8 @@ impl SessionHandle for Control {
         self.side.listen(on_event);
     }
     async fn send(&self, op: Op) -> Result<Reply, RuntimeError> {
-        if models::answers(&op) {
-            return models::answer(op, self.model_controls(), &self.side).await;
+        if let Some(answer) = models_answer(&op, self.model_controls(), &self.side).await {
+            return answer;
         }
         Ok(match op {
             Op::Start(_) => Reply::Start(self.start().await?),
@@ -192,9 +201,14 @@ impl SessionHandle for Control {
             op => return absent::answer(op),
         })
     }
-    // Nothing is told to this session but what it answers at once: all of it goes now, as InProcess's would.
     fn tell(&self, op: Op) {
-        let _ = self.send(op).now_or_never();
+        let Some(this) = self.this.borrow().upgrade() else { return };
+        tell_now(
+            async move {
+                let _ = this.send(op).await;
+            }
+            .boxed_local(),
+        );
     }
 }
 
@@ -208,6 +222,7 @@ async fn flush() {
 async fn status_then_quit(let_go_first: bool) -> String {
     let (input, out) = (Rc::new(Input::default()), Rc::new(Out::default()));
     let control = Rc::new(Control { models: FakeModels::chosen(), ..Control::default() });
+    *control.this.borrow_mut() = Rc::downgrade(&control);
     let options = TerminalOptions::new(control.clone(), input.clone(), out.clone(), "inference-only");
     let terminal = create_terminal(options);
     drop(terminal.run());

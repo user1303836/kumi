@@ -642,6 +642,33 @@ pub fn cloud_provider(models: Option<Rc<dyn ModelController>>, id: &str) -> Opti
     }
 }
 
+/// The model requests (signing in among them), answered from a session's model controls as `InProcess` answers them:
+/// "Not available" for a session with none. None for any other request.
+pub async fn models_answer(op: &Op, models: Option<Rc<dyn ModelController>>, side: &HandleSide) -> Option<Result<Reply, RuntimeError>> {
+    let controls = || part(models.clone());
+    Some(match op {
+        Op::Providers(_) => async { Ok(Reply::Providers(controls()?.providers().await?)) }.await,
+        Op::LocalModels(_) => async { Ok(Reply::LocalModels(controls()?.local().await)) }.await,
+        Op::ChooseDefault(_) => async { Ok(Reply::ChooseDefault(controls()?.choose_default().await?)) }.await,
+        Op::Models(op::Models { provider, refresh }) => async { Ok(Reply::Models(controls()?.models(provider, *refresh).await?)) }.await,
+        Op::ChooseModel(op::ChooseModel { model }) => async { Ok(Reply::ChooseModel(controls()?.choose(model).await?)) }.await,
+        Op::SetEffort(op::SetEffort { effort }) => async { Ok(Reply::SetEffort(controls()?.set_effort(*effort).await?)) }.await,
+        Op::SetFast(op::SetFast { on }) => async { Ok(Reply::SetFast(controls()?.set_fast(*on).await?)) }.await,
+        Op::SetFallback(op::SetFallback { model }) => {
+            async { Ok(Reply::SetFallback(controls()?.set_fallback(model.as_deref()).await?)) }.await
+        }
+        Op::SaveKey(op::SaveKey { provider, key }) => {
+            async { Ok(Reply::SaveKey(controls()?.save_key(*provider, &key.0, None).await?)) }.await
+        }
+        Op::SignOut(op::SignOut { provider }) => async { Ok(Reply::SignOut(controls()?.sign_out(*provider).await?)) }.await,
+        Op::SignInChatgpt(op::SignInChatgpt { id, by_code }) => {
+            async { Ok(Reply::SignInChatgpt(side.sign_in_chatgpt(*id, *by_code, &*controls()?).await?)) }.await
+        }
+        Op::MissingModel(_) => async { Ok(Reply::MissingModel(kumi_ai::control::missing_model(&*controls()?).await)) }.await,
+        _ => return None,
+    })
+}
+
 /// The tokens `model` reads at once, as the session's model controls say.
 pub fn context_window(models: Option<Rc<dyn ModelController>>, model: &str) -> Option<f64> {
     models?.context_window(model)
@@ -746,29 +773,18 @@ impl InProcess {
             }
             Op::Slots(op::Slots { id, words }) => Reply::Slots(self.side.slots(id, &words, &*part(session.slots_context())?).await),
             Op::StopSlots(op::StopSlots { id }) => Reply::StopSlots(self.side.stop_slots(id)),
-            Op::Providers(op::Providers {}) => Reply::Providers(part(session.model_controls())?.providers().await?),
-            Op::LocalModels(op::LocalModels {}) => Reply::LocalModels(part(session.model_controls())?.local().await),
-            Op::ChooseDefault(op::ChooseDefault {}) => Reply::ChooseDefault(part(session.model_controls())?.choose_default().await?),
-            Op::Models(op::Models { provider, refresh }) => {
-                Reply::Models(part(session.model_controls())?.models(&provider, refresh).await?)
-            }
-            Op::ChooseModel(op::ChooseModel { model }) => Reply::ChooseModel(part(session.model_controls())?.choose(&model).await?),
-            Op::SetEffort(op::SetEffort { effort }) => Reply::SetEffort(part(session.model_controls())?.set_effort(effort).await?),
-            Op::SetFast(op::SetFast { on }) => Reply::SetFast(part(session.model_controls())?.set_fast(on).await?),
-            Op::SetFallback(op::SetFallback { model }) => {
-                Reply::SetFallback(part(session.model_controls())?.set_fallback(model.as_deref()).await?)
-            }
-            Op::SaveKey(op::SaveKey { provider, key }) => {
-                Reply::SaveKey(part(session.model_controls())?.save_key(provider, &key.0, None).await?)
-            }
-            Op::SignOut(op::SignOut { provider }) => Reply::SignOut(part(session.model_controls())?.sign_out(provider).await?),
-            Op::SignInChatgpt(op::SignInChatgpt { id, by_code }) => {
-                Reply::SignInChatgpt(self.side.sign_in_chatgpt(id, by_code, &*part(session.model_controls())?).await?)
-            }
-            Op::MissingModel(op::MissingModel {}) => {
-                let models = part(session.model_controls())?;
-                Reply::MissingModel(kumi_ai::control::missing_model(&*models).await)
-            }
+            op @ (Op::Providers(_)
+            | Op::LocalModels(_)
+            | Op::ChooseDefault(_)
+            | Op::Models(_)
+            | Op::ChooseModel(_)
+            | Op::SetEffort(_)
+            | Op::SetFast(_)
+            | Op::SetFallback(_)
+            | Op::SaveKey(_)
+            | Op::SignOut(_)
+            | Op::SignInChatgpt(_)
+            | Op::MissingModel(_)) => return models_answer(&op, session.model_controls(), &self.side).await.expect("a model request"),
             Op::StopSignIn(op::StopSignIn { id }) => Reply::StopSignIn(self.side.stop_sign_in(id)),
             Op::FocusBody(op::FocusBody { request }) => Reply::FocusBody(session.focus_body(&request).await?),
         })

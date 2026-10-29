@@ -16,8 +16,8 @@ use kumi_agent::core::{
     contracts::*,
     jobs::{JobDetail, JobStatus},
     protocol::{
-        cloud_provider, context_window, models_view, op, part, provider_name, Capabilities, HandleSide, ModelsView, Op, Reply,
-        SessionHandle,
+        cloud_provider, context_window, models_answer, models_view, op, part, provider_name, tell_now, Capabilities, HandleSide,
+        ModelsView, Op, Reply, SessionHandle,
     },
 };
 use kumi_ai::providers::ProviderId;
@@ -119,6 +119,8 @@ struct Control {
     models: RefCell<Option<Rc<FakeModels>>>,
     /// What's said between replies, and what stops a /slots request or an aside.
     side: Rc<HandleSide>,
+    /// Itself, for a request told it to run on after `tell` returns, as InProcess's does.
+    this: RefCell<std::rc::Weak<Control>>,
 }
 impl Default for Control {
     fn default() -> Self {
@@ -146,6 +148,7 @@ impl Default for Control {
             music: RefCell::new(None),
             models: RefCell::new(None),
             side: HandleSide::new(),
+            this: RefCell::new(std::rc::Weak::new()),
         }
     }
 }
@@ -442,8 +445,8 @@ impl SessionHandle for Control {
         self.side.listen(on_event);
     }
     async fn send(&self, op: Op) -> Result<Reply, RuntimeError> {
-        if models::answers(&op) {
-            return models::answer(op, self.model_controls(), &self.side).await;
+        if let Some(answer) = models_answer(&op, self.model_controls(), &self.side).await {
+            return answer;
         }
         Ok(match op {
             Op::Start(_) => Reply::Start(self.start().await?),
@@ -486,10 +489,14 @@ impl SessionHandle for Control {
             op => return absent::answer(op),
         })
     }
-    // Plain mode tells this session only what it answers at once (a /slots swap's stop): all of it goes now, as InProcess's
-    // would.
     fn tell(&self, op: Op) {
-        let _ = self.send(op).now_or_never();
+        let Some(this) = self.this.borrow().upgrade() else { return };
+        tell_now(
+            async move {
+                let _ = this.send(op).await;
+            }
+            .boxed_local(),
+        );
     }
 }
 struct Fixture {
@@ -514,6 +521,7 @@ impl Fixture {
         let input = Rc::new(Input { tty, ..Default::default() });
         let out = Rc::new(Out { tty, ..Default::default() });
         let control = Rc::new(Control::default());
+        *control.this.borrow_mut() = Rc::downgrade(&control);
         control.hold.set(hold);
         let models = models.unwrap_or_else(FakeModels::chosen);
         *control.models.borrow_mut() = Some(models.clone());
