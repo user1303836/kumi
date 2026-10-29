@@ -103,6 +103,8 @@ struct Control {
     /// A chat without Live, started without -c or -r: no conversation is kept.
     keeps_none: Cell<bool>,
     export: RefCell<Option<ConversationToExport>>,
+    slots: RefCell<Option<Rc<kumi_listening::slots::SlotsContext>>>,
+    music: RefCell<Option<Rc<kumi_listening::music::learning::Music>>>,
 }
 impl Default for Control {
     fn default() -> Self {
@@ -126,6 +128,8 @@ impl Default for Control {
             now: RefCell::new(None),
             keeps_none: Cell::new(false),
             export: RefCell::new(None),
+            slots: RefCell::new(None),
+            music: RefCell::new(None),
         }
     }
 }
@@ -308,6 +312,51 @@ impl SessionController for Control {
     async fn stop_live(&self) -> Result<bool, RuntimeError> {
         self.calls.borrow_mut().push("stopLive".into());
         Ok(true)
+    }
+    fn has_aside(&self) -> bool {
+        true
+    }
+    async fn aside(&self, question: &str, _: kumi_agent::core::contracts::OnText, _: Option<Signal>) -> Result<String, RuntimeError> {
+        self.calls.borrow_mut().push(format!("aside:{question}"));
+        Ok("A pad holds the chords under the lead.\n\n- soft attack\n- long release".into())
+    }
+    fn has_goal(&self) -> bool {
+        true
+    }
+    async fn goal(&self, text: Option<&str>) -> Result<(), RuntimeError> {
+        self.calls.borrow_mut().push(format!("goal:{}", text.unwrap_or("")));
+        // A new goal comes back as its event, as the session's does; showing one says nothing here.
+        if let Some(text) = text {
+            self.emit(SessionEvent::Objective(kumi_agent::core::goal_mode::ObjectiveStatus {
+                objective: text.into(),
+                state: kumi_agent::core::goal_mode::ObjectiveState::Running,
+                turns: 0,
+                turn_budget: 20,
+                elapsed_ms: 0,
+                budget_ms: 600_000,
+                verdict: None,
+                reason: None,
+                next: None,
+                measured: false,
+            }));
+        }
+        Ok(())
+    }
+    fn has_stop_goal(&self) -> bool {
+        true
+    }
+    async fn stop_goal(&self) -> Result<bool, RuntimeError> {
+        self.calls.borrow_mut().push("stop_goal".into());
+        Ok(true)
+    }
+    fn has_jobs(&self) -> bool {
+        true
+    }
+    fn slots_context(&self) -> Option<Rc<kumi_listening::slots::SlotsContext>> {
+        self.slots.borrow().clone()
+    }
+    fn music(&self) -> Option<Rc<kumi_listening::music::learning::Music>> {
+        self.music.borrow().clone()
     }
 }
 struct Fixture {
@@ -769,7 +818,7 @@ async fn willington_is_said_off_at_the_start_and_switched_by_its_command() {
             assert!(!on.get());
             let text = f.text();
             assert!(text.contains("[willington] Willington bindings are OFF. /willington turns them on again."), "{text}");
-            assert!(text.contains("/willington (Willington's bindings on or off)"), "{text}");
+            assert!(text.contains("[help] /willington: Willington's bindings in Live: macro mapping, zones\n"), "{text}");
             f.quit().await;
             // Without Willington in the bridge: nothing at the start, and no such command.
             let f = Fixture::new(false, false, None, None, None);
@@ -1032,6 +1081,237 @@ async fn plain_mode_in_reaper_and_renoise_never_speaks_lives_words() {
                 }
             }
             kumi::daw::work_with(kumi_types::daw::DawId::Ableton);
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn plain_mode_runs_the_tables_text_commands_and_names_the_full_screen_apps() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let f = Fixture::new(false, false, None, None, None);
+            flush().await;
+            f.input.write("/btw what does a pad do?\n/goal make the bass punchier\n/jobs\n/voice\n/map\n/takeback\n/help\n/login openai\n");
+            flush().await;
+            let text = f.text();
+            for want in [
+                // An aside's lines stay lines.
+                "[btw] A pad holds the chords under the lead.\n",
+                "[btw] - soft attack\n",
+                "[btw] - long release\n",
+                // A new goal that says nothing more is said from its event.
+                "[goal] make the bass punchier · running · 0 of 20 turns",
+                "[jobs] No background jobs.",
+                "[plain] /voice isn't available in plain mode: the full-screen app has it.",
+                "[plain] /map isn't available in plain mode",
+                "[plain] /takeback isn't available in plain mode",
+                "[help] /btw: Ask something on the side",
+                "[help] /model: The model Kumi talks to: /model <provider> lists a provider's",
+                "[help] /pin <id>: ",
+                "[help] Only in the full-screen app: ",
+                "[login] Sign in from a shell",
+            ] {
+                assert!(text.contains(want), "{want}:\n{text}");
+            }
+            assert!(!text.contains("Unknown command"), "{text}");
+            let calls = f.control.calls.borrow().clone();
+            assert!(
+                calls.contains(&"aside:what does a pad do?".into()) && calls.contains(&"goal:make the bass punchier".into()),
+                "{calls:?}"
+            );
+            // A loop's words go as a turn: the session reads it.
+            f.input.write("/loop make it louder\n");
+            flush().await;
+            assert!(f.control.calls.borrow().iter().any(|call| call == "submit:/loop make it louder"), "{:?}", f.control.calls.borrow());
+            // A goal kept from its event is said when the session says nothing more: paused, with what carries it on; and
+            // /goal stop says it stopped.
+            f.emit(json!({"type": "objective", "objective": "make the bass punchier", "state": "paused", "turns": 3, "turnBudget": 20, "elapsedMs": 0, "budgetMs": 600000, "measured": false}));
+            f.input.write("/goal\n/goal stop\n");
+            flush().await;
+            assert!(f.text().contains("[goal] make the bass punchier · paused · 3 of 20 turns · /goal resume carries on"), "{}", f.text());
+            assert!(f.text().contains("[goal] Stopped."), "{}", f.text());
+            // While Kumi works, /goal says a goal is running only while one is: with none, or one that's done, it waits.
+            f.emit(json!({"type": "objective-cleared"}));
+            f.control.state.set(TurnState::Running);
+            f.input.write("/goal\n");
+            flush().await;
+            f.emit(json!({"type": "objective", "objective": "make the bass punchier", "state": "done", "turns": 4, "turnBudget": 20, "elapsedMs": 0, "budgetMs": 600000, "measured": false}));
+            f.input.write("/goal\n");
+            flush().await;
+            assert_eq!(f.text().matches("[busy] Kumi is working: /goal once it's done (Ctrl-C stops it).").count(), 2, "{}", f.text());
+            f.emit(json!({"type": "objective", "objective": "make the bass punchier", "state": "running", "turns": 5, "turnBudget": 20, "elapsedMs": 0, "budgetMs": 600000, "measured": false}));
+            f.input.write("/goal\n");
+            flush().await;
+            assert!(f.text().contains("[goal] A goal is running: /goal pause or /goal stop."), "{}", f.text());
+            // Going back to a conversation, or a copy of this one, waits until Kumi is done; the list still shows.
+            f.input.write("/resume 2\n/fork\n");
+            flush().await;
+            assert!(f.text().contains("[busy] Kumi is working: /resume once it's done (Ctrl-C stops it)."), "{}", f.text());
+            assert!(f.text().contains("[busy] Kumi is working: /fork once it's done (Ctrl-C stops it)."), "{}", f.text());
+            assert!(f.control.resumed.borrow().is_empty() && !f.control.calls.borrow().iter().any(|call| call.starts_with("fork:")));
+            // What plain mode or this session can't do is never put off until Kumi is done.
+            f.input.write("/copy\n/stop\n");
+            flush().await;
+            assert!(f.text().contains("[stop] Kumi can't stop Live here.") && !f.text().contains("/stop once it's done"), "{}", f.text());
+            assert!(f.text().contains("[plain] /copy isn't available in plain mode") && !f.text().contains("/copy once it's done"), "{}", f.text());
+            f.control.state.set(TurnState::Idle);
+            f.quit().await;
+        })
+        .await;
+}
+
+// /slots and /music print their lists as the full-screen app words them; changing your music is the app's.
+#[tokio::test(flavor = "current_thread")]
+async fn plain_mode_lists_the_listening_slots_and_your_music() {
+    use kumi_listening::music::learning::{create_music, MusicOptions};
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let folder = tempfile::tempdir().unwrap();
+            let f = Fixture::new(false, false, None, None, None);
+            flush().await;
+            f.input.write("/slots\n/music\n");
+            flush().await;
+            // Without them, the session has neither command.
+            assert_eq!(f.text().matches("Unknown command. Use /help.").count(), 2, "{}", f.text());
+            *f.control.slots.borrow_mut() = Some(slots_in(folder.path()));
+            let mut options = MusicOptions::new(folder.path().join("kumi/music"), None, Default::default());
+            (options.places, options.fork, options.delay_ms) = (Some(vec![]), false, 3_600_000);
+            *f.control.music.borrow_mut() = Some(create_music(options));
+            f.input.write("/slots\n/music\n/music add /somewhere/Music\n");
+            for _ in 0..50 {
+                flush().await;
+                if f.text().contains("[music] Now:") && f.text().contains("[music] Adding") {
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            }
+            let text = f.text();
+            for want in [
+                "[slots] stems (a mix split into its parts): Live's own splitter",
+                "[music] Folders: none",
+                "[music] Now: off (Kumi asks before it learns your music)",
+                "[music] Adding, removing, pausing or forgetting your music is the full-screen app's; /music lists it here.",
+            ] {
+                assert!(text.contains(want), "{want}:\n{text}");
+            }
+            f.quit().await;
+        })
+        .await;
+}
+
+/// Listening's slots, kept in `folder`.
+fn slots_in(folder: &std::path::Path) -> Rc<kumi_listening::slots::SlotsContext> {
+    Rc::new(kumi_listening::slots::SlotsContext {
+        file: kumi_listening::slots::file_in(folder),
+        store: Rc::new(kumi_ai::auth::store::open_credential_store(folder.join("auth.json"))),
+        env: Default::default(),
+        profile: None,
+    })
+}
+
+/// Until the fixture has said `want`, for up to five seconds.
+async fn until_said(f: &Fixture, want: &str) {
+    for _ in 0..250 {
+        flush().await;
+        if f.text().contains(want) {
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    panic!("never said {want:?}:\n{}", f.text());
+}
+
+// Every command the table offers this session, by each of its names, sent through plain mode: each runs, or says it's
+// the full-screen app's. None is "Unknown command", none goes to the model but /loop's line, and /help keeps its last
+// line whole in a session with nearly everything.
+#[tokio::test(flavor = "current_thread")]
+async fn plain_mode_answers_every_command_the_table_offers_its_session() {
+    use kumi_agent::core::{
+        commands::{Fronts, COMMANDS},
+        protocol::Capabilities,
+    };
+    use kumi_listening::music::learning::{create_music, MusicOptions};
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let folder = tempfile::tempdir().unwrap();
+            let updates =
+                UpdateControl { current: "1.0.0".into(), check: Rc::new(|| async { Ok(None) }.boxed_local()), request: Rc::new(|| {}) };
+            let willington = kumi_daw::provider::Toggle {
+                on: Rc::new(|| Some(false)),
+                set: Rc::new(|_| async { Ok("Willington bindings are ON.") }.boxed_local()),
+            };
+            let into = folder.path().to_path_buf();
+            let f = Fixture::with(false, false, None, Some(updates), None, move |o| {
+                o.folder = Some(into);
+                o.switch_daw = Some(Rc::new(|_| {}));
+                o.willington = Some(willington);
+            });
+            *f.control.slots.borrow_mut() = Some(slots_in(folder.path()));
+            let mut options = MusicOptions::new(folder.path().join("kumi/music"), None, Default::default());
+            (options.places, options.fork, options.delay_ms) = (Some(vec![]), false, 3_600_000);
+            *f.control.music.borrow_mut() = Some(create_music(options));
+            flush().await;
+            // As plain mode reads them: its own model controller, and every part a front end can have but a voice.
+            let can = Capabilities { models: true, ..Capabilities::of(&*f.control) };
+            let fronts = Fronts { voice: false, updates: true, switch_daw: true, willington: true };
+            let names: Vec<&str> = COMMANDS
+                .iter()
+                .filter(|command| command.offered(&can, &fronts))
+                .flat_map(|command| std::iter::once(command.name).chain(command.aliases.iter().copied()))
+                .filter(|name| *name != "/quit")
+                .collect();
+            assert!(names.len() >= 25, "{names:?}");
+            for name in &names {
+                f.input.write(&format!("{name}\n"));
+                for _ in 0..4 {
+                    flush().await;
+                    tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+                }
+            }
+            until_said(&f, "[music] Now: ").await;
+            let text = f.text();
+            assert!(!text.contains("Unknown command"), "{text}");
+            let submitted: Vec<String> = f.control.calls.borrow().iter().filter(|call| call.starts_with("submit:")).cloned().collect();
+            assert_eq!(submitted, ["submit:/loop"], "{text}");
+            // /help says a line each, so its last line comes whole: the keys and how to sign in.
+            let help: Vec<&str> = text.lines().filter(|line| line.starts_with("[help] ")).collect();
+            assert!(help.len() >= 25 && help.iter().all(|line| line.chars().count() < 300), "{help:#?}");
+            assert!(
+                help.last().is_some_and(|line| line.starts_with("[help] Ctrl-C: ") && line.ends_with(" login <provider>.")),
+                "{help:#?}"
+            );
+            f.input.write("/quit\n");
+            assert_eq!(f.quit().await, 0);
+        })
+        .await;
+}
+
+// One /slots swap at a time, as in the full-screen app: another waits, the list still shows, and Ctrl-C stops the swap
+// without closing Kumi.
+#[tokio::test(flavor = "current_thread")]
+async fn plain_mode_tries_one_slots_swap_at_a_time_and_ctrl_c_stops_it() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let folder = tempfile::tempdir().unwrap();
+            // A listening model that never answers: the swap's check waits on it.
+            let silent = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            let port = silent.local_addr().unwrap().port();
+            let f = Fixture::new(true, false, None, None, None);
+            *f.control.slots.borrow_mut() = Some(slots_in(folder.path()));
+            flush().await;
+            f.input.write(&format!("/slots listening http://127.0.0.1:{port}/v1#tiny\r"));
+            until_said(&f, "on a known clip").await;
+            f.input.write("/slots listening off\r/slots\r");
+            until_said(&f, "[slots] stems (a mix split into its parts)").await;
+            assert!(f.text().contains("[slots] Kumi is still trying a model for /slots: wait for it, or Ctrl-C stops it."), "{}", f.text());
+            f.input.write("\x03");
+            until_said(&f, "[slots] Stopping the model Kumi was trying.").await;
+            // Stopped, a swap can be made again, and Kumi is still here.
+            f.input.write("/slots listening off\r");
+            until_said(&f, "Listening now uses off").await;
+            assert!(!f.control.calls.borrow().contains(&"close".into()), "{:?}", f.control.calls.borrow());
+            drop(silent);
+            assert_eq!(f.quit().await, 0);
         })
         .await;
 }

@@ -383,19 +383,25 @@ it):
 ## Plain mode
 
 `KUMI_UI=plain`, or input or output through a pipe, gives a plain line-by-line interface
-instead, which suits screen readers and logs. It has `/help`, `/status`,
-`/undo`, `/stop`, `/refresh`, `/reconnect`, `/new [name]`, `/resume [n, id or name]`
-(and `/conversations`), `/rename <name>`, `/fork [name]`,
-`/export [md|html|json]`, `/share` (each saves a file and says where), `/daw [name]`,
-`/model [provider/model]`, `/effort [level|default]`, `/fast`, `/logout <provider>`,
-`/memory`, `/forget <id>`, `/note <id> <new words>`, `/pin <id>`, `/unpin <id>`,
-`/recipes`, `/willington`, `/update`, `/changelog` and `/quit`, but no `/btw`,
-`/goal`, `/loop`, `/slots`, `/music`, `/map`, `/jobs`, `/takeback` or `/copy`. `/resume` numbers this Set's
-conversations, then other Sets'; Kumi's question about another Set's
-conversation takes 1, 2 or 3 (commands still run while it waits, and other
-words ask it again). It says when a background job
-starts and ends, and one your request needs carries on once Kumi is idle. Sign in from a shell with `kumi login`. Ctrl-C stops the
-answer, or quits when idle.
+instead, which suits screen readers and logs. It has the full-screen app's commands, as
+text, and `/help` lists those this session has.
+
+- `/btw <question>` answers on the side, and `/goal` and `/loop` work as they do in the
+  full-screen app.
+- `/jobs`, `/slots` and `/music` print their lists. Changing your music is the
+  full-screen app's.
+- `/model [provider/model]`, `/effort [level|default]` and `/logout <provider>` take their
+  words here, where the full-screen app opens a panel.
+- `/export [md|html|json]` and `/share` each save a file and say where.
+- `/pin <id>`, `/unpin <id>` and `/forget <id>` keep or forget a note from `/memory`.
+- `/voice`, `/map`, `/palette`, `/copy`, `/recipe` and `/takeback` are only in the
+  full-screen app, and plain mode says so.
+- `/resume` numbers this Set's conversations, then other Sets'. Kumi's question about
+  another Set's conversation takes 1, 2 or 3 (commands still run while it waits, and
+  other words ask it again).
+- It says when a background job starts and ends, and one your request needs carries on
+  once Kumi is idle.
+- Sign in from a shell with `kumi login`. Ctrl-C stops the answer, or quits when idle.
 
 ## Away from Kumi
 
