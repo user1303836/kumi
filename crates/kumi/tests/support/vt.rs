@@ -1,5 +1,5 @@
 //! A minimal terminal, enough of xterm to replay Kumi's renderer output in tests: cursor moves, colours, erasing in
-//! the colours set, a scrolling region and links.
+//! the colours set, a scrolling region with lines deleted in it, and links.
 
 use kumi::tui::style::{link_id, style_key, Rgb, Style};
 use kumi::tui::width::{cell_width, graphemes};
@@ -122,13 +122,18 @@ impl VirtualTerminal {
                 (self.top, self.bottom) = (top - 1, bottom);
                 (self.x, self.y) = (0, 0);
             }
-        } else if final_byte == 'S' {
-            let count = js::number::parse(params).map_or(1, |count| (count as i32).max(1));
-            for _ in 0..count.min(self.bottom - self.top) {
-                let (top, bottom) = (self.top as usize, self.bottom as usize);
-                self.chars[top..bottom].rotate_left(1);
-                self.styles[top..bottom].rotate_left(1);
-                self.erase(self.bottom - 1, 0, self.width);
+        } else if final_byte == 'M' {
+            // Lines deleted at the cursor, inside the scrolling region: those under them move up, and blank lines come
+            // in at its foot. Outside the region it does nothing.
+            if self.y >= self.top && self.y < self.bottom {
+                let count = js::number::parse(params).map_or(1, |count| (count as i32).max(1));
+                for _ in 0..count.min(self.bottom - self.y) {
+                    let (y, bottom) = (self.y as usize, self.bottom as usize);
+                    self.chars[y..bottom].rotate_left(1);
+                    self.styles[y..bottom].rotate_left(1);
+                    self.erase(self.bottom - 1, 0, self.width);
+                }
+                self.x = 0;
             }
         } else if final_byte == 'm' {
             self.sgr(params);

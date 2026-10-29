@@ -427,7 +427,7 @@ fn moved_bands_erased_blanks_and_links_reproduce_every_frame_exactly_and_full_re
                 }
             }
             let output = renderer.frame(&next, None);
-            scrolled += usize::from(output.contains("S\u{1b}[r"));
+            scrolled += usize::from(output.contains("M\u{1b}[r"));
             erased += usize::from(output.contains("\u{1b}[K") || output.contains("X\u{1b}"));
             vt.write(&output);
             same_as_screen(&vt, &next);
@@ -466,7 +466,7 @@ fn text_streaming_under_a_header_moves_its_band_and_writes_only_the_row_that_cam
         let output = renderer.frame(&next, None);
         vt.write(&output);
         same_as_screen(&vt, &next);
-        assert!(output.contains("\u{1b}[3;17r\u{1b}[1S\u{1b}[r"), "{output:?}");
+        assert!(output.contains("\u{1b}[3;17r\u{1b}[3;1H\u{1b}[1M\u{1b}[r"), "{output:?}");
         assert_eq!(output.matches("line ").count(), 1, "only the row that came in: {output:?}");
         assert!(output.len() < 200, "{} bytes", output.len());
     }
@@ -476,7 +476,7 @@ fn text_streaming_under_a_header_moves_its_band_and_writes_only_the_row_that_cam
     let output = renderer.frame(&next, None);
     vt.write(&output);
     same_as_screen(&vt, &next);
-    assert!(output.contains("\u{1b}[4S"), "{output:?}");
+    assert!(output.contains("\u{1b}[4M"), "{output:?}");
 }
 
 #[test]

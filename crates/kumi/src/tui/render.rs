@@ -273,13 +273,14 @@ impl Pen<'_> {
         style == Style { bg: style.bg, ..Style::default() }
     }
 
-    /// Rows `top` to `bottom` moved up `by` in the terminal: a scrolling region, scrolled up (SU), and taken away.
+    /// Rows `top` to `bottom` moved up `by` in the terminal: a scrolling region, `by` lines deleted at its top (DL), and
+    /// the region taken away. DL rather than SU: every terminal Kumi runs in deletes lines, where some ignore SU.
     fn scroll(&mut self, top: usize, bottom: usize, by: usize) {
-        // The rows coming in are blank in the colours set: the terminal's own, then.
+        // The rows coming in at the region's foot are blank in the colours set: the terminal's own, then.
         self.out.push_str(RESET);
         self.style = None;
-        let _ = write!(self.out, "\u{1b}[{};{}r\u{1b}[{by}S\u{1b}[r", top + 1, bottom);
-        // Setting the region, and taking it away, puts the cursor home.
+        let _ = write!(self.out, "\u{1b}[{};{bottom}r\u{1b}[{};1H\u{1b}[{by}M\u{1b}[r", top + 1, top + 1);
+        // Taking the region away puts the cursor home.
         self.at = Some((0, 0));
     }
 }
