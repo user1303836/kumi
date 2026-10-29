@@ -28,12 +28,14 @@ pub(super) struct HelpSection {
 /// the pane's `tabs`, and the commands the `/` menu offers, each with what it says of itself.
 pub(super) fn help_sections(has: Has, keymap: &Keymap, app: &str, tabs: &[String], commands: Vec<(String, String)>) -> Vec<HelpSection> {
     let row = |keys: &str, does: &str| vec![(keys.to_string(), does.to_string())];
-    // The actions a row of keys.json's keys has said, so each is said once.
+    // The actions a row has said, as written or with keys.json's keys, so each is said once.
     let said: RefCell<Vec<&str>> = RefCell::default();
     // A row about Kumi's actions `ids`: as written while they have their own keys. While keys.json gives any of them
     // others, a row for each action with keys, which says its keys and what it does; an action with none has no row.
+    // Either way they're said, and a later row about one of them doesn't say it again.
     let keyed = |ids: &[&'static str], keys: &str, does: &str| -> Vec<(String, String)> {
         if !ids.iter().any(|id| keymap.rebound(id)) {
+            said.borrow_mut().extend_from_slice(ids);
             return if keys.is_empty() { vec![] } else { vec![(keys.to_string(), does.to_string())] };
         }
         let mut rows = vec![];
@@ -539,6 +541,12 @@ mod tests {
             assert!(other.contains(row), "{row:?} in {other}");
         }
         assert!(!other.contains("ctrl+r again") && !other.contains("ctrl+c or a right-click"), "{other}");
+        // A row as written says its actions too: ctrl+c's, about ↑ and undo, doesn't say undo again.
+        let (up, _) = Keymap::new(Some(&serde_json::json!({ "composer.up": ["ctrl+p"] })));
+        let up = said(&every_section_keyed(true, true, &up));
+        assert_eq!(up.matches("Undo in the box").count(), 1, "{up}");
+        assert_eq!(up.matches("ctrl+p  ").count(), 1, "{up}");
+        assert!(up.contains("ctrl+c  Stop Kumi; when it isn't working, clear the box, then quit\n"), "{up}");
         // With Kumi's own keys, every row is as the help writes it.
         let own = said(&every_section());
         assert!(own.contains("ctrl+-  ctrl+_  Undo in the box") && own.contains("← →  Along the line"), "{own}");
