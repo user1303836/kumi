@@ -7,12 +7,16 @@ use async_trait::async_trait;
 use futures::FutureExt;
 use kumi_agent::core::{
     contracts::*,
-    jobs::JobDetail,
-    protocol::{op, SessionHandle},
+    jobs::{JobDetail, JobStatus},
+    protocol::{cloud_provider, op, provider_name, Capabilities, HandleSide, ModelsView, Op, Reply, SessionHandle},
     threaded::{Build, Built, Threaded},
 };
+use kumi_ai::providers::ProviderId;
 use kumi_common::abort::Signal;
-use kumi_types::{contracts::ChangeRecord, errors::RuntimeError};
+use kumi_types::{
+    contracts::{ChangeRecord, LibraryStatus},
+    errors::RuntimeError,
+};
 use std::{
     cell::{Cell, RefCell},
     rc::Rc,
@@ -49,6 +53,8 @@ struct Answers {
     emit: Rc<dyn Fn(SessionEvent)>,
     status: RefCell<SessionStatus>,
     ways: Ways,
+    /// What's said between replies, and what stops an aside.
+    side: Rc<HandleSide>,
 }
 
 impl Drop for Answers {
@@ -63,8 +69,8 @@ fn idle() -> SessionStatus {
     SessionStatus { state: TurnState::Idle, connection: ConnectionState::Connected, turns: 0, max_turns: None, observation: None }
 }
 
-#[async_trait(?Send)]
-impl SessionController for Answers {
+/// What the session does, asked through its handle below.
+impl Answers {
     async fn start(&self) -> Result<(), RuntimeError> {
         Ok(())
     }
@@ -114,18 +120,12 @@ impl SessionController for Answers {
     async fn undo(&self, _: Option<&str>) -> Result<Option<ChangeRecord>, RuntimeError> {
         Ok(None)
     }
-    fn has_aside(&self) -> bool {
-        true
-    }
     /// Until it's stopped.
     async fn aside(&self, _: &str, _: OnText, signal: Option<Signal>) -> Result<String, RuntimeError> {
         if let Some(signal) = signal {
             signal.cancelled().await;
         }
         Ok("stopped".into())
-    }
-    fn has_jobs(&self) -> bool {
-        true
     }
     fn job(&self, id: u32) -> Option<JobDetail> {
         if let Some(reads) = &self.ways.job_reads {
@@ -143,6 +143,74 @@ impl SessionController for Answers {
     }
 }
 
+/// The session as the core's thread reaches it: its own requests through its methods above, an aside through the
+/// handle's side, and the rest not available here.
+#[async_trait(?Send)]
+impl SessionHandle for Answers {
+    fn capabilities(&self) -> Capabilities {
+        Capabilities { aside: true, jobs: true, ..Capabilities::default() }
+    }
+    fn can_show(&self, _: BodyKind) -> bool {
+        false
+    }
+    fn status(&self) -> SessionStatus {
+        Answers::status(self)
+    }
+    fn answering_fallback(&self) -> Option<String> {
+        None
+    }
+    fn library(&self) -> Option<LibraryStatus> {
+        None
+    }
+    fn open_set(&self) -> Option<String> {
+        None
+    }
+    fn jobs(&self) -> Vec<JobStatus> {
+        vec![]
+    }
+    fn job(&self, id: u32) -> Option<JobDetail> {
+        Answers::job(self, id)
+    }
+    fn can_background(&self) -> bool {
+        false
+    }
+    fn models(&self) -> Option<ModelsView> {
+        None
+    }
+    fn provider_name(&self, id: &str) -> String {
+        provider_name(None, id)
+    }
+    fn cloud_provider(&self, id: &str) -> Option<ProviderId> {
+        cloud_provider(None, id)
+    }
+    fn context_window(&self, _: &str) -> Option<f64> {
+        None
+    }
+    fn listen(&self, on_event: Rc<dyn Fn(SessionEvent)>) {
+        self.side.listen(on_event);
+    }
+    async fn send(&self, op: Op) -> Result<Reply, RuntimeError> {
+        Ok(match op {
+            Op::Start(_) => Reply::Start(self.start().await?),
+            Op::Submit(op::Submit { input, pinned, .. }) => Reply::Submit(self.submit(&input, pinned).await?),
+            Op::Refresh(_) => Reply::Refresh(self.refresh().await?),
+            Op::NewConversation(_) => Reply::NewConversation(self.new_conversation().await?),
+            Op::Cancel(_) => Reply::Cancel(self.cancel().await?),
+            Op::Close(_) => Reply::Close(self.close().await?),
+            Op::Undo(op::Undo { id }) => Reply::Undo(self.undo(id.as_deref()).await?),
+            Op::Aside(op::Aside { id, question }) => {
+                Reply::Aside(self.side.aside(id, |on_text, signal| self.aside(&question, on_text, Some(signal))).await?)
+            }
+            Op::StopAside(op::StopAside { id }) => Reply::StopAside(self.side.stop_aside(id)),
+            _ => return Err(RuntimeError::plain("Not available")),
+        })
+    }
+    // The core's thread sends every request it's given: nothing is told to this session.
+    fn tell(&self, op: Op) {
+        let _ = self.send(op).now_or_never();
+    }
+}
+
 fn answers(ways: Ways) -> Build {
     Box::new(move |emit| {
         async move {
@@ -150,7 +218,7 @@ fn answers(ways: Ways) -> Build {
                 emit(SessionEvent::Notice { message: "built".into() });
             }
             let ending = ways.ending.clone().map(|ended| async move { ended.store(true, Ordering::SeqCst) }.boxed_local());
-            Ok(Built { session: Rc::new(Answers { emit, status: RefCell::new(idle()), ways }), ending })
+            Ok(Built { session: Rc::new(Answers { emit, status: RefCell::new(idle()), ways, side: HandleSide::new() }), ending })
         }
         .boxed_local()
     })
