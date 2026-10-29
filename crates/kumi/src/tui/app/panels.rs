@@ -880,14 +880,14 @@ impl TuiApp {
         }
         self.0.scheduler.request();
     }
-    pub(super) fn offer_fix(&self, kind: &str, provider: Option<&str>) {
+    pub(super) fn offer_fix(&self, kind: FailureKind, provider: Option<&str>) {
         let Some(models) = &self.0.options.models else {
             return;
         };
         if self.0.state.borrow().panel.is_some() {
             return;
         }
-        if kind == "config" && models.current().model.is_none() {
+        if kind == FailureKind::Config && models.current().model.is_none() {
             self.task(|app| async move {
                 if let Err(error) = app.open_models().await {
                     app.panel_failed(&error);
@@ -896,7 +896,7 @@ impl TuiApp {
             });
             return;
         }
-        if kind == "network" && provider.is_some_and(|p| models.cloud_provider(p).is_none()) {
+        if kind == FailureKind::Network && provider.is_some_and(|p| models.cloud_provider(p).is_none()) {
             let name = models.provider_name(provider.unwrap());
             self.pick(
                 Picker::new(
@@ -921,8 +921,8 @@ impl TuiApp {
         }
         // A plan's limit that resets later than Kumi waits, credit used up, or a provider still busy or down past the
         // retries.
-        let limited = matches!(kind, "usage-limit" | "billing");
-        if limited || matches!(kind, "rate-limit" | "provider") {
+        let limited = matches!(kind, FailureKind::UsageLimit | FailureKind::Billing);
+        if limited || matches!(kind, FailureKind::RateLimit | FailureKind::Provider) {
             let name = provider.map(|p| models.provider_name(p)).unwrap_or_else(|| "The provider".into());
             let mut items = Vec::new();
             if limited {
@@ -947,7 +947,7 @@ impl TuiApp {
             });
             return;
         }
-        if matches!(kind, "model" | "config") {
+        if matches!(kind, FailureKind::Model | FailureKind::Config) {
             self.pick(
                 Picker::new("Choose another model?", vec![PickerItem::new("Choose a model", "model"), PickerItem::new("Not now", "later")]),
                 |app, item| async move {
@@ -960,7 +960,7 @@ impl TuiApp {
             );
             return;
         }
-        let Some(provider) = provider.and_then(|p| models.cloud_provider(p)).filter(|_| kind == "auth") else {
+        let Some(provider) = provider.and_then(|p| models.cloud_provider(p)).filter(|_| kind == FailureKind::Auth) else {
             return;
         };
         let info = provider.row();
@@ -1051,7 +1051,7 @@ impl TuiApp {
         let status = models.providers().await?.into_iter().find(|p| Some(p.id.as_str()) == current.provider.as_deref());
         if let Some(status) = &status {
             if !status.signed_in {
-                self.offer_fix("auth", Some(status.id.as_str()));
+                self.offer_fix(FailureKind::Auth, Some(status.id.as_str()));
                 return Ok(());
             }
         } else if let Some(server) = models.local().await.into_iter().find(|s| Some(&s.id) == current.provider.as_ref()) {
@@ -1196,8 +1196,13 @@ impl TuiApp {
             let Some(item) = item else { return };
             app.notice(&format!("No answer in {seconds} s; went with {}.", at + 1), NoticeTone::Info);
             // A goal that stopped on this question carries on with the answer, within its budget and its checks.
-            let goal_waits =
-                app.0.state.borrow().objective.as_ref().is_some_and(|goal| goal["state"] == "paused" && goal["verdict"] == "blocked");
+            let goal_waits = app
+                .0
+                .state
+                .borrow()
+                .objective
+                .as_ref()
+                .is_some_and(|goal| goal.status.state == ObjectiveState::Paused && goal.status.verdict == Some(Verdict::Blocked));
             let chosen = if goal_waits && app.0.options.controller.has_goal() {
                 app.close_panel();
                 app.0.state.borrow_mut().editor.set(&format!("/goal answer: {value}"));

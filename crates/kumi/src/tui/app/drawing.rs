@@ -412,51 +412,52 @@ impl TuiApp {
                 (&[][..], None)
             };
             let running = steps.last().filter(|s| s.state == StepState::Running);
-            let label = if let Some(goal) = state.goal.as_ref().filter(|g| matches!(g["state"].as_str(), Some("running" | "starting"))) {
-                format!(
-                    "goal · {}gen {} · {}",
-                    goal.get("best").map(|b| format!("{}% · ", num(&b["score"]))).unwrap_or_default(),
-                    num(&goal["generation"]),
-                    helpers::clock_of(now - goal["since"].as_f64().unwrap_or(0.))
-                )
-            } else if let Some(goal) = state.objective.as_ref().filter(|g| g["state"] == "running" && state.looping.is_none()) {
-                format!(
-                    "goal · turn {}/{} · {}",
-                    num(&goal["turns"]).parse::<f64>().map(|t| t + 1.).map(|t| t.to_string()).unwrap_or_else(|_| "1".into()),
-                    num(&goal["turnBudget"]),
-                    helpers::clock_of(now - goal["since"].as_f64().unwrap_or(0.))
-                )
-            } else if let Some(looping) = &state.looping {
-                format!(
-                    "loop · round {} · {} kept · {} back{} · {}",
-                    num(&looping["rounds"]),
-                    num(&looping["kept"]),
-                    num(&looping["reverted"]),
-                    looping["next"].as_str().map(|next| format!(" · next: {}", next.to_lowercase())).unwrap_or_default(),
-                    helpers::clock_of(now - looping["since"].as_f64().unwrap_or(0.))
-                )
-            } else if let Some(matching) = &state.matching {
-                format!(
-                    "matching · {}{}",
-                    matching
-                        .get("best")
-                        .map(|best| format!(
-                            "{}{}% · ",
-                            matching
-                                .get("first")
-                                .filter(|first| **first != best["score"])
-                                .map(|n| format!("{}→", num(n)))
-                                .unwrap_or_default(),
-                            num(&best["score"])
-                        ))
-                        .unwrap_or_default(),
-                    helpers::clock_of(now - matching["since"].as_f64().unwrap_or(0.))
-                )
-            } else if state.turn_changes > 0 {
-                format!("working · {} {}", state.turn_changes, if state.turn_changes == 1 { "change" } else { "changes" })
-            } else {
-                "working".into()
-            };
+            let label =
+                if let Some(goal) = state.goal.as_ref().filter(|g| matches!(g.status.state, GoalPhase::Running | GoalPhase::Starting)) {
+                    format!(
+                        "goal · {}gen {} · {}",
+                        goal.status.best.as_ref().map(|b| format!("{}% · ", number::to_string(b.score))).unwrap_or_default(),
+                        goal.status.generation,
+                        helpers::clock_of(now - goal.since)
+                    )
+                } else if let Some(goal) =
+                    state.objective.as_ref().filter(|g| g.status.state == ObjectiveState::Running && state.looping.is_none())
+                {
+                    format!("goal · turn {}/{} · {}", goal.status.turns + 1, goal.status.turn_budget, helpers::clock_of(now - goal.since))
+                } else if let Some(looping) = &state.looping {
+                    format!(
+                        "loop · round {} · {} kept · {} back{} · {}",
+                        looping.status.rounds,
+                        looping.status.kept,
+                        looping.status.reverted,
+                        looping.status.next.as_ref().map(|next| format!(" · next: {}", next.to_lowercase())).unwrap_or_default(),
+                        helpers::clock_of(now - looping.since)
+                    )
+                } else if let Some(matching) = &state.matching {
+                    format!(
+                        "matching · {}{}",
+                        matching
+                            .status
+                            .best
+                            .as_ref()
+                            .map(|best| format!(
+                                "{}{}% · ",
+                                matching
+                                    .status
+                                    .first
+                                    .filter(|first| *first != best.score)
+                                    .map(|n| format!("{}→", number::to_string(n)))
+                                    .unwrap_or_default(),
+                                number::to_string(best.score)
+                            ))
+                            .unwrap_or_default(),
+                        helpers::clock_of(now - matching.since)
+                    )
+                } else if state.turn_changes > 0 {
+                    format!("working · {} {}", state.turn_changes, if state.turn_changes == 1 { "change" } else { "changes" })
+                } else {
+                    "working".into()
+                };
             // A provider asked Kumi to wait: say why and for how long (esc still stops).
             if let Some((reason, until)) = state.retry.as_ref().filter(|(_, until)| *until > now) {
                 let seconds = ((until - now) / 1000.).ceil().max(1.);
@@ -664,7 +665,4 @@ impl TuiApp {
             }
         }
     }
-}
-pub(super) fn num(v: &Value) -> String {
-    number::to_string(v.as_f64().unwrap_or(0.))
 }

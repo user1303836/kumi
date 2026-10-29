@@ -177,8 +177,8 @@ pub fn touched_next(before: Option<&DawFocus>, after: Option<&DawFocus>, was: Op
 }
 /// The project's name an observation event gives, as the app shows it: the DAW's name for it, or the label's words
 /// when an older event has none.
-pub fn observed_name(event: &serde_json::Value) -> Option<String> {
-    event["name"].as_str().and_then(shown_name).or_else(|| set_name_from(event["label"].as_str().unwrap_or("")))
+pub fn observed_name(label: &str, name: Option<&str>) -> Option<String> {
+    name.and_then(shown_name).or_else(|| set_name_from(label))
 }
 /// A project's name as the app shows it: trimmed, and none for one that's empty or runs over lines.
 pub fn shown_name(name: &str) -> Option<String> {
