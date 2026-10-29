@@ -239,5 +239,38 @@ case!(esc_esc_is_two_escs_in_a_row_that_do_nothing_else_from_an_empty_box, async
     h.type_text("\x1b").await;
     h.wait_for("Take a request back").await;
     assert!(h.calls().iter().any(|call| call == "take-back-plan"), "{:?}", h.calls());
+    h.type_text("\x1b").await;
+    h.wait_until_hidden("Take a request back").await;
+    // The first putting a copy's toast away (a drag let go copies what it selected).
+    let lines = h.screen();
+    let y = lines.iter().position(|line| line.contains("Widened it.")).unwrap();
+    let x = lines[y][..lines[y].find("Widened it.").unwrap()].chars().count();
+    h.type_text(&format!("\x1b[<0;{};{}M\x1b[<32;{};{}M\x1b[<0;{};{}m", x + 1, y + 1, x + 7, y + 1, x + 7, y + 1)).await;
+    h.has("Copied");
+    esc_esc(&h).await;
+    assert!(!opened(&h));
+    h.type_text("\x1b").await;
+    h.wait_for("Take a request back").await;
+    h.type_text("\x1b").await;
+    h.wait_until_hidden("Take a request back").await;
+    // The first unpinning what was pinned.
+    let pin = json!({"trackRef":"3:track:0","ref":"3:arrangement_clip:0:0","node":"clip","name":"Verse riff","trail":["Bass"],"siblings":[],"live":true,"track":"Bass"});
+    h.emit(json!({"type":"pointed","pin":pin}));
+    h.has("Bass › Verse riff  ×");
+    esc_esc(&h).await;
+    assert!(!has(&h.screen(), "Verse riff  ×"));
+    assert!(!opened(&h));
+    h.type_text("\x1b").await;
+    h.wait_for("Take a request back").await;
+    h.type_text("\x1b").await;
+    h.wait_until_hidden("Take a request back").await;
+    // The first stopping Kumi.
+    h.emit(json!({"type":"state","state":"running"}));
+    h.type_text("\x1b").await;
+    h.wait_for_call("cancel").await;
+    h.type_text("\x1b").await;
+    assert!(!opened(&h));
+    h.type_text("\x1b").await;
+    h.wait_for("Take a request back").await;
     h.close().await;
 });
