@@ -312,7 +312,8 @@ async fn a_renoise_track_renamed_with_kumi_closed_reaches_the_model_with_what_it
             script.rename_track(4, &format!("Sub{order}"));
             script.rename_track(1, "👩‍🎤 Vox");
             // The model reads the tracks, then listens to that one by the name it read, marked: the name finds the track
-            // as Renoise has it (#641). (The catch-up's line cuts a long name short, so it's no name to give back.)
+            // as Renoise has it (#641). (The catch-up's line shows a name too long for it as the model reads it, so it has
+            // no name to give back.)
             let marked = format!("Sub{}", kumi_agent::core::hidden::HIDDEN);
             let listen = json!({"tracks": [marked], "from_beat": 0, "beats": 4});
             let steps: Vec<Step> = vec![
