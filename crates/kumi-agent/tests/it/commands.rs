@@ -335,6 +335,8 @@ fn a_line_types_the_word_its_command_offers_words_for() {
     // A name runs to the end of the line, spaces and all.
     assert_eq!(typing("/palette use Drum K"), Some(("/palette", "palette", "/palette use ".into(), "Drum K".into())));
     assert_eq!(typing("/resume bass sk"), Some(("/resume", "conversation", "/resume ".into(), "bass sk".into())));
+    // Past more spaces typed before it.
+    assert_eq!(typing("/resume  bass sk"), Some(("/resume", "conversation", "/resume  ".into(), "bass sk".into())));
     // A slot's model after the slot, and a slot after back.
     assert_eq!(completing("/slots listening g", |_| true).map(|at| at.arg.completes), Some(Completes::SlotModels));
     // After any of a slot's names, with the word it follows kept.

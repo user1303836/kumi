@@ -262,6 +262,8 @@ pub fn completing(line: &str, offered: impl Fn(&Command) -> bool) -> Option<Comp
             }
             (from, before)
         };
+        // (a name starts at its first letter, past any more spaces typed before it)
+        let from = if arg.to_end { from + line[from..].len() - line[from..].trim_start_matches(' ').len() } else { from };
         let after = before.last().map(|word| word.to_lowercase());
         if !arg.after.is_empty() && !after.as_deref().is_some_and(|after| arg.after.contains(&after)) {
             return None;
