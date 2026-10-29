@@ -122,3 +122,38 @@ case!(what_comes_in_while_scrolled_up_is_counted_below_and_the_top_holds, async 
     assert!(has(&lines, "3 new below · page down · ctrl+end"), "{}", lines.join("\n"));
     h.close().await;
 });
+
+case!(the_top_holds_inside_a_running_answer_as_it_grows_and_over_an_earlier_one_as_the_end_grows, async {
+    let h = Harness::new(120, 36);
+    h.start().await;
+    h.connect();
+    // Inside the answer that's still coming.
+    h.type_text("the request\r").await;
+    h.emit(json!({"type":"state","state":"running"}));
+    let lines = |from: usize, to: usize| (from..=to).map(|line| format!("the request: line {line}\n")).collect::<String>();
+    h.emit(json!({"type":"text","text":lines(1, 60)}));
+    h.type_text(PAGE_UP).await;
+    let top = left(&h.screen()[FIRST]);
+    assert!(top.contains("the request: line"), "{top}");
+    h.emit(json!({"type":"text","text":lines(61, 80)}));
+    let screen = h.screen();
+    assert_eq!(left(&screen[FIRST]), top);
+    assert!(has(&screen, "newer below · page down") && !has(&screen, "new below · page down ·"), "{}", screen.join("\n"));
+    h.emit(json!({"type":"turn-complete","result":{"stopReason":"completed"},"elapsedMs":900}));
+    h.emit(json!({"type":"state","state":"idle"}));
+    // Over an earlier exchange, while the one at the end grows.
+    h.type_text("\x1b[1;5F").await;
+    h.type_text("the next request\r").await;
+    h.emit(json!({"type":"state","state":"running"}));
+    h.emit(json!({"type":"text","text":"the next answer begins\n"}));
+    for _ in 0..2 {
+        h.type_text(PAGE_UP).await;
+    }
+    let top = left(&h.screen()[FIRST]);
+    assert!(top.contains("the request: line"), "{top}");
+    h.emit(json!({"type":"text","text":(1..=30).map(|line| format!("and goes on, line {line}\n")).collect::<String>()}));
+    let screen = h.screen();
+    assert_eq!(left(&screen[FIRST]), top);
+    assert!(has(&screen, "newer below · page down") && !has(&screen, "new below · page down ·"), "{}", screen.join("\n"));
+    h.close().await;
+});

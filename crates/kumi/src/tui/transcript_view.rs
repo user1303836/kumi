@@ -158,6 +158,8 @@ impl TranscriptView {
         }
         self.anchor = Some(Anchor { entry: Rc::clone(&transcript.entries[index]), hint: index, row, width, height: len });
         frame.header = Some(self.pinned(transcript, index, row, now));
+        // Counted over every entry rather than from the next id, so an entry put in and taken away again (a waiting
+        // message sent) isn't counted; a few thousand comparisons a frame.
         frame.new_below = Some(transcript.entries.iter().filter(|entry| entry.id > self.seen).count());
         true
     }
@@ -189,6 +191,8 @@ impl TranscriptView {
             },
             None => return,
         };
+        // The entry may have shrunk since the frame its row came from (its steps folding).
+        let row = row.min(block(transcript, index, self.width, now).0.saturating_sub(1));
         let (index, row) = if rows >= 0 {
             self.up(transcript, index, row, rows.unsigned_abs() as usize, now)
         } else {

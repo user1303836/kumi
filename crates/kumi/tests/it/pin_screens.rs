@@ -1440,17 +1440,17 @@ async fn answered(h: &Harness, request: &str, lines: usize) {
 
 scene!(view_pinned_request, VIEW_SIZES, |width, height| {
     let h = open(width, height, Rc::new(Control::default())).await;
-    answered(&h, "why does the low end sound muddy", 60).await;
+    answered(&h, "why does the low end sound muddy", 90).await;
     h.type_text("\x1b[5~").await;
-    finish(h).await
+    finish_styled(h).await
 });
 
 scene!(view_new_below, VIEW_SIZES, |width, height| {
     let h = open(width, height, Rc::new(Control::default())).await;
-    answered(&h, "why does the low end sound muddy", 60).await;
+    answered(&h, "why does the low end sound muddy", 90).await;
     h.type_text("\x1b[5~").await;
     for note in ["Bass width 100% → 140%", "Kept a note about the kick", "Night Drive saved"] {
         h.emit(json!({"type":"notice","message":note}));
     }
-    finish(h).await
+    finish_styled(h).await
 });
