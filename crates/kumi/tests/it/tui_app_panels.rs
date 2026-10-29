@@ -1364,7 +1364,7 @@ case!(the_help_pages_to_its_end_at_every_size, async {
         for command in ["/model", "/btw", "/voice", "/jobs", "/memory", "/resume"] {
             assert!(!seen.contains(&format!("{command}  ")), "{command} is in the help at {width}×{height}");
         }
-        assert!(!seen.contains("ctrl+t") && !seen.contains("ctrl+b"), "at {width}×{height}");
+        assert!(!seen.contains("ctrl+t  ") && !seen.contains("ctrl+b  "), "at {width}×{height}");
         // Home goes back to the top, end to the end, and ↑ a row up.
         h.type_text("\x1b[H").await;
         assert_eq!(help_scrolled(&h), (0, most));

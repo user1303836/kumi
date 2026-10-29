@@ -105,17 +105,24 @@ pub(super) fn help_sections(has: HelpHas, app: &str, tabs: &[String], commands: 
     let edit = vec![
         row("← →", "Along the line; with alt or ctrl, a word at a time (alt+b, alt+f too)"),
         row("home  end", "The start or end of the line (ctrl+a, ctrl+e too)"),
-        row("backspace", "Delete the character before the cursor; with alt or ctrl, the word (ctrl+w too)"),
+        row("backspace", "Delete the character before the cursor"),
         row("delete", "Delete the character after it (ctrl+d too)"),
-        row("ctrl+k", "Delete to the end of the line"),
-        row("ctrl+u", "Delete to the start of the line"),
+        row("ctrl+w", "Cut the word before the cursor (alt+backspace and ctrl+backspace too)"),
+        row("ctrl+k", "Cut to the end of the line"),
+        row("ctrl+u", "Cut to the start of the line"),
+        row("ctrl+y", "Put back what you cut last (cuts in a row come back together); alt+y right after swaps it for the cut before"),
+        row(
+            "ctrl+-  ctrl+_",
+            "Undo in the box: a run of typing or deleting, a paste, a cut or what you dictated at a time; ctrl+_ where ctrl+- \
+             zooms the terminal",
+        ),
     ];
     let mut stop = vec![row("esc", "Stop Kumi's answer: the steps it finished stay, and waiting messages go back into the box")];
     if has.slots {
         stop.push(row("esc", "A /slots check under way stops first"));
     }
     stop.extend([
-        row("ctrl+c", "Stop Kumi; when it isn't working, clear the box, then quit"),
+        row("ctrl+c", "Stop Kumi; when it isn't working, clear the box (↑ or ctrl+- brings the words back), then quit"),
         row("ctrl+d", "Quit, from an empty box while Kumi isn't working"),
         row("/undo", "Undo Kumi's last change; undo at the end of a HISTORY row takes back that one"),
     ]);

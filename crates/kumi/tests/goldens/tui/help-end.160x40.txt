@@ -1,15 +1,15 @@
   Kumi  ·  Night Drive                                                                                                                                  ● Live
 
                                                                                                                     FOCUS
-   Keys and commands                                                                      ↑ 37 more                 Night Drive
+   Keys and commands                                                                      ↑ 42 more                 Night Drive
                                                                                                                     Your selection will show here
-     ctrl+k              Delete to the end of the line
-     ctrl+u              Delete to the start of the line
-                                                                                                                    NOW
-   Stop and take back                                                                                               Ready
-     esc                 Stop Kumi's answer: the steps it finished stay, and waiting messages go
+                         dictated at a time; ctrl+_ where ctrl+- zooms the terminal
+
+   Stop and take back                                                                                               NOW
+     esc                 Stop Kumi's answer: the steps it finished stay, and waiting messages go                    Ready
                          back into the box
-     ctrl+c              Stop Kumi; when it isn't working, clear the box, then quit
+     ctrl+c              Stop Kumi; when it isn't working, clear the box (↑ or ctrl+- brings the
+                         words back), then quit
      ctrl+d              Quit, from an empty box while Kumi isn't working
      /undo               Undo Kumi's last change; undo at the end of a HISTORY row takes back that
                          one
