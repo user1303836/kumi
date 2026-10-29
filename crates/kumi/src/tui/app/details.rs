@@ -4,7 +4,7 @@
 //! producer's editor.
 
 use super::super::{
-    details::Details,
+    details::{opening, AnswerMeta, Details},
     external_editor,
     keys::Modifiers,
     overlay::{Area, Handled, Overlay},
@@ -43,6 +43,7 @@ impl TuiApp {
                 _ => vec![],
             }
         };
+        let metas = self.answer_metas();
         let panel = self.open_overlay(DetailsPanel { details: None, markdown: String::new(), searching: false, width: 60, height: 20 });
         self.task(move |app| async move {
             let secrets = app.0.state.borrow().secrets.clone();
@@ -50,12 +51,36 @@ impl TuiApp {
             let found = app.session().op(op::ConversationToExport {}).await.ok().flatten();
             let (parts, markdown) = crate::export::details_now(found, &*redact).unwrap_or_default();
             let mut panel = panel.borrow_mut();
-            panel.details = Some(Details::new(parts, under_way));
+            panel.details = Some(Details::new(parts, under_way, metas));
             panel.markdown = markdown;
             drop(panel);
             app.0.scheduler.request();
             Ok(())
         });
+    }
+
+    /// The finished answers this transcript has, oldest first: each one's opening words, and its line for the details (the
+    /// model that gave it, when it started, and its own quiet line of time, changes and cost).
+    fn answer_metas(&self) -> Vec<AnswerMeta> {
+        let state = self.0.state.borrow();
+        let (now, wall) = (perf_now(), kumi_common::time::now_ms() as f64);
+        state
+            .transcript
+            .entries
+            .iter()
+            .filter_map(|entry| {
+                let Entry::Assistant { text, status, started_at, footer, .. } = &*entry.borrow() else { return None };
+                if text.trim().is_empty() || *status == AnswerStatus::Running {
+                    return None;
+                }
+                let started = started_at.and_then(|at| {
+                    use chrono::TimeZone;
+                    chrono::Local.timestamp_millis_opt((wall - (now - at)) as i64).single().map(|at| at.format("%H:%M").to_string())
+                });
+                let line = [state.answer_models.get(&entry.id).cloned(), started, footer.clone()].into_iter().flatten().collect::<Vec<_>>();
+                Some(AnswerMeta { opening: opening(text), line: line.join(" · ") })
+            })
+            .collect()
     }
 
     /// `[`: the details in the terminal's scrollback, until a key brings Kumi's screen back.

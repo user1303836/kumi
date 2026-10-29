@@ -405,6 +405,8 @@ struct State {
     /// The details' files opened in the producer's editor (`v`): kept until Kumi quits, as an editor that opens a window
     /// may return before it reads them.
     details_files: Vec<tempfile::TempPath>,
+    /// The model that gave each answer, by its entry's id, for the details (ctrl+o).
+    answer_models: std::collections::HashMap<u64, String>,
     /// Where the conversation is scrolled to.
     view: super::transcript_view::TranscriptView,
     page: i32,
@@ -596,6 +598,7 @@ impl State {
             tabs_area: None,
             selection: None,
             details_files: vec![],
+            answer_models: Default::default(),
             view: Default::default(),
             page: 10,
             menu_index: 0,
