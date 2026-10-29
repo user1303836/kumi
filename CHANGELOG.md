@@ -3,6 +3,18 @@
 Kumi's releases. The Ableton bridge (`crates/ableton-mcp-server`) is versioned on its own;
 each Kumi release names the bridge it ships with.
 
+## 1.24.31 — 2026-10-29
+
+Ships with bridge 1.0.101, as 1.24.30 did.
+
+- A Drum Rack Kumi builds fills its pads in order from C1, row by row, in the order you asked for the
+  drums, not on General MIDI's keys (ask for those, or name the pads, to have them).
+- Drums Kumi writes for a Drum Rack play its pads: named by the pads' names, or by kick, snare, hat
+  and the like, which find the pad that holds one.
+
+Tested with Live 12.4 on macOS. On Windows, installing and updating are tested; using Kumi with Live
+there is still new.
+
 ## 1.24.30 — 2026-10-29
 
 Ships with bridge 1.0.101, as 1.24.29 did.
