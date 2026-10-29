@@ -64,8 +64,10 @@ pub(super) fn help_sections(has: Has, keymap: &Keymap, app: &str, tabs: &[String
         keyed(&["composer.take-back-waiting"], "alt+↑", "Take the last waiting message back into the box"),
         keyed(&["composer.new-line"], "ctrl+j  alt+enter", "A new line (shift+enter too, where the terminal tells it apart)"),
         keyed(&["composer.up", "composer.down"], "↑ ↓", "The box's lines, then what you sent before"),
+        // A row whose words name other actions' keys (here the search's) is keyed by those actions too: once keys.json
+        // gives any of them others, each says its own.
         keyed(
-            &["composer.history-search"],
+            &["composer.history-search", "search.back", "search.take", "search.cancel"],
             "ctrl+r",
             "Look back through what you sent for the words you type: ctrl+r again finds an earlier one, enter puts it in the \
              box, esc goes back to your draft",
@@ -73,7 +75,7 @@ pub(super) fn help_sections(has: Has, keymap: &Keymap, app: &str, tabs: &[String
     ];
     if has.fronts.voice {
         send.push(keyed(
-            &["voice.talk"],
+            &["voice.talk", "voice.send", "voice.drop"],
             "ctrl+t",
             "Talk instead of typing: press it again to stop, or hold it while you talk. What you said lands in the box; \
              enter stops and sends at once, and esc drops it",
@@ -107,22 +109,35 @@ pub(super) fn help_sections(has: Has, keymap: &Keymap, app: &str, tabs: &[String
         keyed(&["conversation.start"], "ctrl+home", "The start of the conversation"),
         keyed(&["conversation.latest"], "ctrl+end", "Back to the latest"),
         keyed(
-            &["conversation.details"],
+            &[
+                "conversation.details",
+                "details.search",
+                "details.previous-request",
+                "details.next-request",
+                "details.print",
+                "details.edit",
+            ],
             "ctrl+o",
             "The conversation in detail, with what each step was given and gave back: / searches it, { } go from request \
              to request, [ prints it into the terminal's scrollback, v opens it in your editor",
         ),
     ];
     if has.mouse {
-        around.push(row(
-            "drag",
-            if has.copy_on_select {
-                "Copy text as you let go; double-click for a word, triple-click for a line"
-            } else {
+        if has.copy_on_select {
+            around.push(row("drag", "Copy text as you let go; double-click for a word, triple-click for a line"));
+        } else {
+            // While keys.json gives the selection's keys others, drag keeps a row in words, and a row each says the keys.
+            let selection = ["selection.copy", "selection.clear"];
+            if selection.iter().any(|id| keymap.rebound(id)) {
+                around.push(row("drag", "Select text (double-click for a word, triple-click for a line); a right-click copies it"));
+            }
+            around.push(keyed(
+                &selection,
+                "drag",
                 "Select text (double-click for a word, triple-click for a line); ctrl+c or a right-click copies it, and esc \
-                 clears it"
-            },
-        ));
+                 clears it",
+            ));
+        }
         around.push(row("shift+drag", "Your terminal's own selection (option+drag in iTerm2)"));
     } else {
         around.push(row("drag", "The mouse is your terminal's (\"mouse\": \"off\"), so its own selection copies"));
@@ -202,7 +217,7 @@ pub(super) fn help_sections(has: Has, keymap: &Keymap, app: &str, tabs: &[String
              zooms the terminal",
         ),
         keyed(
-            &["composer.editor"],
+            &["composer.editor", "composer.undo"],
             "ctrl+g",
             "Open the draft in your own editor (VISUAL or EDITOR); what you save comes back into the box, and ctrl+- takes it \
              back",
@@ -216,7 +231,7 @@ pub(super) fn help_sections(has: Has, keymap: &Keymap, app: &str, tabs: &[String
     }
     stop.extend([
         keyed(
-            &["app.interrupt"],
+            &["app.interrupt", "composer.up", "composer.undo"],
             "ctrl+c",
             "Stop Kumi; when it isn't working, clear the box (↑ or ctrl+- brings the words back), then quit",
         ),
@@ -511,6 +526,19 @@ mod tests {
             !inner.contains("esc or tab comes back") && !inner.contains("tab completes") && !inner.contains("tab or enter puts it in"),
             "{inner}"
         );
+        // So do the rows whose words name the search's keys and the selection's.
+        let (other, _) = Keymap::new(Some(&serde_json::json!({ "search.take": ["ctrl+y"], "selection.copy": ["ctrl+shift+c"] })));
+        let other = said(&every_section_keyed(false, true, &other));
+        for row in [
+            "ctrl+r  Look back through what you sent for the words you type\n",
+            "ctrl+y  Put the message found in the box\n",
+            "esc  ctrl+c  Stop looking, and keep the draft\n",
+            "drag  Select text (double-click for a word, triple-click for a line); a right-click copies it\n",
+            "ctrl+shift+c  Copy the selected text; just after a copy, copy it again\n",
+        ] {
+            assert!(other.contains(row), "{row:?} in {other}");
+        }
+        assert!(!other.contains("ctrl+r again") && !other.contains("ctrl+c or a right-click"), "{other}");
         // With Kumi's own keys, every row is as the help writes it.
         let own = said(&every_section());
         assert!(own.contains("ctrl+-  ctrl+_  Undo in the box") && own.contains("← →  Along the line"), "{own}");
