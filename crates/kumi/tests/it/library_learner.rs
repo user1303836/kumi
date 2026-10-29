@@ -2,13 +2,19 @@
 mod fixture;
 use fixture::Studio;
 use kumi_library::{
+    create_library,
     learn::library_logs,
     learner::{LearnerMessage, LearnerOptions, LearnerReply},
     plan::PlanOptions,
     sources::SourceOptions,
     state::read_state,
+    Library, LibraryOptions,
 };
-use std::{process::Stdio, time::Duration};
+use std::{
+    process::Stdio,
+    rc::Rc,
+    time::{Duration, Instant},
+};
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader, Lines},
     process::{Child, ChildStdin, ChildStdout, Command},
@@ -141,4 +147,79 @@ async fn resume_immediately_after_learn_keeps_message_order() {
         }
     }
     child.finish().await;
+}
+
+/// The studio's library as the app keeps one, its learner this program (`kumi __library-learner`), learning at once.
+fn studio_library(studio: &Studio) -> Rc<Library> {
+    create_library(LibraryOptions {
+        daws: kumi::daw::registry::libraries(),
+        dir: studio.dir.to_string_lossy().into(),
+        folders: Some(vec![studio.extra.to_string_lossy().into()]),
+        sources: Some(SourceOptions {
+            home: Some(studio.home.path().to_string_lossy().into()),
+            platform: Some("darwin".into()),
+            applications: Some(studio.home.path().join("Applications").to_string_lossy().into()),
+            ..Default::default()
+        }),
+        find_sets: Some(false),
+        workers: Some(1),
+        delay_ms: Some(0),
+        ..Default::default()
+    })
+}
+
+/// Waits (15 s at most) until `ready`.
+async fn until(ready: impl Fn() -> bool) {
+    tokio::time::timeout(Duration::from_secs(15), async {
+        while !ready() {
+            tokio::time::sleep(Duration::from_millis(1)).await;
+        }
+    })
+    .await
+    .expect("in time");
+}
+
+/// Quitting just as the library starts learning: a learner still starting (here one that never gets further) reads no
+/// stop, so closing the library ends it at once rather than waiting out the time it's given to stop.
+#[cfg(unix)]
+#[tokio::test(flavor = "current_thread")]
+async fn closing_as_the_library_starts_learning_ends_its_learner_at_once() {
+    use std::os::unix::fs::PermissionsExt;
+    let studio = Studio::new();
+    let starting = studio.home.path().join("starting-learner");
+    std::fs::write(&starting, "#!/bin/sh\nexec sleep 30\n").unwrap();
+    std::fs::set_permissions(&starting, std::fs::Permissions::from_mode(0o700)).unwrap();
+    // Read by this test's process alone: each test is a process of its own.
+    std::env::set_var("KUMI_LIBRARY_LEARNER_BIN", &starting);
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let library = studio_library(&studio);
+            library.start();
+            until(|| library.status().state == kumi_types::contracts::LibraryState::Learning).await;
+            let closing = Instant::now();
+            library.close().await;
+            assert!(closing.elapsed() < Duration::from_millis(500), "{:?}", closing.elapsed());
+        })
+        .await;
+}
+
+/// A learner that has said where it is stops as the library closes, within the time it's given, and puts its state and
+/// its lock away.
+#[tokio::test(flavor = "current_thread")]
+async fn closing_while_the_library_learns_stops_its_learner() {
+    let studio = Studio::new();
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let library = studio_library(&studio);
+            // Paused, the learner says what it found (seven sounds) and waits.
+            library.pause();
+            library.start();
+            until(|| library.status().todo == Some(7)).await;
+            let closing = Instant::now();
+            library.close().await;
+            assert!(closing.elapsed() < Duration::from_millis(1500), "{:?}", closing.elapsed());
+            assert!(!studio.dir.join("learning.lock").exists());
+            assert!(read_state(studio.dir.to_str().unwrap()).await.unwrap().learning.is_none());
+        })
+        .await;
 }
