@@ -36,5 +36,6 @@
   "reconfigure": true,
   "music": true,
   "map": true,
-  "slots": false
+  "slots": false,
+  "models": true
 }

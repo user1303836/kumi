@@ -23,6 +23,14 @@ use crate::core::contracts::*;
 use crate::core::jobs::{JobDetail, JobStatus};
 use crate::core::palette::{Gathered, PaletteView};
 use crate::core::search_memory::SearchMemoryStatus;
+use kumi_ai::{
+    auth::openai_codex::DevicePrompt,
+    control::{ChatGptSignIn, CurrentModel, DefaultModel, LocalStatus, ProviderStatus},
+    providers::{
+        models::{ApiKeyCheck, ModelInfo, ServiceTier},
+        Effort, ProviderId,
+    },
+};
 use kumi_library::map::MapData;
 use kumi_listening::{music::learning::Music, slots::Said};
 use kumi_types::contracts::*;
@@ -70,6 +78,8 @@ pub struct Capabilities {
     pub music: bool,
     pub map: bool,
     pub slots: bool,
+    /// Choosing a model and signing in (/model, /effort, /fast, /login, /logout).
+    pub models: bool,
 }
 
 impl Capabilities {
@@ -114,6 +124,7 @@ impl Capabilities {
             music: session.music().is_some(),
             map: session.map_loader().is_some(),
             slots: session.slots_context().is_some(),
+            models: session.model_controls().is_some(),
         }
     }
 }
@@ -123,6 +134,27 @@ pub trait Request: Into<Op> {
     type Reply;
     /// This request's own answer, out of the session's; None when the session answered another request.
     fn answer(reply: Reply) -> Option<Self::Reply>;
+}
+
+/// Words that never show: a key. Its Debug says only that it's hidden; on the wire it's itself, as its request needs.
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct Secret(pub String);
+
+impl std::fmt::Debug for Secret {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Secret([redacted])")
+    }
+}
+
+/// The models as a front end shows them, read at once: the one chosen now, whether `/fast` is on, and the fallback.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ModelsView {
+    pub current: CurrentModel,
+    /// `/fast` is on (the setting, whether or not this model has a faster tier).
+    pub fast: bool,
+    /// The model that carries on while the chosen one's plan limit lasts or its provider is down.
+    pub fallback: Option<String>,
 }
 
 /// Each request: its struct in [`op`] (whose doc is the request's), its [`Op`] and [`Reply`] variants, and its
@@ -323,6 +355,40 @@ requests! {
     /// [`op::StopSlots`] stops it.
     Slots { id: u32, words: String } -> Said;
     StopSlots { id: u32 } -> ();
+    /// The providers Kumi can sign in to, and how each is signed in now.
+    Providers {} -> Vec<ProviderStatus>;
+    /// The model servers on this computer, and whether each runs.
+    LocalModels {} -> Vec<LocalStatus>;
+    /// With no model chosen, the first a signed-in provider or a running server offers, chosen: None with one chosen
+    /// already, or none to choose.
+    ChooseDefault {} -> Option<DefaultModel>;
+    /// A provider's models (`refresh`: read afresh, not what this session listed).
+    Models { provider: String, refresh: bool } -> Vec<ModelInfo>;
+    /// The model to talk to from the next message: what to say of it (one that can only talk, say).
+    ChooseModel { model: String } -> Option<String>;
+    /// How hard the model thinks: None, its own default.
+    SetEffort {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        effort: Option<Effort>,
+    } -> ();
+    /// `/fast`: the model's faster tier on or off; None when turning it on and the model has none.
+    SetFast { on: bool } -> Option<ServiceTier>;
+    /// The model that carries on while the chosen one can't (None: none), from the next message.
+    SetFallback {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        model: Option<String>,
+    } -> ();
+    /// A provider's key, checked, and kept when it works: what the check said.
+    SaveKey { provider: ProviderId, key: Secret } -> ApiKeyCheck;
+    /// Signed out of a provider: whether there was a sign-in to take away.
+    SignOut { provider: ProviderId } -> bool;
+    /// Sign in to ChatGPT, in the browser or (`by_code`) with a code to type. Its address or code comes as a `sign-in`
+    /// event with its `id`, and [`op::StopSignIn`] stops it.
+    SignInChatgpt { id: u32, by_code: bool } -> ();
+    StopSignIn { id: u32 } -> ();
+    /// The saved model, when its provider's own list no longer shows it: what to say ("ChatGPT no longer offers
+    /// gpt-5.5 to your sign-in"), or None.
+    MissingModel {} -> Option<String>;
     /// A body for FOCUS (while connected).
     FocusBody { request: BodyRequest } -> Option<FocusBody>;
 }
@@ -344,6 +410,14 @@ pub trait SessionHandle {
     fn job(&self, id: u32) -> Option<JobDetail>;
     /// Whether ctrl-b has a step to move right now.
     fn can_background(&self) -> bool;
+    /// The models as the screen shows them; None where there's no model to choose (`kumi -p`'s).
+    fn models(&self) -> Option<ModelsView>;
+    /// A provider's name as the producer knows it: a model server's own name for one.
+    fn provider_name(&self, id: &str) -> String;
+    /// The cloud provider `id` names (an error's or a model's provider), unless it's a model server's.
+    fn cloud_provider(&self, id: &str) -> Option<ProviderId>;
+    /// The tokens `model` reads at once, as its provider's list (or its server) says: the context meter's whole.
+    fn context_window(&self, model: &str) -> Option<f64>;
     /// Where what the session says between its replies goes (an aside's words).
     fn listen(&self, on_event: Rc<dyn Fn(SessionEvent)>);
     /// A request, answered.
@@ -387,6 +461,8 @@ pub struct InProcess {
     asides: RefCell<HashMap<u32, Signal>>,
     /// The same for /slots' fetches and checks.
     slots: RefCell<HashMap<u32, Signal>>,
+    /// And for ChatGPT's sign-ins.
+    sign_ins: RefCell<HashMap<u32, Signal>>,
 }
 
 impl InProcess {
@@ -397,6 +473,7 @@ impl InProcess {
             on_event: RefCell::new(None),
             asides: RefCell::new(HashMap::new()),
             slots: RefCell::new(HashMap::new()),
+            sign_ins: RefCell::new(HashMap::new()),
         })
     }
     fn emit(&self, event: SessionEvent) {
@@ -525,6 +602,50 @@ impl InProcess {
                 signal.cancel();
                 Reply::StopSlots(())
             }
+            Op::Providers(op::Providers {}) => Reply::Providers(part(session.model_controls())?.providers().await?),
+            Op::LocalModels(op::LocalModels {}) => Reply::LocalModels(part(session.model_controls())?.local().await),
+            Op::ChooseDefault(op::ChooseDefault {}) => Reply::ChooseDefault(part(session.model_controls())?.choose_default().await?),
+            Op::Models(op::Models { provider, refresh }) => {
+                Reply::Models(part(session.model_controls())?.models(&provider, refresh).await?)
+            }
+            Op::ChooseModel(op::ChooseModel { model }) => Reply::ChooseModel(part(session.model_controls())?.choose(&model).await?),
+            Op::SetEffort(op::SetEffort { effort }) => Reply::SetEffort(part(session.model_controls())?.set_effort(effort).await?),
+            Op::SetFast(op::SetFast { on }) => Reply::SetFast(part(session.model_controls())?.set_fast(on).await?),
+            Op::SetFallback(op::SetFallback { model }) => {
+                Reply::SetFallback(part(session.model_controls())?.set_fallback(model.as_deref()).await?)
+            }
+            Op::SaveKey(op::SaveKey { provider, key }) => {
+                Reply::SaveKey(part(session.model_controls())?.save_key(provider, &key.0, None).await?)
+            }
+            Op::SignOut(op::SignOut { provider }) => Reply::SignOut(part(session.model_controls())?.sign_out(provider).await?),
+            Op::SignInChatgpt(op::SignInChatgpt { id, by_code }) => {
+                let models = part(session.model_controls())?;
+                // As an aside's: a stop that came first left its signal stopped.
+                let signal = self.sign_ins.borrow_mut().entry(id).or_insert_with(Signal::new).clone();
+                let this = self.this.clone();
+                let said = move |url: Option<String>, code: Option<DevicePrompt>| {
+                    if let Some(this) = this.upgrade() {
+                        this.emit(SessionEvent::SignIn { id, url, code });
+                    }
+                };
+                let how = if by_code {
+                    ChatGptSignIn::Device { signal, on_code: Rc::new(move |code| said(None, Some(code))) }
+                } else {
+                    ChatGptSignIn::Browser { signal, on_url: Rc::new(move |url| said(Some(url), None)) }
+                };
+                let signed = models.sign_in_chatgpt(how).await;
+                self.sign_ins.borrow_mut().remove(&id);
+                Reply::SignInChatgpt(signed?)
+            }
+            Op::MissingModel(op::MissingModel {}) => {
+                let models = part(session.model_controls())?;
+                Reply::MissingModel(kumi_ai::control::missing_model(&*models).await)
+            }
+            Op::StopSignIn(op::StopSignIn { id }) => {
+                let signal = self.sign_ins.borrow_mut().entry(id).or_insert_with(Signal::new).clone();
+                signal.cancel();
+                Reply::StopSignIn(())
+            }
             Op::FocusBody(op::FocusBody { request }) => Reply::FocusBody(session.focus_body(&request).await?),
         })
     }
@@ -558,6 +679,25 @@ impl SessionHandle for InProcess {
     }
     fn can_background(&self) -> bool {
         self.session.can_background()
+    }
+    fn models(&self) -> Option<ModelsView> {
+        let models = self.session.model_controls()?;
+        Some(ModelsView { current: models.current(), fast: models.fast_enabled(), fallback: models.fallback() })
+    }
+    fn provider_name(&self, id: &str) -> String {
+        match self.session.model_controls() {
+            Some(models) => models.provider_name(id),
+            None => ProviderId::parse(id).map_or_else(|| id.into(), |provider| provider.row().name.into()),
+        }
+    }
+    fn cloud_provider(&self, id: &str) -> Option<ProviderId> {
+        match self.session.model_controls() {
+            Some(models) => models.cloud_provider(id),
+            None => ProviderId::parse(id),
+        }
+    }
+    fn context_window(&self, model: &str) -> Option<f64> {
+        self.session.model_controls()?.context_window(model)
     }
     fn listen(&self, on_event: Rc<dyn Fn(SessionEvent)>) {
         *self.on_event.borrow_mut() = Some(on_event);

@@ -47,8 +47,9 @@ fn everything() -> Now {
         music: true,
         map: true,
         slots: true,
+        models: true,
     };
-    let fronts = Fronts { models: true, voice: true, updates: true, switch_daw: true, willington: true };
+    let fronts = Fronts { voice: true, updates: true, switch_daw: true, willington: true };
     Now { busy: false, goal_running: false, can, fronts }
 }
 

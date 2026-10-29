@@ -20,7 +20,7 @@ macro_rules! case {
     };
 }
 fn model_harness(m: Rc<FakeModels>, width: i32) -> Harness {
-    Harness::with(width, 40, Rc::new(Control::default()), |o| o.models = Some(m))
+    Harness::with(width, 40, Control::with_models(m), |_| {})
 }
 case!(missing_default_model_and_commands_over_picker, async {
     let fake = FakeModels::catalog();

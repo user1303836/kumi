@@ -36,8 +36,6 @@ const fn front(front: Front) -> Needs {
 /// What a front end has itself, that a command may need.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Front {
-    /// Choosing a model and signing in.
-    Models,
     /// Talking instead of typing.
     Voice,
     /// Getting a newer Kumi.
@@ -51,7 +49,6 @@ pub enum Front {
 /// Which of [`Front`] a front end has.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Fronts {
-    pub models: bool,
     pub voice: bool,
     pub updates: bool,
     pub switch_daw: bool,
@@ -61,7 +58,6 @@ pub struct Fronts {
 impl Fronts {
     pub fn has(&self, front: Front) -> bool {
         match front {
-            Front::Models => self.models,
             Front::Voice => self.voice,
             Front::Updates => self.updates,
             Front::SwitchDaw => self.switch_daw,
@@ -106,9 +102,9 @@ pub const COMMANDS: &[Command] = &[
     command("/copy", "Copy Kumi's last answer", &["clipboard"], ALWAYS),
     command("/export", "This conversation as a file: choose, or /export copy, md, html or json (for another Kumi)", &["save"], ALWAYS),
     command("/share", "Save this conversation as a web page that opens anywhere, to send", &["link"], ALWAYS),
-    command("/model", "Choose the model Kumi talks to", &[], front(Front::Models)),
-    command("/effort", "How hard the model thinks", &["reasoning"], front(Front::Models)),
-    command("/fast", "The model's faster tier, when its provider offers one", &["speed"], front(Front::Models)),
+    command("/model", "Choose the model Kumi talks to", &[], can(|c| c.models)),
+    command("/effort", "How hard the model thinks", &["reasoning"], can(|c| c.models)),
+    command("/fast", "The model's faster tier, when its provider offers one", &["speed"], can(|c| c.models)),
     command("/willington", "Willington's bindings in {app}: macro mapping, zones", &[], front(Front::Willington)),
     command("/slots", "Which model does each listening job: /slots listening gemini, /slots back <job>", &[], can(|c| c.slots)),
     command(
@@ -119,7 +115,7 @@ pub const COMMANDS: &[Command] = &[
     ),
     command("/music", "Your own music, which Kumi learns your taste from: folders, songs, pause, forget", &[], can(|c| c.music)),
     command("/map", "Your sounds and songs as a map: hear a point, find more like it; /map open in the browser", &[], can(|c| c.map)),
-    command("/login", "Sign in to a provider", &["key"], front(Front::Models)),
+    command("/login", "Sign in to a provider", &["key"], can(|c| c.models)),
     command("/loop", "Listen, judge and adjust in rounds until the goal is met: /loop <what>, then stop", &[], ALWAYS),
     command("/goal", "Keep at one goal until it's met: /goal <what>, then resume, edit, pause, clear", &["objective"], can(|c| c.goal)),
     command("/memory", "What Kumi remembers", &["notes"], can(|c| c.memory)),
@@ -127,7 +123,7 @@ pub const COMMANDS: &[Command] = &[
     command("/recipes", "Your saved ways of working", &[], can(|c| c.recipes)),
     command("/recipe", "Run a recipe now: /recipe <name> blank=value …", &[], can(|c| c.run_recipe)),
     command("/jobs", "What's running in the background: see, stop or run one again", &[], can(|c| c.jobs)),
-    command("/logout", "Sign out of a provider", &[], front(Front::Models)),
+    command("/logout", "Sign out of a provider", &[], can(|c| c.models)),
     command("/status", "What Kumi is connected to", &["connection"], ALWAYS),
     command("/update", "Get the newest Kumi", &["upgrade", "version"], front(Front::Updates)),
     command("/changelog", "What's new in Kumi", &["release", "news"], ALWAYS),
@@ -393,11 +389,11 @@ pub fn run(line: &str, now: &Now) -> Effect {
         "/changelog" => return Effect::Changelog,
         "/jobs" if can.jobs => return Effect::Jobs,
         "/voice" if fronts.voice => return Effect::Voice,
-        "/fast" if fronts.models => return Effect::Fast,
-        "/model" if fronts.models => return Effect::Model,
-        "/effort" if fronts.models => return Effect::Effort,
-        "/login" if fronts.models => return Effect::Login,
-        "/logout" if fronts.models => return Effect::Logout,
+        "/fast" if can.models => return Effect::Fast,
+        "/model" if can.models => return Effect::Model,
+        "/effort" if can.models => return Effect::Effort,
+        "/login" if can.models => return Effect::Login,
+        "/logout" if can.models => return Effect::Logout,
         "/recipes" if can.recipes => return Effect::Recipes,
         "/memory" if can.memory => return Effect::Memory,
         _ => {}

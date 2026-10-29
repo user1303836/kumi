@@ -14,6 +14,7 @@ mod input;
 mod jobs;
 mod live;
 mod map;
+mod models;
 mod music;
 mod palette;
 mod panels;
@@ -47,7 +48,6 @@ use super::{
 use crate::{
     config::safe_error_message,
     history::InputHistory,
-    models::ModelController,
     terminal::Terminal,
     text::{sanitize_text, StreamingText},
     update::UpdateControl,
@@ -95,7 +95,6 @@ pub struct TuiOptions {
     pub session: Rc<dyn SessionHandle>,
     pub input: Rc<dyn TtyInput>,
     pub output: Rc<dyn TtyOutput>,
-    pub models: Option<Rc<dyn ModelController>>,
     pub mode: String,
     pub startup_notice: Option<String>,
     pub secrets: Vec<String>,
@@ -216,7 +215,6 @@ impl TuiOptions {
             input,
             output,
             mode: mode.into(),
-            models: None,
             startup_notice: None,
             secrets: vec![],
             close_timeout_ms: None,
@@ -429,6 +427,9 @@ struct State {
     next_aside: u32,
     /// The id the next /slots request takes.
     next_slots: u32,
+    /// The id the next ChatGPT sign-in takes, and what each under way does with its address or code.
+    next_sign_in: u32,
+    sign_ins: std::collections::HashMap<u32, Rc<dyn Fn(Option<String>, Option<kumi_ai::auth::openai_codex::DevicePrompt>)>>,
     transport: Option<Transport>,
     activity: String,
     /// What's open over the conversation (a list, a sign-in, a side answer, a job, the help): the top one takes input.
@@ -612,6 +613,8 @@ impl State {
             asides: vec![],
             next_aside: 1,
             next_slots: 1,
+            next_sign_in: 1,
+            sign_ins: std::collections::HashMap::new(),
             transport: None,
             activity: format!("connecting to {}", crate::daw::words().app),
             overlays: Overlays::default(),
@@ -914,7 +917,6 @@ impl TuiApp {
         crate::has::Has {
             can: self.can(),
             fronts: kumi_agent::core::commands::Fronts {
-                models: options.models.is_some(),
                 voice: self.0.voice.is_some(),
                 updates: options.updates.is_some(),
                 switch_daw: options.switch_daw.is_some(),

@@ -118,6 +118,8 @@ pub struct Control {
     pub slots: RefCell<Option<Rc<kumi_listening::slots::SlotsContext>>>,
     /// What /map reads its data with.
     pub map: RefCell<Option<kumi::map::LoadMap>>,
+    /// The models to talk to, and the sign-ins.
+    pub models: RefCell<Option<Rc<dyn kumi::models::ModelController>>>,
 }
 impl Default for Control {
     fn default() -> Self {
@@ -147,10 +149,17 @@ impl Default for Control {
             music: RefCell::default(),
             slots: RefCell::default(),
             map: RefCell::default(),
+            models: RefCell::default(),
         }
     }
 }
 impl Control {
+    /// A session with these models to talk to.
+    pub fn with_models(models: Rc<dyn kumi::models::ModelController>) -> Rc<Control> {
+        let control = Rc::new(Control::default());
+        *control.models.borrow_mut() = Some(models);
+        control
+    }
     /// A session whose /map reads its data with `load`.
     pub fn mapped(load: kumi::map::LoadMap) -> Rc<Control> {
         let control = Rc::new(Control::default());
@@ -576,6 +585,9 @@ impl SessionController for Control {
     }
     fn map_loader(&self) -> Option<kumi::map::LoadMap> {
         self.map.borrow().clone()
+    }
+    fn model_controls(&self) -> Option<Rc<dyn kumi::models::ModelController>> {
+        self.models.borrow().clone()
     }
     fn has_device_tree(&self) -> bool {
         self.tree.borrow().is_some()

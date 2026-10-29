@@ -720,7 +720,7 @@ impl TuiApp {
                 return Ok(());
             }
             Effect::Fast => {
-                let Some(models) = self.0.options.models.clone() else { return Ok(()) };
+                let Some(models) = self.models() else { return Ok(()) };
                 self.clear_editor();
                 let current = models.current();
                 // The setting, not whether this model uses it: a saved "on" can always be turned off.
