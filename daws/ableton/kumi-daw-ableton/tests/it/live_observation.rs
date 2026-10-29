@@ -529,4 +529,27 @@ fn a_reference_follows_its_track_when_one_is_inserted_above_and_is_told_by_name_
     let told = reference_context(&saturator, None, &deleted, &mut book);
     let gone = told["gone"].as_str().unwrap();
     assert!(gone.starts_with("The producer named “Saturator” on “Bass” with @, and Live's devices changed since"), "{gone}");
+
+    // Two of one name: the second Saturator named, then the Compressor between them removed. Its ref now names the
+    // place after the first, and two Saturators fit its name: which is meant can't be told, so it's told by its name.
+    let two = model(
+        &[("1:track:0", "Bass")],
+        &[
+            ("1:device:0:0", "1:track:0", "Saturator"),
+            ("1:device:0:1", "1:track:0", "Compressor"),
+            ("1:device:0:2", "1:track:0", "Saturator"),
+        ],
+    );
+    let offered = candidates(&two, None);
+    let second = match &offered.iter().filter(|candidate| candidate.label == "Saturator").nth(1).unwrap().reference {
+        Reference::Daw { node } => node.clone(),
+        other => panic!("not the Set's: {other:?}"),
+    };
+    assert_eq!(second.r#ref, "1:device:0:2");
+    let told = reference_context(&second, None, &two, &mut book);
+    assert_eq!(told["ref"], json!(book.short_ref("1:device:0:2")), "at its ref while it's there: {told:?}");
+    let removed =
+        model(&[("1:track:0", "Bass")], &[("1:device:0:0", "1:track:0", "Saturator"), ("1:device:0:1", "1:track:0", "Saturator")]);
+    let told = reference_context(&second, None, &removed, &mut book);
+    assert!(told["gone"].as_str().is_some() && told.get("ref").is_none(), "{told:?}");
 }

@@ -5,7 +5,7 @@ use super::{
     fold::fold_tracks,
     inference::no_access,
     more_changes::{set_meter, set_scale},
-    pins::{in_model, pin_context, reference_context, track_now},
+    pins::{in_model, pin_context, reference_context, track_now, InModel},
     project,
     references::{Moved, Shift},
     remember::{CurrentProject, ExportMark, Remember},
@@ -688,7 +688,7 @@ impl Observer {
                 let selected_track = selected.as_ref().and_then(|s| s.get("track")).and_then(|t| t.get("name")).and_then(Value::as_str);
                 let mut unfound: Vec<(&str, String)> = named
                     .iter()
-                    .filter(|reference| reference.node != PinKind::Track && in_model(&model, reference).is_none())
+                    .filter(|reference| reference.node != PinKind::Track && in_model(&model, reference) == InModel::Missing)
                     .filter_map(|reference| {
                         let track = reference.track.as_deref()?;
                         Some((track, track_now(&model, &reference.track_ref, track)?.reference.clone()))
@@ -698,15 +698,17 @@ impl Observer {
                 unfound.sort_by(|a, b| (Some(a.0) != selected_track, &a.1).cmp(&(Some(b.0) != selected_track, &b.1)));
                 unfound.dedup_by(|a, b| a.1 == b.1);
                 let mut trees: HashMap<String, DeviceTree> = HashMap::new();
-                for (track, track_ref) in unfound.into_iter().take(REFERENCE_TREES) {
+                // (by the track's ref now: two tracks of one name each have their own)
+                for (_, track_ref) in unfound.into_iter().take(REFERENCE_TREES) {
                     if let Ok(Some(tree)) = views::device_tree(connection.as_ref(), &track_ref, signal.clone()).await {
-                        trees.insert(track.to_owned(), tree);
+                        trees.insert(track_ref, tree);
                     }
                 }
                 connection.assert_lease(lease, &signal)?;
                 let mut book = connection.references.borrow_mut();
                 for reference in named {
-                    let tree = reference.track.as_deref().and_then(|track| trees.get(track));
+                    let track_ref = reference.track.as_deref().and_then(|track| track_now(&model, &reference.track_ref, track));
+                    let tree = track_ref.and_then(|track| trees.get(&track.reference));
                     references.push(Value::Object(reference_context(reference, tree, &model, &mut book)));
                 }
             }
