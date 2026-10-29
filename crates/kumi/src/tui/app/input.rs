@@ -1185,6 +1185,8 @@ impl TuiApp {
                 }
                 state.current = None;
                 state.watching = false;
+                // (W6-1: a fresh conversation fills the model's context anew)
+                state.last_call = None;
             }
             let started = session.op(op::NewConversation {}).await;
             // Its name, kept with it from its first save.
@@ -1322,6 +1324,8 @@ impl TuiApp {
             status: if outcome.is_error { AnswerStatus::Failed } else { AnswerStatus::Done },
             elapsed_ms: Some(number::round(perf_now() - started)),
             started_at: Some(started),
+            thinking: None,
+            footer: None,
         });
         state.view.follow();
         drop(state);

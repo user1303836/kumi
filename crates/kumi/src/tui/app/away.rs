@@ -118,7 +118,13 @@ impl TuiApp {
         static CLOCK: std::sync::LazyLock<regex::Regex> =
             std::sync::LazyLock::new(|| regex::Regex::new(r" · \d+:\d{2}(:\d{2})?$").expect("regex"));
         let now = self.now_line();
-        let label = CLOCK.replace(&now.label, "").into_owned();
+        // A think's time and its streaming headline would tick it: it says what NOW said before them.
+        let thinking = now.label.starts_with(super::usage::THINKING);
+        let label = if thinking {
+            super::usage::working_label(self.0.state.borrow().turn_changes)
+        } else {
+            CLOCK.replace(&now.label, "").into_owned()
+        };
         let retry = {
             let state = self.0.state.borrow();
             state.retry.as_ref().map(|(reason, _)| match state.waiting_for {
@@ -128,7 +134,7 @@ impl TuiApp {
                 None => reason.clone(),
             })
         };
-        let detail = retry.unwrap_or(now.detail);
+        let detail = retry.unwrap_or(if thinking { "thinking".into() } else { now.detail });
         [label, detail].into_iter().filter(|part| !part.is_empty()).collect::<Vec<_>>().join(" · ")
     }
 

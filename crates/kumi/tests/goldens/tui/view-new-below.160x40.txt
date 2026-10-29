@@ -1,13 +1,12 @@
   Kumi  ·  Night Drive                                                                                                                                  ● Live
 
    why does the low end sound muddy                                                                                 FOCUS
-   Line 28 of what to try for it.                                                                                   Night Drive
-   Line 29 of what to try for it.                                                                                   Your selection will show here
-   Line 30 of what to try for it.
+   Line 29 of what to try for it.                                                                                   Night Drive
+   Line 30 of what to try for it.                                                                                   Your selection will show here
    Line 31 of what to try for it.
-   Line 32 of what to try for it.                                                                                   NOW
-   Line 33 of what to try for it.                                                                                   Ready
-   Line 34 of what to try for it.
+   Line 32 of what to try for it.
+   Line 33 of what to try for it.                                                                                   NOW
+   Line 34 of what to try for it.                                                                                   Ready
    Line 35 of what to try for it.
    Line 36 of what to try for it.
    Line 37 of what to try for it.
@@ -19,9 +18,9 @@
    Line 43 of what to try for it.
    Line 44 of what to try for it.
    Line 45 of what to try for it.
-   Line 46 of what to try for it.                                                                                   HISTORY ──────────────────────────────────
-   Line 47 of what to try for it.                                                                                   Nothing changed yet
-   Line 48 of what to try for it.
+   Line 46 of what to try for it.
+   Line 47 of what to try for it.                                                                                   HISTORY ──────────────────────────────────
+   Line 48 of what to try for it.                                                                                   Nothing changed yet
    Line 49 of what to try for it.
    Line 50 of what to try for it.
    Line 51 of what to try for it.
@@ -32,6 +31,7 @@
    Line 56 of what to try for it.
    Line 57 of what to try for it.
    Line 58 of what to try for it.
+   Line 59 of what to try for it.
                                                                               3 new below · page down · ctrl+end
 
 

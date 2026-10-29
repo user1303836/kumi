@@ -297,6 +297,15 @@ impl TuiApp {
                 }
             }
         }
+        // How full the answering model's context is, past half (`contextMeter`), where there's room for it.
+        if let Some(meter) = self.context_meter() {
+            let named = x + set_name.as_ref().map(|n| text_width(n).min(16) + 5).unwrap_or(0);
+            let at = end - meter.iter().map(|span| text_width(&span.text)).sum::<i32>();
+            if at - named >= 2 {
+                spans(screen, at, 0, &meter, None);
+                end = at - 3;
+            }
+        }
         if let Some(name) = set_name.filter(|s| !s.is_empty()) {
             x = screen.put(x, 0, "  ·  ", &st::FAINT);
             screen.put(x, 0, &truncate(&name, (end - x).max(0)), &st::TEXT);
@@ -507,12 +516,14 @@ impl TuiApp {
             // A steady dot: NOW's glyph already shows Kumi is at work.
             let dot = Some(st::ACCENT);
             let entry = state.current.as_ref().map(|e| e.borrow());
-            let (steps, started) = if let Some(Entry::Assistant { steps, started_at, .. }) = entry.as_deref() {
-                (steps.as_slice(), *started_at)
+            let (steps, started, thinking) = if let Some(Entry::Assistant { steps, started_at, thinking, .. }) = entry.as_deref() {
+                (steps.as_slice(), *started_at, thinking.as_ref())
             } else {
-                (&[][..], None)
+                (&[][..], None, None)
             };
             let running = steps.last().filter(|s| s.state == StepState::Running);
+            // Thinking between steps, with a headline: "thinking · 31s", the headline beneath.
+            let thinking = thinking.filter(|_| running.is_none());
             let label =
                 if let Some(goal) = state.goal.as_ref().filter(|g| matches!(g.status.state, GoalPhase::Running | GoalPhase::Starting)) {
                     format!(
@@ -554,10 +565,10 @@ impl TuiApp {
                             .unwrap_or_default(),
                         helpers::clock_of(now - matching.since)
                     )
-                } else if state.turn_changes > 0 {
-                    format!("working · {} {}", state.turn_changes, if state.turn_changes == 1 { "change" } else { "changes" })
+                } else if let Some(thinking) = thinking {
+                    super::usage::thinking_label(thinking, now, state.turn_changes)
                 } else {
-                    "working".into()
+                    super::usage::working_label(state.turn_changes)
                 };
             // A provider asked Kumi to wait: say why and for how long (esc still stops).
             if let Some((reason, until)) = state.retry.as_ref().filter(|(_, until)| *until > now) {
@@ -627,13 +638,13 @@ impl TuiApp {
                     activity: Some((Activity::Code, state.planning_since)),
                 };
             }
-            return NowLine {
-                dot,
-                label,
-                detail: if state.current.is_some() { "thinking".into() } else { state.activity.clone() },
-                style: st::DIM,
-                activity: Some((Activity::Think, steps.last().and_then(|s| s.ended_at).or(started).unwrap_or(state.busy_since))),
+            let detail = match thinking {
+                Some(thinking) => thinking.headline.clone(),
+                None if state.current.is_some() => "thinking".into(),
+                None => state.activity.clone(),
             };
+            let since = thinking.map(|t| t.since).or_else(|| steps.last().and_then(|s| s.ended_at)).or(started).unwrap_or(state.busy_since);
+            return NowLine { dot, label, detail, style: st::DIM, activity: Some((Activity::Think, since)) };
         }
         if let Some(flash) = flash.filter(|_| !action.is_some_and(|a| a.at > state.last_change.as_ref().unwrap().1)) {
             // A fixed phrase's change, made with no model call.

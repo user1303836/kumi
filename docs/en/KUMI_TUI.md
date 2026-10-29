@@ -14,13 +14,19 @@ closes, crashes or is stopped.
   jobs at work (◐ 2 jobs), and Live's connection. While Live plays, a yellow light blinks on its beat (brightest on
   the bar's first beat) beside the tempo. While your fallback model answers,
   it's named there with "· fallback"; near a plan's limit (80% of a window
-  used), "plan 84% · resets 14:20" shows beside the model.
+  used), "plan 84% · resets 14:20" shows beside the model. Once the model's
+  context is more than half full, a meter beside the model says how full
+  ("context ▰▰▰▰▰▰▱▱▱▱ 62%", in the warning colour from 80%).
 - **Conversation** (left): your messages, Kumi's answers and its steps, in plain
   words ("looked at your Set"), each with its timing. A step at work animates by
   kind (searching, reading, building a device, changing, listening, playing);
   the same step done several times folds into one line ("read a page ×3").
   What Kumi heard shows as a small spectrum, and what it keeps as a line of its
-  own: ✎ a note, ◆ a technique, ↻ a recipe, ✦ a lesson from matching.
+  own: ✎ a note, ◆ a technique, ↻ a recipe, ✦ a lesson from matching. While the
+  model thinks between steps, the headline of its reasoning shows on a row of its
+  own, as a step at work. Each finished answer ends with one quiet line: its
+  time, its changes, and its tokens on an API key or its share of the plan on a
+  subscription ("6.2s · 2 changes · 18.4k in · 1.2k out").
 - **FOCUS** (top right): where you are in Live, following your selection as it
   changes: a track's device tree with rack chains, a clip's notes as a small
   piano roll, or a Session or Arrangement strip. A device you point at (click
@@ -31,7 +37,9 @@ closes, crashes or is stopped.
   the start marker". While Kumi waits for the model, it
   says why and until when: "retrying in 5s · ChatGPT is busy", "carrying on at
   14:20 (in 2h 13m) · ChatGPT's plan limit", "offline · trying again in 20s"
-  (Esc stops any of them).
+  (Esc stops any of them). While the model thinks, NOW says for how long
+  ("thinking · 31s"), with the headline of its reasoning: one line, never the
+  reasoning itself, which stays out of the answer and of `/copy`.
 - **Tabs** (bottom right): **HISTORY** lists the latest three things Kumi kept
   (each with **forget**), then every change, newest first, each with **undo**,
   or **kept** / **no undo** / **check Live** when it can't be undone. A change

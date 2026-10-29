@@ -32,6 +32,8 @@ pub struct FakeModels {
     pub finish_chatgpt: RefCell<Option<tokio::sync::oneshot::Sender<()>>>,
     /// How many times a default model was looked for.
     pub looked: std::cell::Cell<usize>,
+    /// Providers whose lists come only once they're read (a local server's): their models' windows aren't known until.
+    pub unread: RefCell<HashSet<String>>,
 }
 impl Default for FakeModels {
     fn default() -> Self {
@@ -47,6 +49,7 @@ impl Default for FakeModels {
             notes: RefCell::new(HashMap::new()),
             finish_chatgpt: RefCell::new(None),
             looked: std::cell::Cell::new(0),
+            unread: RefCell::new(HashSet::new()),
         }
     }
 }
@@ -135,6 +138,10 @@ impl ModelController for FakeModels {
             fast: info.as_ref().filter(|_| *self.fast.borrow()).and_then(|m| m.service_tiers.first()).cloned(),
         }
     }
+    fn context_window(&self, model: &str) -> Option<f64> {
+        let provider = self.provider(model)?;
+        (!self.unread.borrow().contains(&provider)).then(|| self.info(model).and_then(|info| info.context)).flatten()
+    }
     async fn providers(&self) -> Result<Vec<ProviderStatus>, RuntimeError> {
         Ok(table::offered()
             .into_iter()
@@ -197,6 +204,7 @@ impl ModelController for FakeModels {
     async fn models(&self, provider: &str, _: bool) -> Result<Vec<ModelInfo>, RuntimeError> {
         self.calls.borrow_mut().push(format!("list:{provider}"));
         self.require(provider)?;
+        self.unread.borrow_mut().remove(provider);
         Ok(self.lists.borrow().get(provider).cloned().unwrap_or_default())
     }
     async fn choose(&self, next: &str) -> Result<Option<String>, RuntimeError> {

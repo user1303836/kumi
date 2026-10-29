@@ -274,9 +274,10 @@ case!(a_drag_stays_out_of_the_composer_and_over_ssh_says_how_else_to_copy, async
     let copy = written.rsplit("\x1b]52;c;").next().and_then(|rest| rest.split('\x07').next()).unwrap();
     use base64::Engine;
     let copy = String::from_utf8(base64::engine::general_purpose::STANDARD.decode(copy).unwrap()).unwrap();
-    assert!(copy.starts_with("First line\nSecond line"), "{copy:?}");
+    // (the answer's footer, its time, is a row of it too, as a step's time is)
+    assert_eq!(copy, "First line\nSecond line\n0.0s");
     assert!(!copy.contains("keep my draft"), "{copy:?}");
-    h.has("Copied 2 lines if the terminal allows it · or shift-drag");
+    h.has("Copied 3 lines if the terminal allows it · or shift-drag");
     h.close().await;
 });
 case!(a_copy_over_a_panel_takes_its_lines_not_the_conversation_under_them, async {
@@ -443,7 +444,9 @@ case!(typing_streaming_steps_markdown, async {
     h.has("0.3s");
     h.emit(json!({"type":"turn-complete","result":{"stopReason":"completed"},"elapsedMs":3100}));
     h.emit(json!({"type":"state","state":"idle"}));
-    h.has("▾ 1 step · 3.1s");
+    // The steps fold under their count; the answer's time is on its own quiet line under it.
+    h.has("▾ 1 step");
+    assert!(h.screen().iter().any(|line| line.starts_with("   3.1s ")), "{}", h.screen().join("\n"));
     h.has("Ready");
     assert!(!has(&h.screen(), "live_discover"));
     h.type_text("what's on the bass?\r").await;

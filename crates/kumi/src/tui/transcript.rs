@@ -101,6 +101,31 @@ pub struct WebLine {
     pub title: String,
     pub detail: String,
 }
+/// What the model is thinking, while it thinks: its reasoning's headline, and since when (perf time).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Thinking {
+    pub headline: String,
+    pub since: f64,
+}
+/// The headline of a reasoning summary so far: the latest title the model gave it (a line all in bold, or a heading, as
+/// each part of a summary begins), else its last line that says anything; without its Markdown. Empty while it has
+/// said nothing.
+pub fn headline(reasoning: &str) -> String {
+    let lines: Vec<&str> = reasoning.lines().map(str::trim).filter(|line| !line.is_empty()).collect();
+    let titled = |line: &&&str| line.starts_with('#') || (line.len() > 4 && line.starts_with("**") && line.ends_with("**"));
+    let Some(line) = lines.iter().rev().find(titled).or(lines.last()) else { return String::new() };
+    // A heading's marks, and a list's or a quote's when a space follows: a minus sign before a number stays.
+    let mut line = *line;
+    loop {
+        let marked = line.strip_prefix(['-', '*', '+', '>']).filter(|rest| rest.starts_with(' '));
+        match marked.or_else(|| line.starts_with('#').then(|| line.trim_start_matches('#'))) {
+            Some(rest) => line = rest.trim_start(),
+            None => break,
+        }
+    }
+    let plain = line.replace("**", "").replace("__", "").replace('`', "");
+    plain.split_whitespace().collect::<Vec<_>>().join(" ")
+}
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum AnswerStatus {
@@ -129,6 +154,12 @@ pub enum Entry {
         elapsed_ms: Option<f64>,
         #[serde(rename = "startedAt")]
         started_at: Option<f64>,
+        /// While the model thinks between steps: the headline of its reasoning, on a row of its own as a step's.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        thinking: Option<Thinking>,
+        /// Once it's done: its time, its changes and what it cost, on a quiet line under it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        footer: Option<String>,
     },
     Notice {
         text: String,
@@ -231,7 +262,7 @@ fn led(spans: &[Span], width: i32, first: Span, rest: Rgb) -> impl Iterator<Item
         Row { spans: spans.into(), carry: carry.map(|carry| Carry { lead: 2, ..carry }), ..Default::default() }
     })
 }
-fn seconds(ms: f64) -> String {
+pub(super) fn seconds(ms: f64) -> String {
     format!("{}s", number::to_fixed(ms / 1000., 1))
 }
 pub const FOLD_AFTER_MS: f64 = 3000.;
@@ -454,7 +485,7 @@ pub fn entry_rows_with(entry: &Entry, width: i32, now: f64, markdown: &mut Markd
                 wrapped(&spans, inner)
             })
             .collect(),
-        Entry::Assistant { text, steps, status, elapsed_ms, started_at } => {
+        Entry::Assistant { text, steps, status, elapsed_ms, started_at, thinking, footer } => {
             let mut rows = vec![];
             if !text.is_empty() {
                 let streaming = *status == AnswerStatus::Running;
@@ -467,7 +498,11 @@ pub fn entry_rows_with(entry: &Entry, width: i32, now: f64, markdown: &mut Markd
                     });
                 }
             }
-            if !steps.is_empty() {
+            // The model thinking between steps, its headline on a row of its own under them, as a step at work.
+            let thinking = thinking
+                .as_ref()
+                .filter(|_| *status == AnswerStatus::Running && !steps.iter().any(|step| step.state == StepState::Running));
+            if !steps.is_empty() || thinking.is_some() {
                 if !rows.is_empty() {
                     rows.push(Row::default());
                 }
@@ -482,18 +517,39 @@ pub fn entry_rows_with(entry: &Entry, width: i32, now: f64, markdown: &mut Markd
                         span("▾ ", palette::FAINT),
                         span(format!("{} {}", steps.len(), if steps.len() == 1 { "step" } else { "steps" }), palette::DIM),
                     ];
-                    if let Some(ms) = elapsed_ms {
-                        spans.push(span(format!(" · {}", seconds(*ms)), palette::FAINT));
+                    // (the answer's own line under it says its time, when it has one)
+                    if let Some(ms) = elapsed_ms.filter(|_| footer.is_none() || *status != AnswerStatus::Done) {
+                        spans.push(span(format!(" · {}", seconds(ms)), palette::FAINT));
                     }
                     rows.push(row(spans));
                 }
                 rows.extend(step_rows(steps, now));
+                if let Some(thinking) = thinking {
+                    rows.push(Row {
+                        spans: vec![
+                            span("│ ", palette::RULE),
+                            span(" ", palette::ACCENT),
+                            span(format!(" {}", thinking.headline), palette::DIM),
+                        ]
+                        .into(),
+                        live: Some(LiveRow::Step {
+                            activity: Activity::Think,
+                            since: thinking.since,
+                            label: thinking.headline.clone(),
+                            doing: None,
+                        }),
+                        ..Default::default()
+                    });
+                }
             }
             if *status == AnswerStatus::Stopped {
                 rows.push(row(vec![span("stopped", palette::FAINT)]));
             }
             if *status == AnswerStatus::Failed && text.is_empty() {
                 rows.push(row(vec![span("Kumi couldn't answer that; see the note below.", palette::FAINT)]));
+            }
+            if let Some(footer) = footer.as_ref().filter(|_| *status == AnswerStatus::Done) {
+                rows.push(row(vec![span(footer, palette::FAINT)]));
             }
             rows
         }

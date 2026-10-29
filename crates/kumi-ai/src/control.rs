@@ -83,6 +83,10 @@ pub trait ModelController {
     }
     async fn choose_default(&self) -> Result<Option<DefaultModel>, RuntimeError>;
     async fn models(&self, provider: &str, refresh: bool) -> Result<Vec<ModelInfo>, RuntimeError>;
+    /// The tokens `model` reads at once, as its provider's list (or its server) says: the context meter's whole.
+    fn context_window(&self, _model: &str) -> Option<f64> {
+        None
+    }
     async fn choose(&self, next: &str) -> Result<Option<String>, RuntimeError>;
     async fn set_effort(&self, next: Option<Effort>) -> Result<(), RuntimeError>;
     /// Whether `/fast` is on (the setting, whether or not this model has a faster tier).

@@ -1,16 +1,17 @@
 //! What the kernel asks a model and keeps between turns: a step asked again sends what it first sent, each turn
-//! carries every turn before it whole, and each gives the messages it settled, once.
+//! carries every turn before it whole, and each gives the messages it settled, once. What the model thinks, and
+//! each call's tokens, are told as they come.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use async_trait::async_trait;
 use futures::stream::{self, StreamExt};
-use kumi_agent::core::contracts::StopReason;
+use kumi_agent::core::contracts::{KernelEvent, StopReason};
 use kumi_agent::kernel::agent::{create_agent_kernel, no_room, AgentKernelOptions};
 use kumi_ai::binding::{budget_for, LanguageModel, ModelBinding};
 use kumi_ai::error::LanguageModelError;
-use kumi_ai::types::{CallOptions, FinishReason, FinishReasonUnified, Message, StreamPart, StreamParts, Usage};
+use kumi_ai::types::{CallOptions, FinishReason, FinishReasonUnified, InputTokens, Message, OutputTokens, StreamPart, StreamParts, Usage};
 use kumi_common::abort::{Controller, Signal};
 use kumi_net::error::ApiCallError;
 use serde_json::{json, Value};
@@ -217,5 +218,101 @@ async fn each_turn_gives_the_messages_it_settled_and_a_run_that_settled_none_giv
     let settled: Vec<Value> = kernel.checkpoint().unwrap().messages.iter().map(|message| serde_json::to_value(message).unwrap()).collect();
     assert_eq!(settled[settled.len() - 2..], kernel.last_turn()[..]);
     assert_eq!(settled.len(), 4);
+    kernel.close().await;
+}
+
+/// A model that thinks before it answers: its first call says two parts of its reasoning, then its provider breaks off
+/// busy; its second thinks again and answers, with its own tokens.
+struct ThinksFirst {
+    calls: Cell<usize>,
+}
+
+#[async_trait(?Send)]
+impl LanguageModel for ThinksFirst {
+    async fn do_stream(&self, _: CallOptions) -> Result<StreamParts, LanguageModelError> {
+        let call = self.calls.get();
+        self.calls.set(call + 1);
+        let part = |id: &str, text: &str| {
+            [
+                StreamPart::ReasoningStart { id: id.into(), provider_metadata: None },
+                StreamPart::ReasoningDelta { id: id.into(), delta: text.into(), provider_metadata: None },
+                StreamPart::ReasoningEnd { id: id.into(), provider_metadata: None },
+            ]
+        };
+        let mut parts: Vec<StreamPart> = [part("r0", "**Weighing the kick**"), part("r1", "**Checking the sidechain**")].concat();
+        if call == 0 {
+            let busy = ApiCallError::new("busy", "https://example.invalid", None, Some(503));
+            parts.push(StreamPart::Error { error: LanguageModelError::ApiCall(busy) });
+        } else {
+            parts.extend([
+                StreamPart::TextStart { id: "t".into(), provider_metadata: None },
+                StreamPart::TextDelta { id: "t".into(), delta: "Sidechain it.".into(), provider_metadata: None },
+                StreamPart::TextEnd { id: "t".into(), provider_metadata: None },
+                StreamPart::Finish {
+                    usage: Usage {
+                        input_tokens: InputTokens { total: Some(1200.), cache_read: Some(900.), ..InputTokens::default() },
+                        output_tokens: OutputTokens { total: Some(80.), ..OutputTokens::default() },
+                        raw: None,
+                    },
+                    finish_reason: FinishReason { unified: FinishReasonUnified::Stop, raw: Some("stop".into()) },
+                    provider_metadata: None,
+                },
+            ]);
+        }
+        Ok(stream::iter(parts).boxed_local())
+    }
+}
+
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn what_the_model_thinks_and_each_calls_tokens_are_told_as_they_come_and_thinking_is_never_output() {
+    let binding = ModelBinding {
+        id: "test/thinks".into(),
+        model: Rc::new(ThinksFirst { calls: Cell::new(0) }),
+        prepare: Box::new(|request| CallOptions { prompt: request.messages, ..CallOptions::default() }),
+        budget: None,
+    };
+    let kernel = create_agent_kernel(AgentKernelOptions {
+        conversation: None,
+        binding,
+        instructions: "be brief".into(),
+        tools: vec![],
+        signal: signal(),
+        checkpoint: None,
+        max_steps: None,
+        budget: None,
+    })
+    .unwrap();
+    let events = Rc::new(RefCell::new(vec![]));
+    let sink = events.clone();
+    let result = kernel
+        .run(
+            "punch up the kick",
+            signal(),
+            Rc::new(move |event| {
+                sink.borrow_mut().push(event);
+                Ok(())
+            }),
+        )
+        .await
+        .unwrap();
+    assert_eq!(result.stop_reason, StopReason::Completed);
+    let events = events.borrow();
+    let thought = |text: &str| KernelEvent::Reasoning { text: text.into() };
+    let thinking = [thought("**Weighing the kick**"), thought("\n\n"), thought("**Checking the sidechain**")];
+    // Each part of the summary in a paragraph of its own. Thinking isn't output: the call that broke off after it is
+    // tried again.
+    assert_eq!(events[..3], thinking, "{events:?}");
+    assert!(matches!(events[3], KernelEvent::Retry { .. }), "{events:?}");
+    assert_eq!(events[4..7], thinking, "{events:?}");
+    // The answer, then that call's own tokens as it finished.
+    assert_eq!(events[7], KernelEvent::Text { text: "Sidechain it.".into() });
+    let used = kumi_types::contracts::Usage { input_tokens: 1200., output_tokens: 80., cache_read_tokens: 900., cache_write_tokens: 0. };
+    assert_eq!(events[8..], [KernelEvent::Usage(used.clone())]);
+    assert_eq!(result.usage, Some(used));
+    // What the model thought isn't its answer's words.
+    let settled = serde_json::to_value(&kernel.checkpoint().unwrap().messages).unwrap();
+    let words: Vec<&Value> = settled[1]["content"].as_array().unwrap().iter().filter(|part| part["type"] == "text").collect();
+    assert_eq!(words.len(), 1);
+    assert_eq!(words[0]["text"], "Sidechain it.");
     kernel.close().await;
 }
