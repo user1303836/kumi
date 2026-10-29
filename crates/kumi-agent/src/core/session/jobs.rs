@@ -408,7 +408,7 @@ impl Session {
 
     /// Ctrl-b: the answer's steps at work away from the DAW go on as one job, and the answer carries on without them.
     /// The job's number, or why nothing moved.
-    pub(super) fn background(&self) -> Result<u32, String> {
+    pub fn background(&self) -> Result<u32, String> {
         let jobs = self.0.jobs.clone().ok_or("Kumi can't run background jobs here.")?;
         let steps: Vec<Rc<Foreground>> = self.0.state.borrow().foreground.iter().filter(|step| step.job.get().is_none()).cloned().collect();
         let Some(first) = steps.first().cloned() else {
@@ -498,7 +498,7 @@ impl Session {
 
     /// Carries on with a job that ended whose request needs it, as Kumi: false when Kumi is answering, or the job isn't
     /// waiting to carry on.
-    pub(super) fn carry_on(&self, id: u32) -> bool {
+    pub fn carry_on(&self, id: u32) -> bool {
         {
             let s = self.0.state.borrow();
             if s.state == TurnState::Closed || s.active.is_some() || !s.started || !s.carrying.contains(&id) {

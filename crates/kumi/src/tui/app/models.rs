@@ -17,7 +17,7 @@ pub(super) struct Models(Rc<dyn SessionHandle>);
 impl Models {
     fn view(&self) -> ModelsView {
         // (the session's models stay as they are while it runs: a screen that has them always reads them)
-        self.0.models().unwrap_or_else(|| ModelsView { current: no_model(), fast: false, fallback: None })
+        self.0.models().unwrap_or_else(|| ModelsView { current: no_model(), fast: false, fallback: None, servers: vec![] })
     }
     pub(super) fn current(&self) -> CurrentModel {
         self.view().current

@@ -1647,7 +1647,7 @@ mod jobs_session {
     use kumi_agent::core::{
         contracts::{
             ConnectionListener, ConnectionState, Integration, IntegrationFactory, Kernel, KernelEmit, KernelEvent, KernelFactory,
-            Observation, ObserveHints, Picture, ProjectRef, SessionController, StopReason, TurnResult, TurnState,
+            Observation, ObserveHints, Picture, ProjectRef, StopReason, TurnResult, TurnState,
         },
         jobs::JobState,
         session::{create_session, JobsOptions, Session, SessionOptions},

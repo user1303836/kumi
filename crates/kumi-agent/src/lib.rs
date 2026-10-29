@@ -12,8 +12,8 @@ pub use core::contracts::{
     ArrangementStrip, CatchUp, ChainNode, Claim, ClipView, ConnectionState, ConversationMatch, ConversationNow, ConversationStore,
     ConversationSummary, DeviceNode, DeviceTree, DisconnectCause, Integration, IntegrationFactory, Kernel, KernelCheckpoint, KernelEvent,
     KernelFactory, KernelOptions, LibraryEvent, LiveFocus, LiveTransport, Memory, MemoryEvent, MemoryNote, MemoryScope, MemoryStore,
-    NoteChange, Observation, PinnedNode, RecipeEvent, RecipeSummary, SavedConversation, SessionController, SessionEvent, SessionStatus,
-    SessionStrip, SetAsk, SetChoice, TechniqueEvent, TechniqueSummary, TranscriptLine, TurnResult, TurnState,
+    NoteChange, Observation, PinnedNode, RecipeEvent, RecipeSummary, SavedConversation, SessionEvent, SessionStatus, SessionStrip, SetAsk,
+    SetChoice, TechniqueEvent, TechniqueSummary, TranscriptLine, TurnResult, TurnState,
 };
 pub use core::conversations::{create_conversation_store, create_conversation_store_keeping, gone_words, KEEP_DAYS};
 pub use core::gaps::{gap_tools, GAP_GUIDANCE, GAP_TOOL};

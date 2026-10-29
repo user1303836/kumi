@@ -152,12 +152,12 @@ async fn follow_the_daw<L, F>(
 /// With `absent` (the producer works in several DAWs here), a DAW that isn't open gets those words instead, which say
 /// to open one of them: Kumi follows the producer to the one they open. This one opening later is said as it starts,
 /// and the hold runs from then.
-async fn connect_when_daw_answers<F, A, O, B>(
+async fn connect_when_daw_answers<F, A, O, B, S>(
     answers: F,
     live_open: O,
     words: WatchWords,
     absent: Option<Absent>,
-    controller: Rc<RefCell<Option<Weak<dyn SessionController>>>>,
+    controller: Rc<RefCell<Option<Weak<S>>>>,
     emit: Rc<dyn Fn(SessionEvent)>,
     watching: Rc<Cell<bool>>,
     told: bool,
@@ -167,6 +167,7 @@ async fn connect_when_daw_answers<F, A, O, B>(
     A: std::future::Future<Output = bool>,
     O: FnOnce() -> B,
     B: std::future::Future<Output = bool>,
+    S: Reconnect + ?Sized,
 {
     let mut began = Some(std::time::Instant::now());
     let open = live_open().await;
@@ -188,7 +189,7 @@ async fn connect_when_daw_answers<F, A, O, B>(
     let mut next: Option<std::time::Instant> = Some(std::time::Instant::now());
     for _ in 0..pace.looks {
         let Some(session) = controller.borrow().as_ref().and_then(Weak::upgrade) else { break };
-        if session.status().connection == ConnectionState::Connected {
+        if session.connected() {
             break;
         }
         if let Some(absent) = absent.as_ref().filter(|_| began.is_none()) {
@@ -205,8 +206,7 @@ async fn connect_when_daw_answers<F, A, O, B>(
             if tries < pace.tries && next.is_some_and(|at| std::time::Instant::now() >= at) {
                 tries += 1;
                 // A turn under way makes this fail; it's tried again later.
-                if session.has_reconnect() && session.reconnect().await.is_ok() && session.status().connection == ConnectionState::Connected
-                {
+                if session.reconnect().await.is_ok() && session.connected() {
                     emit(SessionEvent::Notice { message: words.answered.into() });
                     break;
                 }
@@ -221,12 +221,29 @@ async fn connect_when_daw_answers<F, A, O, B>(
     }
     watching.set(false);
 }
+/// The session as the watch for the DAW reaches it: whether it's connected, and to connect it again.
+#[async_trait(?Send)]
+trait Reconnect {
+    fn connected(&self) -> bool;
+    async fn reconnect(&self) -> Result<(), RuntimeError>;
+}
+
+#[async_trait(?Send)]
+impl Reconnect for Session {
+    fn connected(&self) -> bool {
+        self.status().connection == ConnectionState::Connected
+    }
+    async fn reconnect(&self) -> Result<(), RuntimeError> {
+        Session::reconnect(self).await
+    }
+}
+
 /// Live's watch, as its unit tests drive it: Live's words.
 #[cfg(test)]
-async fn connect_when_live_answers<F, A, O, B>(
+async fn connect_when_live_answers<F, A, O, B, S>(
     answers: F,
     live_open: O,
-    controller: Rc<RefCell<Option<Weak<dyn SessionController>>>>,
+    controller: Rc<RefCell<Option<Weak<S>>>>,
     emit: Rc<dyn Fn(SessionEvent)>,
     watching: Rc<Cell<bool>>,
     told: bool,
@@ -236,6 +253,7 @@ async fn connect_when_live_answers<F, A, O, B>(
     A: std::future::Future<Output = bool>,
     O: FnOnce() -> B,
     B: std::future::Future<Output = bool>,
+    S: Reconnect + ?Sized,
 {
     let words = live_words();
     connect_when_daw_answers(answers, live_open, words, None, controller, emit, watching, told, pace).await
@@ -354,7 +372,8 @@ async fn build_session(recipe: Recipe, answers: Answers, emit: Rc<dyn Fn(Session
         projects_dir: Some(projects_dir.clone()),
         ..Default::default()
     });
-    let controller: Rc<RefCell<Option<Weak<dyn SessionController>>>> = Rc::new(RefCell::new(None));
+    // The session itself, for its own callbacks and the watch for the DAW: set once it's made, below.
+    let controller: Rc<RefCell<Option<Weak<Session>>>> = Rc::new(RefCell::new(None));
     let listener_store = store.clone();
     // Which model does each listening job: /slots shows, swaps and takes back.
     let slots_file = slots::file_in(std::path::Path::new(&crate::config::kumi_dir(&env)));
@@ -735,7 +754,7 @@ async fn build_session(recipe: Recipe, answers: Answers, emit: Rc<dyn Fn(Session
         // Beside the goals: a Set's interrupted jobs and unheard reports, for the next time Kumi runs.
         store: Some(create_job_store(load_goals_dir(&env)?)),
     });
-    let session: Rc<dyn SessionController> = Rc::new(create_session(options)?);
+    let session = Rc::new(create_session(options)?);
     *controller.borrow_mut() = Some(Rc::downgrade(&session));
     let (fetch_tx, mut fetch_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
     configure_programs(ProgramDefaults {
@@ -772,7 +791,7 @@ async fn build_session(recipe: Recipe, answers: Answers, emit: Rc<dyn Fn(Session
         controller.borrow_mut().take();
     }
     .boxed_local();
-    Ok((Built { session, ending: Some(ending) }, database_notice))
+    Ok((Built { session: InProcess::new(session), ending: Some(ending) }, database_notice))
 }
 
 pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<String>, answers: Answers) -> Result<i32, RuntimeError> {
@@ -932,7 +951,7 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
         (threaded.clone(), Some(threaded), None, notice)
     } else {
         let (Built { session, ending }, notice) = build_session(recipe, answers.clone(), to_screen).await?;
-        (InProcess::new(session), None, ending, notice)
+        (session, None, ending, notice)
     };
     // The DAW's first-run setup reaches the session as one of its own, on this thread.
     let setup_session: Rc<dyn SetupSession> =
@@ -1418,64 +1437,111 @@ mod reopen_tests {
 #[cfg(test)]
 mod watch_tests {
     use super::*;
-    use kumi_agent::core::contracts::{PinnedNode, SessionStatus, TurnState};
-    use kumi_types::contracts::ChangeRecord;
+    use kumi_agent::core::contracts::{SessionStatus, TurnState};
 
+    /// A session as these tests reach it: whether it's connected (once it's reconnected `connect_on` times), and what's
+    /// open. With `shared`, it reads where its integration starts from as it reconnects, as an integration on the
+    /// session's own thread would.
     struct Fake {
         reconnects: Cell<u32>,
         connect_on: u32,
         connected: Cell<bool>,
+        shared: Option<Arc<Mutex<Option<String>>>>,
+        read: RefCell<Vec<Option<String>>>,
+        open: Option<String>,
     }
-    #[async_trait(?Send)]
-    impl SessionController for Fake {
-        async fn start(&self) -> Result<(), RuntimeError> {
-            Ok(())
+    impl Fake {
+        fn new(connect_on: u32) -> Rc<Fake> {
+            Rc::new(Fake {
+                reconnects: Cell::new(0),
+                connect_on,
+                connected: Cell::new(false),
+                shared: None,
+                read: RefCell::default(),
+                open: None,
+            })
         }
-        async fn submit(&self, _: &str, _: Option<PinnedNode>) -> Result<(), RuntimeError> {
-            Ok(())
-        }
-        async fn refresh(&self) -> Result<(), RuntimeError> {
-            Ok(())
-        }
-        async fn new_conversation(&self) -> Result<(), RuntimeError> {
-            Ok(())
-        }
-        async fn cancel(&self) -> Result<(), RuntimeError> {
-            Ok(())
-        }
-        async fn close(&self) -> Result<(), RuntimeError> {
-            Ok(())
-        }
-        fn status(&self) -> SessionStatus {
-            SessionStatus {
-                state: TurnState::Idle,
-                connection: if self.connected.get() { ConnectionState::Connected } else { ConnectionState::Disconnected },
-                turns: 0,
-                max_turns: None,
-                observation: None,
+        fn reconnected(&self) {
+            if let Some(shared) = &self.shared {
+                self.read.borrow_mut().push(shared.lock().unwrap().clone());
             }
-        }
-        async fn undo(&self, _: Option<&str>) -> Result<Option<ChangeRecord>, RuntimeError> {
-            Ok(None)
-        }
-        fn has_reconnect(&self) -> bool {
-            true
-        }
-        async fn reconnect(&self) -> Result<(), RuntimeError> {
             self.reconnects.set(self.reconnects.get() + 1);
             if self.reconnects.get() >= self.connect_on {
                 self.connected.set(true);
             }
+        }
+    }
+    #[async_trait(?Send)]
+    impl Reconnect for Fake {
+        fn connected(&self) -> bool {
+            self.connected.get()
+        }
+        async fn reconnect(&self) -> Result<(), RuntimeError> {
+            self.reconnected();
             Ok(())
         }
+    }
+    #[async_trait(?Send)]
+    impl SessionHandle for Fake {
+        fn capabilities(&self) -> kumi_agent::core::protocol::Capabilities {
+            kumi_agent::core::protocol::Capabilities { reconnect: true, ..Default::default() }
+        }
+        fn can_show(&self, _: BodyKind) -> bool {
+            false
+        }
+        fn status(&self) -> SessionStatus {
+            let connection = if self.connected.get() { ConnectionState::Connected } else { ConnectionState::Disconnected };
+            SessionStatus { state: TurnState::Idle, connection, turns: 0, max_turns: None, observation: None }
+        }
+        fn answering_fallback(&self) -> Option<String> {
+            None
+        }
+        fn library(&self) -> Option<kumi_types::contracts::LibraryStatus> {
+            None
+        }
+        fn open_set(&self) -> Option<String> {
+            self.open.clone()
+        }
+        fn jobs(&self) -> Vec<kumi_agent::core::jobs::JobStatus> {
+            vec![]
+        }
+        fn job(&self, _: u32) -> Option<kumi_agent::core::jobs::JobDetail> {
+            None
+        }
+        fn can_background(&self) -> bool {
+            false
+        }
+        fn models(&self) -> Option<kumi_agent::core::protocol::ModelsView> {
+            None
+        }
+        fn provider_name(&self, id: &str) -> String {
+            kumi_agent::core::protocol::provider_name(None, id)
+        }
+        fn cloud_provider(&self, id: &str) -> Option<kumi_ai::providers::ProviderId> {
+            kumi_agent::core::protocol::cloud_provider(None, id)
+        }
+        fn context_window(&self, _: &str) -> Option<f64> {
+            None
+        }
+        fn listen(&self, _: Rc<dyn Fn(SessionEvent)>) {}
+        async fn send(&self, op: kumi_agent::core::protocol::Op) -> Result<kumi_agent::core::protocol::Reply, RuntimeError> {
+            use kumi_agent::core::protocol::{Op, Reply};
+            match op {
+                Op::Reconnect(_) => {
+                    self.reconnected();
+                    Ok(Reply::Reconnect(()))
+                }
+                _ => Err(RuntimeError::plain("Not available")),
+            }
+        }
+        fn tell(&self, _: kumi_agent::core::protocol::Op) {}
     }
     async fn watch(connect_on: u32, answers: bool, live_open: bool, hold_ms: u64) -> (u32, Vec<String>, bool) {
         watch_told(connect_on, answers, live_open, hold_ms, false).await
     }
     async fn watch_told(connect_on: u32, answers: bool, live_open: bool, hold_ms: u64, told: bool) -> (u32, Vec<String>, bool) {
-        let fake = Rc::new(Fake { reconnects: Cell::new(0), connect_on, connected: Cell::new(false) });
-        let session: Rc<dyn SessionController> = fake.clone();
-        let controller = Rc::new(RefCell::new(Some(Rc::downgrade(&session))));
+        let fake = Fake::new(connect_on);
+        let controller = Rc::new(RefCell::new(Some(Rc::downgrade(&fake))));
         let notices = Rc::new(RefCell::new(Vec::new()));
         let emit: Rc<dyn Fn(SessionEvent)> = {
             let notices = notices.clone();
@@ -1504,9 +1570,8 @@ mod watch_tests {
     /// What the watch says with several DAWs here (`absent`), for a DAW open as Kumi starts, or opening at the
     /// `opens_at`th look, never answering.
     async fn watch_absent(open: bool, opens_at: u32) -> Vec<String> {
-        let fake = Rc::new(Fake { reconnects: Cell::new(0), connect_on: u32::MAX, connected: Cell::new(false) });
-        let session: Rc<dyn SessionController> = fake.clone();
-        let controller = Rc::new(RefCell::new(Some(Rc::downgrade(&session))));
+        let fake = Fake::new(u32::MAX);
+        let controller = Rc::new(RefCell::new(Some(Rc::downgrade(&fake))));
         let notices = Rc::new(RefCell::new(Vec::new()));
         let emit: Rc<dyn Fn(SessionEvent)> = {
             let notices = notices.clone();
@@ -1581,8 +1646,8 @@ mod watch_tests {
     }
     async fn follow_while_not_connected() {
         use kumi_types::daw::DawId;
-        let fake = Rc::new(Fake { reconnects: Cell::new(0), connect_on: u32::MAX, connected: Cell::new(false) });
-        let session: Rc<dyn SessionHandle> = InProcess::new(fake.clone());
+        let fake = Fake::new(u32::MAX);
+        let session: Rc<dyn SessionHandle> = fake.clone();
         let controller = Rc::downgrade(&session);
         let screen = Rc::new(Screen { handed: RefCell::default(), takes: 3 });
         let ui: Rc<dyn Terminal> = screen.clone();
@@ -1623,8 +1688,8 @@ mod watch_tests {
     }
     async fn follow_after_a_restart() {
         use kumi_types::daw::DawId;
-        let fake = Rc::new(Fake { reconnects: Cell::new(0), connect_on: u32::MAX, connected: Cell::new(false) });
-        let session: Rc<dyn SessionHandle> = InProcess::new(fake.clone());
+        let fake = Fake::new(u32::MAX);
+        let session: Rc<dyn SessionHandle> = fake.clone();
         let controller = Rc::downgrade(&session);
         let handed = |beside: Vec<DawId>| {
             let controller = controller.clone();
@@ -1646,57 +1711,20 @@ mod watch_tests {
         assert!(opened < std::time::Duration::from_millis(200), "REAPER, opened since, followed {opened:?} after Live went");
     }
 
-    /// A session that, as it reconnects, reads where its integration starts from (`shared`), as an integration on the
-    /// session's own thread would.
-    struct Bridged {
-        shared: Arc<Mutex<Option<String>>>,
-        read: RefCell<Vec<Option<String>>>,
-    }
-    #[async_trait(?Send)]
-    impl SessionController for Bridged {
-        async fn start(&self) -> Result<(), RuntimeError> {
-            Ok(())
-        }
-        async fn submit(&self, _: &str, _: Option<PinnedNode>) -> Result<(), RuntimeError> {
-            Ok(())
-        }
-        async fn refresh(&self) -> Result<(), RuntimeError> {
-            Ok(())
-        }
-        async fn new_conversation(&self) -> Result<(), RuntimeError> {
-            Ok(())
-        }
-        async fn cancel(&self) -> Result<(), RuntimeError> {
-            Ok(())
-        }
-        async fn close(&self) -> Result<(), RuntimeError> {
-            Ok(())
-        }
-        fn status(&self) -> SessionStatus {
-            SessionStatus { state: TurnState::Idle, connection: ConnectionState::Connected, turns: 0, max_turns: None, observation: None }
-        }
-        async fn undo(&self, _: Option<&str>) -> Result<Option<ChangeRecord>, RuntimeError> {
-            Ok(None)
-        }
-        fn open_set(&self) -> Option<String> {
-            Some("/Sets/Night Drive.als".into())
-        }
-        fn has_reconnect(&self) -> bool {
-            true
-        }
-        async fn reconnect(&self) -> Result<(), RuntimeError> {
-            self.read.borrow_mut().push(self.shared.lock().unwrap().clone());
-            Ok(())
-        }
-    }
-
     /// The DAW's first-run setup, with the session reached through its handle: the bridge setup found is where the
     /// session's integration starts from before it reconnects, and what's open is read through the handle.
     #[tokio::test(flavor = "current_thread")]
     async fn setup_hands_the_session_the_bridge_it_found_before_it_reconnects() {
         let shared = Arc::new(Mutex::new(None));
-        let fake = Rc::new(Bridged { shared: shared.clone(), read: RefCell::default() });
-        let session: Rc<dyn SessionHandle> = InProcess::new(fake.clone());
+        let fake = Rc::new(Fake {
+            reconnects: Cell::new(0),
+            connect_on: 0,
+            connected: Cell::new(true),
+            shared: Some(shared.clone()),
+            read: RefCell::default(),
+            open: Some("/Sets/Night Drive.als".into()),
+        });
+        let session: Rc<dyn SessionHandle> = fake.clone();
         let bridge = Rc::new(RefCell::new(None));
         let setup = SessionForSetup { session: Rc::downgrade(&session), bridge: bridge.clone(), shared };
         *bridge.borrow_mut() = Some("/found/bridge.json".to_string());
@@ -1704,7 +1732,7 @@ mod watch_tests {
         assert_eq!(*fake.read.borrow(), [Some("/found/bridge.json".to_string())]);
         assert_eq!(setup.open_set().as_deref(), Some("/Sets/Night Drive.als"));
         // The session gone: setup hears so.
-        drop(session);
+        drop((session, fake));
         assert!(setup.reconnect().await.is_err());
         assert_eq!(setup.open_set(), None);
     }

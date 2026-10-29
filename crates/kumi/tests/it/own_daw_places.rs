@@ -644,7 +644,7 @@ async fn walk_away_tells_renoises_status_bar_and_each_daw_says_whether_it_record
             let dir = tempfile::tempdir().unwrap();
             let script = RenoiseScript::new();
             let own = Own::open(dir.path(), Daw::Renoise, DawProfile::RENOISE, renoise(&script), create_renoise_integration).await;
-            assert!(own.session.has_daw_message());
+            assert!(own.session.capabilities().daw_message);
             assert!(own.session.daw_message("Kumi · done · the kick is down").await.unwrap(), "shown");
             assert_eq!(script.statuses(), ["Kumi · done · the kick is down"]);
             assert_eq!(own.session.daw_recording().await.unwrap(), Some(false), "stopped, not recording");

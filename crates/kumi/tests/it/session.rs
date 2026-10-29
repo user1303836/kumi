@@ -1,6 +1,8 @@
 //! Session behavior.
 #[path = "../support/library.rs"]
 mod fixture;
+#[path = "../support/models.rs"]
+mod models;
 use async_trait::async_trait;
 use futures::{future::LocalBoxFuture, FutureExt};
 use kumi_agent::{
@@ -3828,7 +3830,8 @@ local_test!(library_tools_preferences_status_and_forgetting_follow_session_lifec
     });
     let h = harness(None, |o| o.library = Some(library.clone()));
     h.observation.borrow_mut().tools = vec![Rc::new(NamesOnly), Rc::new(Plan { received: Rc::new(RefCell::new(vec![])) })];
-    assert!(h.session.has_library() && h.session.has_taste() && h.session.has_forget_taste());
+    let can = h.session.capabilities();
+    assert!(can.library && can.taste && can.forget_taste);
     assert_eq!(h.session.library(), Some(library.status()));
     h.session.start().await.unwrap();
     let tools = h.record.created.borrow()[0].tools.clone();
@@ -3867,7 +3870,8 @@ local_test!(library_tools_preferences_status_and_forgetting_follow_session_lifec
     unlisten();
     library.close().await;
     let without = harness(None, |_| {});
-    assert!(!without.session.has_library() && !without.session.has_taste() && !without.session.has_forget_taste());
+    let can = without.session.capabilities();
+    assert!(!can.library && !can.taste && !can.forget_taste);
     assert!(without.session.library().is_none());
     without.session.close().await.unwrap();
 });
@@ -4890,7 +4894,7 @@ local_test!(a_chat_that_keeps_no_conversations_says_nothing_of_one, {
     let h = harness(None, |_| {});
     h.session.start().await.unwrap();
     h.session.submit("hello", None).await.unwrap();
-    assert!(!h.session.has_conversations());
+    assert!(!h.session.capabilities().conversations);
     assert!(h.session.conversation_now().await.is_none());
     h.session.new_conversation().await.unwrap();
     assert!(h.notice("New conversation."));
@@ -5259,7 +5263,7 @@ async fn a_real_session_on_a_thread_of_its_own_answers_through_its_handle() {
                         .boxed_local()
                     });
                     let h = harness(Some(run), |options| options.on_event = emit);
-                    let session = Rc::new(h.session.clone());
+                    let session = kumi_agent::core::protocol::InProcess::new(Rc::new(h.session.clone()));
                     // What the harness keeps for its fakes lives as long as the session does.
                     Ok(Built { session, ending: Some(async move { drop(h) }.boxed_local()) })
                 }
@@ -5299,3 +5303,196 @@ async fn a_real_session_on_a_thread_of_its_own_answers_through_its_handle() {
         })
         .await;
 }
+
+// What a session can do that needs one of its parts (its conversations, log, library, techniques, store, jobs, music,
+// map, slots or models), it can't without it; with all of them it can do everything. Taking back needs both the log
+// and the conversations.
+local_test!(what_a_session_can_do_says_which_of_its_parts_it_has, {
+    use kumi_agent::core::{
+        session_log::SessionLog, store_client::StoreClient, store_import::JsonFiles, techniques::create_technique_store,
+    };
+    use kumi_library::{create_library, LibraryOptions};
+    use kumi_listening::{
+        music::learning::{create_music, MusicOptions},
+        slots::{self, SlotsContext},
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let at = |name: &str| dir.path().join(name);
+    // What it can't do, by name.
+    let cannot = |h: &Harness| {
+        let can = serde_json::to_value(h.session.capabilities()).unwrap();
+        let mut cannot: Vec<String> =
+            can.as_object().unwrap().iter().filter(|(_, can)| can.as_bool() == Some(false)).map(|(name, _)| name.clone()).collect();
+        cannot.sort();
+        cannot
+    };
+    let bare = harness(None, |_| {});
+    assert_eq!(
+        cannot(&bare),
+        [
+            "answerTechnique",
+            "conversations",
+            "forgetTaste",
+            "jobs",
+            "library",
+            "map",
+            "models",
+            "music",
+            "palette",
+            "slots",
+            "takeBack",
+            "taste"
+        ]
+    );
+    bare.session.close().await.unwrap();
+    let log = || SessionLog::new(at("logs"), kumi_types::place::Places::LIVE, Rc::new(|text: &str| text.to_owned()));
+    let files = JsonFiles {
+        memory: at("memory.json"),
+        projects: at("projects"),
+        techniques: at("techniques.json"),
+        playbook: at("playbook.json"),
+        gaps: at("gaps.md"),
+    };
+    let (store, _) = StoreClient::open(at("kumi.db"), files, 1).await.unwrap();
+    let library = create_library(LibraryOptions {
+        daws: kumi::daw::registry::libraries(),
+        dir: at("library").to_string_lossy().into(),
+        find_sets: Some(false),
+        fork: Some(false),
+        ..Default::default()
+    });
+    // Nowhere to find songs, and nothing learned while the test runs.
+    let mut music = MusicOptions::new(at("music"), None, Default::default());
+    (music.places, music.fork, music.delay_ms) = (Some(vec![]), false, 3_600_000);
+    let music = create_music(music);
+    let slots = SlotsContext {
+        file: slots::file_in(dir.path()),
+        store: Rc::new(kumi_ai::auth::store::open_credential_store(at("auth.json"))),
+        env: Default::default(),
+        profile: None,
+    };
+    let no_workers: KernelFactory = Rc::new(|_| async { Err(RuntimeError::plain("No workers here.")) }.boxed_local());
+    let no_map: kumi_library::map::LoadMap = Rc::new(|| futures::future::pending().boxed_local());
+    let whole = harness(None, |o| {
+        o.conversations = Some(create_conversation_store(at("projects")));
+        o.log = Some(log());
+        o.library = Some(library.clone());
+        o.techniques = Some(create_technique_store(at("techniques.json")));
+        o.store = Some(store);
+        o.jobs = Some(JobsOptions { worker_factory: no_workers, max: 1, store: None });
+        o.music = Some(music);
+        o.map = Some(no_map);
+        o.slots = Some(Rc::new(slots));
+        o.models = Some(models::FakeModels::catalog());
+    });
+    assert_eq!(cannot(&whole), Vec::<String>::new());
+    whole.session.close().await.unwrap();
+    for half in
+        [harness(None, |o| o.conversations = Some(create_conversation_store(at("projects")))), harness(None, |o| o.log = Some(log()))]
+    {
+        assert!(!half.session.capabilities().take_back);
+        half.session.close().await.unwrap();
+    }
+    library.close().await;
+});
+
+// A session's parts answer their requests through its handle: /music, /map and /slots from its own, and each model
+// request from its model controls, none "Not available" (as one in `Session::answer`'s list of them but not in
+// `models_answer`'s would be).
+local_test!(a_sessions_parts_answer_their_requests_through_its_handle, {
+    use kumi_agent::core::protocol::{op, InProcess, Op, Secret, SessionHandle};
+    use kumi_ai::providers::{Effort, ProviderId};
+    use kumi_library::map::{Kind, Layer, LoadMap, MapData};
+    use kumi_listening::{
+        music::learning::{create_music, MusicOptions},
+        slots::{self, Said, SlotsContext},
+    };
+    let dir = tempfile::tempdir().unwrap();
+    // Nowhere to find songs, and nothing learned while the test runs.
+    let mut music = MusicOptions::new(dir.path().join("music"), None, Default::default());
+    (music.places, music.fork, music.delay_ms) = (Some(vec![]), false, 3_600_000);
+    let music = create_music(music);
+    let slots = SlotsContext {
+        file: slots::file_in(dir.path()),
+        store: Rc::new(kumi_ai::auth::store::open_credential_store(dir.path().join("auth.json"))),
+        env: Default::default(),
+        profile: None,
+    };
+    let map: LoadMap = Rc::new(|| {
+        async { MapData { sounds: Layer::empty(Kind::Sounds, "No sounds yet."), songs: Layer::empty(Kind::Songs, "No songs yet.") } }
+            .boxed_local()
+    });
+    let models = models::FakeModels::catalog();
+    let h = harness(None, |o| {
+        o.music = Some(music.clone());
+        o.slots = Some(Rc::new(slots));
+        o.map = Some(map);
+        o.models = Some(models.clone());
+    });
+    let session: Rc<dyn SessionHandle> = InProcess::new(Rc::new(h.session.clone()));
+    // /music: nothing agreed, held or found yet; paused once asked.
+    let view = session.op(op::Music {}).await.unwrap();
+    assert!(!view.agreed && !view.held && view.found.is_none(), "{view:?}");
+    assert!(session.op(op::MusicFolders {}).await.unwrap().is_empty());
+    session.op(op::HoldMusic { held: true }).await.unwrap();
+    assert!(music.held() && session.op(op::Music {}).await.unwrap().held);
+    // /map: what its loader reads.
+    assert_eq!(session.op(op::Map {}).await.unwrap().sounds.empty.as_deref(), Some("No sounds yet."));
+    // /slots: the slots, a line each.
+    let said = session.op(op::Slots { id: 1, words: String::new() }).await.unwrap();
+    assert!(matches!(&said, Said::Slots { lines, .. } if !lines.is_empty()), "{said:?}");
+    // The model requests, signing in to ChatGPT apart: it waits at the controls until the browser says it's done.
+    let anthropic = ProviderId::parse("anthropic").unwrap();
+    let requests: [Op; 11] = [
+        op::Providers {}.into(),
+        op::LocalModels {}.into(),
+        op::ChooseDefault {}.into(),
+        op::Models { provider: "openai-codex".into(), refresh: false }.into(),
+        op::ChooseModel { model: "openai-codex/gpt-6-luna".into() }.into(),
+        op::SetEffort { effort: Some(Effort::Low) }.into(),
+        op::SetFast { on: false }.into(),
+        op::SetFallback { model: None }.into(),
+        op::SaveKey { provider: anthropic, key: Secret("sk-ant-fixture".into()) }.into(),
+        op::SignOut { provider: anthropic }.into(),
+        op::MissingModel {}.into(),
+    ];
+    for request in requests {
+        let name = request.name();
+        let answer = session.send(request).await;
+        assert!(answer.is_ok(), "{name}: {answer:?}");
+    }
+    let signing_in = tokio::task::spawn_local({
+        let session = session.clone();
+        async move { session.send(op::SignInChatgpt { id: 1, by_code: false }.into()).await }
+    });
+    for _ in 0..1_000 {
+        if signing_in.is_finished() || models.finish_chatgpt.borrow().is_some() {
+            break;
+        }
+        tokio::task::yield_now().await;
+    }
+    let browser = models.finish_chatgpt.borrow_mut().take();
+    if let Some(browser) = browser {
+        let _ = browser.send(());
+    }
+    let answer = signing_in.await.unwrap();
+    assert!(answer.is_ok(), "SignInChatgpt: {answer:?}");
+    // Each reached the controls with what it asked: Models and MissingModel read the list, and ChooseDefault looked for a
+    // default (one is chosen already).
+    assert_eq!(
+        *models.calls.borrow(),
+        [
+            "list:openai-codex",
+            "choose:openai-codex/gpt-6-luna",
+            "effort:low",
+            "fast:false",
+            "fallback:",
+            "key:anthropic:14",
+            "signout:anthropic",
+            "list:openai-codex",
+            "chatgpt"
+        ]
+    );
+    assert_eq!(models.looked.get(), 1);
+    h.session.close().await.unwrap();
+});
