@@ -238,11 +238,11 @@ fn live_words() -> WatchWords {
     crate::daw::provider(kumi_types::daw::DawId::Ableton).expect("Live is registered").watch_words()
 }
 pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<String>, answers: Answers) -> Result<i32, RuntimeError> {
-    let (inference, bridge_config, bridge_missing, resume, daw) = match config {
-        AppConfig::InferenceOnly { inference, bridge_missing, resume, daw } => {
-            (inference, None, bridge_missing.unwrap_or(false), resume, daw)
+    let (inference, bridge_config, bridge_missing, resume, daw, print) = match config {
+        AppConfig::InferenceOnly { inference, bridge_missing, resume, daw, print } => {
+            (inference, None, bridge_missing.unwrap_or(false), resume, daw, print)
         }
-        AppConfig::Live { inference, bridge_config, resume, daw } => (inference, Some(bridge_config), false, resume, daw),
+        AppConfig::Live { inference, bridge_config, resume, daw, print } => (inference, Some(bridge_config), false, resume, daw, print),
         _ => unreachable!(),
     };
     // The DAW this session works with: the one chosen (config), else Live.
@@ -477,7 +477,8 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
     // answer, when they work in several.
     let asked = crate::config::take_daw(&io.args, &io.env).ok().and_then(|(_, asked)| asked);
     let given = io.args.first().is_some_and(|arg| arg == "--bridge-config");
-    let follows = asked.is_none() && !given && (bridge_config.is_some() || bridge_missing);
+    // (one request with -p is answered with what's open now, and ends)
+    let follows = asked.is_none() && !given && print.is_none() && (bridge_config.is_some() || bridge_missing);
     let absent_words: Option<Rc<str>> = follows.then(|| crate::daw::open_one_words(&io.env)).flatten().map(Rc::from);
     // A test's answer for which DAWs run at each look for one the producer opened.
     let running_stand_in = answers.get::<crate::daw::RunningDaws>().cloned();
@@ -862,7 +863,18 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
     };
     // What /export and /share take out: what `kumi report` takes out, as this computer knows it at each export.
     let redact = crate::export::redactor_maker(&io.env);
-    let ui: Rc<dyn Terminal> = if full_screen {
+    let ui: Rc<dyn Terminal> = if let Some(print) = print.clone() {
+        Rc::new(crate::print::Print::new(crate::print::PrintOptions {
+            controller: session,
+            request: print.request,
+            json: print.json,
+            out: io.out.clone(),
+            err: io.err.clone(),
+            secrets: secrets.clone(),
+            instant,
+            startup_notice: notice,
+        }))
+    } else if full_screen {
         let mut options = TuiOptions::new(session, io.input.clone(), io.out.clone(), mode);
         options.models = Some(models.clone());
         options.redact = Some(redact);
@@ -1029,32 +1041,37 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
             GONE_MS,
         ))
     });
-    library.start();
-    music.start();
+    // Learning the producer's sounds and music goes on in the background of a session that stays; a request with -p
+    // only reads what's learned.
+    if print.is_none() {
+        library.start();
+        music.start();
+    }
     let settings = read_settings(&settings_file);
-    let update_check = if settings.update_check != Some(false) && !io.env.get("KUMI_NO_UPDATE_CHECK").is_some_and(|s| !s.is_empty()) {
-        let cache = std::path::Path::new(&settings_file)
-            .parent()
-            .unwrap_or(std::path::Path::new("."))
-            .join("update-check.json")
-            .to_string_lossy()
-            .into_owned();
-        let env = io.env.clone();
-        let installed = io.installed();
-        let ui = ui.clone();
-        Some(tokio::task::spawn_local(async move {
-            let latest = if installed {
-                install::newer_release(&cache, &env, None, None).await
-            } else {
-                update::newer_kumi(CheckIo { cache_file: cache, ..Default::default() }).await
-            };
-            if let Some(latest) = latest {
-                ui.offer_update(&latest);
-            }
-        }))
-    } else {
-        None
-    };
+    let update_check =
+        if print.is_none() && settings.update_check != Some(false) && !io.env.get("KUMI_NO_UPDATE_CHECK").is_some_and(|s| !s.is_empty()) {
+            let cache = std::path::Path::new(&settings_file)
+                .parent()
+                .unwrap_or(std::path::Path::new("."))
+                .join("update-check.json")
+                .to_string_lossy()
+                .into_owned();
+            let env = io.env.clone();
+            let installed = io.installed();
+            let ui = ui.clone();
+            Some(tokio::task::spawn_local(async move {
+                let latest = if installed {
+                    install::newer_release(&cache, &env, None, None).await
+                } else {
+                    update::newer_kumi(CheckIo { cache_file: cache, ..Default::default() }).await
+                };
+                if let Some(latest) = latest {
+                    ui.offer_update(&latest);
+                }
+            }))
+        } else {
+            None
+        };
     let code = running.await;
     // The conversation asked for as Kumi started may not be the one going on now: opened again after an update, Kumi
     // carries on with this one.

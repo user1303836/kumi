@@ -123,6 +123,9 @@ pub enum AppConfig {
         /// The DAW chosen with --daw or KUMI_DAW, when it isn't Live (never written for Live).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         daw: Option<DawId>,
+        /// `-p`: one request, answered, and Kumi ends.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        print: Option<Print>,
     },
     Live {
         #[serde(flatten)]
@@ -133,7 +136,19 @@ pub enum AppConfig {
         /// The DAW chosen with --daw or KUMI_DAW, when it isn't Live (never written for Live).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         daw: Option<DawId>,
+        /// `-p`: one request, answered, and Kumi ends.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        print: Option<Print>,
     },
+}
+/// `-p <request>` (or `--print`): one request, answered, for a script; with `--json`, every event the session sends, a
+/// JSON line each, in place of the answer's words.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Print {
+    pub request: String,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub json: bool,
 }
 /// Which kept conversation Kumi takes up as it starts.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -205,6 +220,34 @@ pub(crate) fn take_daw(args: &[String], env: &Env) -> Result<(Vec<String>, Optio
 }
 /// `-c`/`--continue` and `-r`/`--resume [id or name]` taken out of a session's arguments: what's left, and which
 /// conversation to take up.
+/// `-p <request>` (or `--print <request>`, `--print=<request>`) and `--json` beside it, out of the arguments. The word
+/// after `-p` is the request whatever it starts with (`-p "-3 dB on the kick"`); `--json` without `-p` stays, for what
+/// reads the rest to refuse.
+pub(crate) fn take_print(args: &[String]) -> Result<(Vec<String>, Option<Print>), RuntimeError> {
+    let usage = || RuntimeError::plain(format!("Use: {} -p \"<request>\" [--json]", *KUMI_START));
+    let (mut rest, mut request) = (vec![], None);
+    let mut at = 0;
+    while at < args.len() {
+        let arg = args[at].as_str();
+        let words = match arg {
+            "-p" | "--print" => {
+                at += 1;
+                Some(args.get(at).ok_or_else(usage)?.clone())
+            }
+            _ => arg.strip_prefix("--print=").map(str::to_string),
+        };
+        match words {
+            Some(words) if trim(&words).is_empty() || request.is_some() => return Err(usage()),
+            Some(words) => request = Some(words),
+            None => rest.push(args[at].clone()),
+        }
+        at += 1;
+    }
+    let Some(request) = request else { return Ok((rest, None)) };
+    let json = rest.iter().any(|arg| arg == "--json");
+    rest.retain(|arg| arg != "--json");
+    Ok((rest, Some(Print { request, json })))
+}
 pub(crate) fn take_resume(args: &[String]) -> Result<(Vec<String>, Option<Resume>), RuntimeError> {
     let both = || {
         RuntimeError::plain(format!(
@@ -928,7 +971,12 @@ pub fn load_config(args: &[String], env: &Env) -> Result<AppConfig, RuntimeError
             settings_file: load_settings_file(env)?,
         });
     }
-    let (args, resume) = take_resume(args)?;
+    let (args, print) = take_print(args)?;
+    let (args, resume) = take_resume(&args)?;
+    // Choosing a conversation needs someone there to choose.
+    if print.is_some() && resume == Some(Resume::Pick) {
+        return Err(RuntimeError::plain(format!("With -p, say which conversation: {} -p \"<request>\" -r <id or name>.", *KUMI_START)));
+    }
     let (args, flagged) = take_daw_flag(&args)?;
     let daw = match flagged {
         Some(daw) => Some(daw),
@@ -942,6 +990,7 @@ pub fn load_config(args: &[String], env: &Env) -> Result<AppConfig, RuntimeError
             bridge_missing: None,
             resume,
             daw: daw.filter(|daw| *daw != DawId::Ableton),
+            print,
         });
     }
     if args.is_empty() {
@@ -949,9 +998,9 @@ pub fn load_config(args: &[String], env: &Env) -> Result<AppConfig, RuntimeError
         let (provider, found) = crate::daw::chosen(daw, env);
         let daw = Some(provider.id()).filter(|daw| *daw != DawId::Ableton);
         return Ok(if let Some(bridge_config) = found {
-            AppConfig::Live { inference: load_inference_config(env)?, bridge_config, resume, daw }
+            AppConfig::Live { inference: load_inference_config(env)?, bridge_config, resume, daw, print }
         } else {
-            AppConfig::InferenceOnly { inference: load_inference_config(env)?, bridge_missing: Some(true), resume, daw }
+            AppConfig::InferenceOnly { inference: load_inference_config(env)?, bridge_missing: Some(true), resume, daw, print }
         });
     }
     if !matches!(first, Some("--bridge-config" | "--inference-only")) {
@@ -974,7 +1023,7 @@ pub fn load_config(args: &[String], env: &Env) -> Result<AppConfig, RuntimeError
     }
     // A bridge configuration given is Live's unless --daw says whose: KUMI_DAW doesn't move it to another DAW.
     let daw = flagged;
-    Ok(AppConfig::Live { inference: load_inference_config(env)?, bridge_config: bridge.into(), resume, daw })
+    Ok(AppConfig::Live { inference: load_inference_config(env)?, bridge_config: bridge.into(), resume, daw, print })
 }
 /// Node's stripVTControlCharacters expression, for the same diagnostic and terminal input treatment.
 pub fn strip_vt(text: &str) -> String {

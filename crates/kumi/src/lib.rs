@@ -12,6 +12,7 @@ pub mod login;
 pub mod map;
 pub mod map_server;
 pub mod models;
+pub mod print;
 pub mod process;
 pub mod report;
 pub mod spinner;
