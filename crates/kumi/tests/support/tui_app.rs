@@ -228,6 +228,10 @@ impl SessionController for Control {
     }
     async fn refresh(&self) -> Result<(), RuntimeError> {
         self.call("refresh");
+        // Held this many milliseconds, as a big project takes to read, so what the screen says meanwhile can be seen.
+        if let Some(ms) = self.get::<u64>("refresh-wait") {
+            delay(ms).await;
+        }
         Ok(())
     }
     async fn new_conversation(&self) -> Result<(), RuntimeError> {

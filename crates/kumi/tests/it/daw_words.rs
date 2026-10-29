@@ -74,7 +74,19 @@ async fn tui_states(daw: DawId, label: &str, focuses: Vec<(serde_json::Value, Op
     work_with(daw);
     let found = Found::default();
     let c = Rc::new(Control::default());
-    let h = Harness::with(120, 40, c.clone(), |_| {});
+    // Two requests to take back, the older one's change from an earlier session; a line of taste in /memory.
+    let change = |id: &str, title: &str, state: &str| json!({"id":id,"family":"mixer","title":title,"state":state,"at":1});
+    c.set(
+        "take-back",
+        json!([
+            {"at":3,"words":"and a bit darker","changes":[change("c2", "Bass volume to -6 dB", "applied")]},
+            {"at":2,"words":"add a hi-hat groove","changes":[change("old:c1", "Hi-hat volume to -3 dB", "expired")]}
+        ]),
+    );
+    c.set("taste", json!([{"id":"tempo","line":"Tempo: usually 124–126 BPM"}]));
+    // What keys.json gives that Kumi can't use, said as it starts.
+    let keys = json!({ "composer.undoo": ["ctrl+z"], "app.redraw": ["ctrl+cmd+l"] });
+    let h = Harness::with(120, 40, c.clone(), |o| o.keys = Some(Ok(keys)));
     h.start().await;
     settle(&h).await;
     found.screen("connecting", &h);
@@ -146,6 +158,79 @@ async fn tui_states(daw: DawId, label: &str, focuses: Vec<(serde_json::Value, Op
         h.type_text("\x1b").await;
         settle(&h).await;
     }
+    // A line of taste to forget, as /memory asks.
+    h.type_text("/memory\r").await;
+    h.type_text("tempo\r").await;
+    settle(&h).await;
+    found.screen("forgetting taste", &h);
+    h.type_text("\x1b").await;
+    settle(&h).await;
+    // /refresh, while it reads the project.
+    c.set("refresh-wait", json!(400));
+    h.type_text("/refresh\r").await;
+    delay(60).await;
+    found.screen("/refresh", &h);
+    delay(500).await;
+    settle(&h).await;
+    // The requests to take back, then what's asked before one is (the newest offers a copy; the older one names what
+    // stays as it is), then what taking it back says.
+    h.type_text("\x1b").await;
+    h.type_text("\x1b").await;
+    settle(&h).await;
+    found.screen("take-back list", &h);
+    h.type_text("\r").await;
+    settle(&h).await;
+    found.screen("take-back question", &h);
+    h.type_text("\x1b").await;
+    settle(&h).await;
+    h.type_text("\x1b").await;
+    h.type_text("\x1b").await;
+    settle(&h).await;
+    h.type_text("\x1b[B\r").await;
+    settle(&h).await;
+    found.screen("take-back question", &h);
+    c.set("taken-back", json!({"requests":2,"words":"add a hi-hat groove","undone":[change("c2", "Bass volume to -6 dB", "undone")]}));
+    h.type_text("\r").await;
+    settle(&h).await;
+    found.screen("taken back", &h);
+    h.type_text("\x15").await;
+    // The conversation in detail (ctrl+o), as the session exports it in the DAW's words.
+    let words = kumi::daw::words();
+    let said = |role: &str, text: &str| json!({"role": role, "content": [{"type": "text", "text": text}]});
+    *c.export.borrow_mut() = Some(ConversationToExport {
+        id: "now001".into(),
+        title: "add a hi-hat groove".into(),
+        set: Some("Night Drive".into()),
+        created: now as i64 - 60_000,
+        conversation: SavedConversation {
+            saved_at: now as i64,
+            checkpoint: KernelCheckpoint {
+                version: 1,
+                messages: vec![said("user", "add a hi-hat groove"), said("assistant", "The hi-hats swing now.")],
+                origin: None,
+                tools: None,
+            },
+            changes: None,
+            first: Some("add a hi-hat groove".into()),
+            turns: Some(1),
+        },
+        words: (words.app, words.place),
+    });
+    h.type_text("\x0f").await;
+    settle(&h).await;
+    found.screen("details", &h);
+    h.type_text("q").await;
+    settle(&h).await;
+    // A window beside the DAW, under 100 columns: the drawer, folded and open.
+    h.resize(80, 30);
+    settle(&h).await;
+    found.screen("drawer", &h);
+    h.type_text("\x1c").await;
+    settle(&h).await;
+    found.screen("drawer", &h);
+    h.type_text("\x1c").await;
+    h.resize(120, 40);
+    settle(&h).await;
     h.emit(json!({"type":"connection","state":"disconnected"}));
     settle(&h).await;
     found.screen("the DAW gone", &h);
@@ -203,6 +288,14 @@ case!(a_reaper_session_never_speaks_lives_words, async {
         "Kumi closed. Each project's conversation continues next time.",
         // (/status: REAPER has no status bar Kumi can write to)
         "no status bar",
+        "Forget this, from your Live Sets?",
+        "reading your project",
+        "Take a request back",
+        "Carry on from here in a copy",
+        "Stays as it is: Hi-hat volume to -3 dB",
+        "Took back your last 2 requests",
+        "The hi-hats swing now.",
+        "keys.json names",
     ];
     tui_states(DawId::Reaper, "REAPER — Night Drive", focuses).await.saw(&seen.map(String::from)).assert_none("REAPER");
 });
@@ -238,6 +331,11 @@ case!(a_renoise_session_never_speaks_lives_words, async {
         "paused while Renoise plays",
         "Kumi closed. Each song's conversation continues next time.",
         "status bar too",
+        "Forget this, from your Live Sets?",
+        "reading your song",
+        "Take a request back",
+        "Took back your last 2 requests",
+        "keys.json names",
     ];
     tui_states(DawId::Renoise, "Renoise — Night Drive", focuses).await.saw(&seen.map(String::from)).assert_none("Renoise");
 });

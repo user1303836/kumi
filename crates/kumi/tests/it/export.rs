@@ -264,6 +264,22 @@ impl TtyOutput for Out {
     }
 }
 
+/// With nothing kept, `kumi export` says what to do in the words of the DAW Kumi works with.
+#[tokio::test(flavor = "current_thread")]
+async fn with_nothing_kept_kumi_export_says_so_in_the_daws_words() {
+    use kumi_types::daw::DawId;
+    let home = tempfile::tempdir().unwrap();
+    let env = Env::from([("KUMI_HOME".to_string(), home.path().display().to_string())]);
+    for (daw, place) in [(DawId::Ableton, "a Set"), (DawId::Reaper, "a project"), (DawId::Renoise, "a song")] {
+        kumi::daw::work_with(daw);
+        let (out, err) = (Out::default(), Out::default());
+        let ask = ExportRequest { conversation: None, format: Format::Json, out: None, full: false, raw: false };
+        assert_eq!(export_command(ask, &env, &out, &err, "kumi").await.unwrap(), 1);
+        assert!(err.0.borrow().contains(&format!("talk with Kumi about {place} first.")), "{daw:?}: {}", err.0.borrow());
+    }
+    kumi::daw::work_with(DawId::Ableton);
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn kumi_export_saves_a_kept_conversation_and_kumi_import_keeps_it_to_carry_on() {
     let home = tempfile::tempdir().unwrap();
