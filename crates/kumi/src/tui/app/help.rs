@@ -380,8 +380,8 @@ impl Overlay<TuiApp> for HelpPanel {
         }
         app.draw_lines(screen, area.box_top, width, &lines, None)
     }
-    fn hint(&self, _: &TuiApp) -> String {
-        "↑↓ to scroll · esc to close".into()
+    fn hint(&self, app: &TuiApp) -> String {
+        app.keys_hint(&[(&["help.up", "help.down"], "to scroll"), (&["help.close"], "to close")])
     }
     fn scroll(&mut self, _: &TuiApp, rows: i32) -> bool {
         self.scroll = (self.scroll + rows).clamp(0, self.most);

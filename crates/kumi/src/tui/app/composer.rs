@@ -23,8 +23,9 @@ pub(super) struct Stash {
 }
 
 const LOOKING: &str = "search: ";
-pub(super) const SEARCH_HINT: &str = "ctrl+r older · enter uses it · esc goes back";
-pub(super) const STASH_HINT: &str = "ctrl+s brings back what you put aside";
+pub(super) const SEARCH_HINT: &[(&[&str], &str)] =
+    &[(&["search.back"], "older"), (&["search.take"], "uses it"), (&["search.cancel"], "goes back")];
+pub(super) const STASH_HINT: &[(&[&str], &str)] = &[(&["composer.stash"], "brings back what you put aside")];
 
 /// An editor that closes sooner than this, leaving the draft unchanged, likely opened a window and didn't wait for it.
 const AT_ONCE: Duration = Duration::from_secs(1);
@@ -149,7 +150,11 @@ impl TuiApp {
     pub(super) fn edit_draft(&self) {
         let Some(editor) = self.0.options.editor.clone() else {
             self.notice(
-                "Set VISUAL or EDITOR to your editor (export EDITOR=nano, say), and ctrl+g opens the draft in it.",
+                &self.key_words(
+                    "composer.editor",
+                    "Set VISUAL or EDITOR to your editor (export EDITOR=nano, say), and {} opens the draft in it.",
+                    "Set VISUAL or EDITOR to your editor (export EDITOR=nano, say).",
+                ),
                 NoticeTone::Info,
             );
             return;

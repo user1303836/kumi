@@ -267,13 +267,25 @@ impl Overlay<TuiApp> for DetailsPanel {
     }
 
     /// Short enough for the box's row, which leaves out a hint that doesn't fit.
-    fn hint(&self, _: &TuiApp) -> String {
+    fn hint(&self, app: &TuiApp) -> String {
+        let requests: (&[&str], &str) = (&["details.previous-request", "details.next-request"], "requests");
         if self.searching {
-            "type to search · enter keeps it · esc drops it".into()
+            app.keys_hint(&[(&[], "type to search"), (&["details.search-keep"], "keeps it"), (&["details.search-drop"], "drops it")])
         } else if self.details.as_ref().is_some_and(|details| !details.query.is_empty()) {
-            "n N matches · / searches again · { } requests · q closes".into()
+            app.keys_hint(&[
+                (&["details.next-match", "details.previous-match"], "matches"),
+                (&["details.search"], "searches again"),
+                requests,
+                (&["details.close"], "closes"),
+            ])
         } else {
-            "/ search · { } requests · [ scrollback · v editor · q closes".into()
+            app.keys_hint(&[
+                (&["details.search"], "search"),
+                requests,
+                (&["details.print"], "scrollback"),
+                (&["details.edit"], "editor"),
+                (&["details.close"], "closes"),
+            ])
         }
     }
 

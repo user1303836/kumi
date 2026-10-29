@@ -26,8 +26,14 @@ use kumi_types::place::Place;
 use std::collections::HashMap;
 
 /// What the conversations list says of its keys.
-fn conversations_hint() -> String {
-    format!("enter goes back · tab: this {} or all · ctrl+f rename, pin, delete, copy id · esc closes", crate::daw::words().place)
+fn conversations_hint(app: &TuiApp) -> String {
+    let tabs = format!("{{}}: this {} or all", crate::daw::words().place);
+    app.keys_hint(&[
+        (&["list.choose"], "goes back"),
+        (&["list.next-tab"], &tabs),
+        (&["list.choose-other"], "rename, pin, delete, copy id"),
+        (&["list.close"], "closes"),
+    ])
 }
 /// After choosing a model: say when `/fast` puts it on its faster tier, since that costs more.
 fn fast_note(tier: Option<&ServiceTier>) -> String {
@@ -444,7 +450,7 @@ impl TuiApp {
             lists: vec![list(&here, false), list(&all, true)],
             at: if known && filter.as_deref().is_none_or(str::is_empty) { 0 } else { 1 },
         };
-        let options = PickerOptions { filterable: true, alternate: true, hint: Some(conversations_hint()), ..Default::default() };
+        let options = PickerOptions { filterable: true, alternate: true, hint: Some(conversations_hint(self)), ..Default::default() };
         let mut picker = Picker::with_tabs("Conversations", tabs, options);
         picker.filter = filter.map(|f| string::head(&f, 40)).unwrap_or_default();
         let kept: Vec<ConversationSummary> = all.iter().chain(here.iter()).cloned().collect();
@@ -473,7 +479,12 @@ impl TuiApp {
             return;
         }
         if self.busy() {
-            self.notice("Kumi is still working. Press esc to stop it first.", NoticeTone::Info);
+            let words = self.key_words(
+                "app.stop",
+                "Kumi is still working. Press {} to stop it first.",
+                "Kumi is still working: go back to it once it's done.",
+            );
+            self.notice(&words, NoticeTone::Info);
             return;
         }
         self.0.state.borrow_mut().activity = "going back to it".into();
@@ -498,7 +509,11 @@ impl TuiApp {
         if !row.current {
             items.push(item("Go back to it", "back", "Kumi's next answer carries on from it"));
         }
-        items.push(item("Rename it", "rename", "In the box below; enter keeps the name"));
+        items.push(item(
+            "Rename it",
+            "rename",
+            &self.key_words("composer.send", "In the box below; {} keeps the name", "In the box below"),
+        ));
         items.push(if row.pinned {
             item("Unpin it", "pin", "Kept as long as other conversations again")
         } else {
@@ -647,7 +662,11 @@ impl TuiApp {
             Picker::new(
                 title,
                 vec![
-                    item("Change the words", "change", "In the box below; press enter to keep them"),
+                    item(
+                        "Change the words",
+                        "change",
+                        &self.key_words("composer.send", "In the box below; press {} to keep them", "In the box below"),
+                    ),
                     if note.pinned {
                         item("Unpin it", "pin", "A full memory can make room by dropping it again")
                     } else {
@@ -745,7 +764,12 @@ impl TuiApp {
     /// Run a recipe with its blanks filled, straight away: no model call.
     pub(super) async fn run_recipe_now(&self, recipe: &RecipeSummary, with: JsonObject) {
         if self.busy() {
-            self.notice("Kumi is still working. Press esc to stop it first.", NoticeTone::Info);
+            let words = self.key_words(
+                "app.stop",
+                "Kumi is still working. Press {} to stop it first.",
+                "Kumi is still working: run it once it's done.",
+            );
+            self.notice(&words, NoticeTone::Info);
             return;
         }
         self.0.state.borrow_mut().activity = format!("running “{}”", recipe.name);
@@ -870,7 +894,8 @@ impl TuiApp {
             as_key(&panel, |key| {
                 key.checking = false;
                 key.secret.clear();
-                key.status = Some((format!("{name} didn't accept that key. Paste it again, or esc to leave it."), NoticeTone::Warn));
+                let leave = self.key_words("key.cancel", ", or {} to leave it", "");
+                key.status = Some((format!("{name} didn't accept that key. Paste it again{leave}."), NoticeTone::Warn));
             });
             self.0.scheduler.request();
             return;
@@ -1563,7 +1588,12 @@ impl TuiApp {
             PickerOptions {
                 filterable: true,
                 alternate: true,
-                hint: Some("↑↓ to move · enter to choose · ctrl+f sets the fallback · esc to close".into()),
+                hint: Some(self.keys_hint(&[
+                    (&["list.up", "list.down"], "to move"),
+                    (&["list.choose"], "to choose"),
+                    (&["list.choose-other"], "sets the fallback"),
+                    (&["list.close"], "to close"),
+                ])),
                 ..Default::default()
             }
         };
@@ -1885,7 +1915,14 @@ impl TuiApp {
     pub(super) async fn open_update(&self) -> Result<(), RuntimeError> {
         let updates = self.0.options.updates.as_ref().unwrap();
         if self.busy() {
-            self.notice("Kumi is working: /update once it's done, or press esc to stop it first.", NoticeTone::Info);
+            self.notice(
+                &self.key_words(
+                    "app.stop",
+                    "Kumi is working: /update once it's done, or press {} to stop it first.",
+                    "Kumi is working: /update once it's done.",
+                ),
+                NoticeTone::Info,
+            );
             return Ok(());
         }
         let mut latest = self.0.state.borrow().newer.clone();
@@ -1963,13 +2000,17 @@ impl TuiApp {
             item(
                 if self.0.voice.as_ref().unwrap().listening() { "Stop listening" } else { "Start listening" },
                 "listen",
-                "ctrl+t, or hold it while you talk",
+                &self.key_words("voice.talk", "{}, or hold it while you talk", ""),
             ),
             noted(
                 item(
                     "Send when you stop",
                     "send",
-                    if choices.send { "What you say is sent at once" } else { "What you say waits in the box for enter" },
+                    &if choices.send {
+                        "What you say is sent at once".into()
+                    } else {
+                        self.key_words("composer.send", "What you say waits in the box for {}", "What you say waits in the box")
+                    },
                 ),
                 if choices.send { "on" } else { "off" },
                 if choices.send { NoteTone::Accent } else { NoteTone::Faint },
@@ -2280,15 +2321,14 @@ impl Overlay<TuiApp> for PickPanel {
         app.draw_pick(screen, area, &self.picker.borrow())
     }
     /// The list's own words when it has them (a countdown to Kumi's pick, another way to choose).
-    fn hint(&self, _: &TuiApp) -> String {
+    fn hint(&self, app: &TuiApp) -> String {
         let picker = self.picker.borrow();
         picker.options.hint.clone().unwrap_or_else(|| {
             if picker.options.answers {
-                "a number, then enter answers · or type your own · esc to close"
+                app.keys_hint(&[(&["list.choose"], "a number, then {} answers"), (&[], "or type your own"), (&["list.close"], "to close")])
             } else {
-                "↑↓ to move · enter to choose · esc to close"
+                app.keys_hint(&[(&["list.up", "list.down"], "to move"), (&["list.choose"], "to choose"), (&["list.close"], "to close")])
             }
-            .into()
         })
     }
     /// A list's own words (a countdown to Kumi's pick, another way to choose) stay over a toast.
@@ -2366,8 +2406,8 @@ impl Overlay<TuiApp> for AsidePanel {
 
         app.draw_lines(screen, area.box_top, width, &lines, None)
     }
-    fn hint(&self, _: &TuiApp) -> String {
-        "↑↓ to scroll · c copies · esc to close".into()
+    fn hint(&self, app: &TuiApp) -> String {
+        app.keys_hint(&[(&["aside.up", "aside.down"], "to scroll"), (&["aside.copy"], "copies"), (&["aside.close"], "to close")])
     }
     fn scroll(&mut self, _: &TuiApp, rows: i32) -> bool {
         self.scroll = (self.scroll + rows).max(0);
@@ -2463,24 +2503,26 @@ impl Overlay<TuiApp> for ChatGptPanel {
         } else {
             lines.push(Line::new("Sign in to ChatGPT", st::TITLE));
             if let Some(url) = &self.url {
-                say(&mut lines, "Finish in your browser. If it didn't open, open this link (c copies it):", st::DIM, inner);
+                let copies = app.key_words("chatgpt.copy", " ({} copies it)", "");
+                say(&mut lines, &format!("Finish in your browser. If it didn't open, open this link{copies}:"), st::DIM, inner);
                 for part in helpers::chunk(url, inner.max(1) as usize).into_iter().take((space - 5).max(1) as usize) {
                     lines.push(Line::new(part, st::ACCENT));
                 }
-                lines.push(Line::new("Waiting for the browser… No browser here? d uses a code.", st::FAINT));
+                let by_code = app.key_words("chatgpt.by-code", " No browser here? {} uses a code.", "");
+                lines.push(Line::new(format!("Waiting for the browser…{by_code}"), st::FAINT));
             } else {
                 say(&mut lines, "Starting the sign-in…", st::DIM, inner);
             }
         }
         app.draw_lines(screen, area.box_top, width, &lines, None)
     }
-    fn hint(&self, _: &TuiApp) -> String {
+    fn hint(&self, app: &TuiApp) -> String {
+        let cancel: (&[&str], &str) = (&["chatgpt.cancel"], "to cancel");
         match (self.by_code, &self.url) {
-            (true, _) => "c copies the code · b uses the browser · esc to cancel",
-            (false, Some(_)) => "c copies the link · d uses a code · esc to cancel",
-            (false, None) => "esc to cancel",
+            (true, _) => app.keys_hint(&[(&["chatgpt.copy"], "copies the code"), (&["chatgpt.by-browser"], "uses the browser"), cancel]),
+            (false, Some(_)) => app.keys_hint(&[(&["chatgpt.copy"], "copies the link"), (&["chatgpt.by-code"], "uses a code"), cancel]),
+            (false, None) => app.keys_hint(&[cancel]),
         }
-        .into()
     }
     /// The sign-in under way stops.
     fn closed(&mut self, app: &TuiApp) {
@@ -2566,8 +2608,8 @@ impl Overlay<TuiApp> for KeyPanel {
 
         app.draw_lines(screen, area.box_top, width, &lines, cursor_at)
     }
-    fn hint(&self, _: &TuiApp) -> String {
-        "enter to save · esc to cancel".into()
+    fn hint(&self, app: &TuiApp) -> String {
+        app.keys_hint(&[(&["key.check"], "to save"), (&["key.cancel"], "to cancel")])
     }
     /// A key half typed goes.
     fn closed(&mut self, _: &TuiApp) {

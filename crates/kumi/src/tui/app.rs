@@ -846,6 +846,9 @@ impl VoiceHost for AppVoice {
     fn names(&self) -> Vec<String> {
         self.0.upgrade().map(|a| TuiApp(a).spoken_names()).unwrap_or_default()
     }
+    fn hint(&self, parts: &[(&[&str], &str)]) -> String {
+        self.0.upgrade().map(|a| TuiApp(a).keys_hint(parts)).unwrap_or_default()
+    }
     fn redraw(&self) {
         if let Some(a) = self.0.upgrade() {
             a.scheduler.request();
@@ -1004,6 +1007,14 @@ impl TuiApp {
             mouse: options.mouse,
             copy_on_select: options.copy_on_select,
         }
+    }
+    /// A hint whose keys are as the keymap has them (`Keymap::hint`).
+    fn keys_hint(&self, parts: &[(&[&str], &str)]) -> String {
+        self.0.keymap.hint(parts)
+    }
+    /// Words that name action `id`'s key as the keymap has it (`Keymap::with_key`).
+    fn key_words(&self, id: &str, words: &str, without: &str) -> String {
+        self.0.keymap.with_key(id, words, without)
     }
     /// The actions an input is in `scope`, in the order they're tried: none for a paste, the mouse or a key bound to
     /// nothing there.
