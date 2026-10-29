@@ -748,8 +748,9 @@ async fn own_request(own: Own, steps: Vec<Step>) -> Vec<String> {
 
 /// What a name hides, the model doesn't read, and a name that hides nothing it reads whole, so the name it repeats
 /// still finds what it named (#627): a track whose name hides an order is marked, and a plug-in's parameter with a
-/// variation selector in its name ("Air ☁️") is set by the name the model read, as REAPER matches it exactly. (Renoise's
-/// is in own_session_catchup, where a name the producer gave by hand reaches the model.)
+/// variation selector in its name ("Air ☁️") is set by the name the model read, as REAPER matches it exactly. One whose
+/// name hides an order is set by the marked name the model read, put back as REAPER has it (#641). (Renoise's is in
+/// own_session_catchup, where a name the producer gave by hand reaches the model.)
 #[tokio::test(flavor = "current_thread")]
 async fn in_reaper_a_name_hiding_words_is_marked_and_a_parameter_is_set_by_the_name_the_model_read() {
     use daw_mcp_server::reaper::simulator::ReaperScript;
@@ -758,7 +759,8 @@ async fn in_reaper_a_name_hiding_words_is_marked_and_a_parameter_is_set_by_the_n
             let script = ReaperScript::new(3, 0);
             script.rename(1, &format!("Drums{}", hidden_order()));
             script.rename(2, "👩‍🎤 Vox");
-            script.add_fx_with(2, "ReaComp", &[("Threshold", 0.5), ("Air ☁️", 0.5)]);
+            let drive = format!("Drive{}", hidden_order());
+            script.add_fx_with(2, "ReaComp", &[("Threshold", 0.5), ("Air ☁️", 0.5), (&drive, 0.5)]);
             let config = {
                 let script = script.clone();
                 move |secret| script.config(secret, "/lab/REAPER")
@@ -775,7 +777,9 @@ async fn in_reaper_a_name_hiding_words_is_marked_and_a_parameter_is_set_by_the_n
                 }),
                 step(move |recorded| {
                     named(&last(recorded)["items"], "Air ☁️");
-                    let values = json!([{"param": "Air ☁️", "normalized": 0.8}]);
+                    let marked = format!("Drive{}", kumi_agent::core::hidden::HIDDEN);
+                    named(&last(recorded)["items"], &marked);
+                    let values = json!([{"param": "Air ☁️", "normalized": 0.8}, {"param": marked, "normalized": 0.3}]);
                     call("make_changes", json!({"steps": [{"tool": "fx_params", "input": {"ref": fx.borrow().clone(), "values": values}}]}))
                 }),
                 step(|_| answer("Done.")),
@@ -784,6 +788,7 @@ async fn in_reaper_a_name_hiding_words_is_marked_and_a_parameter_is_set_by_the_n
             let sent = own_request(own, steps).await;
             let vox = script.track(2)["ref"].as_str().unwrap().to_string();
             assert_eq!(script.fx_param(&vox, "ReaComp", "Air ☁️"), Some(0.8), "the parameter, by the name the model read");
+            assert_eq!(script.fx_param(&vox, "ReaComp", &drive), Some(0.3), "the one hiding words, by its marked name");
             // The observation and the read, the hidden order marked.
             let marked = format!("Drums{}", kumi_agent::core::hidden::HIDDEN);
             assert!(sent[0].contains(&marked) && sent[1].contains(&marked), "{}", sent[1]);
