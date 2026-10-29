@@ -247,15 +247,7 @@ impl Scope {
     pub fn types(self) -> bool {
         matches!(
             self,
-            Scope::Box
-                | Scope::Menu
-                | Scope::Tree
-                | Scope::Voice
-                | Scope::Search
-                | Scope::Selection
-                | Scope::List
-                | Scope::KeyBox
-                | Scope::DetailsSearch
+            Scope::Box | Scope::Menu | Scope::Tree | Scope::Voice | Scope::Search | Scope::Selection | Scope::List | Scope::KeyBox
         )
     }
 
@@ -550,9 +542,8 @@ impl Keymap {
                             continue;
                         }
                     };
-                    rebound.push(action.id);
                     let mut taken: Vec<Vec<Chord>> = vec![];
-                    for words in written {
+                    for words in &written {
                         let keys: Option<Vec<Chord>> = words.split_whitespace().map(Chord::parse).collect();
                         let keys = match keys {
                             Some(keys) if (1..=2).contains(&keys.len()) => keys,
@@ -570,10 +561,17 @@ impl Keymap {
                             say(format!("keys.json gives {id} “{words}”, but that types itself {}", scope.words()));
                             continue;
                         }
-                        if taken.contains(&keys) {
-                            continue;
+                        if !taken.contains(&keys) {
+                            taken.push(keys);
                         }
-                        taken.push(keys.clone());
+                    }
+                    // An empty list takes the action's keys away; a list none of which Kumi can use leaves it its own.
+                    if !written.is_empty() && taken.is_empty() {
+                        say(format!("keys.json gives {id} no key Kumi can use, so it keeps its own"));
+                        continue;
+                    }
+                    rebound.push(action.id);
+                    for keys in taken {
                         for &scope in action.scopes {
                             asked.push(Binding { scope, id: action.id, keys: keys.clone(), also: Modifiers::NONE, asked: true });
                         }
@@ -916,6 +914,25 @@ mod tests {
     }
 
     #[test]
+    fn an_entry_with_no_key_kumi_can_use_leaves_the_action_its_own() {
+        let (keymap, said) = with(json!({ "composer.send": ["z"], "details.close": ["x"] }));
+        assert_eq!(
+            said,
+            [
+                "keys.json gives composer.send “z”, but that types itself in the box",
+                "keys.json gives composer.send no key Kumi can use, so it keeps its own",
+            ]
+        );
+        assert_eq!(keymap.actions(Scope::Box, &chord("enter")), ["composer.send"]);
+        // In the detailed view a letter is a key (its search takes what's typed first): x closes it, and esc no longer does.
+        assert_eq!(keymap.actions(Scope::Details, &chord("x")), ["details.close"]);
+        assert!(keymap.actions(Scope::Details, &chord("esc")).is_empty());
+        // An empty list still takes an action's keys away.
+        let (keymap, said) = with(json!({ "composer.send": [] }));
+        assert!(said.is_empty() && keymap.actions(Scope::Box, &chord("enter")).is_empty(), "{said:?}");
+    }
+
+    #[test]
     fn a_key_of_keys_json_goes_first_and_says_what_it_comes_ahead_of() {
         let (keymap, said) = with(json!({ "app.background": ["ctrl+d"] }));
         assert_eq!(keymap.actions(Scope::Box, &chord("ctrl+d")), ["app.background", "app.quit", "composer.delete"]);
@@ -955,7 +972,15 @@ mod tests {
         // The first esc is still app.stop's when it has something to stop.
         assert_eq!(keymap.actions(Scope::Box, &esc), ["app.stop"]);
         assert_eq!(keymap.keys("app.redraw").iter().map(|keys| label(keys)).collect::<Vec<_>>(), ["esc esc"]);
-        let (_, said) = with(json!({ "app.redraw": ["esc esc esc"] }));
-        assert_eq!(said, ["keys.json gives app.redraw “esc esc esc”, which Kumi can't read as a key"]);
+        // Three keys aren't a key; with no other, the action keeps its own.
+        let (keymap, said) = with(json!({ "app.redraw": ["esc esc esc"] }));
+        assert_eq!(
+            said,
+            [
+                "keys.json gives app.redraw “esc esc esc”, which Kumi can't read as a key",
+                "keys.json gives app.redraw no key Kumi can use, so it keeps its own",
+            ]
+        );
+        assert_eq!(keymap.actions(Scope::Box, &chord("ctrl+l")), ["app.redraw"]);
     }
 }

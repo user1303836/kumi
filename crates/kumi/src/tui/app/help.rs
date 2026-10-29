@@ -27,22 +27,36 @@ pub(super) struct HelpSection {
 /// The help's sections: the keys that work in this session (`has`) as `keymap` binds them, in the DAW's words (`app`),
 /// the pane's `tabs`, and the commands the `/` menu offers, each with what it says of itself.
 pub(super) fn help_sections(has: Has, keymap: &Keymap, app: &str, tabs: &[String], commands: Vec<(String, String)>) -> Vec<HelpSection> {
-    let row = |keys: &str, does: &str| Some((keys.to_string(), does.to_string()));
+    let row = |keys: &str, does: &str| vec![(keys.to_string(), does.to_string())];
+    // The actions a row of keys.json's keys has said, so each is said once.
+    let said: RefCell<Vec<&str>> = RefCell::default();
     // A row about Kumi's actions `ids`: as written while they have their own keys. While keys.json gives any of them
-    // others, the keys they have and what each does; with none, there's no row.
-    let keyed = |ids: &[&str], keys: &str, does: &str| -> Option<(String, String)> {
+    // others, a row for each action with keys, which says its keys and what it does; an action with none has no row.
+    let keyed = |ids: &[&'static str], keys: &str, does: &str| -> Vec<(String, String)> {
         if !ids.iter().any(|id| keymap.rebound(id)) {
-            return (!keys.is_empty()).then(|| (keys.to_string(), does.to_string()));
+            return if keys.is_empty() { vec![] } else { vec![(keys.to_string(), does.to_string())] };
         }
-        let (mut bound, mut said) = (vec![], vec![]);
-        for id in ids {
+        let mut rows = vec![];
+        for &id in ids {
+            if said.borrow().contains(&id) {
+                continue;
+            }
+            said.borrow_mut().push(id);
             let keys: Vec<String> = keymap.keys(id).into_iter().map(label).collect();
-            if !keys.is_empty() {
-                bound.extend(keys);
-                said.extend(action(id).map(|action| action.does));
+            if let (false, Some(action)) = (keys.is_empty(), action(id)) {
+                rows.push((keys.join("  "), action.does.to_string()));
             }
         }
-        (!bound.is_empty()).then(|| (bound.join("  "), said.join("; ")))
+        rows
+    };
+    // Another of an action's rows, saying what it does somewhere particular: it goes when the action's keys are
+    // keys.json's, which the action's own row says.
+    let also = |id: &str, keys: &str, does: &str| -> Vec<(String, String)> {
+        if keymap.rebound(id) {
+            vec![]
+        } else {
+            vec![(keys.to_string(), does.to_string())]
+        }
     };
     let mut send = vec![
         keyed(&["composer.send"], "enter", "Send. While Kumi works, it reads your message after the step under way"),
@@ -150,17 +164,17 @@ pub(super) fn help_sections(has: Has, keymap: &Keymap, app: &str, tabs: &[String
             "tab",
             &format!("Into the tree in FOCUS, at {app}'s selection: ↑↓ move, enter pins a row so what you ask is about it, esc or tab comes back"),
         ),
-        keyed(&["app.stop"], "esc", if has.mouse { "Unpin what's pinned (× beside it does too)" } else { "Unpin what's pinned" }),
+        also("app.stop", "esc", if has.mouse { "Unpin what's pinned (× beside it does too)" } else { "Unpin what's pinned" }),
     ]);
     if has.mouse {
-        pane.push(Some((
+        pane.push(vec![(
             "click".to_string(),
             format!(
                 "undo or forget at a row's end; a change's words open its picture{}, a row in FOCUS's tree pins it, and a tab's \
                  name shows that tab",
                 if has.can.jobs { ", a job's open the job" } else { "" }
             ),
-        )));
+        )]);
     }
     let edit = vec![
         keyed(
@@ -196,7 +210,7 @@ pub(super) fn help_sections(has: Has, keymap: &Keymap, app: &str, tabs: &[String
     let mut stop =
         vec![keyed(&["app.stop"], "esc", "Stop Kumi's answer: the steps it finished stay, and waiting messages go back into the box")];
     if has.can.slots {
-        stop.push(keyed(&["app.stop"], "esc", "A /slots check under way stops first"));
+        stop.push(also("app.stop", "esc", "A /slots check under way stops first"));
     }
     stop.extend([
         keyed(
@@ -232,8 +246,8 @@ pub(super) fn help_sections(has: Has, keymap: &Keymap, app: &str, tabs: &[String
         // `?` is a character typed; keys.json can give the help keys as well (f1).
         keyed(&["app.help"], "", ""),
     ];
-    listed.extend(commands.into_iter().map(Some));
-    let section = |title, rows: Vec<Option<(String, String)>>| HelpSection { title, rows: rows.into_iter().flatten().collect() };
+    listed.extend(commands.into_iter().map(|command| vec![command]));
+    let section = |title, rows: Vec<Vec<(String, String)>>| HelpSection { title, rows: rows.into_iter().flatten().collect() };
     vec![
         section("Send and steer", send),
         section("Move around", around),
@@ -443,16 +457,21 @@ mod tests {
             "pane.toggle": [],
             "composer.left": ["ctrl+h"],
             "app.help": ["f1"],
+            "app.stop": ["f9"],
         })));
         let rows = said(&every_section_keyed(true, true, &keymap));
         // Undo's row says its new key, and what it does in the table's words.
         assert!(rows.contains("ctrl+z  Undo in the box\n") && !rows.contains("ctrl+-  ctrl+_"), "{rows}");
         // ctrl+\ has no key now, so its row goes.
         assert!(!rows.contains("ctrl+\\") && !rows.contains("open or close the drawer"), "{rows}");
-        // A row about several actions says each one's keys, and what each does.
-        let along = "ctrl+h  →  alt+←  ctrl+←  alt+b  alt+→  ctrl+→  alt+f  \
-                     Left along the line; Right along the line; A word left; A word right\n";
+        // A row about several actions becomes a row for each, with its keys beside what it does.
+        let along = "ctrl+h  Left along the line\n→  Right along the line\nalt+←  ctrl+←  alt+b  A word left\n\
+                     alt+→  ctrl+→  alt+f  A word right\n";
         assert!(rows.contains(along), "{rows}");
+        // An action is said once: esc's other rows (unpinning, a /slots check) go, and its own says its key.
+        assert_eq!(rows.matches("f9  ").count(), 1, "{rows}");
+        assert!(rows.contains("f9  Stop a /slots check, then Kumi's answer; when it isn't working, unpin\n"), "{rows}");
+        assert!(!rows.contains("Unpin what's pinned") && !rows.contains("A /slots check under way"), "{rows}");
         // ? stays the help's, and f1 opens it too.
         assert!(rows.contains("?  This help, from an empty box\n") && rows.contains("f1  Open the help\n"), "{rows}");
         // With Kumi's own keys, every row is as the help writes it.
