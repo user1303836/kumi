@@ -440,6 +440,8 @@ enum Job {
     Saved { id: String, line: Vec<u8>, from: Option<String> },
     /// The conversation moved to another place (an unsaved Set's, once the Set was saved).
     Moved { folder: PathBuf },
+    /// The conversation going on was taken back to nothing: its log begins again as a new one's.
+    Emptied,
     /// What's written goes to the disk.
     Sync,
     /// Says when everything before it is written.
@@ -657,6 +659,17 @@ impl SessionLog {
         self.send(Job::Sync);
     }
 
+    /// The conversation going on was taken back to nothing, and goes as one never kept (the store deletes its log with
+    /// it): nothing more goes in the file, and its log begins with its next first save, with nothing from before. Once
+    /// `written`, the file can go: a line after it never makes the log again from what the conversation had.
+    pub fn emptied(&self) {
+        if !self.open_now() {
+            return;
+        }
+        self.said();
+        self.send(Job::Emptied);
+    }
+
     /// What's been said goes to the disk, and nothing more is written: the session is closing.
     pub async fn close(&self) {
         if self.closed.replace(true) {
@@ -795,6 +808,12 @@ async fn write(mut jobs: mpsc::UnboundedReceiver<Job>, mut writer: Writer) {
                     log.moved(kit, folder).await;
                 }
             }
+            Job::Emptied => {
+                if let Some(log) = writer.log.as_mut() {
+                    log.emptied();
+                    *writer.opened.borrow_mut() = Some((log.file(), 0));
+                }
+            }
             Job::Sync => {
                 if let Some(log) = writer.log.as_mut() {
                     log.sync().await;
@@ -834,6 +853,16 @@ impl Writer {
 impl Log {
     fn file(&self) -> PathBuf {
         self.folder.join(log_name(&self.id))
+    }
+
+    /// Taken back to nothing: a new conversation's log, its lines waiting for its first save, with nothing it had before
+    /// (nor, for a copy, the original's lines).
+    fn emptied(&mut self) {
+        self.begin = Begin { before: 0, had: None, from: None, kept_at: None };
+        self.upto = None;
+        self.state = Written::Waiting(vec![]);
+        self.full = false;
+        self.dirty = false;
     }
 
     /// A log left a while ago, written to again: one this run was writing is read again first (its size, how it ends),

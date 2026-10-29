@@ -1563,14 +1563,64 @@ local_test!(a_conversation_taken_back_to_nothing_isnt_kept_and_comes_back_as_wha
     // The next request keeps it again, with a log from there.
     one.session.submit("sketch a groove", None).await.unwrap();
     let kept = saved(store.as_ref(), SET, 1).await;
-    assert_eq!(asked_in(&store.log(SET, &kept.id).await.expect("its log").lines), ["sketch a groove"]);
     one.session.close().await.unwrap();
+    assert_eq!(asked_in(&store.log(SET, &kept.id).await.expect("its log").lines), ["sketch a groove"]);
     // Taken up after a restart, it carries on with that alone.
     let (two, _) = takes_back(dir.path(), |_| vec![]);
     project(&two, SET);
     two.session.start().await.unwrap();
     assert_eq!(two.words(0).unwrap(), ["sketch a groove"]);
     two.session.close().await.unwrap();
+});
+local_test!(a_conversation_taken_up_after_a_restart_and_taken_back_to_nothing_keeps_nothing_of_it_in_its_next_log, {
+    use kumi_agent::core::session_log::LogLine;
+    const SET: &str = "afafafafafafafafafafafafafafafaf";
+    let dir = tempfile::tempdir().unwrap();
+    let (one, store) = takes_back(dir.path(), |_| vec![]);
+    project(&one, SET);
+    one.session.start().await.unwrap();
+    one.session.submit("make the bass wider", None).await.unwrap();
+    saved(store.as_ref(), SET, 1).await;
+    one.session.close().await.unwrap();
+    // Taken up after a restart (its log goes on from what was kept), then its only request is taken back.
+    let (two, store) = takes_back(dir.path(), |_| vec![]);
+    project(&two, SET);
+    two.session.start().await.unwrap();
+    assert_eq!(two.words(0).unwrap(), ["make the bass wider"]);
+    let plan = two.session.take_back_plan().await.unwrap();
+    assert_eq!(two.session.take_back(plan[0].at).await.unwrap().requests, 1);
+    assert!(store.current(SET).await.unwrap().is_none());
+    // The next request's log begins with it, with nothing of the request taken back.
+    two.session.submit("sketch a groove", None).await.unwrap();
+    let kept = saved(store.as_ref(), SET, 1).await;
+    two.session.close().await.unwrap();
+    let log = store.log(SET, &kept.id).await.expect("its log");
+    let said: Vec<String> = log
+        .lines
+        .iter()
+        .filter_map(|line| match line {
+            LogLine::Message { message, .. } => Some(message.to_string()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!((log.header.before, asked_in(&log.lines)), (0, vec!["sketch a groove".to_owned()]));
+    assert!(said.iter().all(|message| !message.contains("make the bass wider")), "{said:?}");
+    // Taken up again after another restart, it shows that alone.
+    let (three, _) = takes_back(dir.path(), |_| vec![]);
+    project(&three, SET);
+    three.session.start().await.unwrap();
+    let shown: Vec<String> = three
+        .events
+        .borrow()
+        .iter()
+        .find_map(|e| match e {
+            SessionEvent::Resumed { lines, .. } => Some(lines.iter().map(|line| line.text.clone()).collect()),
+            _ => None,
+        })
+        .expect("taken up");
+    assert_eq!(shown.first().map(String::as_str), Some("sketch a groove"), "{shown:?}");
+    assert!(shown.iter().all(|line| !line.contains("make the bass wider")), "{shown:?}");
+    three.session.close().await.unwrap();
 });
 local_test!(earlier_process_changes_expire_without_pictures_and_same_process_keeps_undo, {
     let dir = tempfile::tempdir().unwrap();

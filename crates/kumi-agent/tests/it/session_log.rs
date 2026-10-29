@@ -830,6 +830,36 @@ async fn requests_taken_back_are_marked_in_the_log_as_it_is_now() {
     .await;
 }
 
+#[tokio::test(flavor = "current_thread")]
+async fn a_conversation_taken_back_to_nothing_begins_its_log_again_with_nothing_from_before() {
+    local(async {
+        let dir = tempfile::tempdir().unwrap();
+        let store = create_conversation_store(dir.path());
+        // Taken up after a restart: its log begins with what was kept, a request and its answer.
+        let asked = [json!({"role":"user","content":"make the bass wider"}), json!({"role":"assistant","content":"Widened."})];
+        store.save(A, ID, &kept(&asked, 1, 7)).await.unwrap();
+        let log = SessionLog::new(dir.path(), Places::LIVE, same());
+        log.open(A, ID, Some(&kept(&asked, 1, 7)), None);
+        log.event(&notice("Before."));
+        // Taken back to nothing: the log lets go of its file, which the store deletes with the conversation.
+        log.emptied();
+        log.written().await;
+        store.delete(A, ID).await.unwrap();
+        // What comes next waits for the conversation's next first save: no line makes the log again from what it had.
+        log.request("sketch a groove", vec![], None, 0, None);
+        log.event(&notice("After."));
+        log.written().await;
+        assert!(!log_file(dir.path(), A, ID).exists());
+        store.save(A, ID, &said("sketch a groove", 9)).await.unwrap();
+        log.saved(ID, 9, 1, None);
+        log.close().await;
+        let read = read(&log_file(dir.path(), A, ID));
+        assert_eq!((read.header.before, kinds(&read)), (0, vec!["request", "event", "saved"]));
+        assert_eq!(notices(&read), ["After."]);
+    })
+    .await;
+}
+
 #[test]
 fn a_change_told_again_later_stays_with_the_request_that_made_it() {
     use kumi_types::contracts::ChangeState;
