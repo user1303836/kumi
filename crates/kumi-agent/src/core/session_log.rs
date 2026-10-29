@@ -23,7 +23,8 @@
 use crate::{
     core::{
         contracts::{
-            KernelCheckpoint, KernelEvent, PinnedNode, SavedConversation, SessionEvent, TranscriptLine, TranscriptRole, TurnState,
+            KernelCheckpoint, KernelEvent, MemoryEvent, PinnedNode, SavedConversation, SessionEvent, TranscriptLine, TranscriptRole,
+            TurnState,
         },
         conversations::{is_conversation_id, write_privately},
     },
@@ -263,9 +264,21 @@ fn told(event: &SessionEvent) -> bool {
         | SessionEvent::Technique(_)
         | SessionEvent::Action(_)
         | SessionEvent::Job(_)
-        | SessionEvent::CarryOn { .. }
-        | SessionEvent::Kernel(_)
-        | SessionEvent::Memory(_) => true,
+        | SessionEvent::CarryOn { .. } => true,
+        // Each kind by name, so one added later is decided on, not taken in by a catch-all: a stream of deltas
+        // (words aside, which go as one event) would be a line each.
+        SessionEvent::Memory(event) => match event {
+            MemoryEvent::Remembered { .. } | MemoryEvent::Forgot { .. } => true,
+        },
+        SessionEvent::Kernel(event) => match event {
+            KernelEvent::Text { .. }
+            | KernelEvent::ToolInput { .. }
+            | KernelEvent::ToolStart { .. }
+            | KernelEvent::ToolEnd { .. }
+            | KernelEvent::Steer { .. }
+            | KernelEvent::Retry { .. }
+            | KernelEvent::ModelSwitch { .. } => true,
+        },
     }
 }
 
