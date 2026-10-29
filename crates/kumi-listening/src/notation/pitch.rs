@@ -170,30 +170,33 @@ impl Drum {
             }
             words.push(word);
         }
+        // Kick, snare, clap, crash, bassdrum and sidestick say so wherever they're written ("Kickdrum", "Claps"); the
+        // shorter names only as words of their own ("Grime Snare" holds no rim, "Phantom" no tom, "Chatter" no hat).
         let says = |parts: &[&str], whole: &[&str]| {
             parts.iter().any(|part| lower.contains(part)) || words.iter().any(|word| whole.contains(&word.as_str()))
         };
-        Some(if says(&["kick", "kik", "bassdrum", "bass drum"], &["bd"]) {
+        const CLOSED: &[&str] = &["hat", "hats", "hihat", "hihats", "hh", "chh", "ch", "closed", "closedhat"];
+        const OPEN: &[&str] = &["open", "openhat", "openhats", "ohh", "oh", "ohat"];
+        const PEDAL: &[&str] = &["pedal", "pedalhat", "ph"];
+        Some(if says(&["kick", "bassdrum", "bass drum"], &["bd", "kik"]) {
             Drum::Kick
         } else if says(&["clap"], &["cp", "clp"]) {
             Drum::Clap
-        } else if says(&["rim", "sidestick", "side stick"], &[]) {
+        } else if says(&["sidestick", "side stick"], &["rim", "rims", "rimshot", "rimshots"]) {
             Drum::Rim
         } else if says(&["snare"], &["sd", "snr"]) {
             Drum::Snare
-        } else if says(&["hat", "closed", "open", "pedal"], &["hh", "chh", "ch", "ohh", "oh", "ph"]) {
-            if says(&["pedal"], &["ph"]) {
-                Drum::PedalHat
-            } else if says(&["open"], &["ohh", "oh", "ohat"]) {
-                Drum::OpenHat
-            } else {
-                Drum::ClosedHat
-            }
-        } else if says(&["crash", "china", "splash"], &[]) {
+        } else if says(&[], PEDAL) {
+            Drum::PedalHat
+        } else if says(&[], OPEN) {
+            Drum::OpenHat
+        } else if says(&[], CLOSED) {
+            Drum::ClosedHat
+        } else if says(&["crash"], &["china", "splash"]) {
             Drum::Crash
-        } else if says(&["ride"], &[]) {
+        } else if says(&[], &["ride", "rides"]) {
             Drum::Ride
-        } else if says(&["tom"], &[]) {
+        } else if says(&[], &["tom", "toms", "lowtom", "midtom", "hitom", "hightom", "floortom"]) {
             Drum::Tom
         } else {
             return None;
@@ -293,6 +296,46 @@ mod tests {
         assert_eq!((drum_pitch("clap", &pads), drum_pitch("Open Hat", &[])), (Ok(39), Ok(46)), "General MIDI's");
         assert!(drum_pitch("zap", &[]).is_err());
         assert_eq!((drum_name(36, &pads), drum_name(42, &[]), drum_name(90, &[])), ("kick808".into(), "hat".into(), "F#5".into()));
+    }
+
+    #[test]
+    fn a_pads_name_says_what_it_holds_in_words_of_its_own() {
+        use Drum::*;
+        for (name, drum) in [
+            ("Kick 909", Some(Kick)),
+            ("Kickdrum", Some(Kick)),
+            ("BD Deep", Some(Kick)),
+            ("Claps", Some(Clap)),
+            ("Rimshot", Some(Rim)),
+            ("Side Stick", Some(Rim)),
+            ("SD Tight", Some(Snare)),
+            ("909hh", Some(ClosedHat)),
+            ("Hi-Hat", Some(ClosedHat)),
+            ("Hihats", Some(ClosedHat)),
+            ("VEH3 Closed", Some(ClosedHat)),
+            ("HH Open", Some(OpenHat)),
+            ("OpenHat", Some(OpenHat)),
+            ("Pedal Hat", Some(PedalHat)),
+            ("Toms", Some(Tom)),
+            ("LowTom", Some(Tom)),
+            ("Crash 2", Some(Crash)),
+            ("China", Some(Crash)),
+            ("Ride Bell", Some(Ride)),
+            // A name inside another word says nothing of it.
+            ("Grime Snare", Some(Snare)),
+            ("Opening Crash", Some(Crash)),
+            ("Custom Perc", None),
+            ("Phantom", None),
+            ("Bottom", None),
+            ("Override", None),
+            ("Chatter", None),
+        ] {
+            assert_eq!(Drum::held_by(name), drum, "{name}");
+        }
+        // So a snare lane plays "Grime Snare", and a rim lane says there's no rim rather than play it.
+        let pads = vec![("Grime Snare".to_owned(), 37)];
+        assert_eq!(drum_pitch("snare", &pads), Ok(37));
+        assert!(drum_pitch("rim", &pads).unwrap_err().contains("no pad holds a rim"));
     }
 
     #[test]
