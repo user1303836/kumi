@@ -10,7 +10,7 @@ use super::{
 };
 use indexmap::IndexMap;
 use kumi_common::{abort::Signal, time::now_ms};
-use kumi_library::{daws::Daws, measure_worker::worker_program};
+use kumi_library::{daws::Daws, measure_worker::worker_program, state::release_ended};
 use serde::{Deserialize, Serialize};
 use std::{
     cell::{Cell, RefCell},
@@ -134,11 +134,21 @@ impl MusicOptions {
     }
 }
 
-/// The scan under way: a child process told over its stdin (`heard`: whether it has said anything yet), or one in this
-/// process.
+/// The scan under way: a child process told over its stdin (`heard`: whether it has said anything yet; `pid`: its
+/// process, whose lock is let go of for it when it's ended), or one in this process.
 enum Running {
-    Child { id: u64, input: mpsc::UnboundedSender<ScanMessage>, done: watch::Receiver<bool>, kill: Signal, heard: Rc<Cell<bool>> },
-    Here { id: u64, control: Control },
+    Child {
+        id: u64,
+        input: mpsc::UnboundedSender<ScanMessage>,
+        done: watch::Receiver<bool>,
+        kill: Signal,
+        heard: Rc<Cell<bool>>,
+        pid: Option<u32>,
+    },
+    Here {
+        id: u64,
+        control: Control,
+    },
 }
 
 impl Running {
@@ -580,6 +590,7 @@ impl Music {
             self.next_scan(options.every_ms);
             return;
         };
+        let pid = child.id();
         let mut input = child.stdin.take().unwrap();
         let mut lines = BufReader::new(child.stdout.take().unwrap()).lines();
         let (sender, mut messages) = mpsc::unbounded_channel::<ScanMessage>();
@@ -589,7 +600,7 @@ impl Music {
         let heard = Rc::new(Cell::new(false));
         let hearing = heard.clone();
         let _ = sender.send(ScanMessage::Learn { options: scan });
-        *self.running.borrow_mut() = Some(Running::Child { id, input: sender, done, kill, heard });
+        *self.running.borrow_mut() = Some(Running::Child { id, input: sender, done, kill, heard, pid });
         tokio::task::spawn_local(async move {
             let writer = tokio::task::spawn_local(async move {
                 while let Some(message) = messages.recv().await {
@@ -676,14 +687,16 @@ impl Music {
         cancel(&self.timer);
         self.listeners.borrow_mut().clear();
         let child = match self.running.borrow().as_ref() {
-            Some(Running::Child { input, done, kill, heard, .. }) => Some((input.clone(), done.clone(), kill.clone(), heard.get())),
+            Some(Running::Child { input, done, kill, heard, pid, .. }) => {
+                Some((input.clone(), done.clone(), kill.clone(), heard.get(), *pid))
+            }
             Some(Running::Here { control, .. }) => {
                 control.stop();
                 None
             }
             None => None,
         };
-        if let Some((input, mut done, kill, heard)) = child {
+        if let Some((input, mut done, kill, heard, pid)) = child {
             // A scan that hasn't said a word is still starting (the program, its models and programs, its lock), and reads
             // no stop till then: nothing of the music's is its own yet, so it's ended at once rather than waited for.
             if heard {
@@ -698,8 +711,14 @@ impl Music {
                     }
                 }
             };
-            if tokio::time::timeout(Duration::from_millis(1500), wait).await.is_err() {
+            let gone = tokio::time::timeout(Duration::from_millis(1500), wait).await.is_ok();
+            if !gone {
                 kill.cancel();
+            }
+            // Ended rather than stopped, it can't let go of a lock it took: that's done for it, so a quit leaves nothing
+            // behind.
+            if let (false, Some(pid)) = (heard && gone, pid) {
+                let _ = release_ended(&self.dir().to_string_lossy(), pid).await;
             }
         }
     }

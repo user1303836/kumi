@@ -44,7 +44,7 @@ use plan::{plan_learning, remembered_file, remembered_folders, PlanOptions};
 use search::{search_presets, PresetHit, PresetQuery, SearchResult, SoundIndex};
 use sources::{below, resolve, SourceOptions};
 pub use sources::{library_sources, Source};
-use state::{acquire_lock, write_state};
+use state::{acquire_lock, release_ended, write_state};
 pub use state::{read_state, LibraryState};
 use std::{
     cell::{Cell, RefCell},
@@ -103,6 +103,8 @@ struct LearnerHandle {
     kill: Signal,
     /// Whether it has said anything yet. Until it does, it's still starting and reads no stop (`close`).
     heard: Rc<Cell<bool>>,
+    /// Its process, whose lock is let go of for it when it's ended.
+    pid: Option<u32>,
 }
 struct HeldIndex {
     index: Rc<SoundIndex>,
@@ -388,6 +390,7 @@ impl Library {
             });
             return;
         };
+        let pid = child.id();
         let mut input = child.stdin.take().unwrap();
         let mut lines = BufReader::new(child.stdout.take().unwrap()).lines();
         let (tx, mut rx) = mpsc::unbounded_channel::<LearnerMessage>();
@@ -400,7 +403,7 @@ impl Library {
         self.next.set(id + 1);
         let _ =
             tx.send(LearnerMessage::Learn { options: LearnerOptions { plan: self.planning(), paused: self.paused.get(), rebuild: false } });
-        *self.learner.borrow_mut() = Some(LearnerHandle { id, input: tx, done, kill, heard });
+        *self.learner.borrow_mut() = Some(LearnerHandle { id, input: tx, done, kill, heard, pid });
         let weak = self.weak.clone();
         tokio::task::spawn_local(async move {
             let writer = tokio::task::spawn_local(async move {
@@ -669,12 +672,11 @@ impl Library {
         if let Some(controller) = self.in_process.borrow().as_ref() {
             controller.cancel();
         }
-        let child = self.learner.borrow().as_ref().map(|c| (c.input.clone(), c.done.clone(), c.kill.clone(), c.heard.get()));
-        if let Some((input, mut done, kill, heard)) = child {
+        let child = self.learner.borrow().as_ref().map(|c| (c.input.clone(), c.done.clone(), c.kill.clone(), c.heard.get(), c.pid));
+        if let Some((input, mut done, kill, heard, pid)) = child {
             // A learner that hasn't said a word is still starting: the program itself, its lock, the plan of its sources
-            // and the library's logs come before it reads a stop. Nothing of the library's is its own yet (a lock left
-            // behind is taken back by the next), so it's ended at once rather than waited for. One that has spoken
-            // stops, putting its state and its lock away.
+            // and the library's logs come before it reads a stop. Nothing of the library's is its own yet, so it's ended
+            // at once rather than waited for. One that has spoken stops, putting its state and its lock away.
             if heard {
                 let _ = input.send(LearnerMessage::Stop);
             } else {
@@ -687,8 +689,14 @@ impl Library {
                     }
                 }
             };
-            if tokio::time::timeout(Duration::from_millis(1500), wait).await.is_err() {
+            let gone = tokio::time::timeout(Duration::from_millis(1500), wait).await.is_ok();
+            if !gone {
                 kill.cancel();
+            }
+            // Ended rather than stopped, it can't let go of a lock it took: that's done for it, so a quit leaves nothing
+            // behind.
+            if let (false, Some(pid)) = (heard && gone, pid) {
+                let _ = release_ended(&self.dir, pid).await;
             }
         }
     }

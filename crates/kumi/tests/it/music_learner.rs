@@ -112,3 +112,43 @@ async fn closing_as_the_music_starts_being_learned_ends_its_scan_at_once() {
         })
         .await;
 }
+
+/// A scan ended before it spoke can't let go of a lock it took, so closing does: a quit leaves nothing behind.
+#[cfg(unix)]
+#[tokio::test(flavor = "current_thread")]
+async fn closing_lets_go_of_the_lock_a_scan_was_ended_holding() {
+    use kumi_listening::music::learning::{create_music, MusicOptions};
+    use std::os::unix::fs::PermissionsExt;
+    let home = tempfile::tempdir().unwrap();
+    let dir = home.path().join("music");
+    std::fs::create_dir_all(&dir).unwrap();
+    let lock = dir.join("learning.lock");
+    // A scan that takes the lock as one does (its pid, which `exec` keeps), then gets no further.
+    let locking = home.path().join("locking-learner");
+    std::fs::write(
+        &locking,
+        format!("#!/bin/sh\nprintf '{{\"pid\":%s,\"at\":%s000}}' \"$$\" \"$(date +%s)\" > '{}'\nexec sleep 30\n", lock.display()),
+    )
+    .unwrap();
+    std::fs::set_permissions(&locking, std::fs::Permissions::from_mode(0o700)).unwrap();
+    // Read by this test's process alone: each test is a process of its own.
+    std::env::set_var("KUMI_LIBRARY_LEARNER_BIN", &locking);
+    let songs = home.path().join("Songs");
+    song(&songs.join("one.wav"), 1.);
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let folders = Some(vec![songs.to_string_lossy().into_owned()]);
+            let music = create_music(MusicOptions::new(dir.clone(), folders, kumi::daw::registry::libraries()));
+            music.learn_now();
+            tokio::time::timeout(Duration::from_secs(15), async {
+                while !std::fs::read_to_string(&lock).is_ok_and(|held| held.ends_with('}')) {
+                    tokio::time::sleep(Duration::from_millis(1)).await;
+                }
+            })
+            .await
+            .expect("the lock is taken in time");
+            music.close().await;
+            assert!(!lock.exists());
+        })
+        .await;
+}

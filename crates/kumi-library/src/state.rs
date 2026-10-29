@@ -124,7 +124,22 @@ impl Holding {
 }
 /// Whether a lock's file names this process.
 async fn held_here(file: &Path) -> bool {
-    read_json::<Value>(file).await.and_then(|holder| holder["pid"].as_f64()) == Some(std::process::id() as f64)
+    held_by(file, std::process::id()).await
+}
+async fn held_by(file: &Path, pid: u32) -> bool {
+    read_json::<Value>(file).await.and_then(|holder| holder["pid"].as_f64()) == Some(pid as f64)
+}
+/// The lock of a learner that was ended rather than stopped (`pid`'s, in `dir`), let go of for it: it can't itself. Only
+/// while it's still that learner's: one another process took over meanwhile is theirs.
+pub async fn release_ended(dir: &str, pid: u32) -> io::Result<()> {
+    let file = Path::new(dir).join("learning.lock");
+    if !held_by(&file, pid).await {
+        return Ok(());
+    }
+    match tokio::fs::remove_file(&file).await {
+        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
+        other => other,
+    }
 }
 /// The logs being written afresh when a learner was stopped dead (`.sounds-<uuid>` and the like): only a lock's holder
 /// writes them, so once it's taken any left are a gone learner's.
