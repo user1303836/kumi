@@ -1003,7 +1003,7 @@ impl TuiApp {
                     state.pending_turn = true;
                 }
                 LogLine::Event { event, .. } => self.event(event),
-                LogLine::Header(_) | LogLine::Message { .. } | LogLine::Saved { .. } => {}
+                LogLine::Header(_) | LogLine::Message { .. } | LogLine::Saved { .. } | LogLine::TakenBack { .. } => {}
             }
         }
         let mut state = self.0.state.borrow_mut();

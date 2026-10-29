@@ -33,10 +33,13 @@ fn asked(at: i64, text: &str, answer: &str) -> Vec<Value> {
 /// The app with a conversation of two requests on screen, which it can take back.
 async fn two_requests() -> Harness {
     let h = Harness::new(120, 36);
-    h.control.set("take-back", json!([
-        {"at":3,"words":"and a bit darker","changes":[filter("applied")]},
-        {"at":2,"words":"make the bass wider","changes":[]}
-    ]));
+    h.control.set(
+        "take-back",
+        json!([
+            {"at":3,"words":"and a bit darker","changes":[filter("applied")]},
+            {"at":2,"words":"make the bass wider","changes":[]}
+        ]),
+    );
     h.start().await;
     h.connect();
     let lines = [asked(2, "make the bass wider", "Widened it."), asked(3, "and a bit darker", "Lowered the filter.")].concat();

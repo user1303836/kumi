@@ -991,7 +991,7 @@ fn every_session_event_keeps_its_wire_shape() {
 
 /// A conversation's log is saved data that this Kumi and later ones read back, line by line: a line that no longer reads
 /// is skipped, so each kind keeps its shape (a header with and without the conversation it copies, a request with and
-/// without its files and what it pointed at, an event, a model message and a save).
+/// without its files and what it pointed at, an event, a model message, a save and requests taken back).
 #[test]
 fn every_line_of_a_conversations_log_keeps_its_shape() {
     let header = |from: Option<&str>| {
@@ -1017,6 +1017,7 @@ fn every_line_of_a_conversations_log_keeps_its_shape() {
         LogLine::Event { at: AT + 3, event: SessionEvent::Kernel(KernelEvent::Text { text: "Widened it.".into() }) },
         LogLine::Message { at: AT + 4, message: serde_json::json!({"role":"assistant","content":[{"type":"text","text":"Widened it."}]}) },
         LogLine::Saved { at: AT + 5, saved_at: AT + 4, turns: 2 },
+        LogLine::TakenBack { at: AT + 6, to: AT + 2 },
     ];
     let kinds: BTreeSet<&str> = lines
         .iter()
@@ -1026,9 +1027,10 @@ fn every_line_of_a_conversations_log_keeps_its_shape() {
             LogLine::Event { .. } => "event",
             LogLine::Message { .. } => "message",
             LogLine::Saved { .. } => "saved",
+            LogLine::TakenBack { .. } => "taken-back",
         })
         .collect();
-    assert_eq!(kinds.len(), 5, "every kind of line is pinned");
+    assert_eq!(kinds.len(), 6, "every kind of line is pinned");
     pinned::<Vec<LogLine>>("log-lines.json", &lines);
 }
 

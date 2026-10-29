@@ -37,5 +37,6 @@
   "music": true,
   "map": true,
   "slots": false,
-  "models": true
+  "models": true,
+  "takeBack": true
 }

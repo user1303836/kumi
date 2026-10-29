@@ -91,6 +91,7 @@ fn kind(line: &LogLine) -> &'static str {
         LogLine::Event { .. } => "event",
         LogLine::Message { .. } => "message",
         LogLine::Saved { .. } => "saved",
+        LogLine::TakenBack { .. } => "taken-back",
     }
 }
 
@@ -791,7 +792,10 @@ fn a_conversation_as_it_stands_leaves_out_what_was_taken_back() {
     // Shown again, what was taken back isn't, nor counted among the earlier messages.
     let replay = replay_of(&written(1, &lines), REPLAYED).unwrap();
     assert_eq!(asked(&replay), ["make the bass wider", "a bit wider still"]);
-    assert!(!replay.lines.iter().any(|line| matches!(line, LogLine::Event { event: SessionEvent::Change { change }, .. } if change.id == "c2")));
+    assert!(!replay
+        .lines
+        .iter()
+        .any(|line| matches!(line, LogLine::Event { event: SessionEvent::Change { change }, .. } if change.id == "c2")));
     let replay = replay_of(&written(1, &lines), 1).unwrap();
     assert_eq!((asked(&replay), replay.before), (vec!["a bit wider still".to_string()], 1 + 1));
 }

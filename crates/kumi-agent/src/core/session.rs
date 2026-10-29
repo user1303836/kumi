@@ -1270,6 +1270,9 @@ impl Session {
     /// The conversation going on as its log holds it now: what it had before the log's first request, and each request
     /// since that stands. Nothing without a log yet (a conversation not kept yet).
     async fn story(&self) -> Result<(Vec<Value>, Vec<Span>), RuntimeError> {
+        // The last answer's save first: a conversation's log begins with its first one.
+        let saving = self.0.saving.borrow().clone();
+        let _ = saving.await;
         let Some(bytes) = (match &self.0.options.log {
             Some(log) => log.as_now().await,
             None => None,

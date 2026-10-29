@@ -1969,6 +1969,24 @@
     "type": "palette"
   },
   {
+    "type": "taken-back",
+    "requests": 2,
+    "replay": {
+      "before": 0,
+      "lines": [
+        {
+          "kind": "request",
+          "at": 1760000000000,
+          "text": "make the kick punchier"
+        }
+      ]
+    }
+  },
+  {
+    "type": "taken-back",
+    "requests": 1
+  },
+  {
     "type": "aside",
     "id": 2,
     "text": "The kick and the bass share 60 Hz, so"

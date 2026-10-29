@@ -1404,7 +1404,10 @@ local_test!(a_change_shown_again_can_be_undone_only_in_the_session_that_made_it,
 /// A session that keeps its conversations, with their logs, in `dir`, whose answer to each request makes the changes
 /// `made` gives for its words. A change is told as the app tells one from the integration (the session watches it, and
 /// the screen hears of it through the log in front of it), and so is an undo of one.
-fn takes_back(dir: &std::path::Path, made: fn(&str) -> Vec<ChangeRecord>) -> (Harness, Rc<dyn ConversationStore>) {
+fn takes_back(
+    dir: &std::path::Path,
+    made: fn(&str) -> Vec<ChangeRecord>,
+) -> (Harness, Rc<kumi_agent::core::conversations::FileConversationStore>) {
     use kumi_agent::core::session_log::SessionLog;
     let store = create_conversation_store(dir);
     let log = SessionLog::new(dir, kumi_types::place::Places::LIVE, Rc::new(|text: &str| text.to_owned()));

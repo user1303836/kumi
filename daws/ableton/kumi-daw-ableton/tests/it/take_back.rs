@@ -14,7 +14,10 @@ use kumi_agent::kernel::budget::OBSERVATION_MARKER;
 use kumi_agent::mcp::client::{McpEndpoint, StderrStatus};
 use kumi_agent::mcp::types::{CallToolResult, Implementation, ListToolsResult};
 use kumi_agent::{create_conversation_store, create_session, Session, SessionOptions};
-use kumi_common::{abort::Signal, js::json::stringify};
+use kumi_common::{
+    abort::{Signal, SignalExt},
+    js::json::stringify,
+};
 use kumi_daw_ableton::integration::Ableton;
 use kumi_daw_ableton::options::{AbletonOptions, HandsSetup};
 use kumi_types::contracts::*;
