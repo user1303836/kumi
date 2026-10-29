@@ -745,7 +745,20 @@ async fn a_reaper_only_doctor_never_speaks_lives_words() {
     }));
     io.answers = io.answers.clone().with(Hands(Rc::new(|| async { Ok(None) }.boxed_local())));
     io.voice = Some(Rc::new(|| async { Ok(ready()) }.boxed_local()));
-    io.model_servers = Some(Rc::new(|| async { Ok(vec![]) }.boxed_local()));
+    // A model server whose models can't all use tools: the line says how many can change the project.
+    let tools: ModelInfo = serde_json::from_value(
+        json!({"id":"ollama/qwen3:8b","provider":"ollama","model":"qwen3:8b","name":"qwen3:8b","efforts":[],"tools":true}),
+    )
+    .unwrap();
+    let talks = ModelInfo {
+        id: "ollama/gemma3:4b".into(),
+        model: "gemma3:4b".into(),
+        name: "gemma3:4b".into(),
+        tools: Some(false),
+        ..tools.clone()
+    };
+    let local = local_servers(&[], &Env::new()).unwrap();
+    servers(&mut io, vec![ServerFinding { server: local[0].clone(), running: true, models: Some(vec![tools, talks]) }]);
     let mut installation = quiet_installation();
     installation.answers = installation.answers.clone().with(Lives(Rc::new(Vec::new)));
     io.installation = installation;
@@ -761,6 +774,7 @@ async fn a_reaper_only_doctor_never_speaks_lives_words() {
     let leaks = live_words::leaks(&text);
     assert!(leaks.is_empty(), "the doctor says Live's words:\n{}\n\nin:\n{text}", leaks.join("\n"));
     assert!(text.contains("REAPER"), "{text}");
+    assert!(text.contains("2 models, 1 can change the project"), "{text}");
     let fixes: Vec<&Check> = sections.iter().flat_map(|s| &s.checks).filter(|c| c.status == CheckStatus::Fix).collect();
     assert!(fixes.iter().all(|c| c.text.contains("REAPER")), "nothing to fix for a DAW this producer doesn't use: {fixes:?}");
     kumi::daw::work_with(kumi_types::daw::DawId::Ableton);

@@ -272,7 +272,7 @@ fn server_checks(servers: &[ServerFinding], env: &Env, said: Option<&str>) -> Ve
                     "{} {}{}",
                     models.len(),
                     if models.len() == 1 { "model" } else { "models" },
-                    if able != models.len() { format!(", {able} can change the Set") } else { String::new() }
+                    if able != models.len() { format!(", {able} can change the {}", crate::daw::words().place) } else { String::new() }
                 )
             } else {
                 "its models unread".into()

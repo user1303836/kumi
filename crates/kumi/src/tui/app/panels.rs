@@ -289,8 +289,9 @@ impl TuiApp {
             }
         }
         if self.can().taste {
-            let places = crate::daw::words().places;
-            items.push(PickerItem::heading(format!("From your {places}")));
+            // (the Live Sets the library learns taste from: Kumi keeps it from the model outside Live)
+            let sets = crate::text::learned_sets(true);
+            items.push(PickerItem::heading(format!("From your {sets}")));
             if taste.is_empty() {
                 items.push(inert(
                     if self
@@ -301,9 +302,10 @@ impl TuiApp {
                         .as_ref()
                         .is_some_and(|l| matches!(l.state, LibraryState::Learning | LibraryState::Paused))
                     {
-                        format!("Learning your {places}…")
+                        format!("Learning your {sets}…")
                     } else {
-                        format!("Nothing yet: how you work, from your own {} {places}", crate::daw::words().app)
+                        let live = kumi_types::daw::DawProfile::ABLETON.words;
+                        format!("Nothing yet: how you work, from your own {} {}", live.app, live.places)
                     }
                     .as_str(),
                 ));
@@ -335,10 +337,10 @@ impl TuiApp {
                         return Ok(());
                     }
                     let title = match kind {
-                        "technique" => "Forget this technique?",
-                        "lesson" => "Forget this lesson?",
-                        "taste" => "Forget this, from your Sets?",
-                        _ => "Forget this note?",
+                        "technique" => "Forget this technique?".to_string(),
+                        "lesson" => "Forget this lesson?".to_string(),
+                        "taste" => format!("Forget this, from your {}?", crate::text::learned_sets(true)),
+                        _ => "Forget this note?".to_string(),
                     };
                     let kind = kind.to_string();
                     let id = id.to_string();
@@ -372,7 +374,10 @@ impl TuiApp {
                                         NoticeTone::Info,
                                     );
                                 } else if kind == "taste" {
-                                    app.notice(&format!("Forgot, from your Sets: {label}"), NoticeTone::Info);
+                                    app.notice(
+                                        &format!("Forgot, from your {}: {label}", crate::text::learned_sets(true)),
+                                        NoticeTone::Info,
+                                    );
                                 }
                                 Ok(())
                             }

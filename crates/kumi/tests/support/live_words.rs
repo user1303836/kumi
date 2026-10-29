@@ -19,6 +19,10 @@ pub const ALLOWED: &[(&str, &str)] = &[
     // "Set it to the whole path": the verb, in uninstall's refusals.
     ("Set KUMI_HOME", "a verb"),
     ("Set it to", "a verb"),
+    // The taste Kumi learned is from the producer's Live Sets, the only projects it learns taste from: /memory names
+    // them so outside Live.
+    ("your Live Sets", "the taste's own source"),
+    ("your own Live Sets", "the taste's own source"),
 ];
 
 /// The lines in `text` that speak Live's words, outside what's allowed.

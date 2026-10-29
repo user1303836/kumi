@@ -250,7 +250,9 @@ async fn dispatch(io: &CliIo, answers: Answers, secrets: &mut Vec<String>) -> Re
             crate::daw::work_with(crate::daw::chosen(*daw, &io.env).0.id());
             write_report(ReportIo::new(doctor_io(io, &answers))).await
         }
-        AppConfig::Export { conversation, format, out, full, raw } => {
+        AppConfig::Export { conversation, format, out, full, raw, daw } => {
+            // In the words of the DAW asked for, else the one this producer works with, as the doctor's.
+            crate::daw::work_with(crate::daw::chosen(*daw, &io.env).0.id());
             let format = match format.as_str() {
                 "html" => Format::Html,
                 "json" => Format::Json,
@@ -322,7 +324,8 @@ async fn dispatch(io: &CliIo, answers: Answers, secrets: &mut Vec<String>) -> Re
                 Ok(1)
             }
         }
-        AppConfig::Library { rebuild } => {
+        AppConfig::Library { rebuild, daw } => {
+            crate::daw::work_with(crate::daw::chosen(*daw, &io.env).0.id());
             let (signal, _guard) = interrupt_signal(io);
             let mut options = LibraryIo::new(io.out.clone(), io.env.clone());
             options.rebuild = *rebuild;

@@ -300,6 +300,18 @@ pub fn library_line(status: Option<&LibraryStatus>) -> Option<String> {
     })
 }
 
+/// The Live Sets the library learns from (their sounds, and the producer's taste): Live's own word in Live, and named
+/// whole outside it ("Live Sets"), where the word alone would be another DAW's. One (`many` false) or more.
+pub fn learned_sets(many: bool) -> String {
+    let live = kumi_types::daw::DawProfile::ABLETON.words;
+    let word = if many { live.places } else { live.place };
+    if crate::daw::current().id() == kumi_types::daw::DawId::Ableton {
+        word.to_string()
+    } else {
+        format!("{} {word}", live.app)
+    }
+}
+
 /// What Kumi's searches remember, in a line: how many settings they heard and on how many devices, and how often one
 /// remembered won the round it was tried in, of the searches that started from one. Nothing until a search has heard something, as for a
 /// library not learned yet.

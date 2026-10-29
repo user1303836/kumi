@@ -143,4 +143,59 @@ fn progress_wording_grouped_counts_and_all_phases() {
         p.phase = phase;
         assert_eq!(progress_line(&p), want);
     }
+    // Outside Live, the Sets the library learns are named whole: they're Live's.
+    kumi::daw::work_with(kumi_types::daw::DawId::Reaper);
+    p.phase = LearnPhase::Sets;
+    assert_eq!(progress_line(&p), "Live Sets: 1 of 4");
+    kumi::daw::work_with(kumi_types::daw::DawId::Ableton);
+}
+
+/// With REAPER, `kumi library` names the Live Sets it learned whole, and the taste it learned from them.
+#[tokio::test(flavor = "current_thread")]
+async fn outside_live_kumi_library_names_the_live_sets_it_learned_and_their_taste() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            kumi::daw::work_with(kumi_types::daw::DawId::Reaper);
+            let home = tempfile::tempdir().unwrap();
+            let env: Env = [
+                ("KUMI_LIBRARY_DIR".into(), home.path().join("library").display().to_string()),
+                ("KUMI_SETTINGS_FILE".into(), home.path().join("settings.json").display().to_string()),
+                ("KUMI_PROJECTS_DIR".into(), home.path().join("projects").display().to_string()),
+            ]
+            .into();
+            // What the library learned of the producer's taste, from their Live Sets.
+            put(
+                home.path().join("library/taste.json"),
+                serde_json::json!({"sets":2,"lines":[{"id":"tempo","line":"Tempo: usually 124–126 BPM"}],"at":1}).to_string(),
+            );
+            let library = create_library(LibraryOptions {
+                daws: kumi::daw::registry::libraries(),
+                dir: env["KUMI_LIBRARY_DIR"].clone(),
+                folders: Some(vec![]),
+                sources: Some(SourceOptions {
+                    home: Some(home.path().display().to_string()),
+                    platform: Some("darwin".into()),
+                    applications: Some(home.path().join("Applications").display().to_string()),
+                    ..Default::default()
+                }),
+                fork: Some(false),
+                workers: Some(0),
+                find_sets: Some(false),
+                ..Default::default()
+            });
+            let out = Rc::new(Out::default());
+            let mut io = LibraryIo::new(out.clone(), env.clone());
+            io.library = Some(library.clone());
+            assert_eq!(run_library(io.clone()).await.unwrap(), 0);
+            let text = out.0.borrow().clone();
+            assert!(text.contains("From your Live Sets (forget a line in Kumi's /memory)\n  Tempo: usually 124–126 BPM"), "{text}");
+            out.0.borrow_mut().clear();
+            io.rebuild = true;
+            assert_eq!(run_library(io).await.unwrap(), 0);
+            let text = out.0.borrow().clone();
+            assert!(text.contains("Learned 0 sounds, 0 presets and 0 Live Sets in"), "{text}");
+            library.close().await;
+            kumi::daw::work_with(kumi_types::daw::DawId::Ableton);
+        })
+        .await;
 }

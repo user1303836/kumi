@@ -130,6 +130,19 @@ macro_rules! case {
         }
     };
 }
+// `kumi export` with nothing kept says what to do in the words of the DAW asked for (--daw), else the producer's.
+case!(with_nothing_kept_kumi_export_says_so_in_the_daws_words, async {
+    let f = Fixture::new(false);
+    for (args, place) in
+        [(&["export"][..], "a Set"), (&["--daw", "reaper", "export"], "a project"), (&["--daw", "renoise", "export"], "a song")]
+    {
+        f.err.0.borrow_mut().clear();
+        assert_eq!(run(f.io(args), unused_factory()).await, 1, "{args:?}");
+        let said = f.err.0.borrow().clone();
+        assert!(said.contains(&format!("talk with Kumi about {place} first.")), "{args:?}: {said}");
+    }
+});
+
 case!(help_version_errors_and_checkout_commands, async {
     let f = Fixture::new(false);
     assert_eq!(run(f.io(&["--version"]), unused_factory()).await, 0);

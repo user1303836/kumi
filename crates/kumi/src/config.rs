@@ -90,6 +90,9 @@ pub enum AppConfig {
     },
     Library {
         rebuild: bool,
+        /// As the doctor's: the DAW whose words it says (its Live Sets named whole outside Live).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        daw: Option<DawId>,
     },
     /// `kumi export`: a kept conversation as a file.
     Export {
@@ -103,6 +106,9 @@ pub enum AppConfig {
         out: Option<String>,
         full: bool,
         raw: bool,
+        /// As the doctor's: the DAW whose words it says, with nothing kept to export.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        daw: Option<DawId>,
     },
     /// `kumi import`: a conversation saved with `kumi export --json`.
     Import {
@@ -807,7 +813,7 @@ const COMMANDS: [&str; 14] = [
 ];
 /// `kumi export [id or name | --last] [--md | --html | --json] [-o <path>] [--full] [--raw]`: which conversation (the
 /// latest without one), its format (Markdown without one), where it goes and what's in it.
-fn export_config(args: &[String]) -> Result<AppConfig, RuntimeError> {
+fn export_config(args: &[String], daw: Option<DawId>) -> Result<AppConfig, RuntimeError> {
     let usage = || RuntimeError::plain("Use: export [id or name | --last] [--md | --html | --json] [-o <path>] [--full] [--raw].");
     let (mut words, mut format, mut out, mut full, mut raw, mut last) = (vec![], None, None, false, false, false);
     let mut at = 0;
@@ -847,6 +853,7 @@ fn export_config(args: &[String]) -> Result<AppConfig, RuntimeError> {
         out,
         full,
         raw,
+        daw,
     })
 }
 /// What Kumi says about words it doesn't know, leading to its help.
@@ -914,14 +921,24 @@ pub fn load_config(args: &[String], env: &Env) -> Result<AppConfig, RuntimeError
             _ => {}
         }
     }
-    if first == Some("library") {
-        if args.len() > 2 || at(1).is_some_and(|s| s != "--rebuild") {
-            return Err(RuntimeError::plain("Use: library [--rebuild]."));
+    // The library and an export speak in the words of the DAW asked for too, as the doctor does.
+    if args.iter().any(|arg| arg == "library" || arg == "export") {
+        let mut known = env.clone();
+        if daw_env_problem(env).is_some() {
+            known.remove("KUMI_DAW");
         }
-        return Ok(AppConfig::Library { rebuild: at(1) == Some("--rebuild") });
-    }
-    if first == Some("export") {
-        return export_config(&args[1..]);
+        let (rest, daw) = take_daw(args, &known)?;
+        let at = |i: usize| rest.get(i).map(String::as_str);
+        match at(0) {
+            Some("library") => {
+                if rest.len() > 2 || at(1).is_some_and(|s| s != "--rebuild") {
+                    return Err(RuntimeError::plain("Use: library [--rebuild]."));
+                }
+                return Ok(AppConfig::Library { rebuild: at(1) == Some("--rebuild"), daw });
+            }
+            Some("export") => return export_config(&rest[1..], daw),
+            _ => {}
+        }
     }
     if first == Some("import") {
         return match &args[1..] {
