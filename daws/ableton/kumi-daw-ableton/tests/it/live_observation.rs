@@ -400,3 +400,156 @@ async fn a_turn_lists_the_bridges_tools_again_only_once_they_changed() {
         })
         .await;
 }
+
+// W5-5 (review points 3 and 4): what `@` offers of the Set comes from its model, with no read of its own. A reference
+// read at this epoch reaches the look where it is; one named before Live's references changed is found again, a track
+// by its name among the Set's and a device in its track's tree read again, or else told by its name.
+#[tokio::test(flavor = "current_thread")]
+async fn a_reference_reaches_the_look_and_one_live_renumbered_is_found_again_or_told_by_name() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            use kumi_agent::core::references::{Candidate, CandidateKind};
+            let fixture: Value = serde_json::from_str(&kumi_testkit::oracle("kumi-daw-ableton/observation-oracle.json")).unwrap();
+            let case = fixture["cases"].as_array().unwrap().iter().find(|case| case["label"] == "time-signature").unwrap();
+            let replies = case["calls"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .zip(case["responses"].as_array().unwrap())
+                .map(|(call, id)| {
+                    let key = format!("{}:{}", call["name"].as_str().unwrap(), call["args"]["kind"].as_str().unwrap_or(""));
+                    (key, fixture["values"][id.as_u64().unwrap() as usize]["reply"].clone())
+                })
+                .collect();
+            let endpoint = Rc::new(Replies::new(replies));
+            let mut options = ConnectionOptions::new(Rc::new(|_, _| {}));
+            let out = endpoint.clone();
+            options.connect = Some(Rc::new(move |_| {
+                let endpoint: Rc<dyn McpEndpoint> = out.clone();
+                async move { Ok(endpoint) }.boxed_local()
+            }));
+            options.reconnect_interval_ms = Some(3600000);
+            let connection = LiveConnection::new(options);
+            connection.start(Signal::new()).await.unwrap();
+            let remember = Remember::new(connection.clone(), None, None);
+            let observer = Observer::new(connection.clone(), remember.clone());
+            observer.observe(endpoint.as_ref(), Signal::new(), None).await.unwrap();
+            let model = observer.model();
+            let calls = endpoint.calls.borrow().len();
+            let offered = kumi_daw_ableton::pins::candidates(&model, None);
+            assert_eq!(endpoint.calls.borrow().len(), calls, "offered from the model alone");
+            assert_eq!(offered.iter().filter(|candidate| candidate.kind == CandidateKind::Track).count(), model.tracks.len());
+            let node = |candidate: &Candidate| match &candidate.reference {
+                Reference::Daw { node } => node.clone(),
+                other => panic!("not the Set's: {other:?}"),
+            };
+            let first = &model.tracks[0];
+            let track = node(&offered[0]);
+            assert_eq!((track.r#ref.as_str(), track.name.as_str()), (first.reference.as_str(), first.name.as_str()));
+            let references = |references: Vec<PinnedNode>| ObserveHints { references, ..ObserveHints::default() };
+            let told = |seen: Observation| serde_json::from_str::<Value>(&seen.context).unwrap()["references"].clone();
+
+            // Read at this epoch: where it is.
+            let seen = observer.observe(endpoint.as_ref(), Signal::new(), Some(references(vec![track.clone()]))).await.unwrap();
+            let now = told(seen);
+            assert_eq!(now[0]["said"], format!("@{}", first.name));
+            assert!(now[0].get("gone").is_none() && now[0]["ref"].as_str().is_some(), "{now}");
+
+            // Named before Live's references changed: the track found again by its name, one the Set doesn't have told by
+            // its name, and a device found again in its track's tree, read under the track's ref now.
+            let renumbered = PinnedNode { r#ref: "999:track:0".into(), track_ref: "999:track:0".into(), ..track.clone() };
+            let unknown = PinnedNode {
+                r#ref: "999:track:7".into(),
+                track_ref: "999:track:7".into(),
+                name: "Not In The Set".into(),
+                track: Some("Not In The Set".into()),
+                ..track.clone()
+            };
+            let missing = PinnedNode {
+                r#ref: "999:device:0:9".into(),
+                track_ref: "999:track:0".into(),
+                node: PinKind::Device,
+                name: "No Such Device".into(),
+                ..track.clone()
+            };
+            let seen =
+                observer.observe(endpoint.as_ref(), Signal::new(), Some(references(vec![renumbered, unknown, missing]))).await.unwrap();
+            let then = told(seen);
+            assert_eq!(then[0]["ref"], now[0]["ref"], "the same track, found by its name: {then}");
+            assert!(then[0].get("gone").is_none(), "{then}");
+            let gone = then[1]["gone"].as_str().unwrap();
+            assert!(gone.starts_with("The producer named “Not In The Set” with @, and Live's tracks changed since"), "{gone}");
+            assert!(then[2]["gone"].as_str().is_some_and(|gone| gone.contains("“No Such Device” on “")), "{then}");
+            assert!(then.as_array().unwrap().iter().all(|told| told["said"].as_str().is_some_and(|said| said.starts_with('@'))));
+            remember.cancel_timer();
+            connection.close().await.unwrap();
+        })
+        .await;
+}
+
+// #700 review: Live's refs are places, within an epoch too, so a reference is checked against this look's model. A track
+// inserted above @Bass leaves it naming Bass where Bass is now, its device too; Bass deleted, both are told by name.
+#[test]
+fn a_reference_follows_its_track_when_one_is_inserted_above_and_is_told_by_name_once_deleted() {
+    use kumi_daw_ableton::{
+        pins::{candidates, reference_context},
+        references::References,
+        set_model::SetModel,
+    };
+    let row = |value: Value| value.as_object().unwrap().clone();
+    let model = |tracks: &[(&str, &str)], devices: &[(&str, &str, &str)]| {
+        let tracks: Vec<JsonObject> = tracks.iter().map(|(at, name)| row(json!({"ref": at, "name": name}))).collect();
+        let devices: Vec<JsonObject> =
+            devices.iter().map(|(at, parent, name)| row(json!({"ref": at, "parentRef": parent, "name": name}))).collect();
+        SetModel::next(&SetModel::default(), &tracks, &devices, true)
+    };
+    let before = model(&[("1:track:0", "Drums"), ("1:track:1", "Bass")], &[("1:device:1:0", "1:track:1", "Saturator")]);
+    let offered = candidates(&before, None);
+    let node = |label: &str| match &offered.iter().find(|candidate| candidate.label == label).unwrap().reference {
+        Reference::Daw { node } => node.clone(),
+        other => panic!("not the Set's: {other:?}"),
+    };
+    let (bass, saturator) = (node("Bass"), node("Saturator"));
+    let mut book = References::default();
+    // Unchanged: where it is.
+    let told = reference_context(&bass, None, &before, &mut book);
+    assert_eq!((told["said"].clone(), told["ref"].clone()), (json!("@Bass"), json!(book.short_ref("1:track:1"))));
+    // A track inserted above Bass at the same epoch: Bass is track 2, its Saturator device 2:0, and 1:track:1 is Keys.
+    let after =
+        model(&[("1:track:0", "Drums"), ("1:track:1", "Keys"), ("1:track:2", "Bass")], &[("1:device:2:0", "1:track:2", "Saturator")]);
+    let told = reference_context(&bass, None, &after, &mut book);
+    assert_eq!(told["ref"], json!(book.short_ref("1:track:2")), "{told:?}");
+    let told = reference_context(&saturator, None, &after, &mut book);
+    assert_eq!(told["ref"], json!(book.short_ref("1:device:2:0")), "{told:?}");
+    // Bass deleted: both told by their names, with no ref to act on.
+    let deleted = model(&[("1:track:0", "Drums"), ("1:track:1", "Keys")], &[]);
+    let told = reference_context(&bass, None, &deleted, &mut book);
+    assert!(told["gone"].as_str().unwrap().starts_with("The producer named “Bass” with @, and Live's tracks changed since"), "{told:?}");
+    assert!(told.get("ref").is_none());
+    let told = reference_context(&saturator, None, &deleted, &mut book);
+    let gone = told["gone"].as_str().unwrap();
+    assert!(gone.starts_with("The producer named “Saturator” on “Bass” with @, and Live's devices changed since"), "{gone}");
+
+    // Two of one name: the second Saturator named, then the Compressor between them removed. Its ref now names the
+    // place after the first, and two Saturators fit its name: which is meant can't be told, so it's told by its name.
+    let two = model(
+        &[("1:track:0", "Bass")],
+        &[
+            ("1:device:0:0", "1:track:0", "Saturator"),
+            ("1:device:0:1", "1:track:0", "Compressor"),
+            ("1:device:0:2", "1:track:0", "Saturator"),
+        ],
+    );
+    let offered = candidates(&two, None);
+    let second = match &offered.iter().filter(|candidate| candidate.label == "Saturator").nth(1).unwrap().reference {
+        Reference::Daw { node } => node.clone(),
+        other => panic!("not the Set's: {other:?}"),
+    };
+    assert_eq!(second.r#ref, "1:device:0:2");
+    let told = reference_context(&second, None, &two, &mut book);
+    assert_eq!(told["ref"], json!(book.short_ref("1:device:0:2")), "at its ref while it's there: {told:?}");
+    let removed =
+        model(&[("1:track:0", "Bass")], &[("1:device:0:0", "1:track:0", "Saturator"), ("1:device:0:1", "1:track:0", "Saturator")]);
+    let told = reference_context(&second, None, &removed, &mut book);
+    assert!(told["gone"].as_str().is_some() && told.get("ref").is_none(), "{told:?}");
+}

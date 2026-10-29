@@ -728,6 +728,10 @@ impl Integration for Ableton {
     async fn observe(&self, signal: Signal, hints: Option<ObserveHints>) -> Result<Observation, RuntimeError> {
         self.observer.observe(self, signal, hints).await
     }
+    async fn reference_candidates(&self, _: Signal) -> Result<Vec<kumi_agent::core::references::Candidate>, RuntimeError> {
+        // From the Set's model as the last look built it: no read of its own.
+        Ok(crate::pins::candidates(&self.observer.model(), self.observer.selected_track().as_deref()))
+    }
     async fn close(&self) -> Result<(), RuntimeError> {
         let pending = self.closing.borrow().clone();
         let closing = if let Some(pending) = pending {
