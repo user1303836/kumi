@@ -28,6 +28,9 @@ const LONGEST: usize = 4;
 /// The most names [`remember`] keeps: past it, it starts again with the ones read since.
 const KEPT: usize = 4096;
 
+/// The longest a string can be, in characters, and be remembered as a name: longer ones are pages and transcripts.
+const NAME_LONGEST: usize = 256;
+
 thread_local! {
     /// Names that hide words, by what the model was shown of them; none where two different names read alike.
     static SHOWN: RefCell<HashMap<String, Option<String>>> = RefCell::new(HashMap::new());
@@ -50,13 +53,17 @@ fn tag(c: char) -> bool {
 /// `text` as the model reads it. A run of characters that draw nothing becomes [`HIDDEN`] when it has a tag in it, a
 /// second variation selector (the first, straight after a character, stays), or more than [`LONGEST`] characters; the
 /// flags tags make stay whole. The marker is written once what was taken out covers its length, so the words never grow
-/// and a cap on them still holds: a short run before that is taken out without one. Words with nothing hidden come back
-/// as they were, not copied.
+/// and a cap on them still holds: a short run before that is taken out without one. That's counted afresh after each
+/// quote, so a JSON string or a quoted name reads the same within a tool's whole result as alone, as [`remember`] keeps
+/// it. Words with nothing hidden come back as they were, not copied.
 pub fn unhidden(text: &str) -> Cow<'_, str> {
     let mut out = String::new();
     // `text` up to here is in `out`; `owed` bytes were taken out and no marker said so yet.
     let (mut copied, mut owed, mut at) = (0, 0, 0);
     while let Some(start) = text[at..].find(invisible).map(|found| at + found) {
+        if text[at..start].contains(['"', '“', '”']) {
+            owed = 0;
+        }
         let end = text[start..].find(|c: char| !invisible(c)).map_or(text.len(), |found| start + found);
         let run = &text[start..end];
         at = end;
@@ -98,8 +105,8 @@ fn flag(run: &str) -> bool {
 }
 
 /// Keeps each string in `value` (a tool's result, the observation) that hides words, by what the model is shown of it.
-/// Only one shown with [`HIDDEN`]: one whose short run was taken out without it reads as a plain name, which another
-/// thing may truly have.
+/// Only one shown with [`HIDDEN`] (one whose short run was taken out without it reads as a plain name, which another
+/// thing may truly have), and at most [`NAME_LONGEST`] characters long.
 pub fn remember(value: &Value) {
     match value {
         Value::String(text) => remember_one(text),
@@ -137,6 +144,9 @@ fn quoted(text: &str) {
 }
 
 fn keep(text: &str) {
+    if text.chars().nth(NAME_LONGEST).is_some() {
+        return;
+    }
     let Cow::Owned(shown) = unhidden(text) else { return };
     if !shown.contains(HIDDEN) {
         return;
