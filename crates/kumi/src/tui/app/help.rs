@@ -313,19 +313,25 @@ impl Overlay<TuiApp> for HelpPanel {
     /// lost.
     fn handle(&mut self, app: &TuiApp, event: InputEvent) -> Handled {
         let page = (self.shown - 1).max(1);
-        let scroll = match app.actions(Scope::Help, &event).first().copied() {
-            Some("help.close") => return Handled::Close,
-            Some("help.up") => self.scroll - 1,
-            Some("help.down") => self.scroll + 1,
-            Some("help.page-up") => self.scroll - page,
-            Some("help.page-down") => self.scroll + page,
-            Some("help.top") => 0,
-            Some("help.end") => self.most,
-            _ if matches!(event, InputEvent::Text { .. } | InputEvent::Paste { .. }) => return Handled::Pass(event),
-            _ => self.scroll,
-        };
-        self.scroll = scroll.clamp(0, self.most);
-        Handled::Kept
+        for id in app.actions(Scope::Help, &event) {
+            let scroll = match id {
+                "help.close" => return Handled::Close,
+                "help.up" => self.scroll - 1,
+                "help.down" => self.scroll + 1,
+                "help.page-up" => self.scroll - page,
+                "help.page-down" => self.scroll + page,
+                "help.top" => 0,
+                "help.end" => self.most,
+                _ => continue,
+            };
+            self.scroll = scroll.clamp(0, self.most);
+            return Handled::Kept;
+        }
+        if matches!(event, InputEvent::Text { .. } | InputEvent::Paste { .. }) {
+            Handled::Pass(event)
+        } else {
+            Handled::Kept
+        }
     }
     /// Its title, then the rows that fit from under the header down to the box. How far it has scrolled is said beside
     /// the title, so no row loses its end to it. It's read rather than chosen from, so it takes more of a wide window

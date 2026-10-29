@@ -151,3 +151,36 @@ case!(keys_json_keys_come_first_in_the_box, async {
     assert_eq!(done.await, 0);
     h.close().await;
 });
+
+case!(a_search_that_ends_on_a_command_gives_the_menu_its_keys, async {
+    let (_folder, history) = history();
+    let h = Harness::with(120, 36, Rc::new(Control::default()), |o| o.history = Some(history));
+    h.start().await;
+    h.connect();
+    h.type_text("older words\r").await;
+    h.wait_for_call("submit:older words").await;
+    h.type_text("/he").await;
+    h.wait_for("enter to choose · esc to close").await;
+    // Looking back for words nothing sent has, then ↑: the search ends with the draft, a command, and ↑ moves its menu
+    // rather than bringing back what was sent.
+    h.type_text("\x12zzz").await;
+    h.wait_until_hidden("enter to choose · esc to close").await;
+    h.type_text("\x1b[A").await;
+    h.wait_for("enter to choose · esc to close").await;
+    h.close().await;
+});
+
+case!(a_panels_key_that_doesnt_apply_lets_the_next_have_it, async {
+    let c = Rc::new(Control::default());
+    c.set("aside", json!("Up to a minute."));
+    let file = json!({ "aside.earlier": ["q"], "aside.close": ["q"] });
+    let h = Harness::with(120, 36, c, |o| o.keys = Some(Ok(file)));
+    h.start().await;
+    h.connect();
+    h.type_text("/btw how long is the tail?\r").await;
+    h.wait_for("btw · how long is the tail?").await;
+    // The only side answer has none before it, so q goes on to closing it.
+    h.type_text("q").await;
+    h.wait_until_hidden("btw ·").await;
+    h.close().await;
+});

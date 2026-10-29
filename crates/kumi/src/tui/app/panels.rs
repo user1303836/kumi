@@ -1461,29 +1461,33 @@ impl TuiApp {
     }
     fn aside_input(&self, panel: &mut AsidePanel, event: InputEvent) -> Handled {
         let AsidePanel { at, scroll } = panel;
-        match self.actions(Scope::Aside, &event).first().copied() {
-            Some("aside.close") => return Handled::Close,
-            Some("aside.up") => *scroll = (*scroll - 1).max(0),
-            Some("aside.page-up") => *scroll = (*scroll - 5).max(0),
-            Some("aside.down") => *scroll += 1,
-            Some("aside.page-down") => *scroll += 5,
-            Some("aside.earlier") if *at > 0 => {
-                *at -= 1;
-                *scroll = 0;
-            }
-            Some("aside.later") if *at + 1 < self.0.state.borrow().asides.len() => {
-                *at += 1;
-                *scroll = 0;
-            }
-            Some("aside.copy") => {
-                let answer =
-                    self.0.state.borrow().asides.get(*at).map(|a| string::trim(&a.borrow().answer).to_string()).unwrap_or_default();
-                if !answer.is_empty() {
-                    self.0.tty.write(&format!("\x1b]52;c;{}\x07", base64::engine::general_purpose::STANDARD.encode(answer)));
-                    self.notice("Copied the side answer.", NoticeTone::Info);
+        // A key's actions in turn: one that doesn't apply (←→ at the first or last answer) lets the next have it.
+        for id in self.actions(Scope::Aside, &event) {
+            match id {
+                "aside.close" => return Handled::Close,
+                "aside.up" => *scroll = (*scroll - 1).max(0),
+                "aside.page-up" => *scroll = (*scroll - 5).max(0),
+                "aside.down" => *scroll += 1,
+                "aside.page-down" => *scroll += 5,
+                "aside.earlier" if *at > 0 => {
+                    *at -= 1;
+                    *scroll = 0;
                 }
+                "aside.later" if *at + 1 < self.0.state.borrow().asides.len() => {
+                    *at += 1;
+                    *scroll = 0;
+                }
+                "aside.copy" => {
+                    let answer =
+                        self.0.state.borrow().asides.get(*at).map(|a| string::trim(&a.borrow().answer).to_string()).unwrap_or_default();
+                    if !answer.is_empty() {
+                        self.0.tty.write(&format!("\x1b]52;c;{}\x07", base64::engine::general_purpose::STANDARD.encode(answer)));
+                        self.notice("Copied the side answer.", NoticeTone::Info);
+                    }
+                }
+                _ => continue,
             }
-            _ => {}
+            break;
         }
         Handled::Kept
     }
@@ -2410,27 +2414,31 @@ impl Overlay<TuiApp> for ChatGptPanel {
             InputEvent::Paste { text } => InputEvent::Text { text },
             event => event,
         };
-        match app.actions(Scope::ChatGpt, &event).first().copied() {
-            Some("chatgpt.cancel") => return Handled::Close,
-            Some("chatgpt.copy") => {
-                let copied = if self.by_code {
-                    self.code.as_ref().map(|code| ("code", code.code.clone()))
-                } else {
-                    self.url.clone().map(|url| ("link", url))
-                };
-                if let Some((what, text)) = copied {
-                    app.copy_text(&text);
-                    app.notice(&format!("Copied the sign-in {what}."), NoticeTone::Info);
+        // A key's actions in turn: one that doesn't apply (the way it's signing in already) lets the next have it.
+        for id in app.actions(Scope::ChatGpt, &event) {
+            match id {
+                "chatgpt.cancel" => return Handled::Close,
+                "chatgpt.copy" => {
+                    let copied = if self.by_code {
+                        self.code.as_ref().map(|code| ("code", code.code.clone()))
+                    } else {
+                        self.url.clone().map(|url| ("link", url))
+                    };
+                    if let Some((what, text)) = copied {
+                        app.copy_text(&text);
+                        app.notice(&format!("Copied the sign-in {what}."), NoticeTone::Info);
+                    }
                 }
+                "chatgpt.by-code" | "chatgpt.by-browser" if self.by_code == (id == "chatgpt.by-browser") => {
+                    // No browser here after all, or no code (over SSH, where the browser's link can still be forwarded):
+                    // the other way, with what was to follow the sign-in, in this one's place.
+                    let (then, by_code) = (self.then.take(), !self.by_code);
+                    self.stop(app);
+                    app.sign_in_chatgpt(by_code, then);
+                }
+                _ => continue,
             }
-            Some(other @ ("chatgpt.by-code" | "chatgpt.by-browser")) if self.by_code == (other == "chatgpt.by-browser") => {
-                // No browser here after all, or no code (over SSH, where the browser's link can still be forwarded): the
-                // other way, with what was to follow the sign-in, in this one's place.
-                let (then, by_code) = (self.then.take(), !self.by_code);
-                self.stop(app);
-                app.sign_in_chatgpt(by_code, then);
-            }
-            _ => {}
+            break;
         }
         Handled::Kept
     }
@@ -2491,24 +2499,28 @@ impl Overlay<TuiApp> for KeyPanel {
     fn handle(&mut self, app: &TuiApp, event: InputEvent) -> Handled {
         match &event {
             InputEvent::Key { .. } => {
-                let action = app.actions(Scope::KeyBox, &event).first().copied();
-                if action == Some("key.cancel") {
-                    return Handled::Close;
-                }
-                if !self.checking && action == Some("key.erase") {
-                    let count = self.secret.encode_utf16().count().saturating_sub(1);
-                    self.secret = head(&self.secret, count);
-                } else if !self.checking && action == Some("key.clear") {
-                    self.secret.clear();
-                } else if !self.checking && action == Some("key.check") && !self.secret.is_empty() {
-                    // The check holds on to this panel: the top one, as only the top one takes keys.
-                    let me = app.0.state.borrow().overlays.top();
-                    if let Some(me) = me {
-                        app.task(move |app| async move {
-                            app.submit_key(me).await;
-                            Ok(())
-                        });
+                // A key's actions in turn: while the key is being checked, only closing applies.
+                for id in app.actions(Scope::KeyBox, &event) {
+                    match id {
+                        "key.cancel" => return Handled::Close,
+                        "key.erase" if !self.checking => {
+                            let count = self.secret.encode_utf16().count().saturating_sub(1);
+                            self.secret = head(&self.secret, count);
+                        }
+                        "key.clear" if !self.checking => self.secret.clear(),
+                        "key.check" if !self.checking && !self.secret.is_empty() => {
+                            // The check holds on to this panel: the top one, as only the top one takes keys.
+                            let me = app.0.state.borrow().overlays.top();
+                            if let Some(me) = me {
+                                app.task(move |app| async move {
+                                    app.submit_key(me).await;
+                                    Ok(())
+                                });
+                            }
+                        }
+                        _ => continue,
                     }
+                    break;
                 }
             }
             InputEvent::Text { text } | InputEvent::Paste { text } if !self.checking => {

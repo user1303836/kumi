@@ -486,25 +486,29 @@ impl TuiApp {
     fn job_panel_input(&self, panel: &mut JobPanel, event: InputEvent) -> Handled {
         let JobPanel { id, scroll } = panel;
         let id = *id;
-        match self.actions(Scope::Job, &event).first().copied() {
-            Some("job.close") => return Handled::Close,
-            Some("job.up") => *scroll = (*scroll - 1).max(0),
-            Some("job.page-up") => *scroll = (*scroll - 5).max(0),
-            Some("job.down") => *scroll += 1,
-            Some("job.page-down") => *scroll += 5,
-            Some("job.stop") => self.stop_job(id),
-            Some("job.again") if self.session().jobs().iter().any(|s| s.id == id && s.state.ended()) => {
-                self.run_job_again(id);
-                return Handled::Close;
-            }
-            Some("job.copy") => {
-                let report = self.session().job(id).and_then(|detail| detail.report).unwrap_or_default();
-                if !report.is_empty() {
-                    self.0.tty.write(&format!("\x1b]52;c;{}\x07", base64::engine::general_purpose::STANDARD.encode(report)));
-                    self.notice(&format!("Copied job {id}'s report."), NoticeTone::Info);
+        // A key's actions in turn: one that doesn't apply (running again a job that hasn't ended) lets the next have it.
+        for action in self.actions(Scope::Job, &event) {
+            match action {
+                "job.close" => return Handled::Close,
+                "job.up" => *scroll = (*scroll - 1).max(0),
+                "job.page-up" => *scroll = (*scroll - 5).max(0),
+                "job.down" => *scroll += 1,
+                "job.page-down" => *scroll += 5,
+                "job.stop" => self.stop_job(id),
+                "job.again" if self.session().jobs().iter().any(|s| s.id == id && s.state.ended()) => {
+                    self.run_job_again(id);
+                    return Handled::Close;
                 }
+                "job.copy" => {
+                    let report = self.session().job(id).and_then(|detail| detail.report).unwrap_or_default();
+                    if !report.is_empty() {
+                        self.0.tty.write(&format!("\x1b]52;c;{}\x07", base64::engine::general_purpose::STANDARD.encode(report)));
+                        self.notice(&format!("Copied job {id}'s report."), NoticeTone::Info);
+                    }
+                }
+                _ => continue,
             }
-            _ => {}
+            break;
         }
         Handled::Kept
     }

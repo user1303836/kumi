@@ -355,6 +355,10 @@ impl TuiApp {
                 return;
             }
             self.search_end(true);
+            // The box's words may make a command now: the menu has the key first, as it did.
+            if !self.menu().is_empty() && self.act_in(Scope::Menu, &chord) {
+                return;
+            }
         }
         if self.0.tabs.inside() {
             if self.tabs_key(&chord) {
@@ -362,8 +366,9 @@ impl TuiApp {
             }
             self.0.tabs.leave();
         }
+        // The tree's own keys while it shows; the pane's (ctrl+\, shift+tab) either way, as they came first.
         if self.0.state.borrow().tree_cursor.is_some() {
-            if self.tree_shown().is_some() && self.act_in(Scope::Tree, &chord) {
+            if self.act_in(Scope::Tree, &chord) {
                 return;
             }
             self.0.state.borrow_mut().tree_cursor = None;
@@ -499,7 +504,7 @@ impl TuiApp {
                         Some((cursor as i32 + if id == "tree.up" { -1 } else { 1 }).clamp(0, rows.len() as i32 - 1) as usize);
                 }
             }
-            "tree.leave" => self.0.state.borrow_mut().tree_cursor = None,
+            "tree.leave" if self.tree_shown().is_some() => self.0.state.borrow_mut().tree_cursor = None,
             // Tab while Kumi works sends the box's words after the answer; otherwise it goes into FOCUS's tree.
             "composer.send-after" => {
                 if !self.busy() {
