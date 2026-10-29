@@ -912,7 +912,8 @@ pub enum SessionEvent {
     },
     /// A kept conversation continues (`lines` are its recent exchanges): the Set's own, one chosen in
     /// /conversations (`chosen`), or one this model couldn't continue (`unreadable`, shown only).
-    /// `changes` are its HISTORY, which Kumi can't undo any more.
+    /// `changes` are its HISTORY, which Kumi can't undo any more. `replay` is what its log holds of its last requests,
+    /// to show them again as they happened; without one (kept before there were logs), the screen shows `lines`.
     Resumed {
         saved_at: i64,
         lines: Vec<TranscriptLine>,
@@ -922,6 +923,8 @@ pub enum SessionEvent {
         chosen: Option<bool>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         unreadable: Option<bool>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        replay: Option<crate::core::session_log::Replay>,
     },
     /// The conversation the producer chose belongs to another Set: open it there, carry on here in a copy, or leave it.
     /// `ask` None: the question is no longer open.
