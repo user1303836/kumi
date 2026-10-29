@@ -505,6 +505,9 @@ impl PlainTerminal {
         self.done()
     }
     fn spawn_submit(&self, text: String) {
+        // Every line is cleaned, typed or piped: a person's paste can arrive through a pipe too (`pbpaste | kumi`, or
+        // typing at a terminal while the output goes to `tee`).
+        let text = sanitize_text(&text, &[]);
         // A readline line listener starts its async handler immediately, before EOF can close it.
         let this = self.clone();
         let mut task = Box::pin(async move {
@@ -540,7 +543,8 @@ impl PlainTerminal {
                     self.edit(|p| p.editor.delete());
                 }
             }
-            InputEvent::Text { text } | InputEvent::Paste { text } => self.edit(|p| p.editor.insert(&text)),
+            // Cleaned as the full-screen composer cleans it, so no terminal control in a paste is echoed back.
+            InputEvent::Text { text } | InputEvent::Paste { text } => self.edit(|p| p.editor.insert(&sanitize_text(&text, &[]))),
             InputEvent::Key { name, mods, .. } => self.edit(|p| match (name.as_str(), mods.ctrl, mods.alt) {
                 ("left", false, false) => p.editor.left(),
                 ("right", false, false) => p.editor.right(),

@@ -1645,7 +1645,7 @@ fn cleaned_value(value: &Value) -> Value {
 /// Whether a character draws nothing and moves nothing a reader sees, but can hide words or turn them around: format
 /// characters (zero-width spaces and joiners, direction marks and overrides, the byte-order mark, soft hyphens), tag
 /// characters, variation selectors and the other default-ignorable code points.
-pub(crate) fn invisible(c: char) -> bool {
+pub fn invisible(c: char) -> bool {
     matches!(c,
         '\u{00AD}' | '\u{034F}' | '\u{061C}' | '\u{115F}' | '\u{1160}' | '\u{17B4}' | '\u{17B5}' | '\u{180B}'..='\u{180F}'
         | '\u{200B}'..='\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2060}'..='\u{206F}' | '\u{3164}' | '\u{FE00}'..='\u{FE0F}'

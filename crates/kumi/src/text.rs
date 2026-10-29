@@ -1,4 +1,4 @@
-use kumi_agent::core::search_memory::SearchMemoryStatus;
+use kumi_agent::core::{export::invisible, search_memory::SearchMemoryStatus};
 use kumi_common::js;
 use kumi_types::contracts::{LibraryState, LibraryStatus, WebAction, WebEvent, WebWhere};
 
@@ -19,6 +19,8 @@ pub struct StreamingText {
     secrets: Vec<String>,
     /// Each secret as a pattern: its UTF-16 units and their KMP prefix function.
     patterns: Vec<Pattern>,
+    /// The last character kept was a variation selector, so the next one in a row is dropped.
+    selector: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -67,8 +69,18 @@ impl Pattern {
     }
 }
 
+/// What takes no room on screen but still reaches the model: Unicode's default-ignorable code points (zero-width
+/// characters, direction marks, the byte-order mark, fillers, and the tag characters that can spell out instructions
+/// hidden in copied text), less the variation selectors, which have a rule of their own. Tags also make the England,
+/// Scotland and Wales flags, which become a plain black flag. None comes before U+00AD, so plain text is quick.
 fn is_invisible(character: char) -> bool {
-    matches!(character, '\u{200b}'..='\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}' | '\u{feff}')
+    character >= '\u{ad}' && invisible(character) && !is_selector(character)
+}
+
+/// Unicode's variation selectors. One after a character chooses its form (❤️, a kanji's in a name); real text never has
+/// two in a row, but a run of them behind one emoji can carry a hidden message, a byte for each.
+fn is_selector(character: char) -> bool {
+    matches!(character, '\u{180b}'..='\u{180d}' | '\u{180f}' | '\u{fe00}'..='\u{fe0f}' | '\u{e0100}'..='\u{e01ef}')
 }
 
 impl Default for StreamingText {
@@ -84,6 +96,7 @@ impl StreamingText {
             pending: String::new(),
             secrets: secrets.to_vec(),
             patterns: secrets.iter().map(|secret| Pattern::new(secret)).collect(),
+            selector: false,
         }
     }
 
@@ -149,10 +162,16 @@ impl StreamingText {
             }
             if character == '\n' {
                 clean.push(character);
+                self.selector = false;
             } else if character == '\t' {
                 clean.push_str("    ");
+                self.selector = false;
             } else if code >= 0x20 && !(0x7f..=0x9f).contains(&code) && !is_invisible(character) {
-                clean.push(character);
+                let selector = is_selector(character);
+                if !(selector && self.selector) {
+                    clean.push(character);
+                    self.selector = selector;
+                }
             }
         }
         self.pending.push_str(&clean);
@@ -179,6 +198,7 @@ impl StreamingText {
     pub fn discard(&mut self) {
         self.pending.clear();
         self.state = State::Text;
+        self.selector = false;
     }
 }
 
@@ -464,5 +484,19 @@ mod tests {
             }
         );
         assert_eq!(web_words(&WebEvent { url: None, title: String::new(), ..read.clone() }, &clean).title, "");
+    }
+
+    /// Unicode's own sets, as the regex crate's tables have them (`tui::width` measures the same default-ignorables as
+    /// taking no room), code point by code point: the lists can't drift from them.
+    #[test]
+    fn invisible_is_every_default_ignorable_but_the_variation_selectors() {
+        let ignorable = regex::Regex::new(r"^\p{Default_Ignorable_Code_Point}$").unwrap();
+        let selector = regex::Regex::new(r"^\p{Variation_Selector}$").unwrap();
+        let mut buffer = [0u8; 4];
+        for character in (0..=0x10ffff).filter_map(char::from_u32) {
+            let text = character.encode_utf8(&mut buffer);
+            assert_eq!(is_selector(character), selector.is_match(text), "U+{:04X}", character as u32);
+            assert_eq!(is_invisible(character), ignorable.is_match(text) && !is_selector(character), "U+{:04X}", character as u32);
+        }
     }
 }
