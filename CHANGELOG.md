@@ -3,6 +3,25 @@
 Kumi's releases. The Ableton bridge (`crates/ableton-mcp-server`) is versioned on its own;
 each Kumi release names the bridge it ships with.
 
+## 1.24.18 — 2026-10-29
+
+Ships with bridge 1.0.101, as 1.24.17 did.
+
+- While the model thinks, Kumi shows the headline of its reasoning and how long it has been thinking,
+  in NOW and on the answer's own row, so a long think no longer looks stuck.
+- The header shows how full the model's context is once it's past half (`contextMeter` in
+  settings.json: auto, always or off), and each answer ends with a quiet line of its time, changes and
+  tokens, or its share of your plan.
+- The mouse wheel scrolls the help, a side answer or a job's details while it's open.
+- A long paste shows as one [pasted 41 lines] chip in the input box; Kumi still gets all of it.
+- Links in Kumi's answers open with a click in iTerm2, Ghostty, WezTerm, kitty, Windows Terminal and
+  VS Code's terminal; elsewhere their address still follows the words.
+- The `/` menu finds a command by what it does (`/hist` finds `/undo`), lists the ones you used lately
+  first, and fits on a short screen.
+
+Tested with Live 12.4 on macOS. On Windows, installing and updating are tested; using Kumi with Live
+there is still new.
+
 ## 1.24.17 — 2026-10-29
 
 Ships with bridge 1.0.101, as 1.24.16 did.
