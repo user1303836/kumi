@@ -377,9 +377,33 @@ case!(kumis_turn_is_told_of_the_palette_strict_or_loose, async {
     assert!(brief.contains("It's loose: these, and each one's 5 nearest") && brief.contains("offer to add it"), "{brief}");
 });
 
+// A word in a folder above a sound's own finds nothing: a producer's home folder ("/Users/padma") is in every path. The
+// sound's own folder still counts (#682).
+case!(a_word_in_a_folder_above_a_sounds_own_finds_nothing, async {
+    let dir = tempfile::tempdir().unwrap();
+    let drums = dir.path().join("padma").join("Drums");
+    std::fs::create_dir_all(&drums).unwrap();
+    let (index, sounds) = library(&drums, 2, 0);
+    let library = Rc::new(Library { index: RefCell::new(Some(index)), ..Default::default() });
+    let (palettes, _) = palettes(dir.path(), Some(library));
+    let tool = PaletteTool::new(Rc::new(palettes));
+    let call = |input: Value| {
+        let tool = tool.clone();
+        async move {
+            serde_json::from_str::<Value>(&tool.execute(input.as_object().unwrap().clone(), Signal::new()).await.unwrap().text).unwrap()
+        }
+    };
+    call(json!({"action": "add", "paths": [sounds[0].path, sounds[1].path]})).await;
+    assert_eq!(call(json!({"action": "search", "words": "pad"})).await["sounds"], json!([]));
+    assert_eq!(call(json!({"action": "search", "words": "drums"})).await["sounds"].as_array().unwrap().len(), 2);
+});
+
 case!(the_palette_tool_lists_searches_brings_in_adds_takes_out_and_excludes, async {
     let dir = tempfile::tempdir().unwrap();
-    let (index, sounds) = library(dir.path(), 6, 4);
+    // The sounds' own folder has a name of its own, whatever letters the temporary folder above it has (#682).
+    let samples = dir.path().join("Samples");
+    std::fs::create_dir(&samples).unwrap();
+    let (index, sounds) = library(&samples, 6, 4);
     let library = Rc::new(Library { index: RefCell::new(Some(index)), ..Default::default() });
     let (palettes, _) = palettes(dir.path(), Some(library));
     let palettes = Rc::new(palettes);

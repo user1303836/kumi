@@ -55,8 +55,12 @@ impl PaletteTool {
                 if action == "search" && words.is_empty() {
                     return Err("search takes words: what its sounds have in their name, class or folder".into());
                 }
+                // A sound's own folder, not every folder above it: a word in the home folder's name ("/Users/padma")
+                // would find every sound.
                 let has = |file: &&PaletteFile| {
-                    let text = format!("{} {} {}", file.name, file.class.as_deref().unwrap_or_default(), file.path).to_lowercase();
+                    let folder = std::path::Path::new(&file.path).parent().and_then(|folder| folder.file_name()).unwrap_or_default();
+                    let text =
+                        format!("{} {} {}", file.name, file.class.as_deref().unwrap_or_default(), folder.to_string_lossy()).to_lowercase();
                     words.iter().all(|word| text.contains(word.as_str()))
                 };
                 let found: Vec<&PaletteFile> = view.files.iter().filter(has).collect();
