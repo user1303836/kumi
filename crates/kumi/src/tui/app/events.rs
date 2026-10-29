@@ -74,6 +74,10 @@ impl TuiApp {
                     self.notice(&format!("{reason}; carrying on with {name} (/model to change)."), NoticeTone::Info);
                 }
             }
+            // An Idle while a turn asked for isn't answered yet waits for its answer (`turn_answered`). A session on a thread
+            // of its own can send one from before it had the request after the request went, which would end the new turn
+            // before it began.
+            SessionEvent::State { state: TurnState::Idle } if self.idle_waits() => {}
             SessionEvent::State { state: turn } => {
                 {
                     let mut state = self.0.state.borrow_mut();
@@ -1105,6 +1109,23 @@ impl TuiApp {
             self.steer_held();
         }
         self.0.scheduler.request();
+    }
+    /// Whether an Idle waits for the answer to a turn asked for, noting that one did.
+    fn idle_waits(&self) -> bool {
+        let mut state = self.0.state.borrow_mut();
+        state.idle_held |= state.turns_asked > 0;
+        state.turns_asked > 0
+    }
+    /// A turn asked for is answered: an Idle that waited for it ends the turn now, as it would have, when the turn ran.
+    pub(super) fn turn_answered(&self, ran: bool) {
+        let waited = {
+            let mut state = self.0.state.borrow_mut();
+            state.turns_asked = state.turns_asked.saturating_sub(1);
+            state.turns_asked == 0 && std::mem::take(&mut state.idle_held)
+        };
+        if waited && ran {
+            self.event(SessionEvent::State { state: TurnState::Idle });
+        }
     }
     fn steer_held(&self) {
         if !self.can().steer {

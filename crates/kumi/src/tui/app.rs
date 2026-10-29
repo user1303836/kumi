@@ -463,6 +463,10 @@ struct State {
     failed: bool,
     bytes: usize,
     pending_turn: bool,
+    /// Turns asked for whose answer hasn't come: an Idle meanwhile waits for it (`idle_waits`), and `idle_held` says
+    /// one did.
+    turns_asked: u32,
+    idle_held: bool,
     held: Vec<Held>,
     last_stop: Option<StopReason>,
     asides: Vec<Rc<RefCell<Aside>>>,
@@ -670,6 +674,8 @@ impl State {
             failed: false,
             bytes: 0,
             pending_turn: false,
+            turns_asked: 0,
+            idle_held: false,
             held: vec![],
             last_stop: None,
             asides: vec![],

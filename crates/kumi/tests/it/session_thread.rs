@@ -248,48 +248,14 @@ async fn the_full_screen_has_written_and_let_go_of_everything_once_it_ends() {
                     break;
                 }
             }
+            // (a request sent again while the first was taken goes to the answer under way, which may ask once more)
             for _ in 0..2500 {
-                if asked.load(Ordering::SeqCst) == 2 && screen().contains("Kept it.") {
+                if asked.load(Ordering::SeqCst) >= 2 && screen().contains("Kept it.") {
                     break;
                 }
                 tokio::time::sleep(Duration::from_millis(4)).await;
             }
-            if !screen().contains("Kept it.") {
-                let plain = regex::Regex::new(r"\x1b\[[0-9;?<>]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(\x07|\x1b\\)")
-                    .unwrap()
-                    .replace_all(&out.0.borrow(), "\n")
-                    .to_string();
-                let lines: Vec<&str> = plain.lines().map(str::trim).filter(|line| !line.is_empty()).collect();
-                let mut said: Vec<&str> = vec![];
-                for line in lines {
-                    if said.last() != Some(&line) {
-                        said.push(line);
-                    }
-                }
-                let mut logged = vec![];
-                let mut folders = vec![folder.path().join("projects")];
-                while let Some(at) = folders.pop() {
-                    for entry in std::fs::read_dir(&at).into_iter().flatten().flatten() {
-                        let path = entry.path();
-                        if path.is_dir() {
-                            folders.push(path);
-                        } else if path.extension().is_some_and(|e| e == "jsonl") {
-                            for line in std::fs::read_to_string(&path).unwrap_or_default().lines() {
-                                let v: Value = serde_json::from_str(line).unwrap_or(Value::Null);
-                                let event = &v["event"];
-                                logged.push(format!("{} {} {}", event["type"], event["state"], event["result"]["stopReason"]));
-                            }
-                        }
-                    }
-                }
-                panic!(
-                    "asked {} times:\n{}\n--- log:\n{}\n--- everything written:\n{}",
-                    asked.load(Ordering::SeqCst),
-                    screen(),
-                    logged.join("\n"),
-                    said.join("\n")
-                );
-            }
+            assert!(screen().contains("Kept it."), "asked {} times:\n{}", asked.load(Ordering::SeqCst), screen());
             input.write("\x03\x03");
             let code = tokio::time::timeout(Duration::from_secs(30), running).await.expect("Kumi ends").unwrap();
             assert_eq!(code, 0, "{}\nstderr: {}", screen(), err.0.borrow());

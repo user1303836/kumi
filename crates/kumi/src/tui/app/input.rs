@@ -1481,10 +1481,12 @@ impl TuiApp {
             }
             state.activity = "thinking".into();
             state.pending_turn = true;
+            state.turns_asked += 1;
             (state.pinned.as_ref().map(|p| p.pin.clone()), std::mem::take(&mut state.attachments))
         };
         self.0.scheduler.request();
         let sent = self.session().op(op::Submit { input: raw.into(), pinned, attachments: attachments.clone(), references }).await;
+        self.turn_answered(sent.is_ok());
         if let Err(error) = sent {
             // Files that didn't go stay, to change or send again.
             let mut state = self.0.state.borrow_mut();

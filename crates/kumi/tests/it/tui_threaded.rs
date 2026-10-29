@@ -240,3 +240,62 @@ async fn ctrl_b_twice_before_its_answer_moves_once() {
         })
         .await;
 }
+
+/// A session that, as it takes a request, first says how an operation before it ended (Running, then Idle), then
+/// answers. On a thread of its own, an earlier operation's end can reach the screen after the request went.
+struct Late {
+    emit: Rc<dyn Fn(SessionEvent)>,
+    status: RefCell<SessionStatus>,
+}
+
+#[async_trait(?Send)]
+impl SessionController for Late {
+    async fn start(&self) -> Result<(), RuntimeError> {
+        Ok(())
+    }
+    async fn submit(&self, _: &str, _: Option<PinnedNode>) -> Result<(), RuntimeError> {
+        (self.emit)(SessionEvent::State { state: TurnState::Running });
+        (self.emit)(SessionEvent::State { state: TurnState::Idle });
+        self.status.borrow_mut().state = TurnState::Running;
+        (self.emit)(SessionEvent::State { state: TurnState::Running });
+        (self.emit)(SessionEvent::Kernel(KernelEvent::Text { text: "Lowered the bass by 3 dB.".into() }));
+        (self.emit)(SessionEvent::TurnComplete { result: TurnResult { stop_reason: StopReason::Completed, usage: None }, elapsed_ms: 1 });
+        self.status.borrow_mut().state = TurnState::Idle;
+        (self.emit)(SessionEvent::State { state: TurnState::Idle });
+        Ok(())
+    }
+    async fn refresh(&self) -> Result<(), RuntimeError> {
+        Ok(())
+    }
+    async fn new_conversation(&self) -> Result<(), RuntimeError> {
+        Ok(())
+    }
+    async fn cancel(&self) -> Result<(), RuntimeError> {
+        Ok(())
+    }
+    async fn close(&self) -> Result<(), RuntimeError> {
+        Ok(())
+    }
+    fn status(&self) -> SessionStatus {
+        self.status.borrow().clone()
+    }
+    async fn undo(&self, _: Option<&str>) -> Result<Option<ChangeRecord>, RuntimeError> {
+        Ok(None)
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn an_answer_shows_whole_when_an_earlier_operations_end_reaches_the_screen_after_the_request() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let build: Build =
+                Box::new(|emit| async move { Ok(Built::new(Rc::new(Late { emit, status: RefCell::new(idle()) }))) }.boxed_local());
+            let h = Harness::on(120, 36, Threaded::spawn(build).await.unwrap(), |_| {});
+            h.start().await;
+            h.input.write("make the bass darker\r");
+            until("the answer", || has(&h.screen(), "Lowered the bass by 3 dB.")).await;
+            assert!(!has(&h.screen(), "stopped"), "{}", h.screen().join("\n"));
+            h.close().await;
+        })
+        .await;
+}
