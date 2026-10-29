@@ -66,6 +66,11 @@ pub(super) fn help_sections(has: HelpHas, app: &str, tabs: &[String], commands: 
         row("ctrl+l", "Draw the screen again"),
     ];
     let mut pane = vec![
+        row(
+            "ctrl+\\",
+            "Below 100 columns, open or close the drawer; at full width, put the side pane away or bring it back; below 24 \
+             rows, the same for the two-line strip",
+        ),
         (
             "shift+tab".to_string(),
             format!("Into the tabs ({}), then on to the next: ↑↓ and page up/down move, esc or tab comes back", tabs.join(", ")),
