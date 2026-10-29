@@ -743,7 +743,10 @@ async fn reads_and_looks_stay_plain_short_and_whole() {
                 time: None,
                 layout: None,
             };
-            let seen = reaper.observe(Signal::new(), Some(ObserveHints { pinned: Some(pin), continuing: None })).await.unwrap();
+            let seen = reaper
+                .observe(Signal::new(), Some(ObserveHints { pinned: Some(pin), continuing: None, ..ObserveHints::default() }))
+                .await
+                .unwrap();
             let context: Value = serde_json::from_str(&seen.context).unwrap();
             assert_eq!(context["markers"].as_array().unwrap().len(), 30);
             assert_eq!(context["moreMarkers"], "10 more markers; reaper_read kind marker pages through every one");
@@ -1183,7 +1186,7 @@ async fn a_pinned_renoise_device_keeps_naming_it_when_tracks_move_above_it() {
                 layout: Some(0),
             };
             let look = |pin: &PinnedNode| {
-                let hints = ObserveHints { pinned: Some(pin.clone()), continuing: None };
+                let hints = ObserveHints { pinned: Some(pin.clone()), continuing: None, ..ObserveHints::default() };
                 renoise.observe(Signal::new(), Some(hints))
             };
             let seen = look(&pin).await.unwrap();
@@ -1287,7 +1290,7 @@ async fn a_pin_first_seen_after_a_shift_names_what_was_pinned() {
         .run_until(async {
             let (host, eventful, renoise) = pinned_song().await;
             track_added_at_the_top(&host, &eventful);
-            let hints = ObserveHints { pinned: Some(compressor_on_bass()), continuing: None };
+            let hints = ObserveHints { pinned: Some(compressor_on_bass()), continuing: None, ..ObserveHints::default() };
             let seen = renoise.observe(Signal::new(), Some(hints)).await.unwrap();
             let pinned: Value = serde_json::from_str::<Value>(&seen.context).unwrap()["pinned"].clone();
             assert!(pinned.get("gone").is_none(), "{pinned}");
@@ -1334,7 +1337,7 @@ async fn a_pin_keeps_the_layout_of_its_own_tree_when_the_same_ref_is_read_again(
             track_added_at_the_top(&host, &eventful);
             host.answers.borrow_mut().push(("focus_body", json!({"epoch": "1", "layout": 1, "devices": []}), false));
             renoise.focus_body(&BodyRequest::Tree { track_ref: "1:track:2".into() }, Signal::new()).await.unwrap();
-            let hints = ObserveHints { pinned: Some(compressor_on_bass()), continuing: None };
+            let hints = ObserveHints { pinned: Some(compressor_on_bass()), continuing: None, ..ObserveHints::default() };
             let seen = renoise.observe(Signal::new(), Some(hints)).await.unwrap();
             let pinned: Value = serde_json::from_str::<Value>(&seen.context).unwrap()["pinned"].clone();
             seen.tools[0]
@@ -1343,6 +1346,192 @@ async fn a_pin_keeps_the_layout_of_its_own_tree_when_the_same_ref_is_read_again(
                 .unwrap();
             assert_eq!(host.asked.borrow().last().unwrap().1["parent"], "1:device:3.2", "Bass's Compressor, not Kick's device");
             assert!(pinned.get("layout").is_none(), "the model isn't told where its refs were read: {pinned}");
+        })
+        .await;
+}
+
+/// What `@` offered, by name and kind.
+fn offered_as(offered: &[kumi_agent::core::references::Candidate]) -> Vec<(&str, kumi_agent::core::references::CandidateKind)> {
+    offered.iter().map(|candidate| (candidate.label.as_str(), candidate.kind)).collect()
+}
+
+/// The node a candidate of the project names.
+fn offered_node(offered: &[kumi_agent::core::references::Candidate], at: usize) -> PinnedNode {
+    match &offered[at].reference {
+        Reference::Daw { node } => node.clone(),
+        other => panic!("not the project's: {other:?}"),
+    }
+}
+
+// W5-5: `@` in REAPER offers its tracks, the selected one first with its FX as FOCUS's tree reads them (once a look,
+// however much the producer types). A message's references reach the look in the turn's short refs, after the words
+// they were named by, and a track deleted since (one a look that lists every track no longer has) is said to be gone.
+#[tokio::test(flavor = "current_thread")]
+async fn reapers_at_offers_its_tracks_and_fx_and_a_track_named_and_deleted_since_is_gone() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            use kumi_agent::core::references::CandidateKind::{Device, Track};
+            let host = Rc::new(Host {
+                answers: RefCell::new(vec![
+                    ("status", json!({"connected": true}), false),
+                    ("snapshot", reaper_snapshot(), false),
+                    (
+                        "focus_body",
+                        json!({"nodes": [
+                            {"ref": "r:fx:{F1}", "name": "ReaComp"},
+                            {"ref": "r:fx:{C1}", "name": "Container", "container": true, "childNodes": [{"ref": "r:fx:{A}", "name": "ReaEQ"}]}
+                        ]}),
+                        false,
+                    ),
+                ]),
+                asked: RefCell::default(),
+            });
+            let reaper = create_reaper_integration(options(host.clone(), Rc::new(RefCell::new(vec![]))));
+            reaper.start(Signal::new()).await.unwrap();
+            reaper.observe(Signal::new(), None).await.unwrap();
+            let offered = reaper.reference_candidates(Signal::new()).await.unwrap();
+            assert_eq!(offered_as(&offered), [("Bass", Track), ("ReaComp", Device), ("Container", Device), ("ReaEQ", Device), ("Drums", Track)]);
+            let trees = || host.asked.borrow().iter().filter(|(tool, _)| tool == "focus_body").cloned().collect::<Vec<_>>();
+            assert_eq!(trees(), [("focus_body".to_string(), json!({"kind": "fx", "ref": BASS}))]);
+            reaper.reference_candidates(Signal::new()).await.unwrap();
+            assert_eq!(trees().len(), 1, "read once a look");
+            let eq = offered_node(&offered, 3);
+            assert_eq!(
+                (eq.track_ref.as_str(), eq.r#ref.as_str(), eq.trail.as_slice(), eq.track.as_deref()),
+                (BASS, "r:fx:{A}", &["Container".to_string()][..], Some("Bass"))
+            );
+            assert_eq!(offered[3].detail.as_deref(), Some("on Bass"));
+
+            // The message names Drums and ReaComp: both reach the look, in its short refs.
+            let hints = ObserveHints { references: vec![offered_node(&offered, 4), offered_node(&offered, 1)], ..ObserveHints::default() };
+            let seen = reaper.observe(Signal::new(), Some(hints.clone())).await.unwrap();
+            let context: Value = serde_json::from_str(&seen.context).unwrap();
+            let references = &context["references"];
+            assert_eq!((references[0]["said"].as_str(), references[0]["ref"].as_str()), (Some("@Drums"), Some("track:1")), "{references}");
+            assert_eq!((references[1]["said"].as_str(), references[1]["trackRef"].as_str()), (Some("@ReaComp"), Some("track:2")), "{references}");
+            assert!(!seen.context.contains("r:fx:") && !seen.context.contains("r:track:"), "{}", seen.context);
+
+            // Drums deleted: a look that lists every track has no Drums, so its reference is gone; ReaComp's track stays.
+            let mut without = reaper_snapshot();
+            without["tracks"] = json!([without["tracks"][1].clone()]);
+            host.answers.borrow_mut().push(("snapshot", without, false));
+            let seen = reaper.observe(Signal::new(), Some(hints)).await.unwrap();
+            let context: Value = serde_json::from_str(&seen.context).unwrap();
+            let gone = context["references"][0]["gone"].as_str().unwrap();
+            assert!(gone.starts_with("The producer named “Drums” with @, and it was deleted since"), "{gone}");
+            assert!(context["references"][1].get("gone").is_none(), "{}", context["references"][1]);
+        })
+        .await;
+}
+
+// W5-5 (review point 2): `@` in Renoise offers its tracks at the layout the look read them, the selected track's DSPs,
+// and its instruments, a list of their own. A track and a DSP named before a track was added above them still name
+// them once the message is sent: their refs are carried from that layout, as the pin's are.
+#[tokio::test(flavor = "current_thread")]
+async fn renoises_at_offers_tracks_dsps_and_instruments_and_a_reference_is_carried_as_the_pin_is() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            use kumi_agent::core::references::CandidateKind::{Device, Instrument, Track};
+            let mut song = song_at(0, &["Kick", "Bass"]);
+            song["selection"] = json!({"trackRef": "1:track:2"});
+            let instruments = json!({"epoch": "1", "items": [
+                {"ref": "1:instrument:1", "name": "808 Kit", "index": 0},
+                {"ref": "1:instrument:2", "name": "", "index": 1}
+            ]});
+            let host = Rc::new(Host {
+                answers: RefCell::new(vec![
+                    ("status", json!({"connected": true}), false),
+                    ("snapshot", song, false),
+                    (
+                        "focus_body",
+                        json!({"epoch": "1", "layout": 0, "nodes": [
+                            {"ref": "1:device:2.1", "name": "TrackVolPan"}, {"ref": "1:device:2.2", "name": "Compressor"}
+                        ]}),
+                        false,
+                    ),
+                    ("read", instruments, false),
+                ]),
+                asked: RefCell::default(),
+            });
+            let eventful = Rc::new(Eventful { host: host.clone(), listener: RefCell::default() });
+            let connect: Connect = {
+                let eventful = eventful.clone();
+                Rc::new(move |_| {
+                    let eventful = eventful.clone();
+                    async move { Ok(eventful as Rc<dyn McpEndpoint>) }.boxed_local()
+                })
+            };
+            let renoise = create_renoise_integration(OwnOptions {
+                context: IntegrationContext::new(Rc::new(|_, _| {})),
+                kumi_home: std::env::temp_dir(),
+                connect: Some(connect),
+            });
+            renoise.start(Signal::new()).await.unwrap();
+            renoise.observe(Signal::new(), None).await.unwrap();
+            let offered = renoise.reference_candidates(Signal::new()).await.unwrap();
+            // (an instrument with no name isn't offered: there's nothing to type)
+            assert_eq!(
+                offered_as(&offered),
+                [("Bass", Track), ("TrackVolPan", Device), ("Compressor", Device), ("Kick", Track), ("808 Kit", Instrument)]
+            );
+            assert_eq!(offered[4].detail.as_deref(), Some("00"), "its number as Renoise shows it");
+            assert!(host.asked.borrow().iter().any(|(tool, args)| tool == "read" && args["kind"] == "instrument"));
+            let (kick, compressor) = (offered_node(&offered, 3), offered_node(&offered, 2));
+            assert_eq!((kick.r#ref.as_str(), kick.layout), ("1:track:1", Some(0)), "Kick, where the look read it");
+            assert_eq!((compressor.r#ref.as_str(), compressor.layout), ("1:device:2.2", Some(0)), "where the tree was read");
+
+            // A track added at the top before the message is sent: Kick is track 2 now, Bass's Compressor 3.2.
+            track_added_at_the_top(&host, &eventful);
+            let hints = ObserveHints { references: vec![kick, compressor], ..ObserveHints::default() };
+            let seen = renoise.observe(Signal::new(), Some(hints.clone())).await.unwrap();
+            let context: Value = serde_json::from_str(&seen.context).unwrap();
+            let references = context["references"].clone();
+            assert_eq!((references[0]["said"].as_str(), references[1]["said"].as_str()), (Some("@Kick"), Some("@Compressor")));
+            assert!(references[0].get("gone").is_none() && references[1].get("gone").is_none(), "{references}");
+            assert!(references[0].get("layout").is_none(), "the model isn't told where its refs were read: {references}");
+            host.answers.borrow_mut().push(("read", json!({"epoch": "1", "layout": 1, "items": []}), false));
+            seen.tools[0]
+                .execute(json!({"kind": "device", "parent": references[0]["ref"]}).as_object().unwrap().clone(), Signal::new())
+                .await
+                .unwrap();
+            assert_eq!(host.asked.borrow().last().unwrap().1["parent"], "1:track:2", "Kick, now track 2");
+            seen.tools[0]
+                .execute(json!({"kind": "param", "parent": references[1]["ref"]}).as_object().unwrap().clone(), Signal::new())
+                .await
+                .unwrap();
+            assert_eq!(host.asked.borrow().last().unwrap().1["parent"], "1:device:3.2", "the Compressor on Bass, now track 3");
+
+            // Kick deleted before the next message: its reference is gone, and the Compressor's still names it.
+            let send = eventful.listener.borrow().clone().expect("Kumi listens to the host's events");
+            send(json!({"name": "tracks", "data": {"epoch": "1", "layout": 2, "gone": [2]}}).as_object().unwrap().clone());
+            host.answers.borrow_mut().push(("snapshot", song_at(2, &["New", "Bass"]), false));
+            let seen = renoise.observe(Signal::new(), Some(hints)).await.unwrap();
+            let context: Value = serde_json::from_str(&seen.context).unwrap();
+            let gone = context["references"][0]["gone"].as_str().unwrap();
+            assert!(gone.starts_with("The producer named “Kick” with @, and it was deleted since"), "{gone}");
+            assert!(context["references"][1].get("gone").is_none(), "{}", context["references"][1]);
+
+            // An instrument named is told by the name at its ref now (an instrument's ref is its place in their list,
+            // which no track shift moves): still 808 Kit there, it reaches the look; one added above it renumbers it.
+            let kit = ObserveHints { references: vec![offered_node(&offered, 4)], ..ObserveHints::default() };
+            let instruments = |names: &[&str]| {
+                let items: Vec<Value> = names
+                    .iter()
+                    .enumerate()
+                    .map(|(at, name)| json!({"ref": format!("1:instrument:{}", at + 1), "name": name, "index": at}))
+                    .collect();
+                json!({"epoch": "1", "items": items})
+            };
+            host.answers.borrow_mut().push(("read", instruments(&["808 Kit"]), false));
+            let seen = renoise.observe(Signal::new(), Some(kit.clone())).await.unwrap();
+            let told = serde_json::from_str::<Value>(&seen.context).unwrap()["references"][0].clone();
+            assert!(told.get("gone").is_none() && told["said"] == "@808 Kit", "{told}");
+            host.answers.borrow_mut().push(("read", instruments(&["New Synth", "808 Kit"]), false));
+            let seen = renoise.observe(Signal::new(), Some(kit)).await.unwrap();
+            let told = serde_json::from_str::<Value>(&seen.context).unwrap()["references"][0].clone();
+            let gone = told["gone"].as_str().unwrap();
+            assert!(gone.starts_with("The producer named “808 Kit” with @, and Renoise has renumbered its instruments since"), "{gone}");
+            assert!(told.get("ref").is_none(), "no ref that names another: {told}");
         })
         .await;
 }

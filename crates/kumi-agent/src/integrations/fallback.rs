@@ -63,6 +63,9 @@ impl Integration for FallbackIntegration {
     async fn observe(&self, signal: Signal, hints: Option<ObserveHints>) -> Result<Observation, RuntimeError> {
         self.current().observe(signal, hints).await
     }
+    async fn reference_candidates(&self, signal: Signal) -> Result<Vec<crate::core::references::Candidate>, RuntimeError> {
+        self.current().reference_candidates(signal).await
+    }
     async fn close(&self) -> Result<(), RuntimeError> {
         self.current().close().await
     }

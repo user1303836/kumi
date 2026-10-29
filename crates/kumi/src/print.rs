@@ -175,7 +175,12 @@ impl Terminal for Print {
             let code = match inner.instant(&request).await {
                 Some(code) => code,
                 None => {
-                    let asked = inner.unless_stopped(inner.session.op(op::Submit { input: request, pinned: None, attachments: vec![] }));
+                    let asked = inner.unless_stopped(inner.session.op(op::Submit {
+                        input: request,
+                        pinned: None,
+                        attachments: vec![],
+                        references: vec![],
+                    }));
                     let asked = asked.await;
                     // An answer that failed or was left part way ends its words too (one that came in full ended them at
                     // turn-complete).

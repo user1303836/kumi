@@ -148,6 +148,7 @@ async fn connected_primary_forwards_focus_hints_and_optional_views() {
             .unwrap(),
         ),
         continuing: None,
+        ..ObserveHints::default()
     };
     wrapped.observe(Signal::new(), Some(hints.clone())).await.unwrap();
     assert_eq!(*primary.hints.borrow(), Some(hints));

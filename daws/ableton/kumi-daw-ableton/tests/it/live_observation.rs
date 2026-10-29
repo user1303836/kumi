@@ -163,7 +163,7 @@ async fn observation_context_dispatches_and_authority_match_source() {
                 for(key,cell) in [("reconnected",&connection.reconnected),("lost",&connection.lost),("available",&connection.available)]{if let Some(v)=config[key].as_bool(){cell.set(v)}}
                 for change in config["changes"].as_array().into_iter().flatten(){let record:ChangeRecord=serde_json::from_value(change["record"].clone()).unwrap();endpoint.changes.borrow_mut().insert(record.id.clone(),ObservedChange{record,within:change["within"].as_str().is_some_and(|s|!s.is_empty())});}
                 let signal=Signal::new();if config["abort"]==true{signal.cancel();}
-                let hints=config.get("hints").map(|h|ObserveHints{pinned:h.get("pinned").map(|v|serde_json::from_value(v.clone()).unwrap()),continuing:h["continuing"].as_bool()});
+                let hints=config.get("hints").map(|h|ObserveHints{pinned:h.get("pinned").map(|v|serde_json::from_value(v.clone()).unwrap()),continuing:h["continuing"].as_bool(),..ObserveHints::default()});
                 let value=match observer.observe(endpoint.as_ref(),signal,hints).await{Ok(v)=>{
                     // The Set model is built from the same rows: the tracks the observation names, in order (a row
                     // without a ref can't be found again, so the model leaves it out).

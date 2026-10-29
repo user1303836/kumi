@@ -4,7 +4,12 @@ mod fixture;
 use async_trait::async_trait;
 use futures::{future::LocalBoxFuture, FutureExt};
 use kumi_agent::{
-    core::{contracts::*, conversations::create_conversation_store, session::*},
+    core::{
+        contracts::*,
+        conversations::create_conversation_store,
+        references::{Candidate, CandidateKind},
+        session::*,
+    },
     kernel::budget::{transcript_of, OBSERVATION_MARKER},
 };
 use kumi_common::abort::Signal;
@@ -72,6 +77,11 @@ struct Record {
     plain_words: Cell<bool>,
     /// The integration can't open places (REAPER's and Renoise's).
     cant_open: Cell<bool>,
+    /// What each look was told besides its signal, in order.
+    hints: RefCell<Vec<Option<ObserveHints>>>,
+    /// What `@` offers from the project, and how often it was asked.
+    offered: RefCell<Vec<Candidate>>,
+    offers: Cell<usize>,
 }
 struct TestKernel {
     record: Rc<Record>,
@@ -164,8 +174,9 @@ impl Integration for TestIntegration {
         (self.listener)(ConnectionState::Connected, None);
         Ok(())
     }
-    async fn observe(&self, signal: Signal, _: Option<ObserveHints>) -> Result<Observation, RuntimeError> {
+    async fn observe(&self, signal: Signal, hints: Option<ObserveHints>) -> Result<Observation, RuntimeError> {
         self.record.observations.set(self.record.observations.get() + 1);
+        self.record.hints.borrow_mut().push(hints);
         if self.record.observe_holds.get() {
             signal.cancelled().await;
             return Err(RuntimeError::Aborted);
@@ -174,6 +185,10 @@ impl Integration for TestIntegration {
             return Err(RuntimeError::plain("secret-token-must-not-escape"));
         }
         Ok(self.observation.borrow().clone())
+    }
+    async fn reference_candidates(&self, _: Signal) -> Result<Vec<Candidate>, RuntimeError> {
+        self.record.offers.set(self.record.offers.get() + 1);
+        Ok(self.record.offered.borrow().clone())
     }
     fn steered(&self) {
         self.record.live_steered.set(self.record.live_steered.get() + 1);
@@ -4844,4 +4859,70 @@ local_test!(a_copy_with_nothing_kept_yet_forks_and_starts_afresh_as_the_conversa
     assert!(h.notice("New conversation."));
     assert!(!h.notice("The last one is kept"));
     h.session.close().await.unwrap();
+});
+
+/// A track as the project's integration offers it to `@`.
+fn offered(name: &str) -> Candidate {
+    Candidate { label: name.into(), kind: CandidateKind::Track, detail: None, reference: Reference::Daw { node: named_track(name) } }
+}
+
+fn named_track(name: &str) -> PinnedNode {
+    PinnedNode {
+        track_ref: format!("1:track:{name}"),
+        r#ref: format!("1:track:{name}"),
+        node: PinKind::Track,
+        name: name.into(),
+        trail: vec![],
+        siblings: vec![],
+        track: Some(name.into()),
+        live: None,
+        time: None,
+        layout: Some(3),
+    }
+}
+
+// W5-5: a message that names things with @ sends the project's to the look, in the message's order, and puts the
+// library's in the turn's context beside the project's; one that names nothing is sent as it always was.
+local_test!(a_message_naming_things_with_at_sends_the_projects_to_the_look_and_the_librarys_with_it, {
+    let h = harness(None, |_| {});
+    h.observation.borrow_mut().context = json!({"daw": "Fixture", "references": [{"said": "@Drums", "ref": "track:1"}]}).to_string();
+    h.session.start().await.unwrap();
+    let (drums, hall) = (named_track("Drums"), named_track("Big Hall"));
+    let references = vec![
+        Reference::Daw { node: drums.clone() },
+        Reference::Technique { id: "t1".into(), name: "Pump".into() },
+        Reference::Daw { node: hall.clone() },
+    ];
+    h.session.submit_with_references("send @Drums to @Big Hall like @Pump", None, vec![], references).await.unwrap();
+    let hints = h.record.hints.borrow().last().cloned().flatten().expect("the look is told what the message names");
+    assert_eq!((hints.references, hints.pinned), (vec![drums, hall], None));
+    let sent = h.record.calls.borrow().last().unwrap().clone();
+    let observed = sent.split(OBSERVATION_MARKER).nth(1).unwrap().trim_start_matches('\n');
+    let context: Value = serde_json::from_str(observed.split("\n</current_observation_untrusted>").next().unwrap()).unwrap();
+    // (no technique store here: a technique is told as it was named)
+    assert_eq!(context["references"], json!([{"said": "@Drums", "ref": "track:1"}, {"said": "@Pump", "technique": "Pump", "id": "t1"}]));
+    assert!(sent.starts_with("send @Drums to @Big Hall like @Pump"), "{sent}");
+    h.session.submit("make it louder", None).await.unwrap();
+    assert_eq!(h.record.hints.borrow().last().cloned().flatten(), None);
+    let sent = h.record.calls.borrow().last().unwrap().clone();
+    assert!(sent.contains(&h.observation.borrow().context), "the look as the integration gave it: {sent}");
+});
+
+// W5-5: what @ offers is read as its list opens and kept while the producer types, then read again after the next look;
+// through the fallback the app wraps an integration in too.
+local_test!(what_at_offers_is_read_as_its_list_opens_and_again_after_a_look, {
+    for wrapped in [false, true] {
+        let h = harness(None, |_| {});
+        h.record.wrapped.set(wrapped);
+        *h.record.offered.borrow_mut() = vec![offered("Drums"), offered("Bass")];
+        h.session.start().await.unwrap();
+        let labels = |found: Vec<Candidate>| found.into_iter().map(|candidate| candidate.label).collect::<Vec<_>>();
+        assert_eq!(labels(h.session.references("", 0).await.unwrap()), ["Drums", "Bass"], "wrapped: {wrapped}");
+        assert_eq!(labels(h.session.references("ba", 50).await.unwrap()), ["Bass"]);
+        assert_eq!(h.record.offers.get(), 1, "typing asks the integration nothing");
+        h.session.submit("hello", None).await.unwrap();
+        h.record.offered.borrow_mut().push(offered("Bass 2"));
+        assert_eq!(labels(h.session.references("ba", 50).await.unwrap()), ["Bass", "Bass 2"]);
+        assert_eq!(h.record.offers.get(), 2, "read again after the look");
+    }
 });

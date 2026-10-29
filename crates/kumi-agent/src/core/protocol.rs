@@ -222,7 +222,12 @@ requests! {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         pinned: Option<PinnedNode>,
         attachments: Vec<Attachment>,
+        /// What the message names with `@`, in the order it names them.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        references: Vec<Reference>,
     } -> ();
+    /// What the producer can name with `@`, best first for `query` (what they've typed after it), at most `limit`.
+    References { query: String, limit: u32 } -> Vec<crate::core::references::Candidate>;
     /// More from the producer for the answer under way, entering it at its next step (a "steer" event says when):
     /// false when no answer is at a point to take it.
     Steer { text: String } -> bool;
@@ -486,11 +491,15 @@ impl InProcess {
         let session = &self.session;
         Ok(match op {
             Op::Start(op::Start {}) => Reply::Start(session.start().await?),
-            Op::Submit(op::Submit { input, pinned, attachments }) => Reply::Submit(if attachments.is_empty() {
+            // Only a message with references takes the controller's way for them, so a session's calls stay as they were.
+            Op::Submit(op::Submit { input, pinned, attachments, references }) => Reply::Submit(if !references.is_empty() {
+                session.submit_with_references(&input, pinned, attachments, references).await?
+            } else if attachments.is_empty() {
                 session.submit(&input, pinned).await?
             } else {
                 session.submit_with(&input, pinned, attachments).await?
             }),
+            Op::References(op::References { query, limit }) => Reply::References(session.references(&query, limit).await?),
             Op::Steer(op::Steer { text }) => Reply::Steer(session.steer(&text)),
             Op::Aside(op::Aside { id, question }) => {
                 // A stop that came first left its signal stopped: the aside ends at once.

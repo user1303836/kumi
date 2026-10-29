@@ -209,6 +209,7 @@ impl TuiApp {
                     PinKind::Clip | PinKind::Selection | PinKind::ClipSlot => IconKind::MidiClip,
                     PinKind::Chain => IconKind::Chain,
                     PinKind::Device => IconKind::Device,
+                    PinKind::Instrument => IconKind::Instrument,
                 };
                 let row = pin.r#ref.clone();
                 self.0.state.borrow_mut().pinned = Some(Pin { pin, kind, row });

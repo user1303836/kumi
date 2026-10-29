@@ -36,6 +36,52 @@
     "attachments": []
   },
   {
+    "type": "submit",
+    "input": "send @Drums to @Big Hall like @Kick 808.wav, from @Warm Pads with @Sidechain pump",
+    "attachments": [],
+    "references": [
+      {
+        "kind": "daw",
+        "node": {
+          "trackRef": "7:track:0",
+          "ref": "7:device:0:0:0:0",
+          "node": "device",
+          "name": "Simpler",
+          "trail": [
+            "Drum Rack",
+            "Kick"
+          ],
+          "siblings": [
+            "Saturator",
+            "EQ Eight"
+          ],
+          "track": "Drums",
+          "live": true
+        }
+      },
+      {
+        "kind": "sample",
+        "path": "/Users/me/Samples/Kick 808.wav",
+        "name": "Kick 808.wav"
+      },
+      {
+        "kind": "palette",
+        "id": "p1",
+        "name": "Warm Pads"
+      },
+      {
+        "kind": "technique",
+        "id": "t1",
+        "name": "Sidechain pump"
+      }
+    ]
+  },
+  {
+    "type": "references",
+    "query": "dru",
+    "limit": 50
+  },
+  {
     "type": "steer",
     "text": "and leave the snare"
   },

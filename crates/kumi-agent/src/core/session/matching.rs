@@ -165,6 +165,7 @@ impl Session {
         text: String,
         pinned: Option<PinnedNode>,
         pictures: Vec<Picture>,
+        references: Vec<Reference>,
     ) -> Result<Option<TurnResult>, RuntimeError> {
         // A /loop that matches a sound to a reference is the knob search: candidates built once, then knob settings
         // tried by the hundred, the model coming back for structural leaps. /loop on its own picks a paused one up.
@@ -211,7 +212,20 @@ impl Session {
             }
         }
         let _hold = looping.as_ref().map(|run| LoopHold { session: self.clone(), run: run.clone() });
-        let snapshot = self.observe(&op, pinned, false).await?;
+        // What the message names with `@`: the project's things are checked as the look reads the project, the
+        // library's are read here.
+        let (mut in_project, mut in_library) = (vec![], vec![]);
+        for reference in references {
+            match reference {
+                Reference::Daw { node } => in_project.push(node),
+                reference => in_library.push(reference),
+            }
+        }
+        let mut snapshot = self.observe_naming(&op, pinned, in_project, false).await?;
+        if !in_library.is_empty() {
+            let named = self.library_references(&in_library).await;
+            snapshot.context = with_references(&snapshot.context, named);
+        }
         self.assert_current(&op)?;
         let note = match &self.0.learned {
             Some(l) => {
