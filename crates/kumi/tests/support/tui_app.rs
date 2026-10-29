@@ -774,6 +774,13 @@ impl Harness {
         let _done = self.app.run();
         delay(5).await;
     }
+    /// Where the terminal's cursor is left once the screen is drawn, as (column, row) from 0: where an input method
+    /// opens (Japanese, Chinese). None while the frame hides it.
+    pub fn cursor(&self) -> Option<(i32, i32)> {
+        self.screen();
+        let vt = self.vt.borrow();
+        vt.cursor_visible.then_some((vt.x, vt.y))
+    }
     pub fn screen(&self) -> Vec<String> {
         self.app.flush();
         let written = self.output.text.borrow();
