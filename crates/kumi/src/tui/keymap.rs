@@ -471,6 +471,8 @@ fn held(chord: &Chord, key: &Chord, also: Modifiers) -> bool {
 pub struct Keymap {
     /// In the order they're tried: keys.json's first, then the defaults in [`ACTIONS`] order.
     bindings: Vec<Binding>,
+    /// The actions keys.json gives keys of its own (or none).
+    rebound: Vec<&'static str>,
 }
 
 impl Keymap {
@@ -585,7 +587,7 @@ impl Keymap {
                 ));
             }
         }
-        (Keymap { bindings }, said)
+        (Keymap { bindings, rebound }, said)
     }
 
     /// The actions `chord` is in `scope`, in the order they're tried.
@@ -612,6 +614,11 @@ impl Keymap {
                 && matches!(binding.keys.as_slice(), [one, two] if held(first, one, binding.also) && held(second, two, binding.also))
         });
         binding.map(|binding| binding.id)
+    }
+
+    /// Whether keys.json gives action `id` keys of its own, or none.
+    pub fn rebound(&self, id: &str) -> bool {
+        self.rebound.contains(&id)
     }
 
     /// The keys an action is bound to, each as it's pressed (one key, or two one after another), in the order they were
