@@ -182,39 +182,6 @@ impl TuiApp {
                     }
                 }
             }
-            Panel::Job { id, scroll } => match self.session().job(*id) {
-                None => lines.push(Line::new(format!("Job {id} is gone."), st::FAINT)),
-                Some(detail) => {
-                    let rows = self.job_lines(&detail, inner);
-                    let mut rows = rows.into_iter();
-                    if let Some((spans, right)) = rows.next() {
-                        let mut title = Line::new("", st::TITLE);
-                        title.spans = Some(spans);
-                        title.right = right;
-                        lines.push(title);
-                    }
-                    let body: Vec<_> = rows.collect();
-                    let room = (space - 4).clamp(3, 18);
-                    *scroll = (*scroll).min(body.len() as i32 - room).max(0);
-                    let shown = &body[*scroll as usize..(*scroll as usize + room as usize).min(body.len())];
-                    for (index, (spans, right)) in shown.iter().enumerate() {
-                        let more = if index == 0 && *scroll > 0 {
-                            Some(format!("↑ {} more", *scroll))
-                        } else if index == shown.len() - 1 && *scroll + room < body.len() as i32 {
-                            Some(format!("↓ {} more", body.len() as i32 - *scroll - room))
-                        } else {
-                            None
-                        };
-                        let mut line = Line::new("", st::TEXT);
-                        line.spans = Some(spans.clone());
-                        line.right = more.map(|s| sp(s, st::FAINT)).or_else(|| right.clone());
-                        lines.push(line);
-                    }
-                    if detail.status.state == kumi_agent::core::jobs::JobState::Running {
-                        self.0.scheduler.request_animation();
-                    }
-                }
-            },
             Panel::Key { provider, secret, checking, status, .. } => {
                 let info = provider.row();
                 lines.push(Line::new(format!("Sign in to {}", info.name), st::TITLE));
@@ -330,7 +297,6 @@ pub(super) fn panel_hint(panel: &Panel) -> String {
             })
         }
         Panel::Btw { .. } => "↑↓ to scroll · c copies · esc to close".into(),
-        Panel::Job { .. } => "↑↓ to scroll · x stops it · r runs it again · c copies · esc to close".into(),
         Panel::Key { .. } => "enter to save · esc to cancel".into(),
         Panel::ChatGpt { by_code: true, .. } => "c copies the code · b uses the browser · esc to cancel".into(),
         Panel::ChatGpt { url: Some(_), .. } => "c copies the link · d uses a code · esc to cancel".into(),

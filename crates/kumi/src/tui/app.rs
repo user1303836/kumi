@@ -278,11 +278,6 @@ enum Panel {
         at: usize,
         scroll: i32,
     },
-    /// A background job's steps and report.
-    Job {
-        id: u32,
-        scroll: i32,
-    },
 }
 struct Aside {
     /// The session's id for it, which its words come in by.

@@ -2304,7 +2304,6 @@ impl Overlay<TuiApp> for Panel {
     fn handle(&mut self, app: &TuiApp, event: InputEvent) -> Handled {
         match self {
             Panel::Btw { .. } => app.aside_input(self, event),
-            Panel::Job { .. } => app.job_panel_input(self, event),
             Panel::Pick { .. } | Panel::Key { .. } | Panel::ChatGpt { .. } => app.panel_key(self, event),
         }
     }
@@ -2334,12 +2333,12 @@ impl Overlay<TuiApp> for Panel {
                     app.session().tell(op::StopAside { id }.into());
                 }
             }
-            Panel::Pick { .. } | Panel::Job { .. } => {}
+            Panel::Pick { .. } => {}
         }
     }
     fn busy(&self, app: &TuiApp) -> bool {
         match self {
-            Panel::Pick { .. } | Panel::Job { .. } => false,
+            Panel::Pick { .. } => false,
             Panel::Btw { at, .. } => app.0.state.borrow().asides.get(*at).is_some_and(|aside| aside.borrow().state == "asking"),
             Panel::Key { .. } | Panel::ChatGpt { .. } => true,
         }
