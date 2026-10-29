@@ -1,6 +1,7 @@
 //! /map's data: the producer's sounds and songs as points on two maps, each point with its group (a sound's class, a
 //! song's style), its name and folder, what of it plays, and what each action asks Kumi. Read afresh each time the map
-//! opens; the terminal's map draws it.
+//! opens; the terminal's map draws it. Its types are kumi-library's (`kumi_library::map`), so the session's protocol can
+//! carry them.
 
 use futures::{future::LocalBoxFuture, FutureExt};
 use kumi_library::{
@@ -15,71 +16,13 @@ use kumi_listening::music::{
 };
 use std::{collections::HashMap, path::PathBuf, rc::Rc};
 
-/// The two maps.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Kind {
-    Sounds,
-    Songs,
-}
-
-/// Both maps, as read when /map opened.
-#[derive(Clone, Debug)]
-pub struct MapData {
-    pub sounds: Layer,
-    pub songs: Layer,
-}
-
-/// One map: its points, their groups, and the folders and tags the points name by number.
-#[derive(Clone, Debug)]
-pub struct Layer {
-    pub kind: Kind,
-    pub points: Vec<Point>,
-    pub groups: Vec<Group>,
-    pub places: Vec<String>,
-    pub tags: Vec<String>,
-    /// Why there's nothing on it yet, said to the producer.
-    pub empty: Option<String>,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct Point {
-    /// What a page asks for it by: a sound's place in its layer, a song's id in music.db.
-    pub id: i64,
-    pub x: f32,
-    pub y: f32,
-    pub group: u16,
-    pub name: String,
-    /// Its folder, by its number in the layer's places.
-    pub place: u32,
-    /// What else the filter reads (a sound's class and kind, a song's genre tags), by its number in the layer's tags.
-    pub tags: u32,
-    pub path: String,
-    /// What of it plays: from where, and for how long (seconds).
-    pub from: f32,
-    pub seconds: f32,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct Group {
-    /// What the legend and the filter call it: a class ("kick"), or a style ("c1 · dark rainy").
-    pub name: String,
-    pub color: [u8; 3],
-    pub count: usize,
-    /// Points that stand for it (a style's own examples, else those nearest its middle), by their place in the layer.
-    pub examples: Vec<u32>,
-}
+pub use kumi_library::map::{Group, Kind, Layer, MapData, Point};
 
 /// How many points stand for a group.
 const EXAMPLES: usize = 3;
 /// The longest stretch of a sound played, in seconds; and what plays of one whose length isn't known.
 const LONGEST_SOUND: f64 = 30.;
 const UNKNOWN_SOUND: f64 = 10.;
-
-impl Layer {
-    pub fn empty(kind: Kind, why: &str) -> Layer {
-        Layer { kind, points: vec![], groups: vec![], places: vec![], tags: vec![], empty: Some(why.into()) }
-    }
-}
 
 /// Each sound class's colour: drums warm, tones cool, voices and noises apart; a sound with no class grey.
 pub fn class_color(class: Option<SoundClass>) -> [u8; 3] {
