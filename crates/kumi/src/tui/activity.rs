@@ -134,8 +134,10 @@ pub fn blend(from: Rgb, to: Rgb, amount: f64) -> Rgb {
     blend_steps(from, to, amount, 6)
 }
 
-/// `blend` in `steps` steps.
+/// `blend` in `steps` steps, between the theme's colours for `from` and `to`.
 pub fn blend_steps(from: Rgb, to: Rgb, amount: f64, steps: u32) -> Rgb {
+    let theme = super::style::theme();
+    let (from, to) = (theme.of(from), theme.of(to));
     let step = js::number::round(amount.clamp(0.0, 1.0) * steps as f64) / steps as f64;
     let channel = |index: usize| js::number::round(from[index] as f64 + (to[index] as f64 - from[index] as f64) * step) as u8;
     [channel(0), channel(1), channel(2)]

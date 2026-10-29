@@ -113,6 +113,19 @@ impl TuiApp {
         Some((drawn, key))
     }
 
+    /// Every picture drawn and image up goes, to be drawn and uploaded afresh as each is next shown: after the
+    /// producer's editor (a terminal may drop images with the screen they were on) and in another theme (they were drawn
+    /// in the last one's colours). HISTORY's rows hold their pictures' cells and an image's id, so they're made again too.
+    pub(super) fn redraw_pictures(&self) {
+        let gone = {
+            let mut state = self.0.state.borrow_mut();
+            state.history_rows = None;
+            state.history_image = None;
+            std::mem::take(&mut state.images).clear()
+        };
+        self.0.tty.write(&gone);
+    }
+
     /// The image an open HISTORY row shows stays up while its rows are kept between frames.
     pub(super) fn touch_images(&self) {
         let mut state = self.0.state.borrow_mut();

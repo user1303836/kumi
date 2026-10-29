@@ -150,13 +150,17 @@ impl TuiApp {
             .iter()
             .map(|change| inert(format!("Stays as it is: {} ({})", self.clean(&change.title, 60), why_left(change))))
             .collect();
-        // (beside the choice, within a list's width)
+        // (beside the choices, in the 40 columns a list leaves beside its longest)
         let words = if undoes == 0 {
-            "Its words go back in the box".to_string()
+            "Nothing to undo; its words come back".to_string()
         } else {
-            format!("Undoes {}; its words go back in the box", changes(undoes))
+            format!("Undoes {}; its words come back", changes(undoes))
         };
         items.push(item(if index == 0 { "Take it back" } else { "Take them back" }, "take", words));
+        // A copy carries on from the requests before it, so the first has none.
+        if index + 1 < requests.len() {
+            items.push(item("Carry on from here in a copy", "copy", "Leaves your DAW and the original alone"));
+        }
         items.push(PickerItem::new("Not now", "later"));
         let asked = self.clean(&going[index].words.replace('\n', " "), 50);
         let title = match index {
@@ -164,14 +168,43 @@ impl TuiApp {
             1 => format!("Take back “{asked}” and the request after it?"),
             n => format!("Take back “{asked}” and the {n} requests after it?"),
         };
-        self.pick(Picker::new(title, items), move |app, answer| async move {
-            app.close_panel();
-            if answer.value.as_deref() == Some("take") && app.may_take_back() {
-                let still = move |requests: &[Requested]| requests.iter().any(|asked| asked.at == at).then_some(at);
-                app.take_back_where(still, "That request isn't there to take back any more.").await;
+        let words = going[index].words.clone();
+        self.pick(Picker::new(title, items), move |app, answer| {
+            let words = words.clone();
+            async move {
+                app.close_panel();
+                match answer.value.as_deref() {
+                    Some("take") if app.may_take_back() => {
+                        let still = move |requests: &[Requested]| requests.iter().any(|asked| asked.at == at).then_some(at);
+                        app.take_back_where(still, "That request isn't there to take back any more.").await;
+                    }
+                    Some("copy") if app.may_take_back() => app.carry_on_before(at, &words).await,
+                    _ => {}
+                }
+                Ok(())
             }
-            Ok(())
         });
+    }
+    /// A copy of the conversation as it stood just before the request asked at `at`, to carry on in, with that request's
+    /// `words` in the box. The session says what it did, and the screen shows the copy as it stands.
+    async fn carry_on_before(&self, at: i64, words: &str) {
+        {
+            let mut state = self.0.state.borrow_mut();
+            state.undoing = true;
+            state.activity = "making the copy".into();
+        }
+        self.0.scheduler.request();
+        match self.session().op(op::ForkConversation { name: None, before: Some(at) }).await {
+            Ok(Some(_)) => self.0.state.borrow_mut().editor.set(words),
+            Ok(None) => self.notice("There's nothing to carry on from yet.", NoticeTone::Info),
+            Err(error) => {
+                if !self.0.state.borrow().closing {
+                    self.error(&error);
+                }
+            }
+        }
+        self.0.state.borrow_mut().undoing = false;
+        self.0.scheduler.request();
     }
 }
 

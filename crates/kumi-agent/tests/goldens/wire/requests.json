@@ -189,6 +189,10 @@
     "type": "fork-conversation"
   },
   {
+    "type": "fork-conversation",
+    "before": 1760000000004
+  },
+  {
     "type": "conversation-now"
   },
   {
@@ -346,6 +350,9 @@
   {
     "type": "palette-command",
     "words": "use Drums"
+  },
+  {
+    "type": "palette-names"
   },
   {
     "type": "music"

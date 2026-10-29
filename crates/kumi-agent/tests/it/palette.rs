@@ -171,6 +171,10 @@ case!(palette_words_list_make_choose_rename_forget_and_set_how_far_it_reaches, a
         palettes.command("list").await.unwrap(),
         "Palettes: Pads (0 sounds, this session's) · Drums (1 sound). /palette use and a name works with another."
     );
+    // As `/palette use` offers them: the latest changed first, this session's marked.
+    let listed: Vec<(String, usize, bool)> =
+        palettes.listed().await.unwrap().into_iter().map(|palette| (palette.name, palette.items, palette.current)).collect();
+    assert_eq!(listed, [("Pads".to_string(), 0, true), ("Drums".to_string(), 1, false)]);
     assert_eq!(palettes.command("use DRUMS").await.unwrap(), "Drums (1 sound) is this session's palette now.");
     assert_eq!(
         palettes.command("loose").await.unwrap(),

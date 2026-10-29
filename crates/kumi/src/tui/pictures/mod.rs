@@ -68,6 +68,9 @@ pub fn draw(picture: &ChangePicture, cols: usize, rows: usize, graphics: Graphic
     if rows == 0 {
         return Drawn { rows: Vec::new(), lines, image: None };
     }
+    // Drawn in the theme's colours: an image's pixels and the half-blocks' edges are mixed from them.
+    let theme = super::style::theme();
+    let (scene, ground) = (scene.in_theme(theme), theme.of(ground));
     match graphics {
         Graphics::Kitty => {
             let image = Raster::draw(&scene, (cols * 8).min(1600) as u32, (rows * 16).min(800) as u32);

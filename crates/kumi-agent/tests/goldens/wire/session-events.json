@@ -1987,6 +1987,24 @@
     "requests": 1
   },
   {
+    "type": "forked",
+    "from": "01JB9Z6P1Q",
+    "replay": {
+      "before": 0,
+      "lines": [
+        {
+          "kind": "request",
+          "at": 1760000000000,
+          "text": "make the kick punchier"
+        }
+      ]
+    }
+  },
+  {
+    "type": "forked",
+    "from": "01JB9Z6P1Q"
+  },
+  {
     "type": "aside",
     "id": 2,
     "text": "The kick and the bass share 60 Hz, so"

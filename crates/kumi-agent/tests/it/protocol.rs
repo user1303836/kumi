@@ -274,6 +274,10 @@ impl SessionController for Reached {
         self.reach("fork_conversation");
         Ok(None)
     }
+    async fn fork_conversation_before(&self, _: Option<&str>, _: i64) -> Result<Option<String>, RuntimeError> {
+        self.reach("fork_conversation_before");
+        Ok(None)
+    }
     async fn answer_set(&self, _: SetChoice) -> Result<(), RuntimeError> {
         self.reach("answer_set");
         Ok(())
@@ -436,6 +440,10 @@ impl SessionController for Reached {
         self.reach("palette_command");
         Ok(String::new())
     }
+    async fn palette_names(&self) -> Result<Vec<kumi_agent::core::palette::PaletteListed>, RuntimeError> {
+        self.reach("palette_names");
+        Ok(vec![])
+    }
     async fn focus_body(&self, _: &BodyRequest) -> Result<Option<FocusBody>, RuntimeError> {
         self.reach("focus_body");
         Ok(None)
@@ -497,7 +505,8 @@ fn method(request: &Op) -> Option<String> {
             }
             Op::PinConversation(_) => "pin_conversation",
             Op::DeleteConversation(_) => "delete_conversation",
-            Op::ForkConversation(_) => "fork_conversation",
+            Op::ForkConversation(op::ForkConversation { before: None, .. }) => "fork_conversation",
+            Op::ForkConversation(_) => "fork_conversation_before",
             Op::AnswerSet(_) => "answer_set",
             Op::ConversationNow(_) => "conversation_now",
             Op::ConversationLines(_) => "conversation_lines",
@@ -531,6 +540,7 @@ fn method(request: &Op) -> Option<String> {
             Op::PaletteGather(_) => "palette_gather",
             Op::PaletteRemove(op::PaletteRemove { path, size, mtime }) => return Some(format!("palette_remove:{path}:{size}:{mtime}")),
             Op::PaletteCommand(_) => "palette_command",
+            Op::PaletteNames(_) => "palette_names",
             Op::Music(_) | Op::MusicFolders(_) | Op::LearnMusic(_) | Op::SetMusicFolders(_) | Op::HoldMusic(_) | Op::ForgetMusic(_) => {
                 "music"
             }

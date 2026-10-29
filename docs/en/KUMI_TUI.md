@@ -196,6 +196,11 @@ Run these as `kumi <command>`; from a copy of the repository, as
 ## Commands inside Kumi
 
 Type `/` for a menu of these: ↑↓ choose, Tab completes, Enter runs, Esc closes.
+After a command and a space, the menu offers its words: `/palette use` your
+palettes, `/resume` your kept conversations, `/slots listening` the models the
+slot takes, `/model` the models you can use, `/export` its formats. Tab puts the
+one chosen in; Enter runs only what you named, so a word only partly typed goes
+in first.
 A message that starts with a path (a file dragged into the terminal) is a
 message, not a command.
 
@@ -215,7 +220,7 @@ message, not a command.
 | `/stop` | Stop Live: clips, the transport and recording. Also stops Kumi's answer |
 | `/refresh` | Read the Set again without asking the model |
 | `/copy` | Copy Kumi's last answer to the clipboard |
-| `/model`, `/effort` | Choose the model (from each provider's own list, then the model servers on your computer: Ollama, LM Studio and those in settings.json; type to filter) and how hard it thinks; from your next message. In `/model`, ctrl+f makes the selected model your fallback (again clears it) |
+| `/model`, `/effort` | Choose the model (from each provider's own list, then the model servers on your computer: Ollama, LM Studio and those in settings.json; type to filter) and how hard it thinks; from your next message. In `/model`, ctrl+f makes the selected model your fallback (again clears it). `/model <id>` chooses one by its id, which Tab completes |
 | `/fast` | Turn on the model's faster tier when its provider lists one (ChatGPT's "Fast": quicker answers, more of your usage); `/fast` again turns it off. Shown as "· fast" beside the model |
 | `/willington` | Turn [Willington](WILLINGTON_INTEGRATION.md) on or off. Rack bindings are requested on supported builds; clip Follow Actions and native editing also require passing exact-library self-tests. Native editing is b5 macOS ARM64 only. Off until enabled; available when the bridge carries Willington. |
 | `/login`, `/logout` | Sign in (ChatGPT in the browser or with a code, or an API key shown only as dots) or out |
@@ -302,7 +307,7 @@ its undo. They're in English for now.
 | Key | Action |
 | --- | --- |
 | Esc | Close the `/` menu; otherwise stop Kumi's answer (the steps it finished stay, waiting messages go back into the box); otherwise unpin the pinned device |
-| Esc Esc | In an empty box while Kumi is idle, with nothing pinned: your requests, newest first, each with how many changes it made. Choose one to take it back with each one after it, as `/takeback` does; first Kumi lists the changes it can't undo, which stay as they are |
+| Esc Esc | In an empty box while Kumi is idle, with nothing pinned: your requests, newest first, each with how many changes it made. Choose one to take it back with each one after it, as `/takeback` does (first Kumi lists the changes it can't undo, which stay as they are), or to carry on from before it in a copy, which leaves your DAW and the conversation as they are |
 | Ctrl-C | Stop Kumi's answer; when idle, clear the box (↑ or Ctrl-- brings the words back); with an empty box, quit |
 | Ctrl-B | Move the answer's slow step that doesn't use Live (a video, pages, the manual, your library) to the background as a job; the answer carries on. In tmux, press Ctrl-B twice |
 | Ctrl-D | Quit, when idle with an empty box |
@@ -386,19 +391,25 @@ it):
 ## Plain mode
 
 `KUMI_UI=plain`, or input or output through a pipe, gives a plain line-by-line interface
-instead, which suits screen readers and logs. It has `/help`, `/status`,
-`/undo`, `/stop`, `/refresh`, `/reconnect`, `/new [name]`, `/resume [n, id or name]`
-(and `/conversations`), `/rename <name>`, `/fork [name]`,
-`/export [md|html|json]`, `/share` (each saves a file and says where), `/daw [name]`,
-`/model [provider/model]`, `/effort [level|default]`, `/fast`, `/logout <provider>`,
-`/memory`, `/forget <id>`, `/note <id> <new words>`, `/pin <id>`, `/unpin <id>`,
-`/recipes`, `/willington`, `/update`, `/changelog` and `/quit`, but no `/btw`,
-`/goal`, `/loop`, `/slots`, `/music`, `/map`, `/jobs`, `/takeback` or `/copy`. `/resume` numbers this Set's
-conversations, then other Sets'; Kumi's question about another Set's
-conversation takes 1, 2 or 3 (commands still run while it waits, and other
-words ask it again). It says when a background job
-starts and ends, and one your request needs carries on once Kumi is idle. Sign in from a shell with `kumi login`. Ctrl-C stops the
-answer, or quits when idle.
+instead, which suits screen readers and logs. It has the full-screen app's commands, as
+text, and `/help` lists those this session has.
+
+- `/btw <question>` answers on the side, and `/goal` and `/loop` work as they do in the
+  full-screen app.
+- `/jobs`, `/slots` and `/music` print their lists. Changing your music is the
+  full-screen app's.
+- `/model [provider/model]`, `/effort [level|default]` and `/logout <provider>` take their
+  words here, where the full-screen app opens a panel.
+- `/export [md|html|json]` and `/share` each save a file and say where.
+- `/pin <id>`, `/unpin <id>` and `/forget <id>` keep or forget a note from `/memory`.
+- `/voice`, `/map`, `/palette`, `/copy`, `/recipe` and `/takeback` are only in the
+  full-screen app, and plain mode says so.
+- `/resume` numbers this Set's conversations, then other Sets'. Kumi's question about
+  another Set's conversation takes 1, 2 or 3 (commands still run while it waits, and
+  other words ask it again).
+- It says when a background job starts and ends, and one your request needs carries on
+  once Kumi is idle.
+- Sign in from a shell with `kumi login`. Ctrl-C stops the answer, or quits when idle.
 
 ## Away from Kumi
 
@@ -426,8 +437,12 @@ answer, or quits when idle.
 - **The computer stays awake** while Kumi works (an answer, a `/goal`, a wait
   for a plan's limit); the display may sleep.
 - **Settings** (`~/.kumi/settings.json`): `"notifications": "off"`,
-  `"liveStatusBar": false`, `"keepAwake": false`, and `"answerAfter"` (seconds
-  before Kumi takes its recommended answer; `0` never).
+  `"liveStatusBar": false`, `"keepAwake": false`, `"answerAfter"` (seconds
+  before Kumi takes its recommended answer; `0` never), and `"theme"`: `system`
+  (the default: light or dark as the terminal's background is, turning with it in
+  terminals that say when their colours change), `dark` (Kumi's own), `light`
+  (for a light terminal) or `colorblind` (colours that stay apart for red-green
+  colour blindness).
 
 ## Terminals
 
@@ -476,7 +491,16 @@ what to draw as data, so another front end could draw the same things.
 one accent, mint `#86e3b5`, and Live's own track colours (very dark ones are
 lightened for display). Warning `#e7b45f`, error `#ee8479`, the beat light
 `#ffe14d`. What Kumi keeps has a colour per kind: notes `#8cc8ff`, techniques
-`#c7a6ff`, recipes `#f2a6c4`, lessons `#e7c88f`.
+`#c7a6ff`, recipes `#f2a6c4`, lessons `#e7c88f`. Three themes draw it
+(`theme`): dark, as above; light, made for a light terminal (dark words on a
+warm white `#f7f7f4`, the accent a deeper mint `#14764e`, the warning amber
+`#925b0d`, and track colours too pale to read deepened); and colorblind, the
+dark one with colours that stay apart for red-green colour blindness (the accent
+sky blue `#56b4e9`, the warning orange `#e69f00`, the error vermilion
+`#d7650b`). Each theme keeps what its colours mean, and its words read at 4.5:1
+or more. With `system`, Kumi takes light or dark from the background the
+terminal reports as Kumi starts, and asks it to say when its colours turn dark or
+light, which some terminals do (mode 2031).
 
 **Foundations**, built from terminal primitives with no UI framework:
 

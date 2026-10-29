@@ -10,7 +10,7 @@
                          HISTORY row takes back that one
 
    Commands
-     /                   The commands as you type: ↑↓ choose, tab completes,
+     /                   Commands and their words: ↑↓ choose, tab completes,
                          enter runs, esc closes
      ?                   This help, from an empty box
      /new                Start a fresh conversation (the last one is kept);

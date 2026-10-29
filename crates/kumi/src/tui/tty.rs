@@ -62,7 +62,9 @@ pub trait TtyOutput {
 // \u001b[>3u asks terminals that support it (kitty, Ghostty, WezTerm, iTerm2) to report keys
 // unambiguously, so Shift+Enter is distinct from Enter and Escape needs no timeout, and to say when
 // a key repeats and when it's let go (ctrl+t held down talks until it's let go). Others ignore it.
-const ENTER: &str = "\u{1b}[?1049h\u{1b}[?7l\u{1b}[?25l\u{1b}[?2004h\u{1b}[?1004h\u{1b}[>3u";
+// \u001b[?2031h asks those that can to say when their colours turn dark or light (mode 2031's reports), so a theme
+// that follows the terminal follows it then too. Others ignore it.
+const ENTER: &str = "\u{1b}[?1049h\u{1b}[?7l\u{1b}[?25l\u{1b}[?2004h\u{1b}[?1004h\u{1b}[>3u\u{1b}[?2031h";
 const MOUSE_ON: &str = "\u{1b}[?1000h\u{1b}[?1002h\u{1b}[?1006h";
 // Any-event mouse reporting (1003): the mouse's moves with no button held, as well as its clicks and drags. On only
 // while something listens for them (the map, which plays the point the mouse comes to): otherwise they'd stream in
@@ -79,8 +81,7 @@ const WHEEL_KEYS_ON: &str = "\u{1b}[?1007h";
 fn leaving(mouse: bool) -> String {
     format!("{RESTORE}{}", if mouse { "" } else { WHEEL_KEYS_ON })
 }
-pub const RESTORE: &str =
-    "\u{1b}[?2026l\u{1b}[0m\u{1b}[<u\u{1b}[?1003l\u{1b}[?1006l\u{1b}[?1002l\u{1b}[?1000l\u{1b}[?1004l\u{1b}[?2004l\u{1b}[?7h\u{1b}[?25h\u{1b}[?1049l";
+pub const RESTORE: &str = "\u{1b}[?2026l\u{1b}[0m\u{1b}[?2031l\u{1b}[<u\u{1b}[?1003l\u{1b}[?1006l\u{1b}[?1002l\u{1b}[?1000l\u{1b}[?1004l\u{1b}[?2004l\u{1b}[?7h\u{1b}[?25h\u{1b}[?1049l";
 
 pub struct TtyOptions {
     pub input: Rc<dyn TtyInput>,

@@ -1,6 +1,7 @@
 mod helpers;
 pub use helpers::*;
 mod away;
+mod complete;
 mod composer;
 mod details;
 pub use away::{AwaySettings, FrontApp, NotifierRunner};
@@ -26,6 +27,7 @@ pub use setup::{waveform, WAVE_WIDTH};
 mod sharing;
 mod shown;
 mod take_back;
+mod theme;
 mod toast;
 mod usage;
 
@@ -189,6 +191,9 @@ pub struct TuiOptions {
     pub typeahead: Vec<u8>,
     /// What keys.json holds (other keys for Kumi's actions), or why it couldn't be read; None when there's no file.
     pub keys: Option<Result<serde_json::Value, String>>,
+    /// The colours the screen is drawn in (`theme`): dark, light or colour-blind; None follows the terminal (`system`),
+    /// light on a light background, and switches as the terminal says its colours changed.
+    pub theme: Option<&'static super::style::Theme>,
 }
 /// When the header shows how full the answering model's context is: from half full (`auto`), always, or never.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -276,6 +281,7 @@ impl TuiOptions {
             context_meter: ContextMeter::Auto,
             typeahead: Vec::new(),
             keys: None,
+            theme: None,
         }
     }
 }
@@ -437,6 +443,11 @@ struct State {
     /// The box's words when ↑↓ last chose in the `/` menu: a command found only by the words of what it does runs on
     /// Enter once it's chosen.
     menu_chosen: Option<String>,
+    /// The words the line's command takes for the word being typed, once read (the menu asks once).
+    offers: complete::Offers,
+    /// Which list the `/` menu shows (none: the commands; else the line before the word whose candidates it lists): a new
+    /// one starts at its first row.
+    menu_list: Option<String>,
     started: bool,
     closing: bool,
     cancelling: bool,
@@ -634,6 +645,8 @@ impl State {
             menu_index: 0,
             menu_dismissed: false,
             menu_chosen: None,
+            offers: complete::Offers::default(),
+            menu_list: None,
             started: false,
             closing: false,
             cancelling: false,
@@ -841,6 +854,8 @@ impl TuiApp {
             let w = weak.clone();
             let resize = weak.clone();
             let profile = options.terminal.clone().unwrap_or_else(away::detect_profile_here);
+            // The producer's theme, or the terminal's: before anything is drawn or mixed in it.
+            super::style::set_theme(options.theme.unwrap_or_else(|| super::style::for_background(profile.background)));
             super::markdown::set_terminal_opens_links(profile.hyperlinks);
             let graphics = options.graphics.unwrap_or_else(|| {
                 let cells_only = std::env::var("KUMI_PICTURES").is_ok_and(|value| value == "cells");
@@ -949,6 +964,11 @@ impl TuiApp {
     #[doc(hidden)]
     pub fn transcript_layout_count(&self) -> usize {
         self.0.state.borrow().transcript.laid_out
+    }
+    /// What's in the input box, for the menu's tests (tab puts a word in).
+    #[doc(hidden)]
+    pub fn draft(&self) -> String {
+        self.0.state.borrow().editor.text().to_string()
     }
     /// The session, which the app reaches only through its protocol.
     fn session(&self) -> &dyn SessionHandle {

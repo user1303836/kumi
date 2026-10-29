@@ -233,7 +233,8 @@ pub(super) fn help_sections(has: Has, keymap: &Keymap, app: &str, tabs: &[String
             &["app.take-back"],
             "esc esc",
             "From an empty box while Kumi isn't working: your requests, newest first, with how many changes each made. Choose \
-             one to take it back with each one after it; first Kumi lists the changes it can't undo",
+             one to take it back with each one after it (first Kumi lists the changes it can't undo), or to carry on from \
+             before it in a copy",
         ));
         stop.push(row(
             "/takeback",
@@ -242,7 +243,7 @@ pub(super) fn help_sections(has: Has, keymap: &Keymap, app: &str, tabs: &[String
         ));
     }
     let mut listed = vec![
-        row("/", "The commands as you type: ↑↓ choose, tab completes, enter runs, esc closes"),
+        row("/", "Commands and their words: ↑↓ choose, tab completes, enter runs, esc closes"),
         row("?", "This help, from an empty box"),
         // `?` is a character typed; keys.json can give the help keys as well (f1).
         keyed(&["app.help"], "", ""),

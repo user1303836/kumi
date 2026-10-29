@@ -1057,6 +1057,14 @@ pub enum SessionEvent {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         replay: Option<crate::core::session_log::Replay>,
     },
+    /// The producer carried on in a copy of the conversation from before one of its requests: `from` is the original,
+    /// which stays as it is, and `replay` the copy as it stands, to show as a conversation taken up shows its log (None:
+    /// nothing of it to show). Nothing in the DAW changed. The copy's log begins as its own copy, so this isn't logged.
+    Forked {
+        from: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        replay: Option<crate::core::session_log::Replay>,
+    },
     /// Words of a side question's answer as they're written (the protocol's `aside` request with this `id`).
     Aside {
         id: u32,
@@ -1581,6 +1589,13 @@ pub trait SessionController {
         let _ = name;
         Ok(None)
     }
+    /// A copy of the conversation going on as it stood just before the request asked at `before` (its `at`, from
+    /// `take_back_plan`), to carry on in: the original stays as it is, and nothing in the DAW changes. Its id, or None
+    /// with nothing to copy.
+    async fn fork_conversation_before(&self, name: Option<&str>, before: i64) -> Result<Option<String>, RuntimeError> {
+        let _ = (name, before);
+        Ok(None)
+    }
     /// The producer's answer to `SetAsked`.
     async fn answer_set(&self, choice: SetChoice) -> Result<(), RuntimeError> {
         let _ = choice;
@@ -1888,6 +1903,10 @@ pub trait SessionController {
     async fn palette_command(&self, words: &str) -> Result<String, RuntimeError> {
         let _ = words;
         Err(absent())
+    }
+    /// Every palette, the latest changed first: what `/palette use` offers.
+    async fn palette_names(&self) -> Result<Vec<crate::core::palette::PaletteListed>, RuntimeError> {
+        Ok(vec![])
     }
     fn has_device_tree(&self) -> bool {
         false

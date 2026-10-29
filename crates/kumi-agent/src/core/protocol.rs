@@ -21,7 +21,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::core::contracts::*;
 use crate::core::jobs::{JobDetail, JobStatus};
-use crate::core::palette::{Gathered, PaletteView};
+use crate::core::palette::{Gathered, PaletteListed, PaletteView};
 use crate::core::search_memory::SearchMemoryStatus;
 use kumi_ai::{
     auth::openai_codex::DevicePrompt,
@@ -305,10 +305,13 @@ requests! {
     PinConversation { id: String, pinned: bool } -> bool;
     /// A kept conversation goes for good (never this one): false when it wasn't kept.
     DeleteConversation { id: String } -> bool;
-    /// A copy of this conversation to carry on in: its id, or None with nothing to copy yet.
+    /// A copy of this conversation to carry on in: its id, or None with nothing to copy yet. With `before` (a request's
+    /// `at`, from `TakeBackPlan`), the copy is the conversation as it stood just before that request.
     ForkConversation {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         name: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        before: Option<i64>,
     } -> Option<String>;
     /// The producer's answer to `set-asked`.
     AnswerSet { choice: SetChoice } -> ();
@@ -372,6 +375,8 @@ requests! {
     PaletteRemove { path: String, size: i64, mtime: i64 } -> bool;
     /// /palette and its words: its answer, in words.
     PaletteCommand { words: String } -> String;
+    /// Every palette, the latest changed first: what `/palette use` offers.
+    PaletteNames {} -> Vec<PaletteListed>;
     /// /music: what Kumi knows of the producer's music and how learning it goes, and (before they add a folder) the
     /// usual place it found songs in.
     Music {} -> MusicView;
@@ -574,9 +579,10 @@ impl InProcess {
             }
             Op::PinConversation(op::PinConversation { id, pinned }) => Reply::PinConversation(session.pin_conversation(&id, pinned).await?),
             Op::DeleteConversation(op::DeleteConversation { id }) => Reply::DeleteConversation(session.delete_conversation(&id).await?),
-            Op::ForkConversation(op::ForkConversation { name }) => {
-                Reply::ForkConversation(session.fork_conversation(name.as_deref()).await?)
-            }
+            Op::ForkConversation(op::ForkConversation { name, before }) => Reply::ForkConversation(match before {
+                Some(before) => session.fork_conversation_before(name.as_deref(), before).await?,
+                None => session.fork_conversation(name.as_deref()).await?,
+            }),
             Op::AnswerSet(op::AnswerSet { choice }) => Reply::AnswerSet(session.answer_set(choice).await?),
             Op::ConversationNow(op::ConversationNow {}) => Reply::ConversationNow(session.conversation_now().await),
             Op::ConversationLines(op::ConversationLines { id }) => Reply::ConversationLines(session.conversation_lines(&id).await?),
@@ -612,6 +618,7 @@ impl InProcess {
                 Reply::PaletteRemove(session.palette_remove(&path, size, mtime).await?)
             }
             Op::PaletteCommand(op::PaletteCommand { words }) => Reply::PaletteCommand(session.palette_command(&words).await?),
+            Op::PaletteNames(op::PaletteNames {}) => Reply::PaletteNames(session.palette_names().await?),
             Op::Music(op::Music {}) => Reply::Music(music_view(&part(session.music())?).await),
             Op::MusicFolders(op::MusicFolders {}) => Reply::MusicFolders(part(session.music())?.folders()),
             Op::LearnMusic(op::LearnMusic { folders }) => Reply::LearnMusic(part(session.music())?.learn(folders)),

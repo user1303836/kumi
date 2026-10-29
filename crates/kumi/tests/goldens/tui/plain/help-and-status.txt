@@ -2,7 +2,29 @@ Kumi · openai-codex/fixture · MCP connecting / Live unverified
 Each Set's conversations are kept: its latest continues next time, and /resume goes back to earlier ones (any Set's, by number, id or name). /help for commands.
 [connection] MCP/Live: connected
 [observation] Current open Set: Night Drive — Remote Script · real-live
-/help · /status · /undo · /stop · /refresh · /reconnect (connect to Live again, keeping the conversation) · /new [name] (start a fresh conversation; the last one is kept) · /resume [number, id or name] (list kept conversations, or go back to one; /conversations too) · /rename <name> · /fork [name] (carry on in a copy) · /export [md|html|json] (save this conversation; keys and paths taken out) · /share (save it as a web page) · /model [provider/model] · /effort [level|default] · /logout <provider> · /memory · /forget <id> · /note <id> <new words> · /pin <id> · /unpin <id> · /recipes · /willington (Willington's bindings on or off) · /update (get the newest Kumi) · /changelog (what's new in it) · /quit | Ctrl-C: cancel work; idle: exit. EOF exits. Sign in with: cargo run -p kumi -- login <provider>.
+[help] /new: Start a fresh conversation (the last one is kept); /new <name> names it
+[help] /resume: Go back to a kept conversation, this Set's or any Set's: /resume <id or name>
+[help] /conversations: The same as /resume
+[help] /rename: Name this conversation: /rename <name>
+[help] /fork: Carry on in a copy of this conversation; the original stays
+[help] /undo: Undo Kumi's last change
+[help] /refresh: Read your Live Set again
+[help] /export: This conversation as a file: /export (Markdown), /export html, or /export json (for another Kumi)
+[help] /share: Save this conversation as a web page that opens anywhere, to send
+[help] /model: The model Kumi talks to: /model <provider> lists a provider's, /model <provider>/<model> chooses one
+[help] /effort: How hard the model thinks: /effort <level>, or /effort default
+[help] /fast: The model's faster tier, when its provider offers one
+[help] /login: Sign in to a provider, from a shell: cargo run -p kumi -- login <provider>
+[help] /loop: Listen, judge and adjust in rounds until the goal is met: /loop <what>, then stop
+[help] /memory: What Kumi remembers
+[help] /recipes: Your saved ways of working
+[help] /logout: Sign out of a provider: /logout <provider>
+[help] /status: What Kumi is connected to
+[help] /changelog: What's new in Kumi
+[help] /help: Keys and commands
+[help] /quit: Close Kumi
+[help] Only in the full-screen app: /copy
+[help] Ctrl-C: cancel work; idle: exit. EOF exits. Sign in with: cargo run -p kumi -- login <provider>.
 [status] idle; MCP/Live: connected; turns 0/30; No current Live observation; Your library: 1,020 sounds · 40 presets · 3 Sets
 [status] Conversation: Bass ideas · now001
 Kumi closed. Each Set's conversation continues next time.
