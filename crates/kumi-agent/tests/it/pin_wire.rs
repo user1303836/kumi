@@ -18,6 +18,7 @@ use kumi_agent::core::{
     match_run::{MatchState, MatchStatus, MatchStop},
     palette::{Gathered, PaletteFile, PaletteView},
     protocol::{op, Capabilities, Op},
+    session_log::{LogLine, LogRequest, Replay},
 };
 use kumi_listening::{
     checklist::{Change as RowChange, Row},
@@ -390,8 +391,25 @@ fn events() -> Vec<SessionEvent> {
         changes: Some(vec![change("c1", ChangeFamily::Parameter, "Decay 400 → 250 ms", ChangeState::Expired)]),
         chosen: Some(true),
         unreadable: Some(false),
+        replay: None,
     });
-    events.push(SessionEvent::Resumed { saved_at: AT, lines: vec![], changes: None, chosen: None, unreadable: Some(true) });
+    events.push(SessionEvent::Resumed { saved_at: AT, lines: vec![], changes: None, chosen: None, unreadable: Some(true), replay: None });
+    // Taken up with its log: the words from before it began, then its last requests as they happened.
+    events.push(SessionEvent::Resumed {
+        saved_at: AT,
+        lines: vec![TranscriptLine { role: TranscriptRole::User, text: "make the kick punchier".into(), tools: None }],
+        changes: None,
+        chosen: None,
+        unreadable: None,
+        replay: Some(Replay {
+            before: 3,
+            earlier: vec![TranscriptLine { role: TranscriptRole::User, text: "make the kick punchier".into(), tools: None }],
+            lines: vec![
+                LogLine::Request(LogRequest { at: AT, text: "and the snare".into(), files: vec!["snare.wav".into()], pinned: None }),
+                LogLine::Event { at: AT + 1, event: SessionEvent::Kernel(KernelEvent::Text { text: "Tightened the snare.".into() }) },
+            ],
+        }),
+    });
     events.push(SessionEvent::SetAsked {
         ask: Some(SetAsk {
             id: "mgj6k3cw0a0b0c".into(),

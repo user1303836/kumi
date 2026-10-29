@@ -22,10 +22,10 @@
 
 use crate::{
     core::{
-        contracts::{KernelCheckpoint, KernelEvent, PinnedNode, SavedConversation, SessionEvent},
+        contracts::{KernelCheckpoint, KernelEvent, PinnedNode, SavedConversation, SessionEvent, TranscriptLine, TranscriptRole, TurnState},
         conversations::{is_conversation_id, write_privately},
     },
-    kernel::budget::OBSERVATION_MARKER,
+    kernel::budget::{transcript_of, OBSERVATION_MARKER},
 };
 use kumi_types::place::Places;
 use serde::{Deserialize, Serialize};
@@ -121,6 +121,76 @@ pub fn read_log(bytes: &[u8]) -> Option<ReadLog> {
 /// The log at `file`; None when there's none, or it isn't one this Kumi reads.
 pub async fn read_log_file(file: &Path) -> Option<ReadLog> {
     read_log(&tokio::fs::read(file).await.ok()?)
+}
+
+/// The most requests a conversation taken up shows again.
+pub const REPLAYED: usize = 30;
+
+/// What a conversation taken up shows of its log: its last requests with everything that happened in them, and before
+/// them, while there's room, the words of the requests it had when its log began (an earlier Kumi's).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Replay {
+    /// How many of the conversation's requests aren't shown: those before the ones its log holds that there wasn't room
+    /// for, and those the log holds before its last 30.
+    pub before: u32,
+    /// The words of the requests the conversation had when its log began, and their answers, as far as there's room: no
+    /// more of them happened than that, as far as the log knows.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub earlier: Vec<TranscriptLine>,
+    /// The log's requests and the conversation's events from the first request shown, in order.
+    pub lines: Vec<LogLine>,
+}
+
+/// What of `log` a conversation taken up shows again: its requests and events from the `most`th request from the end
+/// (all of them, when there are fewer). The model's messages and the saves are the kernel's, not the screen's, and an
+/// earlier run's close isn't the conversation's.
+pub fn replay_of(log: &ReadLog, most: usize) -> Replay {
+    let told: Vec<&LogLine> = log
+        .lines
+        .iter()
+        .filter(|line| match line {
+            LogLine::Request(_) => true,
+            LogLine::Event { event, .. } => !matches!(event, SessionEvent::State { state: TurnState::Closed }),
+            _ => false,
+        })
+        .collect();
+    let requests: Vec<usize> = told.iter().enumerate().filter(|(_, line)| matches!(line, LogLine::Request(_))).map(|(n, _)| n).collect();
+    let left_out = requests.len().saturating_sub(most);
+    let start = if left_out > 0 { requests[left_out] } else { 0 };
+    // What the conversation had when its log began: the messages right after the header, before anything happened.
+    let had: Vec<Value> = log
+        .lines
+        .iter()
+        .map_while(|line| match line {
+            LogLine::Message { message, .. } => Some(message.clone()),
+            _ => None,
+        })
+        .collect();
+    let words = transcript_of(&had);
+    let asked: Vec<usize> = words.iter().enumerate().filter(|(_, line)| line.role == TranscriptRole::User).map(|(n, _)| n).collect();
+    let shown = asked.len().min(most.saturating_sub(requests.len()));
+    let earlier = if shown == 0 { vec![] } else { words[asked[asked.len() - shown]..].to_vec() };
+    Replay {
+        before: log.header.before.saturating_sub(shown as u32) + left_out as u32,
+        earlier,
+        lines: told[start..].iter().map(|line| (*line).clone()).collect(),
+    }
+}
+
+/// Whether `log` is behind its conversation's checkpoint, kept with `turns` requests: something kept turns it never saw
+/// end (an earlier Kumi, after a rollback), so it misses what came then. What it holds is its last save's count, and an
+/// answer's end after it for each turn since (without a save, its count from when it began, and the ends since).
+pub fn behind(log: &ReadLog, turns: u32) -> bool {
+    let (mut known, mut ended) = (log.header.before, 0);
+    for line in &log.lines {
+        match line {
+            LogLine::Saved { turns, .. } => (known, ended) = (*turns, 0),
+            LogLine::Event { event: SessionEvent::TurnComplete { .. }, .. } => ended += 1,
+            _ => {}
+        }
+    }
+    turns > known + ended
 }
 
 fn now() -> i64 {
@@ -273,6 +343,8 @@ pub struct SessionLog {
     words: RefCell<Option<(i64, String)>>,
     closed: Cell<bool>,
     cap: Rc<Cell<u64>>,
+    /// The log of the conversation going on, and how much of it there was when it was opened (none: there was none).
+    opened: Rc<RefCell<Option<(PathBuf, u64)>>>,
     jobs: RefCell<Option<mpsc::UnboundedSender<Job>>>,
 }
 
@@ -287,6 +359,7 @@ impl SessionLog {
             words: RefCell::default(),
             closed: Cell::new(false),
             cap: Rc::new(Cell::new(MAX_LOG_BYTES)),
+            opened: Rc::default(),
             jobs: RefCell::default(),
         })
     }
@@ -316,7 +389,7 @@ impl SessionLog {
         let jobs = jobs.get_or_insert_with(|| {
             let (send, receive) = mpsc::unbounded_channel();
             let kit = Kit { redact: self.redact.clone(), cap: self.cap.clone() };
-            tokio::task::spawn_local(write(receive, Writer { kit, log: None, left: vec![] }));
+            tokio::task::spawn_local(write(receive, Writer { kit, log: None, left: vec![], opened: self.opened.clone() }));
             send
         });
         let _ = jobs.send(job);
@@ -436,6 +509,19 @@ impl SessionLog {
         }
     }
 
+    /// The log of the conversation going on as it was when it was opened, before anything this run wrote in it: what the
+    /// conversation shows again as it's taken up. None without one (a conversation new, or kept before there were logs).
+    pub async fn as_opened(&self) -> Option<ReadLog> {
+        self.written().await;
+        let (file, had) = self.opened.borrow().clone()?;
+        if had == 0 {
+            return None;
+        }
+        let mut bytes = tokio::fs::read(&file).await.ok()?;
+        bytes.truncate(usize::try_from(had).ok()?);
+        read_log(&bytes)
+    }
+
     /// What's been said goes to the disk, and nothing more is written: the session is closing.
     pub async fn close(&self) {
         if self.closed.replace(true) {
@@ -464,6 +550,8 @@ struct Writer {
     /// The conversations left last, the newest last: a save of one that lands after it was left (a /new straight after
     /// an answer) still goes in its log, or begins it with the lines that waited for it.
     left: Vec<Log>,
+    /// The log opened last, and how much of it there was then.
+    opened: Rc<RefCell<Option<(PathBuf, u64)>>>,
 }
 
 /// A conversation's log as it's written.
@@ -541,7 +629,8 @@ async fn write(mut jobs: mpsc::UnboundedReceiver<Job>, mut writer: Writer) {
                 };
                 let kit = &writer.kit;
                 let log = writer.log.insert(log);
-                log.start(kit).await;
+                let had = log.start(kit).await;
+                *writer.opened.borrow_mut() = Some((log.file(), had.unwrap_or(0)));
             }
             Job::Request { line, begin } => {
                 if let Some(log) = writer.log.as_mut() {
@@ -622,15 +711,15 @@ impl Log {
     }
 
     /// A log that waited begins, once its conversation is kept: one there already (an earlier session's) goes on,
-    /// unless it's behind what's kept; otherwise it's made.
-    async fn start(&mut self, kit: &Kit) {
+    /// unless it's behind what's kept; otherwise it's made. The size of the one that went on, when one did.
+    async fn start(&mut self, kit: &Kit) -> Option<u64> {
         if !matches!(self.state, Written::Waiting(_)) {
-            return;
+            return None;
         }
         if !tokio::fs::try_exists(self.folder.join(format!("{}.json", self.id))).await.unwrap_or(false) {
-            return;
+            return None;
         }
-        let Written::Waiting(waiting) = std::mem::replace(&mut self.state, Written::Theirs) else { return };
+        let Written::Waiting(waiting) = std::mem::replace(&mut self.state, Written::Theirs) else { return None };
         let file = self.file();
         match found(&file).await {
             Ok(Found::Ours { size, torn, at }) => {
@@ -642,16 +731,26 @@ impl Log {
                 };
                 if behind {
                     self.make(kit, waiting).await;
-                    return;
+                    return None;
                 }
                 self.state = Written::Appending { size, torn };
                 self.put(kit, split(waiting)).await;
+                Some(size)
             }
-            Ok(Found::Theirs) => {}
-            Ok(Found::Unreadable) => self.make(kit, waiting).await,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => self.make(kit, waiting).await,
+            Ok(Found::Theirs) => None,
+            Ok(Found::Unreadable) => {
+                self.make(kit, waiting).await;
+                None
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                self.make(kit, waiting).await;
+                None
+            }
             // Not to be read now (its permissions, a scanner holding it): left as it is, the lines wait for the next save.
-            Err(_) => self.state = Written::Waiting(waiting),
+            Err(_) => {
+                self.state = Written::Waiting(waiting);
+                None
+            }
         }
     }
 

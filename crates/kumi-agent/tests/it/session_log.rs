@@ -10,7 +10,7 @@ use kumi_agent::{
             TurnState,
         },
         conversations::create_conversation_store,
-        session_log::{log_name, read_log, LogLine, ReadLog, SessionLog, MAX_LOG_BYTES},
+        session_log::{behind, log_name, read_log, replay_of, LogLine, ReadLog, Replay, SessionLog, MAX_LOG_BYTES, REPLAYED},
     },
     kernel::budget::OBSERVATION_MARKER,
 };
@@ -555,7 +555,7 @@ async fn the_log_tells_what_happened_not_how_things_are_now() {
             SessionEvent::SetAsked { ask: None },
             SessionEvent::Resend { text: "make it wider".into() },
             SessionEvent::Aside { id: 1, text: "It's at -6 dB.".into() },
-            SessionEvent::Resumed { saved_at: 7, lines: vec![], changes: None, chosen: None, unreadable: None },
+            SessionEvent::Resumed { saved_at: 7, lines: vec![], changes: None, chosen: None, unreadable: None, replay: None },
         ];
         let story = [
             SessionEvent::State { state: TurnState::Running },
@@ -585,6 +585,128 @@ async fn the_log_tells_what_happened_not_how_things_are_now() {
             })
             .collect();
         assert_eq!(logged, story);
+    })
+    .await;
+}
+
+fn request(text: &str) -> LogLine {
+    LogLine::Request(kumi_agent::core::session_log::LogRequest { at: 1, text: text.into(), files: vec![], pinned: None })
+}
+
+fn told(event: SessionEvent) -> LogLine {
+    LogLine::Event { at: 2, event }
+}
+
+fn message(role: &str, text: &str) -> LogLine {
+    LogLine::Message { at: 3, message: json!({"role":role,"content":text}) }
+}
+
+fn header(before: u32) -> kumi_agent::core::session_log::LogHeader {
+    kumi_agent::core::session_log::LogHeader { v: 1, id: ID.into(), at: 100, kumi: "1.25.0".into(), before, from: None }
+}
+
+fn asked(replay: &Replay) -> Vec<String> {
+    replay
+        .lines
+        .iter()
+        .filter_map(|line| match line {
+            LogLine::Request(request) => Some(request.text.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn a_conversation_taken_up_shows_its_last_requests_and_says_how_many_came_before() {
+    // 35 requests, each answered: the last 30 come back, with all that happened in them; the kernel's messages, its saves
+    // and an earlier run's close don't.
+    let mut lines = vec![];
+    for n in 0..35 {
+        lines.push(request(&format!("request {n}")));
+        lines.push(told(SessionEvent::State { state: TurnState::Running }));
+        lines.push(told(notice(&format!("answer {n}"))));
+        lines.push(message("user", &format!("request {n}")));
+        lines.push(LogLine::Saved { at: 4, saved_at: n, turns: n as u32 });
+    }
+    lines.push(told(SessionEvent::State { state: TurnState::Closed }));
+    let replay = replay_of(&ReadLog { header: header(2), lines }, REPLAYED);
+    assert_eq!(asked(&replay), (5..35).map(|n| format!("request {n}")).collect::<Vec<_>>());
+    assert_eq!((replay.before, replay.earlier.len()), (2 + 5, 0));
+    assert_eq!(replay.lines.len(), 30 * 3);
+    assert!(replay.lines.iter().all(|line| matches!(line, LogLine::Request(_) | LogLine::Event { .. })));
+    assert!(!replay
+        .lines
+        .iter()
+        .any(|line| matches!(line, LogLine::Event { event: SessionEvent::State { state: TurnState::Closed }, .. })));
+}
+
+#[test]
+fn the_requests_from_before_a_log_began_come_back_as_words_while_theres_room() {
+    // Kept before there were logs with 5 requests, then 3 more with its log.
+    let mut lines = vec![];
+    for n in 0..5 {
+        lines.push(message("user", &format!("old {n}")));
+        lines.push(message("assistant", &format!("done {n}")));
+    }
+    for n in 0..3 {
+        lines.push(request(&format!("new {n}")));
+        lines.push(told(notice(&format!("answer {n}"))));
+    }
+    let replay = replay_of(&ReadLog { header: header(5), lines: lines.clone() }, REPLAYED);
+    assert_eq!(asked(&replay), ["new 0", "new 1", "new 2"]);
+    assert_eq!(
+        replay.earlier.iter().map(|line| line.text.as_str()).collect::<Vec<_>>(),
+        ["old 0", "done 0", "old 1", "done 1", "old 2", "done 2", "old 3", "done 3", "old 4", "done 4"]
+    );
+    assert_eq!(replay.before, 0);
+    // Room for 4 in all: the last of the earlier ones, then the three since; the rest are counted.
+    let replay = replay_of(&ReadLog { header: header(5), lines: lines.clone() }, 4);
+    assert_eq!(replay.earlier.iter().map(|line| line.text.as_str()).collect::<Vec<_>>(), ["old 4", "done 4"]);
+    assert_eq!(replay.before, 4);
+    // The budget had let the earliest go before the log began: those are counted, not shown.
+    let trimmed: Vec<LogLine> = lines[6..].to_vec();
+    let replay = replay_of(&ReadLog { header: header(5), lines: trimmed }, REPLAYED);
+    assert_eq!(replay.earlier.len(), 4);
+    assert_eq!(replay.before, 3);
+}
+
+#[test]
+fn a_log_behind_its_checkpoint_is_one_an_earlier_kumi_carried_on_without() {
+    let saved = |at: i64| LogLine::Saved { at: 5, saved_at: at, turns: 1 };
+    let log = ReadLog { header: header(0), lines: vec![request("make it wider"), saved(500)] };
+    assert!(!behind(&log, 500));
+    assert!(behind(&log, 600));
+    assert!(!behind(&log, 400));
+    // Without a save yet, what was kept before the log began is in it.
+    let fresh = ReadLog { header: header(1), lines: vec![message("user", "make it wider")] };
+    assert!(!behind(&fresh, 90));
+    assert!(behind(&fresh, 101));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_conversation_taken_up_shows_its_log_as_it_was_before_this_run_wrote_in_it() {
+    local(async {
+        let dir = tempfile::tempdir().unwrap();
+        let store = create_conversation_store(dir.path());
+        store.save(A, ID, &said("make the bass wider", 7)).await.unwrap();
+        let first = SessionLog::new(dir.path(), Places::LIVE, same());
+        first.open(A, ID, 1, None, None);
+        first.request("and wider", vec![], None, 1, None);
+        first.event(&notice("Widened it."));
+        first.close().await;
+        // Taken up again: what the earlier run wrote, without what this one writes from here.
+        let log = SessionLog::new(dir.path(), Places::LIVE, same());
+        log.open(A, ID, 2, None, None);
+        log.event(&notice("The open Set changed; continuing your conversation."));
+        let opened = log.as_opened().await.expect("its log as it was");
+        assert_eq!(notices(&opened), ["Widened it."]);
+        // A new conversation, and one kept before there were logs, have none to show.
+        log.open(A, "mv66me0m0newer", 0, None, None);
+        assert!(log.as_opened().await.is_none());
+        store.save(A, "mv66me0m0older", &said("an old one", 8)).await.unwrap();
+        log.open(A, "mv66me0m0older", 1, had(&[json!({"role":"user","content":"an old one"})]), None);
+        assert!(log.as_opened().await.is_none());
+        log.close().await;
     })
     .await;
 }

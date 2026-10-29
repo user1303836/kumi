@@ -1151,6 +1151,63 @@ local_test!(a_steered_conversation_keeps_its_log_when_its_taken_up_again, {
     assert_eq!(after.header, before.header);
     assert_eq!(after.lines[..before.lines.len()], before.lines[..]);
 });
+local_test!(a_conversation_taken_up_with_its_log_shows_its_requests_again_and_one_its_log_is_behind_its_words, {
+    use kumi_agent::core::session_log::{LogLine, SessionLog};
+    const SET: &str = "cccccccccccccccccccccccccccccccc";
+    let dir = tempfile::tempdir().unwrap();
+    let store = create_conversation_store(dir.path());
+    let logged = |o: &mut SessionOptions| {
+        let log = SessionLog::new(dir.path(), kumi_types::place::Places::LIVE, Rc::new(|text: &str| text.to_owned()));
+        o.conversations = Some(store.clone());
+        o.on_event = SessionLog::tee(&log, o.on_event.clone());
+        o.log = Some(log);
+    };
+    let replayed = |h: &Harness| {
+        h.events.borrow().iter().find_map(|event| match event {
+            SessionEvent::Resumed { replay, lines, .. } => Some((replay.clone(), lines.len())),
+            _ => None,
+        })
+    };
+    let one = harness(None, logged);
+    project(&one, SET);
+    one.session.start().await.unwrap();
+    one.session.submit("make the bass wider", None).await.unwrap();
+    one.session.submit("and darker", None).await.unwrap();
+    one.session.close().await.unwrap();
+    saved(store.as_ref(), SET, 2).await;
+    // Taken up again: both requests come back as they happened, each answer's words with them.
+    let two = harness(None, logged);
+    project(&two, SET);
+    two.session.start().await.unwrap();
+    let (replay, _) = replayed(&two).expect("taken up");
+    let replay = replay.expect("its log, shown again");
+    let asked: Vec<&str> = replay
+        .lines
+        .iter()
+        .filter_map(|line| match line {
+            LogLine::Request(request) => Some(request.text.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(asked, ["make the bass wider", "and darker"]);
+    let answered = replay
+        .lines
+        .iter()
+        .filter(|line| matches!(line, LogLine::Event { event: SessionEvent::Kernel(KernelEvent::Text { text }), .. } if text == "answer"))
+        .count();
+    assert_eq!((answered, replay.before), (2, 0));
+    two.session.close().await.unwrap();
+    // An earlier Kumi carried it on since, without the log: its words come back instead, as before there were logs.
+    let mut kept = store.current(SET).await.unwrap().unwrap();
+    kept.conversation.saved_at += 60_000;
+    store.save(SET, &kept.id, &kept.conversation).await.unwrap();
+    let three = harness(None, logged);
+    project(&three, SET);
+    three.session.start().await.unwrap();
+    let (replay, lines) = replayed(&three).expect("taken up");
+    assert!(replay.is_none() && lines == 2, "{replay:?}");
+    three.session.close().await.unwrap();
+});
 local_test!(unreadable_kept_history_is_shown_and_retained, {
     let dir = tempfile::tempdir().unwrap();
     let store = create_conversation_store(dir.path());
