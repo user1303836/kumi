@@ -122,6 +122,8 @@ fn each_command_reads_as_its_own_with_its_words() {
         ("/loop", Effect::Loop),
         ("/loop match the reference", Effect::Loop),
         ("/undo", Effect::Undo),
+        ("/takeback", Effect::TakeBack { words: String::new() }),
+        ("/takeback 3", Effect::TakeBack { words: "3".into() }),
         ("/copy", Effect::Copy),
         ("/export", Effect::Export { words: String::new() }),
         ("/export md", Effect::Export { words: "md".into() }),
@@ -194,7 +196,7 @@ fn while_kumi_works_the_rest_wait_for_it_and_these_run() {
         assert!(!matches!(run(line, &now), Effect::Refused(_)), "{line} runs while Kumi works");
     }
     for line in
-        ["/goal a punchier kick", "/loop again", "/undo", "/copy", "/export md", "/share", "/willington", "/refresh", "/new", "/reconnect"]
+        ["/goal a punchier kick", "/loop again", "/undo", "/takeback", "/copy", "/export md", "/share", "/willington", "/refresh", "/new", "/reconnect"]
     {
         let verb = line.split_whitespace().next().unwrap();
         assert_eq!(run(line, &now), Effect::Refused(Why::Busy { verb: verb.into() }), "{line}");

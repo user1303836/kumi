@@ -97,6 +97,12 @@ pub const COMMANDS: &[Command] = &[
     command("/reconnect", "Connect to {app} again, keeping the conversation", &[], can(|c| c.reconnect)),
     command("/daw", "Which DAW Kumi works with; /daw <name> opens Kumi again with another", &[], front(Front::SwitchDaw)),
     command("/undo", "Undo Kumi's last change", &["history", "revert"], ALWAYS),
+    command(
+        "/takeback",
+        "Take back your last request: its changes, and its words to edit; /takeback 3, your last three",
+        &["rewind", "back"],
+        can(|c| c.take_back),
+    ),
     command("/stop", "Stop {app}: clips, the transport and recording", &[], can(|c| c.stop_daw)),
     command("/refresh", "Read your {app} {place} again", &["reload"], ALWAYS),
     command("/copy", "Copy Kumi's last answer", &["clipboard"], ALWAYS),
@@ -348,6 +354,10 @@ pub enum Effect {
     /// `/loop <what>`: the line goes as a request.
     Loop,
     Undo,
+    /// `/takeback [n]`: the last request taken back, or the last n.
+    TakeBack {
+        words: String,
+    },
     Copy,
     /// This conversation as a file: the choices (no words), or the format named.
     Export {
@@ -480,6 +490,9 @@ pub fn run(line: &str, now: &Now) -> Effect {
         "/refresh" => return Effect::Refresh,
         "/reconnect" if can.reconnect => return Effect::Reconnect,
         _ => {}
+    }
+    if let Some(words) = argument(line, "/takeback") {
+        return Effect::TakeBack { words };
     }
     if let Some(words) = argument(line, "/export") {
         return Effect::Export { words };

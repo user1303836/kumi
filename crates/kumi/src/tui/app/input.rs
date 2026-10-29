@@ -1123,6 +1123,11 @@ impl TuiApp {
                 self.undo(None).await;
                 return Ok(());
             }
+            Effect::TakeBack { words } => {
+                self.clear_editor();
+                self.take_back(&words).await;
+                return Ok(());
+            }
             Effect::Copy => {
                 self.clear_editor();
                 self.copy_last_answer();
