@@ -532,6 +532,8 @@ struct State {
     /// What letting go of a drag copied, while its toast shows and nothing else came: the next Ctrl-C copies it again
     /// and the next Esc only takes the toast away, instead of stopping Kumi, clearing the box or quitting.
     copied: Option<(String, f64)>,
+    /// Kumi is closing to open again at once (with another DAW, or updated), where the conversation carries on.
+    reopening: bool,
 }
 impl State {
     fn new(options: &TuiOptions) -> Self {
@@ -659,6 +661,7 @@ impl State {
             select_areas: vec![],
             clicks: None,
             copied: None,
+            reopening: false,
         }
     }
 }
@@ -953,8 +956,8 @@ impl TuiApp {
             state.closing = true;
             state.suppress = true;
             state.stream.discard();
-            // The producer quitting, not Kumi closing to open again with another DAW or failing to start.
-            printing = self.0.options.transcript_on_quit && message.is_none();
+            // The producer quitting, not Kumi closing to open again (with another DAW, or updated) or failing to start.
+            printing = self.0.options.transcript_on_quit && message.is_none() && !state.reopening;
             let flashes = std::mem::take(&mut state.flash_timers);
             let timers = [state.tree_refresh.take(), state.wake_timer.take(), state.beat_timer.take(), state.status_timer.take()];
             let alerting = [state.alert_timer.take(), state.answer_countdown.take()];
@@ -1013,7 +1016,8 @@ impl TuiApp {
             if !app.0.output_failed.get() {
                 // The conversation into the terminal's scrollback before the goodbye, with what /export takes out taken
                 // out.
-                let text = if printing { printed(&app.0.state.borrow().transcript.entries, PRINTED_MOST) } else { String::new() };
+                let plain = app.0.icons == IconStyle::Badges;
+                let text = if printing { printed(&app.0.state.borrow().transcript.entries, PRINTED_MOST, plain) } else { String::new() };
                 if !text.is_empty() {
                     let secrets = app.0.state.borrow().secrets.clone();
                     let redact = crate::export::redactor_now(app.0.options.redact.as_ref(), &secrets).await;
@@ -1032,6 +1036,12 @@ impl TuiApp {
             app.0.done.send_replace(Some(code));
         });
         self.done()
+    }
+    /// Kumi closes to open again at once (with another DAW, or updated): the conversation carries on there, so it isn't
+    /// printed into the scrollback too.
+    fn reopen(&self) -> LocalBoxFuture<'static, i32> {
+        self.0.state.borrow_mut().reopening = true;
+        self.finish(0, None)
     }
     fn cancel(&self) {
         {

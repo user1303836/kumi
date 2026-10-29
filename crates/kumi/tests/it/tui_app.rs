@@ -337,6 +337,50 @@ case!(quitting_prints_the_conversation_into_the_scrollback_before_the_goodbye, a
     );
     h.close().await;
 });
+case!(the_printed_conversation_goes_through_what_export_takes_out, async {
+    use futures::FutureExt;
+    // What /export's redactor takes out (a path in the home folder, say), here a name the stream never masks.
+    let h = Harness::with(120, 36, Rc::new(Control::default()), |o| {
+        o.redact = Some(Rc::new(|| {
+            let redact: Rc<dyn Fn(&str) -> String> = Rc::new(|text: &str| text.replace("EQ Eight", "[taken out]"));
+            async move { redact }.boxed_local()
+        }))
+    });
+    let done = h.app.run();
+    delay(5).await;
+    h.connect();
+    h.type_text("what's on the bass?\r").await;
+    h.emit(json!({"type":"state","state":"running"}));
+    h.emit(json!({"type":"text","text":"An EQ Eight."}));
+    h.emit(json!({"type":"turn-complete","result":{"stopReason":"completed"},"elapsedMs":900}));
+    h.emit(json!({"type":"state","state":"idle"}));
+    h.wait_for("An EQ Eight.").await;
+    h.type_text("\x03").await;
+    assert_eq!(done.await, 0);
+    let written = h.output.text.borrow().clone();
+    let after = written.rsplit(kumi::tui::tty::RESTORE).next().unwrap();
+    assert!(after.contains("An [taken out].") && !after.contains("EQ Eight"), "{after:?}");
+    h.close().await;
+});
+case!(closing_to_open_again_with_another_daw_prints_no_conversation, async {
+    let h = Harness::with(120, 36, Rc::new(Control::default()), |o| o.switch_daw = Some(Rc::new(|_| {})));
+    let done = h.app.run();
+    delay(5).await;
+    h.connect();
+    h.type_text("what's on the bass?\r").await;
+    h.emit(json!({"type":"state","state":"running"}));
+    h.emit(json!({"type":"text","text":"An EQ Eight."}));
+    h.emit(json!({"type":"turn-complete","result":{"stopReason":"completed"},"elapsedMs":900}));
+    h.emit(json!({"type":"state","state":"idle"}));
+    h.wait_for("An EQ Eight.").await;
+    // The conversation carries on in the Kumi that opens: printed here, the next quit would print it twice.
+    h.type_text("/daw renoise\r").await;
+    assert_eq!(done.await, 0);
+    let written = h.output.text.borrow().clone();
+    let after = written.rsplit(kumi::tui::tty::RESTORE).next().unwrap();
+    assert!(!after.contains("what's on the bass?") && after.contains("Kumi closed."), "{after:?}");
+    h.close().await;
+});
 case!(with_transcript_on_quit_off_quitting_prints_only_the_goodbye, async {
     let h = Harness::with(120, 36, Rc::new(Control::default()), |o| o.transcript_on_quit = false);
     let done = h.app.run();

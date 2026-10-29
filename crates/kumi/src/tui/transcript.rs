@@ -862,13 +862,16 @@ pub const PRINTED_MOST: usize = 200 * 1024;
 /// The conversation as the terminal's scrollback keeps it once Kumi quits: each request, each answer as it was written,
 /// and a dim line for each run of alike steps, as the conversation folds them. The terminal wraps the lines, so its own
 /// selection copies them whole. Past `most` bytes, only the end is kept, from a line's start, after a line that says so.
-pub fn printed(entries: &[EntryRef], most: usize) -> String {
+/// `plain` marks them in ASCII, for a terminal whose symbols may not show.
+pub fn printed(entries: &[EntryRef], most: usize, plain: bool) -> String {
+    let (asked, [done, failed, running], times, more) =
+        if plain { ("> ", ["+", "x", "~"], "x", "...") } else { ("› ", ["✓", "×", "…"], "×", "…") };
     let mut out = String::new();
     for entry in entries {
         match &*entry.borrow() {
             Entry::User { text } => {
                 for (index, line) in text.trim_end().lines().enumerate() {
-                    out.push_str(&format!("\x1b[1m{}{line}\x1b[22m\n", if index == 0 { "› " } else { "  " }));
+                    out.push_str(&format!("\x1b[1m{}{line}\x1b[22m\n", if index == 0 { asked } else { "  " }));
                 }
             }
             Entry::Assistant { text, steps, status, .. } => {
@@ -883,11 +886,11 @@ pub fn printed(entries: &[EntryRef], most: usize) -> String {
                     }
                     let step = &steps[start];
                     let glyph = match step.state {
-                        StepState::Done => "✓",
-                        StepState::Error => "×",
-                        StepState::Running => "…",
+                        StepState::Done => done,
+                        StepState::Error => failed,
+                        StepState::Running => running,
                     };
-                    let count = if end - start > 1 { format!(" ×{}", end - start) } else { String::new() };
+                    let count = if end - start > 1 { format!(" {times}{}", end - start) } else { String::new() };
                     out.push_str(&format!("\x1b[2m  {glyph} {}{count}\x1b[22m\n", step.label));
                     start = end;
                 }
@@ -907,7 +910,7 @@ pub fn printed(entries: &[EntryRef], most: usize) -> String {
     // From the first line that starts inside the last `most` bytes (a line break is never inside a character).
     let from = out.len() - most;
     let from = out.as_bytes()[from..].iter().position(|byte| *byte == b'\n').map_or(out.len(), |at| from + at + 1);
-    format!("\x1b[2m… the start of this conversation is left out here\x1b[22m\n\n{}", &out[from..])
+    format!("\x1b[2m{more} the start of this conversation is left out here\x1b[22m\n\n{}", &out[from..])
 }
 
 /// A step's words in the transcript, as Kumi and the DAW show its tool: "looked at your Set".

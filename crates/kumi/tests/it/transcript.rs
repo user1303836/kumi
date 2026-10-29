@@ -238,7 +238,7 @@ fn printed_for_the_scrollback_keeps_requests_answers_and_a_line_for_each_run_of_
         started_at: None,
     });
     t.add(Entry::Assistant { text: String::new(), steps: vec![], status: AnswerStatus::Stopped, elapsed_ms: None, started_at: None });
-    let all = printed(&t.entries, PRINTED_MOST);
+    let all = printed(&t.entries, PRINTED_MOST, false);
     assert_eq!(
         all,
         "\x1b[1m› what's on the bass?\x1b[22m\n\x1b[1m  and the kick?\x1b[22m\n\n**Bass** has an EQ Eight.\n\
@@ -246,9 +246,16 @@ fn printed_for_the_scrollback_keeps_requests_answers_and_a_line_for_each_run_of_
     );
     // Past the most it keeps, the end, from a line's start, after a line that says so; a cut inside a character is safe.
     for most in [40, 41, 42, 43] {
-        let end = printed(&t.entries, most);
+        let end = printed(&t.entries, most, false);
         assert!(end.starts_with("\x1b[2m… the start of this conversation is left out here\x1b[22m\n\n"), "{end:?}");
         assert!(all.ends_with(end.split_once("here\x1b[22m\n\n").unwrap().1), "{end:?}");
     }
-    assert_eq!(printed(&[], PRINTED_MOST), "");
+    assert_eq!(printed(&[], PRINTED_MOST, false), "");
+    // Where the terminal's symbols may not show, the marks are plain.
+    assert_eq!(
+        printed(&t.entries, PRINTED_MOST, true),
+        "\x1b[1m> what's on the bass?\x1b[22m\n\x1b[1m  and the kick?\x1b[22m\n\n**Bass** has an EQ Eight.\n\
+         \x1b[2m  + looked at your Set x2\x1b[22m\n\x1b[2m  x listened\x1b[22m\n\n\x1b[2mstopped\x1b[22m\n\n"
+    );
+    assert!(printed(&t.entries, 40, true).starts_with("\x1b[2m... the start of this conversation is left out here"));
 }

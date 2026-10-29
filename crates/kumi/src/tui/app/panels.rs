@@ -1940,7 +1940,7 @@ impl TuiApp {
                 app.close_panel();
                 if answer.value.as_deref() == Some("yes") {
                     (app.0.options.updates.as_ref().unwrap().request)();
-                    app.finish(0, None).await;
+                    app.reopen().await;
                 }
                 Ok(())
             },
