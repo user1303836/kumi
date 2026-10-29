@@ -1,7 +1,7 @@
   Kumi  ·  Night Drive                                                                                          ● Live
 
                                                                                   FOCUS
-   Keys and commands                                                ↑ 70 more     Night Drive
+   Keys and commands                                                ↑ 74 more     Night Drive
                                                                                   Your selection will show here
      ctrl+c              Stop Kumi; when it isn't working, clear the box (↑
                          or ctrl+- brings the words back), then quit
