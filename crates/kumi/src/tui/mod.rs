@@ -18,6 +18,7 @@ mod selection;
 pub mod style;
 pub mod tabs;
 pub mod transcript;
+pub mod transcript_view;
 pub mod tree;
 pub mod tty;
 pub mod voice;

@@ -81,6 +81,7 @@ mod tui_palette;
 mod tui_pictures;
 mod tui_setup;
 mod tui_slots;
+mod tui_view;
 mod update;
 mod voice_input;
 mod willington;

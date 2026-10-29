@@ -524,6 +524,7 @@ case!(narrow_resize_paste_and_scroll, async {
     h.has("newer below · page down");
     h.emit(json!({"type":"notice","message":"note number 31"}));
     assert_eq!(h.screen().iter().find(|s| s.contains("note number")).unwrap(), &top);
+    h.has("1 new below · page down · ctrl+end");
     h.type_text("\x1b[6~\x1b[6~\x1b[6~").await;
     h.has("note number 31");
     h.close().await;

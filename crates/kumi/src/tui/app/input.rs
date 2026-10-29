@@ -513,11 +513,12 @@ impl TuiApp {
             return;
         }
         if ctrl && name == "home" {
-            state.scroll = i32::MAX;
+            let State { view, transcript, .. } = &mut *state;
+            view.to_start(transcript, perf_now());
             return;
         }
         if ctrl && name == "end" {
-            state.scroll = 0;
+            state.view.follow();
             return;
         }
         if name == "home" || (ctrl && name == "a") {
@@ -555,12 +556,10 @@ impl TuiApp {
             state.editor.delete_word_left();
             return;
         }
-        if name == "pageup" {
-            state.scroll = state.scroll.saturating_add(state.page).max(0);
-            return;
-        }
-        if name == "pagedown" {
-            state.scroll = state.scroll.saturating_sub(state.page).max(0);
+        if name == "pageup" || name == "pagedown" {
+            let page = if name == "pageup" { state.page } else { -state.page };
+            let State { view, transcript, .. } = &mut *state;
+            view.scroll_by(transcript, page, perf_now());
             return;
         }
         if ctrl && name == "l" {
@@ -1136,7 +1135,7 @@ impl TuiApp {
             return Ok(());
         }
         self.clear_editor();
-        self.0.state.borrow_mut().scroll = 0;
+        self.0.state.borrow_mut().view.follow();
         let result = if command == "/refresh" {
             self.0.state.borrow_mut().activity = "reading your Set".into();
             session.op(op::Refresh {}).await
@@ -1287,7 +1286,7 @@ impl TuiApp {
             elapsed_ms: Some(number::round(perf_now() - started)),
             started_at: Some(started),
         });
-        state.scroll = 0;
+        state.view.follow();
         drop(state);
         self.0.scheduler.request();
         true
@@ -1441,7 +1440,8 @@ impl TuiApp {
     }
     pub(super) fn scroll_by(&self, lines: i32) {
         let mut state = self.0.state.borrow_mut();
-        state.scroll = state.scroll.saturating_add(lines).max(0);
+        let State { view, transcript, .. } = &mut *state;
+        view.scroll_by(transcript, lines, perf_now());
     }
     pub(super) fn layout_for(columns: i32) -> (i32, i32) {
         let pane = if columns >= super::drawer::PANE_COLUMNS { ((columns as f64 * 0.34).floor() as i32).clamp(36, 46) } else { 0 };

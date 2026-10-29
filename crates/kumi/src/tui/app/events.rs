@@ -79,7 +79,7 @@ impl TuiApp {
                                 state.bytes = 0;
                                 state.stream.discard();
                                 state.current = Some(state.transcript.add(assistant(Some(perf_now()), AnswerStatus::Running)));
-                                state.scroll = 0;
+                                state.view.follow();
                                 state.planning = None;
                                 state.turn_changes = 0;
                             }
@@ -975,7 +975,7 @@ impl TuiApp {
         let shown = {
             let mut state = self.0.state.borrow_mut();
             state.last_sent = Some(next.text.clone());
-            state.scroll = 0;
+            state.view.follow();
             state.transcript.add(Entry::User { text: words })
         };
         self.task(move |app| async move {
