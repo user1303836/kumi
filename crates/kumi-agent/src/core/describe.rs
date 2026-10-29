@@ -4,11 +4,12 @@
 use indexmap::{IndexMap, IndexSet};
 use kumi_common::js::{
     json::stringify,
-    string::{head, trim, utf16_len},
+    string::{trim, utf16_len},
 };
 use kumi_types::contracts::JsonObject;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use unicode_segmentation::UnicodeSegmentation;
 
 /// A thing in the project as a change names it: its name and its position among its kind, as the DAW gave them (None
 /// when it gave none, which isn't the same as a null), and the track it's on (for watch_me).
@@ -108,8 +109,23 @@ pub struct DescribedWatch {
     pub more: usize,
 }
 
+/// `text` cut to at most `units` UTF-16 units (as JavaScript's `slice` counts them, and Kumi's lines always have) at the
+/// edge of a character: whole emoji, flags and letters with their accents, never half of one (U+FFFD) left behind.
+fn cut(text: &str, units: usize) -> &str {
+    let mut used = 0;
+    let mut end = 0;
+    for character in text.graphemes(true) {
+        used += character.encode_utf16().count();
+        if used > units {
+            break;
+        }
+        end += character.len();
+    }
+    &text[..end]
+}
+
 fn quoted(value: &Value, fallback: &str) -> String {
-    value.as_str().map(trim).filter(|s| !s.is_empty()).map(|s| format!("“{}”", head(s, 60))).unwrap_or_else(|| fallback.into())
+    value.as_str().map(trim).filter(|s| !s.is_empty()).map(|s| format!("“{}”", cut(s, 60))).unwrap_or_else(|| fallback.into())
 }
 
 fn named(words: &ProjectWords, kind: &str, items: &[&ProjectItem], verb: &str) -> String {
@@ -128,13 +144,13 @@ fn named(words: &ProjectWords, kind: &str, items: &[&ProjectItem], verb: &str) -
 pub fn small(value: Option<&Value>) -> Option<Value> {
     let value = value?;
     Some(match value {
-        Value::String(s) => json!(head(s, 120)),
+        Value::String(s) => json!(cut(s, 120)),
         Value::Array(_) | Value::Object(_) => {
             let text = stringify(value);
             if utf16_len(&text) <= 240 {
                 value.clone()
             } else {
-                json!(format!("{}…", head(&text, 237)))
+                json!(format!("{}…", cut(&text, 237)))
             }
         }
         _ => value.clone(),
@@ -399,5 +415,21 @@ mod tests {
         assert_eq!(watched.changes[0]["note"], "renamed and changed");
         assert_eq!(watched.changes[1]["added"], "item");
         assert_eq!(watched.changes[1]["on"], "Drums");
+    }
+
+    /// A name cut to 60 units, as JavaScript counts them, is cut between characters: an emoji, or one joined of several,
+    /// that straddles the cut goes whole, never half of it (U+FFFD) or a joiner with nothing after it (#659).
+    #[test]
+    fn a_long_name_is_cut_between_characters() {
+        let keys = format!("{}🎹 Keys", "a".repeat(59));
+        let vox = format!("{}👩‍🎤 Vox", "b".repeat(57));
+        let changes = [
+            ProjectChange::Added { kind: "track".into(), item: item(&keys, 0), made_of: JsonObject::new() },
+            ProjectChange::Added { kind: "item".into(), item: item(&vox, 1), made_of: JsonObject::new() },
+        ];
+        let said = describe_changes(&changes, &OTHER, None);
+        assert_eq!(said.lines, [format!("Added track “{}”", "a".repeat(59)), format!("Added item “{}”", "b".repeat(57))]);
+        assert_eq!(cut("🎹🎹", 3), "🎹");
+        assert_eq!(cut("Bass", 60), "Bass");
     }
 }
