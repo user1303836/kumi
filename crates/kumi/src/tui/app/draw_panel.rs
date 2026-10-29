@@ -37,7 +37,6 @@ impl TuiApp {
         let inner = width - 4;
         let space = box_top - 5;
         let mut lines: Vec<Line> = vec![];
-        let mut cursor_at: Option<(usize, i32)> = None;
         match panel {
             Panel::Pick { picker, .. } => {
                 let picker = picker.borrow();
@@ -125,35 +124,8 @@ impl TuiApp {
                     lines.push(line);
                 }
             }
-            Panel::Key { provider, secret, checking, status, .. } => {
-                let info = provider.row();
-                lines.push(Line::new(format!("Sign in to {}", info.name), st::TITLE));
-                say(&mut lines, &format!("Paste your {} API key. It stays hidden, even here.", info.name), st::DIM, inner);
-                let count = secret.encode_utf16().count();
-                let dots = "•".repeat(count.min((inner - 20).max(8) as usize));
-                let mut line = Line::new(&dots, st::BRIGHT);
-                line.band = true;
-                if !secret.is_empty() {
-                    line.right = Some(sp(format!("{count} characters"), st::FAINT));
-                }
-                lines.push(line);
-                if !*checking {
-                    cursor_at = Some((lines.len() - 1, text_width(&dots)));
-                }
-                if let Some((text, tone)) = status {
-                    say(&mut lines, text, if *tone == NoticeTone::Warn { st::WARN } else { st::DIM }, inner);
-                } else if let Some(page) = info.key_page {
-                    say(&mut lines, &format!("Make one at {page}."), st::FAINT, inner);
-                }
-                say(
-                    &mut lines,
-                    &format!("Kumi checks it with {}, then keeps it in ~/.kumi, readable only by you.", info.name),
-                    st::FAINT,
-                    inner,
-                );
-            }
         }
-        self.draw_lines(screen, box_top, width, &lines, cursor_at)
+        self.draw_lines(screen, box_top, width, &lines, None)
     }
     /// A panel's `lines` in a box `width` wide over the conversation, down to the input box, whose top row is `box_top`;
     /// the cursor where `cursor_at` puts it, when that line shows.
@@ -217,6 +189,5 @@ pub(super) fn panel_hint(panel: &Panel) -> String {
                 .into()
             })
         }
-        Panel::Key { .. } => "enter to save · esc to cancel".into(),
     }
 }

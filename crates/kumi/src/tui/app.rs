@@ -253,18 +253,7 @@ impl TuiOptions {
 type Action = Rc<dyn Fn() -> LocalBoxFuture<'static, Result<(), RuntimeError>>>;
 type Choice = Rc<dyn Fn(PickerItem) -> LocalBoxFuture<'static, Result<(), RuntimeError>>>;
 enum Panel {
-    Pick {
-        picker: Rc<RefCell<Picker>>,
-        choose: Choice,
-        choosing: Rc<Cell<bool>>,
-    },
-    Key {
-        provider: ProviderId,
-        secret: String,
-        checking: bool,
-        status: Option<(String, NoticeTone)>,
-        then: Option<Action>,
-    },
+    Pick { picker: Rc<RefCell<Picker>>, choose: Choice, choosing: Rc<Cell<bool>> },
 }
 struct Aside {
     /// The session's id for it, which its words come in by.

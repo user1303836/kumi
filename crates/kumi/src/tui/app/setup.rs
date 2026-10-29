@@ -11,7 +11,7 @@ use super::super::{
     wrap::wrap,
 };
 use super::drawing::{sp, st};
-use super::panels::ChatGptPanel;
+use super::panels::{ChatGptPanel, KeyPanel};
 use super::*;
 use kumi_ai::providers::{table, SignIn};
 use kumi_common::abort;
@@ -967,7 +967,7 @@ impl TuiApp {
         // A sign-in open over the setup shows in it, in its words.
         let top = state.overlays.top();
         let top = top.as_ref().map(|top| top.borrow());
-        let key = top.as_ref().and_then(|top| top.downcast_ref::<Panel>());
+        let key = top.as_ref().and_then(|top| top.downcast_ref::<KeyPanel>());
         let chatgpt = top.as_ref().and_then(|top| top.downcast_ref::<ChatGptPanel>());
         let mut y = 1;
         screen.put(x, y, "kumi", &st::TITLE);
@@ -995,7 +995,7 @@ impl TuiApp {
         }
         let column = if width >= 40 { 20 } else { 17 };
         let signing = match (key, chatgpt) {
-            (Some(Panel::Key { checking, .. }), _) => Some(if *checking { "checking the key…" } else { "paste a key" }),
+            (Some(key), _) => Some(if key.checking { "checking the key…" } else { "paste a key" }),
             (_, Some(chatgpt)) => Some(if chatgpt.by_code { "waiting for the code" } else { "waiting for the browser" }),
             _ => None,
         };
@@ -1049,39 +1049,29 @@ impl TuiApp {
         }
         let shown = setup.step == Step::Sign && signing.is_some();
         let panel_kind = chatgpt.filter(|_| shown).map(|chatgpt| chatgpt.by_code);
-        if let Some(panel) = key.filter(|_| shown) {
-            match panel {
-                Panel::Key { provider, secret, checking, status, .. } => {
-                    let info = provider.row();
-                    say(screen, &mut y, &format!("Paste your {} API key. It stays hidden, even here.", info.name), st::TEXT);
-                    y += 1;
-                    let count = secret.encode_utf16().count();
-                    let dots = "•".repeat(count.min((width - 16).max(8) as usize));
-                    screen.put(x, y, &dots, &st::BRIGHT);
-                    if count > 0 {
-                        let tally = format!("{count} characters");
-                        if width > text_width(&dots) + text_width(&tally) + 2 {
-                            screen.put(x + width - text_width(&tally), y, &tally, &st::FAINT);
-                        }
-                    }
-                    if !*checking {
-                        cursor = Some(Cursor { x: x + text_width(&dots), y });
-                    }
-                    y += 2;
-                    if let Some((text, tone)) = status {
-                        say(screen, &mut y, text, if *tone == NoticeTone::Warn { st::WARN } else { st::DIM });
-                    } else if let Some(page) = info.key_page {
-                        say(screen, &mut y, &format!("Make one at {page}."), st::DIM);
-                    }
-                    say(
-                        screen,
-                        &mut y,
-                        &format!("Kumi checks it with {}, then keeps it in ~/.kumi, readable only by you.", info.name),
-                        st::FAINT,
-                    );
+        if let Some(KeyPanel { provider, secret, checking, status, .. }) = key.filter(|_| shown) {
+            let info = provider.row();
+            say(screen, &mut y, &format!("Paste your {} API key. It stays hidden, even here.", info.name), st::TEXT);
+            y += 1;
+            let count = secret.encode_utf16().count();
+            let dots = "•".repeat(count.min((width - 16).max(8) as usize));
+            screen.put(x, y, &dots, &st::BRIGHT);
+            if count > 0 {
+                let tally = format!("{count} characters");
+                if width > text_width(&dots) + text_width(&tally) + 2 {
+                    screen.put(x + width - text_width(&tally), y, &tally, &st::FAINT);
                 }
-                _ => {}
             }
+            if !*checking {
+                cursor = Some(Cursor { x: x + text_width(&dots), y });
+            }
+            y += 2;
+            if let Some((text, tone)) = status {
+                say(screen, &mut y, text, if *tone == NoticeTone::Warn { st::WARN } else { st::DIM });
+            } else if let Some(page) = info.key_page {
+                say(screen, &mut y, &format!("Make one at {page}."), st::DIM);
+            }
+            say(screen, &mut y, &format!("Kumi checks it with {}, then keeps it in ~/.kumi, readable only by you.", info.name), st::FAINT);
         } else if let Some(chatgpt) = chatgpt.filter(|_| shown) {
             if chatgpt.by_code {
                 match &chatgpt.code {

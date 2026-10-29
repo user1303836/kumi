@@ -3,7 +3,7 @@ use super::super::{
     markdown::render_markdown,
     picker::{NoteTone, PickerOptions, PickerTabs},
     render::Cursor,
-    width::graphemes,
+    width::{graphemes, text_width},
 };
 use super::draw_panel::{say, Line};
 use super::drawing::{sp, st};
@@ -748,7 +748,7 @@ impl TuiApp {
             return;
         }
         if provider.row().sign_in == SignIn::ApiKey {
-            self.open_overlay(Panel::Key { provider, secret: String::new(), checking: false, status: None, then });
+            self.open_overlay(KeyPanel { provider, secret: String::new(), checking: false, status: None, then });
             return;
         }
         // Over SSH the browser isn't on this computer: a code, entered in a browser anywhere.
@@ -822,15 +822,12 @@ impl TuiApp {
         });
     }
     async fn submit_key(&self, panel: Shared<TuiApp>) {
-        let started = as_panel(&panel, |p| {
-            let Panel::Key { provider, secret, checking, status, then } = p else {
-                return None;
-            };
-            *checking = true;
-            *status = Some((format!("Checking the key with {}…", provider.row().name), NoticeTone::Info));
-            Some((*provider, secret.clone(), then.clone()))
+        let started = as_key(&panel, |key| {
+            key.checking = true;
+            key.status = Some((format!("Checking the key with {}…", key.provider.row().name), NoticeTone::Info));
+            (key.provider, key.secret.clone(), key.then.clone())
         });
-        let Some((provider, key, then)) = started.flatten() else {
+        let Some((provider, key, then)) = started else {
             return;
         };
         self.0.scheduler.request();
@@ -840,23 +837,19 @@ impl TuiApp {
             Err(error) => {
                 let mut secrets = self.0.state.borrow().secrets.clone();
                 secrets.push(key);
-                as_panel(&panel, |p| {
-                    if let Panel::Key { checking, status, .. } = p {
-                        *checking = false;
-                        *status = Some((safe_error_message(Some(&error.message()), &secrets), NoticeTone::Warn));
-                    }
+                as_key(&panel, |key| {
+                    key.checking = false;
+                    key.status = Some((safe_error_message(Some(&error.message()), &secrets), NoticeTone::Warn));
                 });
                 self.0.scheduler.request();
                 return;
             }
         };
         if verdict == ApiKeyCheck::Refused {
-            as_panel(&panel, |p| {
-                if let Panel::Key { checking, secret, status, .. } = p {
-                    *checking = false;
-                    secret.clear();
-                    *status = Some((format!("{name} didn't accept that key. Paste it again, or esc to leave it."), NoticeTone::Warn));
-                }
+            as_key(&panel, |key| {
+                key.checking = false;
+                key.secret.clear();
+                key.status = Some((format!("{name} didn't accept that key. Paste it again, or esc to leave it."), NoticeTone::Warn));
             });
             self.0.scheduler.request();
             return;
@@ -866,11 +859,7 @@ impl TuiApp {
             state.secrets.push(key.clone());
             state.stream.add_secret(key);
         }
-        as_panel(&panel, |p| {
-            if let Panel::Key { secret, .. } = p {
-                secret.clear();
-            }
-        });
+        as_key(&panel, |key| key.secret.clear());
         self.0.state.borrow_mut().overlays.remove(&panel);
         self.notice(
             &if verdict == ApiKeyCheck::Ok {
@@ -1317,7 +1306,7 @@ impl TuiApp {
     }
     /// Whether a sign-in is the top overlay: a key's box, or ChatGPT's.
     pub(super) fn signing_in(&self) -> bool {
-        self.top_panel(|panel| matches!(panel, Panel::Key { .. })).unwrap_or(false) || self.top_is::<ChatGptPanel>()
+        self.top_is::<KeyPanel>() || self.top_is::<ChatGptPanel>()
     }
     /// Opens `overlay` over the conversation in place of the top one, which isn't told it closed: a panel opening over
     /// another has always replaced it.
@@ -1415,23 +1404,6 @@ impl TuiApp {
                     }
                     _ => {}
                 },
-                Panel::Key { secret, checking, .. } if !*checking => {
-                    if name == "backspace" {
-                        let count = secret.encode_utf16().count().saturating_sub(1);
-                        *secret = head(secret, count);
-                    } else if mods.ctrl && name == "u" {
-                        secret.clear();
-                    } else if name == "enter" && !secret.is_empty() {
-                        // The check holds on to this panel: the top one, as only the top one takes keys.
-                        let me = self.0.state.borrow().overlays.top();
-                        if let Some(me) = me {
-                            self.task(move |app| async move {
-                                app.submit_key(me).await;
-                                Ok(())
-                            });
-                        }
-                    }
-                }
                 _ => {}
             }
             return Handled::Kept;
@@ -1470,12 +1442,6 @@ impl TuiApp {
                     return Handled::Pass(event);
                 }
                 picker.borrow_mut().r#type(&text);
-            }
-            Panel::Key { secret, checking, status, .. } if !*checking => {
-                let clean: String =
-                    text.chars().filter(|c| !string::trim(&c.to_string()).is_empty() && (*c as u32) > 31 && *c != '\x7f').collect();
-                *secret = head(&(secret.clone() + &clean), 4096);
-                *status = None;
             }
             _ => {}
         }
@@ -2283,17 +2249,17 @@ pub(super) fn note_command(line: &str) -> Option<(String, String)> {
     (valid && !words.trim().is_empty()).then(|| (id.to_owned(), words.trim().to_owned()))
 }
 
-/// What `change` makes of `overlay`, when it's one of the panels.
-fn as_panel<R>(overlay: &Shared<TuiApp>, change: impl FnOnce(&mut Panel) -> R) -> Option<R> {
+/// What `change` makes of `overlay`, when it's the key's box.
+fn as_key<R>(overlay: &Shared<TuiApp>, change: impl FnOnce(&mut KeyPanel) -> R) -> Option<R> {
     let mut overlay = overlay.borrow_mut();
-    let changed = overlay.downcast_mut::<Panel>().map(change);
+    let changed = overlay.downcast_mut::<KeyPanel>().map(change);
     changed
 }
 
 impl Overlay<TuiApp> for Panel {
     fn handle(&mut self, app: &TuiApp, event: InputEvent) -> Handled {
         match self {
-            Panel::Pick { .. } | Panel::Key { .. } => app.panel_key(self, event),
+            Panel::Pick { .. } => app.panel_key(self, event),
         }
     }
     fn draw(&mut self, app: &TuiApp, screen: &mut Screen, area: Area) -> Option<Cursor> {
@@ -2305,18 +2271,6 @@ impl Overlay<TuiApp> for Panel {
     /// A list's own words (a countdown to Kumi's pick, another way to choose) stay over a toast.
     fn hint_stays(&self, _: &TuiApp) -> bool {
         matches!(self, Panel::Pick { picker, .. } if picker.borrow().options.hint.is_some())
-    }
-    fn closed(&mut self, _: &TuiApp) {
-        match self {
-            Panel::Key { secret, .. } => secret.clear(),
-            Panel::Pick { .. } => {}
-        }
-    }
-    fn busy(&self, _: &TuiApp) -> bool {
-        match self {
-            Panel::Pick { .. } => false,
-            Panel::Key { .. } => true,
-        }
     }
 }
 
@@ -2486,6 +2440,88 @@ impl Overlay<TuiApp> for ChatGptPanel {
     /// The sign-in under way stops.
     fn closed(&mut self, _: &TuiApp) {
         self.abort.cancel();
+    }
+    fn busy(&self, _: &TuiApp) -> bool {
+        true
+    }
+}
+
+/// The box an API key is pasted into, open over the conversation, while it's typed and then checked.
+pub(super) struct KeyPanel {
+    pub provider: ProviderId,
+    pub secret: String,
+    pub checking: bool,
+    pub status: Option<(String, NoticeTone)>,
+    then: Option<Action>,
+}
+impl Overlay<TuiApp> for KeyPanel {
+    /// What's typed or pasted is the key, shown only as dots; enter checks it with the provider.
+    fn handle(&mut self, app: &TuiApp, event: InputEvent) -> Handled {
+        match &event {
+            InputEvent::Key { name, mods, .. } => {
+                if name == "escape" || (mods.ctrl && name == "c") {
+                    return Handled::Close;
+                }
+                if !self.checking && name == "backspace" {
+                    let count = self.secret.encode_utf16().count().saturating_sub(1);
+                    self.secret = head(&self.secret, count);
+                } else if !self.checking && mods.ctrl && name == "u" {
+                    self.secret.clear();
+                } else if !self.checking && name == "enter" && !self.secret.is_empty() {
+                    // The check holds on to this panel: the top one, as only the top one takes keys.
+                    let me = app.0.state.borrow().overlays.top();
+                    if let Some(me) = me {
+                        app.task(move |app| async move {
+                            app.submit_key(me).await;
+                            Ok(())
+                        });
+                    }
+                }
+            }
+            InputEvent::Text { text } | InputEvent::Paste { text } if !self.checking => {
+                let clean: String =
+                    text.chars().filter(|c| !string::trim(&c.to_string()).is_empty() && (*c as u32) > 31 && *c != '\x7f').collect();
+                self.secret = head(&(self.secret.clone() + &clean), 4096);
+                self.status = None;
+            }
+            _ => {}
+        }
+        Handled::Kept
+    }
+    fn draw(&mut self, app: &TuiApp, screen: &mut Screen, area: Area) -> Option<Cursor> {
+        let width = 76.min(area.left - 2);
+        let inner = width - 4;
+        let mut lines: Vec<Line> = vec![];
+        let mut cursor_at: Option<(usize, i32)> = None;
+        let info = self.provider.row();
+        lines.push(Line::new(format!("Sign in to {}", info.name), st::TITLE));
+        say(&mut lines, &format!("Paste your {} API key. It stays hidden, even here.", info.name), st::DIM, inner);
+        let count = self.secret.encode_utf16().count();
+        let dots = "•".repeat(count.min((inner - 20).max(8) as usize));
+        let mut line = Line::new(&dots, st::BRIGHT);
+        line.band = true;
+        if !self.secret.is_empty() {
+            line.right = Some(sp(format!("{count} characters"), st::FAINT));
+        }
+        lines.push(line);
+        if !self.checking {
+            cursor_at = Some((lines.len() - 1, text_width(&dots)));
+        }
+        if let Some((text, tone)) = &self.status {
+            say(&mut lines, text, if *tone == NoticeTone::Warn { st::WARN } else { st::DIM }, inner);
+        } else if let Some(page) = info.key_page {
+            say(&mut lines, &format!("Make one at {page}."), st::FAINT, inner);
+        }
+        say(&mut lines, &format!("Kumi checks it with {}, then keeps it in ~/.kumi, readable only by you.", info.name), st::FAINT, inner);
+
+        app.draw_lines(screen, area.box_top, width, &lines, cursor_at)
+    }
+    fn hint(&self, _: &TuiApp) -> String {
+        "enter to save · esc to cancel".into()
+    }
+    /// A key half typed goes.
+    fn closed(&mut self, _: &TuiApp) {
+        self.secret.clear();
     }
     fn busy(&self, _: &TuiApp) -> bool {
         true
