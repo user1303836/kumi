@@ -983,105 +983,147 @@ impl MapView {
         was
     }
 
-    pub fn on_key(&mut self, name: &str, shift: bool) -> Asked {
+    /// While its filter is typed: what's typed goes into it, and backspace, enter and esc are the filter's
+    /// (`Scope::MapFilter`).
+    pub fn filtering(&self) -> bool {
+        self.prompt.is_some()
+    }
+
+    /// A character typed into the filter (a pasted line break, or a tab, is a space in its words).
+    pub fn type_filter(&mut self, character: char) {
         self.told = None;
         if let Some(prompt) = self.prompt.as_mut() {
-            match name {
-                "escape" => self.prompt = None,
-                "backspace" => {
+            prompt.push(if character.is_control() { ' ' } else { character });
+        }
+    }
+
+    /// Does what the first of a key's actions that applies does (`ids`, as the key registry has them in the map or its
+    /// filter); one that doesn't apply just now lets the key go on to the next.
+    pub fn act(&mut self, ids: Vec<&'static str>) -> Asked {
+        self.told = None;
+        let picks = self.data.is_some() && self.graphics != Graphics::Words;
+        for id in ids {
+            let (way, pan) = match id {
+                "map.filter-erase" => {
+                    let Some(prompt) = self.prompt.as_mut() else { continue };
                     prompt.pop();
+                    return Asked::Nothing;
                 }
-                "enter" => {
-                    let filter = self.prompt.take().unwrap_or_default();
+                "map.filter-keep" => {
+                    let Some(filter) = self.prompt.take() else { continue };
                     self.refilter(&filter);
                     // The point the mouse is on, filtered out: its ring goes, and its hover ends.
                     if self.hovered.is_some_and(|(tab, at)| !self.views[tab].shown.contains(&at)) {
                         self.hovered = None;
                         return Asked::Leave;
                     }
+                    return Asked::Nothing;
                 }
-                _ => {}
+                "map.filter-drop" => {
+                    if self.prompt.take().is_none() {
+                        continue;
+                    }
+                    return Asked::Nothing;
+                }
+                // Esc lets a box being dragged go, then the points picked, then closes the map.
+                "map.let-go" if self.pressed.is_some() || self.boxed.is_some() => {
+                    (self.pressed, self.boxed) = (None, None);
+                    return Asked::Nothing;
+                }
+                "map.let-go" if self.views.get(self.tab).is_some_and(|view| !view.picked.is_empty()) => {
+                    self.views[self.tab].picked.clear();
+                    self.version += 1;
+                    return Asked::Nothing;
+                }
+                "map.close" => return Asked::Close,
+                "map.gather" => return self.gather(),
+                "map.play" => return self.play(),
+                "map.switch" if self.data.is_some() => {
+                    self.tab = 1 - self.tab;
+                    // A hover on the map left behind ends: what it plays stops.
+                    let hovering = self.hovered.is_some() || self.from_hover;
+                    (self.said, self.hovered, self.version) = (None, None, self.version + 1);
+                    return if hovering { Asked::Leave } else { Asked::Nothing };
+                }
+                "map.zoom-in" => {
+                    self.zoom_by(STEP, None);
+                    return Asked::Nothing;
+                }
+                "map.zoom-out" => {
+                    self.zoom_by(1. / STEP, None);
+                    return Asked::Nothing;
+                }
+                "map.filter" if self.data.is_some() => {
+                    self.prompt = Some(String::new());
+                    return Asked::Nothing;
+                }
+                // Picking: the point chosen picked or let go, every point the filter keeps, each picked one's nearest.
+                "map.pick" if picks => {
+                    if let Some(at) = self.views[self.tab].chosen {
+                        self.toggle(at);
+                    }
+                    return Asked::Nothing;
+                }
+                "map.pick-all" if picks => {
+                    self.pick_all();
+                    return Asked::Nothing;
+                }
+                "map.grow" if picks => {
+                    self.grow();
+                    return Asked::Nothing;
+                }
+                "map.hover" if self.data.is_some() => {
+                    self.hover = !self.hover;
+                    if !self.hover {
+                        self.hovered = None;
+                    }
+                    return Asked::HoverPlays(self.hover);
+                }
+                "map.up" => ((0., 1.), false),
+                "map.down" => ((0., -1.), false),
+                "map.left" => ((-1., 0.), false),
+                "map.right" => ((1., 0.), false),
+                "map.pan-up" => ((0., 1.), true),
+                "map.pan-down" => ((0., -1.), true),
+                "map.pan-left" => ((-1., 0.), true),
+                "map.pan-right" => ((1., 0.), true),
+                _ => continue,
+            };
+            if self.graphics == Graphics::Words {
+                self.list_by(-way.1 as isize);
+            } else if pan {
+                self.pan(way);
+            } else {
+                self.go(way);
             }
             return Asked::Nothing;
-        }
-        let way = match name {
-            "up" => (0., 1.),
-            "down" => (0., -1.),
-            "left" => (-1., 0.),
-            "right" => (1., 0.),
-            // Esc lets a box being dragged go, then the points picked, then closes the map.
-            "escape" if self.pressed.is_some() || self.boxed.is_some() => {
-                (self.pressed, self.boxed) = (None, None);
-                return Asked::Nothing;
-            }
-            "escape" if self.views.get(self.tab).is_some_and(|view| !view.picked.is_empty()) => {
-                self.views[self.tab].picked.clear();
-                self.version += 1;
-                return Asked::Nothing;
-            }
-            "escape" => return Asked::Close,
-            "enter" => return self.gather(),
-            "space" => return self.play(),
-            "tab" if self.data.is_some() => {
-                self.tab = 1 - self.tab;
-                // A hover on the map left behind ends: what it plays stops.
-                let hovering = self.hovered.is_some() || self.from_hover;
-                (self.said, self.hovered, self.version) = (None, None, self.version + 1);
-                return if hovering { Asked::Leave } else { Asked::Nothing };
-            }
-            _ => return Asked::Nothing,
-        };
-        if self.graphics == Graphics::Words {
-            self.list_by(-way.1 as isize);
-        } else if shift {
-            self.pan(way);
-        } else {
-            self.go(way);
         }
         Asked::Nothing
     }
 
-    /// Typed characters, one at a time (they can come together): space plays, + and − zoom, / starts a filter (and
-    /// what follows is its words), h turns hover plays off and on, q closes.
+    /// A key with Kumi's own keys, as the app hands it on (`act`): for tests.
+    #[doc(hidden)]
+    pub fn on_key(&mut self, name: &str, shift: bool) -> Asked {
+        use super::{keymap, keys::Modifiers};
+        let scope = if self.filtering() { keymap::Scope::MapFilter } else { keymap::Scope::Map };
+        let chord = keymap::Chord::new(name, Modifiers { shift, ..Modifiers::NONE });
+        self.act(keymap::Keymap::default().actions(scope, &chord))
+    }
+
+    /// Typed characters with Kumi's own keys, one at a time, as the app hands them on: for tests.
+    #[doc(hidden)]
     pub fn on_text(&mut self, text: &str) -> Asked {
-        self.told = None;
-        for character in text.chars() {
-            let asked = self.on_character(character);
+        use super::{keymap, keys::InputEvent};
+        for typed in text.chars() {
+            if self.filtering() {
+                self.type_filter(typed);
+                continue;
+            }
+            let chord = keymap::Chord::of(&InputEvent::text(&typed.to_string())).expect("one character");
+            let asked = self.act(keymap::Keymap::default().actions(keymap::Scope::Map, &chord));
             if asked != Asked::Nothing {
                 return asked;
             }
-        }
-        Asked::Nothing
-    }
-
-    fn on_character(&mut self, character: char) -> Asked {
-        if let Some(prompt) = self.prompt.as_mut() {
-            // A pasted line break, or a tab, is a space in the filter's words.
-            prompt.push(if character.is_control() { ' ' } else { character });
-            return Asked::Nothing;
-        }
-        match character {
-            ' ' => return self.play(),
-            '+' | '=' => self.zoom_by(STEP, None),
-            '-' | '_' => self.zoom_by(1. / STEP, None),
-            '/' if self.data.is_some() => self.prompt = Some(String::new()),
-            // Picking: the point chosen picked or let go, every point the filter keeps, each picked one's nearest.
-            'x' if self.data.is_some() && self.graphics != Graphics::Words => {
-                if let Some(at) = self.views[self.tab].chosen {
-                    self.toggle(at);
-                }
-            }
-            'a' if self.data.is_some() && self.graphics != Graphics::Words => self.pick_all(),
-            'g' if self.data.is_some() && self.graphics != Graphics::Words => self.grow(),
-            'h' if self.data.is_some() => {
-                self.hover = !self.hover;
-                if !self.hover {
-                    self.hovered = None;
-                }
-                return Asked::HoverPlays(self.hover);
-            }
-            'q' => return Asked::Close,
-            _ => {}
         }
         Asked::Nothing
     }

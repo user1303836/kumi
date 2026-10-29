@@ -361,12 +361,13 @@ it):
   space between (`esc esc`) are pressed one after the other: the first starts the pair only when nothing else in the
   box takes it, the second comes within half a second, and pairs work only in the box.
 - Where actions share a key, keys.json's come first, then Kumi's own, in the order they always were.
-- A character can't be a key where words are typed (the box, a list, the `/` menu): it types itself there. `?` on an
-  empty box always opens the help, and `app.help` can have keys as well (`f1`).
+- A character can't be a key where words are typed (the box, a list, the `/` menu), nor for what only a search or a
+  filter does while it's typed (the detailed view's, the map's): it types itself there. `?` on an empty box always
+  opens the help, and `app.help` can have keys as well (`f1`).
 - Kumi says once, as it starts, what it couldn't use: an action it doesn't know, a key it can't read, a character
   where words are typed, two actions keys.json gives one key, and the keys it puts ahead of Kumi's own.
-- The help (`/help`, `?`) shows the keys as keys.json has them; the hints under the box and in the panels still
-  name Kumi's own keys. The map's keys and setup's aren't actions yet.
+- The help (`/help`, `?`) shows the keys as keys.json has them; the hints under the box, in the panels, in the
+  map and in setup still name Kumi's own keys.
 
 | Where | Actions, with Kumi's own keys |
 | --- | --- |
@@ -384,6 +385,8 @@ it):
 | The key box | `key.check` (enter), `key.erase` (backspace), `key.clear` (ctrl+u), `key.cancel` (esc, ctrl+c) |
 | ChatGPT's sign-in | `chatgpt.copy` (c), `chatgpt.by-code` (d), `chatgpt.by-browser` (b), `chatgpt.cancel` (esc, ctrl+c) |
 | The conversation in detail (ctrl+o) | `details.up`, `details.down`, `details.page-up`, `details.page-down`, `details.top` (home), `details.end` (end), `details.search` (/), `details.next-match` (n), `details.previous-match` (N), `details.next-request` (}), `details.previous-request` ({), `details.print` ([), `details.edit` (v), `details.close` (esc, q, ctrl+c, ctrl+o); while a search is typed, `details.search-erase` (backspace), `details.search-keep` (enter), `details.search-drop` (esc) |
+| The map (`/map`) | `map.up`, `map.down`, `map.left`, `map.right` (the arrows), `map.pan-up`, `map.pan-down`, `map.pan-left`, `map.pan-right` (shift and the arrows), `map.zoom-in` (`+`, `=`), `map.zoom-out` (`-`, `_`), `map.play` (space), `map.hover` (h), `map.pick` (x), `map.pick-all` (a), `map.grow` (g), `map.gather` (enter), `map.filter` (`/`), `map.switch` (tab), `map.let-go` (esc), `map.close` (esc, q, ctrl+c); while its filter is typed, `map.filter-erase` (backspace), `map.filter-keep` (enter), `map.filter-drop` (esc) |
+| Setup | `setup.up` (↑), `setup.down` (↓, tab), `setup.choose` (enter), `setup.later` (esc), `setup.quit` (ctrl+c, ctrl+d) |
 
 ## Plain mode
 

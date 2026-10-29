@@ -327,6 +327,27 @@ case!(an_open_live_is_restarted_only_when_asked_and_esc_puts_setup_off, async {
     h.close().await;
 });
 
+case!(keys_json_gives_setups_actions_other_keys_letters_too, async {
+    // ↓ and esc are j and l: setup takes no words, so a letter keys.json gives it arrives.
+    let file = json!({ "setup.down": ["j"], "setup.later": ["l"] });
+    let live = FakeLive::new(true);
+    let h = setup(80, FakeModels::catalog(), Some((Some(MISSING), live.clone())), |o| o.keys = Some(Ok(file)));
+    h.start().await;
+    h.wait_for("Restart Live now").await;
+    h.type_text("\x1b[B").await;
+    assert!(rows(&h).lines().any(|l| l == "  › Restart Live now"), "↓ moved:\n{}", rows(&h));
+    h.type_text("j").await;
+    h.wait_for("› I'll quit it").await;
+    h.type_text("\r").await;
+    h.wait_for("waiting for you to quit Live").await;
+    // Esc doesn't leave it for later now; l does.
+    h.type_text("\x1b").await;
+    assert!(!said(&h).contains("Kumi chats without Live for now"), "esc left it");
+    h.type_text("l").await;
+    h.wait_for("Kumi chats without Live for now, and offers to connect it next time.").await;
+    h.close().await;
+});
+
 case!(after_kumi_restarts_live_the_control_surface_waits_for_the_live_that_opens, async {
     // #167: the session was connected to the Live Kumi restarts. That connection went with it, so the
     // Control Surface step waits for the Live that opens next rather than calling it connected at once.

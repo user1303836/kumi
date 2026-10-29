@@ -51,7 +51,16 @@ impl TuiApp {
             let signing = self.signing_in();
             match event {
                 InputEvent::Key { .. } | InputEvent::Text { .. } | InputEvent::Paste { .. } if signing => self.panel_input(event),
-                InputEvent::Key { name, mods, .. } => self.setup_key(&name, mods),
+                InputEvent::Key { .. } => self.setup_act(self.actions(Scope::Setup, &event)),
+                // Setup takes no words: a character is a key keys.json may give one of its actions.
+                InputEvent::Text { text } => {
+                    for typed in text.chars() {
+                        let ids = self.actions(Scope::Setup, &InputEvent::text(&typed.to_string()));
+                        if !ids.is_empty() && !self.0.state.borrow().closing {
+                            self.setup_act(ids);
+                        }
+                    }
+                }
                 _ => {}
             }
             self.0.scheduler.request();

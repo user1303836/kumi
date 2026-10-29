@@ -208,9 +208,9 @@ REAPER と Renoise でも画面は同じで（[つなぎ方](KUMI_GUIDE.md#reape
 
 - アクションごとのリストが、そのアクションのキーに置き換わります。空のリストではキーがなくなります。キーは `ctrl`、`alt`（または `option`）、`shift` と名前で書きます：`enter`、`tab`、`esc`、`backspace`、`delete`、`insert`、`up` または `↑`（ほかの矢印も同じ）、`home`、`end`、`pageup`、`pagedown`、`space`、`f1`〜`f12`、または一文字（`ctrl+-`、`ctrl++`）。スペースで区切った二つのキー（`esc esc`）は、続けて押します。最初のキーは、入力欄でほかに何も受け取らないときだけ組の始まりになり、二つ目は半秒以内に押します。組が使えるのは入力欄だけです。
 - 同じキーを複数のアクションが使うときは、keys.json のものが先に、次に Kumi 自身のものが、これまでの順に試されます。
-- 文字を入力する場所（入力欄、一覧、`/` メニュー）では、一文字をキーにはできません。そこでは文字として入力されます。空の入力欄での `?` はいつもヘルプを開き、`app.help` にキーを加えることもできます（`f1`）。
+- 文字を入力する場所（入力欄、一覧、`/` メニュー）では、一文字をキーにはできません。入力中の検索やフィルター（会話の詳細、地図）だけのアクションにもできません。そこでは文字として入力されます。空の入力欄での `?` はいつもヘルプを開き、`app.help` にキーを加えることもできます（`f1`）。
 - 使えなかったものは、起動時に一度だけ伝えます：知らないアクション、読めないキー、文字を入力する場所での一文字、keys.json が一つのキーを与えた二つのアクション、Kumi 自身のキーより先に置いたキー。
-- ヘルプ（`/help`、`?`）は keys.json のとおりのキーを表示しますが、入力欄の下とパネルのヒントは、まだ Kumi 自身のキーを示します。地図とセットアップのキーは、まだアクションではありません。
+- ヘルプ（`/help`、`?`）は keys.json のとおりのキーを表示しますが、入力欄の下、パネル、地図、セットアップのヒントは、まだ Kumi 自身のキーを示します。
 
 | 場所 | アクションと Kumi 自身のキー |
 | --- | --- |
@@ -228,6 +228,8 @@ REAPER と Renoise でも画面は同じで（[つなぎ方](KUMI_GUIDE.md#reape
 | キーの入力欄 | `key.check`（enter）、`key.erase`（backspace）、`key.clear`（ctrl+u）、`key.cancel`（esc、ctrl+c） |
 | ChatGPT のサインイン | `chatgpt.copy`（c）、`chatgpt.by-code`（d）、`chatgpt.by-browser`（b）、`chatgpt.cancel`（esc、ctrl+c） |
 | 会話の詳細（ctrl+o） | `details.up`、`details.down`、`details.page-up`、`details.page-down`、`details.top`（home）、`details.end`（end）、`details.search`（/）、`details.next-match`（n）、`details.previous-match`（N）、`details.next-request`（}）、`details.previous-request`（{）、`details.print`（[）、`details.edit`（v）、`details.close`（esc、q、ctrl+c、ctrl+o）。検索を入力している間は `details.search-erase`（backspace）、`details.search-keep`（enter）、`details.search-drop`（esc） |
+| 地図（`/map`） | `map.up`、`map.down`、`map.left`、`map.right`（矢印）、`map.pan-up`、`map.pan-down`、`map.pan-left`、`map.pan-right`（shift と矢印）、`map.zoom-in`（`+`、`=`）、`map.zoom-out`（`-`、`_`）、`map.play`（space）、`map.hover`（h）、`map.pick`（x）、`map.pick-all`（a）、`map.grow`（g）、`map.gather`（enter）、`map.filter`（`/`）、`map.switch`（tab）、`map.let-go`（esc）、`map.close`（esc、q、ctrl+c）。フィルターの入力中は `map.filter-erase`（backspace）、`map.filter-keep`（enter）、`map.filter-drop`（esc） |
+| セットアップ | `setup.up`（↑）、`setup.down`（↓、tab）、`setup.choose`（enter）、`setup.later`（esc）、`setup.quit`（ctrl+c、ctrl+d） |
 
 ## プレーンモード
 
