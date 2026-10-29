@@ -24,8 +24,8 @@ use tokio::sync::watch;
 use crate::core::contracts::{
     Kernel, KernelCheckpoint, KernelEmit, KernelEvent, OnText, Picture, StopReason, TranscriptLine, TurnResult, WaitFor,
 };
-use crate::core::hidden::{unhidden, unhidden_owned};
-use crate::kernel::budget::{fit_for, fit_measured, opening, put_away_images, transcript_of, PutAway};
+use crate::core::hidden::{named_value, remember_text, unhidden, unhidden_owned};
+use crate::kernel::budget::{fit_for, fit_measured, opening, put_away_images, transcript_of, PutAway, OBSERVATION_MARKER};
 use crate::kernel::deferred::{self, Shelf, CALL_TOOL};
 use kumi_ai::binding::{ContextBudget, DEFAULT_BUDGET};
 use kumi_ai::error::LanguageModelError;
@@ -372,6 +372,11 @@ impl AgentKernel {
         let state = Rc::new(Running { steering: RefCell::new(Vec::new()), context: RefCell::new(None), done: settled });
         *self.inner.running.borrow_mut() = Some(state.clone());
         let _guard = TurnGuard { inner: self.inner.clone(), done };
+        // What the observation names hiding words, so the names the model gives back find them (see `hidden::named`).
+        let observation = input.split_once(OBSERVATION_MARKER).and_then(|(_, rest)| rest.split_once("</current_observation_untrusted>"));
+        if let Some((observation, _)) = observation {
+            remember_text(observation.trim());
+        }
         // The request, with the observation and Kumi's notes: what the DAW's names or a note hide, the model doesn't read.
         let mut content = vec![UserPart::Text(TextPart::new(unhidden(input)))];
         content.extend(pictures.into_iter().map(|picture| {
@@ -1210,7 +1215,9 @@ impl Turn {
                 let work = async move {
                     match streamed {
                         Some(entry) => entry.call.finish(input).await,
-                        None => tool.execute(input.unwrap_or_default(), signal).await,
+                        // The names the model gives as it was shown them, as the DAW has them. (A streamed plan's steps
+                        // are put back as the plan takes each one: its words must stay as they came.)
+                        None => tool.execute(input.map(|input| named_object(&input)).unwrap_or_default(), signal).await,
                     }
                 };
                 match until_aborted(work, &self.abort).await {
@@ -1678,9 +1685,18 @@ fn capped(text: String) -> String {
     )
 }
 
+/// A tool's input with the names in it as the DAW has them (see `hidden::named`).
+fn named_object(input: &JsonObject) -> JsonObject {
+    match named_value(&Value::Object(input.clone())) {
+        Value::Object(input) => input,
+        _ => unreachable!("an object stays one"),
+    }
+}
+
 /// A tool's result as the model reads it: its words, then each image after its caption. What a page, a file or a name
 /// the result has hides, the model doesn't read; the words never grow by it, so the result's cap still holds.
 fn tool_output(outcome: Outcome) -> ToolResultOutput {
+    remember_text(&outcome.text);
     let outcome = Outcome { text: unhidden_owned(outcome.text), ..outcome };
     if outcome.is_error {
         return ToolResultOutput::error_text(outcome.text);

@@ -67,6 +67,7 @@ REAPER と Renoise でも画面は同じで（[つなぎ方](KUMI_GUIDE.md#reape
 | `kumi export [ID または名前 \| --last] [--md \| --html \| --json] [--full] [--raw] [-o パス]` | 保存された会話を Markdown（既定）、Web ページ、Kumi 用ファイルとして保存。ID を省くか `--last` で最新の会話。`--full` で各ステップの入力と結果も加え、`--raw` でキーやパスを残す |
 | `kumi import <ファイル>` | `kumi export --json` で保存した会話を取り込み、`kumi -r` で続けられるようにする |
 | `kumi --inference-only` | DAW なしでチャットする |
+| `kumi -p "<依頼>" [--json]`（`--print` でも可） | 依頼を 1 つ実行し、答えを出力して終わる（スクリプト向け）。うまくいかなかったことは stderr に出し、終了コードで結果を示す：0 答えた、1 失敗、3 1 回の答えのステップ上限で止まった、130 ctrl+c で止めた。`--json` では代わりに Kumi が送るイベントを 1 行ずつ JSON で出す。決まったフレーズ（「tempo 124」）はモデルを使わずすぐ DAW を変える。DAW があれば、`kumi` と同じく開いているプロジェクトの会話に入る。`--inference-only`、`--daw`、`-c`、`-r <ID または名前>` と使える |
 | `kumi --bridge-config <absolute path>` | 自分のブリッジ設定を使う |
 | `kumi login` | サインイン：ChatGPT か API キーかを尋ねる |
 | `kumi login <provider>` | `openai-codex`（ChatGPT。ブラウザなしなら `--device`。SSH 経由ではこれが既定。ブラウザなら `--browser`）に、または API キーで `anthropic`、`openai`、`opencode`、`opencode-go` にサインインする |

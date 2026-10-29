@@ -27,6 +27,15 @@ fn tempo_change(id: &str) -> Value {
         "picture":{"kind":"values","values":[{"name":"Tempo","from":120.0,"to":124.0,"min":20.0,"max":999.0,"fromText":"120 BPM","toText":"124 BPM"}]}}})
 }
 
+/// A note whose velocity alone changed, as Live sends it (#643): its start and length as Live keeps a triplet's
+/// (2.6666666666666665, 0.3333333333333333), and as the model's patch restated them (2.6667, 0.3333).
+fn velocity_change(id: &str) -> Value {
+    json!({"type":"change","change":{"id":id,"family":"clip","title":"Bassline · velocity of 1 note","state":"applied","at":3,
+        "picture":{"kind":"notes","length":4.0,
+            "before":[[2.6666666666666665, 36.0, 0.3333333333333333, 90.0]],
+            "after":[[2.6667, 36.0, 0.3333, 110.0]]}}})
+}
+
 /// The first row under HISTORY's strip with `text`.
 fn history_row(lines: &[String], text: &str) -> usize {
     let strip = lines.iter().position(|line| line.contains("HISTORY")).expect("HISTORY");
@@ -68,6 +77,21 @@ case!(a_history_row_opens_to_its_picture_and_closes_again, async {
     h.type_text("\r").await;
     h.wait_until_hidden("asked -4.5 dB").await;
     assert!(!h.calls().iter().any(|call| call.starts_with("undo:")));
+    h.close().await;
+});
+
+case!(a_note_whose_velocity_alone_changed_is_kept_not_moved, async {
+    // As a saved record keeps it, to 3 decimals: the note stays the note it was, as it does once Kumi starts again.
+    let h = Harness::new(160, 40);
+    h.start().await;
+    h.connect();
+    h.emit(velocity_change("c1"));
+    h.has("Bassline · velocity of 1 note");
+    h.type_text("\x1b[Z").await;
+    h.type_text("\r").await;
+    h.wait_for("1 note → 1 note").await;
+    let screen = h.screen().join("\n");
+    assert!(!screen.contains("· 1 new") && !screen.contains("· 1 gone"), "the note was neither added nor taken away:\n{screen}");
     h.close().await;
 });
 
