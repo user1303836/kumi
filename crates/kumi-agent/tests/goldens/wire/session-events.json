@@ -2022,6 +2022,17 @@
     "back": true
   },
   {
+    "type": "reasoning",
+    "text": "**Weighing the kick's 55 Hz against the bass**\n\n"
+  },
+  {
+    "type": "usage",
+    "inputTokens": 12400.0,
+    "outputTokens": 830.0,
+    "cacheReadTokens": 9000.0,
+    "cacheWriteTokens": 1200.0
+  },
+  {
     "type": "retry",
     "reason": "No connection.",
     "waitMs": 5000,

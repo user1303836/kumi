@@ -507,7 +507,7 @@ impl AgentKernel {
                 call.abort_signal = Some(abort.signal());
                 let timed = kumi_ai::timing::model_call(&binding.id);
                 let parts = binding.model.do_stream(call).await.map_err(StepError::Model)?;
-                consume(kumi_ai::timing::timed(parts, timed), &abort, &hear, None).await
+                consume(kumi_ai::timing::timed(parts, timed), &abort, &hear, &|_| {}, None).await
             }
             .await;
             match attempted {
@@ -771,6 +771,10 @@ async fn turn(inner: Rc<Inner>, first: Message, signal: Signal, emit: KernelEmit
             };
             add(&mut usage.borrow_mut(), &result.usage);
             reported.set(true);
+            // Each call's own, as it finishes: how full the model's context is now.
+            let mut call = Usage::default();
+            add(&mut call, &result.usage);
+            (turn.deliver)(KernelEvent::Usage(call));
             if !result.content.is_empty() {
                 turn.messages.borrow_mut().push(Message::Assistant { content: result.content.clone(), provider_options: None });
             }
@@ -1046,13 +1050,15 @@ impl Turn {
                 self.shown.borrow_mut().push_str(text);
                 (self.deliver)(KernelEvent::Text { text: text.to_string() });
             };
+            // What it thinks shows as it streams, but isn't output: a call that fails after it can still be tried again.
+            let on_reasoning = |text: &str| (self.deliver)(KernelEvent::Reasoning { text: text.to_string() });
             let attempted: Result<StepResult, StepError> = async {
                 let mut call = self.request(&binding);
                 call.abort_signal = Some(self.abort.signal());
                 kumi_ai::timing::effort(&call);
                 let timed = kumi_ai::timing::model_call(&binding.id);
                 let parts = binding.model.do_stream(call).await.map_err(StepError::Model)?;
-                consume(kumi_ai::timing::timed(parts, timed), &self.abort, &on_text, Some(&input as &dyn InputStream)).await
+                consume(kumi_ai::timing::timed(parts, timed), &self.abort, &on_text, &on_reasoning, Some(&input as &dyn InputStream)).await
             }
             .await;
             match attempted {
@@ -1433,6 +1439,7 @@ async fn consume(
     mut parts: StreamParts,
     abort: &Abort,
     on_text: &dyn Fn(&str),
+    on_reasoning: &dyn Fn(&str),
     input: Option<&dyn InputStream>,
 ) -> Result<StepResult, StepError> {
     enum Block {
@@ -1469,6 +1476,8 @@ async fn consume(
         }
     }
     let mut finish: Option<(ModelUsage, FinishReason)> = None;
+    // Whether reasoning was said yet: the next part of the summary begins on a paragraph of its own.
+    let mut reasoned = false;
     loop {
         let next = tokio::select! {
             biased;
@@ -1487,11 +1496,21 @@ async fn consume(
                     on_text(&delta);
                 }
             }
-            StreamPart::ReasoningStart { id, provider_metadata } | StreamPart::ReasoningEnd { id, provider_metadata } => {
+            StreamPart::ReasoningStart { id, provider_metadata } => {
+                block(&mut blocks, &mut open, true, &id, provider_metadata);
+                if std::mem::take(&mut reasoned) {
+                    on_reasoning("\n\n");
+                }
+            }
+            StreamPart::ReasoningEnd { id, provider_metadata } => {
                 block(&mut blocks, &mut open, true, &id, provider_metadata);
             }
             StreamPart::ReasoningDelta { id, delta, provider_metadata } => {
                 block(&mut blocks, &mut open, true, &id, provider_metadata).push_str(&delta);
+                if !delta.is_empty() {
+                    on_reasoning(&delta);
+                    reasoned = true;
+                }
             }
             StreamPart::ToolInputStart { id, tool_name, provider_executed, .. } => {
                 if provider_executed != Some(true) {
