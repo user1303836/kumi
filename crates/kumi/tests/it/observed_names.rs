@@ -171,9 +171,14 @@ fn same_name(observation: &Observation, label: &str) -> bool {
     assert_eq!(event["type"], "observation", "{label}");
     assert_eq!(event["label"], json!(observation.label), "{label}");
     assert_eq!(event.get("name").cloned(), observation.identity.as_ref().map(|identity| json!(identity.name)), "{label}: the event's name");
-    assert_eq!(observed_name(&event), before, "{label}: what the app shows");
+    // What the app shows, from the event as it reads one off the wire.
+    let shown = |event: Value| match serde_json::from_value(event).unwrap() {
+        SessionEvent::Observation { label: words, name } => observed_name(&words, name.as_deref()),
+        other => panic!("{label}: not an observation: {other:?}"),
+    };
+    assert_eq!(shown(event), before, "{label}: what the app shows");
     // An event from before the name was carried reads as it always did.
-    assert_eq!(observed_name(&json!({"type": "observation", "label": observation.label})), before, "{label}: an older event");
+    assert_eq!(shown(json!({"type": "observation", "label": observation.label})), before, "{label}: an older event");
     observation.identity.is_some()
 }
 

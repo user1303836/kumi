@@ -132,16 +132,16 @@ impl TuiApp {
         [label, detail].into_iter().filter(|part| !part.is_empty()).collect::<Vec<_>>().join(" · ")
     }
 
-    /// How far a run has got, 0–100, when Kumi knows: a /goal's turns against its budget, a /loop's rounds against
-    /// its cap.
+    /// How far a run has got, 0–100, when Kumi knows: a /goal's turns against its budget.
     fn progress(&self) -> Option<u8> {
         let state = self.0.state.borrow();
         let share = |done: f64, of: f64| (of > 0.).then(|| ((done / of) * 100.).clamp(0., 100.).round() as u8);
-        if let Some(goal) = state.objective.as_ref().filter(|goal| goal["state"] == "running") {
-            return share(goal["turns"].as_f64().unwrap_or(0.), goal["turnBudget"].as_f64().unwrap_or(0.));
+        if let Some(goal) = state.objective.as_ref().filter(|goal| goal.status.state == ObjectiveState::Running) {
+            return share(goal.status.turns.into(), goal.status.turn_budget.into());
         }
-        if let Some(looping) = &state.looping {
-            return share(looping["rounds"].as_f64().unwrap_or(0.), looping["maxRounds"].as_f64().unwrap_or(0.));
+        // A /loop's rounds against its cap aren't shown yet (#625): its progress stays unknown.
+        if state.looping.is_some() {
+            return None;
         }
         None
     }
@@ -333,10 +333,10 @@ impl TuiApp {
     }
 
     /// An answer that ended while the producer was away: done, a pick waiting, or one that stopped.
-    pub(super) fn answer_ended(&self, reason: &str, elapsed_ms: f64, answer: &str, offered: Option<usize>) {
+    pub(super) fn answer_ended(&self, reason: StopReason, elapsed_ms: f64, answer: &str, offered: Option<usize>) {
         let summary = summary_of(answer);
         match reason {
-            "completed" => {
+            StopReason::Completed => {
                 self.rest(ProgramState::Done, &summary);
                 let in_run = self.0.state.borrow().run_told;
                 if let Some(count) = offered {
@@ -346,11 +346,11 @@ impl TuiApp {
                     self.alert(&format!("Done: {words}"), &format!("Kumi · done · {words}"));
                 }
             }
-            "max-steps" => {
+            StopReason::MaxSteps => {
                 self.rest(ProgramState::Done, "Reached its step limit for one answer");
                 self.alert("Stopped: reached its step limit for one answer", "Kumi · stopped · step limit reached");
             }
-            _ => self.rest(ProgramState::Idle, ""),
+            StopReason::Cancelled => self.rest(ProgramState::Idle, ""),
         }
     }
 
