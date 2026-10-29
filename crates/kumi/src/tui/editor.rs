@@ -121,7 +121,12 @@ impl Editor {
 
     /// Replaces the text, as one step, with the cursor at its end.
     pub fn set(&mut self, text: &str) {
-        let chars: Vec<String> = graphemes(&incoming(text)).into_iter().map(str::to_string).collect();
+        // The box's own text can come back around other words (a held message put back above the draft), and its
+        // chips with it: only marks of chips this draft doesn't have go.
+        let ours = |character: char| !is_mark(character) || (character as u32 - CHIP) < self.chips.len() as u32;
+        let text: std::borrow::Cow<str> =
+            if text.chars().all(ours) { text.into() } else { text.chars().filter(|character| ours(*character)).collect::<String>().into() };
+        let chars: Vec<String> = graphemes(&text).into_iter().map(str::to_string).collect();
         if chars == self.chars {
             self.moved();
         } else {

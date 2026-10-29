@@ -628,22 +628,60 @@ fn a_long_paste_is_one_chip_that_goes_out_whole_and_is_sent_whole() {
     typed(&mut e, "\u{100000}a");
     e.paste("b\u{100001}c");
     assert_eq!(e.shown(), format!("short[pasted 1001 characters] {}…abc", "y".repeat(60)));
-    e.set("\u{100000}set");
+    // Set, a mark of no chip this draft has goes.
+    e.set("\u{100009}set");
     assert_eq!(e.expanded(), "set");
+    // The box's own text, set again around other words (a held message put back above the draft), keeps its chips.
+    let mut e = Editor::new();
+    e.paste(&log);
+    let own = e.text();
+    e.set(&format!("held words\n{own}\u{100005}"));
+    assert_eq!(e.expanded(), format!("held words\n{log}"));
 }
 
 #[test]
-fn a_two_thousand_line_paste_is_one_chip_and_typing_after_it_stays_fast() {
-    let mut e = Editor::new();
+fn a_two_thousand_line_paste_is_one_chip_and_typing_after_it_costs_what_it_does_after_a_short_one() {
     let paste: String = (0..2000).map(|i| format!("{i}: the bass sits under the kick\n")).collect();
-    e.paste(&paste);
-    assert_eq!(e.layout(80).rows, ["[pasted 2000 lines]"]);
-    let started = Instant::now();
-    typed(&mut e, &"a".repeat(100));
-    let took = started.elapsed();
-    assert!(took < Duration::from_millis(16), "{took:?}");
-    assert_eq!(e.expanded(), paste + &"a".repeat(100));
+    let (mut short, mut long) = (Editor::new(), Editor::new());
+    short.paste("a short paste");
+    long.paste(&paste);
+    assert_eq!(long.layout(80).rows, ["[pasted 2000 lines]"]);
+    // The run's first key keeps the text for undo, once: the keys after it are what's timed, the fastest of interleaved
+    // rounds against a short paste's, so a busy machine slows both alike.
+    typed(&mut short, "a");
+    typed(&mut long, "a");
+    let (mut fastest_short, mut fastest_long) = (Duration::MAX, Duration::MAX);
+    for _ in 0..20 {
+        for (editor, fastest) in [(&mut short, &mut fastest_short), (&mut long, &mut fastest_long)] {
+            let started = Instant::now();
+            typed(editor, "punch");
+            *fastest = (*fastest).min(started.elapsed());
+        }
+    }
+    assert!(
+        fastest_long < fastest_short * 10 + Duration::from_micros(200),
+        "five keys took {fastest_long:?} after the chip, {fastest_short:?} after a short paste"
+    );
+    assert_eq!(long.expanded(), format!("{paste}a{}", "punch".repeat(20)));
 }
+
+case!(a_held_message_taken_back_above_a_chip_keeps_the_paste, async {
+    let h = Harness::new(120, 36);
+    h.start().await;
+    h.connect();
+    h.type_text("first\r").await;
+    h.emit(serde_json::json!({"type":"state","state":"running"}));
+    h.type_text("then this\t").await;
+    let log: String = (1..=41).map(|i| format!("error {i}\n")).collect();
+    h.type_text(&format!("\x1b[200~{log}\x1b[201~")).await;
+    // alt+↑ puts the held message back above the draft, chip and all.
+    h.type_text("\x1b[1;3A").await;
+    assert!(has(&composer(&h), "then this") && has(&composer(&h), "[pasted 41 lines]"));
+    h.emit(serde_json::json!({"type":"state","state":"idle"}));
+    h.type_text("\r").await;
+    assert!(h.calls().contains(&format!("submit:then this\n{log}")), "{:?}", h.calls());
+    h.close().await;
+});
 
 case!(a_long_paste_shows_as_a_chip_and_is_sent_whole, async {
     let h = Harness::new(120, 36);
