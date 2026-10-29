@@ -356,8 +356,9 @@ it):
   space between (`esc esc`) are pressed one after the other: the first starts the pair only when nothing else in the
   box takes it, the second comes within half a second, and pairs work only in the box.
 - Where actions share a key, keys.json's come first, then Kumi's own, in the order they always were.
-- A character can't be a key where words are typed (the box, a list, the `/` menu): it types itself there. `?` on an
-  empty box always opens the help, and `app.help` can have keys as well (`f1`).
+- A character can't be a key where words are typed (the box, a list, the `/` menu), nor for what only a search or a
+  filter does while it's typed (the detailed view's, the map's): it types itself there. `?` on an empty box always
+  opens the help, and `app.help` can have keys as well (`f1`).
 - Kumi says once, as it starts, what it couldn't use: an action it doesn't know, a key it can't read, a character
   where words are typed, two actions keys.json gives one key, and the keys it puts ahead of Kumi's own.
 - The help (`/help`, `?`) shows the keys as keys.json has them; the hints under the box, in the panels, in the

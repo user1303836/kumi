@@ -260,6 +260,12 @@ impl Scope {
         )
     }
 
+    /// Where a search or a filter is being typed: what's typed goes into it before any key is read, so a character is a
+    /// key here only for an action that's somewhere else too (closing the view).
+    pub fn takes_text(self) -> bool {
+        matches!(self, Scope::DetailsSearch | Scope::MapFilter)
+    }
+
     /// Where it is, as Kumi says it to the producer.
     pub fn words(self) -> &'static str {
         match self {
@@ -606,6 +612,12 @@ impl Keymap {
                         }
                         if let Some(scope) = action.scopes.iter().find(|scope| scope.types() && keys.iter().any(Chord::typed)) {
                             say(format!("keys.json gives {id} “{words}”, but that types itself {}", scope.words()));
+                            continue;
+                        }
+                        // An action only of a search or a filter being typed would never have its character: that goes
+                        // into the search, and the action would lose its own keys for none.
+                        if keys.iter().any(Chord::typed) && action.scopes.iter().all(|scope| scope.takes_text()) {
+                            say(format!("keys.json gives {id} “{words}”, but that types itself {}", action.scopes[0].words()));
                             continue;
                         }
                         if !taken.contains(&keys) {
@@ -959,6 +971,24 @@ mod tests {
         assert!(said.is_empty(), "{said:?}");
         assert_eq!(keymap.actions(Scope::Box, &chord("f1")), ["app.help"]);
         assert_eq!(keymap.keys("composer.undo"), [&[chord("ctrl+-")][..], &[chord("ctrl+_")][..]]);
+    }
+
+    /// While a search or the map's filter is typed, what's typed goes into it: a letter for an action of that alone is
+    /// refused, and the action keeps its own keys (esc still drops the filter, rather than closing the map).
+    #[test]
+    fn a_letter_for_what_a_search_or_a_filter_alone_does_is_refused() {
+        let (keymap, said) = with(json!({ "map.filter-drop": ["k"], "details.search-keep": ["k", "f2"] }));
+        assert_eq!(
+            said,
+            [
+                "keys.json gives map.filter-drop “k”, but that types itself while the map's filter is typed",
+                "keys.json gives map.filter-drop no key Kumi can use, so it keeps its own",
+                "keys.json gives details.search-keep “k”, but that types itself while searching the detailed view",
+            ]
+        );
+        assert_eq!(keymap.actions(Scope::MapFilter, &chord("escape")), ["map.filter-drop", "map.close"]);
+        assert_eq!(keymap.actions(Scope::DetailsSearch, &chord("f2")), ["details.search-keep"]);
+        assert!(keymap.actions(Scope::DetailsSearch, &chord("k")).is_empty());
     }
 
     /// The map's letters are keys, and setup takes none as words: keys.json can give their actions letters.
