@@ -260,31 +260,24 @@ pub(super) struct HelpPanel {
     most: i32,
 }
 impl Overlay<TuiApp> for HelpPanel {
-    /// ↑↓, the pages, home and end scroll it; esc, enter, `?` and ctrl+c close it. Anything else typed or pasted closes
-    /// it and goes into the box, so none of what the producer goes on to type is lost.
-    fn handle(&mut self, _: &TuiApp, event: InputEvent) -> Handled {
-        match event {
-            InputEvent::Key { ref name, mods, .. } => {
-                if matches!(name.as_str(), "escape" | "enter") || (mods.ctrl && name == "c") {
-                    return Handled::Close;
-                }
-                let page = (self.shown - 1).max(1);
-                self.scroll = match name.as_str() {
-                    "up" => self.scroll - 1,
-                    "down" => self.scroll + 1,
-                    "pageup" => self.scroll - page,
-                    "pagedown" => self.scroll + page,
-                    "home" => 0,
-                    "end" => self.most,
-                    _ => self.scroll,
-                }
-                .clamp(0, self.most);
-                Handled::Kept
-            }
-            InputEvent::Text { ref text } if text == "?" => Handled::Close,
-            InputEvent::Text { .. } | InputEvent::Paste { .. } => Handled::Pass(event),
-            _ => Handled::Kept,
-        }
+    /// ↑↓, the pages, home and end scroll it; esc, enter, `?` and ctrl+c close it (keys.json can say other keys).
+    /// Anything else typed or pasted closes it and goes into the box, so none of what the producer goes on to type is
+    /// lost.
+    fn handle(&mut self, app: &TuiApp, event: InputEvent) -> Handled {
+        let page = (self.shown - 1).max(1);
+        let scroll = match app.actions(Scope::Help, &event).first().copied() {
+            Some("help.close") => return Handled::Close,
+            Some("help.up") => self.scroll - 1,
+            Some("help.down") => self.scroll + 1,
+            Some("help.page-up") => self.scroll - page,
+            Some("help.page-down") => self.scroll + page,
+            Some("help.top") => 0,
+            Some("help.end") => self.most,
+            _ if matches!(event, InputEvent::Text { .. } | InputEvent::Paste { .. }) => return Handled::Pass(event),
+            _ => self.scroll,
+        };
+        self.scroll = scroll.clamp(0, self.most);
+        Handled::Kept
     }
     /// Its title, then the rows that fit from under the header down to the box. How far it has scrolled is said beside
     /// the title, so no row loses its end to it. It's read rather than chosen from, so it takes more of a wide window

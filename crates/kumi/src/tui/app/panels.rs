@@ -1371,50 +1371,57 @@ impl TuiApp {
     /// A key, typed text or a paste for a list.
     fn pick_input(&self, panel: &mut PickPanel, event: InputEvent) -> Handled {
         let PickPanel { picker, choose, choosing } = panel;
-        if let InputEvent::Key { name, mods, .. } = &event {
-            if name == "escape" || (mods.ctrl && name == "c") {
-                let declined = self.closing_offer(picker);
-                let left = self.closing_set_ask(picker);
-                if declined {
-                    self.task(|app| async move { app.session().op(op::AnswerTechnique { keep: false }).await.map(|_| ()) });
-                }
-                if left {
-                    self.task(|app| async move { app.session().op(op::AnswerSet { choice: SetChoice::Cancel }).await });
-                }
-                return Handled::Close;
-            }
-            match name.as_str() {
-                "up" => picker.borrow_mut().r#move(-1),
-                "tab" if picker.borrow().tabs.is_some() => picker.borrow_mut().next_tab(),
-                "down" | "tab" => picker.borrow_mut().r#move(1),
-                "backspace" => picker.borrow_mut().erase(),
-                // A second Enter before the first choice is made would make it again (an answer sent twice).
-                // Ctrl-F chooses the other way, where the list has one (/model: the fallback).
-                "enter" | "f" if !choosing.get() && (name == "enter" || mods.ctrl && picker.borrow().options.alternate) => {
-                    let item = {
-                        let picker = picker.borrow();
-                        let item = picker.selected().cloned().map(|item| PickerItem { chosen: picker.chosen, ..item });
-                        if name == "f" {
-                            item.filter(|item| item.value.as_deref().is_some_and(|value| !value.contains("signin:")))
-                                .map(|item| PickerItem { value: item.value.map(|value| format!("fallback:{value}")), ..item })
-                        } else {
-                            item
+        if let InputEvent::Key { .. } = &event {
+            for id in self.actions(Scope::List, &event) {
+                match id {
+                    "list.close" => {
+                        let declined = self.closing_offer(picker);
+                        let left = self.closing_set_ask(picker);
+                        if declined {
+                            self.task(|app| async move { app.session().op(op::AnswerTechnique { keep: false }).await.map(|_| ()) });
                         }
-                    };
-                    if let Some(item) = item {
-                        choosing.set(true);
-                        let (choose, choosing) = (choose.clone(), choosing.clone());
-                        self.task(move |app| async move {
-                            let chosen = choose(item).await;
-                            choosing.set(false);
-                            if let Err(error) = chosen {
-                                app.panel_failed(&error);
-                            }
-                            Ok(())
-                        });
+                        if left {
+                            self.task(|app| async move { app.session().op(op::AnswerSet { choice: SetChoice::Cancel }).await });
+                        }
+                        return Handled::Close;
                     }
+                    "list.up" => picker.borrow_mut().r#move(-1),
+                    // A list without tabs lets its next key have it: tab is ↓ there.
+                    "list.next-tab" if picker.borrow().tabs.is_none() => continue,
+                    "list.next-tab" => picker.borrow_mut().next_tab(),
+                    "list.down" => picker.borrow_mut().r#move(1),
+                    "list.erase" => picker.borrow_mut().erase(),
+                    // A second Enter before the first choice is made would make it again (an answer sent twice).
+                    // The other way is where the list has one (/model: the fallback).
+                    "list.choose" | "list.choose-other"
+                        if !choosing.get() && (id == "list.choose" || picker.borrow().options.alternate) =>
+                    {
+                        let item = {
+                            let picker = picker.borrow();
+                            let item = picker.selected().cloned().map(|item| PickerItem { chosen: picker.chosen, ..item });
+                            if id == "list.choose-other" {
+                                item.filter(|item| item.value.as_deref().is_some_and(|value| !value.contains("signin:")))
+                                    .map(|item| PickerItem { value: item.value.map(|value| format!("fallback:{value}")), ..item })
+                            } else {
+                                item
+                            }
+                        };
+                        if let Some(item) = item {
+                            choosing.set(true);
+                            let (choose, choosing) = (choose.clone(), choosing.clone());
+                            self.task(move |app| async move {
+                                let chosen = choose(item).await;
+                                choosing.set(false);
+                                if let Err(error) = chosen {
+                                    app.panel_failed(&error);
+                                }
+                                Ok(())
+                            });
+                        }
+                    }
+                    _ => {}
                 }
-                _ => {}
+                break;
             }
             return Handled::Kept;
         }
@@ -1454,30 +1461,21 @@ impl TuiApp {
     }
     fn aside_input(&self, panel: &mut AsidePanel, event: InputEvent) -> Handled {
         let AsidePanel { at, scroll } = panel;
-        if let InputEvent::Key { name, mods, .. } = &event {
-            if matches!(name.as_str(), "escape" | "enter") || (mods.ctrl && name == "c") {
-                return Handled::Close;
+        match self.actions(Scope::Aside, &event).first().copied() {
+            Some("aside.close") => return Handled::Close,
+            Some("aside.up") => *scroll = (*scroll - 1).max(0),
+            Some("aside.page-up") => *scroll = (*scroll - 5).max(0),
+            Some("aside.down") => *scroll += 1,
+            Some("aside.page-down") => *scroll += 5,
+            Some("aside.earlier") if *at > 0 => {
+                *at -= 1;
+                *scroll = 0;
             }
-            match name.as_str() {
-                "up" | "pageup" => *scroll = (*scroll - if name == "up" { 1 } else { 5 }).max(0),
-                "down" | "pagedown" => *scroll += if name == "down" { 1 } else { 5 },
-                "left" if *at > 0 => {
-                    *at -= 1;
-                    *scroll = 0;
-                }
-                "right" if *at + 1 < self.0.state.borrow().asides.len() => {
-                    *at += 1;
-                    *scroll = 0;
-                }
-                _ => {}
+            Some("aside.later") if *at + 1 < self.0.state.borrow().asides.len() => {
+                *at += 1;
+                *scroll = 0;
             }
-            return Handled::Kept;
-        }
-        if let InputEvent::Text { text } = event {
-            if text == " " {
-                return Handled::Close;
-            }
-            if text.to_lowercase() == "c" {
+            Some("aside.copy") => {
                 let answer =
                     self.0.state.borrow().asides.get(*at).map(|a| string::trim(&a.borrow().answer).to_string()).unwrap_or_default();
                 if !answer.is_empty() {
@@ -1485,6 +1483,7 @@ impl TuiApp {
                     self.notice("Copied the side answer.", NoticeTone::Info);
                 }
             }
+            _ => {}
         }
         Handled::Kept
     }
@@ -2406,29 +2405,32 @@ impl ChatGptPanel {
 impl Overlay<TuiApp> for ChatGptPanel {
     /// c copies the link (or the code); d signs in with a code instead, b with the browser again.
     fn handle(&mut self, app: &TuiApp, event: InputEvent) -> Handled {
-        let text = match &event {
-            InputEvent::Key { name, mods, .. } => {
-                return if name == "escape" || (mods.ctrl && name == "c") { Handled::Close } else { Handled::Kept };
-            }
-            InputEvent::Text { text } | InputEvent::Paste { text } => text.to_lowercase(),
-            _ => return Handled::Kept,
+        // A letter pasted does as the letter typed, as it always has here.
+        let event = match event {
+            InputEvent::Paste { text } => InputEvent::Text { text },
+            event => event,
         };
-        if text == "c" {
-            let copied = if self.by_code {
-                self.code.as_ref().map(|code| ("code", code.code.clone()))
-            } else {
-                self.url.clone().map(|url| ("link", url))
-            };
-            if let Some((what, text)) = copied {
-                app.copy_text(&text);
-                app.notice(&format!("Copied the sign-in {what}."), NoticeTone::Info);
+        match app.actions(Scope::ChatGpt, &event).first().copied() {
+            Some("chatgpt.cancel") => return Handled::Close,
+            Some("chatgpt.copy") => {
+                let copied = if self.by_code {
+                    self.code.as_ref().map(|code| ("code", code.code.clone()))
+                } else {
+                    self.url.clone().map(|url| ("link", url))
+                };
+                if let Some((what, text)) = copied {
+                    app.copy_text(&text);
+                    app.notice(&format!("Copied the sign-in {what}."), NoticeTone::Info);
+                }
             }
-        } else if text == if self.by_code { "b" } else { "d" } {
-            // No browser here after all, or no code (over SSH, where the browser's link can still be forwarded): the
-            // other way, with what was to follow the sign-in, in this one's place.
-            let (then, by_code) = (self.then.take(), !self.by_code);
-            self.stop(app);
-            app.sign_in_chatgpt(by_code, then);
+            Some(other @ ("chatgpt.by-code" | "chatgpt.by-browser")) if self.by_code == (other == "chatgpt.by-browser") => {
+                // No browser here after all, or no code (over SSH, where the browser's link can still be forwarded): the
+                // other way, with what was to follow the sign-in, in this one's place.
+                let (then, by_code) = (self.then.take(), !self.by_code);
+                self.stop(app);
+                app.sign_in_chatgpt(by_code, then);
+            }
+            _ => {}
         }
         Handled::Kept
     }
@@ -2488,16 +2490,17 @@ impl Overlay<TuiApp> for KeyPanel {
     /// What's typed or pasted is the key, shown only as dots; enter checks it with the provider.
     fn handle(&mut self, app: &TuiApp, event: InputEvent) -> Handled {
         match &event {
-            InputEvent::Key { name, mods, .. } => {
-                if name == "escape" || (mods.ctrl && name == "c") {
+            InputEvent::Key { .. } => {
+                let action = app.actions(Scope::KeyBox, &event).first().copied();
+                if action == Some("key.cancel") {
                     return Handled::Close;
                 }
-                if !self.checking && name == "backspace" {
+                if !self.checking && action == Some("key.erase") {
                     let count = self.secret.encode_utf16().count().saturating_sub(1);
                     self.secret = head(&self.secret, count);
-                } else if !self.checking && mods.ctrl && name == "u" {
+                } else if !self.checking && action == Some("key.clear") {
                     self.secret.clear();
-                } else if !self.checking && name == "enter" && !self.secret.is_empty() {
+                } else if !self.checking && action == Some("key.check") && !self.secret.is_empty() {
                     // The check holds on to this panel: the top one, as only the top one takes keys.
                     let me = app.0.state.borrow().overlays.top();
                     if let Some(me) = me {

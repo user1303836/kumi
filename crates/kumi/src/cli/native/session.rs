@@ -927,6 +927,7 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
         options.transcript_on_quit = transcript_on_quit;
         options.full_repaint = full_repaint;
         options.context_meter = context_meter;
+        options.keys = read_keys(&load_keys_file(&io.env)?);
         options.next_time = install::next_time(&io.env);
         options.connect_live = live_possible.then(|| ConnectDaw {
             why: connect_why,

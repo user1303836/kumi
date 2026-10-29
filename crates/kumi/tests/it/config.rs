@@ -135,6 +135,22 @@ fn settings_persist_privately_effort_is_validated_and_environment_wins() {
     assert_eq!(load_inference_config(&env).unwrap().model.as_deref(), Some("openai/gpt-6-luna"));
 }
 #[test]
+fn keys_json_is_read_beside_settings_and_a_file_that_isnt_json_says_why() {
+    let folder = tempfile::tempdir().unwrap();
+    let file = folder.path().join("keys.json").to_string_lossy().into_owned();
+    assert_eq!(read_keys(&file), None, "no file, no keys of the producer's own");
+    std::fs::write(&file, json!({"composer.undo": ["ctrl+z"]}).to_string()).unwrap();
+    assert_eq!(read_keys(&file), Some(Ok(json!({"composer.undo": ["ctrl+z"]}))));
+    std::fs::write(&file, "{\"composer.undo\": [\"ctrl+z\",]}").unwrap();
+    let why = read_keys(&file).unwrap().unwrap_err();
+    assert!(why.starts_with("keys.json isn't JSON Kumi can read (") && why.ends_with("), so Kumi keeps its own keys"), "{why}");
+    // It's found beside settings.json, in Kumi's folder, unless KUMI_KEYS_FILE says where.
+    let env = Env::from([("KUMI_HOME".into(), "/kumi-home-test".into())]);
+    assert!(load_keys_file(&env).unwrap().ends_with("keys.json"));
+    let env = Env::from([("KUMI_KEYS_FILE".into(), "/somewhere/keys.json".into())]);
+    assert_eq!(load_keys_file(&env).unwrap(), "/somewhere/keys.json");
+}
+#[test]
 fn instant_phrases_stay_on_unless_turned_off_and_survive_other_writes() {
     let folder = tempfile::tempdir().unwrap();
     let file = folder.path().join("settings.json").to_string_lossy().into_owned();
