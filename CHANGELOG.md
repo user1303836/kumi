@@ -3,6 +3,16 @@
 Kumi's releases. The Ableton bridge (`crates/ableton-mcp-server`) is versioned on its own;
 each Kumi release names the bridge it ships with.
 
+## 1.24.12 — 2026-10-28
+
+Ships with bridge 1.0.101, as 1.24.11 did.
+
+- Pasted text loses characters that don't show on screen, such as those used to hide instructions in
+  copied text.
+
+Tested with Live 12.4 on macOS. On Windows, installing and updating are tested; using Kumi with Live
+there is still new.
+
 ## 1.24.11 — 2026-10-28
 
 Ships with bridge 1.0.101, as 1.24.10 did.
