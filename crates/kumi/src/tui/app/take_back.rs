@@ -135,7 +135,10 @@ impl TuiApp {
         let items = requests
             .iter()
             .map(|asked| {
-                let row = item(self.clean(&asked.words.replace('\n', " "), 70), asked.at.to_string(), changes(asked.changes.len()));
+                // What it changed that still stands: one undone since, or a sound only heard, isn't counted.
+                let standing =
+                    asked.changes.iter().filter(|change| !matches!(change.state, ChangeState::Undone | ChangeState::Heard)).count();
+                let row = item(self.clean(&asked.words.replace('\n', " "), 70), asked.at.to_string(), changes(standing));
                 match left_as_they_are(std::slice::from_ref(asked)).len() {
                     0 => row,
                     stuck => noted(row, format!("{stuck} can't be undone"), NoteTone::Warn),

@@ -172,10 +172,12 @@ case!(esc_esc_says_what_stays_as_it_is_before_an_earlier_request_goes_with_the_o
     let h = Harness::new(120, 36);
     // The first request's change is from an earlier session: Kumi can't undo it.
     let width = json!({"id":"old001:c4","family":"mixer","title":"Bass width 100% → 140%","state":"expired","at":1});
+    // The last one's other change was undone since: it isn't counted.
+    let pad = json!({"id":"c6","family":"mixer","title":"Pad volume 0 dB → -3 dB","state":"undone","at":2});
     h.control.set(
         "take-back",
         json!([
-            {"at":3,"words":"and a bit darker","changes":[filter("applied")]},
+            {"at":3,"words":"and a bit darker","changes":[filter("applied"), pad]},
             {"at":2,"words":"make the bass wider","changes":[width]}
         ]),
     );
@@ -185,6 +187,7 @@ case!(esc_esc_says_what_stays_as_it_is_before_an_earlier_request_goes_with_the_o
     esc_esc(&h).await;
     h.wait_for("Take a request back").await;
     let shown = list(&h, "Take a request back");
+    assert!(shown.iter().any(|line| line.contains("and a bit darker") && line.contains("1 change")), "{shown:#?}");
     assert!(shown.iter().any(|line| line.contains("make the bass wider") && line.contains("1 can't be undone")), "{shown:#?}");
     // Not now: the list closes and nothing's taken back.
     h.type_text("\x1b[B\r").await;
