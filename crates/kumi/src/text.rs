@@ -67,8 +67,19 @@ impl Pattern {
     }
 }
 
+/// What takes no room on screen but still reaches the model: zero-width and direction marks, the invisible operators
+/// (U+2060–U+2064), the byte-order mark and Unicode's tag characters (U+E0000–U+E007F), which can spell out instructions
+/// hidden in copied text. Tags also make the England, Scotland and Wales flags, which become a plain black flag.
 fn is_invisible(character: char) -> bool {
-    matches!(character, '\u{200b}'..='\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}' | '\u{feff}')
+    matches!(
+        character,
+        '\u{200b}'..='\u{200f}'
+            | '\u{202a}'..='\u{202e}'
+            | '\u{2060}'..='\u{2064}'
+            | '\u{2066}'..='\u{2069}'
+            | '\u{feff}'
+            | '\u{e0000}'..='\u{e007f}'
+    )
 }
 
 impl Default for StreamingText {

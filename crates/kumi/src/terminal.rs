@@ -540,7 +540,8 @@ impl PlainTerminal {
                     self.edit(|p| p.editor.delete());
                 }
             }
-            InputEvent::Text { text } | InputEvent::Paste { text } => self.edit(|p| p.editor.insert(&text)),
+            // Cleaned as the full-screen composer cleans it: no terminal controls echoed back, nothing hidden sent on.
+            InputEvent::Text { text } | InputEvent::Paste { text } => self.edit(|p| p.editor.insert(&sanitize_text(&text, &[]))),
             InputEvent::Key { name, mods, .. } => self.edit(|p| match (name.as_str(), mods.ctrl, mods.alt) {
                 ("left", false, false) => p.editor.left(),
                 ("right", false, false) => p.editor.right(),
