@@ -247,9 +247,16 @@ impl SessionController for Control {
     }
     async fn refresh(&self) -> Result<(), RuntimeError> {
         self.call("refresh");
-        // Held while `refresh-hold` is set, as a big project takes to read, so what the screen says meanwhile can be seen.
-        while self.enabled("refresh-hold") {
-            delay(5).await;
+        // Held while `refresh-hold` is set, as a big project takes to read, so what the screen says meanwhile can be seen:
+        // at work meanwhile, as the session's refresh is (its `perform` runs it as Running), which is when NOW says it.
+        if self.enabled("refresh-hold") {
+            self.state.set(TurnState::Running);
+            self.emit(SessionEvent::State { state: TurnState::Running });
+            while self.enabled("refresh-hold") {
+                delay(5).await;
+            }
+            self.state.set(TurnState::Idle);
+            self.emit(SessionEvent::State { state: TurnState::Idle });
         }
         Ok(())
     }
