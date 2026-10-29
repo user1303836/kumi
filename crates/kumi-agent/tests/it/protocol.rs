@@ -449,6 +449,10 @@ impl SessionController for Reached {
         self.reach("map_loader");
         None
     }
+    fn model_controls(&self) -> Option<Rc<dyn kumi_ai::control::ModelController>> {
+        self.reach("model_controls");
+        None
+    }
 }
 
 /// The controller's method each request was before the protocol, with the arguments that share a type in the order it
@@ -523,6 +527,19 @@ fn method(request: &Op) -> Option<String> {
             Op::Map(_) => "map_loader",
             Op::Slots(_) => "slots_context",
             Op::StopSlots(_) => return None,
+            Op::Providers(_)
+            | Op::LocalModels(_)
+            | Op::ChooseDefault(_)
+            | Op::Models(_)
+            | Op::ChooseModel(_)
+            | Op::SetEffort(_)
+            | Op::SetFast(_)
+            | Op::SetFallback(_)
+            | Op::SaveKey(_)
+            | Op::SignOut(_)
+            | Op::SignInChatgpt(_)
+            | Op::MissingModel(_) => "model_controls",
+            Op::StopSignIn(_) => return None,
             Op::FocusBody(_) => "focus_body",
         }
         .into(),
@@ -540,7 +557,8 @@ async fn every_request_reaches_the_method_it_was() {
         let answered = session.send(request).await;
         assert_eq!(*reached.0.borrow(), wanted.iter().cloned().collect::<Vec<_>>(), "{name}");
         // Each is answered, but what's answered from a part this session hasn't (its music, its map, its slots).
-        let from_a_part = wanted.as_deref().is_some_and(|method| ["music", "map_loader", "slots_context"].contains(&method));
+        let from_a_part =
+            wanted.as_deref().is_some_and(|method| ["music", "map_loader", "slots_context", "model_controls"].contains(&method));
         match (answered, from_a_part) {
             (Err(error), true) => assert_eq!(error.message(), "Not available", "{name}"),
             (Ok(_), true) => panic!("{name}: answered without its part"),

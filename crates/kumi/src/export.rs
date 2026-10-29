@@ -11,7 +11,9 @@ use chrono::{FixedOffset, Local, Offset};
 use futures::future::{FutureExt, LocalBoxFuture};
 use kumi_agent::core::contracts::{ConversationMatch, ConversationStore, ConversationSummary, ConversationToExport, SessionController};
 use kumi_agent::core::conversations::FileConversationStore;
-use kumi_agent::core::export::{file_name, html, html_text, import, importable, json, markdown, Format, Options, Source, IMPORT_MAX_BYTES};
+use kumi_agent::core::export::{
+    details, file_name, html, html_text, import, importable, json, markdown, Format, Options, Part, Source, IMPORT_MAX_BYTES,
+};
 use kumi_agent::gone_words;
 use kumi_common::js::string::head;
 use kumi_common::time::now_ms;
@@ -379,6 +381,24 @@ pub fn exported(found: Option<ConversationToExport>, format: Format, redact: &dy
         hasher.finish()
     };
     Ok(Exported { text, name: file_name(&redact(&found.title), &found.id, format), key })
+}
+
+/// The conversation going on now (`found`, as the session gave it to export) for the detailed view (ctrl+o): its full
+/// export in parts, and as Markdown for an editor, both redacted. None before there's anything to show.
+pub fn details_now(found: Option<ConversationToExport>, redact: &dyn Fn(&str) -> String) -> Option<(Vec<Part>, String)> {
+    let found = found?;
+    let source = Source {
+        id: &found.id,
+        conversation: &found.conversation,
+        title: &found.title,
+        place: found.set.as_deref(),
+        words: found.words,
+        created: found.created,
+    };
+    let (zone, now) = (local_zone(), now_ms());
+    let options =
+        Options { full: true, redact, redacted: true, label: &step_label, picture: &picture_of, zone, now, version: KUMI_VERSION };
+    Some((details(&source, &options), render(Format::Markdown, &source, true, Some(redact), zone, now)))
 }
 
 /// Writes an export into `folder`, or the folder Kumi was started in, never over another file; Err says why not.

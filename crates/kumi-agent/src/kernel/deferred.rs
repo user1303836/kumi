@@ -7,10 +7,11 @@
 use std::collections::HashMap;
 use std::rc::Rc;
 
+use crate::core::text::cut;
 use async_trait::async_trait;
 use kumi_common::abort::Signal;
 use kumi_common::js::json::stringify;
-use kumi_common::js::string::{head, trim};
+use kumi_common::js::string::trim;
 use serde_json::{json, Value};
 
 use super::schema;
@@ -190,7 +191,7 @@ impl Shelf {
         }
         match self.get(name) {
             Some(tool) => checked(tool, inner),
-            None => Err(format!("No tool is called {}; find_tools' description lists them.", head(name, 64))),
+            None => Err(format!("No tool is called {}; find_tools' description lists them.", cut(name, 64))),
         }
     }
 }
@@ -215,10 +216,10 @@ fn words(text: &str, room: usize) -> String {
     if text.len() <= room {
         return text.to_string();
     }
-    let cut = head(text, room);
-    match cut.rfind(' ') {
-        Some(at) if at > room / 2 => format!("{}…", &cut[..at]),
-        _ => format!("{cut}…"),
+    let kept = cut(text, room);
+    match kept.rfind(' ') {
+        Some(at) if at > room / 2 => format!("{}…", &kept[..at]),
+        _ => format!("{kept}…"),
     }
 }
 

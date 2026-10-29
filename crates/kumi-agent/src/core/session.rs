@@ -1,5 +1,6 @@
 //! Session ownership, cancellation, context refresh and conversation recovery.
 
+use crate::core::text::cut;
 use crate::core::{
     contracts::*,
     file_sync::FileSync,
@@ -29,7 +30,7 @@ use futures::{
 use kumi_ai::timing;
 use kumi_common::{
     abort::{self, Signal},
-    js::string::{head, trim},
+    js::string::trim,
 };
 use kumi_library::{Library, LibraryToolsOptions};
 use kumi_media::audio::tools::{listening_tools_for, ListeningOptions};
@@ -138,6 +139,8 @@ pub struct SessionOptions {
     pub slots: Option<Rc<kumi_listening::slots::SlotsContext>>,
     /// /map: what reads the producer's sounds and songs on their maps, each time it opens.
     pub map: Option<kumi_library::map::LoadMap>,
+    /// The models to talk to and the sign-ins, which /model, /effort, /fast, /login and /logout ask the session about.
+    pub models: Option<Rc<dyn kumi_ai::control::ModelController>>,
     pub matching: bool,
     pub match_budget: Option<MatchBudget>,
     pub playbook: Option<Rc<dyn PlaybookStore>>,
@@ -189,6 +192,7 @@ impl SessionOptions {
             music: None,
             slots: None,
             map: None,
+            models: None,
             matching: true,
             match_budget: None,
             playbook: None,
@@ -1948,8 +1952,10 @@ impl Session {
                 s.touched = true;
             }
             if s.conversation_first.is_none() {
-                s.conversation_first =
-                    transcript_of(&checkpoint.messages).iter().find(|l| l.role == TranscriptRole::User).map(|l| head(&l.text, 200));
+                s.conversation_first = transcript_of(&checkpoint.messages)
+                    .iter()
+                    .find(|l| l.role == TranscriptRole::User)
+                    .map(|l| cut(&l.text, 200).to_owned());
             }
             // Its name and where a copy came from go beside it with the first save that keeps it.
             let (name, from) = if empty { (None, None) } else { (s.conversation_name.take(), s.copied_from.take()) };
@@ -3317,6 +3323,9 @@ impl SessionController for Session {
     }
     fn map_loader(&self) -> Option<kumi_library::map::LoadMap> {
         self.0.options.map.clone()
+    }
+    fn model_controls(&self) -> Option<Rc<dyn kumi_ai::control::ModelController>> {
+        self.0.options.models.clone()
     }
     fn open_set(&self) -> Option<String> {
         self.0.state.borrow().integration.as_ref().and_then(|integration| integration.open_set())

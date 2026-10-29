@@ -316,3 +316,22 @@ async fn what_the_model_thinks_and_each_calls_tokens_are_told_as_they_come_and_t
     assert_eq!(words[0]["text"], "Sidechain it.");
     kernel.close().await;
 }
+
+/// A tool's result in the plain words a fallback model reads is cut between characters, never through one (#675).
+#[test]
+fn a_part_of_the_plain_words_is_cut_between_characters() {
+    use kumi_ai::types::{ToolPart, ToolResultOutput, ToolResultPart};
+    let long = format!("{}🎹 and more", "a".repeat(4 * 1024 - 1));
+    let read = Message::Tool {
+        content: vec![ToolPart::ToolResult(ToolResultPart {
+            tool_call_id: "x".into(),
+            tool_name: "read".into(),
+            output: ToolResultOutput::Text { value: long, provider_options: None },
+            provider_options: None,
+        })],
+        provider_options: None,
+    };
+    let plain = serde_json::to_string(&kumi_agent::kernel::agent::plain_words(&[read])).unwrap();
+    assert!(plain.contains(&format!("[read returned: {}…]", "a".repeat(4 * 1024 - 1))), "{}", &plain[..120]);
+    assert!(!plain.contains('\u{FFFD}'));
+}

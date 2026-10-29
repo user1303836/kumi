@@ -6,8 +6,8 @@
 use std::collections::HashMap;
 use std::sync::{LazyLock, Mutex};
 
+use crate::core::text::cut;
 use kumi_common::js::number::to_string as number_text;
-use kumi_common::js::string::head;
 use regex::Regex;
 use serde_json::{Map, Value};
 
@@ -170,8 +170,8 @@ fn same(a: &Value, b: &Value) -> bool {
 
 fn shown(value: &Value) -> String {
     match value {
-        Value::String(text) => format!("\"{}\"", head(text, 40)),
-        other => head(&other.to_string(), 40),
+        Value::String(text) => format!("\"{}\"", cut(text, 40)),
+        other => cut(&other.to_string(), 40).to_owned(),
     }
 }
 
@@ -389,5 +389,13 @@ mod tests {
     fn a_pattern_that_wont_compile_checks_nothing() {
         let schema = json!({"type": "string", "pattern": "(unclosed"});
         assert_eq!(problem(&schema, &json!("anything")), None);
+    }
+
+    /// A long value an error shows is cut between characters, never through one (#675).
+    #[test]
+    fn a_long_value_an_error_shows_is_cut_between_characters() {
+        let input = json!({"track": "track:3", "beats": 8, "focus": format!("{}🎹", "a".repeat(39))});
+        let said = format!("`focus` must be one of \"tone\", \"section\", not \"{}\".", "a".repeat(39));
+        assert_eq!(problem(&schema(), &input), Some(said));
     }
 }

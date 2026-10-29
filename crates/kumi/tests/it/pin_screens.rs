@@ -846,7 +846,7 @@ scene!(panel_commands, |width, height| {
 
 scene!(panel_model, |width, height| {
     let fake = models::FakeModels::catalog();
-    let h = Harness::with(width, height, Rc::new(Control::default()), |o| o.models = Some(fake));
+    let h = Harness::with(width, height, Control::with_models(fake), |_| {});
     h.start().await;
     h.connect();
     h.type_text("/model\r").await;
@@ -856,7 +856,7 @@ scene!(panel_model, |width, height| {
 
 scene!(panel_model_narrowed, |width, height| {
     let fake = models::FakeModels::catalog();
-    let h = Harness::with(width, height, Rc::new(Control::default()), |o| o.models = Some(fake));
+    let h = Harness::with(width, height, Control::with_models(fake), |_| {});
     h.start().await;
     h.connect();
     h.type_text("/model\r").await;
@@ -868,7 +868,7 @@ scene!(panel_model_narrowed, |width, height| {
 
 scene!(panel_model_long, |width, height| {
     let fake = models::FakeModels::long_catalog();
-    let h = Harness::with(width, height, Rc::new(Control::default()), |o| o.models = Some(fake));
+    let h = Harness::with(width, height, Control::with_models(fake), |_| {});
     h.start().await;
     h.connect();
     h.type_text("/model\r").await;
@@ -1530,8 +1530,7 @@ scene!(now_thinking, |width, height| {
 /// An answer whose last call filled `input` of its model's 200k tokens, with the meter as `meter` says.
 async fn metered(width: i32, height: i32, meter: ContextMeter, input: f64) -> Shot {
     let fake = reading("anthropic/claude-sonnet-5-5");
-    let h = Harness::with(width, height, Rc::new(Control::default()), |o| {
-        o.models = Some(fake);
+    let h = Harness::with(width, height, Control::with_models(fake), |o| {
         o.context_meter = meter;
     });
     h.start().await;
@@ -1551,7 +1550,7 @@ scene!(header_context_83, |width, height| { metered(width, height, ContextMeter:
 
 scene!(answer_footer, |width, height| {
     let fake = reading("anthropic/claude-sonnet-5-5");
-    let h = Harness::with(width, height, Rc::new(Control::default()), |o| o.models = Some(fake));
+    let h = Harness::with(width, height, Control::with_models(fake), |_| {});
     h.start().await;
     h.connect();
     h.type_text("tighten the hats, they're rushing\r").await;

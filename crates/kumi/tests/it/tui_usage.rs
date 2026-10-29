@@ -98,8 +98,7 @@ case!(the_context_meter_shows_from_half_full_or_as_set, async {
         (ContextMeter::Off, 165_000., None),
     ] {
         let fake = models("anthropic/claude-sonnet-5-5");
-        let h = Harness::with(120, 36, Rc::new(Control::default()), |o| {
-            o.models = Some(fake.clone());
+        let h = Harness::with(120, 36, Control::with_models(fake.clone()), |o| {
             o.context_meter = meter;
         });
         h.start().await;
@@ -129,7 +128,7 @@ case!(the_context_meter_shows_from_half_full_or_as_set, async {
 
 case!(an_answer_on_an_api_key_ends_with_its_time_changes_and_tokens, async {
     let fake = models("anthropic/claude-sonnet-5-5");
-    let h = Harness::with(120, 36, Rc::new(Control::default()), |o| o.models = Some(fake.clone()));
+    let h = Harness::with(120, 36, Control::with_models(fake.clone()), |_| {});
     h.start().await;
     h.connect();
     asked(&h, "tighten the hats").await;
@@ -153,7 +152,7 @@ case!(an_answer_on_a_subscription_ends_with_its_share_of_the_plan, async {
     kumi_ai::providers::usage::forget();
     kumi_ai::providers::usage::record("openai-codex", &headers("40"));
     let fake = models("openai-codex/gpt-6-astra");
-    let h = Harness::with(120, 36, Rc::new(Control::default()), |o| o.models = Some(fake.clone()));
+    let h = Harness::with(120, 36, Control::with_models(fake.clone()), |_| {});
     h.start().await;
     h.connect();
     asked(&h, "tighten the hats").await;
@@ -171,7 +170,7 @@ case!(a_window_not_known_yet_is_read_from_its_providers_list_once, async {
     // A local server's list comes only when asked: the meter reads it once a call has finished, and shows.
     let fake = models("anthropic/claude-sonnet-5-5");
     fake.unread.borrow_mut().insert("anthropic".into());
-    let h = Harness::with(120, 36, Rc::new(Control::default()), |o| o.models = Some(fake.clone()));
+    let h = Harness::with(120, 36, Control::with_models(fake.clone()), |_| {});
     h.start().await;
     h.connect();
     asked(&h, "tighten the hats").await;

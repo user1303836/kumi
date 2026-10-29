@@ -308,8 +308,7 @@ async fn setup_states(daw: DawId) -> Found {
             Rc::new(FakeOwn { open: RefCell::new(open.map(str::to_string)), installed: RefCell::new(installed), fails: Cell::new(fails) });
         // Signed in already: setup is the DAW's step alone.
         let models = models::FakeModels::catalog();
-        let h = Harness::with(120, 30, Rc::new(Control::default()), |o| {
-            o.models = Some(models);
+        let h = Harness::with(120, 30, Control::with_models(models), |o| {
             o.connect_live =
                 Some(ConnectLive { why: Some("Kumi's bridge isn't in yet.".into()), bridge: "1.0.0".into(), live: fake.clone() });
         });

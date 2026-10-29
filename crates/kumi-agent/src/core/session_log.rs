@@ -226,7 +226,8 @@ fn now() -> i64 {
 /// library and music being learned, what a tool is doing this second, the palette shown) is read afresh by a
 /// conversation taken up; so is the account of the conversation a session gives when it takes one up, the log being
 /// that conversation itself; what the screen only offers (a Set's question, a request to send again) isn't history; nor
-/// is a side question's answer, which never enters the conversation, or what a /slots check says as it goes.
+/// is a side question's answer, which never enters the conversation, or what a /slots check or a sign-in says as it
+/// goes.
 fn told(event: &SessionEvent) -> bool {
     match event {
         SessionEvent::Focus { .. }
@@ -243,7 +244,8 @@ fn told(event: &SessionEvent) -> bool {
         | SessionEvent::Watching { .. }
         | SessionEvent::Palette { .. }
         | SessionEvent::Aside { .. }
-        | SessionEvent::SlotsProgress { .. } => false,
+        | SessionEvent::SlotsProgress { .. }
+        | SessionEvent::SignIn { .. } => false,
         SessionEvent::Change { .. }
         | SessionEvent::CatchUp { .. }
         | SessionEvent::State { .. }

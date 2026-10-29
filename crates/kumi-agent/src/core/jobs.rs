@@ -13,12 +13,10 @@ use std::{
 use async_trait::async_trait;
 use tokio::io::AsyncWriteExt;
 
+use crate::core::text::cut;
 use futures::future::LocalBoxFuture;
 use indexmap::IndexMap;
-use kumi_common::{
-    abort::Signal,
-    js::string::{head, trim},
-};
+use kumi_common::{abort::Signal, js::string::trim};
 use serde::{Deserialize, Serialize};
 
 use crate::core::contracts::{KernelEmit, KernelEvent, SessionEvent};
@@ -128,7 +126,7 @@ impl JobSpec {
                 if args.is_empty() || args == "{}" {
                     tool.clone()
                 } else {
-                    format!("{tool} {}", head(&args, 400))
+                    format!("{tool} {}", cut(&args, 400))
                 }
             }
             _ => String::new(),
@@ -263,7 +261,7 @@ fn now() -> i64 {
 pub fn first_line(text: &str) -> String {
     let line = text.lines().map(trim).find(|line| !line.is_empty()).unwrap_or("");
     let plain = line.replace("**", "").replace("__", "").replace('`', "");
-    head(trim(plain.trim_start_matches(['#', '*', '-', '>', ' '])), 160)
+    cut(trim(plain.trim_start_matches(['#', '*', '-', '>', ' '])), 160).to_owned()
 }
 
 /// A time limit in words: "20 minutes", "45 seconds".
@@ -281,7 +279,7 @@ pub fn bounded(report: &str, most: usize) -> String {
     if report.len() <= most {
         return report.to_string();
     }
-    format!("{}… (cut short)", head(report, most - 16))
+    format!("{}… (cut short)", cut(report, most - 16))
 }
 
 /// Pictures a job's report carries, by name, as the next turn shows them to the model.
@@ -376,7 +374,7 @@ impl Jobs {
             let status = JobStatus {
                 id,
                 kind: spec.kind(),
-                title: head(trim(&spec.title), 80),
+                title: cut(trim(&spec.title), 80).to_owned(),
                 state: JobState::Running,
                 when_done: spec.when_done,
                 doing: Some("starting".into()),
@@ -495,7 +493,7 @@ impl Jobs {
                     match outcome.failed {
                         Some(why) => {
                             let report = (!trim(&outcome.report).is_empty()).then(|| bounded(&outcome.report, most));
-                            (JobState::Failed, head(trim(&why), 300), report)
+                            (JobState::Failed, cut(trim(&why), 300).to_owned(), report)
                         }
                         None if trim(&outcome.report).is_empty() => (JobState::Failed, "It ended without a report.".to_string(), None),
                         None => {
@@ -504,7 +502,7 @@ impl Jobs {
                         }
                     }
                 }
-                (None, Err(error)) => (JobState::Failed, head(trim(&error.message()), 300), None),
+                (None, Err(error)) => (JobState::Failed, cut(trim(&error.message()), 300).to_owned(), None),
             };
             job.status.state = status;
             job.status.line = Some(line);
@@ -661,7 +659,7 @@ impl JobHandle {
     }
 
     pub fn doing(&self, text: &str) {
-        let text = head(trim(text), 120);
+        let text = cut(trim(text), 120).to_owned();
         self.update(|job| job.status.doing = (!text.is_empty()).then_some(text));
     }
 
@@ -686,7 +684,7 @@ impl JobHandle {
 
     /// What a step found, in a line: the page read, the video watched.
     pub fn found(&self, text: &str, source: bool) {
-        let text = head(trim(text), 160);
+        let text = cut(trim(text), 160).to_owned();
         self.update(|job| {
             if source {
                 job.status.sources += 1;
@@ -835,5 +833,18 @@ impl JobStore for FileJobStore {
             return Err(RuntimeError::plain(error.to_string()));
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A job's row line and a report cut short end between characters, never through one (#675).
+    #[test]
+    fn a_rows_line_and_a_cut_report_end_between_characters() {
+        let a = |n: usize| "a".repeat(n);
+        assert_eq!(first_line(&format!("{}🎹 more", a(159))), a(159));
+        assert_eq!(bounded(&format!("{}🎹{}", a(83), a(100)), 100), format!("{}… (cut short)", a(83)));
     }
 }

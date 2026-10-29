@@ -101,7 +101,7 @@ fn job_line(status: &JobStatus) -> String {
 fn moved_title(tool: &str, args: &JsonObject) -> String {
     ["title", "name", "query", "url", "path"]
         .iter()
-        .find_map(|key| args.get(*key).and_then(Value::as_str).map(|s| head(trim(s), 60)).filter(|s| !s.is_empty()))
+        .find_map(|key| args.get(*key).and_then(Value::as_str).map(|s| cut(trim(s), 60).to_owned()).filter(|s| !s.is_empty()))
         .unwrap_or_else(|| tool.replace('_', " "))
 }
 
@@ -128,7 +128,7 @@ fn reports_note(reports: &[JobReport]) -> String {
 /// Kumi's message that carries on with a job's result, in place of the producer's: its report comes with the turn's
 /// note, as any job's does.
 fn carry_on_text(status: &JobStatus, request: Option<&str>) -> String {
-    let asked = request.map(|r| format!(": “{}”", head(trim(r), 2000))).unwrap_or_default();
+    let asked = request.map(|r| format!(": “{}”", cut(trim(r), 2000))).unwrap_or_default();
     match status.state {
         JobState::Done => format!(
             "[Kumi] Background job {} (“{}”) finished. Carry on with the request you started it for{asked}, using its report below. (Kumi wrote this message, not the producer.)",
@@ -328,7 +328,7 @@ impl Session {
     /// Starts a job: the producer's request it's for is the turn's under way. Its number, or why it can't start.
     pub(super) fn start_job(&self, mut spec: JobSpec) -> Result<u32, String> {
         let jobs = self.0.jobs.clone().ok_or("Kumi can't run background jobs here.")?;
-        spec.title = head(trim(&spec.title), 80);
+        spec.title = cut(trim(&spec.title), 80).to_owned();
         if spec.title.is_empty() {
             return Err("Give the job a title: a few words for the JOBS tab.".into());
         }

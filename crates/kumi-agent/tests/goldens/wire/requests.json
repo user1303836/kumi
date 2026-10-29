@@ -376,6 +376,63 @@
     "id": 3
   },
   {
+    "type": "providers"
+  },
+  {
+    "type": "local-models"
+  },
+  {
+    "type": "choose-default"
+  },
+  {
+    "type": "models",
+    "provider": "anthropic",
+    "refresh": true
+  },
+  {
+    "type": "choose-model",
+    "model": "anthropic/claude-sonnet-5-5"
+  },
+  {
+    "type": "set-effort",
+    "effort": "high"
+  },
+  {
+    "type": "set-effort"
+  },
+  {
+    "type": "set-fast",
+    "on": true
+  },
+  {
+    "type": "set-fallback",
+    "model": "openai/gpt-5.5"
+  },
+  {
+    "type": "set-fallback"
+  },
+  {
+    "type": "save-key",
+    "provider": "anthropic",
+    "key": "test-key"
+  },
+  {
+    "type": "sign-out",
+    "provider": "openai"
+  },
+  {
+    "type": "sign-in-chatgpt",
+    "id": 4,
+    "byCode": false
+  },
+  {
+    "type": "stop-sign-in",
+    "id": 4
+  },
+  {
+    "type": "missing-model"
+  },
+  {
     "type": "answer-set",
     "choice": "open"
   },

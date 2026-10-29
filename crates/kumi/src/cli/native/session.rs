@@ -759,6 +759,8 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
     options.library = Some(library.clone());
     options.preset_dir = Some(std::path::Path::new(&crate::config::kumi_dir(&io.env)).join("presets"));
     options.music = Some(music.clone());
+    // /model, /effort, /fast, /login and /logout ask the session, which has the models (the kernel's come from them too).
+    options.models = Some(models.clone() as Rc<dyn crate::models::ModelController>);
     // /slots and /map, which the session answers: which model does each listening job, and the library's sounds and
     // the songs on their maps, read each time /map opens.
     options.slots = Some(slots_context);
@@ -899,7 +901,19 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
         }))
     } else if full_screen {
         let mut options = TuiOptions::new(session, io.input.clone(), io.out.clone(), mode);
-        options.models = Some(models.clone());
+        // What the terminal is, asked once as the screen starts: its answers come before what its environment says of
+        // it, which stays the fallback. A terminal its environment keeps quiet (the Linux console, a dumb one) isn't asked,
+        // nor one whose producer said not to (`KUMI_PROBE=off`).
+        let platform = kumi_types::system::platform();
+        let profile = crate::tui::alerts::detect_terminal_profile(&io.env, platform);
+        if io.probe && profile.status && io.env.get("KUMI_PROBE").map(String::as_str) != Some("off") {
+            let probed = crate::tui::probe::probe(&io.input, &io.out, crate::tui::probe::BUDGET).await;
+            let version = probed.answers.version.clone();
+            options.terminal = Some(profile.answered(&probed.answers, &io.env, platform));
+            let depth = crate::tui::style::detect_color_depth_here();
+            options.color_depth = Some(crate::tui::style::answered_color_depth(depth, version.as_deref(), &io.env));
+            options.typeahead = probed.read;
+        }
         options.redact = Some(redact);
         options.command = io.command().to_string();
         options.reveal = Some(Rc::new(crate::export::reveal));

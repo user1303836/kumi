@@ -224,6 +224,21 @@ pub fn detect_color_depth_here() -> ColorDepth {
     detect_color_depth(&kumi_common::env::vars(), process_platform(), &os_release())
 }
 
+/// The colour depth once the terminal has named itself (`tui::probe`): one known to draw 24-bit colour does, where its
+/// environment doesn't say so (over SSH, say). A depth the environment forces (NO_COLOR, KUMI_COLOR) stays, and tmux,
+/// which answers for itself, keeps the environment's.
+pub fn answered_color_depth(depth: ColorDepth, version: Option<&str>, env: &HashMap<String, String>) -> ColorDepth {
+    let forced = env.get("NO_COLOR").is_some_and(|value| !value.is_empty())
+        || env.get("KUMI_COLOR").and_then(|value| ColorDepth::parse(value)).is_some();
+    let name = version.unwrap_or("").to_ascii_lowercase();
+    let truecolor = ["kitty", "ghostty", "wezterm", "iterm2", "foot"].iter().any(|known| name.starts_with(known));
+    if truecolor && !forced {
+        ColorDepth::Truecolor
+    } else {
+        depth
+    }
+}
+
 static TERM_256: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"-256(color)?$").unwrap());
 
 /// Chooses the colour depth from the environment; `NO_COLOR` keeps bold and dim only. On Windows the

@@ -47,8 +47,9 @@ fn everything() -> Now {
         music: true,
         map: true,
         slots: true,
+        models: true,
     };
-    let fronts = Fronts { models: true, voice: true, updates: true, switch_daw: true, willington: true };
+    let fronts = Fronts { voice: true, updates: true, switch_daw: true, willington: true };
     Now { busy: false, goal_running: false, can, fronts }
 }
 
@@ -215,6 +216,16 @@ fn a_command_this_session_has_not_reads_as_unknown_idle_and_as_waiting_busy() {
     for line in ["/resume", "/conversations x", "/rename x", "/fork"] {
         assert_eq!(run(line, &nothing()), Effect::Refused(Why::NotKept), "{line}");
         assert_eq!(run(line, &Now { busy: true, ..nothing() }), Effect::Refused(Why::NotKept), "{line}, busy");
+    }
+}
+
+#[test]
+fn a_name_no_command_has_is_unknown_whatever_kumi_is_doing() {
+    // #688: while Kumi worked, /nonsense read as one to run once it was done.
+    for line in ["/nonsense", "/nonsense with words"] {
+        for now in [nothing(), everything(), Now { busy: true, ..nothing() }, Now { busy: true, goal_running: true, ..everything() }] {
+            assert_eq!(run(line, &now), Effect::Unknown { name: "/nonsense".into() }, "{line}, busy {}", now.busy);
+        }
     }
 }
 

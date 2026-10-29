@@ -56,6 +56,12 @@ impl TuiApp {
         state.hits.retain(|hit| !under(hit));
         let covered = area.y..area.y + area.height;
         state.text_rows.retain(|row| !covered.contains(&row.y));
+        // Tabs under it (the drawer's, below 100 columns) aren't the wheel's either: it goes to what covers them.
+        if state.tabs_area.is_some_and(|tabs| {
+            tabs.y < area.y + area.height && tabs.y + tabs.height > area.y && tabs.x < area.x + area.width && tabs.x + tabs.width > area.x
+        }) {
+            state.tabs_area = None;
+        }
         if let Some(below) = state.text_rows.iter_mut().find(|row| row.y == covered.end) {
             below.carries = None;
         }

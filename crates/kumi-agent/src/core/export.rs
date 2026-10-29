@@ -220,6 +220,64 @@ pub fn markdown(source: &Source, options: &Options) -> String {
     out.chars().filter(|c| !c.is_control() || *c == '\n' || *c == '\t').collect()
 }
 
+/// One part of a conversation as the detailed view shows it (ctrl+o in Kumi's window): what the full export holds, through
+/// the same redactor and rules, as parts rather than a page.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Part {
+    /// What's known of the conversation, as the export's list gives it: the model, when it started.
+    Fact {
+        label: String,
+        value: String,
+    },
+    /// Where a trimmed conversation dropped its start: what was asked in that part, oldest first.
+    Earlier(Vec<String>),
+    Request(String),
+    /// A step, in the producer's words, with what it was given and what came back (where those may leave Kumi).
+    Step {
+        label: String,
+        input: Option<String>,
+        result: Option<String>,
+    },
+    Answer(String),
+    /// What Kumi changed in the DAW: a change's line and its values.
+    Change {
+        line: String,
+        values: Vec<String>,
+    },
+}
+
+/// The conversation in parts, for the detailed view: the full export's facts, each request, each answer's steps and
+/// then its words, and what Kumi changed. Like the export, it holds no control characters but line breaks and tabs.
+pub fn details(source: &Source, options: &Options) -> Vec<Part> {
+    let clean = |text: &str| -> String { text.chars().filter(|c| !c.is_control() || *c == '\n' || *c == '\t').collect() };
+    let doc = read(source, &Options { full: true, ..*options });
+    let mut parts: Vec<Part> =
+        facts(&doc, source, options).into_iter().map(|(label, value)| Part::Fact { label: clean(&label), value: clean(&value) }).collect();
+    if doc.partial {
+        parts.push(Part::Earlier(doc.earlier.iter().map(|ask| clean(ask)).collect()));
+    }
+    for said in &doc.said {
+        match said {
+            Said::Producer(words) => parts.push(Part::Request(clean(words))),
+            Said::Kumi { words, steps } => {
+                parts.extend(steps.iter().map(|step| Part::Step {
+                    label: clean(&step.label),
+                    input: step.input.as_deref().map(clean),
+                    result: step.result.as_deref().map(clean),
+                }));
+                if !words.is_empty() {
+                    parts.push(Part::Answer(clean(words)));
+                }
+            }
+        }
+    }
+    for change in &doc.changes {
+        let values = change.picture.as_ref().map(values_of).unwrap_or_default();
+        parts.push(Part::Change { line: clean(&change_line(change, source.words.0)), values: values.iter().map(|v| clean(v)).collect() });
+    }
+    parts
+}
+
 /// What a page can load and run: nothing from anywhere, and no scripts; only its own styles. Neither a base for its links
 /// nor a form's target falls back to `default-src`, so each is named.
 const POLICY: &str = "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'";

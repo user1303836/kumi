@@ -218,3 +218,36 @@ case!(opening_the_map_while_listening_stops_listening, async {
     assert!(!has(&h.screen(), "Listening…"));
     h.close().await;
 });
+
+// The technique offer closed to talk holds off following no longer once the talking's done (#668).
+case!(an_offer_closed_to_talk_lets_kumi_follow_a_daw, async {
+    use kumi::terminal::Terminal;
+    use kumi_types::daw::DawId;
+    use std::cell::RefCell;
+    let v = voice::Control::new("make the bass darker");
+    let followed = Rc::new(RefCell::new(Vec::<DawId>::new()));
+    let into = followed.clone();
+    let c = Rc::new(Control::default());
+    c.set("techniques", json!([]));
+    let h = Harness::with(120, 36, c, move |o| {
+        o.voice = Some(v);
+        o.follow_daw = Some(Rc::new(move |daw| into.borrow_mut().push(daw)));
+    });
+    let done = h.app.run();
+    delay(5).await;
+    h.connect();
+    h.type_text("recreate the bubbles\r").await;
+    h.emit(json!({"type":"state","state":"running"}));
+    h.emit(json!({"type":"turn-complete","result":{"stopReason":"completed"},"elapsedMs":900}));
+    h.emit(json!({"type":"technique","action":"offered","technique":{"id":"","name":"Liquid bubbles","fits":"bubbly FM effects"}}));
+    h.emit(json!({"type":"state","state":"idle"}));
+    h.has("Keep “Liquid bubbles” as a technique?");
+    h.type_text(TAP).await;
+    h.has("Listening…");
+    assert!(!has(&h.screen(), "Keep “Liquid bubbles” as a technique?"), "ctrl+t closes the offer to talk");
+    h.type_text("\x1b").await;
+    assert!(!has(&h.screen(), "Listening…"));
+    assert!(h.app.follow_daw(DawId::Renoise), "nothing open, so it follows");
+    assert_eq!(*followed.borrow(), [DawId::Renoise]);
+    assert_eq!(done.await, 0);
+});

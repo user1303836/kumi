@@ -67,6 +67,11 @@ pub(super) fn help_sections(has: Has, app: &str, tabs: &[String], commands: Vec<
         ),
         row("ctrl+home", "The start of the conversation"),
         row("ctrl+end", "Back to the latest"),
+        row(
+            "ctrl+o",
+            "The conversation in detail, with what each step was given and gave back: / searches it, { } go from request \
+             to request, [ prints it into the terminal's scrollback, v opens it in your editor",
+        ),
     ];
     if has.mouse {
         around.push(row(

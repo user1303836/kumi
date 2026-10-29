@@ -448,3 +448,11 @@ async fn a_yes_and_an_immediate_refinement_are_kept_in_order() {
     })
     .await
 }
+
+/// An id an error says back is cut between characters, never through one (#675).
+#[tokio::test]
+async fn an_id_an_error_says_back_is_cut_between_characters() {
+    let j = judge();
+    let forgot = j.call(json!({"action": "forget", "id": format!("{}🎹", "a".repeat(7))})).await;
+    assert_eq!(forgot.text, format!("There's no technique {}.", "a".repeat(7)));
+}

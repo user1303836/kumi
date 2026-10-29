@@ -284,7 +284,7 @@ impl TuiApp {
             let at = start - 3 - text_width(&text);
             let named = x + set_name.as_ref().map(|n| text_width(n).min(16) + 5).unwrap_or(0);
             if at - named >= 2 {
-                let chosen = self.0.options.models.as_ref().is_some_and(|m| m.current().model.is_some());
+                let chosen = self.models().is_some_and(|m| m.current().model.is_some());
                 let fallback = self.session().answering_fallback().is_some();
                 screen.put(at, 0, &text, &if chosen && !fallback { st::FAINT } else { st::WARN });
                 end = at - 3;

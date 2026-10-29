@@ -1,12 +1,13 @@
 //! Kumi's change records and its guarded undo, over the DAW's ChangeHost: HISTORY's lifecycle (records, groups,
 //! quiet audition steps, what changed outside it, refusals) is the same for every DAW; each DAW's ways back are its own.
 use crate::core::refs::{Book, Moved, RefScheme, Shift};
+use crate::core::text::cut;
 use async_trait::async_trait;
 use futures::{future::LocalBoxFuture, FutureExt};
 use indexmap::IndexMap;
 use kumi_common::{
     abort::{self, Signal, SignalExt},
-    js::{json::stringify, string::head},
+    js::json::stringify,
 };
 use kumi_listening::notation::thousands;
 use kumi_types::contracts::*;
@@ -474,7 +475,7 @@ impl<H: ChangeHost> History<H> {
             return None;
         }
         let record: ChangeRecord = serde_json::from_value(
-            json!({"id":next_change_id(),"family":"clip","title":head(title,160),"state":"applied","at":self.host.now_ms()}),
+            json!({"id":next_change_id(),"family":"clip","title":cut(title,160),"state":"applied","at":self.host.now_ms()}),
         )
         .unwrap();
         for id in &members {
@@ -548,7 +549,7 @@ impl<H: ChangeHost> History<H> {
                 return Ok(UndoResult::error(if target == "last" {
                     "There's no change of Kumi's left to undo.".into()
                 } else {
-                    format!("There's no change {} in this session.", head(target, 32))
+                    format!("There's no change {} in this session.", cut(target, 32))
                 }));
             };
             let snapshot = entry.borrow().clone();

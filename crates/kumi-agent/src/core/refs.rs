@@ -2,10 +2,11 @@
 //! this turn's discovery may be changed), their short names (`track:5`, a name keeps naming one object), discovery
 //! cursors, and, for a DAW whose refs are positions, where a restructure moved them. How a ref is spelled and what it
 //! points at is the DAW's (`RefScheme`).
+use crate::core::text::cut;
 use indexmap::{IndexMap, IndexSet};
 use kumi_common::js::{
     json::stringify,
-    string::{head, locale_compare, utf16_len},
+    string::{locale_compare, utf16_len},
 };
 use kumi_types::contracts::{JsonObject, TrackChip};
 use serde_json::{json, Value};
@@ -362,8 +363,10 @@ impl<S: RefScheme> Book<S> {
                 }
                 if kind.ends_with("track") {
                     if let Some(name) = row.get("name").and_then(Value::as_str) {
-                        self.known
-                            .insert(reference.into(), KnownTrack { name: head(name, 256), color: row.get("color").and_then(hex_color) });
+                        self.known.insert(
+                            reference.into(),
+                            KnownTrack { name: cut(name, 256).to_owned(), color: row.get("color").and_then(hex_color) },
+                        );
                     }
                 }
             }
@@ -386,7 +389,7 @@ impl<S: RefScheme> Book<S> {
     }
     /// Keeps a parameter's name and range when its row has them; a row naming it otherwise forgets what was kept.
     fn know_parameter(&mut self, reference: &str, row: &JsonObject) {
-        let Some(name) = row.get("name").and_then(Value::as_str).map(|name| head(name, 256)) else { return };
+        let Some(name) = row.get("name").and_then(Value::as_str).map(|name| cut(name, 256).to_owned()) else { return };
         let (min, max) = (row.get("min").and_then(Value::as_f64), row.get("max").and_then(Value::as_f64));
         match (min, max) {
             (Some(min), Some(max)) if min.is_finite() && max.is_finite() && max > min => {
@@ -581,5 +584,14 @@ mod tests {
         stable.shift(&shift);
         assert_eq!(stable.refs.keys().collect::<Vec<_>>(), ["track:0", "track:1", "track:2"]);
         assert_eq!(stable.lengthen(&json!({"ref": "track:3"}))["ref"], "track:2");
+    }
+
+    /// A track's long name is kept cut between characters, never through one (#675).
+    #[test]
+    fn a_tracks_long_name_is_kept_cut_between_characters() {
+        let mut book = Book::<Simple<false>>::default();
+        let row = json!({"ref": "track:0", "name": format!("{}🎹 Keys", "a".repeat(255))}).as_object().cloned().unwrap();
+        book.register_rows("track", &[row], &JsonObject::new(), None).unwrap();
+        assert_eq!(book.known["track:0"].name, "a".repeat(255));
     }
 }

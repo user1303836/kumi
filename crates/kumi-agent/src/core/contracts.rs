@@ -1059,6 +1059,15 @@ pub enum SessionEvent {
         id: u32,
         line: String,
     },
+    /// How a ChatGPT sign-in under way goes (the protocol's `sign-in-chatgpt` request with this `id`): the address the
+    /// browser is to open, or the code to type.
+    SignIn {
+        id: u32,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        url: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        code: Option<kumi_ai::auth::openai_codex::DevicePrompt>,
+    },
     #[serde(untagged)]
     Kernel(KernelEvent),
     #[serde(untagged)]
@@ -1609,6 +1618,10 @@ pub trait SessionController {
     }
     /// What reads /map's data (the producer's sounds and songs on their maps), each time it opens.
     fn map_loader(&self) -> Option<kumi_library::map::LoadMap> {
+        None
+    }
+    /// The models to talk to, and the sign-ins (the protocol answers its model requests from them).
+    fn model_controls(&self) -> Option<Rc<dyn kumi_ai::control::ModelController>> {
         None
     }
     /// The saved Set open in the DAW, by its file, once the session has read it.

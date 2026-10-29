@@ -1,7 +1,8 @@
 //! Bound the visible track list while retaining the tracks in focus: the tracks the model reads each turn, folded to
 //! one line each (and then left out) when they don't fit, the tracks in focus kept whole. The DAW says, in its words,
 //! that the list is folded and how to read what's left out.
-use kumi_common::js::{json::stringify, string::head};
+use crate::core::text::cut;
+use kumi_common::js::json::stringify;
 use kumi_types::contracts::JsonObject;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -49,7 +50,7 @@ pub fn track_line(track: &JsonObject, names: bool) -> String {
         let first = devices
             .iter()
             .take(2)
-            .map(|d| head(&d.get("name").filter(|v| !v.is_null()).map(string).unwrap_or("?".into()), 40))
+            .map(|d| cut(&d.get("name").filter(|v| !v.is_null()).map(string).unwrap_or("?".into()), 40).to_owned())
             .collect::<Vec<_>>()
             .join(", ");
         format!(" · {first}{}", if devices.len() > 2 { format!(" +{}", devices.len() - 2) } else { String::new() })
@@ -59,7 +60,7 @@ pub fn track_line(track: &JsonObject, names: bool) -> String {
     format!(
         "{} {}{}{list}",
         field(track, "ref", "?"),
-        head(&field(track, "name", "(unnamed)"), 60),
+        cut(&field(track, "name", "(unnamed)"), 60),
         if location.is_empty() { String::new() } else { format!(" ({})", location.join(", ")) }
     )
 }
@@ -168,5 +169,13 @@ mod tests {
             ),
             "track:3 Bass (sequencer, in track:5) · 3 devices"
         );
+    }
+
+    /// A long track or device name in a folded line is cut between characters, never through one (#675).
+    #[test]
+    fn a_long_name_in_a_folded_line_is_cut_between_characters() {
+        let a = |n: usize| "a".repeat(n);
+        let track = json!({"ref": "track:1", "name": format!("{}🎹 Bass", a(59)), "devices": [{"name": format!("{}🎹 EQ", a(39))}]});
+        assert_eq!(track_line(track.as_object().unwrap(), true), format!("track:1 {} · {}", a(59), a(39)));
     }
 }

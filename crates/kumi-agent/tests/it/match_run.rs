@@ -194,3 +194,12 @@ fn lessons_keep_improvements_and_goal_scores_round_like_javascript() {
     assert_eq!((goal.from, goal.to), (41.0, 71.0));
     assert_eq!(goal.moves.iter().map(|m| m.label.as_str()).collect::<Vec<_>>(), vec!["generation 1", "generation 3", "generation 4"]);
 }
+
+/// A lesson's winner is cut between characters, never through one (#675).
+#[test]
+fn a_lessons_winner_is_cut_between_characters() {
+    let label = format!("{}🎹", "a".repeat(59));
+    let leader = GoalLeader { label: &label, chain: "EQ Eight", score: 0.9 };
+    let lesson = lesson_from_goal("make the bass wider", None, Some(leader), Some(0.1), &[0.2, 0.5, 0.9], 1.0).unwrap();
+    assert_eq!(lesson.winner, "a".repeat(59));
+}

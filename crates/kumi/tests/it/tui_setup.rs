@@ -199,8 +199,7 @@ fn setup(
     live: Option<(Option<&str>, Rc<FakeLive>)>,
     configure: impl FnOnce(&mut TuiOptions),
 ) -> Harness {
-    Harness::with(width, 30, Rc::new(Control::default()), |o| {
-        o.models = Some(models);
+    Harness::with(width, 30, Control::with_models(models), |o| {
         o.connect_live = live.map(|(why, live)| ConnectLive { why: why.map(str::to_string), bridge: "1.0.74".into(), live });
         configure(o)
     })

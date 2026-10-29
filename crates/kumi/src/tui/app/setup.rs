@@ -11,6 +11,7 @@ use super::super::{
     wrap::wrap,
 };
 use super::drawing::{sp, st};
+use super::models::Models;
 use super::panels::{ChatGptPanel, KeyPanel};
 use super::*;
 use kumi_ai::providers::{table, SignIn};
@@ -201,7 +202,7 @@ impl TuiApp {
         if self.0.options.connect_live.as_ref().is_none_or(|l| l.why.is_none()) {
             return false;
         }
-        let unsigned = self.0.options.models.as_ref().is_some_and(|m| m.current().model.is_none());
+        let unsigned = self.models().is_some_and(|m| m.current().model.is_none());
         self.open_setup(if unsigned { Step::Sign } else { Step::Live }, None);
         true
     }
@@ -209,7 +210,7 @@ impl TuiApp {
     /// Without a model: the provider's own first choice when Kumi is signed in somewhere (or a model on
     /// this computer is running), as always; otherwise signing in comes first, in the setup.
     pub(super) async fn needs_sign_in(&self) -> bool {
-        let (Some(models), Some(live)) = (self.0.options.models.clone(), self.0.options.connect_live.as_ref()) else { return false };
+        let (Some(models), Some(live)) = (self.models(), self.0.options.connect_live.as_ref()) else { return false };
         if models.current().model.is_some() {
             return false;
         }
@@ -315,7 +316,7 @@ impl TuiApp {
 
     /// No model yet, but signed in somewhere: the provider's own first choice, as Kumi always chose.
     async fn default_found(&self) -> bool {
-        let Some(models) = self.0.options.models.clone() else { return false };
+        let Some(models) = self.models() else { return false };
         if models.current().model.is_some() {
             return true;
         }
@@ -338,7 +339,7 @@ impl TuiApp {
 
     /// Who Kumi talks to, for the Sign in step: the chosen model's provider.
     fn note_signed(&self) {
-        let Some(models) = &self.0.options.models else { return };
+        let Some(models) = self.models() else { return };
         let current = models.current();
         let name = current.provider.as_deref().map(|p| models.provider_name(p));
         self.setup_show(|s| s.signed = name);
@@ -419,7 +420,7 @@ impl TuiApp {
     }
 
     async fn setup_sign_in(&self) -> bool {
-        let Some(models) = self.0.options.models.clone() else { return true };
+        let Some(models) = self.models() else { return true };
         // Whether this computer reaches the sign-in at all: looked at once, beside the choices, and said under them
         // (the cause, and the proxy settings) when it doesn't.
         if let Some(reach) = self.0.options.reach.clone() {
@@ -464,7 +465,7 @@ impl TuiApp {
 
     /// How to sign in, with models on this computer offered too once one of their servers runs: looked for only
     /// here, now and every few seconds while the producer chooses. The choice, and what runs here.
-    async fn sign_in_choice(&self, models: &Rc<dyn ModelController>) -> Option<(String, Vec<(String, String)>)> {
+    async fn sign_in_choice(&self, models: &Models) -> Option<(String, Vec<(String, String)>)> {
         let chosen = self.setup_choose(
             "now",
             vec![

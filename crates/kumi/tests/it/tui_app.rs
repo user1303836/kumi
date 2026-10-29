@@ -562,6 +562,16 @@ case!(dragged_files_go_with_the_next_message, async {
     h.has("/no/such/file.png");
     h.close().await;
 });
+case!(a_late_answer_from_the_terminal_is_never_typed_and_its_bel_is_no_ctrl_g, async {
+    let h = Harness::new(120, 36);
+    h.start().await;
+    h.connect();
+    h.type_text("\x1b]11;rgb:1e1e/1e1e/1e1e\x07\x1b[?62;22c").await;
+    h.type_text("draft\r").await;
+    assert!(h.calls().contains(&"submit:draft".into()), "{:?}", h.calls());
+    assert!(!has(&h.screen(), "Set VISUAL or EDITOR"));
+    h.close().await;
+});
 case!(a_paste_loses_what_doesnt_show_on_screen, async {
     let h = Harness::new(120, 36);
     h.start().await;
@@ -685,7 +695,7 @@ case!(undo_history_and_clipboard, async {
 });
 case!(models_filter_keys_redaction, async {
     let fake = models::FakeModels::catalog();
-    let h = Harness::with(120, 36, Rc::new(Control::default()), |o| o.models = Some(fake.clone()));
+    let h = Harness::with(120, 36, Control::with_models(fake.clone()), |_| {});
     h.start().await;
     h.connect();
     h.has("GPT-6 Astra");
@@ -995,7 +1005,7 @@ case!(watched_video_and_web_grouping_redaction, async {
 });
 case!(effort_logout_auth_error_resends, async {
     let fake = models::FakeModels::catalog();
-    let h = Harness::with(120, 36, Rc::new(Control::default()), |o| o.models = Some(fake.clone()));
+    let h = Harness::with(120, 36, Control::with_models(fake.clone()), |_| {});
     h.start().await;
     h.type_text("/effort\r").await;
     h.has("How hard GPT-6 Astra thinks · lower answers sooner");
@@ -1015,7 +1025,7 @@ case!(effort_logout_auth_error_resends, async {
     h.close().await;
     let fake = models::FakeModels::catalog();
     *fake.model.borrow_mut() = Some("anthropic/claude-sonnet-5-5".into());
-    let h = Harness::with(120, 36, Rc::new(Control::default()), |o| o.models = Some(fake.clone()));
+    let h = Harness::with(120, 36, Control::with_models(fake.clone()), |_| {});
     h.start().await;
     h.has("Sign in to Anthropic?");
     h.type_text("\x1b").await;
@@ -1562,4 +1572,54 @@ case!(a_daw_asked_for_is_never_followed_away_from, async {
     assert!(!h.app.follow_daw(kumi_types::daw::DawId::Renoise));
     assert!(!h.calls().contains(&"close".into()));
     h.close().await;
+});
+
+// A question asked with a list holds off following only while its list is open, however the list closes (#668). Each on
+// an app of its own, which following closes: what it followed to, and the technique offer, open.
+fn offered() -> (Harness, Rc<std::cell::RefCell<Vec<kumi_types::daw::DawId>>>) {
+    let followed = Rc::new(std::cell::RefCell::new(Vec::new()));
+    let into = followed.clone();
+    let c = Rc::new(Control::default());
+    c.set("techniques", json!([]));
+    let h = Harness::with(120, 36, c, move |o| o.follow_daw = Some(Rc::new(move |daw| into.borrow_mut().push(daw))));
+    (h, followed)
+}
+async fn offer(h: &Harness) {
+    h.connect();
+    h.type_text("recreate the bubbles\r").await;
+    h.emit(json!({"type":"state","state":"running"}));
+    h.emit(json!({"type":"text","text":"Built the bubble chain on Bubbles."}));
+    h.emit(json!({"type":"turn-complete","result":{"stopReason":"completed"},"elapsedMs":900}));
+    h.emit(json!({"type":"technique","action":"offered","technique":{"id":"","name":"Liquid bubbles","fits":"bubbly FM effects"}}));
+    h.emit(json!({"type":"state","state":"idle"}));
+    h.has("Keep “Liquid bubbles” as a technique?");
+    assert!(!h.app.follow_daw(kumi_types::daw::DawId::Renoise), "the offer is open");
+}
+case!(the_technique_offer_typed_over_lets_kumi_follow_a_daw, async {
+    use kumi_types::daw::DawId;
+    let (h, followed) = offered();
+    let done = h.app.run();
+    delay(5).await;
+    offer(&h).await;
+    h.type_text("x").await;
+    h.type_text("\x7f").await;
+    assert!(!has(&h.screen(), "Keep “Liquid bubbles” as a technique?"));
+    assert!(h.app.follow_daw(DawId::Renoise), "typed over, nothing is open");
+    assert_eq!(*followed.borrow(), [DawId::Renoise]);
+    assert_eq!(done.await, 0);
+});
+case!(the_technique_offer_with_another_list_in_its_place_lets_kumi_follow_a_daw, async {
+    use kumi_types::daw::DawId;
+    let (h, followed) = offered();
+    let done = h.app.run();
+    delay(5).await;
+    offer(&h).await;
+    h.emit(json!({"type":"set-asked","ask":{"id":"far001","title":"Bass ideas","daw":"Live","noun":"Set"}}));
+    h.has("“Bass ideas” is about its Set");
+    assert!(!h.app.follow_daw(DawId::Renoise), "the question in its place is open");
+    h.type_text("\r").await;
+    h.wait_for_call("answer:open").await;
+    assert!(h.app.follow_daw(DawId::Renoise), "answered, nothing is open");
+    assert_eq!(*followed.borrow(), [DawId::Renoise]);
+    assert_eq!(done.await, 0);
 });

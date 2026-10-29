@@ -1,6 +1,8 @@
 use chrono::FixedOffset;
 use kumi_agent::core::contracts::{ConversationStore, KernelCheckpoint, SavedConversation, TranscriptLine, TranscriptRole};
-use kumi_agent::core::export::{file_name, html, import, json, markdown, Format, Options, Source, IMPORT_MAX_BYTES, LEFT_OUT, PARTIAL};
+use kumi_agent::core::export::{
+    details, file_name, html, import, json, markdown, Format, Options, Part, Source, IMPORT_MAX_BYTES, LEFT_OUT, PARTIAL,
+};
 use kumi_agent::core::goal::goal_setup;
 use kumi_agent::core::goal_mode::objective_audit;
 use kumi_agent::core::loop_run::loop_setup;
@@ -253,6 +255,44 @@ fn exports_match_their_golden_files() {
             assert!(out == golden, "{} changed: check the difference, then run this test with KUMI_BLESS=1", file.display());
         }
     }
+}
+
+#[test]
+fn the_detailed_view_has_the_full_exports_requests_steps_and_answers_as_parts() {
+    let conversation = conversation();
+    let title = format!("Make the kick punchier {PLANTED}");
+    let source =
+        Source { id: "k3x9a1b2", conversation: &conversation, title: &title, place: None, words: ("Live", "Set"), created: NOW - 10_000 };
+    // Asked short or full, the details are the full export's.
+    let parts = details(&source, &options(false));
+    let said = format!("{parts:?}");
+    assert!(!said.contains(PLANTED), "a word skipped the redactor: {said}");
+    for never in NEVER {
+        assert!(!said.contains(never), "{never} left Kumi: {said}");
+    }
+    let step = parts.iter().find_map(|part| match part {
+        Part::Step { label, input, result } if label == "used set_mixer" => Some((input.clone(), result.clone())),
+        _ => None,
+    });
+    let (input, _) = step.expect("the mixer step");
+    assert!(input.is_some_and(|input| input.contains("\"track\": \"Kick_01_final\"")));
+    let results = parts.iter().filter_map(|part| match part {
+        Part::Step { result: Some(result), .. } => Some(result.as_str()),
+        _ => None,
+    });
+    assert!(results.into_iter().any(|result| result.contains("Kick_01_final [secret]")), "a step's result, redacted");
+    assert!(parts.iter().any(|part| matches!(part, Part::Answer(words) if words.contains("The render is done."))));
+    assert!(parts.iter().any(|part| matches!(part, Part::Fact { label, .. } if label == "Model")));
+    // The requests in the export's order.
+    let full = markdown(&source, &options(true));
+    let requests: Vec<usize> = parts
+        .iter()
+        .filter_map(|part| match part {
+            Part::Request(words) => full.find(words.lines().next().unwrap_or_default()),
+            _ => None,
+        })
+        .collect();
+    assert!(requests.len() >= 3 && requests.windows(2).all(|pair| pair[0] < pair[1]), "{requests:?}");
 }
 
 #[test]

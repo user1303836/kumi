@@ -114,10 +114,17 @@ struct Inner {
     moves: Cell<bool>,
     /// Lent to a program Kumi runs in it ([`Tty::hand_over`]), and not yet given back for good.
     lent: Cell<bool>,
+    /// Given back for good while lent (Kumi closing): what waits for a key in the lent terminal stops waiting. Only a
+    /// wait under way is woken (a wait starts and polls it without yielding, so none misses it), and nothing is kept for
+    /// later: the terminal is never lent again, so a later wait returns at once.
+    closed: tokio::sync::Notify,
     parser: InputParser,
     decoder: RefCell<Utf8Decoder>,
     emergency: Cell<Option<u64>>,
 }
+
+/// How long the rest of a key's bytes may trail its first ([`Tty::wait_for_key`]).
+const KEY_REST_MS: u64 = 40;
 
 pub struct Tty {
     inner: Rc<Inner>,
@@ -135,6 +142,7 @@ impl Tty {
                 was_raw: Cell::new(false),
                 moves: Cell::new(false),
                 lent: Cell::new(false),
+                closed: tokio::sync::Notify::new(),
                 parser,
                 decoder: RefCell::new(Utf8Decoder::new()),
                 emergency: Cell::new(None),
@@ -204,6 +212,16 @@ impl Tty {
         }
     }
 
+    /// Reads `bytes` as if they had just come in: what was read before the screen was Kumi's (while the terminal was
+    /// asked what it is), so keys typed meanwhile aren't lost and the answers among them are read as answers.
+    pub fn read_again(&self, bytes: &[u8]) {
+        if bytes.is_empty() || !self.is_active() {
+            return;
+        }
+        let text = self.inner.decoder.borrow_mut().write(bytes);
+        self.inner.parser.push(&text);
+    }
+
     /// Lends the terminal to a program Kumi runs in it (the producer's editor) until `run` is done. The screen and every
     /// mode Kumi set go back as they were, raw input too, and Kumi's reader stops reading, so the program gets every
     /// key. Nothing Kumi draws is written meanwhile; once it's taken back, the caller draws the whole screen again. A
@@ -229,6 +247,33 @@ impl Tty {
             inner.options.output.write(&inner.entering());
         }
         result
+    }
+
+    /// While the terminal is lent ([`Tty::hand_over`]), waits for a key as a program run in it would, and drops it whole:
+    /// the rest of an arrow's or a function key's bytes, a moment behind the first, are dropped with it. What was typed
+    /// before and is still in the terminal's own buffer is dropped first; bytes Kumi's reader had already taken before
+    /// the terminal was lent (rare) end the wait at once. Kumi closing meanwhile ends the wait; not lent, it returns at
+    /// once.
+    pub async fn wait_for_key(&self) {
+        let inner = &self.inner;
+        if !inner.lent.get() {
+            return;
+        }
+        let input = &inner.options.input;
+        input.discard_pending();
+        let _ = input.set_raw_mode(true);
+        let pressed = Rc::new(tokio::sync::Notify::new());
+        let key = Rc::clone(&pressed);
+        input.resume(Rc::new(move |_: &[u8]| key.notify_one()));
+        tokio::select! {
+            () = pressed.notified() => tokio::time::sleep(std::time::Duration::from_millis(KEY_REST_MS)).await,
+            () = inner.closed.notified() => {}
+        }
+        if inner.lent.get() {
+            input.pause();
+            input.discard_pending();
+            let _ = input.set_raw_mode(inner.was_raw.get());
+        }
     }
 
     /// Whether the terminal is lent to a program Kumi runs ([`Tty::hand_over`]): its keys, ctrl+c too, are that
@@ -282,6 +327,9 @@ impl Inner {
     fn restore(&self, sync: bool) {
         // Lent to a program: its screen and modes are given back already, and aren't taken again when it's done.
         let lent = self.lent.replace(false);
+        if lent {
+            self.closed.notify_waiters();
+        }
         // Given back by the crash path and not taken again: what it didn't undo is still Kumi's to undo.
         let active = self.active.swap(false, Ordering::SeqCst);
         let taken = self.taken.swap(false, Ordering::SeqCst);

@@ -251,6 +251,15 @@ local_test!(the_bridges_word_on_bad_arguments_comes_back_as_a_tool_error_other_f
     tools.close().await.unwrap();
 });
 
+local_test!(the_bridges_long_word_on_bad_arguments_is_cut_between_characters, {
+    let (_, tools) = open("normal", 2000).await;
+    tools.refresh(signal()).await.unwrap();
+    let rejected = call(&tools, "server_status", json!({"action":"invalid-params-long"})).await.unwrap();
+    let said = format!("The bridge rejected the arguments: {}", "a".repeat(299));
+    assert_eq!(serde_json::to_value(rejected.content).unwrap(), json!([{"type":"text","text":said}]));
+    tools.close().await.unwrap();
+});
+
 local_test!(bounded_sdk_shutdown_terminates_only_the_owned_stubborn_child, {
     let (sibling, sibling_tools) = open("normal", 2000).await;
     let (client, tools) = open("stubborn", 2000).await;
