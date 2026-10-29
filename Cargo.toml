@@ -87,6 +87,8 @@ memchr = "2"
 # ONNX Runtime is loaded at run time from the copy Kumi fetches on first use: nothing native at build time.
 ort = { version = "=2.0.0-rc.13", default-features = false, features = ["load-dynamic", "api-23"] }
 percent-encoding = "2"
+# Markdown's events, for the conversation's answers: CommonMark and its tables, read without backtracking.
+pulldown-cmark = { version = "0.13", default-features = false }
 fancy-regex = "0.14"
 rand = "0.9"
 regex = "1"

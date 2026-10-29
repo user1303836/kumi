@@ -167,7 +167,7 @@ impl TuiApp {
                                 None
                             };
                             let mut line = Line::new("", st::TEXT);
-                            line.spans = Some(row.spans.clone());
+                            line.spans = Some(row.spans.to_vec());
                             line.right = more.map(|s| sp(s, st::FAINT));
                             lines.push(line);
                         }
