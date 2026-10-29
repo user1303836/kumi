@@ -173,6 +173,10 @@ impl Answers {
     pub fn get<T: 'static>(&self) -> Option<&T> {
         self.0.iter().find(|(kind, _)| *kind == TypeId::of::<T>()).and_then(|(_, answer)| answer.downcast_ref())
     }
+    /// Whether there are none: the app has none for a session (each DAW's own integration starts there).
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
 }
 
 /// What a DAW's part of a flow gets from the app: where it says things, how it asks, the environment, how it runs

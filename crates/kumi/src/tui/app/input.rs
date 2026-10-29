@@ -794,7 +794,10 @@ impl TuiApp {
             let state = self.0.state.borrow();
             state.goal.is_some() || state.objective.is_some()
         };
-        let now = Now { busy: self.busy(), goal_running, can: self.can(), fronts: self.has().fronts };
+        // A turn asked for and not answered is under way, though its Running may not have reached the screen yet (a session
+        // on a thread of its own says it a moment later).
+        let busy = self.busy() || self.0.state.borrow().turns_asked > 0;
+        let now = Now { busy, goal_running, can: self.can(), fronts: self.has().fronts };
         match commands::run(command, &now) {
             Effect::Quit => {
                 self.clear_editor();
@@ -1246,10 +1249,13 @@ impl TuiApp {
                     }
                     state.activity = if !text.is_empty() { "setting up the goal" } else { "picking the goal up" }.into();
                     state.pending_turn = true;
+                    state.turns_asked += 1;
                 }
                 self.0.tabs.show("goal");
                 self.0.scheduler.request();
-                if let Err(error) = session.op(op::Goal { text: (!text.is_empty()).then(|| text.to_string()) }).await {
+                let goal = session.op(op::Goal { text: (!text.is_empty()).then(|| text.to_string()) }).await;
+                self.turn_answered(goal.is_ok());
+                if let Err(error) = goal {
                     self.0.state.borrow_mut().pending_turn = false;
                     if !self.0.state.borrow().closing {
                         self.error(&error);
@@ -1506,10 +1512,12 @@ impl TuiApp {
             }
             state.activity = "thinking".into();
             state.pending_turn = true;
+            state.turns_asked += 1;
             (state.pinned.as_ref().map(|p| p.pin.clone()), std::mem::take(&mut state.attachments))
         };
         self.0.scheduler.request();
         let sent = self.session().op(op::Submit { input: raw.into(), pinned, attachments: attachments.clone(), references }).await;
+        self.turn_answered(sent.is_ok());
         if let Err(error) = sent {
             // Files that didn't go stay, to change or send again.
             let mut state = self.0.state.borrow_mut();

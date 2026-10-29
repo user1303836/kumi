@@ -283,7 +283,7 @@ its undo. They're in English for now.
 
 | Key | Action |
 | --- | --- |
-| Enter | Send. While Kumi works, it reads the message after the step under way |
+| Enter | Send. While Kumi works, it reads the message after the step under way; one that names something with `@` waits for the answer |
 | Tab, while Kumi works | Send the message after the answer instead; it waits above the box |
 | Alt-↑ | Take the last waiting message back into the box |
 | Ctrl-J, Alt-Enter, Shift-Enter | New line (Shift-Enter in terminals that report it) |

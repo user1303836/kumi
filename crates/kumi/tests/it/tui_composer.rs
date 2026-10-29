@@ -1132,6 +1132,37 @@ case!(a_message_naming_something_waits_for_the_answer_and_a_command_line_names_n
     h.close().await;
 });
 
+// #724: while Kumi answers, the row under the box says what enter does. A message naming something with @ waits for the
+// answer, and says so; the same words naming nothing go in now.
+case!(while_kumi_answers_the_hint_says_a_message_naming_something_waits_for_the_answer, async {
+    let c = Rc::new(Control::default());
+    let rows = serde_json::json!([{
+        "label": "Drums",
+        "kind": "track",
+        "reference": {"kind": "daw", "node": {"trackRef": "1:track:0", "ref": "1:track:0", "node": "track", "name": "Drums", "trail": [], "siblings": [], "track": "Drums"}},
+    }]);
+    *c.extra.borrow_mut() = serde_json::json!({"references": rows});
+    let h = Harness::with(120, 36, c.clone(), |_| {});
+    h.start().await;
+    h.connect();
+    h.type_text("first\r").await;
+    h.emit(serde_json::json!({"type":"state","state":"running"}));
+    h.emit(serde_json::json!({"type":"tool-start","id":"t1","name":"search_web"}));
+    h.type_text("louder on ").await;
+    h.has("enter sends now · tab after · esc stops");
+    for typed in ["@", "d"] {
+        h.type_text(typed).await;
+    }
+    delay(5).await;
+    h.type_text("\t").await;
+    h.has("enter sends after the answer · esc stops");
+    assert!(!has(&h.screen(), "sends now"), "{:?}", h.screen());
+    // With the chip taken out, the words alone go in now again.
+    h.type_text("\x7f\x7f").await;
+    h.has("enter sends now · tab after · esc stops");
+    h.close().await;
+});
+
 /// The cell just past `text` on the screen, as (column, row): the lowest row that has it, in cells (a wide character
 /// takes two).
 fn end_of(h: &Harness, text: &str) -> (i32, i32) {

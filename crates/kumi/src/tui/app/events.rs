@@ -74,6 +74,10 @@ impl TuiApp {
                     self.notice(&format!("{reason}; carrying on with {name} (/model to change)."), NoticeTone::Info);
                 }
             }
+            // An Idle while a turn asked for isn't answered yet waits for its answer (`turn_answered`). A session on a thread
+            // of its own can send one from before it had the request after the request went, which would end the new turn
+            // before it began.
+            SessionEvent::State { state: TurnState::Idle } if self.idle_waits() => {}
             SessionEvent::State { state: turn } => {
                 {
                     let mut state = self.0.state.borrow_mut();
@@ -911,7 +915,7 @@ impl TuiApp {
         if self.replaying() {
             return;
         }
-        if at_work && self.0.state.borrow().held.iter().any(|h| h.when == "now" && !h.taken) {
+        if at_work && self.0.state.borrow().held.iter().any(|h| h.when == "now" && !h.taken && !h.asked) {
             self.steer_held();
         }
         if carry_on {
@@ -1100,11 +1104,28 @@ impl TuiApp {
         }
     }
     pub(super) fn hold(&self, raw: String, shown: String, words: Composed, when: &'static str) {
-        self.0.state.borrow_mut().held.push(Held { text: raw, shown, words, when, taken: false });
+        self.0.state.borrow_mut().held.push(Held { text: raw, shown, words, when, taken: false, asked: false });
         if when == "now" {
             self.steer_held();
         }
         self.0.scheduler.request();
+    }
+    /// Whether an Idle waits for the answer to a turn asked for, noting that one did.
+    fn idle_waits(&self) -> bool {
+        let mut state = self.0.state.borrow_mut();
+        state.idle_held |= state.turns_asked > 0;
+        state.turns_asked > 0
+    }
+    /// A turn asked for is answered: an Idle that waited for it ends the turn now, as it would have, when the turn ran.
+    pub(super) fn turn_answered(&self, ran: bool) {
+        let waited = {
+            let mut state = self.0.state.borrow_mut();
+            state.turns_asked = state.turns_asked.saturating_sub(1);
+            state.turns_asked == 0 && std::mem::take(&mut state.idle_held)
+        };
+        if waited && ran {
+            self.event(SessionEvent::State { state: TurnState::Idle });
+        }
     }
     fn steer_held(&self) {
         if !self.can().steer {
@@ -1112,10 +1133,16 @@ impl TuiApp {
         }
         let held = self.0.state.borrow().held.clone();
         for (index, item) in held.into_iter().enumerate() {
-            if item.when == "now" && !item.taken {
+            if item.when == "now" && !item.taken && !item.asked {
+                // Asked until the answer says: a session on a thread of its own answers after the events meanwhile, and
+                // one that didn't take it is asked again at the next.
+                if let Some(current) = self.0.state.borrow_mut().held.get_mut(index) {
+                    current.asked = true;
+                }
                 self.when_answered(op::Steer { text: item.text.clone() }, move |app, taken| {
                     if let Some(current) = app.0.state.borrow_mut().held.get_mut(index).filter(|h| h.text == item.text) {
                         current.taken = taken.unwrap_or(false);
+                        current.asked = false;
                     }
                 });
             }

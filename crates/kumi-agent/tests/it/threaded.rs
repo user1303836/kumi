@@ -1,19 +1,20 @@
 //! A session on a thread of its own: a reply comes after every event sent before it, the reads are sent before what
 //! changed them, a session that can't start (or panics as it starts) says why, a panic later ends the front end with
-//! what it said, closing has its bound, the thread ends with its handle, a stop before its aside still stops it, and a
-//! job's details are read for the one watched alone, while it's watched.
+//! what it said (and whoever waits hears why), closing has its bound, the thread ends with its handle (the session's own
+//! ending first, then what's under way within its grace), a stop before its aside still stops it, a job's details are
+//! read for the one watched alone, while it's watched, and what the session said before anything listened comes first.
 use async_trait::async_trait;
 use futures::FutureExt;
 use kumi_agent::core::{
     contracts::*,
     jobs::JobDetail,
     protocol::{op, SessionHandle},
-    threaded::{session_panicked, Build, Threaded},
+    threaded::{Build, Built, Threaded},
 };
 use kumi_common::abort::Signal;
 use kumi_types::{contracts::ChangeRecord, errors::RuntimeError};
 use std::{
-    cell::RefCell,
+    cell::{Cell, RefCell},
     rc::Rc,
     sync::{
         atomic::{AtomicBool, AtomicUsize, Ordering},
@@ -27,6 +28,14 @@ use std::{
 struct Ways {
     /// Its refresh panics: the DAW's read went wrong in a way nothing caught.
     refresh_panics: bool,
+    /// Its answer panics.
+    submit_panics: bool,
+    /// It says something as it's built, before anything listens.
+    says_as_built: bool,
+    /// Set by what it does as its thread ends.
+    ending: Option<Arc<AtomicBool>>,
+    /// Its close leaves a task settling a moment longer, which sets this as it finishes.
+    settles: Option<Arc<AtomicBool>>,
     /// Its close never finishes.
     close_hangs: bool,
     /// Set as it's dropped: its thread is ending.
@@ -60,6 +69,9 @@ impl SessionController for Answers {
         Ok(())
     }
     async fn submit(&self, input: &str, _: Option<PinnedNode>) -> Result<(), RuntimeError> {
+        if self.ways.submit_panics {
+            panic!("the model's stream went wrong");
+        }
         self.status.borrow_mut().state = TurnState::Running;
         (self.emit)(SessionEvent::State { state: TurnState::Running });
         (self.emit)(SessionEvent::Kernel(KernelEvent::Text { text: input.into() }));
@@ -87,6 +99,12 @@ impl SessionController for Answers {
     async fn close(&self) -> Result<(), RuntimeError> {
         if self.ways.close_hangs {
             std::future::pending::<()>().await;
+        }
+        if let Some(settled) = self.ways.settles.clone() {
+            tokio::task::spawn_local(async move {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                settled.store(true, Ordering::SeqCst);
+            });
         }
         Ok(())
     }
@@ -127,22 +145,19 @@ impl SessionController for Answers {
 
 fn answers(ways: Ways) -> Build {
     Box::new(move |emit| {
-        async move { Ok(Rc::new(Answers { emit, status: RefCell::new(idle()), ways }) as Rc<dyn SessionController>) }.boxed_local()
+        async move {
+            if ways.says_as_built {
+                emit(SessionEvent::Notice { message: "built".into() });
+            }
+            let ending = ways.ending.clone().map(|ended| async move { ended.store(true, Ordering::SeqCst) }.boxed_local());
+            Ok(Built { session: Rc::new(Answers { emit, status: RefCell::new(idle()), ways }), ending })
+        }
+        .boxed_local()
     })
 }
 
 async fn spawned(ways: Ways) -> Rc<dyn SessionHandle> {
     Threaded::spawn(answers(ways)).await.unwrap()
-}
-
-/// Panics on the session's thread go where the app's hook sends them; the rest as before.
-fn hooked() {
-    let previous = std::panic::take_hook();
-    std::panic::set_hook(Box::new(move |info| {
-        if !session_panicked(info) {
-            previous(info);
-        }
-    }));
 }
 
 fn local<F: std::future::Future<Output = ()>>(test: F) -> impl std::future::Future<Output = ()> {
@@ -205,7 +220,6 @@ async fn a_session_that_cant_be_built_says_why() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn a_session_that_panics_as_it_is_built_says_so() {
-    hooked();
     local(async {
         let build: Build = Box::new(|_| async { panic!("no room for the store") }.boxed_local());
         let error = Threaded::spawn(build).await.err().expect("no session");
@@ -216,7 +230,6 @@ async fn a_session_that_panics_as_it_is_built_says_so() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn a_panic_on_the_sessions_thread_ends_the_front_end_with_what_it_said() {
-    hooked();
     local(async {
         let threaded = Threaded::spawn(answers(Ways { refresh_panics: true, ..Default::default() })).await.unwrap();
         let ended = Rc::new(RefCell::new(None));
@@ -323,6 +336,88 @@ async fn a_job_no_longer_shown_is_read_no_more() {
         submit().await.unwrap();
         submit().await.unwrap();
         assert_eq!(reads.load(Ordering::SeqCst), before);
+    })
+    .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_request_under_way_as_the_session_ends_hears_why() {
+    local(async {
+        let session = spawned(Ways { submit_panics: true, ..Default::default() }).await;
+        let submit = op::Submit { input: "louder".into(), pinned: None, attachments: vec![], references: vec![] };
+        let answer = tokio::time::timeout(Duration::from_secs(5), session.op(submit)).await.expect("the request heard the session ended");
+        let error = answer.err().expect("ended");
+        assert!(error.message().starts_with("the model's stream went wrong"), "{}", error.message());
+    })
+    .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn the_session_ends_its_own_way_before_its_thread_does() {
+    local(async {
+        let ended = Arc::new(AtomicBool::new(false));
+        let threaded = Threaded::spawn(answers(Ways { ending: Some(ended.clone()), ..Default::default() })).await.unwrap();
+        let fatal = Rc::new(Cell::new(false));
+        threaded.on_fatal({
+            let fatal = fatal.clone();
+            Rc::new(move |_| fatal.set(true))
+        });
+        let session: Rc<dyn SessionHandle> = threaded.clone();
+        session.op(op::Close {}).await.unwrap();
+        assert!(threaded.close_thread().await, "everything finished within its grace");
+        assert!(ended.load(Ordering::SeqCst), "the session's own ending ran before its thread ended");
+        assert!(!fatal.get(), "an end the front end asked for isn't the session ending unasked");
+        let error = session.op(op::Refresh {}).await.err().expect("ended");
+        assert_eq!(error.message(), "Kumi's session has ended");
+    })
+    .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn what_is_still_under_way_as_the_thread_ends_has_its_grace_and_no_more() {
+    local(async {
+        let threaded = Threaded::spawn(answers(Ways { close_hangs: true, ..Default::default() })).await.unwrap();
+        let session: Rc<dyn SessionHandle> = threaded.clone();
+        // A close that never finishes, left under way.
+        session.tell(op::Close {}.into());
+        let began = std::time::Instant::now();
+        assert!(!threaded.close_thread().await, "something was still under way");
+        assert!(began.elapsed() < Duration::from_secs(5), "{:?}", began.elapsed());
+    })
+    .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn what_the_session_said_before_anything_listened_comes_first() {
+    local(async {
+        let session = spawned(Ways { says_as_built: true, ..Default::default() }).await;
+        // Nothing listens yet, and this thread is free meanwhile: what the session said as it was built waits.
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        let seen = Rc::new(RefCell::new(vec![]));
+        session.listen({
+            let seen = seen.clone();
+            Rc::new(move |event| seen.borrow_mut().push(event))
+        });
+        // (handed over once this thread is free, not as it listens: a screen listens as it's made)
+        assert!(seen.borrow().is_empty());
+        session.op(op::Submit { input: "louder".into(), pinned: None, attachments: vec![], references: vec![] }).await.unwrap();
+        let seen = seen.borrow();
+        assert!(matches!(seen.first(), Some(SessionEvent::Notice { message }) if message == "built"), "{seen:?}");
+        assert!(matches!(seen.last(), Some(SessionEvent::State { state: TurnState::Idle })), "{seen:?}");
+    })
+    .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn what_a_close_leaves_settling_finishes_before_the_thread_ends() {
+    local(async {
+        let settled = Arc::new(AtomicBool::new(false));
+        let threaded = Threaded::spawn(answers(Ways { settles: Some(settled.clone()), ..Default::default() })).await.unwrap();
+        let session: Rc<dyn SessionHandle> = threaded.clone();
+        session.op(op::Close {}).await.unwrap();
+        assert!(!settled.load(Ordering::SeqCst), "still settling as close answers");
+        assert!(threaded.close_thread().await, "it finished within its grace");
+        assert!(settled.load(Ordering::SeqCst), "the thread ended only once it had");
     })
     .await;
 }

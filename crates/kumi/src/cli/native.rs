@@ -46,7 +46,12 @@ pub struct CliIo {
     pub reopen: Option<Rc<dyn Fn(Vec<String>) -> LocalBoxFuture<'static, i32>>>,
     /// Which DAWs are on this computer, for /daw to offer (tests); else the DAWs' own detection says.
     pub daws_here: Option<crate::daw::Here>,
+    /// The session on a thread of its own, whichever the front end (the app's). Tests build theirs in this one unless they
+    /// ask for this, and one with stand-ins (`Answers`) always does.
+    pub threaded: bool,
     exit_after_reopen: Rc<Cell<bool>>,
+    /// The session's thread still had something running past its grace as it ended: the shutdown says so, once.
+    left_running: Rc<Cell<bool>>,
 }
 impl CliIo {
     pub fn new(input: Rc<dyn TerminalInput>, out: Rc<dyn TtyOutput>, err: Rc<dyn TtyOutput>, env: Env) -> Self {
@@ -60,7 +65,9 @@ impl CliIo {
             probe: false,
             reopen: None,
             daws_here: None,
+            threaded: false,
             exit_after_reopen: Rc::new(Cell::new(false)),
+            left_running: Rc::new(Cell::new(false)),
         }
     }
     pub fn installed(&self) -> bool {
@@ -517,6 +524,7 @@ pub fn main_with(answers: impl Into<Answers>) -> i32 {
     io.args = kumi_common::env::args().skip(1).collect();
     io.signals = true;
     io.probe = true;
+    io.threaded = true;
     if let Ok(executable) = std::env::current_exe() {
         if let Err(error) = install::ensure_native_launcher(&io.env, &executable) {
             io.err.write(&format!("Kumi: could not update its launcher: {error}\n"));
@@ -524,9 +532,10 @@ pub fn main_with(answers: impl Into<Answers>) -> i32 {
     }
     let err = io.err.clone();
     let explicit_exit = io.exit_after_reopen.clone();
+    let left_running = io.left_running.clone();
     let local = tokio::task::LocalSet::new();
     let code = local.block_on(&runtime, run(io, answers));
-    shutdown::finish(runtime, local, code, explicit_exit.get(), err.as_ref())
+    shutdown::finish(runtime, local, code, explicit_exit.get(), left_running.get(), err.as_ref())
 }
 
 #[cfg(test)]

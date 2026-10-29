@@ -314,6 +314,8 @@ struct Held {
     words: Composed,
     when: &'static str,
     taken: bool,
+    /// Sent to the answer under way, and not answered yet: the events before the answer don't send it again.
+    asked: bool,
 }
 #[derive(Clone)]
 struct Pin {
@@ -461,6 +463,10 @@ struct State {
     failed: bool,
     bytes: usize,
     pending_turn: bool,
+    /// Turns asked for whose answer hasn't come: an Idle meanwhile waits for it (`idle_waits`), and `idle_held` says
+    /// one did.
+    turns_asked: u32,
+    idle_held: bool,
     held: Vec<Held>,
     last_stop: Option<StopReason>,
     asides: Vec<Rc<RefCell<Aside>>>,
@@ -567,6 +573,10 @@ struct State {
     jobs: std::collections::BTreeMap<u32, kumi_agent::core::jobs::JobStatus>,
     /// Jobs that ended whose request carries on, waiting for a moment the producer isn't in the middle of something.
     carry: Vec<u32>,
+    /// The jobs asked to run again and not answered yet: a second r meanwhile isn't sent.
+    running_again: std::collections::BTreeSet<u32>,
+    /// Ctrl-b's move is asked and not answered yet: a second ctrl-b meanwhile isn't sent.
+    backgrounding: bool,
     /// Each job's record last written to the terminal's status (OSC 7501 `id=job-N`).
     job_status_sent: std::collections::BTreeMap<u32, super::alerts::StatusReport>,
     /// The session's palette as it last stood: PALETTE, and its sounds marked on the map; and PALETTE's rows for it, at
@@ -664,6 +674,8 @@ impl State {
             failed: false,
             bytes: 0,
             pending_turn: false,
+            turns_asked: 0,
+            idle_held: false,
             held: vec![],
             last_stop: None,
             asides: vec![],
@@ -734,6 +746,8 @@ impl State {
             answer_countdown: None,
             jobs: std::collections::BTreeMap::new(),
             carry: vec![],
+            running_again: std::collections::BTreeSet::new(),
+            backgrounding: false,
             job_status_sent: std::collections::BTreeMap::new(),
             palette: None,
             palette_rows: None,
