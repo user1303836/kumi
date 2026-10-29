@@ -4,7 +4,7 @@
 use std::rc::Rc;
 
 use kumi_common::js::json::stringify;
-use kumi_library::search::SoundIndex;
+use kumi_library::search::{letter_bit, letters_of, Letters, SoundIndex};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
@@ -37,11 +37,39 @@ pub struct Candidate {
 }
 
 /// How well `query` names `name`, both lowercased: None unless the query's letters are all in the name, in order. A
-/// prefix beats a word's start, which beats letters scattered, and a run of letters beats the same letters apart.
+/// prefix beats a word's start, which beats letters scattered, and a run of letters beats the same letters apart. The
+/// letters are matched from their first place and from each word the first one starts, the best of them: `dr` names
+/// "hydra drums" by its second word.
 fn score(name: &str, query: &[char]) -> Option<u32> {
-    let (mut score, mut matched, mut prefix) = (0, 0, true);
-    let (mut previous, mut run) = (None::<char>, false);
-    for (at, letter) in name.chars().enumerate() {
+    let first = *query.first()?;
+    let mut best: Option<u32> = None;
+    let mut previous: Option<char> = None;
+    for (at, letter) in name.char_indices() {
+        let word = previous.is_none_or(|previous| !previous.is_alphanumeric());
+        if letter == first && (word || best.is_none()) {
+            match matched_from(&name[at..], query, previous, at == 0) {
+                Some(found) => best = best.max(Some(found)),
+                // Not all of it after its first place: nor after any later one.
+                None if best.is_none() => return None,
+                None => {}
+            }
+            // One letter at a word's start is as well as it can be matched.
+            if word && query.len() == 1 {
+                break;
+            }
+        }
+        previous = Some(letter);
+    }
+    // Among equals, the shorter name: it's the closer one.
+    best.map(|score| score * 64 - (name.len() as u32).min(63))
+}
+
+/// The query's letters matched in order from the start of `rest`, each at its first place after the last: their score,
+/// or None when not all are there. `before` is the letter before `rest`; `whole` says `rest` is the whole name.
+fn matched_from(rest: &str, query: &[char], before: Option<char>, whole: bool) -> Option<u32> {
+    let (mut score, mut matched, mut prefix) = (0, 0, whole);
+    let (mut previous, mut run) = (before, false);
+    for (at, letter) in rest.chars().enumerate() {
         let Some(wanted) = query.get(matched) else { break };
         if letter == *wanted {
             score += 1;
@@ -65,8 +93,7 @@ fn score(name: &str, query: &[char]) -> Option<u32> {
     if prefix {
         score += 16;
     }
-    // Among equals, the shorter name: it's the closer one.
-    Some(score * 64 - (name.len() as u32).min(63))
+    Some(score)
 }
 
 /// A list `@` ranks by place without copying it: the short lists, or the library's sounds, which stay in their index
@@ -75,6 +102,10 @@ pub trait Listed {
     fn count(&self) -> usize;
     /// The name at `at`, lowercased as it's matched.
     fn lower(&self, at: usize) -> &str;
+    /// The letters that name has, and those its words start with.
+    fn letters(&self, at: usize) -> Letters {
+        letters_of(self.lower(at))
+    }
     /// What `at` is as the list shows it: made only for the best.
     fn candidate(&self, at: usize) -> Option<Candidate>;
 }
@@ -84,12 +115,14 @@ pub trait Listed {
 pub struct Short {
     candidates: Vec<Candidate>,
     lower: Vec<String>,
+    letters: Vec<Letters>,
 }
 
 impl Short {
     pub fn new(candidates: Vec<Candidate>) -> Short {
-        let lower = candidates.iter().map(|candidate| candidate.label.to_lowercase()).collect();
-        Short { candidates, lower }
+        let lower: Vec<String> = candidates.iter().map(|candidate| candidate.label.to_lowercase()).collect();
+        let letters = lower.iter().map(|lower| letters_of(lower)).collect();
+        Short { candidates, lower, letters }
     }
 }
 
@@ -99,6 +132,9 @@ impl Listed for Short {
     }
     fn lower(&self, at: usize) -> &str {
         &self.lower[at]
+    }
+    fn letters(&self, at: usize) -> Letters {
+        self.letters[at]
     }
     fn candidate(&self, at: usize) -> Option<Candidate> {
         self.candidates.get(at).cloned()
@@ -112,6 +148,9 @@ impl Listed for SoundIndex {
     }
     fn lower(&self, at: usize) -> &str {
         self.named(at).map_or("", |(_, lower, _)| lower)
+    }
+    fn letters(&self, at: usize) -> Letters {
+        SoundIndex::letters(self, at)
     }
     fn candidate(&self, at: usize) -> Option<Candidate> {
         let (name, _, place) = self.named(at)?;
@@ -147,6 +186,13 @@ impl Referable {
         }
     }
 
+    fn letters(&self, at: usize) -> Letters {
+        match at.checked_sub(self.short.count()) {
+            None => self.short.letters(at),
+            Some(at) => self.long.as_ref().map(|long| long.letters(at)).unwrap_or_default(),
+        }
+    }
+
     fn candidate(&self, at: usize) -> Option<Candidate> {
         match at.checked_sub(self.short.count()) {
             None => self.short.candidate(at),
@@ -164,7 +210,29 @@ impl Referable {
             return (0..total.min(limit)).filter_map(|at| self.candidate(at)).collect();
         }
         let narrowed = self.last.take().filter(|(last, _)| query.starts_with(last)).map(|(_, matched)| matched);
-        let scored = |at: usize| score(self.lower(at), &query).map(|score| (score, at));
+        // A name without one of the letters typed is passed over unread, and one letter is ranked from the letters
+        // alone: where it is a word's start, and the name's.
+        let wanted = query.iter().filter_map(|letter| letter_bit(*letter)).fold(0, |wanted, bit| wanted | bit);
+        let single = match query.as_slice() {
+            [only] => letter_bit(*only).map(|bit| (*only, bit)),
+            _ => None,
+        };
+        let scored = |at: usize| {
+            let letters = self.letters(at);
+            if letters.has & wanted != wanted {
+                return None;
+            }
+            let name = self.lower(at);
+            let score = match single {
+                Some((only, bit)) => {
+                    let word = if letters.starts & bit != 0 { 8 } else { 0 };
+                    let prefix = if name.starts_with(only) { 16 } else { 0 };
+                    (1 + word + prefix) * 64 - (name.len() as u32).min(63)
+                }
+                None => score(name, &query)?,
+            };
+            Some((score, at))
+        };
         let mut found: Vec<(u32, usize)> = match narrowed {
             Some(matched) => matched.into_iter().filter_map(scored).collect(),
             None => (0..total).filter_map(scored).collect(),

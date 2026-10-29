@@ -87,14 +87,32 @@ fn a_prefix_beats_a_word_start_which_beats_letters_apart_and_the_projects_come_f
             ("Drums", Track),
             ("Drums", Sample),
             ("Drum Loop 01", Sample),
-            // A word's start, then letters apart.
+            // A word's start, matched there even after letters an earlier word has, then letters apart.
             ("Synth Drums", Track),
-            ("dark rumble", Sample),
             ("Hydrant Drums", Sample),
+            ("dark rumble", Sample),
         ]
     );
+    // `dr` names Hydra Drums by its second word, before Adrenaline's letters in a row.
+    let mut both = Referable::new(vec![track("Adrenaline"), track("Hydra Drums")], None);
+    assert_eq!(labels(&both.rank("dr", 50)), [("Hydra Drums", CandidateKind::Track), ("Adrenaline", CandidateKind::Track)]);
     // Letters out of order name nothing.
     assert!(drums().rank("urd", 50).is_empty());
+}
+
+#[test]
+fn one_letter_is_ranked_from_the_names_letters_as_a_whole_read_would_rank_it() {
+    let sounds = Sounds::new(named(&["Adrenaline", "Kick", "Hydra Drums", "Drums", "Odd 9", "9 Drums"]));
+    let mut referable = Referable::new(vec![], Some(sounds));
+    // The name's start, then a word's, then anywhere; a name without it isn't there.
+    assert_eq!(
+        labels(&referable.rank("d", 50)).iter().map(|(label, _)| *label).collect::<Vec<_>>(),
+        ["Drums", "9 Drums", "Hydra Drums", "Odd 9", "Adrenaline"]
+    );
+    assert_eq!(labels(&referable.rank("9", 50)).iter().map(|(label, _)| *label).collect::<Vec<_>>(), ["9 Drums", "Odd 9"]);
+    // A letter beyond a to z and 0 to 9 is matched by reading the names.
+    let mut accents = Referable::new(vec![track("Élan"), track("Rêve")], None);
+    assert_eq!(labels(&accents.rank("é", 50)), [("Élan", CandidateKind::Track)]);
 }
 
 #[test]

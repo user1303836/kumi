@@ -782,15 +782,40 @@ impl<S: RefScheme + 'static> OwnIntegration<S> {
     }
 
     /// What the message names with `@` in the project, told as the pin is, after the words it was named by. Where refs
-    /// are GUIDs (REAPER's), one whose track a look that listed every track didn't find was deleted.
-    fn reference_now(&self, reference: &PinnedNode, tracks: Option<&HashSet<&str>>) -> Value {
+    /// are GUIDs (REAPER's), one whose track a look that listed every track didn't find was deleted. An instrument's ref
+    /// is its place in their list, which no track shift moves: `instruments` (by ref, as they are now) says whether it's
+    /// still the one named there.
+    fn reference_now(
+        &self,
+        reference: &PinnedNode,
+        tracks: Option<&HashSet<&str>>,
+        instruments: Option<&HashMap<String, String>>,
+    ) -> Value {
         let mut entry = JsonObject::new();
         entry.insert("said".into(), json!(format!("@{}", reference.name)));
         let deleted = !reference.track_ref.is_empty() && tracks.is_some_and(|tracks| !tracks.contains(reference.track_ref.as_str()));
-        if let Value::Object(told) = self.node_now(reference, Some(deleted)) {
+        let moved =
+            reference.node == PinKind::Instrument && instruments.is_some_and(|names| names.get(&reference.r#ref) != Some(&reference.name));
+        let told = if moved { self.renumbered(reference, "named", "with @") } else { self.node_now(reference, Some(deleted)) };
+        if let Value::Object(told) = told {
             entry.extend(told);
         }
         Value::Object(entry)
+    }
+
+    /// A pin or a reference the DAW renumbered past what Kumi could follow, told by its name only.
+    fn renumbered(&self, pin: &PinnedNode, verb: &str, how: &str) -> Value {
+        let on = pin.track.as_deref().filter(|_| pin.node != PinKind::Track).map(|track| format!(" on “{track}”")).unwrap_or_default();
+        let what = if pin.node == PinKind::Instrument { "instruments" } else { "tracks" };
+        json!({
+            "gone": format!(
+                "The producer {verb} “{}”{on} {how}, and {} has renumbered its {what} since in a way Kumi couldn't follow: find it by its name before acting on it, and say so.",
+                pin.name, self.daw.profile.words.app
+            ),
+            "name": pin.name,
+            "node": pin.node,
+            "track": pin.track,
+        })
     }
 
     /// A pin, or a reference (`deleted`: whether a look found it gone, where refs are GUIDs), as the model is told it:
@@ -820,10 +845,13 @@ impl<S: RefScheme + 'static> OwnIntegration<S> {
                 (now.track_ref, now.r#ref) = (carried.track_ref, carried.node_ref);
                 book.shorten(&serde_json::to_value(now).unwrap_or(Value::Null))
             }
-            Err(false) => gone(format!(
-                "The producer {pointed}, and {} has renumbered its tracks since in a way Kumi couldn't follow: find it by its name before acting on it, and say so.",
-                self.daw.profile.words.app
-            )),
+            Err(false) => {
+                drop(book);
+                match deleted {
+                    None => self.renumbered(pin, "pinned", "in FOCUS"),
+                    Some(_) => self.renumbered(pin, "named", "with @"),
+                }
+            }
             Err(true) => deleted_since(),
         }
     }
@@ -834,7 +862,15 @@ impl<S: RefScheme + 'static> OwnIntegration<S> {
     fn pin_place(&self, pin: &PinnedNode) -> Result<Carried, bool> {
         let (epoch, layout) = (self.epoch.borrow().clone(), self.layout.get());
         let key = (pin.track_ref.clone(), pin.r#ref.clone());
-        let known = self.pins.borrow().get(&key).cloned();
+        // What's asked for goes to the back of the book, so the pin in use isn't the first to go when references fill it.
+        let known = {
+            let mut pins = self.pins.borrow_mut();
+            let known = pins.shift_remove(&key);
+            if let Some(known) = &known {
+                pins.insert(key.clone(), known.clone());
+            }
+            known
+        };
         match known {
             Some(Some(carried)) if carried.epoch == epoch && carried.layout == layout => return Ok(carried),
             Some(Some(_)) => return Err(false),
@@ -1253,6 +1289,27 @@ impl<S: RefScheme + 'static> OwnIntegration<S> {
         Ok(Some(slots))
     }
 
+    /// The DAW's instruments by ref as they are now, read once a look when the message names one with `@`: None when it
+    /// names none, or they couldn't be read.
+    async fn instruments_named(
+        &self,
+        references: &[PinnedNode],
+        snapshot: &Value,
+        signal: &Signal,
+    ) -> Result<Option<HashMap<String, String>>, RuntimeError> {
+        if !references.iter().any(|reference| reference.node == PinKind::Instrument) {
+            return Ok(None);
+        }
+        let rows = self.every_row(json!({"kind": "instrument"}), snapshot, signal).await?;
+        Ok(rows.map(|rows| {
+            rows.iter()
+                .filter_map(|row| {
+                    Some((row.get("ref")?.as_str()?.to_owned(), row.get("name").and_then(Value::as_str).unwrap_or_default().to_owned()))
+                })
+                .collect()
+        }))
+    }
+
     /// Every row of a read, page by page, from the project the look read; None when the project changed since, a page is
     /// refused, or there are more than a phrase pages through.
     async fn every_row(&self, args: Value, snapshot: &Value, signal: &Signal) -> Result<Option<Vec<Value>>, RuntimeError> {
@@ -1292,7 +1349,13 @@ impl<S: RefScheme + 'static> OwnIntegration<S> {
     }
 
     /// The observation from the host's snapshot.
-    fn observation(&self, snapshot: &Value, pinned: Option<&PinnedNode>, references: &[PinnedNode]) -> Observation {
+    fn observation(
+        &self,
+        snapshot: &Value,
+        pinned: Option<&PinnedNode>,
+        references: &[PinnedNode],
+        instruments: Option<&HashMap<String, String>>,
+    ) -> Observation {
         self.see_epoch(snapshot.get("epoch").and_then(Value::as_str));
         note_epoch(&self.seen_in, &self.book.borrow().scheme, snapshot);
         if self.layout.get().is_none() {
@@ -1397,7 +1460,8 @@ impl<S: RefScheme + 'static> OwnIntegration<S> {
             let total = snapshot.pointer("/truncated/tracks/total").and_then(Value::as_u64).map_or(0, |total| total as usize);
             let whole = total <= rows.len() && snapshot.get("moreTracks") != Some(&Value::Bool(true));
             let listed: HashSet<&str> = rows.iter().filter_map(|row| row.get("ref").and_then(Value::as_str)).collect();
-            let told: Vec<Value> = references.iter().map(|reference| self.reference_now(reference, whole.then_some(&listed))).collect();
+            let told: Vec<Value> =
+                references.iter().map(|reference| self.reference_now(reference, whole.then_some(&listed), instruments)).collect();
             context["references"] = json!(told);
         }
         // What `@` offers is read again after this look.
@@ -1701,7 +1765,8 @@ impl<S: RefScheme + 'static> Integration for OwnIntegration<S> {
                 let snapshot = self.settled(snapshot, &signal).await?;
                 self.set_connected(true);
                 self.read_flags(&signal).await;
-                Ok(self.observation(&snapshot, pinned, references))
+                let instruments = self.instruments_named(references, &snapshot, &signal).await?;
+                Ok(self.observation(&snapshot, pinned, references, instruments.as_ref()))
             }
             // Busy (a dialog, a load): still there, and still connected. Kumi waits a little for it and looks once more
             // (as Live's #256); still busy, the look keeps the project, and the focus says why it waits.
@@ -1715,7 +1780,10 @@ impl<S: RefScheme + 'static> Integration for OwnIntegration<S> {
                     }
                 }
                 match self.look(&signal).await {
-                    Ok(Ok(snapshot)) => Ok(self.observation(&snapshot, pinned, references)),
+                    Ok(Ok(snapshot)) => {
+                        let instruments = self.instruments_named(references, &snapshot, &signal).await?;
+                        Ok(self.observation(&snapshot, pinned, references, instruments.as_ref()))
+                    }
                     Ok(Err(refused)) if refused.there => Ok(self.unread(&refused.why, refused.busy)),
                     Ok(Err(refused)) => Ok(self.no_access(Some(&refused.why))),
                     Err(error) if error.is_aborted() => Err(error),

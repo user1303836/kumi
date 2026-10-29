@@ -1510,6 +1510,28 @@ async fn renoises_at_offers_tracks_dsps_and_instruments_and_a_reference_is_carri
             let gone = context["references"][0]["gone"].as_str().unwrap();
             assert!(gone.starts_with("The producer named “Kick” with @, and it was deleted since"), "{gone}");
             assert!(context["references"][1].get("gone").is_none(), "{}", context["references"][1]);
+
+            // An instrument named is told by the name at its ref now (an instrument's ref is its place in their list,
+            // which no track shift moves): still 808 Kit there, it reaches the look; one added above it renumbers it.
+            let kit = ObserveHints { references: vec![offered_node(&offered, 4)], ..ObserveHints::default() };
+            let instruments = |names: &[&str]| {
+                let items: Vec<Value> = names
+                    .iter()
+                    .enumerate()
+                    .map(|(at, name)| json!({"ref": format!("1:instrument:{}", at + 1), "name": name, "index": at}))
+                    .collect();
+                json!({"epoch": "1", "items": items})
+            };
+            host.answers.borrow_mut().push(("read", instruments(&["808 Kit"]), false));
+            let seen = renoise.observe(Signal::new(), Some(kit.clone())).await.unwrap();
+            let told = serde_json::from_str::<Value>(&seen.context).unwrap()["references"][0].clone();
+            assert!(told.get("gone").is_none() && told["said"] == "@808 Kit", "{told}");
+            host.answers.borrow_mut().push(("read", instruments(&["New Synth", "808 Kit"]), false));
+            let seen = renoise.observe(Signal::new(), Some(kit)).await.unwrap();
+            let told = serde_json::from_str::<Value>(&seen.context).unwrap()["references"][0].clone();
+            let gone = told["gone"].as_str().unwrap();
+            assert!(gone.starts_with("The producer named “808 Kit” with @, and Renoise has renumbered its instruments since"), "{gone}");
+            assert!(told.get("ref").is_none(), "no ref that names another: {told}");
         })
         .await;
 }
