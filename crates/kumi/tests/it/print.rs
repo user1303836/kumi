@@ -31,12 +31,14 @@ impl TtyOutput for Out {
     }
 }
 
-/// A session that answers as it's told: the events of its answer, then (when it waits) the end ctrl+c brings.
+/// A session that answers as it's told: the events of its answer, then (when it waits) the end ctrl+c brings, unless
+/// it's stubborn and goes on whatever it's told.
 #[derive(Default)]
 struct Fake {
     emit: RefCell<Option<Rc<dyn Fn(SessionEvent)>>>,
     answer: Vec<SessionEvent>,
     waits: bool,
+    stubborn: bool,
     cancelled: tokio::sync::Notify,
     calls: RefCell<Vec<String>>,
 }
@@ -85,7 +87,9 @@ impl SessionController for Fake {
     }
     async fn cancel(&self) -> Result<(), RuntimeError> {
         self.call("cancel");
-        self.cancelled.notify_one();
+        if !self.stubborn {
+            self.cancelled.notify_one();
+        }
         Ok(())
     }
     async fn close(&self) -> Result<(), RuntimeError> {
@@ -182,16 +186,25 @@ async fn what_went_wrong_goes_to_stderr_and_ends_with_1() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn with_json_each_event_is_a_line_of_json() {
-    let fake = answered(&["A low shelf ", SECRET], StopReason::Completed);
+    // A key the model writes across two pieces of words is a key all the same.
+    let (first, rest) = SECRET.split_at(12);
+    let fake = answered(&["A low shelf ", first, rest, " here"], StopReason::Completed);
     let (print, out, _) = print(&fake, "What does a low shelf do?", true);
     assert_eq!(print.run().await, ANSWERED);
     let out = out.0.borrow();
-    assert!(!out.contains(SECRET), "{out}");
+    assert!(!out.contains(first) && !out.contains(rest), "{out}");
     let events: Vec<SessionEvent> = out.lines().map(|line| serde_json::from_str(line).unwrap()).collect();
-    assert_eq!(
-        events,
-        [state(TurnState::Running), text("A low shelf "), text("[redacted]"), ended(StopReason::Completed), state(TurnState::Idle)]
-    );
+    let words: String = events
+        .iter()
+        .filter_map(|event| match event {
+            SessionEvent::Kernel(KernelEvent::Text { text }) => Some(text.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(words, "A low shelf [redacted] here");
+    let others: Vec<&SessionEvent> =
+        events.iter().filter(|event| !matches!(event, SessionEvent::Kernel(KernelEvent::Text { .. }))).collect();
+    assert_eq!(others, [&state(TurnState::Running), &ended(StopReason::Completed), &state(TurnState::Idle)]);
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -206,6 +219,35 @@ async fn ctrl_c_stops_the_answer_and_ends_with_130() {
             assert_eq!(tokio::time::timeout(std::time::Duration::from_secs(5), running).await.unwrap().unwrap(), STOPPED);
             assert_eq!(*out.0.borrow(), "Listening to \n");
             assert_eq!(*fake.calls.borrow(), ["start", "submit:listen to the mix", "cancel", "close"]);
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_second_ctrl_c_or_being_told_to_close_ends_it_while_the_answer_goes_on() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            for told_to_close in [false, true] {
+                let fake = Rc::new(Fake {
+                    answer: vec![state(TurnState::Running), text("Rendering ")],
+                    waits: true,
+                    stubborn: true,
+                    ..Default::default()
+                });
+                let (print, _, _) = print(&fake, "render the mix", false);
+                let running = tokio::task::spawn_local(print.run());
+                tokio::task::yield_now().await;
+                print.interrupt();
+                tokio::task::yield_now().await;
+                assert!(!running.is_finished(), "the first ctrl+c only asks the answer to stop");
+                if told_to_close {
+                    assert_eq!(print.close().await, STOPPED);
+                } else {
+                    print.interrupt();
+                }
+                assert_eq!(tokio::time::timeout(std::time::Duration::from_secs(5), running).await.unwrap().unwrap(), STOPPED);
+                assert_eq!(*fake.calls.borrow(), ["start", "submit:render the mix", "cancel", "close"], "told to close: {told_to_close}");
+            }
         })
         .await;
 }

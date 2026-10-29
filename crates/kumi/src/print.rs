@@ -13,6 +13,7 @@ use std::{
     rc::Rc,
     time::Duration,
 };
+use tokio::sync::Notify;
 
 /// The answer came in full.
 pub const ANSWERED: i32 = 0;
@@ -43,15 +44,18 @@ pub struct Print(Rc<Inner>);
 struct Inner {
     session: Rc<dyn SessionHandle>,
     options: PrintOptions,
-    /// The answer's words made safe to show, as they come.
+    /// The answer's words made safe to show, as they come (with --json too: a key split across two of them is still
+    /// a key).
     words: RefCell<StreamingText>,
     /// Whatever went to stdout ends with a newline (or nothing did).
     ended_line: Cell<bool>,
     /// How the answer ended, by the session's events.
-    stop: Cell<Option<StopReason>>,
+    ended_with: Cell<Option<StopReason>>,
     failed: Cell<bool>,
     /// Ctrl+c came: the answer is being stopped.
     stopping: Cell<bool>,
+    /// A second ctrl+c, or Kumi told to close: stop waiting for the session.
+    done_waiting: Notify,
 }
 
 impl Print {
@@ -63,9 +67,10 @@ impl Print {
             options,
             words,
             ended_line: Cell::new(true),
-            stop: Cell::new(None),
+            ended_with: Cell::new(None),
             failed: Cell::new(false),
             stopping: Cell::new(false),
+            done_waiting: Notify::new(),
         }))
     }
 }
@@ -80,12 +85,27 @@ impl Inner {
     fn say(&self, message: &str) {
         self.options.err.write(&format!("{}\n", safe_error_message(Some(message), &self.options.secrets)));
     }
-    /// The answer's words so far, ended with a newline.
+    /// The answer's words so far: what's held back of them (the start of what may be a key), then a newline; with
+    /// --json, what's held back as a text event of its own.
     fn end_words(&self) {
         let tail = self.words.borrow_mut().finish();
-        self.write(&tail);
-        if !self.ended_line.get() {
-            self.write("\n");
+        if self.options.json {
+            if !tail.is_empty() {
+                self.json_line(&SessionEvent::Kernel(KernelEvent::Text { text: tail }));
+            }
+        } else {
+            self.write(&tail);
+            if !self.ended_line.get() {
+                self.write("\n");
+            }
+        }
+    }
+    /// `asking`, unless Kumi stops waiting first (a second ctrl+c, or told to close): None then.
+    async fn unless_stopped<T>(&self, asking: impl std::future::Future<Output = T>) -> Option<T> {
+        tokio::select! {
+            biased;
+            _ = self.done_waiting.notified() => None,
+            asked = asking => Some(asked),
         }
     }
     /// An event as a JSON line, its secrets taken out.
@@ -118,7 +138,7 @@ impl Inner {
         if self.failed.get() {
             return FAILED;
         }
-        match self.stop.get() {
+        match self.ended_with.get() {
             Some(StopReason::Completed) => ANSWERED,
             Some(StopReason::MaxSteps) => STEP_LIMIT,
             Some(StopReason::Cancelled) => STOPPED,
@@ -139,26 +159,34 @@ impl Terminal for Print {
             if let Some(notice) = &inner.options.startup_notice {
                 inner.say(notice);
             }
-            if let Err(error) = inner.session.op(op::Start {}).await {
-                inner.say(&format!("Kumi couldn't start: {}", error.message()));
-                inner.close().await;
-                return FAILED;
+            match inner.unless_stopped(inner.session.op(op::Start {})).await {
+                Some(Ok(())) => {}
+                Some(Err(error)) => {
+                    inner.say(&format!("Kumi couldn't start: {}", error.message()));
+                    inner.close().await;
+                    return FAILED;
+                }
+                None => {
+                    inner.close().await;
+                    return STOPPED;
+                }
             }
             let request = inner.options.request.clone();
             let code = match inner.instant(&request).await {
                 Some(code) => code,
                 None => {
-                    let asked = inner.session.op(op::Submit { input: request, pinned: None, attachments: vec![] }).await;
-                    // An answer that failed part way ends its line too (one that came in full ended at turn-complete).
-                    if !inner.options.json {
-                        inner.end_words();
-                    }
+                    let asked = inner.unless_stopped(inner.session.op(op::Submit { input: request, pinned: None, attachments: vec![] }));
+                    let asked = asked.await;
+                    // An answer that failed or was left part way ends its words too (one that came in full ended them at
+                    // turn-complete).
+                    inner.end_words();
                     match asked {
-                        Ok(()) => inner.ending(),
-                        Err(error) => {
+                        Some(Ok(())) => inner.ending(),
+                        Some(Err(error)) => {
                             inner.say(&error.message());
                             FAILED
                         }
+                        None => STOPPED,
                     }
                 }
             };
@@ -172,22 +200,28 @@ impl Terminal for Print {
         match &event {
             SessionEvent::Error { message, .. } => {
                 inner.failed.set(true);
-                if !inner.options.json {
+                if inner.options.json {
+                    inner.end_words();
+                } else {
                     inner.say(message);
                 }
             }
             SessionEvent::TurnComplete { result, .. } => {
-                inner.stop.set(Some(result.stop_reason));
-                if !inner.options.json {
-                    inner.end_words();
-                    if result.stop_reason == StopReason::MaxSteps {
-                        inner.say("Kumi reached its step limit for one answer. Ask it to carry on.");
-                    }
+                inner.ended_with.set(Some(result.stop_reason));
+                inner.end_words();
+                if !inner.options.json && result.stop_reason == StopReason::MaxSteps {
+                    inner.say("Kumi reached its step limit for one answer. Ask it to carry on.");
                 }
             }
-            SessionEvent::Kernel(KernelEvent::Text { text }) if !inner.options.json => {
+            // The words go as they're made safe; with --json, as text events of what's safe so far.
+            SessionEvent::Kernel(KernelEvent::Text { text }) => {
                 let shown = inner.words.borrow_mut().push(text);
-                inner.write(&shown);
+                if !inner.options.json {
+                    inner.write(&shown);
+                } else if !shown.is_empty() {
+                    inner.json_line(&SessionEvent::Kernel(KernelEvent::Text { text: shown }));
+                }
+                return;
             }
             SessionEvent::Notice { message } if !inner.options.json => inner.say(message),
             // The rest (steps, changes, the DAW's state) is for a screen, or for --json.
@@ -201,18 +235,15 @@ impl Terminal for Print {
     /// Ctrl+c stops the answer (and Kumi ends with 130); a second one stops waiting for it.
     fn interrupt(&self) {
         if self.0.stopping.replace(true) {
-            let inner = self.0.clone();
-            tokio::task::spawn_local(async move { inner.close().await });
+            self.0.done_waiting.notify_one();
             return;
         }
         self.0.session.tell(op::Cancel {}.into());
     }
+    /// Told to close (SIGTERM): Kumi stops waiting for the answer, closes the session and ends with 130.
     fn close(&self) -> LocalBoxFuture<'static, i32> {
-        let inner = self.0.clone();
-        async move {
-            inner.close().await;
-            STOPPED
-        }
-        .boxed_local()
+        self.0.stopping.set(true);
+        self.0.done_waiting.notify_one();
+        async { STOPPED }.boxed_local()
     }
 }

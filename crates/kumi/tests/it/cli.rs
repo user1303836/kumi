@@ -504,3 +504,27 @@ case!(print_says_what_went_wrong_and_how_to_use_it, async {
         assert!(f.err.0.borrow().contains(said), "{args:?}: {}", f.err.0.borrow());
     }
 });
+
+case!(print_answers_through_a_daws_bridge_too, async {
+    let mut f = Fixture::new(false);
+    let url = model_server(&["Done: ", "the kick is 2 dB louder."]).await;
+    let config = f.folder.path().join("bridge.json");
+    std::fs::write(&config, "{}").unwrap();
+    f.env.insert("KUMI_BRIDGE_CONFIG".into(), config.display().to_string());
+    f.settings(json!({"model": "tiny-server/tiny", "modelServers": [{"name": "Tiny Server", "baseURL": url}],
+        "updateCheck": false, "modelCatalog": false, "libraryFolders": []}));
+    // The DAW's integration as the app makes it, over a bridge that's here.
+    let made = Rc::new(Cell::new(false));
+    let mark = made.clone();
+    let factory = AbletonFactory(Rc::new(move |options: kumi_daw_ableton::AbletonOptions| {
+        mark.set(true);
+        assert!(options.bridge_config.is_some());
+        let connection = options.on_connection;
+        create_inference_only_integration(Rc::new(move |state| connection(state, None)))
+    }));
+    let args = ["-p", "make the kick louder", "--bridge-config", config.to_str().unwrap()];
+    let code = tokio::time::timeout(std::time::Duration::from_secs(30), run(f.io(&args), factory)).await.expect("kumi -p ends");
+    assert_eq!(code, 0, "stdout: {}; stderr: {}", f.output(), f.err.0.borrow());
+    assert!(made.get(), "the DAW's integration was made");
+    assert_eq!(f.output(), "Done: the kick is 2 dB louder.\n");
+});
