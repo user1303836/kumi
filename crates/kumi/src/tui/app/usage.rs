@@ -64,12 +64,12 @@ impl TuiApp {
 
     /// The model answering now: the producer's fallback while it answers for their model, else their model.
     fn answering_model(&self) -> Option<String> {
-        self.0.options.controller.answering_fallback().or_else(|| self.0.options.models.as_ref().and_then(|models| models.current().model))
+        self.session().answering_fallback().or_else(|| self.0.options.models.as_ref().and_then(|models| models.current().model))
     }
 
     /// The answering model's provider: its sign-in says what an answer's cost is told in.
     fn answering_provider(&self) -> Option<String> {
-        match self.0.options.controller.answering_fallback() {
+        match self.session().answering_fallback() {
             Some(model) => model.split('/').next().map(str::to_string),
             None => self.0.options.models.as_ref()?.current().provider,
         }

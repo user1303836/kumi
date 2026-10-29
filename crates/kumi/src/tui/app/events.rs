@@ -48,6 +48,8 @@ impl TuiApp {
                 let at = now_ms_f64() + wait_ms as f64;
                 {
                     let mut state = self.0.state.borrow_mut();
+                    // The call tried again thinks from the start: its headline comes from what it says.
+                    state.reasoning.clear();
                     state.retry = Some((reason.clone(), until));
                     state.waiting_for = wait.map(|wait| (wait, at));
                     state.waiting_cause = cause;
