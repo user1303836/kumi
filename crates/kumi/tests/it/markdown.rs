@@ -1,7 +1,7 @@
 use std::rc::Rc;
 
-use kumi::tui::markdown::{inline, render_markdown, render_markdown_with, MarkdownCache, MarkdownRow};
-use kumi::tui::style::{palette, Style};
+use kumi::tui::markdown::{inline, render_markdown, render_markdown_with, set_terminal_opens_links, MarkdownCache, MarkdownRow};
+use kumi::tui::style::{link_url, palette, Style};
 
 fn base() -> Rc<Style> {
     Rc::new(Style::fg(palette::TEXT))
@@ -251,4 +251,28 @@ fn an_open_code_block_keeps_its_complete_lines_while_it_streams() {
             assert_eq!(cache.settled(), whole[..end].rfind('\n').unwrap() + 1, "at {end} bytes");
         }
     }
+}
+
+#[test]
+fn a_links_words_open_it_and_its_address_follows_them_unless_the_terminal_opens_links() {
+    let said = "Read [the manual](https://kumi-agent.com/docs) or <https://kumi-agent.com>, or [](https://kumi-agent.com/blank).";
+    // A terminal not known to open links: the address follows the words, unless the words are the address.
+    set_terminal_opens_links(false);
+    let rows = render_markdown(said, 120, &base());
+    assert_eq!(
+        text(&rows),
+        ["Read the manual (https://kumi-agent.com/docs) or https://kumi-agent.com, or  (https://kumi-agent.com/blank)."]
+    );
+    let words = rows[0].spans.iter().find(|span| span.text.contains("the manual")).unwrap();
+    assert!(words.style.underline);
+    assert_eq!(link_url(words.style.link).as_deref(), Some("https://kumi-agent.com/docs"));
+    let address = rows[0].spans.iter().find(|span| span.text.contains("(https://kumi-agent.com/docs)")).unwrap();
+    assert_eq!(address.style.link, 0, "the address shown isn't a link of its own");
+    // One that does: the words alone, still opening it; a link without words keeps its address.
+    set_terminal_opens_links(true);
+    let rows = render_markdown(said, 120, &base());
+    assert_eq!(text(&rows), ["Read the manual or https://kumi-agent.com, or  (https://kumi-agent.com/blank)."]);
+    let words = rows[0].spans.iter().find(|span| span.text.contains("the manual")).unwrap();
+    assert_eq!(link_url(words.style.link).as_deref(), Some("https://kumi-agent.com/docs"));
+    set_terminal_opens_links(false);
 }

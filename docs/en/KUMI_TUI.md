@@ -381,7 +381,10 @@ Kumi uses two-letter badges instead of icons; `KUMI_ICONS=glyphs` or `badges`
 chooses. Changes' pictures show as images in kitty and Ghostty (with 24-bit
 colour, outside tmux), in braille and half-blocks elsewhere, and as words where
 symbols may not show; `KUMI_PICTURES=cells` keeps them in cells. Windows
-Terminal is recommended on Windows. In terminals without the
+Terminal is recommended on Windows. Links in Kumi's answers can be clicked in
+iTerm2, Ghostty, WezTerm, kitty, Windows Terminal and VS Code's terminal (outside
+tmux; some want Cmd or Ctrl held), and there the address no longer follows the
+words; elsewhere it still does. In terminals without the
 kitty keyboard protocol, use Ctrl-J or Alt-Enter for a new line. Inside tmux,
 Kumi's status and notifications pass through with `set -g allow-passthrough on`,
 focus reports need `set -g focus-events on`, and over SSH Kumi's copies reach

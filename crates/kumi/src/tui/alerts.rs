@@ -33,6 +33,9 @@ pub struct TerminalProfile {
     /// Every cell is written in each frame that changes, unless the `fullRepaint` setting says otherwise: Windows
     /// Terminal.
     pub repaint: bool,
+    /// The terminal opens a link's words itself (OSC 8), so an answer's addresses needn't follow them: iTerm2, Ghostty,
+    /// WezTerm, kitty, Windows Terminal and VS Code's terminal, outside a multiplexer.
+    pub hyperlinks: bool,
 }
 
 impl TerminalProfile {
@@ -48,6 +51,7 @@ impl TerminalProfile {
             iterm: false,
             erase: true,
             repaint: false,
+            hyperlinks: false,
         }
     }
 }
@@ -128,6 +132,8 @@ pub fn detect_terminal_profile(env: &HashMap<String, String>, platform: &str) ->
     let images = !multiplexed && (own_kitty || own_ghostty);
     // GNU screen names its session in STY; tmux, inside it or around it, erases in the colours set itself.
     let screen = !get("STY").is_empty() && !tmux;
+    // Named as images are, kitty and Ghostty by their own names only.
+    let hyperlinks = !multiplexed && (iterm || own_ghostty || wezterm || own_kitty || windows_terminal || program == "vscode");
     TerminalProfile {
         status: true,
         progress: !tmux && (windows_terminal || conemu || ghostty),
@@ -138,6 +144,7 @@ pub fn detect_terminal_profile(env: &HashMap<String, String>, platform: &str) ->
         iterm,
         erase: !screen,
         repaint: windows_terminal,
+        hyperlinks,
     }
 }
 
@@ -372,6 +379,7 @@ mod tests {
                 iterm: false,
                 erase: true,
                 repaint: false,
+                hyperlinks: true,
             }
         );
         assert_eq!(profile(&[("TERM_PROGRAM", "WezTerm")], "linux").notify, NotifyChannel::Osc777);
@@ -400,6 +408,7 @@ mod tests {
                 iterm: false,
                 erase: true,
                 repaint: true,
+                hyperlinks: true,
             }
         );
         assert!(!profile(&[("TERM_PROGRAM", "iTerm.app")], "darwin").progress);
@@ -420,6 +429,22 @@ mod tests {
         assert!(!images(&[("TERM_PROGRAM", "ghostty"), ("TERM", "xterm-ghostty"), ("ZELLIJ", "0")]));
         assert!(!images(&[("TERM", "xterm-kitty"), ("TMUX", "/tmp/tmux-501/default,1,0")]));
         assert!(!images(&[("TERM", "screen-256color"), ("KITTY_WINDOW_ID", "1")]));
+    }
+
+    #[test]
+    fn the_terminals_known_to_open_links_get_an_answers_link_words_alone() {
+        let opens = |pairs: &[(&str, &str)], platform: &str| detect_terminal_profile(&env(pairs), platform).hyperlinks;
+        assert!(opens(&[("TERM_PROGRAM", "iTerm.app")], "darwin"));
+        assert!(opens(&[("TERM_PROGRAM", "ghostty"), ("TERM", "xterm-ghostty")], "darwin"));
+        assert!(opens(&[("TERM_PROGRAM", "WezTerm")], "linux"));
+        assert!(opens(&[("TERM", "xterm-kitty")], "linux"));
+        assert!(opens(&[("WT_SESSION", "1")], "win32"));
+        assert!(opens(&[("TERM_PROGRAM", "vscode")], "darwin"));
+        assert!(!opens(&[("TERM_PROGRAM", "Apple_Terminal")], "darwin"));
+        assert!(!opens(&[("TERM", "xterm-256color")], "linux"));
+        // A multiplexer between them, or a terminal that only inherited kitty's name: the address stays.
+        assert!(!opens(&[("TERM_PROGRAM", "tmux"), ("TMUX", "/tmp/tmux-501/default,1,0"), ("LC_TERMINAL", "iTerm2")], "darwin"));
+        assert!(!opens(&[("KITTY_WINDOW_ID", "1"), ("TERM_PROGRAM", "Apple_Terminal"), ("TERM", "xterm-256color")], "darwin"));
     }
 
     #[test]
@@ -452,6 +477,7 @@ mod tests {
                 iterm: false,
                 erase: true,
                 repaint: false,
+                hyperlinks: false,
             }
         );
         assert_eq!(

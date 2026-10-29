@@ -4,6 +4,7 @@
 //! Names like Kick_01_final stay literal, and so does a `*` inside a word (2*3*4). The parser doesn't backtrack: a long
 //! line costs its length, never more.
 
+use std::cell::Cell;
 use std::ops::Range;
 use std::rc::Rc;
 
@@ -74,6 +75,16 @@ pub fn inline(text: &str, base: &Rc<Style>) -> Vec<Span> {
     spans
 }
 
+thread_local! {
+    /// Whether the terminal opens a link's words itself (OSC 8), so its address needn't follow them.
+    static OPENS_LINKS: Cell<bool> = const { Cell::new(false) };
+}
+
+/// Said once as the app starts, from what the terminal is known to be (`TerminalProfile::hyperlinks`).
+pub fn set_terminal_opens_links(on: bool) {
+    OPENS_LINKS.set(on);
+}
+
 /// Inline text gathered as spans, line by line (a break, or a single newline, starts one), with the styles of the
 /// elements open around it and the links whose words are still coming.
 struct Inline {
@@ -131,14 +142,25 @@ impl Inline {
             Event::Start(Tag::Emphasis) => self.open(|style| Style { italic: true, ..style }),
             Event::Start(Tag::Strong) => self.open(|style| Style { fg: Some(palette::BRIGHT), bold: true, ..style }),
             Event::Start(Tag::Link { dest_url, .. } | Tag::Image { dest_url, .. }) => {
-                self.open(|style| Style { underline: true, ..style });
+                // The words open the address, where the terminal takes links (the renderer says it with OSC 8).
+                self.open(|style| {
+                    let style = Style { underline: true, ..style };
+                    if dest_url.is_empty() {
+                        style
+                    } else {
+                        style.linked(&dest_url)
+                    }
+                });
                 self.links.push((dest_url.to_string(), String::new()));
             }
             Event::Start(Tag::Strikethrough | Tag::Superscript | Tag::Subscript) => self.open(|style| style),
             Event::End(TagEnd::Link | TagEnd::Image) => {
                 self.close();
-                // The address after the words, unless the words are the address.
-                if let Some((url, _)) = self.links.pop().filter(|(url, label)| !url.is_empty() && url != label) {
+                // The address after the words, unless the words are the address, or the terminal opens them itself
+                // (and there are words to click).
+                let shown =
+                    |(url, label): &(String, String)| !url.is_empty() && url != label && (!OPENS_LINKS.get() || label.trim().is_empty());
+                if let Some((url, _)) = self.links.pop().filter(shown) {
                     self.push_styled(&format!(" ({url})"), faint.clone());
                 }
             }
