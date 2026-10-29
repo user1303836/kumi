@@ -394,8 +394,9 @@ async fn daw_in_a_reaper_session(here: fn(DawId) -> bool) -> String {
         io.daws_here = Some(Rc::new(here));
     });
     wait_for("the first look", &out, |text| text.lines().any(|l| l.starts_with("[observation] "))).await;
+    // /help says it a line each, in the table's words (#703).
     let help = command(&input, &out, "/help").await;
-    assert!(help.contains("/daw [name]"), "{help}");
+    assert!(help.contains("[help] /daw: Which DAW Kumi works with; /daw <name> opens Kumi again with another\n"), "{help}");
     let offered = command(&input, &out, "/daw").await;
     let said = command(&input, &out, "/daw reaper").await;
     assert!(said.contains("[daw] Kumi works with REAPER already."), "{said}");
