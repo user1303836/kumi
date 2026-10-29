@@ -16,7 +16,8 @@ closes, crashes or is stopped.
   it's named there with "· fallback"; near a plan's limit (80% of a window
   used), "plan 84% · resets 14:20" shows beside the model. Once the model's
   context is more than half full, a meter beside the model says how full
-  ("context ▰▰▰▰▰▰▱▱▱▱ 62%", in the warning colour from 80%).
+  ("context ▰▰▰▰▰▰▱▱▱▱ 62%", in the warning colour from 80%); `"contextMeter":
+  "always"` in settings.json shows it from the start, and `"off"` never.
 - **Conversation** (left): your messages, Kumi's answers and its steps, in plain
   words ("looked at your Set"), each with its timing. A step at work animates by
   kind (searching, reading, building a device, changing, listening, playing);
@@ -438,11 +439,13 @@ text, and `/help` lists those this session has.
   for a plan's limit); the display may sleep.
 - **Settings** (`~/.kumi/settings.json`): `"notifications": "off"`,
   `"liveStatusBar": false`, `"keepAwake": false`, `"answerAfter"` (seconds
-  before Kumi takes its recommended answer; `0` never), and `"theme"`: `system`
+  before Kumi takes its recommended answer; `0` never), `"theme"`: `system`
   (the default: light or dark as the terminal's background is, turning with it in
   terminals that say when their colours change), `dark` (Kumi's own), `light`
   (for a light terminal) or `colorblind` (colours that stay apart for red-green
-  colour blindness).
+  colour blindness), and `"fullRepaint": true` (Kumi writes every cell of its
+  window each time something changes, for a terminal that draws only the changes
+  wrongly; on by default in Windows Terminal, where `false` turns it off).
 
 ## Terminals
 

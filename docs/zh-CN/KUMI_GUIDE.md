@@ -564,6 +564,7 @@ Kumi 把一切都保存在 `~/.kumi` 中。`~/.kumi/settings.json` 包含：
 | `fast` | `true` 表示在提供方列出时使用模型的更快档位（`/fast`） |
 | `fallbackModel` | 你的模型达到套餐上限或提供方故障时接着回答的模型，`<provider>/<model>`（在 `/model` 中按 ctrl+f） |
 | `panelTab` | 你上次打开的 Live 面板标签页 |
+| `mapHover` | `false`：在 `/map` 中，鼠标移到某个点上时不播放；在地图中按 `h` 切换开关，Kumi 会把设置记在这里 |
 | `updateCheck` | `false` 关闭启动时的新版本检查 |
 | `whatsNew` | `false` 表示更新后首次启动时不显示 What's new |
 | `notifications` | `"off"`：Kumi 的窗口在其他窗口后面时不发桌面通知（或响铃）；否则为 `"auto"` |
