@@ -39,7 +39,7 @@ use kumi_types::errors::RuntimeError;
 use learn::{learn, Counts, LearnOptions, LearnPhase, PresetEntry, ProgressCallback, SetEntry, SoundEntry, LOG_VERSION};
 pub use learn::{library_logs, LearnProgress};
 use learner::{LearnerMessage, LearnerOptions, LearnerReply};
-use measure_worker::{measure_reference, worker_program, MeasureJob};
+use measure_worker::{gone_within, measure_reference, worker_program, MeasureJob};
 use plan::{plan_learning, remembered_file, remembered_folders, PlanOptions};
 use search::{search_presets, PresetHit, PresetQuery, SearchResult, SoundIndex};
 use sources::{below, resolve, SourceOptions};
@@ -682,20 +682,16 @@ impl Library {
             } else {
                 kill.cancel();
             }
-            let wait = async {
-                while !*done.borrow() {
-                    if done.changed().await.is_err() {
-                        break;
-                    }
-                }
-            };
-            let gone = tokio::time::timeout(Duration::from_millis(1500), wait).await.is_ok();
+            let mut gone = gone_within(&mut done, 1500).await;
+            let stopped = heard && gone;
             if !gone {
                 kill.cancel();
+                gone = gone_within(&mut done, 500).await;
             }
-            // Ended rather than stopped, it can't let go of a lock it took: that's done for it, so a quit leaves nothing
-            // behind.
-            if let (false, Some(pid)) = (heard && gone, pid) {
+            // Ended rather than stopped, it can't let go of a lock it took: that's done for it once it's gone, so a quit
+            // leaves nothing behind. One still there after its end (where no signal reaches it) keeps its lock, and
+            // `still_running` holds that for it while it lives.
+            if let (false, true, Some(pid)) = (stopped, gone, pid) {
                 let _ = release_ended(&self.dir, pid).await;
             }
         }

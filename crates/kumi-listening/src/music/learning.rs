@@ -10,7 +10,11 @@ use super::{
 };
 use indexmap::IndexMap;
 use kumi_common::{abort::Signal, time::now_ms};
-use kumi_library::{daws::Daws, measure_worker::worker_program, state::release_ended};
+use kumi_library::{
+    daws::Daws,
+    measure_worker::{gone_within, worker_program},
+    state::release_ended,
+};
 use serde::{Deserialize, Serialize};
 use std::{
     cell::{Cell, RefCell},
@@ -704,20 +708,16 @@ impl Music {
             } else {
                 kill.cancel();
             }
-            let wait = async {
-                while !*done.borrow() {
-                    if done.changed().await.is_err() {
-                        break;
-                    }
-                }
-            };
-            let gone = tokio::time::timeout(Duration::from_millis(1500), wait).await.is_ok();
+            let mut gone = gone_within(&mut done, 1500).await;
+            let stopped = heard && gone;
             if !gone {
                 kill.cancel();
+                gone = gone_within(&mut done, 500).await;
             }
-            // Ended rather than stopped, it can't let go of a lock it took: that's done for it, so a quit leaves nothing
-            // behind.
-            if let (false, Some(pid)) = (heard && gone, pid) {
+            // Ended rather than stopped, it can't let go of a lock it took: that's done for it once it's gone, so a quit
+            // leaves nothing behind. One still there after its end (where no signal reaches it) keeps its lock, and
+            // `still_running` holds that for it while it lives.
+            if let (false, true, Some(pid)) = (stopped, gone, pid) {
                 let _ = release_ended(&self.dir().to_string_lossy(), pid).await;
             }
         }

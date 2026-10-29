@@ -265,3 +265,39 @@ async fn closing_lets_go_of_the_lock_a_learner_was_ended_holding_and_only_that()
         })
         .await;
 }
+
+/// One still there after it's ended (here one that won't heed the end it's sent) keeps its lock: it could still write
+/// the library, and `still_running` holds the lock for it while it lives.
+#[cfg(unix)]
+#[tokio::test(flavor = "current_thread")]
+async fn a_learner_still_there_after_its_end_keeps_its_lock() {
+    use std::os::unix::fs::PermissionsExt;
+    let studio = Studio::new();
+    std::fs::create_dir_all(&studio.dir).unwrap();
+    let lock = studio.dir.join("learning.lock");
+    // It takes the lock as a learner does, then ignores the end it's sent (an ignored signal stays ignored past `exec`).
+    let stuck = studio.home.path().join("stuck-learner");
+    std::fs::write(
+        &stuck,
+        format!(
+            "#!/bin/sh\ntrap '' TERM\nprintf '{{\"pid\":%s,\"at\":%s000}}' \"$$\" \"$(date +%s)\" > '{}'\nexec sleep 30\n",
+            lock.display()
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&stuck, std::fs::Permissions::from_mode(0o700)).unwrap();
+    // Read by this test's process alone: each test is a process of its own.
+    std::env::set_var("KUMI_LIBRARY_LEARNER_BIN", &stuck);
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let library = studio_library(&studio);
+            library.start();
+            until(|| std::fs::read_to_string(&lock).is_ok_and(|held| held.ends_with('}'))).await;
+            library.close().await;
+            let held: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&lock).unwrap()).unwrap();
+            let pid = held["pid"].as_i64().unwrap() as libc::pid_t;
+            assert_eq!(unsafe { libc::kill(pid, 0) }, 0, "it's still there, its lock its own");
+            unsafe { libc::kill(pid, libc::SIGKILL) };
+        })
+        .await;
+}
