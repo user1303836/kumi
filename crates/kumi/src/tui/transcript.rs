@@ -770,6 +770,8 @@ impl Layout {
 }
 pub struct EntryState {
     entry: RefCell<Entry>,
+    /// Its place in the order entries came in, whatever `insert_before` does to their indices.
+    pub id: u64,
     revision: Cell<u64>,
     cache: RefCell<Option<Cache>>,
     /// An answer's Markdown as rendered so far: a streaming answer renders only its last line again.
@@ -786,6 +788,7 @@ pub type EntryRef = Rc<EntryState>;
 pub struct Transcript {
     pub entries: Vec<EntryRef>,
     pub laid_out: usize,
+    next_id: u64,
 }
 impl Transcript {
     pub fn is_empty(&self) -> bool {
@@ -795,8 +798,10 @@ impl Transcript {
         self.insert_before(entry, None)
     }
     pub fn insert_before(&mut self, entry: Entry, before: Option<&EntryRef>) -> EntryRef {
+        self.next_id += 1;
         let entry = Rc::new(EntryState {
             entry: RefCell::new(entry),
+            id: self.next_id,
             revision: Cell::new(0),
             cache: RefCell::new(None),
             markdown: RefCell::new(MarkdownCache::default()),
@@ -835,35 +840,60 @@ impl Transcript {
     }
     pub fn layout(&mut self, width: i32, now: f64) -> Layout {
         let (mut entries, mut total) = (Vec::with_capacity(self.entries.len()), 0);
-        for entry in &self.entries {
-            let mut moving = false;
-            {
-                if let Entry::Assistant { steps, .. } = &mut *entry.borrow_mut() {
-                    if steps.len() > 1 {
-                        if fold_steps(steps, now) {
-                            entry.revision.set(entry.revision.get().wrapping_add(1));
-                        }
-                        moving = steps_change_at(steps, now) == Some(now);
-                    }
-                }
-            }
-            let revision = entry.revision.get();
-            let mut cached = entry.cache.borrow_mut();
-            if cached.as_ref().is_none_or(|c| c.width != width || c.revision != revision || moving || c.moving) {
-                self.laid_out += 1;
-                let rows = entry_rows_with(&entry.borrow(), width, now, &mut entry.markdown.borrow_mut());
-                // The kept lines serve while the answer streams; a settled answer's rows are the cache above.
-                if !matches!(&*entry.borrow(), Entry::Assistant { status: AnswerStatus::Running, .. }) {
-                    *entry.markdown.borrow_mut() = MarkdownCache::default();
-                }
-                *cached = Some(Cache { width, revision, rows: rows.into(), moving });
-            }
-            let rows = cached.as_ref().unwrap().rows.clone();
+        for index in 0..self.entries.len() {
+            let rows = self.rows_of(index, width, now);
             let gap = total > 0;
             total += usize::from(gap) + rows.len();
             entries.push((gap, rows));
         }
         Layout { entries, total, gap: Row::default() }
+    }
+
+    /// Entry `index`'s rows at `width`, laid out again only when it changed (or its steps fold now).
+    pub fn rows_of(&mut self, index: usize, width: i32, now: f64) -> Rc<[Row]> {
+        let entry = &self.entries[index];
+        let mut moving = false;
+        {
+            if let Entry::Assistant { steps, .. } = &mut *entry.borrow_mut() {
+                if steps.len() > 1 {
+                    if fold_steps(steps, now) {
+                        entry.revision.set(entry.revision.get().wrapping_add(1));
+                    }
+                    moving = steps_change_at(steps, now) == Some(now);
+                }
+            }
+        }
+        let revision = entry.revision.get();
+        let mut cached = entry.cache.borrow_mut();
+        if cached.as_ref().is_none_or(|c| c.width != width || c.revision != revision || moving || c.moving) {
+            self.laid_out += 1;
+            let rows = entry_rows_with(&entry.borrow(), width, now, &mut entry.markdown.borrow_mut());
+            // The kept lines serve while the answer streams; a settled answer's rows are the cache above.
+            if !matches!(&*entry.borrow(), Entry::Assistant { status: AnswerStatus::Running, .. }) {
+                *entry.markdown.borrow_mut() = MarkdownCache::default();
+            }
+            *cached = Some(Cache { width, revision, rows: rows.into(), moving });
+        }
+        cached.as_ref().unwrap().rows.clone()
+    }
+
+    /// When entry `index`'s steps next fold or move: drawing wakes then, for the entries on screen.
+    pub fn change_of(&self, index: usize, now: f64) -> Option<f64> {
+        match &*self.entries[index].borrow() {
+            Entry::Assistant { steps, .. } if steps.len() > 1 => steps_change_at(steps, now),
+            _ => None,
+        }
+    }
+
+    /// Where `entry` is now: at `hint` (where it was), or looked for outward from there, as entries come in before it
+    /// or go.
+    pub fn find(&self, entry: &EntryRef, hint: usize) -> Option<usize> {
+        let at = |index: usize| self.entries.get(index).is_some_and(|e| Rc::ptr_eq(e, entry));
+        if at(hint) {
+            return Some(hint);
+        }
+        (1..=self.entries.len())
+            .find_map(|step| [hint.checked_sub(step), hint.checked_add(step)].into_iter().flatten().find(|index| at(*index)))
     }
 }
 
