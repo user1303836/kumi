@@ -198,7 +198,7 @@ async fn a_request_taken_back_in_live_is_undone_through_kumis_records_until_live
             let taken = session.take_back(plan[0].at).await.unwrap();
             assert_eq!((taken.requests, taken.words.as_deref(), taken.failed.is_none()), (1, Some("tempo 128"), true));
             assert_eq!(taken.undone.len(), 1);
-            assert!(taken.undone[0].title.contains("128"), "{}", taken.undone[0].title);
+            assert_eq!(taken.undone[0].id, plan[0].changes[0].id);
             assert_eq!(bridge.undone.get(), 1);
             // Live refuses the next one (the producer changed the tempo since): Kumi stops there, and the request stays.
             bridge.refusals.borrow_mut().push_back("Undo refused: the tempo was modified after apply.");

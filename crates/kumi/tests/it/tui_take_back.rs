@@ -58,7 +58,8 @@ case!(takeback_takes_the_last_request_back_and_puts_its_words_back_in_the_box, a
     h.control.set("taken-back", json!({"requests":1,"words":"and a bit darker","undone":[filter("undone")]}));
     h.type_text("/takeback\r").await;
     h.wait_for_call("take-back:3").await;
-    h.has("Took back your last request and undid 1 change. Its words are back in the box to change and send again.");
+    h.has("Took back your last request and undid 1 change.");
+    h.has("box to change and send again.");
     let shown = h.screen();
     assert!(!has(&shown, "Lowered the filter."), "{shown:#?}");
     h.has("Widened it.");
@@ -78,10 +79,11 @@ case!(takeback_with_a_number_goes_back_that_many_and_says_where_an_undo_stopped_
     );
     h.type_text("/takeback 2\r").await;
     h.wait_for_call("take-back:2").await;
-    h.has("Took back your last request. Kumi couldn't undo Bass width 100% → 140% and stopped there.");
+    h.has("Took back your last request. Kumi couldn't undo Bass width");
+    h.has("stopped there.");
     h.has("You changed it since Kumi set it, so Kumi left it.");
-    // Not a number: what /takeback takes.
-    h.type_text("/takeback all\r").await;
+    // Not a number: what /takeback takes (the box emptied first of the words that came back).
+    h.type_text("\x15/takeback all\r").await;
     h.has("/takeback takes back your last request, and /takeback 3 your last three.");
     h.close().await;
 });

@@ -83,6 +83,14 @@ impl Kumi {
     }
 }
 
+/// The last messages the model was sent, with the tools' answers: what a change that didn't happen said.
+fn last_sent(kumi: &Kumi) -> String {
+    let sent: serde_json::Value = kumi.model.requests.borrow().last().and_then(|sent| serde_json::from_str(sent).ok()).unwrap_or_default();
+    let messages = sent["messages"].as_array().cloned().unwrap_or_default();
+    let last: Vec<String> = messages.iter().rev().take(4).map(|message| message.to_string().chars().take(1500).collect()).collect();
+    format!("{} requests; the last messages, newest first:\n{}", kumi.model.requests.borrow().len(), last.join("\n"))
+}
+
 fn titles(changes: &[ChangeRecord]) -> Vec<&str> {
     changes.iter().map(|change| change.title.as_str()).collect()
 }
@@ -97,21 +105,27 @@ async fn a_request_taken_back_in_reaper_is_undone_in_reaper_newest_first_until_a
             script.set_project_id(Some("0123456789abcdef0123456789abcdef"));
             let _reaper = simulator(script.config(ensure_secret(&paths.secret()).unwrap(), "/lab/REAPER"), &paths).await;
             let kumi = Kumi::start(Daw::Reaper, home.path()).await;
+            // (REAPER's refs count the master first: Track 1 is track:2.)
             kumi.ask(
                 "Turn Track 1 down.",
-                vec![Box::new(|_| call("track_volume", json!({"ref": "track:1", "volumeDb": -6}))), Box::new(|_| answer("Done."))],
+                vec![Box::new(|_| call("track_volume", json!({"ref": "track:2", "volumeDb": -6}))), Box::new(|_| answer("Done."))],
             )
             .await;
             kumi.ask(
                 "Mute Track 2 and lower Track 3.",
                 vec![
-                    Box::new(|_| call("track_mute", json!({"ref": "track:2", "mute": true}))),
-                    Box::new(|_| call("track_volume", json!({"ref": "track:3", "volumeDb": -3}))),
+                    Box::new(|_| call("track_mute", json!({"ref": "track:3", "mute": true}))),
+                    Box::new(|_| call("track_volume", json!({"ref": "track:4", "volumeDb": -3}))),
                     Box::new(|_| answer("Done.")),
                 ],
             )
             .await;
-            assert_eq!((script.volume(1), script.track(2)["mute"].clone(), script.volume(3)), (-6.0, json!(true), -3.0));
+            assert_eq!(
+                (script.volume(1), script.track(2)["mute"].clone(), script.volume(3)),
+                (-6.0, json!(true), -3.0),
+                "{}",
+                last_sent(&kumi)
+            );
             // The last request taken back: its two changes go, newest first, each a new step of REAPER's undo.
             let steps = script.undo_history().len();
             let taken = kumi.take_back(1).await;
@@ -125,7 +139,7 @@ async fn a_request_taken_back_in_reaper_is_undone_in_reaper_newest_first_until_a
             assert_eq!((taken.requests, taken.undone.len()), (0, 0));
             let failed = taken.failed.expect("the undo that failed");
             assert_eq!((failed.title.as_str(), failed.state), ("Track 1 volume -6 dB", ChangeState::Kept));
-            assert!(failed.note.as_deref().is_some_and(|note| note.contains("changed since Kumi set it")), "{:?}", failed.note);
+            assert_eq!(failed.note.as_deref(), Some("It changed in REAPER since, so Kumi left it as it is."));
             assert_eq!(script.volume(1), -3.0);
             let left = kumi.session.take_back_plan().await.unwrap();
             assert_eq!(left.iter().map(|asked| asked.words.as_str()).collect::<Vec<_>>(), ["Turn Track 1 down."]);
