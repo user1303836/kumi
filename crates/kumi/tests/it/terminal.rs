@@ -1,5 +1,7 @@
 #[path = "../support/live_words.rs"]
 mod live_words;
+#[path = "../support/absent.rs"]
+mod absent;
 #[path = "../support/models.rs"]
 mod models;
 use async_trait::async_trait;
