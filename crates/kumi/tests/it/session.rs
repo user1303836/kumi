@@ -607,8 +607,11 @@ local_test!(a_message_up_to_256_kib_is_sent_and_a_longer_one_is_told_its_size, {
     assert_eq!(most.len(), 256 * 1024);
     h.session.submit(&most, None).await.unwrap();
     assert!(h.record.calls.borrow()[0].contains(&most));
-    let refused = h.session.submit(&format!("{most}x"), None).await.unwrap_err().to_string();
+    let over = format!("{most}x");
+    let refused = h.session.submit(&over, None).await.unwrap_err().to_string();
     assert!(refused.contains("This message is 257 KB, and one message takes up to 256 KB: send part of it."), "{refused}");
+    // Its words go back in the box, to send part of.
+    assert!(h.events.borrow().iter().any(|e| matches!(e, SessionEvent::Resend { text } if *text == over)));
     assert!(h.session.submit(" \n", None).await.unwrap_err().to_string().contains("Enter a nonempty prompt"));
     assert_eq!(h.record.calls.borrow().len(), 1);
     h.session.close().await.unwrap();

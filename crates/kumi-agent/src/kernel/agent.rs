@@ -25,7 +25,7 @@ use crate::core::contracts::{
     Kernel, KernelCheckpoint, KernelEmit, KernelEvent, OnText, Picture, StopReason, TranscriptLine, TurnResult, WaitFor,
 };
 use crate::core::hidden::{named_value, remember_text, unhidden, unhidden_owned};
-use crate::kernel::budget::{fit_for, fit_measured, opening, put_away_images, transcript_of, PutAway, OBSERVATION_MARKER};
+use crate::kernel::budget::{bytes_of, fit_for, fit_measured, opening, put_away_images, transcript_of, PutAway, OBSERVATION_MARKER};
 use crate::kernel::deferred::{self, Shelf, CALL_TOOL};
 use kumi_ai::binding::{ContextBudget, DEFAULT_BUDGET};
 use kumi_ai::error::LanguageModelError;
@@ -368,15 +368,6 @@ impl AgentKernel {
             return Ok(TurnResult { stop_reason: StopReason::Cancelled, usage: None });
         }
         self.come_back(&emit);
-        let (done, settled) = watch::channel(false);
-        let state = Rc::new(Running { steering: RefCell::new(Vec::new()), context: RefCell::new(None), done: settled });
-        *self.inner.running.borrow_mut() = Some(state.clone());
-        let _guard = TurnGuard { inner: self.inner.clone(), done };
-        // What the observation names hiding words, so the names the model gives back find them (see `hidden::named`).
-        let observation = input.split_once(OBSERVATION_MARKER).and_then(|(_, rest)| rest.split_once("</current_observation_untrusted>"));
-        if let Some((observation, _)) = observation {
-            remember_text(observation.trim());
-        }
         // The request, with the observation and Kumi's notes: what the DAW's names or a note hide, the model doesn't read.
         let mut content = vec![UserPart::Text(TextPart::new(unhidden(input)))];
         content.extend(pictures.into_iter().map(|picture| {
@@ -387,7 +378,34 @@ impl AgentKernel {
                 provider_options: None,
             })
         }));
-        turn(self.inner.clone(), Message::User { content, provider_options: None }, signal, emit, state).await
+        let request = Message::User { content, provider_options: None };
+        // The budget clears what came before a request, never the request itself: one past the room the model has (a local
+        // model's can be small) is never sent, since the model would turn it down again each time it was sent.
+        let room = self.inner.budget_now().limit;
+        let size = bytes_of(&request);
+        if size as f64 > room {
+            return Err(KumiError::new(
+                FailureKind::Request,
+                format!(
+                    "{} has room for about {} KB at once, and this message comes to {} KB with what Kumi reads of your {}: send part of it, or choose a model with more room with /model.",
+                    self.answering(),
+                    (room / 1024.0).floor(),
+                    size.div_ceil(1024),
+                    self.inner.profile.get().words.place
+                ),
+            )
+            .into());
+        }
+        let (done, settled) = watch::channel(false);
+        let state = Rc::new(Running { steering: RefCell::new(Vec::new()), context: RefCell::new(None), done: settled });
+        *self.inner.running.borrow_mut() = Some(state.clone());
+        let _guard = TurnGuard { inner: self.inner.clone(), done };
+        // What the observation names hiding words, so the names the model gives back find them (see `hidden::named`).
+        let observation = input.split_once(OBSERVATION_MARKER).and_then(|(_, rest)| rest.split_once("</current_observation_untrusted>"));
+        if let Some((observation, _)) = observation {
+            remember_text(observation.trim());
+        }
+        turn(self.inner.clone(), request, signal, emit, state).await
     }
 
     /// The model that carries on when this kernel's own can't: its plan's limit reached (waiting for the reset
@@ -442,8 +460,15 @@ impl AgentKernel {
             return Err(RuntimeError::plain("Kernel is closed"));
         }
         let words = trim(question);
-        if words.is_empty() || words.len() > MAX_STEER {
-            return Err(KumiError::new(FailureKind::Request, "Ask a side question of at most 16 KiB.").into());
+        if words.is_empty() {
+            return Err(KumiError::new(FailureKind::Request, "Ask a side question.").into());
+        }
+        if words.len() > MAX_STEER {
+            return Err(KumiError::new(
+                FailureKind::Request,
+                format!("This side question is {} KB, and one takes up to 16 KB: ask a shorter one.", words.len().div_ceil(1024)),
+            )
+            .into());
         }
         let context = inner.running.borrow().as_ref().and_then(|running| running.context.borrow().clone());
         let context: Vec<Message> = match context {

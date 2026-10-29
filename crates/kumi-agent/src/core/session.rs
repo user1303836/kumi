@@ -2447,6 +2447,9 @@ impl SessionController for Session {
                 return Err(RuntimeError::plain("Enter a nonempty prompt"));
             }
             if input.len() > MAX_REQUEST {
+                // Its words go back where the producer wrote them, to send part of.
+                drop(s);
+                self.emit(SessionEvent::Resend { text: input.to_owned() });
                 return Err(refused(format!(
                     "This message is {}, and one message takes up to {}: send part of it.",
                     size_words(input.len() as u64),
