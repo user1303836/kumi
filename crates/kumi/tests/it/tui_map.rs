@@ -911,3 +911,24 @@ case!(the_browsers_map_closes_when_the_music_it_shows_is_forgotten_or_its_folder
     assert!(tokio::net::TcpStream::connect(("127.0.0.1", port)).await.is_err(), "closed");
     h.close().await;
 });
+
+case!(keys_json_gives_the_maps_actions_other_keys, async {
+    let file = serde_json::json!({ "map.switch": ["n"], "map.close": ["w"] });
+    let h = Harness::with(160, 40, Control::mapped(loader(fixture(12, 8))), |o| o.keys = Some(Ok(file)));
+    h.start().await;
+    h.connect();
+    h.type_text("/map\r").await;
+    h.wait_for("Sounds 72").await;
+    // Tab isn't the switch to the songs any more: n is.
+    h.type_text("\t").await;
+    assert!(!has(&h.screen(), "c1 · dark rainy"), "tab switched");
+    h.type_text("n").await;
+    h.wait_for("c1 · dark rainy").await;
+    // Nor do q and esc close the map: w does.
+    h.type_text("q").await;
+    h.type_text("\x1b").await;
+    assert!(has(&h.screen(), "Songs 24"), "closed by its own keys");
+    h.type_text("w").await;
+    h.wait_until_hidden("Songs 24").await;
+    h.close().await;
+});
