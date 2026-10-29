@@ -50,6 +50,7 @@ struct Library {
     looked: Cell<usize>,
     hold: RefCell<Option<Rc<tokio::sync::Notify>>>,
     used: HashMap<String, usize>,
+    folders: Vec<String>,
 }
 
 impl Library {
@@ -84,6 +85,9 @@ impl PaletteLibrary for Library {
     }
     async fn used(&self) -> HashMap<String, usize> {
         self.used.clone()
+    }
+    async fn folders(&self) -> Vec<String> {
+        self.folders.clone()
     }
 }
 
@@ -377,25 +381,37 @@ case!(kumis_turn_is_told_of_the_palette_strict_or_loose, async {
     assert!(brief.contains("It's loose: these, and each one's 5 nearest") && brief.contains("offer to add it"), "{brief}");
 });
 
-// A word in a folder above a sound's own finds nothing: a producer's home folder ("/Users/padma") is in every path. The
-// sound's own folder still counts (#682).
-case!(a_word_in_a_folder_above_a_sounds_own_finds_nothing, async {
+// A sound is found by the folders between the library folder it's under and it, such as a pack's and its kind's, and
+// never by a word in a folder above the library's: a producer's home folder ("/Users/padma") is in every path. A sound
+// under none of the library's folders is found by its own (#682).
+case!(a_sound_is_found_by_its_folders_below_the_librarys_and_not_above, async {
     let dir = tempfile::tempdir().unwrap();
-    let drums = dir.path().join("padma").join("Drums");
-    std::fs::create_dir_all(&drums).unwrap();
-    let (index, sounds) = library(&drums, 2, 0);
-    let library = Rc::new(Library { index: RefCell::new(Some(index)), ..Default::default() });
-    let (palettes, _) = palettes(dir.path(), Some(library));
-    let tool = PaletteTool::new(Rc::new(palettes));
-    let call = |input: Value| {
-        let tool = tool.clone();
-        async move {
-            serde_json::from_str::<Value>(&tool.execute(input.as_object().unwrap().clone(), Signal::new()).await.unwrap().text).unwrap()
+    let root = dir.path().join("padma").join("Library");
+    let kicks = root.join("Big Pack").join("Kicks");
+    std::fs::create_dir_all(&kicks).unwrap();
+    let (index, sounds) = library(&kicks, 2, 0);
+    let under = vec![root.to_string_lossy().into_owned()];
+    for (folders, finds, misses) in [(under, ["big pack", "kicks"], ["pad", "library"]), (vec![], ["kicks", "kick 1"], ["pad", "big pack"])]
+    {
+        let store = tempfile::tempdir().unwrap();
+        let library = Rc::new(Library { index: RefCell::new(Some(index.clone())), folders: folders.clone(), ..Default::default() });
+        let (palettes, _) = palettes(store.path(), Some(library));
+        let tool = PaletteTool::new(Rc::new(palettes));
+        let call = |input: Value| {
+            let tool = tool.clone();
+            async move {
+                serde_json::from_str::<Value>(&tool.execute(input.as_object().unwrap().clone(), Signal::new()).await.unwrap().text).unwrap()
+            }
+        };
+        call(json!({"action": "add", "paths": [sounds[0].path, sounds[1].path]})).await;
+        for words in finds {
+            let found = call(json!({"action": "search", "words": words})).await;
+            assert!(!found["sounds"].as_array().unwrap().is_empty(), "{words:?} under {folders:?}: {found}");
         }
-    };
-    call(json!({"action": "add", "paths": [sounds[0].path, sounds[1].path]})).await;
-    assert_eq!(call(json!({"action": "search", "words": "pad"})).await["sounds"], json!([]));
-    assert_eq!(call(json!({"action": "search", "words": "drums"})).await["sounds"].as_array().unwrap().len(), 2);
+        for words in misses {
+            assert_eq!(call(json!({"action": "search", "words": words})).await["sounds"], json!([]), "{words:?} under {folders:?}");
+        }
+    }
 });
 
 case!(the_palette_tool_lists_searches_brings_in_adds_takes_out_and_excludes, async {

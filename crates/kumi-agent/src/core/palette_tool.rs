@@ -55,12 +55,10 @@ impl PaletteTool {
                 if action == "search" && words.is_empty() {
                     return Err("search takes words: what its sounds have in their name, class or folder".into());
                 }
-                // A sound's own folder, not every folder above it: a word in the home folder's name ("/Users/padma")
-                // would find every sound.
+                let folders = if action == "search" { self.palettes.folders().await } else { Vec::new() };
                 let has = |file: &&PaletteFile| {
-                    let folder = std::path::Path::new(&file.path).parent().and_then(|folder| folder.file_name()).unwrap_or_default();
-                    let text =
-                        format!("{} {} {}", file.name, file.class.as_deref().unwrap_or_default(), folder.to_string_lossy()).to_lowercase();
+                    let text = format!("{} {} {}", file.name, file.class.as_deref().unwrap_or_default(), where_it_is(&file.path, &folders))
+                        .to_lowercase();
                     words.iter().all(|word| text.contains(word.as_str()))
                 };
                 let found: Vec<&PaletteFile> = view.files.iter().filter(has).collect();
@@ -138,6 +136,24 @@ fn described(file: &PaletteFile) -> Value {
 /// The session has no palette yet.
 fn none() -> Value {
     json!({"palette": null, "say": "The producer has no palette in this session: Enter on /map, or /palette new and a name, makes one."})
+}
+
+/// What the search reads of where a sound is: the folders between the library folder it's under (the deepest one) and it,
+/// such as a pack's and its kind's, or its own folder when it's under none. Never a folder above the library's, which
+/// every sound's path has: a word in the home folder's name ("/Users/padma") would find them all.
+fn where_it_is(path: &str, library: &[String]) -> String {
+    let path = std::path::Path::new(path);
+    let below = library.iter().filter_map(|folder| path.strip_prefix(folder).ok()).min_by_key(|rest| rest.components().count());
+    let words: Vec<String> = match below {
+        Some(rest) => rest
+            .parent()
+            .into_iter()
+            .flat_map(|folders| folders.components())
+            .map(|c| c.as_os_str().to_string_lossy().into_owned())
+            .collect(),
+        None => path.parent().and_then(|folder| folder.file_name()).map(|name| name.to_string_lossy().into_owned()).into_iter().collect(),
+    };
+    words.join(" ")
 }
 
 #[async_trait(?Send)]
