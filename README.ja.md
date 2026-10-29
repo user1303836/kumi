@@ -10,6 +10,7 @@
   <img alt="Renoise 3.5" src="https://img.shields.io/badge/Renoise-3.5-111111">
   <img alt="Native Rust runtime" src="https://img.shields.io/badge/runtime-native%20Rust-555555">
   <a href="LICENSE.md"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-blue"></a>
+  <a href="https://discord.gg/F3js89Rcxf"><img alt="Discord" src="https://img.shields.io/badge/Discord-join-5865F2?logo=discord&amp;logoColor=white"></a>
 </p>
 
 <p align="center">
