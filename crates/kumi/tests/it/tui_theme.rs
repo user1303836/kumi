@@ -91,15 +91,17 @@ case!(a_picture_open_in_history_is_drawn_and_uploaded_again_in_another_theme, as
     h.type_text("\x1b[Z").await;
     h.type_text("\r").await;
     h.screen();
-    let uploads = |h: &Harness| h.output.text.borrow().matches("\x1b_Ga=T,").count();
-    let before = uploads(&h);
-    assert!(before >= 1, "the picture went up");
+    // HISTORY's own: a clip's notes are 6 rows tall only there (NOW's and the dock's are shorter), and each upload says
+    // its rows once.
+    let history_uploads = |h: &Harness| h.output.text.borrow().matches(",r=6,").count();
+    let before = history_uploads(&h);
+    assert!(before >= 1, "HISTORY's picture went up");
     h.type_text("\x1b[?997;2n").await;
     h.screen();
     assert_eq!(ground_of(&h), ground(&LIGHT));
-    // Each taken down, and what's shown drawn and uploaded afresh in the new theme's colours.
+    // Each taken down, and HISTORY's drawn and uploaded afresh in the new theme's colours.
     assert!(h.output.text.borrow().contains("\x1b_Ga=d,d=I,i=1,"), "taken down");
-    assert!(uploads(&h) > before, "up again: {} then {}", before, uploads(&h));
+    assert!(history_uploads(&h) > before, "HISTORY's picture up again: {before} then {}", history_uploads(&h));
     h.close().await;
 });
 
