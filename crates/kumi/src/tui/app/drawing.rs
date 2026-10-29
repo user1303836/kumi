@@ -15,6 +15,7 @@ use super::drawer::{drawer_fits, PANE_COLUMNS};
 use super::*;
 use crate::text::library_line;
 use kumi_agent::core::commands::Found;
+use kumi_agent::core::protocol::{size_words, MAX_MESSAGE};
 use kumi_ai::failure::reset_words;
 use kumi_common::time::since;
 pub(super) mod st {
@@ -693,6 +694,16 @@ impl TuiApp {
         let overlay_hint = top.as_ref().map(|top| top.borrow().hint(self));
         let toast = toast.filter(|_| !top.is_some_and(|top| top.borrow().hint_stays(self)));
         let state = self.0.state.borrow();
+        // A message past what the session takes at once says so under the box, before enter would.
+        let toast = toast.or_else(|| {
+            let len = state.editor.expanded_len();
+            (len > MAX_MESSAGE && state.search.is_none()).then(|| {
+                (
+                    format!("{}: one message takes up to {}, send part of it", size_words(len as u64), size_words(MAX_MESSAGE as u64)),
+                    NoticeTone::Warn,
+                )
+            })
+        });
         if state.search.is_some() {
             let shown: Vec<String> = layout.rows.iter().skip(first as usize).take(visible as usize).cloned().collect();
             self.draw_search(screen, x, box_.y + 1, &shown, box_);

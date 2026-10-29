@@ -109,7 +109,11 @@ impl TuiApp {
         let Some(search) = state.search.take() else { return };
         if let Some(found) = search.found.filter(|_| take).and_then(|at| self.with_sent(|sent| sent.get(at).cloned())) {
             back_to_draft(state);
-            state.editor.set(&found);
+            // A message sent with chips this run goes in with them.
+            match state.sent_words.iter().rev().find(|(kept, _)| *kept == found).map(|(_, words)| words.clone()) {
+                Some(words) => state.editor.set_composed(&words),
+                None => state.editor.set(&found),
+            }
             state.menu_dismissed = true;
         }
     }
@@ -131,7 +135,10 @@ impl TuiApp {
         match search.found.and_then(|at| self.with_sent(|sent| sent.get(at).cloned())) {
             Some(found) => {
                 let mut shown = Editor::new();
-                shown.set(&found);
+                match state.sent_words.iter().rev().find(|(kept, _)| *kept == found) {
+                    Some((_, words)) => shown.set_composed(words),
+                    None => shown.set(&found),
+                }
                 rows.extend(shown.layout(width).rows);
             }
             None => rows.push(if search.query.is_empty() { "Nothing sent yet".into() } else { "Nothing sent has these words".into() }),

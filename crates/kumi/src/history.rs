@@ -65,7 +65,17 @@ fn without_keys(mut kept: String, key: fn(char) -> bool) -> String {
     LABELLED.replace_all(&long_runs_out(&kept, key), "${1}${2}[redacted]").into_owned()
 }
 pub fn history_text(text: &str, secrets: &[String]) -> String {
-    string::head(&redacted(text, secrets), MAX_ENTRY)
+    cut(&redacted(text, secrets))
+}
+/// What the file keeps of an entry: at most `MAX_ENTRY` characters, a cut one ending in "…" so that, brought back by ↑
+/// later, it isn't sent again unawares as if whole. While Kumi runs, a message sent stays whole among the entries.
+fn cut(kept: &str) -> String {
+    let head = string::head(kept, MAX_ENTRY);
+    if head.len() == kept.len() {
+        head
+    } else {
+        format!("{}…", string::head(kept, MAX_ENTRY - 1))
+    }
 }
 fn redacted(text: &str, secrets: &[String]) -> String {
     string::trim(&without_keys(sanitize_text(text, secrets), joined)).to_string()
@@ -125,8 +135,9 @@ impl InputHistory {
     pub fn sent(&self) -> impl DoubleEndedIterator<Item = &str> {
         self.entries.iter().zip(&self.saved).filter(|(_, saved)| **saved).map(|(entry, _)| entry.as_str())
     }
+    /// A message sent: among the entries whole while Kumi runs, and in the file cut to `MAX_ENTRY`.
     pub fn add(&mut self, text: &str) {
-        let kept = history_text(text, &self.secrets);
+        let kept = redacted(text, &self.secrets);
         if !self.push(&kept, true) {
             return;
         }
@@ -187,11 +198,12 @@ impl InputHistory {
         }
         let mut handle = options.open(file)?;
         if compact {
-            let saved: Vec<_> = self.entries.iter().zip(&self.saved).filter(|(_, saved)| **saved).map(|(s, _)| json::quote(s)).collect();
+            let saved: Vec<_> =
+                self.entries.iter().zip(&self.saved).filter(|(_, saved)| **saved).map(|(s, _)| json::quote(&cut(s))).collect();
             handle.write_all(format!("{}\n", saved.join("\n")).as_bytes())?;
             self.lines = saved.len();
         } else {
-            handle.write_all(format!("{}\n", json::quote(kept)).as_bytes())?;
+            handle.write_all(format!("{}\n", json::quote(&cut(kept))).as_bytes())?;
         }
         Ok(())
     }
