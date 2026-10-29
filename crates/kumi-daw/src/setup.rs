@@ -9,8 +9,9 @@ use std::time::Duration;
 /// The session as the DAW's side of setup reaches it: setup asks it only this.
 #[async_trait(?Send)]
 pub trait SetupSession {
-    /// Connect again, through the bridge just put in place: an error while it can't yet (it's still starting), so setup
-    /// asks again shortly.
+    /// Connect again, through the bridge just put in place: its configuration is in the `bridge` cell
+    /// [`DawProvider::setup`](crate::provider::DawProvider::setup) is given, which setup sets first unless it was given.
+    /// An error while the session can't yet (it's still starting), so setup asks again shortly.
     async fn reconnect(&self) -> Result<(), RuntimeError>;
     /// The saved project open in the DAW, by its file, once the session has read it.
     fn open_set(&self) -> Option<String>;
