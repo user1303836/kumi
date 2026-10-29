@@ -14,27 +14,25 @@ impl TuiApp {
         if self.0.state.borrow().closing {
             return;
         }
-        // Anything from the model, or the turn's end, means the wait is over.
-        if matches!(
-            event,
-            SessionEvent::Kernel(KernelEvent::Text { .. } | KernelEvent::ToolInput { .. } | KernelEvent::ToolStart { .. })
-                | SessionEvent::TurnComplete { .. }
-                | SessionEvent::State { .. }
-        ) {
+        // Anything from the model, or the turn's end, means the wait is over; once it's handled, the model at work takes
+        // in what the producer asked to say now. Every kernel event is placed here, so a new one has to be.
+        let (ends_wait, at_work) = match &event {
+            SessionEvent::Kernel(kernel) => match kernel {
+                KernelEvent::Text { .. } | KernelEvent::ToolInput { .. } | KernelEvent::ToolStart { .. } => (true, true),
+                KernelEvent::ToolEnd { .. } => (false, true),
+                KernelEvent::Steer { .. } | KernelEvent::Retry { .. } | KernelEvent::ModelSwitch { .. } => (false, false),
+            },
+            SessionEvent::TurnComplete { .. } | SessionEvent::State { .. } => (true, false),
+            _ => (false, false),
+        };
+        if ends_wait {
             let mut state = self.0.state.borrow_mut();
             state.retry = None;
             state.waiting_for = None;
             state.waiting_cause = None;
             state.waiting_proxy_down = false;
         }
-        // Once it's handled: the model at work takes in what the producer asked to say now, and a turn's state or a
-        // job's may be when a job's request carries on.
-        let at_work = matches!(
-            event,
-            SessionEvent::Kernel(
-                KernelEvent::Text { .. } | KernelEvent::ToolStart { .. } | KernelEvent::ToolEnd { .. } | KernelEvent::ToolInput { .. }
-            )
-        );
+        // A turn's state or a job's may be when a job's request carries on, once it's handled.
         let carry_on = matches!(event, SessionEvent::State { .. } | SessionEvent::Job(_));
         match event {
             SessionEvent::Kernel(KernelEvent::Retry { reason, wait_ms, wait, cause, proxy_down }) => {
