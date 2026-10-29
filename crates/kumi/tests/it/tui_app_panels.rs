@@ -829,7 +829,7 @@ case!(a_technique_offered_after_an_answer_is_answered_by_number, async {
     h.has("Your answer");
     assert!(!has(&h.screen(), "Keep “Liquid bubbles” as a technique?"));
     // So does a plain question; closing the answer's options answers nothing about the technique.
-    h.type_text("\x1b").await;
+    h.escape().await;
     h.type_text("make it darker\r").await;
     built(&h, "Darker now. Should the riser come in earlier?");
     assert!(!has(&h.screen(), "Keep “Liquid bubbles” as a technique?"));
@@ -1430,7 +1430,7 @@ case!(keys_json_gives_a_panel_other_keys_and_says_what_it_cant_use, async {
     // j scrolls the help a row, and esc, no longer one of its keys, leaves it open.
     h.type_text("j").await;
     assert_eq!(help_scrolled(&h), (1, most - 1));
-    h.type_text("\x1b").await;
+    h.escape().await;
     h.has("Keys and commands");
     // q closes it, and isn't typed into the box.
     h.type_text("q").await;

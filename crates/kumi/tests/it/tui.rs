@@ -648,6 +648,29 @@ async fn keys_text_controls_arrows_with_modifiers_function_keys_and_alt_combinat
 }
 
 #[tokio::test(start_paused = true)]
+async fn a_lone_escape_waits_its_delay_and_says_so_and_a_key_in_it_is_read_with_it() {
+    local(async {
+        let events = Rc::new(RefCell::new(Vec::new()));
+        let sink = Rc::clone(&events);
+        let parser = InputParser::with_escape_delay(Rc::new(move |event| sink.borrow_mut().push(event)), 25.0);
+        assert!(!parser.waiting());
+        // A lone Escape waits for more of a key, then is Escape.
+        parser.push("\u{1b}");
+        assert!(parser.waiting() && events.borrow().is_empty());
+        tokio::time::sleep(Duration::from_millis(30)).await;
+        assert!(!parser.waiting());
+        assert_eq!(events.take(), [key("escape", NONE)]);
+        // A key that comes in its delay is read with it, as that key with alt (Harness::escape waits this out).
+        parser.push("\u{1b}");
+        parser.push("\u{1c}");
+        assert!(!parser.waiting());
+        assert_eq!(events.take(), [key("\\", Modifiers { ctrl: true, alt: true, shift: false })]);
+        parser.dispose();
+    })
+    .await;
+}
+
+#[tokio::test(start_paused = true)]
 async fn keys_shift_enter_in_csi_u_and_modify_other_keys_forms_and_a_key_let_go_is_its_own_event() {
     local(async {
         assert_eq!(

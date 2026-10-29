@@ -819,6 +819,20 @@ impl Harness {
         self.input.write(s);
         delay(45).await;
     }
+    /// Esc alone, read as Esc before anything typed after it: the input waits its delay for more of a key, and a key
+    /// typed meanwhile is read with it, as that key with alt. On a runner that stalls past both timers, a fixed wait
+    /// can lose that race, so this waits until the input holds nothing.
+    pub async fn escape(&self) {
+        self.input.write("\x1b");
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            while self.app.keys_waiting() {
+                delay(5).await;
+            }
+        })
+        .await
+        .expect("Esc read as a key");
+        delay(45).await;
+    }
     pub fn resize(&self, w: i32, h: i32) {
         self.output.width.set(w);
         self.output.height.set(h);
