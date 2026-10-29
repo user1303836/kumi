@@ -889,7 +889,8 @@ impl PlainTerminal {
             // the list still shows.
             Effect::Resume { word } if self.busy() && !word.is_empty() => self.wait_for(verb),
             Effect::Fork { .. } if self.busy() => self.wait_for(verb),
-            Effect::Model
+            // (/model's words are plain mode's own: /model <provider> lists, /model <provider>/<model> chooses)
+            Effect::Model { .. }
             | Effect::Effort
             | Effect::Fast
             | Effect::Login
