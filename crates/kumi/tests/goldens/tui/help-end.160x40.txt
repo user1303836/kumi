@@ -1,12 +1,14 @@
   Kumi  ·  Night Drive                                                                                                                                  ● Live
 
                                                                                                                     FOCUS
-   Keys and commands                                                                      ↑ 49 more                 Night Drive
+   Keys and commands                                                                      ↑ 47 more                 Night Drive
                                                                                                                     Your selection will show here
-     ctrl+s              Put the draft aside, with its files; in an empty box, bring it back
-
-   Stop and take back                                                                                               NOW
-     esc                 Stop Kumi's answer: the steps it finished stay, and waiting messages go                    Ready
+     ctrl+g              Open the draft in your own editor (VISUAL or EDITOR); what you save comes
+                         back into the box, and ctrl+- takes it back
+     ctrl+s              Put the draft aside, with its files; in an empty box, bring it back                        NOW
+                                                                                                                    Ready
+   Stop and take back
+     esc                 Stop Kumi's answer: the steps it finished stay, and waiting messages go
                          back into the box
      ctrl+c              Stop Kumi; when it isn't working, clear the box (↑ or ctrl+- brings the
                          words back), then quit
@@ -17,17 +19,15 @@
    Commands
      /                   The commands as you type: ↑↓ choose, tab completes, enter runs, esc closes
      ?                   This help, from an empty box
-     /new                Start a fresh conversation (the last one is kept); /new <name> names it
-     /undo               Undo Kumi's last change
-     /refresh            Read your Live Set again                                                                   HISTORY ──────────────────────────────────
-     /copy               Copy Kumi's last answer                                                                    Nothing changed yet
+     /new                Start a fresh conversation (the last one is kept); /new <name> names it                    HISTORY ──────────────────────────────────
+     /undo               Undo Kumi's last change                                                                    Nothing changed yet
+     /refresh            Read your Live Set again
+     /copy               Copy Kumi's last answer
      /export             This conversation as a file: choose, or /export copy, md, html or json
                          (for another Kumi)
      /share              Save this conversation as a web page that opens anywhere, to send
      /loop               Listen, judge and adjust in rounds until the goal is met: /loop <what>,
                          then stop
-     /goal               Keep at one goal until it's met: /goal <what>, then resume, edit, pause,
-                         clear
      /status             What Kumi is connected to
      /changelog          What's new in Kumi
      /help               Keys and commands

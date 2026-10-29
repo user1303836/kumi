@@ -19,16 +19,16 @@
 
                                              Kumi can see Night Drive.
 
-                                                                                                                    HISTORY ──────────────────────────────────
-   /new            Start a fresh conversation (the last one is kept)…                                               Nothing changed yet
-   /reconnect
-   /undo                                                               dy?”
-   /refresh
-   /copy                                                               ons goes back to one.
+                                                        Try                                                         HISTORY ──────────────────────────────────
+                                                                                                                    Nothing changed yet
+   /new            Start a fresh conversation (the last one is kept)…
+   /reconnect                                                          dy?”
+   /undo
+   /refresh                                                            ons goes back to one.
+   /copy
    /export
    /share
    /loop
-   /goal
    /status
    /changelog
    /help

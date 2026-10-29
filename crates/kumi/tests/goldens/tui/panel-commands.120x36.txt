@@ -15,16 +15,16 @@
 
                          ░▒▓████████████████████████▓▒░
 
+                            Kumi can see Night Drive.
 
-   /new            Start a fresh conversation (the last one is kept)…
-   /reconnect                                                                     HISTORY ────────────────────────────
-   /undo                                                                          Nothing changed yet
+   /new            Start a fresh conversation (the last one is kept)…             HISTORY ────────────────────────────
+   /reconnect                                                                     Nothing changed yet
+   /undo
    /refresh
    /copy
-   /export
-   /share                                                              one.
+   /export                                                             one.
+   /share
    /loop
-   /goal
    /status
    /changelog
    /help

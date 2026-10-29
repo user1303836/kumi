@@ -121,6 +121,10 @@ impl InputHistory {
     pub fn entries(&self) -> &[String] {
         &self.entries
     }
+    /// What was sent, oldest first: the entries but the drafts kept from ctrl+c.
+    pub fn sent(&self) -> impl DoubleEndedIterator<Item = &str> {
+        self.entries.iter().zip(&self.saved).filter(|(_, saved)| **saved).map(|(entry, _)| entry.as_str())
+    }
     pub fn add(&mut self, text: &str) {
         let kept = history_text(text, &self.secrets);
         if !self.push(&kept, true) {

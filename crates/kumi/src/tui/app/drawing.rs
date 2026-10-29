@@ -12,9 +12,9 @@ use super::super::{
     wrap::Span,
 };
 use super::drawer::{drawer_fits, PANE_COLUMNS};
-use super::input::Command;
 use super::*;
 use crate::text::library_line;
+use kumi_agent::core::commands::Found;
 use kumi_ai::failure::reset_words;
 use kumi_common::time::since;
 pub(super) mod st {
@@ -678,7 +678,7 @@ impl TuiApp {
             vec![(format!("{} isn't connected", crate::daw::words().app), st::DIM)]
         }
     }
-    fn draw_composer(&self, screen: &mut Screen, box_: Rect, layout: &EditorLayout, visible: i32, menu: &[&'static Command]) -> Cursor {
+    fn draw_composer(&self, screen: &mut Screen, box_: Rect, layout: &EditorLayout, visible: i32, menu: &[Found]) -> Cursor {
         screen.fill(box_, &st::RAISED);
         let x = box_.x + 2;
         let width = (box_.width - 4).max(1);
@@ -747,29 +747,45 @@ impl TuiApp {
         }
         Cursor { x: x + layout.cursor_column, y: box_.y + 1 + layout.cursor_row as i32 - first }
     }
-    fn draw_menu(&self, screen: &mut Screen, box_top: i32, left: i32, items: &[&'static Command]) {
+    fn draw_menu(&self, screen: &mut Screen, box_top: i32, left: i32, items: &[Found]) {
         if items.is_empty() {
             return;
         }
         let width = 70.min(left - 2);
-        let top = box_top - items.len() as i32 - 1;
-        if top < 2 {
+        // As many as fit above the box (from the screen's second row), the one chosen among them: a full session has more
+        // commands than a short screen has rows. What's out of sight is said on the first and last rows, as the lists do.
+        let fits = (box_top - 3).max(0) as usize;
+        if fits == 0 {
             return;
         }
-        let about = 3 + super::input::COMMANDS.iter().map(|c| c.name.len()).max().unwrap_or(0) as i32 + 2;
-        let area = Rect::new(1, top - 1, width, items.len() as i32 + 1);
+        let selected = self.0.state.borrow().menu_index.min(items.len() - 1);
+        let shown = items.len().min(fits);
+        let first = if selected < shown { 0 } else { selected + 1 - shown };
+        let top = box_top - shown as i32 - 1;
+        let about = 3 + kumi_agent::core::commands::COMMANDS.iter().map(|c| c.name.len()).max().unwrap_or(0) as i32 + 2;
+        let area = Rect::new(1, top - 1, width, shown as i32 + 1);
         screen.fill(area, &st::RAISED);
         self.cover(area);
-        let selected = self.0.state.borrow().menu_index;
-        for (index, item) in items.iter().enumerate() {
-            let y = top + index as i32;
+        for (row, (index, item)) in items.iter().enumerate().skip(first).take(shown).enumerate() {
+            let y = top + row as i32;
             let chosen = index == selected;
+            let more = if row == 0 && first > 0 {
+                Some(format!("↑ {first} more"))
+            } else if row == shown - 1 && first + shown < items.len() {
+                Some(format!("↓ {} more", items.len() - first - shown))
+            } else {
+                None
+            };
+            let room = width - 1 - more.as_ref().map_or(0, |more| text_width(more) + 1);
             if chosen {
                 screen.fill(Rect::new(1, y, width, 1), &st::SELECTED);
             }
-            screen.put(3, y, item.name, &if chosen { st::ACCENT } else { st::TEXT });
+            screen.put(3, y, item.command.name, &if chosen { st::ACCENT } else { st::TEXT });
             if chosen {
-                screen.put(about, y, &truncate(&item.about(), (width - about - 1).max(1)), &st::BRIGHT);
+                screen.put(about, y, &truncate(&super::input::about(item.command), (room - about).max(1)), &st::BRIGHT);
+            }
+            if let Some(more) = more {
+                screen.put(width - text_width(&more), y, &more, &st::FAINT);
             }
         }
     }

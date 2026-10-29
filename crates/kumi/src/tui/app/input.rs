@@ -10,6 +10,7 @@ use super::toast::TOAST_MS;
 use super::*;
 use crate::text::{library_line, remembered_line};
 use base64::Engine;
+use kumi_agent::core::commands::{self, Command, Effect, Found, Now, Why};
 use std::task::{Context, Poll};
 
 impl TuiApp {
@@ -454,19 +455,27 @@ impl TuiApp {
         if !menu.is_empty() && matches!(name, "up" | "down") {
             let mut state = self.0.state.borrow_mut();
             state.menu_index = (state.menu_index + if name == "up" { menu.len() - 1 } else { 1 }) % menu.len();
+            state.menu_chosen = Some(state.editor.text().to_string());
             return;
         }
         if !menu.is_empty() && name == "tab" {
             let mut state = self.0.state.borrow_mut();
             let index = state.menu_index;
-            state.editor.set(menu[index].name);
+            state.editor.set(menu[index].command.name);
             return;
         }
         if name == "enter" && !alt && !shift {
             if !menu.is_empty() {
                 let mut state = self.0.state.borrow_mut();
-                let index = state.menu_index;
-                state.editor.set(menu[index].name);
+                let found = menu[state.menu_index];
+                let typed = state.editor.text().to_string();
+                let chosen = state.menu_chosen.as_deref() == Some(typed.as_str());
+                state.editor.set(found.command.name);
+                // A command found only by the words of what it does is none the producer named: Enter puts its name in the
+                // box, as tab does, unless they chose it with ↑↓.
+                if !found.named() && !chosen {
+                    return;
+                }
             }
             self.submit_task();
             return;
@@ -594,53 +603,46 @@ impl TuiApp {
             self.0.renderer.borrow_mut().invalidate();
         }
     }
-    pub(super) fn menu(&self) -> Vec<&'static Command> {
+    pub(super) fn menu(&self) -> Vec<Found> {
+        let text = {
+            let state = self.0.state.borrow();
+            let text = state.editor.text().to_string();
+            if state.menu_dismissed
+                || state.search.is_some()
+                || !text.starts_with('/')
+                || text.chars().any(|c| string::trim(&c.to_string()).is_empty())
+            {
+                return vec![];
+            }
+            text
+        };
+        let has = self.has();
+        let recent = self.recent_commands();
+        let recent: Vec<&str> = recent.iter().map(String::as_str).collect();
+        let matches = commands::matching(&text, &recent, |command| has.offers(command));
         let mut state = self.0.state.borrow_mut();
-        let text = state.editor.text();
-        if state.menu_dismissed
-            || state.search.is_some()
-            || !text.starts_with('/')
-            || text.chars().any(|c| string::trim(&c.to_string()).is_empty())
-        {
-            return vec![];
-        }
-        let can = self.can();
-        let matches: Vec<_> = COMMANDS.iter().filter(|cmd| cmd.name.starts_with(&text) && self.offered(&can, cmd.name)).collect();
-        // A command typed in full comes first, even when it begins a longer one (/recipe, /recipes).
-        let mut matches = matches;
-        if let Some(at) = matches.iter().position(|cmd| cmd.name == text) {
-            let exact = matches.remove(at);
-            matches.insert(0, exact);
-        }
         if state.menu_index >= matches.len() {
             state.menu_index = 0;
         }
+        // A choice made with ↑↓ holds for the words it was made for.
+        if state.menu_chosen.as_deref().is_some_and(|chosen| chosen != text) {
+            state.menu_chosen = None;
+        }
         matches
     }
-    /// Whether the `/` menu and the help offer a command: one that needs something only where this session has it
-    /// (`can`, what the session can do).
-    pub(super) fn offered(&self, can: &Capabilities, name: &str) -> bool {
-        match name {
-            "/model" | "/effort" | "/fast" | "/login" | "/logout" => self.0.options.models.is_some(),
-            "/memory" => can.memory,
-            "/note" => can.change_note,
-            "/recipes" => can.recipes,
-            "/recipe" => can.run_recipe,
-            "/jobs" => can.jobs,
-            "/conversations" | "/resume" | "/rename" | "/fork" => can.conversations,
-            "/reconnect" => can.reconnect,
-            "/stop" => can.stop_daw,
-            "/update" => self.0.options.updates.is_some(),
-            "/daw" => self.0.options.switch_daw.is_some(),
-            "/btw" => can.aside,
-            "/voice" => self.0.voice.is_some(),
-            "/willington" => self.willington().is_some(),
-            "/slots" => can.slots,
-            "/music" => can.music,
-            "/map" => can.map,
-            "/palette" => can.palette,
-            _ => true,
+    /// The commands sent lately, latest first, each once: the `/` menu lists them first.
+    fn recent_commands(&self) -> Vec<String> {
+        let Some(history) = &self.0.options.history else { return vec![] };
+        let mut recent: Vec<String> = Vec::new();
+        for line in history.borrow().sent().rev().take(RECENT_LOOK) {
+            let line = string::trim(line);
+            if let Some(name) = line.split_whitespace().next().filter(|_| is_command(line)) {
+                if !recent.iter().any(|seen| seen == name) {
+                    recent.push(name.to_string());
+                }
+            }
         }
+        recent
     }
     pub(super) fn submit_task(&self) {
         let app = self.clone();
@@ -672,562 +674,568 @@ impl TuiApp {
             history.borrow_mut().add(&raw);
         }
         self.0.state.borrow_mut().recall = None;
-        if command == "/quit" {
-            self.clear_editor();
-            self.finish(0, None).await;
-            return Ok(());
-        }
-        if command == "/help" {
-            self.clear_editor();
-            self.open_help();
-            return Ok(());
-        }
-        if command == "/changelog" {
-            self.clear_editor();
-            let since = self.0.state.borrow().news_since.clone();
-            match crate::whats_new::changelog(kumi_types::version::KUMI_VERSION, since.as_deref()) {
-                Some(news) => {
-                    let footer = Some(format!("Every release: {}", crate::whats_new::history_link()));
-                    self.0.state.borrow_mut().transcript.add(Entry::News { title: news.title, items: news.items, footer });
-                    self.0.scheduler.request();
-                }
-                None => self.notice("Kumi's changelog has no notes for this version.", NoticeTone::Info),
-            }
-            return Ok(());
-        }
-        if command == "/jobs" && self.can().jobs {
-            self.clear_editor();
-            self.open_jobs();
-            return Ok(());
-        }
-        if command == "/voice" && self.0.voice.is_some() {
-            self.clear_editor();
-            self.open_voice(None);
-            return Ok(());
-        }
-        if let Some(models) = self.0.options.models.clone().filter(|_| command == "/fast") {
-            self.clear_editor();
-            let current = models.current();
-            // The setting, not whether this model uses it: a saved "on" can always be turned off.
-            let on = !models.fast_enabled();
-            let name = current.name.or(current.model).unwrap_or_else(|| "This model".into());
-            match models.set_fast(on).await {
-                Ok(Some(tier)) => self.notice(
-                    &format!(
-                        "{} is on{}. /fast again turns it off.",
-                        tier.name,
-                        tier.description.map(|d| format!(": {d}")).unwrap_or_default()
-                    ),
-                    NoticeTone::Info,
-                ),
-                Ok(None) if on => self.notice(&format!("{name} has no faster tier to turn on."), NoticeTone::Info),
-                Ok(None) => self.notice("Back to the standard tier.", NoticeTone::Info),
-                Err(error) => self.error(&error),
-            }
-            return Ok(());
-        }
-        if self.0.options.models.is_some() && matches!(command, "/model" | "/effort" | "/login" | "/logout") {
-            self.clear_editor();
-            let result = match command {
-                "/model" => self.open_models().await,
-                "/effort" => self.open_effort().await,
-                "/login" => self.open_login().await,
-                _ => self.open_logout().await,
-            };
-            if let Err(e) = result {
-                self.panel_failed(&e);
-            }
-            return Ok(());
-        }
-        for (cmd, available) in [("/recipes", self.can().recipes), ("/memory", self.can().memory)] {
-            if command == cmd && available {
+        let goal_running = {
+            let state = self.0.state.borrow();
+            state.goal.is_some() || state.objective.is_some()
+        };
+        let now = Now { busy: self.busy(), goal_running, can: self.can(), fronts: self.has().fronts };
+        match commands::run(command, &now) {
+            Effect::Quit => {
                 self.clear_editor();
-                let result = match cmd {
-                    "/recipes" => self.open_recipes().await,
-                    _ => self.open_memory().await,
+                self.finish(0, None).await;
+                return Ok(());
+            }
+            Effect::Help => {
+                self.clear_editor();
+                self.open_help();
+                return Ok(());
+            }
+            Effect::Changelog => {
+                self.clear_editor();
+                let since = self.0.state.borrow().news_since.clone();
+                match crate::whats_new::changelog(kumi_types::version::KUMI_VERSION, since.as_deref()) {
+                    Some(news) => {
+                        let footer = Some(format!("Every release: {}", crate::whats_new::history_link()));
+                        self.0.state.borrow_mut().transcript.add(Entry::News { title: news.title, items: news.items, footer });
+                        self.0.scheduler.request();
+                    }
+                    None => self.notice("Kumi's changelog has no notes for this version.", NoticeTone::Info),
+                }
+                return Ok(());
+            }
+            Effect::Jobs => {
+                self.clear_editor();
+                self.open_jobs();
+                return Ok(());
+            }
+            Effect::Voice => {
+                self.clear_editor();
+                self.open_voice(None);
+                return Ok(());
+            }
+            Effect::Fast => {
+                let Some(models) = self.0.options.models.clone() else { return Ok(()) };
+                self.clear_editor();
+                let current = models.current();
+                // The setting, not whether this model uses it: a saved "on" can always be turned off.
+                let on = !models.fast_enabled();
+                let name = current.name.or(current.model).unwrap_or_else(|| "This model".into());
+                match models.set_fast(on).await {
+                    Ok(Some(tier)) => self.notice(
+                        &format!(
+                            "{} is on{}. /fast again turns it off.",
+                            tier.name,
+                            tier.description.map(|d| format!(": {d}")).unwrap_or_default()
+                        ),
+                        NoticeTone::Info,
+                    ),
+                    Ok(None) if on => self.notice(&format!("{name} has no faster tier to turn on."), NoticeTone::Info),
+                    Ok(None) => self.notice("Back to the standard tier.", NoticeTone::Info),
+                    Err(error) => self.error(&error),
+                }
+                return Ok(());
+            }
+            Effect::Model | Effect::Effort | Effect::Login | Effect::Logout => {
+                self.clear_editor();
+                let result = match command {
+                    "/model" => self.open_models().await,
+                    "/effort" => self.open_effort().await,
+                    "/login" => self.open_login().await,
+                    _ => self.open_logout().await,
                 };
                 if let Err(e) = result {
                     self.panel_failed(&e);
                 }
                 return Ok(());
             }
-        }
-        // A chat that keeps no conversations says so, rather than send these to the model as words.
-        if !self.can().conversations
-            && ["/resume", "/conversations", "/rename", "/fork"].into_iter().any(|verb| argument(command, verb).is_some())
-        {
-            self.clear_editor();
-            self.notice(&super::not_kept(), NoticeTone::Info);
-            return Ok(());
-        }
-        // A kept conversation: the list, or the one an id, the start of one, or a name gives (several: the list of them).
-        if let Some(word) =
-            argument(command, "/resume").or_else(|| argument(command, "/conversations")).filter(|_| self.can().conversations)
-        {
-            self.clear_editor();
-            let found = if word.is_empty() { None } else { Some(session.op(op::FindConversation { word: word.to_string() }).await?) };
-            let result = match found {
-                None => self.open_conversations(None).await,
-                Some(ConversationMatch::One(row)) if row.current => {
-                    self.notice("That's this conversation.", NoticeTone::Info);
-                    Ok(())
+            Effect::Recipes => {
+                self.clear_editor();
+                if let Err(e) = self.open_recipes().await {
+                    self.panel_failed(&e);
                 }
-                Some(ConversationMatch::One(row)) => {
-                    self.go_back_to(&row).await;
-                    Ok(())
-                }
-                Some(ConversationMatch::Several(_)) => self.open_conversations(Some(word)).await,
-                Some(ConversationMatch::Gone) => {
-                    self.notice("That conversation isn't kept any more.", NoticeTone::Info);
-                    Ok(())
-                }
-                Some(ConversationMatch::None) => {
-                    self.notice(&format!("No conversation {}; /resume lists them.", self.clean(&word, 60)), NoticeTone::Info);
-                    Ok(())
-                }
-            };
-            if let Err(e) = result {
-                self.panel_failed(&e);
             }
-            return Ok(());
-        }
-        // A name for this conversation, or (from the list) a kept one: /rename <id> <name>. Alone, the name it has now, to
-        // change in the box.
-        if let Some(words) = argument(command, "/rename").filter(|_| self.can().conversations) {
-            if words.is_empty() {
-                let title = session.op(op::ConversationNow {}).await?.map(|now| now.title).unwrap_or_default();
-                self.0.state.borrow_mut().editor.set(&format!("/rename {title}"));
+            Effect::Memory => {
+                self.clear_editor();
+                if let Err(e) = self.open_memory().await {
+                    self.panel_failed(&e);
+                }
+            }
+            Effect::Refused(Why::NotKept) => {
+                self.clear_editor();
+                self.notice(&super::not_kept(), NoticeTone::Info);
+                return Ok(());
+            }
+            Effect::Resume { word } => {
+                self.clear_editor();
+                let found = if word.is_empty() { None } else { Some(session.op(op::FindConversation { word: word.to_string() }).await?) };
+                let result = match found {
+                    None => self.open_conversations(None).await,
+                    Some(ConversationMatch::One(row)) if row.current => {
+                        self.notice("That's this conversation.", NoticeTone::Info);
+                        Ok(())
+                    }
+                    Some(ConversationMatch::One(row)) => {
+                        self.go_back_to(&row).await;
+                        Ok(())
+                    }
+                    Some(ConversationMatch::Several(_)) => self.open_conversations(Some(word)).await,
+                    Some(ConversationMatch::Gone) => {
+                        self.notice("That conversation isn't kept any more.", NoticeTone::Info);
+                        Ok(())
+                    }
+                    Some(ConversationMatch::None) => {
+                        self.notice(&format!("No conversation {}; /resume lists them.", self.clean(&word, 60)), NoticeTone::Info);
+                        Ok(())
+                    }
+                };
+                if let Err(e) = result {
+                    self.panel_failed(&e);
+                }
+                return Ok(());
+            }
+            Effect::Rename { words } => {
+                if words.is_empty() {
+                    let title = session.op(op::ConversationNow {}).await?.map(|now| now.title).unwrap_or_default();
+                    self.0.state.borrow_mut().editor.set(&format!("/rename {title}"));
+                    self.0.scheduler.request();
+                    return Ok(());
+                }
+                self.clear_editor();
+                let (first, rest) = words.split_once(' ').map(|(a, b)| (a, string::trim(b))).unwrap_or((words.as_str(), ""));
+                let kept = !rest.is_empty()
+                    && matches!(session.op(op::FindConversation { word: first.into() }).await?, ConversationMatch::One(row) if row.id == first);
+                let (id, name) = if kept { (Some(first), rest) } else { (None, words.as_str()) };
+                if session.op(op::RenameConversation { id: id.map(Into::into), name: Some(name.into()) }).await? {
+                    self.notice(&format!("Named “{}”.", self.clean(name, 60)), NoticeTone::Info);
+                } else {
+                    self.notice("That conversation isn't kept any more.", NoticeTone::Info);
+                }
+                return Ok(());
+            }
+            Effect::Fork { name } => {
+                self.clear_editor();
+                if self.busy() {
+                    self.notice("Kumi is still working: fork once it's done, or press esc to stop it.", NoticeTone::Info);
+                    return Ok(());
+                }
+                if session.op(op::ForkConversation { name: (!name.is_empty()).then(|| name.clone()) }).await?.is_none() {
+                    self.notice("Nothing to fork yet: ask something first.", NoticeTone::Info);
+                }
+                return Ok(());
+            }
+            Effect::Recipe => {
+                let (name, with) = match panels::recipe_command(command) {
+                    Ok(parsed) => parsed,
+                    Err(how) => {
+                        self.notice(&how, NoticeTone::Info);
+                        return Ok(());
+                    }
+                };
+                let recipes = session.op(op::Recipes {}).await?;
+                let lower = name.to_lowercase();
+                let Some(recipe) =
+                    recipes.iter().find(|r| r.name == name).or_else(|| recipes.iter().find(|r| r.name.to_lowercase() == lower))
+                else {
+                    self.notice(&format!("Kumi keeps no recipe called “{name}”; /recipes lists them."), NoticeTone::Info);
+                    return Ok(());
+                };
+                if let Some(problem) = panels::recipe_blanks_problem(recipe, &with) {
+                    self.notice(&problem, NoticeTone::Warn);
+                    return Ok(());
+                }
+                // The line stays in the box while Kumi works, to run once it's done.
+                if self.busy() {
+                    self.notice("Kumi is still working: press enter again once it's done, or esc to stop it.", NoticeTone::Info);
+                    return Ok(());
+                }
+                self.clear_editor();
+                self.run_recipe_now(recipe, with).await;
+                return Ok(());
+            }
+            Effect::Note => {
+                let Some((id, words)) = panels::note_command(command) else {
+                    self.notice("Give the note's id and its new words: /note p3 Prefers short reverbs on drums", NoticeTone::Info);
+                    return Ok(());
+                };
+                match session.op(op::ChangeNote { id: id.clone(), change: NoteChange::Text(words) }).await {
+                    Ok(Some(_)) => {
+                        self.clear_editor();
+                        self.notice(&format!("Changed note {id}."), NoticeTone::Info);
+                    }
+                    Ok(None) => self.notice(&format!("There's no note {id}; /memory lists them."), NoticeTone::Info),
+                    Err(error) => self.notice(&error.message(), NoticeTone::Warn),
+                }
+                return Ok(());
+            }
+            Effect::Stop => {
+                self.clear_editor();
+                if self.0.state.borrow().connection != ConnectionState::Connected {
+                    self.notice(
+                        &format!("{} isn't connected, so there's nothing for Kumi to stop.", crate::daw::words().app),
+                        NoticeTone::Info,
+                    );
+                    return Ok(());
+                }
+                if self.busy() {
+                    let _ = session.op(op::Cancel {}).await;
+                }
+                if !session.op(op::StopDaw {}).await? {
+                    self.notice(
+                        &format!("Kumi couldn't stop {0} just now; press space in {0} to stop it.", crate::daw::words().app),
+                        NoticeTone::Warn,
+                    );
+                }
+                return Ok(());
+            }
+            Effect::Daw => {
+                let Some(switch) = self.0.options.switch_daw.clone() else { return Ok(()) };
+                self.clear_editor();
+                match crate::daw::daw_command(&command["/daw".len()..]) {
+                    crate::daw::DawCommand::Say(words) => self.notice(&words, NoticeTone::Info),
+                    crate::daw::DawCommand::Switch(_, _) if self.busy() => {
+                        self.notice("Kumi is working; /daw once it's done (esc stops it).", NoticeTone::Info);
+                    }
+                    crate::daw::DawCommand::Switch(daw, words) => {
+                        self.notice(&words, NoticeTone::Info);
+                        switch(daw);
+                        self.reopen().await;
+                    }
+                }
+                return Ok(());
+            }
+            Effect::Update => {
+                self.clear_editor();
+                if let Err(e) = self.open_update().await {
+                    self.panel_failed(&e);
+                }
+                return Ok(());
+            }
+            Effect::Slots => {
+                self.clear_editor();
+                let words = command["/slots".len()..].to_string();
+                // One swap at a time: a model's fetch can take minutes.
+                if self.0.state.borrow().slots_check.is_some()
+                    && kumi_listening::slots::parse(&words) != Ok(kumi_listening::slots::Asked::Show)
+                {
+                    self.notice("Kumi is still trying a model for /slots: wait for it, or Esc stops it.", NoticeTone::Info);
+                    return Ok(());
+                }
+                // Its own stop, Esc: a model's download takes as long as it takes (a listening model's check has its own
+                // minute and a half). What's under way comes as notices (`slots-progress` events).
+                let id = {
+                    let mut state = self.0.state.borrow_mut();
+                    let id = state.next_slots;
+                    state.next_slots += 1;
+                    state.slots_check.get_or_insert(id);
+                    id
+                };
+                let said = session.op(op::Slots { id, words }).await;
+                let ended = self.0.state.borrow().slots_check == Some(id);
+                if ended {
+                    self.0.state.borrow_mut().slots_check = None;
+                }
+                match said {
+                    Ok(kumi_listening::slots::Said::Slots { lines, footer }) => {
+                        self.0.state.borrow_mut().transcript.add(Entry::News {
+                            title: "Model slots".into(),
+                            items: lines,
+                            footer: Some(footer),
+                        });
+                        self.0.scheduler.request();
+                    }
+                    Ok(kumi_listening::slots::Said::Done(text)) => self.notice(&text, NoticeTone::Info),
+                    Ok(kumi_listening::slots::Said::Refused(text)) => self.notice(&text, NoticeTone::Warn),
+                    Err(error) => self.notice(&error.to_string(), NoticeTone::Warn),
+                }
+                return Ok(());
+            }
+            Effect::Music => {
+                self.clear_editor();
+                self.music_command(&command["/music".len()..]).await;
+                return Ok(());
+            }
+            Effect::Map => {
+                self.clear_editor();
+                self.map_command(&command["/map".len()..]).await;
+                return Ok(());
+            }
+            Effect::Palette => {
+                self.clear_editor();
+                self.palette_command(&command["/palette".len()..]).await;
+                return Ok(());
+            }
+            Effect::Status => {
+                self.clear_editor();
+                let status = session.status();
+                let library = session.library().or_else(|| self.0.state.borrow().library.clone());
+                let library = library_line(library.as_ref());
+                let state = if status.state == TurnState::Idle { "Ready".into() } else { enum_name(&status.state) };
+                let turns = if let Some(max) = status.max_turns.filter(|n| *n != 0) {
+                    format!("{} of {max} turns", status.turns)
+                } else {
+                    format!("{} {}", status.turns, if status.turns == 1 { "turn" } else { "turns" })
+                };
+                self.notice(
+                    &format!(
+                        "{state} · {} · {} · {turns}{}{}{}",
+                        match self.0.state.borrow().focus.as_ref().and_then(|focus| focus.busy.clone()) {
+                            Some(why) => format!("{} is busy: {why}", crate::daw::words().app),
+                            None => format!("{} {}", crate::daw::words().app, enum_name(&status.connection)),
+                        },
+                        self.model_label().unwrap_or_else(|| "no model".into()),
+                        status.observation.as_ref().filter(|s| !s.is_empty()).map(|s| format!(" · {s}")).unwrap_or_default(),
+                        library.map(|l| format!(" · {l}")).unwrap_or_default(),
+                        self.tokens_used()
+                    ),
+                    NoticeTone::Info,
+                );
+                // Where Kumi's lines reach a producer working in the DAW (Live's say so in its own settings): its status bar, or
+                // none to write to.
+                let profile = crate::daw::profile();
+                if !matches!(profile.id, Some(kumi_types::daw::DawId::Ableton) | None) {
+                    let app = profile.words.app;
+                    self.notice(
+                        &if profile.caps.status_line {
+                            format!("While you work in {app}, Kumi's lines show in its status bar too.")
+                        } else {
+                            format!("{app} has no status bar Kumi can write to: while you work there, Kumi tells you by notification.")
+                        },
+                        NoticeTone::Info,
+                    );
+                }
+                if let Some(line) = remembered_line(session.op(op::Remembered {}).await?) {
+                    self.notice(&line, NoticeTone::Info);
+                }
+                if let Some(now) = session.op(op::ConversationNow {}).await? {
+                    self.notice(&conversation_line(&now, |text| self.clean(text, 60)), NoticeTone::Info);
+                }
+                return Ok(());
+            }
+            Effect::Btw => {
+                self.clear_editor();
+                let question = string::trim(&command[4..]);
+                if !question.is_empty() {
+                    self.ask(question);
+                } else {
+                    let len = self.0.state.borrow().asides.len();
+                    if len > 0 {
+                        self.open_overlay(AsidePanel { at: len - 1, scroll: 0 });
+                    } else {
+                        self.notice("Ask on the side with /btw and your question: Kumi answers from the conversation so far, without stopping what it's doing.",NoticeTone::Info);
+                    }
+                }
                 self.0.scheduler.request();
                 return Ok(());
             }
-            self.clear_editor();
-            let (first, rest) = words.split_once(' ').map(|(a, b)| (a, string::trim(b))).unwrap_or((words.as_str(), ""));
-            let kept = !rest.is_empty()
-                && matches!(session.op(op::FindConversation { word: first.into() }).await?, ConversationMatch::One(row) if row.id == first);
-            let (id, name) = if kept { (Some(first), rest) } else { (None, words.as_str()) };
-            if session.op(op::RenameConversation { id: id.map(Into::into), name: Some(name.into()) }).await? {
-                self.notice(&format!("Named “{}”.", self.clean(name, 60)), NoticeTone::Info);
-            } else {
-                self.notice("That conversation isn't kept any more.", NoticeTone::Info);
-            }
-            return Ok(());
-        }
-        // Carry on in a copy of this conversation, named or not; the original stays.
-        if let Some(name) = argument(command, "/fork").filter(|_| self.can().conversations) {
-            self.clear_editor();
-            if self.busy() {
-                self.notice("Kumi is still working: fork once it's done, or press esc to stop it.", NoticeTone::Info);
-                return Ok(());
-            }
-            if session.op(op::ForkConversation { name: (!name.is_empty()).then(|| name.clone()) }).await?.is_none() {
-                self.notice("Nothing to fork yet: ask something first.", NoticeTone::Info);
-            }
-            return Ok(());
-        }
-        // A recipe with its blanks filled runs straight away, with no model call; a line that can't run yet
-        // stays to be fixed.
-        if (command == "/recipe" || command.starts_with("/recipe ")) && self.can().run_recipe {
-            let (name, with) = match panels::recipe_command(command) {
-                Ok(parsed) => parsed,
-                Err(how) => {
-                    self.notice(&how, NoticeTone::Info);
-                    return Ok(());
-                }
-            };
-            let recipes = session.op(op::Recipes {}).await?;
-            let lower = name.to_lowercase();
-            let Some(recipe) = recipes.iter().find(|r| r.name == name).or_else(|| recipes.iter().find(|r| r.name.to_lowercase() == lower))
-            else {
-                self.notice(&format!("Kumi keeps no recipe called “{name}”; /recipes lists them."), NoticeTone::Info);
-                return Ok(());
-            };
-            if let Some(problem) = panels::recipe_blanks_problem(recipe, &with) {
-                self.notice(&problem, NoticeTone::Warn);
-                return Ok(());
-            }
-            // The line stays in the box while Kumi works, to run once it's done.
-            if self.busy() {
-                self.notice("Kumi is still working: press enter again once it's done, or esc to stop it.", NoticeTone::Info);
-                return Ok(());
-            }
-            self.clear_editor();
-            self.run_recipe_now(recipe, with).await;
-            return Ok(());
-        }
-        // A note's new words, from /memory's "Change the words", go straight to the note: no model call.
-        if (command == "/note" || command.starts_with("/note ")) && self.can().change_note {
-            let Some((id, words)) = panels::note_command(command) else {
-                self.notice("Give the note's id and its new words: /note p3 Prefers short reverbs on drums", NoticeTone::Info);
-                return Ok(());
-            };
-            match session.op(op::ChangeNote { id: id.clone(), change: NoteChange::Text(words) }).await {
-                Ok(Some(_)) => {
-                    self.clear_editor();
-                    self.notice(&format!("Changed note {id}."), NoticeTone::Info);
-                }
-                Ok(None) => self.notice(&format!("There's no note {id}; /memory lists them."), NoticeTone::Info),
-                Err(error) => self.notice(&error.message(), NoticeTone::Warn),
-            }
-            return Ok(());
-        }
-        if command == "/stop" && self.can().stop_daw {
-            self.clear_editor();
-            if self.0.state.borrow().connection != ConnectionState::Connected {
-                self.notice(
-                    &format!("{} isn't connected, so there's nothing for Kumi to stop.", crate::daw::words().app),
-                    NoticeTone::Info,
-                );
-                return Ok(());
-            }
-            if self.busy() {
-                let _ = session.op(op::Cancel {}).await;
-            }
-            if !session.op(op::StopDaw {}).await? {
-                self.notice(
-                    &format!("Kumi couldn't stop {0} just now; press space in {0} to stop it.", crate::daw::words().app),
-                    NoticeTone::Warn,
-                );
-            }
-            return Ok(());
-        }
-        if let Some(switch) = self.0.options.switch_daw.clone().filter(|_| command == "/daw" || command.starts_with("/daw ")) {
-            self.clear_editor();
-            match crate::daw::daw_command(&command["/daw".len()..]) {
-                crate::daw::DawCommand::Say(words) => self.notice(&words, NoticeTone::Info),
-                crate::daw::DawCommand::Switch(_, _) if self.busy() => {
-                    self.notice("Kumi is working; /daw once it's done (esc stops it).", NoticeTone::Info);
-                }
-                crate::daw::DawCommand::Switch(daw, words) => {
-                    self.notice(&words, NoticeTone::Info);
-                    switch(daw);
-                    self.reopen().await;
-                }
-            }
-            return Ok(());
-        }
-        if command == "/update" && self.0.options.updates.is_some() {
-            self.clear_editor();
-            if let Err(e) = self.open_update().await {
-                self.panel_failed(&e);
-            }
-            return Ok(());
-        }
-        if self.can().slots && (command == "/slots" || command.starts_with("/slots ")) {
-            self.clear_editor();
-            let words = command["/slots".len()..].to_string();
-            // One swap at a time: a model's fetch can take minutes.
-            if self.0.state.borrow().slots_check.is_some() && kumi_listening::slots::parse(&words) != Ok(kumi_listening::slots::Asked::Show)
-            {
-                self.notice("Kumi is still trying a model for /slots: wait for it, or Esc stops it.", NoticeTone::Info);
-                return Ok(());
-            }
-            // Its own stop, Esc: a model's download takes as long as it takes (a listening model's check has its own
-            // minute and a half). What's under way comes as notices (`slots-progress` events).
-            let id = {
-                let mut state = self.0.state.borrow_mut();
-                let id = state.next_slots;
-                state.next_slots += 1;
-                state.slots_check.get_or_insert(id);
-                id
-            };
-            let said = session.op(op::Slots { id, words }).await;
-            let ended = self.0.state.borrow().slots_check == Some(id);
-            if ended {
-                self.0.state.borrow_mut().slots_check = None;
-            }
-            match said {
-                Ok(kumi_listening::slots::Said::Slots { lines, footer }) => {
-                    self.0.state.borrow_mut().transcript.add(Entry::News {
-                        title: "Model slots".into(),
-                        items: lines,
-                        footer: Some(footer),
-                    });
-                    self.0.scheduler.request();
-                }
-                Ok(kumi_listening::slots::Said::Done(text)) => self.notice(&text, NoticeTone::Info),
-                Ok(kumi_listening::slots::Said::Refused(text)) => self.notice(&text, NoticeTone::Warn),
-                Err(error) => self.notice(&error.to_string(), NoticeTone::Warn),
-            }
-            return Ok(());
-        }
-        if self.can().music && (command == "/music" || command.starts_with("/music ")) {
-            self.clear_editor();
-            self.music_command(&command["/music".len()..]).await;
-            return Ok(());
-        }
-        if self.can().map && (command == "/map" || command.starts_with("/map ")) {
-            self.clear_editor();
-            self.map_command(&command["/map".len()..]).await;
-            return Ok(());
-        }
-        if self.can().palette && (command == "/palette" || command.starts_with("/palette ")) {
-            self.clear_editor();
-            self.palette_command(&command["/palette".len()..]).await;
-            return Ok(());
-        }
-        if command == "/status" {
-            self.clear_editor();
-            let status = session.status();
-            let library = session.library().or_else(|| self.0.state.borrow().library.clone());
-            let library = library_line(library.as_ref());
-            let state = if status.state == TurnState::Idle { "Ready".into() } else { enum_name(&status.state) };
-            let turns = if let Some(max) = status.max_turns.filter(|n| *n != 0) {
-                format!("{} of {max} turns", status.turns)
-            } else {
-                format!("{} {}", status.turns, if status.turns == 1 { "turn" } else { "turns" })
-            };
-            self.notice(
-                &format!(
-                    "{state} · {} · {} · {turns}{}{}{}",
-                    match self.0.state.borrow().focus.as_ref().and_then(|focus| focus.busy.clone()) {
-                        Some(why) => format!("{} is busy: {why}", crate::daw::words().app),
-                        None => format!("{} {}", crate::daw::words().app, enum_name(&status.connection)),
-                    },
-                    self.model_label().unwrap_or_else(|| "no model".into()),
-                    status.observation.as_ref().filter(|s| !s.is_empty()).map(|s| format!(" · {s}")).unwrap_or_default(),
-                    library.map(|l| format!(" · {l}")).unwrap_or_default(),
-                    self.tokens_used()
-                ),
-                NoticeTone::Info,
-            );
-            // Where Kumi's lines reach a producer working in the DAW (Live's say so in its own settings): its status bar, or
-            // none to write to.
-            let profile = crate::daw::profile();
-            if !matches!(profile.id, Some(kumi_types::daw::DawId::Ableton) | None) {
-                let app = profile.words.app;
-                self.notice(
-                    &if profile.caps.status_line {
-                        format!("While you work in {app}, Kumi's lines show in its status bar too.")
+            Effect::Message if now.busy => {
+                let when = {
+                    let mut state = self.0.state.borrow_mut();
+                    state.editor.clear();
+                    if state.current.is_none() && !state.pending_turn {
+                        state.activity = "getting ready".into();
+                    }
+                    if state.current.is_some() || state.pending_turn {
+                        "now"
                     } else {
-                        format!("{app} has no status bar Kumi can write to: while you work there, Kumi tells you by notification.")
-                    },
-                    NoticeTone::Info,
-                );
+                        "after"
+                    }
+                };
+                self.hold(raw, when);
+                return Ok(());
             }
-            if let Some(line) = remembered_line(session.op(op::Remembered {}).await?) {
-                self.notice(&line, NoticeTone::Info);
-            }
-            if let Some(now) = session.op(op::ConversationNow {}).await? {
-                self.notice(&conversation_line(&now, |text| self.clean(text, 60)), NoticeTone::Info);
-            }
-            return Ok(());
-        }
-        if (command == "/btw" || command.starts_with("/btw ")) && self.can().aside {
-            self.clear_editor();
-            let question = string::trim(&command[4..]);
-            if !question.is_empty() {
-                self.ask(question);
-            } else {
-                let len = self.0.state.borrow().asides.len();
-                if len > 0 {
-                    self.open_overlay(AsidePanel { at: len - 1, scroll: 0 });
-                } else {
-                    self.notice("Ask on the side with /btw and your question: Kumi answers from the conversation so far, without stopping what it's doing.",NoticeTone::Info);
-                }
-            }
-            self.0.scheduler.request();
-            return Ok(());
-        }
-        if self.busy() && !is_command(command) {
-            let when = {
-                let mut state = self.0.state.borrow_mut();
-                state.editor.clear();
-                if state.current.is_none() && !state.pending_turn {
-                    state.activity = "getting ready".into();
-                }
-                if state.current.is_some() || state.pending_turn {
-                    "now"
-                } else {
-                    "after"
-                }
-            };
-            self.hold(raw, when);
-            return Ok(());
-        }
-        // /goal's and /loop's control words, in any case and with trailing punctuation: never a goal or a request.
-        let goal_word = subcommand(command, "/goal");
-        let loop_word = subcommand(command, "/loop");
-        if matches!(goal_word.as_deref(), Some("pause" | "hold")) || loop_word.as_deref() == Some("pause") {
-            self.clear_editor();
-            if self.busy() {
-                self.cancel();
-            } else {
-                self.notice(
-                    if loop_word.is_some() { "There's no loop running to pause." } else { "There's no goal running to pause." },
-                    NoticeTone::Info,
-                );
-            }
-            return Ok(());
-        }
-        if matches!(goal_word.as_deref(), Some("stop" | "end" | "clear" | "cancel" | "done")) && self.can().stop_goal {
-            self.clear_editor();
-            if !session.op(op::StopGoal {}).await? {
-                self.notice("There's no goal to stop.", NoticeTone::Info);
-            }
-            return Ok(());
-        }
-        // A loop ends as Esc ends it; a sound-match search ends for good (paused ones too) and keeps its best.
-        if matches!(loop_word.as_deref(), Some("stop" | "end" | "cancel")) {
-            self.clear_editor();
-            if !(self.can().stop_loop && session.op(op::StopLoop {}).await?) {
+            effect @ (Effect::PauseGoal | Effect::PauseLoop) => {
+                self.clear_editor();
                 if self.busy() {
                     self.cancel();
                 } else {
-                    self.notice("There's no loop to stop.", NoticeTone::Info);
+                    self.notice(
+                        if effect == Effect::PauseLoop { "There's no loop running to pause." } else { "There's no goal running to pause." },
+                        NoticeTone::Info,
+                    );
                 }
             }
-            return Ok(());
-        }
-        // /goal alone while a goal works (a /goal objective, or a sound-match search) shows its tab.
-        let goal_running = {
-            let state = self.0.state.borrow();
-            state.goal.is_some() || state.objective.is_some()
-        };
-        if command == "/goal" && self.busy() && goal_running {
-            self.clear_editor();
-            self.0.tabs.show("goal");
-            // (W6-2: asked for, the drawer opens on it)
-            self.open_pane(super::drawer::DrawerTab::Tabs);
-            self.0.scheduler.request();
-            return Ok(());
-        }
-        if self.busy() {
-            self.notice(
-                &format!(
-                    "Kumi is still working: {} once it's done, or press esc to stop it first.",
-                    command.split_whitespace().next().unwrap_or("")
-                ),
-                NoticeTone::Info,
-            );
-            return Ok(());
-        }
-        if (command == "/goal" || command.starts_with("/goal ")) && self.can().goal {
-            self.clear_editor();
-            let text = string::trim(&command[5..]);
-            let clean = string::trim(&self.clean(&raw, usize::MAX)).to_string();
-            {
-                let mut state = self.0.state.borrow_mut();
-                if !text.is_empty() {
-                    state.transcript.add(Entry::User { text: clean });
+            Effect::StopGoal => {
+                self.clear_editor();
+                if !session.op(op::StopGoal {}).await? {
+                    self.notice("There's no goal to stop.", NoticeTone::Info);
                 }
-                state.activity = if !text.is_empty() { "setting up the goal" } else { "picking the goal up" }.into();
-                state.pending_turn = true;
-            }
-            self.0.tabs.show("goal");
-            self.0.scheduler.request();
-            if let Err(error) = session.op(op::Goal { text: (!text.is_empty()).then(|| text.to_string()) }).await {
-                self.0.state.borrow_mut().pending_turn = false;
-                if !self.0.state.borrow().closing {
-                    self.error(&error);
-                }
-            }
-            self.0.scheduler.request();
-            return Ok(());
-        }
-        // /loop goes to the session as a request: it runs it in judged rounds until the goal is met (on its own, it
-        // picks a paused sound-match search back up).
-        if command == "/loop" || command.starts_with("/loop ") {
-            self.clear_editor();
-            self.send(&raw).await;
-            return Ok(());
-        }
-        if command == "/undo" {
-            self.clear_editor();
-            self.undo(None).await;
-            return Ok(());
-        }
-        if command == "/copy" {
-            self.clear_editor();
-            self.copy_last_answer();
-            return Ok(());
-        }
-        // This conversation as a file: the choices, or the one named (copy, md, html, json).
-        if let Some(words) = argument(command, "/export") {
-            self.clear_editor();
-            self.export_as(&words).await;
-            return Ok(());
-        }
-        if command == "/share" {
-            self.clear_editor();
-            self.share().await;
-            return Ok(());
-        }
-        if let Some((willington, on)) = self.willington().filter(|_| command == "/willington") {
-            self.clear_editor();
-            match (willington.set)(!on).await {
-                Ok(said) => {
-                    self.0.state.borrow_mut().willington_off = on;
-                    self.notice(said, NoticeTone::Info);
-                    // The bridge picks the switch up within a second; the model, from the next message.
-                    session.op(op::Reconfigure {}).await?;
-                }
-                Err(error) => self.notice(
-                    &format!("Kumi couldn't turn Willington's bindings {}: {error}", if on { "off" } else { "on" }),
-                    NoticeTone::Warn,
-                ),
-            }
-            self.0.scheduler.request();
-            return Ok(());
-        }
-        self.clear_editor();
-        self.0.state.borrow_mut().view.follow();
-        let result = if command == "/refresh" {
-            self.0.state.borrow_mut().activity = "reading your Set".into();
-            session.op(op::Refresh {}).await
-        } else if let Some(name) = argument(command, "/new") {
-            {
-                let mut state = self.0.state.borrow_mut();
-                state.activity = "starting fresh".into();
-                if !state.transcript.is_empty() {
-                    state.transcript.add(Entry::Divider { text: "New conversation. Kumi won't use what's above".into() });
-                }
-                state.current = None;
-                state.watching = false;
-                // (W6-1: a fresh conversation fills the model's context anew)
-                state.last_call = None;
-            }
-            let started = session.op(op::NewConversation {}).await;
-            // Its name, kept with it from its first save.
-            if started.is_ok() && !name.is_empty() {
-                if self.can().conversations {
-                    session.op(op::RenameConversation { id: None, name: Some(name.clone()) }).await?;
-                } else {
-                    self.notice(&super::not_kept(), NoticeTone::Info);
-                }
-            }
-            started
-        } else if command == "/reconnect" && self.can().reconnect {
-            self.0.state.borrow_mut().activity = format!("connecting to {}", crate::daw::words().app);
-            let result = session.op(op::Reconnect {}).await;
-            // REAPER's and Renoise's integrations retire their rows as they close, each in its DAW's words.
-            if result.is_ok() && crate::daw::current().id() == kumi_types::daw::DawId::Ableton {
-                for change in self.0.state.borrow_mut().records.changes_mut() {
-                    if matches!(change.state, ChangeState::Applied | ChangeState::Unsure) {
-                        change.state = ChangeState::Expired;
-                        change.note = Some("Kumi reconnected to Live since, so it can't undo this; Live's own undo still can.".into());
-                    }
-                }
-            }
-            result
-        } else if is_command(command) {
-            self.notice(
-                &format!("There's no {} command. Type / to see them.", command.split_whitespace().next().unwrap_or("")),
-                NoticeTone::Info,
-            );
-            Ok(())
-        } else {
-            let text = string::trim(&self.clean(&shown, usize::MAX)).to_string();
-            {
-                let mut state = self.0.state.borrow_mut();
-                state.transcript.add(Entry::User { text });
-                state.last_sent = Some(raw.clone());
-            }
-            if self.instant(&raw).await {
                 return Ok(());
             }
-            self.send(&raw).await;
-            return Ok(());
-        };
+            Effect::StopLoop => {
+                self.clear_editor();
+                if !(self.can().stop_loop && session.op(op::StopLoop {}).await?) {
+                    if self.busy() {
+                        self.cancel();
+                    } else {
+                        self.notice("There's no loop to stop.", NoticeTone::Info);
+                    }
+                }
+                return Ok(());
+            }
+            Effect::ShowGoal => {
+                self.clear_editor();
+                self.0.tabs.show("goal");
+                // (W6-2: asked for, the drawer opens on it)
+                self.open_pane(super::drawer::DrawerTab::Tabs);
+                self.0.scheduler.request();
+                return Ok(());
+            }
+            Effect::Refused(Why::Busy { verb }) => {
+                self.notice(&format!("Kumi is still working: {} once it's done, or press esc to stop it first.", verb), NoticeTone::Info);
+                return Ok(());
+            }
+            Effect::Goal => {
+                self.clear_editor();
+                let text = string::trim(&command[5..]);
+                let clean = string::trim(&self.clean(&raw, usize::MAX)).to_string();
+                {
+                    let mut state = self.0.state.borrow_mut();
+                    if !text.is_empty() {
+                        state.transcript.add(Entry::User { text: clean });
+                    }
+                    state.activity = if !text.is_empty() { "setting up the goal" } else { "picking the goal up" }.into();
+                    state.pending_turn = true;
+                }
+                self.0.tabs.show("goal");
+                self.0.scheduler.request();
+                if let Err(error) = session.op(op::Goal { text: (!text.is_empty()).then(|| text.to_string()) }).await {
+                    self.0.state.borrow_mut().pending_turn = false;
+                    if !self.0.state.borrow().closing {
+                        self.error(&error);
+                    }
+                }
+                self.0.scheduler.request();
+                return Ok(());
+            }
+            Effect::Loop => {
+                self.clear_editor();
+                self.send(&raw).await;
+                return Ok(());
+            }
+            Effect::Undo => {
+                self.clear_editor();
+                self.undo(None).await;
+                return Ok(());
+            }
+            Effect::Copy => {
+                self.clear_editor();
+                self.copy_last_answer();
+                return Ok(());
+            }
+            Effect::Export { words } => {
+                self.clear_editor();
+                self.export_as(&words).await;
+                return Ok(());
+            }
+            Effect::Share => {
+                self.clear_editor();
+                self.share().await;
+                return Ok(());
+            }
+            Effect::Willington => {
+                let Some((willington, on)) = self.willington() else { return Ok(()) };
+                self.clear_editor();
+                match (willington.set)(!on).await {
+                    Ok(said) => {
+                        self.0.state.borrow_mut().willington_off = on;
+                        self.notice(said, NoticeTone::Info);
+                        // The bridge picks the switch up within a second; the model, from the next message.
+                        session.op(op::Reconfigure {}).await?;
+                    }
+                    Err(error) => self.notice(
+                        &format!("Kumi couldn't turn Willington's bindings {}: {error}", if on { "off" } else { "on" }),
+                        NoticeTone::Warn,
+                    ),
+                }
+                self.0.scheduler.request();
+                return Ok(());
+            }
+            Effect::Refresh => {
+                self.ready_for_more();
+                let result = {
+                    self.0.state.borrow_mut().activity = "reading your Set".into();
+                    session.op(op::Refresh {}).await
+                };
+                self.settled(result);
+            }
+            Effect::New { name } => {
+                self.ready_for_more();
+                let result = {
+                    {
+                        let mut state = self.0.state.borrow_mut();
+                        state.activity = "starting fresh".into();
+                        if !state.transcript.is_empty() {
+                            state.transcript.add(Entry::Divider { text: "New conversation. Kumi won't use what's above".into() });
+                        }
+                        state.current = None;
+                        state.watching = false;
+                        // (W6-1: a fresh conversation fills the model's context anew)
+                        state.last_call = None;
+                    }
+                    let started = session.op(op::NewConversation {}).await;
+                    // Its name, kept with it from its first save.
+                    if started.is_ok() && !name.is_empty() {
+                        if self.can().conversations {
+                            session.op(op::RenameConversation { id: None, name: Some(name.clone()) }).await?;
+                        } else {
+                            self.notice(&super::not_kept(), NoticeTone::Info);
+                        }
+                    }
+                    started
+                };
+                self.settled(result);
+            }
+            Effect::Reconnect => {
+                self.ready_for_more();
+                let result = {
+                    self.0.state.borrow_mut().activity = format!("connecting to {}", crate::daw::words().app);
+                    let result = session.op(op::Reconnect {}).await;
+                    // REAPER's and Renoise's integrations retire their rows as they close, each in its DAW's words.
+                    if result.is_ok() && crate::daw::current().id() == kumi_types::daw::DawId::Ableton {
+                        for change in self.0.state.borrow_mut().records.changes_mut() {
+                            if matches!(change.state, ChangeState::Applied | ChangeState::Unsure) {
+                                change.state = ChangeState::Expired;
+                                change.note =
+                                    Some("Kumi reconnected to Live since, so it can't undo this; Live's own undo still can.".into());
+                            }
+                        }
+                    }
+                    result
+                };
+                self.settled(result);
+            }
+            Effect::Unknown { name } => {
+                self.ready_for_more();
+                let result = {
+                    self.notice(&format!("There's no {} command. Type / to see them.", name), NoticeTone::Info);
+                    Ok(())
+                };
+                self.settled(result);
+            }
+            Effect::Message => {
+                self.ready_for_more();
+                let text = string::trim(&self.clean(&shown, usize::MAX)).to_string();
+                {
+                    let mut state = self.0.state.borrow_mut();
+                    state.transcript.add(Entry::User { text });
+                    state.last_sent = Some(raw.clone());
+                }
+                if self.instant(&raw).await {
+                    return Ok(());
+                }
+                self.send(&raw).await;
+                return Ok(());
+            }
+        }
+        Ok(())
+    }
+    /// The box cleared and the conversation back at its latest, as a line runs.
+    fn ready_for_more(&self) {
+        self.clear_editor();
+        self.0.state.borrow_mut().view.follow();
+    }
+    /// What a line asked of the session, settled: what went wrong said (unless Kumi is closing), and the screen drawn.
+    fn settled(&self, result: Result<(), RuntimeError>) {
         if let Err(error) = result {
             self.0.state.borrow_mut().pending_turn = false;
             if !self.0.state.borrow().closing {
@@ -1235,7 +1243,6 @@ impl TuiApp {
             }
         }
         self.0.scheduler.request();
-        Ok(())
     }
     fn clear_editor(&self) {
         self.0.state.borrow_mut().editor.clear();
@@ -1257,7 +1264,7 @@ impl TuiApp {
         self.0.state.borrow_mut().editor.erase();
     }
     /// /willington, with whether the bindings are on, while the bridge in Live carries Willington.
-    fn willington(&self) -> Option<(kumi_daw::provider::Toggle, bool)> {
+    pub(super) fn willington(&self) -> Option<(kumi_daw::provider::Toggle, bool)> {
         let willington = self.0.options.willington.clone()?;
         let on = (willington.on)()?;
         Some((willington, on))
@@ -1512,76 +1519,14 @@ fn copied_words(text: &str, here: bool, iterm: bool) -> String {
     let what = if lines > 1 { format!(" {lines} lines") } else { String::new() };
     format!("Copied{what} if the terminal allows it · or {}-drag", if iterm { "option" } else { "shift" })
 }
-/// A command's words after its name (`/rename Night drive`): empty when there are none, None when the line isn't it.
-pub(super) fn argument(command: &str, name: &str) -> Option<String> {
-    let rest = command.strip_prefix(name)?;
-    (rest.is_empty() || rest.starts_with(char::is_whitespace)).then(|| string::trim(rest).to_string())
+
+/// How many of the lines sent last the `/` menu looks through for the commands used lately.
+const RECENT_LOOK: usize = 200;
+
+/// What a command does, as the menu and the help say it: in the DAW's words (Live's as written, for Live).
+pub(super) fn about(command: &Command) -> String {
+    command.about(crate::daw::words(), crate::daw::current().id() == kumi_types::daw::DawId::Ableton)
 }
 fn enum_name(value: &impl serde::Serialize) -> String {
     serde_json::to_value(value).ok().and_then(|v| v.as_str().map(str::to_string)).unwrap_or_default()
-}
-pub(super) struct Command {
-    pub name: &'static str,
-    pub about: &'static str,
-}
-impl Command {
-    /// What the menu says the command does, in the DAW's words (Live's as written, for Live).
-    pub(super) fn about(&self) -> String {
-        let words = crate::daw::words();
-        let live = crate::daw::current().id() == kumi_types::daw::DawId::Ableton;
-        match self.name {
-            "/resume" => format!("Go back to a kept conversation, this {0}'s or any {0}'s: /resume <id or name>", words.place),
-            "/reconnect" => format!("Connect to {} again, keeping the conversation", words.app),
-            "/stop" if !live => format!("Stop {}: the transport and recording", words.app),
-            "/refresh" => format!("Read your {} {} again", words.app, words.place),
-            _ => self.about.to_string(),
-        }
-    }
-}
-
-pub(super) const COMMANDS: &[Command] = &[
-    Command { name: "/new", about: "Start a fresh conversation (the last one is kept); /new <name> names it" },
-    Command { name: "/btw", about: "Ask something on the side, without interrupting Kumi" },
-    Command { name: "/voice", about: "Talk instead of typing: ctrl+t, and how it listens" },
-    Command { name: "/resume", about: "Go back to a kept conversation, this Set's or any Set's: /resume <id or name>" },
-    Command { name: "/conversations", about: "The same as /resume" },
-    Command { name: "/rename", about: "Name this conversation: /rename <name>" },
-    Command { name: "/fork", about: "Carry on in a copy of this conversation; the original stays" },
-    Command { name: "/reconnect", about: "Connect to Live again, keeping the conversation" },
-    Command { name: "/daw", about: "Which DAW Kumi works with; /daw <name> opens Kumi again with another" },
-    Command { name: "/undo", about: "Undo Kumi's last change" },
-    Command { name: "/stop", about: "Stop Live: clips, the transport and recording" },
-    Command { name: "/refresh", about: "Read your Live Set again" },
-    Command { name: "/copy", about: "Copy Kumi's last answer" },
-    Command { name: "/export", about: "This conversation as a file: choose, or /export copy, md, html or json (for another Kumi)" },
-    Command { name: "/share", about: "Save this conversation as a web page that opens anywhere, to send" },
-    Command { name: "/model", about: "Choose the model Kumi talks to" },
-    Command { name: "/effort", about: "How hard the model thinks" },
-    Command { name: "/fast", about: "The model's faster tier, when its provider offers one" },
-    Command { name: "/willington", about: "Willington's bindings in Live: macro mapping, zones" },
-    Command { name: "/slots", about: "Which model does each listening job: /slots listening gemini, /slots back <job>" },
-    Command { name: "/palette", about: "The sounds you gathered (Enter on /map): list, new, use, rename, forget; strict or loose" },
-    Command { name: "/music", about: "Your own music, which Kumi learns your taste from: folders, songs, pause, forget" },
-    Command { name: "/map", about: "Your sounds and songs as a map: hear a point, find more like it; /map open in the browser" },
-    Command { name: "/login", about: "Sign in to a provider" },
-    Command { name: "/loop", about: "Listen, judge and adjust in rounds until the goal is met: /loop <what>, then stop" },
-    Command { name: "/goal", about: "Keep at one goal until it's met: /goal <what>, then resume, edit, pause, clear" },
-    Command { name: "/memory", about: "What Kumi remembers" },
-    Command { name: "/note", about: "Change a note's words: /note <id> <new words>" },
-    Command { name: "/recipes", about: "Your saved ways of working" },
-    Command { name: "/recipe", about: "Run a recipe now: /recipe <name> blank=value …" },
-    Command { name: "/jobs", about: "What's running in the background: see, stop or run one again" },
-    Command { name: "/logout", about: "Sign out of a provider" },
-    Command { name: "/status", about: "What Kumi is connected to" },
-    Command { name: "/update", about: "Get the newest Kumi" },
-    Command { name: "/changelog", about: "What's new in Kumi" },
-    Command { name: "/help", about: "Keys and commands" },
-    Command { name: "/quit", about: "Close Kumi" },
-];
-
-/// A command's subcommand words, read as the session reads them (any case, trailing punctuation aside): `/goal Pause.`
-/// is `pause`. None when the line isn't that command.
-fn subcommand(command: &str, name: &str) -> Option<String> {
-    let rest = command.strip_prefix(name)?;
-    (rest.is_empty() || rest.starts_with(char::is_whitespace)).then(|| kumi_agent::core::goal_mode::command_word(rest))
 }

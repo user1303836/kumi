@@ -75,6 +75,7 @@ mod tui_composer;
 mod tui_drawer;
 mod tui_jobs;
 mod tui_map;
+mod tui_menu;
 mod tui_music;
 mod tui_own_bodies;
 mod tui_palette;
