@@ -165,12 +165,14 @@ async fn tui_states(daw: DawId, label: &str, focuses: Vec<(serde_json::Value, Op
     found.screen("forgetting taste", &h);
     h.type_text("\x1b").await;
     settle(&h).await;
-    // /refresh, while it reads the project.
-    c.set("refresh-wait", json!(400));
+    // /refresh, while it reads the project (held until it's seen).
+    let reading = format!("reading your {}", kumi::daw::words().place);
+    c.set("refresh-hold", json!(true));
     h.type_text("/refresh\r").await;
-    delay(60).await;
+    h.wait_for(&reading).await;
     found.screen("/refresh", &h);
-    delay(500).await;
+    c.unset("refresh-hold");
+    h.wait_until_hidden(&reading).await;
     settle(&h).await;
     // The requests to take back, then what's asked before one is (the newest offers a copy; the older one names what
     // stays as it is), then what taking it back says.

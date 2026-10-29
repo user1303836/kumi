@@ -172,6 +172,11 @@ impl Control {
     pub fn get<T: serde::de::DeserializeOwned>(&self, key: &str) -> Option<T> {
         self.extra.borrow().get(key).cloned().map(|v| serde_json::from_value(v).unwrap())
     }
+    pub fn unset(&self, key: &str) {
+        if let Some(extra) = self.extra.borrow_mut().as_object_mut() {
+            extra.remove(key);
+        }
+    }
     pub fn enabled(&self, key: &str) -> bool {
         self.extra.borrow().get(key).is_some()
     }
@@ -228,9 +233,9 @@ impl SessionController for Control {
     }
     async fn refresh(&self) -> Result<(), RuntimeError> {
         self.call("refresh");
-        // Held this many milliseconds, as a big project takes to read, so what the screen says meanwhile can be seen.
-        if let Some(ms) = self.get::<u64>("refresh-wait") {
-            delay(ms).await;
+        // Held while `refresh-hold` is set, as a big project takes to read, so what the screen says meanwhile can be seen.
+        while self.enabled("refresh-hold") {
+            delay(5).await;
         }
         Ok(())
     }
