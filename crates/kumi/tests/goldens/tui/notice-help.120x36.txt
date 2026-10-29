@@ -1,7 +1,7 @@
   Kumi  ·  Night Drive                                                                                          ● Live
 
                                                                                   FOCUS
-   Keys and commands                                                ↓ 70 more     Night Drive
+   Keys and commands                                                ↓ 74 more     Night Drive
                                                                                   Your selection will show here
    Send and steer
      enter               Send. While Kumi works, it reads your message after
@@ -24,10 +24,10 @@
                          the tabs, it scrolls them)
      ctrl+home           The start of the conversation
      ctrl+end            Back to the latest
-     drag                Copy text as you let go; double-click for a word,
-                         triple-click for a line
-     shift+drag          Your terminal's own selection (option+drag in
-                         iTerm2)
+     ctrl+o              The conversation in detail, with what each step was
+                         given and gave back: / searches it, { } go from
+                         request to request, [ prints it into the terminal's
+                         scrollback, v opens it in your editor
 
 
 

@@ -314,6 +314,12 @@ impl TuiApp {
         if self.search_key(name, mods) {
             return;
         }
+        // W4-4: ctrl+o, the conversation in detail (conversation.details in W3-3's registry).
+        if ctrl && !alt && name == "o" {
+            self.0.tabs.leave();
+            self.open_details();
+            return;
+        }
         if ctrl && !alt && matches!(name, "r" | "g" | "s") {
             self.0.tabs.leave();
             self.0.state.borrow_mut().tree_cursor = None;

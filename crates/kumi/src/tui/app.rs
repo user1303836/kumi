@@ -2,6 +2,7 @@ mod helpers;
 pub use helpers::*;
 mod away;
 mod composer;
+mod details;
 pub use away::{AwaySettings, FrontApp, NotifierRunner};
 mod draw_live;
 mod draw_panel;
@@ -403,6 +404,9 @@ struct State {
     hits: Vec<Hit>,
     tabs_area: Option<Rect>,
     selection: Option<super::selection::Selection>,
+    /// The details' files opened in the producer's editor (`v`): kept until Kumi quits, as an editor that opens a window
+    /// may return before it reads them.
+    details_files: Vec<tempfile::TempPath>,
     /// Where the conversation is scrolled to.
     view: super::transcript_view::TranscriptView,
     page: i32,
@@ -590,6 +594,7 @@ impl State {
             hits: vec![],
             tabs_area: None,
             selection: None,
+            details_files: vec![],
             view: Default::default(),
             page: 10,
             menu_index: 0,
@@ -996,6 +1001,7 @@ impl TuiApp {
                 return self.done();
             }
             state.closing = true;
+            state.details_files.clear();
             state.suppress = true;
             state.stream.discard();
             // The producer quitting, not Kumi closing to open again (with another DAW, or updated) or failing to start.

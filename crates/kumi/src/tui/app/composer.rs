@@ -223,7 +223,7 @@ impl TuiApp {
 
     /// Taken back from the producer's editor: all of the screen is drawn again. Pictures go up again too, as a terminal
     /// may drop them with the screen they were on: those up are taken down, and what's shown is uploaded afresh.
-    fn taken_back(&self) {
+    pub(super) fn taken_back(&self) {
         let gone = std::mem::take(&mut self.0.state.borrow_mut().images).clear();
         self.0.tty.write(&gone);
         self.0.renderer.borrow_mut().invalidate();
