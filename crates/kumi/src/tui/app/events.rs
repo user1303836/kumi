@@ -911,7 +911,7 @@ impl TuiApp {
         if self.replaying() {
             return;
         }
-        if at_work && self.0.state.borrow().held.iter().any(|h| h.when == "now" && !h.taken) {
+        if at_work && self.0.state.borrow().held.iter().any(|h| h.when == "now" && !h.taken && !h.asked) {
             self.steer_held();
         }
         if carry_on {
@@ -1100,7 +1100,7 @@ impl TuiApp {
         }
     }
     pub(super) fn hold(&self, raw: String, shown: String, words: Composed, when: &'static str) {
-        self.0.state.borrow_mut().held.push(Held { text: raw, shown, words, when, taken: false });
+        self.0.state.borrow_mut().held.push(Held { text: raw, shown, words, when, taken: false, asked: false });
         if when == "now" {
             self.steer_held();
         }
@@ -1112,10 +1112,16 @@ impl TuiApp {
         }
         let held = self.0.state.borrow().held.clone();
         for (index, item) in held.into_iter().enumerate() {
-            if item.when == "now" && !item.taken {
+            if item.when == "now" && !item.taken && !item.asked {
+                // Asked until the answer says: a session on a thread of its own answers after the events meanwhile, and
+                // one that didn't take it is asked again at the next.
+                if let Some(current) = self.0.state.borrow_mut().held.get_mut(index) {
+                    current.asked = true;
+                }
                 self.when_answered(op::Steer { text: item.text.clone() }, move |app, taken| {
                     if let Some(current) = app.0.state.borrow_mut().held.get_mut(index).filter(|h| h.text == item.text) {
                         current.taken = taken.unwrap_or(false);
+                        current.asked = false;
                     }
                 });
             }

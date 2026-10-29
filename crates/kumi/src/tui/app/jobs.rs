@@ -359,13 +359,20 @@ impl TuiApp {
     }
 
     fn run_job_again(&self, id: u32) {
-        self.when_answered(op::RunJobAgain { id }, move |app, again| match again {
-            Ok(Ok(again)) => {
-                app.0.state.borrow_mut().jobs.remove(&id);
-                app.notice(&format!("Running it again as job {again}."), NoticeTone::Info);
+        // Asked once until it's answered (a session on a thread of its own answers a moment later).
+        if !self.0.state.borrow_mut().running_again.insert(id) {
+            return;
+        }
+        self.when_answered(op::RunJobAgain { id }, move |app, again| {
+            app.0.state.borrow_mut().running_again.remove(&id);
+            match again {
+                Ok(Ok(again)) => {
+                    app.0.state.borrow_mut().jobs.remove(&id);
+                    app.notice(&format!("Running it again as job {again}."), NoticeTone::Info);
+                }
+                Ok(Err(why)) => app.notice(&why, NoticeTone::Warn),
+                Err(error) => app.error(&error),
             }
-            Ok(Err(why)) => app.notice(&why, NoticeTone::Warn),
-            Err(error) => app.error(&error),
         });
         self.0.scheduler.request();
     }
@@ -420,13 +427,20 @@ impl TuiApp {
 
     /// Ctrl-b: what the answer is doing away from Live goes on in the background, and the answer carries on.
     pub(super) fn background_now(&self) {
-        self.when_answered(op::Background {}, |app, moved| match moved {
-            Ok(Ok(id)) => app.notice(
-                &format!("Moved to the background as job {id}: the answer carries on, and its report comes when it's done."),
-                NoticeTone::Info,
-            ),
-            Ok(Err(why)) => app.notice(&why, NoticeTone::Info),
-            Err(error) => app.error(&error),
+        // Asked once until it's answered, as a job run again is.
+        if std::mem::replace(&mut self.0.state.borrow_mut().backgrounding, true) {
+            return;
+        }
+        self.when_answered(op::Background {}, |app, moved| {
+            app.0.state.borrow_mut().backgrounding = false;
+            match moved {
+                Ok(Ok(id)) => app.notice(
+                    &format!("Moved to the background as job {id}: the answer carries on, and its report comes when it's done."),
+                    NoticeTone::Info,
+                ),
+                Ok(Err(why)) => app.notice(&why, NoticeTone::Info),
+                Err(error) => app.error(&error),
+            }
         });
         self.0.scheduler.request();
     }
@@ -531,9 +545,15 @@ impl Overlay<TuiApp> for JobPanel {
         let (inner, space) = (width - 4, area.box_top - 5);
         let mut lines: Vec<Line> = vec![];
         let (id, scroll) = (self.id, &mut self.scroll);
-        match app.session().job(id) {
+        // A session on a thread of its own sends a job's details a moment after they're first asked for: until then, its
+        // line as JOBS has it.
+        let detail = app.session().job(id).map(|detail| (detail, true)).or_else(|| {
+            let status = app.session().jobs().into_iter().find(|status| status.id == id)?;
+            Some((JobDetail { status, asked: String::new(), steps: vec![], report: None }, false))
+        });
+        match detail {
             None => lines.push(Line::new(format!("Job {id} is gone."), st::FAINT)),
-            Some(detail) => {
+            Some((detail, whole)) => {
                 let rows = app.job_lines(&detail, inner);
                 let mut rows = rows.into_iter();
                 if let Some((spans, right)) = rows.next() {
@@ -542,7 +562,7 @@ impl Overlay<TuiApp> for JobPanel {
                     title.right = right;
                     lines.push(title);
                 }
-                let body: Vec<_> = rows.collect();
+                let body: Vec<_> = if whole { rows.collect() } else { vec![] };
                 let room = (space - 4).clamp(3, 18);
                 *scroll = (*scroll).min(body.len() as i32 - room).max(0);
                 let shown = &body[*scroll as usize..(*scroll as usize + room as usize).min(body.len())];

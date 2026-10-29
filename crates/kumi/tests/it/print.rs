@@ -1,12 +1,17 @@
 //! `kumi -p`'s front end: one request, its answer's words on stdout (or each event as a JSON line with `--json`), what
-//! went wrong on stderr, and an exit code that says how it ended.
+//! went wrong on stderr, and an exit code that says how it ended, over a session in this thread or one of its own.
 use async_trait::async_trait;
+use futures::FutureExt;
 use kumi::{
     print::{Print, PrintOptions, ANSWERED, FAILED, STEP_LIMIT, STOPPED},
     terminal::Terminal,
     tui::tty::TtyOutput,
 };
-use kumi_agent::core::contracts::*;
+use kumi_agent::core::{
+    contracts::*,
+    protocol::InProcess,
+    threaded::{Build, Built, Threaded},
+};
 use kumi_types::contracts::ChangeRecord;
 use kumi_types::errors::{FailureKind, RuntimeError};
 use std::{cell::RefCell, rc::Rc};
@@ -120,7 +125,7 @@ fn state(state: TurnState) -> SessionEvent {
 fn print(fake: &Rc<Fake>, request: &str, json: bool) -> (Print, Rc<Out>, Rc<Out>) {
     let (out, err) = (Rc::new(Out::default()), Rc::new(Out::default()));
     let print = Print::new(PrintOptions {
-        controller: fake.clone(),
+        session: InProcess::new(fake.clone()),
         request: request.into(),
         json,
         out: out.clone(),
@@ -247,6 +252,42 @@ async fn a_second_ctrl_c_or_being_told_to_close_ends_it_while_the_answer_goes_on
                 }
                 assert_eq!(tokio::time::timeout(std::time::Duration::from_secs(5), running).await.unwrap().unwrap(), STOPPED);
                 assert_eq!(*fake.calls.borrow(), ["start", "submit:render the mix", "cancel", "close"], "told to close: {told_to_close}");
+            }
+        })
+        .await;
+}
+
+/// Over a session on a thread of its own, the answer's end (turn-complete, sent just before its Submit returns) is heard
+/// before the Submit's reply, so the exit code says it came in full. Many times: a reply that overtook the events sent
+/// before it would lose only sometimes.
+#[tokio::test(flavor = "current_thread")]
+async fn over_a_session_on_its_own_thread_an_answer_that_came_in_full_ends_with_0() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            for _ in 0..200 {
+                let build: Build = Box::new(|emit| {
+                    async move {
+                        let fake = answered(&["done"], StopReason::Completed);
+                        *fake.emit.borrow_mut() = Some(emit);
+                        Ok(Built::new(fake))
+                    }
+                    .boxed_local()
+                });
+                let session = Threaded::spawn(build).await.unwrap();
+                let (out, err) = (Rc::new(Out::default()), Rc::new(Out::default()));
+                let print = Print::new(PrintOptions {
+                    session: session.clone(),
+                    request: "make it louder".into(),
+                    json: false,
+                    out: out.clone(),
+                    err: err.clone(),
+                    secrets: vec![],
+                    instant: false,
+                    startup_notice: None,
+                });
+                assert_eq!(print.run().await, ANSWERED, "{}", err.0.borrow());
+                assert_eq!(*out.0.borrow(), "done\n");
+                assert!(session.close_thread().await);
             }
         })
         .await;

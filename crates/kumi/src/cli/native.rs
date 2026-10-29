@@ -46,6 +46,9 @@ pub struct CliIo {
     pub reopen: Option<Rc<dyn Fn(Vec<String>) -> LocalBoxFuture<'static, i32>>>,
     /// Which DAWs are on this computer, for /daw to offer (tests); else the DAWs' own detection says.
     pub daws_here: Option<crate::daw::Here>,
+    /// The session on a thread of its own, whichever the front end (the app's). Tests build theirs in this one unless they
+    /// ask for this, and one with stand-ins (`Answers`) always does.
+    pub threaded: bool,
     exit_after_reopen: Rc<Cell<bool>>,
 }
 impl CliIo {
@@ -60,6 +63,7 @@ impl CliIo {
             probe: false,
             reopen: None,
             daws_here: None,
+            threaded: false,
             exit_after_reopen: Rc::new(Cell::new(false)),
         }
     }
@@ -517,6 +521,7 @@ pub fn main_with(answers: impl Into<Answers>) -> i32 {
     io.args = kumi_common::env::args().skip(1).collect();
     io.signals = true;
     io.probe = true;
+    io.threaded = true;
     if let Ok(executable) = std::env::current_exe() {
         if let Err(error) = install::ensure_native_launcher(&io.env, &executable) {
             io.err.write(&format!("Kumi: could not update its launcher: {error}\n"));

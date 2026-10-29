@@ -170,6 +170,10 @@ impl Answers {
         Self(Rc::new(answers))
     }
     /// The answer of type `T`, when there's one.
+    /// Whether there are none: the app has none for a session (each DAW's own integration starts there).
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
     pub fn get<T: 'static>(&self) -> Option<&T> {
         self.0.iter().find(|(kind, _)| *kind == TypeId::of::<T>()).and_then(|(_, answer)| answer.downcast_ref())
     }

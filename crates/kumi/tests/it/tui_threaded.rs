@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use futures::FutureExt;
 use kumi_agent::core::{
     contracts::*,
-    threaded::{Build, Threaded},
+    threaded::{Build, Built, Threaded},
 };
 use kumi_types::{contracts::ChangeRecord, errors::RuntimeError};
 use std::{
@@ -66,8 +66,7 @@ async fn a_key_draws_at_once_while_the_sessions_thread_is_busy() {
         .run_until(async {
             let busy = Arc::new(AtomicBool::new(false));
             let working = busy.clone();
-            let build: Build =
-                Box::new(move |_| async move { Ok(Rc::new(Busy { busy: working }) as Rc<dyn SessionController>) }.boxed_local());
+            let build: Build = Box::new(move |_| async move { Ok(Built::new(Rc::new(Busy { busy: working }))) }.boxed_local());
             let h = Harness::on(120, 36, Threaded::spawn(build).await.unwrap(), |_| {});
             h.start().await;
             h.input.write("make the bass darker\r");

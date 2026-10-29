@@ -6,7 +6,7 @@ use futures::{future::LocalBoxFuture, FutureExt};
 use kumi_agent::core::{
     contracts::*,
     phrases,
-    protocol::{op, InProcess, SessionHandle},
+    protocol::{op, SessionHandle},
 };
 use std::{
     cell::{Cell, RefCell},
@@ -25,7 +25,8 @@ pub const STEP_LIMIT: i32 = 3;
 pub const STOPPED: i32 = 130;
 
 pub struct PrintOptions {
-    pub controller: Rc<dyn SessionController>,
+    /// The session, on a thread of its own or in this one: everything it says comes to [`Print`] through it.
+    pub session: Rc<dyn SessionHandle>,
     pub request: String,
     pub json: bool,
     pub out: Rc<dyn TtyOutput>,
@@ -60,9 +61,9 @@ struct Inner {
 
 impl Print {
     pub fn new(options: PrintOptions) -> Print {
-        let session: Rc<dyn SessionHandle> = InProcess::new(options.controller.clone());
+        let session = options.session.clone();
         let words = RefCell::new(StreamingText::new(&options.secrets));
-        Print(Rc::new(Inner {
+        let print = Print(Rc::new(Inner {
             session,
             options,
             words,
@@ -71,7 +72,14 @@ impl Print {
             failed: Cell::new(false),
             stopping: Cell::new(false),
             done_waiting: Notify::new(),
-        }))
+        }));
+        let heard = Rc::downgrade(&print.0);
+        print.0.session.listen(Rc::new(move |event| {
+            if let Some(inner) = heard.upgrade() {
+                Print(inner).handle_event(event);
+            }
+        }));
+        print
     }
 }
 

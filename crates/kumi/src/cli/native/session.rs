@@ -16,10 +16,12 @@ use kumi_agent::{
         file_sync::FileSync,
         jobs::{create_job_store, DEFAULT_MAX_JOBS, WORKER_STEPS},
         memory::MemoryStoreOptions,
+        protocol::{op, InProcess, SessionHandle},
         session::{JobsOptions, VideoDirectories},
         session_log::SessionLog,
         store_backed::{SqliteMemoryStore, SqlitePlaybookStore, SqliteTechniqueStore},
         store_client::StoreClient,
+        threaded::{Build, Built, Threaded},
     },
     *,
 };
@@ -27,9 +29,12 @@ use kumi_ai::auth::store::{open_credential_store, Credential, CredentialStore};
 use kumi_library::{create_library, LibraryOptions};
 use kumi_listening::slots;
 use kumi_media::programs::{configure_programs, ProgramDefaults};
-use kumi_types::errors::KumiError;
-use kumi_types::errors::SetupFailure;
-use std::{cell::Cell, rc::Weak, sync::Arc};
+use kumi_types::{contracts::ChangeRecord, errors::KumiError, errors::SetupFailure};
+use std::{
+    cell::Cell,
+    rc::Weak,
+    sync::{Arc, Mutex, PoisonError},
+};
 struct UnavailableKernel {
     error: RuntimeError,
     checkpoint: Option<KernelCheckpoint>,
@@ -85,12 +90,13 @@ struct Looked {
 /// open instead of the session's own, `current` ([`crate::daw::to_follow`]), and the screen is handed it: it closes Kumi,
 /// to open again with that DAW, once nothing would be lost, and until then the next look hands it again. A DAW that was
 /// open beside the session's own (`open_at_start`, then what the looks see) is handed only once the session's own has
-/// been gone `gone_ms`. Ends once handed over, or when the session or the screen has gone.
+/// been gone `gone_ms`. Ends once handed over, or when the session or the screen has gone. The session is read through
+/// its handle, as the screen reads it.
 async fn follow_the_daw<L, F>(
     current: kumi_types::daw::DawId,
     open_at_start: Vec<kumi_types::daw::DawId>,
     look: L,
-    controller: Rc<RefCell<Option<Weak<dyn SessionController>>>>,
+    session: Weak<dyn SessionHandle>,
     terminal: Rc<RefCell<Option<Weak<dyn Terminal>>>>,
     look_ms: u64,
     gone_ms: u64,
@@ -104,7 +110,7 @@ async fn follow_the_daw<L, F>(
     let mut looks: u32 = 0;
     loop {
         tokio::time::sleep(std::time::Duration::from_millis(look_ms)).await;
-        let Some(session) = controller.borrow().as_ref().and_then(Weak::upgrade) else { break };
+        let Some(session) = session.upgrade() else { break };
         let connected = session.status().connection == ConnectionState::Connected;
         drop(session);
         looks = looks.wrapping_add(1);
@@ -238,81 +244,116 @@ async fn connect_when_live_answers<F, A, O, B>(
 fn live_words() -> WatchWords {
     crate::daw::provider(kumi_types::daw::DawId::Ableton).expect("Live is registered").watch_words()
 }
-pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<String>, answers: Answers) -> Result<i32, RuntimeError> {
-    let (inference, bridge_config, bridge_missing, resume, daw, print) = match config {
-        AppConfig::InferenceOnly { inference, bridge_missing, resume, daw, print } => {
-            (inference, None, bridge_missing.unwrap_or(false), resume, daw, print)
-        }
-        AppConfig::Live { inference, bridge_config, resume, daw, print } => (inference, Some(bridge_config), false, resume, daw, print),
-        _ => unreachable!(),
-    };
-    // The DAW this session works with: the one chosen (config), else Live.
-    let provider = crate::daw::provider(daw.unwrap_or(kumi_types::daw::DawId::Ableton)).expect("a chosen DAW is registered");
-    crate::daw::work_with(provider.id());
-    // The DAW used last decides only among several bridges: a producer with one (Live alone) never gets the file.
-    if bridge_config.is_some() && crate::daw::providers().into_iter().filter(|p| p.bridge_installed(&io.env)).count() > 1 {
-        crate::daw::remember_used(provider.id(), &io.env);
+/// The session as the DAW's first-run setup reaches it, on this thread (the session may be on one of its own): setup puts
+/// the bridge it found where the session's integration starts from, and reconnects the session; it asks what's open,
+/// and how the session is. It asks nothing else of a session.
+struct SessionForSetup {
+    session: Weak<dyn SessionHandle>,
+    /// Where setup puts the bridge it found ...
+    bridge: Rc<RefCell<Option<String>>>,
+    /// ... and where the session's integration reads it, from either thread.
+    shared: Arc<Mutex<Option<String>>>,
+}
+
+/// What setup never asks of the session: said in a debug build (and so in tests), answered as absent in a release.
+fn not_for_setup(asked: &str) -> RuntimeError {
+    debug_assert!(false, "the DAW's setup asked the session to {asked}");
+    RuntimeError::plain("Not available")
+}
+
+#[async_trait(?Send)]
+impl SessionController for SessionForSetup {
+    async fn start(&self) -> Result<(), RuntimeError> {
+        Err(not_for_setup("start"))
     }
-    let mode = if bridge_config.is_some() { "live" } else { "inference-only" };
+    async fn submit(&self, _: &str, _: Option<PinnedNode>) -> Result<(), RuntimeError> {
+        Err(not_for_setup("answer"))
+    }
+    async fn refresh(&self) -> Result<(), RuntimeError> {
+        Err(not_for_setup("look at the project again"))
+    }
+    async fn new_conversation(&self) -> Result<(), RuntimeError> {
+        Err(not_for_setup("start a conversation"))
+    }
+    async fn cancel(&self) -> Result<(), RuntimeError> {
+        Err(not_for_setup("stop"))
+    }
+    async fn close(&self) -> Result<(), RuntimeError> {
+        Err(not_for_setup("close"))
+    }
+    fn status(&self) -> SessionStatus {
+        match self.session.upgrade() {
+            Some(session) => session.status(),
+            None => SessionStatus {
+                state: TurnState::Closed,
+                connection: ConnectionState::Disconnected,
+                turns: 0,
+                max_turns: None,
+                observation: None,
+            },
+        }
+    }
+    async fn undo(&self, _: Option<&str>) -> Result<Option<ChangeRecord>, RuntimeError> {
+        Err(not_for_setup("undo"))
+    }
+    fn open_set(&self) -> Option<String> {
+        self.session.upgrade()?.open_set()
+    }
+    fn has_reconnect(&self) -> bool {
+        true
+    }
+    async fn reconnect(&self) -> Result<(), RuntimeError> {
+        // The bridge setup found goes where the session's integration starts from, before it reconnects.
+        *self.shared.lock().unwrap_or_else(PoisonError::into_inner) = self.bridge.borrow().clone();
+        let session = self.session.upgrade().ok_or_else(|| RuntimeError::plain("Kumi's session has ended"))?;
+        session.op(op::Reconnect {}).await
+    }
+}
+
+/// What the session is built from where it lives (a thread of its own, or this one in plain mode): only what can cross
+/// between threads. A test's stand-ins (`Answers`) reach a session built in this thread alone.
+struct Recipe {
+    daw: kumi_types::daw::DawId,
+    env: Env,
+    inference: InferenceConfig,
+    settings_file: String,
+    settings: Settings,
+    /// Each Set's conversations are kept: while a DAW may come in this session, or when one was asked for.
+    keeps: bool,
+    /// The conversation carried on, by its place and id.
+    taken_up: Option<(String, String)>,
+    /// What never reaches the conversation's log (keys and tokens).
+    secrets: Vec<String>,
+    /// `kumi -p`: one request, which only reads what's learned.
+    print: bool,
+    full_screen: bool,
+    /// What the watch for the DAW says while it isn't open, when the producer works in several DAWs here.
+    absent_words: Option<String>,
+    /// Where the session finds the DAW's bridge: first-run setup sets it once the bridge is in place.
+    bridge: Arc<Mutex<Option<String>>>,
+}
+
+/// The session, built where it lives from `recipe` (and a test's `answers`), what it says going to `emit`: its stores,
+/// its models, the producer's library and music, the DAW's integration, and what it does as it ends. Also what its
+/// database said as it opened, for the start's notice.
+async fn build_session(recipe: Recipe, answers: Answers, emit: Rc<dyn Fn(SessionEvent)>) -> Result<(Built, Option<String>), RuntimeError> {
+    let Recipe { daw, env, inference, settings_file, settings, keeps, taken_up, secrets, print, full_screen, absent_words, bridge } =
+        recipe;
+    // This thread works with the DAW too.
+    crate::daw::work_with(daw);
+    let provider = crate::daw::provider(daw).expect("a chosen DAW is registered");
     let store = Rc::new(open_credential_store(&inference.auth_file));
-    for credential in store.list().await.unwrap_or_default().values() {
-        match credential {
-            Credential::Oauth(c) => {
-                secrets.push(c.access.clone());
-                secrets.push(c.refresh.clone());
-            }
-            Credential::ApiKey { key } => secrets.push(key.clone()),
-        }
-    }
-    let settings_file = load_settings_file(&io.env)?;
-    let settings = read_settings(&settings_file);
-    let away = AwaySettings {
-        notifications: settings.notifications.as_deref() != Some("off"),
-        live_status_bar: settings.live_status_bar != Some(false),
-        answer_after: settings.answer_after.unwrap_or(AwaySettings::default().answer_after),
-    };
     // The computer stays awake while Kumi works, whichever front end shows it.
     let awake = Rc::new(KeepAwake::system(settings.keep_awake != Some(false)));
-    let terminal: Rc<RefCell<Option<Weak<dyn Terminal>>>> = Rc::new(RefCell::new(None));
-    let emit: Rc<dyn Fn(SessionEvent)> = {
-        let terminal = terminal.clone();
-        let awake = awake.clone();
-        Rc::new(move |event| {
-            awake.follow(&event);
-            let terminal = terminal.borrow().as_ref().and_then(Weak::upgrade);
-            if let Some(terminal) = terminal {
-                terminal.handle_event(event)
-            }
-        })
-    };
-    // What's new since this home's Kumi last started. A home an earlier Kumi used (an update kept the app
-    // before it, or Kumi's database is there) is updated, not new, the first time it has no version noted.
-    let used_before = {
-        let home = std::path::Path::new(&settings_file).parent().unwrap_or(std::path::Path::new("."));
-        home.join("app.previous").exists() || home.join("kumi.db").exists()
-    };
-    let whats_new_on = settings.whats_new != Some(false);
-    let instant = settings.instant_phrases != Some(false);
-    let copy_on_select = settings.copy_on_select != Some(false);
-    let (mouse, transcript_on_quit) = (settings.mouse.as_deref() != Some("off"), settings.transcript_on_quit != Some(false));
-    let full_repaint = settings.full_repaint;
-    let context_meter = match settings.context_meter.as_deref() {
-        Some("always") => ContextMeter::Always,
-        Some("off") => ContextMeter::Off,
-        _ => ContextMeter::Auto,
-    };
-    // ("system", or none set: the terminal's)
-    let theme = match settings.theme.as_deref() {
-        Some("dark") => Some(&crate::tui::style::DARK),
-        Some("light") => Some(&crate::tui::style::LIGHT),
-        Some("colorblind") => Some(&crate::tui::style::COLOR_BLIND),
-        _ => None,
-    };
-    let projects_dir = load_projects_dir(&io.env)?;
+    let emit: Rc<dyn Fn(SessionEvent)> = Rc::new(move |event| {
+        awake.follow(&event);
+        emit(event)
+    });
+    let projects_dir = load_projects_dir(&env)?;
     // Each Set's kept conversations, while Live may come in this session, or when the producer asked for one (then they
     // go on saving where they're kept, Live or not).
     let keep_days = settings.conversations.as_ref().and_then(|c| c.keep_days);
-    let conversations = (bridge_config.is_some() || bridge_missing || resume.is_some())
+    let conversations = keeps
         .then(|| kumi_agent::core::conversations::create_conversation_store_in(&projects_dir, keep_days, crate::daw::registry::places()));
     // Each kept conversation's log, beside it: every event the screen gets passes it first, the session's and the DAW's
     // alike, with keys taken out of the words as the input history takes them out.
@@ -323,44 +364,16 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
         Some(log) => SessionLog::tee(log, emit),
         None => emit,
     };
-    // The conversation asked for is found before anything shows: a word that names none says so, and Kumi stops there.
-    // Only this DAW's conversations (and imported ones) go on here: another DAW's goes on in that DAW (review L4).
-    let ours = |place: &str| kumi_types::place::kept_for(place, provider.id());
-    let (taken_up, choose, resume_notice) = match (&resume, &conversations) {
-        (Some(Resume::Named(word)), Some(store)) => match store.find(word).await? {
-            ConversationMatch::One(row) if !ours(&row.place) => {
-                io.err.write(&format!("{}\n", elsewhere_words(&row, io.command())));
-                return Ok(1);
-            }
-            ConversationMatch::One(row) => (Some((row.place, row.id)), None, None),
-            ConversationMatch::Several(_) => (None, Some(word.clone()), None),
-            ConversationMatch::Gone => {
-                io.err.write(&format!("{}\n", gone_words(store.days_kept().await)));
-                return Ok(1);
-            }
-            ConversationMatch::None => {
-                let word: String = word.chars().filter(|c| !c.is_control()).collect();
-                io.err.write(&format!("No conversation {}. {} -r lists them.\n", string::head(&word, 60), io.command()));
-                return Ok(1);
-            }
-        },
-        (Some(Resume::Last), Some(store)) => match store.all().await?.into_iter().find(|row| ours(&row.place)) {
-            Some(row) => (Some((row.place, row.id)), None, None),
-            None => (None, None, Some("No conversation is kept yet, so this one starts afresh.".to_string())),
-        },
-        (Some(Resume::Pick), _) => (None, Some(String::new()), None),
-        _ => (None, None, None),
-    };
-    let tools_dir = load_tools_dir(&io.env)?;
+    let tools_dir = load_tools_dir(&env)?;
     // The producer's own music, learned from the folders they agreed to (none: not learned).
     let music = {
         let mut options = kumi_listening::music::learning::MusicOptions::new(
-            load_music_dir(&io.env)?.into(),
+            load_music_dir(&env)?.into(),
             settings.music_folders.clone(),
             crate::daw::registry::libraries(),
         );
         // The references taste makes from their songs, which forgetting their music deletes too.
-        options.references = Some(load_references_dir(&io.env)?.into());
+        options.references = Some(load_references_dir(&env)?.into());
         options.library_folders = settings.library_folders.clone();
         options.offered = settings.music_offered == Some(true);
         // The producer's answer, kept in settings.json beside the rest of their settings: what this Kumi changed, applied
@@ -378,7 +391,7 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
     };
     let library = create_library(LibraryOptions {
         daws: crate::daw::registry::libraries(),
-        dir: load_library_dir(&io.env)?,
+        dir: load_library_dir(&env)?,
         folders: Some(settings.library_folders),
         projects_dir: Some(projects_dir.clone()),
         ..Default::default()
@@ -386,19 +399,19 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
     let controller: Rc<RefCell<Option<Weak<dyn SessionController>>>> = Rc::new(RefCell::new(None));
     let listener_store = store.clone();
     // Which model does each listening job: /slots shows, swaps and takes back.
-    let slots_file = slots::file_in(std::path::Path::new(&crate::config::kumi_dir(&io.env)));
+    let slots_file = slots::file_in(std::path::Path::new(&crate::config::kumi_dir(&env)));
     let slots_context = Rc::new(slots::SlotsContext {
         file: slots_file.clone(),
         store: store.clone(),
-        env: io.env.clone(),
+        env: env.clone(),
         profile: Some(provider.profile()),
     });
     // Measured references: the reference tool keeps them, the judge works toward them by name.
-    let references = Rc::new(kumi_listening::references::store::ReferenceStore::new(load_references_dir(&io.env)?));
+    let references = Rc::new(kumi_listening::references::store::ReferenceStore::new(load_references_dir(&env)?));
     let models = Rc::new(create_model_control(ModelControlOptions {
         store,
         settings_file: settings_file.clone(),
-        env: io.env.clone(),
+        env: env.clone(),
         changed: {
             let controller = controller.clone();
             Rc::new(move || {
@@ -422,7 +435,7 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
     // models.dev's catalog of models: the copy Kumi kept, then a newer one at most once a day, never in the way (a slow
     // answer ends with the session, so Kumi's exit doesn't wait on it).
     let catalog = tokio::task::spawn_local(kumi_ai::providers::catalog::refresh(kumi_ai::providers::catalog::RefreshOptions {
-        cache: std::path::Path::new(&crate::config::kumi_dir(&io.env)).join("cache").join("models-catalog.json"),
+        cache: std::path::Path::new(&crate::config::kumi_dir(&env)).join("cache").join("models-catalog.json"),
         fetch: kumi_ai::http::default_fetch(),
         now: kumi_common::time::now_ms() as f64,
         ask: settings.model_catalog != Some(false),
@@ -494,19 +507,9 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
     };
     let bundled = provider.bundled_bridge_version();
     let project_store = create_project_store(&projects_dir);
-    let restore_file = load_restore_file(&io.env)?;
-    let env = io.env.clone();
-    let trace = io.env.get("KUMI_TRACE").is_some_and(|s| s == "1");
-    // A DAW asked for (--daw, KUMI_DAW, a bridge configuration given) is the one Kumi works with. Otherwise Kumi follows
-    // the producer to the DAW they open, and while none is open it says to open one of theirs, not how to make this one
-    // answer, when they work in several.
-    let asked = crate::config::take_daw(&io.args, &io.env).ok().and_then(|(_, asked)| asked);
-    let given = io.args.first().is_some_and(|arg| arg == "--bridge-config");
-    // (one request with -p is answered with what's open now, and ends)
-    let follows = asked.is_none() && !given && print.is_none() && (bridge_config.is_some() || bridge_missing);
-    let absent_words: Option<Rc<str>> = follows.then(|| crate::daw::open_one_words(&io.env)).flatten().map(Rc::from);
-    // A test's answer for which DAWs run at each look for one the producer opened.
-    let running_stand_in = answers.get::<crate::daw::RunningDaws>().cloned();
+    let restore_file = load_restore_file(&env)?;
+    let trace = env.get("KUMI_TRACE").is_some_and(|s| s == "1");
+    let absent_words: Option<Rc<str>> = absent_words.map(Rc::from);
     // Watching for Live to answer, so a chat without Live connects by itself once it does.
     let watching_live = Rc::new(Cell::new(false));
     // That watch, ended with the session: it would notice only after its look and its sleep, and on Windows a look at a
@@ -514,9 +517,6 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
     let live_watch: Rc<RefCell<Option<tokio::task::JoinHandle<()>>>> = Rc::default();
     // Whether the producer was told to restart Live (it runs another version of the bridge): said once a session.
     let restart_said = Rc::new(Cell::new(false));
-    // Where the session finds Live: first-run setup sets it once the bridge is in place.
-    let live_config = Rc::new(RefCell::new(bridge_config.clone()));
-    let full_screen = io.input.is_tty() && io.out.is_tty() && io.env.get("KUMI_UI").map(String::as_str) != Some("plain");
     let integration_factory: IntegrationFactory = {
         let watching_live = watching_live.clone();
         let live_watch = live_watch.clone();
@@ -525,11 +525,12 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
         let music = music.clone();
         let emit = emit.clone();
         let controller = controller.clone();
-        let live_config = live_config.clone();
+        let bridge = bridge.clone();
         let bundled = bundled.clone();
         let references = references.clone();
+        let env = env.clone();
         Box::new(move |on_connection| {
-            let Some(bridge_config) = live_config.borrow().clone() else {
+            let Some(bridge_config) = bridge.lock().unwrap_or_else(PoisonError::into_inner).clone() else {
                 return provider.without_daw(Rc::new(move |state| on_connection(state, None)));
             };
             // What the session gives any DAW's integration; the DAW's provider adds what only it has.
@@ -713,15 +714,13 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
     let mut options = SessionOptions::new(kernel_factory, integration_factory, emit.clone());
     // The session speaks the words of the DAW it works with (Live's for Live).
     options.profile = *provider.profile();
-    // Live may come later in this session, once first-run setup has put the bridge in place.
-    let live_possible = bridge_config.is_some() || bridge_missing;
     options.conversations = conversations.map(|store| store as Rc<dyn ConversationStore>);
     options.log = log;
     options.resume = taken_up;
     // Kumi's database keeps notes, techniques, lessons and gaps, with what earlier Kumis kept in files
     // read in. When it can't open, they stay in their files this time, as before, and Kumi says so once.
-    let files = json_files(&io.env)?;
-    let database = StoreClient::open(load_db_file(&io.env)?.into(), files.clone(), kumi_common::time::now_ms()).await;
+    let files = json_files(&env)?;
+    let database = StoreClient::open(load_db_file(&env)?.into(), files.clone(), kumi_common::time::now_ms()).await;
     let database_notice = match &database {
         Ok((_, Ok(imported))) => Some(imported.sentences().join(" ")).filter(|said| !said.is_empty()),
         Ok((_, Err(why))) => {
@@ -738,45 +737,45 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
     options.memory = Some(match &database {
         Some(client) => Rc::new(SqliteMemoryStore::with_places(client.clone(), crate::daw::registry::places())) as Rc<dyn MemoryStore>,
         None => kumi_agent::core::memory::create_memory_store_in(
-            MemoryStoreOptions { projects_dir: projects_dir.clone().into(), producer_file: load_memory_file(&io.env)?.into() },
+            MemoryStoreOptions { projects_dir: projects_dir.clone().into(), producer_file: load_memory_file(&env)?.into() },
             crate::daw::registry::places(),
         ),
     });
     options.listen = true;
-    options.recipes = Some(create_recipe_store(load_recipes_dir(&io.env)?));
+    options.recipes = Some(create_recipe_store(load_recipes_dir(&env)?));
     options.techniques = Some(match &database {
         Some(client) => Rc::new(SqliteTechniqueStore::new(client.clone())) as Rc<dyn TechniqueStore>,
-        None => create_technique_store(load_techniques_file(&io.env)?),
+        None => create_technique_store(load_techniques_file(&env)?),
     });
     options.playbook = Some(match &database {
         Some(client) => Rc::new(SqlitePlaybookStore::new(client.clone())) as Rc<dyn PlaybookStore>,
-        None => create_playbook_store(load_playbook_file(&io.env)?),
+        None => create_playbook_store(load_playbook_file(&env)?),
     });
     // An older Kumi open beside this one writes the files: what it changes comes in a turn later.
     options.files = database.as_ref().map(|client| FileSync::new(client.clone(), files, &named));
     options.store = database;
-    let goals = load_goals_dir(&io.env)?;
+    let goals = load_goals_dir(&env)?;
     options.objectives = Some(create_objective_store(goals.clone()));
     options.references = Some(references);
     options.goals = Some(create_goal_store(goals));
-    options.gaps = Some(load_gaps_file(&io.env)?);
-    options.timings = Some(load_timings_file(&io.env)?);
-    options.watch = Some(VideoDirectories { videos_dir: load_videos_dir(&io.env)?, tools_dir: tools_dir.clone() });
+    options.gaps = Some(load_gaps_file(&env)?);
+    options.timings = Some(load_timings_file(&env)?);
+    options.watch = Some(VideoDirectories { videos_dir: load_videos_dir(&env)?, tools_dir: tools_dir.clone() });
     options.web = true;
     options.library = Some(library.clone());
-    options.preset_dir = Some(std::path::Path::new(&crate::config::kumi_dir(&io.env)).join("presets"));
+    options.preset_dir = Some(std::path::Path::new(&crate::config::kumi_dir(&env)).join("presets"));
     options.music = Some(music.clone());
     // /model, /effort, /fast, /login and /logout ask the session, which has the models (the kernel's come from them too).
     options.models = Some(models.clone() as Rc<dyn crate::models::ModelController>);
     // /slots and /map, which the session answers: which model does each listening job, and the library's sounds and
     // the songs on their maps, read each time /map opens.
     options.slots = Some(slots_context);
-    options.map = Some(crate::map::loader(library.clone(), load_library_dir(&io.env)?.into(), music.clone()));
+    options.map = Some(crate::map::loader(library.clone(), load_library_dir(&env)?.into(), music.clone()));
     options.jobs = Some(JobsOptions {
         worker_factory,
         max: settings.max_jobs.map(|n| n as usize).unwrap_or(DEFAULT_MAX_JOBS),
         // Beside the goals: a Set's interrupted jobs and unheard reports, for the next time Kumi runs.
-        store: Some(create_job_store(load_goals_dir(&io.env)?)),
+        store: Some(create_job_store(load_goals_dir(&env)?)),
     });
     let session: Rc<dyn SessionController> = Rc::new(create_session(options)?);
     *controller.borrow_mut() = Some(Rc::downgrade(&session));
@@ -795,6 +794,192 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
             }
         })
     };
+    // Learning the producer's sounds and music goes on in the background of a session that stays; a request with -p
+    // only reads what's learned.
+    if !print {
+        library.start();
+        music.start();
+    }
+    // What the session does as it ends, once its front end has let go.
+    let ending = async move {
+        library.close().await;
+        music.close().await;
+        catalog.abort();
+        models.close();
+        fetch_notices.abort();
+        configure_programs(ProgramDefaults::default());
+        if let Some(task) = live_watch.borrow_mut().take() {
+            task.abort();
+        }
+        controller.borrow_mut().take();
+    }
+    .boxed_local();
+    Ok((Built { session, ending: Some(ending) }, database_notice))
+}
+
+pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<String>, answers: Answers) -> Result<i32, RuntimeError> {
+    let (inference, bridge_config, bridge_missing, resume, daw, print) = match config {
+        AppConfig::InferenceOnly { inference, bridge_missing, resume, daw, print } => {
+            (inference, None, bridge_missing.unwrap_or(false), resume, daw, print)
+        }
+        AppConfig::Live { inference, bridge_config, resume, daw, print } => (inference, Some(bridge_config), false, resume, daw, print),
+        _ => unreachable!(),
+    };
+    // The DAW this session works with: the one chosen (config), else Live.
+    let provider = crate::daw::provider(daw.unwrap_or(kumi_types::daw::DawId::Ableton)).expect("a chosen DAW is registered");
+    crate::daw::work_with(provider.id());
+    // The DAW used last decides only among several bridges: a producer with one (Live alone) never gets the file.
+    if bridge_config.is_some() && crate::daw::providers().into_iter().filter(|p| p.bridge_installed(&io.env)).count() > 1 {
+        crate::daw::remember_used(provider.id(), &io.env);
+    }
+    let mode = if bridge_config.is_some() { "live" } else { "inference-only" };
+    let store = Rc::new(open_credential_store(&inference.auth_file));
+    for credential in store.list().await.unwrap_or_default().values() {
+        match credential {
+            Credential::Oauth(c) => {
+                secrets.push(c.access.clone());
+                secrets.push(c.refresh.clone());
+            }
+            Credential::ApiKey { key } => secrets.push(key.clone()),
+        }
+    }
+    let settings_file = load_settings_file(&io.env)?;
+    let settings = read_settings(&settings_file);
+    let away = AwaySettings {
+        notifications: settings.notifications.as_deref() != Some("off"),
+        live_status_bar: settings.live_status_bar != Some(false),
+        answer_after: settings.answer_after.unwrap_or(AwaySettings::default().answer_after),
+    };
+    let terminal: Rc<RefCell<Option<Weak<dyn Terminal>>>> = Rc::new(RefCell::new(None));
+    // Where what a session in this thread says goes: the front end. One on a thread of its own says it through its handle.
+    let to_screen: Rc<dyn Fn(SessionEvent)> = {
+        let terminal = terminal.clone();
+        Rc::new(move |event| {
+            let terminal = terminal.borrow().as_ref().and_then(Weak::upgrade);
+            if let Some(terminal) = terminal {
+                terminal.handle_event(event)
+            }
+        })
+    };
+    // What's new since this home's Kumi last started. A home an earlier Kumi used (an update kept the app
+    // before it, or Kumi's database is there) is updated, not new, the first time it has no version noted.
+    let used_before = {
+        let home = std::path::Path::new(&settings_file).parent().unwrap_or(std::path::Path::new("."));
+        home.join("app.previous").exists() || home.join("kumi.db").exists()
+    };
+    let whats_new_on = settings.whats_new != Some(false);
+    let instant = settings.instant_phrases != Some(false);
+    let copy_on_select = settings.copy_on_select != Some(false);
+    let (mouse, transcript_on_quit) = (settings.mouse.as_deref() != Some("off"), settings.transcript_on_quit != Some(false));
+    let full_repaint = settings.full_repaint;
+    let context_meter = match settings.context_meter.as_deref() {
+        Some("always") => ContextMeter::Always,
+        Some("off") => ContextMeter::Off,
+        _ => ContextMeter::Auto,
+    };
+    // ("system", or none set: the terminal's)
+    let theme = match settings.theme.as_deref() {
+        Some("dark") => Some(&crate::tui::style::DARK),
+        Some("light") => Some(&crate::tui::style::LIGHT),
+        Some("colorblind") => Some(&crate::tui::style::COLOR_BLIND),
+        _ => None,
+    };
+    let projects_dir = load_projects_dir(&io.env)?;
+    // Each Set's kept conversations, while Live may come in this session, or when the producer asked for one: the
+    // session keeps them; here they're only looked in, for the one asked for.
+    let keep_days = settings.conversations.as_ref().and_then(|c| c.keep_days);
+    let keeps = bridge_config.is_some() || bridge_missing || resume.is_some();
+    let conversations = keeps
+        .then(|| kumi_agent::core::conversations::create_conversation_store_in(&projects_dir, keep_days, crate::daw::registry::places()));
+    // The conversation asked for is found before anything shows: a word that names none says so, and Kumi stops there.
+    // Only this DAW's conversations (and imported ones) go on here: another DAW's goes on in that DAW (review L4).
+    let ours = |place: &str| kumi_types::place::kept_for(place, provider.id());
+    let (taken_up, choose, resume_notice) = match (&resume, &conversations) {
+        (Some(Resume::Named(word)), Some(store)) => match store.find(word).await? {
+            ConversationMatch::One(row) if !ours(&row.place) => {
+                io.err.write(&format!("{}\n", elsewhere_words(&row, io.command())));
+                return Ok(1);
+            }
+            ConversationMatch::One(row) => (Some((row.place, row.id)), None, None),
+            ConversationMatch::Several(_) => (None, Some(word.clone()), None),
+            ConversationMatch::Gone => {
+                io.err.write(&format!("{}\n", gone_words(store.days_kept().await)));
+                return Ok(1);
+            }
+            ConversationMatch::None => {
+                let word: String = word.chars().filter(|c| !c.is_control()).collect();
+                io.err.write(&format!("No conversation {}. {} -r lists them.\n", string::head(&word, 60), io.command()));
+                return Ok(1);
+            }
+        },
+        (Some(Resume::Last), Some(store)) => match store.all().await?.into_iter().find(|row| ours(&row.place)) {
+            Some(row) => (Some((row.place, row.id)), None, None),
+            None => (None, None, Some("No conversation is kept yet, so this one starts afresh.".to_string())),
+        },
+        (Some(Resume::Pick), _) => (None, Some(String::new()), None),
+        _ => (None, None, None),
+    };
+    let tools_dir = load_tools_dir(&io.env)?;
+    let bundled = provider.bundled_bridge_version();
+    // A DAW asked for (--daw, KUMI_DAW, a bridge configuration given) is the one Kumi works with. Otherwise Kumi follows
+    // the producer to the DAW they open, and while none is open it says to open one of theirs, not how to make this one
+    // answer, when they work in several.
+    let asked = crate::config::take_daw(&io.args, &io.env).ok().and_then(|(_, asked)| asked);
+    let given = io.args.first().is_some_and(|arg| arg == "--bridge-config");
+    // (one request with -p is answered with what's open now, and ends)
+    let follows = asked.is_none() && !given && print.is_none() && (bridge_config.is_some() || bridge_missing);
+    let absent_words = follows.then(|| crate::daw::open_one_words(&io.env)).flatten();
+    // A test's answer for which DAWs run at each look for one the producer opened.
+    let running_stand_in = answers.get::<crate::daw::RunningDaws>().cloned();
+    // Where the session finds Live: first-run setup sets it once the bridge is in place, and the session reads it from
+    // where its thread reaches it as it reconnects (`SessionForSetup`).
+    let live_config = Rc::new(RefCell::new(bridge_config.clone()));
+    let session_bridge = Arc::new(Mutex::new(bridge_config.clone()));
+    let full_screen = io.input.is_tty() && io.out.is_tty() && io.env.get("KUMI_UI").map(String::as_str) != Some("plain");
+    // Live may come later in this session, once first-run setup has put the bridge in place.
+    let live_possible = bridge_config.is_some() || bridge_missing;
+    // The session: on a thread of its own, so no front end waits on what it does (the full screen, plain mode and -p
+    // alike). A test's stand-ins can't cross to another thread, so a session given them is built in this one.
+    let recipe = Recipe {
+        daw: provider.id(),
+        env: io.env.clone(),
+        inference: inference.clone(),
+        settings_file: settings_file.clone(),
+        settings: settings.clone(),
+        keeps,
+        taken_up,
+        secrets: secrets.clone(),
+        print: print.is_some(),
+        full_screen,
+        absent_words,
+        bridge: session_bridge.clone(),
+    };
+    let (session, threaded, mut ending, database_notice): (
+        Rc<dyn SessionHandle>,
+        Option<Rc<Threaded>>,
+        Option<LocalBoxFuture<'static, ()>>,
+        Option<String>,
+    ) = if io.threaded && answers.is_empty() {
+        let (said, heard) = tokio::sync::oneshot::channel();
+        let build: Build = Box::new(move |emit| {
+            async move {
+                let (built, notice) = build_session(recipe, Answers::default(), emit).await?;
+                let _ = said.send(notice);
+                Ok(built)
+            }
+            .boxed_local()
+        });
+        let threaded = Threaded::spawn(build).await?;
+        let notice = heard.await.ok().flatten();
+        (threaded.clone(), Some(threaded), None, notice)
+    } else {
+        let (Built { session, ending }, notice) = build_session(recipe, answers.clone(), to_screen).await?;
+        (InProcess::new(session), None, ending, notice)
+    };
+    // The DAW's first-run setup reaches the session as one of its own, on this thread.
+    let setup_session: Rc<dyn SessionController> =
+        Rc::new(SessionForSetup { session: Rc::downgrade(&session), bridge: live_config.clone(), shared: session_bridge });
+    let setup_controller = Rc::new(RefCell::new(Some(Rc::downgrade(&setup_session))));
     // What the session says of the DAW's bridge: missing, or older than this Kumi's.
     let bridge = provider.bridge_state(&io.env, bridge_config.is_some(), bridge_missing, bundled.as_deref(), io.command());
     let bridge_notice = bridge.notice;
@@ -897,7 +1082,7 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
     let redact = crate::export::redactor_maker(&io.env);
     let ui: Rc<dyn Terminal> = if let Some(print) = print.clone() {
         Rc::new(crate::print::Print::new(crate::print::PrintOptions {
-            controller: session,
+            session: session.clone(),
             request: print.request,
             json: print.json,
             out: io.out.clone(),
@@ -907,7 +1092,7 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
             startup_notice: notice,
         }))
     } else if full_screen {
-        let mut options = TuiOptions::new(session, io.input.clone(), io.out.clone(), mode);
+        let mut options = TuiOptions::with_session(session.clone(), io.input.clone(), io.out.clone(), mode);
         // What the terminal is, asked once as the screen starts: its answers come before what its environment says of
         // it, which stays the fallback. A terminal its environment keeps quiet (the Linux console, a dumb one) isn't asked,
         // nor one whose producer said not to (`KUMI_PROBE=off`).
@@ -940,12 +1125,7 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
         options.connect_live = live_possible.then(|| ConnectDaw {
             why: connect_why,
             bridge: bundled.clone().unwrap_or_default(),
-            live: provider.setup(
-                &io.env,
-                live_config.clone(),
-                io.args.first().is_some_and(|arg| arg == "--bridge-config"),
-                controller.clone(),
-            ),
+            live: provider.setup(&io.env, live_config.clone(), given, setup_controller.clone()),
         });
         options.secrets = secrets.clone();
         options.history = Some(history);
@@ -1010,8 +1190,8 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
         });
         Rc::new(create_tui(options))
     } else {
-        // Plain mode reaches the session through its protocol, in this thread, its models with it.
-        let mut options = TerminalOptions::new(kumi_agent::core::protocol::InProcess::new(session), io.input.clone(), io.out.clone(), mode);
+        // Plain mode reaches the session through its protocol, its models with it, as the screen does.
+        let mut options = TerminalOptions::new(session.clone(), io.input.clone(), io.out.clone(), mode);
         options.startup_notice = notice;
         options.redact = Some(redact);
         options.command = io.command().to_string();
@@ -1070,6 +1250,18 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
     } else {
         None
     });
+    // The session's thread ending on its own (a panic there) ends the screen in order: the terminal given back, then what
+    // it said, and Kumi ends with 1. `-p` hears it as its request's error.
+    let fatal: Rc<RefCell<Option<String>>> = Rc::default();
+    if let Some(threaded) = &threaded {
+        let (fatal, ui, closes) = (fatal.clone(), Rc::downgrade(&ui), print.is_none());
+        threaded.on_fatal(Rc::new(move |why| {
+            *fatal.borrow_mut() = Some(why);
+            if let Some(ui) = ui.upgrade().filter(|_| closes) {
+                tokio::task::spawn_local(ui.close());
+            }
+        }));
+    }
     let running = ui.run();
     // Following the producer to the DAW they open: one listing a look, made off the screen's thread, or a test's answer.
     let following = follows.then(|| {
@@ -1103,18 +1295,12 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
                     Looked { open, follow }
                 }
             },
-            controller.clone(),
+            Rc::downgrade(&session),
             terminal.clone(),
             FOLLOW_MS,
             GONE_MS,
         ))
     });
-    // Learning the producer's sounds and music goes on in the background of a session that stays; a request with -p
-    // only reads what's learned.
-    if print.is_none() {
-        library.start();
-        music.start();
-    }
     let settings = read_settings(&settings_file);
     let update_check =
         if print.is_none() && settings.update_check != Some(false) && !io.env.get("KUMI_NO_UPDATE_CHECK").is_some_and(|s| !s.is_empty()) {
@@ -1144,11 +1330,7 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
     // The conversation asked for as Kumi started may not be the one going on now: opened again after an update, Kumi
     // carries on with this one.
     let going = if update_after.get() {
-        let session = controller.borrow().as_ref().and_then(Weak::upgrade);
-        match session {
-            Some(session) => session.conversation_now().await.filter(|now| now.kept).map(|now| now.id),
-            None => None,
-        }
+        session.op(op::ConversationNow {}).await.ok().flatten().filter(|now| now.kept).map(|now| now.id)
     } else {
         None
     };
@@ -1157,23 +1339,35 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
     drop(terminate);
     #[cfg(unix)]
     drop(quit);
-    library.close().await;
-    music.close().await;
-    catalog.abort();
-    models.close();
-    fetch_notices.abort();
-    configure_programs(ProgramDefaults::default());
     if let Some(task) = update_check {
         task.abort();
     }
     if let Some(task) = following {
         task.abort();
     }
-    if let Some(task) = live_watch.borrow_mut().take() {
-        task.abort();
-    }
+    // The session ends its own way (its background work closed), on its thread or in this one.
+    let drained = match &threaded {
+        Some(threaded) => threaded.close_thread().await,
+        None => {
+            if let Some(ending) = ending.take() {
+                ending.await;
+            }
+            true
+        }
+    };
     terminal.borrow_mut().take();
-    controller.borrow_mut().take();
+    let mut code = code;
+    if let Some(why) = fatal.borrow_mut().take() {
+        // (-p said it already, as its request's error, unless the request had ended)
+        if print.is_none() || code != crate::print::FAILED {
+            io.err.write(&format!("Kumi's session stopped: {why}\n"));
+        }
+        code = 1;
+    }
+    if !drained {
+        io.err.write("Kumi shutdown left a live handle; terminating this Kumi process.\n");
+        code = 1;
+    }
     if let Some((daw, asked)) = daw_after.get() {
         let mut again = io.clone();
         again.args = if asked { switched_args(&io.args, daw) } else { followed_args(&io.args) };
@@ -1425,8 +1619,8 @@ mod watch_tests {
     async fn follow_while_not_connected() {
         use kumi_types::daw::DawId;
         let fake = Rc::new(Fake { reconnects: Cell::new(0), connect_on: u32::MAX, connected: Cell::new(false) });
-        let session: Rc<dyn SessionController> = fake.clone();
-        let controller = Rc::new(RefCell::new(Some(Rc::downgrade(&session))));
+        let session: Rc<dyn SessionHandle> = InProcess::new(fake.clone());
+        let controller = Rc::downgrade(&session);
         let screen = Rc::new(Screen { handed: RefCell::default(), takes: 3 });
         let ui: Rc<dyn Terminal> = screen.clone();
         let terminal = Rc::new(RefCell::new(Some(Rc::downgrade(&ui))));
@@ -1467,8 +1661,8 @@ mod watch_tests {
     async fn follow_after_a_restart() {
         use kumi_types::daw::DawId;
         let fake = Rc::new(Fake { reconnects: Cell::new(0), connect_on: u32::MAX, connected: Cell::new(false) });
-        let session: Rc<dyn SessionController> = fake.clone();
-        let controller = Rc::new(RefCell::new(Some(Rc::downgrade(&session))));
+        let session: Rc<dyn SessionHandle> = InProcess::new(fake.clone());
+        let controller = Rc::downgrade(&session);
         let handed = |beside: Vec<DawId>| {
             let controller = controller.clone();
             async move {
