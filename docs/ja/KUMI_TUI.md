@@ -210,6 +210,8 @@ REAPER と Renoise でも画面は同じで（[つなぎ方](KUMI_GUIDE.md#reape
 
 Kumi はターミナルが表示できる色数を検出します。`KUMI_COLOR`（`truecolor`、`256`、`16`、`none`）で上書きでき、`NO_COLOR` にも従います。ターミナルの記号が表示されないおそれのある環境（古い Windows コンソール、Linux コンソール）では、Kumi はアイコンの代わりに 2 文字のバッジを使います。`KUMI_ICONS=glyphs` または `badges` で選べます。変更の図は、kitty と Ghostty（24 ビットカラーで、tmux の外）では画像で、それ以外では点字とハーフブロックで、記号が表示されないおそれのある環境では文字で表示されます。`KUMI_PICTURES=cells` で文字セルに固定できます。Windows では Windows Terminal をおすすめします。kitty キーボードプロトコルに対応していないターミナルでは、改行に Ctrl-J か Alt-Enter を使います。tmux の中では、`set -g allow-passthrough on` で Kumi のステータスと通知が通り、フォーカスの報告には `set -g focus-events on` が必要です。SSH 越しでは、`set -g set-clipboard on` で Kumi のコピーがクリップボードに届きます。対応しているターミナルは、押していた Ctrl-T を離したことを伝えます。それ以外では、キーのリピートが止まったところで Kumi は聴くのをやめます。
 
+終了するときは、お別れの前に会話をターミナルのスクロールバックに出力します。あなたの依頼、Kumi の答え、ひと続きのステップごとに一行で、秘密は `/export` と同じように取り除きます（長い会話は最後の 200 KB）。settings.json の `"transcriptOnQuit": false` でこれを止められます。`"mouse": "off"` にすると、マウスはターミナル（または tmux）に任されます。ターミナル自身の選択とコピーが使え、Page Up と Page Down でスクロールし、その間ホイールが ↑ や ↓ を送ることはありません。Kumi のクリック、ドラッグでのコピー、地図でのマウス操作はそのあいだ使えません。
+
 ## 設計メモ
 
 アプリを開発する人向けです（`crates/kumi/src/tui/`）。

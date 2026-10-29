@@ -146,8 +146,8 @@ Kumi 可以在 REAPER 7 及更高版本和 Renoise 3.5 及更高版本中工作�
 **在那里能做什么。** Kumi 读取工程或歌曲，并带撤销地修改它（能修改什么、撤销在那里如何工作，见 [REAPER 与 Renoise](KUMI_CHANGES.md#reaper-与-renoise)）；FOCUS、NOW 和 HISTORY 跟随 DAW 自己的视图（[命令、按键与界面](KUMI_TUI.md#reaper-与-renoise)）。它会聆听、判定自己的修改、配合 `/loop` 和 `/goal` 工作、匹配参考曲、执行即时短语、告诉你它关闭期间的变化、把你手动做的操作变成配方，并使用你的素材库、笔记和对话，全部用这个 DAW 的说法（各 DAW 的对照见 [Kumi 在 Live、REAPER 和 Renoise 中能做什么](DAWS.md)）。在 REAPER 中它还能运行 REAPER 的动作（action）、API 和 Lua（ReaScript）；在 Renoise 中能运行 Lua。以下仍只属于 Live：Max for Live 设备、Kumi Ears、Willington、Kumi 的 Live 扩展（含 **Ask Kumi about this**）、Live 自己的命令和 Live 的手册。
 
 **版本。** 每个 Kumi 版本都附带一个扩展和一个工具，`kumi update` 会把它们更新到最新（见下文“更新、报告与卸载”）。
-Kumi 1.24.10 至 1.24.15 附带 REAPER 扩展 0.1.7，1.24.0 至 1.24.9 附带 0.1.6，1.23.3 附带 0.1.5，1.23.2 附带 0.1.4，1.23.1 附带 0.1.3，1.21.2 至 1.23.0 附带 0.1.2，1.21.0 至 1.21.1 附带 0.1.1，1.20.0 附带 0.1.0。
-Kumi 1.24.10 至 1.24.15 附带 Renoise 工具 1.0.6，1.24.0 至 1.24.9 附带 1.0.5，1.23.3 附带 1.0.4，1.23.2 附带 1.0.3，1.23.1 附带 1.0.2，1.21.0 至 1.23.0 附带 1.0.1，1.20.0 附带 1.0.0。
+Kumi 1.24.10 至 1.24.16 附带 REAPER 扩展 0.1.7，1.24.0 至 1.24.9 附带 0.1.6，1.23.3 附带 0.1.5，1.23.2 附带 0.1.4，1.23.1 附带 0.1.3，1.21.2 至 1.23.0 附带 0.1.2，1.21.0 至 1.21.1 附带 0.1.1，1.20.0 附带 0.1.0。
+Kumi 1.24.10 至 1.24.16 附带 Renoise 工具 1.0.6，1.24.0 至 1.24.9 附带 1.0.5，1.23.3 附带 1.0.4，1.23.2 附带 1.0.3，1.23.1 附带 1.0.2，1.21.0 至 1.23.0 附带 1.0.1，1.20.0 附带 1.0.0。
 
 ## 使用 Kumi
 
@@ -581,6 +581,8 @@ Kumi 把一切都保存在 `~/.kumi` 中。`~/.kumi/settings.json` 包含：
 | `conversations` | `keepDays`：对话在最后一次使用后保留的天数，每个工程最近的 20 段不受此限（90；去掉后取 90 天与上次设定值中较长的一个）；`0` 表示全部保留 |
 | `modelCatalog` | `false`：不获取 models.dev 的模型目录，继续使用已有的副本（[选择模型](#登录并选择模型)） |
 | `copyOnSelect` | `false`：在 Kumi 窗口中拖过的文字松开时不复制，而是保持选中，直到按 Ctrl-C 或右键复制 |
+| `mouse` | `"off"`：把鼠标交给终端（或 tmux），使用终端自己的选择和复制；Page Up 和 Page Down 滚动 |
+| `transcriptOnQuit` | `false`：退出时不把对话打印到终端的回滚记录中 |
 
 `~/.kumi/slots.json` 保存你替换过的模型槽位（`/slots`），`~/.kumi/probes` 按设备和轨道保存每个旋钮起过的作用，`~/.kumi/models` 保存模型运行时和 Kumi 自己的模型，`~/.kumi/cache/models-catalog.json` 保存 models.dev 目录的最新副本。四者都跟随 `KUMI_HOME`。
 
