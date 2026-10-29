@@ -56,7 +56,7 @@ case!(ctrl_o_shows_the_conversation_in_detail_and_q_esc_or_ctrl_o_closes_it, asy
     for close in ["q", "\x1b", CTRL_O] {
         opened(&h).await;
         h.has("make the bass wider");
-        h.has("/ search · n N matches · { } requests · [ scrollback · v editor · q closes");
+        h.has("/ search · { } requests · [ scrollback · v editor · q closes");
         h.type_text(close).await;
         delay(30).await;
         assert!(!has(&h.screen(), "The pad sits back now."), "{close:?} closes it:\n{}", h.screen().join("\n"));
@@ -72,6 +72,7 @@ case!(a_search_counts_its_matches_and_braces_go_from_request_to_request, async {
     h.type_text("/pad").await;
     h.has("search: pad · 1 of 2");
     h.type_text("\r").await;
+    h.has("n N matches · / searches again · { } requests · q closes");
     h.type_text("n").await;
     h.has("search: pad · 2 of 2");
     h.type_text("N").await;
