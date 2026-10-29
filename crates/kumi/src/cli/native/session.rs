@@ -1010,7 +1010,8 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
         });
         Rc::new(create_tui(options))
     } else {
-        let mut options = TerminalOptions::new(session, io.input.clone(), io.out.clone(), models.clone(), mode);
+        // Plain mode reaches the session through its protocol, in this thread, its models with it.
+        let mut options = TerminalOptions::new(kumi_agent::core::protocol::InProcess::new(session), io.input.clone(), io.out.clone(), mode);
         options.startup_notice = notice;
         options.redact = Some(redact);
         options.command = io.command().to_string();

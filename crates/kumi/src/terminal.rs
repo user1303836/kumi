@@ -3,7 +3,6 @@ use crate::{
     config::safe_error_message,
     history::InputHistory,
     input::{KeyInput, TerminalInput, Utf8Decoder},
-    models::ModelController,
     text::{library_line, remembered_line, sanitize_text, web_words, StreamingText},
     tui::{
         editor::Editor,
@@ -16,17 +15,14 @@ use crate::{
 use futures::{future::LocalBoxFuture, FutureExt};
 use kumi_agent::core::{
     commands::{self as registry, Effect, Fronts, Now, Why},
-    contracts::{
-        ConversationMatch, ConversationSummary, KeptLine, NoteChange, SessionController, SessionEvent, SetAsk, SetChoice, TurnState,
-    },
+    contracts::{ConversationMatch, ConversationSummary, KeptLine, NoteChange, SessionEvent, SetAsk, SetChoice, TurnState},
     export::Format,
     goal::GoalPhase,
     goal_mode::{ObjectiveState, ObjectiveStatus},
-    protocol::{op, Capabilities, InProcess, SessionHandle},
+    protocol::{op, Capabilities, SessionHandle},
 };
 use kumi_ai::providers::{table, Effort, ProviderId, EFFORTS};
 use kumi_common::{
-    abort::Signal,
     js::{number, string},
     time::{now_ms_f64, perf_now, since},
 };
@@ -54,10 +50,10 @@ pub trait Terminal {
 }
 #[derive(Clone)]
 pub struct TerminalOptions {
-    pub controller: Rc<dyn SessionController>,
+    /// The session, reached only through its protocol: its models with it.
+    pub session: Rc<dyn SessionHandle>,
     pub input: Rc<dyn TerminalInput>,
     pub output: Rc<dyn TtyOutput>,
-    pub models: Rc<dyn ModelController>,
     pub mode: String,
     pub startup_notice: Option<String>,
     pub secrets: Vec<String>,
@@ -88,18 +84,11 @@ pub struct TerminalOptions {
     pub command: String,
 }
 impl TerminalOptions {
-    pub fn new(
-        controller: Rc<dyn SessionController>,
-        input: Rc<dyn TerminalInput>,
-        output: Rc<dyn TtyOutput>,
-        models: Rc<dyn ModelController>,
-        mode: &str,
-    ) -> Self {
+    pub fn new(session: Rc<dyn SessionHandle>, input: Rc<dyn TerminalInput>, output: Rc<dyn TtyOutput>, mode: &str) -> Self {
         Self {
-            controller,
+            session,
             input,
             output,
-            models,
             mode: mode.into(),
             startup_notice: None,
             secrets: vec![],
@@ -358,10 +347,10 @@ struct State {
     /// Lines said and turns begun since Kumi started: whether a command's call said anything itself.
     said_lines: u64,
     turns_begun: u64,
-    /// The /slots swap under way, by its number, and what stops it: one at a time, and Ctrl-C stops it, as Esc does in
-    /// the full-screen app.
-    slots: Option<(u32, Signal)>,
-    next_slots: u32,
+    /// The /slots swap under way, by its request's id: one at a time, and Ctrl-C stops it, as Esc does in the full-screen
+    /// app. Each /slots request and aside has an id of its own.
+    slots: Option<u32>,
+    next_id: u32,
 }
 struct Inner {
     options: TerminalOptions,
@@ -376,7 +365,7 @@ struct Inner {
 pub struct PlainTerminal(Rc<Inner>);
 pub fn create_terminal(options: TerminalOptions) -> PlainTerminal {
     let text = StreamingText::new(&options.secrets);
-    PlainTerminal(Rc::new(Inner {
+    let terminal = PlainTerminal(Rc::new(Inner {
         options,
         state: RefCell::new(State {
             shared: None,
@@ -411,13 +400,21 @@ pub fn create_terminal(options: TerminalOptions) -> PlainTerminal {
             said_lines: 0,
             turns_begun: 0,
             slots: None,
-            next_slots: 0,
+            next_id: 0,
         }),
         parser: RefCell::new(None),
         keys: RefCell::new(None),
         done: tokio::sync::watch::channel(None).0,
         saying: tokio::sync::watch::channel(0).0,
-    }))
+    }));
+    // What the session says between its replies (/slots' progress) comes in as its other events do.
+    let weak = Rc::downgrade(&terminal.0);
+    terminal.0.options.session.listen(Rc::new(move |event| {
+        if let Some(inner) = weak.upgrade() {
+            PlainTerminal(inner).handle_event(event);
+        }
+    }));
+    terminal
 }
 impl PlainTerminal {
     fn done(&self) -> LocalBoxFuture<'static, i32> {
@@ -448,7 +445,7 @@ impl PlainTerminal {
     fn carry_on(&self, id: u32) {
         let this = self.clone();
         tokio::task::spawn_local(async move {
-            if this.0.options.controller.carry_on(id) {
+            if this.session().op(op::CarryOn { job: id }).await.unwrap_or(false) {
                 this.0.state.borrow_mut().carry.retain(|waiting| *waiting != id);
             }
         });
@@ -467,8 +464,22 @@ impl PlainTerminal {
     fn error(&self, error: &RuntimeError) {
         self.notice(&format!("[error] {}", safe_error_message(Some(&error.message()), &self.0.options.secrets)));
     }
+    /// The session, reached only through its protocol.
+    fn session(&self) -> &dyn SessionHandle {
+        &*self.0.options.session
+    }
+    /// The model Kumi talks to, as the session says it; None where there's no model to choose.
+    fn current_model(&self) -> Option<kumi_ai::control::CurrentModel> {
+        self.session().models().map(|models| models.current)
+    }
+    /// An id for a request that its own events and stop name (an aside, a /slots one).
+    fn next_id(&self) -> u32 {
+        let mut state = self.0.state.borrow_mut();
+        state.next_id += 1;
+        state.next_id
+    }
     fn busy(&self) -> bool {
-        matches!(self.0.options.controller.status().state, TurnState::Running | TurnState::Cancelling)
+        matches!(self.session().status().state, TurnState::Running | TurnState::Cancelling)
     }
     fn prompt(&self) {
         let mut state = self.0.state.borrow_mut();
@@ -495,11 +506,11 @@ impl PlainTerminal {
             let mut code = code;
             let result = tokio::time::timeout(
                 Duration::from_millis(this.0.options.close_timeout_ms.unwrap_or(6000)),
-                this.0.options.controller.close(),
+                this.session().op(op::Close {}),
             )
             .await
             .unwrap_or_else(|_| Err(RuntimeError::plain("Shutdown deadline exceeded")));
-            let hint = this.0.options.controller.conversation_now().await;
+            let hint = this.session().op(op::ConversationNow {}).await.ok().flatten();
             // What a command under way still has to say comes before the goodbye (a little while at most).
             let mut saying = this.0.saying.subscribe();
             let _ = tokio::time::timeout(Duration::from_millis(2000), saying.wait_for(|count| *count == 0)).await;
@@ -658,7 +669,6 @@ impl PlainTerminal {
         if let Some(history) = &self.0.options.history {
             history.borrow_mut().add(input);
         }
-        let controller = &self.0.options.controller;
         // The answer to Kumi's question about another Set's conversation: 1, 2 or 3. A command runs as usual, with the
         // question still open; anything else asks it again.
         let asking = self.0.state.borrow().asking.clone();
@@ -674,7 +684,7 @@ impl PlainTerminal {
                 }
             };
             self.0.state.borrow_mut().asking = None;
-            controller.answer_set(choice).await?;
+            self.session().op(op::AnswerSet { choice }).await?;
             self.prompt();
             return Ok(());
         }
@@ -768,8 +778,7 @@ impl PlainTerminal {
             switch_daw: options.switch_daw.is_some(),
             willington: options.willington.is_some(),
         };
-        // Plain mode chooses models and signs in with its own controller, whatever the session says.
-        let can = Capabilities { models: true, ..Capabilities::of(&*options.controller) };
+        let can = options.session.capabilities();
         let goal_running = {
             let state = self.0.state.borrow();
             state.matching || state.objective.as_ref().is_some_and(|goal| goal.state == ObjectiveState::Running)
@@ -778,7 +787,7 @@ impl PlainTerminal {
     }
     /// Carries out what the shared table made of a line, as text; what only the full-screen app can show says so.
     async fn effect(&self, effect: Effect, verb: &str, argument: Option<&str>, command: &str, input: &str) -> Result<(), RuntimeError> {
-        let controller = &self.0.options.controller;
+        let session = self.session();
         let words = string::trim(command.strip_prefix(verb).unwrap_or("")).to_string();
         match effect {
             Effect::Quit => {
@@ -841,20 +850,20 @@ impl PlainTerminal {
                 }
             }
             Effect::Stop => {
-                if !controller.has_stop_live() {
+                if !session.capabilities().stop_daw {
                     self.notice(&format!("[stop] Kumi can't stop {} here.", crate::daw::words().app));
                     return Ok(());
                 }
                 if self.busy() {
-                    let _ = controller.cancel().await;
+                    let _ = session.op(op::Cancel {}).await;
                 }
-                if !controller.stop_live().await? {
+                if !session.op(op::StopDaw {}).await? {
                     self.notice(&format!("[stop] Kumi couldn't stop {0} just now; press space in {0}.", crate::daw::words().app));
                 }
             }
             Effect::Status => {
-                let status = controller.status();
-                let library = library_line(controller.library().as_ref());
+                let status = session.status();
+                let library = library_line(session.library().as_ref());
                 self.notice(&format!(
                     "[status] {}; MCP/{}: {}; turns {}{}; {}{}",
                     enum_name(status.state),
@@ -874,10 +883,10 @@ impl PlainTerminal {
                 }
                 self.0.saying.send_modify(|count| *count += 1);
                 let _saying = Saying(self.clone());
-                if let Some(line) = remembered_line(controller.remembered().await) {
+                if let Some(line) = remembered_line(session.op(op::Remembered {}).await.ok().flatten()) {
                     self.notice(&format!("[status] {line}"));
                 }
-                if let Some(now) = controller.conversation_now().await {
+                if let Some(now) = session.op(op::ConversationNow {}).await.ok().flatten() {
                     let secrets = self.0.options.secrets.clone();
                     self.notice(&format!(
                         "[status] {}",
@@ -914,7 +923,7 @@ impl PlainTerminal {
             Effect::Goal => {
                 let before = self.said();
                 self.0.state.borrow_mut().answering = true;
-                let result = controller.goal((!words.is_empty()).then_some(words.as_str())).await;
+                let result = session.op(op::Goal { text: (!words.is_empty()).then(|| words.clone()) }).await;
                 self.0.state.borrow_mut().answering = false;
                 result?;
                 // Showing it, its status or an edit, the session answers only with the goal's event, which the full-screen
@@ -924,22 +933,22 @@ impl PlainTerminal {
                 }
             }
             Effect::PauseGoal | Effect::PauseLoop if self.busy() => {
-                let _ = controller.cancel().await;
+                let _ = session.op(op::Cancel {}).await;
             }
             Effect::PauseGoal => self.notice("[goal] There's no goal running to pause."),
             Effect::PauseLoop => self.notice("[loop] There's no loop running to pause."),
             Effect::StopGoal => {
                 let before = self.said();
-                if !controller.stop_goal().await? {
+                if !session.op(op::StopGoal {}).await? {
                     self.notice("[goal] There's no goal to stop.");
                 } else if self.said() == before {
                     self.notice("[goal] Stopped.");
                 }
             }
             Effect::StopLoop => {
-                if !(controller.has_stop_loop() && controller.stop_loop().await?) {
+                if !(session.capabilities().stop_loop && session.op(op::StopLoop {}).await?) {
                     if self.busy() {
-                        let _ = controller.cancel().await;
+                        let _ = session.op(op::Cancel {}).await;
                     } else {
                         self.notice("[loop] There's no loop to stop.");
                     }
@@ -1006,7 +1015,7 @@ impl PlainTerminal {
     /// A turn of `input` for the model, as a message is sent.
     async fn turn(&self, input: &str) -> Result<(), RuntimeError> {
         self.0.state.borrow_mut().answering = true;
-        let result = self.0.options.controller.submit(input, None).await;
+        let result = self.session().op(op::Submit { input: input.into(), pinned: None, attachments: vec![], references: vec![] }).await;
         self.0.state.borrow_mut().answering = false;
         result
     }
@@ -1016,7 +1025,8 @@ impl PlainTerminal {
             self.notice("[btw] Use: /btw <question>, asked on the side without stopping Kumi.");
             return Ok(());
         }
-        let answer = self.0.options.controller.aside(question, Rc::new(|_: &str| {}), None).await?;
+        // Its words come as `aside` events too, which plain mode leaves: the answer is said once it's all in.
+        let answer = self.session().op(op::Aside { id: self.next_id(), question: question.into() }).await?;
         // A line each, as its lines came: a list stays a list.
         for line in answer.lines().filter(|line| !line.trim().is_empty()) {
             self.notice(&format!("[btw] {line}"));
@@ -1025,7 +1035,7 @@ impl PlainTerminal {
     }
     /// /jobs: the background jobs, a line each, those still running first.
     fn jobs(&self) {
-        let mut jobs = self.0.options.controller.jobs();
+        let mut jobs = self.session().jobs();
         if jobs.is_empty() {
             self.notice("[jobs] No background jobs.");
             return;
@@ -1044,42 +1054,38 @@ impl PlainTerminal {
     /// /slots [words]: which model does each listening job, and a swap of one, as the full-screen app says them. One swap
     /// at a time, since a model's fetch can take minutes, and Ctrl-C stops it.
     async fn slots(&self, words: &str) {
-        let Some(context) = self.0.options.controller.slots_context() else {
+        if !self.session().capabilities().slots {
             self.notice("[slots] Kumi's listening isn't set up here.");
             return;
-        };
+        }
         let swap = kumi_listening::slots::parse(words) != Ok(kumi_listening::slots::Asked::Show);
-        let signal = Signal::new();
-        let id = {
+        if swap && self.0.state.borrow().slots.is_some() {
+            self.notice("[slots] Kumi is still trying a model for /slots: wait for it, or Ctrl-C stops it.");
+            return;
+        }
+        // What's under way comes as `slots-progress` events, with this id.
+        let id = self.next_id();
+        if swap {
+            self.0.state.borrow_mut().slots = Some(id);
+        }
+        let said = self.session().op(op::Slots { id, words: words.into() }).await;
+        {
             let mut state = self.0.state.borrow_mut();
-            if swap && state.slots.is_some() {
-                drop(state);
-                self.notice("[slots] Kumi is still trying a model for /slots: wait for it, or Ctrl-C stops it.");
-                return;
-            }
-            swap.then(|| {
-                let id = state.next_slots;
-                state.next_slots += 1;
-                state.slots = Some((id, signal.clone()));
-                id
-            })
-        };
-        let progress = |line: String| self.notice(&format!("[slots] {line}"));
-        let said = kumi_listening::slots::command(words, &context, &progress, signal).await;
-        if let Some(id) = id {
-            let mut state = self.0.state.borrow_mut();
-            if state.slots.as_ref().is_some_and(|(held, _)| *held == id) {
+            if state.slots == Some(id) {
                 state.slots = None;
             }
         }
         match said {
-            kumi_listening::slots::Said::Slots { lines, footer } => {
+            Ok(kumi_listening::slots::Said::Slots { lines, footer }) => {
                 for line in lines {
                     self.notice(&format!("[slots] {line}"));
                 }
                 self.notice(&format!("[slots] {footer}"));
             }
-            kumi_listening::slots::Said::Done(said) | kumi_listening::slots::Said::Refused(said) => self.notice(&format!("[slots] {said}")),
+            Ok(kumi_listening::slots::Said::Done(said) | kumi_listening::slots::Said::Refused(said)) => {
+                self.notice(&format!("[slots] {said}"))
+            }
+            Err(error) => self.error(&error),
         }
     }
     /// /music: what Kumi learns your taste from, as the full-screen app lists it. Changing it (add, remove, pause, forget)
@@ -1089,8 +1095,7 @@ impl PlainTerminal {
             self.notice("[music] Adding, removing, pausing or forgetting your music is the full-screen app's; /music lists it here.");
             return;
         }
-        let session = InProcess::new(self.0.options.controller.clone());
-        match (&*session as &dyn SessionHandle).op(op::Music {}).await {
+        match self.session().op(op::Music {}).await {
             Ok(view) => {
                 for line in crate::tui::app::music_lines(&view.status, view.agreed, view.held, view.found.as_ref(), now_ms_f64()) {
                     self.notice(&format!("[music] {line}"));
@@ -1102,35 +1107,35 @@ impl PlainTerminal {
     /// Answers `verb`, a command plain mode has run since before the shared table (its own /pin, /unpin and /forget
     /// among them), or sends a turn.
     async fn command(&self, verb: &str, argument: Option<&str>, command: &str, input: &str) -> Result<(), RuntimeError> {
-        let controller = &self.0.options.controller;
-        let models = &self.0.options.models;
+        let session = self.session();
+        let can = session.capabilities();
         match verb{
  "/model"=>{self.model_command(argument).await?;},
- "/effort"=>{let choices=EFFORTS.map(|e|e.as_str()).join(", ");if let Some(argument)=argument{let effort=Effort::parse(argument);if argument!="default"&&effort.is_none(){self.notice(&format!("[effort] Choose one of {choices} or default."));}else{models.set_effort(effort).await?;self.notice(&format!("[effort] {argument}."));}}else{self.notice(&format!("[effort] {}. Choose one of {choices} or default.",models.current().effort.map(|e|e.as_str()).unwrap_or("the model's default")));}},
- "/fast"=>{let current=models.current();let on=!models.fast_enabled();match models.set_fast(on).await?{Some(tier)=>self.notice(&format!("[fast] {} is on{}.",tier.name,tier.description.map(|d|format!(": {d}")).unwrap_or_default())),None if on=>self.notice(&format!("[fast] {} has no faster tier.",current.name.or(current.model).unwrap_or_else(||"This model".into()))),None=>self.notice("[fast] Back to the standard tier."),}},
- "/memory"=>{let Some(memory)=controller.memory().await?else{self.notice("[memory] Kumi keeps no notes here.");return Ok(());};let list=|notes:&[kumi_agent::core::contracts::MemoryNote]|{if notes.is_empty(){"none".into()}else{notes.iter().map(|n|format!("{}{} {}",n.id,if n.pinned{" (pinned)"}else{""},n.text)).collect::<Vec<_>>().join(" · ")}};self.notice(&format!("[memory] About you: {}",list(&memory.memory.producer)));self.notice(&if memory.saved{format!("[memory] About {}: {}",memory.set_name.clone().unwrap_or_else(||format!("this {}",crate::daw::words().place)),list(&memory.memory.set))}else{format!("[memory] This {} isn't saved yet; notes about it are kept once it is.",crate::daw::words().place)});if controller.has_techniques(){let techniques=controller.techniques().await?;self.notice(&format!("[memory] Techniques: {}",if techniques.is_empty(){"none yet".into()}else{techniques.iter().map(|t|format!("{} {} (for {})",t.id,t.name,t.fits)).collect::<Vec<_>>().join(" · ")}));}if controller.has_taste(){let taste=controller.taste().await?;self.notice(&format!("[memory] From your {}: {}",crate::daw::words().places,if taste.is_empty(){"nothing yet".into()}else{taste.iter().enumerate().map(|(i,l)|format!("u{} {}",i+1,l.line)).collect::<Vec<_>>().join(" · ")}));self.0.state.borrow_mut().taste=taste;}},
- "/recipes"=>{let recipes=controller.recipes().await?;self.notice(&if recipes.is_empty(){format!("[recipes] None yet. Ask Kumi to save a way of working, or say \"watch me\" and do it in {}.",crate::daw::words().app)}else{format!("[recipes] {}",recipes.iter().map(|r|format!("{}{}: {}",r.name,if r.params.is_empty(){String::new()}else{format!(" (needs {})",r.params.iter().map(|p|p.name.as_str()).collect::<Vec<_>>().join(", "))},r.about)).collect::<Vec<_>>().join(" · "))});},
- "/resume"|"/conversations"|"/rename"|"/fork" if !controller.has_conversations()=>self.notice(&format!("[conversations] {}",crate::tui::app::not_kept())),
+ "/effort"=>{let choices=EFFORTS.map(|e|e.as_str()).join(", ");if let Some(argument)=argument{let effort=Effort::parse(argument);if argument!="default"&&effort.is_none(){self.notice(&format!("[effort] Choose one of {choices} or default."));}else{session.op(op::SetEffort{effort}).await?;self.notice(&format!("[effort] {argument}."));}}else{self.notice(&format!("[effort] {}. Choose one of {choices} or default.",self.current_model().and_then(|c|c.effort).map(|e|e.as_str()).unwrap_or("the model's default")));}},
+ "/fast"=>{let view=session.models();let on=!view.as_ref().is_some_and(|v|v.fast);let current=view.map(|v|v.current);match session.op(op::SetFast{on}).await?{Some(tier)=>self.notice(&format!("[fast] {} is on{}.",tier.name,tier.description.map(|d|format!(": {d}")).unwrap_or_default())),None if on=>self.notice(&format!("[fast] {} has no faster tier.",current.and_then(|c|c.name.or(c.model)).unwrap_or_else(||"This model".into()))),None=>self.notice("[fast] Back to the standard tier."),}},
+ "/memory"=>{let Some(memory)=session.op(op::Memory{}).await?else{self.notice("[memory] Kumi keeps no notes here.");return Ok(());};let list=|notes:&[kumi_agent::core::contracts::MemoryNote]|{if notes.is_empty(){"none".into()}else{notes.iter().map(|n|format!("{}{} {}",n.id,if n.pinned{" (pinned)"}else{""},n.text)).collect::<Vec<_>>().join(" · ")}};self.notice(&format!("[memory] About you: {}",list(&memory.memory.producer)));self.notice(&if memory.saved{format!("[memory] About {}: {}",memory.set_name.clone().unwrap_or_else(||format!("this {}",crate::daw::words().place)),list(&memory.memory.set))}else{format!("[memory] This {} isn't saved yet; notes about it are kept once it is.",crate::daw::words().place)});if can.techniques{let techniques=session.op(op::Techniques{}).await?;self.notice(&format!("[memory] Techniques: {}",if techniques.is_empty(){"none yet".into()}else{techniques.iter().map(|t|format!("{} {} (for {})",t.id,t.name,t.fits)).collect::<Vec<_>>().join(" · ")}));}if can.taste{let taste=session.op(op::Taste{}).await?;self.notice(&format!("[memory] From your {}: {}",crate::daw::words().places,if taste.is_empty(){"nothing yet".into()}else{taste.iter().enumerate().map(|(i,l)|format!("u{} {}",i+1,l.line)).collect::<Vec<_>>().join(" · ")}));self.0.state.borrow_mut().taste=taste;}},
+ "/recipes"=>{let recipes=session.op(op::Recipes{}).await?;self.notice(&if recipes.is_empty(){format!("[recipes] None yet. Ask Kumi to save a way of working, or say \"watch me\" and do it in {}.",crate::daw::words().app)}else{format!("[recipes] {}",recipes.iter().map(|r|format!("{}{}: {}",r.name,if r.params.is_empty(){String::new()}else{format!(" (needs {})",r.params.iter().map(|p|p.name.as_str()).collect::<Vec<_>>().join(", "))},r.about)).collect::<Vec<_>>().join(" · "))});},
+ "/resume"|"/conversations"|"/rename"|"/fork" if !can.conversations=>self.notice(&format!("[conversations] {}",crate::tui::app::not_kept())),
  "/resume"|"/conversations"=>{let words=string::trim(command.strip_prefix(verb).unwrap_or("")).to_string();self.resume_command(&words).await?;},
  "/rename"=>{let words=string::trim(command.strip_prefix(verb).unwrap_or("")).to_string();self.rename_command(&words).await?;},
  "/export"=>{let words=string::trim(command.strip_prefix(verb).unwrap_or("")).to_string();self.export_command(&words, false).await;},
  "/share"=>{self.export_command("html", true).await;},
- "/fork"=>{let name=string::trim(command.strip_prefix(verb).unwrap_or("")).to_string();if controller.fork_conversation((!name.is_empty()).then_some(name.as_str())).await?.is_none(){self.notice("[fork] Nothing to fork yet: ask something first.");}},
- "/note"=>{let usage="[memory] Use: /note <id> <new words>, with an id from /memory.";let words=argument.and_then(|id|command.split_once(id)).map(|(_,words)|words.trim()).unwrap_or("");match argument.filter(|_|!words.is_empty()&&controller.has_change_note()){Some(id)=>match controller.change_note(id,NoteChange::Text(words.into())).await{Ok(Some(_))=>self.notice(&format!("[memory] Changed note {id}.")),Ok(None)=>self.notice(usage),Err(error)=>self.notice(&format!("[memory] {}",error.message()))},None=>self.notice(usage)}},
- "/pin"|"/unpin"=>{let pin=verb=="/pin";let usage=format!("[memory] Use: {verb} <id>, with a note's id from /memory.");match argument.filter(|_|controller.has_change_note()){Some(id)=>match controller.change_note(id,NoteChange::Pinned(pin)).await?{Some(_)=>self.notice(&if pin{format!("[memory] Pinned {id}: Kumi keeps it even when its memory is full.")}else{format!("[memory] Unpinned {id}.")}),None=>self.notice(&usage)},None=>self.notice(&usage)}},
- "/forget"=>{let invalid="[memory] Use: /forget <id>, with an id from /memory.";if argument.is_some_and(|a|a.starts_with('u'))&&controller.has_forget_taste(){if self.0.state.borrow().taste.is_empty(){let taste=controller.taste().await?;self.0.state.borrow_mut().taste=taste;}let n=number::parse(&argument.unwrap()[1..]).unwrap_or(f64::NAN)-1.;let line=if n>=0.&&n.fract()==0.{self.0.state.borrow().taste.get(n as usize).cloned()}else{None};if let Some(line)=line{if controller.forget_taste(&line.id).await?{self.notice(&format!("[memory] Forgot, from your {}: {}",crate::daw::words().places,line.line));}else{self.notice(invalid);}}else{self.notice(invalid);}}else if argument.is_some_and(|a|a.starts_with('t'))&&controller.has_forget_technique(){if !controller.forget_technique(argument.unwrap()).await?{self.notice(invalid);}}else if let Some(argument)=argument{if controller.forget(argument).await?.is_none(){self.notice(invalid);}}else{self.notice(invalid);}},
- "/willington"=>{match self.0.options.willington.clone().and_then(|w|(w.on)().map(|on|(w,on))){Some((willington,on))=>match (willington.set)(!on).await{Ok(said)=>{self.notice(&format!("[willington] {said}"));controller.reconfigure().await?;},Err(error)=>self.notice(&format!("[willington] Kumi couldn't turn Willington's bindings {}: {error}",if on{"off"}else{"on"})),},None=>self.notice("Unknown command. Use /help."),}},
+ "/fork"=>{let name=string::trim(command.strip_prefix(verb).unwrap_or("")).to_string();if session.op(op::ForkConversation{name:(!name.is_empty()).then(||name.clone()),before:None}).await?.is_none(){self.notice("[fork] Nothing to fork yet: ask something first.");}},
+ "/note"=>{let usage="[memory] Use: /note <id> <new words>, with an id from /memory.";let words=argument.and_then(|id|command.split_once(id)).map(|(_,words)|words.trim()).unwrap_or("");match argument.filter(|_|!words.is_empty()&&can.change_note){Some(id)=>match session.op(op::ChangeNote{id:id.into(),change:NoteChange::Text(words.into())}).await{Ok(Some(_))=>self.notice(&format!("[memory] Changed note {id}.")),Ok(None)=>self.notice(usage),Err(error)=>self.notice(&format!("[memory] {}",error.message()))},None=>self.notice(usage)}},
+ "/pin"|"/unpin"=>{let pin=verb=="/pin";let usage=format!("[memory] Use: {verb} <id>, with a note's id from /memory.");match argument.filter(|_|can.change_note){Some(id)=>match session.op(op::ChangeNote{id:id.into(),change:NoteChange::Pinned(pin)}).await?{Some(_)=>self.notice(&if pin{format!("[memory] Pinned {id}: Kumi keeps it even when its memory is full.")}else{format!("[memory] Unpinned {id}.")}),None=>self.notice(&usage)},None=>self.notice(&usage)}},
+ "/forget"=>{let invalid="[memory] Use: /forget <id>, with an id from /memory.";if argument.is_some_and(|a|a.starts_with('u'))&&can.forget_taste{if self.0.state.borrow().taste.is_empty(){let taste=session.op(op::Taste{}).await?;self.0.state.borrow_mut().taste=taste;}let n=number::parse(&argument.unwrap()[1..]).unwrap_or(f64::NAN)-1.;let line=if n>=0.&&n.fract()==0.{self.0.state.borrow().taste.get(n as usize).cloned()}else{None};if let Some(line)=line{if session.op(op::ForgetTaste{id:line.id.clone()}).await?{self.notice(&format!("[memory] Forgot, from your {}: {}",crate::daw::words().places,line.line));}else{self.notice(invalid);}}else{self.notice(invalid);}}else if argument.is_some_and(|a|a.starts_with('t'))&&can.forget_technique{if !session.op(op::ForgetTechnique{id:argument.unwrap().into()}).await?{self.notice(invalid);}}else if let Some(argument)=argument{if session.op(op::Forget{id:argument.into()}).await?.is_none(){self.notice(invalid);}}else{self.notice(invalid);}},
+ "/willington"=>{match self.0.options.willington.clone().and_then(|w|(w.on)().map(|on|(w,on))){Some((willington,on))=>match (willington.set)(!on).await{Ok(said)=>{self.notice(&format!("[willington] {said}"));session.op(op::Reconfigure{}).await?;},Err(error)=>self.notice(&format!("[willington] Kumi couldn't turn Willington's bindings {}: {error}",if on{"off"}else{"on"})),},None=>self.notice("Unknown command. Use /help."),}},
  "/login"=>self.notice(&format!("[login] Sign in from a shell: {} login <provider> (openai-codex, anthropic, openai, opencode). The full-screen app signs in here.",*KUMI)),
- "/logout"=>{if let Some(provider)=argument.and_then(ProviderId::parse){self.notice(&if models.sign_out(provider).await?{format!("[logout] Signed out of {}.",provider.as_str())}else{format!("[logout] There was no sign-in for {} to remove.",provider.as_str())});}else{self.notice(&format!("[logout] Use: /logout <provider> ({}).",table::rows().map(|row|row.id).collect::<Vec<_>>().join(", ")));}},
- _=>{if command=="/undo"{if let Some(change)=controller.undo(None).await?{self.notice(&if enum_name(change.state)=="undone"{format!("[undo] Undid: {}",change.title)}else{string::trim(&format!("[undo] Kept: {}. {}",change.title,change.note.unwrap_or_default())).into()});}}else if command=="/refresh"{controller.refresh().await?;}else if command=="/reconnect"&&controller.has_reconnect(){controller.reconnect().await?;}else if verb=="/new"{self.notice("── New conversation. Kumi won't use what's above ──");controller.new_conversation().await?;let name=string::trim(command.strip_prefix(verb).unwrap_or(""));if !name.is_empty(){if controller.has_conversations(){controller.rename_conversation(None,Some(name)).await?;}else{self.notice(&format!("[conversations] {}",crate::tui::app::not_kept()));}}}else if command_like(command){self.notice("Unknown command. Use /help.");}else if let Some(outcome)=self.instant(input).await{self.notice(&format!("[instant] {}",outcome.text));}else{self.0.state.borrow_mut().answering=true;let result=controller.submit(input,None).await;self.0.state.borrow_mut().answering=false;result?;}}
+ "/logout"=>{if let Some(provider)=argument.and_then(ProviderId::parse){self.notice(&if session.op(op::SignOut{provider}).await?{format!("[logout] Signed out of {}.",provider.as_str())}else{format!("[logout] There was no sign-in for {} to remove.",provider.as_str())});}else{self.notice(&format!("[logout] Use: /logout <provider> ({}).",table::rows().map(|row|row.id).collect::<Vec<_>>().join(", ")));}},
+ _=>{if command=="/undo"{if let Some(change)=session.op(op::Undo{id:None}).await?{self.notice(&if enum_name(change.state)=="undone"{format!("[undo] Undid: {}",change.title)}else{string::trim(&format!("[undo] Kept: {}. {}",change.title,change.note.unwrap_or_default())).into()});}}else if command=="/refresh"{session.op(op::Refresh{}).await?;}else if command=="/reconnect"&&can.reconnect{session.op(op::Reconnect{}).await?;}else if verb=="/new"{self.notice("── New conversation. Kumi won't use what's above ──");session.op(op::NewConversation{}).await?;let name=string::trim(command.strip_prefix(verb).unwrap_or(""));if !name.is_empty(){if can.conversations{session.op(op::RenameConversation{id:None,name:Some(name.into())}).await?;}else{self.notice(&format!("[conversations] {}",crate::tui::app::not_kept()));}}}else if command_like(command){self.notice("Unknown command. Use /help.");}else if let Some(outcome)=self.instant(input).await{self.notice(&format!("[instant] {}",outcome.text));}else{self.turn(input).await?;}}
  }
         Ok(())
     }
     /// This Set's kept conversations, then other Sets' newest: one numbered list, the same each time it's asked for.
     async fn listed(&self) -> Result<Vec<ConversationSummary>, RuntimeError> {
-        let controller = &self.0.options.controller;
-        let here = controller.conversations().await?;
-        let others = controller.all_conversations().await?.into_iter().filter(|row| !here.iter().any(|h| h.id == row.id)).take(10);
+        let here = self.session().op(op::Conversations {}).await?;
+        let others =
+            self.session().op(op::AllConversations {}).await?.into_iter().filter(|row| !here.iter().any(|h| h.id == row.id)).take(10);
         Ok(here.iter().cloned().chain(others).collect())
     }
     /// /export [md | html | json], and /share (`again`: a web page, the one saved last while nothing changed): this
@@ -1146,7 +1151,14 @@ impl PlainTerminal {
             }
         };
         let redact = crate::export::redactor_now(self.0.options.redact.as_ref(), &self.0.options.secrets).await;
-        let exported = match crate::export::conversation_now(&*self.0.options.controller, format, &*redact).await {
+        let found = match self.session().op(op::ConversationToExport {}).await {
+            Ok(found) => found,
+            Err(error) => {
+                self.error(&error);
+                return;
+            }
+        };
+        let exported = match crate::export::exported(found, format, &*redact) {
             Ok(exported) => exported,
             Err(why) => {
                 self.notice(&format!("[export] {why}"));
@@ -1173,7 +1185,6 @@ impl PlainTerminal {
     }
     /// /resume: the list; or the conversation a number from it, an id, the start of one or a name gives.
     async fn resume_command(&self, words: &str) -> Result<(), RuntimeError> {
-        let controller = &self.0.options.controller;
         let kept = self.listed().await?;
         let mention = |row: &ConversationSummary, with_set: bool| {
             let title = head(&sanitize_text(&row.title(), &self.0.options.secrets), 80);
@@ -1199,7 +1210,7 @@ impl PlainTerminal {
                 self.notice("[conversations] None kept yet: a conversation is kept once you've asked something.");
                 return Ok(());
             }
-            let here = controller.conversations().await?.len();
+            let here = self.session().op(op::Conversations {}).await?.len();
             let rows: Vec<String> = kept
                 .iter()
                 .enumerate()
@@ -1225,12 +1236,12 @@ impl PlainTerminal {
                 }
             }
         } else {
-            controller.find_conversation(words).await?
+            self.session().op(op::FindConversation { word: words.into() }).await?
         };
         match found {
             ConversationMatch::One(row) if row.current => self.notice("[conversations] That's this one."),
             ConversationMatch::One(row) => {
-                if !controller.resume_conversation(&row.id).await? {
+                if !self.session().op(op::ResumeConversation { id: row.id.clone() }).await? {
                     self.notice("[conversations] That conversation isn't kept any more.");
                 }
             }
@@ -1248,16 +1259,17 @@ impl PlainTerminal {
     }
     /// /rename <name>, or (a kept one) /rename <id> <name>.
     async fn rename_command(&self, words: &str) -> Result<(), RuntimeError> {
-        let controller = &self.0.options.controller;
+        let session = self.session();
         if words.is_empty() {
-            let title = controller.conversation_now().await.map(|now| now.title).unwrap_or_default();
+            let title = session.op(op::ConversationNow {}).await.ok().flatten().map(|now| now.title).unwrap_or_default();
             self.notice(&format!("[rename] Use: /rename <name>. Now: {}", if title.is_empty() { "(no name yet)" } else { &title }));
             return Ok(());
         }
         let (first, rest) = words.split_once(' ').map(|(a, b)| (a, string::trim(b))).unwrap_or((words, ""));
-        let kept = !rest.is_empty() && matches!(controller.find_conversation(first).await?, ConversationMatch::One(row) if row.id == first);
+        let kept = !rest.is_empty()
+            && matches!(session.op(op::FindConversation { word: first.into() }).await?, ConversationMatch::One(row) if row.id == first);
         let (id, name) = if kept { (Some(first), rest) } else { (None, words) };
-        self.notice(&if controller.rename_conversation(id, Some(name)).await? {
+        self.notice(&if session.op(op::RenameConversation { id: id.map(str::to_string), name: Some(name.into()) }).await? {
             format!("[rename] Named “{}”.", head(&sanitize_text(name, &self.0.options.secrets), 60))
         } else {
             "[rename] That conversation isn't kept any more.".into()
@@ -1266,29 +1278,35 @@ impl PlainTerminal {
     }
     /// A fixed phrase ("tempo 124", "mute drums") run at once with no model call; None sends it to the model.
     async fn instant(&self, input: &str) -> Option<kumi_agent::core::contracts::InstantOutcome> {
-        let controller = &self.0.options.controller;
-        if !self.0.options.instant || !controller.has_instant() || kumi_agent::core::phrases::parse(input).is_none() {
+        if !self.0.options.instant || !self.session().capabilities().instant || kumi_agent::core::phrases::parse(input).is_none() {
             return None;
         }
-        controller.instant(input).await.ok().flatten()
+        self.session().op(op::Instant { text: input.into() }).await.ok().flatten()
     }
     async fn model_command(&self, argument: Option<&str>) -> Result<(), RuntimeError> {
-        let models = &self.0.options.models;
+        let session = self.session();
         let Some(argument) = argument else {
-            let current = models.current();
-            let mut available =
-                models.providers().await?.into_iter().filter(|p| p.signed_in).map(|p| p.id.as_str().to_string()).collect::<Vec<_>>();
-            available.extend(models.local().await.into_iter().filter(|s| s.running).map(|s| s.id));
+            let current = self.current_model();
+            let mut available = session
+                .op(op::Providers {})
+                .await?
+                .into_iter()
+                .filter(|p| p.signed_in)
+                .map(|p| p.id.as_str().to_string())
+                .collect::<Vec<_>>();
+            available.extend(session.op(op::LocalModels {}).await?.into_iter().filter(|s| s.running).map(|s| s.id));
             self.notice(&format!(
                 "[model] {}{}. List a provider's with /model <provider> ({}); choose with /model <provider>/<model>.",
-                current.model.as_deref().unwrap_or("none chosen"),
-                current.effort.map(|e| format!(", effort {}", e.as_str())).unwrap_or_default(),
+                current.as_ref().and_then(|c| c.model.as_deref()).unwrap_or("none chosen"),
+                current.as_ref().and_then(|c| c.effort).map(|e| format!(", effort {}", e.as_str())).unwrap_or_default(),
                 if available.is_empty() { "sign in first, or open Ollama or LM Studio".into() } else { available.join(", ") }
             ));
             return Ok(());
         };
-        if !argument.contains('/') && (ProviderId::parse(argument).is_some() || models.local().await.iter().any(|s| s.id == argument)) {
-            let listed = models.models(argument, false).await?;
+        if !argument.contains('/')
+            && (ProviderId::parse(argument).is_some() || session.op(op::LocalModels {}).await?.iter().any(|s| s.id == argument))
+        {
+            let listed = session.op(op::Models { provider: argument.into(), refresh: false }).await?;
             self.notice(&format!(
                 "[model] {argument}: {}",
                 if listed.is_empty() {
@@ -1298,8 +1316,12 @@ impl PlainTerminal {
                 }
             ));
         } else {
-            let note = models.choose(argument).await?;
-            let fast = models.current().fast.map(|tier| format!(" {} is on; /fast turns it off.", tier.name)).unwrap_or_default();
+            let note = session.op(op::ChooseModel { model: argument.into() }).await?;
+            let fast = self
+                .current_model()
+                .and_then(|c| c.fast)
+                .map(|tier| format!(" {} is on; /fast turns it off.", tier.name))
+                .unwrap_or_default();
             self.notice(&format!(
                 "[model] {argument} from the next answer on.{}{fast}",
                 note.filter(|n| !n.is_empty()).map(|n| format!(" {n}")).unwrap_or_default()
@@ -1380,7 +1402,7 @@ impl Terminal for PlainTerminal {
         }));
         self.notice(&format!(
             "Kumi · {} · {}",
-            self.0.options.models.current().model.as_deref().unwrap_or("no model chosen yet"),
+            self.current_model().and_then(|current| current.model).as_deref().unwrap_or("no model chosen yet"),
             if self.0.options.mode == "inference-only" {
                 format!("MCP disconnected / No {} access", crate::daw::words().app)
             } else {
@@ -1408,23 +1430,22 @@ impl Terminal for PlainTerminal {
                 Self(inner).bytes(bytes);
             }
         }));
-        if self.0.options.models.current().model.is_none() {
+        if self.current_model().is_some_and(|current| current.model.is_none()) {
             let this = self.clone();
             tokio::task::spawn_local(async move {
-                if let Ok(chosen) = this.0.options.models.choose_default().await {
+                if let Ok(chosen) = this.session().op(op::ChooseDefault {}).await {
                     if !this.0.state.borrow().closing {
-                        this.notice(&if let Some(chosen)=chosen{if let Some(where_)=chosen.model.r#where.filter(|s|!s.is_empty()){format!("[model] {}, in {} {where_}. /model changes it.{}",chosen.model.id,this.0.options.models.provider_name(&chosen.model.provider),chosen.note.filter(|s|!s.is_empty()).map(|s|format!(" {s}")).unwrap_or_default())}else{format!("[model] {}, the first {} lists. /model changes it.",chosen.model.id,chosen.model.provider)}}else{format!("[model] Not signed in to a provider yet. Sign in with: {} login <provider>, then /model; or open Ollama or LM Studio.",*KUMI)});
+                        this.notice(&if let Some(chosen)=chosen{if let Some(where_)=chosen.model.r#where.filter(|s|!s.is_empty()){format!("[model] {}, in {} {where_}. /model changes it.{}",chosen.model.id,this.session().provider_name(&chosen.model.provider),chosen.note.filter(|s|!s.is_empty()).map(|s|format!(" {s}")).unwrap_or_default())}else{format!("[model] {}, the first {} lists. /model changes it.",chosen.model.id,chosen.model.provider)}}else{format!("[model] Not signed in to a provider yet. Sign in with: {} login <provider>, then /model; or open Ollama or LM Studio.",*KUMI)});
                     }
                 }
             });
-        } else {
+        } else if self.current_model().is_some() {
             // A saved model the provider's own list no longer shows: said once, with how to choose another.
             let this = self.clone();
             tokio::task::spawn_local(async move {
-                let models = this.0.options.models.clone();
-                if let Some(said) = crate::models::missing_model(models.as_ref()).await {
+                if let Some(said) = this.session().op(op::MissingModel {}).await.ok().flatten() {
                     if !this.0.state.borrow().closing {
-                        let provider = models.current().provider.unwrap_or_default();
+                        let provider = this.current_model().and_then(|current| current.provider).unwrap_or_default();
                         this.notice(&format!(
                             "[model] {said}. /model {provider} lists the ones it does; /model {provider}/<model> chooses one."
                         ));
@@ -1435,7 +1456,7 @@ impl Terminal for PlainTerminal {
         let this = self.clone();
         tokio::task::spawn_local(async move {
             if !this.0.state.borrow().closing {
-                if let Err(error) = this.0.options.controller.start().await {
+                if let Err(error) = this.session().op(op::Start {}).await {
                     if !this.0.state.borrow().closing {
                         this.error(&error);
                         this.finish(1).await;
@@ -1495,6 +1516,12 @@ impl Terminal for PlainTerminal {
                 }
             }
             "objective-cleared" => self.0.state.borrow_mut().objective = None,
+            // A /slots fetch or check under way, as it goes.
+            "slots-progress" => {
+                if let SessionEvent::SlotsProgress { line, .. } = &event {
+                    self.notice(&format!("[slots] {line}"));
+                }
+            }
             "goal" => {
                 if let SessionEvent::Goal(status) = &event {
                     let mut state = self.0.state.borrow_mut();
@@ -1520,7 +1547,7 @@ impl Terminal for PlainTerminal {
                             self.notice(&format!("[job {}] {}: {how}{line}", status.id, status.title));
                             if status.when_done == WhenDone::Continue && state != JobState::Stopped {
                                 self.0.state.borrow_mut().carry.push(status.id);
-                                if self.0.options.controller.status().state == TurnState::Idle {
+                                if self.session().status().state == TurnState::Idle {
                                     self.carry_on(status.id);
                                 }
                             }
@@ -1722,7 +1749,7 @@ impl Terminal for PlainTerminal {
             "error" => {
                 self.error(&RuntimeError::plain(get("message")));
                 self.0.state.borrow_mut().text.discard();
-                if get("kind") == "auth" && self.0.options.models.cloud_provider(get("provider")).is_some() {
+                if get("kind") == "auth" && self.session().cloud_provider(get("provider")).is_some() {
                     self.notice(&format!("[login] Sign in from a shell: {} login {}", *KUMI, get("provider")));
                 }
             }
@@ -1981,9 +2008,9 @@ impl Terminal for PlainTerminal {
             return;
         }
         // A /slots swap under way stops first, as Esc stops it in the full-screen app.
-        if let Some((_, signal)) = state.slots.take() {
+        if let Some(id) = state.slots.take() {
             drop(state);
-            signal.cancel();
+            self.session().tell(op::StopSlots { id }.into());
             self.notice("[slots] Stopping the model Kumi was trying.");
             return;
         }
@@ -2002,7 +2029,7 @@ impl Terminal for PlainTerminal {
         self.notice("[cancelling] Cancelling current work.");
         let this = self.clone();
         tokio::task::spawn_local(async move {
-            if let Err(error) = this.0.options.controller.cancel().await {
+            if let Err(error) = this.session().op(op::Cancel {}).await {
                 this.error(&error);
             }
             this.0.state.borrow_mut().cancelling = false;

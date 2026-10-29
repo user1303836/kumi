@@ -10,7 +10,7 @@ use kumi::{
     terminal::{create_terminal, PlainTerminal, Terminal, TerminalOptions},
     tui::tty::TtyOutput,
 };
-use kumi_agent::core::contracts::*;
+use kumi_agent::core::{contracts::*, protocol::InProcess};
 use kumi_types::contracts::*;
 use kumi_types::errors::RuntimeError;
 use serde_json::{json, Value};
@@ -124,6 +124,8 @@ struct Control {
     all: RefCell<Vec<ConversationSummary>>,
     now: RefCell<Option<ConversationNow>>,
     stop: Cell<bool>,
+    /// The session's models, which plain mode reaches through it.
+    models: Rc<models::FakeModels>,
 }
 impl Default for Control {
     fn default() -> Self {
@@ -138,6 +140,7 @@ impl Default for Control {
             all: RefCell::default(),
             now: RefCell::default(),
             stop: Cell::new(false),
+            models: models::FakeModels::chosen(),
         }
     }
 }
@@ -145,6 +148,9 @@ impl Default for Control {
 impl SessionController for Control {
     async fn start(&self) -> Result<(), RuntimeError> {
         Ok(())
+    }
+    fn model_controls(&self) -> Option<Rc<dyn kumi::models::ModelController>> {
+        Some(self.models.clone())
     }
     async fn submit(&self, _: &str, _: Option<PinnedNode>) -> Result<(), RuntimeError> {
         Ok(())
@@ -230,7 +236,7 @@ impl Fixture {
         let input = Rc::new(Input::default());
         let out = Rc::new(Out::default());
         let control = Rc::new(control);
-        let mut options = TerminalOptions::new(control.clone(), input.clone(), out.clone(), models::FakeModels::chosen(), "live");
+        let mut options = TerminalOptions::new(InProcess::new(control.clone()), input.clone(), out.clone(), "live");
         options.secrets = vec!["private-token".into()];
         options.close_timeout_ms = Some(25);
         let terminal = create_terminal(options);

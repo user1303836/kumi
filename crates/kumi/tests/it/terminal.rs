@@ -10,7 +10,7 @@ use kumi::{
     tui::tty::TtyOutput,
     update::UpdateControl,
 };
-use kumi_agent::core::contracts::*;
+use kumi_agent::core::{contracts::*, protocol::InProcess};
 use kumi_common::abort::Signal;
 use kumi_types::contracts::*;
 use kumi_types::errors::RuntimeError;
@@ -105,6 +105,8 @@ struct Control {
     export: RefCell<Option<ConversationToExport>>,
     slots: RefCell<Option<Rc<kumi_listening::slots::SlotsContext>>>,
     music: RefCell<Option<Rc<kumi_listening::music::learning::Music>>>,
+    /// The session's models, which plain mode reaches through it.
+    models: RefCell<Option<Rc<FakeModels>>>,
 }
 impl Default for Control {
     fn default() -> Self {
@@ -130,6 +132,7 @@ impl Default for Control {
             export: RefCell::new(None),
             slots: RefCell::new(None),
             music: RefCell::new(None),
+            models: RefCell::new(None),
         }
     }
 }
@@ -358,6 +361,9 @@ impl SessionController for Control {
     fn music(&self) -> Option<Rc<kumi_listening::music::learning::Music>> {
         self.music.borrow().clone()
     }
+    fn model_controls(&self) -> Option<Rc<dyn kumi::models::ModelController>> {
+        self.models.borrow().clone().map(|models| models as Rc<dyn kumi::models::ModelController>)
+    }
 }
 struct Fixture {
     input: Rc<Input>,
@@ -383,7 +389,8 @@ impl Fixture {
         let control = Rc::new(Control::default());
         control.hold.set(hold);
         let models = models.unwrap_or_else(FakeModels::chosen);
-        let mut options = TerminalOptions::new(control.clone(), input.clone(), out.clone(), models.clone(), "inference-only");
+        *control.models.borrow_mut() = Some(models.clone());
+        let mut options = TerminalOptions::new(InProcess::new(control.clone()), input.clone(), out.clone(), "inference-only");
         options.startup_notice = notice.map(str::to_string);
         options.updates = updates;
         options.secrets = vec!["private-token".into()];
@@ -1251,8 +1258,8 @@ async fn plain_mode_answers_every_command_the_table_offers_its_session() {
             (options.places, options.fork, options.delay_ms) = (Some(vec![]), false, 3_600_000);
             *f.control.music.borrow_mut() = Some(create_music(options));
             flush().await;
-            // As plain mode reads them: its own model controller, and every part a front end can have but a voice.
-            let can = Capabilities { models: true, ..Capabilities::of(&*f.control) };
+            // As plain mode reads them: the session's, and every part a front end can have but a voice.
+            let can = Capabilities::of(&*f.control);
             let fronts = Fronts { voice: false, updates: true, switch_daw: true, willington: true };
             let names: Vec<&str> = COMMANDS
                 .iter()
