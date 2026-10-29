@@ -115,6 +115,10 @@ case!(cursor_spacing_quiet_stop_and_auto_send, async {
     delay(150).await;
     assert_eq!(*v.calls.borrow(), ["listen", "stop", "write "]);
     h.has("make the bass darker");
+    // One dictation is one step: ctrl+- takes back the words it brought, not a letter at a time.
+    h.type_text("\x1f").await;
+    h.has("make the bass");
+    assert!(!has(&h.screen(), "darker"));
     v.choose(VoiceChange { send: Some(true), ..Default::default() }).unwrap();
     v.mic.spoke.set(false);
     h.type_text("\x15").await;

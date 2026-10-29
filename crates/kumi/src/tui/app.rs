@@ -23,7 +23,7 @@ mod shown;
 
 use super::{
     alerts::{self, ProgramState, StatusReport, TerminalProfile},
-    editor::Editor,
+    editor::{Draft, Editor},
     icons::{detect_icon_style_here, IconKind, IconStyle},
     keys::InputEvent,
     picker::{Picker, PickerItem},
@@ -421,7 +421,8 @@ struct State {
     instant_changes: Vec<String>,
     busy_since: f64,
     turn_changes: usize,
-    recall: Option<(usize, String)>,
+    /// Which earlier message ↑ shows, and the draft set aside meanwhile.
+    recall: Option<(usize, Draft)>,
     last_sent: Option<String>,
     tree: Option<DeviceTree>,
     /// Bumped whenever `tree` is read again: its rows are made again only then, or for another focus.
