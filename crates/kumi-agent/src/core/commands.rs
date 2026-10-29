@@ -15,8 +15,50 @@ pub struct Command {
     pub about: &'static str,
     /// Words the menu also finds it by, that it doesn't show ("history" for /undo).
     pub finds: &'static [&'static str],
+    /// The words it takes that the menu offers, as each is typed (tab puts the one chosen in).
+    pub args: &'static [Arg],
     pub needs: Needs,
 }
+
+/// A word a command takes, and what the menu offers for it.
+pub struct Arg {
+    /// What the word is ("palette").
+    pub name: &'static str,
+    /// Which word it is after the command's name: 1 for the first.
+    pub at: usize,
+    /// The words before it that it follows (`use` for a palette's name); empty, any.
+    pub after: &'static [&'static str],
+    pub completes: Completes,
+    /// It runs to the end of the line, spaces and all: a palette's or a conversation's name.
+    pub to_end: bool,
+}
+
+/// What the menu offers for a word. Fixed words are the command's own; the rest the front end reads through the
+/// session, once as the word starts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Completes {
+    Words(&'static [&'static str]),
+    /// The producer's palettes, by name.
+    Palettes,
+    /// Kept conversations, by name or the start of their id.
+    Conversations,
+    /// The models a provider lists, by id.
+    Models,
+    /// The models the slot named by the word before can take.
+    SlotModels,
+}
+
+const fn arg(name: &'static str, at: usize, after: &'static [&'static str], completes: Completes) -> Arg {
+    Arg { name, at, after, completes, to_end: false }
+}
+
+/// A word that runs to the end of the line, spaces and all: a name.
+const fn to_end(name: &'static str, at: usize, after: &'static [&'static str], completes: Completes) -> Arg {
+    Arg { to_end: true, ..arg(name, at, after, completes) }
+}
+
+/// The slots `/slots` names, and the jobs `/slots back` takes back.
+pub const JOBS: &[&str] = &["listening", "stems", "transcription", "embeddings"];
 
 /// What a command needs to be offered: something the session can do, or something the front end has itself.
 #[derive(Clone, Copy)]
@@ -85,13 +127,19 @@ pub const COMMANDS: &[Command] = &[
     command("/new", "Start a fresh conversation (the last one is kept); /new <name> names it", &[], ALWAYS),
     command("/btw", "Ask something on the side, without interrupting Kumi", &["aside", "question"], can(|c| c.aside)),
     command("/voice", "Talk instead of typing: ctrl+t, and how it listens", &["microphone", "speak"], front(Front::Voice)),
-    command(
-        "/resume",
-        "Go back to a kept conversation, this {place}'s or any {place}'s: /resume <id or name>",
-        &[],
-        can(|c| c.conversations),
-    ),
-    command("/conversations", "The same as /resume", &[], can(|c| c.conversations)),
+    Command {
+        args: &[to_end("conversation", 1, &[], Completes::Conversations)],
+        ..command(
+            "/resume",
+            "Go back to a kept conversation, this {place}'s or any {place}'s: /resume <id or name>",
+            &[],
+            can(|c| c.conversations),
+        )
+    },
+    Command {
+        args: &[to_end("conversation", 1, &[], Completes::Conversations)],
+        ..command("/conversations", "The same as /resume", &[], can(|c| c.conversations))
+    },
     command("/rename", "Name this conversation: /rename <name>", &["title"], can(|c| c.conversations)),
     command("/fork", "Carry on in a copy of this conversation; the original stays", &["branch"], can(|c| c.conversations)),
     command("/reconnect", "Connect to {app} again, keeping the conversation", &[], can(|c| c.reconnect)),
@@ -106,20 +154,44 @@ pub const COMMANDS: &[Command] = &[
     command("/stop", "Stop {app}: clips, the transport and recording", &[], can(|c| c.stop_daw)),
     command("/refresh", "Read your {app} {place} again", &["reload"], ALWAYS),
     command("/copy", "Copy Kumi's last answer", &["clipboard"], ALWAYS),
-    command("/export", "This conversation as a file: choose, or /export copy, md, html or json (for another Kumi)", &["save"], ALWAYS),
+    Command {
+        args: &[arg("format", 1, &[], Completes::Words(&["copy", "md", "html", "json"]))],
+        ..command("/export", "This conversation as a file: choose, or /export copy, md, html or json (for another Kumi)", &["save"], ALWAYS)
+    },
     command("/share", "Save this conversation as a web page that opens anywhere, to send", &["link"], ALWAYS),
-    command("/model", "Choose the model Kumi talks to", &[], can(|c| c.models)),
+    Command {
+        args: &[arg("model", 1, &[], Completes::Models)],
+        ..command("/model", "Choose the model Kumi talks to", &[], can(|c| c.models))
+    },
     command("/effort", "How hard the model thinks", &["reasoning"], can(|c| c.models)),
     command("/fast", "The model's faster tier, when its provider offers one", &["speed"], can(|c| c.models)),
     command("/willington", "Willington's bindings in {app}: macro mapping, zones", &[], front(Front::Willington)),
-    command("/slots", "Which model does each listening job: /slots listening gemini, /slots back <job>", &[], can(|c| c.slots)),
-    command(
-        "/palette",
-        "The sounds you gathered (Enter on /map): list, new, use, rename, forget; strict or loose",
-        &["samples"],
-        can(|c| c.palette),
-    ),
-    command("/music", "Your own music, which Kumi learns your taste from: folders, songs, pause, forget", &[], can(|c| c.music)),
+    Command {
+        args: &[
+            arg("slot", 1, &[], Completes::Words(&["listening", "stems", "transcription", "embeddings", "back"])),
+            arg("slot", 2, &["back"], Completes::Words(JOBS)),
+            // (after any word: a slot answers to other names too, "ears" for listening)
+            arg("model", 2, &[], Completes::SlotModels),
+        ],
+        ..command("/slots", "Which model does each listening job: /slots listening gemini, /slots back <job>", &[], can(|c| c.slots))
+    },
+    Command {
+        args: &[
+            arg("what", 1, &[], Completes::Words(&["list", "new", "use", "rename", "forget", "strict", "loose"])),
+            // (not after rename, which takes a new name)
+            to_end("palette", 2, &["use", "forget"], Completes::Palettes),
+        ],
+        ..command(
+            "/palette",
+            "The sounds you gathered (Enter on /map): list, new, use, rename, forget; strict or loose",
+            &["samples"],
+            can(|c| c.palette),
+        )
+    },
+    Command {
+        args: &[arg("what", 1, &[], Completes::Words(&["add", "remove", "pause", "resume", "forget"]))],
+        ..command("/music", "Your own music, which Kumi learns your taste from: folders, songs, pause, forget", &[], can(|c| c.music))
+    },
     command("/map", "Your sounds and songs as a map: hear a point, find more like it; /map open in the browser", &[], can(|c| c.map)),
     command("/login", "Sign in to a provider", &["key"], can(|c| c.models)),
     command("/loop", "Listen, judge and adjust in rounds until the goal is met: /loop <what>, then stop", &[], ALWAYS),
@@ -138,7 +210,66 @@ pub const COMMANDS: &[Command] = &[
 ];
 
 const fn command(name: &'static str, about: &'static str, finds: &'static [&'static str], needs: Needs) -> Command {
-    Command { name, aliases: &[], about, finds, needs }
+    Command { name, aliases: &[], about, finds, args: &[], needs }
+}
+
+/// The word a line is typing, where its command offers words for it: `/palette use Ki` is typing the palette (`Ki` so
+/// far) after `/palette use `.
+#[derive(Clone)]
+pub struct Completing {
+    pub command: &'static Command,
+    pub arg: &'static Arg,
+    /// The line before the word, its space included: what a candidate goes after.
+    pub before: String,
+    /// The word as typed so far.
+    pub typed: String,
+    /// The word before it, in lower case (the slot whose models are offered); none for a command's first.
+    pub after: Option<String>,
+}
+
+/// What `line` is typing, if it's a word its command (one `offered`) offers words for: after the command's name and
+/// a space, the words typed before it (any for a word that follows any, else one it follows), and the start of it. A
+/// word that runs to the end of the line takes all that follows the words before it, spaces and all.
+pub fn completing(line: &str, offered: impl Fn(&Command) -> bool) -> Option<Completing> {
+    let (name, rest) = line.split_once(' ')?;
+    let command = named(name).filter(|command| offered(command))?;
+    // Each word after the command's name, with where it ends in the line.
+    let mut at = name.len() + 1;
+    let mut words: Vec<(usize, &str)> = vec![];
+    for word in rest.split(' ') {
+        at += word.len();
+        if !word.is_empty() {
+            words.push((at, word));
+        }
+        at += 1;
+    }
+    command.args.iter().find_map(|arg| {
+        let (from, before): (usize, Vec<&str>) = if arg.to_end {
+            match arg.at - 1 {
+                0 => (name.len() + 1, vec![]),
+                // Typed once a space follows the words before it.
+                before => {
+                    let &(end, _) = words.get(before - 1).filter(|(end, _)| *end < line.len())?;
+                    (end + 1, words[..before].iter().map(|(_, word)| *word).collect())
+                }
+            }
+        } else {
+            // The word after the last space, with every word before it.
+            let from = line.rfind(' ')? + 1;
+            let before: Vec<&str> = words.iter().filter(|(end, _)| *end < from).map(|(_, word)| *word).collect();
+            if before.len() + 1 != arg.at {
+                return None;
+            }
+            (from, before)
+        };
+        // (a name starts at its first letter, past any more spaces typed before it)
+        let from = if arg.to_end { from + line[from..].len() - line[from..].trim_start_matches(' ').len() } else { from };
+        let after = before.last().map(|word| word.to_lowercase());
+        if !arg.after.is_empty() && !after.as_deref().is_some_and(|after| arg.after.contains(&after)) {
+            return None;
+        }
+        Some(Completing { command, arg, before: line[..from].to_string(), typed: line[from..].to_string(), after })
+    })
 }
 
 /// The command named `name`, or one that has it as another name.
@@ -311,8 +442,11 @@ pub enum Effect {
     Jobs,
     Voice,
     Fast,
-    Model,
     Effort,
+    /// The model picker (no words), or the model the words name, by its id.
+    Model {
+        words: String,
+    },
     Login,
     Logout,
     Recipes,
@@ -400,13 +534,15 @@ pub fn run(line: &str, now: &Now) -> Effect {
         "/jobs" if can.jobs => return Effect::Jobs,
         "/voice" if fronts.voice => return Effect::Voice,
         "/fast" if can.models => return Effect::Fast,
-        "/model" if can.models => return Effect::Model,
         "/effort" if can.models => return Effect::Effort,
         "/login" if can.models => return Effect::Login,
         "/logout" if can.models => return Effect::Logout,
         "/recipes" if can.recipes => return Effect::Recipes,
         "/memory" if can.memory => return Effect::Memory,
         _ => {}
+    }
+    if let Some(words) = argument(line, "/model").filter(|_| can.models) {
+        return Effect::Model { words };
     }
     if !can.conversations && ["/resume", "/conversations", "/rename", "/fork"].into_iter().any(|verb| argument(line, verb).is_some()) {
         return Effect::Refused(Why::NotKept);

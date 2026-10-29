@@ -3966,6 +3966,12 @@ impl SessionController for Session {
         let palettes = self.0.palettes.clone().ok_or_else(|| RuntimeError::plain("Kumi keeps no palettes here."))?;
         palettes.command(words).await
     }
+    async fn palette_names(&self) -> Result<Vec<crate::core::palette::PaletteListed>, RuntimeError> {
+        match self.0.palettes.clone() {
+            Some(palettes) => palettes.listed().await,
+            None => Ok(vec![]),
+        }
+    }
     fn has_jobs(&self) -> bool {
         self.0.jobs.is_some()
     }

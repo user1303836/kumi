@@ -1629,3 +1629,39 @@ scene!(colorblind_history, |width, height| {
     }
     finish_styled(h).await
 });
+
+// A command's words in the `/` menu.
+
+scene!(menu_resume_words, |width, height| {
+    let c = Rc::new(Control::default());
+    let now = now_ms();
+    *c.conversations.borrow_mut() = serde_json::from_value(json!([
+        {"id":"now001","savedAt":now,"first":"add a hi-hat groove","turns":2,"current":true},
+        {"id":"old001","savedAt":now - 2 * HOUR,"first":"make the bass wider and glue the low end","turns":5,"current":false,"set":"Night Drive"},
+        {"id":"old002","savedAt":now - 30 * HOUR,"first":"tighten the drums","turns":3,"current":false,"name":"Drum pass","set":"Night Drive"},
+        {"id":"old003","savedAt":now - 26 * 24 * HOUR,"first":"write a pad under the chorus","turns":9,"current":false,"set":"Glass Rooms"}
+    ]))
+    .unwrap();
+    let h = open(width, height, c).await;
+    h.type_text("/resume ").await;
+    h.wait_for("Drum pass").await;
+    h.type_text("\x1b[B").await;
+    finish(h).await
+});
+
+scene!(menu_slot_models, |width, height| {
+    use kumi_ai::auth::store::{open_credential_store, CredentialStore};
+    use kumi_listening::slots::{self, SlotsContext};
+    let folder = tempfile::tempdir().unwrap();
+    let c = Rc::new(Control::default());
+    *c.slots.borrow_mut() = Some(Rc::new(SlotsContext {
+        file: slots::file_in(folder.path()),
+        store: Rc::new(open_credential_store(folder.path().join("auth.json"))) as Rc<dyn CredentialStore>,
+        env: Default::default(),
+        profile: None,
+    }));
+    let h = open(width, height, c).await;
+    h.type_text("/slots listening ").await;
+    h.wait_for("the meters alone").await;
+    finish(h).await
+});

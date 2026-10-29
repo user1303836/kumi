@@ -1676,6 +1676,7 @@ pub(crate) fn requests() -> Vec<Op> {
         .into(),
         op::PaletteRemove { path: "/Samples/Kicks/Kick 808.wav".into(), size: 48_210, mtime: AT }.into(),
         op::PaletteCommand { words: "use Drums".into() }.into(),
+        op::PaletteNames {}.into(),
         op::Music {}.into(),
         op::MusicFolders {}.into(),
         op::LearnMusic { folders: vec!["~/Music/Bounces".into()] }.into(),

@@ -1,7 +1,7 @@
 //! The command table, as the full-screen app read lines before it had one: what each line asks for (the order of its old
 //! `submit()`, rows C1–C41 of the review's inventory), and what the `/` menu finds for what's typed.
 use kumi_agent::core::{
-    commands::{is_command, matching, named, run, By, Effect, Found, Fronts, Now, Why, COMMANDS},
+    commands::{completing, is_command, matching, named, run, By, Completes, Effect, Found, Fronts, Now, Why, COMMANDS},
     protocol::Capabilities,
 };
 use std::collections::BTreeSet;
@@ -94,7 +94,8 @@ fn each_command_reads_as_its_own_with_its_words() {
         ("/jobs", Effect::Jobs),
         ("/voice", Effect::Voice),
         ("/fast", Effect::Fast),
-        ("/model", Effect::Model),
+        ("/model", Effect::Model { words: "".into() }),
+        ("/model anthropic/claude-sonnet-5-5", Effect::Model { words: "anthropic/claude-sonnet-5-5".into() }),
         ("/effort", Effect::Effort),
         ("/login", Effect::Login),
         ("/logout", Effect::Logout),
@@ -178,6 +179,7 @@ fn while_kumi_works_the_rest_wait_for_it_and_these_run() {
         "/help",
         "/jobs",
         "/model",
+        "/model openai/gpt-6",
         "/memory",
         "/resume",
         "/rename x",
@@ -312,4 +314,71 @@ fn common_words_find_no_command() {
     }
     // A word that starts like a common one still finds what says it: /thi finds /effort ("thinks").
     assert_eq!(names(matching("/thi", &[], all)), ["/effort"]);
+}
+
+/// What a line is typing, as (command, the word's name, the line before it, the word so far).
+fn typing(line: &str) -> Option<(&'static str, &'static str, String, String)> {
+    completing(line, |_| true).map(|at| (at.command.name, at.arg.name, at.before, at.typed))
+}
+
+#[test]
+fn a_line_types_the_word_its_command_offers_words_for() {
+    // The first word after a command and a space, as it's typed.
+    assert_eq!(typing("/export "), Some(("/export", "format", "/export ".into(), "".into())));
+    assert_eq!(typing("/export ht"), Some(("/export", "format", "/export ".into(), "ht".into())));
+    // A word that follows the one before it: a palette's name after use, rename and forget, never after new.
+    assert_eq!(typing("/palette use Ki"), Some(("/palette", "palette", "/palette use ".into(), "Ki".into())));
+    assert_eq!(typing("/palette Forget "), Some(("/palette", "palette", "/palette Forget ".into(), "".into())));
+    assert_eq!(typing("/palette new Ki"), None);
+    // rename takes a new name: no palette's is offered for it.
+    assert_eq!(typing("/palette rename Ki"), None);
+    // A name runs to the end of the line, spaces and all.
+    assert_eq!(typing("/palette use Drum K"), Some(("/palette", "palette", "/palette use ".into(), "Drum K".into())));
+    assert_eq!(typing("/resume bass sk"), Some(("/resume", "conversation", "/resume ".into(), "bass sk".into())));
+    // Past more spaces typed before it.
+    assert_eq!(typing("/resume  bass sk"), Some(("/resume", "conversation", "/resume  ".into(), "bass sk".into())));
+    // A slot's model after the slot, and a slot after back.
+    assert_eq!(completing("/slots listening g", |_| true).map(|at| at.arg.completes), Some(Completes::SlotModels));
+    // After any of a slot's names, with the word it follows kept.
+    let ears = completing("/slots ears ", |_| true).unwrap();
+    assert_eq!((ears.arg.completes, ears.after.as_deref()), (Completes::SlotModels, Some("ears")));
+    assert_eq!(
+        completing("/slots back ", |_| true).map(|at| at.arg.completes),
+        Some(Completes::Words(&["listening", "stems", "transcription", "embeddings"]))
+    );
+    // An alias's words as its command's: /conversations is /resume's.
+    assert_eq!(typing("/conversations ni"), Some(("/conversations", "conversation", "/conversations ".into(), "ni".into())));
+    // Past what a command takes, a command that takes no words, a name still being typed, or one not offered: none.
+    assert_eq!(typing("/export md now"), None);
+    assert_eq!(typing("/undo "), None);
+    assert_eq!(typing("/expo"), None);
+    assert_eq!(completing("/palette use ", |command| command.name != "/palette").map(|at| at.command.name), None);
+}
+
+#[test]
+fn every_word_a_command_offers_is_one_it_takes() {
+    for command in COMMANDS {
+        for arg in command.args {
+            assert!(arg.at >= 1, "{}: {}", command.name, arg.name);
+            // A word that follows another follows one the command offers before it.
+            for after in arg.after {
+                let before = command.args.iter().filter(|earlier| earlier.at + 1 == arg.at);
+                let offered =
+                    before.into_iter().any(|earlier| matches!(earlier.completes, Completes::Words(words) if words.contains(after)));
+                assert!(offered, "{} {}: after {after}", command.name, arg.name);
+            }
+        }
+    }
+}
+
+#[test]
+fn the_slots_offered_are_every_slot_kumi_has() {
+    use kumi_listening::slots::Job;
+    let jobs: BTreeSet<&str> = Job::ALL.iter().map(|job| job.name()).collect();
+    assert_eq!(kumi_agent::core::commands::JOBS.iter().copied().collect::<BTreeSet<_>>(), jobs);
+    let slots = named("/slots").unwrap();
+    let Some(Completes::Words(first)) = slots.args.iter().find(|arg| arg.at == 1).map(|arg| arg.completes) else {
+        panic!("/slots' first word")
+    };
+    assert_eq!(first.iter().copied().filter(|word| *word != "back").collect::<BTreeSet<_>>(), jobs);
 }
