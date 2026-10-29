@@ -8,7 +8,7 @@ use std::sync::LazyLock;
 
 use chrono::{DateTime, FixedOffset};
 use kumi_common::js::json::{file_text, stringify_pretty};
-use kumi_common::js::string::{head, trim, trim_end, trim_start, utf16_len};
+use kumi_common::js::string::{trim, trim_end, trim_start, utf16_len};
 use serde_json::{json, Map, Value};
 use unicode_normalization::UnicodeNormalization;
 
@@ -22,6 +22,7 @@ use crate::core::recall::SEARCH_CONVERSATIONS_TOOL;
 use crate::core::recipes::{FORGET_RECIPE_TOOL, SAVE_RECIPE_TOOL};
 use crate::core::taste_log::REACTION_TOOL;
 use crate::core::techniques::TECHNIQUE_TOOL;
+use crate::core::text::cut;
 use crate::kernel::agent::CARRY_ON_NOTE;
 use crate::kernel::budget::{split_asks, OBSERVATION_MARKER, SHORTENED};
 use crate::kernel::deferred::{shown, FIND_TOOLS};
@@ -1485,13 +1486,13 @@ pub fn import(text: &str, now: i64, command: &str) -> Result<Imported, String> {
     let title = value
         .get("title")
         .and_then(Value::as_str)
-        .map(|title| head(&one_line(&neutralized(&drawn(title))), MAX_TITLE))
+        .map(|title| cut(&one_line(&neutralized(&drawn(title))), MAX_TITLE).to_owned())
         .filter(|title| !title.is_empty())
-        .unwrap_or_else(|| head(&one_line(&first), MAX_TITLE));
+        .unwrap_or_else(|| cut(&one_line(&first), MAX_TITLE).to_owned());
     let place = value
         .get("set")
         .and_then(Value::as_str)
-        .map(|set| head(&one_line(&neutralized(&drawn(set))), MAX_TITLE))
+        .map(|set| cut(&one_line(&neutralized(&drawn(set))), MAX_TITLE).to_owned())
         .filter(|set| !set.is_empty());
     let saved_at = value.get("saved").and_then(Value::as_i64).filter(|at| (1..=now).contains(at)).unwrap_or(now);
     let turns = producer.iter().filter(|words| *words != PARTWAY).count() as u32;
@@ -1503,7 +1504,7 @@ pub fn import(text: &str, now: i64, command: &str) -> Result<Imported, String> {
             saved_at,
             checkpoint: KernelCheckpoint { version: 1, messages, origin: None, tools: None },
             changes: (!changes.is_empty()).then_some(changes),
-            first: Some(head(&first, 300)),
+            first: Some(cut(&first, 300).to_owned()),
             turns: Some(turns),
         },
     })
@@ -1584,7 +1585,7 @@ fn one_line_strings(value: &Value) -> Value {
     match value {
         Value::String(text) => {
             let shown: String = text.chars().map(|c| if c.is_control() { ' ' } else { c }).collect();
-            Value::String(head(&one_line(&shown), MAX_WORDS))
+            Value::String(cut(&one_line(&shown), MAX_WORDS).to_owned())
         }
         Value::Array(items) => Value::Array(items.iter().map(one_line_strings).collect()),
         Value::Object(fields) => Value::Object(fields.iter().map(|(key, item)| (key.clone(), one_line_strings(item))).collect()),
@@ -1617,7 +1618,7 @@ fn output_text(output: &ToolResultOutput) -> String {
 /// Words from a file, at most [`MAX_PART`] long: past it, cut, and said to be.
 fn bounded(text: &str) -> String {
     if utf16_len(text) > MAX_PART {
-        format!("{} [cut: it ran longer than Kumi imports]", head(text, MAX_PART))
+        format!("{} [cut: it ran longer than Kumi imports]", cut(text, MAX_PART))
     } else {
         text.to_string()
     }

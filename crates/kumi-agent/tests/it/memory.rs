@@ -257,3 +257,22 @@ async fn concurrent_writes_have_distinct_ids_and_invalid_projects_cannot_escape(
     assert_eq!(memory.producer.len(), 2);
     assert_eq!(f.store.save(MemoryScope::Set, Some("../../escape"), &[]).await.unwrap_err().to_string(), "invalid project id");
 }
+
+/// A note, the Set's name over its notes, and an id an error says back are cut between characters, never through one
+/// (#666).
+#[tokio::test]
+async fn notes_and_what_is_said_of_them_are_cut_between_characters() {
+    let f = Fixture::new(true);
+    // Words of "é", which no secret is made of ("aaaa…" would read as a key and not be kept).
+    let e = |n: usize| "é".repeat(n);
+    let a = |n: usize| "a".repeat(n);
+    f.remember(json!({"note": format!("{}🎹 and the rest", e(MAX_NOTE - 1)), "about": "set"})).await;
+    let kept = f.store.load(Some(PROJECT)).await.unwrap().set;
+    assert_eq!(kept[0].text, e(MAX_NOTE - 1));
+    let block = memory_instructions(&Memory { producer: vec![], set: kept }, Some(&format!("{}🎹 Night Drive", e(119))));
+    assert!(block.contains(&format!("About this Set ({}):", e(119))), "{block}");
+    let id = format!("{}🎹", a(15));
+    assert_eq!(f.forget(&id).await.text, format!("There's no note {}.", a(15)));
+    let replacing = f.remember(json!({"note": "Chorus at bar 41", "about": "set", "replaces": id})).await.text;
+    assert!(replacing.starts_with(&format!("There's no note {} about this Set", a(15))), "{replacing}");
+}
