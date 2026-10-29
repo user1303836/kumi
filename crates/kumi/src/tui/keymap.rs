@@ -101,8 +101,13 @@ impl Chord {
         }
     }
 
-    /// How the help and the box's hints write it: "ctrl+z", "alt+↑", "page up", "esc".
+    /// How the help and the box's hints write it: "ctrl+z", "alt+↑", "page up", "esc", and a letter with shift as the
+    /// capital it types ("N").
     pub fn label(&self) -> String {
+        let capital = self.key.to_uppercase();
+        if self.mods == Modifiers::SHIFT && self.key.chars().count() == 1 && capital.chars().count() == 1 && capital != self.key {
+            return capital;
+        }
         let key = match self.key.as_str() {
             "escape" => "esc",
             "up" => "↑",
@@ -130,6 +135,24 @@ pub const AGAIN_MS: f64 = 500.;
 /// Keys pressed one after another (esc esc), written with a space between.
 pub fn label(keys: &[Chord]) -> String {
     keys.iter().map(Chord::label).collect::<Vec<_>>().join(" ")
+}
+
+/// A key as a sentence's first word writes it: "Esc", "Ctrl+C".
+pub fn capitalized(label: &str) -> String {
+    let capital = |part: &str| {
+        let mut chars = part.chars();
+        chars.next().map(|first| first.to_uppercase().chain(chars).collect()).unwrap_or_default()
+    };
+    label.split('+').map(capital).collect::<Vec<String>>().join("+")
+}
+
+/// Two actions' keys as one part of a hint: arrows run together ("↑↓"), others have a space between ("n N", "{ }").
+fn together(keys: &[String]) -> String {
+    if keys.iter().all(|key| matches!(key.as_str(), "↑" | "↓" | "←" | "→")) {
+        keys.concat()
+    } else {
+        keys.join(" ")
+    }
 }
 
 /// A key and the modifiers that may be held with it besides (`shift?+left`, `any+escape`), which only Kumi's own
@@ -467,7 +490,8 @@ pub const ACTIONS: &[Action] = &[
     act(
         "details.close",
         &[Details, DetailsSearch],
-        &["any+escape", "ctrl+alt?+shift?+c", "ctrl+alt?+shift?+o", "q"],
+        // q is first: the key the view's hint names.
+        &["q", "any+escape", "ctrl+alt?+shift?+c", "ctrl+alt?+shift?+o"],
         "Close the detailed view",
     ),
     act("details.up", &[Details, DetailsSearch], &["any+up"], "Scroll up a row"),
@@ -523,6 +547,7 @@ pub fn action(id: &str) -> Option<&'static Action> {
 }
 
 /// A key (or keys, one after another) that does an action in a scope.
+#[derive(Clone)]
 struct Binding {
     scope: Scope,
     id: &'static str,
@@ -553,6 +578,7 @@ fn held(chord: &Chord, key: &Chord, also: Modifiers) -> bool {
 }
 
 /// The keys in force: the defaults, with keys.json's over them.
+#[derive(Clone)]
 pub struct Keymap {
     /// In the order they're tried: keys.json's first, then the defaults in [`ACTIONS`] order.
     bindings: Vec<Binding>,
@@ -731,6 +757,43 @@ impl Keymap {
                 && matches!(binding.keys.as_slice(), [one, two] if held(first, one, binding.also) && held(second, two, binding.also))
         });
         binding.map(|binding| binding.id)
+    }
+
+    /// How a hint writes an action's key: its first, as the help writes keys ("esc", "ctrl+t"); none when it has none.
+    pub fn key(&self, id: &str) -> Option<String> {
+        self.keys(id).first().map(|keys| label(keys))
+    }
+
+    /// A hint in parts, joined with " · ". Each part is the actions it's about and what their keys do there: the keys
+    /// come first ("esc to close"), or where `{}` is ("a number, then {} answers"), and a part with no actions is words
+    /// alone ("or type your own"). A part whose actions have no keys is left out.
+    pub fn hint(&self, parts: &[(&[&str], &str)]) -> String {
+        self.hint_written(&parts.iter().map(|&(ids, words)| (ids, "", words)).collect::<Vec<_>>())
+    }
+
+    /// `hint`, with a part's keys written in words while its actions keep Kumi's own ("arrows", "+ −"), as the help's
+    /// rows are: each part is (ids, written, words). Once keys.json gives any of them keys, or with `written` empty,
+    /// the keys say themselves.
+    pub fn hint_written(&self, parts: &[(&[&str], &str, &str)]) -> String {
+        let mut said: Vec<String> = vec![];
+        for &(ids, written, words) in parts {
+            if ids.is_empty() {
+                said.push(words.to_string());
+                continue;
+            }
+            let keys: Vec<String> = ids.iter().filter_map(|id| self.key(id)).collect();
+            if keys.is_empty() {
+                continue;
+            }
+            let keys = if written.is_empty() || ids.iter().any(|id| self.rebound(id)) { together(&keys) } else { written.to_string() };
+            said.push(if words.contains("{}") { words.replace("{}", &keys) } else { format!("{keys} {words}") });
+        }
+        said.join(" · ")
+    }
+
+    /// Words that name action `id`'s key: `words` with the key where `{}` is, or `without` while the action has none.
+    pub fn with_key(&self, id: &str, words: &str, without: &str) -> String {
+        self.key(id).map_or_else(|| without.to_string(), |key| words.replace("{}", &key))
     }
 
     /// Whether keys.json gives action `id` keys of its own, or none.
@@ -1120,5 +1183,51 @@ mod tests {
             ]
         );
         assert_eq!(keymap.actions(Scope::Box, &chord("ctrl+l")), ["app.redraw"]);
+    }
+
+    #[test]
+    fn a_hint_names_each_actions_first_key_as_the_keymap_has_it() {
+        // Kumi's own keys write the hints as they were.
+        let keymap = Keymap::default();
+        assert_eq!(keymap.hint(&[(&["app.stop"], "to stop")]), "esc to stop");
+        assert_eq!(keymap.hint(&[(&["help.up", "help.down"], "to scroll"), (&["help.close"], "to close")]), "↑↓ to scroll · esc to close");
+        assert_eq!(
+            keymap.hint(&[
+                (&["details.next-match", "details.previous-match"], "matches"),
+                (&["details.previous-request", "details.next-request"], "requests"),
+                (&["details.close"], "closes"),
+            ]),
+            "n N matches · { } requests · q closes"
+        );
+        assert_eq!(
+            keymap.hint(&[(&["list.choose"], "a number, then {} answers"), (&[], "or type your own")]),
+            "a number, then enter answers · or type your own"
+        );
+        // keys.json's first key is the one named, and a part whose actions have no keys goes.
+        let (keymap, _) = with(json!({ "app.stop": ["f9", "ctrl+q"], "menu.close": [], "help.up": ["k"], "help.down": ["j"] }));
+        assert_eq!(keymap.hint(&[(&["app.stop"], "to stop")]), "f9 to stop");
+        assert_eq!(keymap.hint(&[(&["menu.run"], "to choose"), (&["menu.close"], "to close")]), "enter to choose");
+        assert_eq!(keymap.hint(&[(&["menu.close"], "to close")]), "");
+        assert_eq!(keymap.hint(&[(&["help.up", "help.down"], "to scroll")]), "k j to scroll");
+        assert_eq!(keymap.key("menu.close"), None);
+        assert_eq!(keymap.with_key("app.stop", "press {} to stop it", "wait for it"), "press f9 to stop it");
+        assert_eq!(keymap.with_key("menu.close", "{} closes it", "it stays"), "it stays");
+        // Kumi's own keys written in words stay words; keys.json's say themselves.
+        let arrows: (&[&str], &str, &str) = (&["map.up", "map.down", "map.left", "map.right"], "arrows", "move");
+        assert_eq!(Keymap::default().hint_written(&[arrows, (&["map.close"], "", "closes")]), "arrows move · esc closes");
+        let (keymap, _) = with(json!({ "map.left": ["h"] }));
+        assert_eq!(keymap.hint_written(&[arrows]), "↑ ↓ h → move");
+    }
+
+    #[test]
+    fn a_letter_with_shift_is_its_capital_and_a_key_starting_a_sentence_has_capitals() {
+        assert_eq!(chord("shift+n").label(), "N");
+        assert_eq!(chord("N").label(), "N");
+        for key in ["ctrl+shift+n", "shift+1", "shift+tab"] {
+            assert_eq!(chord(key).label(), key);
+        }
+        assert_eq!(capitalized("ctrl+c"), "Ctrl+C");
+        assert_eq!(capitalized("esc"), "Esc");
+        assert_eq!(capitalized("ctrl++"), "Ctrl++");
     }
 }

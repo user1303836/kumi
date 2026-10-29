@@ -1,6 +1,7 @@
 //! Taps, holds, quiet-stop, transcription and cancellation.
 use super::{
     activity::{activity_glyph, shimmer, Activity},
+    keymap::Keymap,
     style::{palette, Style},
     transcript::NoticeTone,
     wrap::Span,
@@ -91,6 +92,10 @@ pub trait VoiceHost {
     fn names(&self) -> Vec<String>;
     fn redraw(&self);
     fn animate(&self, on: bool);
+    /// A hint, its keys as the producer has them (`Keymap::hint`): Kumi's own unless the host knows others.
+    fn hint(&self, parts: &[(&[&str], &str)]) -> String {
+        Keymap::default().hint(parts)
+    }
 }
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum VoicePhase {
@@ -414,7 +419,7 @@ impl VoiceInput {
                 });
                 Some(VoiceView {
                     status: vec![activity_glyph(Activity::Listen, elapsed, false), dim(format!(" {words}"))],
-                    hint: "esc to cancel".into(),
+                    hint: self.0.host.hint(&[(&["voice.drop"], "to cancel")]),
                     placeholder: "Getting ready to listen…".into(),
                 })
             }
@@ -441,11 +446,10 @@ impl VoiceInput {
                 Some(VoiceView {
                     status,
                     hint: if state.held.is_some() {
-                        "let go to stop · esc to cancel"
+                        self.0.host.hint(&[(&[], "let go to stop"), (&["voice.drop"], "to cancel")])
                     } else {
-                        "ctrl+t to stop · enter to send · esc to cancel"
-                    }
-                    .into(),
+                        self.0.host.hint(&[(&["voice.talk"], "to stop"), (&["voice.send"], "to send"), (&["voice.drop"], "to cancel")])
+                    },
                     placeholder: "Listening…".into(),
                 })
             }
@@ -456,7 +460,11 @@ impl VoiceInput {
                 }
                 Some(VoiceView {
                     status,
-                    hint: if state.send_after { "sends once it's written · esc to cancel" } else { "esc to cancel" }.into(),
+                    hint: if state.send_after {
+                        self.0.host.hint(&[(&[], "sends once it's written"), (&["voice.drop"], "to cancel")])
+                    } else {
+                        self.0.host.hint(&[(&["voice.drop"], "to cancel")])
+                    },
                     placeholder: "Writing down what you said…".into(),
                 })
             }

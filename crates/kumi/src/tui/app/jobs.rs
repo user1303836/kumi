@@ -370,6 +370,19 @@ impl TuiApp {
         self.0.scheduler.request();
     }
 
+    /// The jobs list's title, with the keys that open a job and act on it there, as the keymap has them.
+    fn jobs_title(&self) -> String {
+        let there: Vec<String> = [("job.stop", "stops it there"), ("job.again", "runs it again")]
+            .iter()
+            .filter_map(|(id, words)| self.0.keymap.key(id).map(|key| format!("{key} {words}")))
+            .collect();
+        match (self.0.keymap.key("list.choose"), there.is_empty()) {
+            (None, _) => "Background jobs".into(),
+            (Some(key), true) => format!("Background jobs · {key} opens one"),
+            (Some(key), false) => format!("Background jobs · {key} opens one: {}", there.join(", ")),
+        }
+    }
+
     /// /jobs: each job; Enter opens one, where x stops it and r runs it again.
     pub(super) fn open_jobs(&self) {
         let jobs = self.session().jobs();
@@ -406,16 +419,13 @@ impl TuiApp {
                 })
                 .collect()
         };
-        self.pick(
-            Picker::with_options("Background jobs · enter opens one: x stops it there, r runs it again", items, PickerOptions::default()),
-            move |app, item| async move {
-                app.close_panel();
-                if let Some(id) = item.value.as_deref().and_then(|v| v.parse::<u32>().ok()) {
-                    app.open_job(id);
-                }
-                Ok(())
-            },
-        );
+        self.pick(Picker::with_options(self.jobs_title(), items, PickerOptions::default()), move |app, item| async move {
+            app.close_panel();
+            if let Some(id) = item.value.as_deref().and_then(|v| v.parse::<u32>().ok()) {
+                app.open_job(id);
+            }
+            Ok(())
+        });
     }
 
     /// Ctrl-b: what the answer is doing away from Live goes on in the background, and the answer carries on.
@@ -566,8 +576,14 @@ impl Overlay<TuiApp> for JobPanel {
         }
         app.draw_lines(screen, area.box_top, width, &lines, None)
     }
-    fn hint(&self, _: &TuiApp) -> String {
-        "↑↓ to scroll · x stops it · r runs it again · c copies · esc to close".into()
+    fn hint(&self, app: &TuiApp) -> String {
+        app.keys_hint(&[
+            (&["job.up", "job.down"], "to scroll"),
+            (&["job.stop"], "stops it"),
+            (&["job.again"], "runs it again"),
+            (&["job.copy"], "copies"),
+            (&["job.close"], "to close"),
+        ])
     }
     fn scroll(&mut self, _: &TuiApp, rows: i32) -> bool {
         self.scroll = (self.scroll + rows).max(0);

@@ -31,7 +31,12 @@ impl TuiApp {
             return false;
         }
         if self.busy() {
-            self.notice("Kumi is still working. Press esc to stop it first, then take it back.", NoticeTone::Info);
+            let words = self.key_words(
+                "app.stop",
+                "Kumi is still working. Press {} to stop it first, then take it back.",
+                "Kumi is still working: take it back once it's done.",
+            );
+            self.notice(&words, NoticeTone::Info);
             return false;
         }
         true
