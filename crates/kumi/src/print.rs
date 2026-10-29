@@ -25,7 +25,9 @@ pub const STEP_LIMIT: i32 = 3;
 pub const STOPPED: i32 = 130;
 
 pub struct PrintOptions {
-    /// The session, on a thread of its own or in this one: everything it says comes to [`Print`] through it.
+    /// The session, on a thread of its own or in this one. One on its own thread says everything through it; one in this
+    /// thread says its own events through [`Terminal::handle_event`], and through it only what the handle says between
+    /// its replies.
     pub session: Rc<dyn SessionHandle>,
     pub request: String,
     pub json: bool,
@@ -57,6 +59,8 @@ struct Inner {
     stopping: Cell<bool>,
     /// A second ctrl+c, or Kumi told to close: stop waiting for the session.
     done_waiting: Notify,
+    /// What the error the request ended with said (Kumi couldn't start, or the answer failed).
+    said_error: RefCell<Option<String>>,
 }
 
 impl Print {
@@ -72,6 +76,7 @@ impl Print {
             failed: Cell::new(false),
             stopping: Cell::new(false),
             done_waiting: Notify::new(),
+            said_error: RefCell::new(None),
         }));
         let heard = Rc::downgrade(&print.0);
         print.0.session.listen(Rc::new(move |event| {
@@ -80,6 +85,10 @@ impl Print {
             }
         }));
         print
+    }
+    /// What the error the request ended with said, when it ended with one: said already, to stderr.
+    pub fn said_error(&self) -> Option<String> {
+        self.0.said_error.borrow().clone()
     }
 }
 
@@ -170,6 +179,7 @@ impl Terminal for Print {
             match inner.unless_stopped(inner.session.op(op::Start {})).await {
                 Some(Ok(())) => {}
                 Some(Err(error)) => {
+                    *inner.said_error.borrow_mut() = Some(error.message());
                     inner.say(&format!("Kumi couldn't start: {}", error.message()));
                     inner.close().await;
                     return FAILED;
@@ -196,6 +206,7 @@ impl Terminal for Print {
                     match asked {
                         Some(Ok(())) => inner.ending(),
                         Some(Err(error)) => {
+                            *inner.said_error.borrow_mut() = Some(error.message());
                             inner.say(&error.message());
                             FAILED
                         }

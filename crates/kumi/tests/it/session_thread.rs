@@ -1,6 +1,6 @@
 //! The session on a thread of its own, made as the app makes it (`kumi::cli::run` with `io.threaded`, as main() sets it):
-//! once Kumi has ended, what the session kept is written and it has let go of its conversation, for `kumi -p` and the
-//! full screen alike.
+//! once Kumi has ended, what the session kept is written and it has let go of its conversation, for `kumi -p`, the full
+//! screen and plain mode alike.
 #[path = "../support/vt.rs"]
 mod vt;
 use kumi::{
@@ -28,6 +28,7 @@ struct Input {
     tty: bool,
     raw: Cell<bool>,
     data: RefCell<Option<ByteListener>>,
+    end: RefCell<Option<Rc<dyn Fn()>>>,
 }
 impl TerminalInput for Input {
     fn is_tty(&self) -> bool {
@@ -46,12 +47,21 @@ impl TerminalInput for Input {
     fn pause(&self) {
         self.data.borrow_mut().take();
     }
-    fn on_end(&self, _: Rc<dyn Fn()>) {}
+    fn on_end(&self, end: Rc<dyn Fn()>) {
+        *self.end.borrow_mut() = Some(end);
+    }
 }
 impl Input {
     fn write(&self, text: &str) {
         let listener = self.data.borrow().clone().expect("Kumi reads keys");
         listener(text.as_bytes())
+    }
+    /// What's typed has ended (the producer's ctrl+d, a script's last line).
+    fn end(&self) {
+        let end = self.end.borrow().clone();
+        if let Some(end) = end {
+            end()
+        }
     }
 }
 
@@ -259,6 +269,36 @@ async fn the_full_screen_has_written_and_let_go_of_everything_once_it_ends() {
             input.write("\x03\x03");
             let code = tokio::time::timeout(Duration::from_secs(30), running).await.expect("Kumi ends").unwrap();
             assert_eq!(code, 0, "{}\nstderr: {}", screen(), err.0.borrow());
+            let (notes, locks) = left(folder.path());
+            assert_eq!(notes, [NOTE]);
+            assert!(!locks.is_empty(), "the conversation was kept");
+            assert!(locks.iter().all(|(_, free)| *free), "still held once Kumi ended: {locks:?}");
+        })
+        .await;
+}
+
+/// Plain mode, two lines piped in as it starts: the first is answered once the session has started, the second is said
+/// to wait (not sent as a second request the session turns away), and once Kumi ends all is written and let go.
+#[tokio::test(flavor = "current_thread")]
+async fn plain_mode_has_written_and_let_go_of_everything_once_it_ends() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let asked = Arc::new(AtomicUsize::new(0));
+            let (folder, mut env) = home(&noting_server(asked.clone()).await);
+            env.insert("KUMI_UI".into(), "plain".into());
+            let input = Rc::new(Input::default());
+            let (out, err) = (Rc::new(Output::default()), Rc::new(Output::default()));
+            let running = tokio::task::spawn_local(kumi(env, input.clone(), out.clone(), err.clone(), &["--inference-only", "-c"]));
+            until("plain mode reads lines", || input.data.borrow().is_some()).await;
+            input.write("Note how I start a track.\nAnd keep it short.\n");
+            until("the answer", || asked.load(Ordering::SeqCst) >= 2 && out.0.borrow().contains("Kept it.")).await;
+            let said = format!("{}{}", out.0.borrow(), err.0.borrow());
+            assert!(said.contains("No second turn was submitted."), "{said}");
+            assert!(!said.contains("Session is busy"), "{said}");
+            input.end();
+            let code = tokio::time::timeout(Duration::from_secs(30), running).await.expect("Kumi ends").unwrap();
+            assert_eq!(code, 0, "stdout: {}; stderr: {}", out.0.borrow(), err.0.borrow());
+            assert_eq!(asked.load(Ordering::SeqCst), 2, "the first line alone was asked");
             let (notes, locks) = left(folder.path());
             assert_eq!(notes, [NOTE]);
             assert!(!locks.is_empty(), "the conversation was kept");

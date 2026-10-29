@@ -9,7 +9,7 @@ use kumi_agent::core::{
     contracts::*,
     jobs::JobDetail,
     protocol::{op, SessionHandle},
-    threaded::{session_panicked, Build, Built, Threaded},
+    threaded::{Build, Built, Threaded},
 };
 use kumi_common::abort::Signal;
 use kumi_types::{contracts::ChangeRecord, errors::RuntimeError};
@@ -160,16 +160,6 @@ async fn spawned(ways: Ways) -> Rc<dyn SessionHandle> {
     Threaded::spawn(answers(ways)).await.unwrap()
 }
 
-/// Panics on the session's thread go where the app's hook sends them; the rest as before.
-fn hooked() {
-    let previous = std::panic::take_hook();
-    std::panic::set_hook(Box::new(move |info| {
-        if !session_panicked(info) {
-            previous(info);
-        }
-    }));
-}
-
 fn local<F: std::future::Future<Output = ()>>(test: F) -> impl std::future::Future<Output = ()> {
     async move { tokio::task::LocalSet::new().run_until(test).await }
 }
@@ -230,7 +220,6 @@ async fn a_session_that_cant_be_built_says_why() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn a_session_that_panics_as_it_is_built_says_so() {
-    hooked();
     local(async {
         let build: Build = Box::new(|_| async { panic!("no room for the store") }.boxed_local());
         let error = Threaded::spawn(build).await.err().expect("no session");
@@ -241,7 +230,6 @@ async fn a_session_that_panics_as_it_is_built_says_so() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn a_panic_on_the_sessions_thread_ends_the_front_end_with_what_it_said() {
-    hooked();
     local(async {
         let threaded = Threaded::spawn(answers(Ways { refresh_panics: true, ..Default::default() })).await.unwrap();
         let ended = Rc::new(RefCell::new(None));
@@ -354,11 +342,11 @@ async fn a_job_no_longer_shown_is_read_no_more() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn a_request_under_way_as_the_session_ends_hears_why() {
-    hooked();
     local(async {
         let session = spawned(Ways { submit_panics: true, ..Default::default() }).await;
         let submit = op::Submit { input: "louder".into(), pinned: None, attachments: vec![], references: vec![] };
-        let error = session.op(submit).await.err().expect("ended");
+        let answer = tokio::time::timeout(Duration::from_secs(5), session.op(submit)).await.expect("the request heard the session ended");
+        let error = answer.err().expect("ended");
         assert!(error.message().starts_with("the model's stream went wrong"), "{}", error.message());
     })
     .await;

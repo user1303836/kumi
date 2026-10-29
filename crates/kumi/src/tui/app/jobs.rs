@@ -15,6 +15,7 @@ use super::*;
 use crate::tui::picker::{NoteTone, PickerOptions};
 use base64::Engine;
 use kumi_agent::core::jobs::{JobDetail, JobState, JobStatus, JobStepState};
+use std::time::{Duration, Instant};
 
 /// The JOBS tab: on the strip from the first job.
 pub(super) struct JobsTab {
@@ -346,7 +347,7 @@ impl TuiApp {
     }
 
     pub(super) fn open_job(&self, id: u32) {
-        self.open_overlay(JobPanel { id, scroll: 0 });
+        self.open_overlay(JobPanel { id, scroll: 0, waiting: None });
     }
 
     pub(super) fn stop_job(&self, id: u32) {
@@ -498,7 +499,7 @@ impl TuiApp {
 
     /// Keys on a job's overlay: scroll, x stops it, r runs it again, c copies its report, Esc closes.
     fn job_panel_input(&self, panel: &mut JobPanel, event: InputEvent) -> Handled {
-        let JobPanel { id, scroll } = panel;
+        let JobPanel { id, scroll, .. } = panel;
         let id = *id;
         // A key's actions in turn: one that doesn't apply (running again a job that hasn't ended) lets the next have it.
         for action in self.actions(Scope::Job, &event) {
@@ -532,7 +533,13 @@ impl TuiApp {
 pub(super) struct JobPanel {
     id: u32,
     scroll: i32,
+    /// Since when it has waited for the job's details (a session on a thread of its own sends them a moment after
+    /// they're first asked for): meanwhile it draws again at the animation's pace, for a while, so they show as they come.
+    waiting: Option<Instant>,
 }
+
+/// How long the job panel draws again on its own while the job's details are on their way.
+const DETAILS_WAIT: Duration = Duration::from_secs(2);
 impl Overlay<TuiApp> for JobPanel {
     fn handle(&mut self, app: &TuiApp, event: InputEvent) -> Handled {
         app.job_panel_input(self, event)
@@ -551,6 +558,12 @@ impl Overlay<TuiApp> for JobPanel {
             let status = app.session().jobs().into_iter().find(|status| status.id == id)?;
             Some((JobDetail { status, asked: String::new(), steps: vec![], report: None }, false))
         });
+        match &detail {
+            Some((_, false)) if self.waiting.get_or_insert_with(Instant::now).elapsed() < DETAILS_WAIT => {
+                app.0.scheduler.request_animation()
+            }
+            _ => self.waiting = None,
+        }
         match detail {
             None => lines.push(Line::new(format!("Job {id} is gone."), st::FAINT)),
             Some((detail, whole)) => {

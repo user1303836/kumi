@@ -177,7 +177,8 @@ mod imp {
     }
 }
 
-/// The calling thread's execution state: Kumi's runtime keeps to one thread, and Windows ends it with the thread.
+/// The calling thread's execution state: the session's thread holds and lets go of it (KeepAwake lives there, with the
+/// session), and Windows ends it with that thread.
 #[cfg(windows)]
 mod imp {
     use windows_sys::Win32::System::Power::{SetThreadExecutionState, ES_CONTINUOUS, ES_SYSTEM_REQUIRED};

@@ -151,6 +151,21 @@ thread_local! {
     static PANICS: RefCell<Option<mpsc::UnboundedSender<Back>>> = const { RefCell::new(None) };
 }
 
+/// Once in a process, before its first session's thread: a panic on a session's thread goes to its front end as the
+/// session's end, whichever front end it has (tokio would catch one in a request's task, and nothing would answer it).
+/// The screen's own hook asks the same first; any other panic goes on to the hook there was.
+fn hook_panics() {
+    static HOOKED: std::sync::Once = std::sync::Once::new();
+    HOOKED.call_once(|| {
+        let previous = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |info| {
+            if !session_panicked(info) {
+                previous(info);
+            }
+        }));
+    });
+}
+
 /// Whether a panic is the session's own, on its thread. Then it's sent to the front end, which ends in order (the
 /// terminal given back, then the message), and the front end's hook leaves the terminal alone: false elsewhere.
 pub fn session_panicked(info: &std::panic::PanicHookInfo) -> bool {
@@ -345,6 +360,7 @@ impl Threaded {
     /// The session `build` makes, on a thread of its own, once it's ready. Why not, when it couldn't be built, or its
     /// thread panicked or ended first.
     pub async fn spawn(build: Build) -> Result<Rc<Threaded>, RuntimeError> {
+        hook_panics();
         let (down, down_rx) = mpsc::unbounded_channel();
         let (back_tx, mut back) = mpsc::unbounded_channel();
         std::thread::Builder::new()

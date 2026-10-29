@@ -248,12 +248,8 @@ struct Late {
     status: RefCell<SessionStatus>,
 }
 
-#[async_trait(?Send)]
-impl SessionController for Late {
-    async fn start(&self) -> Result<(), RuntimeError> {
-        Ok(())
-    }
-    async fn submit(&self, _: &str, _: Option<PinnedNode>) -> Result<(), RuntimeError> {
+impl Late {
+    fn answer(&self) {
         (self.emit)(SessionEvent::State { state: TurnState::Running });
         (self.emit)(SessionEvent::State { state: TurnState::Idle });
         self.status.borrow_mut().state = TurnState::Running;
@@ -262,6 +258,23 @@ impl SessionController for Late {
         (self.emit)(SessionEvent::TurnComplete { result: TurnResult { stop_reason: StopReason::Completed, usage: None }, elapsed_ms: 1 });
         self.status.borrow_mut().state = TurnState::Idle;
         (self.emit)(SessionEvent::State { state: TurnState::Idle });
+    }
+}
+
+#[async_trait(?Send)]
+impl SessionController for Late {
+    async fn start(&self) -> Result<(), RuntimeError> {
+        Ok(())
+    }
+    async fn submit(&self, _: &str, _: Option<PinnedNode>) -> Result<(), RuntimeError> {
+        self.answer();
+        Ok(())
+    }
+    fn has_goal(&self) -> bool {
+        true
+    }
+    async fn goal(&self, _: Option<&str>) -> Result<(), RuntimeError> {
+        self.answer();
         Ok(())
     }
     async fn refresh(&self) -> Result<(), RuntimeError> {
@@ -284,17 +297,183 @@ impl SessionController for Late {
     }
 }
 
+/// An answer, or a goal's, shows whole when an earlier operation's end reaches the screen after it was asked for.
 #[tokio::test(flavor = "current_thread")]
 async fn an_answer_shows_whole_when_an_earlier_operations_end_reaches_the_screen_after_the_request() {
     tokio::task::LocalSet::new()
         .run_until(async {
-            let build: Build =
-                Box::new(|emit| async move { Ok(Built::new(Rc::new(Late { emit, status: RefCell::new(idle()) }))) }.boxed_local());
+            for asked in ["make the bass darker\r", "/goal make the bass darker\r"] {
+                let build: Build =
+                    Box::new(|emit| async move { Ok(Built::new(Rc::new(Late { emit, status: RefCell::new(idle()) }))) }.boxed_local());
+                let h = Harness::on(120, 36, Threaded::spawn(build).await.unwrap(), |_| {});
+                h.start().await;
+                h.input.write(asked);
+                until("the answer", || has(&h.screen(), "Lowered the bass by 3 dB.")).await;
+                assert!(!has(&h.screen(), "stopped"), "{asked}:\n{}", h.screen().join("\n"));
+                h.close().await;
+            }
+        })
+        .await;
+}
+
+/// A session whose answer keeps its thread busy a moment before it says the answer has begun, takes into the answer
+/// what's said meanwhile once it has, and turns away a second request while it answers. `submits` and `steers` count
+/// the two.
+struct Slow {
+    emit: Rc<dyn Fn(SessionEvent)>,
+    status: RefCell<SessionStatus>,
+    at_work: Arc<AtomicBool>,
+    submits: Arc<AtomicUsize>,
+    steers: Arc<AtomicUsize>,
+    closed: Cell<bool>,
+}
+
+#[async_trait(?Send)]
+impl SessionController for Slow {
+    async fn start(&self) -> Result<(), RuntimeError> {
+        Ok(())
+    }
+    async fn submit(&self, _: &str, _: Option<PinnedNode>) -> Result<(), RuntimeError> {
+        if self.status.borrow().state == TurnState::Running {
+            return Err(RuntimeError::plain("Session is busy; cancel first"));
+        }
+        self.submits.fetch_add(1, Ordering::SeqCst);
+        self.at_work.store(true, Ordering::SeqCst);
+        std::thread::sleep(Duration::from_millis(300));
+        self.status.borrow_mut().state = TurnState::Running;
+        (self.emit)(SessionEvent::State { state: TurnState::Running });
+        while !self.closed.get() {
+            tokio::time::sleep(Duration::from_millis(1)).await;
+        }
+        Ok(())
+    }
+    async fn refresh(&self) -> Result<(), RuntimeError> {
+        Ok(())
+    }
+    async fn new_conversation(&self) -> Result<(), RuntimeError> {
+        Ok(())
+    }
+    async fn cancel(&self) -> Result<(), RuntimeError> {
+        Ok(())
+    }
+    async fn close(&self) -> Result<(), RuntimeError> {
+        self.closed.set(true);
+        Ok(())
+    }
+    fn status(&self) -> SessionStatus {
+        self.status.borrow().clone()
+    }
+    async fn undo(&self, _: Option<&str>) -> Result<Option<ChangeRecord>, RuntimeError> {
+        Ok(None)
+    }
+    fn has_steer(&self) -> bool {
+        true
+    }
+    fn steer(&self, _: &str) -> bool {
+        self.steers.fetch_add(1, Ordering::SeqCst);
+        true
+    }
+}
+
+/// A second message while the first's answer hasn't reached the screen yet (the session's thread busy in it) goes to
+/// that answer, rather than as a second request the session turns away, its words lost.
+#[tokio::test(flavor = "current_thread")]
+async fn a_second_message_before_the_answer_has_begun_goes_to_it() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let (at_work, submits, steers) =
+                (Arc::new(AtomicBool::new(false)), Arc::new(AtomicUsize::new(0)), Arc::new(AtomicUsize::new(0)));
+            let (working, answered, asked) = (at_work.clone(), submits.clone(), steers.clone());
+            let build: Build = Box::new(move |emit| {
+                async move {
+                    Ok(Built::new(Rc::new(Slow {
+                        emit,
+                        status: RefCell::new(idle()),
+                        at_work: working,
+                        submits: answered,
+                        steers: asked,
+                        closed: Cell::new(false),
+                    })))
+                }
+                .boxed_local()
+            });
             let h = Harness::on(120, 36, Threaded::spawn(build).await.unwrap(), |_| {});
             h.start().await;
             h.input.write("make the bass darker\r");
-            until("the answer", || has(&h.screen(), "Lowered the bass by 3 dB.")).await;
-            assert!(!has(&h.screen(), "stopped"), "{}", h.screen().join("\n"));
+            until("the session at work", || at_work.load(Ordering::SeqCst)).await;
+            h.input.write("and the kick\r");
+            until("the second message asked of the answer", || steers.load(Ordering::SeqCst) >= 1).await;
+            assert_eq!(submits.load(Ordering::SeqCst), 1);
+            assert!(!has(&h.screen(), "Session is busy"), "{}", h.screen().join("\n"));
+            h.close().await;
+        })
+        .await;
+}
+
+/// A session with a background job done, whose details it reads on its own thread.
+struct Jobbed {
+    emit: Rc<dyn Fn(SessionEvent)>,
+}
+
+fn done_job() -> serde_json::Value {
+    serde_json::json!({"id": 3, "kind": "worker", "title": "Hear the mix", "state": "done", "whenDone": "tell", "startedAt": 1,
+                       "endedAt": 2, "steps": 0, "sources": 0})
+}
+
+#[async_trait(?Send)]
+impl SessionController for Jobbed {
+    async fn start(&self) -> Result<(), RuntimeError> {
+        let _ = &self.emit;
+        Ok(())
+    }
+    async fn submit(&self, _: &str, _: Option<PinnedNode>) -> Result<(), RuntimeError> {
+        Ok(())
+    }
+    async fn refresh(&self) -> Result<(), RuntimeError> {
+        Ok(())
+    }
+    async fn new_conversation(&self) -> Result<(), RuntimeError> {
+        Ok(())
+    }
+    async fn cancel(&self) -> Result<(), RuntimeError> {
+        Ok(())
+    }
+    async fn close(&self) -> Result<(), RuntimeError> {
+        Ok(())
+    }
+    fn status(&self) -> SessionStatus {
+        idle()
+    }
+    async fn undo(&self, _: Option<&str>) -> Result<Option<ChangeRecord>, RuntimeError> {
+        Ok(None)
+    }
+    fn has_jobs(&self) -> bool {
+        true
+    }
+    fn jobs(&self) -> Vec<kumi_agent::core::jobs::JobStatus> {
+        vec![serde_json::from_value(done_job()).unwrap()]
+    }
+    fn job(&self, id: u32) -> Option<kumi_agent::core::jobs::JobDetail> {
+        (id == 3).then(|| {
+            serde_json::from_value(serde_json::json!({"status": done_job(), "asked": "Hear the mix in mono", "steps": [],
+                                                      "report": "It holds up in mono."}))
+            .unwrap()
+        })
+    }
+}
+
+/// A job's panel, opened while Kumi is idle, shows the job's details as they come, with no key to draw them.
+#[tokio::test(flavor = "current_thread")]
+async fn a_jobs_details_show_as_they_come_without_a_key() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let build: Build = Box::new(|emit| async move { Ok(Built::new(Rc::new(Jobbed { emit }))) }.boxed_local());
+            let h = Harness::on(120, 36, Threaded::spawn(build).await.unwrap(), |_| {});
+            h.start().await;
+            h.input.write("/jobs\r");
+            until("the jobs", || has(&h.screen(), "Background jobs")).await;
+            h.input.write("\r");
+            until("the job's details", || has(&h.screen(), "Asked: Hear the mix in mono")).await;
             h.close().await;
         })
         .await;

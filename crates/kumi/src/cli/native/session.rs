@@ -1080,8 +1080,10 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
     };
     // What /export and /share take out: what `kumi report` takes out, as this computer knows it at each export.
     let redact = crate::export::redactor_maker(&io.env);
+    // -p's front end, for what it said as its request ended.
+    let mut printing: Option<crate::print::Print> = None;
     let ui: Rc<dyn Terminal> = if let Some(print) = print.clone() {
-        Rc::new(crate::print::Print::new(crate::print::PrintOptions {
+        let front = crate::print::Print::new(crate::print::PrintOptions {
             session: session.clone(),
             request: print.request,
             json: print.json,
@@ -1090,7 +1092,9 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
             secrets: secrets.clone(),
             instant,
             startup_notice: notice,
-        }))
+        });
+        printing = Some(front.clone());
+        Rc::new(front)
     } else if full_screen {
         let mut options = TuiOptions::with_session(session.clone(), io.input.clone(), io.out.clone(), mode);
         // What the terminal is, asked once as the screen starts: its answers come before what its environment says of
@@ -1359,8 +1363,8 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
     let mut code = code;
     let fatal = fatal.borrow_mut().take();
     if let Some(why) = &fatal {
-        // (-p said it already, as its request's error, unless the request had ended)
-        if print.is_none() || code != crate::print::FAILED {
+        // Unless -p said it already, as its request's error.
+        if printing.as_ref().and_then(crate::print::Print::said_error).as_deref() != Some(why.as_str()) {
             io.err.write(&format!("Kumi's session stopped: {why}\n"));
         }
         code = 1;
