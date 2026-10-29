@@ -23,7 +23,7 @@ mod shown;
 
 use super::{
     alerts::{self, ProgramState, StatusReport, TerminalProfile},
-    editor::Editor,
+    editor::{Draft, Editor},
     icons::{detect_icon_style_here, IconKind, IconStyle},
     keys::InputEvent,
     picker::{Picker, PickerItem},
@@ -47,6 +47,12 @@ use crate::{
 };
 use futures::{future::LocalBoxFuture, FutureExt};
 use kumi_agent::core::contracts::*;
+use kumi_agent::core::{
+    goal::{GoalPhase, GoalStatus},
+    goal_mode::{ObjectiveState, ObjectiveStatus, Verdict},
+    loop_run::{LoopState, LoopStatus, LoopStop},
+    match_run::{MatchState, MatchStatus, MatchStop},
+};
 use kumi_ai::providers::ProviderId;
 use kumi_common::{
     abort::Signal,
@@ -288,6 +294,13 @@ struct LastAction {
     glyph: String,
     memory: bool,
 }
+/// A run's latest status (a sound match, a goal, a loop, a /goal objective), and when it began on the performance
+/// clock: its time counts on from there between the session's events.
+#[derive(Clone)]
+struct Timed<T> {
+    status: T,
+    since: f64,
+}
 #[derive(Default)]
 struct Used {
     input: f64,
@@ -360,12 +373,12 @@ struct State {
     map_play: u64,
     last_change: Option<(String, f64)>,
     last_action: Option<LastAction>,
-    goal: Option<Value>,
-    matching: Option<Value>,
+    goal: Option<Timed<GoalStatus>>,
+    matching: Option<Timed<MatchStatus>>,
     /// The loop under way: its status, and when it started.
-    looping: Option<Value>,
+    looping: Option<Timed<LoopStatus>>,
     /// The /goal objective's latest status (and, while it runs, when it started).
-    objective: Option<Value>,
+    objective: Option<Timed<ObjectiveStatus>>,
     watching: bool,
     undoing: bool,
     hits: Vec<Hit>,
@@ -384,7 +397,7 @@ struct State {
     bytes: usize,
     pending_turn: bool,
     held: Vec<Held>,
-    last_stop: Option<String>,
+    last_stop: Option<StopReason>,
     asides: Vec<Rc<RefCell<Aside>>>,
     transport: Option<Transport>,
     activity: String,
@@ -408,7 +421,8 @@ struct State {
     instant_changes: Vec<String>,
     busy_since: f64,
     turn_changes: usize,
-    recall: Option<(usize, String)>,
+    /// Which earlier message ↑ shows, and the draft set aside meanwhile.
+    recall: Option<(usize, Draft)>,
     last_sent: Option<String>,
     tree: Option<DeviceTree>,
     /// Bumped whenever `tree` is read again: its rows are made again only then, or for another focus.

@@ -8,7 +8,7 @@ use super::super::{
     width::{text_width, truncate, truncate_with},
     wrap::wrap,
 };
-use super::drawing::{num, sp, spans, st};
+use super::drawing::{sp, spans, st};
 use super::*;
 impl TuiApp {
     fn click<F: Fn(TuiApp) + 'static>(&self, f: F) -> Rc<dyn Fn()> {
@@ -1195,41 +1195,44 @@ impl TuiApp {
         rows
     }
     /// The /goal objective: what it is, where it stands against its budget, the last check and what's next.
-    fn objective_rows(&self, objective: &Value, width: i32) -> Vec<TabRow> {
-        let clean = |v: &Value, max| self.clean(&v.as_str().unwrap_or("").replace('\n', " "), max);
-        let running = objective["state"] == "running";
-        let elapsed =
-            if running { perf_now() - objective["since"].as_f64().unwrap_or(0.) } else { objective["elapsedMs"].as_f64().unwrap_or(0.) };
+    fn objective_rows(&self, objective: &Timed<ObjectiveStatus>, width: i32) -> Vec<TabRow> {
+        let clean = |text: &str, max| self.clean(&text.replace('\n', " "), max);
+        let status = &objective.status;
+        let running = status.state == ObjectiveState::Running;
+        let elapsed = if running { perf_now() - objective.since } else { status.elapsed_ms as f64 };
         let mut rows = vec![];
         let mut line = |parts: Vec<super::super::wrap::Span>| {
             rows.extend(wrap(&parts, width).into_iter().map(|spans| TabRow { spans, ..Default::default() }))
         };
-        line(vec![sp(clean(&objective["objective"], 300), st::TEXT)]);
-        let state = match (objective["state"].as_str().unwrap_or(""), objective["verdict"].as_str().unwrap_or("")) {
-            ("running", _) => "working".to_string(),
-            ("done", "complete") => "met".into(),
-            ("done", _) => "stopped".into(),
-            (_, "blocked") => "blocked · /goal resume once it's dealt with".into(),
-            (_, "budget") => "out of budget · /goal resume carries on".into(),
-            (_, "stuck") => "stuck · /goal edit, or resume".into(),
-            _ => "paused · /goal resume carries on".into(),
+        line(vec![sp(clean(&status.objective, 300), st::TEXT)]);
+        let state = match (status.state, status.verdict) {
+            (ObjectiveState::Running, _) => "working".to_string(),
+            (ObjectiveState::Done, Some(Verdict::Complete)) => "met".into(),
+            (ObjectiveState::Done, _) => "stopped".into(),
+            (ObjectiveState::Paused, Some(Verdict::Blocked)) => "blocked · /goal resume once it's dealt with".into(),
+            (ObjectiveState::Paused, Some(Verdict::Budget)) => "out of budget · /goal resume carries on".into(),
+            (ObjectiveState::Paused, Some(Verdict::Stuck)) => "stuck · /goal edit, or resume".into(),
+            (ObjectiveState::Paused, None | Some(Verdict::Complete | Verdict::Continue)) => "paused · /goal resume carries on".into(),
         };
         line(vec![sp(
             format!(
                 "{state} · turn {} of {} · {} of {}",
-                num(&objective["turns"]),
-                num(&objective["turnBudget"]),
+                status.turns,
+                status.turn_budget,
                 helpers::clock_of(elapsed),
-                helpers::clock_of(objective["budgetMs"].as_f64().unwrap_or(0.))
+                helpers::clock_of(status.budget_ms as f64)
             ),
             st::DIM,
         )]);
-        let reason = clean(&objective["reason"], 300);
+        let reason = clean(status.reason.as_deref().unwrap_or(""), 300);
         if !reason.is_empty() {
-            let by = if objective["measured"] == true { "measured" } else { "checked" };
-            line(vec![sp(format!("{by}: "), st::DIM), sp(reason, if objective["verdict"] == "complete" { st::ACCENT } else { st::TEXT })]);
+            let by = if status.measured { "measured" } else { "checked" };
+            line(vec![
+                sp(format!("{by}: "), st::DIM),
+                sp(reason, if status.verdict == Some(Verdict::Complete) { st::ACCENT } else { st::TEXT }),
+            ]);
         }
-        let next = clean(&objective["next"], 300);
+        let next = clean(status.next.as_deref().unwrap_or(""), 300);
         if !next.is_empty() {
             line(vec![sp("next: ", st::DIM), sp(next, st::TEXT)]);
         }
@@ -1242,63 +1245,62 @@ impl TuiApp {
         let Some(goal) = self.0.state.borrow().goal.clone() else {
             return vec![];
         };
-        let clean = |v: &Value, max| self.clean(&v.as_str().unwrap_or("").replace('\n', " "), max);
-        let running = matches!(goal["state"].as_str(), Some("running" | "starting"));
-        let elapsed = if running { perf_now() - goal["since"].as_f64().unwrap_or(0.) } else { goal["elapsedMs"].as_f64().unwrap_or(0.) };
+        let clean = |text: &str, max| self.clean(&text.replace('\n', " "), max);
+        let status = &goal.status;
+        let running = matches!(status.state, GoalPhase::Running | GoalPhase::Starting);
+        let elapsed = if running { perf_now() - goal.since } else { status.elapsed_ms as f64 };
         let mut rows = vec![];
         let mut line = |parts: Vec<super::super::wrap::Span>| {
             rows.extend(wrap(&parts, width).into_iter().map(|spans| TabRow { spans, ..Default::default() }))
         };
-        line(vec![sp(clean(&goal["goal"], 300), st::TEXT)]);
-        let why = clean(&goal["why"], 80);
-        let state = match goal["state"].as_str().unwrap_or("") {
-            "starting" => "setting up".into(),
-            "running" => "searching".into(),
-            "paused" => {
+        line(vec![sp(clean(&status.goal, 300), st::TEXT)]);
+        let why = clean(status.why.as_deref().unwrap_or(""), 80);
+        let state = match status.state {
+            GoalPhase::Starting => "setting up".into(),
+            GoalPhase::Running => "searching".into(),
+            GoalPhase::Paused => {
                 format!("paused{} · /loop carries on", if !why.is_empty() && why != "paused" { format!(" · {why}") } else { String::new() })
             }
-            _ => format!("done{}", if !why.is_empty() { format!(" · {why}") } else { String::new() }),
+            GoalPhase::Done => format!("done{}", if !why.is_empty() { format!(" · {why}") } else { String::new() }),
         };
         line(vec![sp(
             format!(
                 "{state} · gen {} · {} heard · {} {} · {}",
-                num(&goal["generation"]),
-                num(&goal["rendered"]),
-                num(&goal["candidates"]),
-                if goal["candidates"].as_f64() == Some(1.) { "candidate" } else { "candidates" },
+                status.generation,
+                status.rendered,
+                status.candidates,
+                if status.candidates == 1 { "candidate" } else { "candidates" },
                 helpers::clock_of(elapsed)
             ),
             st::DIM,
         )]);
-        if let Some(best) = goal.get("best") {
-            let trend = goal["trend"].as_array().cloned().unwrap_or_default();
-            let trend = &trend[trend.len().saturating_sub((width - 16).max(4) as usize)..];
-            let low = trend.iter().filter_map(Value::as_f64).fold(f64::INFINITY, f64::min);
-            let high = trend.iter().filter_map(Value::as_f64).fold(f64::NEG_INFINITY, f64::max);
+        if let Some(best) = &status.best {
+            let trend = &status.trend[status.trend.len().saturating_sub((width - 16).max(4) as usize)..];
+            let low = trend.iter().copied().fold(f64::INFINITY, f64::min);
+            let high = trend.iter().copied().fold(f64::NEG_INFINITY, f64::max);
             let levels = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
             let spark = trend
                 .iter()
-                .map(|v| levels[if high > low { number::round((v.as_f64().unwrap_or(0.) - low) / (high - low) * 7.) as usize } else { 7 }])
+                .map(|v| levels[if high > low { number::round((v - low) / (high - low) * 7.) as usize } else { 7 }])
                 .collect::<String>();
             line(vec![
-                sp(format!("{}%", num(&best["score"])), st::ACCENT),
+                sp(format!("{}%", number::to_string(best.score)), st::ACCENT),
                 sp(
-                    if goal.get("first").is_some_and(|v| v != &best["score"]) {
-                        format!(" from {}%  ", num(&goal["first"]))
-                    } else {
-                        "  ".into()
+                    match status.first.filter(|first| *first != best.score) {
+                        Some(first) => format!(" from {}%  ", number::to_string(first)),
+                        None => "  ".into(),
                     },
                     st::DIM,
                 ),
                 sp(spark, st::ACCENT),
             ]);
-            if goal["leader"].as_str().is_some_and(|s| !s.is_empty()) {
-                line(vec![sp("best  ", st::FAINT), sp(clean(&goal["leader"], 200), st::TEXT)]);
+            if let Some(leader) = status.leader.as_deref().filter(|leader| !leader.is_empty()) {
+                line(vec![sp("best  ", st::FAINT), sp(clean(leader, 200), st::TEXT)]);
             }
         }
-        for (key, label, max, style) in [("idea", "tried  ", 200, st::DIM), ("bestTrack", "kept on  ", 80, st::TEXT)] {
-            if goal[key].as_str().is_some_and(|s| !s.is_empty()) {
-                line(vec![sp(label, st::FAINT), sp(clean(&goal[key], max), style)]);
+        for (text, label, max, style) in [(&status.idea, "tried  ", 200, st::DIM), (&status.best_track, "kept on  ", 80, st::TEXT)] {
+            if let Some(text) = text.as_deref().filter(|text| !text.is_empty()) {
+                line(vec![sp(label, st::FAINT), sp(clean(text, max), style)]);
             }
         }
         let tokens = self.tokens_used();

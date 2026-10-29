@@ -1,45 +1,51 @@
 use super::super::{
     choices::choices,
     icons::IconKind,
-    transcript::{step_label, Step, WebLine},
+    transcript::{self, step_label, Step, WebLine},
 };
 use super::*;
 use crate::text::web_words;
 use kumi_ai::failure::reset_words;
 use kumi_common::time::since;
-use serde_json::json;
+use kumi_types::errors::FailureKind;
 
 impl TuiApp {
     pub(super) fn event(&self, event: SessionEvent) {
         if self.0.state.borrow().closing {
             return;
         }
-        let value = serde_json::to_value(&event).expect("session event");
-        let kind = value["type"].as_str().unwrap_or("");
-        let get = |key: &str| value[key].as_str().unwrap_or("");
-        let n = |key: &str| value[key].as_f64().unwrap_or(0.);
-        // Anything from the model, or the turn's end, means the wait is over.
-        if matches!(kind, "text" | "tool-input" | "tool-start" | "turn-complete" | "state") {
+        // Anything from the model, or the turn's end, means the wait is over; once it's handled, the model at work takes
+        // in what the producer asked to say now. Every kernel event is placed here, so a new one has to be.
+        let (ends_wait, at_work) = match &event {
+            SessionEvent::Kernel(kernel) => match kernel {
+                KernelEvent::Text { .. } | KernelEvent::ToolInput { .. } | KernelEvent::ToolStart { .. } => (true, true),
+                KernelEvent::ToolEnd { .. } => (false, true),
+                KernelEvent::Steer { .. } | KernelEvent::Retry { .. } | KernelEvent::ModelSwitch { .. } => (false, false),
+            },
+            SessionEvent::TurnComplete { .. } | SessionEvent::State { .. } => (true, false),
+            _ => (false, false),
+        };
+        if ends_wait {
             let mut state = self.0.state.borrow_mut();
             state.retry = None;
             state.waiting_for = None;
             state.waiting_cause = None;
             state.waiting_proxy_down = false;
         }
-        match kind {
-            "retry" => {
-                let reason = self.clean_line(get("reason"), 80);
+        // A turn's state or a job's may be when a job's request carries on, once it's handled.
+        let carry_on = matches!(event, SessionEvent::State { .. } | SessionEvent::Job(_));
+        match event {
+            SessionEvent::Kernel(KernelEvent::Retry { reason, wait_ms, wait, cause, proxy_down }) => {
+                let reason = self.clean_line(&reason, 80);
                 // No wait: Kumi carries on at once, and the model's next words end it.
-                let until = if n("waitMs") > 0. { perf_now() + n("waitMs") } else { f64::INFINITY };
-                let wait: Option<WaitFor> = serde_json::from_value(value["wait"].clone()).ok().flatten();
-                let cause: Option<NetCause> = serde_json::from_value(value["cause"].clone()).ok().flatten();
-                let at = now_ms_f64() + n("waitMs");
+                let until = if wait_ms > 0 { perf_now() + wait_ms as f64 } else { f64::INFINITY };
+                let at = now_ms_f64() + wait_ms as f64;
                 {
                     let mut state = self.0.state.borrow_mut();
                     state.retry = Some((reason.clone(), until));
                     state.waiting_for = wait.map(|wait| (wait, at));
                     state.waiting_cause = cause;
-                    state.waiting_proxy_down = value["proxyDown"].as_bool().unwrap_or(false);
+                    state.waiting_proxy_down = proxy_down;
                 }
                 // A plan's limit pauses the answer until it resets: told once, as a wait, not a stop.
                 if wait == Some(WaitFor::Limit) {
@@ -50,22 +56,21 @@ impl TuiApp {
                     );
                 }
             }
-            "model-switch" => {
-                let model = get("model").to_string();
-                let name = model.split_once('/').map_or(model.as_str(), |(_, name)| name).to_string();
-                let reason = self.clean_line(get("reason"), 120);
+            SessionEvent::Kernel(KernelEvent::ModelSwitch { model, reason, back }) => {
+                let name = model.split_once('/').map_or(model.as_str(), |(_, name)| name);
+                let reason = self.clean_line(&reason, 120);
                 // The header asks the session which model answers; the conversation says when that changes.
-                if value["back"] == true {
+                if back {
                     self.notice(&format!("{reason}: back to {name}."), NoticeTone::Info);
                 } else {
                     self.notice(&format!("{reason}; carrying on with {name} (/model to change)."), NoticeTone::Info);
                 }
             }
-            "state" => {
+            SessionEvent::State { state: turn } => {
                 {
                     let mut state = self.0.state.borrow_mut();
-                    match get("state") {
-                        "running" => {
+                    match turn {
+                        TurnState::Running => {
                             if state.pending_turn {
                                 state.pending_turn = false;
                                 state.last_stop = None;
@@ -79,12 +84,12 @@ impl TuiApp {
                                 state.turn_changes = 0;
                             }
                         }
-                        "cancelling" => {
+                        TurnState::Cancelling => {
                             state.suppress = true;
                             state.stream.discard();
                         }
-                        "idle" if state.pending_turn => state.pending_turn = false,
-                        _ => {
+                        TurnState::Idle if state.pending_turn => state.pending_turn = false,
+                        TurnState::Idle | TurnState::Closed => {
                             if let Some(entry) = state.current.take() {
                                 if let Entry::Assistant { status, .. } = &mut *entry.borrow_mut() {
                                     *status = if state.failed { AnswerStatus::Failed } else { AnswerStatus::Stopped };
@@ -95,28 +100,28 @@ impl TuiApp {
                         }
                     }
                 }
-                if get("state") == "idle" {
+                if turn == TurnState::Idle {
                     self.after_busy();
                 }
                 {
                     let mut state = self.0.state.borrow_mut();
-                    if matches!(get("state"), "running" | "cancelling") && state.busy_since == 0. {
+                    if matches!(turn, TurnState::Running | TurnState::Cancelling) && state.busy_since == 0. {
                         state.busy_since = perf_now();
                         // At work again: the status says so, not how the last answer ended.
                         state.resting = None;
                         state.run_told = false;
                         state.run_active = false;
-                    } else if get("state") == "idle" {
+                    } else if turn == TurnState::Idle {
                         state.busy_since = 0.;
                     }
                 }
                 self.0.scheduler.set_animating(
-                    matches!(get("state"), "running" | "cancelling") || self.0.voice.as_ref().is_some_and(VoiceInput::active),
+                    matches!(turn, TurnState::Running | TurnState::Cancelling) || self.0.voice.as_ref().is_some_and(VoiceInput::active),
                 );
             }
-            "connection" => {
-                self.0.state.borrow_mut().connection = serde_json::from_value(value["state"].clone()).unwrap();
-                if get("state") == "connected" {
+            SessionEvent::Connection { state: connection } => {
+                self.0.state.borrow_mut().connection = connection;
+                if connection == ConnectionState::Connected {
                     self.read_tree(true);
                     self.read_clip(true);
                     self.read_strip(true);
@@ -135,11 +140,10 @@ impl TuiApp {
                     state.own.body = None;
                 }
             }
-            "observation" => self.0.state.borrow_mut().set_name = observed_name(&value),
-            "library" => {
+            SessionEvent::Observation { label, name } => self.0.state.borrow_mut().set_name = observed_name(&label, name.as_deref()),
+            SessionEvent::Library(LibraryEvent { status: library }) => {
                 let tell = {
                     let mut state = self.0.state.borrow_mut();
-                    let library: LibraryStatus = serde_json::from_value(value["status"].clone()).unwrap();
                     let tell = !state.told_library
                         && matches!(library.state, LibraryState::Learning | LibraryState::Paused)
                         && library.learned_at.unwrap_or(0) == 0;
@@ -153,12 +157,9 @@ impl TuiApp {
                     self.notice("Learning your library in the background…", NoticeTone::Info);
                 }
             }
-            "music" => {
+            SessionEvent::Music(MusicEvent { status: music }) => {
                 let tell = {
                     let mut state = self.0.state.borrow_mut();
-                    let Ok(music) = serde_json::from_value::<kumi_listening::music::learning::MusicStatus>(value["status"].clone()) else {
-                        return;
-                    };
                     // The first time Kumi learns their music: nothing heard yet.
                     let tell = !state.told_music
                         && music.state == kumi_listening::music::learning::MusicState::Learning
@@ -174,11 +175,10 @@ impl TuiApp {
                     self.notice("Learning your music in the background…", NoticeTone::Info);
                 }
             }
-            "focus" => {
+            SessionEvent::Focus { focus } => {
                 {
                     let mut state = self.0.state.borrow_mut();
                     // Read in neutral terms: the DAW's presentation fills them from its own wire form.
-                    let focus: Option<DawFocus> = serde_json::from_value(value["focus"].clone()).unwrap();
                     let focus = focus.map(|focus| filled(crate::daw::view(), &focus));
                     state.touched = touched_next(state.focus.as_ref(), focus.as_ref(), state.touched);
                     state.focus = focus;
@@ -189,36 +189,35 @@ impl TuiApp {
                 self.read_own(false);
                 self.follow_lines();
             }
-            "pointed" => {
-                let pin: PinnedNode = serde_json::from_value(value["pin"].clone()).unwrap();
-                let kind = match value["pin"]["node"].as_str().unwrap_or("") {
-                    "track" => IconKind::MidiTrack,
-                    "scene" => IconKind::Scene,
-                    "clip" | "selection" | "clip-slot" => IconKind::MidiClip,
-                    "chain" => IconKind::Chain,
-                    _ => IconKind::Device,
+            SessionEvent::Pointed { pin } => {
+                let kind = match pin.node {
+                    PinKind::Track => IconKind::MidiTrack,
+                    PinKind::Scene => IconKind::Scene,
+                    PinKind::Clip | PinKind::Selection | PinKind::ClipSlot => IconKind::MidiClip,
+                    PinKind::Chain => IconKind::Chain,
+                    PinKind::Device => IconKind::Device,
                 };
                 let row = pin.r#ref.clone();
                 self.0.state.borrow_mut().pinned = Some(Pin { pin, kind, row });
             }
-            "resumed" => {
-                let when = since(n("savedAt"), now_ms_f64());
+            SessionEvent::Resumed { saved_at, lines, changes, chosen, unreadable } => {
+                let when = since(saved_at as f64, now_ms_f64());
                 // What's new, shown as Kumi started, doesn't count: the conversation goes above it.
                 let at_start = {
                     let state = self.0.state.borrow();
                     state.transcript.is_empty() || state.news.is_some()
                 };
-                if value["chosen"] == true {
+                if chosen == Some(true) {
                     self.0.state.borrow_mut().transcript.add(Entry::Divider { text: format!("Back to your conversation from {when}") });
-                } else if value["unreadable"] == true {
+                } else if unreadable == Some(true) {
                     self.notice(&format!("Your conversation from {when}, which this model can't continue:"), NoticeTone::Info);
                 } else {
                     self.notice(&format!("Continuing your conversation from {when}. /new starts fresh."), NoticeTone::Info);
                 }
                 let mut answer: Option<EntryRef> = None;
-                for line in array(&value["lines"]) {
-                    let text = self.clean(s(&line["text"]), usize::MAX);
-                    if line["role"] == "user" {
+                for line in lines {
+                    let text = self.clean(&line.text, usize::MAX);
+                    if line.role == TranscriptRole::User {
                         answer = None;
                         if !text.is_empty() {
                             self.0.state.borrow_mut().transcript.add(Entry::User { text });
@@ -234,8 +233,8 @@ impl TuiApp {
                             }
                             words.push_str(&text);
                         }
-                        for tool in array(&line["tools"]).iter().map(s) {
-                            if !QUIET_TOOLS.contains(&tool) {
+                        for tool in line.tools.iter().flatten() {
+                            if !QUIET_TOOLS.contains(&tool.as_str()) {
                                 steps.push(Step {
                                     id: format!("resumed:{}", steps.len()),
                                     tool: Some(tool.into()),
@@ -248,10 +247,10 @@ impl TuiApp {
                     self.0.state.borrow_mut().transcript.touch(answer);
                 }
                 let mut state = self.0.state.borrow_mut();
-                let mut earlier: Vec<ChangeRecord> = array(&value["changes"])
-                    .iter()
-                    .map(|c| serde_json::from_value(c.clone()).unwrap())
-                    .filter(|c: &ChangeRecord| !state.records.changes().iter().any(|known| known.id == c.id))
+                let mut earlier: Vec<ChangeRecord> = changes
+                    .unwrap_or_default()
+                    .into_iter()
+                    .filter(|c| !state.records.changes().iter().any(|known| known.id == c.id))
                     .collect();
                 if !earlier.is_empty() {
                     let changes = state.records.changes_mut();
@@ -276,28 +275,25 @@ impl TuiApp {
                     }
                 }
             }
-            "set-asked" => {
+            SessionEvent::SetAsked { ask } => {
                 self.0.state.borrow_mut().selection = None;
-                let ask: Option<SetAsk> = serde_json::from_value(value["ask"].clone()).ok();
                 self.open_set_ask(ask);
             }
-            "resend" => {
+            SessionEvent::Resend { text } => {
                 let mut state = self.0.state.borrow_mut();
                 if state.editor.is_empty() {
-                    state.editor.set(get("text"));
+                    state.editor.set(&text);
                     state.recall = None;
                 }
             }
-            "catch-up" => {
-                let catch: CatchUp = serde_json::from_value(value["catchUp"].clone()).unwrap();
+            SessionEvent::CatchUp { catch_up: catch } => {
                 let tell = !self.0.state.borrow().transcript.is_empty() && !(catch.after_reconnect == Some(true) && catch.lines.is_empty());
                 if tell {
                     self.notice(&catch_up_text(&catch, now_ms_f64()), NoticeTone::Info);
                 }
                 self.0.state.borrow_mut().catch_up = Some(catch);
             }
-            "change" => {
-                let change: ChangeRecord = serde_json::from_value(value["change"].clone()).unwrap();
+            SessionEvent::Change { change } => {
                 let (new, refresh) = {
                     let mut state = self.0.state.borrow_mut();
                     if let Some(index) = state.records.changes().iter().position(|c| c.id == change.id) {
@@ -337,49 +333,41 @@ impl TuiApp {
                     self.flash();
                 }
             }
-            "notice" => self.notice(get("message"), NoticeTone::Info),
-            "job" => {
-                if let SessionEvent::Job(status) = &event {
-                    self.job_event(status);
-                }
-            }
-            "carry-on" => self.carry_on_event(n("job") as u32, get("title")),
-            "palette" => {
-                if let SessionEvent::Palette { palette } = event {
-                    self.palette_event(palette);
-                }
-            }
-            "error" => {
+            SessionEvent::Notice { message } => self.notice(&message, NoticeTone::Info),
+            SessionEvent::Job(status) => self.job_event(&status),
+            SessionEvent::CarryOn { job, title } => self.carry_on_event(job, &title),
+            SessionEvent::Palette { palette } => self.palette_event(palette),
+            SessionEvent::Error { message: said, kind, provider } => {
                 {
                     let mut state = self.0.state.borrow_mut();
                     state.failed = true;
                     state.stream.discard();
                 }
-                let message = self.clean_line(get("message"), 300);
+                let message = self.clean_line(&said, 300);
                 self.rest(ProgramState::Error, &message);
-                if get("kind") == "auth" {
+                if kind == Some(FailureKind::Auth) {
                     self.alert(&format!("Needs you: {message}"), "Kumi needs you · sign in, in Kumi");
                 } else {
                     self.alert(&format!("Stopped: {message}"), &format!("Kumi · stopped · {message}"));
                 }
-                self.notice(get("message"), NoticeTone::Warn);
-                if !get("kind").is_empty() {
-                    self.offer_fix(get("kind"), value["provider"].as_str());
+                self.notice(&said, NoticeTone::Warn);
+                if let Some(kind) = kind {
+                    self.offer_fix(kind, provider.as_deref());
                 }
             }
-            "text" => {
+            SessionEvent::Kernel(KernelEvent::Text { text }) => {
                 let mut state = self.0.state.borrow_mut();
                 if state.suppress || state.current.is_none() {
                     return;
                 }
-                state.bytes += get("text").len();
+                state.bytes += text.len();
                 if state.bytes > 4 * 1024 * 1024 {
                     drop(state);
                     self.notice("That answer got too long to show, so Kumi stopped it.", NoticeTone::Warn);
                     self.cancel();
                     return;
                 }
-                let text = state.stream.push(get("text"));
+                let text = state.stream.push(&text);
                 if let Some(entry) = state.current.clone() {
                     if let Entry::Assistant { text: words, .. } = &mut *entry.borrow_mut() {
                         words.push_str(&text);
@@ -387,30 +375,25 @@ impl TuiApp {
                     state.transcript.touch(&entry);
                 }
             }
-            "remembered" => {
+            SessionEvent::Memory(MemoryEvent::Remembered { scope, note, replaced, pending }) => {
                 let set = self.0.state.borrow().set_name.clone().unwrap_or_else(|| format!("this {}", crate::daw::words().place));
-                let about = if get("scope") == "producer" {
-                    "about you".into()
-                } else if value["pending"] == true {
-                    format!("about {set}, kept once it's saved")
-                } else {
-                    format!("about {set}")
+                let pending = pending == Some(true);
+                let about = match scope {
+                    MemoryScope::Producer => "about you".into(),
+                    MemoryScope::Set if pending => format!("about {set}, kept once it's saved"),
+                    MemoryScope::Set => format!("about {set}"),
                 };
                 self.memory_line(
                     MemoryKind::Note,
-                    &format!(
-                        "{} {about}: {}",
-                        if value.get("replaced").is_some() { "Updated a note" } else { "Noted" },
-                        s(&value["note"]["text"])
-                    ),
+                    &format!("{} {about}: {}", if replaced.is_some() { "Updated a note" } else { "Noted" }, note.text),
                 );
-                let id = s(&value["note"]["id"]).to_string();
-                let key = format!("note:{}:{}{id}", get("scope"), if value["pending"] == true { "pending:" } else { "" });
+                let key = format!("note:{}:{}{}", scope_key(scope), if pending { "pending:" } else { "" }, note.id);
+                let id = note.id;
                 let controller = self.0.options.controller.clone();
                 self.keep(
                     key,
                     MemoryKind::Note,
-                    s(&value["note"]["text"]),
+                    &note.text,
                     Rc::new(move || {
                         let controller = controller.clone();
                         let id = id.clone();
@@ -418,119 +401,114 @@ impl TuiApp {
                     }),
                 );
             }
-            "forgot" => {
-                self.memory_line(MemoryKind::Note, &format!("Forgot: {}", s(&value["note"]["text"])));
-                self.forgotten(&format!("note:{}:{}", get("scope"), s(&value["note"]["id"])));
-                self.forgotten(&format!("note:{}:pending:{}", get("scope"), s(&value["note"]["id"])));
+            SessionEvent::Memory(MemoryEvent::Forgot { scope, note }) => {
+                self.memory_line(MemoryKind::Note, &format!("Forgot: {}", note.text));
+                self.forgotten(&format!("note:{}:{}", scope_key(scope), note.id));
+                self.forgotten(&format!("note:{}:pending:{}", scope_key(scope), note.id));
             }
-            "lesson" => {
-                let key = format!("lesson:{}", get("id"));
-                if get("action") == "forgot" {
-                    self.memory_line(MemoryKind::Lesson, &format!("Forgot a lesson: {}", get("line")));
-                    self.forgotten(&key);
-                } else {
-                    self.memory_line(
-                        MemoryKind::Lesson,
-                        &format!(
-                            "{}: {}",
-                            if get("action") == "updated" { "Updated what I learned" } else { "Learned from this match" },
-                            get("line")
-                        ),
-                    );
-                    let id = get("id").to_string();
-                    let controller = self.0.options.controller.clone();
-                    self.keep(
-                        key,
-                        MemoryKind::Lesson,
-                        get("line"),
-                        Rc::new(move || {
-                            let controller = controller.clone();
-                            let id = id.clone();
-                            async move { controller.forget_lesson(&id).await }.boxed_local()
-                        }),
-                    );
+            SessionEvent::Lesson { action, id, line } => {
+                let key = format!("lesson:{id}");
+                match action {
+                    LessonAction::Forgot => {
+                        self.memory_line(MemoryKind::Lesson, &format!("Forgot a lesson: {line}"));
+                        self.forgotten(&key);
+                    }
+                    LessonAction::Learned | LessonAction::Updated => {
+                        self.memory_line(
+                            MemoryKind::Lesson,
+                            &format!(
+                                "{}: {line}",
+                                if action == LessonAction::Updated { "Updated what I learned" } else { "Learned from this match" }
+                            ),
+                        );
+                        let controller = self.0.options.controller.clone();
+                        self.keep(
+                            key,
+                            MemoryKind::Lesson,
+                            &line,
+                            Rc::new(move || {
+                                let controller = controller.clone();
+                                let id = id.clone();
+                                async move { controller.forget_lesson(&id).await }.boxed_local()
+                            }),
+                        );
+                    }
                 }
             }
-            "technique" if get("action") == "offered" => {
-                let name = s(&value["technique"]["name"]);
-                let line = if self.offer_technique(name) {
-                    format!("Keep this as a technique? {name}")
-                } else {
-                    format!("Keep this as a technique? {name} · say “keep the technique”")
+            SessionEvent::Technique(TechniqueEvent { action, technique }) => {
+                let name = technique.name.as_str();
+                let line = match action {
+                    TechniqueAction::Offered => {
+                        if self.offer_technique(name) {
+                            format!("Keep this as a technique? {name}")
+                        } else {
+                            format!("Keep this as a technique? {name} · say “keep the technique”")
+                        }
+                    }
+                    TechniqueAction::Kept => format!("Kept a technique: {name}"),
+                    TechniqueAction::Updated => format!("Updated a technique: {name}"),
+                    TechniqueAction::Used => format!("Using your technique: {name}"),
+                    TechniqueAction::Forgot => format!("Forgot the technique: {name}"),
                 };
                 self.memory_line(MemoryKind::Technique, &line);
-            }
-            "technique" => {
-                let technique = &value["technique"];
-                let name = s(&technique["name"]);
-                self.memory_line(
-                    MemoryKind::Technique,
-                    &format!(
-                        "{}: {name}",
-                        match get("action") {
-                            "kept" => "Kept a technique",
-                            "updated" => "Updated a technique",
-                            "used" => "Using your technique",
-                            _ => "Forgot the technique",
-                        }
-                    ),
-                );
-                let key = format!("technique:{}", s(&technique["id"]));
-                if matches!(get("action"), "kept" | "updated") {
-                    let id = s(&technique["id"]).to_string();
-                    let controller = self.0.options.controller.clone();
-                    self.keep(
-                        key,
-                        MemoryKind::Technique,
-                        name,
-                        Rc::new(move || {
-                            let controller = controller.clone();
-                            let id = id.clone();
-                            async move { controller.forget_technique(&id).await }.boxed_local()
-                        }),
-                    );
-                } else if get("action") == "forgot" {
-                    self.forgotten(&key);
+                let key = format!("technique:{}", technique.id);
+                match action {
+                    TechniqueAction::Kept | TechniqueAction::Updated => {
+                        let id = technique.id.clone();
+                        let controller = self.0.options.controller.clone();
+                        self.keep(
+                            key,
+                            MemoryKind::Technique,
+                            name,
+                            Rc::new(move || {
+                                let controller = controller.clone();
+                                let id = id.clone();
+                                async move { controller.forget_technique(&id).await }.boxed_local()
+                            }),
+                        );
+                    }
+                    TechniqueAction::Forgot => self.forgotten(&key),
+                    TechniqueAction::Offered | TechniqueAction::Used => {}
                 }
             }
-            "recipe" => {
-                let steps = format!("{} {}", number::to_string(n("steps")), if n("steps") == 1. { "step" } else { "steps" });
-                let name = get("name");
+            SessionEvent::Recipe(RecipeEvent { action, name, steps }) => {
+                let steps = format!("{} {}", number::to_string(steps as f64), if steps == 1 { "step" } else { "steps" });
                 self.memory_line(
                     MemoryKind::Recipe,
-                    &match get("action") {
-                        "saved" => format!("Saved a recipe: {name} ({steps})"),
-                        "updated" => format!("Updated a recipe: {name} ({steps})"),
-                        "running" => format!("Running your recipe: {name} ({steps})"),
-                        _ => format!("Forgot the recipe: {name}"),
+                    &match action {
+                        RecipeAction::Saved => format!("Saved a recipe: {name} ({steps})"),
+                        RecipeAction::Updated => format!("Updated a recipe: {name} ({steps})"),
+                        RecipeAction::Running => format!("Running your recipe: {name} ({steps})"),
+                        RecipeAction::Forgotten => format!("Forgot the recipe: {name}"),
                     },
                 );
                 let key = format!("recipe:{}", name.to_lowercase());
-                if matches!(get("action"), "saved" | "updated") {
-                    let name = name.to_string();
-                    let name_copy = name.clone();
-                    let controller = self.0.options.controller.clone();
-                    self.keep(
-                        key,
-                        MemoryKind::Recipe,
-                        &name_copy,
-                        Rc::new(move || {
-                            let controller = controller.clone();
-                            let name = name.clone();
-                            async move { controller.forget_recipe(&name).await }.boxed_local()
-                        }),
-                    );
-                } else if get("action") == "forgotten" {
-                    self.forgotten(&key);
+                match action {
+                    RecipeAction::Saved | RecipeAction::Updated => {
+                        let forget = name.clone();
+                        let controller = self.0.options.controller.clone();
+                        self.keep(
+                            key,
+                            MemoryKind::Recipe,
+                            &name,
+                            Rc::new(move || {
+                                let controller = controller.clone();
+                                let name = forget.clone();
+                                async move { controller.forget_recipe(&name).await }.boxed_local()
+                            }),
+                        );
+                    }
+                    RecipeAction::Forgotten => self.forgotten(&key),
+                    RecipeAction::Running => {}
                 }
             }
-            "action" => {
-                let title = self.clean(get("title"), 120);
-                let glyph = if value["recording"] == true {
+            SessionEvent::Action(ActionEvent { title, playing, recording }) => {
+                let title = self.clean(&title, 120);
+                let glyph = if recording == Some(true) {
                     "●"
-                } else if value["playing"] == true {
+                } else if playing == Some(true) {
                     "▶"
-                } else if value["playing"] == false || value["recording"] == false {
+                } else if playing == Some(false) || recording == Some(false) {
                     "■"
                 } else {
                     "›"
@@ -538,10 +516,9 @@ impl TuiApp {
                 self.0.state.borrow_mut().last_action = Some(LastAction { title, at: perf_now(), glyph: glyph.into(), memory: false });
                 self.flash();
             }
-            "transport" => {
+            SessionEvent::Transport { transport } => {
                 let started = {
                     let mut state = self.0.state.borrow_mut();
-                    let transport: Option<Transport> = serde_json::from_value(value["transport"].clone()).unwrap();
                     let was = state.transport.as_ref().is_some_and(|transport| transport.playing);
                     let now = transport.as_ref().is_some_and(|transport| transport.playing);
                     state.transport = transport;
@@ -554,152 +531,134 @@ impl TuiApp {
                 }
                 self.follow_lines();
             }
-            "watching" => self.0.state.borrow_mut().watching = value["on"] == true,
-            "heard" => {
-                let mut entry = value.clone();
-                entry["kind"] = json!("heard");
-                entry["file"] = json!(self.clean(get("file"), 120));
-                entry["summary"] = json!(self.clean(get("summary"), 200));
-                if let Some(c) = entry.get_mut("compared") {
-                    c["reference"] = json!(self.clean(s(&c["reference"]), 120));
-                    c["summary"] = json!(self.clean(s(&c["summary"]), 200));
-                }
-                self.insert_before(serde_json::from_value(entry).unwrap());
-            }
-            "goal" => {
-                if matches!(get("state"), "running" | "starting") {
+            SessionEvent::Watching { on } => self.0.state.borrow_mut().watching = on,
+            SessionEvent::Heard(heard) => self.insert_before(Entry::Heard {
+                file: self.clean(&heard.file, 120),
+                summary: self.clean(&heard.summary, 200),
+                bands: heard.bands,
+                compared: heard.compared.map(|c| transcript::Comparison {
+                    reference: self.clean(&c.reference, 120),
+                    summary: self.clean(&c.summary, 200),
+                    differences: c.differences,
+                }),
+            }),
+            SessionEvent::Goal(status) => {
+                if matches!(status.state, GoalPhase::Running | GoalPhase::Starting) {
                     self.0.state.borrow_mut().run_active = true;
                 }
-                let was = self.0.state.borrow().goal.as_ref().map(|goal| s(&goal["state"]).to_string());
-                if matches!(was.as_deref(), Some("running" | "starting")) && matches!(get("state"), "done" | "paused") {
-                    let best =
-                        value.get("best").map(|best| format!(" · best {}%", super::drawing::num(&best["score"]))).unwrap_or_default();
-                    let ended = if get("state") == "done" { "done" } else { "paused" };
+                let was = self.0.state.borrow().goal.as_ref().map(|goal| goal.status.state);
+                if matches!(was, Some(GoalPhase::Running | GoalPhase::Starting))
+                    && matches!(status.state, GoalPhase::Done | GoalPhase::Paused)
+                {
+                    let best = status.best.as_ref().map(|best| format!(" · best {}%", number::to_string(best.score))).unwrap_or_default();
+                    let ended = if status.state == GoalPhase::Done { "done" } else { "paused" };
                     self.run_ended(&format!("Sound match {ended}{best}"), &format!("Kumi · sound match {ended}{best}"));
                 }
-                let show = self.0.state.borrow().goal.is_none() || get("state") == "starting";
+                let show = self.0.state.borrow().goal.is_none() || status.state == GoalPhase::Starting;
                 if show {
                     self.0.tabs.show("goal");
                 }
-                let mut status = value.clone();
-                status["since"] = json!(perf_now() - n("elapsedMs"));
                 let mut state = self.0.state.borrow_mut();
-                state.goal = Some(status);
+                state.goal = Some(Timed { since: perf_now() - status.elapsed_ms as f64, status });
                 // A sound-match search took over: the GOAL tab shows it, not the last /goal.
                 state.objective = None;
             }
-            "match" => {
-                if get("state") == "running" {
+            SessionEvent::Match(status) => {
+                let running = status.state == MatchState::Running;
+                if running {
                     self.0.state.borrow_mut().run_active = true;
                 }
-                self.0.state.borrow_mut().matching = if get("state") == "running" {
-                    let mut status = value.clone();
-                    status["since"] = json!(perf_now() - n("elapsedMs"));
-                    Some(status)
-                } else {
-                    None
-                };
-                if get("state") == "done" && value.get("best").is_some() {
-                    let best = super::drawing::num(&value["best"]["score"]);
-                    self.run_ended(&format!("Matching done · best {best}%"), &format!("Kumi · matching done · {best}%"));
-                    let score = value["best"]["score"].as_f64().unwrap_or(0.);
-                    let first = value
-                        .get("first")
-                        .and_then(Value::as_f64)
-                        .filter(|n| *n != score)
-                        .map(|n| format!("{}% → ", number::to_string(n)))
+                self.0.state.borrow_mut().matching =
+                    running.then(|| Timed { since: perf_now() - status.elapsed_ms as f64, status: status.clone() });
+                if let (MatchState::Done, Some(best)) = (status.state, &status.best) {
+                    let score = number::to_string(best.score);
+                    self.run_ended(&format!("Matching done · best {score}%"), &format!("Kumi · matching done · {score}%"));
+                    let first = status
+                        .first
+                        .filter(|first| *first != best.score)
+                        .map(|first| format!("{}% → ", number::to_string(first)))
                         .unwrap_or_default();
-                    let why = match value["stop"].as_str().unwrap_or("plateau") {
-                        "reached" => "close enough",
-                        "budget" => "its budget spent",
-                        "no-audition" => "nothing to compare",
-                        _ => "no more gain",
+                    let why = match status.stop.unwrap_or(MatchStop::Plateau) {
+                        MatchStop::Reached => "close enough",
+                        MatchStop::Budget => "its budget spent",
+                        MatchStop::NoAudition => "nothing to compare",
+                        MatchStop::Plateau => "no more gain",
                     };
                     self.notice(
-                        &format!(
-                            "Matching: {first}{}% ({}) · {} · {why}",
-                            number::to_string(score),
-                            s(&value["best"]["label"]),
-                            helpers::clock_of(n("elapsedMs"))
-                        ),
+                        &format!("Matching: {first}{score}% ({}) · {} · {why}", best.label, helpers::clock_of(status.elapsed_ms as f64)),
                         NoticeTone::Info,
                     );
                 }
             }
-            "objective" => {
-                if get("state") == "running" {
+            SessionEvent::Objective(status) => {
+                if status.state == ObjectiveState::Running {
                     self.0.state.borrow_mut().run_active = true;
                 }
-                let was = self.0.state.borrow().objective.as_ref().map(|goal| s(&goal["state"]).to_string());
-                if was.as_deref() == Some("running") && get("state") != "running" {
-                    let goal = self.clean_line(get("objective"), 80);
-                    let reason = self.clean_line(get("reason"), 120);
-                    let (body, live) = match (get("state"), get("verdict")) {
-                        ("done", "complete") => (format!("Goal met: {goal}"), format!("Kumi · goal met · {goal}")),
-                        (_, "blocked") => (format!("Goal blocked: {reason}"), "Kumi needs you · goal blocked".to_string()),
-                        (_, "stuck") => (format!("Goal stuck: {reason}"), "Kumi · goal stuck".to_string()),
-                        (_, "budget") => (format!("Goal stopped: its budget is spent ({goal})"), "Kumi · goal out of budget".to_string()),
-                        _ => {
+                let was = self.0.state.borrow().objective.as_ref().map(|goal| goal.status.state);
+                if was == Some(ObjectiveState::Running) && status.state != ObjectiveState::Running {
+                    let goal = self.clean_line(&status.objective, 80);
+                    let reason = self.clean_line(status.reason.as_deref().unwrap_or(""), 120);
+                    let (body, live) = match (status.state, status.verdict) {
+                        (ObjectiveState::Done, Some(Verdict::Complete)) => {
+                            (format!("Goal met: {goal}"), format!("Kumi · goal met · {goal}"))
+                        }
+                        (_, Some(Verdict::Blocked)) => (format!("Goal blocked: {reason}"), "Kumi needs you · goal blocked".to_string()),
+                        (_, Some(Verdict::Stuck)) => (format!("Goal stuck: {reason}"), "Kumi · goal stuck".to_string()),
+                        (_, Some(Verdict::Budget)) => {
+                            (format!("Goal stopped: its budget is spent ({goal})"), "Kumi · goal out of budget".to_string())
+                        }
+                        (_, None | Some(Verdict::Complete | Verdict::Continue)) => {
                             (format!("Goal paused: {}", if reason.is_empty() { &goal } else { &reason }), "Kumi · goal paused".to_string())
                         }
                     };
                     self.run_ended(&body, &live);
                 }
-                let mut status = value.clone();
-                status["since"] = json!(perf_now() - n("elapsedMs"));
-                self.0.state.borrow_mut().objective = Some(status);
+                self.0.state.borrow_mut().objective = Some(Timed { since: perf_now() - status.elapsed_ms as f64, status });
                 self.0.tabs.show("goal");
             }
             // No goal here (none set, or another Set is open): the GOAL tab stops showing the last one.
-            "objective-cleared" => self.0.state.borrow_mut().objective = None,
-            "loop" => {
-                if get("state") == "running" {
+            SessionEvent::ObjectiveCleared => self.0.state.borrow_mut().objective = None,
+            SessionEvent::Loop(status) => {
+                let running = status.state == LoopState::Running;
+                if running {
                     self.0.state.borrow_mut().run_active = true;
                 }
-                self.0.state.borrow_mut().looping = if get("state") == "running" {
-                    let mut status = value.clone();
-                    status["since"] = json!(perf_now() - n("elapsedMs"));
-                    Some(status)
-                } else {
-                    None
-                };
-                if get("state") == "done" && n("rounds") > 0. {
-                    let (rounds, kept) = (n("rounds"), n("kept"));
+                self.0.state.borrow_mut().looping =
+                    running.then(|| Timed { since: perf_now() - status.elapsed_ms as f64, status: status.clone() });
+                if status.state == LoopState::Done && status.rounds > 0 {
+                    let (rounds, kept) = (status.rounds, status.kept);
                     self.run_ended(&format!("Loop done: {rounds} rounds, {kept} kept"), &format!("Kumi · loop done · {kept} kept"));
-                    let why = match value["stop"].as_str().unwrap_or("") {
-                        "met" => "every item within tolerance",
-                        "stalled" => "changes stopped helping",
-                        "budget" => "its budget spent",
-                        "ended" => "ended",
-                        _ => "nothing more judged",
+                    let why = match status.stop {
+                        Some(LoopStop::Met) => "every item within tolerance",
+                        Some(LoopStop::Stalled) => "changes stopped helping",
+                        Some(LoopStop::Budget) => "its budget spent",
+                        Some(LoopStop::Ended) => "ended",
+                        Some(LoopStop::Unjudged) | None => "nothing more judged",
                     };
                     self.notice(
                         &format!(
                             "Loop: {} rounds · {} kept · {} taken back · {} listens · {} · {why}",
-                            n("rounds"),
-                            n("kept"),
-                            n("reverted"),
-                            n("listens"),
-                            helpers::clock_of(n("elapsedMs"))
+                            status.rounds,
+                            status.kept,
+                            status.reverted,
+                            status.listens,
+                            helpers::clock_of(status.elapsed_ms as f64)
                         ),
                         NoticeTone::Info,
                     );
                 }
             }
-            "judged" => {
-                if let SessionEvent::Judged(round) = &event {
-                    let lines = round.lines().iter().map(|line| self.clean_line(line, 400)).collect();
-                    self.insert_before(Entry::Judged { lines, kept: round.kept, met: round.met });
-                }
+            SessionEvent::Judged(round) => {
+                let lines = round.lines().iter().map(|line| self.clean_line(line, 400)).collect();
+                self.insert_before(Entry::Judged { lines, kept: round.kept, met: round.met });
             }
-            "auditioned" => {
-                let mut entry = value.clone();
-                entry["kind"] = json!("auditioned");
-                let gaps = array(&value["gaps"])
+            SessionEvent::Auditioned(audition) => {
+                let gaps = audition
+                    .gaps
                     .iter()
                     .take(3)
-                    .map(|v| {
-                        let mut text = s(v);
+                    .map(|gap| {
+                        let mut text = gap.as_str();
                         if let Some((prefix, _)) = text.split_once(" (").filter(|_| text.ends_with(')')) {
                             text = prefix;
                         }
@@ -707,103 +666,95 @@ impl TuiApp {
                         self.clean_line(text, 48)
                     })
                     .collect::<Vec<_>>();
-                entry["gaps"] = json!(gaps);
-                if let Some(best) = entry.get_mut("best") {
-                    best["label"] = json!(self.clean_line(s(&best["label"]), 60));
-                }
-                entry["takes"] = Value::Array(
-                    array(&value["takes"])
-                        .iter()
+                self.insert_before(Entry::Auditioned {
+                    round: audition.round.into(),
+                    best: audition.best.map(|best| transcript::Best { label: self.clean_line(&best.label, 60), score: best.score }),
+                    previous: audition.previous,
+                    takes: audition
+                        .takes
+                        .into_iter()
                         .take(8)
-                        .map(|take| {
-                            let mut take = take.clone();
-                            take["label"] = json!(self.clean_line(s(&take["label"]), 40));
-                            take
-                        })
+                        .map(|take| transcript::Take { label: self.clean_line(&take.label, 40), score: take.score, silent: take.silent })
                         .collect(),
-                );
-                self.insert_before(serde_json::from_value(entry).unwrap());
-            }
-            "watched" => {
-                let mut entry = value.clone();
-                entry["kind"] = json!("watched");
-                entry["title"] = json!(self.clean_line(get("title"), 160));
-                if !get("channel").is_empty() {
-                    entry["channel"] = json!(self.clean_line(get("channel"), 80));
-                } else {
-                    entry.as_object_mut().unwrap().remove("channel");
-                }
-                if n("duration") == 0. {
-                    entry.as_object_mut().unwrap().remove("duration");
-                }
-                entry["chapters"] =
-                    json!(array(&value["chapters"]).iter().take(24).map(|s| self.clean_line(super::events::s(s), 60)).collect::<Vec<_>>());
-                entry["words"] = json!(match get("words") {
-                    "captions" => "its captions",
-                    "automatic" => "its automatic captions",
-                    "transcribed" => "its speech, transcribed by Kumi",
-                    _ => "no words",
+                    gaps,
                 });
-                entry["frames"] = Value::Array(
-                    array(&value["frames"])
-                        .iter()
-                        .take(16)
-                        .filter(|f| {
-                            let t = &f["thumb"];
-                            let w = t["width"].as_u64().unwrap_or(0);
-                            let h = t["height"].as_u64().unwrap_or(0);
-                            w > 0 && w <= 64 && h > 0 && h <= 64 && array(&t["rgb"]).len() as u64 == w * h * 3
-                        })
-                        .cloned()
-                        .collect(),
-                );
-                entry["notes"] = json!(array(&value["notes"]).iter().map(|n| self.clean_line(s(n), 300)).collect::<Vec<_>>());
-                entry["pictures"] = json!(matches!(self.0.depth, ColorDepth::Truecolor | ColorDepth::Colors256));
-                self.insert_before(serde_json::from_value(entry).unwrap());
             }
-            "web" => {
-                if let SessionEvent::Web(event) = event {
-                    let words = web_words(&event, &|text, max| {
-                        head(
-                            &sanitize_text(text, &self.0.state.borrow().secrets)
-                                .split(|c: char| string::trim(&c.to_string()).is_empty())
-                                .filter(|s| !s.is_empty())
-                                .collect::<Vec<_>>()
-                                .join(" "),
-                            max,
-                        )
-                    });
-                    let line = WebLine { lead: words.lead, title: words.title, detail: words.detail };
-                    let mut state = self.0.state.borrow_mut();
-                    let at =
-                        state.current.as_ref().and_then(|current| state.transcript.entries.iter().position(|e| Rc::ptr_eq(e, current)));
-                    let above = match at {
-                        Some(n) if n > 0 => state.transcript.entries.get(n - 1).cloned(),
-                        None => state.transcript.entries.last().cloned(),
-                        _ => None,
-                    };
-                    let mut added = false;
-                    if let Some(above) = above {
-                        if let Entry::Web { lines } = &mut *above.borrow_mut() {
-                            if lines.len() < 24 {
-                                lines.push(line.clone());
-                                added = true;
-                            }
-                        }
-                        if added {
-                            state.transcript.touch(&above);
+            SessionEvent::Watched(watched) => self.insert_before(Entry::Watched {
+                title: self.clean_line(&watched.title, 160),
+                channel: watched.channel.filter(|channel| !channel.is_empty()).map(|channel| self.clean_line(&channel, 80)),
+                duration: watched.duration.filter(|duration| *duration != 0.),
+                from: watched.from,
+                to: watched.to,
+                chapters: watched.chapters.iter().take(24).map(|chapter| self.clean_line(chapter, 60)).collect(),
+                words: match watched.words {
+                    WordsSource::Captions => "its captions",
+                    WordsSource::Automatic => "its automatic captions",
+                    WordsSource::Transcribed => "its speech, transcribed by Kumi",
+                    WordsSource::None => "no words",
+                }
+                .into(),
+                frames: watched
+                    .frames
+                    .into_iter()
+                    .take(16)
+                    .filter(|frame| {
+                        let (w, h) = (frame.thumb.width as usize, frame.thumb.height as usize);
+                        w > 0 && w <= 64 && h > 0 && h <= 64 && frame.thumb.rgb.len() == w * h * 3
+                    })
+                    .map(|frame| transcript::Frame {
+                        at: frame.at,
+                        zoom: frame.zoom,
+                        thumb: transcript::Picture {
+                            width: frame.thumb.width as usize,
+                            height: frame.thumb.height as usize,
+                            rgb: frame.thumb.rgb,
+                        },
+                    })
+                    .collect(),
+                sound: watched.sound.map(|sound| transcript::Sound { from: sound.from, to: sound.to }),
+                notes: watched.notes.iter().map(|note| self.clean_line(note, 300)).collect(),
+                pictures: matches!(self.0.depth, ColorDepth::Truecolor | ColorDepth::Colors256),
+            }),
+            SessionEvent::Web(web) => {
+                let words = web_words(&web, &|text, max| {
+                    head(
+                        &sanitize_text(text, &self.0.state.borrow().secrets)
+                            .split(|c: char| string::trim(&c.to_string()).is_empty())
+                            .filter(|s| !s.is_empty())
+                            .collect::<Vec<_>>()
+                            .join(" "),
+                        max,
+                    )
+                });
+                let line = WebLine { lead: words.lead, title: words.title, detail: words.detail };
+                let mut state = self.0.state.borrow_mut();
+                let at = state.current.as_ref().and_then(|current| state.transcript.entries.iter().position(|e| Rc::ptr_eq(e, current)));
+                let above = match at {
+                    Some(n) if n > 0 => state.transcript.entries.get(n - 1).cloned(),
+                    None => state.transcript.entries.last().cloned(),
+                    _ => None,
+                };
+                let mut added = false;
+                if let Some(above) = above {
+                    if let Entry::Web { lines } = &mut *above.borrow_mut() {
+                        if lines.len() < 24 {
+                            lines.push(line.clone());
+                            added = true;
                         }
                     }
-                    if !added {
-                        let current = state.current.clone();
-                        state.transcript.insert_before(Entry::Web { lines: vec![line] }, current.as_ref());
+                    if added {
+                        state.transcript.touch(&above);
                     }
                 }
+                if !added {
+                    let current = state.current.clone();
+                    state.transcript.insert_before(Entry::Web { lines: vec![line] }, current.as_ref());
+                }
             }
-            "steer" => {
-                let words = string::trim(&self.clean(get("text"), usize::MAX)).to_string();
+            SessionEvent::Kernel(KernelEvent::Steer { text }) => {
+                let words = string::trim(&self.clean(&text, usize::MAX)).to_string();
                 let mut state = self.0.state.borrow_mut();
-                if let Some(at) = state.held.iter().position(|h| h.when == "now" && h.taken && h.text == get("text")) {
+                if let Some(at) = state.held.iter().position(|h| h.when == "now" && h.taken && h.text == text) {
                     state.held.remove(at);
                 }
                 if let Some(before) = state.current.take() {
@@ -825,8 +776,8 @@ impl TuiApp {
                     state.transcript.add(Entry::User { text: words });
                 }
             }
-            "doing" => {
-                let text = self.clean_line(get("text"), 80);
+            SessionEvent::Doing { text } => {
+                let text = self.clean_line(&text, 80);
                 let state = self.0.state.borrow();
                 if let Some(entry) = &state.current {
                     let mut changed = false;
@@ -841,25 +792,25 @@ impl TuiApp {
                     }
                 }
             }
-            "tool-input" => {
+            SessionEvent::Kernel(KernelEvent::ToolInput { id, name }) => {
                 let mut state = self.0.state.borrow_mut();
-                if state.current.is_some() && !state.suppress && (crate::daw::presentation().plan)(get("name")) {
-                    state.planning = Some(get("id").into());
+                if state.current.is_some() && !state.suppress && (crate::daw::presentation().plan)(&name) {
+                    state.planning = Some(id);
                     state.planning_since = perf_now();
                 }
             }
-            "tool-start" => {
+            SessionEvent::Kernel(KernelEvent::ToolStart { id, name }) => {
                 let mut state = self.0.state.borrow_mut();
-                if state.planning.as_deref() == Some(get("id")) {
+                if state.planning.as_deref() == Some(id.as_str()) {
                     state.planning = None;
                 }
-                if !state.suppress && !QUIET_TOOLS.contains(&get("name")) {
+                if !state.suppress && !QUIET_TOOLS.contains(&name.as_str()) {
                     if let Some(entry) = &state.current {
                         if let Entry::Assistant { steps, .. } = &mut *entry.borrow_mut() {
                             steps.push(Step {
-                                id: get("id").into(),
-                                tool: Some(get("name").into()),
-                                label: step_label(get("name")).into(),
+                                id,
+                                label: step_label(&name).into(),
+                                tool: Some(name),
                                 state: StepState::Running,
                                 started_at: Some(perf_now()),
                                 ..Default::default()
@@ -869,14 +820,14 @@ impl TuiApp {
                     }
                 }
             }
-            "tool-end" => {
+            SessionEvent::Kernel(KernelEvent::ToolEnd { id, is_error, elapsed_ms, .. }) => {
                 let state = self.0.state.borrow();
                 if let Some(entry) = &state.current {
                     let mut changed = false;
                     if let Entry::Assistant { steps, .. } = &mut *entry.borrow_mut() {
-                        if let Some(step) = steps.iter_mut().find(|s| s.id == get("id")) {
-                            step.state = if value["isError"] == true { StepState::Error } else { StepState::Done };
-                            step.ms = Some(n("elapsedMs"));
+                        if let Some(step) = steps.iter_mut().find(|s| s.id == id) {
+                            step.state = if is_error { StepState::Error } else { StepState::Done };
+                            step.ms = Some(elapsed_ms as f64);
                             step.ended_at = Some(perf_now());
                             step.doing = None;
                             changed = true;
@@ -887,26 +838,27 @@ impl TuiApp {
                     }
                 }
             }
-            "turn-complete" => {
-                let reason = s(&value["result"]["stopReason"]);
+            SessionEvent::TurnComplete { result, elapsed_ms } => {
+                let reason = result.stop_reason;
+                let elapsed = elapsed_ms as f64;
                 let mut offered = None;
                 let mut answer = String::new();
                 {
                     let mut state = self.0.state.borrow_mut();
-                    if let Some(usage) = value["result"].get("usage") {
-                        state.used.input += usage["inputTokens"].as_f64().unwrap_or(0.);
-                        state.used.output += usage["outputTokens"].as_f64().unwrap_or(0.);
-                        state.used.cached += usage["cacheReadTokens"].as_f64().unwrap_or(0.);
+                    if let Some(usage) = &result.usage {
+                        state.used.input += usage.input_tokens;
+                        state.used.output += usage.output_tokens;
+                        state.used.cached += usage.cache_read_tokens;
                         state.used.answers += 1;
                     }
-                    state.last_stop = Some(reason.into());
+                    state.last_stop = Some(reason);
                     let Some(entry) = state.current.take() else {
                         drop(state);
-                        self.answer_ended(reason, n("elapsedMs"), "", None);
+                        self.answer_ended(reason, elapsed, "", None);
                         self.0.scheduler.request();
                         return;
                     };
-                    let cancelled = reason == "cancelled";
+                    let cancelled = reason == StopReason::Cancelled;
                     let tail = if !cancelled && !state.suppress {
                         state.stream.finish()
                     } else {
@@ -916,10 +868,10 @@ impl TuiApp {
                     if let Entry::Assistant { text, status, elapsed_ms, .. } = &mut *entry.borrow_mut() {
                         text.push_str(&tail);
                         *status = if cancelled { AnswerStatus::Stopped } else { AnswerStatus::Done };
-                        *elapsed_ms = Some(n("elapsedMs"));
+                        *elapsed_ms = Some(elapsed);
                         // An answer that ends asking the producer to pick: one key answers, unless they've already
                         // typed or queued something.
-                        if reason == "completed" && state.held.is_empty() && state.editor.is_empty() && state.panel.is_none() {
+                        if reason == StopReason::Completed && state.held.is_empty() && state.editor.is_empty() && state.panel.is_none() {
                             offered = choices(text);
                         }
                         answer = text.clone();
@@ -927,23 +879,20 @@ impl TuiApp {
                     end_steps(&entry);
                     state.transcript.touch(&entry);
                 }
-                self.answer_ended(reason, n("elapsedMs"), &answer, offered.as_ref().map(|(_, choices)| choices.len()));
+                self.answer_ended(reason, elapsed, &answer, offered.as_ref().map(|(_, choices)| choices.len()));
                 if let Some(offered) = offered {
                     self.0.state.borrow_mut().selection = None;
                     self.open_answers(offered);
                 }
-                if reason == "max-steps" {
+                if reason == StopReason::MaxSteps {
                     self.notice("Kumi reached its step limit for one answer. Ask it to carry on.", NoticeTone::Info);
                 }
             }
-            _ => {}
         }
-        if matches!(kind, "text" | "tool-start" | "tool-end" | "tool-input")
-            && self.0.state.borrow().held.iter().any(|h| h.when == "now" && !h.taken)
-        {
+        if at_work && self.0.state.borrow().held.iter().any(|h| h.when == "now" && !h.taken) {
             self.steer_held();
         }
-        if matches!(kind, "state" | "job") {
+        if carry_on {
             self.maybe_carry_on();
         }
         // What the session sends (words as they stream, state, the DAW's events) is drawn at the animation's pace;
@@ -1032,7 +981,7 @@ impl TuiApp {
     fn after_busy(&self) {
         let next = {
             let mut state = self.0.state.borrow_mut();
-            let back = state.last_stop.as_deref() == Some("cancelled") || state.failed || state.cancelling;
+            let back = state.last_stop == Some(StopReason::Cancelled) || state.failed || state.cancelling;
             state.last_stop = None;
             state.failed = false;
             if state.held.is_empty() || state.closing {
@@ -1074,9 +1023,10 @@ impl TuiApp {
         });
     }
 }
-fn s(v: &Value) -> &str {
-    v.as_str().unwrap_or("")
-}
-fn array(v: &Value) -> &[Value] {
-    v.as_array().map(Vec::as_slice).unwrap_or_default()
+/// A memory's scope as the keys of what Kumi kept name it ("note:producer:p3").
+fn scope_key(scope: MemoryScope) -> &'static str {
+    match scope {
+        MemoryScope::Producer => "producer",
+        MemoryScope::Set => "set",
+    }
 }
