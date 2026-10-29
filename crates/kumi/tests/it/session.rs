@@ -599,6 +599,42 @@ local_test!(busy_turn_still_stops_at_hard_limit, {
     assert!(h.error("this answer had run for"));
     h.session.close().await.unwrap();
 });
+local_test!(a_message_up_to_256_kib_is_sent_and_a_longer_one_is_told_its_size, {
+    let h = harness(None, |_| {});
+    h.session.start().await.unwrap();
+    // 2,048 lines of 128 bytes: the most one message takes.
+    let most = format!("{}{}", format!("{}\n", "x".repeat(127)).repeat(2047), "x".repeat(128));
+    assert_eq!(most.len(), 256 * 1024);
+    h.session.submit(&most, None).await.unwrap();
+    assert!(h.record.calls.borrow()[0].contains(&most));
+    let over = format!("{most}x");
+    let refused = h.session.submit(&over, None).await.unwrap_err().to_string();
+    assert!(refused.contains("This message is 257 KB, and one message takes up to 256 KB: send part of it."), "{refused}");
+    // Its words go back in the box, to send part of.
+    assert!(h.events.borrow().iter().any(|e| matches!(e, SessionEvent::Resend { text } if *text == over)));
+    assert!(h.session.submit(" \n", None).await.unwrap_err().to_string().contains("Enter a nonempty prompt"));
+    assert_eq!(h.record.calls.borrow().len(), 1);
+    h.session.close().await.unwrap();
+});
+local_test!(a_message_the_model_has_no_room_for_goes_back_in_the_box_without_the_pictures_advice, {
+    const REFUSED: &str = "test/small has room for about 17 KB at once, and this message comes to 20 KB with what Kumi reads of your Set: send part of it, or choose a model with more room with /model.";
+    let run: Run = Rc::new(|_, _, _| async { Err(KumiError::new(FailureKind::Request, REFUSED).into()) }.boxed_local());
+    let h = harness(Some(run), |_| {});
+    h.session.start().await.unwrap();
+    h.session.submit("what's wrong in this log", None).await.unwrap();
+    assert!(h.error(REFUSED));
+    assert!(h.events.borrow().iter().any(|e| matches!(e, SessionEvent::Resend { text } if text == "what's wrong in this log")));
+    // With a picture it's still the room, not the picture, that's said.
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("synth.png");
+    std::fs::write(&path, vec![7u8; 1500]).unwrap();
+    let picture =
+        Attachment { path: path.to_string_lossy().into_owned(), name: "synth.png".into(), media_type: "image/png".into(), bytes: 1500 };
+    h.session.submit_with("make this", None, vec![picture]).await.unwrap();
+    assert!(!h.error("may not take pictures"));
+    assert!(h.events.borrow().iter().any(|e| matches!(e, SessionEvent::Resend { text } if text.starts_with("make this"))));
+    h.session.close().await.unwrap();
+});
 local_test!(refresh_failure_never_calls_inference_or_exposes_private_errors, {
     let h = harness(None, |_| {});
     h.session.start().await.unwrap();
@@ -745,7 +781,7 @@ local_test!(default_session_has_no_turn_limit_and_validates_prompts, {
     assert!(h.session.submit("x", None).await.is_err());
     h.session.start().await.unwrap();
     assert!(h.session.submit(" \u{feff}", None).await.is_err());
-    assert!(h.session.submit(&"x".repeat(16385), None).await.is_err());
+    assert!(h.session.submit(&"x".repeat(256 * 1024 + 1), None).await.is_err());
     for n in 0..30 {
         h.session.submit(&n.to_string(), None).await.unwrap();
     }

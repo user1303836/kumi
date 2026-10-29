@@ -932,7 +932,8 @@ pub enum SessionEvent {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         ask: Option<SetAsk>,
     },
-    /// Live is back after stopping a request: the app offers to send `text` again.
+    /// A request that didn't go: Live stopped it and is back, or it was too long to send. The app puts `text` back, to
+    /// send again or in part.
     Resend {
         text: String,
     },
