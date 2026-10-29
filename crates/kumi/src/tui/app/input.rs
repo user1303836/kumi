@@ -5,6 +5,7 @@ use super::super::{
     tree::TreeRole,
     width::truncate,
 };
+use super::panels::AsidePanel;
 use super::toast::TOAST_MS;
 use super::*;
 use crate::text::{library_line, remembered_line};
@@ -31,8 +32,7 @@ impl TuiApp {
         }
         if self.setup_active() {
             // A sign-in under way takes its own keys; its esc goes back to the setup's choices.
-            let signing =
-                self.0.state.borrow().panel.as_ref().is_some_and(|p| matches!(&*p.borrow(), Panel::Key { .. } | Panel::ChatGpt { .. }));
+            let signing = self.signing_in();
             match event {
                 InputEvent::Key { .. } | InputEvent::Text { .. } | InputEvent::Paste { .. } if signing => self.panel_input(event),
                 InputEvent::Key { name, mods, .. } => self.setup_key(&name, mods),
@@ -45,13 +45,8 @@ impl TuiApp {
             self.map_input(event);
             return;
         }
-        let panel = self.0.state.borrow().panel.clone();
-        let busy_panel = panel.as_ref().is_some_and(|p| match &*p.borrow() {
-            Panel::Pick { .. } => false,
-            Panel::Btw { at, .. } => self.0.state.borrow().asides.get(*at).is_some_and(|a| a.borrow().state == "asking"),
-            Panel::Job { .. } | Panel::Help { .. } => false,
-            _ => true,
-        });
+        let panel = self.0.state.borrow().overlays.top();
+        let busy_panel = panel.as_ref().is_some_and(|top| top.borrow().busy(self));
         if let Some(voice) = &self.0.voice {
             match &event {
                 InputEvent::Key { name, mods, repeat } if name == "t" && mods.ctrl && !mods.alt && !busy_panel => {
@@ -97,7 +92,12 @@ impl TuiApp {
                     && self.0.tabs.key(&if text == " " { "space".to_string() } else { text.to_lowercase() }) => {}
             // The help's typed key, in a block of its own until keys have a registry. `?` arrives as typed text, which
             // key() never sees: on an empty box it opens the help, and anywhere else it types itself.
-            InputEvent::Text { text } if text == "?" && self.0.state.borrow().editor.is_empty() => self.open_help(),
+            // (while looking back through what was sent, `?` is a character to find)
+            InputEvent::Text { text }
+                if text == "?" && self.0.state.borrow().editor.is_empty() && self.0.state.borrow().search.is_none() =>
+            {
+                self.open_help()
+            }
             // End of the help's typed key.
             InputEvent::Text { text } | InputEvent::Paste { text } => self.type_into_box(&text, typed),
             InputEvent::Key { name, mods, .. } => self.key(&name, mods),
@@ -106,7 +106,7 @@ impl TuiApp {
                 let up = direction == Some(WheelDirection::Up);
                 if area.is_some_and(|a| x >= a.x - 2 && x < a.x + a.width + 2 && y >= a.y && y < a.y + a.height) {
                     self.0.tabs.scroll_by(if up { -3 } else { 3 });
-                } else {
+                } else if !self.scroll_overlay(if up { -3 } else { 3 }) {
                     self.scroll_by(if up { 3 } else { -3 });
                 }
             }
@@ -129,6 +129,12 @@ impl TuiApp {
         let mut state = self.0.state.borrow_mut();
         state.tree_cursor = None;
         let clean = sanitize_text(text, &[]);
+        // While looking back through what was sent, they're what to find.
+        if state.search.is_some() {
+            drop(state);
+            self.search_type(&clean);
+            return;
+        }
         if typed {
             state.editor.type_text(&clean);
         } else {
@@ -301,6 +307,22 @@ impl TuiApp {
                 }
             }
         }
+        // W5-3's keys, until W3-3's key registry takes them over: composer.history-search (ctrl+r, and the keys while
+        // looking), composer.editor (ctrl+g) and composer.stash (ctrl+s).
+        if self.search_key(name, mods) {
+            return;
+        }
+        if ctrl && !alt && matches!(name, "r" | "g" | "s") {
+            self.0.tabs.leave();
+            self.0.state.borrow_mut().tree_cursor = None;
+            match name {
+                "r" => self.search_back(),
+                "g" => self.edit_draft(),
+                _ => self.stash(),
+            }
+            return;
+        }
+        // End of W5-3's keys.
         // ---- W6-2 · the pane: ctrl+\ opens and closes the drawer, or puts the pane away and back (pane.toggle; into the
         // key registry with W3-3) ----
         if ctrl && !alt && name == "\\" {
@@ -418,8 +440,8 @@ impl TuiApp {
             } else if checking {
                 // A /slots fetch or check stops first.
                 let check = self.0.state.borrow_mut().slots_check.take();
-                if let Some(check) = check {
-                    check.abort();
+                if let Some(id) = check {
+                    self.session().tell(op::StopSlots { id }.into());
                 }
             } else if self.busy() {
                 self.cancel();
@@ -518,11 +540,12 @@ impl TuiApp {
             return;
         }
         if ctrl && name == "home" {
-            state.scroll = i32::MAX;
+            let State { view, transcript, .. } = &mut *state;
+            view.to_start(transcript, perf_now());
             return;
         }
         if ctrl && name == "end" {
-            state.scroll = 0;
+            state.view.follow();
             return;
         }
         if name == "home" || (ctrl && name == "a") {
@@ -560,12 +583,10 @@ impl TuiApp {
             state.editor.delete_word_left();
             return;
         }
-        if name == "pageup" {
-            state.scroll = state.scroll.saturating_add(state.page).max(0);
-            return;
-        }
-        if name == "pagedown" {
-            state.scroll = state.scroll.saturating_sub(state.page).max(0);
+        if name == "pageup" || name == "pagedown" {
+            let page = if name == "pageup" { state.page } else { -state.page };
+            let State { view, transcript, .. } = &mut *state;
+            view.scroll_by(transcript, page, perf_now());
             return;
         }
         if ctrl && name == "l" {
@@ -575,7 +596,11 @@ impl TuiApp {
     pub(super) fn menu(&self) -> Vec<&'static Command> {
         let mut state = self.0.state.borrow_mut();
         let text = state.editor.text();
-        if state.menu_dismissed || !text.starts_with('/') || text.chars().any(|c| string::trim(&c.to_string()).is_empty()) {
+        if state.menu_dismissed
+            || state.search.is_some()
+            || !text.starts_with('/')
+            || text.chars().any(|c| string::trim(&c.to_string()).is_empty())
+        {
             return vec![];
         }
         let can = self.can();
@@ -609,9 +634,9 @@ impl TuiApp {
             "/btw" => can.aside,
             "/voice" => self.0.voice.is_some(),
             "/willington" => self.willington().is_some(),
-            "/slots" => self.0.options.slots.is_some(),
-            "/music" => self.0.options.music.is_some(),
-            "/map" => self.0.options.map.is_some(),
+            "/slots" => can.slots,
+            "/music" => can.music,
+            "/map" => can.map,
             "/palette" => can.palette,
             _ => true,
         }
@@ -884,7 +909,7 @@ impl TuiApp {
             }
             return Ok(());
         }
-        if let Some(slots) = self.0.options.slots.clone().filter(|_| command == "/slots" || command.starts_with("/slots ")) {
+        if self.can().slots && (command == "/slots" || command.starts_with("/slots ")) {
             self.clear_editor();
             let words = command["/slots".len()..].to_string();
             // One swap at a time: a model's fetch can take minutes.
@@ -893,20 +918,22 @@ impl TuiApp {
                 self.notice("Kumi is still trying a model for /slots: wait for it, or Esc stops it.", NoticeTone::Info);
                 return Ok(());
             }
-            let app = self.clone();
-            let progress = move |line: String| app.notice(&line, NoticeTone::Info);
             // Its own stop, Esc: a model's download takes as long as it takes (a listening model's check has its own
-            // minute and a half).
-            let check = Rc::new(kumi_common::abort::Controller::new());
-            let signal = check.signal.clone();
-            self.0.state.borrow_mut().slots_check.get_or_insert_with(|| check.clone());
-            let said = kumi_listening::slots::command(&words, &slots, &progress, signal).await;
-            let ended = self.0.state.borrow().slots_check.as_ref().is_some_and(|current| Rc::ptr_eq(current, &check));
+            // minute and a half). What's under way comes as notices (`slots-progress` events).
+            let id = {
+                let mut state = self.0.state.borrow_mut();
+                let id = state.next_slots;
+                state.next_slots += 1;
+                state.slots_check.get_or_insert(id);
+                id
+            };
+            let said = session.op(op::Slots { id, words }).await;
+            let ended = self.0.state.borrow().slots_check == Some(id);
             if ended {
                 self.0.state.borrow_mut().slots_check = None;
             }
             match said {
-                kumi_listening::slots::Said::Slots { lines, footer } => {
+                Ok(kumi_listening::slots::Said::Slots { lines, footer }) => {
                     self.0.state.borrow_mut().transcript.add(Entry::News {
                         title: "Model slots".into(),
                         items: lines,
@@ -914,19 +941,20 @@ impl TuiApp {
                     });
                     self.0.scheduler.request();
                 }
-                kumi_listening::slots::Said::Done(text) => self.notice(&text, NoticeTone::Info),
-                kumi_listening::slots::Said::Refused(text) => self.notice(&text, NoticeTone::Warn),
+                Ok(kumi_listening::slots::Said::Done(text)) => self.notice(&text, NoticeTone::Info),
+                Ok(kumi_listening::slots::Said::Refused(text)) => self.notice(&text, NoticeTone::Warn),
+                Err(error) => self.notice(&error.to_string(), NoticeTone::Warn),
             }
             return Ok(());
         }
-        if let Some(music) = self.0.options.music.clone().filter(|_| command == "/music" || command.starts_with("/music ")) {
+        if self.can().music && (command == "/music" || command.starts_with("/music ")) {
             self.clear_editor();
-            self.music_command(music, &command["/music".len()..]).await;
+            self.music_command(&command["/music".len()..]).await;
             return Ok(());
         }
-        if let Some(load) = self.0.options.map.clone().filter(|_| command == "/map" || command.starts_with("/map ")) {
+        if self.can().map && (command == "/map" || command.starts_with("/map ")) {
             self.clear_editor();
-            self.map_command(load, &command["/map".len()..]).await;
+            self.map_command(&command["/map".len()..]).await;
             return Ok(());
         }
         if self.can().palette && (command == "/palette" || command.starts_with("/palette ")) {
@@ -989,7 +1017,7 @@ impl TuiApp {
             } else {
                 let len = self.0.state.borrow().asides.len();
                 if len > 0 {
-                    self.0.state.borrow_mut().panel = Some(Rc::new(RefCell::new(Panel::Btw { at: len - 1, scroll: 0 })));
+                    self.open_overlay(AsidePanel { at: len - 1, scroll: 0 });
                 } else {
                     self.notice("Ask on the side with /btw and your question: Kumi answers from the conversation so far, without stopping what it's doing.",NoticeTone::Info);
                 }
@@ -1139,7 +1167,7 @@ impl TuiApp {
             return Ok(());
         }
         self.clear_editor();
-        self.0.state.borrow_mut().scroll = 0;
+        self.0.state.borrow_mut().view.follow();
         let result = if command == "/refresh" {
             self.0.state.borrow_mut().activity = "reading your Set".into();
             session.op(op::Refresh {}).await
@@ -1152,6 +1180,8 @@ impl TuiApp {
                 }
                 state.current = None;
                 state.watching = false;
+                // (W6-1: a fresh conversation fills the model's context anew)
+                state.last_call = None;
             }
             let started = session.op(op::NewConversation {}).await;
             // Its name, kept with it from its first save.
@@ -1289,8 +1319,10 @@ impl TuiApp {
             status: if outcome.is_error { AnswerStatus::Failed } else { AnswerStatus::Done },
             elapsed_ms: Some(number::round(perf_now() - started)),
             started_at: Some(started),
+            thinking: None,
+            footer: None,
         });
-        state.scroll = 0;
+        state.view.follow();
         drop(state);
         self.0.scheduler.request();
         true
@@ -1337,14 +1369,15 @@ impl TuiApp {
             state: "asking",
             stopped: false,
         }));
-        {
+        let at = {
             let mut state = self.0.state.borrow_mut();
             state.asides.push(aside.clone());
             if state.asides.len() > 20 {
                 state.asides.remove(0);
             }
-            state.panel = Some(Rc::new(RefCell::new(Panel::Btw { at: state.asides.len() - 1, scroll: 0 })));
-        }
+            state.asides.len() - 1
+        };
+        self.open_overlay(AsidePanel { at, scroll: 0 });
         let question = question.to_string();
         self.task(move |app| async move {
             // Its words come as `aside` events while it's answered.
@@ -1444,7 +1477,8 @@ impl TuiApp {
     }
     pub(super) fn scroll_by(&self, lines: i32) {
         let mut state = self.0.state.borrow_mut();
-        state.scroll = state.scroll.saturating_add(lines).max(0);
+        let State { view, transcript, .. } = &mut *state;
+        view.scroll_by(transcript, lines, perf_now());
     }
     pub(super) fn layout_for(columns: i32) -> (i32, i32) {
         let pane = if columns >= super::drawer::PANE_COLUMNS { ((columns as f64 * 0.34).floor() as i32).clamp(36, 46) } else { 0 };

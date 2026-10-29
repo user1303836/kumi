@@ -1,9 +1,9 @@
   Kumi  ·  Night Drive                                                                                                                                  ● Live
 
                                                                                                                     FOCUS
-   Keys and commands                                                                      ↑ 44 more                 Night Drive
+   Keys and commands                                                                      ↑ 49 more                 Night Drive
                                                                                                                     Your selection will show here
-                         dictated at a time; ctrl+_ where ctrl+- zooms the terminal
+     ctrl+s              Put the draft aside, with its files; in an empty box, bring it back
 
    Stop and take back                                                                                               NOW
      esc                 Stop Kumi's answer: the steps it finished stay, and waiting messages go                    Ready

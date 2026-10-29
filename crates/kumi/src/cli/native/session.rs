@@ -5,7 +5,7 @@ use crate::{
     history::{log_redactor, open_input_history},
     models::{create_model_control, ModelControlOptions},
     terminal::{create_terminal, Terminal, TerminalOptions},
-    tui::app::{create_tui, AwaySettings, ConnectDaw, MapHover, PanelTab, TuiOptions},
+    tui::app::{create_tui, AwaySettings, ConnectDaw, ContextMeter, MapHover, PanelTab, TuiOptions},
     voice::{create_voice_control, VoiceControlOptions},
 };
 use async_trait::async_trait;
@@ -296,6 +296,11 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
     let copy_on_select = settings.copy_on_select != Some(false);
     let (mouse, transcript_on_quit) = (settings.mouse.as_deref() != Some("off"), settings.transcript_on_quit != Some(false));
     let full_repaint = settings.full_repaint;
+    let context_meter = match settings.context_meter.as_deref() {
+        Some("always") => ContextMeter::Always,
+        Some("off") => ContextMeter::Off,
+        _ => ContextMeter::Auto,
+    };
     let projects_dir = load_projects_dir(&io.env)?;
     // Each Set's kept conversations, while Live may come in this session, or when the producer asked for one (then they
     // go on saving where they're kept, Live or not).
@@ -754,6 +759,10 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
     options.library = Some(library.clone());
     options.preset_dir = Some(std::path::Path::new(&crate::config::kumi_dir(&io.env)).join("presets"));
     options.music = Some(music.clone());
+    // /slots and /map, which the session answers: which model does each listening job, and the library's sounds and
+    // the songs on their maps, read each time /map opens.
+    options.slots = Some(slots_context);
+    options.map = Some(crate::map::loader(library.clone(), load_library_dir(&io.env)?.into(), music.clone()));
     options.jobs = Some(JobsOptions {
         worker_factory,
         max: settings.max_jobs.map(|n| n as usize).unwrap_or(DEFAULT_MAX_JOBS),
@@ -903,6 +912,7 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
         options.mouse = mouse;
         options.transcript_on_quit = transcript_on_quit;
         options.full_repaint = full_repaint;
+        options.context_meter = context_meter;
         options.next_time = install::next_time(&io.env);
         options.connect_live = live_possible.then(|| ConnectDaw {
             why: connect_why,
@@ -923,6 +933,7 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
         if !options.remote {
             options.copy = Some(Rc::new(login::copy_to_clipboard));
         }
+        options.editor = crate::tui::external_editor::editor_command(|name| io.env.get(name).cloned());
         options.reach = Some({
             let env = io.env.clone();
             Rc::new(move || {
@@ -936,10 +947,7 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
         options.ask_daw = ask_daw;
         options.pick_daw = pick_daw;
         options.willington = provider.toggle(&io.env);
-        options.slots = Some(slots_context);
-        options.music = Some(music.clone());
-        // /map: the library's sounds and the songs, read each time it opens; Space plays through Kumi's player.
-        options.map = Some(crate::map::loader(library.clone(), load_library_dir(&io.env)?.into(), music.clone()));
+        // /map's points play through Kumi's player (Space).
         options.player = Some(Rc::new(kumi_media::audio::player::Player::new()));
         options.voice = Some(Rc::new(create_voice_control(VoiceControlOptions {
             env: Some(io.env.clone()),
@@ -1015,6 +1023,24 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
         Some(tokio::task::spawn_local(async move {
             if signal.recv().await.is_some() {
                 ui.close().await;
+            }
+        }))
+    } else {
+        None
+    });
+    // SIGQUIT (ctrl+\ where the terminal isn't raw): Kumi closes as for SIGTERM, but not while the terminal is lent to
+    // the producer's editor, whose key it was.
+    #[cfg(unix)]
+    let quit = SignalTask(if io.signals {
+        let ui = ui.clone();
+        let mut signal =
+            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::quit()).map_err(|e| RuntimeError::plain(e.to_string()))?;
+        Some(tokio::task::spawn_local(async move {
+            while signal.recv().await.is_some() {
+                if !ui.lent() {
+                    ui.close().await;
+                    break;
+                }
             }
         }))
     } else {
@@ -1105,6 +1131,8 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
     drop(interrupt);
     #[cfg(unix)]
     drop(terminate);
+    #[cfg(unix)]
+    drop(quit);
     library.close().await;
     music.close().await;
     catalog.abort();

@@ -3,6 +3,36 @@
 Kumi's releases. The Ableton bridge (`crates/ableton-mcp-server`) is versioned on its own;
 each Kumi release names the bridge it ships with.
 
+## 1.24.17 — 2026-10-29
+
+Ships with bridge 1.0.101, as 1.24.16 did.
+
+- Tables in Kumi's answers are laid out in columns that fit the window, with numbers lined up on the
+  right; a table still arriving waits until it's whole.
+- /help shows every key and command in a panel that scrolls, instead of a note cut off partway; `?` on
+  an empty box opens it too.
+- A conversation you carry on comes back as you left it: its last 30 requests with their steps,
+  pictures and listening rounds.
+- A message of up to 256 KB, such as a long pasted log or lyric sheet, can be sent. A longer one says
+  how long it is and goes back in the box.
+- A message too long for the model's room, as a local model's can be, says how much room the model has
+  instead of failing each time it's sent.
+- Kumi writes less to the terminal while an answer streams in, so it keeps up better over SSH and in
+  slow terminals.
+- The `fullRepaint` setting redraws Kumi's whole window on each change, for a terminal that draws only
+  the changes wrongly; it's on by default in Windows Terminal.
+- Ctrl+R looks back through what you sent for the words you type.
+- Ctrl+G opens the message you're writing in your own editor (the one VISUAL or EDITOR names), and
+  brings back what you save.
+- Ctrl+S puts the message you're writing aside, with its files; Ctrl+S in an empty box brings it back.
+- A note, an imported conversation's title or a recipe's words that were cut short no longer end in a
+  broken character.
+- Scrolled up in a conversation, the request whose answer you're reading stays at the top (a click
+  goes back to it), and the bottom row counts what came in below.
+
+Tested with Live 12.4 on macOS. On Windows, installing and updating are tested; using Kumi with Live
+there is still new.
+
 ## 1.24.16 — 2026-10-29
 
 Ships with bridge 1.0.101, as 1.24.15 did.

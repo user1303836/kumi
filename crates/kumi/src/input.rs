@@ -39,6 +39,8 @@ pub trait TerminalInput {
     fn emergency_raw_mode(&self) -> Option<RawModeRestorer> {
         None
     }
+    /// Drops what's waiting to be read: what was typed while the terminal was lent to another program.
+    fn discard_pending(&self) {}
 }
 
 /// Node's `StringDecoder("utf8")`: text from byte chunks that may split a character between them.

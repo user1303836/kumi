@@ -324,3 +324,36 @@ async fn a_daws_recipe_kept_beside_lives_by_an_earlier_kumi_is_found_as_that_daw
     assert!(!f.dir.path().join("recipes/vox-chain.json").exists(), "moved out of Live's folder");
     assert_eq!(f.store.get_in("vox chain", DawId::Reaper).await.unwrap().unwrap().about, "EQ, comp, de-ess");
 }
+
+/// A recipe's name and words, and the name, tool or value an error says back, are cut between characters, never through
+/// one (#666).
+#[tokio::test]
+async fn a_recipes_words_and_what_its_errors_say_back_are_cut_between_characters() {
+    let f = Fixture::new();
+    // A recipe's words of "é", which no secret is made of ("aaaa…" would read as a key and not be kept).
+    let e = |n: usize| "é".repeat(n);
+    let a = |n: usize| "a".repeat(n);
+    let mut recipe = resample();
+    recipe["name"] = json!(format!("{}🎹 Resample", e(79)));
+    recipe["about"] = json!(format!("{}🎹 and more", e(299)));
+    recipe["params"][0]["about"] = json!(format!("{}🎹 here", e(159)));
+    let said = f.run("save_recipe", recipe).await;
+    assert!(!said.is_error, "{}", said.text);
+    let saved = f.store.list().await.unwrap().remove(0);
+    assert_eq!(
+        (saved.name.as_str(), saved.about.as_str(), saved.params[0].about.as_str()),
+        (e(79).as_str(), e(299).as_str(), e(159).as_str())
+    );
+    let mut odd = resample();
+    odd["steps"][0]["tool"] = json!(format!("{}🎹", a(63)));
+    let said = f.run("save_recipe", odd).await.text;
+    assert!(said.starts_with(&format!("{} isn't one of Kumi's change tools", a(63))), "{said}");
+    let mut literal = resample();
+    literal["steps"][0]["input"]["trackRef"] = json!(format!("{}🎹", a(63)));
+    let said = f.run("save_recipe", literal).await.text;
+    assert!(said.starts_with(&format!("trackRef is \"{}\",", a(63))), "{said}");
+    let missing = format!("{}🎹", a(79));
+    let none = format!("There's no recipe called \"{}\".", a(79));
+    assert_eq!(f.run("run_recipe", json!({"name": missing, "with": {}})).await.text, none);
+    assert_eq!(f.run("forget_recipe", json!({"name": missing})).await.text, none);
+}

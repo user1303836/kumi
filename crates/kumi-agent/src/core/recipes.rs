@@ -1,5 +1,6 @@
 //! Repeatable plans of changes with named blanks, saved privately and replayed through make_changes.
 use crate::core::contracts::{RecipeAction, RecipeEvent};
+use crate::core::text::cut;
 use async_trait::async_trait;
 use kumi_common::{
     abort::Signal,
@@ -84,7 +85,7 @@ fn words(value: Option<&Value>, max: usize) -> String {
             c => c,
         })
         .collect();
-    string::head(&text.split_whitespace().collect::<Vec<_>>().join(" "), max)
+    cut(&text.split_whitespace().collect::<Vec<_>>().join(" "), max).to_owned()
 }
 fn suspect(recipe: &Recipe) -> bool {
     suspect_note(&recipe.name) || suspect_note(&recipe.about) || recipe.params.iter().any(|p| suspect_note(&p.about))
@@ -129,7 +130,7 @@ fn params(value: Option<&Value>, clean: bool) -> Vec<RecipeParam> {
                 return None;
             }
             let about =
-                if clean { words(p.get("about"), 160) } else { string::head(p.get("about").and_then(Value::as_str).unwrap_or(""), 160) };
+                if clean { words(p.get("about"), 160) } else { cut(p.get("about").and_then(Value::as_str).unwrap_or(""), 160).to_owned() };
             Some(RecipeParam { name: name.into(), about })
         })
         .collect()
@@ -473,7 +474,7 @@ impl RecipeTool {
         }) {
             return Ok(ToolResult::error(format!(
                 "{} isn't one of Kumi's change tools; a recipe is made of {} steps.",
-                string::head(&js_string(step.get("tool")), 64),
+                cut(&js_string(step.get("tool")), 64),
                 self.profile.vocab.plan_tool
             )));
         }
@@ -485,7 +486,7 @@ impl RecipeTool {
         }
         let refs=Value::Array(steps.iter().map(|s|json!({"input":s.get("input").filter(|v|!v.is_null()).cloned().unwrap_or(json!({})),"each":s.get("each").filter(|v|!v.is_null()).cloned().unwrap_or(json!({}))})).collect());
         if let Some((key, value)) = literal_ref(&refs, "") {
-            return Ok(ToolResult::error(format!("{key} is {}, which means something only in this session: use a $blank (declared in params) for what's chosen when the recipe runs, or @name for what an earlier step makes.",json::quote(&string::head(value,64)))));
+            return Ok(ToolResult::error(format!("{key} is {}, which means something only in this session: use a $blank (declared in params) for what's chosen when the recipe runs, or @name for what an earlier step makes.",json::quote(cut(value, 64)))));
         }
         let daw = self.profile.id.unwrap_or(DawId::Ableton);
         let existing = self.options.store.get_in(&name, daw).await?;
@@ -528,10 +529,7 @@ impl RecipeTool {
         let Some(mut recipe) = recipe else {
             return Ok(ToolResult::error(format!(
                 "There's no recipe called {}.",
-                json::quote(&string::head(
-                    &js_string(Some(input.get("name").filter(|v| !v.is_null()).unwrap_or(&Value::String(String::new())))),
-                    80
-                ))
+                json::quote(cut(&js_string(Some(input.get("name").filter(|v| !v.is_null()).unwrap_or(&Value::String(String::new())))), 80))
             )));
         };
         let values = input.get("with").and_then(Value::as_object).cloned().unwrap_or_default();
@@ -574,6 +572,6 @@ impl RecipeTool {
                 return Ok(quiet(json!({"forgot":recipe.name})));
             }
         }
-        Ok(ToolResult::error(format!("There's no recipe called {}.", json::quote(&string::head(name, 80)))))
+        Ok(ToolResult::error(format!("There's no recipe called {}.", json::quote(cut(name, 80)))))
     }
 }

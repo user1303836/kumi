@@ -769,3 +769,31 @@ fn a_tracker_route_keyzone_and_items_picture_say_their_words_and_pass_the_redact
         }
     }
 }
+
+/// What an import cuts short (its title and Set, its first request, a change's words, a message's words past what Kumi
+/// imports) is cut between characters, never through one (#666).
+#[test]
+fn an_import_cuts_its_words_between_characters() {
+    let a = |n: usize| "a".repeat(n);
+    let file = json!({"format": "kumi-conversation", "version": 1,
+    "title": format!("{}🎹 Night", a(59)),
+    "set": format!("{}🎹 Drive", a(59)),
+    "changes": [{"id": "c1", "family": "tempo", "title": format!("{}🎹 BPM", a(299)), "state": "applied", "at": NOW - 400}],
+    "messages": [
+        {"role": "user", "content": [{"type": "text", "text": format!("{}🎹 and more", a(299))}]},
+        {"role": "assistant", "content": [{"type": "text", "text": "Sure."}]},
+        {"role": "user", "content": [{"type": "text", "text": format!("{}🎹{}", a(64 * 1024 - 1), a(100))}]}
+    ]});
+    let imported = import(&file.to_string(), NOW, "kumi").unwrap();
+    assert_eq!(imported.title, a(59));
+    assert_eq!(imported.place, Some(a(59)));
+    assert_eq!(imported.conversation.first, Some(a(299)));
+    assert_eq!(imported.conversation.changes.unwrap()[0].title, a(299));
+    let said = imported.conversation.checkpoint.messages[2]["content"][0]["text"].as_str().unwrap();
+    assert_eq!(said, format!("{} [cut: it ran longer than Kumi imports]", a(64 * 1024 - 1)));
+    // Without a title, the start of its first request is the title.
+    let untitled = json!({"format": "kumi-conversation", "version": 1, "messages": [
+        {"role": "user", "content": [{"type": "text", "text": format!("{}🎹 Keys", a(59))}]}
+    ]});
+    assert_eq!(import(&untitled.to_string(), NOW, "kumi").unwrap().title, a(59));
+}

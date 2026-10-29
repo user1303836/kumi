@@ -202,11 +202,9 @@ case!(voice_panel_send_language_and_microphone, async {
 });
 case!(opening_the_map_while_listening_stops_listening, async {
     let v = voice::Control::new("make the bass darker");
-    let h = Harness::with(120, 36, Rc::new(Control::default()), |o| {
-        o.voice = Some(v.clone());
-        let empty = kumi::map::MapData { sounds: kumi::map::sounds_layer(vec![]), songs: kumi::map::songs_layer(vec![], vec![]) };
-        o.map = Some(Rc::new(move || futures::FutureExt::boxed_local(std::future::ready(empty.clone()))));
-    });
+    let empty = kumi::map::MapData { sounds: kumi::map::sounds_layer(vec![]), songs: kumi::map::songs_layer(vec![], vec![]) };
+    let control = Control::mapped(Rc::new(move || futures::FutureExt::boxed_local(std::future::ready(empty.clone()))));
+    let h = Harness::with(120, 36, control, |o| o.voice = Some(v.clone()));
     h.start().await;
     h.connect();
     h.type_text(TAP).await;

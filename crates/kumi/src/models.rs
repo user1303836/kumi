@@ -661,6 +661,9 @@ impl ModelController for ModelControl {
     fn cloud_provider(&self, id: &str) -> Option<ProviderId> {
         ModelControl::cloud_provider(self, id)
     }
+    fn context_window(&self, model: &str) -> Option<f64> {
+        self.info_for(Some(model)).and_then(|info| info.context)
+    }
     async fn choose_default(&self) -> Result<Option<DefaultModel>, RuntimeError> {
         ModelControl::choose_default(self).await
     }

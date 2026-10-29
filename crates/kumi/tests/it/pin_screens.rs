@@ -12,6 +12,7 @@ mod models;
 mod support;
 use futures::FutureExt;
 use kumi::tui::activity::{activity_glyph, Activity};
+use kumi::tui::app::ContextMeter;
 use serde_json::{json, Value};
 use std::{cell::Cell, rc::Rc};
 use support::*;
@@ -1457,4 +1458,110 @@ scene!(drawer_waiting, DRAWER_SIZES, |width, height| {
     h.type_text("make it darker\r").await;
     h.wait_for("at the next step").await;
     finish_steady(h, &["thinking"]).await
+});
+
+/// The conversation scrolled up, at the widths its layout changes at: the side pane, a wider window, the drawer.
+const VIEW_SIZES: [(i32, i32); 3] = [(120, 36), (160, 40), (80, 30)];
+
+/// A request, sent and answered with `lines` numbered lines.
+async fn answered(h: &Harness, request: &str, lines: usize) {
+    h.type_text(&format!("{request}\r")).await;
+    h.emit(json!({"type":"state","state":"running"}));
+    let answer: String = (1..=lines).map(|line| format!("Line {line} of what to try for it.\n")).collect();
+    h.emit(json!({"type":"text","text":answer}));
+    h.emit(json!({"type":"turn-complete","result":{"stopReason":"completed"},"elapsedMs":900}));
+    h.emit(json!({"type":"state","state":"idle"}));
+}
+
+scene!(view_pinned_request, VIEW_SIZES, |width, height| {
+    let h = open(width, height, Rc::new(Control::default())).await;
+    answered(&h, "why does the low end sound muddy", 90).await;
+    h.type_text("\x1b[5~").await;
+    finish_styled(h).await
+});
+
+scene!(view_new_below, VIEW_SIZES, |width, height| {
+    let h = open(width, height, Rc::new(Control::default())).await;
+    answered(&h, "why does the low end sound muddy", 90).await;
+    h.type_text("\x1b[5~").await;
+    for note in ["Bass width 100% → 140%", "Kept a note about the kick", "Night Drive saved"] {
+        h.emit(json!({"type":"notice","message":note}));
+    }
+    finish_styled(h).await
+});
+
+// What the model thinks and what an answer costs.
+
+/// The catalog with `model` chosen, each model reading 200k tokens at once.
+fn reading(model: &str) -> Rc<models::FakeModels> {
+    let fake = models::FakeModels::catalog();
+    for list in fake.lists.borrow_mut().values_mut() {
+        for info in list.iter_mut() {
+            info.context = Some(200_000.);
+        }
+    }
+    *fake.model.borrow_mut() = Some(model.into());
+    fake.signed_in.borrow_mut().insert(kumi_ai::providers::ProviderId::parse("anthropic").unwrap());
+    fake
+}
+
+/// The times that run while Kumi works (an answer's, a think's) read 0.0s on the rows saying `texts`.
+fn still(mut shot: Shot, texts: &[&str]) -> Shot {
+    let time = regex::Regex::new(r"[0-9]+\.[0-9]s$").unwrap();
+    for line in &mut shot.lines {
+        if texts.iter().any(|text| line.contains(text)) {
+            *line = time.replace(line.trim_end(), "0.0s").into_owned();
+        }
+    }
+    shot
+}
+
+scene!(now_thinking, |width, height| {
+    let h = open(width, height, Rc::new(Control::default())).await;
+    h.type_text("make the kick punch through the bass without losing the sub\r").await;
+    h.emit(json!({"type":"state","state":"running"}));
+    h.emit(json!({"type":"tool-start","id":"t1","name":"live_discover"}));
+    h.emit(json!({"type":"tool-end","id":"t1","name":"live_discover","isError":false,"elapsedMs":400}));
+    h.emit(json!({"type":"reasoning","text":"**Weighing the kick against the bass**\n\nThe sub rings 60 ms past each hit."}));
+    let shot = finish_steady(h, &["Weighing the kick against the bass"]).await;
+    still(shot, &["▾ working", "Weighing the kick against the bass"])
+});
+
+/// An answer whose last call filled `input` of its model's 200k tokens, with the meter as `meter` says.
+async fn metered(width: i32, height: i32, meter: ContextMeter, input: f64) -> Shot {
+    let fake = reading("anthropic/claude-sonnet-5-5");
+    let h = Harness::with(width, height, Rc::new(Control::default()), |o| {
+        o.models = Some(fake);
+        o.context_meter = meter;
+    });
+    h.start().await;
+    h.connect();
+    h.type_text("tighten the hats\r").await;
+    h.emit(json!({"type":"state","state":"running"}));
+    h.emit(json!({"type":"usage","inputTokens":input,"outputTokens":1_000.0,"cacheReadTokens":0.0,"cacheWriteTokens":0.0}));
+    h.emit(json!({"type":"text","text":"Nudged the closed hats 8 ms later."}));
+    h.emit(json!({"type":"turn-complete","result":{"stopReason":"completed"},"elapsedMs":1400}));
+    h.emit(json!({"type":"state","state":"idle"}));
+    finish(h).await
+}
+
+scene!(header_context_41, |width, height| { metered(width, height, ContextMeter::Always, 81_000.).await });
+
+scene!(header_context_83, |width, height| { metered(width, height, ContextMeter::Auto, 165_000.).await });
+
+scene!(answer_footer, |width, height| {
+    let fake = reading("anthropic/claude-sonnet-5-5");
+    let h = Harness::with(width, height, Rc::new(Control::default()), |o| o.models = Some(fake));
+    h.start().await;
+    h.connect();
+    h.type_text("tighten the hats, they're rushing\r").await;
+    h.emit(json!({"type":"state","state":"running"}));
+    h.emit(json!({"type":"tool-start","id":"t1","name":"make_changes"}));
+    h.emit(change("c1", "clip", "Changed 32 notes in “Hats”", json!({"track":{"name":"Hats","color":"#ffd84d"}})));
+    h.emit(change("c2", "mixer", "Hats volume -6 dB", json!({"track":{"name":"Hats","color":"#ffd84d"}})));
+    h.emit(json!({"type":"tool-end","id":"t1","name":"make_changes","isError":false,"elapsedMs":1100}));
+    h.emit(json!({"type":"text","text":"Nudged the closed hats 8 ms later on beats 2 and 4 and brought them down 6 dB, so the groove sits back."}));
+    h.emit(json!({"type":"turn-complete","result":{"stopReason":"completed","usage":{"inputTokens":18_400.0,"outputTokens":1_200.0,"cacheReadTokens":16_100.0,"cacheWriteTokens":0.0}},"elapsedMs":6200}));
+    h.emit(json!({"type":"state","state":"idle"}));
+    finish(h).await
 });

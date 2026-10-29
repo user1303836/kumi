@@ -1,7 +1,12 @@
 use super::super::{
+    activity::{activity_glyph, Activity},
+    markdown::render_markdown,
     picker::{NoteTone, PickerOptions, PickerTabs},
-    width::graphemes,
+    render::Cursor,
+    width::{graphemes, text_width},
 };
+use super::draw_panel::{say, Line};
+use super::drawing::{sp, st};
 use super::*;
 use crate::{
     models::{ChatGptSignIn, LocalStatus, ProviderStatus},
@@ -743,9 +748,7 @@ impl TuiApp {
             return;
         }
         if provider.row().sign_in == SignIn::ApiKey {
-            self.0.state.borrow_mut().panel =
-                Some(Rc::new(RefCell::new(Panel::Key { provider, secret: String::new(), checking: false, status: None, then })));
-            self.0.scheduler.request();
+            self.open_overlay(KeyPanel { provider, secret: String::new(), checking: false, status: None, then });
             return;
         }
         // Over SSH the browser isn't on this computer: a code, entered in a browser anywhere.
@@ -757,16 +760,12 @@ impl TuiApp {
             return;
         };
         let abort = Signal::new();
-        let panel = Rc::new(RefCell::new(Panel::ChatGpt { url: None, code: None, by_code, abort: abort.clone(), then }));
-        self.0.state.borrow_mut().panel = Some(panel.clone());
-        self.0.scheduler.request();
+        let panel = self.open_overlay(ChatGptPanel { url: None, code: None, by_code, abort: abort.clone(), then });
         let weak = Rc::downgrade(&self.0);
         let shown = panel.clone();
         let how = if by_code {
             let on_code = Rc::new(move |prompt: kumi_ai::auth::openai_codex::DevicePrompt| {
-                if let Panel::ChatGpt { code, .. } = &mut *shown.borrow_mut() {
-                    *code = Some(prompt);
-                }
+                shown.borrow_mut().code = Some(prompt);
                 if let Some(a) = weak.upgrade() {
                     a.scheduler.request();
                 }
@@ -774,9 +773,7 @@ impl TuiApp {
             ChatGptSignIn::Device { signal: abort.clone(), on_code }
         } else {
             let on_url = Rc::new(move |url: String| {
-                if let Panel::ChatGpt { url: at, .. } = &mut *shown.borrow_mut() {
-                    *at = Some(url.clone());
-                }
+                shown.borrow_mut().url = Some(url.clone());
                 if let Some(a) = weak.upgrade() {
                     if let Some(open) = &a.options.open_browser {
                         open(&url);
@@ -790,10 +787,9 @@ impl TuiApp {
             let result = models.sign_in_chatgpt(how).await;
             match result {
                 Ok(()) => {
-                    if app.same_panel(&panel) {
-                        app.0.state.borrow_mut().panel = None;
+                    if app.0.state.borrow_mut().overlays.remove(&panel) {
                         app.notice("Signed in to ChatGPT.", NoticeTone::Info);
-                        let then = if let Panel::ChatGpt { then, .. } = &*panel.borrow() { then.clone() } else { None };
+                        let then = panel.borrow().then.clone();
                         if let Some(then) = then {
                             if let Err(error) = then().await {
                                 if !abort.is_cancelled() && !app.0.state.borrow().closing {
@@ -810,9 +806,7 @@ impl TuiApp {
                     }
                 }
                 Err(error) => {
-                    if app.same_panel(&panel) {
-                        app.0.state.borrow_mut().panel = None;
-                    }
+                    app.0.state.borrow_mut().overlays.remove(&panel);
                     if !abort.is_cancelled() && !app.0.state.borrow().closing {
                         let message = format!(
                             "The ChatGPT sign-in didn't finish: {}",
@@ -827,15 +821,14 @@ impl TuiApp {
             Ok(())
         });
     }
-    async fn submit_key(&self, panel: PanelRef) {
-        let (provider, key, then) = {
-            let mut p = panel.borrow_mut();
-            let Panel::Key { provider, secret, checking, status, then } = &mut *p else {
-                return;
-            };
-            *checking = true;
-            *status = Some((format!("Checking the key with {}…", provider.row().name), NoticeTone::Info));
-            (*provider, secret.clone(), then.clone())
+    async fn submit_key(&self, panel: Shared<TuiApp>) {
+        let started = as_key(&panel, |key| {
+            key.checking = true;
+            key.status = Some((format!("Checking the key with {}…", key.provider.row().name), NoticeTone::Info));
+            (key.provider, key.secret.clone(), key.then.clone())
+        });
+        let Some((provider, key, then)) = started else {
+            return;
         };
         self.0.scheduler.request();
         let name = provider.row().name;
@@ -844,20 +837,20 @@ impl TuiApp {
             Err(error) => {
                 let mut secrets = self.0.state.borrow().secrets.clone();
                 secrets.push(key);
-                if let Panel::Key { checking, status, .. } = &mut *panel.borrow_mut() {
-                    *checking = false;
-                    *status = Some((safe_error_message(Some(&error.message()), &secrets), NoticeTone::Warn));
-                }
+                as_key(&panel, |key| {
+                    key.checking = false;
+                    key.status = Some((safe_error_message(Some(&error.message()), &secrets), NoticeTone::Warn));
+                });
                 self.0.scheduler.request();
                 return;
             }
         };
         if verdict == ApiKeyCheck::Refused {
-            if let Panel::Key { checking, secret, status, .. } = &mut *panel.borrow_mut() {
-                *checking = false;
-                secret.clear();
-                *status = Some((format!("{name} didn't accept that key. Paste it again, or esc to leave it."), NoticeTone::Warn));
-            }
+            as_key(&panel, |key| {
+                key.checking = false;
+                key.secret.clear();
+                key.status = Some((format!("{name} didn't accept that key. Paste it again, or esc to leave it."), NoticeTone::Warn));
+            });
             self.0.scheduler.request();
             return;
         }
@@ -866,12 +859,8 @@ impl TuiApp {
             state.secrets.push(key.clone());
             state.stream.add_secret(key);
         }
-        if let Panel::Key { secret, .. } = &mut *panel.borrow_mut() {
-            secret.clear();
-        }
-        if self.same_panel(&panel) {
-            self.0.state.borrow_mut().panel = None;
-        }
+        as_key(&panel, |key| key.secret.clear());
+        self.0.state.borrow_mut().overlays.remove(&panel);
         self.notice(
             &if verdict == ApiKeyCheck::Ok {
                 format!("Signed in to {name}.")
@@ -891,7 +880,7 @@ impl TuiApp {
         let Some(models) = &self.0.options.models else {
             return;
         };
-        if self.0.state.borrow().panel.is_some() {
+        if !self.0.state.borrow().overlays.is_empty() {
             return;
         }
         if kind == FailureKind::Config && models.current().model.is_none() {
@@ -1036,7 +1025,7 @@ impl TuiApp {
         let Some(models) = &self.0.options.models else {
             return Ok(());
         };
-        if self.0.state.borrow().panel.is_some() || self.0.state.borrow().closing {
+        if !self.0.state.borrow().overlays.is_empty() || self.0.state.borrow().closing {
             return Ok(());
         }
         let current = models.current();
@@ -1050,7 +1039,7 @@ impl TuiApp {
                 return Ok(());
             }
             self.notice("Sign in to a provider to talk to its models: ChatGPT with your plan, or others with an API key. Or open Ollama or LM Studio to use models on this computer.",NoticeTone::Info);
-            if self.0.state.borrow().panel.is_none() {
+            if self.0.state.borrow().overlays.is_empty() {
                 self.open_models().await?;
             }
             return Ok(());
@@ -1085,7 +1074,7 @@ impl TuiApp {
             self.notice(&format!("{said}; choose another model."), NoticeTone::Warn);
             let free = {
                 let state = self.0.state.borrow();
-                state.panel.is_none() && state.editor.is_empty()
+                state.overlays.is_empty() && state.editor.is_empty()
             };
             if free && !self.busy() {
                 self.open_models().await?;
@@ -1115,9 +1104,7 @@ impl TuiApp {
             Some(a) => f(TuiApp(a), item).boxed_local(),
             None => async { Ok(()) }.boxed_local(),
         });
-        self.0.state.borrow_mut().panel =
-            Some(Rc::new(RefCell::new(Panel::Pick { picker: picker.clone(), choose, choosing: Rc::default() })));
-        self.0.scheduler.request();
+        self.open_overlay(PickPanel { picker: picker.clone(), choose, choosing: Rc::default() });
         picker
     }
     /// Kumi's answer asked the producer to pick: its options, picked by number (or ↑↓) and sent with
@@ -1189,13 +1176,14 @@ impl TuiApp {
             }
             let Some(a) = weak.upgrade() else { return };
             let app = TuiApp(a);
-            let choose = app.0.state.borrow().panel.clone().and_then(|panel| match &*panel.borrow() {
-                Panel::Pick { picker: active, choose, choosing } if Rc::ptr_eq(active, &picker) && !choosing.get() => {
-                    choosing.set(true);
-                    Some((choose.clone(), choosing.clone()))
-                }
-                _ => None,
-            });
+            let choose = app
+                .top_as(|panel: &PickPanel| {
+                    (Rc::ptr_eq(&panel.picker, &picker) && !panel.choosing.get()).then(|| {
+                        panel.choosing.set(true);
+                        (panel.choose.clone(), panel.choosing.clone())
+                    })
+                })
+                .flatten();
             app.0.state.borrow_mut().answer_countdown = None;
             let Some((choose, choosing)) = choose else { return };
             picker.borrow_mut().select(Some(&value));
@@ -1230,11 +1218,7 @@ impl TuiApp {
     pub(super) fn stop_answer_countdown(&self) {
         let Some(task) = self.0.state.borrow_mut().answer_countdown.take() else { return };
         task.abort();
-        if let Some(panel) = self.0.state.borrow().panel.clone() {
-            if let Panel::Pick { picker, .. } = &*panel.borrow() {
-                picker.borrow_mut().options.hint = None;
-            }
-        }
+        self.top_as(|panel: &PickPanel| panel.picker.borrow_mut().options.hint = None);
         self.0.scheduler.request();
     }
     /// After an answer, whether to keep the technique from what Kumi built: 1 keeps it, 2 doesn't. Like
@@ -1254,7 +1238,7 @@ impl TuiApp {
                     _ => None,
                 })
                 .unwrap_or(false);
-            !asked && state.held.is_empty() && state.editor.is_empty() && state.panel.is_none()
+            !asked && state.held.is_empty() && state.editor.is_empty() && state.overlays.is_empty()
         };
         if !free || !self.can().answer_technique {
             return false;
@@ -1284,46 +1268,66 @@ impl TuiApp {
         self.0.state.borrow_mut().offer = Some(picker);
         true
     }
-    /// Whether `panel` is the technique offer, letting go of it: closing that is a no.
-    fn closing_offer(&self, panel: &PanelRef) -> bool {
+    /// Whether `picker` is the technique offer's, letting go of the offer whatever is closing: closing that is a no.
+    fn closing_offer(&self, picker: &Rc<RefCell<Picker>>) -> bool {
         let offer = self.0.state.borrow_mut().offer.take();
-        offer.is_some_and(|offer| matches!(&*panel.borrow(), Panel::Pick { picker, .. } if Rc::ptr_eq(picker, &offer)))
+        offer.is_some_and(|offer| Rc::ptr_eq(picker, &offer))
     }
-    /// Whether `panel` is the question about another Set's conversation, letting go of it: closing that leaves it.
-    fn closing_set_ask(&self, panel: &PanelRef) -> bool {
+    /// Whether `picker` is the question about another Set's conversation, letting go of it whatever is closing: closing
+    /// that leaves it.
+    fn closing_set_ask(&self, picker: &Rc<RefCell<Picker>>) -> bool {
         let ask = self.0.state.borrow_mut().set_ask.take();
-        ask.is_some_and(|ask| matches!(&*panel.borrow(), Panel::Pick { picker, .. } if Rc::ptr_eq(picker, &ask)))
+        ask.is_some_and(|ask| Rc::ptr_eq(picker, &ask))
     }
-    fn same_panel(&self, panel: &PanelRef) -> bool {
-        self.0.state.borrow().panel.as_ref().is_some_and(|p| Rc::ptr_eq(p, panel))
-    }
+    /// Whether the top panel is `picker`'s list.
     fn same_picker(&self, picker: &Rc<RefCell<Picker>>) -> bool {
-        self.0
-            .state
-            .borrow()
-            .panel
-            .as_ref()
-            .is_some_and(|p| matches!(&*p.borrow(),Panel::Pick{picker:active,..}if Rc::ptr_eq(active,picker)))
+        self.top_as(|panel: &PickPanel| Rc::ptr_eq(&panel.picker, picker)).unwrap_or(false)
     }
+    /// What `look` makes of the top overlay, when it's a `T`.
+    pub(super) fn top_as<T: Overlay<TuiApp>, R>(&self, look: impl FnOnce(&T) -> R) -> Option<R> {
+        let top = self.0.state.borrow().overlays.top()?;
+        let top = top.borrow();
+        let seen = top.downcast_ref::<T>().map(look);
+        seen
+    }
+    /// Whether Kumi's numbered answers are the top overlay, waiting for the producer's pick.
+    pub(super) fn answers_open(&self) -> bool {
+        self.top_as(|panel: &PickPanel| panel.picker.borrow().options.answers).unwrap_or(false)
+    }
+    /// Whether the top overlay is a `T`.
+    pub(super) fn top_is<T: Overlay<TuiApp>>(&self) -> bool {
+        let top = self.0.state.borrow().overlays.top();
+        top.is_some_and(|top| top.borrow().downcast_ref::<T>().is_some())
+    }
+    /// Whether a sign-in is the top overlay: a key's box, or ChatGPT's.
+    pub(super) fn signing_in(&self) -> bool {
+        self.top_is::<KeyPanel>() || self.top_is::<ChatGptPanel>()
+    }
+    /// Opens `overlay` over the conversation in place of the top one, which isn't told it closed: a panel opening over
+    /// another has always replaced it.
+    pub(super) fn open_overlay<T: Overlay<TuiApp>>(&self, overlay: T) -> Rc<RefCell<T>> {
+        let overlay = Rc::new(RefCell::new(overlay));
+        self.0.state.borrow_mut().overlays.open(overlay.clone());
+        self.0.scheduler.request();
+        overlay
+    }
+    /// The wheel away from the tabs scrolls the top overlay, when it's one that scrolls: true when it did.
+    pub(super) fn scroll_overlay(&self, rows: i32) -> bool {
+        let top = self.0.state.borrow().overlays.top();
+        top.is_some_and(|top| top.borrow_mut().scroll(self, rows))
+    }
+    /// Closes the top overlay.
     pub(super) fn close_panel(&self) {
-        let panel = self.0.state.borrow_mut().panel.take();
-        if let Some(panel) = panel {
-            match &mut *panel.borrow_mut() {
-                Panel::ChatGpt { abort, .. } => abort.cancel(),
-                Panel::Key { secret, .. } => secret.clear(),
-                Panel::Btw { at, .. } => {
-                    let aside = self.0.state.borrow().asides.get(*at).cloned();
-                    if let Some(aside) = aside.filter(|aside| aside.borrow().state == "asking") {
-                        let id = {
-                            let mut aside = aside.borrow_mut();
-                            aside.stopped = true;
-                            aside.id
-                        };
-                        self.session().tell(op::StopAside { id }.into());
-                    }
-                }
-                _ => {}
-            }
+        let top = self.0.state.borrow().overlays.top();
+        match top {
+            Some(top) => self.close_overlay(&top),
+            None => self.0.scheduler.request(),
+        }
+    }
+    /// Closes `overlay` while it's open, and it lets go of what it holds.
+    fn close_overlay<T: Overlay<TuiApp> + ?Sized>(&self, overlay: &Rc<RefCell<T>>) {
+        if self.0.state.borrow_mut().overlays.remove(overlay) {
+            overlay.borrow_mut().closed(self);
         }
         self.0.scheduler.request();
     }
@@ -1333,198 +1337,140 @@ impl TuiApp {
             self.error(error);
         }
     }
+    /// Input while something's open: the top overlay takes it, then stays, closes, or closes and hands it on.
     pub(super) fn panel_input(&self, event: InputEvent) {
-        let Some(panel) = self.0.state.borrow().panel.clone() else {
+        let Some(top) = self.0.state.borrow().overlays.top() else {
             return;
         };
-        if matches!(&*panel.borrow(), Panel::Btw { .. }) {
-            self.aside_input(&panel, event);
-            return;
+        let handled = top.borrow_mut().handle(self, event);
+        match handled {
+            Handled::Kept => {}
+            Handled::Close => self.close_overlay(&top),
+            Handled::Pass(event) => {
+                self.close_overlay(&top);
+                self.on_input(event);
+            }
         }
-        if matches!(&*panel.borrow(), Panel::Job { .. }) {
-            self.job_panel_input(&panel, event);
-            return;
-        }
-        if matches!(&*panel.borrow(), Panel::Help { .. }) {
-            self.help_input(&panel, event);
-            return;
-        }
+    }
+    /// A key, typed text or a paste for a list.
+    fn pick_input(&self, panel: &mut PickPanel, event: InputEvent) -> Handled {
+        let PickPanel { picker, choose, choosing } = panel;
         if let InputEvent::Key { name, mods, .. } = &event {
             if name == "escape" || (mods.ctrl && name == "c") {
-                let declined = self.closing_offer(&panel);
-                let left = self.closing_set_ask(&panel);
-                self.close_panel();
+                let declined = self.closing_offer(picker);
+                let left = self.closing_set_ask(picker);
                 if declined {
                     self.task(|app| async move { app.session().op(op::AnswerTechnique { keep: false }).await.map(|_| ()) });
                 }
                 if left {
                     self.task(|app| async move { app.session().op(op::AnswerSet { choice: SetChoice::Cancel }).await });
                 }
-                return;
+                return Handled::Close;
             }
-            let mut p = panel.borrow_mut();
-            match &mut *p {
-                Panel::Pick { picker, choose, choosing } => match name.as_str() {
-                    "up" => picker.borrow_mut().r#move(-1),
-                    "tab" if picker.borrow().tabs.is_some() => picker.borrow_mut().next_tab(),
-                    "down" | "tab" => picker.borrow_mut().r#move(1),
-                    "backspace" => picker.borrow_mut().erase(),
-                    // A second Enter before the first choice is made would make it again (an answer sent twice).
-                    // Ctrl-F chooses the other way, where the list has one (/model: the fallback).
-                    "enter" | "f" if !choosing.get() && (name == "enter" || mods.ctrl && picker.borrow().options.alternate) => {
-                        let item = {
-                            let picker = picker.borrow();
-                            let item = picker.selected().cloned().map(|item| PickerItem { chosen: picker.chosen, ..item });
-                            if name == "f" {
-                                item.filter(|item| item.value.as_deref().is_some_and(|value| !value.contains("signin:")))
-                                    .map(|item| PickerItem { value: item.value.map(|value| format!("fallback:{value}")), ..item })
-                            } else {
-                                item
-                            }
-                        };
-                        if let Some(item) = item {
-                            choosing.set(true);
-                            let (choose, choosing) = (choose.clone(), choosing.clone());
-                            self.task(move |app| async move {
-                                let chosen = choose(item).await;
-                                choosing.set(false);
-                                if let Err(error) = chosen {
-                                    app.panel_failed(&error);
-                                }
-                                Ok(())
-                            });
+            match name.as_str() {
+                "up" => picker.borrow_mut().r#move(-1),
+                "tab" if picker.borrow().tabs.is_some() => picker.borrow_mut().next_tab(),
+                "down" | "tab" => picker.borrow_mut().r#move(1),
+                "backspace" => picker.borrow_mut().erase(),
+                // A second Enter before the first choice is made would make it again (an answer sent twice).
+                // Ctrl-F chooses the other way, where the list has one (/model: the fallback).
+                "enter" | "f" if !choosing.get() && (name == "enter" || mods.ctrl && picker.borrow().options.alternate) => {
+                    let item = {
+                        let picker = picker.borrow();
+                        let item = picker.selected().cloned().map(|item| PickerItem { chosen: picker.chosen, ..item });
+                        if name == "f" {
+                            item.filter(|item| item.value.as_deref().is_some_and(|value| !value.contains("signin:")))
+                                .map(|item| PickerItem { value: item.value.map(|value| format!("fallback:{value}")), ..item })
+                        } else {
+                            item
                         }
-                    }
-                    _ => {}
-                },
-                Panel::Key { secret, checking, .. } if !*checking => {
-                    if name == "backspace" {
-                        let count = secret.encode_utf16().count().saturating_sub(1);
-                        *secret = head(secret, count);
-                    } else if mods.ctrl && name == "u" {
-                        secret.clear();
-                    } else if name == "enter" && !secret.is_empty() {
-                        drop(p);
-                        let panel = panel.clone();
+                    };
+                    if let Some(item) = item {
+                        choosing.set(true);
+                        let (choose, choosing) = (choose.clone(), choosing.clone());
                         self.task(move |app| async move {
-                            app.submit_key(panel).await;
+                            let chosen = choose(item).await;
+                            choosing.set(false);
+                            if let Err(error) = chosen {
+                                app.panel_failed(&error);
+                            }
                             Ok(())
                         });
                     }
                 }
                 _ => {}
             }
-            return;
+            return Handled::Kept;
         }
         let text = match &event {
-            InputEvent::Text { text } | InputEvent::Paste { text } => text,
-            _ => return,
+            InputEvent::Text { text } | InputEvent::Paste { text } => text.clone(),
+            _ => return Handled::Kept,
         };
-        let mut p = panel.borrow_mut();
-        match &mut *p {
-            Panel::ChatGpt { url, code, by_code, .. } if text.to_lowercase() == "c" => {
-                let copied =
-                    if *by_code { code.as_ref().map(|code| ("code", code.code.clone())) } else { url.clone().map(|url| ("link", url)) };
-                drop(p);
-                if let Some((what, text)) = copied {
-                    self.copy_text(&text);
-                    self.notice(&format!("Copied the sign-in {what}."), NoticeTone::Info);
-                }
+        if picker.borrow().options.answers {
+            // A number picks its option and Enter sends it; typing on ("2 dB quieter") takes the number into the input
+            // box with the rest, so a free answer that starts with one arrives whole.
+            let picked = {
+                let picker = picker.borrow();
+                let number = text.parse().ok().filter(|_| picker.typed.is_empty());
+                number.and_then(|n| picker.numbered(n)).and_then(|item| item.value.clone())
+            };
+            if let Some(value) = picked {
+                let mut picker = picker.borrow_mut();
+                picker.select(Some(&value));
+                picker.typed = text;
+                picker.chosen = true;
+                return Handled::Kept;
             }
-            // No browser here after all, or no code (over SSH, where the browser's link can still be forwarded): the other
-            // way, with what was to follow the sign-in.
-            Panel::ChatGpt { by_code, abort, then, .. } if text.to_lowercase() == if *by_code { "b" } else { "d" } => {
-                let (then, by_code) = (then.take(), !*by_code);
-                abort.cancel();
-                drop(p);
-                self.sign_in_chatgpt(by_code, then);
+            let typed = std::mem::take(&mut picker.borrow_mut().typed);
+            // Typed on, it's words of the answer, never a key: a `?` that starts one doesn't open the help.
+            if matches!(event, InputEvent::Text { .. }) {
+                self.type_into_box(&format!("{typed}{text}"), true);
+                return Handled::Close;
             }
-            Panel::Pick { picker, .. } => {
-                if picker.borrow().options.answers {
-                    // A number picks its option and Enter sends it; typing on ("2 dB quieter") takes the number
-                    // into the input box with the rest, so a free answer that starts with one arrives whole.
-                    let picked = {
-                        let picker = picker.borrow();
-                        let number = text.parse().ok().filter(|_| picker.typed.is_empty());
-                        number.and_then(|n| picker.numbered(n)).and_then(|item| item.value.clone())
-                    };
-                    if let Some(value) = picked {
-                        let mut picker = picker.borrow_mut();
-                        picker.select(Some(&value));
-                        picker.typed = text.clone();
-                        picker.chosen = true;
-                        return;
-                    }
-                    let typed = std::mem::take(&mut picker.borrow_mut().typed);
-                    drop(p);
-                    self.close_panel();
-                    // Typed on, it's words of the answer, never a key: a `?` that starts one doesn't open the help.
-                    if matches!(event, InputEvent::Text { .. }) {
-                        self.type_into_box(&format!("{typed}{text}"), true);
-                    } else {
-                        self.0.state.borrow_mut().editor.insert(&typed);
-                        self.on_input(event);
-                    }
-                    return;
-                }
-                if picker.borrow().filter.is_empty() && text.starts_with('/') {
-                    drop(p);
-                    self.close_panel();
-                    self.on_input(event);
-                    return;
-                }
-                picker.borrow_mut().r#type(text);
-            }
-            Panel::Key { secret, checking, status, .. } if !*checking => {
-                let clean: String =
-                    text.chars().filter(|c| !string::trim(&c.to_string()).is_empty() && (*c as u32) > 31 && *c != '\x7f').collect();
-                *secret = head(&(secret.clone() + &clean), 4096);
-                *status = None;
-            }
-            _ => {}
+            self.0.state.borrow_mut().editor.insert(&typed);
+            return Handled::Pass(event);
         }
+        if picker.borrow().filter.is_empty() && text.starts_with('/') {
+            return Handled::Pass(event);
+        }
+        picker.borrow_mut().r#type(&text);
+        Handled::Kept
     }
-    fn aside_input(&self, panel: &PanelRef, event: InputEvent) {
+    fn aside_input(&self, panel: &mut AsidePanel, event: InputEvent) -> Handled {
+        let AsidePanel { at, scroll } = panel;
         if let InputEvent::Key { name, mods, .. } = &event {
             if matches!(name.as_str(), "escape" | "enter") || (mods.ctrl && name == "c") {
-                self.close_panel();
-                return;
+                return Handled::Close;
             }
-            if let Panel::Btw { at, scroll } = &mut *panel.borrow_mut() {
-                match name.as_str() {
-                    "up" | "pageup" => *scroll = (*scroll - if name == "up" { 1 } else { 5 }).max(0),
-                    "down" | "pagedown" => *scroll += if name == "down" { 1 } else { 5 },
-                    "left" if *at > 0 => {
-                        *at -= 1;
-                        *scroll = 0;
-                    }
-                    "right" if *at + 1 < self.0.state.borrow().asides.len() => {
-                        *at += 1;
-                        *scroll = 0;
-                    }
-                    _ => {}
+            match name.as_str() {
+                "up" | "pageup" => *scroll = (*scroll - if name == "up" { 1 } else { 5 }).max(0),
+                "down" | "pagedown" => *scroll += if name == "down" { 1 } else { 5 },
+                "left" if *at > 0 => {
+                    *at -= 1;
+                    *scroll = 0;
                 }
+                "right" if *at + 1 < self.0.state.borrow().asides.len() => {
+                    *at += 1;
+                    *scroll = 0;
+                }
+                _ => {}
             }
-            return;
+            return Handled::Kept;
         }
         if let InputEvent::Text { text } = event {
             if text == " " {
-                self.close_panel();
-                return;
+                return Handled::Close;
             }
             if text.to_lowercase() == "c" {
-                let at = if let Panel::Btw { at, .. } = &*panel.borrow() {
-                    *at
-                } else {
-                    return;
-                };
-                let answer = self.0.state.borrow().asides.get(at).map(|a| string::trim(&a.borrow().answer).to_string()).unwrap_or_default();
+                let answer =
+                    self.0.state.borrow().asides.get(*at).map(|a| string::trim(&a.borrow().answer).to_string()).unwrap_or_default();
                 if !answer.is_empty() {
                     self.0.tty.write(&format!("\x1b]52;c;{}\x07", base64::engine::general_purpose::STANDARD.encode(answer)));
                     self.notice("Copied the side answer.", NoticeTone::Info);
                 }
             }
         }
+        Handled::Kept
     }
     pub(super) fn model_label(&self) -> Option<String> {
         let current = self.0.options.models.as_ref()?.current();
@@ -2029,12 +1975,7 @@ impl TuiApp {
                 Some("send") => {
                     let control = app.0.options.voice.as_ref().unwrap();
                     control.choose(VoiceChange { send: Some(!control.choices().send), ..Default::default() })?;
-                    let panel = app.0.state.borrow().panel.clone();
-                    if let Some(panel) = panel {
-                        if let Panel::Pick { picker, .. } = &*panel.borrow() {
-                            picker.borrow_mut().set_items(app.voice_items());
-                        }
-                    }
+                    app.top_as(|panel: &PickPanel| panel.picker.borrow_mut().set_items(app.voice_items()));
                     app.0.scheduler.request();
                 }
                 Some("language") => app.open_voice_language(),
@@ -2107,7 +2048,7 @@ impl TuiApp {
         let Some(control) = &self.0.options.voice else {
             return;
         };
-        if self.0.state.borrow().panel.is_some() || self.0.state.borrow().closing {
+        if !self.0.state.borrow().overlays.is_empty() || self.0.state.borrow().closing {
             return;
         }
         let privacy = matches!(trouble, VoiceTrouble::Permission | VoiceTrouble::Silence | VoiceTrouble::Device) && control.has_privacy();
@@ -2291,4 +2232,301 @@ pub(super) fn note_command(line: &str) -> Option<(String, String)> {
     let digits = id.strip_prefix(['p', 's'])?;
     let valid = !digits.is_empty() && digits.len() <= 4 && digits.bytes().all(|b| b.is_ascii_digit());
     (valid && !words.trim().is_empty()).then(|| (id.to_owned(), words.trim().to_owned()))
+}
+
+/// What `change` makes of `overlay`, when it's the key's box.
+fn as_key<R>(overlay: &Shared<TuiApp>, change: impl FnOnce(&mut KeyPanel) -> R) -> Option<R> {
+    let mut overlay = overlay.borrow_mut();
+    let changed = overlay.downcast_mut::<KeyPanel>().map(change);
+    changed
+}
+
+/// A list to choose from, open over the conversation: its picker, what choosing an item does, and whether a choice is
+/// being made.
+pub(super) struct PickPanel {
+    pub picker: Rc<RefCell<Picker>>,
+    choose: Choice,
+    choosing: Rc<Cell<bool>>,
+}
+impl Overlay<TuiApp> for PickPanel {
+    fn handle(&mut self, app: &TuiApp, event: InputEvent) -> Handled {
+        app.pick_input(self, event)
+    }
+    fn draw(&mut self, app: &TuiApp, screen: &mut Screen, area: Area) -> Option<Cursor> {
+        app.draw_pick(screen, area, &self.picker.borrow())
+    }
+    /// The list's own words when it has them (a countdown to Kumi's pick, another way to choose).
+    fn hint(&self, _: &TuiApp) -> String {
+        let picker = self.picker.borrow();
+        picker.options.hint.clone().unwrap_or_else(|| {
+            if picker.options.answers {
+                "a number, then enter answers · or type your own · esc to close"
+            } else {
+                "↑↓ to move · enter to choose · esc to close"
+            }
+            .into()
+        })
+    }
+    /// A list's own words (a countdown to Kumi's pick, another way to choose) stay over a toast.
+    fn hint_stays(&self, _: &TuiApp) -> bool {
+        self.picker.borrow().options.hint.is_some()
+    }
+}
+
+/// A side answer (/btw), open over the conversation: the `at`th of the asides, scrolled `scroll` rows down.
+pub(super) struct AsidePanel {
+    pub at: usize,
+    pub scroll: i32,
+}
+impl Overlay<TuiApp> for AsidePanel {
+    fn handle(&mut self, app: &TuiApp, event: InputEvent) -> Handled {
+        app.aside_input(self, event)
+    }
+    fn draw(&mut self, app: &TuiApp, screen: &mut Screen, area: Area) -> Option<Cursor> {
+        let width = 76.min(area.left - 2);
+        let (inner, space) = (width - 4, area.box_top - 5);
+        let mut lines: Vec<Line> = vec![];
+        let (at, scroll) = (self.at, &mut self.scroll);
+        let (aside, len) = {
+            let state = app.0.state.borrow();
+            (state.asides.get(at).cloned(), state.asides.len())
+        };
+        let mut title =
+            Line::new(format!("btw · {}", aside.as_ref().map(|a| a.borrow().question.replace('\n', " ")).unwrap_or_default()), st::TITLE);
+        if len > 1 {
+            title.right = Some(sp(format!("{} of {len} · ←→", at + 1), st::FAINT));
+        }
+        lines.push(title);
+        if let Some(aside) = aside {
+            let aside = aside.borrow();
+            if string::trim(&aside.answer).is_empty() {
+                let mut line = Line::new("", st::DIM);
+                line.spans = Some(if aside.state == "asking" {
+                    vec![activity_glyph(Activity::Think, perf_now(), false), sp(" thinking it over…", st::DIM)]
+                } else {
+                    vec![sp("No answer came back.", st::FAINT)]
+                });
+                lines.push(line);
+            } else {
+                let rows = render_markdown(
+                    string::trim(&aside.answer),
+                    inner,
+                    &Rc::new(if aside.state == "failed" { st::WARN } else { st::TEXT }),
+                );
+                let room = (space - 4).clamp(3, 16);
+                *scroll = (*scroll).min(rows.len() as i32 - room).max(0);
+                let shown = &rows[*scroll as usize..(*scroll as usize + room as usize).min(rows.len())];
+                for (index, row) in shown.iter().enumerate() {
+                    let more = if index == 0 && *scroll > 0 {
+                        Some(format!("↑ {} more", *scroll))
+                    } else if index == shown.len() - 1 && *scroll + room < rows.len() as i32 {
+                        Some(format!("↓ {} more", rows.len() as i32 - *scroll - room))
+                    } else {
+                        None
+                    };
+                    let mut line = Line::new("", st::TEXT);
+                    line.spans = Some(row.spans.to_vec());
+                    line.right = more.map(|s| sp(s, st::FAINT));
+                    lines.push(line);
+                }
+                if aside.state == "asking" {
+                    let mut line = Line::new("", st::DIM);
+                    line.spans = Some(vec![activity_glyph(Activity::Think, perf_now(), false)]);
+                    lines.push(line);
+                }
+            }
+            if aside.state == "asking" {
+                app.0.scheduler.request_animation();
+            }
+        }
+
+        app.draw_lines(screen, area.box_top, width, &lines, None)
+    }
+    fn hint(&self, _: &TuiApp) -> String {
+        "↑↓ to scroll · c copies · esc to close".into()
+    }
+    fn scroll(&mut self, _: &TuiApp, rows: i32) -> bool {
+        self.scroll = (self.scroll + rows).max(0);
+        true
+    }
+    /// A side question still being answered stops (unless Kumi, closing, stopped it already).
+    fn closed(&mut self, app: &TuiApp) {
+        let aside = app.0.state.borrow().asides.get(self.at).cloned();
+        if let Some(aside) = aside.filter(|aside| aside.borrow().state == "asking" && !aside.borrow().stopped) {
+            let id = {
+                let mut aside = aside.borrow_mut();
+                aside.stopped = true;
+                aside.id
+            };
+            app.session().tell(op::StopAside { id }.into());
+        }
+    }
+    /// While its answer is still being written.
+    fn busy(&self, app: &TuiApp) -> bool {
+        app.0.state.borrow().asides.get(self.at).is_some_and(|aside| aside.borrow().state == "asking")
+    }
+}
+
+/// ChatGPT's sign-in, open over the conversation: in this computer's browser (`url`, once it's known), or `by_code`, with
+/// a code entered in a browser anywhere.
+pub(super) struct ChatGptPanel {
+    pub url: Option<String>,
+    pub code: Option<kumi_ai::auth::openai_codex::DevicePrompt>,
+    pub by_code: bool,
+    abort: Signal,
+    then: Option<Action>,
+}
+impl Overlay<TuiApp> for ChatGptPanel {
+    /// c copies the link (or the code); d signs in with a code instead, b with the browser again.
+    fn handle(&mut self, app: &TuiApp, event: InputEvent) -> Handled {
+        let text = match &event {
+            InputEvent::Key { name, mods, .. } => {
+                return if name == "escape" || (mods.ctrl && name == "c") { Handled::Close } else { Handled::Kept };
+            }
+            InputEvent::Text { text } | InputEvent::Paste { text } => text.to_lowercase(),
+            _ => return Handled::Kept,
+        };
+        if text == "c" {
+            let copied = if self.by_code {
+                self.code.as_ref().map(|code| ("code", code.code.clone()))
+            } else {
+                self.url.clone().map(|url| ("link", url))
+            };
+            if let Some((what, text)) = copied {
+                app.copy_text(&text);
+                app.notice(&format!("Copied the sign-in {what}."), NoticeTone::Info);
+            }
+        } else if text == if self.by_code { "b" } else { "d" } {
+            // No browser here after all, or no code (over SSH, where the browser's link can still be forwarded): the
+            // other way, with what was to follow the sign-in, in this one's place.
+            let (then, by_code) = (self.then.take(), !self.by_code);
+            self.abort.cancel();
+            app.sign_in_chatgpt(by_code, then);
+        }
+        Handled::Kept
+    }
+    fn draw(&mut self, app: &TuiApp, screen: &mut Screen, area: Area) -> Option<Cursor> {
+        let width = 76.min(area.left - 2);
+        let (inner, space) = (width - 4, area.box_top - 5);
+        let mut lines: Vec<Line> = vec![];
+        if self.by_code {
+            lines.push(Line::new("Sign in to ChatGPT", st::TITLE));
+            if let Some(code) = &self.code {
+                say(&mut lines, &format!("In a browser on any device, open {} and enter this code:", code.url), st::DIM, inner);
+                lines.push(Line::new(code.code.clone(), st::BRIGHT));
+                lines.push(Line::new("Waiting for the code…", st::FAINT));
+            } else {
+                say(&mut lines, "Asking ChatGPT for a sign-in code…", st::DIM, inner);
+            }
+        } else {
+            lines.push(Line::new("Sign in to ChatGPT", st::TITLE));
+            if let Some(url) = &self.url {
+                say(&mut lines, "Finish in your browser. If it didn't open, open this link (c copies it):", st::DIM, inner);
+                for part in helpers::chunk(url, inner.max(1) as usize).into_iter().take((space - 5).max(1) as usize) {
+                    lines.push(Line::new(part, st::ACCENT));
+                }
+                lines.push(Line::new("Waiting for the browser… No browser here? d uses a code.", st::FAINT));
+            } else {
+                say(&mut lines, "Starting the sign-in…", st::DIM, inner);
+            }
+        }
+        app.draw_lines(screen, area.box_top, width, &lines, None)
+    }
+    fn hint(&self, _: &TuiApp) -> String {
+        match (self.by_code, &self.url) {
+            (true, _) => "c copies the code · b uses the browser · esc to cancel",
+            (false, Some(_)) => "c copies the link · d uses a code · esc to cancel",
+            (false, None) => "esc to cancel",
+        }
+        .into()
+    }
+    /// The sign-in under way stops.
+    fn closed(&mut self, _: &TuiApp) {
+        self.abort.cancel();
+    }
+    fn busy(&self, _: &TuiApp) -> bool {
+        true
+    }
+}
+
+/// The box an API key is pasted into, open over the conversation, while it's typed and then checked.
+pub(super) struct KeyPanel {
+    pub provider: ProviderId,
+    pub secret: String,
+    pub checking: bool,
+    pub status: Option<(String, NoticeTone)>,
+    then: Option<Action>,
+}
+impl Overlay<TuiApp> for KeyPanel {
+    /// What's typed or pasted is the key, shown only as dots; enter checks it with the provider.
+    fn handle(&mut self, app: &TuiApp, event: InputEvent) -> Handled {
+        match &event {
+            InputEvent::Key { name, mods, .. } => {
+                if name == "escape" || (mods.ctrl && name == "c") {
+                    return Handled::Close;
+                }
+                if !self.checking && name == "backspace" {
+                    let count = self.secret.encode_utf16().count().saturating_sub(1);
+                    self.secret = head(&self.secret, count);
+                } else if !self.checking && mods.ctrl && name == "u" {
+                    self.secret.clear();
+                } else if !self.checking && name == "enter" && !self.secret.is_empty() {
+                    // The check holds on to this panel: the top one, as only the top one takes keys.
+                    let me = app.0.state.borrow().overlays.top();
+                    if let Some(me) = me {
+                        app.task(move |app| async move {
+                            app.submit_key(me).await;
+                            Ok(())
+                        });
+                    }
+                }
+            }
+            InputEvent::Text { text } | InputEvent::Paste { text } if !self.checking => {
+                let clean: String =
+                    text.chars().filter(|c| !string::trim(&c.to_string()).is_empty() && (*c as u32) > 31 && *c != '\x7f').collect();
+                self.secret = head(&(self.secret.clone() + &clean), 4096);
+                self.status = None;
+            }
+            _ => {}
+        }
+        Handled::Kept
+    }
+    fn draw(&mut self, app: &TuiApp, screen: &mut Screen, area: Area) -> Option<Cursor> {
+        let width = 76.min(area.left - 2);
+        let inner = width - 4;
+        let mut lines: Vec<Line> = vec![];
+        let mut cursor_at: Option<(usize, i32)> = None;
+        let info = self.provider.row();
+        lines.push(Line::new(format!("Sign in to {}", info.name), st::TITLE));
+        say(&mut lines, &format!("Paste your {} API key. It stays hidden, even here.", info.name), st::DIM, inner);
+        let count = self.secret.encode_utf16().count();
+        let dots = "•".repeat(count.min((inner - 20).max(8) as usize));
+        let mut line = Line::new(&dots, st::BRIGHT);
+        line.band = true;
+        if !self.secret.is_empty() {
+            line.right = Some(sp(format!("{count} characters"), st::FAINT));
+        }
+        lines.push(line);
+        if !self.checking {
+            cursor_at = Some((lines.len() - 1, text_width(&dots)));
+        }
+        if let Some((text, tone)) = &self.status {
+            say(&mut lines, text, if *tone == NoticeTone::Warn { st::WARN } else { st::DIM }, inner);
+        } else if let Some(page) = info.key_page {
+            say(&mut lines, &format!("Make one at {page}."), st::FAINT, inner);
+        }
+        say(&mut lines, &format!("Kumi checks it with {}, then keeps it in ~/.kumi, readable only by you.", info.name), st::FAINT, inner);
+
+        app.draw_lines(screen, area.box_top, width, &lines, cursor_at)
+    }
+    fn hint(&self, _: &TuiApp) -> String {
+        "enter to save · esc to cancel".into()
+    }
+    /// A key half typed goes.
+    fn closed(&mut self, _: &TuiApp) {
+        self.secret.clear();
+    }
+    fn busy(&self, _: &TuiApp) -> bool {
+        true
+    }
 }

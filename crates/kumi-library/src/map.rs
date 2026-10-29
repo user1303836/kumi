@@ -7,8 +7,9 @@ use super::{
     classify::{SoundClass, SoundKind},
     search::SoundIndex,
 };
+use futures::future::LocalBoxFuture;
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, path::Path};
+use std::{collections::HashMap, path::Path, rc::Rc};
 
 /// The map's file, in the library's folder.
 pub const SOUNDS_MAP: &str = "sounds-map.json";
@@ -106,6 +107,9 @@ pub enum Kind {
     Sounds,
     Songs,
 }
+
+/// How /map reads its data, each time it opens (the app makes it, from the library and the producer's music).
+pub type LoadMap = Rc<dyn Fn() -> LocalBoxFuture<'static, MapData>>;
 
 /// Both maps, as read when /map opened.
 #[derive(Clone, Debug)]

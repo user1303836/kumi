@@ -1,6 +1,7 @@
 mod helpers;
 pub use helpers::*;
 mod away;
+mod composer;
 pub use away::{AwaySettings, FrontApp, NotifierRunner};
 mod draw_live;
 mod draw_panel;
@@ -23,12 +24,14 @@ pub use setup::{waveform, WAVE_WIDTH};
 mod sharing;
 mod shown;
 mod toast;
+mod usage;
 
 use super::{
     alerts::{self, ProgramState, StatusReport, TerminalProfile},
     editor::{Draft, Editor},
     icons::{detect_icon_style_here, IconKind, IconStyle},
     keys::InputEvent,
+    overlay::{Area, Handled, Overlay, Overlays, Shared},
     picker::{Picker, PickerItem},
     render::Renderer,
     scheduler::FrameScheduler,
@@ -122,12 +125,6 @@ pub struct TuiOptions {
     pub connect_live: Option<ConnectDaw>,
     /// /willington, where Kumi's bridge can carry Willington.
     pub willington: Option<kumi_daw::provider::Toggle>,
-    /// /slots: which model does each listening job, swapped and taken back.
-    pub slots: Option<Rc<kumi_listening::slots::SlotsContext>>,
-    /// /music: the producer's own music, which Kumi learns their taste from.
-    pub music: Option<Rc<kumi_listening::music::learning::Music>>,
-    /// /map: reads the producer's sounds and songs on their maps, each time it opens.
-    pub map: Option<crate::map::LoadMap>,
     /// What plays a point of the map.
     pub player: Option<Rc<kumi_media::audio::player::Player>>,
     /// Whether the map's points play as the mouse comes to them, remembered; they do when None.
@@ -177,7 +174,25 @@ pub struct TuiOptions {
     pub mouse: bool,
     /// Quitting prints the conversation into the terminal's scrollback (`transcriptOnQuit`).
     pub transcript_on_quit: bool,
+    /// The producer's editor, which ctrl+g opens the draft in ([`crate::tui::external_editor::editor_command`]); None
+    /// where there's none.
+    pub editor: Option<String>,
+    /// Runs `editor` on the draft's file while the terminal is lent to it, to its exit code; None runs it as a program.
+    /// Tests give their own.
+    pub run_editor: Option<EditorRunner>,
+    /// When the header says how full the model's context is (`contextMeter`).
+    pub context_meter: ContextMeter,
 }
+/// When the header shows how full the answering model's context is: from half full (`auto`), always, or never.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ContextMeter {
+    #[default]
+    Auto,
+    Always,
+    Off,
+}
+/// Runs the producer's editor on a file until it closes: its exit code, 0 when it closed well.
+pub type EditorRunner = Rc<dyn Fn(std::path::PathBuf) -> LocalBoxFuture<'static, std::io::Result<i32>>>;
 /// The DAW's part of first-run setup: the setup shows it when Kumi's bridge isn't in the DAW yet, or is older
 /// than Kumi's.
 pub struct ConnectDaw {
@@ -218,9 +233,6 @@ impl TuiOptions {
             voice: None,
             connect_live: None,
             willington: None,
-            slots: None,
-            music: None,
-            map: None,
             player: None,
             map_hover: None,
             whats_new: None,
@@ -244,51 +256,14 @@ impl TuiOptions {
             copy_on_select: true,
             mouse: true,
             transcript_on_quit: true,
+            editor: None,
+            run_editor: None,
+            context_meter: ContextMeter::Auto,
         }
     }
 }
 type Action = Rc<dyn Fn() -> LocalBoxFuture<'static, Result<(), RuntimeError>>>;
 type Choice = Rc<dyn Fn(PickerItem) -> LocalBoxFuture<'static, Result<(), RuntimeError>>>;
-type PanelRef = Rc<RefCell<Panel>>;
-enum Panel {
-    Pick {
-        picker: Rc<RefCell<Picker>>,
-        choose: Choice,
-        choosing: Rc<Cell<bool>>,
-    },
-    Key {
-        provider: ProviderId,
-        secret: String,
-        checking: bool,
-        status: Option<(String, NoticeTone)>,
-        then: Option<Action>,
-    },
-    /// ChatGPT's sign-in: in this computer's browser (`url`, once it's known), or `by_code`, with a code entered in
-    /// a browser anywhere.
-    ChatGpt {
-        url: Option<String>,
-        code: Option<kumi_ai::auth::openai_codex::DevicePrompt>,
-        by_code: bool,
-        abort: Signal,
-        then: Option<Action>,
-    },
-    Btw {
-        at: usize,
-        scroll: i32,
-    },
-    /// A background job's steps and report.
-    Job {
-        id: u32,
-        scroll: i32,
-    },
-    /// The keys and commands, scrolled `scroll` rows down: `shown` rows fit when it was last drawn, and it scrolls
-    /// `most` rows at most.
-    Help {
-        scroll: i32,
-        shown: i32,
-        most: i32,
-    },
-}
 struct Aside {
     /// The session's id for it, which its words come in by.
     id: u32,
@@ -424,8 +399,8 @@ struct State {
     hits: Vec<Hit>,
     tabs_area: Option<Rect>,
     selection: Option<super::selection::Selection>,
-    scroll: i32,
-    last_total: i32,
+    /// Where the conversation is scrolled to.
+    view: super::transcript_view::TranscriptView,
     page: i32,
     menu_index: usize,
     menu_dismissed: bool,
@@ -441,9 +416,12 @@ struct State {
     asides: Vec<Rc<RefCell<Aside>>>,
     /// The id the next aside takes.
     next_aside: u32,
+    /// The id the next /slots request takes.
+    next_slots: u32,
     transport: Option<Transport>,
     activity: String,
-    panel: Option<PanelRef>,
+    /// What's open over the conversation (a list, a sign-in, a side answer, a job, the help): the top one takes input.
+    overlays: Overlays<TuiApp>,
     /// The picker asking whether to keep a technique: closing it is a no.
     offer: Option<Rc<RefCell<Picker>>>,
     /// The picker asking about another Set's conversation: closing it leaves that conversation.
@@ -465,6 +443,10 @@ struct State {
     turn_changes: usize,
     /// Which earlier message ↑ shows, and the draft set aside meanwhile.
     recall: Option<(usize, Draft)>,
+    /// ctrl+r: an earlier message being looked for.
+    search: Option<composer::Search>,
+    /// ctrl+s: a draft put aside, with its files.
+    stash: Option<composer::Stash>,
     last_sent: Option<String>,
     tree: Option<DeviceTree>,
     /// Bumped whenever `tree` is read again: its rows are made again only then, or for another focus.
@@ -494,8 +476,8 @@ struct State {
     flash_timers: Vec<JoinHandle<()>>,
     /// First-run setup, shown in place of the session until it's done or put off.
     setup: Option<setup::Setup>,
-    /// A /slots swap's fetch or check under way: Esc stops it.
-    slots_check: Option<Rc<kumi_common::abort::Controller>>,
+    /// A /slots swap's fetch or check under way, by its request's id: Esc stops it.
+    slots_check: Option<u32>,
     /// Whether Kumi's window is in front, as the terminal says when that changes (assumed until it does), and
     /// since when it isn't.
     window_focused: bool,
@@ -548,6 +530,14 @@ struct State {
     /// A conversation taken up is being shown again from its log: what happened then draws as it did, and nothing of
     /// the moment comes with it (no alert, sound or terminal status, no animation, no panel, nothing sent or carried on).
     replaying: bool,
+    /// The model's reasoning since it last spoke or ran a step: what the headline comes from.
+    reasoning: String,
+    /// The last model call's tokens, with the model that answered it: how full its context is.
+    last_call: Option<(Usage, Option<String>)>,
+    /// The providers whose lists were read for a model's window, once each.
+    windows_asked: std::collections::HashSet<String>,
+    /// The plan's window, as this answer began: what share of it the answer took.
+    plan_before: Option<kumi_ai::providers::usage::PlanWindow>,
 }
 impl State {
     fn new(options: &TuiOptions) -> Self {
@@ -593,8 +583,7 @@ impl State {
             hits: vec![],
             tabs_area: None,
             selection: None,
-            scroll: 0,
-            last_total: 0,
+            view: Default::default(),
             page: 10,
             menu_index: 0,
             menu_dismissed: false,
@@ -609,9 +598,10 @@ impl State {
             last_stop: None,
             asides: vec![],
             next_aside: 1,
+            next_slots: 1,
             transport: None,
             activity: format!("connecting to {}", crate::daw::words().app),
-            panel: None,
+            overlays: Overlays::default(),
             offer: None,
             set_ask: None,
             planning: None,
@@ -625,6 +615,8 @@ impl State {
             busy_since: 0.,
             turn_changes: 0,
             recall: None,
+            search: None,
+            stash: None,
             last_sent: None,
             tree: None,
             tree_revision: 0,
@@ -677,6 +669,10 @@ impl State {
             copied: None,
             reopening: false,
             replaying: false,
+            reasoning: String::new(),
+            last_call: None,
+            windows_asked: std::collections::HashSet::new(),
+            plan_before: None,
         }
     }
 }
@@ -963,6 +959,7 @@ impl TuiApp {
     }
     fn finish(&self, code: i32, message: Option<String>) -> LocalBoxFuture<'static, i32> {
         let printing;
+        let closing;
         {
             let mut state = self.0.state.borrow_mut();
             if state.closing {
@@ -985,13 +982,7 @@ impl TuiApp {
             for task in timers.into_iter().chain(alerting).flatten().chain(flashes) {
                 task.abort();
             }
-            if let Some(panel) = state.panel.take() {
-                match &mut *panel.borrow_mut() {
-                    Panel::ChatGpt { abort, .. } => abort.cancel(),
-                    Panel::Key { secret, .. } => secret.clear(),
-                    _ => {}
-                }
-            }
+            closing = state.overlays.drain();
             if let Some(setup) = state.setup.as_mut() {
                 setup.stop();
             }
@@ -1004,6 +995,10 @@ impl TuiApp {
                     self.session().tell(op::StopAside { id: aside.id }.into());
                 }
             }
+        }
+        // What's open lets go of what it holds: a sign-in under way stops, a key half typed goes.
+        for overlay in closing {
+            overlay.borrow_mut().closed(self);
         }
         if let Some(voice) = &self.0.voice {
             voice.cancel();
@@ -1152,7 +1147,7 @@ impl Terminal for TuiApp {
                 app.run_setup(true).await;
             } else if let Err(error) = app.check_model().await {
                 app.panel_failed(&error);
-            } else if let Some(filter) = app.0.options.choose_conversation.clone().filter(|_| app.0.state.borrow().panel.is_none()) {
+            } else if let Some(filter) = app.0.options.choose_conversation.clone().filter(|_| app.0.state.borrow().overlays.is_empty()) {
                 // `kumi -r`: the producer chooses the conversation as Kumi starts.
                 if let Err(error) = app.open_conversations(Some(filter).filter(|f| !f.is_empty())).await {
                     app.panel_failed(&error);
@@ -1180,7 +1175,8 @@ impl Terminal for TuiApp {
         self.0.scheduler.request();
     }
     fn interrupt(&self) {
-        if self.0.state.borrow().closing {
+        // While the terminal is lent to the producer's editor, ctrl+c is the editor's.
+        if self.0.state.borrow().closing || self.0.tty.lent() {
             return;
         }
         if self.busy() {
@@ -1192,20 +1188,25 @@ impl Terminal for TuiApp {
     fn close(&self) -> LocalBoxFuture<'static, i32> {
         self.finish(0, None)
     }
+    fn lent(&self) -> bool {
+        self.0.tty.lent()
+    }
     fn follow_daw(&self, daw: kumi_types::daw::DawId) -> bool {
         let Some(follow) = self.0.options.follow_daw.clone() else { return false };
-        // Nothing the producer is in the middle of: an answer, setup, a panel or question, the map, what they typed or
-        // attached, a background job.
-        let waiting = {
+        // Nothing the producer is in the middle of: an answer, setup, a panel or question, the map, what they typed,
+        // attached or put aside, a search, their editor, a background job.
+        let waiting = self.0.tty.lent() || {
             let state = self.0.state.borrow();
             state.closing
                 || state.setup.is_some()
-                || state.panel.is_some()
+                || !state.overlays.is_empty()
                 || state.offer.is_some()
                 || state.set_ask.is_some()
                 || state.map.is_some()
                 || !state.editor.is_empty()
                 || !state.attachments.is_empty()
+                || state.stash.is_some()
+                || state.search.is_some()
                 || state.jobs.values().any(|job| !job.state.ended())
         };
         if waiting || self.busy() {
@@ -1256,7 +1257,7 @@ fn head(text: &str, count: usize) -> String {
     String::from_utf16_lossy(&text.encode_utf16().take(count).collect::<Vec<_>>())
 }
 fn assistant(started_at: Option<f64>, status: AnswerStatus) -> Entry {
-    Entry::Assistant { text: String::new(), steps: vec![], status, elapsed_ms: None, started_at }
+    Entry::Assistant { text: String::new(), steps: vec![], status, elapsed_ms: None, started_at, thinking: None, footer: None }
 }
 /// An answer's steps still running, ended as failed. `timed`: each takes how long it ran until now (an answer shown
 /// again from a log has no time for a step it cut short: the log doesn't say when it ended).

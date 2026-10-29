@@ -14,13 +14,19 @@ closes, crashes or is stopped.
   jobs at work (◐ 2 jobs), and Live's connection. While Live plays, a yellow light blinks on its beat (brightest on
   the bar's first beat) beside the tempo. While your fallback model answers,
   it's named there with "· fallback"; near a plan's limit (80% of a window
-  used), "plan 84% · resets 14:20" shows beside the model.
+  used), "plan 84% · resets 14:20" shows beside the model. Once the model's
+  context is more than half full, a meter beside the model says how full
+  ("context ▰▰▰▰▰▰▱▱▱▱ 62%", in the warning colour from 80%).
 - **Conversation** (left): your messages, Kumi's answers and its steps, in plain
   words ("looked at your Set"), each with its timing. A step at work animates by
   kind (searching, reading, building a device, changing, listening, playing);
   the same step done several times folds into one line ("read a page ×3").
   What Kumi heard shows as a small spectrum, and what it keeps as a line of its
-  own: ✎ a note, ◆ a technique, ↻ a recipe, ✦ a lesson from matching.
+  own: ✎ a note, ◆ a technique, ↻ a recipe, ✦ a lesson from matching. While the
+  model thinks between steps, the headline of its reasoning shows on a row of its
+  own, as a step at work. Each finished answer ends with one quiet line: its
+  time, its changes, and its tokens on an API key or its share of the plan on a
+  subscription ("6.2s · 2 changes · 18.4k in · 1.2k out").
 - **FOCUS** (top right): where you are in Live, following your selection as it
   changes: a track's device tree with rack chains, a clip's notes as a small
   piano roll, or a Session or Arrangement strip. A device you point at (click
@@ -31,7 +37,9 @@ closes, crashes or is stopped.
   the start marker". While Kumi waits for the model, it
   says why and until when: "retrying in 5s · ChatGPT is busy", "carrying on at
   14:20 (in 2h 13m) · ChatGPT's plan limit", "offline · trying again in 20s"
-  (Esc stops any of them).
+  (Esc stops any of them). While the model thinks, NOW says for how long
+  ("thinking · 31s"), with the headline of its reasoning: one line, never the
+  reasoning itself, which stays out of the answer and of `/copy`.
 - **Tabs** (bottom right): **HISTORY** lists the latest three things Kumi kept
   (each with **forget**), then every change, newest first, each with **undo**,
   or **kept** / **no undo** / **check Live** when it can't be undone. A change
@@ -279,6 +287,9 @@ its undo. They're in English for now.
 | Ctrl-K / Ctrl-U | Cut to the end / start of the line |
 | Ctrl-Y | Put back what you cut last (cuts in a row, like Ctrl-W twice, come back together); Alt-Y right after swaps it for the cut before |
 | Ctrl-- (Ctrl-_) | Undo in the box: a run of typing or deleting, a paste, a cut or what you dictated at a time. Where Ctrl-- zooms the terminal out (Windows Terminal, GNOME Terminal, Konsole), use Ctrl-_, that is Ctrl-Shift-- |
+| Ctrl-R | Look back through what you sent for the words you type: Ctrl-R again finds an earlier one, Enter puts it in the box, Esc goes back to your draft |
+| Ctrl-G | Open the draft in your own editor, the one VISUAL or EDITOR names (one that opens a window has to wait for it: `code --wait`). What you save comes back into the box, and Ctrl-- takes it back |
+| Ctrl-S | Put the draft aside, with its files; Ctrl-S in an empty box brings it back (with words in the box, they change places) |
 | Ctrl-T | Talk instead of typing: press it again to stop, or hold it while you talk. What you said lands in the box at the cursor; Enter stops and sends at once, Esc drops it |
 | Ctrl-V | Add the picture on the clipboard (a screenshot, say) to your next message; files dragged into the window are added the same way |
 | Backspace, in an empty box | Take back the last file added |
@@ -292,7 +303,7 @@ its undo. They're in English for now.
 | Ctrl-C | Stop Kumi's answer; when idle, clear the box (↑ or Ctrl-- brings the words back); with an empty box, quit |
 | Ctrl-B | Move the answer's slow step that doesn't use Live (a video, pages, the manual, your library) to the background as a job; the answer carries on. In tmux, press Ctrl-B twice |
 | Ctrl-D | Quit, when idle with an empty box |
-| Page Up / Page Down, mouse wheel | Scroll the conversation (the wheel over the tabs scrolls the tab); it stays put while new text arrives |
+| Page Up / Page Down, mouse wheel | Scroll the conversation (the wheel over the tabs scrolls the tab); it stays put while new text arrives. Scrolled up, the top row keeps the request whose answer you're reading (a click goes back to it), and the bottom row counts what came in below |
 | Ctrl-Home / Ctrl-End | The start of the conversation / back to the latest |
 | Ctrl-L | Redraw the screen |
 
@@ -320,11 +331,13 @@ window has been behind another for 2 minutes), Kumi takes it after a countdown
 Enter; Kumi checks it with the provider, or saves it unchecked when the provider
 can't be reached. In the ChatGPT sign-in panel, `c` copies the link (or the code), `d` signs in
 with a code instead of the browser, and `b` goes back to the browser. In the
-`/btw` panel, ↑↓ and Page Up/Down scroll, ←→ go through earlier answers, `c`
-copies, and Esc, Enter or Space closes it. In a job's details, ↑↓ scroll, `x`
-stops it, `r` runs it again, `c` copies its report, and Esc closes them.
-In the help, ↑↓, Page Up/Down, Home and End scroll, and Esc, Enter or `?`
-closes it; typing or pasting closes it too, and what you type goes into the box.
+`/btw` panel, ↑↓, Page Up/Down and the mouse wheel scroll, ←→ go through
+earlier answers, `c` copies, and Esc, Enter or Space closes it. In a job's
+details, ↑↓ and the wheel scroll, `x` stops it, `r` runs it again, `c` copies
+its report, and Esc closes them. In the help, ↑↓, Page Up/Down, Home, End and
+the wheel scroll, and Esc, Enter or `?` closes it; typing or pasting closes it
+too, and what you type goes into the box. With `"mouse": "off"`, the wheel
+scrolls none of these.
 
 ## Plain mode
 

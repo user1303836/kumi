@@ -23,6 +23,8 @@ use crate::core::contracts::*;
 use crate::core::jobs::{JobDetail, JobStatus};
 use crate::core::palette::{Gathered, PaletteView};
 use crate::core::search_memory::SearchMemoryStatus;
+use kumi_library::map::MapData;
+use kumi_listening::{music::learning::Music, slots::Said};
 use kumi_types::contracts::*;
 use kumi_types::errors::RuntimeError;
 
@@ -65,6 +67,9 @@ pub struct Capabilities {
     pub session_strip: bool,
     pub arrangement_strip: bool,
     pub reconfigure: bool,
+    pub music: bool,
+    pub map: bool,
+    pub slots: bool,
 }
 
 impl Capabilities {
@@ -106,6 +111,9 @@ impl Capabilities {
             session_strip: session.has_session_strip(),
             arrangement_strip: session.has_arrangement_strip(),
             reconfigure: session.has_reconfigure(),
+            music: session.music().is_some(),
+            map: session.map_loader().is_some(),
+            slots: session.slots_context().is_some(),
         }
     }
 }
@@ -296,6 +304,25 @@ requests! {
     PaletteRemove { path: String, size: i64, mtime: i64 } -> bool;
     /// /palette and its words: its answer, in words.
     PaletteCommand { words: String } -> String;
+    /// /music: what Kumi knows of the producer's music and how learning it goes, and (before they add a folder) the
+    /// usual place it found songs in.
+    Music {} -> MusicView;
+    /// The folders Kumi learns the producer's music from.
+    MusicFolders {} -> Vec<String>;
+    /// /music add: learn from these folders from now on, the producer having agreed; or why it can't.
+    LearnMusic { folders: Vec<String> } -> Result<(), String>;
+    /// /music remove: learn from these folders alone from now on; or why it can't.
+    SetMusicFolders { folders: Vec<String> } -> Result<(), String>;
+    /// /music pause (`held`) and resume.
+    HoldMusic { held: bool } -> ();
+    /// /music forget: everything Kumi learned of the producer's music; or why it couldn't.
+    ForgetMusic {} -> Result<(), String>;
+    /// /map: the producer's sounds and songs on their maps, read afresh.
+    Map {} -> MapData;
+    /// /slots and its words: what it says. What's under way comes as `slots-progress` events with its `id`, and
+    /// [`op::StopSlots`] stops it.
+    Slots { id: u32, words: String } -> Said;
+    StopSlots { id: u32 } -> ();
     /// A body for FOCUS (while connected).
     FocusBody { request: BodyRequest } -> Option<FocusBody>;
 }
@@ -332,6 +359,24 @@ impl<'a> dyn SessionHandle + 'a {
     }
 }
 
+/// A part of the session a request is answered from (its music, its map, its slots), or why it can't be.
+fn part<T>(part: Option<T>) -> Result<T, RuntimeError> {
+    part.ok_or_else(|| RuntimeError::plain("Not available"))
+}
+
+/// What /music shows, read from the producer's music: before they add a folder, the usual place songs were found in,
+/// looked for off Kumi's thread.
+async fn music_view(music: &Rc<Music>) -> MusicView {
+    let found = match music.folders().is_empty() {
+        true => {
+            let (places, skip) = (music.places(), music.skipping());
+            tokio::task::spawn_blocking(move || kumi_listening::music::folders::found_in(places, &skip())).await.ok().flatten()
+        }
+        false => None,
+    };
+    MusicView { status: music.status(), agreed: music.agreed(), held: music.held(), found }
+}
+
 /// A session in this process, behind [`SessionController`]: each request goes to the method it was before the
 /// protocol, and the state it shows is read from it as it's asked for.
 pub struct InProcess {
@@ -340,11 +385,19 @@ pub struct InProcess {
     on_event: RefCell<Option<Rc<dyn Fn(SessionEvent)>>>,
     /// The asides under way, by id, and what stops each.
     asides: RefCell<HashMap<u32, Signal>>,
+    /// The same for /slots' fetches and checks.
+    slots: RefCell<HashMap<u32, Signal>>,
 }
 
 impl InProcess {
     pub fn new(session: Rc<dyn SessionController>) -> Rc<InProcess> {
-        Rc::new_cyclic(|this| InProcess { this: this.clone(), session, on_event: RefCell::new(None), asides: RefCell::new(HashMap::new()) })
+        Rc::new_cyclic(|this| InProcess {
+            this: this.clone(),
+            session,
+            on_event: RefCell::new(None),
+            asides: RefCell::new(HashMap::new()),
+            slots: RefCell::new(HashMap::new()),
+        })
     }
     fn emit(&self, event: SessionEvent) {
         let on_event = self.on_event.borrow().clone();
@@ -438,6 +491,40 @@ impl InProcess {
                 Reply::PaletteRemove(session.palette_remove(&path, size, mtime).await?)
             }
             Op::PaletteCommand(op::PaletteCommand { words }) => Reply::PaletteCommand(session.palette_command(&words).await?),
+            Op::Music(op::Music {}) => Reply::Music(music_view(&part(session.music())?).await),
+            Op::MusicFolders(op::MusicFolders {}) => Reply::MusicFolders(part(session.music())?.folders()),
+            Op::LearnMusic(op::LearnMusic { folders }) => Reply::LearnMusic(part(session.music())?.learn(folders)),
+            Op::SetMusicFolders(op::SetMusicFolders { folders }) => {
+                Reply::SetMusicFolders(part(session.music())?.set_folders(Some(folders)))
+            }
+            Op::HoldMusic(op::HoldMusic { held }) => Reply::HoldMusic(part(session.music())?.hold(held)),
+            Op::ForgetMusic(op::ForgetMusic {}) => {
+                let music = part(session.music())?;
+                Reply::ForgetMusic(music.forget().await)
+            }
+            Op::Map(op::Map {}) => {
+                let load = part(session.map_loader())?;
+                Reply::Map(load().await)
+            }
+            Op::Slots(op::Slots { id, words }) => {
+                let context = part(session.slots_context())?;
+                // As an aside's: a stop that came first left its signal stopped.
+                let signal = self.slots.borrow_mut().entry(id).or_insert_with(Signal::new).clone();
+                let this = self.this.clone();
+                let progress = move |line: String| {
+                    if let Some(this) = this.upgrade() {
+                        this.emit(SessionEvent::SlotsProgress { id, line });
+                    }
+                };
+                let said = kumi_listening::slots::command(&words, &context, &progress, signal).await;
+                self.slots.borrow_mut().remove(&id);
+                Reply::Slots(said)
+            }
+            Op::StopSlots(op::StopSlots { id }) => {
+                let signal = self.slots.borrow_mut().entry(id).or_insert_with(Signal::new).clone();
+                signal.cancel();
+                Reply::StopSlots(())
+            }
             Op::FocusBody(op::FocusBody { request }) => Reply::FocusBody(session.focus_body(&request).await?),
         })
     }

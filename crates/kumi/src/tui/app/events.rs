@@ -19,9 +19,14 @@ impl TuiApp {
         // in what the producer asked to say now. Every kernel event is placed here, so a new one has to be.
         let (ends_wait, at_work) = match &event {
             SessionEvent::Kernel(kernel) => match kernel {
-                KernelEvent::Text { .. } | KernelEvent::ToolInput { .. } | KernelEvent::ToolStart { .. } => (true, true),
+                KernelEvent::Text { .. }
+                | KernelEvent::Reasoning { .. }
+                | KernelEvent::ToolInput { .. }
+                | KernelEvent::ToolStart { .. } => (true, true),
                 KernelEvent::ToolEnd { .. } => (false, true),
-                KernelEvent::Steer { .. } | KernelEvent::Retry { .. } | KernelEvent::ModelSwitch { .. } => (false, false),
+                KernelEvent::Steer { .. } | KernelEvent::Retry { .. } | KernelEvent::ModelSwitch { .. } | KernelEvent::Usage(_) => {
+                    (false, false)
+                }
             },
             SessionEvent::TurnComplete { .. } | SessionEvent::State { .. } => (true, false),
             _ => (false, false),
@@ -43,6 +48,8 @@ impl TuiApp {
                 let at = now_ms_f64() + wait_ms as f64;
                 {
                     let mut state = self.0.state.borrow_mut();
+                    // The call tried again thinks from the start: its headline comes from what it says.
+                    state.reasoning.clear();
                     state.retry = Some((reason.clone(), until));
                     state.waiting_for = wait.map(|wait| (wait, at));
                     state.waiting_cause = cause;
@@ -80,9 +87,12 @@ impl TuiApp {
                                 state.bytes = 0;
                                 state.stream.discard();
                                 state.current = Some(state.transcript.add(assistant(Some(perf_now()), AnswerStatus::Running)));
-                                state.scroll = 0;
+                                state.view.follow();
                                 state.planning = None;
                                 state.turn_changes = 0;
+                                state.reasoning.clear();
+                                // (read from the provider's last answer: no state of the app's)
+                                state.plan_before = self.answering_plan();
                             }
                         }
                         TurnState::Cancelling => {
@@ -204,6 +214,8 @@ impl TuiApp {
                 self.0.state.borrow_mut().pinned = Some(Pin { pin, kind, row });
             }
             SessionEvent::Resumed { saved_at, lines, changes, chosen, unreadable, replay } => {
+                // Another conversation in the model's context: the meter waits for its next call (or its log's last).
+                self.0.state.borrow_mut().last_call = None;
                 let when = since(saved_at as f64, now_ms_f64());
                 // What's new, shown as Kumi started, doesn't count: the conversation goes above it.
                 let at_start = {
@@ -336,6 +348,8 @@ impl TuiApp {
                 }
                 self.0.scheduler.request();
             }
+            // What a /slots fetch or check under way says.
+            SessionEvent::SlotsProgress { line, .. } => self.notice(&line, NoticeTone::Info),
             SessionEvent::Error { message: said, kind, provider } => {
                 {
                     let mut state = self.0.state.borrow_mut();
@@ -355,7 +369,12 @@ impl TuiApp {
                     self.offer_fix(kind, provider.as_deref());
                 }
             }
+            SessionEvent::Kernel(KernelEvent::Reasoning { text }) => self.reasoned(&text),
+            SessionEvent::Kernel(KernelEvent::Usage(usage)) => self.called(usage),
             SessionEvent::Kernel(KernelEvent::Text { text }) => {
+                if !text.is_empty() {
+                    self.thought_ends();
+                }
                 let mut state = self.0.state.borrow_mut();
                 if state.suppress || state.current.is_none() {
                     return;
@@ -764,6 +783,7 @@ impl TuiApp {
                 }
             }
             SessionEvent::Kernel(KernelEvent::ToolInput { id, name }) => {
+                self.thought_ends();
                 let mut state = self.0.state.borrow_mut();
                 if state.current.is_some() && !state.suppress && (crate::daw::presentation().plan)(&name) {
                     state.planning = Some(id);
@@ -771,6 +791,7 @@ impl TuiApp {
                 }
             }
             SessionEvent::Kernel(KernelEvent::ToolStart { id, name }) => {
+                self.thought_ends();
                 let mut state = self.0.state.borrow_mut();
                 if state.planning.as_deref() == Some(id.as_str()) {
                     state.planning = None;
@@ -814,6 +835,9 @@ impl TuiApp {
                 let elapsed = elapsed_ms as f64;
                 let mut offered = None;
                 let mut answer = String::new();
+                self.thought_ends();
+                let changes = self.0.state.borrow().turn_changes;
+                let footer = self.answer_footer(elapsed, changes, result.usage.as_ref());
                 {
                     let mut state = self.0.state.borrow_mut();
                     // (an answer shown again from a log was counted by the session that answered it)
@@ -837,13 +861,16 @@ impl TuiApp {
                         state.stream.discard();
                         String::new()
                     };
-                    if let Entry::Assistant { text, status, elapsed_ms, .. } = &mut *entry.borrow_mut() {
+                    if let Entry::Assistant { text, steps, status, elapsed_ms, footer: line, .. } = &mut *entry.borrow_mut() {
                         text.push_str(&tail);
                         *status = if cancelled { AnswerStatus::Stopped } else { AnswerStatus::Done };
                         *elapsed_ms = Some(elapsed);
+                        // Under what the answer said or did; one with neither (a run told in notices) has no line.
+                        *line = (!text.is_empty() || !steps.is_empty()).then_some(footer);
                         // An answer that ends asking the producer to pick: one key answers, unless they've already
                         // typed or queued something.
-                        if reason == StopReason::Completed && state.held.is_empty() && state.editor.is_empty() && state.panel.is_none() {
+                        if reason == StopReason::Completed && state.held.is_empty() && state.editor.is_empty() && state.overlays.is_empty()
+                        {
                             offered = choices(text);
                         }
                         answer = text.clone();
@@ -1077,7 +1104,7 @@ impl TuiApp {
         let shown = {
             let mut state = self.0.state.borrow_mut();
             state.last_sent = Some(next.text.clone());
-            state.scroll = 0;
+            state.view.follow();
             state.transcript.add(Entry::User { text: words })
         };
         self.task(move |app| async move {

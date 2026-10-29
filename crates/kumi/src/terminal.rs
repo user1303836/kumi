@@ -42,6 +42,11 @@ pub trait Terminal {
         let _ = daw;
         false
     }
+    /// Whether the terminal is lent to a program Kumi runs (the producer's editor): its keys, and the signals the
+    /// terminal sends for them, are that program's.
+    fn lent(&self) -> bool {
+        false
+    }
 }
 #[derive(Clone)]
 pub struct TerminalOptions {
