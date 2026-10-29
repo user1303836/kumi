@@ -210,7 +210,7 @@ Kumi 占据整个终端窗口，并在 Kumi 关闭、崩溃或被停止时把窗
 - 多个动作共用一个键时，先试 keys.json 里的，再按一贯的顺序试 Kumi 自己的。
 - 在输入文字的地方（输入框、列表、`/` 菜单），单个字符不能作为按键，在那里它会被当作文字输入。输入框为空时，`?` 总是打开帮助；也可以给 `app.help` 再加按键（`f1`）。
 - 启动时，Kumi 会把用不上的内容说一次：不认识的动作、读不懂的按键、输入文字处的单个字符、keys.json 给了同一个键的两个动作，以及排在 Kumi 自身按键之前的键。
-- 帮助（`/help`、`?`）按 keys.json 显示按键，但输入框下方和面板里的提示仍写着 Kumi 自己的按键。地图和设置的按键还不是动作。
+- 帮助（`/help`、`?`）按 keys.json 显示按键，但输入框下方、面板、地图和设置里的提示仍写着 Kumi 自己的按键。
 
 | 位置 | 动作与 Kumi 自己的按键 |
 | --- | --- |
@@ -228,6 +228,8 @@ Kumi 占据整个终端窗口，并在 Kumi 关闭、崩溃或被停止时把窗
 | 密钥输入框 | `key.check`（enter）、`key.erase`（backspace）、`key.clear`（ctrl+u）、`key.cancel`（esc、ctrl+c） |
 | ChatGPT 登录 | `chatgpt.copy`（c）、`chatgpt.by-code`（d）、`chatgpt.by-browser`（b）、`chatgpt.cancel`（esc、ctrl+c） |
 | 对话详情（ctrl+o） | `details.up`、`details.down`、`details.page-up`、`details.page-down`、`details.top`（home）、`details.end`（end）、`details.search`（/）、`details.next-match`（n）、`details.previous-match`（N）、`details.next-request`（}）、`details.previous-request`（{）、`details.print`（[）、`details.edit`（v）、`details.close`（esc、q、ctrl+c、ctrl+o）；输入搜索时有 `details.search-erase`（backspace）、`details.search-keep`（enter）、`details.search-drop`（esc） |
+| 地图（`/map`） | `map.up`、`map.down`、`map.left`、`map.right`（方向键）、`map.pan-up`、`map.pan-down`、`map.pan-left`、`map.pan-right`（shift 加方向键）、`map.zoom-in`（`+`、`=`）、`map.zoom-out`（`-`、`_`）、`map.play`（space）、`map.hover`（h）、`map.pick`（x）、`map.pick-all`（a）、`map.grow`（g）、`map.gather`（enter）、`map.filter`（`/`）、`map.switch`（tab）、`map.let-go`（esc）、`map.close`（esc、q、ctrl+c）；输入筛选时，`map.filter-erase`（backspace）、`map.filter-keep`（enter）、`map.filter-drop`（esc） |
+| 设置 | `setup.up`、`setup.down`（↓、tab）、`setup.choose`（enter）、`setup.later`（esc）、`setup.quit`（ctrl+c、ctrl+d） |
 
 ## 纯文本模式
 
