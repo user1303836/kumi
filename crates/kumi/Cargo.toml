@@ -45,6 +45,7 @@ memchr.workspace = true
 rand.workspace = true
 regex.workspace = true
 fancy-regex.workspace = true
+pulldown-cmark.workspace = true
 reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true

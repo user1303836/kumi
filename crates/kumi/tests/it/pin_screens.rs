@@ -1,7 +1,7 @@
-//! Whole screens of the full-screen app as Kumi 1.18.0 draws them for Live, at 120×36 and 160×40: FOCUS, NOW and
-//! HISTORY with each picture, the panels, the disconnect notices and the dashboards. Each screen is kept as plain text
-//! in tests/goldens/tui (one file per scene and size, trailing spaces trimmed), and FOCUS's scenes keep their colours
-//! too (`.styles.txt`, each row's runs of styles); `KUMI_BLESS=1` writes them again.
+//! Whole screens of the full-screen app as Kumi 1.18.0 draws them for Live, at 120×36 and 160×40 (the help at 80×30
+//! too): FOCUS, NOW and HISTORY with each picture, the panels, the disconnect notices and the dashboards. Each screen is
+//! kept as plain text in tests/goldens/tui (one file per scene and size, trailing spaces trimmed), and FOCUS's scenes
+//! keep their colours too (`.styles.txt`, each row's runs of styles); `KUMI_BLESS=1` writes them again.
 //!
 //! The same bytes on every machine and at any moment: times are given relative to now (saved 3 hours ago, a job
 //! started 65.02 s ago, a goal 185.02 s in), so the app's own clock only adds the milliseconds a scene takes; the
@@ -17,6 +17,8 @@ use std::{cell::Cell, rc::Rc};
 use support::*;
 
 const SIZES: [(i32, i32); 2] = [(120, 36), (160, 40)];
+/// The help is whole at 80 columns too, the width of a terminal beside the DAW.
+const HELP_SIZES: [(i32, i32); 3] = [(80, 30), (120, 36), (160, 40)];
 const HOUR: i64 = 3_600_000;
 
 fn golden(name: &str, actual: &str) {
@@ -873,10 +875,19 @@ scene!(panel_model_long, |width, height| {
     finish(h).await
 });
 
-scene!(notice_help, |width, height| {
+scene!(notice_help, HELP_SIZES, |width, height| {
     let h = open(width, height, Rc::new(Control::default())).await;
     h.type_text("/help\r").await;
     h.wait_for("ctrl+j").await;
+    finish(h).await
+});
+
+scene!(help_end, HELP_SIZES, |width, height| {
+    let h = open(width, height, Rc::new(Control::default())).await;
+    h.type_text("?").await;
+    h.wait_for("Keys and commands").await;
+    h.type_text("\x1b[F").await;
+    h.wait_for("/quit").await;
     finish(h).await
 });
 

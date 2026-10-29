@@ -7,6 +7,7 @@ mod draw_panel;
 mod drawer;
 mod drawing;
 mod events;
+mod help;
 mod input;
 mod jobs;
 mod live;
@@ -276,6 +277,13 @@ enum Panel {
     Job {
         id: u32,
         scroll: i32,
+    },
+    /// The keys and commands, scrolled `scroll` rows down: `shown` rows fit when it was last drawn, and it scrolls
+    /// `most` rows at most.
+    Help {
+        scroll: i32,
+        shown: i32,
+        most: i32,
     },
 }
 struct Aside {

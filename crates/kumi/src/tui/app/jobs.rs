@@ -470,7 +470,7 @@ impl TuiApp {
         if let Some(report) = detail.report.as_ref().filter(|r| !r.is_empty()) {
             lines.push((vec![], None));
             for row in render_markdown(&sanitize_text(report, &self.0.state.borrow().secrets), width.max(8), &Rc::new(st::TEXT)) {
-                lines.push((row.spans, None));
+                lines.push((row.spans.to_vec(), None));
             }
         } else if status.state.ended() {
             if let Some(line) = status.line.as_ref() {

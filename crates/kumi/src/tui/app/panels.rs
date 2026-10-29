@@ -1345,6 +1345,10 @@ impl TuiApp {
             self.job_panel_input(&panel, event);
             return;
         }
+        if matches!(&*panel.borrow(), Panel::Help { .. }) {
+            self.help_input(&panel, event);
+            return;
+        }
         if let InputEvent::Key { name, mods, .. } = &event {
             if name == "escape" || (mods.ctrl && name == "c") {
                 let declined = self.closing_offer(&panel);
@@ -1454,8 +1458,13 @@ impl TuiApp {
                     let typed = std::mem::take(&mut picker.borrow_mut().typed);
                     drop(p);
                     self.close_panel();
-                    self.0.state.borrow_mut().editor.insert(&typed);
-                    self.on_input(event);
+                    // Typed on, it's words of the answer, never a key: a `?` that starts one doesn't open the help.
+                    if matches!(event, InputEvent::Text { .. }) {
+                        self.type_into_box(&format!("{typed}{text}"), true);
+                    } else {
+                        self.0.state.borrow_mut().editor.insert(&typed);
+                        self.on_input(event);
+                    }
                     return;
                 }
                 if picker.borrow().filter.is_empty() && text.starts_with('/') {
