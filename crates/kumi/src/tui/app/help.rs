@@ -237,7 +237,7 @@ impl TuiApp {
             attachments: can.attachments,
             jobs: can.jobs,
             palette: can.palette,
-            slots: self.0.options.slots.is_some(),
+            slots: can.slots,
             copy_on_select: self.0.options.copy_on_select,
             mouse: self.0.options.mouse,
         };

@@ -25,11 +25,12 @@ impl TuiApp {
         state.map.is_some() && state.panel.is_none()
     }
 
-    /// /map opens the map, and reads it; /map open shows it in the browser, and /map close closes that.
-    pub(super) async fn map_command(&self, load: crate::map::LoadMap, words: &str) {
+    /// /map opens the map, and reads it (the session has the library and the music); /map open shows it in the browser,
+    /// and /map close closes that.
+    pub(super) async fn map_command(&self, words: &str) {
         match words.trim() {
             "" => {}
-            "open" => return self.open_map_page(load).await,
+            "open" => return self.open_map_page().await,
             "close" => return self.close_map_page(),
             _ => {
                 self.notice(
@@ -49,8 +50,16 @@ impl TuiApp {
         // The mouse's moves, reported while the map is open: a point plays as the mouse comes to it.
         self.0.tty.report_moves(true);
         self.0.scheduler.request();
+        let data = match self.session().op(op::Map {}).await {
+            Ok(data) => data,
+            Err(error) => {
+                if self.map_open() {
+                    self.close_map();
+                }
+                return self.notice(&error.to_string(), NoticeTone::Warn);
+            }
+        };
         // Made ready to draw (turned, fitted, its points' room worked out) off Kumi's thread: a big map takes a moment.
-        let data = load().await;
         let Ok(made) = tokio::task::spawn_blocking(move || ready(data)).await else {
             if self.map_open() {
                 self.close_map();
@@ -73,7 +82,7 @@ impl TuiApp {
 
     /// /map open: the map as it is now, served to the browser on this computer until /map close or Kumi quits (a map
     /// opened before closes). Over SSH the browser is on another computer: Kumi says how to reach the map from it.
-    async fn open_map_page(&self, load: crate::map::LoadMap) {
+    async fn open_map_page(&self) {
         let asked = {
             let mut state = self.0.state.borrow_mut();
             state.map_page_asked += 1;
@@ -85,7 +94,7 @@ impl TuiApp {
             let state = app.0.state.borrow();
             !state.closing && state.map_page_asked == asked
         };
-        let reading = load();
+        let reading = self.session().op(op::Map {});
         tokio::pin!(reading);
         let data = tokio::select! {
             data = &mut reading => data,
@@ -99,6 +108,14 @@ impl TuiApp {
         if !wanted(self) {
             return;
         }
+        let data = match data {
+            Ok(data) => data,
+            Err(error) => {
+                self.0.state.borrow_mut().map_page_opening = false;
+                self.notice(&format!("Kumi couldn't open the map in your browser: {error}"), NoticeTone::Warn);
+                return;
+            }
+        };
         let page = crate::map::Page::new(data);
         let page = Arc::new(if self.can().palette { page.with_palette() } else { page });
         let app = Rc::downgrade(&self.0);

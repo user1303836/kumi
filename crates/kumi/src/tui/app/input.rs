@@ -445,8 +445,8 @@ impl TuiApp {
             } else if checking {
                 // A /slots fetch or check stops first.
                 let check = self.0.state.borrow_mut().slots_check.take();
-                if let Some(check) = check {
-                    check.abort();
+                if let Some(id) = check {
+                    self.session().tell(op::StopSlots { id }.into());
                 }
             } else if self.busy() {
                 self.cancel();
@@ -640,9 +640,9 @@ impl TuiApp {
             "/btw" => can.aside,
             "/voice" => self.0.voice.is_some(),
             "/willington" => self.willington().is_some(),
-            "/slots" => self.0.options.slots.is_some(),
-            "/music" => self.0.options.music.is_some(),
-            "/map" => self.0.options.map.is_some(),
+            "/slots" => can.slots,
+            "/music" => can.music,
+            "/map" => can.map,
             "/palette" => can.palette,
             _ => true,
         }
@@ -915,7 +915,7 @@ impl TuiApp {
             }
             return Ok(());
         }
-        if let Some(slots) = self.0.options.slots.clone().filter(|_| command == "/slots" || command.starts_with("/slots ")) {
+        if self.can().slots && (command == "/slots" || command.starts_with("/slots ")) {
             self.clear_editor();
             let words = command["/slots".len()..].to_string();
             // One swap at a time: a model's fetch can take minutes.
@@ -924,20 +924,22 @@ impl TuiApp {
                 self.notice("Kumi is still trying a model for /slots: wait for it, or Esc stops it.", NoticeTone::Info);
                 return Ok(());
             }
-            let app = self.clone();
-            let progress = move |line: String| app.notice(&line, NoticeTone::Info);
             // Its own stop, Esc: a model's download takes as long as it takes (a listening model's check has its own
-            // minute and a half).
-            let check = Rc::new(kumi_common::abort::Controller::new());
-            let signal = check.signal.clone();
-            self.0.state.borrow_mut().slots_check.get_or_insert_with(|| check.clone());
-            let said = kumi_listening::slots::command(&words, &slots, &progress, signal).await;
-            let ended = self.0.state.borrow().slots_check.as_ref().is_some_and(|current| Rc::ptr_eq(current, &check));
+            // minute and a half). What's under way comes as notices (`slots-progress` events).
+            let id = {
+                let mut state = self.0.state.borrow_mut();
+                let id = state.next_slots;
+                state.next_slots += 1;
+                state.slots_check.get_or_insert(id);
+                id
+            };
+            let said = session.op(op::Slots { id, words }).await;
+            let ended = self.0.state.borrow().slots_check == Some(id);
             if ended {
                 self.0.state.borrow_mut().slots_check = None;
             }
             match said {
-                kumi_listening::slots::Said::Slots { lines, footer } => {
+                Ok(kumi_listening::slots::Said::Slots { lines, footer }) => {
                     self.0.state.borrow_mut().transcript.add(Entry::News {
                         title: "Model slots".into(),
                         items: lines,
@@ -945,19 +947,20 @@ impl TuiApp {
                     });
                     self.0.scheduler.request();
                 }
-                kumi_listening::slots::Said::Done(text) => self.notice(&text, NoticeTone::Info),
-                kumi_listening::slots::Said::Refused(text) => self.notice(&text, NoticeTone::Warn),
+                Ok(kumi_listening::slots::Said::Done(text)) => self.notice(&text, NoticeTone::Info),
+                Ok(kumi_listening::slots::Said::Refused(text)) => self.notice(&text, NoticeTone::Warn),
+                Err(error) => self.notice(&error.to_string(), NoticeTone::Warn),
             }
             return Ok(());
         }
-        if let Some(music) = self.0.options.music.clone().filter(|_| command == "/music" || command.starts_with("/music ")) {
+        if self.can().music && (command == "/music" || command.starts_with("/music ")) {
             self.clear_editor();
-            self.music_command(music, &command["/music".len()..]).await;
+            self.music_command(&command["/music".len()..]).await;
             return Ok(());
         }
-        if let Some(load) = self.0.options.map.clone().filter(|_| command == "/map" || command.starts_with("/map ")) {
+        if self.can().map && (command == "/map" || command.starts_with("/map ")) {
             self.clear_editor();
-            self.map_command(load, &command["/map".len()..]).await;
+            self.map_command(&command["/map".len()..]).await;
             return Ok(());
         }
         if self.can().palette && (command == "/palette" || command.starts_with("/palette ")) {

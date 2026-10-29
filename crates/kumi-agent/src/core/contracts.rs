@@ -1020,6 +1020,11 @@ pub enum SessionEvent {
         id: u32,
         text: String,
     },
+    /// What a /slots fetch or check under way says (the protocol's `slots` request with this `id`).
+    SlotsProgress {
+        id: u32,
+        line: String,
+    },
     #[serde(untagged)]
     Kernel(KernelEvent),
     #[serde(untagged)]
@@ -1379,6 +1384,16 @@ pub struct InstantOutcome {
     pub is_error: bool,
 }
 
+/// What /music shows: what Kumi knows of the producer's music and how learning it goes, whether they agreed it learns
+/// it, whether they paused it, and (before they add a folder) the usual place Kumi found songs in.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MusicView {
+    pub status: kumi_listening::music::learning::MusicStatus,
+    pub agreed: bool,
+    pub held: bool,
+    pub found: Option<kumi_listening::music::folders::Found>,
+}
+
 /// Optional methods (`steer?()` and so on) have a `has_…` flag, false by default, that says whether
 /// this controller offers them; their default bodies answer as an absent method's caller would read.
 #[async_trait(?Send)]
@@ -1531,6 +1546,18 @@ pub trait SessionController {
     /// What Kumi remembers of searches, for a DAW's listening to hand what it hears to and start from: None without its
     /// database.
     fn settings_memory(&self) -> Option<Rc<dyn kumi_listening::heard_settings::SettingsMemory>> {
+        None
+    }
+    /// The producer's own music, which /music shows and changes (the protocol answers its requests from it).
+    fn music(&self) -> Option<Rc<kumi_listening::music::learning::Music>> {
+        None
+    }
+    /// What /slots reads and swaps: which model does each listening job.
+    fn slots_context(&self) -> Option<Rc<kumi_listening::slots::SlotsContext>> {
+        None
+    }
+    /// What reads /map's data (the producer's sounds and songs on their maps), each time it opens.
+    fn map_loader(&self) -> Option<kumi_library::map::LoadMap> {
         None
     }
     /// The saved Set open in the DAW, by its file, once the session has read it.
