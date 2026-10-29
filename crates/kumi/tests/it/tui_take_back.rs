@@ -109,3 +109,19 @@ case!(takeback_needs_a_kept_conversation_and_kumi_at_rest, async {
     h.has("There's no request of yours to take back yet.");
     h.close().await;
 });
+
+case!(takeback_names_the_changes_it_leaves_as_they_are, async {
+    let h = Harness::new(120, 36);
+    // The last request's change is from an earlier session: Kumi can't undo it, and leaves it.
+    let width = json!({"id":"old001:c4","family":"mixer","title":"Bass width 100% → 140%","state":"expired","at":1});
+    h.control.set("take-back", json!([{"at":3,"words":"and a bit wider","changes":[width]}]));
+    h.control.set("taken-back", json!({"requests":1,"words":"and a bit wider","undone":[]}));
+    h.start().await;
+    h.connect();
+    h.type_text("/takeback\r").await;
+    h.wait_for_call("take-back:3").await;
+    h.has("Took back your last request.");
+    h.has("Left as it is: Bass width");
+    h.has("earlier session).");
+    h.close().await;
+});

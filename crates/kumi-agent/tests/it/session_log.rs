@@ -829,3 +829,25 @@ async fn requests_taken_back_are_marked_in_the_log_as_it_is_now() {
     })
     .await;
 }
+
+#[test]
+fn a_change_told_again_later_stays_with_the_request_that_made_it() {
+    use kumi_types::contracts::ChangeState;
+    let lines = vec![
+        asked_at(10, "make the bass wider"),
+        changed("c1", 11, "unsure"),
+        asked_at(20, "and darker"),
+        // Confirmed after the next request began, as a late picture or an /undo would be told.
+        changed("c1", 11, "applied"),
+        changed("c2", 21, "applied"),
+        asked_at(30, "and brighter"),
+        changed("c3", 31, "applied"),
+        LogLine::TakenBack { at: 40, to: 30 },
+        // The change of the request taken back, told again after: still that request's.
+        changed("c3", 31, "undone"),
+    ];
+    let (_, spans) = story_of(&read_log(&written(0, &lines)).unwrap());
+    let changes: Vec<Vec<(&str, ChangeState)>> =
+        spans.iter().map(|span| span.changes.iter().map(|change| (change.id.as_str(), change.state)).collect()).collect();
+    assert_eq!(changes, [vec![("c1", ChangeState::Applied)], vec![("c2", ChangeState::Applied)]]);
+}

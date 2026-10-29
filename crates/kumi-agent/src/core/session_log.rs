@@ -145,6 +145,8 @@ pub struct Span {
 /// with), and each request since that wasn't taken back, oldest first.
 pub fn story_of(log: &ReadLog) -> (Vec<Value>, Vec<Span>) {
     let (mut had, mut spans) = (vec![], Vec::<Span>::new());
+    // The changes of the requests taken back: told again later (a picture that came late), they're still theirs.
+    let mut gone: Vec<(String, i64)> = vec![];
     for line in &log.lines {
         match line {
             LogLine::Request(request) => spans.push(Span { request: request.clone(), changes: vec![], messages: vec![] }),
@@ -152,17 +154,23 @@ pub fn story_of(log: &ReadLog) -> (Vec<Value>, Vec<Span>) {
                 Some(span) => span.messages.push(message.clone()),
                 None => had.push(message.clone()),
             },
-            // (an id is this Kumi process's: one from another run is another change)
+            // A change told again (its picture late, confirmed, undone) stays with the request that made it, during a later
+            // one too. (An id is this Kumi process's: one from another run is another change.)
             LogLine::Event { event: SessionEvent::Change { change }, .. } => {
-                if let Some(span) = spans.last_mut() {
-                    match span.changes.iter_mut().find(|kept| kept.id == change.id && kept.at == change.at) {
-                        Some(kept) => *kept = change.clone(),
-                        None => span.changes.push(change.clone()),
-                    }
+                let same = |kept: &ChangeRecord| kept.id == change.id && kept.at == change.at;
+                if gone.iter().any(|(id, at)| *id == change.id && *at == change.at) {
+                    continue;
+                }
+                let made = spans.iter_mut().rev().flat_map(|span| span.changes.iter_mut()).find(|kept| same(kept));
+                if let Some(kept) = made {
+                    *kept = change.clone();
+                } else if let Some(span) = spans.last_mut() {
+                    span.changes.push(change.clone());
                 }
             }
             LogLine::TakenBack { to, .. } => {
                 if let Some(at) = spans.iter().position(|span| span.request.at == *to) {
+                    gone.extend(spans[at..].iter().flat_map(|span| &span.changes).map(|change| (change.id.clone(), change.at)));
                     spans.truncate(at);
                 }
             }

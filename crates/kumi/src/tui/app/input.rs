@@ -1518,13 +1518,23 @@ impl TuiApp {
         let taken = match self.session().op(op::TakeBackPlan {}).await {
             // Newest first: the earliest of the last `count`, or the first of all when there are fewer.
             Ok(requests) => match requests.get(count.min(requests.len()).saturating_sub(1)) {
-                Some(earliest) => self.session().op(op::TakeBack { to: earliest.at }).await.map(Some),
+                Some(earliest) => self.session().op(op::TakeBack { to: earliest.at }).await.map(|taken| Some((taken, requests))),
                 None => Ok(None),
             },
             Err(error) => Err(error),
         };
         match taken {
-            Ok(Some(taken)) => self.taken_back(taken),
+            Ok(Some((taken, requests))) => {
+                // What the requests that went changed that Kumi couldn't undo, as the plan had them: left as they are.
+                let left: Vec<ChangeRecord> = requests
+                    .iter()
+                    .take(taken.requests as usize)
+                    .flat_map(|asked| &asked.changes)
+                    .filter(|change| !matches!(change.state, ChangeState::Applied | ChangeState::Undone | ChangeState::Heard))
+                    .cloned()
+                    .collect();
+                self.taken_back(taken, left);
+            }
             Ok(None) => self.notice("There's no request of yours to take back yet.", NoticeTone::Info),
             Err(error) => {
                 if !self.0.state.borrow().closing {
@@ -1536,7 +1546,7 @@ impl TuiApp {
         self.0.scheduler.request();
     }
     /// What taking requests back did, in words, with the earliest one's words back in the box.
-    fn taken_back(&self, taken: TakenBack) {
+    fn taken_back(&self, taken: TakenBack, left: Vec<ChangeRecord>) {
         let many = |n: usize, one: &str, more: &str| if n == 1 { format!("1 {one}") } else { format!("{n} {more}") };
         let undid = (!taken.undone.is_empty()).then(|| many(taken.undone.len(), "change", "changes"));
         let mut said = vec![];
@@ -1554,6 +1564,15 @@ impl TuiApp {
                 string::trim(&format!("Kumi couldn't undo {} and stopped there. {}", failed.title, failed.note.as_deref().unwrap_or("")))
                     .to_string(),
             );
+        }
+        if !left.is_empty() {
+            let why = |change: &ChangeRecord| match change.state {
+                ChangeState::Expired => "from an earlier session",
+                ChangeState::Unsure => "never confirmed",
+                _ => "Kumi can't undo it",
+            };
+            let named: Vec<String> = left.iter().map(|change| format!("{} ({})", change.title, why(change))).collect();
+            said.push(format!("Left as {}: {}.", if left.len() == 1 { "it is" } else { "they are" }, named.join("; ")));
         }
         if let Some(words) = taken.words.filter(|words| !words.is_empty()) {
             self.0.state.borrow_mut().editor.set(&words);

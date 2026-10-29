@@ -1299,7 +1299,7 @@ impl Session {
             }
         };
         let checkpoint = Rc::new(KernelCheckpoint { messages, ..base });
-        {
+        let (place, id) = {
             let mut s = self.0.state.borrow_mut();
             // The next kernel carries on from it, as after another model.
             s.switched = Some(Settled { checkpoint: checkpoint.clone(), key: key.clone() });
@@ -1308,12 +1308,27 @@ impl Session {
                 s.conversation_first = None;
             }
             s.touched = true;
-        }
+            (s.place.clone(), s.conversation_id.clone())
+        };
         self.drop_kernel().await?;
-        if let Some(log) = &self.0.options.log {
-            log.taken_back(to);
+        if checkpoint.messages.is_empty() {
+            // Taken back to nothing, it's as a conversation never kept: it goes, its log with it, and the next request
+            // keeps it again.
+            if let (Some(store), Some(place)) = (self.0.options.conversations.clone(), place.as_deref()) {
+                store.delete(place, &id).await?;
+                if let Some(log) = &self.0.options.log {
+                    log.open(place, &id, None, None);
+                }
+            }
+            let mut s = self.0.state.borrow_mut();
+            s.settled = Some(Settled { checkpoint, key });
+            s.as_kept = false;
+        } else {
+            if let Some(log) = &self.0.options.log {
+                log.taken_back(to);
+            }
+            self.keep_conversation(checkpoint, key, false);
         }
-        self.keep_conversation(checkpoint, key, false);
         let shown = match &self.0.options.log {
             Some(log) => log.as_now().await,
             None => None,

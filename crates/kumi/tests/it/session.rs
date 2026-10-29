@@ -1548,6 +1548,30 @@ local_test!(a_change_from_an_earlier_session_stays_as_it_is_when_its_request_is_
     assert!(two.record.undone.borrow().is_empty());
     two.session.close().await.unwrap();
 });
+local_test!(a_conversation_taken_back_to_nothing_isnt_kept_and_comes_back_as_what_came_after, {
+    const SET: &str = "aeaeaeaeaeaeaeaeaeaeaeaeaeaeaeae";
+    let dir = tempfile::tempdir().unwrap();
+    let (one, store) = takes_back(dir.path(), |_| vec![]);
+    project(&one, SET);
+    one.session.start().await.unwrap();
+    one.session.submit("make the bass wider", None).await.unwrap();
+    saved(store.as_ref(), SET, 1).await;
+    // Its only request taken back: nothing of it is kept, as a conversation never kept.
+    let plan = one.session.take_back_plan().await.unwrap();
+    assert_eq!(one.session.take_back(plan[0].at).await.unwrap().requests, 1);
+    assert!(store.current(SET).await.unwrap().is_none());
+    // The next request keeps it again, with a log from there.
+    one.session.submit("sketch a groove", None).await.unwrap();
+    let kept = saved(store.as_ref(), SET, 1).await;
+    assert_eq!(asked_in(&store.log(SET, &kept.id).await.expect("its log").lines), ["sketch a groove"]);
+    one.session.close().await.unwrap();
+    // Taken up after a restart, it carries on with that alone.
+    let (two, _) = takes_back(dir.path(), |_| vec![]);
+    project(&two, SET);
+    two.session.start().await.unwrap();
+    assert_eq!(two.words(0).unwrap(), ["sketch a groove"]);
+    two.session.close().await.unwrap();
+});
 local_test!(earlier_process_changes_expire_without_pictures_and_same_process_keeps_undo, {
     let dir = tempfile::tempdir().unwrap();
     let store = create_conversation_store(dir.path());
