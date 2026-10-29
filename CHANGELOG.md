@@ -3,6 +3,21 @@
 Kumi's releases. The Ableton bridge (`crates/ableton-mcp-server`) is versioned on its own;
 each Kumi release names the bridge it ships with.
 
+## 1.24.24 — 2026-10-29
+
+Ships with bridge 1.0.101, as 1.24.23 did.
+
+- Kumi's colours follow your terminal: light on a light terminal and dark on a dark one, switching
+  when the terminal does. `"theme"` in settings.json can also fix them to `dark`, `light` or
+  `colorblind`, a theme for red-green colour blindness.
+- In the `/` menu, Tab completes a command's words too: `/palette use` lists your palettes, `/resume`
+  your kept conversations, `/model` your models, `/slots listening` the models a slot can take, and
+  `/export` its formats.
+- `/model <id>` chooses a model by its id, such as `/model anthropic/claude-sonnet-5-5`.
+
+Tested with Live 12.4 on macOS. On Windows, installing and updating are tested; using Kumi with Live
+there is still new.
+
 ## 1.24.23 — 2026-10-29
 
 Ships with bridge 1.0.101, as 1.24.22 did.
