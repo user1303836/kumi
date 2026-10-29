@@ -254,8 +254,10 @@ its undo. They're in English for now.
 | ↑ and ↓ | Move through the box's lines, then through what you sent before (kept across `/new` and restarts, without secrets) |
 | Ctrl-A / Ctrl-E, Home / End | Start / end of the line |
 | Alt-← / Alt-→, Ctrl-← / Ctrl-→, Alt-B / Alt-F | Word left / right |
-| Ctrl-W, Alt-Backspace, Ctrl-Backspace | Delete the word before the cursor |
-| Ctrl-K / Ctrl-U | Delete to the end / start of the line |
+| Ctrl-W, Alt-Backspace, Ctrl-Backspace | Cut the word before the cursor |
+| Ctrl-K / Ctrl-U | Cut to the end / start of the line |
+| Ctrl-Y | Put back what you cut last (cuts in a row, like Ctrl-W twice, come back together); Alt-Y right after swaps it for the cut before |
+| Ctrl-- (Ctrl-_) | Undo in the box: a run of typing or deleting, a paste, a cut or what you dictated at a time |
 | Ctrl-T | Talk instead of typing: press it again to stop, or hold it while you talk. What you said lands in the box at the cursor; Enter stops and sends at once, Esc drops it |
 | Ctrl-V | Add the picture on the clipboard (a screenshot, say) to your next message; files dragged into the window are added the same way |
 | Backspace, in an empty box | Take back the last file added |
@@ -265,7 +267,7 @@ its undo. They're in English for now.
 | Key | Action |
 | --- | --- |
 | Esc | Close the `/` menu; otherwise stop Kumi's answer (the steps it finished stay, waiting messages go back into the box); otherwise unpin the pinned device |
-| Ctrl-C | Stop Kumi's answer; when idle, clear the box; with an empty box, quit |
+| Ctrl-C | Stop Kumi's answer; when idle, clear the box (↑ or Ctrl-- brings the words back); with an empty box, quit |
 | Ctrl-B | Move the answer's slow step that doesn't use Live (a video, pages, the manual, your library) to the background as a job; the answer carries on. In tmux, press Ctrl-B twice |
 | Ctrl-D | Quit, when idle with an empty box |
 | Page Up / Page Down, mouse wheel | Scroll the conversation (the wheel over the tabs scrolls the tab); it stays put while new text arrives |

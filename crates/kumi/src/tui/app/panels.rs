@@ -163,25 +163,25 @@ impl TuiApp {
             return;
         }
         let index = index - 1;
-        let draft = state.recall.as_ref().map(|r| r.1.clone()).unwrap_or_else(|| state.editor.text());
+        // The draft is set aside the first time, with what undo can take back in it; a message shown since just goes.
+        let shown = state.editor.show(&entries[index]);
+        let draft = state.recall.take().map(|(_, draft)| draft).unwrap_or(shown);
         state.recall = Some((index, draft));
-        state.editor.set(&entries[index]);
         state.menu_dismissed = true;
     }
     pub(super) fn recall_newer(&self) {
         let entries = self.0.options.history.as_ref().map(|h| h.borrow().entries().to_vec()).unwrap_or_default();
         let mut state = self.0.state.borrow_mut();
-        let Some((index, draft)) = state.recall.clone() else {
+        let Some((index, draft)) = state.recall.take() else {
             return;
         };
         let index = index + 1;
         if index >= entries.len() {
-            state.editor.set(&draft);
-            state.recall = None;
+            state.editor.restore(draft);
             return;
         }
+        state.editor.show(&entries[index]);
         state.recall = Some((index, draft));
-        state.editor.set(&entries[index]);
         state.menu_dismissed = true;
     }
     pub(super) async fn open_memory(&self) -> Result<(), RuntimeError> {

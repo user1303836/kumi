@@ -78,6 +78,7 @@ impl TuiApp {
             self.0.scheduler.request();
             return;
         }
+        let typed = matches!(event, InputEvent::Text { .. });
         match event {
             InputEvent::Paste { text } if self.0.options.controller.has_attachments() && attach::pasted_files(&text).is_some() => {
                 // Files dragged in arrive as their paths: they go with the next message instead.
@@ -95,7 +96,13 @@ impl TuiApp {
                 self.0.tabs.leave();
                 let mut state = self.0.state.borrow_mut();
                 state.tree_cursor = None;
-                state.editor.insert(&sanitize_text(&text, &[]));
+                // A run of typing is one step to undo; a paste is one of its own.
+                let clean = sanitize_text(&text, &[]);
+                if typed {
+                    state.editor.type_text(&clean);
+                } else {
+                    state.editor.insert(&clean);
+                }
                 state.menu_dismissed = false;
             }
             InputEvent::Key { name, mods, .. } => self.key(&name, mods),
@@ -292,7 +299,7 @@ impl TuiApp {
             if self.busy() {
                 self.cancel();
             } else if !self.0.state.borrow().editor.is_empty() {
-                self.0.state.borrow_mut().editor.clear();
+                self.erase_draft();
             } else {
                 drop(self.finish(0, None));
             }
@@ -436,6 +443,21 @@ impl TuiApp {
             state.editor.end();
             return;
         }
+        // W5-2's keys, until W3-3's key registry takes them over: composer.undo (ctrl+-, which legacy terminals send
+        // as ctrl+_), composer.yank (ctrl+y) and alt+y, which swaps what ctrl+y put in for the cut before it.
+        if ctrl && matches!(name, "-" | "_") {
+            state.editor.undo();
+            return;
+        }
+        if ctrl && name == "y" {
+            state.editor.yank();
+            return;
+        }
+        if alt && name == "y" {
+            state.editor.yank_earlier();
+            return;
+        }
+        // End of W5-2's keys.
         if ctrl && name == "k" {
             state.editor.kill_to_end();
             return;
@@ -1093,6 +1115,21 @@ impl TuiApp {
     }
     fn clear_editor(&self) {
         self.0.state.borrow_mut().editor.clear();
+    }
+    /// ctrl+c on words not sent: they go into the history first, so ↑ brings them back, and the box empties as a step
+    /// ctrl+- takes back. An earlier message ↑ is showing, unchanged, is in the history already.
+    fn erase_draft(&self) {
+        let (text, shown) = {
+            let state = self.0.state.borrow();
+            (state.editor.text(), state.recall.as_ref().map(|(index, _)| *index))
+        };
+        if let Some(history) = &self.0.options.history {
+            let unchanged = shown.is_some_and(|index| history.borrow().entries().get(index) == Some(&text));
+            if !unchanged {
+                history.borrow_mut().add(&text);
+            }
+        }
+        self.0.state.borrow_mut().editor.erase();
     }
     /// /willington, with whether the bindings are on, while the bridge in Live carries Willington.
     fn willington(&self) -> Option<(kumi_daw::provider::Toggle, bool)> {

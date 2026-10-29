@@ -1,6 +1,13 @@
-//! The input box: text and cursor. Positions count graphemes, so the cursor never splits a character.
+//! The input box: text and cursor, the steps undo takes back, and what the cutting keys cut. Positions count graphemes,
+//! so the cursor never splits a character.
 
 use super::width::{cell_width, graphemes};
+
+/// How many steps undo keeps, and how much text they may hold between them (each step keeps the whole text).
+const STEPS: usize = 100;
+const STEP_BYTES: usize = 4 << 20;
+/// How many cuts ctrl+y and alt+y can bring back.
+const KILLS: usize = 10;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct EditorLayout {
@@ -15,10 +22,45 @@ struct Place {
     column: i32,
 }
 
+/// The text and cursor before a change: undo puts them back.
+#[derive(Clone, Debug)]
+struct Step {
+    text: String,
+    position: usize,
+}
+
+/// Changes that grow the newest step while each carries on where the last left the cursor.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Run {
+    Typing,
+    Deleting,
+}
+
+/// A draft set aside, with its cursor and its steps, while the producer looks back through what they sent.
+#[derive(Clone, Debug, Default)]
+pub struct Draft {
+    chars: Vec<String>,
+    position: usize,
+    steps: Vec<Step>,
+    bytes: usize,
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct Editor {
     chars: Vec<String>,
     position: usize,
+    /// What undo takes back, newest last, and the bytes of text they hold.
+    steps: Vec<Step>,
+    bytes: usize,
+    /// The run the newest step is still growing, and where its last change left the cursor.
+    run: Option<(Run, usize)>,
+    /// What the cutting keys cut, newest last.
+    kills: Vec<String>,
+    /// The last change was a cut, so the next cut joins it, as in the shells: ctrl+w three times, then ctrl+y, puts
+    /// back all three words.
+    killing: bool,
+    /// The cut ctrl+y (or alt+y) has just put in, which alt+y may swap.
+    yanked: Option<usize>,
 }
 
 fn is_space(grapheme: &str) -> bool {
@@ -42,53 +84,88 @@ impl Editor {
         self.chars.is_empty()
     }
 
+    /// Replaces the text, as one step, with the cursor at its end.
     pub fn set(&mut self, text: &str) {
-        self.chars = graphemes(text).into_iter().map(str::to_string).collect();
+        let chars: Vec<String> = graphemes(text).into_iter().map(str::to_string).collect();
+        if chars == self.chars {
+            self.moved();
+        } else {
+            self.change(None);
+            self.chars = chars;
+        }
         self.position = self.chars.len();
     }
 
+    /// Empties the box once its words are sent or held: the next draft starts with nothing to undo. What was cut stays.
     pub fn clear(&mut self) {
+        self.chars.clear();
+        self.position = 0;
+        self.steps.clear();
+        self.bytes = 0;
+        self.moved();
+    }
+
+    /// Empties the box as a step undo can take back.
+    pub fn erase(&mut self) {
+        if self.chars.is_empty() {
+            return;
+        }
+        self.change(None);
         self.chars.clear();
         self.position = 0;
     }
 
+    /// Puts a paste, dictated words or a new line in at the cursor: one step each.
     pub fn insert(&mut self, text: &str) {
-        let before = self.chars[..self.position].concat() + text;
-        // Re-segment, so a combining mark typed after a letter joins it.
-        let after = self.chars[self.position..].concat();
-        self.chars = graphemes(&(before.clone() + &after)).into_iter().map(str::to_string).collect();
-        self.position = graphemes(&before).len();
+        if text.is_empty() {
+            return;
+        }
+        self.change(None);
+        self.put(text);
     }
 
+    /// Puts typed text in at the cursor: a run of typing is one step.
+    pub fn type_text(&mut self, text: &str) {
+        if text.is_empty() {
+            return;
+        }
+        self.change(Some(Run::Typing));
+        self.put(text);
+        self.run = Some((Run::Typing, self.position));
+    }
+
+    /// One character back: a run of deleting is one step.
     pub fn backspace(&mut self) {
         if self.position == 0 {
             return;
         }
-        self.chars.remove(self.position - 1);
-        self.position -= 1;
+        self.change(Some(Run::Deleting));
+        self.splice(self.position - 1, self.position, "");
+        self.run = Some((Run::Deleting, self.position));
     }
 
     pub fn delete(&mut self) {
-        if self.position < self.chars.len() {
-            self.chars.remove(self.position);
+        if self.position == self.chars.len() {
+            return;
         }
+        self.change(Some(Run::Deleting));
+        self.splice(self.position, self.position + 1, "");
+        self.run = Some((Run::Deleting, self.position));
     }
 
     pub fn left(&mut self) {
         self.position = self.position.saturating_sub(1);
+        self.moved();
     }
 
     pub fn right(&mut self) {
         self.position = (self.position + 1).min(self.chars.len());
+        self.moved();
     }
 
     pub fn word_left(&mut self) {
-        while self.position > 0 && is_space(&self.chars[self.position - 1]) {
-            self.position -= 1;
-        }
-        while self.position > 0 && !is_space(&self.chars[self.position - 1]) {
-            self.position -= 1;
-        }
+        self.position = self.word_start();
+        self.moved();
     }
 
     pub fn word_right(&mut self) {
@@ -98,38 +175,96 @@ impl Editor {
         while self.position < self.chars.len() && !is_space(&self.chars[self.position]) {
             self.position += 1;
         }
+        self.moved();
     }
 
+    /// Cuts the word before the cursor.
     pub fn delete_word_left(&mut self) {
-        let end = self.position;
-        self.word_left();
-        self.chars.drain(self.position..end);
+        self.kill(self.word_start(), self.position);
     }
 
     pub fn home(&mut self) {
-        while self.position > 0 && self.chars[self.position - 1] != "\n" {
-            self.position -= 1;
-        }
+        self.position = self.line_start();
+        self.moved();
     }
 
     pub fn end(&mut self) {
-        while self.position < self.chars.len() && self.chars[self.position] != "\n" {
-            self.position += 1;
-        }
+        self.position = self.line_end();
+        self.moved();
     }
 
+    /// Cuts to the end of the line.
     pub fn kill_to_end(&mut self) {
-        let mut end = self.position;
-        while end < self.chars.len() && self.chars[end] != "\n" {
-            end += 1;
-        }
-        self.chars.drain(self.position..end);
+        self.kill(self.position, self.line_end());
     }
 
+    /// Cuts to the start of the line.
     pub fn kill_to_start(&mut self) {
-        let end = self.position;
-        self.home();
-        self.chars.drain(self.position..end);
+        self.kill(self.line_start(), self.position);
+    }
+
+    /// Puts the newest cut back in at the cursor, as a step. False when nothing was cut.
+    pub fn yank(&mut self) -> bool {
+        let Some(cut) = self.kills.last().cloned() else {
+            return false;
+        };
+        self.change(None);
+        self.put(&cut);
+        self.yanked = Some(self.kills.len() - 1);
+        true
+    }
+
+    /// Right after `yank`, puts the cut before the one it put in in its place, and round to the newest again; still one
+    /// step. False at any other time.
+    pub fn yank_earlier(&mut self) -> bool {
+        let Some(at) = self.yanked.filter(|_| self.kills.len() > 1) else {
+            return false;
+        };
+        // The newest step is the text as it was before the yank.
+        let Some(Step { text, position }) = self.steps.last().cloned() else {
+            return false;
+        };
+        let at = (at + self.kills.len() - 1) % self.kills.len();
+        self.chars = graphemes(&text).into_iter().map(str::to_string).collect();
+        self.position = position;
+        let cut = self.kills[at].clone();
+        self.put(&cut);
+        self.yanked = Some(at);
+        true
+    }
+
+    /// Takes back the newest step. False when there's none.
+    pub fn undo(&mut self) -> bool {
+        let Some(step) = self.steps.pop() else {
+            return false;
+        };
+        self.bytes -= step.text.len();
+        self.chars = graphemes(&step.text).into_iter().map(str::to_string).collect();
+        self.position = step.position;
+        self.moved();
+        true
+    }
+
+    /// Shows an earlier message in the box, with no steps of its own yet. The draft it replaces, steps and all, is
+    /// returned, to come back with `restore`.
+    pub fn show(&mut self, text: &str) -> Draft {
+        let draft = Draft {
+            chars: std::mem::replace(&mut self.chars, graphemes(text).into_iter().map(str::to_string).collect()),
+            position: self.position,
+            steps: std::mem::take(&mut self.steps),
+            bytes: std::mem::take(&mut self.bytes),
+        };
+        self.position = self.chars.len();
+        self.moved();
+        draft
+    }
+
+    pub fn restore(&mut self, draft: Draft) {
+        self.chars = draft.chars;
+        self.position = draft.position;
+        self.steps = draft.steps;
+        self.bytes = draft.bytes;
+        self.moved();
     }
 
     /// Rows as displayed at `width` cells (wrapping between characters), with the cursor's place.
@@ -154,7 +289,112 @@ impl Editor {
         let best = best.or_else(|| places.iter().position(|place| place.row == row));
         // TS: findIndex gives -1 when no place is on the row, which can't happen for a row the layout has.
         self.position = best.unwrap_or(0);
+        self.moved();
         true
+    }
+
+    /// Before each change: the text as it was becomes a step undo takes back, unless this change carries on the run of
+    /// typing or deleting that the newest step began, from where its last change left the cursor.
+    fn change(&mut self, run: Option<Run>) {
+        if run.is_none() || run.map(|run| (run, self.position)) != self.run {
+            let step = Step { text: self.chars.concat(), position: self.position };
+            self.bytes += step.text.len();
+            self.steps.push(step);
+            while self.steps.len() > STEPS || (self.bytes > STEP_BYTES && self.steps.len() > 1) {
+                self.bytes -= self.steps.remove(0).text.len();
+            }
+        }
+        self.moved();
+    }
+
+    /// The cursor moved or the text changed: a run of typing or deleting, a cut's joining and alt+y's turn end here.
+    fn moved(&mut self) {
+        self.run = None;
+        self.killing = false;
+        self.yanked = None;
+    }
+
+    /// Cuts `start..end`, as a step, into the kill ring, or onto its newest cut right after another cut: after it when
+    /// cutting forward, before it when cutting back.
+    fn kill(&mut self, start: usize, end: usize) {
+        if start >= end {
+            return;
+        }
+        let joins = self.killing;
+        let forward = start == self.position;
+        self.change(None);
+        let cut = self.chars[start..end].concat();
+        self.splice(start, end, "");
+        match self.kills.last_mut() {
+            Some(last) if joins => {
+                if forward {
+                    last.push_str(&cut);
+                } else {
+                    last.insert_str(0, &cut);
+                }
+            }
+            _ => {
+                self.kills.push(cut);
+                if self.kills.len() > KILLS {
+                    self.kills.remove(0);
+                }
+            }
+        }
+        self.killing = true;
+    }
+
+    /// Puts `text` in at the cursor and moves past it.
+    fn put(&mut self, text: &str) {
+        self.splice(self.position, self.position, text);
+    }
+
+    /// Replaces characters `from..to` with `text`, leaving the cursor just after it. The text stays split into the
+    /// characters a terminal draws, segmenting only around the change: the character before it, which may join what
+    /// comes next (a mark typed after a letter), and those after, as far as they change (flags' letters pair up anew to
+    /// the end of a run).
+    fn splice(&mut self, from: usize, to: usize, text: &str) {
+        let start = from.saturating_sub(1);
+        let head = self.chars[start..from].concat() + text;
+        let mut end = (to + 1).min(self.chars.len());
+        loop {
+            let window = head.clone() + &self.chars[to..end].concat();
+            let pieces: Vec<String> = graphemes(&window).into_iter().map(str::to_string).collect();
+            // Settled once the window ends on the very character that was there: what follows it can't change.
+            if end == self.chars.len() || pieces.last() == self.chars.get(end - 1) {
+                let cursor = start + graphemes(&head).len();
+                self.chars.splice(start..end, pieces);
+                self.position = cursor;
+                return;
+            }
+            end = (end + (end - to)).min(self.chars.len());
+        }
+    }
+
+    fn line_start(&self) -> usize {
+        let mut at = self.position;
+        while at > 0 && self.chars[at - 1] != "\n" {
+            at -= 1;
+        }
+        at
+    }
+
+    fn line_end(&self) -> usize {
+        let mut at = self.position;
+        while at < self.chars.len() && self.chars[at] != "\n" {
+            at += 1;
+        }
+        at
+    }
+
+    fn word_start(&self) -> usize {
+        let mut at = self.position;
+        while at > 0 && is_space(&self.chars[at - 1]) {
+            at -= 1;
+        }
+        while at > 0 && !is_space(&self.chars[at - 1]) {
+            at -= 1;
+        }
+        at
     }
 
     fn measure(&self, width: i32) -> (EditorLayout, Vec<Place>) {
