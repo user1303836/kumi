@@ -83,8 +83,16 @@ impl InputHistory {
         self.push(&kept, false);
     }
     fn push(&mut self, kept: &str, saved: bool) -> bool {
-        if kept.is_empty() || self.entries.last().is_some_and(|last| last == kept) {
+        if kept.is_empty() {
             return false;
+        }
+        if self.entries.last().is_some_and(|last| last == kept) {
+            // A draft kept from ctrl+c, now sent: it stays one entry, and is written now.
+            let unsaved = saved && self.saved.last() == Some(&false);
+            if unsaved {
+                *self.saved.last_mut().expect("an entry") = true;
+            }
+            return unsaved;
         }
         self.entries.push(kept.to_string());
         self.saved.push(saved);

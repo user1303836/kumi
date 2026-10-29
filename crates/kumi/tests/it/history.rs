@@ -84,4 +84,9 @@ fn a_draft_cleared_with_ctrl_c_is_kept_whole_while_kumi_runs_and_never_written()
     assert_eq!(saved.lines().count(), 499);
     assert_eq!(history.entries().len(), 500);
     assert_eq!(history.entries()[498], "cleared just before the file is compacted");
+    // A draft cleared, then brought back with ↑ and sent, is written then, and stays one entry.
+    history.keep("cleared, then sent");
+    history.add("cleared, then sent");
+    assert_eq!(history.entries().iter().filter(|entry| *entry == "cleared, then sent").count(), 1);
+    assert_eq!(open_input_history(Some(file.clone()), vec![]).entries().last().map(String::as_str), Some("cleared, then sent"));
 }
