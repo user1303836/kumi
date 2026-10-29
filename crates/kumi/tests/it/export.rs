@@ -388,6 +388,20 @@ fn the_page_draws_what_history_draws_from_a_record() {
     assert_eq!(picture_of(&record(json!({}))), None, "nothing to draw");
 }
 
+/// A note whose velocity alone changed, in the run that made it (#650): its start and length as Live keeps a triplet's
+/// (2.6666666666666665, 0.3333333333333333), and as the model's patch restated them (2.6667, 0.3333). The page draws
+/// the note once, kept, as it does from the saved record after a restart; not moved, with a ghost beside it.
+#[test]
+fn the_page_draws_a_note_whose_velocity_alone_changed_as_kept() {
+    let change: ChangeRecord = serde_json::from_value(json!({"id": "c1", "family": "clip", "title": "Bassline · velocity of 1 note",
+        "state": "applied", "at": 3, "picture": {"kind": "notes", "length": 4.0,
+            "before": [[2.6666666666666665, 36.0, 0.3333333333333333, 90.0]], "after": [[2.6667, 36.0, 0.3333, 110.0]]}}))
+    .unwrap();
+    let svg = picture_of(&change).unwrap();
+    assert_eq!(svg.matches("<rect").count(), 1, "{svg}");
+    assert!(svg.contains("<rect class=\"dim\"") && !svg.contains("class=\"ghost\""), "{svg}");
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn a_refused_import_leaves_nothing_behind() {
     let home = tempfile::tempdir().unwrap();
