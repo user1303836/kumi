@@ -129,12 +129,8 @@ case!(a_conversation_shown_again_tells_nothing_of_the_moment_it_happened, async 
         o.models = Some(models::FakeModels::catalog());
         o.terminal = Some(kumi::tui::alerts::TerminalProfile {
             status: true,
-            progress: false,
             notify: kumi::tui::alerts::NotifyChannel::Osc9,
-            tmux: false,
-            app_id: None,
-            images: false,
-            iterm: false,
+            ..kumi::tui::alerts::TerminalProfile::quiet()
         });
         o.alert_gap_ms = Some(60.);
     });

@@ -1442,6 +1442,7 @@ Kumi keeps everything in `~/.kumi`. `~/.kumi/settings.json` holds:
 | `copyOnSelect` | `false`: text you drag across in Kumi's window stays selected until Ctrl-C or right-click copies it, instead of copying as you let go |
 | `mouse` | `"off"`: Kumi leaves the mouse to the terminal (or tmux), whose own selection and copying then work; Page Up and Page Down scroll |
 | `transcriptOnQuit` | `false`: quitting doesn't print the conversation into the terminal's scrollback |
+| `fullRepaint` | `true`: Kumi writes every cell of its window each time something changes, for a terminal that draws only the changes wrongly. On by default in Windows Terminal, where `false` turns it off |
 
 `~/.kumi/slots.json` keeps the model slots you swapped (`/slots`),
 `~/.kumi/probes` what each knob was heard to do, by device and track, and

@@ -136,6 +136,8 @@ pub struct TuiOptions {
     pub whats_new: Option<crate::whats_new::News>,
     /// How this terminal shows Kumi's status and notifications; read from the environment when None.
     pub terminal: Option<TerminalProfile>,
+    /// Every cell written in each frame that changes (the `fullRepaint` setting); the terminal's own way when None.
+    pub full_repaint: Option<bool>,
     /// What the producer chose about being told while away from Kumi's window.
     pub away: AwaySettings,
     /// Runs the program that shows a desktop notification, for a terminal without its own; None runs it.
@@ -223,6 +225,7 @@ impl TuiOptions {
             map_hover: None,
             whats_new: None,
             terminal: None,
+            full_repaint: None,
             away: AwaySettings::default(),
             run_notifier: None,
             alert_gap_ms: None,
@@ -854,11 +857,16 @@ impl TuiApp {
             let tabs = TabPanel::new(tabs, active.as_deref(), options.panel_tab.as_ref().map(|p| p.save.clone()));
             let voice = options.voice.as_ref().map(|v| VoiceInput::new(v.clone(), Rc::new(AppVoice(weak.clone()))));
             let (done, _) = watch::channel(None);
+            // Links open where an OSC is safe to send, as the status is.
+            let renderer = Renderer::new(depth)
+                .full_repaint(options.full_repaint.unwrap_or(profile.repaint))
+                .erasing(profile.erase)
+                .linking(profile.status);
             Inner {
                 state: RefCell::new(State::new(&options)),
                 options,
                 tty,
-                renderer: RefCell::new(Renderer::new(depth)),
+                renderer: RefCell::new(renderer),
                 screen: RefCell::new(None),
                 marks: RefCell::default(),
                 scheduler,

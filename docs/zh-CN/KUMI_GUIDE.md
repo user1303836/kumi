@@ -583,6 +583,7 @@ Kumi 把一切都保存在 `~/.kumi` 中。`~/.kumi/settings.json` 包含：
 | `copyOnSelect` | `false`：在 Kumi 窗口中拖过的文字松开时不复制，而是保持选中，直到按 Ctrl-C 或右键复制 |
 | `mouse` | `"off"`：把鼠标交给终端（或 tmux），使用终端自己的选择和复制；Page Up 和 Page Down 滚动 |
 | `transcriptOnQuit` | `false`：退出时不把对话打印到终端的回滚记录中 |
+| `fullRepaint` | `true`：每当有变化，Kumi 都重写窗口中的每个单元格，适用于只绘制变化部分会出错的终端。在 Windows Terminal 中默认开启，设为 `false` 即关闭 |
 
 `~/.kumi/slots.json` 保存你替换过的模型槽位（`/slots`），`~/.kumi/probes` 按设备和轨道保存每个旋钮起过的作用，`~/.kumi/models` 保存模型运行时和 Kumi 自己的模型，`~/.kumi/cache/models-catalog.json` 保存 models.dev 目录的最新副本。四者都跟随 `KUMI_HOME`。
 
