@@ -22,7 +22,9 @@
 
 use crate::{
     core::{
-        contracts::{KernelCheckpoint, KernelEvent, PinnedNode, SavedConversation, SessionEvent, TranscriptLine, TranscriptRole, TurnState},
+        contracts::{
+            KernelCheckpoint, KernelEvent, PinnedNode, SavedConversation, SessionEvent, TranscriptLine, TranscriptRole, TurnState,
+        },
         conversations::{is_conversation_id, write_privately},
     },
     kernel::budget::{transcript_of, OBSERVATION_MARKER},
