@@ -265,22 +265,73 @@ async fn this_computer_is_reached_directly_and_socks_proxies_work() {
     assert_eq!(*asked.lock().unwrap(), ["kumi-socks.test"], "the proxy looked the name up");
 }
 
-/// The access method an authority information access names a certificate's issuer by (caIssuers), as DER.
-const CA_ISSUERS: [u8; 10] = [0x06, 0x08, 0x2B, 0x06, 0x01, 0x05, 0x05, 0x07, 0x30, 0x02];
+/// The extension that says where a certificate's issuer can be fetched (authority information access), and its access
+/// method for the issuer itself (caIssuers): their object identifiers, as DER holds them.
+const AUTHORITY_INFORMATION_ACCESS: [u8; 8] = [0x2B, 0x06, 0x01, 0x05, 0x05, 0x07, 0x01, 0x01];
+const CA_ISSUERS: [u8; 8] = [0x2B, 0x06, 0x01, 0x05, 0x05, 0x07, 0x30, 0x02];
 
 /// Authority information access: where a certificate's issuer can be fetched, as one names it (caIssuers).
 fn issuer_at(url: &str) -> rcgen::CustomExtension {
+    let method = [&[0x06, CA_ISSUERS.len() as u8][..], &CA_ISSUERS].concat();
     let location = [&[0x86, url.len() as u8][..], url.as_bytes()].concat();
-    let description = [&[0x30, (CA_ISSUERS.len() + location.len()) as u8][..], &CA_ISSUERS, &location].concat();
+    let description = [&[0x30, (method.len() + location.len()) as u8][..], &method, &location].concat();
     let content = [&[0x30, description.len() as u8][..], &description].concat();
     rcgen::CustomExtension::from_oid_content(&[1, 3, 6, 1, 5, 5, 7, 1, 1], content)
 }
 
-/// The address a certificate names for its issuer, read from it as [`issuer_at`] writes it.
+/// One DER element off the front of `bytes`: its tag, its contents and what follows it. None when its length doesn't
+/// fit in what's there.
+fn element(bytes: &[u8]) -> Option<(u8, &[u8], &[u8])> {
+    let (&tag, rest) = bytes.split_first()?;
+    let (&first, rest) = rest.split_first()?;
+    let (length, rest) = match first {
+        0x00..=0x7F => (usize::from(first), rest),
+        0x81..=0x84 => {
+            let (length, rest) = rest.split_at_checked(usize::from(first & 0x7F))?;
+            (length.iter().fold(0, |length, byte| length << 8 | usize::from(*byte)), rest)
+        }
+        _ => return None,
+    };
+    let (contents, rest) = rest.split_at_checked(length)?;
+    Some((tag, contents, rest))
+}
+
+/// The DER elements that fill `bytes` exactly, as (tag, contents): None when they don't.
+fn elements(mut bytes: &[u8]) -> Option<Vec<(u8, &[u8])>> {
+    let mut found = Vec::new();
+    while !bytes.is_empty() {
+        let (tag, contents, rest) = element(bytes)?;
+        found.push((tag, contents));
+        bytes = rest;
+    }
+    Some(found)
+}
+
+/// The address a certificate names for its issuer, read as a verifier reads it: element by element, each length
+/// checked, from the certificate to its authority information access and that extension's caIssuers location. None for
+/// a certificate whose extension a verifier would skip.
 fn named_issuer(certificate: &[u8]) -> Option<String> {
-    let at = certificate.windows(CA_ISSUERS.len()).position(|bytes| bytes == CA_ISSUERS)? + CA_ISSUERS.len();
-    let (&[0x86, length], rest) = certificate.get(at..)?.split_first_chunk::<2>()? else { return None };
-    String::from_utf8(rest.get(..usize::from(length))?.to_vec()).ok()
+    let [(0x30, certificate)] = elements(certificate)?[..] else { return None };
+    let (0x30, signed) = *elements(certificate)?.first()? else { return None };
+    // The extensions are the [3] of what's signed.
+    let (_, extensions) = elements(signed)?.into_iter().find(|(tag, _)| *tag == 0xA3)?;
+    let [(0x30, extensions)] = elements(extensions)?[..] else { return None };
+    for (_, extension) in elements(extensions)? {
+        // Its identifier, whether it's critical, and its value.
+        let ([(0x06, id), (0x04, value)] | [(0x06, id), (0x01, _), (0x04, value)]) = elements(extension)?[..] else { return None };
+        if id != AUTHORITY_INFORMATION_ACCESS {
+            continue;
+        }
+        let [(0x30, descriptions)] = elements(value)?[..] else { return None };
+        for (_, description) in elements(descriptions)? {
+            if let [(0x06, method), (0x86, location)] = elements(description)?[..] {
+                if method == CA_ISSUERS {
+                    return String::from_utf8(location.to_vec()).ok();
+                }
+            }
+        }
+    }
+    None
 }
 
 /// A certificate check that follows the issuer a certificate names, as the system's does on macOS: it asks that address
@@ -300,6 +351,8 @@ impl ServerCertVerifier for FollowsIssuer {
         let address = named_issuer(end_entity);
         if let Some((host, path)) = address.as_deref().and_then(|address| address.strip_prefix("http://")?.split_once('/')) {
             if let Ok(mut stream) = TcpStream::connect(host) {
+                // An issuer's server that never answers fails the test rather than holding it.
+                let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
                 let _ = write!(stream, "GET /{path} HTTP/1.1\r\nhost: {host}\r\nconnection: close\r\n\r\n");
                 let _ = stream.read_to_end(&mut Vec::new());
             }
