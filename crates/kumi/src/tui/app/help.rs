@@ -320,6 +320,10 @@ impl Overlay<TuiApp> for HelpPanel {
     fn hint(&self, _: &TuiApp) -> String {
         "↑↓ to scroll · esc to close".into()
     }
+    fn scroll(&mut self, _: &TuiApp, rows: i32) -> bool {
+        self.scroll = (self.scroll + rows).clamp(0, self.most);
+        true
+    }
 }
 
 #[cfg(test)]

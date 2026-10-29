@@ -571,4 +571,8 @@ impl Overlay<TuiApp> for JobPanel {
     fn hint(&self, _: &TuiApp) -> String {
         "↑↓ to scroll · x stops it · r runs it again · c copies · esc to close".into()
     }
+    fn scroll(&mut self, _: &TuiApp, rows: i32) -> bool {
+        self.scroll = (self.scroll + rows).max(0);
+        true
+    }
 }

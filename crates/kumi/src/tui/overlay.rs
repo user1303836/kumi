@@ -49,6 +49,11 @@ pub trait Overlay<App>: Any {
     fn busy(&self, _app: &App) -> bool {
         false
     }
+    /// The mouse wheel while it's the top one: `rows` down, or up when negative. True when it scrolled; otherwise what's
+    /// under it scrolls, as without it.
+    fn scroll(&mut self, _app: &App, _rows: i32) -> bool {
+        false
+    }
 }
 
 impl<App: 'static> dyn Overlay<App> {

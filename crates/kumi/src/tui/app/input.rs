@@ -106,7 +106,7 @@ impl TuiApp {
                 let up = direction == Some(WheelDirection::Up);
                 if area.is_some_and(|a| x >= a.x - 2 && x < a.x + a.width + 2 && y >= a.y && y < a.y + a.height) {
                     self.0.tabs.scroll_by(if up { -3 } else { 3 });
-                } else {
+                } else if !self.scroll_overlay(if up { -3 } else { 3 }) {
                     self.scroll_by(if up { 3 } else { -3 });
                 }
             }

@@ -1311,6 +1311,11 @@ impl TuiApp {
         self.0.scheduler.request();
         overlay
     }
+    /// The wheel away from the tabs scrolls the top overlay, when it's one that scrolls: true when it did.
+    pub(super) fn scroll_overlay(&self, rows: i32) -> bool {
+        let top = self.0.state.borrow().overlays.top();
+        top.is_some_and(|top| top.borrow_mut().scroll(self, rows))
+    }
     /// Closes the top overlay.
     pub(super) fn close_panel(&self) {
         let top = self.0.state.borrow().overlays.top();
@@ -2339,6 +2344,10 @@ impl Overlay<TuiApp> for AsidePanel {
     }
     fn hint(&self, _: &TuiApp) -> String {
         "↑↓ to scroll · c copies · esc to close".into()
+    }
+    fn scroll(&mut self, _: &TuiApp, rows: i32) -> bool {
+        self.scroll = (self.scroll + rows).max(0);
+        true
     }
     /// A side question still being answered stops (unless Kumi, closing, stopped it already).
     fn closed(&mut self, app: &TuiApp) {
