@@ -197,6 +197,43 @@ fn compacted(chars: &[String], chips: &[Chip]) -> Composed {
     Composed { chars, chips: kept.into_iter().map(|(_, chip)| chip).collect() }
 }
 
+/// What a cutting key cut: its text, each chip in it as a character standing for its copy in `chips` (`CHIP` onwards),
+/// since the ring outlives the draft its chips belong to.
+#[derive(Clone, Debug, Default)]
+struct Cut {
+    text: String,
+    chips: Vec<Chip>,
+}
+
+impl Cut {
+    /// The bytes of text it holds, each chip's whole paste among them.
+    fn bytes(&self) -> usize {
+        self.text.len() + self.chips.iter().map(|chip| chip.text.len()).sum::<usize>()
+    }
+}
+
+/// Characters as one text, each chip among them standing now for a copy of it put in `kept`, numbered on from those
+/// already there; past the plane's end, a chip is all it holds.
+fn marked(graphemes: &[String], chips: &[Chip], kept: &mut Vec<Chip>) -> String {
+    let mut text = String::new();
+    for grapheme in graphemes {
+        match chip_of(chips, grapheme) {
+            Some((chip, rest)) => {
+                match char::from_u32(CHIP + kept.len() as u32).filter(|mark| (*mark as u32) <= 0x10_fffd) {
+                    Some(mark) => {
+                        kept.push(chip.clone());
+                        text.push(mark);
+                    }
+                    None => text.push_str(&chip.text),
+                }
+                text.push_str(rest);
+            }
+            None => text.push_str(grapheme),
+        }
+    }
+    text
+}
+
 /// A draft set aside, with its cursor, its steps and its chips, while the producer looks back through what they sent.
 #[derive(Clone, Debug, Default)]
 pub struct Draft {
@@ -216,8 +253,8 @@ pub struct Editor {
     bytes: usize,
     /// The run the newest step is still growing, and where its last change left the cursor.
     run: Option<(Run, usize)>,
-    /// What the cutting keys cut, newest last.
-    kills: Vec<String>,
+    /// What the cutting keys cut, newest last, with the chips they cut.
+    kills: Vec<Cut>,
     /// The last change was a cut, so the next cut joins it, as in the shells: ctrl+w three times, then ctrl+y, puts
     /// back all three words.
     killing: bool,
@@ -498,7 +535,7 @@ impl Editor {
             return false;
         };
         self.change(None);
-        self.put_pasted(&cut);
+        self.put_cut(&cut);
         self.yanked = Some(self.kills.len() - 1);
         true
     }
@@ -517,7 +554,7 @@ impl Editor {
         self.chars = graphemes(&text).into_iter().map(str::to_string).collect();
         self.position = position;
         let cut = self.kills[at].clone();
-        self.put_pasted(&cut);
+        self.put_cut(&cut);
         self.yanked = Some(at);
         true
     }
@@ -624,20 +661,17 @@ impl Editor {
         let joins = self.killing;
         let forward = start == self.position;
         self.change(None);
-        // A chip is cut as all it holds: the ring outlives the draft its chips belong to.
-        let cut = self.whole(&self.chars[start..end]);
-        self.splice(start, end, "");
-        match self.kills.last_mut() {
-            Some(last) if joins => {
-                if forward {
-                    last.push_str(&cut);
-                } else {
-                    last.insert_str(0, &cut);
-                }
-            }
-            _ => self.kills.push(cut),
+        let mut cut = if joins { self.kills.pop().unwrap_or_default() } else { Cut::default() };
+        // A chip is cut as a copy, to come back as a chip: the ring outlives the draft its chips belong to.
+        let text = marked(&self.chars[start..end], &self.chips, &mut cut.chips);
+        if forward {
+            cut.text.push_str(&text);
+        } else {
+            cut.text.insert_str(0, &text);
         }
-        while self.kills.len() > KILLS || (self.kills.len() > 1 && self.kills.iter().map(String::len).sum::<usize>() > KILL_BYTES) {
+        self.splice(start, end, "");
+        self.kills.push(cut);
+        while self.kills.len() > KILLS || (self.kills.len() > 1 && self.kills.iter().map(Cut::bytes).sum::<usize>() > KILL_BYTES) {
             self.kills.remove(0);
         }
         self.killing = true;
@@ -651,14 +685,41 @@ impl Editor {
     /// Puts a paste in at the cursor: as one chip when it's long (see `paste`).
     fn put_pasted(&mut self, text: &str) {
         let (lines, characters) = (text.lines().count(), text.chars().count());
-        let mark = char::from_u32(CHIP + self.chips.len() as u32).filter(|mark| (*mark as u32) <= 0x10_fffd);
-        match mark.filter(|_| lines > CHIP_LINES || characters > CHIP_CHARACTERS) {
+        if lines > CHIP_LINES || characters > CHIP_CHARACTERS {
+            let label = if lines > 1 { format!("[pasted {lines} lines]") } else { format!("[pasted {characters} characters]") };
+            self.put_chip(Chip { text: text.to_string(), label, reference: None });
+        } else {
+            self.put(text);
+        }
+    }
+
+    /// Puts a chip in at the cursor as the one character it stands as; past the plane's end, as all it holds.
+    fn put_chip(&mut self, chip: Chip) {
+        match char::from_u32(CHIP + self.chips.len() as u32).filter(|mark| (*mark as u32) <= 0x10_fffd) {
             Some(mark) => {
-                let label = if lines > 1 { format!("[pasted {lines} lines]") } else { format!("[pasted {characters} characters]") };
-                self.chips.push(Chip { text: text.to_string(), label, reference: None });
+                self.chips.push(chip);
                 self.splice(self.position, self.position, &mark.to_string());
             }
-            None => self.put(text),
+            None => self.put(&chip.text),
+        }
+    }
+
+    /// Puts a cut back in at the cursor: its words as a paste (a long run of them as a chip), and its chips as chips
+    /// again.
+    fn put_cut(&mut self, cut: &Cut) {
+        let mut from = 0;
+        for (at, character) in cut.text.char_indices() {
+            let Some(chip) = (character as u32).checked_sub(CHIP).and_then(|chip| cut.chips.get(chip as usize)) else {
+                continue;
+            };
+            if from < at {
+                self.put_pasted(&cut.text[from..at]);
+            }
+            self.put_chip(chip.clone());
+            from = at + character.len_utf8();
+        }
+        if from < cut.text.len() {
+            self.put_pasted(&cut.text[from..]);
         }
     }
 
