@@ -5,7 +5,7 @@ use super::{
     fold::fold_tracks,
     inference::no_access,
     more_changes::{set_meter, set_scale},
-    pins::pin_context,
+    pins::{in_model, pin_context, reference_context, track_now, InModel},
     project,
     references::{Moved, Shift},
     remember::{CurrentProject, ExportMark, Remember},
@@ -41,6 +41,9 @@ use std::{
     time::UNIX_EPOCH,
 };
 const MIXER_TRACKS: usize = 64;
+/// The most tracks a message's `@` references make Kumi read the device tree of, to find a device the Set's model
+/// doesn't hold (deeper in its racks, or moved): the selected track's first. One past them is told by its name.
+const REFERENCE_TREES: usize = 4;
 /// The kept devices are reused for this long after they were read whole (or checked by the backstop), and older ones
 /// are read whole again: Live tells of no device renamed or rack edited.
 const REUSE_MS: i64 = 60_000;
@@ -114,6 +117,8 @@ pub struct Observer {
     previous: RefCell<Option<Previous>>,
     /// The Set as the last observation read it.
     model: RefCell<Rc<SetModel>>,
+    /// The selected track's name as the last look read it: what `@` offers first.
+    selected_track: RefCell<Option<String>>,
     /// The Set's devices kept between turns.
     devices: Rc<RefCell<Devices>>,
     /// The Set's name, tempo, meter and scale as the last observation read them, for its fingerprint.
@@ -129,6 +134,7 @@ impl Observer {
             last_track_count: Cell::new(0),
             previous: RefCell::new(None),
             model: RefCell::new(Rc::new(SetModel::default())),
+            selected_track: RefCell::new(None),
             devices: Rc::new(RefCell::new(Devices::default())),
             song: RefCell::new(None),
         }
@@ -136,6 +142,10 @@ impl Observer {
     /// The Set as the last observation read it: its tracks and their devices, found by id or name.
     pub fn model(&self) -> Rc<SetModel> {
         self.model.borrow().clone()
+    }
+    /// The selected track's name as the last look read it.
+    pub fn selected_track(&self) -> Option<String> {
+        self.selected_track.borrow().clone()
     }
     /// The Set's fingerprint, as Kumi logs it with the producer's reactions (`fingerprint_of`).
     pub fn fingerprint(&self) -> Option<Value> {
@@ -621,6 +631,8 @@ impl Observer {
                 ))
             })();
 
+            *self.selected_track.borrow_mut() =
+                selected.as_ref().and_then(|s| s.get("track")).and_then(|t| t.get("name")).and_then(Value::as_str).map(str::to_owned);
             connection.notify_connected();
             let restored = host.restore_after_crash(&identity, row.get("filePath").and_then(Value::as_str), signal.clone()).await?;
             connection.assert_lease(lease, &signal)?;
@@ -666,6 +678,40 @@ impl Observer {
                 None
             };
             connection.assert_lease(lease, &signal)?;
+            // What the message names with `@`, each told as a pin is, checked against this look's model. A device the
+            // model doesn't hold (deeper in its racks, or moved) is looked for in its track's tree, read under the track's
+            // ref now, for at most REFERENCE_TREES tracks (the selected one's first).
+            let named = hints.as_ref().map(|hints| hints.references.as_slice()).unwrap_or_default();
+            let mut references: Vec<Value> = Vec::with_capacity(named.len());
+            if !named.is_empty() {
+                let model = self.model();
+                let selected_track = selected.as_ref().and_then(|s| s.get("track")).and_then(|t| t.get("name")).and_then(Value::as_str);
+                let mut unfound: Vec<(&str, String)> = named
+                    .iter()
+                    .filter(|reference| reference.node != PinKind::Track && in_model(&model, reference) == InModel::Missing)
+                    .filter_map(|reference| {
+                        let track = reference.track.as_deref()?;
+                        Some((track, track_now(&model, &reference.track_ref, track)?.reference.clone()))
+                    })
+                    .collect();
+                // The selected track's first, each track once.
+                unfound.sort_by(|a, b| (Some(a.0) != selected_track, &a.1).cmp(&(Some(b.0) != selected_track, &b.1)));
+                unfound.dedup_by(|a, b| a.1 == b.1);
+                let mut trees: HashMap<String, DeviceTree> = HashMap::new();
+                // (by the track's ref now: two tracks of one name each have their own)
+                for (_, track_ref) in unfound.into_iter().take(REFERENCE_TREES) {
+                    if let Ok(Some(tree)) = views::device_tree(connection.as_ref(), &track_ref, signal.clone()).await {
+                        trees.insert(track_ref, tree);
+                    }
+                }
+                connection.assert_lease(lease, &signal)?;
+                let mut book = connection.references.borrow_mut();
+                for reference in named {
+                    let track_ref = reference.track.as_deref().and_then(|track| track_now(&model, &reference.track_ref, track));
+                    let tree = track_ref.and_then(|track| trees.get(&track.reference));
+                    references.push(Value::Object(reference_context(reference, tree, &model, &mut book)));
+                }
+            }
 
             // The saved Set's project: decided once for a Set at a path, from the id kept inside it.
             let known_project = project.as_ref().filter(|p| p.identity == identity && p.path == path).and_then(|p| p.project.clone());
@@ -733,6 +779,15 @@ impl Observer {
             }
             if let Some(pin) = hints.as_ref().and_then(|h| h.pinned.as_ref()) {
                 focus_refs.insert(connection.references.borrow_mut().short_ref(&pin.track_ref));
+            }
+            // A track named with `@`, or one a device named is on, is shown whole as the selected one is.
+            for reference in &references {
+                let track = reference.get("track").or_else(|| reference.get("name").filter(|_| reference["kind"] == "track"));
+                if let Some(track) = track.and_then(Value::as_str) {
+                    if let [found] = self.model().tracks_named(track).as_slice() {
+                        focus_refs.insert(connection.references.borrow_mut().short_ref(&found.reference));
+                    }
+                }
             }
             let changes = host.changes();
             let recent: IndexSet<_> =
@@ -805,6 +860,9 @@ impl Observer {
             }
             if let Some(pinned) = pinned {
                 context.insert("pinned".into(), Value::Object(pinned));
+            }
+            if !references.is_empty() {
+                context.insert("references".into(), Value::Array(references));
             }
             if let Some(selected) = selected {
                 context.insert("selectedInLive".into(), Value::Object(selected));

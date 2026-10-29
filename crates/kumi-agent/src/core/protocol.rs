@@ -36,6 +36,30 @@ use kumi_listening::{music::learning::Music, slots::Said};
 use kumi_types::contracts::*;
 use kumi_types::errors::RuntimeError;
 
+/// The most a message the producer sends holds, in bytes: a paste of 2,000 lines (a log, a lyric sheet) fits. With the
+/// observation and the answer's reads it still fits the kernel's default budget (400 KB), which clears earlier exchanges
+/// to make room, and a saved conversation keeps it with its answer (the last exchange, up to 1 MB). A front end says so
+/// before sending more, and the session refuses it.
+pub const MAX_MESSAGE: usize = 256 * 1024;
+
+/// A size as a message's limit is said: KB, or MB from one.
+pub fn size_words(bytes: u64) -> String {
+    if bytes >= 1024 * 1024 {
+        format!("{:.1} MB", bytes as f64 / (1024.0 * 1024.0))
+    } else {
+        format!("{} KB", bytes.div_ceil(1024))
+    }
+}
+
+/// What a message past [`MAX_MESSAGE`] is told.
+pub fn too_long_words(bytes: usize) -> String {
+    format!(
+        "This message is {}, and one message takes up to {}: send part of it.",
+        size_words(bytes as u64),
+        size_words(MAX_MESSAGE as u64)
+    )
+}
+
 /// What a session can do, so a front end offers only that. A session's stay as they are while it runs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

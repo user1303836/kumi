@@ -170,8 +170,13 @@ impl TuiApp {
             return;
         }
         let index = index - 1;
-        // The draft is set aside the first time, with what undo can take back in it; a message shown since just goes.
-        let shown = state.editor.show(&entries[index]);
+        // The draft is set aside the first time, with what undo can take back in it; a message shown since just goes. One
+        // sent with chips this run comes back with them.
+        let words = state.sent_words.iter().rev().find(|(kept, _)| *kept == entries[index]).map(|(_, words)| words.clone());
+        let shown = match words {
+            Some(words) => state.editor.show_composed(&words),
+            None => state.editor.show(&entries[index]),
+        };
         let draft = state.recall.take().map(|(_, draft)| draft).unwrap_or(shown);
         state.recall = Some((index, draft));
         state.menu_dismissed = true;
@@ -187,7 +192,11 @@ impl TuiApp {
             state.editor.restore(draft);
             return;
         }
-        state.editor.show(&entries[index]);
+        let words = state.sent_words.iter().rev().find(|(kept, _)| *kept == entries[index]).map(|(_, words)| words.clone());
+        match words {
+            Some(words) => state.editor.show_composed(&words),
+            None => state.editor.show(&entries[index]),
+        };
         state.recall = Some((index, draft));
         state.menu_dismissed = true;
     }

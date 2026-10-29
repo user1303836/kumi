@@ -11,7 +11,11 @@ use super::*;
 use crate::text::{library_line, remembered_line};
 use base64::Engine;
 use kumi_agent::core::commands::{self, Command, Effect, Found, Now, Why};
+use kumi_agent::core::protocol::{too_long_words, MAX_MESSAGE};
 use std::task::{Context, Poll};
+
+/// How many messages sent with chips are kept, by their history entry, for ↑ to bring back as chips.
+const SENT_WORDS_KEPT: usize = 20;
 
 impl TuiApp {
     pub(super) fn on_input(&self, event: InputEvent) {
@@ -23,6 +27,12 @@ impl TuiApp {
             self.window_focus(focused);
             return;
         }
+        // esc esc: when the first esc came, ended by whatever else the producer does (letting a key go or moving the
+        // mouse does nothing). Only an esc that reaches the box's keys can be the second.
+        let escaped = match event {
+            InputEvent::Release { .. } | InputEvent::Mouse { action: MouseAction::Move, .. } => None,
+            _ => self.0.state.borrow_mut().escaped.take(),
+        };
         // Someone's there: Kumi doesn't answer its own question for them.
         if matches!(event, InputEvent::Key { .. } | InputEvent::Text { .. } | InputEvent::Paste { .. } | InputEvent::Mouse { .. }) {
             self.stop_answer_countdown();
@@ -101,7 +111,8 @@ impl TuiApp {
             }
             // End of the help's typed key.
             InputEvent::Text { text } | InputEvent::Paste { text } => self.type_into_box(&text, typed),
-            InputEvent::Key { name, mods, .. } => self.key(&name, mods),
+            // (a key held down isn't pressed twice)
+            InputEvent::Key { name, mods, repeat } => self.key(&name, mods, escaped.filter(|_| !repeat)),
             InputEvent::Mouse { action: MouseAction::Wheel, direction, x, y, .. } => {
                 let area = self.0.state.borrow().tabs_area;
                 let up = direction == Some(WheelDirection::Up);
@@ -290,7 +301,8 @@ impl TuiApp {
         self.toast(&copied_words(text, here, self.0.profile.iterm), NoticeTone::Info);
         true
     }
-    fn key(&self, name: &str, mods: Modifiers) {
+    /// A key the box and the conversation take, `escaped` when an esc that did nothing else came just before it.
+    fn key(&self, name: &str, mods: Modifiers, escaped: Option<f64>) {
         let Modifiers { ctrl, alt, shift } = mods;
         if let Some(voice) = &self.0.voice {
             if voice.active() {
@@ -384,14 +396,19 @@ impl TuiApp {
         if name == "tab" && menu.is_empty() && !ctrl && !alt && self.busy() {
             let raw = self.composed();
             if !raw.is_empty() && !is_command(string::trim(&raw)) {
-                if let Some(history) = &self.0.options.history {
-                    history.borrow_mut().add(&raw);
+                if self.too_long(&raw) {
+                    return;
                 }
+                let (shown, words) = {
+                    let state = self.0.state.borrow();
+                    (state.editor.shown(), state.editor.composed())
+                };
+                self.remember_sent(&raw, &words);
                 let mut state = self.0.state.borrow_mut();
                 state.recall = None;
                 state.editor.clear();
                 drop(state);
-                self.hold(raw, "after");
+                self.hold(raw, shown, words, "after");
                 return;
             }
         }
@@ -455,6 +472,9 @@ impl TuiApp {
                 self.cancel();
             } else if self.0.state.borrow().pinned.is_some() {
                 self.unpin();
+            } else {
+                // Only an esc that did nothing else is half of esc esc.
+                self.escaped(escaped);
             }
             return;
         }
@@ -532,9 +552,9 @@ impl TuiApp {
         }
         if alt && name == "up" {
             if let Some(at) = state.held.iter().rposition(|h| !h.taken) {
+                // Back above the draft as the box held it, chips and all.
                 let item = state.held.remove(at);
-                let text = if state.editor.is_empty() { item.text } else { format!("{}\n{}", item.text, state.editor.text()) };
-                state.editor.set(&text);
+                state.editor.put_back(&[item.words]);
                 state.recall = None;
                 return;
             }
@@ -667,18 +687,46 @@ impl TuiApp {
     fn composed(&self) -> String {
         sanitize_text(&self.0.state.borrow().editor.expanded(), &[])
     }
+    /// Into the history, and, with chips, kept by its entry for ↑ to bring back as chips (this run's newest).
+    fn remember_sent(&self, raw: &str, words: &Composed) {
+        let Some(history) = &self.0.options.history else { return };
+        history.borrow_mut().add(raw);
+        if !words.has_chips() {
+            return;
+        }
+        let Some(entry) = history.borrow().entries().last().cloned() else { return };
+        let mut state = self.0.state.borrow_mut();
+        state.sent_words.retain(|(kept, _)| *kept != entry);
+        if state.sent_words.len() >= SENT_WORDS_KEPT {
+            state.sent_words.remove(0);
+        }
+        state.sent_words.push((entry, words.clone()));
+    }
+    /// Whether a message is past what the session takes at once: then it's said so, and the box keeps it.
+    fn too_long(&self, raw: &str) -> bool {
+        if raw.len() <= MAX_MESSAGE {
+            return false;
+        }
+        self.notice(&too_long_words(raw.len()), NoticeTone::Warn);
+        true
+    }
     pub(super) async fn submit(&self) -> Result<(), RuntimeError> {
         let raw = self.composed();
         // The conversation shows a long paste as its chip and the start of its first line; the model gets all of it.
-        let shown = self.0.state.borrow().editor.shown();
+        let (shown, words) = {
+            let state = self.0.state.borrow();
+            (state.editor.shown(), state.editor.composed())
+        };
         let command = string::trim(&raw);
         if command.is_empty() {
             return Ok(());
         }
-        let session = self.session();
-        if let Some(history) = &self.0.options.history {
-            history.borrow_mut().add(&raw);
+        // A message past what the session takes stays in the box, said so, rather than sent to be refused.
+        if !is_command(command) && self.too_long(&raw) {
+            return Ok(());
         }
+        let session = self.session();
+        self.remember_sent(&raw, &words);
         self.0.state.borrow_mut().recall = None;
         let goal_running = {
             let state = self.0.state.borrow();
@@ -1046,7 +1094,7 @@ impl TuiApp {
                         "after"
                     }
                 };
-                self.hold(raw, when);
+                self.hold(raw, shown, words, when);
                 return Ok(());
             }
             effect @ (Effect::PauseGoal | Effect::PauseLoop) => {
@@ -1230,6 +1278,7 @@ impl TuiApp {
                     let mut state = self.0.state.borrow_mut();
                     state.transcript.add(Entry::User { text });
                     state.last_sent = Some(raw.clone());
+                    state.last_words = Some(words.clone());
                 }
                 if self.instant(&raw).await {
                     return Ok(());
@@ -1495,96 +1544,6 @@ impl TuiApp {
         }
         self.0.state.borrow_mut().undoing = false;
         self.0.scheduler.request();
-    }
-    /// /takeback: the producer's last request taken back, or their last `words` of them. Kumi undoes their changes newest
-    /// first and puts the earliest one's words back in the box.
-    pub(super) async fn take_back(&self, words: &str) {
-        if self.0.state.borrow().closing || self.0.state.borrow().undoing {
-            return;
-        }
-        if !self.can().take_back {
-            self.notice("Kumi can't take requests back here: this conversation isn't kept.", NoticeTone::Info);
-            return;
-        }
-        if self.busy() {
-            self.notice("Kumi is still working. Press esc to stop it first, then take it back.", NoticeTone::Info);
-            return;
-        }
-        let Some(count) = (if words.is_empty() { Some(1) } else { words.parse::<usize>().ok().filter(|n| *n > 0) }) else {
-            self.notice("/takeback takes back your last request, and /takeback 3 your last three.", NoticeTone::Info);
-            return;
-        };
-        {
-            let mut state = self.0.state.borrow_mut();
-            state.undoing = true;
-            state.activity = "taking it back".into();
-        }
-        self.0.scheduler.request();
-        let taken = match self.session().op(op::TakeBackPlan {}).await {
-            // Newest first: the earliest of the last `count`, or the first of all when there are fewer.
-            Ok(requests) => match requests.get(count.min(requests.len()).saturating_sub(1)) {
-                Some(earliest) => self.session().op(op::TakeBack { to: earliest.at }).await.map(|taken| Some((taken, requests))),
-                None => Ok(None),
-            },
-            Err(error) => Err(error),
-        };
-        match taken {
-            Ok(Some((taken, requests))) => {
-                // What the requests that went changed that Kumi couldn't undo, as the plan had them: left as they are.
-                let left: Vec<ChangeRecord> = requests
-                    .iter()
-                    .take(taken.requests as usize)
-                    .flat_map(|asked| &asked.changes)
-                    .filter(|change| !matches!(change.state, ChangeState::Applied | ChangeState::Undone | ChangeState::Heard))
-                    .cloned()
-                    .collect();
-                self.took_back(taken, left);
-            }
-            Ok(None) => self.notice("There's no request of yours to take back yet.", NoticeTone::Info),
-            Err(error) => {
-                if !self.0.state.borrow().closing {
-                    self.error(&error);
-                }
-            }
-        }
-        self.0.state.borrow_mut().undoing = false;
-        self.0.scheduler.request();
-    }
-    /// What taking requests back did, in words, with the earliest one's words back in the box.
-    fn took_back(&self, taken: TakenBack, left: Vec<ChangeRecord>) {
-        let many = |n: usize, one: &str, more: &str| if n == 1 { format!("1 {one}") } else { format!("{n} {more}") };
-        let undid = (!taken.undone.is_empty()).then(|| many(taken.undone.len(), "change", "changes"));
-        let mut said = vec![];
-        match (taken.requests, undid) {
-            (0, None) => {}
-            (0, Some(undid)) => said.push(format!("Undid {undid}.")),
-            (n, undid) => said.push(format!(
-                "Took back {}{}.",
-                if n == 1 { "your last request".to_string() } else { format!("your last {n} requests") },
-                undid.map(|undid| format!(" and undid {undid}")).unwrap_or_default()
-            )),
-        }
-        if let Some(failed) = &taken.failed {
-            said.push(
-                string::trim(&format!("Kumi couldn't undo {} and stopped there. {}", failed.title, failed.note.as_deref().unwrap_or("")))
-                    .to_string(),
-            );
-        }
-        if !left.is_empty() {
-            let why = |change: &ChangeRecord| match change.state {
-                ChangeState::Expired => "from an earlier session",
-                ChangeState::Unsure => "never confirmed",
-                _ => "Kumi can't undo it",
-            };
-            let named: Vec<String> = left.iter().map(|change| format!("{} ({})", change.title, why(change))).collect();
-            said.push(format!("Left as {}: {}.", if left.len() == 1 { "it is" } else { "they are" }, named.join("; ")));
-        }
-        if let Some(words) = taken.words.filter(|words| !words.is_empty()) {
-            self.0.state.borrow_mut().editor.set(&words);
-            said.push("Its words are back in the box to change and send again.".into());
-        }
-        let tone = if taken.failed.is_some() { NoticeTone::Warn } else { NoticeTone::Info };
-        self.notice(&said.join(" "), tone);
     }
     pub(super) fn scroll_by(&self, lines: i32) {
         let mut state = self.0.state.borrow_mut();

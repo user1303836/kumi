@@ -198,6 +198,13 @@ impl SessionController for Control {
     }
     async fn submit(&self, s: &str, pin: Option<PinnedNode>) -> Result<(), RuntimeError> {
         if let Some(error) = self.get::<String>("submit-error") {
+            // As the session hands back a message it can't take (one too long): the words go back in the box.
+            if self.get::<bool>("submit-resend") == Some(true) {
+                let emit = self.emit.borrow().clone();
+                if let Some(emit) = emit {
+                    emit(SessionEvent::Resend { text: s.into() });
+                }
+            }
             return Err(RuntimeError::plain(error));
         }
         self.call(format!("submit:{s}"));

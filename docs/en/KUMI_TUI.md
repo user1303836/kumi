@@ -293,7 +293,7 @@ its undo. They're in English for now.
 | Ctrl-S | Put the draft aside, with its files; Ctrl-S in an empty box brings it back (with words in the box, they change places) |
 | Ctrl-T | Talk instead of typing: press it again to stop, or hold it while you talk. What you said lands in the box at the cursor; Enter stops and sends at once, Esc drops it |
 | Ctrl-V | Add the picture on the clipboard (a screenshot, say) to your next message; files dragged into the window are added the same way |
-| A long paste | More than 10 lines or 1,000 characters goes in as one chip, `[pasted 41 lines]`: Backspace takes it out whole, Kumi gets all of it, and the conversation shows the chip and the start of its first line |
+| A long paste | More than 10 lines or 1,000 characters goes in as one chip, `[pasted 41 lines]`: Backspace takes it out whole, Kumi gets all of it, and the conversation shows the chip and the start of its first line. A message held while Kumi works, taken back with Alt-↑, put back after a stop, or brought back with ↑ or Ctrl-R keeps its chips. One message takes up to 256 KB: a longer one says so under the box, and Enter keeps it there. The history file keeps a long message's first 4,096 characters, ending in `…`; ↑ brings back one sent since Kumi started whole |
 | Backspace, in an empty box | Take back the last file added |
 | `?`, in an empty box | The keys and commands, as `/help` shows them; anywhere else, a question mark. To start a message with one, type a space first, or paste it |
 
@@ -302,6 +302,7 @@ its undo. They're in English for now.
 | Key | Action |
 | --- | --- |
 | Esc | Close the `/` menu; otherwise stop Kumi's answer (the steps it finished stay, waiting messages go back into the box); otherwise unpin the pinned device |
+| Esc Esc | In an empty box while Kumi is idle, with nothing pinned: your requests, newest first, each with how many changes it made. Choose one to take it back with each one after it, as `/takeback` does; first Kumi lists the changes it can't undo, which stay as they are |
 | Ctrl-C | Stop Kumi's answer; when idle, clear the box (↑ or Ctrl-- brings the words back); with an empty box, quit |
 | Ctrl-B | Move the answer's slow step that doesn't use Live (a video, pages, the manual, your library) to the background as a job; the answer carries on. In tmux, press Ctrl-B twice |
 | Ctrl-D | Quit, when idle with an empty box |

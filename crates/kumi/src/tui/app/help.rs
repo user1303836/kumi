@@ -171,6 +171,11 @@ pub(super) fn help_sections(has: Has, app: &str, tabs: &[String], commands: Vec<
     ]);
     if has.can.take_back {
         stop.push(row(
+            "esc esc",
+            "From an empty box while Kumi isn't working: your requests, newest first, with how many changes each made. Choose \
+             one to take it back with each one after it; first Kumi lists the changes it can't undo",
+        ));
+        stop.push(row(
             "/takeback",
             "Take back your last request (/takeback 3, your last three): Kumi undoes its changes, newest first, and its words \
              come back to the box to change and send again",

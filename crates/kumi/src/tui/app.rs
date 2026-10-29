@@ -25,12 +25,13 @@ pub use music::{music_lines, parse_music, MusicAsked, MUSIC_FOOTER};
 pub use setup::{waveform, WAVE_WIDTH};
 mod sharing;
 mod shown;
+mod take_back;
 mod toast;
 mod usage;
 
 use super::{
     alerts::{self, ProgramState, StatusReport, TerminalProfile},
-    editor::{Draft, Editor},
+    editor::{Composed, Draft, Editor},
     icons::{detect_icon_style_here, IconKind, IconStyle},
     keys::InputEvent,
     overlay::{Area, Handled, Overlay, Overlays, Shared},
@@ -289,7 +290,12 @@ struct Aside {
 }
 #[derive(Clone)]
 struct Held {
+    /// What the session gets: each chip's whole paste in its place.
     text: String,
+    /// What the conversation shows: each chip as its label.
+    shown: String,
+    /// The words as the box held them, to come back there as they were, chips and all.
+    words: Composed,
     when: &'static str,
     taken: bool,
 }
@@ -408,6 +414,8 @@ struct State {
     objective: Option<Timed<ObjectiveStatus>>,
     watching: bool,
     undoing: bool,
+    /// When an esc nothing took came, in an empty box with Kumi at rest: a second soon after takes a request back.
+    escaped: Option<f64>,
     hits: Vec<Hit>,
     tabs_area: Option<Rect>,
     selection: Option<super::selection::Selection>,
@@ -471,6 +479,13 @@ struct State {
     /// ctrl+s: a draft put aside, with its files.
     stash: Option<composer::Stash>,
     last_sent: Option<String>,
+    /// The last message sent, as the box held it: the session handing it back puts its chips back too.
+    last_words: Option<Composed>,
+    /// A held message being sent after an answer: handed back by the session meanwhile, it's left to the send's own
+    /// failure to put back, so it comes back once.
+    sending_held: Option<String>,
+    /// The messages sent this run with chips, by their history entry, newest last: ↑ brings them back as chips.
+    sent_words: Vec<(String, Composed)>,
     tree: Option<DeviceTree>,
     /// Bumped whenever `tree` is read again: its rows are made again only then, or for another focus.
     tree_revision: u64,
@@ -603,6 +618,7 @@ impl State {
             objective: None,
             watching: false,
             undoing: false,
+            escaped: None,
             hits: vec![],
             tabs_area: None,
             selection: None,
@@ -646,6 +662,9 @@ impl State {
             search: None,
             stash: None,
             last_sent: None,
+            last_words: None,
+            sending_held: None,
+            sent_words: Vec::new(),
             tree: None,
             tree_revision: 0,
             tree_rows: None,
