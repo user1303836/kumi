@@ -32,16 +32,16 @@ fn say(lines: &mut Vec<Line>, text: &str, style: Style, width: i32) {
     }
 }
 impl TuiApp {
-    pub(super) fn draw_panel(&self, screen: &mut Screen, panel: &PanelRef, box_top: i32, left: i32) -> Option<Cursor> {
+    pub(super) fn draw_panel(&self, screen: &mut Screen, panel: &mut Panel, box_top: i32, left: i32) -> Option<Cursor> {
         // The help is read rather than chosen from: it takes more of a wide window, so less of it wraps.
-        let widest = if matches!(&*panel.borrow(), Panel::Help { .. }) { 100 } else { 76 };
+        let widest = if matches!(panel, Panel::Help { .. }) { 100 } else { 76 };
         let width = widest.min(left - 2);
         let x = 3;
         let inner = width - 4;
         let space = box_top - 5;
         let mut lines: Vec<Line> = vec![];
         let mut cursor_at: Option<(usize, i32)> = None;
-        match &mut *panel.borrow_mut() {
+        match panel {
             Panel::Pick { picker, .. } => {
                 let picker = picker.borrow();
                 let visible = picker.visible();
@@ -323,5 +323,29 @@ impl TuiApp {
             }
         }
         cursor_at.filter(|(line, _)| row_of(*line) < box_top - 1).map(|(line, column)| Cursor { x: x + column, y: row_of(line) })
+    }
+}
+/// The box's hint while `panel` is the top one: a list's own words when it has them (a countdown to Kumi's pick,
+/// another way to choose).
+pub(super) fn panel_hint(panel: &Panel) -> String {
+    match panel {
+        Panel::Pick { picker, .. } => {
+            let picker = picker.borrow();
+            picker.options.hint.clone().unwrap_or_else(|| {
+                if picker.options.answers {
+                    "a number, then enter answers · or type your own · esc to close"
+                } else {
+                    "↑↓ to move · enter to choose · esc to close"
+                }
+                .into()
+            })
+        }
+        Panel::Btw { .. } => "↑↓ to scroll · c copies · esc to close".into(),
+        Panel::Job { .. } => "↑↓ to scroll · x stops it · r runs it again · c copies · esc to close".into(),
+        Panel::Help { .. } => "↑↓ to scroll · esc to close".into(),
+        Panel::Key { .. } => "enter to save · esc to cancel".into(),
+        Panel::ChatGpt { by_code: true, .. } => "c copies the code · b uses the browser · esc to cancel".into(),
+        Panel::ChatGpt { url: Some(_), .. } => "c copies the link · d uses a code · esc to cancel".into(),
+        Panel::ChatGpt { .. } => "esc to cancel".into(),
     }
 }

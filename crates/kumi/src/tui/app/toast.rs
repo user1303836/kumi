@@ -41,8 +41,8 @@ impl TuiApp {
         if self.setup_active() || self.map_shown() {
             return false;
         }
-        let state = self.0.state.borrow();
-        !state.panel.as_ref().is_some_and(|p| matches!(&*p.borrow(), Panel::Pick { picker, .. } if picker.borrow().options.hint.is_some()))
+        let top = self.0.state.borrow().overlays.top();
+        !top.is_some_and(|top| top.borrow().hint_stays(self))
     }
 
     /// Takes the toast away before its time.

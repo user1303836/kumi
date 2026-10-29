@@ -169,17 +169,18 @@ impl TuiApp {
         if files != 0 {
             self.draw_attachments(&mut screen, 3, box_top - under - 2 - chip, left - 6);
         }
-        let no_panel = self.0.state.borrow().panel.is_none();
+        let open = self.0.state.borrow().overlays.all();
         let menu = self.menu();
-        if waiting != 0 && no_panel && menu.is_empty() {
+        if waiting != 0 && open.is_empty() && menu.is_empty() {
             self.draw_held(&mut screen, 3, box_top - under - 1 - chip - files - waiting, left - 6, waiting);
         }
         let mut cursor = Some(self.draw_composer(&mut screen, Rect::new(1, box_top, left - 2, box_height), &layout, visible, &menu));
-        let panel = self.0.state.borrow().panel.clone();
-        if let Some(panel) = panel {
-            cursor = self.draw_panel(&mut screen, &panel, box_top, left);
-        } else {
+        if open.is_empty() {
             self.draw_menu(&mut screen, box_top, left, &menu);
+        }
+        // What's open over the conversation, bottom first: the top one's cursor is the one that shows.
+        for overlay in open {
+            cursor = overlay.borrow_mut().draw(self, &mut screen, Area { box_top, left });
         }
         if self.0.state.borrow().closing {
             cursor = None;
@@ -695,33 +696,12 @@ impl TuiApp {
                 screen.put_in(x, box_.y + 1 + index as i32, row, &st::BRIGHT, box_);
             }
         }
-        // A list's own words when it has them (a countdown to Kumi's pick, another way to choose).
-        let own_hint = state.panel.as_ref().and_then(|p| match &*p.borrow() {
-            Panel::Pick { picker, .. } => picker.borrow().options.hint.clone(),
-            _ => None,
-        });
+        // The top overlay's own words, while one is open.
+        let top = state.overlays.top();
+        let overlay_hint = top.as_ref().map(|top| top.borrow().hint(self));
         // A list's own words stay over a toast: a countdown to Kumi's pick can't wait for it to go.
-        let toast = toast.filter(|_| own_hint.is_none());
-        let panel_hint = state.panel.as_ref().map(|p| match &*p.borrow() {
-            _ if own_hint.is_some() => own_hint.as_deref().unwrap_or(""),
-            Panel::Btw { .. } => "↑↓ to scroll · c copies · esc to close",
-            Panel::Job { .. } => "↑↓ to scroll · x stops it · r runs it again · c copies · esc to close",
-            Panel::Help { .. } => "↑↓ to scroll · esc to close",
-            Panel::Pick { picker, .. } if picker.borrow().options.answers => {
-                "a number, then enter answers · or type your own · esc to close"
-            }
-            Panel::Pick { .. } => "↑↓ to move · enter to choose · esc to close",
-            Panel::Key { .. } => "enter to save · esc to cancel",
-            Panel::ChatGpt { by_code: true, .. } => "c copies the code · b uses the browser · esc to cancel",
-            Panel::ChatGpt { url, .. } => {
-                if url.is_some() {
-                    "c copies the link · d uses a code · esc to cancel"
-                } else {
-                    "esc to cancel"
-                }
-            }
-        });
-        let hint = toast.as_ref().map(|(text, _)| text.as_str()).or(panel_hint).unwrap_or_else(|| {
+        let toast = toast.filter(|_| !top.is_some_and(|top| top.borrow().hint_stays(self)));
+        let hint = toast.as_ref().map(|(text, _)| text.as_str()).or(overlay_hint.as_deref()).unwrap_or_else(|| {
             if state.search.is_some() {
                 super::composer::SEARCH_HINT
             } else if !menu.is_empty() {

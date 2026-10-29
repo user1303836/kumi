@@ -30,6 +30,7 @@ use super::{
     editor::{Draft, Editor},
     icons::{detect_icon_style_here, IconKind, IconStyle},
     keys::InputEvent,
+    overlay::{Area, Handled, Overlay, Overlays, Shared},
     picker::{Picker, PickerItem},
     render::Renderer,
     scheduler::FrameScheduler,
@@ -447,7 +448,8 @@ struct State {
     next_slots: u32,
     transport: Option<Transport>,
     activity: String,
-    panel: Option<PanelRef>,
+    /// What's open over the conversation (a list, a sign-in, a side answer, a job, the help): the top one takes input.
+    overlays: Overlays<TuiApp>,
     /// The picker asking whether to keep a technique: closing it is a no.
     offer: Option<Rc<RefCell<Picker>>>,
     /// The picker asking about another Set's conversation: closing it leaves that conversation.
@@ -619,7 +621,7 @@ impl State {
             next_slots: 1,
             transport: None,
             activity: format!("connecting to {}", crate::daw::words().app),
-            panel: None,
+            overlays: Overlays::default(),
             offer: None,
             set_ask: None,
             planning: None,
@@ -972,6 +974,7 @@ impl TuiApp {
     }
     fn finish(&self, code: i32, message: Option<String>) -> LocalBoxFuture<'static, i32> {
         let printing;
+        let closing;
         {
             let mut state = self.0.state.borrow_mut();
             if state.closing {
@@ -994,13 +997,7 @@ impl TuiApp {
             for task in timers.into_iter().chain(alerting).flatten().chain(flashes) {
                 task.abort();
             }
-            if let Some(panel) = state.panel.take() {
-                match &mut *panel.borrow_mut() {
-                    Panel::ChatGpt { abort, .. } => abort.cancel(),
-                    Panel::Key { secret, .. } => secret.clear(),
-                    _ => {}
-                }
-            }
+            closing = state.overlays.drain();
             if let Some(setup) = state.setup.as_mut() {
                 setup.stop();
             }
@@ -1013,6 +1010,10 @@ impl TuiApp {
                     self.session().tell(op::StopAside { id: aside.id }.into());
                 }
             }
+        }
+        // What's open lets go of what it holds: a sign-in under way stops, a key half typed goes.
+        for overlay in closing {
+            overlay.borrow_mut().closed(self);
         }
         if let Some(voice) = &self.0.voice {
             voice.cancel();
@@ -1161,7 +1162,7 @@ impl Terminal for TuiApp {
                 app.run_setup(true).await;
             } else if let Err(error) = app.check_model().await {
                 app.panel_failed(&error);
-            } else if let Some(filter) = app.0.options.choose_conversation.clone().filter(|_| app.0.state.borrow().panel.is_none()) {
+            } else if let Some(filter) = app.0.options.choose_conversation.clone().filter(|_| app.0.state.borrow().overlays.is_empty()) {
                 // `kumi -r`: the producer chooses the conversation as Kumi starts.
                 if let Err(error) = app.open_conversations(Some(filter).filter(|f| !f.is_empty())).await {
                     app.panel_failed(&error);
@@ -1213,7 +1214,7 @@ impl Terminal for TuiApp {
             let state = self.0.state.borrow();
             state.closing
                 || state.setup.is_some()
-                || state.panel.is_some()
+                || !state.overlays.is_empty()
                 || state.offer.is_some()
                 || state.set_ask.is_some()
                 || state.map.is_some()

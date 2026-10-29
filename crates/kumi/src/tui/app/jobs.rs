@@ -224,7 +224,7 @@ impl TuiApp {
             let quiet = !state.closing
                 && !state.pending_turn
                 && !state.cancelling
-                && state.panel.is_none()
+                && state.overlays.is_empty()
                 && state.editor.is_empty()
                 && state.held.is_empty()
                 && state.setup.is_none()
@@ -344,8 +344,7 @@ impl TuiApp {
     }
 
     pub(super) fn open_job(&self, id: u32) {
-        self.0.state.borrow_mut().panel = Some(Rc::new(RefCell::new(Panel::Job { id, scroll: 0 })));
-        self.0.scheduler.request();
+        self.open_panel(Panel::Job { id, scroll: 0 });
     }
 
     pub(super) fn stop_job(&self, id: u32) {
@@ -482,29 +481,26 @@ impl TuiApp {
     }
 
     /// Keys on a job's overlay: scroll, x stops it, r runs it again, c copies its report, Esc closes.
-    pub(super) fn job_panel_input(&self, panel: &PanelRef, event: InputEvent) {
-        let Panel::Job { id, .. } = &*panel.borrow() else { return };
+    pub(super) fn job_panel_input(&self, panel: &mut Panel, event: InputEvent) -> Handled {
+        let Panel::Job { id, scroll } = panel else { return Handled::Kept };
         let id = *id;
         match event {
             InputEvent::Key { name, mods, .. } => {
                 if matches!(name.as_str(), "escape" | "enter") || (mods.ctrl && name == "c") {
-                    self.close_panel();
-                    return;
+                    return Handled::Close;
                 }
-                if let Panel::Job { scroll, .. } = &mut *panel.borrow_mut() {
-                    match name.as_str() {
-                        "up" | "pageup" => *scroll = (*scroll - if name == "up" { 1 } else { 5 }).max(0),
-                        "down" | "pagedown" => *scroll += if name == "down" { 1 } else { 5 },
-                        _ => {}
-                    }
+                match name.as_str() {
+                    "up" | "pageup" => *scroll = (*scroll - if name == "up" { 1 } else { 5 }).max(0),
+                    "down" | "pagedown" => *scroll += if name == "down" { 1 } else { 5 },
+                    _ => {}
                 }
             }
             InputEvent::Text { text } => match text.to_lowercase().as_str() {
-                " " => self.close_panel(),
+                " " => return Handled::Close,
                 "x" => self.stop_job(id),
                 "r" if self.session().jobs().iter().any(|s| s.id == id && s.state.ended()) => {
-                    self.close_panel();
                     self.run_job_again(id);
+                    return Handled::Close;
                 }
                 "c" => {
                     let report = self.session().job(id).and_then(|detail| detail.report).unwrap_or_default();
@@ -517,6 +513,6 @@ impl TuiApp {
             },
             _ => {}
         }
-        self.0.scheduler.request();
+        Handled::Kept
     }
 }

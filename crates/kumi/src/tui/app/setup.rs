@@ -532,7 +532,7 @@ impl TuiApp {
                 done = &mut rx => break done.is_ok(),
                 _ = tokio::time::sleep(Duration::from_millis(50)) => {
                     // A sign-in's `then` runs before anything else once its panel closes.
-                    if self.0.state.borrow().panel.is_none() || self.closing() {
+                    if self.0.state.borrow().overlays.is_empty() || self.closing() {
                         break rx.try_recv().is_ok();
                     }
                 }
@@ -963,7 +963,10 @@ impl TuiApp {
         let width = (columns - 4).min(60);
         let state = self.0.state.borrow();
         let setup = state.setup.as_ref()?;
-        let panel = state.panel.clone();
+        // A sign-in open over the setup shows in it, in its words.
+        let top = state.overlays.top();
+        let top = top.as_ref().map(|top| top.borrow());
+        let panel = top.as_ref().and_then(|top| top.downcast_ref::<Panel>());
         let mut y = 1;
         screen.put(x, y, "kumi", &st::TITLE);
         let version = KUMI_VERSION;
@@ -989,7 +992,7 @@ impl TuiApp {
             names.extend(enable.map(|enable| (Step::Surface, enable.label)));
         }
         let column = if width >= 40 { 20 } else { 17 };
-        let signing = panel.as_ref().and_then(|p| match &*p.borrow() {
+        let signing = panel.and_then(|p| match p {
             Panel::Key { checking, .. } => Some(if *checking { "checking the key…" } else { "paste a key" }),
             Panel::ChatGpt { by_code: true, .. } => Some("waiting for the code"),
             Panel::ChatGpt { .. } => Some("waiting for the browser"),
@@ -1044,12 +1047,12 @@ impl TuiApp {
             return None;
         }
         let shown = setup.step == Step::Sign && signing.is_some();
-        let panel_kind = panel.as_ref().filter(|_| shown).and_then(|p| match &*p.borrow() {
+        let panel_kind = panel.filter(|_| shown).and_then(|p| match p {
             Panel::ChatGpt { by_code, .. } => Some(*by_code),
             _ => None,
         });
         if let Some(panel) = panel.filter(|_| shown) {
-            match &*panel.borrow() {
+            match panel {
                 Panel::Key { provider, secret, checking, status, .. } => {
                     let info = provider.row();
                     say(screen, &mut y, &format!("Paste your {} API key. It stays hidden, even here.", info.name), st::TEXT);

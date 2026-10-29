@@ -250,22 +250,18 @@ impl TuiApp {
     /// Opens the help: /help, or `?` on an empty box.
     pub(super) fn open_help(&self) {
         self.0.tabs.leave();
-        let mut state = self.0.state.borrow_mut();
-        state.tree_cursor = None;
-        state.panel = Some(Rc::new(RefCell::new(Panel::Help { scroll: 0, shown: 1, most: 0 })));
-        drop(state);
-        self.0.scheduler.request();
+        self.0.state.borrow_mut().tree_cursor = None;
+        self.open_panel(Panel::Help { scroll: 0, shown: 1, most: 0 });
     }
     /// Keys in the help: ↑↓, the pages, home and end scroll it; esc, enter, `?` and ctrl+c close it. Anything else typed
     /// or pasted closes it and goes into the box, so none of what the producer goes on to type is lost.
-    pub(super) fn help_input(&self, panel: &PanelRef, event: InputEvent) {
+    pub(super) fn help_input(&self, panel: &mut Panel, event: InputEvent) -> Handled {
         match event {
             InputEvent::Key { ref name, mods, .. } => {
                 if matches!(name.as_str(), "escape" | "enter") || (mods.ctrl && name == "c") {
-                    self.close_panel();
-                    return;
+                    return Handled::Close;
                 }
-                if let Panel::Help { scroll, shown, most } = &mut *panel.borrow_mut() {
+                if let Panel::Help { scroll, shown, most } = panel {
                     let page = (*shown - 1).max(1);
                     *scroll = match name.as_str() {
                         "up" => *scroll - 1,
@@ -278,13 +274,11 @@ impl TuiApp {
                     }
                     .clamp(0, *most);
                 }
+                Handled::Kept
             }
-            InputEvent::Text { ref text } if text == "?" => self.close_panel(),
-            InputEvent::Text { .. } | InputEvent::Paste { .. } => {
-                self.close_panel();
-                self.on_input(event);
-            }
-            _ => {}
+            InputEvent::Text { ref text } if text == "?" => Handled::Close,
+            InputEvent::Text { .. } | InputEvent::Paste { .. } => Handled::Pass(event),
+            _ => Handled::Kept,
         }
     }
 }

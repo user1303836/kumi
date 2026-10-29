@@ -94,18 +94,13 @@ impl TuiApp {
         if self.busy() {
             return report(ProgramState::Working, self.working_words(), self.progress());
         }
-        let state = self.0.state.borrow();
-        if let Some(panel) = &state.panel {
-            match &*panel.borrow() {
-                Panel::Pick { picker, .. } if picker.borrow().options.answers => {
-                    return report(ProgramState::Blocked(Blocked::Question), "Your answer, in Kumi".into(), None);
-                }
-                Panel::Key { .. } | Panel::ChatGpt { .. } => {
-                    return report(ProgramState::Blocked(Blocked::Auth), "Signing in, in Kumi".into(), None);
-                }
-                _ => {}
-            }
+        if self.answers_open() {
+            return report(ProgramState::Blocked(Blocked::Question), "Your answer, in Kumi".into(), None);
         }
+        if self.signing_in() {
+            return report(ProgramState::Blocked(Blocked::Auth), "Signing in, in Kumi".into(), None);
+        }
+        let state = self.0.state.borrow();
         match &state.resting {
             Some((rest, words)) => report(*rest, words.clone(), None),
             None => report(ProgramState::Idle, String::new(), None),
