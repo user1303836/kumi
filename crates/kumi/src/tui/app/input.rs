@@ -5,7 +5,7 @@ use super::super::{
     tree::TreeRole,
     width::truncate,
 };
-use super::panels::AsidePanel;
+use super::panels::{item, AsidePanel};
 use super::toast::TOAST_MS;
 use super::*;
 use crate::text::{library_line, remembered_line};
@@ -790,7 +790,15 @@ impl TuiApp {
                 }
                 return Ok(());
             }
-            Effect::Model | Effect::Effort | Effect::Login | Effect::Logout => {
+            Effect::Model { words } if !words.is_empty() => {
+                // A model named by its id: chosen as the picker chooses one, signing in first where its provider needs it.
+                self.clear_editor();
+                if let Err(error) = self.choose_model_item(item(words.clone(), words, "")).await {
+                    self.error(&error);
+                }
+                return Ok(());
+            }
+            Effect::Model { .. } | Effect::Effort | Effect::Login | Effect::Logout => {
                 self.clear_editor();
                 let result = match command {
                     "/model" => self.open_models().await,

@@ -152,7 +152,10 @@ pub const COMMANDS: &[Command] = &[
         ..command("/export", "This conversation as a file: choose, or /export copy, md, html or json (for another Kumi)", &["save"], ALWAYS)
     },
     command("/share", "Save this conversation as a web page that opens anywhere, to send", &["link"], ALWAYS),
-    command("/model", "Choose the model Kumi talks to", &[], can(|c| c.models)),
+    Command {
+        args: &[arg("model", 1, &[], Completes::Models)],
+        ..command("/model", "Choose the model Kumi talks to", &[], can(|c| c.models))
+    },
     command("/effort", "How hard the model thinks", &["reasoning"], can(|c| c.models)),
     command("/fast", "The model's faster tier, when its provider offers one", &["speed"], can(|c| c.models)),
     command("/willington", "Willington's bindings in {app}: macro mapping, zones", &[], front(Front::Willington)),
@@ -400,8 +403,11 @@ pub enum Effect {
     Jobs,
     Voice,
     Fast,
-    Model,
     Effort,
+    /// The model picker (no words), or the model the words name, by its id.
+    Model {
+        words: String,
+    },
     Login,
     Logout,
     Recipes,
@@ -489,13 +495,15 @@ pub fn run(line: &str, now: &Now) -> Effect {
         "/jobs" if can.jobs => return Effect::Jobs,
         "/voice" if fronts.voice => return Effect::Voice,
         "/fast" if can.models => return Effect::Fast,
-        "/model" if can.models => return Effect::Model,
         "/effort" if can.models => return Effect::Effort,
         "/login" if can.models => return Effect::Login,
         "/logout" if can.models => return Effect::Logout,
         "/recipes" if can.recipes => return Effect::Recipes,
         "/memory" if can.memory => return Effect::Memory,
         _ => {}
+    }
+    if let Some(words) = argument(line, "/model").filter(|_| can.models) {
+        return Effect::Model { words };
     }
     if !can.conversations && ["/resume", "/conversations", "/rename", "/fork"].into_iter().any(|verb| argument(line, verb).is_some()) {
         return Effect::Refused(Why::NotKept);

@@ -1,5 +1,7 @@
 //! The `/` menu: what it finds for what's typed (a name, then the words of what a command does), the commands sent
 //! lately first, and a window around the one chosen when they don't all fit above the box.
+#[path = "../support/models.rs"]
+mod models;
 #[path = "../support/tui_app.rs"]
 mod support;
 use kumi::history::open_input_history;
@@ -219,6 +221,31 @@ async fn slots_offers_a_slot_then_the_models_it_takes() {
             // After back, a slot again.
             h.type_text("\x15/slots back em\t").await;
             assert_eq!(h.app.draft(), "/slots back embeddings");
+            h.close().await;
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn model_offers_the_signed_in_providers_models_and_chooses_one_by_its_id() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let fake = models::FakeModels::catalog();
+            for provider in ["anthropic", "openai-codex"] {
+                fake.signed_in.borrow_mut().insert(kumi_ai::providers::ProviderId::parse(provider).unwrap());
+            }
+            let h = Harness::with(120, 36, Control::with_models(fake.clone()), |_| {});
+            h.start().await;
+            h.connect();
+            h.type_text("/model ").await;
+            h.wait_for("anthropic/claude-sonnet-5-5").await;
+            h.has("GPT-6 Astra · chosen");
+            // Found by a word of its name; tab puts in its id.
+            h.type_text("haiku\t").await;
+            assert_eq!(h.app.draft(), "/model anthropic/claude-haiku-4-5");
+            // The id whole, Enter chooses it, as the picker does.
+            h.type_text("\r").await;
+            h.wait_for("Kumi talks to Claude Haiku 4.5 from your next message").await;
             h.close().await;
         })
         .await;

@@ -1661,7 +1661,7 @@ impl TuiApp {
         }
         Ok(())
     }
-    async fn choose_model_item(&self, item: PickerItem) -> Result<(), RuntimeError> {
+    pub(super) async fn choose_model_item(&self, item: PickerItem) -> Result<(), RuntimeError> {
         let models = self.models().unwrap();
         let value = item.value.as_deref().unwrap_or("");
         if let Some(provider) = value.strip_prefix("signin:").and_then(ProviderId::parse) {

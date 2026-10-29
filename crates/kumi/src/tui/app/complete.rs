@@ -240,7 +240,31 @@ impl TuiApp {
                     })
                     .collect())
             }
-            Completes::Words(_) | Completes::SlotModels | Completes::Models => Ok(vec![]),
+            Completes::Models => {
+                let Some(models) = self.models() else { return Ok(vec![]) };
+                let current = models.current().model;
+                // The providers signed in to and the model servers running, as /model's list has them, read together.
+                let statuses = models.providers().await?;
+                let servers = models.local().await;
+                let sources: Vec<String> = statuses
+                    .iter()
+                    .filter(|status| status.signed_in)
+                    .map(|status| status.id.as_str().to_string())
+                    .chain(servers.into_iter().filter(|server| server.running).map(|server| server.id))
+                    .collect();
+                let lists = futures::future::join_all(sources.iter().map(|source| models.models(source, false))).await;
+                Ok(lists
+                    .into_iter()
+                    .flatten()
+                    .flatten()
+                    .map(|info| {
+                        let about =
+                            if current.as_deref() == Some(info.id.as_str()) { format!("{} · chosen", info.name) } else { info.name };
+                        Candidate { word: info.id.clone(), label: info.id, about }
+                    })
+                    .collect())
+            }
+            Completes::Words(_) | Completes::SlotModels => Ok(vec![]),
         }
     }
 }
