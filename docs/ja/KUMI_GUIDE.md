@@ -564,6 +564,7 @@ Kumi はすべてを `~/.kumi` に保存します。`~/.kumi/settings.json` に�
 | `fast` | `true` で、プロバイダーが一覧に載せている場合にモデルの速い層を使う（`/fast`） |
 | `fallbackModel` | あなたのモデルがプランの上限に達したとき、またはプロバイダーが落ちているときに続けるモデル。`<provider>/<model>`（`/model` で ctrl+f） |
 | `panelTab` | 最後に開いていた Live ペインのタブ |
+| `mapHover` | `false`：`/map` で、マウスが点に来ても再生しない。地図の `h` でオンとオフを切り替え、Kumi はここに覚えておく |
 | `updateCheck` | `false` で起動時の新バージョン確認を無効にする |
 | `whatsNew` | `false` で、アップデート後の最初の起動時に What's new を表示しない |
 | `notifications` | `"off"`：Kumi のウィンドウがほかのウィンドウの後ろにある間、デスクトップ通知（やベル）を出さない。それ以外は `"auto"` |

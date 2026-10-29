@@ -1423,6 +1423,7 @@ Kumi keeps everything in `~/.kumi`. `~/.kumi/settings.json` holds:
 | `fast` | `true` asks for the model's faster tier where its provider lists one (`/fast`) |
 | `fallbackModel` | The model that carries on when yours hits its plan's limit or its provider is down, `<provider>/<model>` (ctrl+f in `/model`) |
 | `panelTab` | The Live pane's tab you had open last |
+| `mapHover` | `false`: in `/map`, a point doesn't play as the mouse comes to it; `h` in the map turns that off and on, and Kumi keeps it here |
 | `updateCheck` | `false` turns off the check for a newer version at start |
 | `whatsNew` | `false` turns off What's new as Kumi first starts after an update |
 | `notifications` | `"off"`: no desktop notification (or bell) while Kumi's window is behind another; `"auto"` otherwise |
