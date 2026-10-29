@@ -185,6 +185,21 @@ case!(a_panels_key_that_doesnt_apply_lets_the_next_have_it, async {
     h.close().await;
 });
 
+case!(keys_one_after_another_take_their_second_key_before_what_it_does_alone, async {
+    let file = json!({ "app.help": ["ctrl+x ctrl+e"] });
+    let h = Harness::with(120, 36, Rc::new(Control::default()), |o| o.keys = Some(Ok(file)));
+    h.start().await;
+    h.connect();
+    // Alone, ctrl+e is still the line's end.
+    h.type_text("ab\x01\x05c").await;
+    assert!(has(&h.screen(), "abc"), "{:?}", h.screen());
+    h.type_text("\x05\x15").await;
+    // After ctrl+x, it finishes the pair, and the help opens.
+    h.type_text("\x18\x05").await;
+    h.wait_for("Keys and commands").await;
+    h.close().await;
+});
+
 #[test]
 fn every_action_is_in_the_keys_docs_in_each_language() {
     for (language, doc) in [

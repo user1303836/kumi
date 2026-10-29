@@ -624,6 +624,26 @@ impl Keymap {
                     and(&behind)
                 ));
             }
+            // A pair whose first key is another action's starts only when that action doesn't apply.
+            if let [first, _] = binding.keys.as_slice() {
+                let mut takers: Vec<&str> = vec![];
+                for other in bindings.iter().filter(|other| other.scope == binding.scope && other.id != binding.id && other.takes(first)) {
+                    if !takers.contains(&other.id) {
+                        takers.push(other.id);
+                    }
+                }
+                if !takers.is_empty() {
+                    say(format!(
+                        "keys.json gives {} to {} {}: {} starts it only when {} {} take it",
+                        label(&binding.keys),
+                        binding.id,
+                        binding.scope.words(),
+                        first.label(),
+                        and(&takers),
+                        if takers.len() == 1 { "doesn't" } else { "don't" }
+                    ));
+                }
+            }
         }
         (Keymap { bindings, rebound }, said)
     }
@@ -965,7 +985,19 @@ mod tests {
         let esc = chord("esc");
         assert_eq!(Keymap::default().then(Scope::Box, &esc, &chord("shift+esc")), Some("app.take-back"));
         let (keymap, said) = with(json!({ "app.redraw": ["esc esc"] }));
-        assert_eq!(said, ["keys.json gives esc esc to app.redraw in the box, ahead of app.take-back"]);
+        assert_eq!(
+            said,
+            [
+                "keys.json gives esc esc to app.redraw in the box, ahead of app.take-back",
+                "keys.json gives esc esc to app.redraw in the box: esc starts it only when app.stop doesn't take it",
+            ]
+        );
+        // A pair whose first key another action has always (ctrl+g, the editor's) never starts, and that's said.
+        let (_, said) = with(json!({ "app.help": ["ctrl+g ctrl+h"] }));
+        assert_eq!(
+            said,
+            ["keys.json gives ctrl+g ctrl+h to app.help in the box: ctrl+g starts it only when composer.editor doesn't take it"]
+        );
         assert!(keymap.starts(Scope::Box, &esc) && !keymap.starts(Scope::Help, &esc));
         assert_eq!(keymap.then(Scope::Box, &esc, &esc), Some("app.redraw"));
         assert_eq!(keymap.then(Scope::Box, &esc, &chord("enter")), None);

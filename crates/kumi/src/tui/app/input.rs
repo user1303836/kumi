@@ -345,6 +345,15 @@ impl TuiApp {
     /// pressed one after another (`pending` is the first, when it came), or the first.
     fn key(&self, name: &str, mods: Modifiers, pending: Option<(Chord, f64)>) {
         let chord = Chord::new(name, mods);
+        // The second of keys pressed one after another comes before what the key does alone, when their action
+        // applies: ctrl+e finishes a pair ctrl+x ctrl+e, though alone it's the line's end.
+        let now = perf_now();
+        let first = pending.filter(|(_, at)| now - at <= AGAIN_MS).map(|(first, _)| first);
+        if let Some(id) = first.and_then(|first| self.0.keymap.then(Scope::Box, &first, &chord)) {
+            if self.act(id) {
+                return;
+            }
+        }
         if !self.menu().is_empty() && self.act_in(Scope::Menu, &chord) {
             return;
         }
@@ -374,21 +383,8 @@ impl TuiApp {
             }
             self.0.state.borrow_mut().tree_cursor = None;
         }
-        if !self.act_in(Scope::Box, &chord) {
-            self.one_after_another(chord, pending);
-        }
-    }
-    /// A key nothing took, in the box: with the first of keys pressed one after another just before it (esc esc), it
-    /// does their action when that applies; otherwise, when it starts some, it's kept for the next.
-    fn one_after_another(&self, chord: Chord, pending: Option<(Chord, f64)>) {
-        let now = perf_now();
-        let first = pending.filter(|(_, at)| now - at <= AGAIN_MS).map(|(first, _)| first);
-        if let Some(id) = first.and_then(|first| self.0.keymap.then(Scope::Box, &first, &chord)) {
-            if self.act(id) {
-                return;
-            }
-        }
-        if self.0.keymap.starts(Scope::Box, &chord) {
+        // A key nothing took that starts keys pressed one after another (esc esc) is kept for the next.
+        if !self.act_in(Scope::Box, &chord) && self.0.keymap.starts(Scope::Box, &chord) {
             self.0.state.borrow_mut().pending = Some((chord, now));
         }
     }
@@ -639,8 +635,15 @@ impl TuiApp {
             }
             "app.redraw" => self.0.renderer.borrow_mut().invalidate(),
             "app.help" => self.open_help(),
-            // Keys pressed one after another: in an empty box, where requests can be taken back.
-            "app.take-back" if self.0.state.borrow().editor.is_empty() && self.can().take_back => {
+            // Keys pressed one after another, in an empty box where requests can be taken back. While esc has something
+            // to stop or unpin (a turn begun between the two), that comes first.
+            "app.take-back"
+                if self.0.state.borrow().editor.is_empty()
+                    && self.can().take_back
+                    && !self.busy()
+                    && self.0.state.borrow().slots_check.is_none()
+                    && self.0.state.borrow().pinned.is_none() =>
+            {
                 let app = self.clone();
                 tokio::task::spawn_local(async move { app.pick_take_back().await });
             }

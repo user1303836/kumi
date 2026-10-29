@@ -353,7 +353,8 @@ it):
 - An action's list replaces its keys, and an empty list takes them away. A key is `ctrl`, `alt` (or `option`) and
   `shift` with a name: `enter`, `tab`, `esc`, `backspace`, `delete`, `insert`, `up` or `↑` (and the other arrows),
   `home`, `end`, `pageup`, `pagedown`, `space`, `f1` to `f12`, or one character (`ctrl+-`, `ctrl++`). Two keys with a
-  space between (`esc esc`) are pressed one after the other.
+  space between (`esc esc`) are pressed one after the other: the first starts the pair only when nothing else in the
+  box takes it, the second comes within half a second, and pairs work only in the box.
 - Where actions share a key, keys.json's come first, then Kumi's own, in the order they always were.
 - A character can't be a key where words are typed (the box, a list, the `/` menu): it types itself there. `?` on an
   empty box always opens the help, and `app.help` can have keys as well (`f1`).
