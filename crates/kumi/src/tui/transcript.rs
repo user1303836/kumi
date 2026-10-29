@@ -530,7 +530,8 @@ pub fn entry_rows_with(entry: &Entry, width: i32, now: f64, markdown: &mut Markd
                             span("│ ", palette::RULE),
                             span(" ", palette::ACCENT),
                             span(format!(" {}", thinking.headline), palette::DIM),
-                        ],
+                        ]
+                        .into(),
                         live: Some(LiveRow::Step {
                             activity: Activity::Think,
                             since: thinking.since,
