@@ -220,6 +220,16 @@ fn a_command_this_session_has_not_reads_as_unknown_idle_and_as_waiting_busy() {
 }
 
 #[test]
+fn a_name_no_command_has_is_unknown_whatever_kumi_is_doing() {
+    // #688: while Kumi worked, /nonsense read as one to run once it was done.
+    for line in ["/nonsense", "/nonsense with words"] {
+        for now in [nothing(), everything(), Now { busy: true, ..nothing() }, Now { busy: true, goal_running: true, ..everything() }] {
+            assert_eq!(run(line, &now), Effect::Unknown { name: "/nonsense".into() }, "{line}, busy {}", now.busy);
+        }
+    }
+}
+
+#[test]
 fn goal_is_offered_only_where_kumi_keeps_goals() {
     // #636: the menu offered /goal where a line said there was no such command.
     let goal = named("/goal").unwrap();

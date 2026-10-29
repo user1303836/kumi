@@ -1573,3 +1573,53 @@ case!(a_daw_asked_for_is_never_followed_away_from, async {
     assert!(!h.calls().contains(&"close".into()));
     h.close().await;
 });
+
+// A question asked with a list holds off following only while its list is open, however the list closes (#668). Each on
+// an app of its own, which following closes: what it followed to, and the technique offer, open.
+fn offered() -> (Harness, Rc<std::cell::RefCell<Vec<kumi_types::daw::DawId>>>) {
+    let followed = Rc::new(std::cell::RefCell::new(Vec::new()));
+    let into = followed.clone();
+    let c = Rc::new(Control::default());
+    c.set("techniques", json!([]));
+    let h = Harness::with(120, 36, c, move |o| o.follow_daw = Some(Rc::new(move |daw| into.borrow_mut().push(daw))));
+    (h, followed)
+}
+async fn offer(h: &Harness) {
+    h.connect();
+    h.type_text("recreate the bubbles\r").await;
+    h.emit(json!({"type":"state","state":"running"}));
+    h.emit(json!({"type":"text","text":"Built the bubble chain on Bubbles."}));
+    h.emit(json!({"type":"turn-complete","result":{"stopReason":"completed"},"elapsedMs":900}));
+    h.emit(json!({"type":"technique","action":"offered","technique":{"id":"","name":"Liquid bubbles","fits":"bubbly FM effects"}}));
+    h.emit(json!({"type":"state","state":"idle"}));
+    h.has("Keep “Liquid bubbles” as a technique?");
+    assert!(!h.app.follow_daw(kumi_types::daw::DawId::Renoise), "the offer is open");
+}
+case!(the_technique_offer_typed_over_lets_kumi_follow_a_daw, async {
+    use kumi_types::daw::DawId;
+    let (h, followed) = offered();
+    let done = h.app.run();
+    delay(5).await;
+    offer(&h).await;
+    h.type_text("x").await;
+    h.type_text("\x7f").await;
+    assert!(!has(&h.screen(), "Keep “Liquid bubbles” as a technique?"));
+    assert!(h.app.follow_daw(DawId::Renoise), "typed over, nothing is open");
+    assert_eq!(*followed.borrow(), [DawId::Renoise]);
+    assert_eq!(done.await, 0);
+});
+case!(the_technique_offer_with_another_list_in_its_place_lets_kumi_follow_a_daw, async {
+    use kumi_types::daw::DawId;
+    let (h, followed) = offered();
+    let done = h.app.run();
+    delay(5).await;
+    offer(&h).await;
+    h.emit(json!({"type":"set-asked","ask":{"id":"far001","title":"Bass ideas","daw":"Live","noun":"Set"}}));
+    h.has("“Bass ideas” is about its Set");
+    assert!(!h.app.follow_daw(DawId::Renoise), "the question in its place is open");
+    h.type_text("\r").await;
+    h.wait_for_call("answer:open").await;
+    assert!(h.app.follow_daw(DawId::Renoise), "answered, nothing is open");
+    assert_eq!(*followed.borrow(), [DawId::Renoise]);
+    assert_eq!(done.await, 0);
+});

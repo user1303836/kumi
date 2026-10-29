@@ -3,6 +3,20 @@
 Kumi's releases. The Ableton bridge (`crates/ableton-mcp-server`) is versioned on its own;
 each Kumi release names the bridge it ships with.
 
+## 1.24.19 — 2026-10-29
+
+Ships with bridge 1.0.101, as 1.24.18 did.
+
+- A conversation's title, a technique, a job's line or a tool's error that was cut short no longer
+  ends in a broken character.
+- Kumi asks the terminal what it is as it starts, so pictures, notifications and full colour work over
+  SSH too.
+- When a technique offer or a question about another Set's conversation closes without an answer, Kumi
+  follows you to a DAW you open again.
+
+Tested with Live 12.4 on macOS. On Windows, installing and updating are tested; using Kumi with Live
+there is still new.
+
 ## 1.24.18 — 2026-10-29
 
 Ships with bridge 1.0.101, as 1.24.17 did.
