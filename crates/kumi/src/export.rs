@@ -9,7 +9,7 @@ use std::rc::Rc;
 
 use chrono::{FixedOffset, Local, Offset};
 use futures::future::{FutureExt, LocalBoxFuture};
-use kumi_agent::core::contracts::{ConversationMatch, ConversationStore, ConversationSummary, ConversationToExport, SessionController};
+use kumi_agent::core::contracts::{ConversationMatch, ConversationStore, ConversationSummary, ConversationToExport};
 use kumi_agent::core::conversations::FileConversationStore;
 use kumi_agent::core::export::{
     details, file_name, html, html_text, import, importable, json, markdown, Format, Options, Part, Source, IMPORT_MAX_BYTES,
@@ -348,15 +348,6 @@ pub struct Exported {
     pub text: String,
     pub name: String,
     pub key: u64,
-}
-
-/// The conversation going on now in `format`, redacted; Err, in the producer's words, before there's anything to export.
-pub async fn conversation_now(
-    controller: &dyn SessionController,
-    format: Format,
-    redact: &dyn Fn(&str) -> String,
-) -> Result<Exported, String> {
-    exported(controller.conversation_to_export().await, format, redact)
 }
 
 /// The conversation going on now (`found`, as the session gave it to export) in `format`, redacted; Err, in the

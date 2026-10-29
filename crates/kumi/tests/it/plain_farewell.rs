@@ -8,7 +8,7 @@ use kumi::{
     terminal::{create_terminal, Terminal, TerminalOptions},
     tui::tty::TtyOutput,
 };
-use kumi_agent::core::contracts::*;
+use kumi_agent::core::{contracts::*, protocol::InProcess};
 use kumi_types::contracts::*;
 use kumi_types::errors::RuntimeError;
 use models::FakeModels;
@@ -74,11 +74,16 @@ impl TtyOutput for Out {
 struct Control {
     asked: Cell<usize>,
     gate: Notify,
+    /// The session's models, which plain mode reaches through it.
+    models: Rc<FakeModels>,
 }
 #[async_trait(?Send)]
 impl SessionController for Control {
     async fn start(&self) -> Result<(), RuntimeError> {
         Ok(())
+    }
+    fn model_controls(&self) -> Option<Rc<dyn kumi::models::ModelController>> {
+        Some(self.models.clone())
     }
     async fn submit(&self, _: &str, _: Option<PinnedNode>) -> Result<(), RuntimeError> {
         Ok(())
@@ -118,8 +123,9 @@ async fn flush() {
 
 /// /status, then /quit, with /status's conversation let go before /quit or only once Kumi is closing: what was said.
 async fn status_then_quit(let_go_first: bool) -> String {
-    let (input, out, control) = (Rc::new(Input::default()), Rc::new(Out::default()), Rc::new(Control::default()));
-    let options = TerminalOptions::new(control.clone(), input.clone(), out.clone(), FakeModels::chosen(), "inference-only");
+    let (input, out) = (Rc::new(Input::default()), Rc::new(Out::default()));
+    let control = Rc::new(Control { models: FakeModels::chosen(), ..Control::default() });
+    let options = TerminalOptions::new(InProcess::new(control.clone()), input.clone(), out.clone(), "inference-only");
     let terminal = create_terminal(options);
     drop(terminal.run());
     flush().await;
