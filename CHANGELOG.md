@@ -3,6 +3,18 @@
 Kumi's releases. The Ableton bridge (`crates/ableton-mcp-server`) is versioned on its own;
 each Kumi release names the bridge it ships with.
 
+## 1.24.25 — 2026-10-29
+
+Ships with bridge 1.0.101, as 1.24.24 did.
+
+- keys.json now reaches the map and setup: `map.zoom-in`, `setup.later` and the others take the keys
+  you give them.
+- Type @ in the input box to name a track, a device, an instrument, or a sound, palette or technique
+  of yours exactly: Kumi is told that one thing.
+
+Tested with Live 12.4 on macOS. On Windows, installing and updating are tested; using Kumi with Live
+there is still new.
+
 ## 1.24.24 — 2026-10-29
 
 Ships with bridge 1.0.101, as 1.24.23 did.
