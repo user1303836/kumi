@@ -785,6 +785,7 @@ impl TuiApp {
             let w = weak.clone();
             let resize = weak.clone();
             let profile = options.terminal.clone().unwrap_or_else(away::detect_profile_here);
+            super::markdown::set_terminal_opens_links(profile.hyperlinks);
             let graphics = options.graphics.unwrap_or_else(|| {
                 let cells_only = std::env::var("KUMI_PICTURES").is_ok_and(|value| value == "cells");
                 super::pictures::graphics_for(&profile, depth, icons == IconStyle::Glyphs, cells_only)

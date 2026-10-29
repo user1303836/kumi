@@ -1332,6 +1332,24 @@ case!(input_history_new_conversation_and_frame_budget, async {
     }
     h.close().await;
 });
+case!(an_answers_link_opens_with_a_click_where_the_terminal_opens_links, async {
+    use kumi::tui::alerts::TerminalProfile;
+    let h = Harness::with(120, 36, Rc::new(Control::default()), |o| {
+        o.terminal = Some(TerminalProfile { status: true, hyperlinks: true, ..TerminalProfile::quiet() });
+    });
+    h.start().await;
+    h.connect();
+    h.type_text("where's the manual\r").await;
+    h.emit(json!({"type":"state","state":"running"}));
+    h.emit(json!({"type":"text","text":"It's in [the manual](https://kumi-agent.com/docs)."}));
+    h.emit(json!({"type":"turn-complete","result":{"stopReason":"completed"},"elapsedMs":900}));
+    h.emit(json!({"type":"state","state":"idle"}));
+    h.has("It's in the manual.");
+    assert!(!has(&h.screen(), "(https://kumi-agent.com/docs)"));
+    let written = h.output.text.borrow().clone();
+    assert!(written.contains(";https://kumi-agent.com/docs\x1b\\the manual"), "the words go out opening the address");
+    h.close().await;
+});
 case!(whole_screens_match_source, async {
     let cases: Vec<serde_json::Value> = serde_json::from_str(&kumi_testkit::oracle("kumi/screens.json")).unwrap();
     for case in cases {
