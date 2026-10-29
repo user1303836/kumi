@@ -699,6 +699,20 @@ impl Harness {
         Self::with(w, h, Rc::new(Control::default()), |_| {})
     }
     pub fn with(w: i32, h: i32, control: Rc<Control>, configure: impl FnOnce(&mut TuiOptions)) -> Self {
+        Self::built(w, h, control, None, configure)
+    }
+    /// The screen on `session`, reached through its protocol alone (one on a thread of its own, say): the harness's
+    /// `control` isn't that session, and nothing it emits reaches the screen.
+    pub fn on(w: i32, h: i32, session: Rc<dyn kumi_agent::core::protocol::SessionHandle>, configure: impl FnOnce(&mut TuiOptions)) -> Self {
+        Self::built(w, h, Rc::new(Control::default()), Some(session), configure)
+    }
+    fn built(
+        w: i32,
+        h: i32,
+        control: Rc<Control>,
+        session: Option<Rc<dyn kumi_agent::core::protocol::SessionHandle>>,
+        configure: impl FnOnce(&mut TuiOptions),
+    ) -> Self {
         let input = Rc::new(Input::default());
         let output = Rc::new(Out {
             text: RefCell::default(),
@@ -709,7 +723,11 @@ impl Harness {
         });
         let browsed = Rc::new(RefCell::new(vec![]));
         let notified = Rc::new(RefCell::new(vec![]));
-        let mut opts = TuiOptions::new(control.clone(), input.clone(), output.clone(), "live");
+        let on_its_own = session.is_some();
+        let mut opts = match session {
+            Some(session) => TuiOptions::with_session(session, input.clone(), output.clone(), "live"),
+            None => TuiOptions::new(control.clone(), input.clone(), output.clone(), "live"),
+        };
         // No status or notification unless a test asks: none of this machine's terminal.
         opts.terminal = Some(TerminalProfile::quiet());
         let n = notified.clone();
@@ -728,8 +746,10 @@ impl Harness {
         opts.open_browser = Some(Rc::new(move |s| b.borrow_mut().push(s.into())));
         configure(&mut opts);
         let app = TuiApp::new(opts);
-        let a = app.clone();
-        *control.emit.borrow_mut() = Some(Rc::new(move |e| a.handle_event(e)));
+        if !on_its_own {
+            let a = app.clone();
+            *control.emit.borrow_mut() = Some(Rc::new(move |e| a.handle_event(e)));
+        }
         Self { input, output, control, app, browsed, notified, vt: RefCell::new(vt::VirtualTerminal::new(w, h)), consumed: Cell::new(0) }
     }
     pub async fn start(&self) {

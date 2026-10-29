@@ -486,34 +486,29 @@ impl TuiApp {
     fn job_panel_input(&self, panel: &mut JobPanel, event: InputEvent) -> Handled {
         let JobPanel { id, scroll } = panel;
         let id = *id;
-        match event {
-            InputEvent::Key { name, mods, .. } => {
-                if matches!(name.as_str(), "escape" | "enter") || (mods.ctrl && name == "c") {
-                    return Handled::Close;
-                }
-                match name.as_str() {
-                    "up" | "pageup" => *scroll = (*scroll - if name == "up" { 1 } else { 5 }).max(0),
-                    "down" | "pagedown" => *scroll += if name == "down" { 1 } else { 5 },
-                    _ => {}
-                }
-            }
-            InputEvent::Text { text } => match text.to_lowercase().as_str() {
-                " " => return Handled::Close,
-                "x" => self.stop_job(id),
-                "r" if self.session().jobs().iter().any(|s| s.id == id && s.state.ended()) => {
+        // A key's actions in turn: one that doesn't apply (running again a job that hasn't ended) lets the next have it.
+        for action in self.actions(Scope::Job, &event) {
+            match action {
+                "job.close" => return Handled::Close,
+                "job.up" => *scroll = (*scroll - 1).max(0),
+                "job.page-up" => *scroll = (*scroll - 5).max(0),
+                "job.down" => *scroll += 1,
+                "job.page-down" => *scroll += 5,
+                "job.stop" => self.stop_job(id),
+                "job.again" if self.session().jobs().iter().any(|s| s.id == id && s.state.ended()) => {
                     self.run_job_again(id);
                     return Handled::Close;
                 }
-                "c" => {
+                "job.copy" => {
                     let report = self.session().job(id).and_then(|detail| detail.report).unwrap_or_default();
                     if !report.is_empty() {
                         self.0.tty.write(&format!("\x1b]52;c;{}\x07", base64::engine::general_purpose::STANDARD.encode(report)));
                         self.notice(&format!("Copied job {id}'s report."), NoticeTone::Info);
                     }
                 }
-                _ => {}
-            },
-            _ => {}
+                _ => continue,
+            }
+            break;
         }
         Handled::Kept
     }
@@ -527,6 +522,9 @@ pub(super) struct JobPanel {
 impl Overlay<TuiApp> for JobPanel {
     fn handle(&mut self, app: &TuiApp, event: InputEvent) -> Handled {
         app.job_panel_input(self, event)
+    }
+    fn closed(&mut self, app: &TuiApp) {
+        app.session().unwatch_job();
     }
     fn draw(&mut self, app: &TuiApp, screen: &mut Screen, area: Area) -> Option<Cursor> {
         let width = 76.min(area.left - 2);

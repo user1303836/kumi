@@ -110,6 +110,10 @@ pub trait ModelController {
     async fn save_key(&self, provider: ProviderId, key: &str, signal: Option<Signal>) -> Result<ApiKeyCheck, RuntimeError>;
     async fn sign_in_chatgpt(&self, io: ChatGptSignIn) -> Result<(), RuntimeError>;
     async fn sign_out(&self, provider: ProviderId) -> Result<bool, RuntimeError>;
+    /// The model servers on this computer, by id and name: a provider's name is a server's own.
+    fn server_names(&self) -> Vec<(String, String)> {
+        Vec::new()
+    }
 }
 
 /// The saved model, when its provider's own list (the one /model shows, read once a session) no longer shows it:

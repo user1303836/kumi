@@ -5,9 +5,6 @@ use super::super::picker::{NoteTone, PickerOptions};
 use super::panels::{inert, item, noted};
 use super::*;
 
-/// How soon the second esc of `esc esc` comes after the first.
-const AGAIN_MS: f64 = 500.;
-
 impl TuiApp {
     /// /takeback: the producer's last request taken back, or their last `words` of them. Kumi undoes their changes newest
     /// first and puts the earliest one's words back in the box.
@@ -100,23 +97,9 @@ impl TuiApp {
         let tone = if taken.failed.is_some() { NoticeTone::Warn } else { NoticeTone::Info };
         self.notice(&said.join(" "), tone);
     }
-    /// An esc nothing else took, with Kumi at rest and nothing pinned. In an empty box, the second within half a second
-    /// of the first (`before`) opens the requests to take back.
-    pub(super) fn escaped(&self, before: Option<f64>) {
-        if !self.0.state.borrow().editor.is_empty() || !self.can().take_back {
-            return;
-        }
-        let now = perf_now();
-        if before.is_some_and(|at| now - at <= AGAIN_MS) {
-            let app = self.clone();
-            tokio::task::spawn_local(async move { app.pick_take_back().await });
-        } else {
-            self.0.state.borrow_mut().escaped = Some(now);
-        }
-    }
-    /// esc esc: the producer's requests that stand, newest first, each with how many changes it made and how many of them
+    /// esc esc (app.take-back): the producer's requests that stand, newest first, each with how many changes it made and how many of them
     /// Kumi can't undo. Choosing one asks before it's taken back, with each one after it.
-    async fn pick_take_back(&self) {
+    pub(super) async fn pick_take_back(&self) {
         if !self.may_take_back() {
             return;
         }
