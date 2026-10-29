@@ -8,6 +8,7 @@ use crate::core::{
     recall::{recall_tool_for, RecallOptions},
     recipes::{recipe_instructions, recipe_tools_for, RecipeStore, RecipeToolsOptions, RUN_RECIPE_TOOL},
     search_memory::SearchMemory,
+    session_log::SessionLog,
     store_client::StoreClient,
     taste_log::{TasteLog, UndoneBy, Whereabouts},
     techniques::{
@@ -105,6 +106,9 @@ pub struct SessionOptions {
     pub cancel_grace_ms: Option<u64>,
     pub max_turns: Option<u32>,
     pub conversations: Option<Rc<dyn ConversationStore>>,
+    /// The kept conversations' logs: the session says which conversation is going on and logs its requests and what its
+    /// answers settle, and the events reach it on their way to the screen (`SessionLog::tee` in front of `on_event`).
+    pub log: Option<Rc<SessionLog>>,
     pub missing_after_ms: Option<u64>,
     pub memory: Option<Rc<dyn MemoryStore>>,
     pub listen: bool,
@@ -160,6 +164,7 @@ impl SessionOptions {
             cancel_grace_ms: None,
             max_turns: None,
             conversations: None,
+            log: None,
             missing_after_ms: None,
             memory: None,
             listen: false,
@@ -1159,7 +1164,9 @@ impl Session {
             );
         }
     }
-    fn begin(&self, place: String, id: String, conversation: Option<&SavedConversation>) {
+    /// The conversation going on from here: `id` in `place`, as it was kept when it's taken up, and `from`, the one it
+    /// copies when another Kumi window has that one open.
+    fn begin(&self, place: String, id: String, conversation: Option<&SavedConversation>, from: Option<&str>) {
         // This Kumi holds the conversation it's in, and lets go of the one it leaves.
         if let Some(store) = &self.0.options.conversations {
             let before = {
@@ -1172,6 +1179,10 @@ impl Session {
                 }
                 store.claim(&place, &id);
             }
+        }
+        // Its log is written from here: a kept one's goes on, and one it has no log for begins with what it had.
+        if let Some(log) = &self.0.options.log {
+            log.open(&place, &id, conversation, from.map(str::to_owned));
         }
         let mut s = self.0.state.borrow_mut();
         if s.conversation_id != id {
@@ -1228,17 +1239,16 @@ impl Session {
         if ours || store.claim(place, id) == Claim::Ours {
             return (id.to_owned(), None);
         }
-        let copy = store.new_id().await;
-        self.notice(format!(
-            "Another Kumi window has this conversation open, so this one carries on in a copy ({copy}); each keeps its own turns."
-        ));
-        (copy, Some(id.to_owned()))
+        (store.new_id().await, Some(id.to_owned()))
     }
-    /// Begin a kept conversation taken up by `take_up`.
+    /// Begin a kept conversation taken up by `take_up`. A copy says so once it's begun, so its log has it.
     fn begin_taken(&self, place: String, (id, from): (String, Option<String>), conversation: &SavedConversation) {
-        self.begin(place, id, Some(conversation));
+        self.begin(place, id.clone(), Some(conversation), from.as_deref());
         if from.is_some() {
             self.0.state.borrow_mut().copied_from = from;
+            self.notice(format!(
+                "Another Kumi window has this conversation open, so this one carries on in a copy ({id}); each keeps its own turns."
+            ));
         }
     }
     /// The open Set's own conversation, as Kumi opens on it: its place's current one (or a copy, when another Kumi has
@@ -1252,7 +1262,7 @@ impl Session {
         self.assert_current(op)?;
         let (Some(kept), Some(project)) = (kept, project) else {
             let id = self.fresh_id().await;
-            self.begin(project.cloned().unwrap_or(self.unsaved().into()), id, None);
+            self.begin(project.cloned().unwrap_or(self.unsaved().into()), id, None, None);
             return Ok(None);
         };
         let begin = {
@@ -1686,7 +1696,7 @@ impl Session {
             let mut taken_up = false;
             if fresh {
                 let id = self.fresh_id().await;
-                self.begin(project.clone().unwrap_or(self.unsaved().into()), id, None);
+                self.begin(project.clone().unwrap_or(self.unsaved().into()), id, None, None);
             } else if let Some(chosen) = chosen {
                 from = Some(chosen.conversation.checkpoint.clone());
                 picked = true;
@@ -1771,7 +1781,7 @@ impl Session {
                         return Err(error);
                     }
                     unreadable = resumed.clone();
-                    self.begin(project.unwrap_or(self.unsaved().into()), new_conversation_id(now()), None);
+                    self.begin(project.unwrap_or(self.unsaved().into()), new_conversation_id(now()), None, None);
                     self.build_kernel(op, observation, None).await?
                 }
             };
@@ -1919,12 +1929,18 @@ impl Session {
             )
         };
         if let (Some(store), Some(place)) = (self.0.options.conversations.clone(), place) {
+            let log = self.0.options.log.clone();
             self.enqueue(async move {
-                if name.is_some() || from.is_some() {
+                let kept = if name.is_some() || from.is_some() {
                     store.create(&place, &id, &conversation, name.as_deref(), from.as_deref()).await
                 } else {
                     store.save(&place, &id, &conversation).await
+                };
+                // Its log says so, as of then: a copy's begins now, from the log of the one it copies.
+                if let (Ok(()), Some(log)) = (&kept, log) {
+                    log.saved(&id, conversation.saved_at, conversation.turns.unwrap_or(0), from);
                 }
+                kept
             });
         }
     }
@@ -1991,6 +2007,9 @@ impl Session {
                     s.place = Some(to.clone());
                     s.conversation_id.clone()
                 };
+                if let Some(log) = &self.0.options.log {
+                    log.moved(&to);
+                }
                 let unsaved = self.unsaved();
                 self.enqueue(async move { store.move_conversation(&id, unsaved, &to).await });
             }
@@ -2429,6 +2448,14 @@ impl SessionController for Session {
             s.turns += 1;
             s.interrupted = None;
         }
+        // The request, in the producer's words, before anything of its answer: a full log begins again with it.
+        if let Some(log) = &self.0.options.log {
+            let (turns, had) = {
+                let s = self.0.state.borrow();
+                (s.conversation_turns, s.settled.as_ref().map(|settled| settled.checkpoint.clone()))
+            };
+            log.request(input, attachments.iter().map(|file| file.name.clone()).collect(), pinned.clone(), turns, had);
+        }
         let said = text.clone();
         self.perform(
             true,
@@ -2768,6 +2795,11 @@ impl SessionController for Session {
             s.conversation_name = None;
             s.copied_from = None;
             s.touched = true;
+        }
+        // The copy's log begins as the original's is now, and is as up to date as the copy's checkpoint.
+        if let Some(log) = &self.0.options.log {
+            log.open(&place, &id, Some(&conversation), Some(source.clone()));
+            log.saved(&id, conversation.saved_at, conversation.turns.unwrap_or(0), Some(source.clone()));
         }
         self.wanted_goes_on_as(&place, &old, &id);
         self.notice(format!("Forked; the original stays as {source}."));
@@ -3619,6 +3651,15 @@ impl SessionController for Session {
             }
             let saving = this.0.saving.borrow().clone();
             let _ = this.bounded(saving).await;
+            // Its log is all on the disk before another Kumi may take the conversation up.
+            if let Some(log) = this.0.options.log.clone() {
+                let _ = this
+                    .bounded(async move {
+                        log.close().await;
+                        Ok(())
+                    })
+                    .await;
+            }
             // Another Kumi may take this conversation up now.
             let held = {
                 let s = this.0.state.borrow();

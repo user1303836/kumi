@@ -39,6 +39,7 @@ pub mod routing;
 pub mod scripts;
 pub mod search_memory;
 pub mod session;
+pub mod session_log;
 pub mod spec;
 pub mod stems;
 pub mod store_backed;

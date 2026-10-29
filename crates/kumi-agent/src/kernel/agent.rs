@@ -219,6 +219,8 @@ struct Inner {
     fixed: usize,
     /// The settled conversation, shared with the turn under way (its `earlier`) rather than copied into it.
     history: RefCell<Rc<Vec<Message>>>,
+    /// How many of the history's last messages the last turn settled into it.
+    last_turn: Cell<usize>,
     running: RefCell<Option<Rc<Running>>>,
     closing: RefCell<Option<Shared<LocalBoxFuture<'static, ()>>>>,
 }
@@ -321,6 +323,7 @@ pub fn create_agent_kernel(options: AgentKernelOptions) -> Result<AgentKernel, R
             tools_key,
             fixed,
             history: RefCell::new(Rc::new(history)),
+            last_turn: Cell::new(0),
             running: RefCell::new(None),
             closing: RefCell::new(None),
         }),
@@ -353,6 +356,8 @@ impl AgentKernel {
         signal: Signal,
         emit: KernelEmit,
     ) -> Result<TurnResult, RuntimeError> {
+        // Whatever this run comes to, the last turn's messages aren't its to give again: only what it settles is.
+        self.inner.last_turn.set(0);
         if self.inner.closing.borrow().is_some() {
             return Err(RuntimeError::plain("Kernel is closed"));
         }
@@ -527,6 +532,16 @@ impl AgentKernel {
         transcript_of(&values)
     }
 
+    /// The messages the last turn settled into the history, as they went in; none while one is under way.
+    pub fn last_turn(&self) -> Vec<Value> {
+        if self.inner.running.borrow().is_some() {
+            return Vec::new();
+        }
+        let history = self.inner.history.borrow();
+        let settled = self.inner.last_turn.get().min(history.len());
+        history[history.len() - settled..].iter().map(|message| serde_json::to_value(message).expect("message serializes")).collect()
+    }
+
     pub async fn close(&self) {
         let existing = self.inner.closing.borrow().clone();
         let closing = match existing {
@@ -580,6 +595,9 @@ impl Kernel for AgentKernel {
             origin: Some(self.inner.binding().id.clone()),
             tools: Some(self.inner.tools_key.clone()),
         })
+    }
+    fn last_turn(&self) -> Vec<Value> {
+        AgentKernel::last_turn(self)
     }
     fn has_transcript(&self) -> bool {
         true
@@ -868,6 +886,7 @@ impl Turn {
     fn settle(&self, after: Vec<Message>) {
         let mut history = std::mem::take(&mut *self.earlier.borrow_mut());
         *self.inner.history.borrow_mut() = Rc::default();
+        self.inner.last_turn.set(after.len());
         Rc::make_mut(&mut history).extend(after);
         *self.inner.history.borrow_mut() = history;
     }

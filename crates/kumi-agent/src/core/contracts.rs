@@ -150,6 +150,11 @@ pub trait Kernel {
     fn checkpoint(&self) -> Result<KernelCheckpoint, RuntimeError> {
         Err(absent())
     }
+    /// The messages the last turn settled into the conversation, in order, as they went in (none when it left none, or
+    /// one is under way): the session log keeps each, where the checkpoint keeps what the budget leaves of them.
+    fn last_turn(&self) -> Vec<Value> {
+        Vec::new()
+    }
     fn has_transcript(&self) -> bool {
         false
     }
