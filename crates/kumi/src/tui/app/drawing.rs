@@ -125,20 +125,30 @@ impl TuiApp {
             (i32::from(state.pinned.is_some()), i32::from(!state.attachments.is_empty()), state.held.len().min(3) as i32)
         };
         let area = Rect::new(0, 2, left, (box_top - dock - 3 - chip - files - waiting).max(1));
+        // The drawer goes right under the conversation, so what goes with the next message (waiting messages, files,
+        // the pin) stays by the box, as it does beside the side pane; the strip sits between them and the box.
+        let under = if drawer { 0 } else { dock };
+        let docked = if drawer { box_top - 1 - chip - files - waiting - dock } else { box_top - dock - 1 };
         {
             let mut state = self.0.state.borrow_mut();
             state.page = (area.height - 2).max(1);
-            // Where a drag selects: the conversation side down to the composer, the composer, and the pane.
-            state.select_areas = vec![Rect::new(0, 0, left, box_top), Rect::new(0, box_top, left, rows - box_top)];
+            // Where a drag selects: the conversation side down to the composer, the composer, and the pane. The drawer
+            // keeps its own, as the pane does, so the conversation side stops above it and goes on under it.
+            state.select_areas = if drawer {
+                vec![
+                    Rect::new(0, 0, left, docked),
+                    Rect::new(0, docked, columns, dock),
+                    Rect::new(0, docked + dock, left, box_top - docked - dock),
+                ]
+            } else {
+                vec![Rect::new(0, 0, left, box_top)]
+            };
+            state.select_areas.push(Rect::new(0, box_top, left, rows - box_top));
             if pane != 0 {
                 state.select_areas.push(Rect::new(left, 0, pane, rows));
             }
         }
         self.draw_conversation(&mut screen, area);
-        // The drawer goes right under the conversation, so what goes with the next message (waiting messages, files,
-        // the pin) stays by the box, as it does beside the side pane; the strip sits between them and the box.
-        let under = if drawer { 0 } else { dock };
-        let docked = if drawer { box_top - 1 - chip - files - waiting - dock } else { box_top - dock - 1 };
         if pane != 0 {
             self.draw_pane(&mut screen, Rect::new(left, 1, pane, rows - 1));
         } else if drawer {

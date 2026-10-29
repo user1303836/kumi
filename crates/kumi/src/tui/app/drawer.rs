@@ -95,19 +95,6 @@ pub(super) fn drawer_fits(columns: i32, rows: i32) -> bool {
     columns < PANE_COLUMNS && rows >= DRAWER_ROWS
 }
 
-/// Where a drag that starts at row `y` may select, with the drawer at `drawer`: the drawer keeps its own, as the side pane
-/// does, so a drag stays above it (the conversation), in it, or under it (the box and what goes with it).
-pub(super) fn drag_area(drawer: Rect, y: i32, screen: Rect) -> Rect {
-    let bottom = drawer.y + drawer.height;
-    if y < drawer.y {
-        Rect::new(screen.x, screen.y, screen.width, drawer.y - screen.y)
-    } else if y < bottom {
-        Rect::new(screen.x, drawer.y, screen.width, drawer.height)
-    } else {
-        Rect::new(screen.x, bottom, screen.width, screen.y + screen.height - bottom)
-    }
-}
-
 impl TuiApp {
     /// The drawer follows what landed since the last frame: a new change opens it to NOW, and the tab panel turning to
     /// another tab (GOAL as a goal starts) opens a folded one on it. Only while it's on screen, the producer hasn't
@@ -214,11 +201,6 @@ impl TuiApp {
         if let Some(id) = id {
             self.0.tabs.show(id);
         }
-    }
-
-    /// Where a drag starting at row `y` may select while the drawer is drawn.
-    pub(super) fn drawer_drag(&self, y: i32, screen: Rect) -> Option<Rect> {
-        self.0.state.borrow().drawer.area.map(|drawer| drag_area(drawer, y, screen))
     }
 
     /// The drawer's rows: its row of tabs folded, 6 to 10 open by the window's.
