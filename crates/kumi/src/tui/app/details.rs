@@ -4,7 +4,7 @@
 //! producer's editor.
 
 use super::super::{
-    details::{opening, AnswerMeta, Details},
+    details::{words_of, AnswerMeta, Details},
     external_editor,
     keys::Modifiers,
     overlay::{Area, Handled, Overlay},
@@ -78,7 +78,7 @@ impl TuiApp {
                     chrono::Local.timestamp_millis_opt((wall - (now - at)) as i64).single().map(|at| at.format("%H:%M").to_string())
                 });
                 let line = [state.answer_models.get(&entry.id).cloned(), started, footer.clone()].into_iter().flatten().collect::<Vec<_>>();
-                Some(AnswerMeta { opening: opening(text), line: line.join(" · ") })
+                Some(AnswerMeta { words: words_of(text), line: line.join(" · ") })
             })
             .collect()
     }
