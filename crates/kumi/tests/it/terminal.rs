@@ -309,6 +309,23 @@ impl SessionController for Control {
         self.calls.borrow_mut().push("stopLive".into());
         Ok(true)
     }
+    fn has_aside(&self) -> bool {
+        true
+    }
+    async fn aside(&self, question: &str, _: kumi_agent::core::contracts::OnText, _: Option<Signal>) -> Result<String, RuntimeError> {
+        self.calls.borrow_mut().push(format!("aside:{question}"));
+        Ok("A pad holds the chords under the lead.".into())
+    }
+    fn has_goal(&self) -> bool {
+        true
+    }
+    async fn goal(&self, text: Option<&str>) -> Result<(), RuntimeError> {
+        self.calls.borrow_mut().push(format!("goal:{}", text.unwrap_or("")));
+        Ok(())
+    }
+    fn has_jobs(&self) -> bool {
+        true
+    }
 }
 struct Fixture {
     input: Rc<Input>,
@@ -1032,6 +1049,41 @@ async fn plain_mode_in_reaper_and_renoise_never_speaks_lives_words() {
                 }
             }
             kumi::daw::work_with(kumi_types::daw::DawId::Ableton);
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn plain_mode_runs_the_tables_text_commands_and_names_the_full_screen_apps() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let f = Fixture::new(false, false, None, None, None);
+            flush().await;
+            f.input.write("/btw what does a pad do?\n/goal make the bass punchier\n/jobs\n/voice\n/map\n/help\n");
+            flush().await;
+            let text = f.text();
+            for want in [
+                "[btw] A pad holds the chords under the lead.",
+                "[jobs] No background jobs.",
+                "[plain] /voice isn't available in plain mode: the full-screen app has it.",
+                "[plain] /map isn't available in plain mode",
+                "/btw (Ask something on the side",
+                "/pin <id>",
+                "Only in the full-screen app: ",
+            ] {
+                assert!(text.contains(want), "{want}:\n{text}");
+            }
+            assert!(!text.contains("Unknown command"), "{text}");
+            let calls = f.control.calls.borrow().clone();
+            assert!(
+                calls.contains(&"aside:what does a pad do?".into()) && calls.contains(&"goal:make the bass punchier".into()),
+                "{calls:?}"
+            );
+            // A loop's words go as a turn: the session reads it.
+            f.input.write("/loop make it louder\n");
+            flush().await;
+            assert!(f.control.calls.borrow().iter().any(|call| call == "submit:/loop make it louder"), "{:?}", f.control.calls.borrow());
+            f.quit().await;
         })
         .await;
 }

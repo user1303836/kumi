@@ -709,7 +709,6 @@ impl PlainTerminal {
     fn now(&self) -> Now {
         let options = &self.0.options;
         let fronts = Fronts {
-            models: true,
             voice: false,
             updates: options.updates.is_some(),
             switch_daw: options.switch_daw.is_some(),
@@ -722,7 +721,9 @@ impl PlainTerminal {
         let controller = &self.0.options.controller;
         let words = string::trim(command.strip_prefix(verb).unwrap_or("")).to_string();
         match effect {
-            Effect::Quit => self.finish(0).await,
+            Effect::Quit => {
+                self.finish(0).await;
+            }
             Effect::Help => self.notice(&self.help()),
             Effect::Daw => {
                 let Some(switch) = self.0.options.switch_daw.clone() else { return Ok(()) };
@@ -943,7 +944,7 @@ impl PlainTerminal {
             return;
         }
         let session = InProcess::new(self.0.options.controller.clone());
-        match (&session as &dyn SessionHandle).op(op::Music {}).await {
+        match (&*session as &dyn SessionHandle).op(op::Music {}).await {
             Ok(view) => {
                 for line in crate::tui::app::music_lines(&view.status, view.agreed, view.held, view.found.as_ref(), now_ms_f64()) {
                     self.notice(&format!("[music] {line}"));
@@ -1909,7 +1910,7 @@ mod registry_tests {
         for value in can.as_object_mut().unwrap().values_mut() {
             *value = Value::Bool(true);
         }
-        let fronts = Fronts { models: true, voice: true, updates: true, switch_daw: true, willington: true };
+        let fronts = Fronts { voice: true, updates: true, switch_daw: true, willington: true };
         Now { busy: false, goal_running: false, can: serde_json::from_value(can).unwrap(), fronts }
     }
 
