@@ -171,6 +171,7 @@ REAPER と Renoise でも画面は同じで（[つなぎ方](KUMI_GUIDE.md#reape
 | Ctrl-S | 下書きを添付ファイルごと脇に置く。入力欄が空のときの Ctrl-S で戻す（入力欄に文字があれば入れ替わる） |
 | Ctrl-T | 入力の代わりに話す：もう一度押すと止まり、押したまま話すこともできる。話した内容はカーソル位置に入る。Enter で止めてすぐ送り、Esc で破棄する |
 | Ctrl-V | クリップボードの画像（スクリーンショットなど）を次のメッセージに添える。ウインドウにドラッグしたファイルも同じように添えられる |
+| `@` | トラック、デバイス、インストゥルメント、自分のサウンド・パレット・テクニックを正確に指す。`@` の後に打つと候補が出て、Tab か Enter で選んだものが入る（`@Drums`）。Kumi にはまさにそれが伝わる。Backspace でまるごと消え、↑ と Ctrl-G では言葉として戻るので、もう一度指し直す |
 | 長い貼り付け | 10 行または 1,000 文字を超える貼り付けは `[pasted 41 lines]` のような 1 つのチップになる。Backspace でまるごと消え、Kumi には全文が届き、会話にはチップと最初の行の冒頭が出る。Kumi の作業中に待たせたメッセージ、Alt-↑ で戻したもの、停止後に戻ったもの、↑ や Ctrl-R で呼び戻したものもチップのまま。1 つのメッセージは 256 KB まで：それより長いと入力欄の下にそう出て、Enter を押しても欄に残る。履歴ファイルには長いメッセージの最初の 4,096 文字が `…` 付きで残る。Kumi の起動後に送ったものは ↑ で全文が戻る |
 | 空の入力欄で Backspace | 最後に添えたファイルを取り消す |
 | 空の入力欄で `?` | `/help` と同じく、キーとコマンドを開く。ほかの場所では `?` が入力される。メッセージを `?` で始めるには、先にスペースを入力するか、貼り付ける |
@@ -179,7 +180,7 @@ REAPER と Renoise でも画面は同じで（[つなぎ方](KUMI_GUIDE.md#reape
 
 | キー | 動作 |
 | --- | --- |
-| Esc | `/` メニューを閉じる。メニューがなければ Kumi の答えを止める（終わったステップは残り、待機中のメッセージは入力欄に戻る）。それもなければ、ピン留めしたデバイスを外す |
+| Esc | `/` か `@` のメニューを閉じる。メニューがなければ Kumi の答えを止める（終わったステップは残り、待機中のメッセージは入力欄に戻る）。それもなければ、ピン留めしたデバイスを外す |
 | Esc Esc | Kumi が何もしていないとき、空の入力欄で（ピン留めがなければ）：あなたの依頼を新しい順に、それぞれの変更の数とともに表示します。一つ選ぶと、`/takeback` と同じように、その依頼とその後の依頼をすべて取り消せます（その前に、Kumi が元に戻せない変更を示します。それらはそのまま残ります）。または、その依頼の前からコピーで続けることもでき、DAW と元の会話はそのまま残ります |
 | Ctrl-C | Kumi の答えを止める。Kumi が何もしていないときは入力欄を空にし（↑ か Ctrl-- で文字が戻る）、入力欄が空なら終了する |
 | Ctrl-B | 答えの中の、Live を使わない時間のかかるステップ（ビデオ、ページ、マニュアル、ライブラリー）をジョブとしてバックグラウンドに移す。答えはそのまま続く。tmux では Ctrl-B を 2 回押す |
@@ -208,7 +209,7 @@ REAPER と Renoise でも画面は同じで（[つなぎ方](KUMI_GUIDE.md#reape
 
 - アクションごとのリストが、そのアクションのキーに置き換わります。空のリストではキーがなくなります。キーは `ctrl`、`alt`（または `option`）、`shift` と名前で書きます：`enter`、`tab`、`esc`、`backspace`、`delete`、`insert`、`up` または `↑`（ほかの矢印も同じ）、`home`、`end`、`pageup`、`pagedown`、`space`、`f1`〜`f12`、または一文字（`ctrl+-`、`ctrl++`）。スペースで区切った二つのキー（`esc esc`）は、続けて押します。最初のキーは、入力欄でほかに何も受け取らないときだけ組の始まりになり、二つ目は半秒以内に押します。組が使えるのは入力欄だけです。
 - 同じキーを複数のアクションが使うときは、keys.json のものが先に、次に Kumi 自身のものが、これまでの順に試されます。
-- 文字を入力する場所（入力欄、一覧、`/` メニュー）では、一文字をキーにはできません。入力中の検索やフィルター（会話の詳細、地図）だけのアクションにもできません。そこでは文字として入力されます。空の入力欄での `?` はいつもヘルプを開き、`app.help` にキーを加えることもできます（`f1`）。
+- 文字を入力する場所（入力欄、一覧、`/` と `@` のメニュー）では、一文字をキーにはできません。入力中の検索やフィルター（会話の詳細、地図）だけのアクションにもできません。そこでは文字として入力されます。空の入力欄での `?` はいつもヘルプを開き、`app.help` にキーを加えることもできます（`f1`）。
 - 使えなかったものは、起動時に一度だけ伝えます：知らないアクション、読めないキー、文字を入力する場所での一文字、keys.json が一つのキーを与えた二つのアクション、Kumi 自身のキーより先に置いたキー。
 - ヘルプ（`/help`、`?`）は keys.json のとおりのキーを表示しますが、入力欄の下、パネル、地図、セットアップのヒントは、まだ Kumi 自身のキーを示します。
 
@@ -217,7 +218,7 @@ REAPER と Renoise でも画面は同じで（[つなぎ方](KUMI_GUIDE.md#reape
 | 入力欄 | `composer.send`（enter）、`composer.send-after`（Kumi の作業中の tab）、`composer.take-back-waiting`（alt+↑）、`composer.new-line`（ctrl+j、alt+enter、shift+enter）、`composer.up`、`composer.down`、`composer.left`、`composer.right`、`composer.word-left`（alt+←、ctrl+←、alt+b）、`composer.word-right`（alt+→、ctrl+→、alt+f）、`composer.line-start`（home、ctrl+a）、`composer.line-end`（end、ctrl+e）、`composer.backspace`、`composer.take-back-file`（空の入力欄での backspace）、`composer.delete`（delete、ctrl+d）、`composer.cut-word`（ctrl+w、alt+backspace、ctrl+backspace）、`composer.cut-to-end`（ctrl+k）、`composer.cut-to-start`（ctrl+u）、`composer.yank`（ctrl+y）、`composer.yank-earlier`（alt+y）、`composer.undo`（ctrl+-、ctrl+_）、`composer.history-search`（ctrl+r）、`composer.editor`（ctrl+g）、`composer.stash`（ctrl+s） |
 | Kumi | `app.stop`（esc）、`app.take-back`（空の入力欄での esc esc）、`app.interrupt`（ctrl+c）、`app.quit`（ctrl+d）、`app.background`（ctrl+b）、`app.paste-picture`（ctrl+v）、`app.redraw`（ctrl+l）、`app.help`（自身のキーはなし：`?`）、`voice.talk`（ctrl+t）、`conversation.page-up`、`conversation.page-down`、`conversation.start`（ctrl+home）、`conversation.latest`（ctrl+end）、`conversation.details`（ctrl+o） |
 | ペイン | `pane.toggle`（ctrl+\\）、`pane.tabs`（shift+tab）、`pane.tree`（tab）。タブでは `tabs.up`、`tabs.down`、`tabs.page-up`、`tabs.page-down`、`tabs.open`（enter）、`tabs.next`（shift+tab）、`tabs.leave`（esc、tab）。ツリーでは `tree.up`、`tree.down`、`tree.pin`（enter）、`tree.leave`（esc、tab） |
-| `/` メニュー | `menu.up`、`menu.down`、`menu.complete`（tab）、`menu.run`（enter）、`menu.close`（esc） |
+| `/` と `@` のメニュー | `menu.up`、`menu.down`、`menu.complete`（tab）、`menu.run`（enter。`@` では tab と同じく選んだものを入れる）、`menu.close`（esc） |
 | 振り返り（ctrl+r） | `search.back`（ctrl+r）、`search.erase`（backspace）、`search.take`（enter、tab）、`search.cancel`（esc、ctrl+c） |
 | 聴いている間 | `voice.send`（enter）、`voice.drop`（esc、ctrl+c） |
 | 選択したテキスト | `selection.copy`（ctrl+c）、`selection.clear`（esc） |

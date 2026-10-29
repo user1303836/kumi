@@ -1151,7 +1151,7 @@ impl TuiApp {
         };
         self.task(move |app| async move {
             app.0.state.borrow_mut().sending_held = Some(next.text.clone());
-            let sent = app.send(&next.text).await;
+            let sent = app.send_naming(&next.text, next.words.references()).await;
             app.0.state.borrow_mut().sending_held = None;
             if sent || app.0.state.borrow().closing {
                 return Ok(());

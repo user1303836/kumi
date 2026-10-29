@@ -1,11 +1,11 @@
   Kumi  ·  Night Drive                                                  ● Live
 
 
-   Keys and commands                                                ↑ 80 more
+   Keys and commands                                                ↑ 83 more
 
-   Commands
-     /                   Commands and their words: ↑↓ choose, tab completes,
-                         enter runs, esc closes
+     @                   Name a track, a device, a sound, a palette or a
+                         technique exactly: ↑↓ choose, tab or enter puts it
+                         in, esc closes
      ?                   This help, from an empty box
      /new                Start a fresh conversation (the last one is kept);
                          /new <name> names it

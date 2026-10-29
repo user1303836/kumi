@@ -196,6 +196,20 @@ impl SessionController for Control {
         self.call("reconfigure");
         Ok(())
     }
+    async fn submit_with_references(
+        &self,
+        s: &str,
+        pin: Option<PinnedNode>,
+        attachments: Vec<Attachment>,
+        references: Vec<Reference>,
+    ) -> Result<(), RuntimeError> {
+        self.call(format!("references-sent:{}", serde_json::to_string(&references).unwrap()));
+        self.submit_with(s, pin, attachments).await
+    }
+    async fn references(&self, query: &str, _: u32) -> Result<Vec<kumi_agent::core::references::Candidate>, RuntimeError> {
+        self.call(format!("references:{query}"));
+        Ok(self.get("references").unwrap_or_default())
+    }
     async fn submit(&self, s: &str, pin: Option<PinnedNode>) -> Result<(), RuntimeError> {
         if let Some(error) = self.get::<String>("submit-error") {
             // As the session hands back a message it can't take (one too long): the words go back in the box.

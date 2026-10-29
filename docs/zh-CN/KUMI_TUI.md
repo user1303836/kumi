@@ -171,6 +171,7 @@ Kumi 占据整个终端窗口，并在 Kumi 关闭、崩溃或被停止时把窗
 | Ctrl-S | 把草稿连同附件放到一边；输入框为空时按 Ctrl-S 取回（输入框有文字时两者互换） |
 | Ctrl-T | 用说话代替打字：再按一次停止，或按住说话。你说的话会出现在光标处；Enter 立即停止并发送，Esc 放弃 |
 | Ctrl-V | 把剪贴板中的图片（比如截图）添加到下一条消息；拖进窗口的文件也会这样添加 |
+| `@` | 准确地指代一样东西：音轨、设备、乐器，或你的声音、调色板、技巧。在 `@` 后输入即可找到，按 Tab 或 Enter 放入所选（`@Drums`），Kumi 收到的正是那一个。Backspace 会整个删除它；↑ 和 Ctrl-G 会把它还原为文字，需要重新指代 |
 | 长段粘贴 | 超过 10 行或 1,000 个字符的粘贴会成为一个整体，例如 `[pasted 41 lines]`：Backspace 会整个删除它，Kumi 收到全部内容，对话中显示这个块和第一行的开头。Kumi 工作时暂存的消息、用 Alt-↑ 取回的、停止后放回的，以及用 ↑ 或 Ctrl-R 找回的，都保持为块。一条消息最多 256 KB：更长的会在输入框下方提示，按 Enter 它仍留在框中。历史文件只保留长消息的前 4,096 个字符，以 `…` 结尾；Kumi 启动后发送的消息用 ↑ 能完整找回 |
 | 输入框为空时按 Backspace | 撤回最后添加的文件 |
 | 输入框为空时按 `?` | 与 `/help` 一样打开按键和命令；在其他地方则输入问号。要让消息以问号开头，先输入一个空格，或直接粘贴 |
@@ -179,7 +180,7 @@ Kumi 占据整个终端窗口，并在 Kumi 关闭、崩溃或被停止时把窗
 
 | 按键 | 操作 |
 | --- | --- |
-| Esc | 关闭 `/` 菜单；否则停止 Kumi 的回答（已完成的步骤保留，等待中的消息回到输入框）；否则取消固定的设备 |
+| Esc | 关闭 `/` 或 `@` 菜单；否则停止 Kumi 的回答（已完成的步骤保留，等待中的消息回到输入框）；否则取消固定的设备 |
 | Esc Esc | Kumi 空闲、输入框为空且没有固定的设备时：按从新到旧列出你的请求，以及每个请求做了几处更改。选择一个，可以像 `/takeback` 一样收回它以及之后的所有请求（在此之前，Kumi 会列出它无法撤销的更改，这些更改保持原样）；也可以从它之前开始，在副本中继续，DAW 和原来的对话都保持原样 |
 | Ctrl-C | 停止 Kumi 的回答；空闲时清空输入框（按 ↑ 或 Ctrl-- 可找回文字）；输入框为空时退出 |
 | Ctrl-B | 把回答中不用 Live 的耗时步骤（视频、网页、手册、你的素材库）作为任务移到后台，回答继续进行。在 tmux 中按两次 Ctrl-B |
@@ -208,7 +209,7 @@ Kumi 占据整个终端窗口，并在 Kumi 关闭、崩溃或被停止时把窗
 
 - 每个动作的列表会取代它原来的按键，空列表则让它不再有按键。按键写作 `ctrl`、`alt`（或 `option`）、`shift` 加上名称：`enter`、`tab`、`esc`、`backspace`、`delete`、`insert`、`up` 或 `↑`（其他方向键同理）、`home`、`end`、`pageup`、`pagedown`、`space`、`f1` 到 `f12`，或单个字符（`ctrl+-`、`ctrl++`）。用空格隔开的两个键（`esc esc`）表示先后按下：只有当输入框里没有别的动作接收第一个键时，它才开始这一组；第二个键要在半秒内按下；这样的组合只在输入框里有效。
 - 多个动作共用一个键时，先试 keys.json 里的，再按一贯的顺序试 Kumi 自己的。
-- 在输入文字的地方（输入框、列表、`/` 菜单），单个字符不能作为按键；正在输入的搜索或筛选（对话详情、地图）独有的动作也不能。在那里它会被当作文字输入。输入框为空时，`?` 总是打开帮助；也可以给 `app.help` 再加按键（`f1`）。
+- 在输入文字的地方（输入框、列表、`/` 和 `@` 菜单），单个字符不能作为按键；正在输入的搜索或筛选（对话详情、地图）独有的动作也不能。在那里它会被当作文字输入。输入框为空时，`?` 总是打开帮助；也可以给 `app.help` 再加按键（`f1`）。
 - 启动时，Kumi 会把用不上的内容说一次：不认识的动作、读不懂的按键、输入文字处的单个字符、keys.json 给了同一个键的两个动作，以及排在 Kumi 自身按键之前的键。
 - 帮助（`/help`、`?`）按 keys.json 显示按键，但输入框下方、面板、地图和设置里的提示仍写着 Kumi 自己的按键。
 
@@ -217,7 +218,7 @@ Kumi 占据整个终端窗口，并在 Kumi 关闭、崩溃或被停止时把窗
 | 输入框 | `composer.send`（enter）、`composer.send-after`（Kumi 工作时的 tab）、`composer.take-back-waiting`（alt+↑）、`composer.new-line`（ctrl+j、alt+enter、shift+enter）、`composer.up`、`composer.down`、`composer.left`、`composer.right`、`composer.word-left`（alt+←、ctrl+←、alt+b）、`composer.word-right`（alt+→、ctrl+→、alt+f）、`composer.line-start`（home、ctrl+a）、`composer.line-end`（end、ctrl+e）、`composer.backspace`、`composer.take-back-file`（输入框为空时的 backspace）、`composer.delete`（delete、ctrl+d）、`composer.cut-word`（ctrl+w、alt+backspace、ctrl+backspace）、`composer.cut-to-end`（ctrl+k）、`composer.cut-to-start`（ctrl+u）、`composer.yank`（ctrl+y）、`composer.yank-earlier`（alt+y）、`composer.undo`（ctrl+-、ctrl+_）、`composer.history-search`（ctrl+r）、`composer.editor`（ctrl+g）、`composer.stash`（ctrl+s） |
 | Kumi | `app.stop`（esc）、`app.take-back`（输入框为空时的 esc esc）、`app.interrupt`（ctrl+c）、`app.quit`（ctrl+d）、`app.background`（ctrl+b）、`app.paste-picture`（ctrl+v）、`app.redraw`（ctrl+l）、`app.help`（没有自己的按键：`?`）、`voice.talk`（ctrl+t）、`conversation.page-up`、`conversation.page-down`、`conversation.start`（ctrl+home）、`conversation.latest`（ctrl+end）、`conversation.details`（ctrl+o） |
 | 窗格 | `pane.toggle`（ctrl+\\）、`pane.tabs`（shift+tab）、`pane.tree`（tab）；标签页里有 `tabs.up`、`tabs.down`、`tabs.page-up`、`tabs.page-down`、`tabs.open`（enter）、`tabs.next`（shift+tab）、`tabs.leave`（esc、tab）；设备树里有 `tree.up`、`tree.down`、`tree.pin`（enter）、`tree.leave`（esc、tab） |
-| `/` 菜单 | `menu.up`、`menu.down`、`menu.complete`（tab）、`menu.run`（enter）、`menu.close`（esc） |
+| `/` 和 `@` 菜单 | `menu.up`、`menu.down`、`menu.complete`（tab）、`menu.run`（enter；在 `@` 中与 tab 一样放入选中的那一项）、`menu.close`（esc） |
 | 回看（ctrl+r） | `search.back`（ctrl+r）、`search.erase`（backspace）、`search.take`（enter、tab）、`search.cancel`（esc、ctrl+c） |
 | 聆听时 | `voice.send`（enter）、`voice.drop`（esc、ctrl+c） |
 | 选中的文字 | `selection.copy`（ctrl+c）、`selection.clear`（esc） |

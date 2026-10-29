@@ -299,6 +299,7 @@ its undo. They're in English for now.
 | Ctrl-S | Put the draft aside, with its files; Ctrl-S in an empty box brings it back (with words in the box, they change places) |
 | Ctrl-T | Talk instead of typing: press it again to stop, or hold it while you talk. What you said lands in the box at the cursor; Enter stops and sends at once, Esc drops it |
 | Ctrl-V | Add the picture on the clipboard (a screenshot, say) to your next message; files dragged into the window are added the same way |
+| `@` | Name something exactly: a track, a device, an instrument, or a sound, palette or technique of yours. What you type after it finds them; Tab or Enter puts in the one chosen (`@Drums`), and Kumi is told exactly that one. Backspace takes it out whole; ↑ and Ctrl-G give it back as words, to name again |
 | A long paste | More than 10 lines or 1,000 characters goes in as one chip, `[pasted 41 lines]`: Backspace takes it out whole, Kumi gets all of it, and the conversation shows the chip and the start of its first line. A message held while Kumi works, taken back with Alt-↑, put back after a stop, or brought back with ↑ or Ctrl-R keeps its chips. One message takes up to 256 KB: a longer one says so under the box, and Enter keeps it there. The history file keeps a long message's first 4,096 characters, ending in `…`; ↑ brings back one sent since Kumi started whole |
 | Backspace, in an empty box | Take back the last file added |
 | `?`, in an empty box | The keys and commands, as `/help` shows them; anywhere else, a question mark. To start a message with one, type a space first, or paste it |
@@ -307,7 +308,7 @@ its undo. They're in English for now.
 
 | Key | Action |
 | --- | --- |
-| Esc | Close the `/` menu; otherwise stop Kumi's answer (the steps it finished stay, waiting messages go back into the box); otherwise unpin the pinned device |
+| Esc | Close the `/` or `@` menu; otherwise stop Kumi's answer (the steps it finished stay, waiting messages go back into the box); otherwise unpin the pinned device |
 | Esc Esc | In an empty box while Kumi is idle, with nothing pinned: your requests, newest first, each with how many changes it made. Choose one to take it back with each one after it, as `/takeback` does (first Kumi lists the changes it can't undo, which stay as they are), or to carry on from before it in a copy, which leaves your DAW and the conversation as they are |
 | Ctrl-C | Stop Kumi's answer; when idle, clear the box (↑ or Ctrl-- brings the words back); with an empty box, quit |
 | Ctrl-B | Move the answer's slow step that doesn't use Live (a video, pages, the manual, your library) to the background as a job; the answer carries on. In tmux, press Ctrl-B twice |
@@ -362,9 +363,9 @@ it):
   space between (`esc esc`) are pressed one after the other: the first starts the pair only when nothing else in the
   box takes it, the second comes within half a second, and pairs work only in the box.
 - Where actions share a key, keys.json's come first, then Kumi's own, in the order they always were.
-- A character can't be a key where words are typed (the box, a list, the `/` menu), nor for what only a search or a
-  filter does while it's typed (the detailed view's, the map's): it types itself there. `?` on an empty box always
-  opens the help, and `app.help` can have keys as well (`f1`).
+- A character can't be a key where words are typed (the box, a list, the `/` and `@` menus), nor for what only a
+  search or a filter does while it's typed (the detailed view's, the map's): it types itself there. `?` on an empty
+  box always opens the help, and `app.help` can have keys as well (`f1`).
 - Kumi says once, as it starts, what it couldn't use: an action it doesn't know, a key it can't read, a character
   where words are typed, two actions keys.json gives one key, and the keys it puts ahead of Kumi's own.
 - The help (`/help`, `?`) shows the keys as keys.json has them; the hints under the box, in the panels, in the
@@ -375,7 +376,7 @@ it):
 | The box | `composer.send` (enter), `composer.send-after` (tab, while Kumi works), `composer.take-back-waiting` (alt+↑), `composer.new-line` (ctrl+j, alt+enter, shift+enter), `composer.up`, `composer.down`, `composer.left`, `composer.right`, `composer.word-left` (alt+←, ctrl+←, alt+b), `composer.word-right` (alt+→, ctrl+→, alt+f), `composer.line-start` (home, ctrl+a), `composer.line-end` (end, ctrl+e), `composer.backspace`, `composer.take-back-file` (backspace, in an empty box), `composer.delete` (delete, ctrl+d), `composer.cut-word` (ctrl+w, alt+backspace, ctrl+backspace), `composer.cut-to-end` (ctrl+k), `composer.cut-to-start` (ctrl+u), `composer.yank` (ctrl+y), `composer.yank-earlier` (alt+y), `composer.undo` (ctrl+-, ctrl+_), `composer.history-search` (ctrl+r), `composer.editor` (ctrl+g), `composer.stash` (ctrl+s) |
 | Kumi | `app.stop` (esc), `app.take-back` (esc esc, in an empty box), `app.interrupt` (ctrl+c), `app.quit` (ctrl+d), `app.background` (ctrl+b), `app.paste-picture` (ctrl+v), `app.redraw` (ctrl+l), `app.help` (none of its own: `?`), `voice.talk` (ctrl+t), `conversation.page-up`, `conversation.page-down`, `conversation.start` (ctrl+home), `conversation.latest` (ctrl+end), `conversation.details` (ctrl+o) |
 | The pane | `pane.toggle` (ctrl+\\), `pane.tabs` (shift+tab), `pane.tree` (tab); in the tabs, `tabs.up`, `tabs.down`, `tabs.page-up`, `tabs.page-down`, `tabs.open` (enter), `tabs.next` (shift+tab), `tabs.leave` (esc, tab); in the tree, `tree.up`, `tree.down`, `tree.pin` (enter), `tree.leave` (esc, tab) |
-| The `/` menu | `menu.up`, `menu.down`, `menu.complete` (tab), `menu.run` (enter), `menu.close` (esc) |
+| The `/` and `@` menus | `menu.up`, `menu.down`, `menu.complete` (tab), `menu.run` (enter; after `@`, it puts in the one chosen, as tab does), `menu.close` (esc) |
 | Looking back (ctrl+r) | `search.back` (ctrl+r), `search.erase` (backspace), `search.take` (enter, tab), `search.cancel` (esc, ctrl+c) |
 | While Kumi listens | `voice.send` (enter), `voice.drop` (esc, ctrl+c) |
 | Selected text | `selection.copy` (ctrl+c), `selection.clear` (esc) |

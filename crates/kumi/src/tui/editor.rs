@@ -2,6 +2,7 @@
 //! so the cursor never splits a character.
 
 use super::width::{cell_width, graphemes, text_width};
+use kumi_agent::core::contracts::Reference;
 
 /// How many steps undo keeps, and how much text they may hold between them (each step keeps the whole text).
 const STEPS: usize = 100;
@@ -45,11 +46,13 @@ enum Run {
     Deleting,
 }
 
-/// A long paste, kept whole as one character of the box: what was pasted, and what the box shows for it.
+/// A long paste, kept whole as one character of the box: what was pasted, and what the box shows for it. Or what a
+/// message names with `@` (`reference`), whose words are its label, "@Drums".
 #[derive(Clone, Debug)]
 struct Chip {
     text: String,
     label: String,
+    reference: Option<Reference>,
 }
 
 /// A message's words as the box held them: its characters, each chip as the one character it stands as, and those chips.
@@ -80,6 +83,39 @@ impl Composed {
     pub fn shown(&self) -> String {
         shown(&self.chars, &self.chips)
     }
+
+    /// What its chips name with `@`, in the order they come, each once.
+    pub fn references(&self) -> Vec<Reference> {
+        references(&self.chars, &self.chips)
+    }
+
+    /// The words with each reference chip as the words it stands for ("@Drums"): a message sent comes back from the
+    /// history so, to be named again, and fresh.
+    pub fn without_references(&self) -> Composed {
+        let mut chars = Vec::with_capacity(self.chars.len());
+        for grapheme in &self.chars {
+            match chip_of(&self.chips, grapheme) {
+                Some((chip, rest)) if chip.reference.is_some() => {
+                    chars.extend(graphemes(&format!("{}{rest}", chip.label)).into_iter().map(str::to_string));
+                }
+                _ => chars.push(grapheme.clone()),
+            }
+        }
+        compacted(&chars, &self.chips)
+    }
+}
+
+/// What the chips among `graphemes` name with `@`, in the order they come, each once.
+fn references(graphemes: &[String], chips: &[Chip]) -> Vec<Reference> {
+    let mut named: Vec<Reference> = Vec::new();
+    for grapheme in graphemes {
+        if let Some(reference) = chip_of(chips, grapheme).and_then(|(chip, _)| chip.reference.as_ref()) {
+            if !named.contains(reference) {
+                named.push(reference.clone());
+            }
+        }
+    }
+    named
 }
 
 /// The chip a character stands for among `chips`, and what was typed after it in the same character (a mark).
@@ -109,6 +145,7 @@ fn shown(graphemes: &[String], chips: &[Chip]) -> String {
     graphemes
         .iter()
         .map(|grapheme| match chip_of(chips, grapheme) {
+            Some((chip, rest)) if chip.reference.is_some() => format!("{}{rest}", chip.label),
             Some((chip, rest)) => {
                 let first = chip.text.lines().map(str::trim).find(|line| !line.is_empty()).unwrap_or("");
                 let start: String = first.chars().take(CHIP_FIRST_LINE).collect();
@@ -131,6 +168,33 @@ fn moved_mark(grapheme: &str, count: usize, offset: usize) -> String {
         },
         None => grapheme.to_string(),
     }
+}
+
+/// Characters and the chips they hold, those alone, numbered as they first come.
+fn compacted(chars: &[String], chips: &[Chip]) -> Composed {
+    let mut kept: Vec<(usize, Chip)> = Vec::new();
+    let chars = chars
+        .iter()
+        .map(|grapheme| {
+            let mut letters = grapheme.chars();
+            let Some(at) = letters.next().and_then(|first| (first as u32).checked_sub(CHIP)).map(|at| at as usize) else {
+                return grapheme.clone();
+            };
+            let Some(chip) = chips.get(at) else { return grapheme.clone() };
+            let now = match kept.iter().position(|(was, _)| *was == at) {
+                Some(now) => now,
+                None => {
+                    kept.push((at, chip.clone()));
+                    kept.len() - 1
+                }
+            };
+            match char::from_u32(CHIP + now as u32) {
+                Some(mark) => format!("{mark}{}", letters.as_str()),
+                None => grapheme.clone(),
+            }
+        })
+        .collect();
+    Composed { chars, chips: kept.into_iter().map(|(_, chip)| chip).collect() }
 }
 
 /// A draft set aside, with its cursor, its steps and its chips, while the producer looks back through what they sent.
@@ -250,30 +314,7 @@ impl Editor {
     /// The box's words, chips and all: what a message held or sent keeps, to come back as it was. Only the chips its
     /// words hold go with it (the box keeps those undo may bring back), numbered as they come.
     pub fn composed(&self) -> Composed {
-        let mut kept: Vec<(usize, Chip)> = Vec::new();
-        let chars = self
-            .chars
-            .iter()
-            .map(|grapheme| {
-                let mut letters = grapheme.chars();
-                let Some(at) = letters.next().and_then(|first| (first as u32).checked_sub(CHIP)).map(|at| at as usize) else {
-                    return grapheme.clone();
-                };
-                let Some(chip) = self.chips.get(at) else { return grapheme.clone() };
-                let now = match kept.iter().position(|(was, _)| *was == at) {
-                    Some(now) => now,
-                    None => {
-                        kept.push((at, chip.clone()));
-                        kept.len() - 1
-                    }
-                };
-                match char::from_u32(CHIP + now as u32) {
-                    Some(mark) => format!("{mark}{}", letters.as_str()),
-                    None => grapheme.clone(),
-                }
-            })
-            .collect();
-        Composed { chars, chips: kept.into_iter().map(|(_, chip)| chip).collect() }
+        compacted(&self.chars, &self.chips)
     }
 
     /// The box's words replaced by a message's, its chips chips again: one step undo takes back. The box's own chips stay
@@ -284,6 +325,39 @@ impl Editor {
         self.chars = composed.chars.iter().map(|grapheme| moved_mark(grapheme, composed.chips.len(), offset)).collect();
         self.chips.extend(composed.chips.iter().cloned());
         self.position = self.chars.len();
+    }
+
+    /// The `count` characters before the cursor (an `@` and what was typed after it) replaced by a chip naming
+    /// `reference`, drawn and sent as `label` ("@Drums"): one step, which backspace takes out whole, as a paste's.
+    pub fn insert_reference(&mut self, count: usize, label: &str, reference: Reference) {
+        let Some(mark) = char::from_u32(CHIP + self.chips.len() as u32).filter(|mark| (*mark as u32) <= 0x10_fffd) else { return };
+        self.change(None);
+        self.chips.push(Chip { text: label.to_string(), label: label.to_string(), reference: Some(reference) });
+        let from = self.position.saturating_sub(count);
+        self.splice(from, self.position, &format!("{mark} "));
+    }
+
+    /// What the box's chips name with `@`, in the order they're in, each once: what goes with the message.
+    pub fn references(&self) -> Vec<Reference> {
+        references(&self.chars, &self.chips)
+    }
+
+    /// The `@` being typed at the cursor, at the start or after a space: how many characters it and what follows it
+    /// take, and what was typed after it. None when the cursor isn't in one.
+    pub fn at_query(&self) -> Option<(usize, String)> {
+        let mut at = self.position;
+        while at > 0 {
+            let grapheme = &self.chars[at - 1];
+            if grapheme == "@" {
+                let opens = at == 1 || is_space(&self.chars[at - 2]);
+                return opens.then(|| (self.position - at + 1, self.chars[at..self.position].concat()));
+            }
+            if is_space(grapheme) || self.chip(grapheme).is_some() {
+                return None;
+            }
+            at -= 1;
+        }
+        None
     }
 
     /// How many bytes `expanded` would be, without making it.
@@ -581,7 +655,7 @@ impl Editor {
         match mark.filter(|_| lines > CHIP_LINES || characters > CHIP_CHARACTERS) {
             Some(mark) => {
                 let label = if lines > 1 { format!("[pasted {lines} lines]") } else { format!("[pasted {characters} characters]") };
-                self.chips.push(Chip { text: text.to_string(), label });
+                self.chips.push(Chip { text: text.to_string(), label, reference: None });
                 self.splice(self.position, self.position, &mark.to_string());
             }
             None => self.put(text),

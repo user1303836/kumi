@@ -199,7 +199,7 @@ fn read_default(words: &str) -> Option<(Vec<Chord>, Modifiers)> {
 pub enum Scope {
     /// The input box, and the conversation it scrolls.
     Box,
-    /// The `/` menu, over the box while a command is being typed.
+    /// The `/` menu, over the box while a command is being typed, and `@`'s list while what it names is.
     Menu,
     /// The pane's tabs, after shift+tab.
     Tabs,
@@ -270,7 +270,7 @@ impl Scope {
     pub fn words(self) -> &'static str {
         match self {
             Scope::Box => "in the box",
-            Scope::Menu => "in the / menu",
+            Scope::Menu => "in the / or @ menu",
             Scope::Tabs => "in the tabs",
             Scope::Tree => "in FOCUS's tree",
             Scope::Voice => "while Kumi listens",
@@ -364,12 +364,12 @@ pub const ACTIONS: &[Action] = &[
     act("tree.down", &[Tree], &["shift?+down"], "The row below"),
     act("tree.pin", &[Tree], &["shift?+enter"], "Pin the row, so what you ask is about it"),
     act("tree.leave", &[Tree], &["any+escape", "any+tab"], "Back to the box"),
-    // The / menu.
+    // The / menu, and @'s list.
     act("menu.close", &[Menu], &["any+escape"], "Close the menu"),
-    act("menu.up", &[Menu], &["any+up"], "The command above"),
-    act("menu.down", &[Menu], &["any+down"], "The command below"),
-    act("menu.complete", &[Menu], &["any+tab"], "Complete the command"),
-    act("menu.run", &[Menu], &["ctrl?+enter"], "Run the command"),
+    act("menu.up", &[Menu], &["any+up"], "The row above"),
+    act("menu.down", &[Menu], &["any+down"], "The row below"),
+    act("menu.complete", &[Menu], &["any+tab"], "Complete the command or its word; after @, put in the one chosen"),
+    act("menu.run", &[Menu], &["ctrl?+enter"], "Run the command; after @, put in the one chosen, as tab does"),
     // The box. Send-after has tab only while Kumi works with words in the box; the tree, only when FOCUS shows it.
     act("composer.send-after", &[InBox], &["shift?+tab"], "While Kumi works: send the words after the answer instead"),
     act("pane.tree", &[InBox], &["shift?+tab"], "Into FOCUS's tree, at the DAW's selection"),

@@ -1,14 +1,12 @@
   Kumi  ·  Night Drive                                                                                                                                  ● Live
 
                                                                                                                     FOCUS
-   Keys and commands                                                                      ↑ 50 more                 Night Drive
+   Keys and commands                                                                      ↑ 52 more                 Night Drive
                                                                                                                     Your selection will show here
-     ctrl+g              Open the draft in your own editor (VISUAL or EDITOR); what you save comes
-                         back into the box, and ctrl+- takes it back
-     ctrl+s              Put the draft aside, with its files; in an empty box, bring it back                        NOW
-                                                                                                                    Ready
-   Stop and take back
-     esc                 Stop Kumi's answer: the steps it finished stay, and waiting messages go
+     ctrl+s              Put the draft aside, with its files; in an empty box, bring it back
+
+   Stop and take back                                                                                               NOW
+     esc                 Stop Kumi's answer: the steps it finished stay, and waiting messages go                    Ready
                          back into the box
      ctrl+c              Stop Kumi; when it isn't working, clear the box (↑ or ctrl+- brings the
                          words back), then quit
@@ -18,6 +16,8 @@
 
    Commands
      /                   Commands and their words: ↑↓ choose, tab completes, enter runs, esc closes
+     @                   Name a track, a device, a sound, a palette or a technique exactly: ↑↓
+                         choose, tab or enter puts it in, esc closes
      ?                   This help, from an empty box
      /new                Start a fresh conversation (the last one is kept); /new <name> names it                    HISTORY ──────────────────────────────────
      /undo               Undo Kumi's last change                                                                    Nothing changed yet

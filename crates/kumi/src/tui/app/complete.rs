@@ -37,6 +37,17 @@ pub(super) enum Menu {
     Commands(Vec<Found>),
     /// The words the command takes for the word being typed.
     Words { completing: Completing, offered: Vec<Offered> },
+    /// What `@` names, as the session ranked it for what's typed after it: `count` characters before the cursor are the
+    /// `@` and those.
+    References { count: usize, rows: Vec<kumi_agent::core::references::Candidate> },
+}
+
+/// What the menu puts in the box for an item.
+pub(super) enum Insert {
+    /// The line, as it now reads.
+    Text(String),
+    /// A chip naming `reference`, drawn and sent as `label`, in place of the `count` characters before the cursor.
+    Chip { count: usize, label: String, reference: Reference },
 }
 
 impl Menu {
@@ -48,38 +59,44 @@ impl Menu {
         match self {
             Menu::Commands(found) => found.len(),
             Menu::Words { offered, .. } => offered.len(),
+            Menu::References { rows, .. } => rows.len(),
         }
+    }
+
+    /// The chip for what `@` names at `index`.
+    fn chip(count: usize, rows: &[kumi_agent::core::references::Candidate], index: usize) -> Insert {
+        let row = &rows[index];
+        Insert::Chip { count, label: format!("@{}", row.label), reference: row.reference.clone() }
     }
 
     /// What tab puts in the box for the item at `index`: a command's name, or the line with the word chosen, and a space
     /// where the menu offers the word after it.
-    pub(super) fn fill(&self, index: usize) -> String {
+    pub(super) fn fill(&self, index: usize) -> Insert {
         match self {
-            Menu::Commands(found) => found[index].command.name.into(),
+            Menu::Commands(found) => Insert::Text(found[index].command.name.into()),
             Menu::Words { completing, offered } => {
                 let line = format!("{}{}", completing.before, offered[index].candidate.word);
                 // (a name runs to the line's end: nothing follows it)
                 let next = format!("{line} ");
-                if !completing.arg.to_end && commands::completing(&next, |_| true).is_some() {
-                    next
-                } else {
-                    line
-                }
+                Insert::Text(if !completing.arg.to_end && commands::completing(&next, |_| true).is_some() { next } else { line })
             }
+            Menu::References { count, rows } => Menu::chip(*count, rows, index),
         }
     }
 
     /// What Enter does with the item at `index` (`chosen` with ↑↓): the line it leaves in the box, and whether that line
     /// runs. A command found only by the words of what it does, or a word only partly typed, is none the producer named:
     /// Enter puts it in, as tab does, unless they chose it. A word not begun yet leaves the line to run as it stands.
-    pub(super) fn enter(&self, index: usize, line: &str, chosen: bool) -> (String, bool) {
+    pub(super) fn enter(&self, index: usize, line: &str, chosen: bool) -> (Insert, bool) {
         match self {
-            Menu::Commands(found) => (found[index].command.name.into(), found[index].named() || chosen),
-            Menu::Words { completing, .. } if completing.typed.is_empty() && !chosen => (line.into(), true),
+            Menu::Commands(found) => (Insert::Text(found[index].command.name.into()), found[index].named() || chosen),
+            Menu::Words { completing, .. } if completing.typed.is_empty() && !chosen => (Insert::Text(line.into()), true),
             Menu::Words { completing, offered } => {
                 let offered = &offered[index];
-                (format!("{}{}", completing.before, offered.candidate.word), chosen || offered.by == By::Typed)
+                (Insert::Text(format!("{}{}", completing.before, offered.candidate.word)), chosen || offered.by == By::Typed)
             }
+            // What's named goes in; the message is sent with the next Enter.
+            Menu::References { count, rows } => (Menu::chip(*count, rows, index), false),
         }
     }
 }
@@ -123,6 +140,9 @@ pub(super) struct Offers {
 impl TuiApp {
     /// What the `/` menu shows for the line in the box: nothing once it's closed, while a search runs, or for a message.
     pub(super) fn menu(&self) -> Menu {
+        if let Some(menu) = self.references_menu() {
+            return menu;
+        }
         let text = {
             let mut state = self.0.state.borrow_mut();
             let text = state.editor.text().to_string();
@@ -151,6 +171,8 @@ impl TuiApp {
         let list = match &menu {
             Menu::Commands(_) => None,
             Menu::Words { completing, .. } => Some(completing.before.clone()),
+            // (`@`'s list isn't made here: references_menu makes it, and keys it)
+            Menu::References { .. } => None,
         };
         if state.menu_list != list {
             state.menu_list = list;
@@ -165,6 +187,27 @@ impl TuiApp {
             state.menu_chosen = None;
         }
         menu
+    }
+
+    /// What `@` names, where the cursor is in one and the session answered for what's typed after it.
+    fn references_menu(&self) -> Option<Menu> {
+        let mut state = self.0.state.borrow_mut();
+        if state.menu_dismissed || state.search.is_some() {
+            return None;
+        }
+        let (count, query) = state.editor.at_query()?;
+        let rows = state.references.as_ref().filter(|named| named.query == query && !named.rows.is_empty())?.rows.clone();
+        // Each `@` is a list of its own, by where it is in the box: it starts at its first row, as the menu's others do.
+        let list = Some(format!("@{}", state.editor.cursor() - count));
+        if state.menu_list != list {
+            state.menu_list = list;
+            state.menu_index = 0;
+            state.menu_chosen = None;
+        }
+        if state.menu_index >= rows.len() {
+            state.menu_index = 0;
+        }
+        Some(Menu::References { count, rows })
     }
 
     /// The words the line's command takes for the word being typed, where it offers any; what was read for another
