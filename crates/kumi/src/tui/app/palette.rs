@@ -16,6 +16,8 @@ const PLAYED: f64 = 30.;
 /// The PALETTE tab: the session's palette, a row a file, and loading its sounds as a kit.
 pub(super) struct PaletteTab {
     pub app: Weak<Inner>,
+    /// What it says while it's empty, with the map's key that puts sounds in as the keymap has it.
+    pub empty: String,
 }
 impl Tab for PaletteTab {
     fn id(&self) -> &str {
@@ -31,7 +33,7 @@ impl Tab for PaletteTab {
         self.app.upgrade().map(|a| TuiApp(a).palette_rows(width)).unwrap_or_default()
     }
     fn empty(&self) -> Option<&str> {
-        Some("Nothing in it yet: pick sounds on /map and press Enter")
+        Some(&self.empty)
     }
     fn shown(&self) -> bool {
         self.app.upgrade().is_some_and(|a| a.state.borrow().palette.is_some())

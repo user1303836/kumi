@@ -135,8 +135,9 @@ pub(super) fn help_sections(has: Has, keymap: &Keymap, app: &str, tabs: &[String
             "Below 100 columns, open or close the drawer; at full width, put the side pane away or bring it back; below 24 \
              rows, the same for the two-line strip",
         ),
+        // The words name the tabs' own keys too: while keys.json gives any of them others, a row each says its keys.
         keyed(
-            &["pane.tabs"],
+            &["pane.tabs", "tabs.next", "tabs.up", "tabs.down", "tabs.page-up", "tabs.page-down", "tabs.leave"],
             "shift+tab",
             &format!("Into the tabs ({}), then on to the next: ↑↓ and page up/down move, esc or tab comes back", tabs.join(", ")),
         ),
@@ -159,8 +160,9 @@ pub(super) fn help_sections(has: Has, keymap: &Keymap, app: &str, tabs: &[String
         pane.push(row("space  x", "On a sound in PALETTE: play it, or take it out"));
     }
     pane.extend([
+        // So do the tree's.
         keyed(
-            &["pane.tree"],
+            &["pane.tree", "tree.up", "tree.down", "tree.pin", "tree.leave"],
             "tab",
             &format!("Into the tree in FOCUS, at {app}'s selection: ↑↓ move, enter pins a row so what you ask is about it, esc or tab comes back"),
         ),
@@ -242,12 +244,21 @@ pub(super) fn help_sections(has: Has, keymap: &Keymap, app: &str, tabs: &[String
              come back to the box to change and send again",
         ));
     }
+    // The / and @ menus' keys are the menu's actions'. While keys.json gives any of them others, / and @ keep rows of
+    // their own, and a row each says the menu's keys.
+    let menu = ["menu.up", "menu.down", "menu.complete", "menu.run", "menu.close"];
+    let rebound = menu.iter().any(|id| keymap.rebound(id));
     let mut listed = vec![
-        row("/", "Commands and their words: ↑↓ choose, tab completes, enter runs, esc closes"),
+        if rebound { row("/", "Commands and their words") } else { vec![] },
+        keyed(&menu, "/", "Commands and their words: ↑↓ choose, tab completes, enter runs, esc closes"),
         row(
             "@",
-            "Name a track, a device, a sound, a palette or a technique exactly: ↑↓ choose, tab or enter puts it in, esc \
-             closes",
+            if rebound {
+                "Name a track, a device, a sound, a palette or a technique exactly"
+            } else {
+                "Name a track, a device, a sound, a palette or a technique exactly: ↑↓ choose, tab or enter puts it in, esc \
+                 closes"
+            },
         ),
         row("?", "This help, from an empty box"),
         // `?` is a character typed; keys.json can give the help keys as well (f1).
@@ -481,6 +492,25 @@ mod tests {
         assert!(!rows.contains("Unpin what's pinned") && !rows.contains("A /slots check under way"), "{rows}");
         // ? stays the help's, and f1 opens it too.
         assert!(rows.contains("?  This help, from an empty box\n") && rows.contains("f1  Open the help\n"), "{rows}");
+        // The rows whose words name the tabs', the tree's and the / and @ menus' keys become a row for each of those
+        // actions.
+        let (inner, _) = Keymap::new(Some(&serde_json::json!({ "tabs.leave": ["q"], "tree.pin": ["f3"], "menu.close": ["f2"] })));
+        let inner = said(&every_section_keyed(true, true, &inner));
+        for row in [
+            "q  Back to the box\n",
+            "↑  The row above\n",
+            "f3  Pin the row, so what you ask is about it\n",
+            "/  Commands and their words\n",
+            "f2  Close the menu\n",
+            "tab  Complete the command or its word; after @, put in the one chosen\n",
+            "@  Name a track, a device, a sound, a palette or a technique exactly\n",
+        ] {
+            assert!(inner.contains(row), "{row:?} in {inner}");
+        }
+        assert!(
+            !inner.contains("esc or tab comes back") && !inner.contains("tab completes") && !inner.contains("tab or enter puts it in"),
+            "{inner}"
+        );
         // With Kumi's own keys, every row is as the help writes it.
         let own = said(&every_section());
         assert!(own.contains("ctrl+-  ctrl+_  Undo in the box") && own.contains("← →  Along the line"), "{own}");

@@ -1057,7 +1057,11 @@ impl TuiApp {
                 if self.0.state.borrow().slots_check.is_some()
                     && kumi_listening::slots::parse(&words) != Ok(kumi_listening::slots::Asked::Show)
                 {
-                    self.notice("Kumi is still trying a model for /slots: wait for it, or Esc stops it.", NoticeTone::Info);
+                    let words = match self.0.keymap.key("app.stop") {
+                        Some(key) => format!("Kumi is still trying a model for /slots: wait for it, or {} stops it.", capitalized(&key)),
+                        None => "Kumi is still trying a model for /slots: wait for it.".into(),
+                    };
+                    self.notice(&words, NoticeTone::Info);
                     return Ok(());
                 }
                 // Its own stop, Esc: a model's download takes as long as it takes (a listening model's check has its own

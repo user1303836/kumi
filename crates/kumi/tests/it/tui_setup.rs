@@ -334,12 +334,15 @@ case!(keys_json_gives_setups_actions_other_keys_letters_too, async {
     let h = setup(80, FakeModels::catalog(), Some((Some(MISSING), live.clone())), |o| o.keys = Some(Ok(file)));
     h.start().await;
     h.wait_for("Restart Live now").await;
+    // The hints say keys.json's keys.
+    assert!(rows(&h).lines().any(|l| l == "  ↑ j choose · enter select · l later"), "the hint:\n{}", rows(&h));
     h.type_text("\x1b[B").await;
     assert!(rows(&h).lines().any(|l| l == "  › Restart Live now"), "↓ moved:\n{}", rows(&h));
     h.type_text("j").await;
     h.wait_for("› I'll quit it").await;
     h.type_text("\r").await;
     h.wait_for("waiting for you to quit Live").await;
+    assert!(rows(&h).lines().any(|l| l == "  l later"), "the hint:\n{}", rows(&h));
     // Esc doesn't leave it for later now; l does.
     h.type_text("\x1b").await;
     assert!(!said(&h).contains("Kumi chats without Live for now"), "esc left it");

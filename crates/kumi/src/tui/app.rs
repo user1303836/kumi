@@ -35,7 +35,7 @@ use super::{
     alerts::{self, ProgramState, StatusReport, TerminalProfile},
     editor::{Composed, Draft, Editor},
     icons::{detect_icon_style_here, IconKind, IconStyle},
-    keymap::{Chord, Keymap, Scope, AGAIN_MS},
+    keymap::{capitalized, Chord, Keymap, Scope, AGAIN_MS},
     keys::InputEvent,
     overlay::{Area, Handled, Overlay, Overlays, Shared},
     picker::{Picker, PickerItem},
@@ -923,6 +923,11 @@ impl TuiApp {
                     TuiApp(a).event(event);
                 }
             }));
+            let (keymap, keys_said) = match &options.keys {
+                Some(Ok(file)) => Keymap::new(Some(file)),
+                Some(Err(why)) => (Keymap::default(), vec![why.clone()]),
+                None => Keymap::new(None),
+            };
             let can = options.session.capabilities();
             let mut tabs: Vec<Rc<dyn Tab>> =
                 vec![Rc::new(AppTab { app: weak.clone(), id: "history", title: "HISTORY", empty: "Nothing changed yet" })];
@@ -933,17 +938,16 @@ impl TuiApp {
                 tabs.push(Rc::new(jobs::JobsTab { app: weak.clone() }));
             }
             if can.palette {
-                tabs.push(Rc::new(palette::PaletteTab { app: weak.clone() }));
+                let gathers = keymap.key("map.gather").map(|key| format!(" and press {}", capitalized(&key))).unwrap_or_default();
+                tabs.push(Rc::new(palette::PaletteTab {
+                    app: weak.clone(),
+                    empty: format!("Nothing in it yet: pick sounds on /map{gathers}"),
+                }));
             }
             tabs.extend(options.tabs.clone());
             let active = options.panel_tab.as_ref().and_then(|p| (p.load)());
             let tabs = TabPanel::new(tabs, active.as_deref(), options.panel_tab.as_ref().map(|p| p.save.clone()));
             let voice = options.voice.as_ref().map(|v| VoiceInput::new(v.clone(), Rc::new(AppVoice(weak.clone()))));
-            let (keymap, keys_said) = match &options.keys {
-                Some(Ok(file)) => Keymap::new(Some(file)),
-                Some(Err(why)) => (Keymap::default(), vec![why.clone()]),
-                None => Keymap::new(None),
-            };
             let (done, _) = watch::channel(None);
             // Links open where an OSC is safe to send, as the status is.
             let renderer = Renderer::new(depth)
