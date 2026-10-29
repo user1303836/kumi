@@ -432,7 +432,7 @@ impl Session {
 
                     if let Some(idea) = idea {
                         let clean = idea.replace(['*', '_', '`'], "");
-                        let clean = head(trim(&clean), 200);
+                        let clean = cut(trim(&clean), 200).to_owned();
                         if !clean.is_empty() {
                             state.idea = Some(clean);
                         }
@@ -453,7 +453,7 @@ impl Session {
                         Ok(rig) => rig,
                         Err(why) => {
                             state.status = GoalRun::Paused;
-                            state.why = Some(head(&format!("the search couldn't start again after the model's idea: {why}"), 200));
+                            state.why = Some(cut(&format!("the search couldn't start again after the model's idea: {why}"), 200).to_owned());
                             break;
                         }
                     };
@@ -482,7 +482,7 @@ impl Session {
         if let Err(error) = searching {
             if !op.signal.is_cancelled() {
                 state.status = GoalRun::Paused;
-                state.why = Some(head(&error.message(), 200));
+                state.why = Some(cut(&error.message(), 200).to_owned());
             }
         }
         let cleanup = abort::timeout(150_000);

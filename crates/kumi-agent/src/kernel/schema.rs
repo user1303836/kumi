@@ -6,8 +6,8 @@
 use std::collections::HashMap;
 use std::sync::{LazyLock, Mutex};
 
+use crate::core::text::cut;
 use kumi_common::js::number::to_string as number_text;
-use kumi_common::js::string::head;
 use regex::Regex;
 use serde_json::{Map, Value};
 
@@ -170,8 +170,8 @@ fn same(a: &Value, b: &Value) -> bool {
 
 fn shown(value: &Value) -> String {
     match value {
-        Value::String(text) => format!("\"{}\"", head(text, 40)),
-        other => head(&other.to_string(), 40),
+        Value::String(text) => format!("\"{}\"", cut(text, 40)),
+        other => cut(&other.to_string(), 40).to_owned(),
     }
 }
 

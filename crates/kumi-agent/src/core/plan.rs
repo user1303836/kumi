@@ -1,5 +1,6 @@
 //! Plans run in arrival order, batching adjacent changes and settling the DAW when interrupted, over the DAW's
 //! PlanHost: its change kinds and actions, each step's change, its batches and its safety copy.
+use crate::core::text::cut;
 use crate::core::{
     history::{ChangeHost, History},
     plan_stream::{step_scanner, StepScanner},
@@ -16,7 +17,6 @@ use kumi_common::{
     js::{
         json::stringify,
         number::{round, to_string},
-        string::head,
     },
 };
 use kumi_types::{
@@ -409,7 +409,7 @@ impl<H: PlanHost> Plan<H> {
         let step = at + 1;
         let items: Vec<JsonObject> = self.steps.borrow()[at..at + run].iter().map(row).collect();
         let tool = items[0].get("tool").cloned().unwrap_or(Value::Null);
-        let error = head(&error, 600);
+        let error = cut(&error, 600).to_owned();
         state.refused.push(if run > 1 {
             json!({"steps":format!("{step}–{}", step + run - 1),"tool":tool,"error":error})
         } else {
@@ -482,7 +482,7 @@ impl<H: PlanHost> Plan<H> {
         if !finished {
             if let Some(note) = self.quiet(&state).await {
                 match &mut outcome {
-                    Ok(Some(stopped)) => stopped.error = head(&format!("{} {note}", stopped.error), 800),
+                    Ok(Some(stopped)) => stopped.error = cut(&format!("{} {note}", stopped.error), 800).to_owned(),
                     _ => state.quieted = Some(note),
                 }
             }
@@ -546,8 +546,9 @@ impl<H: PlanHost> Plan<H> {
                 index += 1;
                 continue;
             }
-            let stop =
-                |error: String| Some(Stop { step, tool: item.get("tool").cloned().unwrap_or(Value::Null), error: head(&error, 600) });
+            let stop = |error: String| {
+                Some(Stop { step, tool: item.get("tool").cloned().unwrap_or(Value::Null), error: cut(&error, 600).to_owned() })
+            };
             let confirmed = !state.done.is_empty();
             let key = |batch: &Batch| item.get("input").and_then(|v| v.get(batch.key));
             let mut run = 1;
@@ -646,7 +647,7 @@ impl<H: PlanHost> Plan<H> {
             let kind = tool.and_then(|tool| self.host.change_kind(tool));
             let action = if kind.is_none() { tool.and_then(|tool| self.host.action_kind(tool)) } else { None };
             if kind.is_none() && action.is_none() && tool != Some("wait") {
-                self.refuse(state, index, 1, format!("{} isn't one of Kumi's change tools", head(&js_string(item.get("tool")), 64)));
+                self.refuse(state, index, 1, format!("{} isn't one of Kumi's change tools", cut(&js_string(item.get("tool")), 64)));
                 index += 1;
                 continue;
             }

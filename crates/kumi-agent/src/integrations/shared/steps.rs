@@ -1,6 +1,7 @@
 //! The line each step that isn't a tool of its own gets in a DAW's plan tool description.
 
-use kumi_common::js::string::{head, trim};
+use crate::core::text::cut;
+use kumi_common::js::string::trim;
 use kumi_types::contracts::JsonObject;
 use serde_json::{json, Value};
 
@@ -22,14 +23,14 @@ pub fn own_step_line(name: &str, description: &str, schema: &JsonObject) -> Stri
 
 fn line_of(name: &str, mut what: String, schema: &JsonObject) -> String {
     if what.len() > WHAT {
-        let cut = head(&what, WHAT);
-        what = format!("{}…", cut.rfind(' ').filter(|at| *at > WHAT / 2).map_or(cut.as_str(), |at| &cut[..at]));
+        let kept = cut(&what, WHAT);
+        what = format!("{}…", kept.rfind(' ').filter(|at| *at > WHAT / 2).map_or(kept, |at| &kept[..at]));
     }
     let fields = crate::kernel::schema::fields(schema);
     let line = if fields.is_empty() { format!("{name}: {what}") } else { format!("{name}: {what} ({})", fields.join(", ")) };
     if line.len() > LINE {
-        let cut = head(&line, LINE - 1);
-        format!("{}…)", cut.trim_end_matches([',', ' ', '?']).trim_end_matches(|c: char| c.is_alphanumeric() || c == '_'))
+        let kept = cut(&line, LINE - 1);
+        format!("{}…)", kept.trim_end_matches([',', ' ', '?']).trim_end_matches(|c: char| c.is_alphanumeric() || c == '_'))
     } else {
         line
     }

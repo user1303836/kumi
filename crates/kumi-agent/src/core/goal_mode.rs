@@ -4,6 +4,7 @@
 //! (never discarding what's done), and is kept on disk so it survives a restart. The listen, assess, adjust loop is one
 //! of its tools: a turn that starts a judged run runs the loop inside it.
 
+use crate::core::text::cut;
 use async_trait::async_trait;
 use kumi_listening::round::{Round, RoundKind};
 use kumi_types::daw::DawProfile;
@@ -192,7 +193,7 @@ pub fn read_audit(answer: &str) -> Check {
         None => Check {
             verdict: Verdict::Continue,
             reason: "the check got no clear answer".into(),
-            next: Some(kumi_common::js::string::head(answer.trim(), 200)),
+            next: Some(cut(answer.trim(), 200).to_owned()),
             measured: false,
         },
     }
@@ -349,7 +350,7 @@ pub fn error_check(error: &RuntimeError) -> Check {
 /// `error_check`, with the DAW's fix in its words.
 pub fn error_check_for(profile: &DawProfile, error: &RuntimeError) -> Check {
     let open = format!("check that {} is open with Kumi's bridge", profile.words.app);
-    let reason = kumi_common::js::string::head(&error.message(), 200);
+    let reason = cut(&error.message(), 200).to_owned();
     let fix = match error.kumi().map(|kumi| kumi.kind) {
         Some(FailureKind::Auth) => Some("sign in again (/login)"),
         Some(FailureKind::Billing) => Some("sort out the provider account's billing or credits, or choose another model (/model)"),

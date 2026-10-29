@@ -1,5 +1,6 @@
 //! Session ownership, cancellation, context refresh and conversation recovery.
 
+use crate::core::text::cut;
 use crate::core::{
     contracts::*,
     file_sync::FileSync,
@@ -28,7 +29,7 @@ use futures::{
 use kumi_ai::timing;
 use kumi_common::{
     abort::{self, Signal},
-    js::string::{head, trim},
+    js::string::trim,
 };
 use kumi_library::{Library, LibraryToolsOptions};
 use kumi_media::audio::tools::{listening_tools_for, ListeningOptions};
@@ -1944,8 +1945,10 @@ impl Session {
                 s.touched = true;
             }
             if s.conversation_first.is_none() {
-                s.conversation_first =
-                    transcript_of(&checkpoint.messages).iter().find(|l| l.role == TranscriptRole::User).map(|l| head(&l.text, 200));
+                s.conversation_first = transcript_of(&checkpoint.messages)
+                    .iter()
+                    .find(|l| l.role == TranscriptRole::User)
+                    .map(|l| cut(&l.text, 200).to_owned());
             }
             // Its name and where a copy came from go beside it with the first save that keeps it.
             let (name, from) = if empty { (None, None) } else { (s.conversation_name.take(), s.copied_from.take()) };
