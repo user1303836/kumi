@@ -198,7 +198,9 @@ impl TuiApp {
         };
         let commands =
             COMMANDS.iter().filter(|command| self.offered(&can, command.name)).map(|command| (command.name.into(), command.about()));
-        help_sections(has, crate::daw::words().app, &self.0.tabs.titles(), commands.collect())
+        // The tabs shift+tab goes through: those on the strip.
+        let tabs: Vec<String> = self.0.tabs.titles().into_iter().map(|(_, title, _)| title).collect();
+        help_sections(has, crate::daw::words().app, &tabs, commands.collect())
     }
     /// Opens the help: /help, or `?` on an empty box.
     pub(super) fn open_help(&self) {
