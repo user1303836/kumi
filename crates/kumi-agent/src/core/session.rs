@@ -1,5 +1,6 @@
 //! Session ownership, cancellation, context refresh and conversation recovery.
 
+use crate::core::protocol::{size_words, too_long_words, MAX_MESSAGE as MAX_REQUEST};
 use crate::core::text::cut;
 use crate::core::{
     contracts::*,
@@ -509,18 +510,6 @@ const PICTURES: &[&str] = &["image/png", "image/jpeg", "image/gif", "image/webp"
 const MAX_PICTURE: u64 = 3 * 1024 * 1024 + 768 * 1024;
 const MAX_PICTURES: u64 = 20 * 1024 * 1024;
 const MAX_ATTACHMENTS: usize = 10;
-/// The most a message the producer sends holds, in bytes: a paste of 2,000 lines (a log, a lyric sheet) fits. With the
-/// observation and the answer's reads it still fits the kernel's default budget (400 KB), which clears earlier exchanges
-/// to make room, and a saved conversation keeps it with its answer (the last exchange, up to 1 MB).
-const MAX_REQUEST: usize = 256 * 1024;
-
-fn size_words(bytes: u64) -> String {
-    if bytes >= 1024 * 1024 {
-        format!("{:.1} MB", bytes as f64 / (1024.0 * 1024.0))
-    } else {
-        format!("{} KB", bytes.div_ceil(1024))
-    }
-}
 fn refused(message: String) -> RuntimeError {
     KumiError::new(FailureKind::Request, message).into()
 }
@@ -2629,11 +2618,7 @@ impl SessionController for Session {
                 // Its words go back where the producer wrote them, to send part of.
                 drop(s);
                 self.emit(SessionEvent::Resend { text: input.to_owned() });
-                return Err(refused(format!(
-                    "This message is {}, and one message takes up to {}: send part of it.",
-                    size_words(input.len() as u64),
-                    size_words(MAX_REQUEST as u64)
-                )));
+                return Err(refused(too_long_words(input.len())));
             }
             if self.0.options.max_turns.is_some_and(|max| s.turns >= max) {
                 return Err(RuntimeError::plain("Conversation limit reached; use /new"));

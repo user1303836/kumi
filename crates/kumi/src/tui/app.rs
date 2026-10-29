@@ -30,7 +30,7 @@ mod usage;
 
 use super::{
     alerts::{self, ProgramState, StatusReport, TerminalProfile},
-    editor::{Draft, Editor},
+    editor::{Composed, Draft, Editor},
     icons::{detect_icon_style_here, IconKind, IconStyle},
     keys::InputEvent,
     overlay::{Area, Handled, Overlay, Overlays, Shared},
@@ -280,7 +280,12 @@ struct Aside {
 }
 #[derive(Clone)]
 struct Held {
+    /// What the session gets: each chip's whole paste in its place.
     text: String,
+    /// What the conversation shows: each chip as its label.
+    shown: String,
+    /// The words as the box held them, to come back there as they were, chips and all.
+    words: Composed,
     when: &'static str,
     taken: bool,
 }
@@ -462,6 +467,10 @@ struct State {
     /// ctrl+s: a draft put aside, with its files.
     stash: Option<composer::Stash>,
     last_sent: Option<String>,
+    /// The last message sent, as the box held it: the session handing it back puts its chips back too.
+    last_words: Option<Composed>,
+    /// The messages sent this run with chips, by their history entry, newest last: ↑ brings them back as chips.
+    sent_words: Vec<(String, Composed)>,
     tree: Option<DeviceTree>,
     /// Bumped whenever `tree` is read again: its rows are made again only then, or for another focus.
     tree_revision: u64,
@@ -637,6 +646,8 @@ impl State {
             search: None,
             stash: None,
             last_sent: None,
+            last_words: None,
+            sent_words: Vec::new(),
             tree: None,
             tree_revision: 0,
             tree_rows: None,

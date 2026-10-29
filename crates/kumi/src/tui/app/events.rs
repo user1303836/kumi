@@ -281,7 +281,12 @@ impl TuiApp {
             SessionEvent::Resend { text } => {
                 let mut state = self.0.state.borrow_mut();
                 if state.editor.is_empty() {
-                    state.editor.set(&text);
+                    // The last message sent comes back as the box held it, its long pastes chips again.
+                    let words = state.last_words.clone().filter(|_| state.last_sent.as_deref() == Some(text.as_str()));
+                    match words {
+                        Some(words) => state.editor.put_back(&[words]),
+                        None => state.editor.set(&text),
+                    }
                     state.recall = None;
                 }
             }
@@ -750,11 +755,16 @@ impl TuiApp {
                 }
             }
             SessionEvent::Kernel(KernelEvent::Steer { text }) => {
-                let words = string::trim(&self.clean(&text, usize::MAX)).to_string();
+                // Shown as the box showed it, a long paste as its chip.
+                let shown = {
+                    let mut state = self.0.state.borrow_mut();
+                    match state.held.iter().position(|h| h.when == "now" && h.taken && h.text == text) {
+                        Some(at) => state.held.remove(at).shown,
+                        None => text.clone(),
+                    }
+                };
+                let words = string::trim(&self.clean(&shown, usize::MAX)).to_string();
                 let mut state = self.0.state.borrow_mut();
-                if let Some(at) = state.held.iter().position(|h| h.when == "now" && h.taken && h.text == text) {
-                    state.held.remove(at);
-                }
                 if let Some(before) = state.current.take() {
                     let tail = if !state.suppress { state.stream.finish() } else { String::new() };
                     let empty = if let Entry::Assistant { text, status, steps, .. } = &mut *before.borrow_mut() {
@@ -1068,8 +1078,8 @@ impl TuiApp {
             state.records.set_forgotten(&entry);
         }
     }
-    pub(super) fn hold(&self, raw: String, when: &'static str) {
-        self.0.state.borrow_mut().held.push(Held { text: raw, when, taken: false });
+    pub(super) fn hold(&self, raw: String, shown: String, words: Composed, when: &'static str) {
+        self.0.state.borrow_mut().held.push(Held { text: raw, shown, words, when, taken: false });
         if when == "now" {
             self.steer_held();
         }
@@ -1103,20 +1113,18 @@ impl TuiApp {
                 return;
             }
             if back {
-                let mut words = state.held.drain(..).map(|h| h.text).collect::<Vec<_>>();
-                if !state.editor.is_empty() {
-                    words.push(state.editor.text().into());
-                }
-                state.editor.set(&words.join("\n"));
+                let held: Vec<Composed> = state.held.drain(..).map(|h| h.words).collect();
+                state.editor.put_back(&held);
                 state.recall = None;
                 return;
             }
             state.held.remove(0)
         };
-        let words = string::trim(&self.clean(&next.text, usize::MAX)).to_string();
+        let words = string::trim(&self.clean(&next.shown, usize::MAX)).to_string();
         let shown = {
             let mut state = self.0.state.borrow_mut();
             state.last_sent = Some(next.text.clone());
+            state.last_words = Some(next.words.clone());
             state.view.follow();
             state.transcript.add(Entry::User { text: words })
         };
@@ -1126,12 +1134,9 @@ impl TuiApp {
             }
             let mut state = app.0.state.borrow_mut();
             state.transcript.remove(&shown);
-            let mut words = vec![next.text];
-            words.extend(state.held.drain(..).map(|h| h.text));
-            if !state.editor.is_empty() {
-                words.push(state.editor.text().into());
-            }
-            state.editor.set(&words.join("\n"));
+            let mut back = vec![next.words];
+            back.extend(state.held.drain(..).map(|h| h.words));
+            state.editor.put_back(&back);
             drop(state);
             app.0.scheduler.request();
             Ok(())
