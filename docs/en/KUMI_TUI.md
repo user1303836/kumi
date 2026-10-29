@@ -196,6 +196,10 @@ Run these as `kumi <command>`; from a copy of the repository, as
 ## Commands inside Kumi
 
 Type `/` for a menu of these: ↑↓ choose, Tab completes, Enter runs, Esc closes.
+After a command and a space, the menu offers its words: `/palette use` your
+palettes, `/resume` your kept conversations, `/slots listening` the models the
+slot takes, `/export` its formats. Tab puts the one chosen in; Enter runs only
+what you named, so a word only partly typed goes in first.
 A message that starts with a path (a file dragged into the terminal) is a
 message, not a command.
 

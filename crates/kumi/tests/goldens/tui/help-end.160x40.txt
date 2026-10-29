@@ -17,7 +17,7 @@
                          one
 
    Commands
-     /                   The commands as you type: ↑↓ choose, tab completes, enter runs, esc closes
+     /                   Commands and their words: ↑↓ choose, tab completes, enter runs, esc closes
      ?                   This help, from an empty box
      /new                Start a fresh conversation (the last one is kept); /new <name> names it                    HISTORY ──────────────────────────────────
      /undo               Undo Kumi's last change                                                                    Nothing changed yet

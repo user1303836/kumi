@@ -311,6 +311,19 @@ fn job_word(word: &str) -> Option<Job> {
     Job::ALL.into_iter().find(|job| job.words().contains(&word))
 }
 
+/// What the slot a word names can take, as the `/` menu offers it after `/slots <job>`: each choice's word and what it
+/// is, in the DAW's words. None for a word that names no slot; a model on this computer (`<address>#<model>`) or a model
+/// file is the producer's to type.
+pub fn choices_for(profile: &DawProfile, word: &str) -> Option<Vec<(&'static str, String)>> {
+    let job = job_word(&word.to_lowercase())?;
+    let choices = match job {
+        Job::Listening => vec![("gemini", Choice::Gemini), ("openai", Choice::Openai), ("off", Choice::Off), ("default", Choice::Default)],
+        Job::Embeddings => vec![("default", Choice::Default), ("off", Choice::Off)],
+        Job::Stems | Job::Transcription => vec![("default", Choice::Default)],
+    };
+    Some(choices.into_iter().map(|(word, choice)| (word, describe_for(profile, job, &choice))).collect())
+}
+
 fn choice_word(word: &str) -> Option<Choice> {
     match word {
         "gemini" | "google" => Some(Choice::Gemini),

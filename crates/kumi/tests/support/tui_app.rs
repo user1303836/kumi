@@ -479,6 +479,10 @@ impl SessionController for Control {
         self.call(format!("palette:{words}"));
         Ok(self.get::<String>("palette-said").unwrap_or_else(|| format!("Did {words}.")))
     }
+    async fn palette_names(&self) -> Result<Vec<kumi_agent::core::palette::PaletteListed>, RuntimeError> {
+        self.call("palette-names");
+        Ok(self.get::<Vec<kumi_agent::core::palette::PaletteListed>>("palettes").unwrap_or_default())
+    }
     fn has_jobs(&self) -> bool {
         self.enabled("jobs")
     }

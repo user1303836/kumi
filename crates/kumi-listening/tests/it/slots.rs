@@ -118,6 +118,25 @@ fn context(folder: &std::path::Path, env: &[(&str, &str)]) -> SlotsContext {
 fn quiet(_: String) {}
 
 #[test]
+fn each_slot_offers_the_choices_it_takes_by_word() {
+    let words = |word: &str| {
+        slots::choices_for(&kumi_types::daw::DawProfile::ABLETON, word)
+            .map(|choices| choices.into_iter().map(|(word, _)| word).collect::<Vec<_>>())
+    };
+    assert_eq!(words("listening"), Some(vec!["gemini", "openai", "off", "default"]));
+    // By any word the slot is called, in any case.
+    assert_eq!(words("Ears"), words("listening"));
+    assert_eq!(words("embeddings"), Some(vec!["default", "off"]));
+    assert_eq!(words("stems"), Some(vec!["default"]));
+    assert_eq!(words("transcription"), Some(vec!["default"]));
+    assert_eq!(words("back"), None);
+    // Each says what it is, as /slots does.
+    let listening = slots::choices_for(&kumi_types::daw::DawProfile::ABLETON, "listening").unwrap();
+    assert_eq!(listening[0].1, "Gemini (its newest model that takes audio)");
+    assert_eq!(listening[2].1, "off: the meters alone");
+}
+
+#[test]
 fn plain_words_ask_for_a_slot_and_what_it_should_use() {
     assert_eq!(parse(""), Ok(Asked::Show));
     assert_eq!(parse(" show "), Ok(Asked::Show));

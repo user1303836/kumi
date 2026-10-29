@@ -1,0 +1,40 @@
+  Kumi  ·  Night Drive                                                                                                                                  ● Live
+
+                                                                                                                    FOCUS
+                                                                                                                    Night Drive
+                                                                                                                    Your selection will show here
+
+
+                                                                                                                    NOW
+                                                                                                                    Ready
+
+
+
+                                          ██                          ▀▀
+                                          ██ ▄█▀  ██  ██  ██▀▀██▀▀█▄  ██
+                                          ██▀█▄   ██  ██  ██  ██  ██  ██
+                                          ▀▀  ▀▀   ▀▀▀▀▀  ▀▀  ▀▀  ▀▀  ▀▀
+
+                                          ░▒▓████████████████████████▓▒░
+
+                                             Kumi can see Night Drive.
+
+                                                        Try                                                         HISTORY ──────────────────────────────────
+                                              “What's on this track?”                                               Nothing changed yet
+                                              “Set the tempo to 124”
+                                        “Why might my low end sound muddy?”
+
+                       Kumi keeps each Set's conversations: /conversations goes back to one.
+
+
+
+
+   gemini   Gemini (its newest model that takes audio)
+   openai   OpenAI (its newest audio model)
+   off      off: the meters alone
+   default  the lookup: a model named in KUMI_LISTENER, else Gemini …
+
+
+   /slots listening
+                                                                                 enter to choose · esc to close
+

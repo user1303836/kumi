@@ -1,6 +1,7 @@
 mod helpers;
 pub use helpers::*;
 mod away;
+mod complete;
 mod composer;
 mod details;
 pub use away::{AwaySettings, FrontApp, NotifierRunner};
@@ -442,6 +443,8 @@ struct State {
     /// The box's words when ↑↓ last chose in the `/` menu: a command found only by the words of what it does runs on
     /// Enter once it's chosen.
     menu_chosen: Option<String>,
+    /// The words the line's command takes for the word being typed, once read (the menu asks once).
+    offers: complete::Offers,
     started: bool,
     closing: bool,
     cancelling: bool,
@@ -639,6 +642,7 @@ impl State {
             menu_index: 0,
             menu_dismissed: false,
             menu_chosen: None,
+            offers: complete::Offers::default(),
             started: false,
             closing: false,
             cancelling: false,
@@ -956,6 +960,11 @@ impl TuiApp {
     #[doc(hidden)]
     pub fn transcript_layout_count(&self) -> usize {
         self.0.state.borrow().transcript.laid_out
+    }
+    /// What's in the input box, for the menu's tests (tab puts a word in).
+    #[doc(hidden)]
+    pub fn draft(&self) -> String {
+        self.0.state.borrow().editor.text().to_string()
     }
     /// The session, which the app reaches only through its protocol.
     fn session(&self) -> &dyn SessionHandle {

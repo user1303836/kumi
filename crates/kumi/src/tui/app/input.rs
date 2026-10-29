@@ -10,7 +10,7 @@ use super::toast::TOAST_MS;
 use super::*;
 use crate::text::{library_line, remembered_line};
 use base64::Engine;
-use kumi_agent::core::commands::{self, Command, Effect, Found, Now, Why};
+use kumi_agent::core::commands::{self, Command, Effect, Now, Why};
 use kumi_agent::core::protocol::{too_long_words, MAX_MESSAGE};
 use std::task::{Context, Poll};
 
@@ -419,20 +419,20 @@ impl TuiApp {
             "menu.complete" => {
                 let menu = self.menu();
                 let mut state = self.0.state.borrow_mut();
-                let index = state.menu_index;
-                state.editor.set(menu[index].command.name);
+                let fill = menu.fill(state.menu_index);
+                state.editor.set(&fill);
             }
             "menu.run" => {
                 let menu = self.menu();
                 {
                     let mut state = self.0.state.borrow_mut();
-                    let found = menu[state.menu_index];
                     let typed = state.editor.text().to_string();
                     let chosen = state.menu_chosen.as_deref() == Some(typed.as_str());
-                    state.editor.set(found.command.name);
-                    // A command found only by the words of what it does is none the producer named: Enter puts its name in
-                    // the box, as tab does, unless they chose it with ↑↓.
-                    if !found.named() && !chosen {
+                    // What the producer didn't name (a command found by what it does, a word only partly typed) Enter puts
+                    // in the box, as tab does, unless they chose it with ↑↓.
+                    let (line, runs) = menu.enter(state.menu_index, &typed, chosen);
+                    state.editor.set(&line);
+                    if !runs {
                         return true;
                     }
                 }
@@ -657,35 +657,8 @@ impl TuiApp {
         }
         true
     }
-    pub(super) fn menu(&self) -> Vec<Found> {
-        let text = {
-            let state = self.0.state.borrow();
-            let text = state.editor.text().to_string();
-            if state.menu_dismissed
-                || state.search.is_some()
-                || !text.starts_with('/')
-                || text.chars().any(|c| string::trim(&c.to_string()).is_empty())
-            {
-                return vec![];
-            }
-            text
-        };
-        let has = self.has();
-        let recent = self.recent_commands();
-        let recent: Vec<&str> = recent.iter().map(String::as_str).collect();
-        let matches = commands::matching(&text, &recent, |command| has.offers(command));
-        let mut state = self.0.state.borrow_mut();
-        if state.menu_index >= matches.len() {
-            state.menu_index = 0;
-        }
-        // A choice made with ↑↓ holds for the words it was made for.
-        if state.menu_chosen.as_deref().is_some_and(|chosen| chosen != text) {
-            state.menu_chosen = None;
-        }
-        matches
-    }
     /// The commands sent lately, latest first, each once: the `/` menu lists them first.
-    fn recent_commands(&self) -> Vec<String> {
+    pub(super) fn recent_commands(&self) -> Vec<String> {
         let Some(history) = &self.0.options.history else { return vec![] };
         let mut recent: Vec<String> = Vec::new();
         for line in history.borrow().sent().rev().take(RECENT_LOOK) {

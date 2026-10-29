@@ -440,6 +440,10 @@ impl SessionController for Reached {
         self.reach("palette_command");
         Ok(String::new())
     }
+    async fn palette_names(&self) -> Result<Vec<kumi_agent::core::palette::PaletteListed>, RuntimeError> {
+        self.reach("palette_names");
+        Ok(vec![])
+    }
     async fn focus_body(&self, _: &BodyRequest) -> Result<Option<FocusBody>, RuntimeError> {
         self.reach("focus_body");
         Ok(None)
@@ -536,6 +540,7 @@ fn method(request: &Op) -> Option<String> {
             Op::PaletteGather(_) => "palette_gather",
             Op::PaletteRemove(op::PaletteRemove { path, size, mtime }) => return Some(format!("palette_remove:{path}:{size}:{mtime}")),
             Op::PaletteCommand(_) => "palette_command",
+            Op::PaletteNames(_) => "palette_names",
             Op::Music(_) | Op::MusicFolders(_) | Op::LearnMusic(_) | Op::SetMusicFolders(_) | Op::HoldMusic(_) | Op::ForgetMusic(_) => {
                 "music"
             }

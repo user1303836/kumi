@@ -1,7 +1,7 @@
 //! The command table, as the full-screen app read lines before it had one: what each line asks for (the order of its old
 //! `submit()`, rows C1–C41 of the review's inventory), and what the `/` menu finds for what's typed.
 use kumi_agent::core::{
-    commands::{is_command, matching, named, run, By, Effect, Found, Fronts, Now, Why, COMMANDS},
+    commands::{completing, is_command, matching, named, run, By, Completes, Effect, Found, Fronts, Now, Why, COMMANDS},
     protocol::Capabilities,
 };
 use std::collections::BTreeSet;
@@ -312,4 +312,49 @@ fn common_words_find_no_command() {
     }
     // A word that starts like a common one still finds what says it: /thi finds /effort ("thinks").
     assert_eq!(names(matching("/thi", &[], all)), ["/effort"]);
+}
+
+/// What a line is typing, as (command, the word's name, the line before it, the word so far).
+fn typing(line: &str) -> Option<(&'static str, &'static str, String, String)> {
+    completing(line, |_| true).map(|at| (at.command.name, at.arg.name, at.before, at.typed))
+}
+
+#[test]
+fn a_line_types_the_word_its_command_offers_words_for() {
+    // The first word after a command and a space, as it's typed.
+    assert_eq!(typing("/export "), Some(("/export", "format", "/export ".into(), "".into())));
+    assert_eq!(typing("/export ht"), Some(("/export", "format", "/export ".into(), "ht".into())));
+    // A word that follows the one before it: a palette's name after use, rename and forget, never after new.
+    assert_eq!(typing("/palette use Ki"), Some(("/palette", "palette", "/palette use ".into(), "Ki".into())));
+    assert_eq!(typing("/palette Forget "), Some(("/palette", "palette", "/palette Forget ".into(), "".into())));
+    assert_eq!(typing("/palette new Ki"), None);
+    // A slot's model after the slot, and a slot after back.
+    assert_eq!(completing("/slots listening g", |_| true).map(|at| at.arg.completes), Some(Completes::SlotModels));
+    assert_eq!(
+        completing("/slots back ", |_| true).map(|at| at.arg.completes),
+        Some(Completes::Words(&["listening", "stems", "transcription", "embeddings"]))
+    );
+    // An alias's words as its command's: /conversations is /resume's.
+    assert_eq!(typing("/conversations ni"), Some(("/conversations", "conversation", "/conversations ".into(), "ni".into())));
+    // Past what a command takes, a command that takes no words, a name still being typed, or one not offered: none.
+    assert_eq!(typing("/export md now"), None);
+    assert_eq!(typing("/undo "), None);
+    assert_eq!(typing("/expo"), None);
+    assert_eq!(completing("/palette use ", |command| command.name != "/palette").map(|at| at.command.name), None);
+}
+
+#[test]
+fn every_word_a_command_offers_is_one_it_takes() {
+    for command in COMMANDS {
+        for arg in command.args {
+            assert!(arg.at >= 1, "{}: {}", command.name, arg.name);
+            // A word that follows another follows one the command offers before it.
+            for after in arg.after {
+                let before = command.args.iter().filter(|earlier| earlier.at + 1 == arg.at);
+                let offered =
+                    before.into_iter().any(|earlier| matches!(earlier.completes, Completes::Words(words) if words.contains(after)));
+                assert!(offered, "{} {}: after {after}", command.name, arg.name);
+            }
+        }
+    }
 }

@@ -110,6 +110,15 @@ impl From<&Item> for PaletteFile {
     }
 }
 
+/// A palette as `/palette use` offers it: its name, how many sounds it holds, and whether it's this session's.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PaletteListed {
+    pub name: String,
+    pub items: usize,
+    pub current: bool,
+}
+
 /// The session's palette as it is now: its name, how far it reaches (0: only its own sounds), its files in the order
 /// they came, and the sounds it never brings in.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -343,6 +352,16 @@ impl Palettes {
             let held = counted(palette.items);
             (palette, held)
         }))
+    }
+
+    /// Every palette, the latest changed first: what `/palette use` offers.
+    pub async fn listed(&self) -> Result<Vec<PaletteListed>, RuntimeError> {
+        let all = self.store.read(|connection| palettes::all(connection)).await.map_err(failed)?;
+        let current = self.current.borrow().clone();
+        Ok(all
+            .into_iter()
+            .map(|palette| PaletteListed { current: Some(&palette.id) == current.as_ref(), name: palette.name, items: palette.items })
+            .collect())
     }
 
     async fn list(&self) -> Result<String, RuntimeError> {

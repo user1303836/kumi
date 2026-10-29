@@ -21,7 +21,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::core::contracts::*;
 use crate::core::jobs::{JobDetail, JobStatus};
-use crate::core::palette::{Gathered, PaletteView};
+use crate::core::palette::{Gathered, PaletteListed, PaletteView};
 use crate::core::search_memory::SearchMemoryStatus;
 use kumi_ai::{
     auth::openai_codex::DevicePrompt,
@@ -375,6 +375,8 @@ requests! {
     PaletteRemove { path: String, size: i64, mtime: i64 } -> bool;
     /// /palette and its words: its answer, in words.
     PaletteCommand { words: String } -> String;
+    /// Every palette, the latest changed first: what `/palette use` offers.
+    PaletteNames {} -> Vec<PaletteListed>;
     /// /music: what Kumi knows of the producer's music and how learning it goes, and (before they add a folder) the
     /// usual place it found songs in.
     Music {} -> MusicView;
@@ -616,6 +618,7 @@ impl InProcess {
                 Reply::PaletteRemove(session.palette_remove(&path, size, mtime).await?)
             }
             Op::PaletteCommand(op::PaletteCommand { words }) => Reply::PaletteCommand(session.palette_command(&words).await?),
+            Op::PaletteNames(op::PaletteNames {}) => Reply::PaletteNames(session.palette_names().await?),
             Op::Music(op::Music {}) => Reply::Music(music_view(&part(session.music())?).await),
             Op::MusicFolders(op::MusicFolders {}) => Reply::MusicFolders(part(session.music())?.folders()),
             Op::LearnMusic(op::LearnMusic { folders }) => Reply::LearnMusic(part(session.music())?.learn(folders)),
