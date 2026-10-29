@@ -1,7 +1,7 @@
   Kumi  ·  Night Drive                                                  ● Live
 
 
-   Keys and commands                                                ↓ 70 more
+   Keys and commands                                                ↓ 78 more
 
    Send and steer
      enter               Send. While Kumi works, it reads your message after
@@ -12,6 +12,9 @@
      ctrl+j  alt+enter   A new line (shift+enter too, where the terminal
                          tells it apart)
      ↑ ↓                 The box's lines, then what you sent before
+     ctrl+r              Look back through what you sent for the words you
+                         type: ctrl+r again finds an earlier one, enter puts
+                         it in the box, esc goes back to your draft
      ctrl+v              Add the picture on the clipboard to your next
                          message; files dragged in go with it too
      backspace           In an empty box, take back the last file added
@@ -19,9 +22,6 @@
    Move around
      page up  page down  Scroll the conversation; the mouse wheel too (over
                          the tabs, it scrolls them)
-     ctrl+home           The start of the conversation
-     ctrl+end            Back to the latest
-     drag                Copy text as you let go; double-click for a word,
 
 
 

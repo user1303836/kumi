@@ -43,6 +43,11 @@ pub(super) fn help_sections(has: HelpHas, app: &str, tabs: &[String], commands: 
         row("alt+↑", "Take the last waiting message back into the box"),
         row("ctrl+j  alt+enter", "A new line (shift+enter too, where the terminal tells it apart)"),
         row("↑ ↓", "The box's lines, then what you sent before"),
+        row(
+            "ctrl+r",
+            "Look back through what you sent for the words you type: ctrl+r again finds an earlier one, enter puts it in the \
+             box, esc goes back to your draft",
+        ),
     ];
     if has.voice {
         send.push(row(
@@ -146,6 +151,12 @@ pub(super) fn help_sections(has: HelpHas, app: &str, tabs: &[String], commands: 
             "Undo in the box: a run of typing or deleting, a paste, a cut or what you dictated at a time; ctrl+_ where ctrl+- \
              zooms the terminal",
         ),
+        row(
+            "ctrl+g",
+            "Open the draft in your own editor (VISUAL or EDITOR); what you save comes back into the box, and ctrl+- takes it \
+             back",
+        ),
+        row("ctrl+s", "Put the draft aside, with its files; in an empty box, bring it back"),
     ];
     let mut stop = vec![row("esc", "Stop Kumi's answer: the steps it finished stay, and waiting messages go back into the box")];
     if has.slots {

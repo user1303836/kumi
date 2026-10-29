@@ -1,7 +1,7 @@
   Kumi  ·  Night Drive                                                  ● Live
 
 
-   Keys and commands                                                ↑ 70 more
+   Keys and commands                                                ↑ 78 more
 
                          enter runs, esc closes
      ?                   This help, from an empty box

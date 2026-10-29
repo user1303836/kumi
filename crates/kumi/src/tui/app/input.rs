@@ -98,7 +98,9 @@ impl TuiApp {
             // The help's typed key, in a block of its own until keys have a registry. `?` arrives as typed text, which
             // key() never sees: on an empty box it opens the help, and anywhere else it types itself.
             // (while looking back through what was sent, `?` is a character to find)
-            InputEvent::Text { text } if text == "?" && self.0.state.borrow().editor.is_empty() && self.0.state.borrow().search.is_none() => {
+            InputEvent::Text { text }
+                if text == "?" && self.0.state.borrow().editor.is_empty() && self.0.state.borrow().search.is_none() =>
+            {
                 self.open_help()
             }
             // End of the help's typed key.
