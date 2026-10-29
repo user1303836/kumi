@@ -1,6 +1,6 @@
 //! The session on a thread of its own, made as the app makes it (`kumi::cli::run` with `io.threaded`, as main() sets it):
-//! once Kumi has ended, what the session kept is written and it has let go of its conversation, for `kumi -p`, the full
-//! screen and plain mode alike.
+//! once Kumi has ended, what the session kept is written and it has let go of its conversation and its database, for
+//! `kumi -p`, the full screen and plain mode alike.
 #[path = "../support/vt.rs"]
 mod vt;
 use kumi::{
@@ -177,8 +177,12 @@ fn kumi(env: Env, input: Rc<Input>, out: Rc<Output>, err: Rc<Output>, args: &[&s
 }
 
 /// What the session kept, read once Kumi has ended: the producer's notes in kumi.db, and whether each conversation it
-/// held is let go (its `<id>.lock` free for another Kumi).
+/// held is let go (its `<id>.lock` free for another Kumi). Kumi's database is closed by then. The session opens it on
+/// its thread and closes it only as the thread ends, after what the session does as it ends, and SQLite folds the
+/// write-ahead log back into kumi.db and deletes it as the last connection closes. (Asked first: reading the notes opens
+/// kumi.db again.)
 fn left(home: &Path) -> (Vec<String>, Vec<(String, bool)>) {
+    assert!(!home.join("kumi.db-wal").exists(), "kumi.db is still open once Kumi ended: Kumi didn't wait for the session's thread");
     let notes = kumi_store::read_only(home.join("kumi.db"), |connection| kumi_store::notes::in_use(connection, &kumi_store::Scope::Global))
         .unwrap()
         .into_iter()
