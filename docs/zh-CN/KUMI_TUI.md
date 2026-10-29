@@ -235,6 +235,7 @@ Kumi 占据整个终端窗口，并在 Kumi 关闭、崩溃或被停止时把窗
 
 - `/btw <question>` 顺便回答问题，`/goal` 和 `/loop` 的用法与全屏应用中相同。
 - `/jobs`、`/slots` 和 `/music` 打印各自的列表。更改你的音乐要在全屏应用中进行。
+- `/model [provider/model]`、`/effort [level|default]` 和 `/logout <provider>` 在全屏应用中会打开面板，在这里则直接跟上参数。
 - `/export [md|html|json]` 和 `/share` 都会保存文件并告诉你位置。
 - `/pin <id>`、`/unpin <id>` 和 `/forget <id>` 用来保留或忘记 `/memory` 中的笔记。
 - `/voice`、`/map`、`/palette`、`/copy`、`/recipe` 和 `/takeback` 只在全屏应用中可用，纯文本模式会这样告诉你。

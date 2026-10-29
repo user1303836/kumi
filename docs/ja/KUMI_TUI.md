@@ -235,6 +235,7 @@ REAPER と Renoise でも画面は同じで（[つなぎ方](KUMI_GUIDE.md#reape
 
 - `/btw <question>` は横から答え、`/goal` と `/loop` はフルスクリーンのアプリと同じように動きます。
 - `/jobs`、`/slots`、`/music` は一覧を表示します。音楽を変えるのはフルスクリーンのアプリで行います。
+- `/model [provider/model]`、`/effort [level|default]`、`/logout <provider>` は、フルスクリーンのアプリではパネルを開きますが、ここでは言葉で指定します。
 - `/export [md|html|json]` と `/share` はどちらもファイルを保存し、場所を伝えます。
 - `/pin <id>`、`/unpin <id>`、`/forget <id>` で `/memory` のメモを残したり忘れさせたりします。
 - `/voice`、`/map`、`/palette`、`/copy`、`/recipe`、`/takeback` はフルスクリーンのアプリだけにあり、プレーンモードではそう伝えます。

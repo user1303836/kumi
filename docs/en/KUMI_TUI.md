@@ -390,6 +390,8 @@ text, and `/help` lists those this session has.
   full-screen app.
 - `/jobs`, `/slots` and `/music` print their lists. Changing your music is the
   full-screen app's.
+- `/model [provider/model]`, `/effort [level|default]` and `/logout <provider>` take their
+  words here, where the full-screen app opens a panel.
 - `/export [md|html|json]` and `/share` each save a file and say where.
 - `/pin <id>`, `/unpin <id>` and `/forget <id>` keep or forget a note from `/memory`.
 - `/voice`, `/map`, `/palette`, `/copy`, `/recipe` and `/takeback` are only in the

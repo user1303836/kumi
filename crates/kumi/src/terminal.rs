@@ -20,10 +20,13 @@ use kumi_agent::core::{
         ConversationMatch, ConversationSummary, KeptLine, NoteChange, SessionController, SessionEvent, SetAsk, SetChoice, TurnState,
     },
     export::Format,
+    goal::GoalPhase,
+    goal_mode::{ObjectiveState, ObjectiveStatus},
     protocol::{op, Capabilities, InProcess, SessionHandle},
 };
 use kumi_ai::providers::{table, Effort, ProviderId, EFFORTS};
 use kumi_common::{
+    abort::Signal,
     js::{number, string},
     time::{now_ms_f64, perf_now, since},
 };
@@ -130,6 +133,20 @@ fn all_on() -> Now {
     }
     let fronts = Fronts { voice: true, updates: true, switch_daw: true, willington: true };
     Now { busy: false, goal_running: false, can: serde_json::from_value(can).unwrap_or_default(), fronts }
+}
+/// Plain mode's words for a command where the table's are the full-screen app's: plain mode takes words where that app
+/// opens a panel, and only lists what that app also changes.
+fn plain_about(name: &str) -> Option<String> {
+    Some(match name {
+        "/model" => "The model Kumi talks to: /model <provider> lists a provider's, /model <provider>/<model> chooses one".into(),
+        "/effort" => "How hard the model thinks: /effort <level>, or /effort default".into(),
+        "/login" => format!("Sign in to a provider, from a shell: {} login <provider>", *KUMI),
+        "/logout" => "Sign out of a provider: /logout <provider>".into(),
+        "/export" => "This conversation as a file: /export (Markdown), /export html, or /export json (for another Kumi)".into(),
+        "/jobs" => "What's running in the background, a line each".into(),
+        "/music" => "Your own music, which Kumi learns your taste from: listed here, changed in the full-screen app".into(),
+        _ => return None,
+    })
 }
 /// What the full-screen app shows and plain mode can't: /help names them, and a line asking for one is told so.
 fn full_screen_only(effect: &Effect) -> bool {
@@ -333,8 +350,18 @@ struct State {
     asking: Option<String>,
     /// Why the DAW answers late, while it does (a dialog is open), as its focus says.
     busy: Option<String>,
-    /// A /goal or a sound match is set: /goal while Kumi works says so, as the full-screen app shows it.
-    goal: bool,
+    /// The last /goal as its event said it (its words, state, turns and budget): what /goal says when the session says
+    /// nothing more, and whether one is running. None once it's cleared, or a sound match took over.
+    objective: Option<ObjectiveStatus>,
+    /// A sound match is running or starting.
+    matching: bool,
+    /// Lines said and turns begun since Kumi started: whether a command's call said anything itself.
+    said_lines: u64,
+    turns_begun: u64,
+    /// The /slots swap under way, by its number, and what stops it: one at a time, and Ctrl-C stops it, as Esc does in
+    /// the full-screen app.
+    slots: Option<(u32, Signal)>,
+    next_slots: u32,
 }
 struct Inner {
     options: TerminalOptions,
@@ -379,7 +406,12 @@ pub fn create_terminal(options: TerminalOptions) -> PlainTerminal {
             said: std::collections::HashMap::new(),
             asking: None,
             busy: None,
-            goal: false,
+            objective: None,
+            matching: false,
+            said_lines: 0,
+            turns_begun: 0,
+            slots: None,
+            next_slots: 0,
         }),
         parser: RefCell::new(None),
         keys: RefCell::new(None),
@@ -426,6 +458,7 @@ impl PlainTerminal {
         if state.output_failed || state.closed {
             return;
         }
+        state.said_lines += 1;
         let text = head(&sanitize_text(message, &self.0.options.secrets).replace('\n', " "), 2048);
         if let Some(p) = &mut state.presentation {
             p.notice(self.0.options.output.as_ref(), &text, false);
@@ -658,9 +691,9 @@ impl PlainTerminal {
         let argument = parts.next();
         // Plain mode's own commands, which the shared table doesn't have: a note pinned, unpinned or forgotten.
         let own = matches!(verb, "/pin" | "/unpin" | "/forget");
-        // The table answers for /model, /effort and /logout alone: plain mode reads their words itself (/model
+        // The table answers for /model, /effort, /login and /logout alone: plain mode reads their words itself (/model
         // <provider>, /effort high, /logout <provider>), where the full-screen app chooses in a panel.
-        let asked = if matches!(verb, "/model" | "/effort" | "/logout") { verb } else { command };
+        let asked = if matches!(verb, "/model" | "/effort" | "/login" | "/logout") { verb } else { command };
         let effect = (!own).then(|| registry::run(asked, &self.now()));
         if self.busy() {
             match effect {
@@ -699,30 +732,32 @@ impl PlainTerminal {
         }
         Ok(())
     }
-    /// /help, from the shared table: each command this session has, as it says itself; plain mode's own; and those only the
-    /// full-screen app shows.
-    fn help(&self) -> String {
+    /// /help, a line each, from the shared table: each command this session has, in the table's words or plain mode's where
+    /// they differ; plain mode's own; those only the full-screen app shows; and the keys.
+    fn help(&self) -> Vec<String> {
         let now = Now { busy: false, ..self.now() };
         let (words, live) = (crate::daw::words(), crate::daw::current().id() == kumi_types::daw::DawId::Ableton);
-        let (mut here, mut there) = (vec![], vec![]);
+        let (mut lines, mut there) = (vec![], vec![]);
         for command in registry::COMMANDS.iter().filter(|command| command.offered(&now.can, &now.fronts)) {
             if full_screen_only(&registry::run(command.name, &now)) {
                 there.push(command.name);
             } else {
-                here.push(format!("{} ({})", command.name, command.about(words, live)));
+                let about = plain_about(command.name).unwrap_or_else(|| command.about(words, live));
+                lines.push(format!("[help] {}: {about}", command.name));
             }
         }
-        here.extend([
-            "/pin <id> (keep a note from /memory even when Kumi's memory is full)".to_string(),
-            "/unpin <id>".to_string(),
-            "/forget <id> (forget a note, a technique, or u1, u2… from your places)".to_string(),
-        ]);
-        let mut said = here.join(" · ");
-        if !there.is_empty() {
-            said.push_str(&format!(" · Only in the full-screen app: {}", there.join(", ")));
+        if now.can.change_note {
+            lines.push("[help] /pin <id>: Keep a note from /memory even when Kumi's memory is full".into());
+            lines.push("[help] /unpin <id>: Unpin a note".into());
         }
-        said.push_str(&format!(" · Ctrl-C: cancel work; idle: exit. EOF exits. Sign in with: {} login <provider>.", *KUMI));
-        said
+        if now.can.forget || now.can.forget_taste || now.can.forget_technique {
+            lines.push("[help] /forget <id>: Forget a note, a technique, or u1, u2… from your places".into());
+        }
+        if !there.is_empty() {
+            lines.push(format!("[help] Only in the full-screen app: {}", there.join(", ")));
+        }
+        lines.push(format!("[help] Ctrl-C: cancel work; idle: exit. EOF exits. Sign in with: {} login <provider>.", *KUMI));
+        lines
     }
     /// What the shared table needs of this session and of plain mode to answer a line.
     fn now(&self) -> Now {
@@ -735,7 +770,11 @@ impl PlainTerminal {
         };
         // Plain mode chooses models and signs in with its own controller, whatever the session says.
         let can = Capabilities { models: true, ..Capabilities::of(&*options.controller) };
-        Now { busy: self.busy(), goal_running: self.0.state.borrow().goal, can, fronts }
+        let goal_running = {
+            let state = self.0.state.borrow();
+            state.matching || state.objective.as_ref().is_some_and(|goal| goal.state == ObjectiveState::Running)
+        };
+        Now { busy: self.busy(), goal_running, can, fronts }
     }
     /// Carries out what the shared table made of a line, as text; what only the full-screen app can show says so.
     async fn effect(&self, effect: Effect, verb: &str, argument: Option<&str>, command: &str, input: &str) -> Result<(), RuntimeError> {
@@ -745,7 +784,11 @@ impl PlainTerminal {
             Effect::Quit => {
                 self.finish(0).await;
             }
-            Effect::Help => self.notice(&self.help()),
+            Effect::Help => {
+                for line in self.help() {
+                    self.notice(&line);
+                }
+            }
             Effect::Daw => {
                 let Some(switch) = self.0.options.switch_daw.clone() else { return Ok(()) };
                 match crate::daw::daw_command(&command["/daw".len()..]) {
@@ -842,6 +885,10 @@ impl PlainTerminal {
                     ));
                 }
             }
+            // Going back to a conversation, or carrying on in a copy, waits until Kumi is done, as in the full-screen app;
+            // the list still shows.
+            Effect::Resume { word } if self.busy() && !word.is_empty() => self.wait_for(verb),
+            Effect::Fork { .. } if self.busy() => self.wait_for(verb),
             Effect::Model
             | Effect::Effort
             | Effect::Fast
@@ -864,10 +911,16 @@ impl PlainTerminal {
             // The line itself is the loop's request; the session reads it.
             Effect::Loop => self.turn(input).await?,
             Effect::Goal => {
+                let before = self.said();
                 self.0.state.borrow_mut().answering = true;
                 let result = controller.goal((!words.is_empty()).then_some(words.as_str())).await;
                 self.0.state.borrow_mut().answering = false;
                 result?;
+                // Showing it, its status or an edit, the session answers only with the goal's event, which the full-screen
+                // app draws in its GOAL tab: here it's said.
+                if self.said() == before {
+                    self.say_goal();
+                }
             }
             Effect::PauseGoal | Effect::PauseLoop if self.busy() => {
                 let _ = controller.cancel().await;
@@ -875,8 +928,11 @@ impl PlainTerminal {
             Effect::PauseGoal => self.notice("[goal] There's no goal running to pause."),
             Effect::PauseLoop => self.notice("[loop] There's no loop running to pause."),
             Effect::StopGoal => {
+                let before = self.said();
                 if !controller.stop_goal().await? {
                     self.notice("[goal] There's no goal to stop.");
+                } else if self.said() == before {
+                    self.notice("[goal] Stopped.");
                 }
             }
             Effect::StopLoop => {
@@ -899,12 +955,36 @@ impl PlainTerminal {
             }
             Effect::Refused(Why::NotKept) => self.notice(&format!("[conversations] {}", crate::tui::app::not_kept())),
             // Told to wait only for what this session and plain mode can do once Kumi is done.
-            Effect::Refused(Why::Busy { verb }) if self.offers(&verb) && !the_apps_own(&verb) => {
-                self.notice(&format!("[busy] Kumi is working: {verb} once it's done (Ctrl-C stops it)."))
-            }
+            Effect::Refused(Why::Busy { verb }) if self.offers(&verb) && !the_apps_own(&verb) => self.wait_for(&verb),
             Effect::Refused(Why::Busy { verb: name }) | Effect::Unknown { name } => self.not_here(&name),
         }
         Ok(())
+    }
+    /// `verb` waits until Kumi is done.
+    fn wait_for(&self, verb: &str) {
+        self.notice(&format!("[busy] Kumi is working: {verb} once it's done (Ctrl-C stops it)."));
+    }
+    /// How much has been said, in lines and turns begun: a call that changes neither said nothing itself.
+    fn said(&self) -> (u64, u64) {
+        let state = self.0.state.borrow();
+        (state.said_lines, state.turns_begun)
+    }
+    /// The goal as its last event said it: its words, state, turns and budget, and what carries it on.
+    fn say_goal(&self) {
+        let goal = self.0.state.borrow().objective.clone();
+        let Some(goal) = goal else {
+            self.notice("[goal] No goal yet: /goal <what to reach> sets one.");
+            return;
+        };
+        let words = head(&sanitize_text(&goal.objective, &self.0.options.secrets), 120);
+        let mut said = format!("[goal] {words} · {} · {} of {} turns", enum_name(goal.state), goal.turns, goal.turn_budget);
+        if let Some(reason) = goal.reason.as_deref().filter(|reason| !reason.is_empty()) {
+            said.push_str(&format!(" · {}", head(&sanitize_text(reason, &self.0.options.secrets), 160)));
+        }
+        if goal.state == ObjectiveState::Paused {
+            said.push_str(" · /goal resume carries on");
+        }
+        self.notice(&said);
     }
     /// Whether this session and plain mode have `name`, as /help lists them.
     fn offers(&self, name: &str) -> bool {
@@ -936,7 +1016,10 @@ impl PlainTerminal {
             return Ok(());
         }
         let answer = self.0.options.controller.aside(question, Rc::new(|_: &str| {}), None).await?;
-        self.notice(&format!("[btw] {answer}"));
+        // A line each, as its lines came: a list stays a list.
+        for line in answer.lines().filter(|line| !line.trim().is_empty()) {
+            self.notice(&format!("[btw] {line}"));
+        }
         Ok(())
     }
     /// /jobs: the background jobs, a line each, those still running first.
@@ -957,14 +1040,38 @@ impl PlainTerminal {
             self.notice(&format!("[jobs] Job {} · {title} · {}{doing}", job.id, enum_name(&job.state)));
         }
     }
-    /// /slots [words]: which model does each listening job, and a swap of one, as the full-screen app says them.
+    /// /slots [words]: which model does each listening job, and a swap of one, as the full-screen app says them. One swap
+    /// at a time, since a model's fetch can take minutes, and Ctrl-C stops it.
     async fn slots(&self, words: &str) {
         let Some(context) = self.0.options.controller.slots_context() else {
             self.notice("[slots] Kumi's listening isn't set up here.");
             return;
         };
+        let swap = kumi_listening::slots::parse(words) != Ok(kumi_listening::slots::Asked::Show);
+        let signal = Signal::new();
+        let id = {
+            let mut state = self.0.state.borrow_mut();
+            if swap && state.slots.is_some() {
+                drop(state);
+                self.notice("[slots] Kumi is still trying a model for /slots: wait for it, or Ctrl-C stops it.");
+                return;
+            }
+            swap.then(|| {
+                let id = state.next_slots;
+                state.next_slots += 1;
+                state.slots = Some((id, signal.clone()));
+                id
+            })
+        };
         let progress = |line: String| self.notice(&format!("[slots] {line}"));
-        match kumi_listening::slots::command(words, &context, &progress, kumi_common::abort::Signal::default()).await {
+        let said = kumi_listening::slots::command(words, &context, &progress, signal).await;
+        if let Some(id) = id {
+            let mut state = self.0.state.borrow_mut();
+            if state.slots.as_ref().is_some_and(|(held, _)| *held == id) {
+                state.slots = None;
+            }
+        }
+        match said {
             kumi_listening::slots::Said::Slots { lines, footer } => {
                 for line in lines {
                     self.notice(&format!("[slots] {line}"));
@@ -1357,6 +1464,7 @@ impl Terminal for PlainTerminal {
                 let mut state = self.0.state.borrow_mut();
                 let queued = if get("state") == "idle" && !state.answering { state.queued.take() } else { None };
                 if get("state") == "running" {
+                    state.turns_begun += 1;
                     state.suppress = false;
                     state.displayed_bytes = 0;
                     state.text.discard();
@@ -1378,8 +1486,21 @@ impl Terminal for PlainTerminal {
                     self.carry_on(id);
                 }
             }
-            "goal" | "objective" => self.0.state.borrow_mut().goal = true,
-            "objective-cleared" => self.0.state.borrow_mut().goal = false,
+            // A /goal as its event says it, kept for /goal; a sound match taking over clears it, as the full-screen app's
+            // GOAL tab shows the match then.
+            "objective" => {
+                if let SessionEvent::Objective(status) = &event {
+                    self.0.state.borrow_mut().objective = Some(status.clone());
+                }
+            }
+            "objective-cleared" => self.0.state.borrow_mut().objective = None,
+            "goal" => {
+                if let SessionEvent::Goal(status) = &event {
+                    let mut state = self.0.state.borrow_mut();
+                    state.matching = matches!(status.state, GoalPhase::Running | GoalPhase::Starting);
+                    state.objective = None;
+                }
+            }
             "job" => {
                 if let SessionEvent::Job(status) = &event {
                     use kumi_agent::core::jobs::{JobState, WhenDone};
@@ -1858,6 +1979,13 @@ impl Terminal for PlainTerminal {
         if state.closing {
             return;
         }
+        // A /slots swap under way stops first, as Esc stops it in the full-screen app.
+        if let Some((_, signal)) = state.slots.take() {
+            drop(state);
+            signal.cancel();
+            self.notice("[slots] Stopping the model Kumi was trying.");
+            return;
+        }
         if !self.busy() {
             drop(state);
             drop(self.finish(0));
@@ -1948,13 +2076,13 @@ mod registry_tests {
     fn plain_mode_runs_or_declines_every_command_in_the_shared_table() {
         let now = all_on();
         let mut declined = vec![];
-        for command in registry::COMMANDS {
-            let effect = registry::run(command.name, &now);
-            // A command the table has comes to an effect plain mode's match answers: it runs it, or says it's the
-            // full-screen app's. Never "Unknown command", and never a message for the model.
-            assert!(!matches!(effect, Effect::Unknown { .. } | Effect::Message), "{} isn't answered: {effect:?}", command.name);
+        for name in registry::COMMANDS.iter().flat_map(|command| std::iter::once(&command.name).chain(command.aliases)) {
+            let effect = registry::run(name, &now);
+            // A command the table has, by any of its names, comes to an effect plain mode's match answers: it runs it, or
+            // says it's the full-screen app's. Never "Unknown command", and never a message for the model.
+            assert!(!matches!(effect, Effect::Unknown { .. } | Effect::Message), "{name} isn't answered: {effect:?}");
             if full_screen_only(&effect) {
-                declined.push(command.name);
+                declined.push(*name);
             }
         }
         declined.sort();
