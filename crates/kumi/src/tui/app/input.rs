@@ -160,10 +160,13 @@ impl TuiApp {
                 if self.0.state.borrow_mut().selection.take().is_some_and(|s| s.moved) {
                     return true;
                 }
-                // Just after a copy, Esc takes its toast away; it doesn't stop Kumi.
+                // Just after a copy, Esc takes its toast away. While Kumi works it stops it too, as ever; while it's idle,
+                // that's all it does (unpinning, or taking a request back, can wait for the next).
                 if self.just_copied().is_some() {
                     self.end_toast();
-                    return true;
+                    if !self.busy() {
+                        return true;
+                    }
                 }
             }
             InputEvent::Mouse { action: MouseAction::Drag, button: MouseButton::Left, x, y, .. } => {

@@ -177,7 +177,7 @@ case!(letting_go_of_a_drag_copies_it_and_the_view_goes_on, async {
     h.wait_for_call("cancel").await;
     h.close().await;
 });
-case!(esc_just_after_a_copy_only_takes_its_toast_away, async {
+case!(esc_just_after_a_copy_stops_a_working_kumi_and_while_idle_only_takes_the_toast_away, async {
     let copied = Rc::new(std::cell::RefCell::new(Vec::<String>::new()));
     let h = copying(&copied);
     h.start().await;
@@ -187,15 +187,23 @@ case!(esc_just_after_a_copy_only_takes_its_toast_away, async {
     h.emit(json!({"type":"text","text":"Select these words"}));
     h.wait_for("Select these words").await;
     let (y, x) = find(&h, "Select these words");
-    h.type_text(&format!("\x1b[<0;{};{}M\x1b[<32;{};{}M\x1b[<0;{};{}m", x + 1, y + 1, x + 6, y + 1, x + 6, y + 1)).await;
+    let drag = format!("\x1b[<0;{};{}M\x1b[<32;{};{}M\x1b[<0;{};{}m", x + 1, y + 1, x + 6, y + 1, x + 6, y + 1);
+    h.type_text(&drag).await;
     h.has("Copied “Select”");
-    h.type_text("\x1b").await;
-    assert!(!h.calls().contains(&"cancel".into()));
-    h.wait_until_hidden("Copied “Select”").await;
-    h.has("esc to stop");
-    // The next Esc stops Kumi as ever.
+    // While Kumi works, Esc is the stop key as ever: it stops Kumi and takes the toast with it.
     h.type_text("\x1b").await;
     h.wait_for_call("cancel").await;
+    h.wait_until_hidden("Copied “Select”").await;
+    // While it's idle, the first Esc just after a copy only takes the toast away.
+    h.emit(json!({"type":"state","state":"idle"}));
+    let (y, x) = find(&h, "Select these words");
+    let drag = format!("\x1b[<0;{};{}M\x1b[<32;{};{}M\x1b[<0;{};{}m", x + 1, y + 1, x + 6, y + 1, x + 6, y + 1);
+    h.type_text(&drag).await;
+    h.has("Copied “Select”");
+    let cancels = h.calls().iter().filter(|call| *call == "cancel").count();
+    h.type_text("\x1b").await;
+    h.wait_until_hidden("Copied “Select”").await;
+    assert_eq!(h.calls().iter().filter(|call| *call == "cancel").count(), cancels);
     h.close().await;
 });
 case!(a_double_click_copies_a_word_and_a_triple_click_the_line_it_wrapped, async {
