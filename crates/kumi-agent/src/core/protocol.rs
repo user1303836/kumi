@@ -15,7 +15,7 @@ use std::{
 };
 
 use async_trait::async_trait;
-use futures::{task::noop_waker, FutureExt};
+use futures::{future::LocalBoxFuture, task::noop_waker, FutureExt};
 use kumi_common::abort::Signal;
 use serde::{Deserialize, Serialize};
 
@@ -25,14 +25,17 @@ use crate::core::palette::{Gathered, PaletteListed, PaletteView};
 use crate::core::search_memory::SearchMemoryStatus;
 use kumi_ai::{
     auth::openai_codex::DevicePrompt,
-    control::{ChatGptSignIn, CurrentModel, DefaultModel, LocalStatus, ProviderStatus},
+    control::{ChatGptSignIn, CurrentModel, DefaultModel, LocalStatus, ModelController, ProviderStatus},
     providers::{
         models::{ApiKeyCheck, ModelInfo, ServiceTier},
         Effort, ProviderId,
     },
 };
 use kumi_library::map::MapData;
-use kumi_listening::{music::learning::Music, slots::Said};
+use kumi_listening::{
+    music::learning::Music,
+    slots::{Said, SlotsContext},
+};
 use kumi_types::contracts::*;
 use kumi_types::errors::RuntimeError;
 
@@ -477,13 +480,13 @@ impl<'a> dyn SessionHandle + 'a {
 }
 
 /// A part of the session a request is answered from (its music, its map, its slots), or why it can't be.
-fn part<T>(part: Option<T>) -> Result<T, RuntimeError> {
+pub fn part<T>(part: Option<T>) -> Result<T, RuntimeError> {
     part.ok_or_else(|| RuntimeError::plain("Not available"))
 }
 
 /// What /music shows, read from the producer's music: before they add a folder, the usual place songs were found in,
 /// looked for off Kumi's thread.
-async fn music_view(music: &Rc<Music>) -> MusicView {
+pub async fn music_view(music: &Rc<Music>) -> MusicView {
     let found = match music.folders().is_empty() {
         true => {
             let (places, skip) = (music.places(), music.skipping());
@@ -499,6 +502,14 @@ async fn music_view(music: &Rc<Music>) -> MusicView {
 pub struct InProcess {
     this: Weak<InProcess>,
     session: Rc<dyn SessionController>,
+    side: Rc<HandleSide>,
+}
+
+/// The handle's side of a session in this process, whatever answers its requests (`InProcess` a session's, a test its
+/// own): who hears what's said between replies, and what stops each aside, /slots request and ChatGPT sign-in under way,
+/// by its id.
+pub struct HandleSide {
+    this: Weak<HandleSide>,
     on_event: RefCell<Option<Rc<dyn Fn(SessionEvent)>>>,
     /// The asides under way, by id, and what stops each.
     asides: RefCell<HashMap<u32, Signal>>,
@@ -508,22 +519,164 @@ pub struct InProcess {
     sign_ins: RefCell<HashMap<u32, Signal>>,
 }
 
-impl InProcess {
-    pub fn new(session: Rc<dyn SessionController>) -> Rc<InProcess> {
-        Rc::new_cyclic(|this| InProcess {
+impl HandleSide {
+    pub fn new() -> Rc<HandleSide> {
+        Rc::new_cyclic(|this| HandleSide {
             this: this.clone(),
-            session,
             on_event: RefCell::new(None),
             asides: RefCell::new(HashMap::new()),
             slots: RefCell::new(HashMap::new()),
             sign_ins: RefCell::new(HashMap::new()),
         })
     }
-    fn emit(&self, event: SessionEvent) {
+    /// Where what's said between replies goes: [`SessionHandle::listen`]'s.
+    pub fn listen(&self, on_event: Rc<dyn Fn(SessionEvent)>) {
+        *self.on_event.borrow_mut() = Some(on_event);
+    }
+    /// Says `event` to whoever listens.
+    pub fn emit(&self, event: SessionEvent) {
         let on_event = self.on_event.borrow().clone();
         if let Some(on_event) = on_event {
             on_event(event);
         }
+    }
+    /// [`op::Aside`], which `ask` asks given where its words go (`aside` events with `id`) and what stops it.
+    pub async fn aside<F>(&self, id: u32, ask: impl FnOnce(OnText, Signal) -> F) -> Result<String, RuntimeError>
+    where
+        F: std::future::Future<Output = Result<String, RuntimeError>>,
+    {
+        // A stop that came first left its signal stopped: the aside ends at once.
+        let signal = under_way(&self.asides, id);
+        let this = self.this.clone();
+        let on_text: OnText = Rc::new(move |text: &str| {
+            if let Some(this) = this.upgrade() {
+                this.emit(SessionEvent::Aside { id, text: text.into() });
+            }
+        });
+        let answer = ask(on_text, signal).await;
+        self.asides.borrow_mut().remove(&id);
+        answer
+    }
+    /// [`op::StopAside`]: before its aside starts too, which takes the stopped signal up as it starts (an id is never used
+    /// again, so what a late stop leaves is harmless).
+    pub fn stop_aside(&self, id: u32) {
+        under_way(&self.asides, id).cancel();
+    }
+    /// [`op::Slots`] from the session's slots: what's under way comes as `slots-progress` events with `id`.
+    pub async fn slots(&self, id: u32, words: &str, context: &SlotsContext) -> Said {
+        // As an aside's: a stop that came first left its signal stopped.
+        let signal = under_way(&self.slots, id);
+        let this = self.this.clone();
+        let progress = move |line: String| {
+            if let Some(this) = this.upgrade() {
+                this.emit(SessionEvent::SlotsProgress { id, line });
+            }
+        };
+        let said = kumi_listening::slots::command(words, context, &progress, signal).await;
+        self.slots.borrow_mut().remove(&id);
+        said
+    }
+    /// [`op::StopSlots`].
+    pub fn stop_slots(&self, id: u32) {
+        under_way(&self.slots, id).cancel();
+    }
+    /// [`op::SignInChatgpt`] through the session's model controls: its address or code comes as a `sign-in` event with
+    /// `id`.
+    pub async fn sign_in_chatgpt(&self, id: u32, by_code: bool, models: &dyn ModelController) -> Result<(), RuntimeError> {
+        // As an aside's: a stop that came first left its signal stopped.
+        let signal = under_way(&self.sign_ins, id);
+        let this = self.this.clone();
+        let said = move |url: Option<String>, code: Option<DevicePrompt>| {
+            if let Some(this) = this.upgrade() {
+                this.emit(SessionEvent::SignIn { id, url, code });
+            }
+        };
+        let how = if by_code {
+            ChatGptSignIn::Device { signal, on_code: Rc::new(move |code| said(None, Some(code))) }
+        } else {
+            ChatGptSignIn::Browser { signal, on_url: Rc::new(move |url| said(Some(url), None)) }
+        };
+        let signed = models.sign_in_chatgpt(how).await;
+        self.sign_ins.borrow_mut().remove(&id);
+        signed
+    }
+    /// [`op::StopSignIn`].
+    pub fn stop_sign_in(&self, id: u32) {
+        under_way(&self.sign_ins, id).cancel();
+    }
+}
+
+/// What stops the request `id`: made as it starts, or as a stop comes before it.
+fn under_way(signals: &RefCell<HashMap<u32, Signal>>, id: u32) -> Signal {
+    signals.borrow_mut().entry(id).or_insert_with(Signal::new).clone()
+}
+
+/// [`SessionHandle::tell`]'s timing, for any handle in this process: `answering` goes as far as it goes at once (all of
+/// it, for what a session does at once), then the rest in a task of its own.
+pub fn tell_now(mut answering: LocalBoxFuture<'static, ()>) {
+    if answering.as_mut().poll(&mut Context::from_waker(&noop_waker())).is_pending() {
+        tokio::task::spawn_local(answering);
+    }
+}
+
+/// The models as a front end shows them, from the session's model controls: None where there's no model to choose.
+pub fn models_view(models: Option<Rc<dyn ModelController>>) -> Option<ModelsView> {
+    let models = models?;
+    Some(ModelsView { current: models.current(), fast: models.fast_enabled(), fallback: models.fallback() })
+}
+
+/// A provider's name as the producer knows it: the session's model controls know a model server's own name; without
+/// them, the providers' table's.
+pub fn provider_name(models: Option<Rc<dyn ModelController>>, id: &str) -> String {
+    match models {
+        Some(models) => models.provider_name(id),
+        None => ProviderId::parse(id).map_or_else(|| id.into(), |provider| provider.row().name.into()),
+    }
+}
+
+/// The cloud provider `id` names, unless the session's model controls know it as a model server's.
+pub fn cloud_provider(models: Option<Rc<dyn ModelController>>, id: &str) -> Option<ProviderId> {
+    match models {
+        Some(models) => models.cloud_provider(id),
+        None => ProviderId::parse(id),
+    }
+}
+
+/// The model requests (signing in among them), answered from a session's model controls as `InProcess` answers them:
+/// "Not available" for a session with none. None for any other request.
+pub async fn models_answer(op: &Op, models: Option<Rc<dyn ModelController>>, side: &HandleSide) -> Option<Result<Reply, RuntimeError>> {
+    let controls = || part(models.clone());
+    Some(match op {
+        Op::Providers(_) => async { Ok(Reply::Providers(controls()?.providers().await?)) }.await,
+        Op::LocalModels(_) => async { Ok(Reply::LocalModels(controls()?.local().await)) }.await,
+        Op::ChooseDefault(_) => async { Ok(Reply::ChooseDefault(controls()?.choose_default().await?)) }.await,
+        Op::Models(op::Models { provider, refresh }) => async { Ok(Reply::Models(controls()?.models(provider, *refresh).await?)) }.await,
+        Op::ChooseModel(op::ChooseModel { model }) => async { Ok(Reply::ChooseModel(controls()?.choose(model).await?)) }.await,
+        Op::SetEffort(op::SetEffort { effort }) => async { Ok(Reply::SetEffort(controls()?.set_effort(*effort).await?)) }.await,
+        Op::SetFast(op::SetFast { on }) => async { Ok(Reply::SetFast(controls()?.set_fast(*on).await?)) }.await,
+        Op::SetFallback(op::SetFallback { model }) => {
+            async { Ok(Reply::SetFallback(controls()?.set_fallback(model.as_deref()).await?)) }.await
+        }
+        Op::SaveKey(op::SaveKey { provider, key }) => {
+            async { Ok(Reply::SaveKey(controls()?.save_key(*provider, &key.0, None).await?)) }.await
+        }
+        Op::SignOut(op::SignOut { provider }) => async { Ok(Reply::SignOut(controls()?.sign_out(*provider).await?)) }.await,
+        Op::SignInChatgpt(op::SignInChatgpt { id, by_code }) => {
+            async { Ok(Reply::SignInChatgpt(side.sign_in_chatgpt(*id, *by_code, &*controls()?).await?)) }.await
+        }
+        Op::MissingModel(_) => async { Ok(Reply::MissingModel(kumi_ai::control::missing_model(&*controls()?).await)) }.await,
+        _ => return None,
+    })
+}
+
+/// The tokens `model` reads at once, as the session's model controls say.
+pub fn context_window(models: Option<Rc<dyn ModelController>>, model: &str) -> Option<f64> {
+    models?.context_window(model)
+}
+
+impl InProcess {
+    pub fn new(session: Rc<dyn SessionController>) -> Rc<InProcess> {
+        Rc::new_cyclic(|this| InProcess { this: this.clone(), session, side: HandleSide::new() })
     }
     async fn serve(&self, op: Op) -> Result<Reply, RuntimeError> {
         let session = &self.session;
@@ -540,25 +693,9 @@ impl InProcess {
             Op::References(op::References { query, limit }) => Reply::References(session.references(&query, limit).await?),
             Op::Steer(op::Steer { text }) => Reply::Steer(session.steer(&text)),
             Op::Aside(op::Aside { id, question }) => {
-                // A stop that came first left its signal stopped: the aside ends at once.
-                let signal = self.asides.borrow_mut().entry(id).or_insert_with(Signal::new).clone();
-                let this = self.this.clone();
-                let on_text: OnText = Rc::new(move |text: &str| {
-                    if let Some(this) = this.upgrade() {
-                        this.emit(SessionEvent::Aside { id, text: text.into() });
-                    }
-                });
-                let answer = session.aside(&question, on_text, Some(signal)).await;
-                self.asides.borrow_mut().remove(&id);
-                Reply::Aside(answer?)
+                Reply::Aside(self.side.aside(id, |on_text, signal| session.aside(&question, on_text, Some(signal))).await?)
             }
-            Op::StopAside(op::StopAside { id }) => {
-                // Before its aside starts too: the aside takes the stopped signal up as it starts (an id is never used
-                // again, so what a late stop leaves is harmless).
-                let signal = self.asides.borrow_mut().entry(id).or_insert_with(Signal::new).clone();
-                signal.cancel();
-                Reply::StopAside(())
-            }
+            Op::StopAside(op::StopAside { id }) => Reply::StopAside(self.side.stop_aside(id)),
             Op::Cancel(op::Cancel {}) => Reply::Cancel(session.cancel().await?),
             Op::Close(op::Close {}) => Reply::Close(session.close().await?),
             Op::Undo(op::Undo { id }) => Reply::Undo(session.undo(id.as_deref()).await?),
@@ -634,69 +771,27 @@ impl InProcess {
                 let load = part(session.map_loader())?;
                 Reply::Map(load().await)
             }
-            Op::Slots(op::Slots { id, words }) => {
-                let context = part(session.slots_context())?;
-                // As an aside's: a stop that came first left its signal stopped.
-                let signal = self.slots.borrow_mut().entry(id).or_insert_with(Signal::new).clone();
-                let this = self.this.clone();
-                let progress = move |line: String| {
-                    if let Some(this) = this.upgrade() {
-                        this.emit(SessionEvent::SlotsProgress { id, line });
-                    }
-                };
-                let said = kumi_listening::slots::command(&words, &context, &progress, signal).await;
-                self.slots.borrow_mut().remove(&id);
-                Reply::Slots(said)
+            Op::Slots(op::Slots { id, words }) => Reply::Slots(self.side.slots(id, &words, &*part(session.slots_context())?).await),
+            Op::StopSlots(op::StopSlots { id }) => Reply::StopSlots(self.side.stop_slots(id)),
+            op @ (Op::Providers(_)
+            | Op::LocalModels(_)
+            | Op::ChooseDefault(_)
+            | Op::Models(_)
+            | Op::ChooseModel(_)
+            | Op::SetEffort(_)
+            | Op::SetFast(_)
+            | Op::SetFallback(_)
+            | Op::SaveKey(_)
+            | Op::SignOut(_)
+            | Op::SignInChatgpt(_)
+            | Op::MissingModel(_)) => {
+                // If this list and models_answer's ever part ways, a request the controls don't answer is "Not available", not a
+                // panic.
+                return models_answer(&op, session.model_controls(), &self.side)
+                    .await
+                    .unwrap_or_else(|| Err(RuntimeError::plain("Not available")));
             }
-            Op::StopSlots(op::StopSlots { id }) => {
-                let signal = self.slots.borrow_mut().entry(id).or_insert_with(Signal::new).clone();
-                signal.cancel();
-                Reply::StopSlots(())
-            }
-            Op::Providers(op::Providers {}) => Reply::Providers(part(session.model_controls())?.providers().await?),
-            Op::LocalModels(op::LocalModels {}) => Reply::LocalModels(part(session.model_controls())?.local().await),
-            Op::ChooseDefault(op::ChooseDefault {}) => Reply::ChooseDefault(part(session.model_controls())?.choose_default().await?),
-            Op::Models(op::Models { provider, refresh }) => {
-                Reply::Models(part(session.model_controls())?.models(&provider, refresh).await?)
-            }
-            Op::ChooseModel(op::ChooseModel { model }) => Reply::ChooseModel(part(session.model_controls())?.choose(&model).await?),
-            Op::SetEffort(op::SetEffort { effort }) => Reply::SetEffort(part(session.model_controls())?.set_effort(effort).await?),
-            Op::SetFast(op::SetFast { on }) => Reply::SetFast(part(session.model_controls())?.set_fast(on).await?),
-            Op::SetFallback(op::SetFallback { model }) => {
-                Reply::SetFallback(part(session.model_controls())?.set_fallback(model.as_deref()).await?)
-            }
-            Op::SaveKey(op::SaveKey { provider, key }) => {
-                Reply::SaveKey(part(session.model_controls())?.save_key(provider, &key.0, None).await?)
-            }
-            Op::SignOut(op::SignOut { provider }) => Reply::SignOut(part(session.model_controls())?.sign_out(provider).await?),
-            Op::SignInChatgpt(op::SignInChatgpt { id, by_code }) => {
-                let models = part(session.model_controls())?;
-                // As an aside's: a stop that came first left its signal stopped.
-                let signal = self.sign_ins.borrow_mut().entry(id).or_insert_with(Signal::new).clone();
-                let this = self.this.clone();
-                let said = move |url: Option<String>, code: Option<DevicePrompt>| {
-                    if let Some(this) = this.upgrade() {
-                        this.emit(SessionEvent::SignIn { id, url, code });
-                    }
-                };
-                let how = if by_code {
-                    ChatGptSignIn::Device { signal, on_code: Rc::new(move |code| said(None, Some(code))) }
-                } else {
-                    ChatGptSignIn::Browser { signal, on_url: Rc::new(move |url| said(Some(url), None)) }
-                };
-                let signed = models.sign_in_chatgpt(how).await;
-                self.sign_ins.borrow_mut().remove(&id);
-                Reply::SignInChatgpt(signed?)
-            }
-            Op::MissingModel(op::MissingModel {}) => {
-                let models = part(session.model_controls())?;
-                Reply::MissingModel(kumi_ai::control::missing_model(&*models).await)
-            }
-            Op::StopSignIn(op::StopSignIn { id }) => {
-                let signal = self.sign_ins.borrow_mut().entry(id).or_insert_with(Signal::new).clone();
-                signal.cancel();
-                Reply::StopSignIn(())
-            }
+            Op::StopSignIn(op::StopSignIn { id }) => Reply::StopSignIn(self.side.stop_sign_in(id)),
             Op::FocusBody(op::FocusBody { request }) => Reply::FocusBody(session.focus_body(&request).await?),
         })
     }
@@ -732,39 +827,30 @@ impl SessionHandle for InProcess {
         self.session.can_background()
     }
     fn models(&self) -> Option<ModelsView> {
-        let models = self.session.model_controls()?;
-        Some(ModelsView { current: models.current(), fast: models.fast_enabled(), fallback: models.fallback() })
+        models_view(self.session.model_controls())
     }
     fn provider_name(&self, id: &str) -> String {
-        match self.session.model_controls() {
-            Some(models) => models.provider_name(id),
-            None => ProviderId::parse(id).map_or_else(|| id.into(), |provider| provider.row().name.into()),
-        }
+        provider_name(self.session.model_controls(), id)
     }
     fn cloud_provider(&self, id: &str) -> Option<ProviderId> {
-        match self.session.model_controls() {
-            Some(models) => models.cloud_provider(id),
-            None => ProviderId::parse(id),
-        }
+        cloud_provider(self.session.model_controls(), id)
     }
     fn context_window(&self, model: &str) -> Option<f64> {
-        self.session.model_controls()?.context_window(model)
+        context_window(self.session.model_controls(), model)
     }
     fn listen(&self, on_event: Rc<dyn Fn(SessionEvent)>) {
-        *self.on_event.borrow_mut() = Some(on_event);
+        self.side.listen(on_event);
     }
     async fn send(&self, op: Op) -> Result<Reply, RuntimeError> {
         self.serve(op).await
     }
     fn tell(&self, op: Op) {
         let Some(this) = self.this.upgrade() else { return };
-        // As far as it goes at once (all of it, for what the controller does at once), then the rest in a task of its own.
-        let mut serving = async move {
-            let _ = this.serve(op).await;
-        }
-        .boxed_local();
-        if serving.as_mut().poll(&mut Context::from_waker(&noop_waker())).is_pending() {
-            tokio::task::spawn_local(serving);
-        }
+        tell_now(
+            async move {
+                let _ = this.serve(op).await;
+            }
+            .boxed_local(),
+        );
     }
 }

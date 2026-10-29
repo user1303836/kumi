@@ -1,3 +1,5 @@
+#[path = "../support/absent.rs"]
+mod absent;
 #[path = "../support/live_words.rs"]
 mod live_words;
 #[path = "../support/models.rs"]
@@ -10,7 +12,15 @@ use kumi::{
     tui::tty::TtyOutput,
     update::UpdateControl,
 };
-use kumi_agent::core::{contracts::*, protocol::InProcess};
+use kumi_agent::core::{
+    contracts::*,
+    jobs::{JobDetail, JobStatus},
+    protocol::{
+        cloud_provider, context_window, models_answer, models_view, op, part, provider_name, tell_now, Capabilities, HandleSide,
+        ModelsView, Op, Reply, SessionHandle,
+    },
+};
+use kumi_ai::providers::ProviderId;
 use kumi_common::abort::Signal;
 use kumi_types::contracts::*;
 use kumi_types::errors::RuntimeError;
@@ -107,6 +117,10 @@ struct Control {
     music: RefCell<Option<Rc<kumi_listening::music::learning::Music>>>,
     /// The session's models, which plain mode reaches through it.
     models: RefCell<Option<Rc<FakeModels>>>,
+    /// What's said between replies, and what stops a /slots request or an aside.
+    side: Rc<HandleSide>,
+    /// Itself, for a request told it to run on after `tell` returns, as InProcess's does.
+    this: RefCell<std::rc::Weak<Control>>,
 }
 impl Default for Control {
     fn default() -> Self {
@@ -133,6 +147,8 @@ impl Default for Control {
             slots: RefCell::new(None),
             music: RefCell::new(None),
             models: RefCell::new(None),
+            side: HandleSide::new(),
+            this: RefCell::new(std::rc::Weak::new()),
         }
     }
 }
@@ -149,8 +165,8 @@ impl Control {
         }
     }
 }
-#[async_trait(?Send)]
-impl SessionController for Control {
+/// What the test's session does, asked through its handle below.
+impl Control {
     async fn start(&self) -> Result<(), RuntimeError> {
         self.calls.borrow_mut().push("start".into());
         Ok(())
@@ -365,6 +381,124 @@ impl SessionController for Control {
         self.models.borrow().clone().map(|models| models as Rc<dyn kumi::models::ModelController>)
     }
 }
+/// The test's session as plain mode reaches it: its own requests through its methods above, what the session's parts
+/// answer as `InProcess` answers them, and what it has nothing for as a session without it does.
+#[async_trait(?Send)]
+impl SessionHandle for Control {
+    fn capabilities(&self) -> Capabilities {
+        Capabilities {
+            aside: self.has_aside(),
+            reconnect: self.has_reconnect(),
+            conversations: self.has_conversations(),
+            memory: self.has_memory(),
+            library: self.has_library(),
+            taste: self.has_taste(),
+            forget_taste: self.has_forget_taste(),
+            change_note: self.has_change_note(),
+            goal: self.has_goal(),
+            stop_goal: self.has_stop_goal(),
+            stop_daw: self.has_stop_live(),
+            jobs: self.has_jobs(),
+            music: self.music.borrow().is_some(),
+            slots: self.slots.borrow().is_some(),
+            models: self.models.borrow().is_some(),
+            ..Capabilities::default()
+        }
+    }
+    fn can_show(&self, _: BodyKind) -> bool {
+        false
+    }
+    fn status(&self) -> SessionStatus {
+        Control::status(self)
+    }
+    fn answering_fallback(&self) -> Option<String> {
+        None
+    }
+    fn library(&self) -> Option<LibraryStatus> {
+        Control::library(self)
+    }
+    fn open_set(&self) -> Option<String> {
+        None
+    }
+    fn jobs(&self) -> Vec<JobStatus> {
+        vec![]
+    }
+    fn job(&self, _: u32) -> Option<JobDetail> {
+        None
+    }
+    fn can_background(&self) -> bool {
+        false
+    }
+    fn models(&self) -> Option<ModelsView> {
+        models_view(self.model_controls())
+    }
+    fn provider_name(&self, id: &str) -> String {
+        provider_name(self.model_controls(), id)
+    }
+    fn cloud_provider(&self, id: &str) -> Option<ProviderId> {
+        cloud_provider(self.model_controls(), id)
+    }
+    fn context_window(&self, model: &str) -> Option<f64> {
+        context_window(self.model_controls(), model)
+    }
+    fn listen(&self, on_event: Rc<dyn Fn(SessionEvent)>) {
+        self.side.listen(on_event);
+    }
+    async fn send(&self, op: Op) -> Result<Reply, RuntimeError> {
+        if let Some(answer) = models_answer(&op, self.model_controls(), &self.side).await {
+            return answer;
+        }
+        Ok(match op {
+            Op::Start(_) => Reply::Start(self.start().await?),
+            // (no attachments or references here)
+            Op::Submit(op::Submit { input, pinned, .. }) => Reply::Submit(self.submit(&input, pinned).await?),
+            Op::Refresh(_) => Reply::Refresh(self.refresh().await?),
+            Op::NewConversation(_) => Reply::NewConversation(self.new_conversation().await?),
+            Op::Cancel(_) => Reply::Cancel(self.cancel().await?),
+            Op::Close(_) => Reply::Close(self.close().await?),
+            Op::Undo(op::Undo { id }) => Reply::Undo(self.undo(id.as_deref()).await?),
+            Op::Memory(_) => Reply::Memory(self.memory().await?),
+            Op::ChangeNote(op::ChangeNote { id, change }) => Reply::ChangeNote(self.change_note(&id, change).await?),
+            Op::Forget(op::Forget { id }) => Reply::Forget(self.forget(&id).await?),
+            Op::Taste(_) => Reply::Taste(self.taste().await?),
+            Op::ForgetTaste(op::ForgetTaste { id }) => Reply::ForgetTaste(self.forget_taste(&id).await?),
+            Op::Conversations(_) => Reply::Conversations(self.conversations().await?),
+            Op::ResumeConversation(op::ResumeConversation { id }) => Reply::ResumeConversation(self.resume_conversation(&id).await?),
+            Op::AllConversations(_) => Reply::AllConversations(self.all_conversations().await?),
+            Op::FindConversation(op::FindConversation { word }) => Reply::FindConversation(self.find_conversation(&word).await?),
+            Op::RenameConversation(op::RenameConversation { id, name }) => {
+                Reply::RenameConversation(self.rename_conversation(id.as_deref(), name.as_deref()).await?)
+            }
+            Op::ForkConversation(op::ForkConversation { name, before: None }) => {
+                Reply::ForkConversation(self.fork_conversation(name.as_deref()).await?)
+            }
+            Op::AnswerSet(op::AnswerSet { choice }) => Reply::AnswerSet(self.answer_set(choice).await?),
+            Op::ConversationNow(_) => Reply::ConversationNow(self.conversation_now().await),
+            Op::ConversationToExport(_) => Reply::ConversationToExport(self.conversation_to_export().await),
+            Op::Reconnect(_) => Reply::Reconnect(self.reconnect().await?),
+            Op::StopDaw(_) => Reply::StopDaw(self.stop_live().await?),
+            Op::Aside(op::Aside { id, question }) => {
+                Reply::Aside(self.side.aside(id, |on_text, signal| self.aside(&question, on_text, Some(signal))).await?)
+            }
+            Op::StopAside(op::StopAside { id }) => Reply::StopAside(self.side.stop_aside(id)),
+            Op::Goal(op::Goal { text }) => Reply::Goal(self.goal(text.as_deref()).await?),
+            Op::StopGoal(_) => Reply::StopGoal(self.stop_goal().await?),
+            Op::Slots(op::Slots { id, words }) => Reply::Slots(self.side.slots(id, &words, &*part(self.slots_context())?).await),
+            Op::StopSlots(op::StopSlots { id }) => Reply::StopSlots(self.side.stop_slots(id)),
+            Op::Music(_) => Reply::Music(kumi_agent::core::protocol::music_view(&part(self.music())?).await),
+            op => return absent::answer(op),
+        })
+    }
+    fn tell(&self, op: Op) {
+        let Some(this) = self.this.borrow().upgrade() else { return };
+        tell_now(
+            async move {
+                let _ = this.send(op).await;
+            }
+            .boxed_local(),
+        );
+    }
+}
 struct Fixture {
     input: Rc<Input>,
     out: Rc<Out>,
@@ -387,10 +521,11 @@ impl Fixture {
         let input = Rc::new(Input { tty, ..Default::default() });
         let out = Rc::new(Out { tty, ..Default::default() });
         let control = Rc::new(Control::default());
+        *control.this.borrow_mut() = Rc::downgrade(&control);
         control.hold.set(hold);
         let models = models.unwrap_or_else(FakeModels::chosen);
         *control.models.borrow_mut() = Some(models.clone());
-        let mut options = TerminalOptions::new(InProcess::new(control.clone()), input.clone(), out.clone(), "inference-only");
+        let mut options = TerminalOptions::new(control.clone(), input.clone(), out.clone(), "inference-only");
         options.startup_notice = notice.map(str::to_string);
         options.updates = updates;
         options.secrets = vec!["private-token".into()];
@@ -1233,10 +1368,7 @@ async fn until_said(f: &Fixture, want: &str) {
 // line whole in a session with nearly everything.
 #[tokio::test(flavor = "current_thread")]
 async fn plain_mode_answers_every_command_the_table_offers_its_session() {
-    use kumi_agent::core::{
-        commands::{Fronts, COMMANDS},
-        protocol::Capabilities,
-    };
+    use kumi_agent::core::commands::{Fronts, COMMANDS};
     use kumi_listening::music::learning::{create_music, MusicOptions};
     tokio::task::LocalSet::new()
         .run_until(async {
@@ -1259,7 +1391,7 @@ async fn plain_mode_answers_every_command_the_table_offers_its_session() {
             *f.control.music.borrow_mut() = Some(create_music(options));
             flush().await;
             // As plain mode reads them: the session's, and every part a front end can have but a voice.
-            let can = Capabilities::of(&*f.control);
+            let can = f.control.capabilities();
             let fronts = Fronts { voice: false, updates: true, switch_daw: true, willington: true };
             let names: Vec<&str> = COMMANDS
                 .iter()
