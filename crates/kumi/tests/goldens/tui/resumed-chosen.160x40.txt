@@ -10,16 +10,16 @@
 
    Widened it to 140%, keeping the sub mono.
 
-   ▾ 2 steps
-   │ ✓ looked at your Set
-   │ ✓ made changes
+   ▾ 2 steps · 2.1s
+   │ ✓ looked at your Set                    0.4s
+   │ ✓ made changes                          0.9s
 
    and a bit darker
 
    Lowered the filter to 800 Hz.
 
-
-                                                                                                                    HISTORY 2 ────────────────────────────────
+   ▾ 1 step · 1.6s
+   │ ✓ made changes                          0.7s                                                                   HISTORY 2 ────────────────────────────────
                                                                                                                     ○ Operator · Filter Freq 1.20 kHz  no undo
                                                                                                                       → 800 Hz
                                                                                                                     ○ Bass width 100% → 140%           no undo

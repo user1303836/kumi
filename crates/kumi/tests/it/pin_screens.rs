@@ -946,15 +946,37 @@ scene!(catch_up_notices, |width, height| {
 });
 
 fn resumed(extra: Value) -> Value {
+    let width = json!({"id":"old001:c4","family":"mixer","title":"Bass width 100% → 140%","state":"expired","note":"From an earlier session, so Kumi can't undo it now.","at":1});
+    let filter = json!({"id":"old001:c5","family":"parameter","title":"Operator · Filter Freq 1.20 kHz → 800 Hz","state":"expired","note":"From an earlier session, so Kumi can't undo it now.","at":2});
+    let event = |event: Value| json!({"kind":"event","at":1,"event":event});
+    // What its log holds of it: each request, and what happened in its answer.
+    let replay = json!({"before":0,"lines":[
+        {"kind":"request","at":1,"text":"make the bass wider"},
+        event(json!({"type":"state","state":"running"})),
+        event(json!({"type":"tool-start","id":"t1","name":"live_discover"})),
+        event(json!({"type":"tool-end","id":"t1","name":"live_discover","isError":false,"elapsedMs":420})),
+        event(json!({"type":"tool-start","id":"t2","name":"make_changes"})),
+        event(json!({"type":"change","change":width})),
+        event(json!({"type":"tool-end","id":"t2","name":"make_changes","isError":false,"elapsedMs":900})),
+        event(json!({"type":"text","text":"Widened it to 140%, keeping the sub mono."})),
+        event(json!({"type":"turn-complete","result":{"stopReason":"completed"},"elapsedMs":2100})),
+        event(json!({"type":"state","state":"idle"})),
+        {"kind":"request","at":2,"text":"and a bit darker"},
+        event(json!({"type":"state","state":"running"})),
+        event(json!({"type":"tool-start","id":"t3","name":"make_changes"})),
+        event(json!({"type":"change","change":filter})),
+        event(json!({"type":"tool-end","id":"t3","name":"make_changes","isError":false,"elapsedMs":700})),
+        event(json!({"type":"text","text":"Lowered the filter to 800 Hz."})),
+        event(json!({"type":"turn-complete","result":{"stopReason":"completed"},"elapsedMs":1600})),
+        event(json!({"type":"state","state":"idle"}))]});
     let mut resumed = json!({"type":"resumed","savedAt":now_ms()-3*HOUR,
         "lines":[
             {"role":"user","text":"make the bass wider"},
             {"role":"assistant","text":"Widened it to 140%, keeping the sub mono.","tools":["live_discover","make_changes"]},
             {"role":"user","text":"and a bit darker"},
             {"role":"assistant","text":"Lowered the filter to 800 Hz."}],
-        "changes":[
-            {"id":"old001:c4","family":"mixer","title":"Bass width 100% → 140%","state":"expired","note":"From an earlier session, so Kumi can't undo it now.","at":1},
-            {"id":"old001:c5","family":"parameter","title":"Operator · Filter Freq 1.20 kHz → 800 Hz","state":"expired","note":"From an earlier session, so Kumi can't undo it now.","at":2}]});
+        "changes":[width, filter],
+        "replay":replay});
     for (key, value) in extra.as_object().unwrap() {
         resumed[key] = value.clone();
     }
@@ -981,7 +1003,8 @@ scene!(resumed_chosen, |width, height| {
 
 scene!(resumed_unreadable, |width, height| {
     let h = open(width, height, Rc::new(Control::default())).await;
-    h.emit(resumed(json!({"unreadable":true})));
+    // Shown only, as its words.
+    h.emit(resumed(json!({"unreadable":true,"replay":null})));
     finish(h).await
 });
 
