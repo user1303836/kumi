@@ -101,6 +101,8 @@ struct LearnerHandle {
     input: mpsc::UnboundedSender<LearnerMessage>,
     done: watch::Receiver<bool>,
     kill: Signal,
+    /// Whether it has said anything yet. Until it does, it's still starting and reads no stop (`close`).
+    heard: Rc<Cell<bool>>,
 }
 struct HeldIndex {
     index: Rc<SoundIndex>,
@@ -392,11 +394,13 @@ impl Library {
         let (done_tx, done) = watch::channel(false);
         let kill = Signal::new();
         let killed = kill.clone();
+        let heard = Rc::new(Cell::new(false));
+        let hearing = heard.clone();
         let id = self.next.get();
         self.next.set(id + 1);
         let _ =
             tx.send(LearnerMessage::Learn { options: LearnerOptions { plan: self.planning(), paused: self.paused.get(), rebuild: false } });
-        *self.learner.borrow_mut() = Some(LearnerHandle { id, input: tx, done, kill });
+        *self.learner.borrow_mut() = Some(LearnerHandle { id, input: tx, done, kill, heard });
         let weak = self.weak.clone();
         tokio::task::spawn_local(async move {
             let writer = tokio::task::spawn_local(async move {
@@ -411,7 +415,7 @@ impl Library {
             let mut terminated = false;
             loop {
                 tokio::select! {
-                    result=lines.next_line(),if reading=>match result{Ok(Some(line))=>{if let Ok(message)=serde_json::from_str::<LearnerReply>(&line){if let Some(library)=weak.upgrade(){match message{LearnerReply::Progress{progress}=>{*library.progress.borrow_mut()=Some(progress);library.notify();},LearnerReply::Done{progress}=>*library.progress.borrow_mut()=Some(progress),_=>{}}}}},_=>reading=false},
+                    result=lines.next_line(),if reading=>match result{Ok(Some(line))=>{hearing.set(true);if let Ok(message)=serde_json::from_str::<LearnerReply>(&line){if let Some(library)=weak.upgrade(){match message{LearnerReply::Progress{progress}=>{*library.progress.borrow_mut()=Some(progress);library.notify();},LearnerReply::Done{progress}=>*library.progress.borrow_mut()=Some(progress),_=>{}}}}},_=>reading=false},
                     _=child.wait()=>break,
                     _=killed.cancelled(),if !terminated=>{terminated=true;#[cfg(unix)]if let Some(pid)=child.id(){unsafe{libc::kill(pid as i32,libc::SIGTERM);}}#[cfg(not(unix))]{let _=child.start_kill();}},
                 }
@@ -665,9 +669,17 @@ impl Library {
         if let Some(controller) = self.in_process.borrow().as_ref() {
             controller.cancel();
         }
-        let child = self.learner.borrow().as_ref().map(|c| (c.input.clone(), c.done.clone(), c.kill.clone()));
-        if let Some((input, mut done, kill)) = child {
-            let _ = input.send(LearnerMessage::Stop);
+        let child = self.learner.borrow().as_ref().map(|c| (c.input.clone(), c.done.clone(), c.kill.clone(), c.heard.get()));
+        if let Some((input, mut done, kill, heard)) = child {
+            // A learner that hasn't said a word is still starting: the program itself, its lock, the plan of its sources
+            // and the library's logs come before it reads a stop. Nothing of the library's is its own yet (a lock left
+            // behind is taken back by the next), so it's ended at once rather than waited for. One that has spoken
+            // stops, putting its state and its lock away.
+            if heard {
+                let _ = input.send(LearnerMessage::Stop);
+            } else {
+                kill.cancel();
+            }
             let wait = async {
                 while !*done.borrow() {
                     if done.changed().await.is_err() {

@@ -134,9 +134,10 @@ impl MusicOptions {
     }
 }
 
-/// The scan under way: a child process told over its stdin, or one in this process.
+/// The scan under way: a child process told over its stdin (`heard`: whether it has said anything yet), or one in this
+/// process.
 enum Running {
-    Child { id: u64, input: mpsc::UnboundedSender<ScanMessage>, done: watch::Receiver<bool>, kill: Signal },
+    Child { id: u64, input: mpsc::UnboundedSender<ScanMessage>, done: watch::Receiver<bool>, kill: Signal, heard: Rc<Cell<bool>> },
     Here { id: u64, control: Control },
 }
 
@@ -585,8 +586,10 @@ impl Music {
         let (done_sender, done) = watch::channel(false);
         let kill = Signal::new();
         let killed = kill.clone();
+        let heard = Rc::new(Cell::new(false));
+        let hearing = heard.clone();
         let _ = sender.send(ScanMessage::Learn { options: scan });
-        *self.running.borrow_mut() = Some(Running::Child { id, input: sender, done, kill });
+        *self.running.borrow_mut() = Some(Running::Child { id, input: sender, done, kill, heard });
         tokio::task::spawn_local(async move {
             let writer = tokio::task::spawn_local(async move {
                 while let Some(message) = messages.recv().await {
@@ -601,6 +604,7 @@ impl Music {
                 tokio::select! {
                     line = lines.next_line(), if reading => match line {
                         Ok(Some(line)) => {
+                            hearing.set(true);
                             if let (Ok(reply), Some(music)) = (serde_json::from_str::<ScanReply>(&line), weak.upgrade()) {
                                 music.heard(reply);
                             }
@@ -672,15 +676,21 @@ impl Music {
         cancel(&self.timer);
         self.listeners.borrow_mut().clear();
         let child = match self.running.borrow().as_ref() {
-            Some(Running::Child { input, done, kill, .. }) => Some((input.clone(), done.clone(), kill.clone())),
+            Some(Running::Child { input, done, kill, heard, .. }) => Some((input.clone(), done.clone(), kill.clone(), heard.get())),
             Some(Running::Here { control, .. }) => {
                 control.stop();
                 None
             }
             None => None,
         };
-        if let Some((input, mut done, kill)) = child {
-            let _ = input.send(ScanMessage::Stop);
+        if let Some((input, mut done, kill, heard)) = child {
+            // A scan that hasn't said a word is still starting (the program, its models and programs, its lock), and reads
+            // no stop till then: nothing of the music's is its own yet, so it's ended at once rather than waited for.
+            if heard {
+                let _ = input.send(ScanMessage::Stop);
+            } else {
+                kill.cancel();
+            }
             let wait = async {
                 while !*done.borrow() {
                     if done.changed().await.is_err() {

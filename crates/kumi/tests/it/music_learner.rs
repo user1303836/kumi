@@ -85,3 +85,30 @@ async fn while_another_kumi_learns_the_music_the_learner_leaves_it() {
     assert!(matches!(replies[..], [ScanReply::Busy]), "{replies:?}");
     assert!(!database(&home.join("music")).exists(), "nothing walked");
 }
+
+/// Quitting just as the music starts being learned: a scan still starting (here one that never gets further) reads no
+/// stop, so closing ends it at once rather than waiting out the time it's given to stop.
+#[cfg(unix)]
+#[tokio::test(flavor = "current_thread")]
+async fn closing_as_the_music_starts_being_learned_ends_its_scan_at_once() {
+    use kumi_listening::music::learning::{create_music, MusicOptions};
+    use std::os::unix::fs::PermissionsExt;
+    let home = tempfile::tempdir().unwrap();
+    let starting = home.path().join("starting-learner");
+    std::fs::write(&starting, "#!/bin/sh\nexec sleep 30\n").unwrap();
+    std::fs::set_permissions(&starting, std::fs::Permissions::from_mode(0o700)).unwrap();
+    // Read by this test's process alone: each test is a process of its own.
+    std::env::set_var("KUMI_LIBRARY_LEARNER_BIN", &starting);
+    let songs = home.path().join("Songs");
+    song(&songs.join("one.wav"), 1.);
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let folders = Some(vec![songs.to_string_lossy().into_owned()]);
+            let music = create_music(MusicOptions::new(home.path().join("music"), folders, kumi::daw::registry::libraries()));
+            music.learn_now();
+            let closing = std::time::Instant::now();
+            music.close().await;
+            assert!(closing.elapsed() < Duration::from_millis(500), "{:?}", closing.elapsed());
+        })
+        .await;
+}
