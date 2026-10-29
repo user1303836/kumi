@@ -405,7 +405,7 @@ mod tests {
         let first = 3 + text_width("Use the ");
         assert!((first..first + 3).all(|x| lit(x, low)) && !lit(first - 1, low), "low, lit");
         assert!((3..6).all(|x| lit(x, low + 1)) && !lit(6, low + 1), "end, lit");
-        assert!(screen.lines()[39].contains("search: LOW END · 1 of 1"));
+        assert!(screen.lines()[39].trim_start().starts_with("search: LOW"), "the search line, cut to the narrow area");
     }
 
     #[test]
