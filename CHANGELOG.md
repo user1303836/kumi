@@ -3,6 +3,15 @@
 Kumi's releases. The Ableton bridge (`crates/ableton-mcp-server`) is versioned on its own;
 each Kumi release names the bridge it ships with.
 
+## 1.24.29 — 2026-10-29
+
+Ships with bridge 1.0.101, as 1.24.28 did.
+
+- Quitting Kumi just as it starts learning your library no longer waits a second and a half.
+
+Tested with Live 12.4 on macOS. On Windows, installing and updating are tested; using Kumi with Live
+there is still new.
+
 ## 1.24.28 — 2026-10-29
 
 Ships with bridge 1.0.101, as 1.24.27 did.
