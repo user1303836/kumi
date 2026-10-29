@@ -22,7 +22,7 @@
 
 use crate::{
     core::{
-        contracts::{KernelCheckpoint, KernelEvent, PinnedNode, SessionEvent},
+        contracts::{KernelCheckpoint, KernelEvent, PinnedNode, SavedConversation, SessionEvent},
         conversations::{is_conversation_id, write_privately},
     },
     kernel::budget::OBSERVATION_MARKER,
@@ -226,6 +226,9 @@ struct Begin {
     /// Its messages by then: its checkpoint as kept when it was taken up, or as it was at a request.
     had: Option<Rc<KernelCheckpoint>>,
     from: Option<String>,
+    /// When the checkpoint of a conversation taken up was kept: a log whose last save is older, with no answer ended
+    /// since, is behind it.
+    kept_at: Option<i64>,
 }
 
 /// What a copy takes of the original's log: its lines up to the end of its last save as the copy began, which is what
@@ -345,11 +348,11 @@ impl SessionLog {
         }
     }
 
-    /// The conversation `id` in `place` goes on from here. Without a log yet, its log begins once it's kept: with the
-    /// `before` requests and the messages `had` it had by then, or (`from`) as a copy of that conversation's log as it is
-    /// now. One kept with a log that's behind (an earlier Kumi carried the conversation on without it) begins again
-    /// from what's kept.
-    pub fn open(&self, place: &str, id: &str, before: u32, had: Option<Rc<KernelCheckpoint>>, from: Option<String>) {
+    /// The conversation `id` in `place` goes on from here, `kept` as it was kept when it's taken up. Without a log yet, its
+    /// log begins once it's kept: with the requests and messages it had by then, or (`from`) as a copy of that
+    /// conversation's log as it is now. One whose log is behind it (an earlier Kumi carried it on without the log) begins
+    /// its log again from what's kept.
+    pub fn open(&self, place: &str, id: &str, kept: Option<&SavedConversation>, from: Option<String>) {
         if self.closed.get() {
             return;
         }
@@ -362,7 +365,13 @@ impl SessionLog {
         self.said();
         *self.going.borrow_mut() = going.clone();
         if let Some((folder, id)) = going {
-            self.send(Job::Open { folder, id, begin: Begin { before, had, from } });
+            let begin = Begin {
+                before: kept.and_then(|kept| kept.turns).unwrap_or(0),
+                had: kept.map(|kept| Rc::new(kept.checkpoint.clone())),
+                from,
+                kept_at: kept.map(|kept| kept.saved_at),
+            };
+            self.send(Job::Open { folder, id, begin });
         }
     }
 
@@ -388,7 +397,7 @@ impl SessionLog {
         }
         self.said();
         let line = line_of(&LogLine::Request(LogRequest { at: now(), text: (self.redact)(text), files, pinned }));
-        self.send(Job::Request { line, begin: Begin { before, had, from: None } });
+        self.send(Job::Request { line, begin: Begin { before, had, from: None, kept_at: None } });
     }
 
     /// What an answer settled into the conversation, message by message.
@@ -622,11 +631,13 @@ impl Log {
         let Written::Waiting(waiting) = std::mem::replace(&mut self.state, Written::Theirs) else { return };
         let file = self.file();
         match found(&file).await {
-            Ok(Found::Ours { size, torn, before }) => {
-                // Kept since with more than it holds (an earlier Kumi, after a rollback): begun again from what's kept,
-                // so it never skips what happened then.
-                let behind =
-                    self.begin.had.is_some() && known_turns(&file, size, before).await.is_some_and(|known| self.begin.before > known);
+            Ok(Found::Ours { size, torn, at }) => {
+                // Kept since without it (an earlier Kumi, after a rollback): begun again from what's kept, so it never
+                // skips what happened then.
+                let behind = match self.begin.kept_at {
+                    Some(kept) => last_save(&file, size, at).await.is_some_and(|(saved, ended)| kept > saved && !ended),
+                    None => false,
+                };
                 if behind {
                     self.make(kit, waiting).await;
                     return;
@@ -810,10 +821,10 @@ impl Log {
     }
 }
 
-/// What a log on disk is to this Kumi: its own form (its size, whether it ends on a line cut short, and how many requests
-/// its conversation had when it began), a later Kumi's, or none it can read.
+/// What a log on disk is to this Kumi: its own form (its size, whether it ends on a line cut short, and when it began),
+/// a later Kumi's, or none it can read.
 enum Found {
-    Ours { size: u64, torn: bool, before: u32 },
+    Ours { size: u64, torn: bool, at: i64 },
     Theirs,
     Unreadable,
 }
@@ -849,50 +860,50 @@ async fn found(file: &Path) -> std::io::Result<Found> {
     handle.seek(std::io::SeekFrom::End(-1)).await?;
     let mut last = [0u8];
     handle.read_exact(&mut last).await?;
-    Ok(Found::Ours { size, torn: last[0] != b'\n', before: header.before })
+    Ok(Found::Ours { size, torn: last[0] != b'\n', at: header.at })
 }
 
 const SAVED: &[u8] = br#"{"kind":"saved","#;
 const COMPLETED: &[u8] = br#""event":{"type":"turn-complete""#;
 
-/// How many of its conversation's requests a log holds to the end: its last save's count, and an answer's end after it
-/// for each turn it saw end since (those of a turn the checkpoint never kept too, which only make it look less
-/// behind); without a save, its count from when it began, and the ends since. Read from its last MB, or all of it.
-async fn known_turns(file: &Path, size: u64, before: u32) -> Option<u32> {
+/// When a log's last save was kept (when the log began, without one), and whether an answer ended after it: one that
+/// did is a turn whose save the log missed (Kumi stopped right after it), not one kept without the log. Read from its
+/// last MB, or all of it when that holds no save. (Saves are told apart by when, not by their counts: a checkpoint
+/// counts each of the producer's lines, a steer's too, where the log counts requests.)
+async fn last_save(file: &Path, size: u64, began: i64) -> Option<(i64, bool)> {
     const TAIL: u64 = 1024 * 1024;
     let mut handle = tokio::fs::File::open(file).await.ok()?;
     let from = size.saturating_sub(TAIL);
     handle.seek(std::io::SeekFrom::Start(from)).await.ok()?;
     let mut bytes = vec![];
     handle.read_to_end(&mut bytes).await.ok()?;
-    let mut counted = turns_in(&bytes, from > 0);
-    if counted.0.is_none() && from > 0 {
-        let whole = tokio::fs::read(file).await.ok()?;
-        counted = turns_in(&whole, false);
+    let mut found = saves_in(&bytes, from > 0);
+    if found.0.is_none() && from > 0 {
+        found = saves_in(&tokio::fs::read(file).await.ok()?, false);
     }
-    let (saved, completed) = counted;
-    Some(saved.unwrap_or(before) + completed)
+    let (saved, ended) = found;
+    Some((saved.unwrap_or(began), ended))
 }
 
-/// The last save's count of requests in these lines, and the answers' ends after it (or in all of them, without one).
-/// A first line cut where they begin (`cut`) isn't read.
-fn turns_in(bytes: &[u8], cut: bool) -> (Option<u32>, u32) {
+/// When the last save in these lines was kept, and whether an answer ended after it (or in all of them, without one). A
+/// first line cut where they begin (`cut`) isn't read.
+fn saves_in(bytes: &[u8], cut: bool) -> (Option<i64>, bool) {
     let mut lines = bytes.split(|b| *b == b'\n');
     if cut {
         lines.next();
     }
-    let (mut saved, mut completed) = (None, 0);
+    let (mut saved, mut ended) = (None, false);
     for line in lines {
         if line.starts_with(SAVED) {
-            if let Ok(LogLine::Saved { turns, .. }) = serde_json::from_slice(line) {
-                saved = Some(turns);
-                completed = 0;
+            if let Ok(LogLine::Saved { saved_at, .. }) = serde_json::from_slice(line) {
+                saved = Some(saved_at);
+                ended = false;
             }
         } else if line.windows(COMPLETED.len()).any(|window| window == COMPLETED) {
-            completed += 1;
+            ended = true;
         }
     }
-    (saved, completed)
+    (saved, ended)
 }
 
 async fn append(file: &Path, bytes: &[u8]) -> std::io::Result<()> {

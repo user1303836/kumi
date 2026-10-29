@@ -124,6 +124,8 @@ impl Kernel for TestKernel {
     }
     fn steer(&self, text: &str) -> bool {
         self.record.steered.borrow_mut().push(text.into());
+        // Into the conversation as one of the producer's lines, as the agent's kernel puts it.
+        self.history.borrow_mut().push(json!({"role":"user","content":text}));
         true
     }
     fn has_aside(&self) -> bool {
@@ -1107,6 +1109,47 @@ local_test!(a_conversations_log_follows_its_requests_answers_and_saves_and_moves
         .collect();
     assert!(order.windows(2).all(|pair| pair[0] < pair[1]) && order.len() == 4, "{order:?}");
     assert!(matches!(read.lines[order[0]], LogLine::Request(_)) && matches!(read.lines[order[2]], LogLine::Request(_)));
+});
+local_test!(a_steered_conversation_keeps_its_log_when_its_taken_up_again, {
+    use kumi_agent::core::session_log::SessionLog;
+    const SET: &str = "dddddddddddddddddddddddddddddddd";
+    let dir = tempfile::tempdir().unwrap();
+    let store = create_conversation_store(dir.path());
+    let logged = |o: &mut SessionOptions| {
+        let log = SessionLog::new(dir.path(), kumi_types::place::Places::LIVE, Rc::new(|text: &str| text.to_owned()));
+        o.conversations = Some(store.clone());
+        o.on_event = SessionLog::tee(&log, o.on_event.clone());
+        o.log = Some(log);
+    };
+    // The producer steers the answer to their one request.
+    let held = Rc::new(RefCell::new(None::<Session>));
+    let active = held.clone();
+    let run: Run = Rc::new(move |_, _, emit| {
+        let session = active.borrow().clone().unwrap();
+        async move {
+            assert!(session.steer("and keep the sub mono"));
+            emit(KernelEvent::Text { text: "Widened it, the sub mono.".into() })?;
+            Ok(complete())
+        }
+        .boxed_local()
+    });
+    let one = harness(Some(run), logged);
+    *held.borrow_mut() = Some(one.session.clone());
+    project(&one, SET);
+    one.session.start().await.unwrap();
+    one.session.submit("make the bass wider", None).await.unwrap();
+    one.session.close().await.unwrap();
+    // Kept as two turns, one for each of the producer's lines, where its log saw one request.
+    let kept = saved(store.as_ref(), SET, 2).await;
+    let before = store.log(SET, &kept.id).await.expect("its log");
+    // Taken up again as it was kept: its log goes on, all it held still in it.
+    let two = harness(None, logged);
+    project(&two, SET);
+    two.session.start().await.unwrap();
+    two.session.close().await.unwrap();
+    let after = store.log(SET, &kept.id).await.expect("its log");
+    assert_eq!(after.header, before.header);
+    assert_eq!(after.lines[..before.lines.len()], before.lines[..]);
 });
 local_test!(unreadable_kept_history_is_shown_and_retained, {
     let dir = tempfile::tempdir().unwrap();

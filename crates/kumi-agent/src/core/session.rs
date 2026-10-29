@@ -1182,8 +1182,7 @@ impl Session {
         }
         // Its log is written from here: a kept one's goes on, and one it has no log for begins with what it had.
         if let Some(log) = &self.0.options.log {
-            let turns = conversation.and_then(|c| c.turns).unwrap_or(0);
-            log.open(&place, &id, turns, conversation.map(|c| Rc::new(c.checkpoint.clone())), from.map(str::to_owned));
+            log.open(&place, &id, conversation, from.map(str::to_owned));
         }
         let mut s = self.0.state.borrow_mut();
         if s.conversation_id != id {
@@ -2797,9 +2796,10 @@ impl SessionController for Session {
             s.copied_from = None;
             s.touched = true;
         }
-        // The copy's log begins as the original's is now.
+        // The copy's log begins as the original's is now, and is as up to date as the copy's checkpoint.
         if let Some(log) = &self.0.options.log {
-            log.open(&place, &id, conversation.turns.unwrap_or(0), Some(Rc::new(conversation.checkpoint.clone())), Some(source.clone()));
+            log.open(&place, &id, Some(&conversation), Some(source.clone()));
+            log.saved(&id, conversation.saved_at, conversation.turns.unwrap_or(0), Some(source.clone()));
         }
         self.wanted_goes_on_as(&place, &old, &id);
         self.notice(format!("Forked; the original stays as {source}."));
