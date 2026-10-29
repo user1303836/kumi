@@ -592,6 +592,52 @@ async fn busy_rejection_cancel_preserves_input_and_close_is_once() {
         })
         .await;
 }
+/// A line that starts with a path, as a file dragged into the terminal gives, is a message, by the full-screen app's
+/// rule (#624): whether Kumi is idle, answering, getting ready or asking about another Set's conversation.
+#[tokio::test]
+async fn a_line_that_starts_with_a_path_is_a_message_not_a_command() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let f = Fixture::new(false, true, None, None, None);
+            flush().await;
+            let submits = || f.control.calls.borrow().iter().filter(|c| c.starts_with("submit:")).cloned().collect::<Vec<_>>();
+            f.input.write("/Users/me/Music/kick.wav make it punchier\n");
+            flush().await;
+            assert_eq!(submits(), ["submit:/Users/me/Music/kick.wav make it punchier"]);
+            // While Kumi answers, it's turned away as any message is.
+            f.input.write("/Users/me/Music/hat.wav\n");
+            flush().await;
+            assert!(f.text().contains("[busy] Busy; cancel first. No second turn was submitted."), "{}", f.text());
+            f.control.hold.set(false);
+            f.control.release();
+            flush().await;
+            // While Kumi gets ready, it waits and goes once Kumi is idle.
+            f.control.state.set(TurnState::Running);
+            f.input.write("/Users/me/Music/snare.wav and this one\n");
+            flush().await;
+            assert!(f.text().contains("[waiting] Kumi is getting ready"), "{}", f.text());
+            f.control.state.set(TurnState::Idle);
+            f.emit(json!({"type":"state","state":"idle"}));
+            flush().await;
+            assert_eq!(submits(), ["submit:/Users/me/Music/kick.wav make it punchier", "submit:/Users/me/Music/snare.wav and this one"]);
+            // Kumi's question about another Set's conversation is asked again, as for any other words.
+            f.emit(json!({"type":"set-asked","ask":{"id":"there2","title":"","daw":"Live","noun":"Set"}}));
+            let question = "This conversation is about its Set, and Live has a Set not saved yet open.";
+            f.input.write("/Users/me/Music/kick.wav\n");
+            flush().await;
+            assert_eq!(f.text().matches(question).count(), 2, "{}", f.text());
+            assert!(f.control.answers.borrow().is_empty());
+            f.input.write("3\n");
+            flush().await;
+            // A slash and a word is still a command: this one, which Kumi doesn't have, is the only unknown one here.
+            f.input.write("/kick make it punchier\n");
+            flush().await;
+            assert_eq!(f.text().matches("Unknown command. Use /help.").count(), 1, "{}", f.text());
+            assert_eq!(submits().len(), 2);
+            f.quit().await;
+        })
+        .await;
+}
 #[tokio::test]
 async fn eof_and_shutdown_deadline_suppress_late_output_restore_raw_mode() {
     tokio::task::LocalSet::new()
