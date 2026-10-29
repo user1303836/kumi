@@ -1,7 +1,7 @@
   Kumi  ·  Night Drive                                                                                                                                  ● Live
 
                                                                                                                     FOCUS
-   Keys and commands                                                                      ↑ 42 more                 Night Drive
+   Keys and commands                                                                      ↑ 44 more                 Night Drive
                                                                                                                     Your selection will show here
                          dictated at a time; ctrl+_ where ctrl+- zooms the terminal
 

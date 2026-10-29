@@ -1,7 +1,7 @@
   Kumi  ·  Night Drive                                                                                                                                  ● Live
 
                                                                                                                     FOCUS
-   Keys and commands                                                                      ↓ 42 more                 Night Drive
+   Keys and commands                                                                      ↓ 44 more                 Night Drive
                                                                                                                     Your selection will show here
    Send and steer
      enter               Send. While Kumi works, it reads your message after the step under way
@@ -23,6 +23,8 @@
      ctrl+l              Draw the screen again                                                                      Nothing changed yet
 
    The pane
+     ctrl+\              Below 100 columns, open or close the drawer; at full width, put the side
+                         pane away or bring it back; below 24 rows, the same for the two-line strip
      shift+tab           Into the tabs (HISTORY), then on to the next: ↑↓ and page up/down move,
                          esc or tab comes back
      enter               In the tabs: open a change's picture; on what Kumi kept, forget it
@@ -30,8 +32,6 @@
      u                   On a change with its picture open: undo it
      tab                 Into the tree in FOCUS, at Live's selection: ↑↓ move, enter pins a row so
                          what you ask is about it, esc or tab comes back
-     esc                 Unpin what's pinned (× beside it does too)
-     click               undo or forget at a row's end; a change's words open its picture, a row in
 
 
 
