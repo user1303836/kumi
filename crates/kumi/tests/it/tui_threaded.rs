@@ -479,12 +479,13 @@ async fn a_jobs_details_show_as_they_come_without_a_key() {
         .await;
 }
 
-/// A session whose start takes a moment (its thread free meanwhile), which turns away a request while it starts, as the
-/// session does, and answers one once it has. `submits` counts the answers.
+/// A session whose start takes a moment (its thread free meanwhile), which turns away a request before it has started
+/// and while it starts, as the session does, and answers one once it has. `submits` counts the answers.
 struct Starting {
     emit: Rc<dyn Fn(SessionEvent)>,
     status: RefCell<SessionStatus>,
     starting: Cell<bool>,
+    started: Cell<bool>,
     submits: Arc<AtomicUsize>,
 }
 
@@ -493,6 +494,7 @@ impl SessionController for Starting {
     async fn start(&self) -> Result<(), RuntimeError> {
         self.starting.set(true);
         tokio::time::sleep(Duration::from_millis(300)).await;
+        self.started.set(true);
         (self.emit)(SessionEvent::State { state: TurnState::Running });
         (self.emit)(SessionEvent::State { state: TurnState::Idle });
         self.starting.set(false);
@@ -501,6 +503,9 @@ impl SessionController for Starting {
     async fn submit(&self, _: &str, _: Option<PinnedNode>) -> Result<(), RuntimeError> {
         if self.starting.get() {
             return Err(RuntimeError::plain("Session is busy; cancel first"));
+        }
+        if !self.started.get() {
+            return Err(RuntimeError::plain("Session is not started"));
         }
         self.submits.fetch_add(1, Ordering::SeqCst);
         self.status.borrow_mut().state = TurnState::Running;
@@ -546,6 +551,7 @@ async fn a_message_sent_while_the_session_starts_waits_for_it() {
                             emit,
                             status: RefCell::new(idle()),
                             starting: Cell::new(false),
+                            started: Cell::new(false),
                             submits: answered,
                         })))
                     }
@@ -562,7 +568,7 @@ async fn a_message_sent_while_the_session_starts_waits_for_it() {
                 }
                 until("the answer", || has(&h.screen(), "Lowered the bass by 3 dB.")).await;
                 assert_eq!(submits.load(Ordering::SeqCst), 1, "typed ahead: {ahead}");
-                assert!(!has(&h.screen(), "Session is busy"), "typed ahead: {ahead}\n{}", h.screen().join("\n"));
+                assert!(!has(&h.screen(), "Session is"), "typed ahead: {ahead}\n{}", h.screen().join("\n"));
                 h.close().await;
             }
         })
