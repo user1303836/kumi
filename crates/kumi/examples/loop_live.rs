@@ -14,7 +14,7 @@ use kumi_agent::{
     create_agent_kernel, create_memory_store, create_recipe_store, create_session,
     kernel::agent::AgentKernelOptions,
     mcp::client,
-    IntegrationFactory, Kernel, KernelFactory, KernelOptions, Session, SessionController, SessionEvent, SessionOptions,
+    IntegrationFactory, Kernel, KernelFactory, KernelOptions, Session, SessionEvent, SessionOptions,
 };
 use kumi_ai::{
     auth::store::{open_credential_store, CredentialStore},

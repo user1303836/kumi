@@ -1,15 +1,22 @@
 //! The screen on a session on a thread of its own: a key still draws at once while the session's thread is busy, and
 //! what's asked of the session once until it answers (words for the answer under way, ctrl-b's move) is asked once.
+#[path = "../support/absent.rs"]
+mod absent;
 #[path = "../support/tui_app.rs"]
 mod support;
 use async_trait::async_trait;
 use futures::FutureExt;
 use kumi_agent::core::{
     contracts::*,
-    protocol::SessionHandle,
+    jobs::{JobDetail, JobStatus},
+    protocol::{cloud_provider, op, provider_name, Capabilities, ModelsView, Op, Reply, SessionHandle},
     threaded::{Build, Built, Threaded},
 };
-use kumi_types::{contracts::ChangeRecord, errors::RuntimeError};
+use kumi_ai::providers::ProviderId;
+use kumi_types::{
+    contracts::{ChangeRecord, LibraryStatus},
+    errors::RuntimeError,
+};
 use std::{
     cell::{Cell, RefCell},
     rc::Rc,
@@ -20,6 +27,61 @@ use std::{
     time::{Duration, Instant},
 };
 use support::*;
+
+/// The handle's reads every session here gives alike: none of what they're about, and nothing told to them (the core's
+/// thread sends every request it's given). Each session answers its own requests in its `send`.
+macro_rules! alike {
+    () => {
+        fn can_show(&self, _: BodyKind) -> bool {
+            false
+        }
+        fn answering_fallback(&self) -> Option<String> {
+            None
+        }
+        fn library(&self) -> Option<LibraryStatus> {
+            None
+        }
+        fn open_set(&self) -> Option<String> {
+            None
+        }
+        fn can_background(&self) -> bool {
+            false
+        }
+        fn models(&self) -> Option<ModelsView> {
+            None
+        }
+        fn provider_name(&self, id: &str) -> String {
+            provider_name(None, id)
+        }
+        fn cloud_provider(&self, id: &str) -> Option<ProviderId> {
+            cloud_provider(None, id)
+        }
+        fn context_window(&self, _: &str) -> Option<f64> {
+            None
+        }
+        fn listen(&self, _: Rc<dyn Fn(SessionEvent)>) {}
+        fn tell(&self, op: Op) {
+            let _ = self.send(op).now_or_never();
+        }
+    };
+}
+
+/// A session's own requests, as each of these sessions answers them; anything else as a session with nothing for it.
+macro_rules! answered {
+    ($session:expr, $op:expr, { $($arm:tt)* }) => {
+        Ok(match $op {
+            Op::Start(_) => Reply::Start($session.start().await?),
+            Op::Submit(op::Submit { input, pinned, .. }) => Reply::Submit($session.submit(&input, pinned).await?),
+            Op::Refresh(_) => Reply::Refresh($session.refresh().await?),
+            Op::NewConversation(_) => Reply::NewConversation($session.new_conversation().await?),
+            Op::Cancel(_) => Reply::Cancel($session.cancel().await?),
+            Op::Close(_) => Reply::Close($session.close().await?),
+            Op::Undo(op::Undo { id }) => Reply::Undo($session.undo(id.as_deref()).await?),
+            $($arm)*
+            op => return absent::answer(op),
+        })
+    };
+}
 
 /// How long the session's answer keeps its thread busy, yielding nothing.
 const WORK: Duration = Duration::from_millis(200);
@@ -32,8 +94,8 @@ struct Busy {
     busy: Arc<AtomicBool>,
 }
 
-#[async_trait(?Send)]
-impl SessionController for Busy {
+/// What the session does, asked through its handle below.
+impl Busy {
     async fn start(&self) -> Result<(), RuntimeError> {
         Ok(())
     }
@@ -61,6 +123,26 @@ impl SessionController for Busy {
     async fn undo(&self, _: Option<&str>) -> Result<Option<ChangeRecord>, RuntimeError> {
         Ok(None)
     }
+}
+
+#[async_trait(?Send)]
+impl SessionHandle for Busy {
+    fn capabilities(&self) -> Capabilities {
+        Capabilities { ..Capabilities::default() }
+    }
+    fn status(&self) -> SessionStatus {
+        Busy::status(self)
+    }
+    fn jobs(&self) -> Vec<JobStatus> {
+        vec![]
+    }
+    fn job(&self, _: u32) -> Option<JobDetail> {
+        None
+    }
+    async fn send(&self, op: Op) -> Result<Reply, RuntimeError> {
+        answered!(self, op, {})
+    }
+    alike!();
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -119,8 +201,8 @@ struct Steers {
     closed: Cell<bool>,
 }
 
-#[async_trait(?Send)]
-impl SessionController for Steers {
+/// What the session does, asked through its handle below.
+impl Steers {
     async fn start(&self) -> Result<(), RuntimeError> {
         Ok(())
     }
@@ -159,20 +241,34 @@ impl SessionController for Steers {
     async fn undo(&self, _: Option<&str>) -> Result<Option<ChangeRecord>, RuntimeError> {
         Ok(None)
     }
-    fn has_steer(&self) -> bool {
-        true
-    }
     fn steer(&self, _: &str) -> bool {
         self.steers.fetch_add(1, Ordering::SeqCst);
         self.said.get()
-    }
-    fn has_jobs(&self) -> bool {
-        true
     }
     fn background(&self) -> Result<u32, String> {
         self.moves.fetch_add(1, Ordering::SeqCst);
         Ok(7)
     }
+}
+
+#[async_trait(?Send)]
+impl SessionHandle for Steers {
+    fn capabilities(&self) -> Capabilities {
+        Capabilities { steer: true, jobs: true, ..Capabilities::default() }
+    }
+    fn status(&self) -> SessionStatus {
+        Steers::status(self)
+    }
+    fn jobs(&self) -> Vec<JobStatus> {
+        vec![]
+    }
+    fn job(&self, _: u32) -> Option<JobDetail> {
+        None
+    }
+    async fn send(&self, op: Op) -> Result<Reply, RuntimeError> {
+        answered!(self, op, { Op::Steer(op::Steer { text }) => Reply::Steer(self.steer(&text)), Op::Background(_) => Reply::Background(self.background()), })
+    }
+    alike!();
 }
 
 /// The screen on a [`Steers`] on a thread of its own, and its counts: what it was asked to take, and to move.
@@ -261,17 +357,14 @@ impl Late {
     }
 }
 
-#[async_trait(?Send)]
-impl SessionController for Late {
+/// What the session does, asked through its handle below.
+impl Late {
     async fn start(&self) -> Result<(), RuntimeError> {
         Ok(())
     }
     async fn submit(&self, _: &str, _: Option<PinnedNode>) -> Result<(), RuntimeError> {
         self.answer();
         Ok(())
-    }
-    fn has_goal(&self) -> bool {
-        true
     }
     async fn goal(&self, _: Option<&str>) -> Result<(), RuntimeError> {
         self.answer();
@@ -295,6 +388,26 @@ impl SessionController for Late {
     async fn undo(&self, _: Option<&str>) -> Result<Option<ChangeRecord>, RuntimeError> {
         Ok(None)
     }
+}
+
+#[async_trait(?Send)]
+impl SessionHandle for Late {
+    fn capabilities(&self) -> Capabilities {
+        Capabilities { goal: true, ..Capabilities::default() }
+    }
+    fn status(&self) -> SessionStatus {
+        Late::status(self)
+    }
+    fn jobs(&self) -> Vec<JobStatus> {
+        vec![]
+    }
+    fn job(&self, _: u32) -> Option<JobDetail> {
+        None
+    }
+    async fn send(&self, op: Op) -> Result<Reply, RuntimeError> {
+        answered!(self, op, { Op::Goal(op::Goal { text }) => Reply::Goal(self.goal(text.as_deref()).await?), })
+    }
+    alike!();
 }
 
 /// An answer, or a goal's, shows whole when an earlier operation's end reaches the screen after it was asked for.
@@ -328,8 +441,8 @@ struct Slow {
     closed: Cell<bool>,
 }
 
-#[async_trait(?Send)]
-impl SessionController for Slow {
+/// What the session does, asked through its handle below.
+impl Slow {
     async fn start(&self) -> Result<(), RuntimeError> {
         Ok(())
     }
@@ -366,13 +479,30 @@ impl SessionController for Slow {
     async fn undo(&self, _: Option<&str>) -> Result<Option<ChangeRecord>, RuntimeError> {
         Ok(None)
     }
-    fn has_steer(&self) -> bool {
-        true
-    }
     fn steer(&self, _: &str) -> bool {
         self.steers.fetch_add(1, Ordering::SeqCst);
         true
     }
+}
+
+#[async_trait(?Send)]
+impl SessionHandle for Slow {
+    fn capabilities(&self) -> Capabilities {
+        Capabilities { steer: true, ..Capabilities::default() }
+    }
+    fn status(&self) -> SessionStatus {
+        Slow::status(self)
+    }
+    fn jobs(&self) -> Vec<JobStatus> {
+        vec![]
+    }
+    fn job(&self, _: u32) -> Option<JobDetail> {
+        None
+    }
+    async fn send(&self, op: Op) -> Result<Reply, RuntimeError> {
+        answered!(self, op, { Op::Steer(op::Steer { text }) => Reply::Steer(self.steer(&text)), })
+    }
+    alike!();
 }
 
 /// A second message while the first's answer hasn't reached the screen yet (the session's thread busy in it) goes to
@@ -420,8 +550,8 @@ fn done_job() -> serde_json::Value {
                        "endedAt": 2, "steps": 0, "sources": 0})
 }
 
-#[async_trait(?Send)]
-impl SessionController for Jobbed {
+/// What the session does, asked through its handle below.
+impl Jobbed {
     async fn start(&self) -> Result<(), RuntimeError> {
         let _ = &self.emit;
         Ok(())
@@ -447,9 +577,6 @@ impl SessionController for Jobbed {
     async fn undo(&self, _: Option<&str>) -> Result<Option<ChangeRecord>, RuntimeError> {
         Ok(None)
     }
-    fn has_jobs(&self) -> bool {
-        true
-    }
     fn jobs(&self) -> Vec<kumi_agent::core::jobs::JobStatus> {
         vec![serde_json::from_value(done_job()).unwrap()]
     }
@@ -460,6 +587,26 @@ impl SessionController for Jobbed {
             .unwrap()
         })
     }
+}
+
+#[async_trait(?Send)]
+impl SessionHandle for Jobbed {
+    fn capabilities(&self) -> Capabilities {
+        Capabilities { jobs: true, ..Capabilities::default() }
+    }
+    fn status(&self) -> SessionStatus {
+        Jobbed::status(self)
+    }
+    fn jobs(&self) -> Vec<JobStatus> {
+        Jobbed::jobs(self)
+    }
+    fn job(&self, id: u32) -> Option<JobDetail> {
+        Jobbed::job(self, id)
+    }
+    async fn send(&self, op: Op) -> Result<Reply, RuntimeError> {
+        answered!(self, op, {})
+    }
+    alike!();
 }
 
 /// A job's panel, opened while Kumi is idle, shows the job's details as they come, with no key to draw them.

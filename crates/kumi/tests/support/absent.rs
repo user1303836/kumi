@@ -1,5 +1,5 @@
 //! What a session answers a request it has nothing for: no part for it, or none set up. The tests' sessions answer what
-//! their tests ask, and leave every other request to [`answer`], which says what `SessionController`'s defaults said.
+//! their tests ask, and leave every other request to [`answer`] (what the session's old trait answered by default).
 use kumi_agent::core::{
     contracts::ConversationMatch,
     protocol::{op, Op, Reply},

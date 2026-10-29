@@ -1,5 +1,7 @@
 //! `kumi -p`'s front end: one request, its answer's words on stdout (or each event as a JSON line with `--json`), what
 //! went wrong on stderr, and an exit code that says how it ended, over a session in this thread or one of its own.
+#[path = "../support/absent.rs"]
+mod absent;
 use async_trait::async_trait;
 use futures::FutureExt;
 use kumi::{
@@ -9,10 +11,12 @@ use kumi::{
 };
 use kumi_agent::core::{
     contracts::*,
-    protocol::InProcess,
+    jobs::{JobDetail, JobStatus},
+    protocol::{cloud_provider, op, provider_name, tell_now, Capabilities, ModelsView, Op, Reply, SessionHandle},
     threaded::{Build, Built, Threaded},
 };
-use kumi_types::contracts::ChangeRecord;
+use kumi_ai::providers::ProviderId;
+use kumi_types::contracts::{ChangeRecord, LibraryStatus};
 use kumi_types::errors::{FailureKind, RuntimeError};
 use std::{cell::RefCell, rc::Rc};
 
@@ -46,6 +50,15 @@ struct Fake {
     stubborn: bool,
     cancelled: tokio::sync::Notify,
     calls: RefCell<Vec<String>>,
+    /// Itself, for a request told it to run on after `tell` returns, as InProcess's does.
+    this: RefCell<std::rc::Weak<Fake>>,
+}
+
+/// `fake`, shared, knowing itself.
+fn made(fake: Fake) -> Rc<Fake> {
+    let fake = Rc::new(fake);
+    *fake.this.borrow_mut() = Rc::downgrade(&fake);
+    fake
 }
 
 impl Fake {
@@ -60,8 +73,8 @@ impl Fake {
     }
 }
 
-#[async_trait(?Send)]
-impl SessionController for Fake {
+/// What the session does, asked through its handle below.
+impl Fake {
     async fn start(&self) -> Result<(), RuntimeError> {
         self.call("start");
         Ok(())
@@ -76,9 +89,6 @@ impl SessionController for Fake {
             self.emit(ended(StopReason::Cancelled));
         }
         Ok(())
-    }
-    fn has_instant(&self) -> bool {
-        true
     }
     async fn instant(&self, text: &str) -> Result<Option<InstantOutcome>, RuntimeError> {
         self.call(format!("instant:{text}"));
@@ -109,6 +119,73 @@ impl SessionController for Fake {
     }
 }
 
+/// `kumi -p`'s session: its own requests through its methods above, and anything else as a session without it.
+#[async_trait(?Send)]
+impl SessionHandle for Fake {
+    fn capabilities(&self) -> Capabilities {
+        Capabilities { instant: true, ..Capabilities::default() }
+    }
+    fn can_show(&self, _: BodyKind) -> bool {
+        false
+    }
+    fn status(&self) -> SessionStatus {
+        Fake::status(self)
+    }
+    fn answering_fallback(&self) -> Option<String> {
+        None
+    }
+    fn library(&self) -> Option<LibraryStatus> {
+        None
+    }
+    fn open_set(&self) -> Option<String> {
+        None
+    }
+    fn jobs(&self) -> Vec<JobStatus> {
+        vec![]
+    }
+    fn job(&self, _: u32) -> Option<JobDetail> {
+        None
+    }
+    fn can_background(&self) -> bool {
+        false
+    }
+    fn models(&self) -> Option<ModelsView> {
+        None
+    }
+    fn provider_name(&self, id: &str) -> String {
+        provider_name(None, id)
+    }
+    fn cloud_provider(&self, id: &str) -> Option<ProviderId> {
+        cloud_provider(None, id)
+    }
+    fn context_window(&self, _: &str) -> Option<f64> {
+        None
+    }
+    fn listen(&self, _: Rc<dyn Fn(SessionEvent)>) {}
+    async fn send(&self, op: Op) -> Result<Reply, RuntimeError> {
+        Ok(match op {
+            Op::Start(_) => Reply::Start(self.start().await?),
+            Op::Submit(op::Submit { input, pinned, .. }) => Reply::Submit(self.submit(&input, pinned).await?),
+            Op::Instant(op::Instant { text }) => Reply::Instant(self.instant(&text).await?),
+            Op::Refresh(_) => Reply::Refresh(self.refresh().await?),
+            Op::NewConversation(_) => Reply::NewConversation(self.new_conversation().await?),
+            Op::Cancel(_) => Reply::Cancel(self.cancel().await?),
+            Op::Close(_) => Reply::Close(self.close().await?),
+            Op::Undo(op::Undo { id }) => Reply::Undo(self.undo(id.as_deref()).await?),
+            op => return absent::answer(op),
+        })
+    }
+    fn tell(&self, op: Op) {
+        let Some(this) = self.this.borrow().upgrade() else { return };
+        tell_now(
+            async move {
+                let _ = this.send(op).await;
+            }
+            .boxed_local(),
+        );
+    }
+}
+
 fn text(words: &str) -> SessionEvent {
     SessionEvent::Kernel(KernelEvent::Text { text: words.into() })
 }
@@ -125,7 +202,7 @@ fn state(state: TurnState) -> SessionEvent {
 fn print(fake: &Rc<Fake>, request: &str, json: bool) -> (Print, Rc<Out>, Rc<Out>) {
     let (out, err) = (Rc::new(Out::default()), Rc::new(Out::default()));
     let print = Print::new(PrintOptions {
-        session: InProcess::new(fake.clone()),
+        session: fake.clone(),
         request: request.into(),
         json,
         out: out.clone(),
@@ -143,7 +220,7 @@ fn answered(words: &[&str], stop: StopReason) -> Rc<Fake> {
     let mut answer = vec![state(TurnState::Running)];
     answer.extend(words.iter().map(|words| text(words)));
     answer.extend([ended(stop), state(TurnState::Idle)]);
-    Rc::new(Fake { answer, ..Default::default() })
+    made(Fake { answer, ..Default::default() })
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -181,7 +258,7 @@ async fn what_went_wrong_goes_to_stderr_and_ends_with_1() {
         kind: Some(FailureKind::Auth),
         provider: Some("anthropic".into()),
     };
-    let fake = Rc::new(Fake { answer: vec![state(TurnState::Running), failed, state(TurnState::Idle)], ..Default::default() });
+    let fake = made(Fake { answer: vec![state(TurnState::Running), failed, state(TurnState::Idle)], ..Default::default() });
     let (print, out, err) = print(&fake, "hello", false);
     assert_eq!(print.run().await, FAILED);
     assert!(out.0.borrow().is_empty(), "{}", out.0.borrow());
@@ -216,7 +293,7 @@ async fn with_json_each_event_is_a_line_of_json() {
 async fn ctrl_c_stops_the_answer_and_ends_with_130() {
     tokio::task::LocalSet::new()
         .run_until(async {
-            let fake = Rc::new(Fake { answer: vec![state(TurnState::Running), text("Listening to ")], waits: true, ..Default::default() });
+            let fake = made(Fake { answer: vec![state(TurnState::Running), text("Listening to ")], waits: true, ..Default::default() });
             let (print, out, _) = print(&fake, "listen to the mix", false);
             let running = tokio::task::spawn_local(print.run());
             tokio::task::yield_now().await;
@@ -233,7 +310,7 @@ async fn a_second_ctrl_c_or_being_told_to_close_ends_it_while_the_answer_goes_on
     tokio::task::LocalSet::new()
         .run_until(async {
             for told_to_close in [false, true] {
-                let fake = Rc::new(Fake {
+                let fake = made(Fake {
                     answer: vec![state(TurnState::Running), text("Rendering ")],
                     waits: true,
                     stubborn: true,

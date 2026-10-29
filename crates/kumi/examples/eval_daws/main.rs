@@ -32,8 +32,8 @@ use kumi_agent::{
         client::McpEndpoint,
         types::{CallToolResult, ContentBlock},
     },
-    AgentKernel, AgentKernelOptions, IntegrationFactory, Kernel, KernelEvent, KernelFactory, KernelOptions, Session, SessionController,
-    SessionEvent, SessionOptions,
+    AgentKernel, AgentKernelOptions, IntegrationFactory, Kernel, KernelEvent, KernelFactory, KernelOptions, Session, SessionEvent,
+    SessionOptions,
 };
 use kumi_ai::{
     auth::store::open_credential_store,

@@ -1732,7 +1732,7 @@ mod watch_tests {
         assert_eq!(*fake.read.borrow(), [Some("/found/bridge.json".to_string())]);
         assert_eq!(setup.open_set().as_deref(), Some("/Sets/Night Drive.als"));
         // The session gone: setup hears so.
-        drop(session);
+        drop((session, fake));
         assert!(setup.reconnect().await.is_err());
         assert_eq!(setup.open_set(), None);
     }

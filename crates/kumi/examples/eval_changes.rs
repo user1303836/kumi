@@ -24,7 +24,7 @@ use kumi_agent::{
         types::{CallToolResult, Implementation, ListToolsResult},
     },
     AgentKernel, AgentKernelOptions, IntegrationFactory, Kernel, KernelEvent, KernelFactory, KernelOptions, Recipe, RecipeStore, Session,
-    SessionController, SessionEvent, SessionOptions,
+    SessionEvent, SessionOptions,
 };
 use kumi_ai::{
     auth::store::open_credential_store,

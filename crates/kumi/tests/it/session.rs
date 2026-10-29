@@ -3828,7 +3828,8 @@ local_test!(library_tools_preferences_status_and_forgetting_follow_session_lifec
     });
     let h = harness(None, |o| o.library = Some(library.clone()));
     h.observation.borrow_mut().tools = vec![Rc::new(NamesOnly), Rc::new(Plan { received: Rc::new(RefCell::new(vec![])) })];
-    assert!(h.session.has_library() && h.session.has_taste() && h.session.has_forget_taste());
+    let can = h.session.capabilities();
+    assert!(can.library && can.taste && can.forget_taste);
     assert_eq!(h.session.library(), Some(library.status()));
     h.session.start().await.unwrap();
     let tools = h.record.created.borrow()[0].tools.clone();
@@ -3867,7 +3868,8 @@ local_test!(library_tools_preferences_status_and_forgetting_follow_session_lifec
     unlisten();
     library.close().await;
     let without = harness(None, |_| {});
-    assert!(!without.session.has_library() && !without.session.has_taste() && !without.session.has_forget_taste());
+    let can = without.session.capabilities();
+    assert!(!can.library && !can.taste && !can.forget_taste);
     assert!(without.session.library().is_none());
     without.session.close().await.unwrap();
 });
@@ -4890,7 +4892,7 @@ local_test!(a_chat_that_keeps_no_conversations_says_nothing_of_one, {
     let h = harness(None, |_| {});
     h.session.start().await.unwrap();
     h.session.submit("hello", None).await.unwrap();
-    assert!(!h.session.has_conversations());
+    assert!(!h.session.capabilities().conversations);
     assert!(h.session.conversation_now().await.is_none());
     h.session.new_conversation().await.unwrap();
     assert!(h.notice("New conversation."));
@@ -5259,7 +5261,7 @@ async fn a_real_session_on_a_thread_of_its_own_answers_through_its_handle() {
                         .boxed_local()
                     });
                     let h = harness(Some(run), |options| options.on_event = emit);
-                    let session = Rc::new(h.session.clone());
+                    let session = kumi_agent::core::protocol::InProcess::new(Rc::new(h.session.clone()));
                     // What the harness keeps for its fakes lives as long as the session does.
                     Ok(Built { session, ending: Some(async move { drop(h) }.boxed_local()) })
                 }
