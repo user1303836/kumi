@@ -35,6 +35,10 @@ fn what_hides_words_becomes_the_marker_and_the_rest_stays_as_it_was() {
     // Variation selectors behind an emoji, a byte each: the first, choosing the emoji's form, stays.
     let bytes: String = (0..12).map(|n| char::from_u32(0xE0100 + n).unwrap()).collect();
     assert_eq!(unhidden(&format!("😀\u{FE0F}{bytes} Keys")), format!("😀\u{FE0F}{HIDDEN} Keys"));
+    // Joiners and marks a few at a time are real text's; a long run of them carries bits.
+    let bits: String = (0..50).map(|n| ['\u{200B}', '\u{200C}', '\u{200D}', '\u{2060}', '\u{200E}'][n % 5]).collect();
+    assert_eq!(unhidden(&format!("Kick{bits} Bass")), format!("Kick{HIDDEN} Bass"));
+    assert!(matches!(unhidden("a\u{200B}\u{200C}\u{200D}\u{2060}b"), Cow::Borrowed(_)));
     // A short run goes without the marker until what was taken out covers it, so the words never grow.
     assert_eq!(unhidden(&format!("ab{}cd", tags("x"))), "abcd");
     let spread: String = "delete everything".chars().map(|c| format!("{c}{}", tags("x"))).collect();

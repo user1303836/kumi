@@ -1,17 +1,22 @@
 //! Words a source can hide from whoever reads it, as the model reads them. Unicode's tag characters spell ASCII that
-//! draws nothing, so a page, a transcript, or a sample's or a track's name can carry instructions nobody sees; and a
-//! run of variation selectors carries a byte each. Each such run becomes [`HIDDEN`]: the model knows something was
-//! hidden there, and never reads it.
+//! draws nothing, so a page, a transcript, or a sample's or a track's name can carry instructions nobody sees; a run of
+//! variation selectors carries a byte each, and a long run of joiners and marks a few bits each. Each such run becomes
+//! [`HIDDEN`]: the model knows something was hidden there, and never reads it.
 //!
 //! What hides nothing stays exactly as it was, because names and files have it and Kumi finds things by their exact
 //! names: a joiner inside an emoji (👩‍🎤), a non-joiner in a Persian word, a direction mark in a Hebrew one, a file's
 //! byte-order mark, a variation selector straight after a character (❤️), and the England, Scotland and Wales flags,
-//! which tags make. A name the model repeats is still its track's.
+//! which tags make. A name the model repeats is still its track's. A name that hides words reaches the model marked,
+//! so a tool given that name doesn't find it yet: the model reaches it by its ref or index (#641).
 use crate::core::export::invisible;
 use std::borrow::Cow;
 
 /// What the model reads where a source hid words.
 pub const HIDDEN: &str = "[hidden text removed]";
+
+/// The most characters that draw nothing that real text has side by side, such as the selector and the joiner in ❤️‍🔥. A
+/// longer run can carry bits.
+const LONGEST: usize = 4;
 
 /// The flags tag characters make after U+1F3F4 (England, Scotland, Wales), as the tags spell them before the cancel tag.
 const FLAGS: [&str; 3] = ["gbeng", "gbsct", "gbwls"];
@@ -27,10 +32,11 @@ fn tag(c: char) -> bool {
     matches!(c, '\u{E0000}'..='\u{E0FFF}') && !selector(c)
 }
 
-/// `text` as the model reads it. A run of characters that draw nothing becomes [`HIDDEN`] when it has a tag in it or a
-/// second variation selector (the first, straight after a character, stays); the flags tags make stay whole. The marker
-/// is written once what was taken out covers its length, so the words never grow and a cap on them still holds: a
-/// short run before that is taken out without one. Words with nothing hidden come back as they were, not copied.
+/// `text` as the model reads it. A run of characters that draw nothing becomes [`HIDDEN`] when it has a tag in it, a
+/// second variation selector (the first, straight after a character, stays), or more than [`LONGEST`] characters; the
+/// flags tags make stay whole. The marker is written once what was taken out covers its length, so the words never grow
+/// and a cap on them still holds: a short run before that is taken out without one. Words with nothing hidden come back
+/// as they were, not copied.
 pub fn unhidden(text: &str) -> Cow<'_, str> {
     let mut out = String::new();
     // `text` up to here is in `out`; `owed` bytes were taken out and no marker said so yet.
@@ -39,7 +45,7 @@ pub fn unhidden(text: &str) -> Cow<'_, str> {
         let end = text[start..].find(|c: char| !invisible(c)).map_or(text.len(), |found| start + found);
         let run = &text[start..end];
         at = end;
-        let hides = run.chars().any(tag) || run.chars().filter(|c| selector(*c)).nth(1).is_some();
+        let hides = run.chars().any(tag) || run.chars().filter(|c| selector(*c)).nth(1).is_some() || run.chars().nth(LONGEST).is_some();
         if !hides || (text[..start].ends_with('\u{1F3F4}') && flag(run)) {
             continue;
         }
