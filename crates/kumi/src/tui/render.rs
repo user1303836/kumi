@@ -6,7 +6,7 @@ use std::ops::Range;
 use std::rc::Rc;
 
 use super::screen::{Screen, BLANK};
-use super::style::{link_url, sgr, ColorDepth, Style, StyleTable};
+use super::style::{link_url, sgr, theme, ColorDepth, Style, StyleTable, Theme};
 
 pub fn cursor_to(x: i32, y: i32) -> String {
     format!("\u{1b}[{};{}H", y + 1, x + 1)
@@ -77,11 +77,13 @@ pub struct Renderer {
     full_repaint: bool,
     erase: bool,
     links: bool,
+    /// The theme the last frame was written in: another one redraws everything.
+    theme: &'static Theme,
 }
 
 impl Renderer {
     pub fn new(depth: ColorDepth) -> Renderer {
-        Renderer { depth, previous: None, full_repaint: false, erase: true, links: true }
+        Renderer { depth, previous: None, full_repaint: false, erase: true, links: true, theme: theme() }
     }
 
     /// Every cell written in every frame that changes (the `fullRepaint` setting, for a terminal that draws changes
@@ -109,6 +111,11 @@ impl Renderer {
     /// terminal never shows half a frame. The hardware cursor is shown at `cursor` (where
     /// input methods for Japanese and Chinese open), or hidden. Empty when nothing changed.
     pub fn frame(&mut self, screen: &Screen, cursor: Option<Cursor>) -> String {
+        let theme = theme();
+        if theme.name != self.theme.name {
+            self.theme = theme;
+            self.previous = None;
+        }
         let fresh = self.previous.as_ref().is_none_or(|previous| {
             previous.width != screen.width || previous.height != screen.height || !Rc::ptr_eq(&previous.table, &screen.table)
         });
@@ -121,7 +128,7 @@ impl Renderer {
             })
             .collect();
         let mut pen =
-            Pen { out: String::new(), table: &screen.table, depth: self.depth, links: self.links, at: None, style: None, link: 0 };
+            Pen { out: String::new(), table: &screen.table, theme, depth: self.depth, links: self.links, at: None, style: None, link: 0 };
         let erase = self.erase && !self.full_repaint;
         let kept = self.previous.as_mut().filter(|_| !fresh);
         let mut same = vec![false; height];
@@ -200,6 +207,8 @@ impl Renderer {
 struct Pen<'a> {
     out: String,
     table: &'a StyleTable,
+    /// The screen's palette colours are written in this theme's.
+    theme: &'static Theme,
     depth: ColorDepth,
     links: bool,
     at: Option<(i32, i32)>,
@@ -220,7 +229,7 @@ impl Pen<'_> {
             return;
         }
         let style = self.table.style(id);
-        self.out.push_str(&sgr(&style, self.depth));
+        self.out.push_str(&sgr(&self.theme.style(&style), self.depth));
         self.style = Some(id);
         let link = if self.links { style.link } else { 0 };
         if link != self.link {

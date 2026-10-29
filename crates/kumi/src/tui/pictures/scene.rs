@@ -7,7 +7,7 @@ use std::f64::consts::PI;
 use kumi_types::contracts::{ChangePicture, ClipNote};
 use kumi_types::picture::{Dynamics, EqBand, EqShape, PictureItem, PictureZone};
 
-use super::super::style::{palette, Rgb};
+use super::super::style::{palette, Rgb, Theme};
 
 /// One thing drawn.
 #[derive(Clone, Debug, PartialEq)]
@@ -25,6 +25,17 @@ pub enum Shape {
 pub struct Scene {
     pub shapes: Vec<Shape>,
     pub lines: bool,
+}
+
+impl Scene {
+    /// The scene in `theme`'s colours.
+    pub fn in_theme(mut self, theme: &Theme) -> Scene {
+        for shape in &mut self.shapes {
+            let (Shape::Line { color, .. } | Shape::Rect { color, .. } | Shape::Dot { color, .. }) = shape;
+            *color = theme.of(*color);
+        }
+        self
+    }
 }
 
 /// What came before, drawn under what's there now.

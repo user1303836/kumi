@@ -423,8 +423,10 @@ answer, or quits when idle.
 - **The computer stays awake** while Kumi works (an answer, a `/goal`, a wait
   for a plan's limit); the display may sleep.
 - **Settings** (`~/.kumi/settings.json`): `"notifications": "off"`,
-  `"liveStatusBar": false`, `"keepAwake": false`, and `"answerAfter"` (seconds
-  before Kumi takes its recommended answer; `0` never).
+  `"liveStatusBar": false`, `"keepAwake": false`, `"answerAfter"` (seconds
+  before Kumi takes its recommended answer; `0` never), and `"theme"`: `dark`
+  (Kumi's own), `light` (for a light terminal) or `colorblind` (colours that stay
+  apart for red-green colour blindness).
 
 ## Terminals
 
@@ -473,7 +475,13 @@ what to draw as data, so another front end could draw the same things.
 one accent, mint `#86e3b5`, and Live's own track colours (very dark ones are
 lightened for display). Warning `#e7b45f`, error `#ee8479`, the beat light
 `#ffe14d`. What Kumi keeps has a colour per kind: notes `#8cc8ff`, techniques
-`#c7a6ff`, recipes `#f2a6c4`, lessons `#e7c88f`.
+`#c7a6ff`, recipes `#f2a6c4`, lessons `#e7c88f`. Three themes draw it
+(`theme`): dark, as above; light, made for a light terminal (dark words on a
+warm white `#f7f7f4`, the accent a deeper mint `#17895a`, the warning amber
+`#a8690f`, and track colours too pale to read deepened); and colorblind, the
+dark one with colours that stay apart for red-green colour blindness (the accent
+sky blue `#56b4e9`, the warning orange `#e69f00`, the error vermilion
+`#d55e00`). Each theme keeps what its colours mean.
 
 **Foundations**, built from terminal primitives with no UI framework:
 

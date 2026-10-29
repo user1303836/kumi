@@ -311,6 +311,43 @@ fn the_screen_keeps_wide_characters_whole_and_lets_text_show_the_background_bene
 }
 
 #[test]
+fn a_theme_writes_the_palettes_colours_in_its_own_and_another_redraws_everything() {
+    use kumi::tui::style::{set_theme, Theme, DARK, LIGHT};
+    let table = Rc::new(StyleTable::new());
+    let mut screen = Screen::with_table(12, 2, Rc::clone(&table));
+    screen.fill(screen.bounds(), &Style::bg(palette::GROUND));
+    screen.put(1, 0, "Ready", &Style::fg(palette::FAINT));
+    screen.put(1, 1, "undo", &Style::fg(palette::ACCENT));
+    // What the terminal shows, in a theme's colours: each cell's style written in them.
+    let shown_in = |theme: &'static Theme, screen: &Screen| {
+        let mut vt = VirtualTerminal::new(12, 2);
+        let mut renderer = Renderer::new(ColorDepth::Truecolor);
+        set_theme(theme);
+        vt.write(&renderer.frame(screen, None));
+        (vt, renderer)
+    };
+    let (dark, _) = shown_in(&DARK, &screen);
+    same_as_screen(&dark, &screen);
+    let (light, mut renderer) = shown_in(&LIGHT, &screen);
+    assert_eq!(
+        light.styles[0][1],
+        style_key(&LIGHT.style(&Style { fg: Some(palette::FAINT), bg: Some(palette::GROUND), ..Style::default() }))
+    );
+    assert_eq!(
+        light.styles[1][1],
+        style_key(&LIGHT.style(&Style { fg: Some(palette::ACCENT), bg: Some(palette::GROUND), ..Style::default() }))
+    );
+    assert_ne!(light.styles[0][1], dark.styles[0][1]);
+    // Unchanged in the same theme, nothing is written; in another, all of it again, in that one's colours.
+    assert_eq!(renderer.frame(&screen, None), "");
+    set_theme(&DARK);
+    let again = renderer.frame(&screen, None);
+    let mut vt = VirtualTerminal::new(12, 2);
+    vt.write(&again);
+    same_as_screen(&vt, &screen);
+}
+
+#[test]
 fn the_renderers_output_reproduces_every_frame_exactly_redrawing_only_what_changed() {
     let mut seed = 7.0f64;
     let mut random = move || {

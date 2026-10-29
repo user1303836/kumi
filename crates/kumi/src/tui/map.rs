@@ -516,6 +516,9 @@ fn nearest_lists(points: &[Point]) -> Vec<u32> {
 }
 
 fn mix(under: Rgb, over: Rgb, share: f64) -> Rgb {
+    // (between the theme's colours for them: its ground, under a point)
+    let theme = super::style::theme();
+    let (under, over) = (theme.of(under), theme.of(over));
     std::array::from_fn(|c| (under[c] as f64 + (over[c] as f64 - under[c] as f64) * share).round() as u8)
 }
 
@@ -898,7 +901,12 @@ impl MapView {
     /// The map's data, read and made ready to draw: each map zoomed out with the point nearest its middle chosen. The
     /// songs' map comes first when there are no sounds on one yet.
     pub fn loaded(&mut self, ready: Ready) {
-        let Ready { data, fits } = ready;
+        let Ready { mut data, fits } = ready;
+        // Each class's and style's colour as it reads on the theme's ground.
+        let theme = super::style::theme();
+        for group in data.sounds.groups.iter_mut().chain(data.songs.groups.iter_mut()) {
+            group.color = theme.legible(group.color);
+        }
         self.views = vec![View::new(&data.sounds, fits[0].aspect), View::new(&data.songs, fits[1].aspect)];
         self.fits = fits.into();
         self.tab = usize::from(data.sounds.points.is_empty() && !data.songs.points.is_empty());

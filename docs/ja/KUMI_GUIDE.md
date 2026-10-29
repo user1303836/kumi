@@ -570,6 +570,7 @@ Kumi はすべてを `~/.kumi` に保存します。`~/.kumi/settings.json` に�
 | `liveStatusBar` | `false`：Kumi が終えたときやあなたが必要なときに、Live（または Renoise）のステータスバーに一行を出さない |
 | `keepAwake` | `false`：Kumi が作業している間もコンピューターはスリープできる |
 | `answerAfter` | 誰もいないときに Kumi がおすすめの答えを選ぶまでの秒数（60）。`0` は選ばない |
+| `theme` | `dark`（Kumi 本来の配色、既定）、`light`（明るいターミナルのための配色）、`colorblind`（赤緑の色覚の違いでも見分けやすい色にした dark） |
 | `instantPhrases` | `false` で、決まったフレーズ（"tempo 124"、"mute drums"）もほかのメッセージと同じくモデルに送る（[即時フレーズ](KUMI_TUI.md#即時フレーズ)） |
 | `contextMeter` | ヘッダーの、モデルのコンテキストがどれだけ埋まったかのメーター：`"auto"`（既定）は半分を超えてから、`"always"` は常に、`"off"` は表示しない |
 | `modelServers` | 名前を付けたモデルサーバー：`[{ "name", "baseURL", "apiKey", "format" }]`（[このコンピューター上のモデル](#このコンピューター上のモデル)） |

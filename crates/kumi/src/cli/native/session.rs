@@ -301,6 +301,12 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
         Some("off") => ContextMeter::Off,
         _ => ContextMeter::Auto,
     };
+    // ("system", or none set: dark until Kumi asks the terminal its background)
+    let theme = match settings.theme.as_deref() {
+        Some("light") => &crate::tui::style::LIGHT,
+        Some("colorblind") => &crate::tui::style::COLOR_BLIND,
+        _ => &crate::tui::style::DARK,
+    };
     let projects_dir = load_projects_dir(&io.env)?;
     // Each Set's kept conversations, while Live may come in this session, or when the producer asked for one (then they
     // go on saving where they're kept, Live or not).
@@ -928,6 +934,7 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
         options.full_repaint = full_repaint;
         options.context_meter = context_meter;
         options.keys = read_keys(&load_keys_file(&io.env)?);
+        options.theme = theme;
         options.next_time = install::next_time(&io.env);
         options.connect_live = live_possible.then(|| ConnectDaw {
             why: connect_why,

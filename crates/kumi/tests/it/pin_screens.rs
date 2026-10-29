@@ -1564,3 +1564,68 @@ scene!(answer_footer, |width, height| {
     h.emit(json!({"type":"state","state":"idle"}));
     finish(h).await
 });
+
+// Themes: the same screens in the light theme's colours and the colour-blind one's.
+
+/// The app in `theme`, started and connected to Night Drive.
+async fn open_in(width: i32, height: i32, theme: &'static kumi::tui::style::Theme) -> Harness {
+    let h = Harness::with(width, height, Rc::new(Control::default()), |o| o.theme = theme);
+    h.start().await;
+    h.connect();
+    h
+}
+
+fn changes_of_every_state() -> Vec<Value> {
+    let state = |id: &str, family: &str, title: &str, state: &str, extra: Value| {
+        let mut change = change(id, family, title, extra);
+        change["change"]["state"] = json!(state);
+        change
+    };
+    vec![
+        state("c1", "tempo", "Tempo 120 → 124 BPM", "applied", json!({"from":120.0,"to":124.0})),
+        state("c2", "mixer", "Bass width 100% → 140%", "applied", json!({"track":{"name":"Bass","color":"#f59a3c"}})),
+        state("c3", "rename", "Renamed 2-MIDI to Lead", "undone", json!({})),
+        state("c4", "structure", "Added return track “Drum Bus”", "kept", json!({"note":"Live's own undo can take it back."})),
+        state("c5", "device", "Loaded Glue Compressor on Drums", "unsure", json!({"note":"Live didn't confirm it."})),
+        state("c7", "parameter", "Tried 3 pads against the reference", "heard", json!({"score":82.0})),
+    ]
+}
+
+scene!(light_welcome, |width, height| {
+    let h = open_in(width, height, &kumi::tui::style::LIGHT).await;
+    finish_styled(h).await
+});
+
+scene!(light_history, |width, height| {
+    let h = open_in(width, height, &kumi::tui::style::LIGHT).await;
+    h.emit(json!({"type":"remembered","scope":"set","note":{"id":"s1","text":"The Reese is the main bass","at":1}}));
+    for change in changes_of_every_state() {
+        h.emit(change);
+    }
+    finish_styled(h).await
+});
+
+scene!(light_picture, |width, height| {
+    let h = open_in(width, height, &kumi::tui::style::LIGHT).await;
+    let note = |start: f64, pitch: f64, duration: f64| json!([start, pitch, duration, 100.0]);
+    h.emit(change(
+        "c1",
+        "clip",
+        "Chords · 3 notes moved, 1 added",
+        json!({"track":{"name":"Keys","color":"#5ec1f7"},"picture":{"kind":"notes","length":8.0,
+            "before":[note(0.,60.,2.),note(2.,62.,2.),note(4.,64.,2.)],
+            "after":[note(0.,60.,1.),note(1.,67.,1.),note(2.,65.,2.),note(4.,64.,4.)]}}),
+    ));
+    h.type_text("\x1b[Z").await;
+    h.type_text("\r").await;
+    finish_styled(h).await
+});
+
+scene!(colorblind_history, |width, height| {
+    let h = open_in(width, height, &kumi::tui::style::COLOR_BLIND).await;
+    h.emit(json!({"type":"remembered","scope":"set","note":{"id":"s1","text":"The Reese is the main bass","at":1}}));
+    for change in changes_of_every_state() {
+        h.emit(change);
+    }
+    finish_styled(h).await
+});

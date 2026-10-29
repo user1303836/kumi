@@ -273,6 +273,9 @@ fn terminal_settings_round_trip_survive_other_writes_and_keep_a_newer_kumis_valu
     std::fs::write(&file, json!({"mouse":false,"transcriptOnQuit":0,"theme":"Dark","fullRepaint":"yes"}).to_string()).unwrap();
     let settings = read_settings(&file);
     assert_eq!((settings.mouse, settings.transcript_on_quit, settings.theme, settings.full_repaint), (None, None, None, None));
+    // The colour-blind theme is one of the theme's own values.
+    std::fs::write(&file, json!({"theme":"colorblind"}).to_string()).unwrap();
+    assert_eq!(read_settings(&file).theme.as_deref(), Some("colorblind"));
 }
 #[test]
 fn background_job_settings_round_trip_and_survive_a_model_change() {

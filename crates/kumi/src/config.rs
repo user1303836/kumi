@@ -430,7 +430,7 @@ pub struct Settings {
     /// false: quitting doesn't print the conversation into the terminal's scrollback.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub transcript_on_quit: Option<bool>,
-    /// "dark" or "light"; the terminal's own background chooses ("system") otherwise.
+    /// "dark", "light" or "colorblind"; the terminal's own background chooses ("system") otherwise.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub theme: Option<String>,
     /// "always" or "off": when the header shows how full the model's context is; "auto" shows it past half.
@@ -550,7 +550,7 @@ pub fn read_settings(file: &str) -> Settings {
         mouse: (value["mouse"] == "off").then(|| "off".to_string()),
         copy_on_select: (value["copyOnSelect"] == false).then_some(false),
         transcript_on_quit: (value["transcriptOnQuit"] == false).then_some(false),
-        theme: value["theme"].as_str().filter(|theme| ["dark", "light"].contains(theme)).map(str::to_string),
+        theme: value["theme"].as_str().filter(|theme| ["dark", "light", "colorblind"].contains(theme)).map(str::to_string),
         context_meter: value["contextMeter"].as_str().filter(|meter| ["always", "off"].contains(meter)).map(str::to_string),
         full_repaint: value["fullRepaint"].as_bool(),
     }
