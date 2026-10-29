@@ -872,7 +872,7 @@ impl TuiApp {
                     self.notice("Kumi is still working: fork once it's done, or press esc to stop it.", NoticeTone::Info);
                     return Ok(());
                 }
-                if session.op(op::ForkConversation { name: (!name.is_empty()).then(|| name.clone()) }).await?.is_none() {
+                if session.op(op::ForkConversation { name: (!name.is_empty()).then(|| name.clone()), before: None }).await?.is_none() {
                     self.notice("Nothing to fork yet: ask something first.", NoticeTone::Info);
                 }
                 return Ok(());

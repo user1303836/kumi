@@ -807,6 +807,15 @@ fn events() -> Vec<SessionEvent> {
         }),
     });
     events.push(SessionEvent::TakenBack { requests: 1, replay: None });
+    events.push(SessionEvent::Forked {
+        from: "01JB9Z6P1Q".into(),
+        replay: Some(Replay {
+            before: 0,
+            earlier: vec![],
+            lines: vec![LogLine::Request(LogRequest { at: AT, text: "make the kick punchier".into(), files: vec![], pinned: None })],
+        }),
+    });
+    events.push(SessionEvent::Forked { from: "01JB9Z6P1Q".into(), replay: None });
     events.push(SessionEvent::Aside { id: 2, text: "The kick and the bass share 60 Hz, so".into() });
     events.push(SessionEvent::SlotsProgress { id: 3, line: "Fetching the stem model: 12 of 80 MB".into() });
     events.push(SessionEvent::SignIn { id: 4, url: Some("https://auth.openai.com/authorize?state=kumi".into()), code: None });
@@ -907,6 +916,7 @@ fn variant(event: &SessionEvent) -> &'static str {
         SessionEvent::CarryOn { .. } => "CarryOn",
         SessionEvent::Palette { .. } => "Palette",
         SessionEvent::TakenBack { .. } => "TakenBack",
+        SessionEvent::Forked { .. } => "Forked",
         SessionEvent::Aside { .. } => "Aside",
         SessionEvent::SlotsProgress { .. } => "SlotsProgress",
         SessionEvent::SignIn { .. } => "SignIn",
@@ -928,7 +938,7 @@ fn variant(event: &SessionEvent) -> &'static str {
     }
 }
 
-const VARIANTS: [&str; 50] = [
+const VARIANTS: [&str; 51] = [
     "Focus",
     "Pointed",
     "Change",
@@ -965,6 +975,7 @@ const VARIANTS: [&str; 50] = [
     "CarryOn",
     "Palette",
     "TakenBack",
+    "Forked",
     "Aside",
     "SlotsProgress",
     "SignIn",
@@ -1622,8 +1633,9 @@ pub(crate) fn requests() -> Vec<Op> {
         op::RenameConversation { id: None, name: None }.into(),
         op::PinConversation { id: "01JB9Z6P1Q".into(), pinned: true }.into(),
         op::DeleteConversation { id: "01JB9Z6P1Q".into() }.into(),
-        op::ForkConversation { name: Some("Kick, darker".into()) }.into(),
-        op::ForkConversation { name: None }.into(),
+        op::ForkConversation { name: Some("Kick, darker".into()), before: None }.into(),
+        op::ForkConversation { name: None, before: None }.into(),
+        op::ForkConversation { name: None, before: Some(AT + 4) }.into(),
         op::ConversationNow {}.into(),
         op::ConversationLines { id: "01JB9Z6P1Q".into() }.into(),
         op::ConversationToExport {}.into(),
