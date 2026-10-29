@@ -116,6 +116,8 @@ pub trait Request: Into<Op> {
     type Reply;
     /// This request's own answer, out of the session's; None when the session answered another request.
     fn answer(reply: Reply) -> Option<Self::Reply>;
+    /// The session's answer to this request as it travels: `value`, in this request's own [`Reply`].
+    fn reply(value: Self::Reply) -> Reply;
 }
 
 /// Words that never show: a key. Its Debug says only that it's hidden; on the wire it's itself, as its request needs.
@@ -191,6 +193,9 @@ macro_rules! requests {
                         Reply::$name(reply) => Some(reply),
                         _ => None,
                     }
+                }
+                fn reply(value: $reply) -> Reply {
+                    Reply::$name(value)
                 }
             }
         )*
@@ -601,25 +606,43 @@ pub fn cloud_provider(models: Option<Rc<dyn ModelController>>, id: &str) -> Opti
 /// "Not available" for a session with none. None for any other request.
 pub async fn models_answer(op: &Op, models: Option<Rc<dyn ModelController>>, side: &HandleSide) -> Option<Result<Reply, RuntimeError>> {
     let controls = || part(models.clone());
+    // Each answers its own request (its type picks the reply), as `Session::answer`'s arms do.
     Some(match op {
-        Op::Providers(_) => async { Ok(Reply::Providers(controls()?.providers().await?)) }.await,
-        Op::LocalModels(_) => async { Ok(Reply::LocalModels(controls()?.local().await)) }.await,
-        Op::ChooseDefault(_) => async { Ok(Reply::ChooseDefault(controls()?.choose_default().await?)) }.await,
-        Op::Models(op::Models { provider, refresh }) => async { Ok(Reply::Models(controls()?.models(provider, *refresh).await?)) }.await,
-        Op::ChooseModel(op::ChooseModel { model }) => async { Ok(Reply::ChooseModel(controls()?.choose(model).await?)) }.await,
-        Op::SetEffort(op::SetEffort { effort }) => async { Ok(Reply::SetEffort(controls()?.set_effort(*effort).await?)) }.await,
-        Op::SetFast(op::SetFast { on }) => async { Ok(Reply::SetFast(controls()?.set_fast(*on).await?)) }.await,
-        Op::SetFallback(op::SetFallback { model }) => {
-            async { Ok(Reply::SetFallback(controls()?.set_fallback(model.as_deref()).await?)) }.await
+        Op::Providers(request) => answered(request.clone(), |op::Providers {}| async move { controls()?.providers().await }).await,
+        Op::LocalModels(request) => answered(request.clone(), |op::LocalModels {}| async move { Ok(controls()?.local().await) }).await,
+        Op::ChooseDefault(request) => {
+            answered(request.clone(), |op::ChooseDefault {}| async move { controls()?.choose_default().await }).await
         }
-        Op::SaveKey(op::SaveKey { provider, key }) => {
-            async { Ok(Reply::SaveKey(controls()?.save_key(*provider, &key.0, None).await?)) }.await
+        Op::Models(request) => {
+            answered(request.clone(), |op::Models { provider, refresh }| async move { controls()?.models(&provider, refresh).await }).await
         }
-        Op::SignOut(op::SignOut { provider }) => async { Ok(Reply::SignOut(controls()?.sign_out(*provider).await?)) }.await,
-        Op::SignInChatgpt(op::SignInChatgpt { id, by_code }) => {
-            async { Ok(Reply::SignInChatgpt(side.sign_in_chatgpt(*id, *by_code, &*controls()?).await?)) }.await
+        Op::ChooseModel(request) => {
+            answered(request.clone(), |op::ChooseModel { model }| async move { controls()?.choose(&model).await }).await
         }
-        Op::MissingModel(_) => async { Ok(Reply::MissingModel(kumi_ai::control::missing_model(&*controls()?).await)) }.await,
+        Op::SetEffort(request) => {
+            answered(request.clone(), |op::SetEffort { effort }| async move { controls()?.set_effort(effort).await }).await
+        }
+        Op::SetFast(request) => answered(request.clone(), |op::SetFast { on }| async move { controls()?.set_fast(on).await }).await,
+        Op::SetFallback(request) => {
+            answered(request.clone(), |op::SetFallback { model }| async move { controls()?.set_fallback(model.as_deref()).await }).await
+        }
+        Op::SaveKey(request) => {
+            answered(request.clone(), |op::SaveKey { provider, key }| async move { controls()?.save_key(provider, &key.0, None).await })
+                .await
+        }
+        Op::SignOut(request) => {
+            answered(request.clone(), |op::SignOut { provider }| async move { controls()?.sign_out(provider).await }).await
+        }
+        Op::SignInChatgpt(request) => {
+            answered(
+                request.clone(),
+                |op::SignInChatgpt { id, by_code }| async move { side.sign_in_chatgpt(id, by_code, &*controls()?).await },
+            )
+            .await
+        }
+        Op::MissingModel(request) => {
+            answered(request.clone(), |op::MissingModel {}| async move { Ok(kumi_ai::control::missing_model(&*controls()?).await) }).await
+        }
         _ => return None,
     })
 }
@@ -638,104 +661,174 @@ impl InProcess {
     }
 }
 
+/// `request`'s reply, which `answering` gives from the request itself. Its type picks the reply, so an arm can only answer
+/// its own request: `Op::Undo(request)` answered with a `RenameConversation`'s closure doesn't build.
+async fn answered<R, F>(request: R, answering: impl FnOnce(R) -> F) -> Result<Reply, RuntimeError>
+where
+    R: Request,
+    F: std::future::Future<Output = Result<R::Reply, RuntimeError>>,
+{
+    Ok(R::reply(answering(request).await?))
+}
+
 /// The session answers its requests itself.
 impl Session {
     /// Answers `op`. Every request has its arm here, so a new one doesn't build until the session answers it.
     pub async fn answer(&self, op: Op, side: &HandleSide) -> Result<Reply, RuntimeError> {
         let session = self;
-        Ok(match op {
-            Op::Start(op::Start {}) => Reply::Start(session.start().await?),
+        match op {
+            Op::Start(request) => answered(request, |op::Start {}| async move { session.start().await }).await,
             // Only a message with references takes the controller's way for them, so a session's calls stay as they were.
-            Op::Submit(op::Submit { input, pinned, attachments, references }) => Reply::Submit(if !references.is_empty() {
-                session.submit_with_references(&input, pinned, attachments, references).await?
-            } else if attachments.is_empty() {
-                session.submit(&input, pinned).await?
-            } else {
-                session.submit_with(&input, pinned, attachments).await?
-            }),
-            Op::References(op::References { query, limit }) => Reply::References(session.references(&query, limit).await?),
-            Op::Steer(op::Steer { text }) => Reply::Steer(session.steer(&text)),
-            Op::Aside(op::Aside { id, question }) => {
-                Reply::Aside(side.aside(id, |on_text, signal| session.aside(&question, on_text, Some(signal))).await?)
+            Op::Submit(request) => {
+                answered(request, |op::Submit { input, pinned, attachments, references }| async move {
+                    if !references.is_empty() {
+                        session.submit_with_references(&input, pinned, attachments, references).await
+                    } else if attachments.is_empty() {
+                        session.submit(&input, pinned).await
+                    } else {
+                        session.submit_with(&input, pinned, attachments).await
+                    }
+                })
+                .await
             }
-            Op::StopAside(op::StopAside { id }) => Reply::StopAside(side.stop_aside(id)),
-            Op::Cancel(op::Cancel {}) => Reply::Cancel(session.cancel().await?),
-            Op::Close(op::Close {}) => Reply::Close(session.close().await?),
-            Op::Undo(op::Undo { id }) => Reply::Undo(session.undo(id.as_deref()).await?),
-            Op::TakeBackPlan(op::TakeBackPlan {}) => Reply::TakeBackPlan(session.take_back_plan().await?),
-            Op::TakeBack(op::TakeBack { to }) => Reply::TakeBack(session.take_back(to).await?),
-            Op::Refresh(op::Refresh {}) => Reply::Refresh(session.refresh().await?),
-            Op::NewConversation(op::NewConversation {}) => Reply::NewConversation(session.new_conversation().await?),
-            Op::Reconnect(op::Reconnect {}) => Reply::Reconnect(session.reconnect().await?),
-            Op::Reconfigure(op::Reconfigure {}) => Reply::Reconfigure(session.reconfigure().await?),
-            Op::Instant(op::Instant { text }) => Reply::Instant(session.instant(&text).await?),
-            Op::Pick(op::Pick { pick }) => Reply::Pick(session.picked(pick)),
-            Op::Conversations(op::Conversations {}) => Reply::Conversations(session.conversations().await?),
-            Op::AllConversations(op::AllConversations {}) => Reply::AllConversations(session.all_conversations().await?),
-            Op::FindConversation(op::FindConversation { word }) => Reply::FindConversation(session.find_conversation(&word).await?),
-            Op::ResumeConversation(op::ResumeConversation { id }) => Reply::ResumeConversation(session.resume_conversation(&id).await?),
-            Op::RenameConversation(op::RenameConversation { id, name }) => {
-                Reply::RenameConversation(session.rename_conversation(id.as_deref(), name.as_deref()).await?)
+            Op::References(request) => {
+                answered(request, |op::References { query, limit }| async move { session.references(&query, limit).await }).await
             }
-            Op::PinConversation(op::PinConversation { id, pinned }) => Reply::PinConversation(session.pin_conversation(&id, pinned).await?),
-            Op::DeleteConversation(op::DeleteConversation { id }) => Reply::DeleteConversation(session.delete_conversation(&id).await?),
-            Op::ForkConversation(op::ForkConversation { name, before }) => Reply::ForkConversation(match before {
-                Some(before) => session.fork_conversation_before(name.as_deref(), before).await?,
-                None => session.fork_conversation(name.as_deref()).await?,
-            }),
-            Op::AnswerSet(op::AnswerSet { choice }) => Reply::AnswerSet(session.answer_set(choice).await?),
-            Op::ConversationNow(op::ConversationNow {}) => Reply::ConversationNow(session.conversation_now().await),
-            Op::ConversationLines(op::ConversationLines { id }) => Reply::ConversationLines(session.conversation_lines(&id).await?),
-            Op::ConversationToExport(op::ConversationToExport {}) => Reply::ConversationToExport(session.conversation_to_export().await),
-            Op::Memory(op::Memory {}) => Reply::Memory(session.memory().await?),
-            Op::Remembered(op::Remembered {}) => Reply::Remembered(session.remembered().await),
-            Op::Taste(op::Taste {}) => Reply::Taste(session.taste().await?),
-            Op::ForgetTaste(op::ForgetTaste { id }) => Reply::ForgetTaste(session.forget_taste(&id).await?),
-            Op::Forget(op::Forget { id }) => Reply::Forget(session.forget(&id).await?),
-            Op::ChangeNote(op::ChangeNote { id, change }) => Reply::ChangeNote(session.change_note(&id, change).await?),
-            Op::Recipes(op::Recipes {}) => Reply::Recipes(session.recipes().await?),
-            Op::PinForRecipe(op::PinForRecipe { pin }) => Reply::PinForRecipe(session.pin_for_recipe(&pin)),
-            Op::RunRecipe(op::RunRecipe { name, with }) => Reply::RunRecipe(session.run_recipe(&name, with).await?),
-            Op::ForgetRecipe(op::ForgetRecipe { name }) => Reply::ForgetRecipe(session.forget_recipe(&name).await?),
-            Op::Techniques(op::Techniques {}) => Reply::Techniques(session.techniques().await?),
-            Op::ForgetTechnique(op::ForgetTechnique { id }) => Reply::ForgetTechnique(session.forget_technique(&id).await?),
-            Op::AnswerTechnique(op::AnswerTechnique { keep }) => Reply::AnswerTechnique(session.answer_technique(keep).await?),
-            Op::Lessons(op::Lessons {}) => Reply::Lessons(session.lessons().await?),
-            Op::ForgetLesson(op::ForgetLesson { id }) => Reply::ForgetLesson(session.forget_lesson(&id).await?),
-            Op::Goal(op::Goal { text }) => Reply::Goal(session.goal(text.as_deref()).await?),
-            Op::StopGoal(op::StopGoal {}) => Reply::StopGoal(session.stop_goal().await?),
-            Op::StopLoop(op::StopLoop {}) => Reply::StopLoop(session.stop_loop().await?),
-            Op::StopDaw(op::StopDaw {}) => Reply::StopDaw(session.stop_live().await?),
-            Op::DawMessage(op::DawMessage { text }) => Reply::DawMessage(session.daw_message(&text).await?),
-            Op::DawRecording(op::DawRecording {}) => Reply::DawRecording(session.daw_recording().await?),
-            Op::StopJob(op::StopJob { id }) => Reply::StopJob(session.stop_job(id)),
-            Op::RunJobAgain(op::RunJobAgain { id }) => Reply::RunJobAgain(session.run_job_again(id)),
-            Op::Background(op::Background {}) => Reply::Background(session.background()),
-            Op::CarryOn(op::CarryOn { job }) => Reply::CarryOn(session.carry_on(job)),
-            Op::Palette(op::Palette {}) => Reply::Palette(session.palette().await?),
-            Op::PaletteGather(op::PaletteGather { files }) => Reply::PaletteGather(session.palette_gather(files).await?),
-            Op::PaletteRemove(op::PaletteRemove { path, size, mtime }) => {
-                Reply::PaletteRemove(session.palette_remove(&path, size, mtime).await?)
+            Op::Steer(request) => answered(request, |op::Steer { text }| async move { Ok(session.steer(&text)) }).await,
+            Op::Aside(request) => {
+                answered(request, |op::Aside { id, question }| async move {
+                    side.aside(id, |on_text, signal| session.aside(&question, on_text, Some(signal))).await
+                })
+                .await
             }
-            Op::PaletteCommand(op::PaletteCommand { words }) => Reply::PaletteCommand(session.palette_command(&words).await?),
-            Op::PaletteNames(op::PaletteNames {}) => Reply::PaletteNames(session.palette_names().await?),
-            Op::Music(op::Music {}) => Reply::Music(music_view(&part(session.music())?).await),
-            Op::MusicFolders(op::MusicFolders {}) => Reply::MusicFolders(part(session.music())?.folders()),
-            Op::LearnMusic(op::LearnMusic { folders }) => Reply::LearnMusic(part(session.music())?.learn(folders)),
-            Op::SetMusicFolders(op::SetMusicFolders { folders }) => {
-                Reply::SetMusicFolders(part(session.music())?.set_folders(Some(folders)))
+            Op::StopAside(request) => answered(request, |op::StopAside { id }| async move { Ok(side.stop_aside(id)) }).await,
+            Op::Cancel(request) => answered(request, |op::Cancel {}| async move { session.cancel().await }).await,
+            Op::Close(request) => answered(request, |op::Close {}| async move { session.close().await }).await,
+            Op::Undo(request) => answered(request, |op::Undo { id }| async move { session.undo(id.as_deref()).await }).await,
+            Op::TakeBackPlan(request) => answered(request, |op::TakeBackPlan {}| async move { session.take_back_plan().await }).await,
+            Op::TakeBack(request) => answered(request, |op::TakeBack { to }| async move { session.take_back(to).await }).await,
+            Op::Refresh(request) => answered(request, |op::Refresh {}| async move { session.refresh().await }).await,
+            Op::NewConversation(request) => {
+                answered(request, |op::NewConversation {}| async move { session.new_conversation().await }).await
             }
-            Op::HoldMusic(op::HoldMusic { held }) => Reply::HoldMusic(part(session.music())?.hold(held)),
-            Op::ForgetMusic(op::ForgetMusic {}) => {
-                let music = part(session.music())?;
-                Reply::ForgetMusic(music.forget().await)
+            Op::Reconnect(request) => answered(request, |op::Reconnect {}| async move { session.reconnect().await }).await,
+            Op::Reconfigure(request) => answered(request, |op::Reconfigure {}| async move { session.reconfigure().await }).await,
+            Op::Instant(request) => answered(request, |op::Instant { text }| async move { session.instant(&text).await }).await,
+            Op::Pick(request) => answered(request, |op::Pick { pick }| async move { Ok(session.picked(pick)) }).await,
+            Op::Conversations(request) => answered(request, |op::Conversations {}| async move { session.conversations().await }).await,
+            Op::AllConversations(request) => {
+                answered(request, |op::AllConversations {}| async move { session.all_conversations().await }).await
             }
-            Op::Map(op::Map {}) => {
-                let load = part(session.map_loader())?;
-                Reply::Map(load().await)
+            Op::FindConversation(request) => {
+                answered(request, |op::FindConversation { word }| async move { session.find_conversation(&word).await }).await
             }
-            Op::Slots(op::Slots { id, words }) => Reply::Slots(side.slots(id, &words, &*part(session.slots_context())?).await),
-            Op::StopSlots(op::StopSlots { id }) => Reply::StopSlots(side.stop_slots(id)),
+            Op::ResumeConversation(request) => {
+                answered(request, |op::ResumeConversation { id }| async move { session.resume_conversation(&id).await }).await
+            }
+            Op::RenameConversation(request) => {
+                answered(request, |op::RenameConversation { id, name }| async move {
+                    session.rename_conversation(id.as_deref(), name.as_deref()).await
+                })
+                .await
+            }
+            Op::PinConversation(request) => {
+                answered(request, |op::PinConversation { id, pinned }| async move { session.pin_conversation(&id, pinned).await }).await
+            }
+            Op::DeleteConversation(request) => {
+                answered(request, |op::DeleteConversation { id }| async move { session.delete_conversation(&id).await }).await
+            }
+            Op::ForkConversation(request) => {
+                answered(request, |op::ForkConversation { name, before }| async move {
+                    match before {
+                        Some(before) => session.fork_conversation_before(name.as_deref(), before).await,
+                        None => session.fork_conversation(name.as_deref()).await,
+                    }
+                })
+                .await
+            }
+            Op::AnswerSet(request) => answered(request, |op::AnswerSet { choice }| async move { session.answer_set(choice).await }).await,
+            Op::ConversationNow(request) => {
+                answered(request, |op::ConversationNow {}| async move { Ok(session.conversation_now().await) }).await
+            }
+            Op::ConversationLines(request) => {
+                answered(request, |op::ConversationLines { id }| async move { session.conversation_lines(&id).await }).await
+            }
+            Op::ConversationToExport(request) => {
+                answered(request, |op::ConversationToExport {}| async move { Ok(session.conversation_to_export().await) }).await
+            }
+            Op::Memory(request) => answered(request, |op::Memory {}| async move { session.memory().await }).await,
+            Op::Remembered(request) => answered(request, |op::Remembered {}| async move { Ok(session.remembered().await) }).await,
+            Op::Taste(request) => answered(request, |op::Taste {}| async move { session.taste().await }).await,
+            Op::ForgetTaste(request) => answered(request, |op::ForgetTaste { id }| async move { session.forget_taste(&id).await }).await,
+            Op::Forget(request) => answered(request, |op::Forget { id }| async move { session.forget(&id).await }).await,
+            Op::ChangeNote(request) => {
+                answered(request, |op::ChangeNote { id, change }| async move { session.change_note(&id, change).await }).await
+            }
+            Op::Recipes(request) => answered(request, |op::Recipes {}| async move { session.recipes().await }).await,
+            Op::PinForRecipe(request) => {
+                answered(request, |op::PinForRecipe { pin }| async move { Ok(session.pin_for_recipe(&pin)) }).await
+            }
+            Op::RunRecipe(request) => {
+                answered(request, |op::RunRecipe { name, with }| async move { session.run_recipe(&name, with).await }).await
+            }
+            Op::ForgetRecipe(request) => {
+                answered(request, |op::ForgetRecipe { name }| async move { session.forget_recipe(&name).await }).await
+            }
+            Op::Techniques(request) => answered(request, |op::Techniques {}| async move { session.techniques().await }).await,
+            Op::ForgetTechnique(request) => {
+                answered(request, |op::ForgetTechnique { id }| async move { session.forget_technique(&id).await }).await
+            }
+            Op::AnswerTechnique(request) => {
+                answered(request, |op::AnswerTechnique { keep }| async move { session.answer_technique(keep).await }).await
+            }
+            Op::Lessons(request) => answered(request, |op::Lessons {}| async move { session.lessons().await }).await,
+            Op::ForgetLesson(request) => answered(request, |op::ForgetLesson { id }| async move { session.forget_lesson(&id).await }).await,
+            Op::Goal(request) => answered(request, |op::Goal { text }| async move { session.goal(text.as_deref()).await }).await,
+            Op::StopGoal(request) => answered(request, |op::StopGoal {}| async move { session.stop_goal().await }).await,
+            Op::StopLoop(request) => answered(request, |op::StopLoop {}| async move { session.stop_loop().await }).await,
+            Op::StopDaw(request) => answered(request, |op::StopDaw {}| async move { session.stop_live().await }).await,
+            Op::DawMessage(request) => answered(request, |op::DawMessage { text }| async move { session.daw_message(&text).await }).await,
+            Op::DawRecording(request) => answered(request, |op::DawRecording {}| async move { session.daw_recording().await }).await,
+            Op::StopJob(request) => answered(request, |op::StopJob { id }| async move { Ok(session.stop_job(id)) }).await,
+            Op::RunJobAgain(request) => answered(request, |op::RunJobAgain { id }| async move { Ok(session.run_job_again(id)) }).await,
+            Op::Background(request) => answered(request, |op::Background {}| async move { Ok(session.background()) }).await,
+            Op::CarryOn(request) => answered(request, |op::CarryOn { job }| async move { Ok(session.carry_on(job)) }).await,
+            Op::Palette(request) => answered(request, |op::Palette {}| async move { session.palette().await }).await,
+            Op::PaletteGather(request) => {
+                answered(request, |op::PaletteGather { files }| async move { session.palette_gather(files).await }).await
+            }
+            Op::PaletteRemove(request) => {
+                answered(request, |op::PaletteRemove { path, size, mtime }| async move { session.palette_remove(&path, size, mtime).await })
+                    .await
+            }
+            Op::PaletteCommand(request) => {
+                answered(request, |op::PaletteCommand { words }| async move { session.palette_command(&words).await }).await
+            }
+            Op::PaletteNames(request) => answered(request, |op::PaletteNames {}| async move { session.palette_names().await }).await,
+            Op::Music(request) => answered(request, |op::Music {}| async move { Ok(music_view(&part(session.music())?).await) }).await,
+            Op::MusicFolders(request) => answered(request, |op::MusicFolders {}| async move { Ok(part(session.music())?.folders()) }).await,
+            Op::LearnMusic(request) => {
+                answered(request, |op::LearnMusic { folders }| async move { Ok(part(session.music())?.learn(folders)) }).await
+            }
+            Op::SetMusicFolders(request) => {
+                answered(request, |op::SetMusicFolders { folders }| async move { Ok(part(session.music())?.set_folders(Some(folders))) })
+                    .await
+            }
+            Op::HoldMusic(request) => {
+                answered(request, |op::HoldMusic { held }| async move { Ok(part(session.music())?.hold(held)) }).await
+            }
+            Op::ForgetMusic(request) => {
+                answered(request, |op::ForgetMusic {}| async move { Ok(part(session.music())?.forget().await) }).await
+            }
+            Op::Map(request) => answered(request, |op::Map {}| async move { Ok(part(session.map_loader())?().await) }).await,
+            Op::Slots(request) => {
+                answered(
+                    request,
+                    |op::Slots { id, words }| async move { Ok(side.slots(id, &words, &*part(session.slots_context())?).await) },
+                )
+                .await
+            }
+            Op::StopSlots(request) => answered(request, |op::StopSlots { id }| async move { Ok(side.stop_slots(id)) }).await,
             op @ (Op::Providers(_)
             | Op::LocalModels(_)
             | Op::ChooseDefault(_)
@@ -750,13 +843,13 @@ impl Session {
             | Op::MissingModel(_)) => {
                 // If this list and models_answer's ever part ways, a request the controls don't answer is "Not available", not a
                 // panic.
-                return models_answer(&op, session.model_controls(), side)
-                    .await
-                    .unwrap_or_else(|| Err(RuntimeError::plain("Not available")));
+                models_answer(&op, session.model_controls(), side).await.unwrap_or_else(|| Err(RuntimeError::plain("Not available")))
             }
-            Op::StopSignIn(op::StopSignIn { id }) => Reply::StopSignIn(side.stop_sign_in(id)),
-            Op::FocusBody(op::FocusBody { request }) => Reply::FocusBody(session.focus_body(&request).await?),
-        })
+            Op::StopSignIn(request) => answered(request, |op::StopSignIn { id }| async move { Ok(side.stop_sign_in(id)) }).await,
+            Op::FocusBody(request) => {
+                answered(request, |op::FocusBody { request }| async move { session.focus_body(&request).await }).await
+            }
+        }
     }
 }
 
