@@ -318,6 +318,9 @@ impl ChangeContext for PreparationContext<'_> {
     async fn value_for(&self, parameter_ref: &str, text: &str) -> Result<Result<f64, String>, RuntimeError> {
         self.parameters.value_for_text(parameter_ref, text, self.signal.clone()).await
     }
+    async fn drum_pads(&self, device_ref: &str) -> Option<Vec<super::notes::DrumPad>> {
+        super::notes::drum_pads(&self.parameters.history.connection, device_ref, &self.signal).await
+    }
 }
 impl PreparationContext<'_> {
     async fn read(&self, device_ref: &str, ranges: bool) -> Result<Vec<ParameterRange>, RuntimeError> {

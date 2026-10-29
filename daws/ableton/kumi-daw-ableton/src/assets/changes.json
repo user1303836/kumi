@@ -130,13 +130,12 @@
       "family": "device",
       "always": true,
       "unavailable": "There's no Drum Rack in the Set yet: load one with load_device first (search the Browser for \"Drum Rack\"), then its pads can take samples.",
-      "description": "Load a sample onto an empty pad of a Drum Rack, in a new Simpler on that pad, or in Live 12's Drum Sampler with instrument \"Drum Sampler\"; undo clears the pad. deviceRef is the Drum Rack from discovery in this turn; note is the pad's note: 36 (C1) is the first pad, then 37, 38 and so on up to 51 on a new rack. sample is the path of an audio file (one find_sounds returned, or any on this computer).",
+      "description": "Load a sample onto an empty pad of a Drum Rack, in a new Simpler on that pad, or in Live 12's Drum Sampler with instrument \"Drum Sampler\"; undo clears the pad. deviceRef is the Drum Rack from discovery in this turn; Leave note out and the sample takes the rack's next empty pad, in order from its first, row by row: C1, C#1, D1 and D#1, then E1 up (36 to 51 on a new rack), so a kit's sounds fill the first pads in the order you load them. Give note (36 is C1) only for a pad the producer names, or General MIDI's keys when they ask for them. sample is the path of an audio file (one find_sounds returned, or any on this computer).",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,
         "required": [
           "deviceRef",
-          "note",
           "sample"
         ],
         "properties": {
@@ -149,7 +148,7 @@
             "type": "integer",
             "minimum": 0,
             "maximum": 127,
-            "description": "The pad: 36 is C1, the first pad"
+            "description": "The pad, only for one the producer names (36 is C1, the first pad); left out, the next empty pad"
           },
           "sample": {
             "description": "The path of an audio file (one find_sounds returned, or any on this computer), or {\"random\": true, \"words\": [\"kick\"]} for Kumi to pick one itself (words and folders optional)",
@@ -639,7 +638,7 @@
       "preview": "live_midi_transform_preview",
       "apply": "live_midi_transform_apply",
       "family": "clip",
-      "description": "Transform or generate a clip's notes (Session or Arrangement). transform and its params: transpose {semitones}; scale-constrain {root 0–11 (0 is C), scale}; quantize {grid beats, amount, target start|end|both}; swing {grid, amount}; velocity-curve {curve linear-up|linear-down|arch|exp-up|exp-down, amount}; humanize-velocity {maxDelta}; humanize-timing {maxOffset beats}; legato {gap}; staccato {factor 0.05–1}; rotate {steps} (rotates pitches, keeps rhythm); repeat {times 2–8, decay}; ratchet {subdivisions 2–16, probability}; chord-voicing {strategy close|open|drop2}; arpeggiate {pattern up|down|updown|downup|random, rate beats}; seeded-variation {velocityMax, timingMax, probabilityDepth, seed}; euclidean {pulses, steps, rotation, pitch, velocity, stepLength, noteLength, bars}; chord-progression {chords [\"Cm\",\"Ab\",\"Eb\",\"Bb\"] or roman numerals with root and scale, voicing close|drop2|spread, chordDuration beats, octave, velocity}; drum-pattern {style four-on-the-floor|backbeat|breakbeat|trap-hats, bars, density 0–1, mapping {kick: 36, snare: 38, closedHat: 42, …}}; bassline {pattern octave|walking|arpeggiated, chords, root, scale, stepBeats, octave}; motif-invert {axis pitch}; motif-retrograde {}; motif-augment and motif-diminish {numerator, denominator}. Scales: major, minor, harmonic-minor, melodic-minor, dorian, phrygian, lydian, mixolydian, locrian, major-pentatonic, minor-pentatonic, blues, chromatic. scope duplicate writes the result to a copy in a Session slot (target {trackRef, sceneIndex}) and leaves the original; generative ones (repeat, ratchet, arpeggiate, euclidean, chord-progression, drum-pattern, bassline) do by default. An Arrangement clip's notes change in place, so the generative ones need a Session clip.",
+      "description": "Transform or generate a clip's notes (Session or Arrangement). transform and its params: transpose {semitones}; scale-constrain {root 0–11 (0 is C), scale}; quantize {grid beats, amount, target start|end|both}; swing {grid, amount}; velocity-curve {curve linear-up|linear-down|arch|exp-up|exp-down, amount}; humanize-velocity {maxDelta}; humanize-timing {maxOffset beats}; legato {gap}; staccato {factor 0.05–1}; rotate {steps} (rotates pitches, keeps rhythm); repeat {times 2–8, decay}; ratchet {subdivisions 2–16, probability}; chord-voicing {strategy close|open|drop2}; arpeggiate {pattern up|down|updown|downup|random, rate beats}; seeded-variation {velocityMax, timingMax, probabilityDepth, seed}; euclidean {pulses, steps, rotation, pitch, velocity, stepLength, noteLength, bars}; chord-progression {chords [\"Cm\",\"Ab\",\"Eb\",\"Bb\"] or roman numerals with root and scale, voicing close|drop2|spread, chordDuration beats, octave, velocity}; drum-pattern {style four-on-the-floor|backbeat|breakbeat|trap-hats, bars, density 0–1, mapping {kick, snare, closedHat, …: each one's pad note; left out, Kumi finds them by the rack's chain names}}; bassline {pattern octave|walking|arpeggiated, chords, root, scale, stepBeats, octave}; motif-invert {axis pitch}; motif-retrograde {}; motif-augment and motif-diminish {numerator, denominator}. Scales: major, minor, harmonic-minor, melodic-minor, dorian, phrygian, lydian, mixolydian, locrian, major-pentatonic, minor-pentatonic, blues, chromatic. scope duplicate writes the result to a copy in a Session slot (target {trackRef, sceneIndex}) and leaves the original; generative ones (repeat, ratchet, arpeggiate, euclidean, chord-progression, drum-pattern, bassline) do by default. An Arrangement clip's notes change in place, so the generative ones need a Session clip.",
       "methods": [
         "summarize"
       ]

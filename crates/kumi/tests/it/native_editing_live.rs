@@ -1,71 +1,19 @@
 //! Explicit operator fixture: run only with the disposable Live bridge prepared.
 //! KUMI_EDITING_LIVE_CONFIG names an owner-only local endpoint file. Never run in CI.
+#[path = "../support/live_host.rs"]
+mod live_host;
 use ableton_mcp_server::{
     bridge::remote_adapter::{RemoteScriptEndpoint, RemoteScriptLiveAdapter},
     host::{McpHost, McpHostOptions},
     live::{AsyncLiveAdapter, LiveAdapter, LiveInvocation},
 };
-use async_trait::async_trait;
 use futures::FutureExt;
-use kumi_agent::{
-    mcp::{
-        client::{McpEndpoint, StderrStatus},
-        types::{CallToolResult, Implementation, ListToolsResult},
-    },
-    Integration,
-};
+use kumi_agent::{mcp::client::McpEndpoint, Integration};
 use kumi_common::abort::Signal;
 use kumi_daw_ableton::{integration::Ableton, options::AbletonOptions};
-use kumi_types::{contracts::JsonObject, errors::RuntimeError};
+use live_host::HostEndpoint;
 use serde_json::{json, Value};
 use std::{path::Path, rc::Rc};
-struct HostEndpoint(Rc<McpHost>);
-impl HostEndpoint {
-    async fn request(&self, method: &str, params: Value) -> Result<Value, RuntimeError> {
-        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
-        let reply = self
-            .0
-            .handle_async(
-                &json!({"jsonrpc":"2.0","id":NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed),"method":method,"params":params}),
-                None,
-            )
-            .await
-            .map_err(|e| RuntimeError::plain(e.to_string()))?
-            .unwrap();
-        if reply.get("error").is_some() {
-            return Err(RuntimeError::plain(reply["error"].to_string()));
-        }
-        Ok(reply["result"].clone())
-    }
-}
-#[async_trait(?Send)]
-impl McpEndpoint for HostEndpoint {
-    fn pid(&self) -> Option<u32> {
-        None
-    }
-    fn server_info(&self) -> Option<Implementation> {
-        Some(serde_json::from_value(json!({"name":"real-live-fixture","version":"1.0.87"})).unwrap())
-    }
-    async fn list(&self, _: Option<&str>, _: Signal) -> Result<ListToolsResult, RuntimeError> {
-        serde_json::from_value(self.request("tools/list", json!({})).await?).map_err(|e| RuntimeError::plain(e.to_string()))
-    }
-    async fn call(&self, name: &str, args: JsonObject, _: Signal) -> Result<CallToolResult, RuntimeError> {
-        serde_json::from_value(self.request("tools/call", json!({"name":name,"arguments":args})).await?)
-            .map_err(|e| RuntimeError::plain(e.to_string()))
-    }
-    fn on_catalog_changed(&self, _: Rc<dyn Fn()>) -> Box<dyn Fn()> {
-        Box::new(|| {})
-    }
-    fn on_disconnect(&self, _: Rc<dyn Fn()>) -> Box<dyn Fn()> {
-        Box::new(|| {})
-    }
-    fn stderr_status(&self) -> StderrStatus {
-        StderrStatus { bytes: 0, truncated: false }
-    }
-    async fn close(&self) -> Result<(), RuntimeError> {
-        Ok(())
-    }
-}
 #[tokio::test(flavor = "current_thread")]
 #[ignore = "requires the explicitly prepared disposable real-Live fixture"]
 async fn native_editing_through_make_changes_host_and_history() {
