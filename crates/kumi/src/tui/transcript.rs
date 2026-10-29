@@ -202,7 +202,8 @@ pub enum LiveRow {
 }
 #[derive(Clone, Debug, Default)]
 pub struct Row {
-    pub spans: Vec<Span>,
+    /// Shared: a frame's rows, an answer's kept Markdown among them, are made without copying their words.
+    pub spans: Rc<[Span]>,
     pub band: Option<Band>,
     pub trailing: Option<Span>,
     pub live: Option<LiveRow>,
@@ -217,17 +218,17 @@ fn span(text: impl Into<String>, color: Rgb) -> Span {
     Span::new(text, &style(color))
 }
 fn row(spans: Vec<Span>) -> Row {
-    Row { spans, ..Default::default() }
+    Row { spans: spans.into(), ..Default::default() }
 }
 fn wrapped(spans: &[Span], width: i32) -> Vec<Row> {
-    wrap_carried(spans, width).into_iter().map(|(spans, carry)| Row { spans, carry, ..Default::default() }).collect()
+    wrap_carried(spans, width).into_iter().map(|(spans, carry)| Row { spans: spans.into(), carry, ..Default::default() }).collect()
 }
 /// Text wrapped to `width` after a lead of two cells: `first` on the first row, two spaces in `rest` on the rows that
 /// carry it on.
 fn led(spans: &[Span], width: i32, first: Span, rest: Rgb) -> impl Iterator<Item = Row> {
     wrap_carried(spans, (width - 2).max(1)).into_iter().enumerate().map(move |(index, (mut spans, carry))| {
         spans.insert(0, if index == 0 { first.clone() } else { span("  ", rest) });
-        Row { spans, carry: carry.map(|carry| Carry { lead: 2, ..carry }), ..Default::default() }
+        Row { spans: spans.into(), carry: carry.map(|carry| Carry { lead: 2, ..carry }), ..Default::default() }
     })
 }
 fn seconds(ms: f64) -> String {
@@ -307,7 +308,11 @@ fn step_row(step: &Step, fade: f64, folded: Option<(usize, f64)>) -> Row {
     if let Some((count, _)) = folded {
         spans.push(span(format!(" ×{count}"), palette::FAINT));
     }
-    Row { spans, trailing: step.ms.map(|ms| faded(seconds(folded.map_or(ms, |(_, ms)| ms)), palette::FAINT)), ..Default::default() }
+    Row {
+        spans: spans.into(),
+        trailing: step.ms.map(|ms| faded(seconds(folded.map_or(ms, |(_, ms)| ms)), palette::FAINT)),
+        ..Default::default()
+    }
 }
 fn step_rows(steps: &[Step], now: f64) -> Vec<Row> {
     let mut rows = vec![];
@@ -317,7 +322,7 @@ fn step_rows(steps: &[Step], now: f64) -> Vec<Row> {
         if first.state == StepState::Running {
             let label = doing_label(first.tool.as_deref(), &first.label);
             rows.push(Row {
-                spans: vec![span("│ ", palette::RULE), span(" ", palette::ACCENT), span(format!(" {label}"), palette::DIM)],
+                spans: vec![span("│ ", palette::RULE), span(" ", palette::ACCENT), span(format!(" {label}"), palette::DIM)].into(),
                 live: Some(LiveRow::Step {
                     activity: activity_of(first.tool.as_deref()),
                     since: first.started_at.unwrap_or(now),
@@ -375,7 +380,12 @@ pub fn entry_rows_with(entry: &Entry, width: i32, now: f64, markdown: &mut Markd
                 lines.iter().map(|(line, _)| text_width(&line.iter().map(|s| s.text.as_str()).collect::<String>())).max().unwrap_or(0) + 2;
             lines
                 .into_iter()
-                .map(|(spans, carry)| Row { spans, band: Some(Band { bg: palette::RAISED, width: band }), carry, ..Default::default() })
+                .map(|(spans, carry)| Row {
+                    spans: spans.into(),
+                    band: Some(Band { bg: palette::RAISED, width: band }),
+                    carry,
+                    ..Default::default()
+                })
                 .collect()
         }
         Entry::Notice { text, tone } => {
@@ -447,7 +457,8 @@ pub fn entry_rows_with(entry: &Entry, width: i32, now: f64, markdown: &mut Markd
         Entry::Assistant { text, steps, status, elapsed_ms, started_at } => {
             let mut rows = vec![];
             if !text.is_empty() {
-                for r in render_markdown_with(text.trim_end_matches('\n'), inner, &style(palette::TEXT), markdown) {
+                let streaming = *status == AnswerStatus::Running;
+                for r in render_markdown_with(text.trim_end_matches('\n'), inner, &style(palette::TEXT), markdown, streaming) {
                     rows.push(Row {
                         spans: r.spans,
                         band: r.bg.map(|bg| Band { bg, width: inner + 2 }),
@@ -462,7 +473,7 @@ pub fn entry_rows_with(entry: &Entry, width: i32, now: f64, markdown: &mut Markd
                 }
                 if *status == AnswerStatus::Running {
                     rows.push(Row {
-                        spans: vec![span("▾ ", palette::FAINT), span("working", palette::DIM)],
+                        spans: vec![span("▾ ", palette::FAINT), span("working", palette::DIM)].into(),
                         live: Some(LiveRow::Header { label: "working".into(), since: *started_at }),
                         ..Default::default()
                     });
