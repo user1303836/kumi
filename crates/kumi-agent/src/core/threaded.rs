@@ -85,8 +85,6 @@ pub struct Snapshot {
     can_background: bool,
     shows: Vec<BodyKind>,
     models: Option<ModelsView>,
-    /// The model servers on this computer, by id and name: a provider's name is a server's own.
-    servers: Vec<(String, String)>,
     /// The context windows of the model chosen and of the fallback, the two that answer.
     windows: Vec<(String, f64)>,
 }
@@ -94,7 +92,6 @@ pub struct Snapshot {
 impl Snapshot {
     fn read(handle: &dyn SessionHandle) -> Snapshot {
         let models = handle.models();
-        let servers = models.as_ref().map(|view| view.servers.clone()).unwrap_or_default();
         let answering = models.iter().flat_map(|view| [view.current.model.clone(), view.fallback.clone()]).flatten();
         let windows = answering.filter_map(|model| Some((model.clone(), handle.context_window(&model)?))).collect();
         Snapshot {
@@ -106,7 +103,6 @@ impl Snapshot {
             can_background: handle.can_background(),
             shows: SHOWN.into_iter().filter(|kind| handle.can_show(*kind)).collect(),
             models,
-            servers,
             windows,
         }
     }
@@ -535,15 +531,17 @@ impl SessionHandle for Threaded {
     fn models(&self) -> Option<ModelsView> {
         self.reads.borrow().models.clone()
     }
+    // The model servers' names come in the models' view: a provider's name is a server's own.
     fn provider_name(&self, id: &str) -> String {
         let reads = self.reads.borrow();
-        match reads.servers.iter().find(|(server, _)| server == id) {
+        match reads.models.iter().flat_map(|view| &view.servers).find(|(server, _)| server == id) {
             Some((_, name)) => name.clone(),
             None => ProviderId::parse(id).map_or_else(|| id.into(), |provider| provider.row().name.into()),
         }
     }
     fn cloud_provider(&self, id: &str) -> Option<ProviderId> {
-        ProviderId::parse(id).filter(|_| !self.reads.borrow().servers.iter().any(|(server, _)| server == id))
+        let reads = self.reads.borrow();
+        ProviderId::parse(id).filter(|_| !reads.models.iter().flat_map(|view| &view.servers).any(|(server, _)| server == id))
     }
     fn context_window(&self, model: &str) -> Option<f64> {
         self.reads.borrow().windows.iter().find(|(at, _)| at == model).map(|(_, window)| *window)
