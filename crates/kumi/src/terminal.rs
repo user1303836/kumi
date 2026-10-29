@@ -6,7 +6,6 @@ use crate::{
     models::ModelController,
     text::{library_line, remembered_line, sanitize_text, web_words, StreamingText},
     tui::{
-        app::is_command,
         editor::Editor,
         keys::{InputEvent, InputParser},
         tty::TtyOutput,
@@ -16,10 +15,12 @@ use crate::{
 };
 use futures::{future::LocalBoxFuture, FutureExt};
 use kumi_agent::core::{
+    commands::{self as registry, Effect, Fronts, Now, Why},
     contracts::{
         ConversationMatch, ConversationSummary, KeptLine, NoteChange, SessionController, SessionEvent, SetAsk, SetChoice, TurnState,
     },
     export::Format,
+    protocol::{op, Capabilities, InProcess, SessionHandle},
 };
 use kumi_ai::providers::{table, Effort, ProviderId, EFFORTS};
 use kumi_common::{
@@ -115,38 +116,15 @@ impl TerminalOptions {
         }
     }
 }
-/// The commands `PlainTerminal::command` answers (those before it, /help to /status, are answered first).
-const COMMANDS: [&str; 22] = [
-    "/model",
-    "/effort",
-    "/fast",
-    "/memory",
-    "/recipes",
-    "/resume",
-    "/conversations",
-    "/rename",
-    "/export",
-    "/share",
-    "/fork",
-    "/note",
-    "/pin",
-    "/unpin",
-    "/forget",
-    "/willington",
-    "/login",
-    "/logout",
-    "/undo",
-    "/refresh",
-    "/reconnect",
-    "/new",
-];
-/// A command by the full-screen app's rule ([`is_command`]), so a line that starts with a path (a file dragged in) is a
-/// message; or a lone `/`, which opens the menu there and never reaches the model, so here it's pointed to /help.
+/// A command by the shared table's rule ([`registry::is_command`]), so a line that starts with a path (a file dragged in)
+/// is a message; or a lone `/`, which opens the menu in the full-screen app and never reaches the model, so here it's
+/// pointed to /help.
 fn command_like(line: &str) -> bool {
-    line == "/" || is_command(line)
+    line == "/" || registry::is_command(line)
 }
-fn help(daw: bool) -> String {
-    format!("/help · /status · /undo · /stop · /refresh · /reconnect (connect to {app} again, keeping the conversation){daw} · /new [name] (start a fresh conversation; the last one is kept) · /resume [number, id or name] (list kept conversations, or go back to one; /conversations too) · /rename <name> · /fork [name] (carry on in a copy) · /export [md|html|json] (save this conversation; keys and paths taken out) · /share (save it as a web page) · /model [provider/model] · /effort [level|default] · /logout <provider> · /memory · /forget <id> · /note <id> <new words> · /pin <id> · /unpin <id> · /recipes{willington} · /update (get the newest Kumi) · /changelog (what's new in it) · /quit | Ctrl-C: cancel work; idle: exit. EOF exits. Sign in with: {kumi} login <provider>.", app = crate::daw::words().app, daw = if daw { " · /daw [name] (which DAW Kumi works with, or open Kumi again with another)" } else { "" }, kumi = *KUMI, willington = if crate::daw::current().id() == kumi_types::daw::DawId::Ableton { " · /willington (Willington's bindings on or off)" } else { "" })
+/// What the full-screen app shows and plain mode can't: /help names them, and a line asking for one is told so.
+fn full_screen_only(effect: &Effect) -> bool {
+    matches!(effect, Effect::Voice | Effect::Map | Effect::Palette | Effect::Copy | Effect::Recipe)
 }
 fn head(text: &str, limit: usize) -> String {
     String::from_utf16_lossy(&text.encode_utf16().take(limit).collect::<Vec<_>>())
@@ -651,136 +629,49 @@ impl PlainTerminal {
             self.prompt();
             return Ok(());
         }
-        if command == "/quit" {
-            self.finish(0).await;
-            return Ok(());
-        }
-        if command == "/help" {
-            self.notice(&help(self.0.options.switch_daw.is_some()));
-            return Ok(());
-        }
-        if let Some(switch) = self.0.options.switch_daw.clone().filter(|_| command == "/daw" || command.starts_with("/daw ")) {
-            match crate::daw::daw_command(&command["/daw".len()..]) {
-                crate::daw::DawCommand::Say(words) => self.notice(&format!("[daw] {words}")),
-                crate::daw::DawCommand::Switch(_, _) if self.busy() => {
-                    self.notice("[daw] Kumi is working; /daw once it's done (Ctrl-C stops it).");
-                }
-                crate::daw::DawCommand::Switch(daw, words) => {
-                    self.notice(&format!("[daw] {words}"));
-                    switch(daw);
-                    self.finish(0).await;
-                }
-            }
-            return Ok(());
-        }
-        if command == "/changelog" {
-            let since = self.0.options.whats_new.as_ref().and_then(|news| news.since.clone());
-            match crate::whats_new::changelog(kumi_types::version::KUMI_VERSION, since.as_deref()) {
-                Some(news) => self.news(&news, Some(format!("Every release: {}", crate::whats_new::history_link()))),
-                None => self.notice("[new] Kumi's changelog has no notes for this version."),
-            }
-            return Ok(());
-        }
-        if command == "/update" {
-            if let Some(updates) = &self.0.options.updates {
-                if self.busy() {
-                    self.notice("[update] Kumi is working; /update once it's done (Ctrl-C stops it).");
-                    return Ok(());
-                }
-                let known = self.0.state.borrow().newer.clone();
-                let latest = if known.is_some() {
-                    known
-                } else {
-                    match (updates.check)().await {
-                        Ok(latest) => latest,
-                        Err(error) => {
-                            self.notice(&format!(
-                                "[update] {}. Try /update again later.",
-                                safe_error_message(Some(&error.message()), &self.0.options.secrets)
-                            ));
-                            return Ok(());
-                        }
-                    }
-                };
-                let Some(latest) = latest else {
-                    self.notice(&format!("[update] Kumi is up to date ({}).", updates.current));
-                    return Ok(());
-                };
-                self.notice(&format!("[update] Updating to Kumi {latest}: Kumi closes, updates and opens again."));
-                (updates.request)();
-                self.finish(0).await;
-                return Ok(());
-            }
-        }
-        if command == "/stop" {
-            if !controller.has_stop_live() {
-                self.notice(&format!("[stop] Kumi can't stop {} here.", crate::daw::words().app));
-                return Ok(());
-            }
-            if self.busy() {
-                let _ = controller.cancel().await;
-            }
-            if !controller.stop_live().await? {
-                self.notice(&format!("[stop] Kumi couldn't stop {0} just now; press space in {0}.", crate::daw::words().app));
-            }
-            return Ok(());
-        }
-        if command == "/status" {
-            let status = controller.status();
-            let library = library_line(controller.library().as_ref());
-            self.notice(&format!(
-                "[status] {}; MCP/{}: {}; turns {}{}; {}{}",
-                enum_name(status.state),
-                crate::daw::words().app,
-                self.0.state.borrow().busy.as_ref().map_or_else(|| enum_name(status.connection), |why| format!("busy ({why})")),
-                status.turns,
-                status.max_turns.filter(|n| *n != 0).map(|n| format!("/{n}")).unwrap_or_default(),
-                status.observation.clone().unwrap_or_else(|| format!("No current {} observation", crate::daw::words().app)),
-                library.map(|s| format!("; {s}")).unwrap_or_default()
-            ));
-            // Its second line comes before Kumi's goodbye, should /quit come while it works out the conversation.
-            struct Saying(PlainTerminal);
-            impl Drop for Saying {
-                fn drop(&mut self) {
-                    self.0 .0.saying.send_modify(|count| *count -= 1);
-                }
-            }
-            self.0.saying.send_modify(|count| *count += 1);
-            let _saying = Saying(self.clone());
-            if let Some(line) = remembered_line(controller.remembered().await) {
-                self.notice(&format!("[status] {line}"));
-            }
-            if let Some(now) = controller.conversation_now().await {
-                let secrets = self.0.options.secrets.clone();
-                self.notice(&format!(
-                    "[status] {}",
-                    crate::tui::app::conversation_line(&now, |text| head(&sanitize_text(text, &secrets), 60))
-                ));
-            }
-            return Ok(());
-        }
-        if self.busy() {
-            // A command Kumi doesn't have is no turn: it's said so at once, as when Kumi isn't working.
-            let verb = command.split(|c: char| c.is_whitespace() || c == '\u{feff}').find(|s| !s.is_empty()).unwrap_or("");
-            if command_like(command) && !COMMANDS.contains(&verb) {
-                self.notice("Unknown command. Use /help.");
-                return Ok(());
-            }
-            let mut state = self.0.state.borrow_mut();
-            if !state.answering && !command_like(command) && state.queued.is_none() {
-                state.queued = Some(input.into());
-                drop(state);
-                self.notice("[waiting] Kumi is getting ready; your message goes as soon as it is.");
-            } else {
-                drop(state);
-                self.notice("[busy] Busy; cancel first. No second turn was submitted.");
+        // A lone `/` opens the menu in the full-screen app and never reaches the model; here it's pointed to /help.
+        if command == "/" {
+            self.notice("Unknown command. Use /help.");
+            if !self.busy() {
+                self.prompt();
             }
             return Ok(());
         }
         let mut parts = command.split(|c: char| c.is_whitespace() || c == '\u{feff}').filter(|s| !s.is_empty());
         let verb = parts.next().unwrap_or("");
         let argument = parts.next();
-        let result = self.command(verb, argument, command, input).await;
+        // Plain mode's own commands, which the shared table doesn't have: a note pinned, unpinned or forgotten.
+        let own = matches!(verb, "/pin" | "/unpin" | "/forget");
+        let effect = (!own).then(|| registry::run(command, &self.now()));
+        if self.busy() {
+            match effect {
+                // A message while Kumi gets ready waits, once; while it answers, it's said to wait.
+                Some(Effect::Message) => {
+                    let mut state = self.0.state.borrow_mut();
+                    if !state.answering && state.queued.is_none() {
+                        state.queued = Some(input.into());
+                        drop(state);
+                        self.notice("[waiting] Kumi is getting ready; your message goes as soon as it is.");
+                    } else {
+                        drop(state);
+                        self.notice("[busy] Busy; cancel first. No second turn was submitted.");
+                    }
+                }
+                None => self.notice("[busy] Busy; cancel first. No second turn was submitted."),
+                Some(effect) => {
+                    if let Err(error) = self.effect(effect, verb, argument, command, input).await {
+                        if !self.0.state.borrow().closing {
+                            self.error(&error);
+                        }
+                    }
+                }
+            }
+            return Ok(());
+        }
+        let result = match effect {
+            Some(effect) => self.effect(effect, verb, argument, command, input).await,
+            None => self.command(verb, argument, command, input).await,
+        };
         if !self.0.state.borrow().closing {
             if let Err(error) = &result {
                 self.error(error);
@@ -789,7 +680,280 @@ impl PlainTerminal {
         }
         Ok(())
     }
-    /// Answers `verb`, one of [`COMMANDS`] (any other line [`command_like`] is unknown), or sends a turn.
+    /// /help, from the shared table: each command this session has, as it says itself; plain mode's own; and those only the
+    /// full-screen app shows.
+    fn help(&self) -> String {
+        let now = Now { busy: false, ..self.now() };
+        let (words, live) = (crate::daw::words(), crate::daw::current().id() == kumi_types::daw::DawId::Ableton);
+        let (mut here, mut there) = (vec![], vec![]);
+        for command in registry::COMMANDS.iter().filter(|command| command.offered(&now.can, &now.fronts)) {
+            if full_screen_only(&registry::run(command.name, &now)) {
+                there.push(command.name);
+            } else {
+                here.push(format!("{} ({})", command.name, command.about(words, live)));
+            }
+        }
+        here.extend([
+            "/pin <id> (keep a note from /memory even when Kumi's memory is full)".to_string(),
+            "/unpin <id>".to_string(),
+            "/forget <id> (forget a note, a technique, or u1, u2… from your places)".to_string(),
+        ]);
+        let mut said = here.join(" · ");
+        if !there.is_empty() {
+            said.push_str(&format!(" · Only in the full-screen app: {}", there.join(", ")));
+        }
+        said.push_str(&format!(" · Ctrl-C: cancel work; idle: exit. EOF exits. Sign in with: {} login <provider>.", *KUMI));
+        said
+    }
+    /// What the shared table needs of this session and of plain mode to answer a line.
+    fn now(&self) -> Now {
+        let options = &self.0.options;
+        let fronts = Fronts {
+            models: true,
+            voice: false,
+            updates: options.updates.is_some(),
+            switch_daw: options.switch_daw.is_some(),
+            willington: options.willington.is_some(),
+        };
+        Now { busy: self.busy(), goal_running: false, can: Capabilities::of(&*options.controller), fronts }
+    }
+    /// Carries out what the shared table made of a line, as text; what only the full-screen app can show says so.
+    async fn effect(&self, effect: Effect, verb: &str, argument: Option<&str>, command: &str, input: &str) -> Result<(), RuntimeError> {
+        let controller = &self.0.options.controller;
+        let words = string::trim(command.strip_prefix(verb).unwrap_or("")).to_string();
+        match effect {
+            Effect::Quit => self.finish(0).await,
+            Effect::Help => self.notice(&self.help()),
+            Effect::Daw => {
+                let Some(switch) = self.0.options.switch_daw.clone() else { return Ok(()) };
+                match crate::daw::daw_command(&command["/daw".len()..]) {
+                    crate::daw::DawCommand::Say(words) => self.notice(&format!("[daw] {words}")),
+                    crate::daw::DawCommand::Switch(_, _) if self.busy() => {
+                        self.notice("[daw] Kumi is working; /daw once it's done (Ctrl-C stops it).");
+                    }
+                    crate::daw::DawCommand::Switch(daw, words) => {
+                        self.notice(&format!("[daw] {words}"));
+                        switch(daw);
+                        self.finish(0).await;
+                    }
+                }
+            }
+            Effect::Changelog => {
+                let since = self.0.options.whats_new.as_ref().and_then(|news| news.since.clone());
+                match crate::whats_new::changelog(kumi_types::version::KUMI_VERSION, since.as_deref()) {
+                    Some(news) => self.news(&news, Some(format!("Every release: {}", crate::whats_new::history_link()))),
+                    None => self.notice("[new] Kumi's changelog has no notes for this version."),
+                }
+            }
+            Effect::Update => {
+                if let Some(updates) = &self.0.options.updates {
+                    if self.busy() {
+                        self.notice("[update] Kumi is working; /update once it's done (Ctrl-C stops it).");
+                        return Ok(());
+                    }
+                    let known = self.0.state.borrow().newer.clone();
+                    let latest = if known.is_some() {
+                        known
+                    } else {
+                        match (updates.check)().await {
+                            Ok(latest) => latest,
+                            Err(error) => {
+                                self.notice(&format!(
+                                    "[update] {}. Try /update again later.",
+                                    safe_error_message(Some(&error.message()), &self.0.options.secrets)
+                                ));
+                                return Ok(());
+                            }
+                        }
+                    };
+                    let Some(latest) = latest else {
+                        self.notice(&format!("[update] Kumi is up to date ({}).", updates.current));
+                        return Ok(());
+                    };
+                    self.notice(&format!("[update] Updating to Kumi {latest}: Kumi closes, updates and opens again."));
+                    (updates.request)();
+                    self.finish(0).await;
+                }
+            }
+            Effect::Stop => {
+                if !controller.has_stop_live() {
+                    self.notice(&format!("[stop] Kumi can't stop {} here.", crate::daw::words().app));
+                    return Ok(());
+                }
+                if self.busy() {
+                    let _ = controller.cancel().await;
+                }
+                if !controller.stop_live().await? {
+                    self.notice(&format!("[stop] Kumi couldn't stop {0} just now; press space in {0}.", crate::daw::words().app));
+                }
+            }
+            Effect::Status => {
+                let status = controller.status();
+                let library = library_line(controller.library().as_ref());
+                self.notice(&format!(
+                    "[status] {}; MCP/{}: {}; turns {}{}; {}{}",
+                    enum_name(status.state),
+                    crate::daw::words().app,
+                    self.0.state.borrow().busy.as_ref().map_or_else(|| enum_name(status.connection), |why| format!("busy ({why})")),
+                    status.turns,
+                    status.max_turns.filter(|n| *n != 0).map(|n| format!("/{n}")).unwrap_or_default(),
+                    status.observation.clone().unwrap_or_else(|| format!("No current {} observation", crate::daw::words().app)),
+                    library.map(|s| format!("; {s}")).unwrap_or_default()
+                ));
+                // Its second line comes before Kumi's goodbye, should /quit come while it works out the conversation.
+                struct Saying(PlainTerminal);
+                impl Drop for Saying {
+                    fn drop(&mut self) {
+                        self.0 .0.saying.send_modify(|count| *count -= 1);
+                    }
+                }
+                self.0.saying.send_modify(|count| *count += 1);
+                let _saying = Saying(self.clone());
+                if let Some(line) = remembered_line(controller.remembered().await) {
+                    self.notice(&format!("[status] {line}"));
+                }
+                if let Some(now) = controller.conversation_now().await {
+                    let secrets = self.0.options.secrets.clone();
+                    self.notice(&format!(
+                        "[status] {}",
+                        crate::tui::app::conversation_line(&now, |text| head(&sanitize_text(text, &secrets), 60))
+                    ));
+                }
+            }
+            Effect::Model
+            | Effect::Effort
+            | Effect::Fast
+            | Effect::Login
+            | Effect::Logout
+            | Effect::Memory
+            | Effect::Recipes
+            | Effect::Note
+            | Effect::Resume { .. }
+            | Effect::Rename { .. }
+            | Effect::Fork { .. }
+            | Effect::Export { .. }
+            | Effect::Share
+            | Effect::Willington
+            | Effect::Undo
+            | Effect::Refresh
+            | Effect::Reconnect
+            | Effect::New { .. }
+            | Effect::Message => self.command(verb, argument, command, input).await?,
+            // The line itself is the loop's request; the session reads it.
+            Effect::Loop => self.turn(input).await?,
+            Effect::Goal => {
+                self.0.state.borrow_mut().answering = true;
+                let result = controller.goal((!words.is_empty()).then_some(words.as_str())).await;
+                self.0.state.borrow_mut().answering = false;
+                result?;
+            }
+            Effect::PauseGoal | Effect::PauseLoop if self.busy() => {
+                let _ = controller.cancel().await;
+            }
+            Effect::PauseGoal => self.notice("[goal] There's no goal running to pause."),
+            Effect::PauseLoop => self.notice("[loop] There's no loop running to pause."),
+            Effect::StopGoal => {
+                if !controller.stop_goal().await? {
+                    self.notice("[goal] There's no goal to stop.");
+                }
+            }
+            Effect::StopLoop => {
+                if !(controller.has_stop_loop() && controller.stop_loop().await?) {
+                    if self.busy() {
+                        let _ = controller.cancel().await;
+                    } else {
+                        self.notice("[loop] There's no loop to stop.");
+                    }
+                }
+            }
+            Effect::ShowGoal => self.notice("[goal] A goal is running: /goal pause or /goal stop."),
+            Effect::Btw => self.aside(&words).await?,
+            Effect::Jobs => self.jobs(),
+            Effect::Slots => self.slots(&words).await,
+            Effect::Music => self.music(&words).await,
+            // (the effects `full_screen_only` names)
+            Effect::Voice | Effect::Map | Effect::Palette | Effect::Copy | Effect::Recipe => {
+                self.notice(&format!("[plain] {verb} isn't available in plain mode: the full-screen app has it."))
+            }
+            Effect::Refused(Why::NotKept) => self.notice(&format!("[conversations] {}", crate::tui::app::not_kept())),
+            Effect::Refused(Why::Busy { verb }) => {
+                self.notice(&format!("[busy] Kumi is working: {verb} once it's done (Ctrl-C stops it)."))
+            }
+            Effect::Unknown { .. } => self.notice("Unknown command. Use /help."),
+        }
+        Ok(())
+    }
+    /// A turn of `input` for the model, as a message is sent.
+    async fn turn(&self, input: &str) -> Result<(), RuntimeError> {
+        self.0.state.borrow_mut().answering = true;
+        let result = self.0.options.controller.submit(input, None).await;
+        self.0.state.borrow_mut().answering = false;
+        result
+    }
+    /// /btw <question>: asked on the side, without stopping what Kumi is doing; its answer is said once it's all in.
+    async fn aside(&self, question: &str) -> Result<(), RuntimeError> {
+        if question.is_empty() {
+            self.notice("[btw] Use: /btw <question>, asked on the side without stopping Kumi.");
+            return Ok(());
+        }
+        let answer = self.0.options.controller.aside(question, Rc::new(|_: &str| {}), None).await?;
+        self.notice(&format!("[btw] {answer}"));
+        Ok(())
+    }
+    /// /jobs: the background jobs, a line each, those still running first.
+    fn jobs(&self) {
+        let mut jobs = self.0.options.controller.jobs();
+        if jobs.is_empty() {
+            self.notice("[jobs] No background jobs.");
+            return;
+        }
+        jobs.sort_by_key(|job| enum_name(&job.state) != "running");
+        for job in jobs {
+            let title = head(&sanitize_text(&job.title, &self.0.options.secrets), 80);
+            let doing = job
+                .doing
+                .as_deref()
+                .map(|doing| format!(" · {}", head(&sanitize_text(doing, &self.0.options.secrets), 60)))
+                .unwrap_or_default();
+            self.notice(&format!("[jobs] Job {} · {title} · {}{doing}", job.id, enum_name(&job.state)));
+        }
+    }
+    /// /slots [words]: which model does each listening job, and a swap of one, as the full-screen app says them.
+    async fn slots(&self, words: &str) {
+        let Some(context) = self.0.options.controller.slots_context() else {
+            self.notice("[slots] Kumi's listening isn't set up here.");
+            return;
+        };
+        let progress = |line: String| self.notice(&format!("[slots] {line}"));
+        match kumi_listening::slots::command(words, &context, &progress, kumi_common::abort::Signal::default()).await {
+            kumi_listening::slots::Said::Slots { lines, footer } => {
+                for line in lines {
+                    self.notice(&format!("[slots] {line}"));
+                }
+                self.notice(&format!("[slots] {footer}"));
+            }
+            kumi_listening::slots::Said::Done(said) | kumi_listening::slots::Said::Refused(said) => self.notice(&format!("[slots] {said}")),
+        }
+    }
+    /// /music: what Kumi learns your taste from, as the full-screen app lists it. Changing it (add, remove, pause, forget)
+    /// is the full-screen app's.
+    async fn music(&self, words: &str) {
+        if !words.is_empty() {
+            self.notice("[music] Adding, removing, pausing or forgetting your music is the full-screen app's; /music lists it here.");
+            return;
+        }
+        let session = InProcess::new(self.0.options.controller.clone());
+        match (&session as &dyn SessionHandle).op(op::Music {}).await {
+            Ok(view) => {
+                for line in crate::tui::app::music_lines(&view.status, view.agreed, view.held, view.found.as_ref(), now_ms_f64()) {
+                    self.notice(&format!("[music] {line}"));
+                }
+            }
+            Err(error) => self.error(&error),
+        }
+    }
+    /// Answers `verb`, a command plain mode has run since before the shared table (its own /pin, /unpin and /forget
+    /// among them), or sends a turn.
     async fn command(&self, verb: &str, argument: Option<&str>, command: &str, input: &str) -> Result<(), RuntimeError> {
         let controller = &self.0.options.controller;
         let models = &self.0.options.models;
@@ -1733,4 +1897,46 @@ fn expired_rest(reason: &str, rest: &[String]) -> Option<String> {
         ))
         .into(),
     )
+}
+
+#[cfg(test)]
+mod registry_tests {
+    use super::*;
+
+    /// A session that can do everything, in a front end with every part: the table offers every command.
+    fn everything() -> Now {
+        let mut can = serde_json::to_value(Capabilities::default()).unwrap();
+        for value in can.as_object_mut().unwrap().values_mut() {
+            *value = Value::Bool(true);
+        }
+        let fronts = Fronts { models: true, voice: true, updates: true, switch_daw: true, willington: true };
+        Now { busy: false, goal_running: false, can: serde_json::from_value(can).unwrap(), fronts }
+    }
+
+    #[test]
+    fn plain_mode_runs_or_declines_every_command_in_the_shared_table() {
+        let now = everything();
+        let mut declined = vec![];
+        for command in registry::COMMANDS {
+            let effect = registry::run(command.name, &now);
+            // A command the table has comes to an effect plain mode's match answers: it runs it, or says it's the
+            // full-screen app's. Never "Unknown command", and never a message for the model.
+            assert!(!matches!(effect, Effect::Unknown { .. } | Effect::Message), "{} isn't answered: {effect:?}", command.name);
+            if full_screen_only(&effect) {
+                declined.push(command.name);
+            }
+        }
+        declined.sort();
+        assert_eq!(declined, ["/copy", "/map", "/palette", "/recipe", "/voice"], "what plain mode leaves to the full-screen app");
+    }
+
+    #[test]
+    fn plain_modes_own_commands_stay_out_of_the_shared_table_and_a_lone_slash_is_no_command_there() {
+        for own in ["/pin", "/unpin", "/forget"] {
+            assert!(registry::named(own).is_none(), "{own} is plain mode's own");
+        }
+        // run() takes a lone `/` as words; plain mode catches it first (#629's rule).
+        assert_eq!(registry::run("/", &everything()), Effect::Message);
+        assert!(command_like("/") && command_like("/help") && !command_like("/Users/me/Music/kick.wav make it punchier"));
+    }
 }
