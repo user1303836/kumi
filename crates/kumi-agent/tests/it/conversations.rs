@@ -3,6 +3,7 @@
 use kumi_agent::core::{
     contracts::{Claim, ConversationMatch, ConversationStore, ConversationSummary, SavedConversation},
     conversations::{create_conversation_store, create_conversation_store_keeping, fresh_id, title},
+    session_log::log_name,
 };
 use serde_json::{json, Value};
 use std::{
@@ -779,4 +780,117 @@ async fn a_conversation_from_a_file_keeps_its_set_and_an_earlier_kumi_writing_th
 #[test]
 fn a_title_draws_what_it_says() {
     assert_eq!(title(None, "\u{202E}gnol \u{200B}kick\u{E0041}"), "gnol kick");
+}
+
+/// Kumi 1.24's reading of a place's folder, where it goes past 1.16.3's: what it takes for a conversation's file, and for
+/// its name and pin beside it. Nothing else in the folder is anything to it.
+mod kumi_1_24 {
+    /// Its list, index, search, trim and report take `<id>.json` (`strip_suffix(".json")`), as 1.16.3's did.
+    pub fn conversation_file(name: &str) -> Option<&str> {
+        name.strip_suffix(".json").filter(|id| super::kumi_1_16_3::conversation(id))
+    }
+    pub fn meta_file(name: &str) -> Option<&str> {
+        name.strip_suffix(".meta").filter(|id| super::kumi_1_16_3::conversation(id))
+    }
+}
+
+/// A log beside a conversation, as this Kumi writes one: a header, then a request.
+fn log_beside(kept: &Path, id: &str, words: &str) {
+    let header = json!({"kind":"header","v":1,"id":id,"at":1,"kumi":"1.25.0","before":0});
+    let request = json!({"kind":"request","at":2,"text":words});
+    std::fs::create_dir_all(kept).unwrap();
+    std::fs::write(kept.join(log_name(id)), format!("{header}\n{request}\n")).unwrap();
+}
+
+/// Kumi 1.24 lists conversations with `strip_suffix(".json")`: a conversation's log beside it is never one to it, so a
+/// rollback lists, reads, keeps and reports what it did before there were logs, and forward again nothing's lost.
+#[tokio::test(flavor = "current_thread")]
+async fn a_conversations_log_is_never_a_conversation_to_kumi_1_24() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = create_conversation_store(dir.path());
+    let kept = dir.path().join(A).join("conversations");
+    for n in 0..25 {
+        let id = format!("old{n:03}aaaaaa");
+        store.save(A, &id, &said(&format!("request {n}"), 10 + n)).await.unwrap();
+        log_beside(&kept, &id, &format!("zebra {n}"));
+        age(&kept.join(format!("{id}.json")), Duration::from_secs(60 * (30 - n as u64)));
+    }
+    for id in ["old000aaaaaa", "a", "mv66me0m3fa91c", "zzzzzzzzzzzzzzzzzzzzzzzz"] {
+        assert_eq!((kumi_1_24::conversation_file(&log_name(id)), kumi_1_24::meta_file(&log_name(id))), (None, None), "{id}");
+    }
+    // Its listing, and what its report took: only the conversations themselves, each read as one.
+    let listed = kumi_1_16_3::names(&kept);
+    assert_eq!(listed.len(), 25);
+    assert!(listed.iter().all(|name| name.ends_with(".json")), "{listed:?}");
+    for file in kumi_1_16_3::report_candidates(dir.path()) {
+        assert!(kumi_1_16_3::read(&file).is_some(), "{}", file.display());
+    }
+    // Its trim keeps the 20 newest by those names alone, and lets the others go; their logs it doesn't see.
+    kumi_1_16_3::trim(&dir.path().join(A));
+    assert_eq!(kumi_1_16_3::names(&kept).len(), 20);
+    assert!(kept.join(log_name("old000aaaaaa")).exists());
+    // Forward again, this Kumi lists, indexes and searches as before: a log's words aren't a conversation's.
+    let again = create_conversation_store(dir.path());
+    assert_eq!(again.list(A).await.unwrap().len(), 20);
+    assert!(again.search(&["zebra".into()], 1, 10, None).await.unwrap().is_empty());
+    // And the logs of those 1.24 let go go too, once they've been left a while.
+    for n in 0..25 {
+        age(&kept.join(log_name(&format!("old{n:03}aaaaaa"))), Duration::from_secs(3600));
+    }
+    again.tidy(A).await.unwrap();
+    for n in 0..25 {
+        let log = kept.join(log_name(&format!("old{n:03}aaaaaa")));
+        assert_eq!(log.exists(), n >= 5, "old{n:03}aaaaaa");
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_log_goes_with_its_conversation_and_one_left_behind_follows_it_or_goes() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = create_conversation_store(dir.path());
+    let kept = dir.path().join(A).join("conversations");
+    // Deleted, a conversation's log goes with it.
+    store.save(A, "mv66me0m0gone1", &said("one", 1)).await.unwrap();
+    log_beside(&kept, "mv66me0m0gone1", "one");
+    assert!(store.delete(A, "mv66me0m0gone1").await.unwrap());
+    assert!(!kept.join(log_name("mv66me0m0gone1")).exists());
+    // Let go past the newest and the days kept, its log goes with it.
+    let keeping = create_conversation_store_keeping(dir.path(), Some(1));
+    for n in 0..21 {
+        let id = format!("kept{n:02}aaaaaa");
+        keeping.save(A, &id, &said("words", 1)).await.unwrap();
+        log_beside(&kept, &id, "words");
+    }
+    age(&kept.join("kept00aaaaaa.json"), DAY * 2);
+    keeping.tidy(A).await.unwrap();
+    assert!(!kept.join("kept00aaaaaa.json").exists() && !kept.join(log_name("kept00aaaaaa")).exists());
+    assert!(kept.join(log_name("kept01aaaaaa")).exists());
+    // Left without its conversation (an earlier Kumi let it go): it stays a while, then goes.
+    log_beside(&kept, "mv66me0m0left1", "left");
+    store.tidy(A).await.unwrap();
+    assert!(kept.join(log_name("mv66me0m0left1")).exists());
+    age(&kept.join(log_name("mv66me0m0left1")), Duration::from_secs(3600));
+    store.tidy(A).await.unwrap();
+    assert!(!kept.join(log_name("mv66me0m0left1")).exists());
+    // One a Kumi has open stays, however long it's been: its conversation is on its way to it.
+    log_beside(&kept, "mv66me0m0held1", "held");
+    age(&kept.join(log_name("mv66me0m0held1")), Duration::from_secs(3600));
+    let window = create_conversation_store(dir.path());
+    assert_eq!(window.claim(A, "mv66me0m0held1"), Claim::Ours);
+    store.tidy(A).await.unwrap();
+    window.tidy(A).await.unwrap();
+    assert!(kept.join(log_name("mv66me0m0held1")).exists());
+    window.release(A, "mv66me0m0held1");
+    store.tidy(A).await.unwrap();
+    assert!(!kept.join(log_name("mv66me0m0held1")).exists());
+    // An earlier Kumi moved an unsaved Set's conversation to the Set's place once it was saved, and left its log behind:
+    // the log follows it.
+    let unsaved = dir.path().join("unsaved").join("conversations");
+    store.save("unsaved", "mv66me0m0moved", &said("a new song", 20)).await.unwrap();
+    log_beside(&unsaved, "mv66me0m0moved", "a new song");
+    std::fs::rename(unsaved.join("mv66me0m0moved.json"), kept.join("mv66me0m0moved.json")).unwrap();
+    age(&unsaved.join(log_name("mv66me0m0moved")), Duration::from_secs(3600));
+    store.tidy("unsaved").await.unwrap();
+    assert!(!unsaved.join(log_name("mv66me0m0moved")).exists());
+    assert!(store.log(A, "mv66me0m0moved").await.is_some());
 }

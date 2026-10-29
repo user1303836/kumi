@@ -2,7 +2,7 @@
 use super::*;
 use crate::{
     awake::KeepAwake,
-    history::open_input_history,
+    history::{log_redactor, open_input_history},
     models::{create_model_control, ModelControlOptions},
     terminal::{create_terminal, Terminal, TerminalOptions},
     tui::app::{create_tui, AwaySettings, ConnectDaw, MapHover, PanelTab, TuiOptions},
@@ -17,6 +17,7 @@ use kumi_agent::{
         jobs::{create_job_store, DEFAULT_MAX_JOBS, WORKER_STEPS},
         memory::MemoryStoreOptions,
         session::{JobsOptions, VideoDirectories},
+        session_log::SessionLog,
         store_backed::{SqliteMemoryStore, SqlitePlaybookStore, SqliteTechniqueStore},
         store_client::StoreClient,
     },
@@ -298,6 +299,15 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
     let keep_days = settings.conversations.as_ref().and_then(|c| c.keep_days);
     let conversations = (bridge_config.is_some() || bridge_missing || resume.is_some())
         .then(|| kumi_agent::core::conversations::create_conversation_store_in(&projects_dir, keep_days, crate::daw::registry::places()));
+    // Each kept conversation's log, beside it: every event the screen gets passes it first, the session's and the DAW's
+    // alike, with keys taken out of the words as the input history takes them out.
+    let log = conversations
+        .as_ref()
+        .map(|_| SessionLog::new(&projects_dir, crate::daw::registry::places(), Rc::new(log_redactor(secrets.clone()))));
+    let emit = match &log {
+        Some(log) => SessionLog::tee(log, emit),
+        None => emit,
+    };
     // The conversation asked for is found before anything shows: a word that names none says so, and Kumi stops there.
     // Only this DAW's conversations (and imported ones) go on here: another DAW's goes on in that DAW (review L4).
     let ours = |place: &str| kumi_types::place::kept_for(place, provider.id());
@@ -690,6 +700,7 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
     // Live may come later in this session, once first-run setup has put the bridge in place.
     let live_possible = bridge_config.is_some() || bridge_missing;
     options.conversations = conversations.map(|store| store as Rc<dyn ConversationStore>);
+    options.log = log;
     options.resume = taken_up;
     // Kumi's database keeps notes, techniques, lessons and gaps, with what earlier Kumis kept in files
     // read in. When it can't open, they stay in their files this time, as before, and Kumi says so once.

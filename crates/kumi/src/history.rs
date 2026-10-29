@@ -26,15 +26,36 @@ static KEYS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
 static LABELLED: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)(?<![A-Za-z0-9_])(api[_-]?key|token|secret|password)([\s\u{feff}]*[:=][\s\u{feff}]*)[^\s\u{feff}]+").unwrap()
 });
+/// `text` without anything shaped like a key, or set after a word that names one ("token: …").
+fn without_keys(mut kept: String) -> String {
+    for pattern in KEYS.iter() {
+        kept = pattern.replace_all(&kept, "[redacted]").into_owned();
+    }
+    LABELLED.replace_all(&kept, "${1}${2}[redacted]").into_owned()
+}
 pub fn history_text(text: &str, secrets: &[String]) -> String {
     string::head(&redacted(text, secrets), MAX_ENTRY)
 }
 fn redacted(text: &str, secrets: &[String]) -> String {
-    let mut kept = sanitize_text(text, secrets);
-    for pattern in KEYS.iter() {
-        kept = pattern.replace_all(&kept, "[redacted]").into_owned();
+    string::trim(&without_keys(sanitize_text(text, secrets))).to_string()
+}
+/// What a conversation's log keeps of its words: the input history's redaction, `secrets` (the keys this computer knows)
+/// then anything shaped like a key, with the words otherwise as they were (the screen cleans them as it draws them). A
+/// known key under 8 characters (a local model server's "none") is a word, not a secret.
+pub fn log_redactor(secrets: Vec<String>) -> impl Fn(&str) -> String {
+    let mut secrets: Vec<String> = secrets.into_iter().filter(|secret| string::utf16_len(secret) >= 8).collect();
+    // A longer key that holds a shorter one goes first, whole.
+    secrets.sort_by_key(|secret| std::cmp::Reverse(string::utf16_len(secret)));
+    secrets.dedup();
+    move |text| {
+        let mut kept = text.to_owned();
+        for secret in &secrets {
+            if kept.contains(secret.as_str()) {
+                kept = kept.replace(secret.as_str(), "[redacted]");
+            }
+        }
+        without_keys(kept)
     }
-    string::trim(&LABELLED.replace_all(&kept, "${1}${2}[redacted]")).to_string()
 }
 pub struct InputHistory {
     entries: Vec<String>,

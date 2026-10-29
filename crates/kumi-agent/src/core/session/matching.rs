@@ -148,6 +148,10 @@ impl Session {
         } else {
             held.value.run_with(&input, pictures, op.signal.clone(), emit).await
         };
+        // What the answer settled into the conversation goes in its log, message by message.
+        if let Some(log) = &self.0.options.log {
+            log.messages(&held.value.last_turn());
+        }
         // A turn that didn't settle may not have kept them: the next one hears them again.
         if !matches!(&result, Ok(turn) if turn.stop_reason != StopReason::Cancelled) {
             self.return_job_reports(&taken);
