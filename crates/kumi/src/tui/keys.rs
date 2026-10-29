@@ -99,6 +99,8 @@ pub enum Reply {
     Color { which: u32, rgb: Option<[u8; 3]> },
     /// DA1's, asked last: the others have come, or won't.
     Attributes(String),
+    /// The terminal's colours turned dark or light (its report once mode 2031 is on: `CSI ? 997 ; 1 n` dark, `2` light).
+    Scheme { dark: bool },
 }
 
 /// What an OSC answer says: a colour Kumi asked for (`11;rgb:1e1e/1e1e/1e1e`), or nothing Kumi reads.
@@ -507,6 +509,11 @@ fn csi(state: &mut State, timed_out: bool, events: &mut Vec<InputEvent>) -> usiz
         let reply = match final_byte {
             'c' => Some(Reply::Attributes(answer.to_string())),
             'u' => answer.parse().ok().map(Reply::KittyKeys),
+            'n' => match answer {
+                "997;1" => Some(Reply::Scheme { dark: true }),
+                "997;2" => Some(Reply::Scheme { dark: false }),
+                _ => None,
+            },
             'y' => answer
                 .strip_suffix('$')
                 .and_then(|answer| answer.split_once(';'))
