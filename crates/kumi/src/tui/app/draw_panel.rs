@@ -32,100 +32,96 @@ pub(super) fn say(lines: &mut Vec<Line>, text: &str, style: Style, width: i32) {
     }
 }
 impl TuiApp {
-    pub(super) fn draw_panel(&self, screen: &mut Screen, panel: &mut Panel, box_top: i32, left: i32) -> Option<Cursor> {
-        let width = 76.min(left - 2);
-        let inner = width - 4;
-        let space = box_top - 5;
+    /// A list to choose from, in its box: its title (with its tabs, or what's typed to filter it), then the rows that
+    /// fit around the one chosen.
+    pub(super) fn draw_pick(&self, screen: &mut Screen, area: Area, picker: &Picker) -> Option<Cursor> {
+        let width = 76.min(area.left - 2);
+        let space = area.box_top - 5;
         let mut lines: Vec<Line> = vec![];
-        match panel {
-            Panel::Pick { picker, .. } => {
-                let picker = picker.borrow();
-                let visible = picker.visible();
-                let selected = picker.selected();
-                let filter = if !picker.filter.is_empty() {
-                    Some(format!("filter: {}", picker.filter))
-                } else if picker.options.filterable {
-                    Some("type to filter".into())
-                } else {
-                    None
-                };
-                let mut title = Line::new(&picker.title, st::TITLE);
-                title.right = filter.map(|f| sp(f, if picker.filter.is_empty() { st::FAINT } else { st::BRIGHT }));
-                // Its tabs beside the title, the one showing lit.
-                if let Some(tabs) = &picker.tabs {
-                    let mut spans = vec![sp(&picker.title, st::TITLE), sp("   ", st::FAINT)];
-                    for (at, name) in tabs.names.iter().enumerate() {
-                        if at > 0 {
-                            spans.push(sp(" · ", st::FAINT));
-                        }
-                        spans.push(sp(name, if at == tabs.at { st::ACCENT } else { st::FAINT }));
-                    }
-                    title.spans = Some(spans);
+        let visible = picker.visible();
+        let selected = picker.selected();
+        let filter = if !picker.filter.is_empty() {
+            Some(format!("filter: {}", picker.filter))
+        } else if picker.options.filterable {
+            Some("type to filter".into())
+        } else {
+            None
+        };
+        let mut title = Line::new(&picker.title, st::TITLE);
+        title.right = filter.map(|f| sp(f, if picker.filter.is_empty() { st::FAINT } else { st::BRIGHT }));
+        // Its tabs beside the title, the one showing lit.
+        if let Some(tabs) = &picker.tabs {
+            let mut spans = vec![sp(&picker.title, st::TITLE), sp("   ", st::FAINT)];
+            for (at, name) in tabs.names.iter().enumerate() {
+                if at > 0 {
+                    spans.push(sp(" · ", st::FAINT));
                 }
-                lines.push(title);
-                if visible.is_empty() {
-                    lines.push(Line::new(format!("Nothing matches “{}”.", picker.filter), st::FAINT));
-                }
-                let rows = (space - 2).clamp(1, 14);
-                let at = selected.and_then(|s| visible.iter().position(|i| std::ptr::eq(*i, s))).unwrap_or(0) as i32;
-                let mut first = (at - rows / 2).min(visible.len() as i32 - rows).max(0) as usize;
-                if first > 0 && visible[first - 1].heading && at - (first as i32) < rows - 1 {
-                    first -= 1;
-                }
-                let shown = &visible[first..(first + rows as usize).min(visible.len())];
-                let label_width = shown
-                    .iter()
-                    .filter(|i| !i.heading && i.detail.as_ref().is_some_and(|s| !s.is_empty()))
-                    .map(|i| text_width(&i.label))
-                    .max()
-                    .unwrap_or(0)
-                    .min(28);
-                for (index, item) in shown.iter().enumerate() {
-                    let note = item.note.as_ref().filter(|s| !s.is_empty()).map(|s| {
-                        sp(
-                            s,
-                            match item.note_tone {
-                                Some(NoteTone::Accent) => st::ACCENT,
-                                Some(NoteTone::Warn) => st::WARN,
-                                _ => st::FAINT,
-                            },
-                        )
-                    });
-                    let more = if index == 0 && first > 0 {
-                        Some(format!("↑ {first} more"))
-                    } else if index == shown.len() - 1 && first + (rows as usize) < visible.len() {
-                        Some(format!("↓ {} more", visible.len() - first - rows as usize))
-                    } else {
-                        None
-                    };
-                    let right = note.or_else(|| more.map(|s| sp(s, st::FAINT)));
-                    if item.heading {
-                        let mut line = Line::new(&item.label, st::LABEL);
-                        line.right = right;
-                        lines.push(line);
-                        continue;
-                    }
-                    let chosen = selected.is_some_and(|s| std::ptr::eq(*item, s));
-                    let mut line = Line::new(
-                        &item.label,
-                        if item.inert {
-                            st::FAINT
-                        } else if chosen {
-                            st::ACCENT
-                        } else {
-                            st::TEXT
-                        },
-                    );
-                    line.indent = 2;
-                    line.band = chosen;
-                    line.label_width = label_width;
-                    line.detail = item.detail.as_ref().filter(|s| !s.is_empty()).map(|s| sp(s, if chosen { st::BRIGHT } else { st::DIM }));
-                    line.right = right;
-                    lines.push(line);
-                }
+                spans.push(sp(name, if at == tabs.at { st::ACCENT } else { st::FAINT }));
             }
+            title.spans = Some(spans);
         }
-        self.draw_lines(screen, box_top, width, &lines, None)
+        lines.push(title);
+        if visible.is_empty() {
+            lines.push(Line::new(format!("Nothing matches “{}”.", picker.filter), st::FAINT));
+        }
+        let rows = (space - 2).clamp(1, 14);
+        let at = selected.and_then(|s| visible.iter().position(|i| std::ptr::eq(*i, s))).unwrap_or(0) as i32;
+        let mut first = (at - rows / 2).min(visible.len() as i32 - rows).max(0) as usize;
+        if first > 0 && visible[first - 1].heading && at - (first as i32) < rows - 1 {
+            first -= 1;
+        }
+        let shown = &visible[first..(first + rows as usize).min(visible.len())];
+        let label_width = shown
+            .iter()
+            .filter(|i| !i.heading && i.detail.as_ref().is_some_and(|s| !s.is_empty()))
+            .map(|i| text_width(&i.label))
+            .max()
+            .unwrap_or(0)
+            .min(28);
+        for (index, item) in shown.iter().enumerate() {
+            let note = item.note.as_ref().filter(|s| !s.is_empty()).map(|s| {
+                sp(
+                    s,
+                    match item.note_tone {
+                        Some(NoteTone::Accent) => st::ACCENT,
+                        Some(NoteTone::Warn) => st::WARN,
+                        _ => st::FAINT,
+                    },
+                )
+            });
+            let more = if index == 0 && first > 0 {
+                Some(format!("↑ {first} more"))
+            } else if index == shown.len() - 1 && first + (rows as usize) < visible.len() {
+                Some(format!("↓ {} more", visible.len() - first - rows as usize))
+            } else {
+                None
+            };
+            let right = note.or_else(|| more.map(|s| sp(s, st::FAINT)));
+            if item.heading {
+                let mut line = Line::new(&item.label, st::LABEL);
+                line.right = right;
+                lines.push(line);
+                continue;
+            }
+            let chosen = selected.is_some_and(|s| std::ptr::eq(*item, s));
+            let mut line = Line::new(
+                &item.label,
+                if item.inert {
+                    st::FAINT
+                } else if chosen {
+                    st::ACCENT
+                } else {
+                    st::TEXT
+                },
+            );
+            line.indent = 2;
+            line.band = chosen;
+            line.label_width = label_width;
+            line.detail = item.detail.as_ref().filter(|s| !s.is_empty()).map(|s| sp(s, if chosen { st::BRIGHT } else { st::DIM }));
+            line.right = right;
+            lines.push(line);
+        }
+        self.draw_lines(screen, area.box_top, width, &lines, None)
     }
     /// A panel's `lines` in a box `width` wide over the conversation, down to the input box, whose top row is `box_top`;
     /// the cursor where `cursor_at` puts it, when that line shows.
@@ -172,22 +168,5 @@ impl TuiApp {
             }
         }
         cursor_at.filter(|(line, _)| row_of(*line) < box_top - 1).map(|(line, column)| Cursor { x: x + column, y: row_of(line) })
-    }
-}
-/// The box's hint while `panel` is the top one: a list's own words when it has them (a countdown to Kumi's pick,
-/// another way to choose).
-pub(super) fn panel_hint(panel: &Panel) -> String {
-    match panel {
-        Panel::Pick { picker, .. } => {
-            let picker = picker.borrow();
-            picker.options.hint.clone().unwrap_or_else(|| {
-                if picker.options.answers {
-                    "a number, then enter answers · or type your own · esc to close"
-                } else {
-                    "↑↓ to move · enter to choose · esc to close"
-                }
-                .into()
-            })
-        }
     }
 }

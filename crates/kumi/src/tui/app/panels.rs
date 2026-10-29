@@ -1104,7 +1104,7 @@ impl TuiApp {
             Some(a) => f(TuiApp(a), item).boxed_local(),
             None => async { Ok(()) }.boxed_local(),
         });
-        self.open_overlay(Panel::Pick { picker: picker.clone(), choose, choosing: Rc::default() });
+        self.open_overlay(PickPanel { picker: picker.clone(), choose, choosing: Rc::default() });
         picker
     }
     /// Kumi's answer asked the producer to pick: its options, picked by number (or ↑↓) and sent with
@@ -1177,12 +1177,11 @@ impl TuiApp {
             let Some(a) = weak.upgrade() else { return };
             let app = TuiApp(a);
             let choose = app
-                .top_panel(|panel| match panel {
-                    Panel::Pick { picker: active, choose, choosing } if Rc::ptr_eq(active, &picker) && !choosing.get() => {
-                        choosing.set(true);
-                        Some((choose.clone(), choosing.clone()))
-                    }
-                    _ => None,
+                .top_as(|panel: &PickPanel| {
+                    (Rc::ptr_eq(&panel.picker, &picker) && !panel.choosing.get()).then(|| {
+                        panel.choosing.set(true);
+                        (panel.choose.clone(), panel.choosing.clone())
+                    })
                 })
                 .flatten();
             app.0.state.borrow_mut().answer_countdown = None;
@@ -1219,11 +1218,7 @@ impl TuiApp {
     pub(super) fn stop_answer_countdown(&self) {
         let Some(task) = self.0.state.borrow_mut().answer_countdown.take() else { return };
         task.abort();
-        self.top_panel(|panel| {
-            if let Panel::Pick { picker, .. } = panel {
-                picker.borrow_mut().options.hint = None;
-            }
-        });
+        self.top_as(|panel: &PickPanel| panel.picker.borrow_mut().options.hint = None);
         self.0.scheduler.request();
     }
     /// After an answer, whether to keep the technique from what Kumi built: 1 keeps it, 2 doesn't. Like
@@ -1274,30 +1269,30 @@ impl TuiApp {
         true
     }
     /// Whether `picker` is the technique offer's, letting go of the offer whatever is closing: closing that is a no.
-    fn closing_offer(&self, picker: Option<&Rc<RefCell<Picker>>>) -> bool {
+    fn closing_offer(&self, picker: &Rc<RefCell<Picker>>) -> bool {
         let offer = self.0.state.borrow_mut().offer.take();
-        offer.zip(picker).is_some_and(|(offer, picker)| Rc::ptr_eq(picker, &offer))
+        offer.is_some_and(|offer| Rc::ptr_eq(picker, &offer))
     }
     /// Whether `picker` is the question about another Set's conversation, letting go of it whatever is closing: closing
     /// that leaves it.
-    fn closing_set_ask(&self, picker: Option<&Rc<RefCell<Picker>>>) -> bool {
+    fn closing_set_ask(&self, picker: &Rc<RefCell<Picker>>) -> bool {
         let ask = self.0.state.borrow_mut().set_ask.take();
-        ask.zip(picker).is_some_and(|(ask, picker)| Rc::ptr_eq(picker, &ask))
+        ask.is_some_and(|ask| Rc::ptr_eq(picker, &ask))
     }
     /// Whether the top panel is `picker`'s list.
     fn same_picker(&self, picker: &Rc<RefCell<Picker>>) -> bool {
-        self.top_panel(|panel| matches!(panel, Panel::Pick { picker: active, .. } if Rc::ptr_eq(active, picker))).unwrap_or(false)
+        self.top_as(|panel: &PickPanel| Rc::ptr_eq(&panel.picker, picker)).unwrap_or(false)
     }
-    /// What `look` makes of the top overlay, when it's one of the panels.
-    pub(super) fn top_panel<R>(&self, look: impl FnOnce(&Panel) -> R) -> Option<R> {
+    /// What `look` makes of the top overlay, when it's a `T`.
+    pub(super) fn top_as<T: Overlay<TuiApp>, R>(&self, look: impl FnOnce(&T) -> R) -> Option<R> {
         let top = self.0.state.borrow().overlays.top()?;
         let top = top.borrow();
-        let seen = top.downcast_ref::<Panel>().map(look);
+        let seen = top.downcast_ref::<T>().map(look);
         seen
     }
     /// Whether Kumi's numbered answers are the top overlay, waiting for the producer's pick.
     pub(super) fn answers_open(&self) -> bool {
-        self.top_panel(|panel| matches!(panel, Panel::Pick { picker, .. } if picker.borrow().options.answers)).unwrap_or(false)
+        self.top_as(|panel: &PickPanel| panel.picker.borrow().options.answers).unwrap_or(false)
     }
     /// Whether the top overlay is a `T`.
     pub(super) fn top_is<T: Overlay<TuiApp>>(&self) -> bool {
@@ -1352,14 +1347,11 @@ impl TuiApp {
             }
         }
     }
-    /// A key, typed text or a paste for a list or a sign-in.
-    fn panel_key(&self, panel: &mut Panel, event: InputEvent) -> Handled {
+    /// A key, typed text or a paste for a list.
+    fn pick_input(&self, panel: &mut PickPanel, event: InputEvent) -> Handled {
+        let PickPanel { picker, choose, choosing } = panel;
         if let InputEvent::Key { name, mods, .. } = &event {
             if name == "escape" || (mods.ctrl && name == "c") {
-                let picker = match panel {
-                    Panel::Pick { picker, .. } => Some(&*picker),
-                    _ => None,
-                };
                 let declined = self.closing_offer(picker);
                 let left = self.closing_set_ask(picker);
                 if declined {
@@ -1370,40 +1362,37 @@ impl TuiApp {
                 }
                 return Handled::Close;
             }
-            match panel {
-                Panel::Pick { picker, choose, choosing } => match name.as_str() {
-                    "up" => picker.borrow_mut().r#move(-1),
-                    "tab" if picker.borrow().tabs.is_some() => picker.borrow_mut().next_tab(),
-                    "down" | "tab" => picker.borrow_mut().r#move(1),
-                    "backspace" => picker.borrow_mut().erase(),
-                    // A second Enter before the first choice is made would make it again (an answer sent twice).
-                    // Ctrl-F chooses the other way, where the list has one (/model: the fallback).
-                    "enter" | "f" if !choosing.get() && (name == "enter" || mods.ctrl && picker.borrow().options.alternate) => {
-                        let item = {
-                            let picker = picker.borrow();
-                            let item = picker.selected().cloned().map(|item| PickerItem { chosen: picker.chosen, ..item });
-                            if name == "f" {
-                                item.filter(|item| item.value.as_deref().is_some_and(|value| !value.contains("signin:")))
-                                    .map(|item| PickerItem { value: item.value.map(|value| format!("fallback:{value}")), ..item })
-                            } else {
-                                item
-                            }
-                        };
-                        if let Some(item) = item {
-                            choosing.set(true);
-                            let (choose, choosing) = (choose.clone(), choosing.clone());
-                            self.task(move |app| async move {
-                                let chosen = choose(item).await;
-                                choosing.set(false);
-                                if let Err(error) = chosen {
-                                    app.panel_failed(&error);
-                                }
-                                Ok(())
-                            });
+            match name.as_str() {
+                "up" => picker.borrow_mut().r#move(-1),
+                "tab" if picker.borrow().tabs.is_some() => picker.borrow_mut().next_tab(),
+                "down" | "tab" => picker.borrow_mut().r#move(1),
+                "backspace" => picker.borrow_mut().erase(),
+                // A second Enter before the first choice is made would make it again (an answer sent twice).
+                // Ctrl-F chooses the other way, where the list has one (/model: the fallback).
+                "enter" | "f" if !choosing.get() && (name == "enter" || mods.ctrl && picker.borrow().options.alternate) => {
+                    let item = {
+                        let picker = picker.borrow();
+                        let item = picker.selected().cloned().map(|item| PickerItem { chosen: picker.chosen, ..item });
+                        if name == "f" {
+                            item.filter(|item| item.value.as_deref().is_some_and(|value| !value.contains("signin:")))
+                                .map(|item| PickerItem { value: item.value.map(|value| format!("fallback:{value}")), ..item })
+                        } else {
+                            item
                         }
+                    };
+                    if let Some(item) = item {
+                        choosing.set(true);
+                        let (choose, choosing) = (choose.clone(), choosing.clone());
+                        self.task(move |app| async move {
+                            let chosen = choose(item).await;
+                            choosing.set(false);
+                            if let Err(error) = chosen {
+                                app.panel_failed(&error);
+                            }
+                            Ok(())
+                        });
                     }
-                    _ => {}
-                },
+                }
                 _ => {}
             }
             return Handled::Kept;
@@ -1412,39 +1401,34 @@ impl TuiApp {
             InputEvent::Text { text } | InputEvent::Paste { text } => text.clone(),
             _ => return Handled::Kept,
         };
-        match panel {
-            Panel::Pick { picker, .. } => {
-                if picker.borrow().options.answers {
-                    // A number picks its option and Enter sends it; typing on ("2 dB quieter") takes the number
-                    // into the input box with the rest, so a free answer that starts with one arrives whole.
-                    let picked = {
-                        let picker = picker.borrow();
-                        let number = text.parse().ok().filter(|_| picker.typed.is_empty());
-                        number.and_then(|n| picker.numbered(n)).and_then(|item| item.value.clone())
-                    };
-                    if let Some(value) = picked {
-                        let mut picker = picker.borrow_mut();
-                        picker.select(Some(&value));
-                        picker.typed = text;
-                        picker.chosen = true;
-                        return Handled::Kept;
-                    }
-                    let typed = std::mem::take(&mut picker.borrow_mut().typed);
-                    // Typed on, it's words of the answer, never a key: a `?` that starts one doesn't open the help.
-                    if matches!(event, InputEvent::Text { .. }) {
-                        self.type_into_box(&format!("{typed}{text}"), true);
-                        return Handled::Close;
-                    }
-                    self.0.state.borrow_mut().editor.insert(&typed);
-                    return Handled::Pass(event);
-                }
-                if picker.borrow().filter.is_empty() && text.starts_with('/') {
-                    return Handled::Pass(event);
-                }
-                picker.borrow_mut().r#type(&text);
+        if picker.borrow().options.answers {
+            // A number picks its option and Enter sends it; typing on ("2 dB quieter") takes the number into the input
+            // box with the rest, so a free answer that starts with one arrives whole.
+            let picked = {
+                let picker = picker.borrow();
+                let number = text.parse().ok().filter(|_| picker.typed.is_empty());
+                number.and_then(|n| picker.numbered(n)).and_then(|item| item.value.clone())
+            };
+            if let Some(value) = picked {
+                let mut picker = picker.borrow_mut();
+                picker.select(Some(&value));
+                picker.typed = text;
+                picker.chosen = true;
+                return Handled::Kept;
             }
-            _ => {}
+            let typed = std::mem::take(&mut picker.borrow_mut().typed);
+            // Typed on, it's words of the answer, never a key: a `?` that starts one doesn't open the help.
+            if matches!(event, InputEvent::Text { .. }) {
+                self.type_into_box(&format!("{typed}{text}"), true);
+                return Handled::Close;
+            }
+            self.0.state.borrow_mut().editor.insert(&typed);
+            return Handled::Pass(event);
         }
+        if picker.borrow().filter.is_empty() && text.starts_with('/') {
+            return Handled::Pass(event);
+        }
+        picker.borrow_mut().r#type(&text);
         Handled::Kept
     }
     fn aside_input(&self, panel: &mut AsidePanel, event: InputEvent) -> Handled {
@@ -1986,11 +1970,7 @@ impl TuiApp {
                 Some("send") => {
                     let control = app.0.options.voice.as_ref().unwrap();
                     control.choose(VoiceChange { send: Some(!control.choices().send), ..Default::default() })?;
-                    app.top_panel(|panel| {
-                        if let Panel::Pick { picker, .. } = panel {
-                            picker.borrow_mut().set_items(app.voice_items());
-                        }
-                    });
+                    app.top_as(|panel: &PickPanel| panel.picker.borrow_mut().set_items(app.voice_items()));
                     app.0.scheduler.request();
                 }
                 Some("language") => app.open_voice_language(),
@@ -2256,21 +2236,35 @@ fn as_key<R>(overlay: &Shared<TuiApp>, change: impl FnOnce(&mut KeyPanel) -> R) 
     changed
 }
 
-impl Overlay<TuiApp> for Panel {
+/// A list to choose from, open over the conversation: its picker, what choosing an item does, and whether a choice is
+/// being made.
+pub(super) struct PickPanel {
+    pub picker: Rc<RefCell<Picker>>,
+    choose: Choice,
+    choosing: Rc<Cell<bool>>,
+}
+impl Overlay<TuiApp> for PickPanel {
     fn handle(&mut self, app: &TuiApp, event: InputEvent) -> Handled {
-        match self {
-            Panel::Pick { .. } => app.panel_key(self, event),
-        }
+        app.pick_input(self, event)
     }
     fn draw(&mut self, app: &TuiApp, screen: &mut Screen, area: Area) -> Option<Cursor> {
-        app.draw_panel(screen, self, area.box_top, area.left)
+        app.draw_pick(screen, area, &self.picker.borrow())
     }
+    /// The list's own words when it has them (a countdown to Kumi's pick, another way to choose).
     fn hint(&self, _: &TuiApp) -> String {
-        super::draw_panel::panel_hint(self)
+        let picker = self.picker.borrow();
+        picker.options.hint.clone().unwrap_or_else(|| {
+            if picker.options.answers {
+                "a number, then enter answers · or type your own · esc to close"
+            } else {
+                "↑↓ to move · enter to choose · esc to close"
+            }
+            .into()
+        })
     }
     /// A list's own words (a countdown to Kumi's pick, another way to choose) stay over a toast.
     fn hint_stays(&self, _: &TuiApp) -> bool {
-        matches!(self, Panel::Pick { picker, .. } if picker.borrow().options.hint.is_some())
+        self.picker.borrow().options.hint.is_some()
     }
 }
 
