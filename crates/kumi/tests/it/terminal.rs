@@ -1069,7 +1069,7 @@ async fn plain_mode_runs_the_tables_text_commands_and_names_the_full_screen_apps
         .run_until(async {
             let f = Fixture::new(false, false, None, None, None);
             flush().await;
-            f.input.write("/btw what does a pad do?\n/goal make the bass punchier\n/jobs\n/voice\n/map\n/help\n");
+            f.input.write("/btw what does a pad do?\n/goal make the bass punchier\n/jobs\n/voice\n/map\n/takeback\n/help\n");
             flush().await;
             let text = f.text();
             for want in [
@@ -1077,6 +1077,7 @@ async fn plain_mode_runs_the_tables_text_commands_and_names_the_full_screen_apps
                 "[jobs] No background jobs.",
                 "[plain] /voice isn't available in plain mode: the full-screen app has it.",
                 "[plain] /map isn't available in plain mode",
+                "[plain] /takeback isn't available in plain mode",
                 "/btw (Ask something on the side",
                 "/pin <id>",
                 "Only in the full-screen app: ",
@@ -1102,6 +1103,11 @@ async fn plain_mode_runs_the_tables_text_commands_and_names_the_full_screen_apps
             f.input.write("/goal\n");
             flush().await;
             assert!(f.text().contains("[goal] A goal is running: /goal pause or /goal stop."), "{}", f.text());
+            // What plain mode or this session can't do is never put off until Kumi is done.
+            f.input.write("/copy\n/stop\n");
+            flush().await;
+            assert!(f.text().contains("[stop] Kumi can't stop Live here.") && !f.text().contains("/stop once it's done"), "{}", f.text());
+            assert!(f.text().contains("[plain] /copy isn't available in plain mode") && !f.text().contains("/copy once it's done"), "{}", f.text());
             f.control.state.set(TurnState::Idle);
             f.quit().await;
         })

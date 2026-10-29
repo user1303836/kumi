@@ -133,7 +133,11 @@ fn all_on() -> Now {
 }
 /// What the full-screen app shows and plain mode can't: /help names them, and a line asking for one is told so.
 fn full_screen_only(effect: &Effect) -> bool {
-    matches!(effect, Effect::Voice | Effect::Map | Effect::Palette | Effect::Copy | Effect::Recipe)
+    matches!(effect, Effect::Voice | Effect::Map | Effect::Palette | Effect::Copy | Effect::Recipe | Effect::TakeBack { .. })
+}
+/// A command in the table that only the full-screen app runs, whatever this session has or is doing.
+fn the_apps_own(name: &str) -> bool {
+    registry::named(name).is_some_and(|command| full_screen_only(&registry::run(command.name, &all_on())))
 }
 fn head(text: &str, limit: usize) -> String {
     String::from_utf16_lossy(&text.encode_utf16().take(limit).collect::<Vec<_>>())
@@ -890,26 +894,33 @@ impl PlainTerminal {
             Effect::Slots => self.slots(&words).await,
             Effect::Music => self.music(&words).await,
             // (the effects `full_screen_only` names)
-            Effect::Voice | Effect::Map | Effect::Palette | Effect::Copy | Effect::Recipe => {
+            Effect::Voice | Effect::Map | Effect::Palette | Effect::Copy | Effect::Recipe | Effect::TakeBack { .. } => {
                 self.notice(&format!("[plain] {verb} isn't available in plain mode: the full-screen app has it."))
             }
             Effect::Refused(Why::NotKept) => self.notice(&format!("[conversations] {}", crate::tui::app::not_kept())),
-            Effect::Refused(Why::Busy { verb }) => {
+            // Told to wait only for what this session and plain mode can do once Kumi is done.
+            Effect::Refused(Why::Busy { verb }) if self.offers(&verb) && !the_apps_own(&verb) => {
                 self.notice(&format!("[busy] Kumi is working: {verb} once it's done (Ctrl-C stops it)."))
             }
-            // A command the table has but this session or plain mode lacks: /stop says why, as plain mode always has, and
-            // the full-screen app's own are named as such; any other is unknown here.
-            Effect::Unknown { name } if name == "/stop" => {
-                self.notice(&format!("[stop] Kumi can't stop {} here.", crate::daw::words().app))
-            }
-            Effect::Unknown { name }
-                if registry::named(&name).is_some_and(|command| full_screen_only(&registry::run(command.name, &all_on()))) =>
-            {
-                self.notice(&format!("[plain] {name} isn't available in plain mode: the full-screen app has it."))
-            }
-            Effect::Unknown { .. } => self.notice("Unknown command. Use /help."),
+            Effect::Refused(Why::Busy { verb: name }) | Effect::Unknown { name } => self.not_here(&name),
         }
         Ok(())
+    }
+    /// Whether this session and plain mode have `name`, as /help lists them.
+    fn offers(&self, name: &str) -> bool {
+        let now = self.now();
+        registry::named(name).is_some_and(|command| command.offered(&now.can, &now.fronts))
+    }
+    /// A command this session or plain mode lacks, or words it doesn't take: /stop says why, as plain mode always has,
+    /// and the full-screen app's own are named as such; any other is unknown here.
+    fn not_here(&self, name: &str) {
+        if name == "/stop" && !self.offers(name) {
+            self.notice(&format!("[stop] Kumi can't stop {} here.", crate::daw::words().app));
+        } else if the_apps_own(name) {
+            self.notice(&format!("[plain] {name} isn't available in plain mode: the full-screen app has it."));
+        } else {
+            self.notice("Unknown command. Use /help.");
+        }
     }
     /// A turn of `input` for the model, as a message is sent.
     async fn turn(&self, input: &str) -> Result<(), RuntimeError> {
@@ -1947,7 +1958,11 @@ mod registry_tests {
             }
         }
         declined.sort();
-        assert_eq!(declined, ["/copy", "/map", "/palette", "/recipe", "/voice"], "what plain mode leaves to the full-screen app");
+        assert_eq!(
+            declined,
+            ["/copy", "/map", "/palette", "/recipe", "/takeback", "/voice"],
+            "what plain mode leaves to the full-screen app"
+        );
     }
 
     #[test]
