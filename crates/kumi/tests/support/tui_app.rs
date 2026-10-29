@@ -579,6 +579,14 @@ impl SessionController for Control {
         self.call(format!("fork:{}", name.unwrap_or("")));
         Ok(Some("fork01".into()))
     }
+    /// As the session carries on in a copy from before a request: the screen hears of it (`forked-event`), then the id.
+    async fn fork_conversation_before(&self, _: Option<&str>, before: i64) -> Result<Option<String>, RuntimeError> {
+        self.call(format!("fork-before:{before}"));
+        if let Some(event) = self.get::<SessionEvent>("forked-event") {
+            self.emit(event);
+        }
+        Ok(Some("fork02".into()))
+    }
     async fn answer_set(&self, choice: SetChoice) -> Result<(), RuntimeError> {
         self.call(format!("answer:{}", serde_json::to_value(choice).unwrap().as_str().unwrap()));
         Ok(())

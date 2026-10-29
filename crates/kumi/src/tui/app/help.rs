@@ -233,7 +233,8 @@ pub(super) fn help_sections(has: Has, keymap: &Keymap, app: &str, tabs: &[String
             &["app.take-back"],
             "esc esc",
             "From an empty box while Kumi isn't working: your requests, newest first, with how many changes each made. Choose \
-             one to take it back with each one after it; first Kumi lists the changes it can't undo",
+             one to take it back with each one after it (first Kumi lists the changes it can't undo), or to carry on from \
+             before it in a copy",
         ));
         stop.push(row(
             "/takeback",

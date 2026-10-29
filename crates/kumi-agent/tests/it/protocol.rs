@@ -274,6 +274,10 @@ impl SessionController for Reached {
         self.reach("fork_conversation");
         Ok(None)
     }
+    async fn fork_conversation_before(&self, _: Option<&str>, _: i64) -> Result<Option<String>, RuntimeError> {
+        self.reach("fork_conversation_before");
+        Ok(None)
+    }
     async fn answer_set(&self, _: SetChoice) -> Result<(), RuntimeError> {
         self.reach("answer_set");
         Ok(())
@@ -497,7 +501,8 @@ fn method(request: &Op) -> Option<String> {
             }
             Op::PinConversation(_) => "pin_conversation",
             Op::DeleteConversation(_) => "delete_conversation",
-            Op::ForkConversation(_) => "fork_conversation",
+            Op::ForkConversation(op::ForkConversation { before: None, .. }) => "fork_conversation",
+            Op::ForkConversation(_) => "fork_conversation_before",
             Op::AnswerSet(_) => "answer_set",
             Op::ConversationNow(_) => "conversation_now",
             Op::ConversationLines(_) => "conversation_lines",

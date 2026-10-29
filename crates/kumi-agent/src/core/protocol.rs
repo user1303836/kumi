@@ -305,10 +305,13 @@ requests! {
     PinConversation { id: String, pinned: bool } -> bool;
     /// A kept conversation goes for good (never this one): false when it wasn't kept.
     DeleteConversation { id: String } -> bool;
-    /// A copy of this conversation to carry on in: its id, or None with nothing to copy yet.
+    /// A copy of this conversation to carry on in: its id, or None with nothing to copy yet. With `before` (a request's
+    /// `at`, from `TakeBackPlan`), the copy is the conversation as it stood just before that request.
     ForkConversation {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         name: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        before: Option<i64>,
     } -> Option<String>;
     /// The producer's answer to `set-asked`.
     AnswerSet { choice: SetChoice } -> ();
@@ -574,9 +577,10 @@ impl InProcess {
             }
             Op::PinConversation(op::PinConversation { id, pinned }) => Reply::PinConversation(session.pin_conversation(&id, pinned).await?),
             Op::DeleteConversation(op::DeleteConversation { id }) => Reply::DeleteConversation(session.delete_conversation(&id).await?),
-            Op::ForkConversation(op::ForkConversation { name }) => {
-                Reply::ForkConversation(session.fork_conversation(name.as_deref()).await?)
-            }
+            Op::ForkConversation(op::ForkConversation { name, before }) => Reply::ForkConversation(match before {
+                Some(before) => session.fork_conversation_before(name.as_deref(), before).await?,
+                None => session.fork_conversation(name.as_deref()).await?,
+            }),
             Op::AnswerSet(op::AnswerSet { choice }) => Reply::AnswerSet(session.answer_set(choice).await?),
             Op::ConversationNow(op::ConversationNow {}) => Reply::ConversationNow(session.conversation_now().await),
             Op::ConversationLines(op::ConversationLines { id }) => Reply::ConversationLines(session.conversation_lines(&id).await?),
