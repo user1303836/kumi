@@ -528,6 +528,9 @@ impl Overlay<TuiApp> for JobPanel {
     fn handle(&mut self, app: &TuiApp, event: InputEvent) -> Handled {
         app.job_panel_input(self, event)
     }
+    fn closed(&mut self, app: &TuiApp) {
+        app.session().unwatch_job();
+    }
     fn draw(&mut self, app: &TuiApp, screen: &mut Screen, area: Area) -> Option<Cursor> {
         let width = 76.min(area.left - 2);
         let (inner, space) = (width - 4, area.box_top - 5);

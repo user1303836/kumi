@@ -211,8 +211,17 @@ pub struct ConnectDaw {
 pub use ConnectDaw as ConnectLive;
 impl TuiOptions {
     pub fn new(controller: Rc<dyn SessionController>, input: Rc<dyn TtyInput>, output: Rc<dyn TtyOutput>, mode: impl Into<String>) -> Self {
+        Self::with_session(InProcess::new(controller), input, output, mode)
+    }
+    /// The screen for a session reached through `session`: one on a thread of its own, say.
+    pub fn with_session(
+        session: Rc<dyn SessionHandle>,
+        input: Rc<dyn TtyInput>,
+        output: Rc<dyn TtyOutput>,
+        mode: impl Into<String>,
+    ) -> Self {
         Self {
-            session: InProcess::new(controller),
+            session,
             input,
             output,
             mode: mode.into(),

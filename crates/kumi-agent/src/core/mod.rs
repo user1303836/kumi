@@ -51,6 +51,7 @@ pub mod store_rows;
 pub mod taste_log;
 pub mod techniques;
 pub mod text;
+pub mod threaded;
 // Where a turn's time went (kumi-ai, whose model calls it times first).
 pub mod to_midi;
 pub mod variations;

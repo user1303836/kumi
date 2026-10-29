@@ -444,6 +444,8 @@ pub trait SessionHandle {
     /// The background jobs, oldest first, and one with its steps and report.
     fn jobs(&self) -> Vec<JobStatus>;
     fn job(&self, id: u32) -> Option<JobDetail>;
+    /// The job asked for last isn't shown any more (its panel closed).
+    fn unwatch_job(&self) {}
     /// Whether ctrl-b has a step to move right now.
     fn can_background(&self) -> bool;
     /// The models as the screen shows them; None where there's no model to choose (`kumi -p`'s).

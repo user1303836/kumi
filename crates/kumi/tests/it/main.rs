@@ -86,6 +86,7 @@ mod tui_replay;
 mod tui_setup;
 mod tui_slots;
 mod tui_take_back;
+mod tui_threaded;
 mod tui_usage;
 mod tui_view;
 mod update;
