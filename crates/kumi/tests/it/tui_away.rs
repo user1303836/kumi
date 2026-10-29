@@ -261,6 +261,26 @@ case!(a_goals_end_is_told_once_in_place_of_its_answers_done, async {
     h.close().await;
 });
 
+// A loop's progress is its rounds against its budget's (#625), in Kumi's status and the terminal's bar: three judged with
+// nine left is a quarter of the way.
+case!(a_loops_progress_is_its_rounds_against_its_budget, async {
+    let h = Harness::with(120, 36, Rc::new(Control::default()), |o| {
+        o.terminal = Some(TerminalProfile { progress: true, ..profile(NotifyChannel::None) });
+        o.alert_gap_ms = Some(60.);
+    });
+    h.start().await;
+    h.connect();
+    h.emit(json!({"type":"state","state":"running"}));
+    h.emit(json!({"type":"loop","state":"running","request":"master this to -9 LUFS","rounds":3,"kept":2,"reverted":1,"listens":4,"elapsedMs":60000,"roundsLeft":9}));
+    until("the loop's progress", || {
+        reports(&h);
+        h.output.text.borrow().contains("\x1b]9;4;1;25")
+    })
+    .await;
+    assert!(h.output.text.borrow().contains(":progress=25:"), "{:?}", h.output.text.borrow());
+    h.close().await;
+});
+
 case!(a_terminal_that_never_says_where_focus_is_asks_the_system_only_when_theres_something_to_tell, async {
     let in_front = Rc::new(std::cell::Cell::new(Some(false)));
     let asked = Rc::new(std::cell::Cell::new(0));
