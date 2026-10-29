@@ -899,6 +899,18 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
         }))
     } else if full_screen {
         let mut options = TuiOptions::new(session, io.input.clone(), io.out.clone(), mode);
+        // What the terminal is, asked once as the screen starts: its answers come before what its environment says of
+        // it, which stays the fallback. A terminal its environment keeps quiet (the Linux console, a dumb one) isn't asked.
+        let platform = kumi_types::system::platform();
+        let profile = crate::tui::alerts::detect_terminal_profile(&io.env, platform);
+        if io.probe && profile.status {
+            let probed = crate::tui::probe::probe(&io.input, &io.out, crate::tui::probe::BUDGET).await;
+            let version = probed.answers.version.clone();
+            options.terminal = Some(profile.answered(&probed.answers, &io.env, platform));
+            let depth = crate::tui::style::detect_color_depth_here();
+            options.color_depth = Some(crate::tui::style::answered_color_depth(depth, version.as_deref(), &io.env));
+            options.typeahead = probed.read;
+        }
         options.models = Some(models.clone());
         options.redact = Some(redact);
         options.command = io.command().to_string();

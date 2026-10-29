@@ -13,6 +13,7 @@ pub mod markdown;
 pub mod overlay;
 pub mod picker;
 pub mod pictures;
+pub mod probe;
 pub mod render;
 pub mod scheduler;
 pub mod screen;

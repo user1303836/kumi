@@ -81,6 +81,42 @@ pub enum InputEvent {
     Focus {
         focused: bool,
     },
+    /// The terminal's answer to something Kumi asked it as it started (`tui::probe`): read, never typed, even when it
+    /// comes late.
+    Reply(Reply),
+}
+
+/// A terminal's answer to one of the questions Kumi asks it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Reply {
+    /// XTVERSION's: its name and version (`kitty(0.35.2)`, `ghostty 1.1.3`, `tmux 3.4`).
+    Version(String),
+    /// DECRPM's: whether a private mode is known and set (`CSI ? 2026 ; 2 $ y`).
+    Mode { mode: u32, value: u32 },
+    /// The kitty keyboard protocol's flags: the terminal speaks it.
+    KittyKeys(u32),
+    /// OSC 10's (the text's colour) or 11's (the background's), as 8-bit red, green and blue when Kumi can read it.
+    Color { which: u32, rgb: Option<[u8; 3]> },
+    /// DA1's, asked last: the others have come, or won't.
+    Attributes(String),
+}
+
+/// What an OSC answer says: a colour Kumi asked for (`11;rgb:1e1e/1e1e/1e1e`), or nothing Kumi reads.
+fn osc_reply(content: &str) -> Option<Reply> {
+    let (which, value) = content.split_once(';')?;
+    let which = which.parse::<u32>().ok().filter(|which| matches!(which, 10 | 11))?;
+    Some(Reply::Color { which, rgb: rgb(value) })
+}
+
+/// `rgb:R/G/B` with one to four hex digits each, as 8-bit channels.
+fn rgb(value: &str) -> Option<[u8; 3]> {
+    let channel = |hex: &str| {
+        let full = (1u32 << (4 * hex.len().clamp(1, 4))) - 1;
+        u32::from_str_radix(hex, 16).ok().filter(|_| (1..=4).contains(&hex.len())).map(|value| ((value * 255 + full / 2) / full) as u8)
+    };
+    let mut channels = value.strip_prefix("rgb:")?.split('/').map(channel);
+    let rgb = [channels.next()??, channels.next()??, channels.next()??];
+    channels.next().is_none().then_some(rgb)
 }
 
 impl InputEvent {
@@ -331,6 +367,13 @@ fn key(events: &mut Vec<InputEvent>, name: &str, mods: Modifiers, event: i64) {
 }
 
 /// Characters consumed from an escape at the start of the buffer, or 0 to wait for more.
+/// Where a string sequence's content ends and the sequence does: at ST (`ESC \`) or BEL, whichever comes first.
+fn terminated(buffer: &str) -> Option<(usize, usize)> {
+    let st = buffer[2..].find("\u{1b}\\").map(|at| (2 + at, 2 + at + 2));
+    let bel = buffer[2..].find('\u{7}').map(|at| (2 + at, 2 + at + 1));
+    [st, bel].into_iter().flatten().min()
+}
+
 fn escape(state: &mut State, timed_out: bool, events: &mut Vec<InputEvent>) -> usize {
     let buffer = state.buffer.as_str();
     if buffer.len() == 1 {
@@ -354,12 +397,38 @@ fn escape(state: &mut State, timed_out: bool, events: &mut Vec<InputEvent>) -> u
         return 0;
     }
     if kitty || (second == b'P' && third.is_some_and(|b| b.is_ascii_digit() || b == b'>')) {
-        let end = [buffer[2..].find("\u{1b}\\").map(|at| at + 4), buffer[2..].find('\u{7}').map(|at| at + 3)].into_iter().flatten().min();
-        return match end {
-            Some(end) => end,
+        return match terminated(buffer) {
+            Some((content, end)) => {
+                // XTVERSION's answer: `DCS > | name ST`.
+                if let Some(version) = buffer[2..content].strip_prefix(">|").filter(|_| second == b'P') {
+                    events.push(InputEvent::Reply(Reply::Version(version.to_string())));
+                }
+                end
+            }
             None if !timed_out && buffer.len() < 64 * 1024 => 0,
             None => buffer.len(),
         };
+    }
+    // An OSC answer (a colour: `OSC 11 ; rgb:… BEL`) is read, never typed, and its BEL is never ctrl+g. Alt-] on its own
+    // waits the Escape delay, as Escape does.
+    if second == b']' {
+        let rest = &buffer[2..];
+        let digits = rest.bytes().take_while(u8::is_ascii_digit).count();
+        if digits == rest.len() && digits < 4 && !timed_out {
+            return 0;
+        }
+        if digits > 0 && rest.as_bytes().get(digits) == Some(&b';') {
+            return match terminated(buffer) {
+                Some((content, end)) => {
+                    if let Some(reply) = osc_reply(&buffer[2..content]) {
+                        events.push(InputEvent::Reply(reply));
+                    }
+                    end
+                }
+                None if !timed_out && buffer.len() < 64 * 1024 => 0,
+                None => buffer.len(),
+            };
+        }
     }
     if second == b'O' {
         if buffer.len() == 2 && !timed_out {
@@ -412,6 +481,20 @@ fn csi(state: &mut State, timed_out: bool, events: &mut Vec<InputEvent>) -> usiz
         return length;
     }
     if params == "201" && final_byte == '~' {
+        return length;
+    }
+    // Answers to what Kumi asked: no key has `?` among its parameters.
+    if let Some(answer) = params.strip_prefix('?') {
+        let reply = match final_byte {
+            'c' => Some(Reply::Attributes(answer.to_string())),
+            'u' => answer.parse().ok().map(Reply::KittyKeys),
+            'y' => answer
+                .strip_suffix('$')
+                .and_then(|answer| answer.split_once(';'))
+                .and_then(|(mode, value)| Some(Reply::Mode { mode: mode.parse().ok()?, value: value.parse().ok()? })),
+            _ => None,
+        };
+        events.extend(reply.map(InputEvent::Reply));
         return length;
     }
     if let Some(report) = params.strip_prefix('<') {
