@@ -547,6 +547,7 @@ pub fn action(id: &str) -> Option<&'static Action> {
 }
 
 /// A key (or keys, one after another) that does an action in a scope.
+#[derive(Clone)]
 struct Binding {
     scope: Scope,
     id: &'static str,
@@ -577,6 +578,7 @@ fn held(chord: &Chord, key: &Chord, also: Modifiers) -> bool {
 }
 
 /// The keys in force: the defaults, with keys.json's over them.
+#[derive(Clone)]
 pub struct Keymap {
     /// In the order they're tried: keys.json's first, then the defaults in [`ACTIONS`] order.
     bindings: Vec<Binding>,
@@ -766,8 +768,15 @@ impl Keymap {
     /// come first ("esc to close"), or where `{}` is ("a number, then {} answers"), and a part with no actions is words
     /// alone ("or type your own"). A part whose actions have no keys is left out.
     pub fn hint(&self, parts: &[(&[&str], &str)]) -> String {
+        self.hint_written(&parts.iter().map(|&(ids, words)| (ids, "", words)).collect::<Vec<_>>())
+    }
+
+    /// `hint`, with a part's keys written in words while its actions keep Kumi's own ("arrows", "+ −"), as the help's
+    /// rows are: each part is (ids, written, words). Once keys.json gives any of them keys, or with `written` empty,
+    /// the keys say themselves.
+    pub fn hint_written(&self, parts: &[(&[&str], &str, &str)]) -> String {
         let mut said: Vec<String> = vec![];
-        for (ids, words) in parts {
+        for &(ids, written, words) in parts {
             if ids.is_empty() {
                 said.push(words.to_string());
                 continue;
@@ -776,7 +785,7 @@ impl Keymap {
             if keys.is_empty() {
                 continue;
             }
-            let keys = together(&keys);
+            let keys = if written.is_empty() || ids.iter().any(|id| self.rebound(id)) { together(&keys) } else { written.to_string() };
             said.push(if words.contains("{}") { words.replace("{}", &keys) } else { format!("{keys} {words}") });
         }
         said.join(" · ")
@@ -1203,6 +1212,11 @@ mod tests {
         assert_eq!(keymap.key("menu.close"), None);
         assert_eq!(keymap.with_key("app.stop", "press {} to stop it", "wait for it"), "press f9 to stop it");
         assert_eq!(keymap.with_key("menu.close", "{} closes it", "it stays"), "it stays");
+        // Kumi's own keys written in words stay words; keys.json's say themselves.
+        let arrows: (&[&str], &str, &str) = (&["map.up", "map.down", "map.left", "map.right"], "arrows", "move");
+        assert_eq!(Keymap::default().hint_written(&[arrows, (&["map.close"], "", "closes")]), "arrows move · esc closes");
+        let (keymap, _) = with(json!({ "map.left": ["h"] }));
+        assert_eq!(keymap.hint_written(&[arrows]), "↑ ↓ h → move");
     }
 
     #[test]

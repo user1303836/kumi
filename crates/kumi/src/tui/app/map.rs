@@ -46,7 +46,8 @@ impl TuiApp {
         }
         let hover = self.0.options.map_hover.as_ref().is_none_or(|hover| (hover.load)());
         let gathers = self.can().palette;
-        self.0.state.borrow_mut().map = Some(MapView::new(self.0.graphics, hover).gliding(self.0.options.map_glides).gathering(gathers));
+        self.0.state.borrow_mut().map =
+            Some(MapView::new(self.0.graphics, hover).gliding(self.0.options.map_glides).gathering(gathers).keyed(&self.0.keymap));
         // The mouse's moves, reported while the map is open: a point plays as the mouse comes to it.
         self.0.tty.report_moves(true);
         self.0.scheduler.request();
