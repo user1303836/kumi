@@ -11,6 +11,7 @@ mod fake_daw_listening;
 mod file_sync;
 mod gaps;
 mod goal_store;
+mod hidden;
 mod kernel_turns;
 mod latency_budgets;
 mod local_servers;

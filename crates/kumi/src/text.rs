@@ -1,4 +1,4 @@
-use kumi_agent::core::{export::invisible, search_memory::SearchMemoryStatus};
+use kumi_agent::core::{export::invisible, hidden::selector as is_selector, search_memory::SearchMemoryStatus};
 use kumi_common::js;
 use kumi_types::contracts::{LibraryState, LibraryStatus, WebAction, WebEvent, WebWhere};
 
@@ -75,12 +75,6 @@ impl Pattern {
 /// Scotland and Wales flags, which become a plain black flag. None comes before U+00AD, so plain text is quick.
 fn is_invisible(character: char) -> bool {
     character >= '\u{ad}' && invisible(character) && !is_selector(character)
-}
-
-/// Unicode's variation selectors. One after a character chooses its form (❤️, a kanji's in a name); real text never has
-/// two in a row, but a run of them behind one emoji can carry a hidden message, a byte for each.
-fn is_selector(character: char) -> bool {
-    matches!(character, '\u{180b}'..='\u{180d}' | '\u{180f}' | '\u{fe00}'..='\u{fe0f}' | '\u{e0100}'..='\u{e01ef}')
 }
 
 impl Default for StreamingText {

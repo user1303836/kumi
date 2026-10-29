@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
@@ -23,6 +24,7 @@ use tokio::sync::watch;
 use crate::core::contracts::{
     Kernel, KernelCheckpoint, KernelEmit, KernelEvent, OnText, Picture, StopReason, TranscriptLine, TurnResult, WaitFor,
 };
+use crate::core::hidden::{unhidden, unhidden_owned};
 use crate::kernel::budget::{fit_for, fit_measured, opening, put_away_images, transcript_of, PutAway};
 use crate::kernel::deferred::{self, Shelf, CALL_TOOL};
 use kumi_ai::binding::{ContextBudget, DEFAULT_BUDGET};
@@ -251,6 +253,8 @@ pub fn create_agent_kernel(options: AgentKernelOptions) -> Result<AgentKernel, R
     let max_steps = max_steps.unwrap_or(200);
     let budget_given = budget.is_some();
     let budget = budget.unwrap_or(DEFAULT_BUDGET);
+    // Notes, habits and names from the DAW and the library go into them: what those hide, the model doesn't read.
+    let instructions = unhidden_owned(instructions);
     if trim(&instructions).is_empty() || instructions.len() > MAX_INSTRUCTIONS {
         return Err(RuntimeError::plain("Kernel instructions must be nonempty and at most 64 KiB."));
     }
@@ -363,7 +367,8 @@ impl AgentKernel {
         let state = Rc::new(Running { steering: RefCell::new(Vec::new()), context: RefCell::new(None), done: settled });
         *self.inner.running.borrow_mut() = Some(state.clone());
         let _guard = TurnGuard { inner: self.inner.clone(), done };
-        let mut content = vec![UserPart::Text(TextPart::new(input))];
+        // The request, with the observation and Kumi's notes: what the DAW's names or a note hide, the model doesn't read.
+        let mut content = vec![UserPart::Text(TextPart::new(unhidden(input)))];
         content.extend(pictures.into_iter().map(|picture| {
             UserPart::File(FilePart {
                 filename: Some(picture.name),
@@ -415,7 +420,7 @@ impl AgentKernel {
         if self.inner.closing.borrow().is_some() || trim(text).is_empty() || text.len() > MAX_STEER {
             return false;
         }
-        running.steering.borrow_mut().push(text.to_string());
+        running.steering.borrow_mut().push(unhidden(text).into_owned());
         true
     }
 
@@ -435,7 +440,7 @@ impl AgentKernel {
             Some(context) => context(),
             None => inner.history.borrow().to_vec(),
         };
-        let asked = [Message::user_text(format!("{ASIDE_NOTE}\n\n{words}"))];
+        let asked = [Message::user_text(format!("{ASIDE_NOTE}\n\n{}", unhidden(words)))];
         let fitted = fit_for(&inner.profile.get(), &context, &asked, &inner.budget_now());
         // The conversation in plain words, its calls and their results written out: then no tools are
         // offered at all, which every provider takes (some can't be told "none" with calls in the conversation).
@@ -1535,7 +1540,7 @@ fn restore(checkpoint: &KernelCheckpoint, model: &str, tools: &str) -> Result<Ve
     // TS: the messages were taken as they came; here they must be messages a model can read.
     let messages: Vec<Message> = serde_json::from_value(Value::Array(checkpoint.messages.clone()))
         .map_err(|_| RuntimeError::plain("Unsupported checkpoint version."))?;
-    let messages = without_images(&messages);
+    let messages = unhidden_history(without_images(&messages));
     let Some(origin) = &checkpoint.origin else { return Ok(messages) };
     // Reasoning belongs to the model that wrote it, and Claude's to the tools it saw as well: another
     // model, or other tools, continue from the words, tool calls and results. (Older saves name only
@@ -1543,6 +1548,57 @@ fn restore(checkpoint: &KernelCheckpoint, model: &str, tools: &str) -> Result<Ve
     let same_model = origin == model || Some(origin.as_str()) == model.split('/').next();
     let same_tools = checkpoint.tools.as_deref().is_none_or(|key| key == tools);
     Ok(if same_model && same_tools { messages } else { without_reasoning(&messages) })
+}
+
+/// A kept conversation as the model reads it now: one kept before Kumi showed what a source hides as hidden (see
+/// [`unhidden`]) may still have it, in the producer's requests and the tools' results. When anything changed the
+/// reasoning goes too, as some models bind theirs to the exact conversation. What a provider's own tools fetched (its web
+/// search) stays as the provider gave it: its model read that first, and it may be signed for replay.
+fn unhidden_history(mut messages: Vec<Message>) -> Vec<Message> {
+    let mut changed = false;
+    let mut clean = |text: &mut String| {
+        let shown = match unhidden(text) {
+            Cow::Owned(shown) => Some(shown),
+            Cow::Borrowed(_) => None,
+        };
+        if let Some(shown) = shown {
+            *text = shown;
+            changed = true;
+        }
+    };
+    for message in &mut messages {
+        match message {
+            Message::User { content, .. } => {
+                for part in content {
+                    if let UserPart::Text(part) = part {
+                        clean(&mut part.text);
+                    }
+                }
+            }
+            Message::Tool { content, .. } => {
+                for part in content {
+                    let ToolPart::ToolResult(result) = part else { continue };
+                    match &mut result.output {
+                        ToolResultOutput::Text { value, .. } | ToolResultOutput::ErrorText { value, .. } => clean(value),
+                        ToolResultOutput::Content { value, .. } => {
+                            for item in value {
+                                if let ToolResultContentItem::Text { text, .. } = item {
+                                    clean(text);
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    if changed {
+        without_reasoning(&messages)
+    } else {
+        messages
+    }
 }
 
 /// The conversation without the models' reasoning or any provider's replay metadata: what was said,
@@ -1603,8 +1659,10 @@ fn capped(text: String) -> String {
     )
 }
 
-/// A tool's result as the model reads it: its words, then each image after its caption.
+/// A tool's result as the model reads it: its words, then each image after its caption. What a page, a file or a name
+/// the result has hides, the model doesn't read; the words never grow by it, so the result's cap still holds.
 fn tool_output(outcome: Outcome) -> ToolResultOutput {
+    let outcome = Outcome { text: unhidden_owned(outcome.text), ..outcome };
     if outcome.is_error {
         return ToolResultOutput::error_text(outcome.text);
     }
@@ -1620,7 +1678,7 @@ fn tool_output(outcome: Outcome) -> ToolResultOutput {
     let mut value = vec![ToolResultContentItem::Text { text: outcome.text, provider_options: None }];
     for image in images {
         if let Some(caption) = image.caption.as_deref().filter(|caption| !caption.is_empty()) {
-            value.push(ToolResultContentItem::Text { text: head(caption, 1000), provider_options: None });
+            value.push(ToolResultContentItem::Text { text: head(&unhidden(caption), 1000), provider_options: None });
         }
         // A copy, as a plain byte array: a Buffer would measure (and save) as a list of numbers.
         value.push(ToolResultContentItem::File {

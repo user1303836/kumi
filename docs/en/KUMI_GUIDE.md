@@ -324,8 +324,8 @@ Kumi about this**), Live's own commands and Live's manual.
 
 **Versions.** Each Kumi release ships with an extension and a tool, which
 `kumi update` brings up to date ([updating](#updating-reporting-and-uninstalling)).
-Kumi 1.24.10 to 1.24.13 with REAPER extension 0.1.7, 1.24.0 to 1.24.9 with 0.1.6, 1.23.3 with 0.1.5, 1.23.2 with 0.1.4, 1.23.1 with 0.1.3, 1.21.2 to 1.23.0 with 0.1.2, 1.21.0 to 1.21.1 with 0.1.1, 1.20.0 with 0.1.0.
-Kumi 1.24.10 to 1.24.13 with Renoise tool 1.0.6, 1.24.0 to 1.24.9 with 1.0.5, 1.23.3 with 1.0.4, 1.23.2 with 1.0.3, 1.23.1 with 1.0.2, 1.21.0 to 1.23.0 with 1.0.1, 1.20.0 with 1.0.0.
+Kumi 1.24.10 to 1.24.14 with REAPER extension 0.1.7, 1.24.0 to 1.24.9 with 0.1.6, 1.23.3 with 0.1.5, 1.23.2 with 0.1.4, 1.23.1 with 0.1.3, 1.21.2 to 1.23.0 with 0.1.2, 1.21.0 to 1.21.1 with 0.1.1, 1.20.0 with 0.1.0.
+Kumi 1.24.10 to 1.24.14 with Renoise tool 1.0.6, 1.24.0 to 1.24.9 with 1.0.5, 1.23.3 with 1.0.4, 1.23.2 with 1.0.3, 1.23.1 with 1.0.2, 1.21.0 to 1.23.0 with 1.0.1, 1.20.0 with 1.0.0.
 
 ## Working with Kumi
 
@@ -1380,9 +1380,10 @@ says which need which.
   yours goes with the request. `"modelCatalog": false` stops it.
 
 Track, clip and device names, tool results and web pages are data for Kumi,
-never instructions. Kumi keeps its files in `~/.kumi`, readable only by you;
-sign-ins are in `~/.kumi/auth.json`. Terminal scrollback and your provider's
-own retention are separate.
+never instructions. Words they hide in characters that don't show on screen
+reach the model as `[hidden text removed]`. Kumi keeps its files in `~/.kumi`,
+readable only by you; sign-ins are in `~/.kumi/auth.json`. Terminal scrollback
+and your provider's own retention are separate.
 
 ## Proxies and school or office networks
 

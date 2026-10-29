@@ -3,6 +3,23 @@
 Kumi's releases. The Ableton bridge (`crates/ableton-mcp-server`) is versioned on its own;
 each Kumi release names the bridge it ships with.
 
+## 1.24.14 — 2026-10-28
+
+Ships with bridge 1.0.101, as 1.24.13 did.
+
+- Undo in the input box with Ctrl+- (or Ctrl+_ where Ctrl+- zooms the terminal): a run of typing, a
+  paste or a cut at a time.
+- Ctrl+K, Ctrl+U and Ctrl+W cut, and Ctrl+Y puts back what they cut (Alt+Y right after for the cut
+  before).
+- Ctrl+C on words you haven't sent keeps them: ↑ brings them back.
+- Typing stays fast after pasting a long text.
+- Words hidden in characters that don't show on screen, in web pages, video transcripts, sample and
+  preset names, or track and device names, no longer reach the model; it reads "[hidden text removed]"
+  instead.
+
+Tested with Live 12.4 on macOS. On Windows, installing and updating are tested; using Kumi with Live
+there is still new.
+
 ## 1.24.13 — 2026-10-28
 
 Ships with bridge 1.0.101, as 1.24.12 did.
