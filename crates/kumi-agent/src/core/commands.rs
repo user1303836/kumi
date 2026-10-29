@@ -380,6 +380,11 @@ pub fn run(line: &str, now: &Now) -> Effect {
     if !is_command(line) {
         return Effect::Message;
     }
+    // A name no command has is unknown whatever Kumi is doing: while it works, there's nothing to run once it's done.
+    let verb = line.split_whitespace().next().unwrap_or_default();
+    if named(verb).is_none() {
+        return Effect::Unknown { name: verb.to_string() };
+    }
     let (can, fronts) = (&now.can, &now.fronts);
     let with_words = |name: &str| line == name || line.starts_with(&format!("{name} "));
     match line {
@@ -463,7 +468,7 @@ pub fn run(line: &str, now: &Now) -> Effect {
         return Effect::ShowGoal;
     }
     if now.busy {
-        return Effect::Refused(Why::Busy { verb: line.split_whitespace().next().unwrap_or_default().to_string() });
+        return Effect::Refused(Why::Busy { verb: verb.to_string() });
     }
     if with_words("/goal") && can.goal {
         return Effect::Goal;
@@ -486,5 +491,5 @@ pub fn run(line: &str, now: &Now) -> Effect {
     if let Some(name) = argument(line, "/new") {
         return Effect::New { name };
     }
-    Effect::Unknown { name: line.split_whitespace().next().unwrap_or_default().to_string() }
+    Effect::Unknown { name: verb.to_string() }
 }
