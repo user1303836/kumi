@@ -276,3 +276,30 @@ fn a_links_words_open_it_and_its_address_follows_them_unless_the_terminal_opens_
     assert_eq!(link_url(words.style.link).as_deref(), Some("https://kumi-agent.com/docs"));
     set_terminal_opens_links(false);
 }
+
+#[test]
+fn only_web_and_mail_links_open_and_words_that_read_as_another_address_keep_the_real_one() {
+    set_terminal_opens_links(true);
+    let line = |said: &str| text(&render_markdown(said, 200, &base()))[0].clone();
+    let link = |said: &str, words: &str| {
+        let rows = render_markdown(said, 200, &base());
+        rows[0].spans.iter().find(|span| span.text.contains(words)).map(|span| span.style.link).unwrap()
+    };
+    // Any other kind of address stays words, with the address after them.
+    for (said, words, shown) in [
+        ("[the file](file:///etc/hosts)", "the file", "the file (file:///etc/hosts)"),
+        ("[run it](javascript:alert(1))", "run it", "run it (javascript:alert(1))"),
+        ("[the track](spotify:track:4uLU6hMCjMI75M1A2tKUQC)", "the track", "the track (spotify:track:4uLU6hMCjMI75M1A2tKUQC)"),
+    ] {
+        assert_eq!(line(said), shown);
+        assert_eq!(link(said, words), 0, "{said} opens nothing");
+    }
+    // Words that read as another address than the one they open keep the real one after them.
+    assert_eq!(line("[ableton.com](https://evil.example/ableton)"), "ableton.com (https://evil.example/ableton)");
+    assert_ne!(link("[ableton.com](https://evil.example/ableton)", "ableton.com"), 0);
+    // The same host, or words that aren't an address: the words alone.
+    assert_eq!(line("[ableton.com](https://www.ableton.com/en/live/)"), "ableton.com");
+    assert_eq!(line("[help@ableton.com](mailto:help@ableton.com)"), "help@ableton.com");
+    assert_eq!(line("[write to us](mailto:help@ableton.com)"), "write to us");
+    set_terminal_opens_links(false);
+}

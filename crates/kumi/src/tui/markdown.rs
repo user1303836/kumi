@@ -85,6 +85,31 @@ pub fn set_terminal_opens_links(on: bool) {
     OPENS_LINKS.set(on);
 }
 
+/// Whether a link may open with a click: the web's and mail's. Any other kind (a file, a script, an app's own) stays
+/// words, its address shown after them.
+fn clickable(url: &str) -> bool {
+    let scheme = url.split_once(':').map(|(scheme, _)| scheme.to_ascii_lowercase());
+    matches!(scheme.as_deref(), Some("http" | "https" | "mailto"))
+}
+
+/// The host a text reads as, when it reads as an address ("ableton.com", "https://www.ableton.com/en/",
+/// "help@ableton.com"): lowercased, without "www.".
+fn host(text: &str) -> Option<String> {
+    let text = text.trim();
+    if text.is_empty() || text.contains(char::is_whitespace) {
+        return None;
+    }
+    let rest = match text.split_once("://") {
+        Some((_, rest)) => rest,
+        None if text.to_ascii_lowercase().starts_with("mailto:") => &text["mailto:".len()..],
+        None => text,
+    };
+    let host = rest.split(['/', '?', '#']).next()?.rsplit('@').next()?.split(':').next()?.to_ascii_lowercase();
+    let host = host.strip_prefix("www.").map(str::to_string).unwrap_or(host);
+    let (name, top) = host.rsplit_once('.')?;
+    (!name.is_empty() && top.len() >= 2 && top.chars().all(|c| c.is_ascii_alphabetic())).then_some(host)
+}
+
 /// Inline text gathered as spans, line by line (a break, or a single newline, starts one), with the styles of the
 /// elements open around it and the links whose words are still coming.
 struct Inline {
@@ -142,13 +167,14 @@ impl Inline {
             Event::Start(Tag::Emphasis) => self.open(|style| Style { italic: true, ..style }),
             Event::Start(Tag::Strong) => self.open(|style| Style { fg: Some(palette::BRIGHT), bold: true, ..style }),
             Event::Start(Tag::Link { dest_url, .. } | Tag::Image { dest_url, .. }) => {
-                // The words open the address, where the terminal takes links (the renderer says it with OSC 8).
+                // The words open the address, where the terminal takes links (the renderer says it with OSC 8): the web's
+                // and mail's only.
                 self.open(|style| {
                     let style = Style { underline: true, ..style };
-                    if dest_url.is_empty() {
-                        style
-                    } else {
+                    if clickable(&dest_url) {
                         style.linked(&dest_url)
+                    } else {
+                        style
                     }
                 });
                 self.links.push((dest_url.to_string(), String::new()));
@@ -156,10 +182,14 @@ impl Inline {
             Event::Start(Tag::Strikethrough | Tag::Superscript | Tag::Subscript) => self.open(|style| style),
             Event::End(TagEnd::Link | TagEnd::Image) => {
                 self.close();
-                // The address after the words, unless the words are the address, or the terminal opens them itself
-                // (and there are words to click).
-                let shown =
-                    |(url, label): &(String, String)| !url.is_empty() && url != label && (!OPENS_LINKS.get() || label.trim().is_empty());
+                // The address after the words, unless the words are the address; or the terminal opens a link of the
+                // web or mail itself, and there are words to click that don't read as some other address than the one
+                // they open ([ableton.com](https://elsewhere…) shows where it goes).
+                let shown = |(url, label): &(String, String)| {
+                    let misleading = host(label).is_some_and(|words| host(url).as_deref() != Some(words.as_str()));
+                    let opened = OPENS_LINKS.get() && clickable(url) && !label.trim().is_empty() && !misleading;
+                    !url.is_empty() && url != label && !opened
+                };
                 if let Some((url, _)) = self.links.pop().filter(shown) {
                     self.push_styled(&format!(" ({url})"), faint.clone());
                 }
