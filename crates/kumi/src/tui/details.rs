@@ -37,6 +37,21 @@ struct Laid {
     requests: Vec<usize>,
 }
 
+/// What Kumi's own transcript knows of a finished answer: its words as answers are matched by ([`words_of`]), and its line
+/// of model, time and cost.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AnswerMeta {
+    pub words: (String, String),
+    pub line: String,
+}
+
+/// A text's opening and closing words, as answers are matched by: its first and last 32 characters, its spaces as one
+/// (all of a short one).
+pub fn words_of(text: &str) -> (String, String) {
+    let words: Vec<char> = text.split_whitespace().collect::<Vec<_>>().join(" ").chars().collect();
+    (words.iter().take(32).collect(), words[words.len().saturating_sub(32)..].iter().collect())
+}
+
 /// A match of the search: its line, and the bytes it covers there.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Match {
@@ -49,6 +64,8 @@ pub struct Details {
     parts: Vec<Part>,
     /// The turn still under way, from Kumi's own transcript (the saved conversation doesn't have it yet): its steps.
     under_way: Vec<String>,
+    /// The finished answers Kumi's own transcript has, oldest first.
+    metas: Vec<AnswerMeta>,
     laid: Option<Laid>,
     /// The first row on screen.
     pub top: usize,
@@ -183,16 +200,49 @@ impl Builder {
 }
 
 impl Details {
-    pub fn new(parts: Vec<Part>, under_way: Vec<String>) -> Details {
-        Details { parts, under_way, laid: None, top: 0, query: String::new(), matches: vec![], current: 0 }
+    pub fn new(parts: Vec<Part>, under_way: Vec<String>, metas: Vec<AnswerMeta>) -> Details {
+        Details { parts, under_way, metas, laid: None, top: 0, query: String::new(), matches: vec![], current: 0 }
+    }
+
+    /// Each answer's line, by its part: the details' answers and the transcript's paired from the newest back, as far as
+    /// their words agree (a conversation taken up again has answers the transcript never had). Where two answers side by
+    /// side read the same ("Done."), one missing from either side couldn't be told: the pairing stops there.
+    fn answer_lines(&self) -> std::collections::HashMap<usize, String> {
+        let (indices, answers): (Vec<usize>, Vec<(String, String)>) = self
+            .parts
+            .iter()
+            .enumerate()
+            .filter_map(|(index, part)| match part {
+                Part::Answer(text) => Some((index, words_of(text))),
+                _ => None,
+            })
+            .unzip();
+        let kept: Vec<(String, String)> = self.metas.iter().map(|meta| meta.words.clone()).collect();
+        // An answer reading as the one beside it, older or newer.
+        let alike = |list: &[(String, String)], at: usize| (at > 0 && list[at - 1] == list[at]) || list.get(at + 1) == Some(&list[at]);
+        let mut lines = std::collections::HashMap::new();
+        for back in 0..answers.len().min(kept.len()) {
+            let (at, meta) = (answers.len() - 1 - back, kept.len() - 1 - back);
+            if answers[at] != kept[meta] || alike(&answers, at) || alike(&kept, meta) {
+                break;
+            }
+            if !self.metas[meta].line.is_empty() {
+                lines.insert(indices[at], self.metas[meta].line.clone());
+            }
+        }
+        lines
     }
 
     fn lay_out(&mut self, width: i32) -> &Laid {
         if self.laid.as_ref().is_none_or(|laid| laid.width != width) {
             let mut builder = Builder { width, rows: vec![], lines: vec![], requests: vec![] };
             let mut changes = false;
-            for part in &self.parts {
+            let answer_lines = self.answer_lines();
+            for (index, part) in self.parts.iter().enumerate() {
                 builder.part(part, &mut changes);
+                if let Some(line) = answer_lines.get(&index) {
+                    builder.line(&[span(line, palette::FAINT)], None, 0);
+                }
             }
             if self.parts.is_empty() && self.under_way.is_empty() {
                 builder.line(&[span("There's nothing to show yet: ask Kumi something first.", palette::FAINT)], None, 0);
@@ -374,6 +424,7 @@ mod tests {
                 Part::Answer("Done.".into()),
             ],
             vec!["looking at Pad".into()],
+            vec![],
         )
     }
 
@@ -389,6 +440,56 @@ mod tests {
     }
 
     #[test]
+    fn each_answer_the_transcript_knows_gets_its_line_paired_from_the_newest_back() {
+        let parts = vec![
+            Part::Request("one".into()),
+            Part::Answer("An answer from before Kumi opened.".into()),
+            Part::Request("two".into()),
+            Part::Answer("The bass is wider now.".into()),
+            Part::Request("three".into()),
+            Part::Answer("The pad sits back.".into()),
+        ];
+        let metas = vec![
+            AnswerMeta { words: words_of("The bass is wider now."), line: "gpt-5 · 14:02 · 3 s".into() },
+            AnswerMeta { words: words_of("The pad  sits\nback."), line: "gpt-5 · 14:05 · 2 s · 1.2k in · 300 out".into() },
+        ];
+        let mut details = Details::new(parts, vec![], metas);
+        let rows = texts(&mut details, 60);
+        let after = |words: &str| rows[rows.iter().position(|row| row == words).expect(words) + 1].clone();
+        assert_eq!(after("The bass is wider now."), "gpt-5 · 14:02 · 3 s");
+        assert_eq!(after("The pad sits back."), "gpt-5 · 14:05 · 2 s · 1.2k in · 300 out");
+        assert_eq!(after("An answer from before Kumi opened."), "", "older than the transcript: no line");
+        // Opening words that differ stop the pairing there, so no line goes under another answer.
+        let parts = vec![Part::Answer("Something else.".into()), Part::Answer("The pad sits back.".into())];
+        let metas = vec![
+            AnswerMeta { words: words_of("Not this one."), line: "wrong".into() },
+            AnswerMeta { words: words_of("The pad sits back."), line: "right".into() },
+        ];
+        let rows = texts(&mut Details::new(parts, vec![], metas), 60);
+        assert!(rows.contains(&"right".to_string()) && !rows.contains(&"wrong".to_string()), "{rows:#?}");
+        // Answers side by side that read the same: one missing from the transcript (a stopped one, an instant phrase's
+        // reply) couldn't be told from the other, so neither gets a line and the pairing stops there.
+        let parts = vec![Part::Answer("Done.".into()), Part::Answer("Done.".into()), Part::Answer("The pad sits back.".into())];
+        let metas = vec![
+            AnswerMeta { words: words_of("Done."), line: "the one before".into() },
+            AnswerMeta { words: words_of("The pad sits back."), line: "the pad's".into() },
+        ];
+        let rows = texts(&mut Details::new(parts, vec![], metas), 60);
+        assert!(rows.contains(&"the pad's".to_string()) && !rows.contains(&"the one before".to_string()), "{rows:#?}");
+        let parts = vec![Part::Answer("Done.".into()), Part::Answer("Done.".into())];
+        let metas = vec![AnswerMeta { words: words_of("Done."), line: "which one?".into() }];
+        let rows = texts(&mut Details::new(parts, vec![], metas), 60);
+        assert!(!rows.contains(&"which one?".to_string()), "neither: {rows:#?}");
+        // The same opening words with a different end aren't the same answer.
+        let metas = vec![AnswerMeta { words: words_of("Done. And the kick is louder by 2 dB, as you asked for it."), line: "x".into() }];
+        let rows = texts(
+            &mut Details::new(vec![Part::Answer("Done. And the hats are quieter by 3 dB, as you asked for them.".into())], vec![], metas),
+            60,
+        );
+        assert!(!rows.contains(&"x".to_string()), "{rows:#?}");
+    }
+
+    #[test]
     fn steps_show_their_first_lines_and_requests_are_gone_to_in_turn() {
         let mut details = sample("Wider now.");
         let rows = texts(&mut details, 60);
@@ -396,12 +497,12 @@ mod tests {
         assert!(rows.contains(&"    … 8 more lines".to_string()), "{rows:#?}");
         // A result on one long line counts by the rows it wraps to.
         let long = format!("{{{}}}", (0..200).map(|n| format!("\"key{n}\":{n}")).collect::<Vec<_>>().join(","));
-        let mut one_line = Details::new(vec![Part::Step { label: "read it".into(), input: None, result: Some(long) }], vec![]);
+        let mut one_line = Details::new(vec![Part::Step { label: "read it".into(), input: None, result: Some(long) }], vec![], vec![]);
         let cut = texts(&mut one_line, 40);
         assert_eq!(cut.len(), 1 + STEP_LINES + 1, "{cut:#?}");
         assert_eq!(cut.last().unwrap(), "    … 1 more line");
         // Nothing to show says so.
-        assert_eq!(texts(&mut Details::new(vec![], vec![]), 80), ["There's nothing to show yet: ask Kumi something first."]);
+        assert_eq!(texts(&mut Details::new(vec![], vec![], vec![]), 80), ["There's nothing to show yet: ask Kumi something first."]);
         assert!(rows.contains(&"Under way".to_string()) && rows.contains(&"▸ looking at Pad".to_string()), "{rows:#?}");
         for (forward, request) in [(true, "make the bass wider"), (true, "and the pad"), (false, "make the bass wider")] {
             details.next_request(forward, 60);

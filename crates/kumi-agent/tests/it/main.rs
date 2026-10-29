@@ -25,6 +25,7 @@ mod protocol;
 mod providers;
 mod recall;
 mod recipes;
+mod references;
 mod search_memory;
 mod session_log;
 mod store_backed;

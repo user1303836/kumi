@@ -323,6 +323,28 @@ impl Palettes {
         }
     }
 
+    /// Every palette, the last changed first, each with what it holds in /palette's words ("12 sounds"): what `@` offers.
+    pub async fn all(&self) -> Result<Vec<(Palette, String)>, RuntimeError> {
+        let all = self.store.read(|connection| palettes::all(connection)).await.map_err(failed)?;
+        Ok(all
+            .into_iter()
+            .map(|palette| {
+                let held = counted(palette.items);
+                (palette, held)
+            })
+            .collect())
+    }
+
+    /// The palette with this id as it is now, with what it holds in /palette's words: None once it's forgotten.
+    pub async fn by_id(&self, id: &str) -> Result<Option<(Palette, String)>, RuntimeError> {
+        let id = id.to_owned();
+        let found = self.store.read(move |connection| palettes::by_id(connection, &id)).await.map_err(failed)?;
+        Ok(found.map(|palette| {
+            let held = counted(palette.items);
+            (palette, held)
+        }))
+    }
+
     async fn list(&self) -> Result<String, RuntimeError> {
         let all = self.store.read(|connection| palettes::all(connection)).await.map_err(failed)?;
         if all.is_empty() {

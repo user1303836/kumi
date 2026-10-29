@@ -401,7 +401,9 @@ case!(ctrl_g_lends_the_terminal_to_the_editor_and_takes_the_draft_back, async {
     // The terminal went back as Kumi found it while the editor had it, then Kumi took it again.
     let written = h.output.text.borrow()[before..].to_string();
     let lent = written.find(kumi::tui::tty::RESTORE).expect("given back");
-    assert!(written[lent..].contains("\x1b[?1049h"));
+    let taken = lent + written[lent..].find("\x1b[?1049h").expect("taken again");
+    // Taken again, the whole screen is drawn anew, rows the edit didn't change too: the header is one.
+    assert!(written[taken..].contains("Kumi"), "the header redrawn after the take-back");
     // What came back is one step: ctrl+- brings the draft back.
     h.type_text("\x1f").await;
     assert!(has(&composer(&h), "tighten") && !has(&composer(&h), "and the snare"));

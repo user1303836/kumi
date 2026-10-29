@@ -209,6 +209,7 @@ impl TuiApp {
                     PinKind::Clip | PinKind::Selection | PinKind::ClipSlot => IconKind::MidiClip,
                     PinKind::Chain => IconKind::Chain,
                     PinKind::Device => IconKind::Device,
+                    PinKind::Instrument => IconKind::Instrument,
                 };
                 let row = pin.r#ref.clone();
                 self.0.state.borrow_mut().pinned = Some(Pin { pin, kind, row });
@@ -845,6 +846,7 @@ impl TuiApp {
                 self.thought_ends();
                 let changes = self.0.state.borrow().turn_changes;
                 let footer = self.answer_footer(elapsed, changes, result.usage.as_ref());
+                let model = self.answering_model();
                 {
                     let mut state = self.0.state.borrow_mut();
                     // (an answer shown again from a log was counted by the session that answered it)
@@ -868,6 +870,10 @@ impl TuiApp {
                         state.stream.discard();
                         String::new()
                     };
+                    // The model that gave it, for the details (ctrl+o).
+                    if let Some(model) = model.filter(|_| !state.replaying) {
+                        state.answer_models.insert(entry.id, model);
+                    }
                     if let Entry::Assistant { text, steps, status, elapsed_ms, footer: line, .. } = &mut *entry.borrow_mut() {
                         text.push_str(&tail);
                         *status = if cancelled { AnswerStatus::Stopped } else { AnswerStatus::Done };

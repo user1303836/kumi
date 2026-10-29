@@ -165,3 +165,24 @@ case!(what_the_view_covers_cant_be_clicked_through_it, async {
     h.has("The pad sits back now.");
     h.close().await;
 });
+
+case!(an_answer_given_while_kumi_ran_shows_its_time_and_cost_under_it, async {
+    let h = Harness::new(120, 36);
+    h.start().await;
+    h.connect();
+    h.type_text("and the pad\r").await;
+    h.emit(json!({"type":"state","state":"running"}));
+    h.emit(json!({"type":"text","text":"The pad sits back now."}));
+    h.emit(json!({"type":"turn-complete","result":{"stopReason":"completed"},"elapsedMs":900}));
+    h.emit(json!({"type":"state","state":"idle"}));
+    opened(&h).await;
+    let lines = h.screen();
+    let answer = lines.iter().rposition(|line| line.contains("The pad sits back now.")).unwrap();
+    let under = &lines[answer + 1];
+    let clock = under.split_whitespace().any(|word| word.len() == 5 && word.as_bytes()[2] == b':');
+    assert!(under.contains("0.9") && clock, "its time and when it started:\n{}", lines.join("\n"));
+    // The answer from before this run of Kumi has no line under it.
+    let older = lines.iter().position(|line| line.contains("The bass is wider")).unwrap();
+    assert!(lines[older + 1].trim().is_empty() || !lines[older + 1].contains("0.9"), "{}", lines.join("\n"));
+    h.close().await;
+});

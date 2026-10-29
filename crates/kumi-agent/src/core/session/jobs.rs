@@ -513,7 +513,7 @@ impl Session {
         let started = self.perform(
             true,
             Phase::Refresh,
-            Box::new(move |this, op| async move { this.submit_turn(op, text, None, vec![]).await }.boxed_local()),
+            Box::new(move |this, op| async move { this.submit_turn(op, text, None, vec![], vec![]).await }.boxed_local()),
             None,
             Some(said),
         );

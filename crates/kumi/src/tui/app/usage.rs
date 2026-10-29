@@ -75,7 +75,7 @@ impl TuiApp {
     }
 
     /// The model answering now: the producer's fallback while it answers for their model, else their model.
-    fn answering_model(&self) -> Option<String> {
+    pub(super) fn answering_model(&self) -> Option<String> {
         self.session().answering_fallback().or_else(|| self.models().and_then(|models| models.current().model))
     }
 

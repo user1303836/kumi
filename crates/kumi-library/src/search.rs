@@ -235,6 +235,8 @@ struct Prepared {
     root: usize,
     name: String,
     lower: String,
+    /// The letters `lower` has, and those its words start with.
+    letters: Letters,
     where_: String,
     hay: String,
     folders: Vec<String>,
@@ -248,9 +250,11 @@ fn prepared(entry: &SoundEntry, source: &Source, root: usize) -> Prepared {
     let ext = extension(&entry.path);
     let name = name.strip_suffix(&ext).unwrap_or(&name).to_owned();
     let all = std::iter::once(source.label.clone()).chain(folders).collect::<Vec<_>>();
+    let lower = name.to_lowercase();
     Prepared {
         root,
-        lower: name.to_lowercase(),
+        letters: letters_of(&lower),
+        lower,
         name,
         where_: all.join(" / "),
         hay: format!("{}/{relative}", source.label).to_lowercase(),
@@ -258,6 +262,39 @@ fn prepared(entry: &SoundEntry, source: &Source, root: usize) -> Prepared {
         vector: entry.vector.as_deref().map(unpack_vector).unwrap_or_default(),
     }
 }
+/// The ASCII letters and digits a lowercased name has, and those that start one of its words, a bit each: what `@`'s
+/// ranking reads to pass over a name without the letters typed, and to rank one letter without reading the name.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Letters {
+    pub has: u64,
+    pub starts: u64,
+}
+
+/// The letters of a lowercased name. A word starts where the letter before isn't a letter or a digit.
+pub fn letters_of(lower: &str) -> Letters {
+    let mut letters = Letters::default();
+    let mut previous: Option<char> = None;
+    for letter in lower.chars() {
+        if let Some(bit) = letter_bit(letter) {
+            letters.has |= bit;
+            if previous.is_none_or(|previous| !previous.is_alphanumeric()) {
+                letters.starts |= bit;
+            }
+        }
+        previous = Some(letter);
+    }
+    letters
+}
+
+/// A letter's bit in [`Letters`]: a to z, then 0 to 9; none for any other.
+pub fn letter_bit(letter: char) -> Option<u64> {
+    match letter {
+        'a'..='z' => Some(1 << (letter as u32 - 'a' as u32)),
+        '0'..='9' => Some(1 << (26 + letter as u32 - '0' as u32)),
+        _ => None,
+    }
+}
+
 pub struct SoundIndex {
     pub entries: Vec<SoundEntry>,
     /// The sources its sounds are under, the longest path first.
@@ -703,6 +740,15 @@ impl SoundIndex {
     /// Each measured sound's row and its numbers as the search compares them: standardized, each group weighted.
     pub fn compared(&self) -> impl Iterator<Item = (usize, &[f32])> + '_ {
         (0..self.entries.len()).filter_map(|row| self.compared_at(row).map(|numbers| (row, numbers)))
+    }
+    /// The letters the sound's lowercased name in this row has, and those its words start with.
+    pub fn letters(&self, row: usize) -> Letters {
+        self.prepared.get(row).map(|prepared| prepared.letters).unwrap_or_default()
+    }
+    /// The sound in this row as the search names it: its file's name without the extension, that name lowercased as the
+    /// search matches it, and where it is ("Splice / Drums / 808").
+    pub fn named(&self, row: usize) -> Option<(&str, &str, &str)> {
+        self.prepared.get(row).map(|prepared| (prepared.name.as_str(), prepared.lower.as_str(), prepared.where_.as_str()))
     }
     /// The numbers the search compares for the sound in this row: None when it isn't measured.
     pub fn compared_at(&self, row: usize) -> Option<&[f32]> {
