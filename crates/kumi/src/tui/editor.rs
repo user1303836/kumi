@@ -52,6 +52,87 @@ struct Chip {
     label: String,
 }
 
+/// A message's words as the box held them: its characters, each chip as the one character it stands as, and those chips.
+/// Sent, it's `expanded`; in the conversation, `shown`; put back in a box (`put_back`, `show_composed`), its chips are
+/// chips again.
+#[derive(Clone, Debug, Default)]
+pub struct Composed {
+    chars: Vec<String>,
+    chips: Vec<Chip>,
+}
+
+impl Composed {
+    pub fn is_empty(&self) -> bool {
+        self.chars.is_empty()
+    }
+
+    /// Whether any of it is a chip: else it's as good as its words.
+    pub fn has_chips(&self) -> bool {
+        !self.chips.is_empty()
+    }
+
+    /// Each chip's whole paste in its place: what's sent.
+    pub fn expanded(&self) -> String {
+        whole(&self.chars, &self.chips)
+    }
+
+    /// Each chip as its label and the start of its first line: what the conversation shows.
+    pub fn shown(&self) -> String {
+        shown(&self.chars, &self.chips)
+    }
+}
+
+/// The chip a character stands for among `chips`, and what was typed after it in the same character (a mark).
+fn chip_of<'a>(chips: &'a [Chip], grapheme: &'a str) -> Option<(&'a Chip, &'a str)> {
+    let first = grapheme.chars().next()?;
+    let at = (first as u32).checked_sub(CHIP)? as usize;
+    chips.get(at).map(|chip| (chip, &grapheme[first.len_utf8()..]))
+}
+
+/// Characters with each chip's whole paste in its place.
+fn whole(graphemes: &[String], chips: &[Chip]) -> String {
+    let mut text = String::new();
+    for grapheme in graphemes {
+        match chip_of(chips, grapheme) {
+            Some((chip, rest)) => {
+                text.push_str(&chip.text);
+                text.push_str(rest);
+            }
+            None => text.push_str(grapheme),
+        }
+    }
+    text
+}
+
+/// Characters with each chip as its label and the start of its first line.
+fn shown(graphemes: &[String], chips: &[Chip]) -> String {
+    graphemes
+        .iter()
+        .map(|grapheme| match chip_of(chips, grapheme) {
+            Some((chip, rest)) => {
+                let first = chip.text.lines().map(str::trim).find(|line| !line.is_empty()).unwrap_or("");
+                let start: String = first.chars().take(CHIP_FIRST_LINE).collect();
+                let more = if start.len() < first.len() { "…" } else { "" };
+                format!("{} {start}{more}{rest}", chip.label)
+            }
+            None => grapheme.clone(),
+        })
+        .collect()
+}
+
+/// A character of `count` chips, standing now for the one `offset` places on: the chips are put after others.
+fn moved_mark(grapheme: &str, count: usize, offset: usize) -> String {
+    let mut chars = grapheme.chars();
+    let Some(first) = chars.next() else { return grapheme.to_string() };
+    match (first as u32).checked_sub(CHIP).map(|at| at as usize).filter(|at| *at < count) {
+        Some(at) => match char::from_u32(CHIP + (offset + at) as u32).filter(|mark| (*mark as u32) <= 0x10_fffd) {
+            Some(mark) => format!("{mark}{}", chars.as_str()),
+            None => grapheme.to_string(),
+        },
+        None => grapheme.to_string(),
+    }
+}
+
 /// A draft set aside, with its cursor, its steps and its chips, while the producer looks back through what they sent.
 #[derive(Clone, Debug, Default)]
 pub struct Draft {
@@ -163,18 +244,80 @@ impl Editor {
 
     /// The text with each chip as its label and the start of its first line: what the conversation shows.
     pub fn shown(&self) -> String {
+        shown(&self.chars, &self.chips)
+    }
+
+    /// The box's words, chips and all: what a message held or sent keeps, to come back as it was. Only the chips its
+    /// words hold go with it (the box keeps those undo may bring back), numbered as they come.
+    pub fn composed(&self) -> Composed {
+        let mut kept: Vec<(usize, Chip)> = Vec::new();
+        let chars = self
+            .chars
+            .iter()
+            .map(|grapheme| {
+                let mut letters = grapheme.chars();
+                let Some(at) = letters.next().and_then(|first| (first as u32).checked_sub(CHIP)).map(|at| at as usize) else {
+                    return grapheme.clone();
+                };
+                let Some(chip) = self.chips.get(at) else { return grapheme.clone() };
+                let now = match kept.iter().position(|(was, _)| *was == at) {
+                    Some(now) => now,
+                    None => {
+                        kept.push((at, chip.clone()));
+                        kept.len() - 1
+                    }
+                };
+                match char::from_u32(CHIP + now as u32) {
+                    Some(mark) => format!("{mark}{}", letters.as_str()),
+                    None => grapheme.clone(),
+                }
+            })
+            .collect();
+        Composed { chars, chips: kept.into_iter().map(|(_, chip)| chip).collect() }
+    }
+
+    /// The box's words replaced by a message's, its chips chips again: one step undo takes back. The box's own chips stay
+    /// kept, as a step may hold one.
+    pub fn set_composed(&mut self, composed: &Composed) {
+        self.change(None);
+        let offset = self.chips.len();
+        self.chars = composed.chars.iter().map(|grapheme| moved_mark(grapheme, composed.chips.len(), offset)).collect();
+        self.chips.extend(composed.chips.iter().cloned());
+        self.position = self.chars.len();
+    }
+
+    /// How many bytes `expanded` would be, without making it.
+    pub fn expanded_len(&self) -> usize {
         self.chars
             .iter()
             .map(|grapheme| match self.chip(grapheme) {
-                Some((chip, rest)) => {
-                    let first = chip.text.lines().map(str::trim).find(|line| !line.is_empty()).unwrap_or("");
-                    let start: String = first.chars().take(CHIP_FIRST_LINE).collect();
-                    let more = if start.len() < first.len() { "…" } else { "" };
-                    format!("{} {start}{more}{rest}", chip.label)
-                }
-                None => grapheme.clone(),
+                Some((chip, rest)) => chip.text.len() + rest.len(),
+                None => grapheme.len(),
             })
-            .collect()
+            .sum()
+    }
+
+    /// Messages put back above the draft, each on a line of its own, their chips chips again: one step, with the
+    /// cursor at the end.
+    pub fn put_back(&mut self, messages: &[Composed]) {
+        let messages: Vec<&Composed> = messages.iter().filter(|message| !message.is_empty()).collect();
+        if messages.is_empty() {
+            return;
+        }
+        self.change(None);
+        let mut chars = Vec::new();
+        for message in messages {
+            let offset = self.chips.len();
+            chars.extend(message.chars.iter().map(|grapheme| moved_mark(grapheme, message.chips.len(), offset)));
+            self.chips.extend(message.chips.iter().cloned());
+            chars.push("\n".to_string());
+        }
+        if self.chars.is_empty() {
+            chars.pop();
+        }
+        chars.append(&mut self.chars);
+        self.chars = chars;
+        self.position = self.chars.len();
     }
 
     /// Empties the box as a step undo can take back.
@@ -332,6 +475,16 @@ impl Editor {
         draft
     }
 
+    /// `show`, for a message sent with chips: they come back as chips.
+    pub fn show_composed(&mut self, composed: &Composed) -> Draft {
+        let draft = self.show("");
+        self.chars = composed.chars.clone();
+        self.chips = composed.chips.clone();
+        self.position = self.chars.len();
+        self.moved();
+        draft
+    }
+
     pub fn restore(&mut self, draft: Draft) {
         self.chars = draft.chars;
         self.position = draft.position;
@@ -437,24 +590,12 @@ impl Editor {
 
     /// The chip a character of the box stands for, and what was typed after it in the same character (a mark).
     fn chip<'a>(&'a self, grapheme: &'a str) -> Option<(&'a Chip, &'a str)> {
-        let first = grapheme.chars().next()?;
-        let at = (first as u32).checked_sub(CHIP)? as usize;
-        self.chips.get(at).map(|chip| (chip, &grapheme[first.len_utf8()..]))
+        chip_of(&self.chips, grapheme)
     }
 
     /// Characters of the box with each chip's whole paste in its place.
     fn whole(&self, graphemes: &[String]) -> String {
-        let mut text = String::new();
-        for grapheme in graphemes {
-            match self.chip(grapheme) {
-                Some((chip, rest)) => {
-                    text.push_str(&chip.text);
-                    text.push_str(rest);
-                }
-                None => text.push_str(grapheme),
-            }
-        }
-        text
+        whole(graphemes, &self.chips)
     }
 
     /// Replaces characters `from..to` with `text`, leaving the cursor just after it. The text stays split into the

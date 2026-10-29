@@ -1,6 +1,6 @@
 [package]
 name = "kumi-types"
-version = "1.24.20"
+version = "1.24.21"
 description = "Kumi's shared types and settings: the DAW profiles, the contracts between the agent and its tools, errors, timing, and the system and version every layer names."
 edition.workspace = true
 license.workspace = true

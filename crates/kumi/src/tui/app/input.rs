@@ -11,7 +11,11 @@ use super::*;
 use crate::text::{library_line, remembered_line};
 use base64::Engine;
 use kumi_agent::core::commands::{self, Command, Effect, Found, Now, Why};
+use kumi_agent::core::protocol::{too_long_words, MAX_MESSAGE};
 use std::task::{Context, Poll};
+
+/// How many messages sent with chips are kept, by their history entry, for ↑ to bring back as chips.
+const SENT_WORDS_KEPT: usize = 20;
 
 impl TuiApp {
     pub(super) fn on_input(&self, event: InputEvent) {
@@ -392,14 +396,19 @@ impl TuiApp {
         if name == "tab" && menu.is_empty() && !ctrl && !alt && self.busy() {
             let raw = self.composed();
             if !raw.is_empty() && !is_command(string::trim(&raw)) {
-                if let Some(history) = &self.0.options.history {
-                    history.borrow_mut().add(&raw);
+                if self.too_long(&raw) {
+                    return;
                 }
+                let (shown, words) = {
+                    let state = self.0.state.borrow();
+                    (state.editor.shown(), state.editor.composed())
+                };
+                self.remember_sent(&raw, &words);
                 let mut state = self.0.state.borrow_mut();
                 state.recall = None;
                 state.editor.clear();
                 drop(state);
-                self.hold(raw, "after");
+                self.hold(raw, shown, words, "after");
                 return;
             }
         }
@@ -543,9 +552,9 @@ impl TuiApp {
         }
         if alt && name == "up" {
             if let Some(at) = state.held.iter().rposition(|h| !h.taken) {
+                // Back above the draft as the box held it, chips and all.
                 let item = state.held.remove(at);
-                let text = if state.editor.is_empty() { item.text } else { format!("{}\n{}", item.text, state.editor.text()) };
-                state.editor.set(&text);
+                state.editor.put_back(&[item.words]);
                 state.recall = None;
                 return;
             }
@@ -678,18 +687,46 @@ impl TuiApp {
     fn composed(&self) -> String {
         sanitize_text(&self.0.state.borrow().editor.expanded(), &[])
     }
+    /// Into the history, and, with chips, kept by its entry for ↑ to bring back as chips (this run's newest).
+    fn remember_sent(&self, raw: &str, words: &Composed) {
+        let Some(history) = &self.0.options.history else { return };
+        history.borrow_mut().add(raw);
+        if !words.has_chips() {
+            return;
+        }
+        let Some(entry) = history.borrow().entries().last().cloned() else { return };
+        let mut state = self.0.state.borrow_mut();
+        state.sent_words.retain(|(kept, _)| *kept != entry);
+        if state.sent_words.len() >= SENT_WORDS_KEPT {
+            state.sent_words.remove(0);
+        }
+        state.sent_words.push((entry, words.clone()));
+    }
+    /// Whether a message is past what the session takes at once: then it's said so, and the box keeps it.
+    fn too_long(&self, raw: &str) -> bool {
+        if raw.len() <= MAX_MESSAGE {
+            return false;
+        }
+        self.notice(&too_long_words(raw.len()), NoticeTone::Warn);
+        true
+    }
     pub(super) async fn submit(&self) -> Result<(), RuntimeError> {
         let raw = self.composed();
         // The conversation shows a long paste as its chip and the start of its first line; the model gets all of it.
-        let shown = self.0.state.borrow().editor.shown();
+        let (shown, words) = {
+            let state = self.0.state.borrow();
+            (state.editor.shown(), state.editor.composed())
+        };
         let command = string::trim(&raw);
         if command.is_empty() {
             return Ok(());
         }
-        let session = self.session();
-        if let Some(history) = &self.0.options.history {
-            history.borrow_mut().add(&raw);
+        // A message past what the session takes stays in the box, said so, rather than sent to be refused.
+        if !is_command(command) && self.too_long(&raw) {
+            return Ok(());
         }
+        let session = self.session();
+        self.remember_sent(&raw, &words);
         self.0.state.borrow_mut().recall = None;
         let goal_running = {
             let state = self.0.state.borrow();
@@ -1057,7 +1094,7 @@ impl TuiApp {
                         "after"
                     }
                 };
-                self.hold(raw, when);
+                self.hold(raw, shown, words, when);
                 return Ok(());
             }
             effect @ (Effect::PauseGoal | Effect::PauseLoop) => {
@@ -1241,6 +1278,7 @@ impl TuiApp {
                     let mut state = self.0.state.borrow_mut();
                     state.transcript.add(Entry::User { text });
                     state.last_sent = Some(raw.clone());
+                    state.last_words = Some(words.clone());
                 }
                 if self.instant(&raw).await {
                     return Ok(());

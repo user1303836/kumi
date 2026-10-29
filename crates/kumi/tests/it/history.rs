@@ -41,7 +41,8 @@ fn key_formats_and_labels_are_redacted_and_terminal_controls_removed() {
         "api_key = [redacted] token: [redacted] password=[redacted] secret: [redacted]"
     );
     assert_eq!(history_text("\x1b[31mred\x1b[0m", &[]), "red");
-    assert_eq!(history_text(&"x".repeat(5000), &[]).len(), 4096);
+    // The file keeps a long one cut, ending so: brought back later, it isn't sent again unawares as if whole.
+    assert_eq!(history_text(&"x".repeat(5000), &[]), format!("{}…", "x".repeat(4095)));
 }
 #[test]
 fn history_recovers_valid_lines_compacts_and_survives_unwritable_storage() {
@@ -137,9 +138,24 @@ fn a_long_run_is_read_once_through() {
     // Half a million starts a pattern that looked ahead from each would scan to the end from.
     let long = "a-".repeat(150_000);
     let began = std::time::Instant::now();
-    assert_eq!(history_text(&long, &[]).len(), 4096);
+    assert_eq!(history_text(&long, &[]).chars().count(), 4096);
     assert_eq!(log_redactor(vec![])(&long), long);
     let run = format!("{}1", "a".repeat(300_000));
     assert_eq!(log_redactor(vec![])(&run), "[redacted]");
     assert!(began.elapsed() < std::time::Duration::from_secs(5), "{:?}", began.elapsed());
+}
+
+// #645: a message sent stays whole among the entries while Kumi runs, so ↑ brings all of it back; the file keeps it cut
+// to 4,096 characters, ending so.
+#[test]
+fn a_message_sent_stays_whole_while_kumi_runs_and_the_file_keeps_it_cut() {
+    let tmp = tempfile::tempdir().unwrap();
+    let file = tmp.path().join("input-history");
+    let long = "x".repeat(10_000);
+    let mut history = open_input_history(Some(file.clone()), vec![]);
+    history.add(&long);
+    history.add("then this");
+    assert_eq!(history.entries(), [long.clone(), "then this".to_string()]);
+    let again = open_input_history(Some(file), vec![]);
+    assert_eq!(again.entries(), [format!("{}…", "x".repeat(4095)), "then this".to_string()]);
 }
