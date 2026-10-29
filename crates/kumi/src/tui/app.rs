@@ -400,6 +400,8 @@ struct State {
     objective: Option<Timed<ObjectiveStatus>>,
     watching: bool,
     undoing: bool,
+    /// When an esc nothing took came, in an empty box with Kumi at rest: a second soon after takes a request back.
+    escaped: Option<f64>,
     hits: Vec<Hit>,
     tabs_area: Option<Rect>,
     selection: Option<super::selection::Selection>,
@@ -595,6 +597,7 @@ impl State {
             objective: None,
             watching: false,
             undoing: false,
+            escaped: None,
             hits: vec![],
             tabs_area: None,
             selection: None,

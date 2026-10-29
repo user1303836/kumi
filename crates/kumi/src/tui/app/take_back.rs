@@ -1,6 +1,12 @@
-//! Taking requests back: `/takeback [n]`. Kumi undoes the changes of the requests taken back, newest first, and puts
-//! the earliest one's words back in the box.
+//! Taking requests back: `/takeback [n]`, and `esc esc`'s list of the producer's requests, newest first, each with how
+//! many changes it made. Kumi undoes the changes of the request chosen and of each one after it, newest first, and puts
+//! its words back in the box; before it does, the list says which of those changes Kumi can't undo.
+use super::super::picker::{NoteTone, PickerOptions};
+use super::panels::{inert, item, noted};
 use super::*;
+
+/// How soon the second esc of `esc esc` comes after the first.
+const AGAIN_MS: f64 = 500.;
 
 impl TuiApp {
     /// /takeback: the producer's last request taken back, or their last `words` of them. Kumi undoes their changes newest
@@ -93,6 +99,93 @@ impl TuiApp {
         }
         let tone = if taken.failed.is_some() { NoticeTone::Warn } else { NoticeTone::Info };
         self.notice(&said.join(" "), tone);
+    }
+    /// An esc nothing else took, with Kumi at rest and nothing pinned. In an empty box, the second within half a second
+    /// of the first (`before`) opens the requests to take back.
+    pub(super) fn escaped(&self, before: Option<f64>) {
+        if !self.0.state.borrow().editor.is_empty() || !self.can().take_back {
+            return;
+        }
+        let now = perf_now();
+        if before.is_some_and(|at| now - at <= AGAIN_MS) {
+            let app = self.clone();
+            tokio::task::spawn_local(async move { app.pick_take_back().await });
+        } else {
+            self.0.state.borrow_mut().escaped = Some(now);
+        }
+    }
+    /// esc esc: the producer's requests that stand, newest first, each with how many changes it made and how many of them
+    /// Kumi can't undo. Choosing one asks before it's taken back, with each one after it.
+    async fn pick_take_back(&self) {
+        if !self.may_take_back() {
+            return;
+        }
+        let requests = match self.session().op(op::TakeBackPlan {}).await {
+            Ok(requests) => requests,
+            Err(error) => return self.error(&error),
+        };
+        // Something may have begun while the log was read (a list over Kumi at work would take the esc that stops it).
+        if self.busy() || self.0.state.borrow().closing {
+            return;
+        }
+        if requests.is_empty() {
+            self.notice("There's no request of yours to take back yet.", NoticeTone::Info);
+            return;
+        }
+        let items = requests
+            .iter()
+            .map(|asked| {
+                let row = item(self.clean(&asked.words.replace('\n', " "), 70), asked.at.to_string(), changes(asked.changes.len()));
+                match left_as_they_are(std::slice::from_ref(asked)).len() {
+                    0 => row,
+                    stuck => noted(row, format!("{stuck} can't be undone"), NoteTone::Warn),
+                }
+            })
+            .collect();
+        let requests = Rc::new(requests);
+        let options = PickerOptions { filterable: true, ..Default::default() };
+        self.pick(Picker::with_options("Take a request back", items, options), move |app, chosen| {
+            let requests = requests.clone();
+            async move {
+                if let Some(at) = chosen.value.and_then(|value| value.parse::<i64>().ok()) {
+                    app.confirm_take_back(&requests, at);
+                }
+                Ok(())
+            }
+        });
+    }
+    /// Before the request asked at `at` is taken back, with each one after it: what Kumi undoes, and each change it can't
+    /// undo, which stays as it is.
+    fn confirm_take_back(&self, requests: &[Requested], at: i64) {
+        let Some(index) = requests.iter().position(|asked| asked.at == at) else { return };
+        let going = &requests[..=index];
+        let undoes = going.iter().flat_map(|asked| &asked.changes).filter(|change| change.state == ChangeState::Applied).count();
+        let mut items: Vec<PickerItem> = left_as_they_are(going)
+            .iter()
+            .map(|change| inert(format!("Stays as it is: {} ({})", self.clean(&change.title, 60), why_left(change))))
+            .collect();
+        // (beside the choice, within a list's width)
+        let words = if undoes == 0 {
+            "Its words go back in the box".to_string()
+        } else {
+            format!("Undoes {}; its words go back in the box", changes(undoes))
+        };
+        items.push(item(if index == 0 { "Take it back" } else { "Take them back" }, "take", words));
+        items.push(PickerItem::new("Not now", "later"));
+        let asked = self.clean(&going[index].words.replace('\n', " "), 50);
+        let title = match index {
+            0 => format!("Take back “{asked}”?"),
+            1 => format!("Take back “{asked}” and the request after it?"),
+            n => format!("Take back “{asked}” and the {n} requests after it?"),
+        };
+        self.pick(Picker::new(title, items), move |app, answer| async move {
+            app.close_panel();
+            if answer.value.as_deref() == Some("take") && app.may_take_back() {
+                let still = move |requests: &[Requested]| requests.iter().any(|asked| asked.at == at).then_some(at);
+                app.take_back_where(still, "That request isn't there to take back any more.").await;
+            }
+            Ok(())
+        });
     }
 }
 

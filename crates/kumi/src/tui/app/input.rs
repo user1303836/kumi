@@ -23,6 +23,12 @@ impl TuiApp {
             self.window_focus(focused);
             return;
         }
+        // esc esc: when the first esc came, ended by whatever else the producer does (letting a key go or moving the
+        // mouse does nothing). Only an esc that reaches the box's keys can be the second.
+        let escaped = match event {
+            InputEvent::Release { .. } | InputEvent::Mouse { action: MouseAction::Move, .. } => None,
+            _ => self.0.state.borrow_mut().escaped.take(),
+        };
         // Someone's there: Kumi doesn't answer its own question for them.
         if matches!(event, InputEvent::Key { .. } | InputEvent::Text { .. } | InputEvent::Paste { .. } | InputEvent::Mouse { .. }) {
             self.stop_answer_countdown();
@@ -101,7 +107,8 @@ impl TuiApp {
             }
             // End of the help's typed key.
             InputEvent::Text { text } | InputEvent::Paste { text } => self.type_into_box(&text, typed),
-            InputEvent::Key { name, mods, .. } => self.key(&name, mods),
+            // (a key held down isn't pressed twice)
+            InputEvent::Key { name, mods, repeat } => self.key(&name, mods, escaped.filter(|_| !repeat)),
             InputEvent::Mouse { action: MouseAction::Wheel, direction, x, y, .. } => {
                 let area = self.0.state.borrow().tabs_area;
                 let up = direction == Some(WheelDirection::Up);
@@ -290,7 +297,8 @@ impl TuiApp {
         self.toast(&copied_words(text, here, self.0.profile.iterm), NoticeTone::Info);
         true
     }
-    fn key(&self, name: &str, mods: Modifiers) {
+    /// A key the box and the conversation take, `escaped` when an esc that did nothing else came just before it.
+    fn key(&self, name: &str, mods: Modifiers, escaped: Option<f64>) {
         let Modifiers { ctrl, alt, shift } = mods;
         if let Some(voice) = &self.0.voice {
             if voice.active() {
@@ -455,6 +463,9 @@ impl TuiApp {
                 self.cancel();
             } else if self.0.state.borrow().pinned.is_some() {
                 self.unpin();
+            } else {
+                // Only an esc that did nothing else is half of esc esc.
+                self.escaped(escaped);
             }
             return;
         }
