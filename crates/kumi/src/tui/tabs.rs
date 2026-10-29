@@ -68,8 +68,17 @@ struct State {
     cursor: Option<i32>,
     last_rows: Rc<[TabRow]>,
     last_height: i32,
-    /// Counts the times a tab was asked for (by a click, a key or Kumi), shown already or not.
-    asked: u64,
+    /// The rows last drawn, by the tab's id: the first one shown and the one after the last, the ends' "n more" aside.
+    shown: Option<(String, i32, i32)>,
+    /// Counts the times the tab showing changed, by a click, a key or Kumi.
+    switches: u64,
+}
+
+impl State {
+    /// The first row last drawn for this tab, when the rows last drawn were its.
+    fn first_shown(&self, id: &str) -> Option<i32> {
+        self.shown.as_ref().filter(|(shown, ..)| shown == id).map(|(_, first, _)| *first)
+    }
 }
 
 struct Inner {
@@ -102,7 +111,8 @@ impl TabPanel {
                     cursor: None,
                     last_rows: Rc::default(),
                     last_height: 1,
-                    asked: 0,
+                    shown: None,
+                    switches: 0,
                 }),
             }),
         }
@@ -134,13 +144,10 @@ impl TabPanel {
     pub fn show(&self, id: &str) {
         {
             let mut state = self.inner.state.borrow_mut();
-            if !self.inner.tabs.iter().any(|tab| tab.id() == id && tab.shown()) {
+            if !self.inner.tabs.iter().any(|tab| tab.id() == id && tab.shown()) || id == state.active {
                 return;
             }
-            state.asked += 1;
-            if id == state.active {
-                return;
-            }
+            state.switches += 1;
             state.active = id.to_string();
             state.cursor = state.cursor.map(|_| 0);
         }
@@ -149,9 +156,9 @@ impl TabPanel {
         }
     }
 
-    /// How many times a tab was asked for: a drawer that holds the tabs under other things turns to them when it moves.
-    pub fn asked(&self) -> u64 {
-        self.inner.state.borrow().asked
+    /// How many times the tab showing changed: a drawer that holds the tabs among other things can follow them.
+    pub fn switches(&self) -> u64 {
+        self.inner.state.borrow().switches
     }
 
     /// The tabs on the strip, in order: each one's id, title and count.
@@ -186,7 +193,8 @@ impl TabPanel {
         let active = self.active_id();
         let mut state = self.inner.state.borrow_mut();
         let scroll = state.scrolls.get(&active).copied().unwrap_or(0);
-        state.cursor = Some((scroll + if scroll > 0 { 1 } else { 0 }).min((state.last_rows.len() as i32 - 1).max(0)));
+        let first = state.first_shown(&active).unwrap_or(scroll + if scroll > 0 { 1 } else { 0 });
+        state.cursor = Some(first.min((state.last_rows.len() as i32 - 1).max(0)));
     }
 
     pub fn leave(&self) {
@@ -204,7 +212,10 @@ impl TabPanel {
             let shift = |state: &mut State, by: i32| {
                 let cursor = (cursor + by).clamp(0, (count - 1).max(0));
                 state.cursor = Some(cursor);
-                // Kept in view, clear of the "n more" rows at the ends.
+                // Kept in view, clear of the "n more" rows at the ends: a row among those last shown already is.
+                if matches!(&state.shown, Some((id, first, end)) if *id == active && (*first..*end).contains(&cursor)) {
+                    return;
+                }
                 let active = active.clone();
                 let scroll = state.scrolls.get(&active).copied().unwrap_or(0);
                 let height = state.last_height;
@@ -295,7 +306,8 @@ impl TabPanel {
         // The things (rows' `item`s) at the top of the view and under the keyboard's row, in the rows last drawn.
         let previous = state.last_rows.clone();
         let item_at = |at: i32| previous.get(at.max(0) as usize).and_then(|row| row.item.clone());
-        let (top, under) = (item_at(scrolled + if scrolled > 0 { 1 } else { 0 }), state.cursor.and_then(item_at));
+        let top_row = state.first_shown(&active).unwrap_or(scrolled + if scrolled > 0 { 1 } else { 0 });
+        let (top, under) = (item_at(top_row), state.cursor.and_then(item_at));
         let find = |item: &Option<String>| item.as_ref().and_then(|item| rows.iter().position(|row| row.item.as_ref() == Some(item)));
         if let Some(before) = before.filter(|before| *before != total) {
             match find(&top) {
@@ -317,6 +329,7 @@ impl TabPanel {
         state.last_rows = rows.clone();
         state.last_height = height;
         if rows.is_empty() {
+            state.shown = Some((active, 0, 0));
             screen.put(area.x, area.y, &truncate(tab.empty().unwrap_or("Nothing here yet"), area.width), &faint);
             return;
         }
@@ -350,6 +363,7 @@ impl TabPanel {
         let (_, more_above, more_below) = ends(first, last);
         let (first, last) = (if more_above > 0 { first } else { 0 }, if more_below > 0 { last } else { 0 });
         let (shown, more_above, more_below) = ends(first, last);
+        self.inner.state.borrow_mut().shown = Some((active, scroll + first, scroll + first + shown.len() as i32));
         let mut y = area.y;
         if first > 0 {
             screen.put(area.x, y, &format!("↑ {more_above} more"), &faint);
@@ -460,6 +474,31 @@ mod tests {
         // Another change past it is counted.
         let lines = draw(&TabPanel::new(vec![Rc::new(Opened { older: true })], None, None));
         assert!(lines[3].starts_with("picture 2") && lines[4].starts_with("↓ 1 more"), "{lines:?}");
+    }
+
+    #[test]
+    fn the_keyboard_comes_in_at_the_first_row_shown_and_moves_through_what_shows_before_it_scrolls() {
+        let draw = |panel: &TabPanel| {
+            let mut screen = Screen::new(20, 5);
+            panel.draw_rows(&mut screen, Rect::new(0, 0, 20, 5), &mut vec![]);
+            screen.lines()
+        };
+        let panel = TabPanel::new(vec![Rc::new(Opened { older: false })], None, None);
+        draw(&panel);
+        // Scrolled into the picture, with no ends: the first row showing is picture 2, the change's fourth row.
+        panel.scroll_by(3);
+        draw(&panel);
+        panel.enter();
+        assert_eq!(panel.cursor(), Some(3));
+        for _ in 0..4 {
+            assert!(panel.key("down"));
+        }
+        assert_eq!(panel.cursor(), Some(7));
+        let lines = draw(&panel);
+        assert!(lines[0].starts_with("picture 2") && lines[4].starts_with("picture 6"), "the view stays: {lines:?}");
+        // One more goes past what shows: the view follows.
+        assert!(panel.key("down"));
+        assert!(draw(&panel).iter().any(|line| line.starts_with("picture 7")));
     }
 
     #[test]

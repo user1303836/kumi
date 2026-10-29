@@ -173,7 +173,10 @@ impl TuiApp {
                 }
                 if let Some(screen) = self.0.screen.borrow().as_ref().filter(|s| s.width > 0 && s.height > 0) {
                     let (pane, left) = self.layout(screen.width);
-                    let area = if pane == 0 || self.setup_active() {
+                    // (W6-2: below 100 columns the drawer keeps its own, as the side pane does)
+                    let area = if let Some(area) = self.drawer_drag(*y, screen.bounds()).filter(|_| !self.setup_active()) {
+                        area
+                    } else if pane == 0 || self.setup_active() {
                         screen.bounds()
                     } else if *x < left {
                         Rect::new(0, 0, left, screen.height)
@@ -977,6 +980,8 @@ impl TuiApp {
         if command == "/goal" && self.busy() && goal_running {
             self.clear_editor();
             self.0.tabs.show("goal");
+            // (W6-2: asked for, the drawer opens on it)
+            self.open_pane(super::drawer::DrawerTab::Tabs);
             self.0.scheduler.request();
             return Ok(());
         }

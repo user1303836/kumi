@@ -341,6 +341,42 @@ case!(renoises_cursor_line_stays_in_view_deep_in_a_pattern, async {
     h.close().await;
 });
 
+case!(renoises_pattern_fits_the_drawer_around_its_cursor, async {
+    work_with(DawId::Renoise);
+    let c = Rc::new(Control::default());
+    let mut cells: Vec<String> = (0..33).map(|_| "--- .. .. .. ..".to_string()).collect();
+    cells[16] = "OFF 01 .. .. ..".into();
+    *c.own.borrow_mut() = Some(FocusBody::Tracker(TrackerGrid {
+        item_ref: "3:pattern:2".into(),
+        name: "Drop".into(),
+        lines: 64,
+        from: 23,
+        cursor: Some(39),
+        playing: None,
+        lpb: Some(4.),
+        heading: None,
+        facts: vec![],
+        tracks: vec![TrackerTrack { name: "Bass".into(), color: None, cells }],
+    }));
+    let h = Harness::with(80, 30, c.clone(), |_| {});
+    h.start().await;
+    h.connect();
+    let focus = json!({"track":{"name":"Bass","kind":"sequencer"},"trackRef":"3:track:2","mainView":{"kind":"pattern-editor","label":"Pattern Editor"},"item":{"kind":"pattern-track","itemRef":"3:pattern:2","name":"Drop"}});
+    h.emit(json!({"type":"focus","focus":focus}));
+    let strip = |lines: &[String]| lines.iter().position(|line| line.starts_with("  NOW   FOCUS")).expect("the drawer");
+    let lines = h.screen();
+    h.type_text(&click(&lines, strip(&lines), "FOCUS")).await;
+    shows(&h, "FOCUS · Pattern").await;
+    // The drawer's six rows hold the pattern's title, its tracks' names and the lines around the cursor, the next one
+    // too.
+    let lines = h.screen();
+    let drawer = &lines[strip(&lines) + 1..strip(&lines) + 7];
+    let cursor =
+        drawer.iter().position(|line| line.contains(" 39 ")).unwrap_or_else(|| panic!("line 39 in the drawer:\n{}", lines.join("\n")));
+    assert!(drawer[cursor].contains("OFF 01") && drawer.get(cursor + 1).is_some_and(|line| line.contains(" 40 ")), "{}", lines.join("\n"));
+    h.close().await;
+});
+
 // ----- goldens (m4-tui): each new body and each family's picture, drawn from what the bridges send -----
 //
 // Whole screens kept as text in tests/goldens/tui/daw (trailing spaces trimmed): at 120×36 and 160×40, narrow (80×30),

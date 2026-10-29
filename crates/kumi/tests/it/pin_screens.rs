@@ -1406,3 +1406,21 @@ scene!(drawer_palette, DRAWER_SIZES, |width, height| {
     drawer_tab(&h, "PALETTE").await;
     finish(h).await
 });
+
+scene!(drawer_waiting, DRAWER_SIZES, |width, height| {
+    let c = Rc::new(Control::default());
+    c.steer_enabled.set(true);
+    c.steer_result.set(false);
+    let h = open(width, height, c).await;
+    // A pinned clip, an answer under way with a change in it, and a message waiting: the drawer under the
+    // conversation, then what goes with the next message, by the box.
+    let pin = json!({"trackRef":"3:track:0","ref":"3:arrangement_clip:0:0","node":"clip","name":"Verse riff","trail":["Bass"],"siblings":[],"live":true,"track":"Bass"});
+    h.emit(json!({"type":"pointed","pin":pin}));
+    h.type_text("double it\r").await;
+    h.wait_for_call("submit:double it").await;
+    h.emit(json!({"type":"state","state":"running"}));
+    h.emit(change("c1", "tempo", "Tempo 120 → 124 BPM", json!({"from":120.0,"to":124.0})));
+    h.type_text("make it darker\r").await;
+    h.wait_for("at the next step").await;
+    finish_steady(h, &["thinking"]).await
+});

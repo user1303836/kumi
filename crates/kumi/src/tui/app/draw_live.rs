@@ -17,6 +17,23 @@ pub(super) struct FocusDrawn {
     pub busy: Option<String>,
     pub rows: Option<i32>,
 }
+/// How tall FOCUS's body may be: in the pane, so many rows for the device tree and for a DAW's own body; in the drawer,
+/// all of it in so many rows, whatever heads it (the tree's track, a tracker's title and track names).
+pub(super) enum FocusRoom {
+    Pane { tree: i32, own: i32 },
+    Rows(i32),
+}
+impl FocusRoom {
+    fn most(&self, kind: BodyKind) -> i32 {
+        match (self, kind) {
+            (FocusRoom::Pane { tree, .. }, BodyKind::Tree) => *tree,
+            (FocusRoom::Pane { own, .. }, _) => *own,
+            (FocusRoom::Rows(rows), BodyKind::Tree) => rows - 1,
+            (FocusRoom::Rows(rows), BodyKind::Tracker) => rows - 2,
+            (FocusRoom::Rows(rows), _) => *rows,
+        }
+    }
+}
 impl TuiApp {
     fn click<F: Fn(TuiApp) + 'static>(&self, f: F) -> Rc<dyn Fn()> {
         let weak = Rc::downgrade(&self.0);
@@ -76,14 +93,8 @@ impl TuiApp {
         let width = area.width - 4;
         screen.put(x, area.y + 1, &truncate("FOCUS", width), &st::LABEL);
         let bottom = Self::bottom_height(area.height);
-        let focus = self.draw_focus(
-            screen,
-            x,
-            area.y + 2,
-            width,
-            (area.height - bottom - 10).clamp(2, 12),
-            (area.height - bottom - 8).clamp(3, 16),
-        );
+        let room = FocusRoom::Pane { tree: (area.height - bottom - 10).clamp(2, 12), own: (area.height - bottom - 8).clamp(3, 16) };
+        let focus = self.draw_focus(screen, x, area.y + 2, width, room);
         if let Some(said) = &focus.busy {
             screen.put(x + 5, area.y + 1, &truncate(said, (width - 5).max(1)), &st::WARN);
         } else if let Some(heading) = &focus.heading {
@@ -131,9 +142,9 @@ impl TuiApp {
         self.0.tabs.draw(screen, tabs_area, &mut hits);
         self.0.state.borrow_mut().hits.extend(hits);
     }
-    /// FOCUS's body, as the pane and the drawer show it: drawn at (x, y) in `width`, the device tree in `tree_most`
-    /// rows and a DAW's own body in `own_most`, and read again as the DAW changes while it shows.
-    pub(super) fn draw_focus(&self, screen: &mut Screen, x: i32, y: i32, width: i32, tree_most: i32, own_most: i32) -> FocusDrawn {
+    /// FOCUS's body, as the pane and the drawer show it: drawn at (x, y) in `width`, as tall as `room` lets the device
+    /// tree and a DAW's own body be, and read again as the DAW changes while it shows.
+    pub(super) fn draw_focus(&self, screen: &mut Screen, x: i32, y: i32, width: i32, room: FocusRoom) -> FocusDrawn {
         let rows = self.tree_shown();
         let clip = if rows.is_none() { self.clip_shown() } else { None };
         let own = if rows.is_none() && clip.is_none() { self.own_shown() } else { None };
@@ -175,18 +186,21 @@ impl TuiApp {
         // Each body's heading is the DAW's word for it.
         let heading = |kind| format!(" · {}", (crate::daw::view().heading)(kind));
         let (heading, rows) = if let Some(rows) = rows {
-            (Some(heading(BodyKind::Tree)), Some(self.draw_tree(screen, x, y, width, &rows, tree_most)))
+            (Some(heading(BodyKind::Tree)), Some(self.draw_tree(screen, x, y, width, &rows, room.most(BodyKind::Tree))))
         } else if let Some(clip) = clip {
             (Some(heading(BodyKind::Notes)), Some(self.draw_notes(screen, x, y, width, &clip)))
         } else if let Some(grid) = grid {
             (Some(heading(BodyKind::Grid)), Some(self.draw_grid(screen, x, y, width, &grid)))
         } else if let Some(own) = own {
+            let most = |kind| room.most(kind);
             let (kind, drawn) = match &own {
-                FocusBody::Tracker(grid) => (BodyKind::Tracker, self.draw_tracker(screen, x, y, width, grid, own_most)),
-                FocusBody::Matrix(matrix) => (BodyKind::Matrix, self.draw_matrix(screen, x, y, width, matrix, own_most)),
-                FocusBody::Keyzones(map) => (BodyKind::Keyzones, self.draw_keyzones(screen, x, y, width, map, own_most)),
-                FocusBody::Routing(routing) => (BodyKind::Routing, self.draw_routing(screen, x, y, width, routing, own_most)),
-                FocusBody::Mixer(mixer) => (BodyKind::Mixer, self.draw_mixer(screen, x, y, width, mixer, own_most)),
+                FocusBody::Tracker(grid) => (BodyKind::Tracker, self.draw_tracker(screen, x, y, width, grid, most(BodyKind::Tracker))),
+                FocusBody::Matrix(matrix) => (BodyKind::Matrix, self.draw_matrix(screen, x, y, width, matrix, most(BodyKind::Matrix))),
+                FocusBody::Keyzones(map) => (BodyKind::Keyzones, self.draw_keyzones(screen, x, y, width, map, most(BodyKind::Keyzones))),
+                FocusBody::Routing(routing) => {
+                    (BodyKind::Routing, self.draw_routing(screen, x, y, width, routing, most(BodyKind::Routing)))
+                }
+                FocusBody::Mixer(mixer) => (BodyKind::Mixer, self.draw_mixer(screen, x, y, width, mixer, most(BodyKind::Mixer))),
                 _ => (BodyKind::Routing, 0),
             };
             // (a tracker grid that isn't a pattern, Renoise's phrase, says its own word)

@@ -306,3 +306,120 @@ case!(the_focus_tab_keeps_its_body_fresh_only_while_it_shows, async {
     assert!(reads(&h) > read, "the FOCUS tab is kept fresh: {:?}", h.calls());
     h.close().await;
 });
+
+case!(a_drawer_the_producer_opened_keeps_their_tab_while_changes_land, async {
+    let h = Harness::new(80, 30);
+    h.start().await;
+    h.connect();
+    h.emit(focus());
+    click(&h, tabs(&h.screen()), "FOCUS").await;
+    h.emit(change("c1", "Chords · 3 notes moved"));
+    let lines = h.screen();
+    let row = tabs(&lines);
+    // Still FOCUS: HISTORY's count says a change landed.
+    assert!(lines[row + 1].contains("■ Bass › Operator") && lines[row].contains("HISTORY 1"), "{}", lines.join("\n"));
+    assert!(!has(&lines, "Chords · 3 notes moved"), "{}", lines.join("\n"));
+    h.close().await;
+});
+
+case!(a_goals_reports_never_turn_the_drawer_away_from_a_change_and_slash_goal_opens_it_on_goal, async {
+    let c = Rc::new(Control::default());
+    c.set("goal", json!(true));
+    let h = Harness::with(80, 30, c, |_| {});
+    h.start().await;
+    h.connect();
+    let objective = |turns: u32| json!({"type":"objective","objective":"master this to -9 LUFS","state":"running","turns":turns,"turnBudget":12,"elapsedMs":65_020,"budgetMs":3_600_000,"verdict":"continue","reason":"","next":"","measured":false});
+    h.type_text("/goal master this to -9 LUFS\r").await;
+    h.wait_for_call("goal:master this to -9 LUFS").await;
+    h.emit(json!({"type":"state","state":"running"}));
+    h.emit(objective(1));
+    let lines = h.screen();
+    assert!(lines[tabs(&lines) + 1].contains("master this to -9 LUFS"), "{}", lines.join("\n"));
+    // A change turns it to NOW, and the goal's next report leaves it there.
+    h.emit(change("c1", "Limiter · ceiling -1 dB"));
+    h.emit(objective(2));
+    let lines = h.screen();
+    assert!(lines[tabs(&lines) + 2].contains("Limiter · ceiling -1 dB"), "{}", lines.join("\n"));
+    // /goal, asked for while it works, opens it on GOAL, which a change then leaves alone.
+    h.type_text("/goal\r").await;
+    h.emit(change("c2", "Limiter · ceiling -0.5 dB"));
+    let lines = h.screen();
+    assert!(lines[tabs(&lines) + 1].contains("master this to -9 LUFS"), "{}", lines.join("\n"));
+    h.close().await;
+});
+
+case!(closing_the_drawer_and_putting_the_side_pane_away_are_kept_apart, async {
+    // Closed at 80 columns: wider, the side pane is there all the same.
+    let h = Harness::new(80, 30);
+    h.start().await;
+    h.connect();
+    h.emit(change("c1", "Chords · 3 notes moved"));
+    h.type_text("\x1c").await;
+    h.resize(120, 36);
+    delay(10).await;
+    let lines = h.screen();
+    assert!(has(&lines, "Your selection will show here") && !has(&lines, "shows the pane"), "{}", lines.join("\n"));
+    h.close().await;
+    // Put away at full width, the pane says how it comes back; narrower, the drawer still opens to a change.
+    let h = Harness::new(120, 36);
+    h.start().await;
+    h.connect();
+    h.type_text("\x1c").await;
+    let lines = h.screen();
+    assert!(!has(&lines, "Your selection will show here"), "{}", lines.join("\n"));
+    assert!(lines[35].trim_end().ends_with("ctrl+\\ shows the pane"), "{}", lines.join("\n"));
+    h.resize(80, 30);
+    delay(10).await;
+    h.emit(change("c1", "Chords · 3 notes moved"));
+    let lines = h.screen();
+    assert!(lines[tabs(&lines) + 2].contains("Chords · 3 notes moved") && !has(&lines, "shows the pane"), "{}", lines.join("\n"));
+    h.close().await;
+});
+
+case!(a_click_on_the_tab_showing_closes_the_drawer_and_the_keys_words_open_it, async {
+    let h = Harness::new(80, 30);
+    h.start().await;
+    h.connect();
+    h.emit(change("c1", "Chords · 3 notes moved"));
+    click(&h, tabs(&h.screen()), "NOW").await;
+    let lines = h.screen();
+    assert!(lines[tabs(&lines)].trim_end().ends_with("ctrl+\\ opens"), "{}", lines.join("\n"));
+    // Closed by the click, as by ctrl+\: a change leaves it folded.
+    h.emit(change("c2", "Bass · 2 notes added"));
+    assert!(!has(&h.screen(), "Bass · 2 notes added"));
+    click(&h, tabs(&h.screen()), "ctrl+\\ opens").await;
+    let lines = h.screen();
+    assert!(lines[tabs(&lines) + 2].contains("Bass · 2 notes added"), "{}", lines.join("\n"));
+    h.close().await;
+});
+
+case!(a_drag_stays_above_the_drawer_or_in_it, async {
+    use std::cell::RefCell;
+    let copied = Rc::new(RefCell::new(Vec::<String>::new()));
+    let copy = copied.clone();
+    let h = Harness::with(80, 30, Rc::new(Control::default()), move |o| {
+        o.copy = Some(Rc::new(move |text| copy.borrow_mut().push(text.into())));
+    });
+    h.start().await;
+    h.connect();
+    h.emit(json!({"type":"notice","message":"Words in the conversation"}));
+    h.emit(change("c1", "Chords · 3 notes moved"));
+    let lines = h.screen();
+    let said = lines.iter().position(|line| line.contains("Words in the conversation")).unwrap();
+    let at = lines[said][..lines[said].find("Words").unwrap()].chars().count();
+    let changed = tabs(&lines) + 2;
+    let drag = |from: (usize, usize), to: (usize, usize)| {
+        format!("\x1b[<0;{};{}M\x1b[<32;{};{}M\x1b[<0;{};{}m", from.0 + 1, from.1 + 1, to.0 + 1, to.1 + 1, to.0 + 1, to.1 + 1)
+    };
+    // From the conversation down into the drawer: the conversation's rows only.
+    h.type_text(&drag((at, said), (20, changed))).await;
+    h.type_text("\x03").await;
+    let text = copied.borrow().last().cloned().unwrap_or_default();
+    assert!(text.starts_with("Words in the conversation") && !text.contains("Chords") && !text.contains("NOW"), "{text:?}");
+    // From past the drawer's change up into the conversation: the drawer's rows only.
+    h.type_text(&drag((30, changed), (0, said))).await;
+    h.type_text("\x03").await;
+    let text = copied.borrow().last().cloned().unwrap_or_default();
+    assert!(text.contains("NOW   FOCUS") && text.contains("Chords") && !text.contains("Words in the conversation"), "{text:?}");
+    h.close().await;
+});

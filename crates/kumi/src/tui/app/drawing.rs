@@ -73,8 +73,9 @@ impl TuiApp {
         {
             let mut state = self.0.state.borrow_mut();
             state.hits.clear();
-            // (set again by whatever draws the tabs this frame)
+            // (set again by whatever draws the tabs, or the drawer, this frame)
             state.tabs_area = None;
+            state.drawer.area = None;
         }
         // What landed since the last frame opens the drawer where it's on screen.
         self.follow_drawer(columns >= 24 && drawer_fits(columns, rows) && !self.setup_active() && !self.map_shown());
@@ -104,7 +105,7 @@ impl TuiApp {
         let box_height = visible + 2;
         let box_top = rows - 1 - box_height;
         // Below 100 columns the pane is the drawer under the conversation, or the two-line strip without the rows for
-        // it; put away, the strip goes and the drawer stays folded to its row.
+        // it; put away, the strip goes.
         let drawer = drawer_fits(columns, rows);
         let dock = if columns >= PANE_COLUMNS {
             0
@@ -122,24 +123,33 @@ impl TuiApp {
         let area = Rect::new(0, 2, left, (box_top - dock - 3 - chip - files - waiting).max(1));
         self.0.state.borrow_mut().page = (area.height - 2).max(1);
         self.draw_conversation(&mut screen, area);
+        // The drawer goes right under the conversation, so what goes with the next message (waiting messages, files,
+        // the pin) stays by the box, as it does beside the side pane; the strip sits between them and the box.
+        let under = if drawer { 0 } else { dock };
+        let docked = if drawer { box_top - 1 - chip - files - waiting - dock } else { box_top - dock - 1 };
         if pane != 0 {
             self.draw_pane(&mut screen, Rect::new(left, 1, pane, rows - 1));
         } else if drawer {
-            self.draw_drawer(&mut screen, Rect::new(0, box_top - dock - 1, columns, dock));
+            self.draw_drawer(&mut screen, Rect::new(0, docked, columns, dock));
         } else {
             self.keep_tree_fresh(None);
-            self.draw_dock(&mut screen, Rect::new(0, box_top - dock - 1, columns, dock));
+            self.draw_dock(&mut screen, Rect::new(0, docked, columns, dock));
+        }
+        // Put away (ctrl+\), the pane says how it comes back, on the row under the box.
+        if pane == 0 && !drawer && self.0.state.borrow().pane_away {
+            let back = "ctrl+\\ shows the pane";
+            screen.put(columns - 2 - text_width(back), rows - 1, back, &st::FAINT);
         }
         if chip != 0 {
-            self.draw_pin(&mut screen, 3, box_top - dock - 2, left - 6);
+            self.draw_pin(&mut screen, 3, box_top - under - 2, left - 6);
         }
         if files != 0 {
-            self.draw_attachments(&mut screen, 3, box_top - dock - 2 - chip, left - 6);
+            self.draw_attachments(&mut screen, 3, box_top - under - 2 - chip, left - 6);
         }
         let no_panel = self.0.state.borrow().panel.is_none();
         let menu = self.menu();
         if waiting != 0 && no_panel && menu.is_empty() {
-            self.draw_held(&mut screen, 3, box_top - dock - 1 - chip - files - waiting, left - 6, waiting);
+            self.draw_held(&mut screen, 3, box_top - under - 1 - chip - files - waiting, left - 6, waiting);
         }
         let mut cursor = Some(self.draw_composer(&mut screen, Rect::new(1, box_top, left - 2, box_height), &layout, visible, &menu));
         let panel = self.0.state.borrow().panel.clone();

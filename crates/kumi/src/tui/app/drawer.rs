@@ -1,10 +1,10 @@
 //! Below 100 columns, with 24 rows or more, the pane is a drawer under the conversation: a row of tabs (NOW, FOCUS,
 //! then the tab panel's HISTORY, GOAL, JOBS and PALETTE) over the tab it shows, 6 to 10 rows by the window's height.
-//! A change landing opens it to NOW, and Kumi turning the tabs (to GOAL) opens it to them; what Kumi opened folds back
-//! to its row once nothing new has landed for a while. It never takes the keyboard, and nothing turns it while the
-//! keyboard is in it. ctrl+\ opens and closes it, and a drawer the producer closed stays folded until they open it.
-//! At other sizes ctrl+\ puts the pane away and brings it back: the side pane at full width, the two-line strip below
-//! 24 rows.
+//! A change landing opens it to NOW, and Kumi turning the tabs (to GOAL) opens a folded one on them; what Kumi opened
+//! folds back to its row once nothing new has landed for a while. A drawer the producer opened keeps their tab, and one
+//! they closed stays folded until they open it. It never takes the keyboard. ctrl+\ (or a click on the tab showing)
+//! opens and closes it. At other sizes ctrl+\ puts the pane away and brings it back: the side pane at full width, the
+//! two-line strip below 24 rows.
 
 use super::super::{
     activity::activity_glyph,
@@ -14,7 +14,7 @@ use super::super::{
     width::{text_width, truncate},
     wrap::Span,
 };
-use super::draw_live::change_marks;
+use super::draw_live::{change_marks, FocusRoom};
 use super::drawing::{sp, spans, st, NowLine};
 use super::*;
 
@@ -47,9 +47,13 @@ pub(super) struct Drawer {
     /// None while it's folded to its row of tabs.
     opened: Option<Opened>,
     openings: u64,
-    /// What it followed last: the latest change's time, and how often the tab panel was asked for a tab.
+    /// The producer closed it: Kumi leaves it folded until they open it.
+    closed: bool,
+    /// What it followed last: the latest change's time, and how often the tab panel's tab changed.
     seen_change: Option<f64>,
-    seen_asked: u64,
+    seen_switches: u64,
+    /// Where it was drawn this frame, if it was: a drag that starts in it stays in it.
+    pub(super) area: Option<Rect>,
 }
 
 impl Drawer {
@@ -57,12 +61,29 @@ impl Drawer {
         self.opened.is_some()
     }
 
-    /// Something landed: the drawer shows it, open. Kumi's opening, to fold later, unless the producer's holds it.
-    fn landed(&mut self, tab: DrawerTab) -> Option<u64> {
-        self.tab = tab;
+    /// A change landed: it opens on NOW, as Kumi's. One the producer opened keeps their tab (HISTORY's count says so).
+    fn change_landed(&mut self) -> Option<u64> {
         if self.opened == Some(Opened::Hand) {
             return None;
         }
+        self.tab = DrawerTab::Now;
+        self.kumi_opens()
+    }
+
+    /// The tab panel turned to another tab (GOAL, as a goal starts): a folded drawer opens on it, and one Kumi opened
+    /// on the tabs stays open longer; one open on something else keeps showing that.
+    fn tabs_turned(&mut self) -> Option<u64> {
+        match self.opened {
+            None => {
+                self.tab = DrawerTab::Tabs;
+                self.kumi_opens()
+            }
+            Some(Opened::Kumi(_)) if self.tab == DrawerTab::Tabs => self.kumi_opens(),
+            _ => None,
+        }
+    }
+
+    fn kumi_opens(&mut self) -> Option<u64> {
         self.openings += 1;
         self.opened = Some(Opened::Kumi(self.openings));
         Some(self.openings)
@@ -74,30 +95,44 @@ pub(super) fn drawer_fits(columns: i32, rows: i32) -> bool {
     columns < PANE_COLUMNS && rows >= DRAWER_ROWS
 }
 
+/// Where a drag that starts at row `y` may select, with the drawer at `drawer`: the drawer keeps its own, as the side pane
+/// does, so a drag stays above it (the conversation), in it, or under it (the box and what goes with it).
+pub(super) fn drag_area(drawer: Rect, y: i32, screen: Rect) -> Rect {
+    let bottom = drawer.y + drawer.height;
+    if y < drawer.y {
+        Rect::new(screen.x, screen.y, screen.width, drawer.y - screen.y)
+    } else if y < bottom {
+        Rect::new(screen.x, drawer.y, screen.width, drawer.height)
+    } else {
+        Rect::new(screen.x, bottom, screen.width, screen.y + screen.height - bottom)
+    }
+}
+
 impl TuiApp {
-    /// The drawer follows what landed since the last frame: a new change opens it to NOW, and the tabs asked for (GOAL
-    /// as a goal starts) open it to them. Only while it's on screen, the producer hasn't closed it and the keyboard
-    /// isn't in it; otherwise what landed is only noted, so it doesn't open later for something long gone.
+    /// The drawer follows what landed since the last frame: a new change opens it to NOW, and the tab panel turning to
+    /// another tab (GOAL as a goal starts) opens a folded one on it. Only while it's on screen, the producer hasn't
+    /// closed it and the keyboard isn't in it; otherwise what landed is only noted, so it doesn't open later for
+    /// something long gone.
     pub(super) fn follow_drawer(&self, shown: bool) {
-        let asked = self.0.tabs.asked();
+        let switches = self.0.tabs.switches();
         let keys = self.0.tabs.inside() || self.0.state.borrow().tree_cursor.is_some();
         let opening = {
             let mut state = self.0.state.borrow_mut();
             let latest = state.last_change.as_ref().map(|(_, at)| *at);
-            let open = shown && !state.pane_away && !keys;
             let drawer = &mut state.drawer;
+            let open = shown && !drawer.closed && !keys;
             let mut opening = None;
-            if asked != drawer.seen_asked {
-                drawer.seen_asked = asked;
+            if switches != drawer.seen_switches {
+                drawer.seen_switches = switches;
                 if open {
-                    opening = drawer.landed(DrawerTab::Tabs);
+                    opening = drawer.tabs_turned();
                 }
             }
             // (a change and the tabs at once: the change)
             if latest != drawer.seen_change {
                 drawer.seen_change = latest;
                 if open && latest.is_some() {
-                    opening = drawer.landed(DrawerTab::Now).or(opening);
+                    opening = drawer.change_landed().or(opening);
                 }
             }
             opening
@@ -137,7 +172,7 @@ impl TuiApp {
             if drawer_fits(size.columns, size.rows) {
                 let open = !state.drawer.is_open();
                 state.drawer.opened = open.then_some(Opened::Hand);
-                state.pane_away = !open;
+                state.drawer.closed = !open;
                 open
             } else {
                 state.pane_away = !state.pane_away;
@@ -151,16 +186,39 @@ impl TuiApp {
         self.0.scheduler.request();
     }
 
-    /// The producer goes into the pane (a click on a drawer's tab, Shift-Tab into the tabs, Tab into FOCUS's tree): it
-    /// shows that part, and stays until they close it.
+    /// The producer goes into the pane (a click on a drawer's tab, Shift-Tab into the tabs, Tab into FOCUS's tree,
+    /// `/goal` to see the goal): it shows that part, and the drawer stays open until they close it.
     pub(super) fn open_pane(&self, tab: DrawerTab) {
         let size = self.0.tty.size();
         let mut state = self.0.state.borrow_mut();
-        state.pane_away = false;
         if drawer_fits(size.columns, size.rows) {
             state.drawer.tab = tab;
             state.drawer.opened = Some(Opened::Hand);
+            state.drawer.closed = false;
+        } else {
+            state.pane_away = false;
         }
+    }
+
+    /// A click on one of the drawer's tabs (`id`, the tab panel's): on the one showing it closes the drawer, as ctrl+\
+    /// does; on another it opens there.
+    fn click_drawer_tab(&self, tab: DrawerTab, id: Option<&str>) {
+        let showing = self.0.state.borrow().drawer.is_open()
+            && self.0.state.borrow().drawer.tab == tab
+            && id.is_none_or(|id| id == self.0.tabs.active_id());
+        if showing {
+            self.toggle_pane();
+            return;
+        }
+        self.open_pane(tab);
+        if let Some(id) = id {
+            self.0.tabs.show(id);
+        }
+    }
+
+    /// Where a drag starting at row `y` may select while the drawer is drawn.
+    pub(super) fn drawer_drag(&self, y: i32, screen: Rect) -> Option<Rect> {
+        self.0.state.borrow().drawer.area.map(|drawer| drag_area(drawer, y, screen))
     }
 
     /// The drawer's rows: its row of tabs folded, 6 to 10 open by the window's.
@@ -174,6 +232,7 @@ impl TuiApp {
 
     /// The drawer at `area`: its row of tabs, then the tab it shows while it's open.
     pub(super) fn draw_drawer(&self, screen: &mut Screen, area: Rect) {
+        self.0.state.borrow_mut().drawer.area = Some(area);
         screen.fill(area, &st::SURFACE);
         let (x, width) = (area.x + 2, area.width - 4);
         let (tab, open) = {
@@ -191,7 +250,7 @@ impl TuiApp {
                 self.draw_drawer_now(screen, body, &now);
             }
             DrawerTab::Focus => {
-                let focus = self.draw_focus(screen, x, body.y, width, body.height - 1, body.height);
+                let focus = self.draw_focus(screen, x, body.y, width, FocusRoom::Rows(body.height));
                 heading = focus.busy.map(|said| (said, st::WARN)).or(focus.heading.map(|heading| (heading, st::FAINT)));
                 // Bodies draw as tall as they are: what runs past the drawer is painted over, and can't be clicked.
                 let below = Rect::new(0, area.y + area.height, screen.width, (screen.height - area.y - area.height).max(0));
@@ -243,14 +302,14 @@ impl TuiApp {
         let style = |chosen: bool| if chosen { st::ACCENT } else { st::DIM };
         let start = x;
         let mut column = screen.put(x, y, "NOW", &style(tab == DrawerTab::Now));
-        self.hit(start, y, column - start, |app| app.open_pane(DrawerTab::Now));
+        self.hit(start, y, column - start, |app| app.click_drawer_tab(DrawerTab::Now, None));
         column = screen.put(column, y, "   ", &st::FAINT);
         let start = column;
         column = screen.put(column, y, "FOCUS", &style(tab == DrawerTab::Focus));
         if let Some((words, style)) = &heading {
             column = screen.put(column, y, &truncate(words, room), style);
         }
-        self.hit(start, y, column - start, |app| app.open_pane(DrawerTab::Focus));
+        self.hit(start, y, column - start, |app| app.click_drawer_tab(DrawerTab::Focus, None));
         for (id, title, badge) in titles {
             column = screen.put(column, y, "   ", &st::FAINT);
             let start = column;
@@ -258,16 +317,16 @@ impl TuiApp {
             if let Some(count) = badge {
                 column = screen.put(column, y, &format!(" {count}"), &st::FAINT);
             }
-            self.hit(start, y, column - start, move |app| {
-                app.open_pane(DrawerTab::Tabs);
-                app.0.tabs.show(&id);
-            });
+            self.hit(start, y, column - start, move |app| app.click_drawer_tab(DrawerTab::Tabs, Some(&id)));
         }
-        // A quiet rule to the end, as the pane's tabs have.
+        // A quiet rule to the end, as the pane's tabs have; the key's words there open and close it too.
         let at = x + width - ends;
         if at - column >= 3 {
             screen.put(column + 1, y, &"─".repeat((at - column - 2) as usize), &Style::fg(palette::RULE));
             spans(screen, at, y, &end, None);
+            if now.dot.is_none() && ends > 0 {
+                self.hit(at, y, ends, |app| app.toggle_pane());
+            }
         }
     }
 
