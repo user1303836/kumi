@@ -58,8 +58,9 @@ impl Menu {
             Menu::Commands(found) => found[index].command.name.into(),
             Menu::Words { completing, offered } => {
                 let line = format!("{}{}", completing.before, offered[index].candidate.word);
+                // (a name runs to the line's end: nothing follows it)
                 let next = format!("{line} ");
-                if commands::completing(&next, |_| true).is_some() {
+                if !completing.arg.to_end && commands::completing(&next, |_| true).is_some() {
                     next
                 } else {
                     line
@@ -125,9 +126,9 @@ impl TuiApp {
         let text = {
             let mut state = self.0.state.borrow_mut();
             let text = state.editor.text().to_string();
-            // What was read for a command goes once the line names another, or none.
-            let command = text.split(' ').next().unwrap_or_default();
-            if state.offers.key.is_some_and(|(name, _)| name != command) {
+            // What was read for a command goes once the line names another, or none (by its name: an alias is it).
+            let command = commands::named(text.split(' ').next().unwrap_or_default()).map(|command| command.name);
+            if state.offers.key.is_some_and(|(name, _)| Some(name) != command) {
                 state.offers = Offers::default();
             }
             if state.menu_dismissed || state.search.is_some() || !text.starts_with('/') {
@@ -145,6 +146,17 @@ impl TuiApp {
             Menu::Commands(commands::matching(&text, &recent, |command| has.offers(command)))
         };
         let mut state = self.0.state.borrow_mut();
+        // Another list (a command's words after its name, the next word's after one) starts at its first row, nothing
+        // chosen in it: what was chosen in the last is none of its.
+        let list = match &menu {
+            Menu::Commands(_) => None,
+            Menu::Words { completing, .. } => Some(completing.before.clone()),
+        };
+        if state.menu_list != list {
+            state.menu_list = list;
+            state.menu_index = 0;
+            state.menu_chosen = None;
+        }
         if state.menu_index >= menu.len() {
             state.menu_index = 0;
         }
@@ -174,8 +186,7 @@ impl TuiApp {
         match completes {
             Completes::Words(words) => return Some(Rc::new(words.iter().map(|word| Candidate::word(word)).collect())),
             Completes::SlotModels => {
-                let slot = completing.before.split_whitespace().last().unwrap_or_default();
-                let choices = kumi_listening::slots::choices_for(crate::daw::profile(), slot)?;
+                let choices = kumi_listening::slots::choices_for(crate::daw::profile(), completing.after.as_deref()?)?;
                 let choices = choices.into_iter().map(|(word, about)| Candidate { word: word.into(), label: word.into(), about });
                 return Some(Rc::new(choices.collect()));
             }

@@ -126,7 +126,7 @@ fn each_slot_offers_the_choices_it_takes_by_word() {
     assert_eq!(words("listening"), Some(vec!["gemini", "openai", "off", "default"]));
     // By any word the slot is called, in any case.
     assert_eq!(words("Ears"), words("listening"));
-    assert_eq!(words("embeddings"), Some(vec!["default", "off"]));
+    assert_eq!(words("embeddings"), Some(vec!["off", "default"]));
     assert_eq!(words("stems"), Some(vec!["default"]));
     assert_eq!(words("transcription"), Some(vec!["default"]));
     assert_eq!(words("back"), None);

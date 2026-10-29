@@ -330,8 +330,16 @@ fn a_line_types_the_word_its_command_offers_words_for() {
     assert_eq!(typing("/palette use Ki"), Some(("/palette", "palette", "/palette use ".into(), "Ki".into())));
     assert_eq!(typing("/palette Forget "), Some(("/palette", "palette", "/palette Forget ".into(), "".into())));
     assert_eq!(typing("/palette new Ki"), None);
+    // rename takes a new name: no palette's is offered for it.
+    assert_eq!(typing("/palette rename Ki"), None);
+    // A name runs to the end of the line, spaces and all.
+    assert_eq!(typing("/palette use Drum K"), Some(("/palette", "palette", "/palette use ".into(), "Drum K".into())));
+    assert_eq!(typing("/resume bass sk"), Some(("/resume", "conversation", "/resume ".into(), "bass sk".into())));
     // A slot's model after the slot, and a slot after back.
     assert_eq!(completing("/slots listening g", |_| true).map(|at| at.arg.completes), Some(Completes::SlotModels));
+    // After any of a slot's names, with the word it follows kept.
+    let ears = completing("/slots ears ", |_| true).unwrap();
+    assert_eq!((ears.arg.completes, ears.after.as_deref()), (Completes::SlotModels, Some("ears")));
     assert_eq!(
         completing("/slots back ", |_| true).map(|at| at.arg.completes),
         Some(Completes::Words(&["listening", "stems", "transcription", "embeddings"]))
@@ -359,4 +367,16 @@ fn every_word_a_command_offers_is_one_it_takes() {
             }
         }
     }
+}
+
+#[test]
+fn the_slots_offered_are_every_slot_kumi_has() {
+    use kumi_listening::slots::Job;
+    let jobs: BTreeSet<&str> = Job::ALL.iter().map(|job| job.name()).collect();
+    assert_eq!(kumi_agent::core::commands::JOBS.iter().copied().collect::<BTreeSet<_>>(), jobs);
+    let slots = named("/slots").unwrap();
+    let Some(Completes::Words(first)) = slots.args.iter().find(|arg| arg.at == 1).map(|arg| arg.completes) else {
+        panic!("/slots' first word")
+    };
+    assert_eq!(first.iter().copied().filter(|word| *word != "back").collect::<BTreeSet<_>>(), jobs);
 }

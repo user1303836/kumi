@@ -29,6 +29,8 @@ pub struct Arg {
     /// The words before it that it follows (`use` for a palette's name); empty, any.
     pub after: &'static [&'static str],
     pub completes: Completes,
+    /// It runs to the end of the line, spaces and all: a palette's or a conversation's name.
+    pub to_end: bool,
 }
 
 /// What the menu offers for a word. Fixed words are the command's own; the rest the front end reads through the
@@ -47,11 +49,16 @@ pub enum Completes {
 }
 
 const fn arg(name: &'static str, at: usize, after: &'static [&'static str], completes: Completes) -> Arg {
-    Arg { name, at, after, completes }
+    Arg { name, at, after, completes, to_end: false }
+}
+
+/// A word that runs to the end of the line, spaces and all: a name.
+const fn to_end(name: &'static str, at: usize, after: &'static [&'static str], completes: Completes) -> Arg {
+    Arg { to_end: true, ..arg(name, at, after, completes) }
 }
 
 /// The slots `/slots` names, and the jobs `/slots back` takes back.
-const JOBS: &[&str] = &["listening", "stems", "transcription", "embeddings"];
+pub const JOBS: &[&str] = &["listening", "stems", "transcription", "embeddings"];
 
 /// What a command needs to be offered: something the session can do, or something the front end has itself.
 #[derive(Clone, Copy)]
@@ -121,7 +128,7 @@ pub const COMMANDS: &[Command] = &[
     command("/btw", "Ask something on the side, without interrupting Kumi", &["aside", "question"], can(|c| c.aside)),
     command("/voice", "Talk instead of typing: ctrl+t, and how it listens", &["microphone", "speak"], front(Front::Voice)),
     Command {
-        args: &[arg("conversation", 1, &[], Completes::Conversations)],
+        args: &[to_end("conversation", 1, &[], Completes::Conversations)],
         ..command(
             "/resume",
             "Go back to a kept conversation, this {place}'s or any {place}'s: /resume <id or name>",
@@ -130,7 +137,7 @@ pub const COMMANDS: &[Command] = &[
         )
     },
     Command {
-        args: &[arg("conversation", 1, &[], Completes::Conversations)],
+        args: &[to_end("conversation", 1, &[], Completes::Conversations)],
         ..command("/conversations", "The same as /resume", &[], can(|c| c.conversations))
     },
     command("/rename", "Name this conversation: /rename <name>", &["title"], can(|c| c.conversations)),
@@ -162,15 +169,17 @@ pub const COMMANDS: &[Command] = &[
     Command {
         args: &[
             arg("slot", 1, &[], Completes::Words(&["listening", "stems", "transcription", "embeddings", "back"])),
-            arg("model", 2, JOBS, Completes::SlotModels),
             arg("slot", 2, &["back"], Completes::Words(JOBS)),
+            // (after any word: a slot answers to other names too, "ears" for listening)
+            arg("model", 2, &[], Completes::SlotModels),
         ],
         ..command("/slots", "Which model does each listening job: /slots listening gemini, /slots back <job>", &[], can(|c| c.slots))
     },
     Command {
         args: &[
             arg("what", 1, &[], Completes::Words(&["list", "new", "use", "rename", "forget", "strict", "loose"])),
-            arg("palette", 2, &["use", "rename", "forget"], Completes::Palettes),
+            // (not after rename, which takes a new name)
+            to_end("palette", 2, &["use", "forget"], Completes::Palettes),
         ],
         ..command(
             "/palette",
@@ -214,23 +223,51 @@ pub struct Completing {
     pub before: String,
     /// The word as typed so far.
     pub typed: String,
+    /// The word before it, in lower case (the slot whose models are offered); none for a command's first.
+    pub after: Option<String>,
 }
 
 /// What `line` is typing, if it's a word its command (one `offered`) offers words for: after the command's name and
-/// a space, the words typed before it (any for a word that follows any, else one it follows), and the start of it.
+/// a space, the words typed before it (any for a word that follows any, else one it follows), and the start of it. A
+/// word that runs to the end of the line takes all that follows the words before it, spaces and all.
 pub fn completing(line: &str, offered: impl Fn(&Command) -> bool) -> Option<Completing> {
     let (name, rest) = line.split_once(' ')?;
     let command = named(name).filter(|command| offered(command))?;
-    // The words before the one being typed, which is what follows the last space (nothing, after a space).
-    let (done, typed) = rest.rsplit_once(' ').map_or(("", rest), |(done, typed)| (done, typed));
-    let words: Vec<&str> = done.split(' ').filter(|word| !word.is_empty()).collect();
-    let at = words.len() + 1;
-    let after = words.last().map(|word| word.to_lowercase());
-    let arg = command
-        .args
-        .iter()
-        .find(|arg| arg.at == at && (arg.after.is_empty() || after.as_deref().is_some_and(|after| arg.after.contains(&after))))?;
-    Some(Completing { command, arg, before: line[..line.len() - typed.len()].to_string(), typed: typed.to_string() })
+    // Each word after the command's name, with where it ends in the line.
+    let mut at = name.len() + 1;
+    let mut words: Vec<(usize, &str)> = vec![];
+    for word in rest.split(' ') {
+        at += word.len();
+        if !word.is_empty() {
+            words.push((at, word));
+        }
+        at += 1;
+    }
+    command.args.iter().find_map(|arg| {
+        let (from, before): (usize, Vec<&str>) = if arg.to_end {
+            match arg.at - 1 {
+                0 => (name.len() + 1, vec![]),
+                // Typed once a space follows the words before it.
+                before => {
+                    let &(end, _) = words.get(before - 1).filter(|(end, _)| *end < line.len())?;
+                    (end + 1, words[..before].iter().map(|(_, word)| *word).collect())
+                }
+            }
+        } else {
+            // The word after the last space, with every word before it.
+            let from = line.rfind(' ')? + 1;
+            let before: Vec<&str> = words.iter().filter(|(end, _)| *end < from).map(|(_, word)| *word).collect();
+            if before.len() + 1 != arg.at {
+                return None;
+            }
+            (from, before)
+        };
+        let after = before.last().map(|word| word.to_lowercase());
+        if !arg.after.is_empty() && !after.as_deref().is_some_and(|after| arg.after.contains(&after)) {
+            return None;
+        }
+        Some(Completing { command, arg, before: line[..from].to_string(), typed: line[from..].to_string(), after })
+    })
 }
 
 /// The command named `name`, or one that has it as another name.

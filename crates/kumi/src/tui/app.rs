@@ -445,6 +445,9 @@ struct State {
     menu_chosen: Option<String>,
     /// The words the line's command takes for the word being typed, once read (the menu asks once).
     offers: complete::Offers,
+    /// Which list the `/` menu shows (none: the commands; else the line before the word whose candidates it lists): a new
+    /// one starts at its first row.
+    menu_list: Option<String>,
     started: bool,
     closing: bool,
     cancelling: bool,
@@ -643,6 +646,7 @@ impl State {
             menu_dismissed: false,
             menu_chosen: None,
             offers: complete::Offers::default(),
+            menu_list: None,
             started: false,
             closing: false,
             cancelling: false,

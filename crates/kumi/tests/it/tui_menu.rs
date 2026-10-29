@@ -189,6 +189,9 @@ async fn resume_offers_the_kept_conversations_by_what_was_asked_in_them() {
             assert_eq!(h.app.draft(), "/resume old001");
             h.type_text("\x15/resume dru\t").await;
             assert_eq!(h.app.draft(), "/resume Drum pass");
+            // A name runs on past its spaces.
+            h.type_text("\x15/resume drum p\t").await;
+            assert_eq!(h.app.draft(), "/resume Drum pass");
             h.close().await;
         })
         .await;
@@ -246,6 +249,31 @@ async fn model_offers_the_signed_in_providers_models_and_chooses_one_by_its_id()
             // The id whole, Enter chooses it, as the picker does.
             h.type_text("\r").await;
             h.wait_for("Kumi talks to Claude Haiku 4.5 from your next message").await;
+            h.close().await;
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn each_list_starts_at_its_first_row_with_nothing_chosen() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let control = Rc::new(Control::default());
+            control.set("palette", serde_json::json!(true));
+            control.set(
+                "palettes",
+                serde_json::json!([{"name":"Kicks","items":12,"current":true},{"name":"Pads","items":1,"current":false},{"name":"Vox","items":4,"current":false}]),
+            );
+            let h = Harness::with(120, 36, control, |_| {});
+            h.start().await;
+            h.connect();
+            // ↓↓ chooses use among /palette's words; its palettes are another list, from its first row.
+            h.type_text("/palette ").await;
+            h.type_text("\x1b[B\x1b[B\t").await;
+            assert_eq!(h.app.draft(), "/palette use ");
+            h.wait_for("12 sounds").await;
+            h.type_text("\t").await;
+            assert_eq!(h.app.draft(), "/palette use Kicks");
             h.close().await;
         })
         .await;

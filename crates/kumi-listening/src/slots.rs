@@ -316,12 +316,10 @@ fn job_word(word: &str) -> Option<Job> {
 /// file is the producer's to type.
 pub fn choices_for(profile: &DawProfile, word: &str) -> Option<Vec<(&'static str, String)>> {
     let job = job_word(&word.to_lowercase())?;
-    let choices = match job {
-        Job::Listening => vec![("gemini", Choice::Gemini), ("openai", Choice::Openai), ("off", Choice::Off), ("default", Choice::Default)],
-        Job::Embeddings => vec![("default", Choice::Default), ("off", Choice::Off)],
-        Job::Stems | Job::Transcription => vec![("default", Choice::Default)],
-    };
-    Some(choices.into_iter().map(|(word, choice)| (word, describe_for(profile, job, &choice))).collect())
+    // The choices by name that the slot takes, as a swap to one would find (`fits_for`).
+    let named = [("gemini", Choice::Gemini), ("openai", Choice::Openai), ("off", Choice::Off), ("default", Choice::Default)];
+    let fits = named.into_iter().filter(|(_, choice)| fits_for(profile, job, &Wanted::Choice(choice.clone())).is_ok());
+    Some(fits.map(|(word, choice)| (word, describe_for(profile, job, &choice))).collect())
 }
 
 fn choice_word(word: &str) -> Option<Choice> {
