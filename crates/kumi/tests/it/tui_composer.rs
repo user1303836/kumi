@@ -217,22 +217,37 @@ fn segmenting_around_each_change_matches_segmenting_the_whole_text() {
     }
 }
 
+/// A key typed after a long paste costs what one typed after a paste a hundred times shorter does: the editor segments
+/// around the edit, not the whole text again (which made a key after 50 KB take a frame). Measured as the fastest of
+/// rounds taken by turns, so a busy machine slows both alike and can't fail it, with no clock bound to miss (#646).
 #[test]
-fn typing_a_hundred_characters_after_a_long_paste_takes_less_than_a_frame() {
-    let mut e = Editor::new();
-    let paste = "the bass sits under the kick, a little to the left\n".repeat(1000);
-    assert!(paste.len() > 50_000);
-    e.insert(&paste);
-    let typing: String =
-        "and now a hundred characters typed one by one after it, as fast as anyone types them. ok!!!".chars().cycle().take(100).collect();
-    let started = Instant::now();
-    typed(&mut e, &typing);
-    let took = started.elapsed();
-    assert!(took < Duration::from_millis(16), "{took:?}");
-    assert_eq!(e.text(), paste + &typing);
+fn typing_after_a_long_paste_costs_what_typing_after_a_short_one_does() {
+    let line = "the bass sits under the kick, a little to the left\n";
+    let (short_paste, long_paste) = (line.repeat(10), line.repeat(1000));
+    assert!(long_paste.len() > 50_000);
+    let (mut short, mut long) = (Editor::new(), Editor::new());
+    short.insert(&short_paste);
+    long.insert(&long_paste);
+    // The run's first key keeps the text for undo, once, as a run of typing does: the keys after it are what's timed.
+    typed(&mut short, "a");
+    typed(&mut long, "a");
+    let (mut fastest_short, mut fastest_long) = (Duration::MAX, Duration::MAX);
+    for _ in 0..20 {
+        for (editor, fastest) in [(&mut short, &mut fastest_short), (&mut long, &mut fastest_long)] {
+            let started = Instant::now();
+            typed(editor, "punch");
+            *fastest = (*fastest).min(started.elapsed());
+        }
+    }
+    let after = format!("a{}", "punch".repeat(20));
+    assert!(
+        fastest_long < fastest_short * 10 + Duration::from_micros(200),
+        "five keys took {fastest_long:?} after the long paste, {fastest_short:?} after the short one"
+    );
+    assert_eq!(long.text(), long_paste.clone() + &after);
     // All of it is one step.
-    assert!(e.undo());
-    assert!(e.text().ends_with("to the left\n"));
+    assert!(long.undo());
+    assert_eq!(long.text(), long_paste);
 }
 
 case!(undo_yank_and_ctrl_c_in_the_composer, async {
