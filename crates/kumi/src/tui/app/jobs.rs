@@ -344,7 +344,7 @@ impl TuiApp {
     }
 
     pub(super) fn open_job(&self, id: u32) {
-        self.open_panel(Panel::Job { id, scroll: 0 });
+        self.open_overlay(Panel::Job { id, scroll: 0 });
     }
 
     pub(super) fn stop_job(&self, id: u32) {

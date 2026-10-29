@@ -10,18 +10,19 @@ use super::super::{
 };
 use super::drawing::{sp, st};
 use super::*;
-struct Line {
-    text: String,
-    style: Style,
-    detail: Option<Span>,
-    right: Option<Span>,
-    band: bool,
-    spans: Option<Vec<Span>>,
-    indent: i32,
-    label_width: i32,
+/// A row of a panel's box: its words in a style, or spans of their own, with what's at the right edge.
+pub(super) struct Line {
+    pub text: String,
+    pub style: Style,
+    pub detail: Option<Span>,
+    pub right: Option<Span>,
+    pub band: bool,
+    pub spans: Option<Vec<Span>>,
+    pub indent: i32,
+    pub label_width: i32,
 }
 impl Line {
-    fn new(text: impl Into<String>, style: Style) -> Self {
+    pub(super) fn new(text: impl Into<String>, style: Style) -> Self {
         Self { text: text.into(), style, detail: None, right: None, band: false, spans: None, indent: 0, label_width: 0 }
     }
 }
@@ -33,10 +34,7 @@ fn say(lines: &mut Vec<Line>, text: &str, style: Style, width: i32) {
 }
 impl TuiApp {
     pub(super) fn draw_panel(&self, screen: &mut Screen, panel: &mut Panel, box_top: i32, left: i32) -> Option<Cursor> {
-        // The help is read rather than chosen from: it takes more of a wide window, so less of it wraps.
-        let widest = if matches!(panel, Panel::Help { .. }) { 100 } else { 76 };
-        let width = widest.min(left - 2);
-        let x = 3;
+        let width = 76.min(left - 2);
         let inner = width - 4;
         let space = box_top - 5;
         let mut lines: Vec<Line> = vec![];
@@ -217,29 +215,6 @@ impl TuiApp {
                     }
                 }
             },
-            Panel::Help { scroll, shown, most } => {
-                let rows = super::help::help_rows(&self.help_sections(), inner);
-                // From under the header down to the box; how far it has scrolled is said beside the title, so no row
-                // loses its end to it.
-                let room = (space - 2).max(3);
-                (*shown, *most) = (room.min(rows.len() as i32), (rows.len() as i32 - room).max(0));
-                *scroll = (*scroll).clamp(0, *most);
-                let (above, below) = (*scroll, *most - *scroll);
-                let mut title = Line::new("Keys and commands", st::TITLE);
-                title.right = match (above > 0, below > 0) {
-                    (true, true) => Some(format!("↑ {above} · ↓ {below} more")),
-                    (true, false) => Some(format!("↑ {above} more")),
-                    (false, true) => Some(format!("↓ {below} more")),
-                    (false, false) => None,
-                }
-                .map(|more| sp(more, st::FAINT));
-                lines.push(title);
-                for row in rows.into_iter().skip(*scroll as usize).take(room as usize) {
-                    let mut line = Line::new("", st::TEXT);
-                    line.spans = Some(row);
-                    lines.push(line);
-                }
-            }
             Panel::Key { provider, secret, checking, status, .. } => {
                 let info = provider.row();
                 lines.push(Line::new(format!("Sign in to {}", info.name), st::TITLE));
@@ -290,6 +265,20 @@ impl TuiApp {
                 }
             }
         }
+        self.draw_lines(screen, box_top, width, &lines, cursor_at)
+    }
+    /// A panel's `lines` in a box `width` wide over the conversation, down to the input box, whose top row is `box_top`;
+    /// the cursor where `cursor_at` puts it, when that line shows.
+    pub(super) fn draw_lines(
+        &self,
+        screen: &mut Screen,
+        box_top: i32,
+        width: i32,
+        lines: &[Line],
+        cursor_at: Option<(usize, i32)>,
+    ) -> Option<Cursor> {
+        let x = 3;
+        let inner = width - 4;
         let gap = i32::from(lines.len() as i32 + 3 <= box_top - 2);
         let height = lines.len() as i32 + gap + 2;
         let top = (box_top - 1 - height).max(1);
@@ -342,7 +331,6 @@ pub(super) fn panel_hint(panel: &Panel) -> String {
         }
         Panel::Btw { .. } => "↑↓ to scroll · c copies · esc to close".into(),
         Panel::Job { .. } => "↑↓ to scroll · x stops it · r runs it again · c copies · esc to close".into(),
-        Panel::Help { .. } => "↑↓ to scroll · esc to close".into(),
         Panel::Key { .. } => "enter to save · esc to cancel".into(),
         Panel::ChatGpt { by_code: true, .. } => "c copies the code · b uses the browser · esc to cancel".into(),
         Panel::ChatGpt { url: Some(_), .. } => "c copies the link · d uses a code · esc to cancel".into(),

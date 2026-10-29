@@ -744,7 +744,7 @@ impl TuiApp {
             return;
         }
         if provider.row().sign_in == SignIn::ApiKey {
-            self.open_panel(Panel::Key { provider, secret: String::new(), checking: false, status: None, then });
+            self.open_overlay(Panel::Key { provider, secret: String::new(), checking: false, status: None, then });
             return;
         }
         // Over SSH the browser isn't on this computer: a code, entered in a browser anywhere.
@@ -756,7 +756,7 @@ impl TuiApp {
             return;
         };
         let abort = Signal::new();
-        let panel = self.open_panel(Panel::ChatGpt { url: None, code: None, by_code, abort: abort.clone(), then });
+        let panel = self.open_overlay(Panel::ChatGpt { url: None, code: None, by_code, abort: abort.clone(), then });
         let weak = Rc::downgrade(&self.0);
         let shown = panel.clone();
         let how = if by_code {
@@ -1115,7 +1115,7 @@ impl TuiApp {
             Some(a) => f(TuiApp(a), item).boxed_local(),
             None => async { Ok(()) }.boxed_local(),
         });
-        self.open_panel(Panel::Pick { picker: picker.clone(), choose, choosing: Rc::default() });
+        self.open_overlay(Panel::Pick { picker: picker.clone(), choose, choosing: Rc::default() });
         picker
     }
     /// Kumi's answer asked the producer to pick: its options, picked by number (or ↑↓) and sent with
@@ -1314,13 +1314,13 @@ impl TuiApp {
     pub(super) fn signing_in(&self) -> bool {
         self.top_panel(|panel| matches!(panel, Panel::Key { .. } | Panel::ChatGpt { .. })).unwrap_or(false)
     }
-    /// Opens `panel` over the conversation in place of the top one, which isn't told it closed: a panel opening over
+    /// Opens `overlay` over the conversation in place of the top one, which isn't told it closed: a panel opening over
     /// another has always replaced it.
-    pub(super) fn open_panel(&self, panel: Panel) -> PanelRef {
-        let panel = Rc::new(RefCell::new(panel));
-        self.0.state.borrow_mut().overlays.open(panel.clone());
+    pub(super) fn open_overlay<T: Overlay<TuiApp>>(&self, overlay: T) -> Rc<RefCell<T>> {
+        let overlay = Rc::new(RefCell::new(overlay));
+        self.0.state.borrow_mut().overlays.open(overlay.clone());
         self.0.scheduler.request();
-        panel
+        overlay
     }
     /// Closes the top overlay.
     pub(super) fn close_panel(&self) {
@@ -2305,7 +2305,6 @@ impl Overlay<TuiApp> for Panel {
         match self {
             Panel::Btw { .. } => app.aside_input(self, event),
             Panel::Job { .. } => app.job_panel_input(self, event),
-            Panel::Help { .. } => app.help_input(self, event),
             Panel::Pick { .. } | Panel::Key { .. } | Panel::ChatGpt { .. } => app.panel_key(self, event),
         }
     }
@@ -2335,12 +2334,12 @@ impl Overlay<TuiApp> for Panel {
                     app.session().tell(op::StopAside { id }.into());
                 }
             }
-            Panel::Pick { .. } | Panel::Job { .. } | Panel::Help { .. } => {}
+            Panel::Pick { .. } | Panel::Job { .. } => {}
         }
     }
     fn busy(&self, app: &TuiApp) -> bool {
         match self {
-            Panel::Pick { .. } | Panel::Job { .. } | Panel::Help { .. } => false,
+            Panel::Pick { .. } | Panel::Job { .. } => false,
             Panel::Btw { at, .. } => app.0.state.borrow().asides.get(*at).is_some_and(|aside| aside.borrow().state == "asking"),
             Panel::Key { .. } | Panel::ChatGpt { .. } => true,
         }

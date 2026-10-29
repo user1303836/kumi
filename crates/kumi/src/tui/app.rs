@@ -252,7 +252,6 @@ impl TuiOptions {
 }
 type Action = Rc<dyn Fn() -> LocalBoxFuture<'static, Result<(), RuntimeError>>>;
 type Choice = Rc<dyn Fn(PickerItem) -> LocalBoxFuture<'static, Result<(), RuntimeError>>>;
-type PanelRef = Rc<RefCell<Panel>>;
 enum Panel {
     Pick {
         picker: Rc<RefCell<Picker>>,
@@ -283,13 +282,6 @@ enum Panel {
     Job {
         id: u32,
         scroll: i32,
-    },
-    /// The keys and commands, scrolled `scroll` rows down: `shown` rows fit when it was last drawn, and it scrolls
-    /// `most` rows at most.
-    Help {
-        scroll: i32,
-        shown: i32,
-        most: i32,
     },
 }
 struct Aside {

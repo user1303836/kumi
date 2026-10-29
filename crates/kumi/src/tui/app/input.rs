@@ -1016,7 +1016,7 @@ impl TuiApp {
             } else {
                 let len = self.0.state.borrow().asides.len();
                 if len > 0 {
-                    self.open_panel(Panel::Btw { at: len - 1, scroll: 0 });
+                    self.open_overlay(Panel::Btw { at: len - 1, scroll: 0 });
                 } else {
                     self.notice("Ask on the side with /btw and your question: Kumi answers from the conversation so far, without stopping what it's doing.",NoticeTone::Info);
                 }
@@ -1372,7 +1372,7 @@ impl TuiApp {
             }
             state.asides.len() - 1
         };
-        self.open_panel(Panel::Btw { at, scroll: 0 });
+        self.open_overlay(Panel::Btw { at, scroll: 0 });
         let question = question.to_string();
         self.task(move |app| async move {
             // Its words come as `aside` events while it's answered.
