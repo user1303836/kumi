@@ -647,7 +647,8 @@ impl TuiApp {
         }
         if command == "/help" {
             self.clear_editor();
-            self.notice(&help(self.0.options.switch_daw.is_some(), self.0.options.copy_on_select), NoticeTone::Info);
+            let options = &self.0.options;
+            self.notice(&help(options.switch_daw.is_some(), options.copy_on_select, options.mouse), NoticeTone::Info);
             return Ok(());
         }
         if command == "/changelog" {
@@ -868,7 +869,7 @@ impl TuiApp {
                 crate::daw::DawCommand::Switch(daw, words) => {
                     self.notice(&words, NoticeTone::Info);
                     switch(daw);
-                    self.finish(0, None).await;
+                    self.reopen().await;
                 }
             }
             return Ok(());
@@ -1499,12 +1500,18 @@ impl Command {
 }
 
 /// Keys and commands, in the DAW's words (Live's, as it always said them, for Live).
-pub(super) fn help(daw: bool, copy_on_select: bool) -> String {
+pub(super) fn help(daw: bool, copy_on_select: bool, mouse: bool) -> String {
     let words = crate::daw::words();
-    let copying = if copy_on_select {
-        "drag across text to copy it, double-click for a word or triple-click for a line"
+    // With the mouse left to the terminal, its wheel and Kumi's clicks aren't there either.
+    let scroll = if mouse { "page up/down or the mouse wheel scroll" } else { "page up/down scroll" };
+    let undo = if mouse { "click undo in HISTORY, or /undo, to take back a change" } else { "/undo takes back a change" };
+    let plays = if mouse { "space or the mouse plays a point" } else { "space plays a point" };
+    let copying = if !mouse {
+        "the mouse is your terminal's (\"mouse\": \"off\"), so its own selection copies"
+    } else if copy_on_select {
+        "drag across text to copy it, double-click for a word or triple-click for a line (Shift-drag, or Option in iTerm2, uses terminal selection)"
     } else {
-        "drag across text (double-click for a word, triple-click for a line), then Ctrl+C or right-click copies it and Esc clears it"
+        "drag across text (double-click for a word, triple-click for a line), then Ctrl+C or right-click copies it and Esc clears it (Shift-drag, or Option in iTerm2, uses terminal selection)"
     };
     let daw = if daw { " · /daw says which DAW Kumi works with, and /daw <name> opens Kumi again with another" } else { "" };
     let (app, place, places) = (words.app, words.place, words.places);
@@ -1515,7 +1522,7 @@ pub(super) fn help(daw: bool, copy_on_select: bool) -> String {
         ""
     };
     format!(
-        "enter sends · ctrl+j or alt+enter starts a new line · ctrl+t talks instead of typing: press it again to stop, or hold it while you talk, and what you said lands in the box (enter stops and sends at once); /voice chooses the language and the microphone · ↑ and ↓ go through what you sent before · while Kumi works, enter sends a message it reads after the step under way, tab one for after the answer, and alt+↑ takes the last waiting one back · /btw asks something on the side without interrupting · ctrl+b moves a slow step that doesn't use {app} (a video, pages) to the background (press it twice in tmux), and /jobs shows, stops or reruns background jobs · esc stops Kumi · page up/down or the mouse wheel scroll, ctrl+home goes to the start and ctrl+end back · click undo in HISTORY, or /undo, to take back a change · /new starts a fresh conversation, /resume goes back to one kept (this {place}'s, or any {place}'s by its id or name), /rename names this one, and /fork carries on in a copy · /reconnect connects to {app} again, keeping the conversation{daw} · /copy copies the last answer, /export copies or saves the whole conversation, and /share saves it as a web page to send; {copying} (Shift-drag, or Option in iTerm2, uses terminal selection) · /model and /effort choose the model and how hard it thinks, and /fast turns on its faster tier when it has one;{willington} /slots shows which model does each listening job (stems, transcription, listening, embeddings), swaps one in plain words after a quick test, and /slots back <job> takes a swap back; /music shows your own music, which Kumi learns your taste from on this computer, and adds or removes a folder, pauses or forgets it; /map draws your sounds and songs as a map to move around, where space or the mouse plays a point, and /map open shows it in your browser; /login and /logout sign in and out · /memory shows what Kumi remembers (notes, techniques, recipes and what it learned from your {places}), and forget in MEMORY drops one; /recipes your saved ways of working · /update gets the newest Kumi, and /changelog says what's new in it · drag files in, or ctrl+v a picture, to send them with your next message (backspace in an empty box takes the last one back) · ctrl+c clears the box, then quits · type / for commands"
+        "enter sends · ctrl+j or alt+enter starts a new line · ctrl+t talks instead of typing: press it again to stop, or hold it while you talk, and what you said lands in the box (enter stops and sends at once); /voice chooses the language and the microphone · ↑ and ↓ go through what you sent before · while Kumi works, enter sends a message it reads after the step under way, tab one for after the answer, and alt+↑ takes the last waiting one back · /btw asks something on the side without interrupting · ctrl+b moves a slow step that doesn't use {app} (a video, pages) to the background (press it twice in tmux), and /jobs shows, stops or reruns background jobs · esc stops Kumi · {scroll}, ctrl+home goes to the start and ctrl+end back · {undo} · /new starts a fresh conversation, /resume goes back to one kept (this {place}'s, or any {place}'s by its id or name), /rename names this one, and /fork carries on in a copy · /reconnect connects to {app} again, keeping the conversation{daw} · /copy copies the last answer, /export copies or saves the whole conversation, and /share saves it as a web page to send; {copying} · /model and /effort choose the model and how hard it thinks, and /fast turns on its faster tier when it has one;{willington} /slots shows which model does each listening job (stems, transcription, listening, embeddings), swaps one in plain words after a quick test, and /slots back <job> takes a swap back; /music shows your own music, which Kumi learns your taste from on this computer, and adds or removes a folder, pauses or forgets it; /map draws your sounds and songs as a map to move around, where {plays}, and /map open shows it in your browser; /login and /logout sign in and out · /memory shows what Kumi remembers (notes, techniques, recipes and what it learned from your {places}), and forget in MEMORY drops one; /recipes your saved ways of working · /update gets the newest Kumi, and /changelog says what's new in it · drag files in, or ctrl+v a picture, to send them with your next message (backspace in an empty box takes the last one back) · ctrl+c clears the box, then quits · type / for commands"
     )
 }
 pub(super) const COMMANDS: &[Command] = &[
@@ -1563,4 +1570,17 @@ pub(super) const COMMANDS: &[Command] = &[
 fn subcommand(command: &str, name: &str) -> Option<String> {
     let rest = command.strip_prefix(name)?;
     (rest.is_empty() || rest.starts_with(char::is_whitespace)).then(|| kumi_agent::core::goal_mode::command_word(rest))
+}
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn help_leaves_the_wheel_and_the_clicks_out_while_the_mouse_is_the_terminals() {
+        let off = super::help(false, true, false);
+        assert!(off.contains("its own selection copies"), "{off}");
+        for gone in ["drag across text", "mouse wheel", "click undo", "or the mouse plays"] {
+            assert!(!off.contains(gone), "{gone}: {off}");
+        }
+        let on = super::help(false, true, true);
+        assert!(on.contains("drag across text to copy it") && on.contains("mouse wheel") && on.contains("click undo"), "{on}");
+    }
 }

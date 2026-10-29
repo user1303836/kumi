@@ -69,6 +69,11 @@ const MOUSE_ON: &str = "\u{1b}[?1000h\u{1b}[?1002h\u{1b}[?1006h";
 // whenever the mouse crossed the window.
 const MOUSE_MOVES_ON: &str = "\u{1b}[?1003h";
 const MOUSE_MOVES_OFF: &str = "\u{1b}[?1003l";
+// With the mouse left to the terminal, its wheel isn't Kumi's either: on a full screen, many terminals turn it into ↑
+// and ↓ (alternate scroll, 1007), which would bring back what the producer sent before. Off while Kumi runs, and on
+// again as it leaves, as those terminals have it.
+const WHEEL_KEYS_OFF: &str = "\u{1b}[?1007l";
+const WHEEL_KEYS_ON: &str = "\u{1b}[?1007h";
 pub const RESTORE: &str =
     "\u{1b}[?2026l\u{1b}[0m\u{1b}[<u\u{1b}[?1003l\u{1b}[?1006l\u{1b}[?1002l\u{1b}[?1000l\u{1b}[?1004l\u{1b}[?2004l\u{1b}[?7h\u{1b}[?25h\u{1b}[?1049l";
 
@@ -77,7 +82,8 @@ pub struct TtyOptions {
     pub output: Rc<dyn TtyOutput>,
     pub on_input: Rc<dyn Fn(InputEvent)>,
     pub on_resize: Rc<dyn Fn()>,
-    /// Mouse reporting stops the terminal's own text selection; on by default.
+    /// Mouse reporting stops the terminal's own text selection; on by default. Off, the wheel doesn't type ↑ and ↓
+    /// either.
     pub mouse: bool,
     /// Written before [`RESTORE`] whenever the terminal is given back, the crash path's too: what clears the
     /// status Kumi showed in the terminal (its OSC 7501 record and 9;4 progress). Empty for none.
@@ -115,7 +121,7 @@ impl Tty {
         let parser = InputParser::new(Rc::clone(&options.on_input));
         Tty {
             inner: Rc::new(Inner {
-                restore: format!("{}{RESTORE}", options.farewell),
+                restore: format!("{}{RESTORE}{}", options.farewell, if options.mouse { "" } else { WHEEL_KEYS_ON }),
                 options,
                 active: Arc::new(AtomicBool::new(false)),
                 taken: Arc::new(AtomicBool::new(false)),
@@ -220,10 +226,10 @@ impl Tty {
 }
 
 impl Inner {
-    /// What takes the terminal: the screen and the keys, mouse reporting where it's on, and the mouse's moves while
-    /// they're asked for.
+    /// What takes the terminal: the screen and the keys, mouse reporting where it's on (else the wheel's keys off), and
+    /// the mouse's moves while they're asked for.
     fn entering(&self) -> String {
-        let mouse = if self.options.mouse { MOUSE_ON } else { "" };
+        let mouse = if self.options.mouse { MOUSE_ON } else { WHEEL_KEYS_OFF };
         let moves = if self.options.mouse && self.moves.get() { MOUSE_MOVES_ON } else { "" };
         format!("{ENTER}{mouse}{moves}")
     }
@@ -813,6 +819,26 @@ mod tests {
             let crashed = Arc::clone(&self.crashed);
             Some(Arc::new(move |data| crashed.lock().unwrap().push_str(data)))
         }
+    }
+
+    #[test]
+    fn with_the_mouse_off_the_terminal_keeps_it_and_its_wheel_types_no_keys() {
+        let terminal = Rc::new(Crash { raw: Arc::new(AtomicBool::new(false)), crashed: Arc::default(), written: RefCell::default() });
+        let tty = Tty::new(TtyOptions {
+            input: terminal.clone(),
+            output: terminal.clone(),
+            on_input: Rc::new(|_| {}),
+            on_resize: Rc::new(|| {}),
+            mouse: false,
+            farewell: String::new(),
+        });
+        // Taken without mouse reporting and with the wheel's ↑ and ↓ off; given back, the crash path's way too, with
+        // them on again.
+        assert_eq!(tty.inner.entering(), format!("{ENTER}{WHEEL_KEYS_OFF}"));
+        assert_eq!(tty.inner.restore, format!("{RESTORE}{WHEEL_KEYS_ON}"));
+        // Nor are the mouse's moves asked for, for the map.
+        tty.report_moves(true);
+        assert_eq!(tty.inner.entering(), format!("{ENTER}{WHEEL_KEYS_OFF}"));
     }
 
     // No other test in this binary owns a terminal: the panic here runs every registered restorer in the process.

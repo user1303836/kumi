@@ -310,6 +310,108 @@ case!(a_copy_over_a_panel_takes_its_lines_not_the_conversation_under_them, async
     assert_eq!(copied.borrow().last(), Some(&expected));
     h.close().await;
 });
+case!(quitting_prints_the_conversation_into_the_scrollback_before_the_goodbye, async {
+    let h = Harness::new(120, 36);
+    let done = h.app.run();
+    delay(5).await;
+    h.connect();
+    h.type_text("what's on the bass?\r").await;
+    h.emit(json!({"type":"state","state":"running"}));
+    for id in ["t1", "t2"] {
+        h.emit(json!({"type":"tool-start","id":id,"name":"live_discover"}));
+        h.emit(json!({"type":"tool-end","id":id,"name":"live_discover","isError":false,"elapsedMs":300}));
+    }
+    h.emit(json!({"type":"text","text":"**Bass** has an EQ Eight, private-token."}));
+    h.emit(json!({"type":"turn-complete","result":{"stopReason":"completed"},"elapsedMs":900}));
+    h.emit(json!({"type":"state","state":"idle"}));
+    h.wait_for("EQ Eight").await;
+    h.type_text("\x03").await;
+    assert_eq!(done.await, 0);
+    // On the main screen, after the full screen is given back: the request, the answer and its steps, then the goodbye.
+    let written = h.output.text.borrow().clone();
+    let after = written.rsplit(kumi::tui::tty::RESTORE).next().unwrap();
+    assert_eq!(
+        after,
+        "\x1b[1m› what's on the bass?\x1b[22m\n\n**Bass** has an EQ Eight, [redacted].\n\x1b[2m  ✓ looked at your Set ×2\x1b[22m\n\n\
+         Kumi closed. Each Set's conversation continues next time.\n"
+    );
+    h.close().await;
+});
+case!(the_printed_conversation_goes_through_what_export_takes_out, async {
+    use futures::FutureExt;
+    // What /export's redactor takes out (a path in the home folder, say), here a name the stream never masks.
+    let h = Harness::with(120, 36, Rc::new(Control::default()), |o| {
+        o.redact = Some(Rc::new(|| {
+            let redact: Rc<dyn Fn(&str) -> String> = Rc::new(|text: &str| text.replace("EQ Eight", "[taken out]"));
+            async move { redact }.boxed_local()
+        }))
+    });
+    let done = h.app.run();
+    delay(5).await;
+    h.connect();
+    h.type_text("what's on the bass?\r").await;
+    h.emit(json!({"type":"state","state":"running"}));
+    h.emit(json!({"type":"text","text":"An EQ Eight."}));
+    h.emit(json!({"type":"turn-complete","result":{"stopReason":"completed"},"elapsedMs":900}));
+    h.emit(json!({"type":"state","state":"idle"}));
+    h.wait_for("An EQ Eight.").await;
+    h.type_text("\x03").await;
+    assert_eq!(done.await, 0);
+    let written = h.output.text.borrow().clone();
+    let after = written.rsplit(kumi::tui::tty::RESTORE).next().unwrap();
+    assert!(after.contains("An [taken out].") && !after.contains("EQ Eight"), "{after:?}");
+    h.close().await;
+});
+case!(closing_to_open_again_with_another_daw_prints_no_conversation, async {
+    let h = Harness::with(120, 36, Rc::new(Control::default()), |o| o.switch_daw = Some(Rc::new(|_| {})));
+    let done = h.app.run();
+    delay(5).await;
+    h.connect();
+    h.type_text("what's on the bass?\r").await;
+    h.emit(json!({"type":"state","state":"running"}));
+    h.emit(json!({"type":"text","text":"An EQ Eight."}));
+    h.emit(json!({"type":"turn-complete","result":{"stopReason":"completed"},"elapsedMs":900}));
+    h.emit(json!({"type":"state","state":"idle"}));
+    h.wait_for("An EQ Eight.").await;
+    // The conversation carries on in the Kumi that opens: printed here, the next quit would print it twice.
+    h.type_text("/daw renoise\r").await;
+    assert_eq!(done.await, 0);
+    let written = h.output.text.borrow().clone();
+    let after = written.rsplit(kumi::tui::tty::RESTORE).next().unwrap();
+    assert!(!after.contains("what's on the bass?") && after.contains("Kumi closed."), "{after:?}");
+    h.close().await;
+});
+case!(with_transcript_on_quit_off_quitting_prints_only_the_goodbye, async {
+    let h = Harness::with(120, 36, Rc::new(Control::default()), |o| o.transcript_on_quit = false);
+    let done = h.app.run();
+    delay(5).await;
+    h.connect();
+    h.type_text("what's on the bass?\r").await;
+    h.emit(json!({"type":"state","state":"running"}));
+    h.emit(json!({"type":"text","text":"An EQ Eight."}));
+    h.emit(json!({"type":"turn-complete","result":{"stopReason":"completed"},"elapsedMs":900}));
+    h.emit(json!({"type":"state","state":"idle"}));
+    h.wait_for("An EQ Eight.").await;
+    h.type_text("\x03").await;
+    assert_eq!(done.await, 0);
+    let restore = kumi::tui::tty::RESTORE;
+    assert!(h.output.text.borrow().ends_with(&format!("{restore}Kumi closed. Each Set's conversation continues next time.\n")));
+    h.close().await;
+});
+case!(with_the_mouse_off_kumi_leaves_it_and_its_wheel_to_the_terminal, async {
+    let h = Harness::with(120, 36, Rc::new(Control::default()), |o| o.mouse = false);
+    let done = h.app.run();
+    delay(5).await;
+    h.connect();
+    // No mouse reporting: the terminal (or tmux) selects and copies; and its wheel types no ↑ or ↓ meanwhile.
+    let written = h.output.text.borrow().clone();
+    assert!(!written.contains("\x1b[?1000h") && !written.contains("\x1b[?1002h") && written.contains("\x1b[?1007l"));
+    h.type_text("\x03").await;
+    assert_eq!(done.await, 0);
+    let restore = kumi::tui::tty::RESTORE;
+    assert!(h.output.text.borrow().contains(&format!("{restore}\x1b[?1007h")));
+    h.close().await;
+});
 case!(started_by_the_installer_the_farewell_says_how_to_start_kumi_next_time, async {
     let next = "Next time: open a new terminal window and type kumi";
     let h = Harness::with(120, 36, Rc::new(Control::default()), |o| o.next_time = Some(next.into()));

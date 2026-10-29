@@ -380,6 +380,14 @@ your clipboard with `set -g set-clipboard on`. Those terminals
 say when a held Ctrl-T is let go; elsewhere, Kumi stops listening once the key's
 repeats stop.
 
+Quitting prints the conversation into the terminal's scrollback before the
+goodbye: your requests, Kumi's answers and a line for each run of steps, with
+secrets taken out as `/export` takes them out (the last 200 KB of a long one).
+`"transcriptOnQuit": false` in settings.json turns this off. `"mouse": "off"`
+leaves the mouse to the terminal, or tmux: its own selection and copying work,
+Page Up and Page Down scroll, and the wheel types no ↑ or ↓ meanwhile. Kumi's
+clicks, its drag to copy and the map's mouse are off then.
+
 ## Design notes
 
 For people working on the app (`crates/kumi/src/tui/`).
