@@ -1291,6 +1291,38 @@ case!(input_history_new_conversation_and_frame_budget, async {
     h.emit(json!({"type":"text","text":"one more"}));
     h.screen();
     assert_eq!(h.app.transcript_layout_count() - before, 1);
+    // What a streamed line costs a frame with two thousand entries before it, the bytes written and the time to draw:
+    // beside the pane, then with the pane put away (ctrl+\) and the conversation as wide as the window. The lines
+    // differ, as an answer's do, so a row moved up isn't nearly the row it lands on.
+    let said = [
+        "The kick sits at 52 Hz, and the bass's low end clashes with it",
+        "Cut the bass below 40 Hz",
+        "then sidechain it to the kick by 3 dB with a fast release",
+        "The pad's reverb tail is long enough to blur the snare",
+        "Shorten it to 1.2 s",
+        "or duck it under the vocal while the verse plays",
+        "EQ Eight on the vocal bus: a gentle shelf above 8 kHz",
+    ];
+    for (pane, start) in [("beside the pane", 0usize), ("without the pane", 40)] {
+        if start > 0 {
+            h.type_text("\x1c").await;
+            h.screen();
+        }
+        let (mut bytes, mut times) = (vec![], vec![]);
+        for i in start..start + 40 {
+            let written = h.output.text.borrow().len();
+            h.emit(json!({"type":"text","text":format!("\n{} (line {i})", said[i % said.len()])}));
+            let started = std::time::Instant::now();
+            h.app.flush();
+            times.push(started.elapsed());
+            bytes.push(h.output.text.borrow().len() - written);
+        }
+        let mean = bytes.iter().sum::<usize>() / bytes.len();
+        let time = times.iter().sum::<std::time::Duration>() / times.len() as u32;
+        let most = bytes.iter().max().unwrap();
+        eprintln!("a streamed line {pane}: {mean} bytes a frame on average, {most} at most; drawn in {time:?} on average");
+        h.has(&format!("(line {})", start + 39));
+    }
     h.close().await;
 });
 case!(whole_screens_match_source, async {
