@@ -1462,8 +1462,8 @@ fn older_and_later_pictures_still_read() {
 }
 
 /// One of every request a front end makes: each optional field filled and left out, and each value of the enums they
-/// carry.
-fn requests() -> Vec<Op> {
+/// carry. (The protocol's tests send each of them too.)
+pub(crate) fn requests() -> Vec<Op> {
     let pinned = pins().remove(0);
     let mut requests: Vec<Op> = vec![
         op::Start {}.into(),
@@ -1564,73 +1564,12 @@ fn requests() -> Vec<Op> {
     requests
 }
 
-/// Each request's name, to check every one is pinned: a request added later has to be named here.
-fn request(op: &Op) -> &'static str {
-    match op {
-        Op::Start(_) => "Start",
-        Op::Submit(_) => "Submit",
-        Op::Steer(_) => "Steer",
-        Op::Aside(_) => "Aside",
-        Op::StopAside(_) => "StopAside",
-        Op::Cancel(_) => "Cancel",
-        Op::Close(_) => "Close",
-        Op::Undo(_) => "Undo",
-        Op::Refresh(_) => "Refresh",
-        Op::NewConversation(_) => "NewConversation",
-        Op::Reconnect(_) => "Reconnect",
-        Op::Reconfigure(_) => "Reconfigure",
-        Op::Instant(_) => "Instant",
-        Op::Pick(_) => "Pick",
-        Op::Conversations(_) => "Conversations",
-        Op::AllConversations(_) => "AllConversations",
-        Op::FindConversation(_) => "FindConversation",
-        Op::ResumeConversation(_) => "ResumeConversation",
-        Op::RenameConversation(_) => "RenameConversation",
-        Op::PinConversation(_) => "PinConversation",
-        Op::DeleteConversation(_) => "DeleteConversation",
-        Op::ForkConversation(_) => "ForkConversation",
-        Op::AnswerSet(_) => "AnswerSet",
-        Op::ConversationNow(_) => "ConversationNow",
-        Op::ConversationLines(_) => "ConversationLines",
-        Op::ConversationToExport(_) => "ConversationToExport",
-        Op::Memory(_) => "Memory",
-        Op::Remembered(_) => "Remembered",
-        Op::Taste(_) => "Taste",
-        Op::ForgetTaste(_) => "ForgetTaste",
-        Op::Forget(_) => "Forget",
-        Op::ChangeNote(_) => "ChangeNote",
-        Op::Recipes(_) => "Recipes",
-        Op::PinForRecipe(_) => "PinForRecipe",
-        Op::RunRecipe(_) => "RunRecipe",
-        Op::ForgetRecipe(_) => "ForgetRecipe",
-        Op::Techniques(_) => "Techniques",
-        Op::ForgetTechnique(_) => "ForgetTechnique",
-        Op::AnswerTechnique(_) => "AnswerTechnique",
-        Op::Lessons(_) => "Lessons",
-        Op::ForgetLesson(_) => "ForgetLesson",
-        Op::Goal(_) => "Goal",
-        Op::StopGoal(_) => "StopGoal",
-        Op::StopLoop(_) => "StopLoop",
-        Op::StopDaw(_) => "StopDaw",
-        Op::DawMessage(_) => "DawMessage",
-        Op::DawRecording(_) => "DawRecording",
-        Op::StopJob(_) => "StopJob",
-        Op::RunJobAgain(_) => "RunJobAgain",
-        Op::Background(_) => "Background",
-        Op::CarryOn(_) => "CarryOn",
-        Op::Palette(_) => "Palette",
-        Op::PaletteGather(_) => "PaletteGather",
-        Op::PaletteRemove(_) => "PaletteRemove",
-        Op::PaletteCommand(_) => "PaletteCommand",
-        Op::FocusBody(_) => "FocusBody",
-    }
-}
-
 #[test]
 fn every_request_keeps_its_wire_shape() {
     let requests = requests();
-    let names: BTreeSet<&str> = requests.iter().map(request).collect();
-    assert_eq!(names.len(), 56, "every request is pinned: {names:?}");
+    // Every request in the protocol's table has one here: a request added later has to be.
+    let names: BTreeSet<&str> = requests.iter().map(Op::name).collect();
+    assert_eq!(names, Op::NAMES.iter().copied().collect::<BTreeSet<_>>(), "every request is pinned");
     pinned::<Vec<Op>>("requests.json", &requests);
 }
 

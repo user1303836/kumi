@@ -144,6 +144,16 @@ macro_rules! requests {
         pub enum Reply {
             $($name($reply),)*
         }
+        impl Op {
+            /// Every request's name, as its struct in [`op`] is called.
+            pub const NAMES: &'static [&'static str] = &[$(stringify!($name)),*];
+            /// This request's name, as its struct in [`op`] is called.
+            pub fn name(&self) -> &'static str {
+                match self {
+                    $(Op::$name(_) => stringify!($name),)*
+                }
+            }
+        }
         $(
             impl From<op::$name> for Op {
                 fn from(request: op::$name) -> Op {
@@ -353,8 +363,8 @@ impl InProcess {
             }),
             Op::Steer(op::Steer { text }) => Reply::Steer(session.steer(&text)),
             Op::Aside(op::Aside { id, question }) => {
-                let signal = Signal::new();
-                self.asides.borrow_mut().insert(id, signal.clone());
+                // A stop that came first left its signal stopped: the aside ends at once.
+                let signal = self.asides.borrow_mut().entry(id).or_insert_with(Signal::new).clone();
                 let this = self.this.clone();
                 let on_text: OnText = Rc::new(move |text: &str| {
                     if let Some(this) = this.upgrade() {
@@ -366,10 +376,10 @@ impl InProcess {
                 Reply::Aside(answer?)
             }
             Op::StopAside(op::StopAside { id }) => {
-                let signal = self.asides.borrow_mut().remove(&id);
-                if let Some(signal) = signal {
-                    signal.cancel();
-                }
+                // Before its aside starts too: the aside takes the stopped signal up as it starts (an id is never used
+                // again, so what a late stop leaves is harmless).
+                let signal = self.asides.borrow_mut().entry(id).or_insert_with(Signal::new).clone();
+                signal.cancel();
                 Reply::StopAside(())
             }
             Op::Cancel(op::Cancel {}) => Reply::Cancel(session.cancel().await?),

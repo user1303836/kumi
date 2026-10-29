@@ -4,10 +4,12 @@
 use async_trait::async_trait;
 use kumi_agent::core::{
     contracts::*,
-    protocol::{op, Capabilities, InProcess, SessionHandle},
+    palette::{Gathered, PaletteView},
+    protocol::{op, Capabilities, InProcess, Op, SessionHandle},
+    search_memory::SearchMemoryStatus,
 };
 use kumi_common::abort::Signal;
-use kumi_types::contracts::ChangeRecord;
+use kumi_types::contracts::{ChangeRecord, JsonObject};
 use kumi_types::errors::RuntimeError;
 use std::{cell::RefCell, rc::Rc};
 
@@ -44,10 +46,11 @@ impl SessionController for Fake {
     }
     /// Two pieces of words, then it waits until it's stopped.
     async fn aside(&self, question: &str, on_text: OnText, signal: Option<Signal>) -> Result<String, RuntimeError> {
-        self.call(format!("aside:{question}"));
+        let signal = signal.expect("an aside can be stopped");
+        self.call(format!("aside:{question}{}", if signal.is_cancelled() { ":stopped already" } else { "" }));
         on_text("It's ");
         on_text("the low shelf.");
-        signal.expect("an aside can be stopped").cancelled().await;
+        signal.cancelled().await;
         Err(RuntimeError::plain("stopped"))
     }
     /// What waits on something before it's done.
@@ -159,4 +162,345 @@ fn capabilities_are_the_controllers_flags() {
     let can = Capabilities::of(&Fake::default());
     assert!(can.aside);
     assert!(!can.steer && !can.palette && !can.jobs && !can.conversations);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_stop_that_comes_before_its_aside_starts_still_stops_it() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let fake = Rc::new(Fake::default());
+            let session: Rc<dyn SessionHandle> = InProcess::new(fake.clone());
+            // Closed (its panel, or Kumi) before the task that asks it ran.
+            session.tell(op::StopAside { id: 1 }.into());
+            let answer =
+                tokio::time::timeout(std::time::Duration::from_secs(5), session.op(op::Aside { id: 1, question: "why the shelf?".into() }))
+                    .await
+                    .expect("a stopped aside ends at once");
+            assert!(answer.is_err());
+            assert_eq!(fake.calls(), ["aside:why the shelf?:stopped already"]);
+        })
+        .await;
+}
+
+/// The method each request reached, by its name (and, where two of its arguments have one type, with them), answering
+/// as an absent method would.
+#[derive(Default)]
+struct Reached(RefCell<Vec<String>>);
+
+impl Reached {
+    fn reach(&self, method: impl Into<String>) {
+        self.0.borrow_mut().push(method.into());
+    }
+}
+
+#[async_trait(?Send)]
+impl SessionController for Reached {
+    async fn start(&self) -> Result<(), RuntimeError> {
+        self.reach("start");
+        Ok(())
+    }
+    async fn submit(&self, _: &str, _: Option<PinnedNode>) -> Result<(), RuntimeError> {
+        self.reach("submit");
+        Ok(())
+    }
+    async fn submit_with(&self, _: &str, _: Option<PinnedNode>, _: Vec<Attachment>) -> Result<(), RuntimeError> {
+        self.reach("submit_with");
+        Ok(())
+    }
+    fn steer(&self, _: &str) -> bool {
+        self.reach("steer");
+        false
+    }
+    async fn aside(&self, _: &str, _: OnText, _: Option<Signal>) -> Result<String, RuntimeError> {
+        self.reach("aside");
+        Ok(String::new())
+    }
+    async fn refresh(&self) -> Result<(), RuntimeError> {
+        self.reach("refresh");
+        Ok(())
+    }
+    async fn new_conversation(&self) -> Result<(), RuntimeError> {
+        self.reach("new_conversation");
+        Ok(())
+    }
+    async fn reconnect(&self) -> Result<(), RuntimeError> {
+        self.reach("reconnect");
+        Ok(())
+    }
+    async fn conversations(&self) -> Result<Vec<ConversationSummary>, RuntimeError> {
+        self.reach("conversations");
+        Ok(vec![])
+    }
+    async fn resume_conversation(&self, _: &str) -> Result<bool, RuntimeError> {
+        self.reach("resume_conversation");
+        Ok(false)
+    }
+    async fn all_conversations(&self) -> Result<Vec<ConversationSummary>, RuntimeError> {
+        self.reach("all_conversations");
+        Ok(vec![])
+    }
+    async fn find_conversation(&self, _: &str) -> Result<ConversationMatch, RuntimeError> {
+        self.reach("find_conversation");
+        Ok(ConversationMatch::None)
+    }
+    async fn rename_conversation(&self, id: Option<&str>, name: Option<&str>) -> Result<bool, RuntimeError> {
+        self.reach(format!("rename_conversation:{id:?}:{name:?}"));
+        Ok(false)
+    }
+    async fn pin_conversation(&self, _: &str, _: bool) -> Result<bool, RuntimeError> {
+        self.reach("pin_conversation");
+        Ok(false)
+    }
+    async fn delete_conversation(&self, _: &str) -> Result<bool, RuntimeError> {
+        self.reach("delete_conversation");
+        Ok(false)
+    }
+    async fn fork_conversation(&self, _: Option<&str>) -> Result<Option<String>, RuntimeError> {
+        self.reach("fork_conversation");
+        Ok(None)
+    }
+    async fn answer_set(&self, _: SetChoice) -> Result<(), RuntimeError> {
+        self.reach("answer_set");
+        Ok(())
+    }
+    async fn conversation_now(&self) -> Option<ConversationNow> {
+        self.reach("conversation_now");
+        None
+    }
+    async fn conversation_lines(&self, _: &str) -> Result<Vec<TranscriptLine>, RuntimeError> {
+        self.reach("conversation_lines");
+        Ok(vec![])
+    }
+    async fn conversation_to_export(&self) -> Option<ConversationToExport> {
+        self.reach("conversation_to_export");
+        None
+    }
+    async fn cancel(&self) -> Result<(), RuntimeError> {
+        self.reach("cancel");
+        Ok(())
+    }
+    async fn close(&self) -> Result<(), RuntimeError> {
+        self.reach("close");
+        Ok(())
+    }
+    fn status(&self) -> SessionStatus {
+        SessionStatus { state: TurnState::Idle, connection: ConnectionState::Disconnected, turns: 0, max_turns: None, observation: None }
+    }
+    async fn undo(&self, _: Option<&str>) -> Result<Option<ChangeRecord>, RuntimeError> {
+        self.reach("undo");
+        Ok(None)
+    }
+    async fn memory(&self) -> Result<Option<MemoryView>, RuntimeError> {
+        self.reach("memory");
+        Ok(None)
+    }
+    async fn remembered(&self) -> Option<SearchMemoryStatus> {
+        self.reach("remembered");
+        None
+    }
+    async fn taste(&self) -> Result<Vec<KeptLine>, RuntimeError> {
+        self.reach("taste");
+        Ok(vec![])
+    }
+    async fn forget_taste(&self, _: &str) -> Result<bool, RuntimeError> {
+        self.reach("forget_taste");
+        Ok(false)
+    }
+    async fn forget(&self, _: &str) -> Result<Option<MemoryNote>, RuntimeError> {
+        self.reach("forget");
+        Ok(None)
+    }
+    async fn change_note(&self, _: &str, _: NoteChange) -> Result<Option<MemoryNote>, RuntimeError> {
+        self.reach("change_note");
+        Ok(None)
+    }
+    async fn recipes(&self) -> Result<Vec<RecipeSummary>, RuntimeError> {
+        self.reach("recipes");
+        Ok(vec![])
+    }
+    async fn instant(&self, _: &str) -> Result<Option<InstantOutcome>, RuntimeError> {
+        self.reach("instant");
+        Ok(None)
+    }
+    fn pin_for_recipe(&self, _: &PinnedNode) -> Option<PinnedNode> {
+        self.reach("pin_for_recipe");
+        None
+    }
+    async fn run_recipe(&self, _: &str, _: JsonObject) -> Result<RecipeOutcome, RuntimeError> {
+        self.reach("run_recipe");
+        Ok(RecipeOutcome { text: String::new(), is_error: false })
+    }
+    async fn forget_recipe(&self, _: &str) -> Result<bool, RuntimeError> {
+        self.reach("forget_recipe");
+        Ok(false)
+    }
+    async fn techniques(&self) -> Result<Vec<TechniqueSummary>, RuntimeError> {
+        self.reach("techniques");
+        Ok(vec![])
+    }
+    async fn forget_technique(&self, _: &str) -> Result<bool, RuntimeError> {
+        self.reach("forget_technique");
+        Ok(false)
+    }
+    async fn answer_technique(&self, _: bool) -> Result<bool, RuntimeError> {
+        self.reach("answer_technique");
+        Ok(false)
+    }
+    fn picked(&self, _: Picked) {
+        self.reach("picked");
+    }
+    async fn goal(&self, _: Option<&str>) -> Result<(), RuntimeError> {
+        self.reach("goal");
+        Ok(())
+    }
+    async fn stop_goal(&self) -> Result<bool, RuntimeError> {
+        self.reach("stop_goal");
+        Ok(false)
+    }
+    async fn stop_loop(&self) -> Result<bool, RuntimeError> {
+        self.reach("stop_loop");
+        Ok(false)
+    }
+    async fn lessons(&self) -> Result<Vec<LessonEntry>, RuntimeError> {
+        self.reach("lessons");
+        Ok(vec![])
+    }
+    async fn forget_lesson(&self, _: &str) -> Result<bool, RuntimeError> {
+        self.reach("forget_lesson");
+        Ok(false)
+    }
+    async fn stop_live(&self) -> Result<bool, RuntimeError> {
+        self.reach("stop_live");
+        Ok(false)
+    }
+    async fn daw_message(&self, _: &str) -> Result<bool, RuntimeError> {
+        self.reach("daw_message");
+        Ok(false)
+    }
+    async fn daw_recording(&self) -> Result<Option<bool>, RuntimeError> {
+        self.reach("daw_recording");
+        Ok(None)
+    }
+    fn stop_job(&self, _: u32) -> bool {
+        self.reach("stop_job");
+        false
+    }
+    fn run_job_again(&self, _: u32) -> Result<u32, String> {
+        self.reach("run_job_again");
+        Err(String::new())
+    }
+    fn background(&self) -> Result<u32, String> {
+        self.reach("background");
+        Err(String::new())
+    }
+    fn carry_on(&self, _: u32) -> bool {
+        self.reach("carry_on");
+        false
+    }
+    async fn palette(&self) -> Result<Option<PaletteView>, RuntimeError> {
+        self.reach("palette");
+        Ok(None)
+    }
+    async fn palette_gather(&self, _: Vec<Gathered>) -> Result<String, RuntimeError> {
+        self.reach("palette_gather");
+        Ok(String::new())
+    }
+    async fn palette_remove(&self, path: &str, size: i64, mtime: i64) -> Result<bool, RuntimeError> {
+        self.reach(format!("palette_remove:{path}:{size}:{mtime}"));
+        Ok(false)
+    }
+    async fn palette_command(&self, _: &str) -> Result<String, RuntimeError> {
+        self.reach("palette_command");
+        Ok(String::new())
+    }
+    async fn focus_body(&self, _: &BodyRequest) -> Result<Option<FocusBody>, RuntimeError> {
+        self.reach("focus_body");
+        Ok(None)
+    }
+    async fn reconfigure(&self) -> Result<(), RuntimeError> {
+        self.reach("reconfigure");
+        Ok(())
+    }
+}
+
+/// The controller's method each request was before the protocol, with the arguments that share a type in the order it
+/// takes them; None for the handle's own (stopping an aside stops the signal it gave it).
+fn method(request: &Op) -> Option<String> {
+    Some(
+        match request {
+            Op::Start(_) => "start",
+            Op::Submit(op::Submit { attachments, .. }) if attachments.is_empty() => "submit",
+            Op::Submit(_) => "submit_with",
+            Op::Steer(_) => "steer",
+            Op::Aside(_) => "aside",
+            Op::StopAside(_) => return None,
+            Op::Cancel(_) => "cancel",
+            Op::Close(_) => "close",
+            Op::Undo(_) => "undo",
+            Op::Refresh(_) => "refresh",
+            Op::NewConversation(_) => "new_conversation",
+            Op::Reconnect(_) => "reconnect",
+            Op::Reconfigure(_) => "reconfigure",
+            Op::Instant(_) => "instant",
+            Op::Pick(_) => "picked",
+            Op::Conversations(_) => "conversations",
+            Op::AllConversations(_) => "all_conversations",
+            Op::FindConversation(_) => "find_conversation",
+            Op::ResumeConversation(_) => "resume_conversation",
+            Op::RenameConversation(op::RenameConversation { id, name }) => {
+                return Some(format!("rename_conversation:{:?}:{:?}", id.as_deref(), name.as_deref()))
+            }
+            Op::PinConversation(_) => "pin_conversation",
+            Op::DeleteConversation(_) => "delete_conversation",
+            Op::ForkConversation(_) => "fork_conversation",
+            Op::AnswerSet(_) => "answer_set",
+            Op::ConversationNow(_) => "conversation_now",
+            Op::ConversationLines(_) => "conversation_lines",
+            Op::ConversationToExport(_) => "conversation_to_export",
+            Op::Memory(_) => "memory",
+            Op::Remembered(_) => "remembered",
+            Op::Taste(_) => "taste",
+            Op::ForgetTaste(_) => "forget_taste",
+            Op::Forget(_) => "forget",
+            Op::ChangeNote(_) => "change_note",
+            Op::Recipes(_) => "recipes",
+            Op::PinForRecipe(_) => "pin_for_recipe",
+            Op::RunRecipe(_) => "run_recipe",
+            Op::ForgetRecipe(_) => "forget_recipe",
+            Op::Techniques(_) => "techniques",
+            Op::ForgetTechnique(_) => "forget_technique",
+            Op::AnswerTechnique(_) => "answer_technique",
+            Op::Lessons(_) => "lessons",
+            Op::ForgetLesson(_) => "forget_lesson",
+            Op::Goal(_) => "goal",
+            Op::StopGoal(_) => "stop_goal",
+            Op::StopLoop(_) => "stop_loop",
+            Op::StopDaw(_) => "stop_live",
+            Op::DawMessage(_) => "daw_message",
+            Op::DawRecording(_) => "daw_recording",
+            Op::StopJob(_) => "stop_job",
+            Op::RunJobAgain(_) => "run_job_again",
+            Op::Background(_) => "background",
+            Op::CarryOn(_) => "carry_on",
+            Op::Palette(_) => "palette",
+            Op::PaletteGather(_) => "palette_gather",
+            Op::PaletteRemove(op::PaletteRemove { path, size, mtime }) => return Some(format!("palette_remove:{path}:{size}:{mtime}")),
+            Op::PaletteCommand(_) => "palette_command",
+            Op::FocusBody(_) => "focus_body",
+        }
+        .into(),
+    )
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn every_request_reaches_the_method_it_was() {
+    let reached = Rc::new(Reached::default());
+    let session: Rc<dyn SessionHandle> = InProcess::new(reached.clone());
+    // One of each, as their wire pins have them.
+    for request in crate::pin_wire::requests() {
+        let (name, wanted) = (request.name(), method(&request));
+        reached.0.borrow_mut().clear();
+        session.send(request).await.unwrap_or_else(|error| panic!("{name}: {error}"));
+        assert_eq!(*reached.0.borrow(), wanted.into_iter().collect::<Vec<_>>(), "{name}");
+    }
 }
