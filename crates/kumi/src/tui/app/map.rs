@@ -268,15 +268,27 @@ impl TuiApp {
             let mut state = self.0.state.borrow_mut();
             let Some(view) = state.map.as_mut() else { return };
             match event {
-                InputEvent::Key { name, mods, .. } if mods.ctrl => {
-                    if name == "c" {
-                        Asked::Close
-                    } else {
-                        Asked::Nothing
-                    }
+                // Its keys as the registry has them (keys.json can say others): the filter's while it's typed.
+                InputEvent::Key { .. } => {
+                    let scope = if view.filtering() { Scope::MapFilter } else { Scope::Map };
+                    view.act(self.actions(scope, &event))
                 }
-                InputEvent::Key { name, mods, .. } => view.on_key(&name, mods.shift),
-                InputEvent::Text { text } | InputEvent::Paste { text } => view.on_text(&text),
+                // Typed characters, one at a time (they can come together): the filter's words while it's typed, and
+                // otherwise keys.
+                InputEvent::Text { text } | InputEvent::Paste { text } => {
+                    let mut asked = Asked::Nothing;
+                    for typed in text.chars() {
+                        if view.filtering() {
+                            view.type_filter(typed);
+                            continue;
+                        }
+                        asked = view.act(self.actions(Scope::Map, &InputEvent::text(&typed.to_string())));
+                        if asked != Asked::Nothing {
+                            break;
+                        }
+                    }
+                    asked
+                }
                 InputEvent::Mouse { action: MouseAction::Press, button: MouseButton::Left, x, y, mods, .. } => {
                     view.on_click(x, y, mods.ctrl)
                 }

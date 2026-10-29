@@ -927,35 +927,40 @@ impl TuiApp {
         }
     }
 
-    pub(super) fn setup_key(&self, name: &str, mods: super::super::keys::Modifiers) {
-        if mods.ctrl && matches!(name, "c" | "d") {
-            drop(self.finish(0, None));
-            return;
-        }
-        let mut state = self.0.state.borrow_mut();
-        let Some(setup) = state.setup.as_mut() else { return };
-        if setup.answer.is_some() {
-            match name {
-                "up" => setup.chosen = setup.chosen.saturating_sub(1),
-                "down" | "tab" => setup.chosen = (setup.chosen + 1).min(setup.choices.len().saturating_sub(1)),
-                "enter" => {
+    /// One of setup's keys: does what the first of its actions that applies does (`ids`, as the key registry has them
+    /// in setup); one that doesn't apply just now lets the key go on to the next.
+    pub(super) fn setup_act(&self, ids: Vec<&'static str>) {
+        for id in ids {
+            if id == "setup.quit" {
+                drop(self.finish(0, None));
+                return;
+            }
+            let mut state = self.0.state.borrow_mut();
+            let Some(setup) = state.setup.as_mut() else { return };
+            // A question asked (a list of choices), or a step under way.
+            let asking = setup.answer.is_some();
+            match id {
+                "setup.up" if asking => setup.chosen = setup.chosen.saturating_sub(1),
+                "setup.down" if asking => setup.chosen = (setup.chosen + 1).min(setup.choices.len().saturating_sub(1)),
+                "setup.choose" if asking => {
                     let value = setup.choices.get(setup.chosen).map(|c| c.value.clone());
                     if let (Some(value), Some(answer)) = (value, setup.answer.take()) {
                         setup.choices.clear();
                         let _ = answer.send(Some(value));
                     }
                 }
-                "escape" => {
-                    if let Some(answer) = setup.answer.take() {
+                // Once set, enter goes on as esc does.
+                "setup.choose" if setup.step == Step::Set => setup.esc.cancel(),
+                "setup.later" => match setup.answer.take() {
+                    Some(answer) => {
                         let _ = answer.send(None);
                     }
-                }
-                _ => {}
+                    None => setup.esc.cancel(),
+                },
+                _ => continue,
             }
-        } else if name == "escape" || (name == "enter" && setup.step == Step::Set) {
-            setup.esc.cancel();
+            break;
         }
-        drop(state);
         self.0.scheduler.request();
     }
 

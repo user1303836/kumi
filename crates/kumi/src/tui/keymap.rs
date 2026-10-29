@@ -221,6 +221,12 @@ pub enum Scope {
     Details,
     /// While a search is typed in the detailed view.
     DetailsSearch,
+    /// The map (/map), full screen: its letters are keys.
+    Map,
+    /// While the map's filter is typed: what's typed goes into it.
+    MapFilter,
+    /// Setup, before the session starts.
+    Setup,
 }
 
 impl Scope {
@@ -241,6 +247,9 @@ impl Scope {
         Scope::ChatGpt,
         Scope::Details,
         Scope::DetailsSearch,
+        Scope::Map,
+        Scope::MapFilter,
+        Scope::Setup,
     ];
 
     /// Where what's typed is words (or goes on to the box): a character bound there would stop it being typed.
@@ -269,6 +278,9 @@ impl Scope {
             Scope::ChatGpt => "in ChatGPT's sign-in",
             Scope::Details => "in the detailed view",
             Scope::DetailsSearch => "while searching the detailed view",
+            Scope::Map => "in the map",
+            Scope::MapFilter => "while the map's filter is typed",
+            Scope::Setup => "in setup",
         }
     }
 }
@@ -287,7 +299,10 @@ const fn act(id: &'static str, scopes: &'static [Scope], keys: &'static [&'stati
     Action { id, scopes, keys, does }
 }
 
-use Scope::{Aside, Box as InBox, ChatGpt, Details, DetailsSearch, Help, Job, KeyBox, List, Menu, Search, Selection, Tabs, Tree, Voice};
+use Scope::{
+    Aside, Box as InBox, ChatGpt, Details, DetailsSearch, Help, Job, KeyBox, List, Map, MapFilter, Menu, Search, Selection, Setup, Tabs,
+    Tree, Voice,
+};
 
 /// Every action, in the order their keys are tried where they share one: an action listed first has the key first, and
 /// lets it go on when what it does doesn't apply.
@@ -462,6 +477,38 @@ pub const ACTIONS: &[Action] = &[
     act("details.previous-request", &[Details], &["{"], "The request before"),
     act("details.print", &[Details], &["["], "Print it into the terminal's scrollback"),
     act("details.edit", &[Details], &["v"], "Open it in your editor"),
+    // The map (/map), full screen, where letters are keys. Held with alt (or shift, but for the arrows) a key did the
+    // same; with ctrl, only ctrl+c did anything. While its filter is typed, backspace, enter and esc are the filter's,
+    // and what's typed goes into it.
+    act("map.filter-erase", &[MapFilter], &["alt?+shift?+backspace"], "Take back the last character of the filter"),
+    act("map.filter-keep", &[MapFilter], &["alt?+shift?+enter"], "Filter the map by what's typed"),
+    act("map.filter-drop", &[MapFilter], &["alt?+shift?+escape"], "Stop typing the filter: the one before stays"),
+    act("map.let-go", &[Map], &["alt?+shift?+escape"], "Let go of the box being dragged, then of the points picked"),
+    act("map.close", &[Map, MapFilter], &["alt?+shift?+escape", "ctrl+alt?+shift?+c", "q"], "Close the map"),
+    act("map.up", &[Map], &["alt?+up"], "To the nearest point above (in a list, the row above)"),
+    act("map.down", &[Map], &["alt?+down"], "To the nearest point below (in a list, the row below)"),
+    act("map.left", &[Map], &["alt?+left"], "To the nearest point to the left"),
+    act("map.right", &[Map], &["alt?+right"], "To the nearest point to the right"),
+    act("map.pan-up", &[Map], &["alt?+shift+up"], "Pan the map up"),
+    act("map.pan-down", &[Map], &["alt?+shift+down"], "Pan the map down"),
+    act("map.pan-left", &[Map], &["alt?+shift+left"], "Pan the map left"),
+    act("map.pan-right", &[Map], &["alt?+shift+right"], "Pan the map right"),
+    act("map.gather", &[Map], &["alt?+shift?+enter"], "Put the points picked (or the one chosen) into your palette"),
+    act("map.play", &[Map], &["alt?+shift?+space"], "Play the point chosen, or stop it"),
+    act("map.switch", &[Map], &["alt?+shift?+tab"], "Switch between your sounds and your songs"),
+    act("map.zoom-in", &[Map], &["+", "="], "Zoom in"),
+    act("map.zoom-out", &[Map], &["-", "_"], "Zoom out"),
+    act("map.filter", &[Map], &["/"], "Filter by class, folder, pack or genre tag: type the words, enter keeps them"),
+    act("map.pick", &[Map], &["x"], "Pick the point chosen, or let it go"),
+    act("map.pick-all", &[Map], &["a"], "Pick every point the filter keeps"),
+    act("map.grow", &[Map], &["g"], "Pick each picked point's nearest"),
+    act("map.hover", &[Map], &["h"], "Turn playing the point the mouse is on off and on"),
+    // Setup, before the session: quitting first, then its choices, whatever else is held.
+    act("setup.quit", &[Setup], &["ctrl+alt?+shift?+c", "ctrl+alt?+shift?+d"], "Quit"),
+    act("setup.up", &[Setup], &["any+up"], "The choice above"),
+    act("setup.down", &[Setup], &["any+down", "any+tab"], "The choice below"),
+    act("setup.choose", &[Setup], &["any+enter"], "Choose; once you're set, go on to the session"),
+    act("setup.later", &[Setup], &["any+escape"], "Leave the step for later"),
 ];
 
 /// The action called `id`.
@@ -841,6 +888,8 @@ mod tests {
             (Scope::Box, "alt+backspace", &["composer.take-back-file", "composer.cut-word"]),
             (Scope::Box, "ctrl+alt+y", &["composer.yank", "composer.yank-earlier"]),
             (Scope::List, "tab", &["list.next-tab", "list.down"]),
+            (Scope::Map, "escape", &["map.let-go", "map.close"]),
+            (Scope::MapFilter, "escape", &["map.filter-drop", "map.close"]),
         ] {
             assert_eq!(keymap.actions(scope, &chord(words)), ids, "{words} {}", scope.words());
         }
@@ -873,6 +922,17 @@ mod tests {
             (Scope::Aside, "space", &["aside.close"]),
             (Scope::Selection, "ctrl+alt+c", &[]),
             (Scope::List, "ctrl+f", &["list.choose-other"]),
+            (Scope::Map, "alt+up", &["map.up"]),
+            (Scope::Map, "shift+up", &["map.pan-up"]),
+            (Scope::Map, "ctrl+up", &[]),
+            (Scope::Map, "shift+tab", &["map.switch"]),
+            (Scope::Map, "ctrl+shift+c", &["map.close"]),
+            (Scope::Map, "ctrl+escape", &[]),
+            (Scope::MapFilter, "ctrl+c", &["map.close"]),
+            (Scope::MapFilter, "ctrl+backspace", &[]),
+            (Scope::Setup, "ctrl+up", &["setup.up"]),
+            (Scope::Setup, "shift+tab", &["setup.down"]),
+            (Scope::Setup, "ctrl+alt+d", &["setup.quit"]),
         ] {
             assert_eq!(keymap.actions(scope, &chord(words)), ids, "{words} {}", scope.words());
         }
@@ -899,6 +959,22 @@ mod tests {
         assert!(said.is_empty(), "{said:?}");
         assert_eq!(keymap.actions(Scope::Box, &chord("f1")), ["app.help"]);
         assert_eq!(keymap.keys("composer.undo"), [&[chord("ctrl+-")][..], &[chord("ctrl+_")][..]]);
+    }
+
+    /// The map's letters are keys, and setup takes none as words: keys.json can give their actions letters.
+    #[test]
+    fn keys_json_reaches_the_map_and_setup_letters_too() {
+        let (keymap, said) = with(json!({ "map.zoom-in": ["z"], "map.close": ["w"], "setup.later": ["l"] }));
+        assert!(said.is_empty(), "{said:?}");
+        assert_eq!(keymap.actions(Scope::Map, &chord("z")), ["map.zoom-in"]);
+        assert!(keymap.actions(Scope::Map, &chord("+")).is_empty(), "zoom's own keys go");
+        // An action of the map and of its filter has its keys in both, and its old ones in neither.
+        for scope in [Scope::Map, Scope::MapFilter] {
+            assert_eq!(keymap.actions(scope, &chord("w")), ["map.close"]);
+        }
+        assert_eq!(keymap.actions(Scope::Map, &chord("escape")), ["map.let-go"]);
+        assert_eq!(keymap.actions(Scope::Setup, &chord("l")), ["setup.later"]);
+        assert!(keymap.actions(Scope::Setup, &chord("escape")).is_empty());
     }
 
     #[test]
