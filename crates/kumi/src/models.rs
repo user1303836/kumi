@@ -691,4 +691,7 @@ impl ModelController for ModelControl {
     async fn sign_out(&self, provider: ProviderId) -> Result<bool, RuntimeError> {
         ModelControl::sign_out(self, provider).await
     }
+    fn server_names(&self) -> Vec<(String, String)> {
+        self.servers().into_iter().map(|server| (server.id, server.name)).collect()
+    }
 }

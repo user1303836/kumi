@@ -420,6 +420,11 @@ fn install_hooks() {
     HOOKS.call_once(|| {
         let previous = std::panic::take_hook();
         std::panic::set_hook(Box::new(move |info| {
+            // A panic on the session's own thread ends the screen in order (the terminal given back, then what it
+            // said), from the screen's thread: it isn't this thread's to restore.
+            if kumi_agent::core::threaded::session_panicked(info) {
+                return;
+            }
             run_restorers();
             previous(info);
         }));
@@ -892,6 +897,30 @@ mod vt_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A panic on the session's own thread leaves the terminal alone: the screen's thread gives it back, in order, when
+    /// it hears the session ended. A panic anywhere else gives it back at once, as it always has.
+    #[test]
+    fn a_panic_on_the_sessions_thread_leaves_the_terminal_to_the_screens_thread() {
+        use futures::FutureExt;
+        let restored = Arc::new(AtomicBool::new(false));
+        let id = register({
+            let restored = restored.clone();
+            Arc::new(move || restored.store(true, Ordering::SeqCst))
+        });
+        let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        let started = tokio::task::LocalSet::new().block_on(&runtime, async {
+            let build: kumi_agent::core::threaded::Build = Box::new(|_| async { panic!("no room for the store") }.boxed_local());
+            kumi_agent::core::threaded::Threaded::spawn(build).await
+        });
+        let why = started.err().expect("the session didn't start").message();
+        assert!(why.starts_with("no room for the store"), "{why}");
+        assert!(!restored.load(Ordering::SeqCst), "the session's thread gave the terminal back");
+        // Any other thread's panic gives it back, as before.
+        let _ = std::thread::spawn(|| panic!("a worker's own panic")).join();
+        assert!(restored.load(Ordering::SeqCst));
+        unregister(id);
+    }
 
     /// A terminal whose crash path is seen: raw mode and the crash writes are shared with the hook's thread.
     struct Crash {
