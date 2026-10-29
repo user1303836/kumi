@@ -350,6 +350,13 @@ impl TuiApp {
             }
             // What a /slots fetch or check under way says.
             SessionEvent::SlotsProgress { line, .. } => self.notice(&line, NoticeTone::Info),
+            // How a ChatGPT sign-in under way goes: its panel shows the code, or the browser opens the address.
+            SessionEvent::SignIn { id, url, code } => {
+                let heard = self.0.state.borrow().sign_ins.get(&id).cloned();
+                if let Some(heard) = heard {
+                    heard(url, code);
+                }
+            }
             SessionEvent::Error { message: said, kind, provider } => {
                 {
                     let mut state = self.0.state.borrow_mut();

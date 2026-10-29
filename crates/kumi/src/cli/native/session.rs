@@ -759,6 +759,8 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
     options.library = Some(library.clone());
     options.preset_dir = Some(std::path::Path::new(&crate::config::kumi_dir(&io.env)).join("presets"));
     options.music = Some(music.clone());
+    // /model, /effort, /fast, /login and /logout ask the session, which has the models (the kernel's come from them too).
+    options.models = Some(models.clone() as Rc<dyn crate::models::ModelController>);
     // /slots and /map, which the session answers: which model does each listening job, and the library's sounds and
     // the songs on their maps, read each time /map opens.
     options.slots = Some(slots_context);
@@ -912,7 +914,6 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
             options.color_depth = Some(crate::tui::style::answered_color_depth(depth, version.as_deref(), &io.env));
             options.typeahead = probed.read;
         }
-        options.models = Some(models.clone());
         options.redact = Some(redact);
         options.command = io.command().to_string();
         options.reveal = Some(Rc::new(crate::export::reveal));

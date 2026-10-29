@@ -61,7 +61,7 @@ impl TuiApp {
         let answering = self.answering_model();
         self.0.state.borrow_mut().last_call = Some((usage, answering.clone()));
         // A window not known yet (a local server's, a pinned model's, the fallback's provider's): its list, read once.
-        let Some((model, models)) = answering.zip(self.0.options.models.clone()) else { return };
+        let Some((model, models)) = answering.zip(self.models()) else { return };
         let Some(provider) = model.split_once('/').map(|(provider, _)| provider.to_string()) else { return };
         if models.context_window(&model).is_some() || !self.0.state.borrow_mut().windows_asked.insert(provider.clone()) {
             return;
@@ -76,14 +76,14 @@ impl TuiApp {
 
     /// The model answering now: the producer's fallback while it answers for their model, else their model.
     fn answering_model(&self) -> Option<String> {
-        self.session().answering_fallback().or_else(|| self.0.options.models.as_ref().and_then(|models| models.current().model))
+        self.session().answering_fallback().or_else(|| self.models().and_then(|models| models.current().model))
     }
 
     /// The answering model's provider: its sign-in says what an answer's cost is told in.
     fn answering_provider(&self) -> Option<String> {
         match self.session().answering_fallback() {
             Some(model) => model.split('/').next().map(str::to_string),
-            None => self.0.options.models.as_ref()?.current().provider,
+            None => self.models()?.current().provider,
         }
     }
 
@@ -107,7 +107,7 @@ impl TuiApp {
     /// Tokens on an API key; on a subscription, the share of the plan's window the answer took (when the provider said).
     fn answer_cost(&self, usage: Option<&Usage>) -> Option<String> {
         let provider = self.answering_provider()?;
-        let cloud = self.0.options.models.as_ref()?.cloud_provider(&provider)?;
+        let cloud = self.models()?.cloud_provider(&provider)?;
         if cloud.row().sign_in == SignIn::ApiKey {
             let usage = usage.filter(|usage| usage.input_tokens + usage.output_tokens > 0.)?;
             return Some(format!("{} in · {} out", tokens(usage.input_tokens), tokens(usage.output_tokens)));
@@ -126,7 +126,7 @@ impl TuiApp {
             return None;
         }
         let (usage, model) = self.0.state.borrow().last_call.clone()?;
-        let window = self.0.options.models.as_ref()?.context_window(model.as_deref()?).filter(|window| *window > 0.)?;
+        let window = self.models()?.context_window(model.as_deref()?).filter(|window| *window > 0.)?;
         let full = ((usage.input_tokens + usage.output_tokens) / window).clamp(0., 1.);
         if mode == ContextMeter::Auto && full < 0.5 {
             return None;

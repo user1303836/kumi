@@ -5,7 +5,6 @@ mod models;
 #[path = "../support/tui_app.rs"]
 mod support;
 use serde_json::{json, Value};
-use std::rc::Rc;
 use support::*;
 macro_rules! case {
     ($name:ident,$body:expr) => {
@@ -125,8 +124,7 @@ case!(requests_before_the_last_shown_are_counted_and_the_words_before_the_log_co
 
 case!(a_conversation_shown_again_tells_nothing_of_the_moment_it_happened, async {
     // With a model controller, as the app has: an error live would offer its fix.
-    let h = Harness::with(120, 36, Rc::new(Control::default()), |o| {
-        o.models = Some(models::FakeModels::catalog());
+    let h = Harness::with(120, 36, Control::with_models(models::FakeModels::catalog()), |o| {
         o.terminal = Some(kumi::tui::alerts::TerminalProfile {
             status: true,
             notify: kumi::tui::alerts::NotifyChannel::Osc9,
@@ -194,7 +192,7 @@ case!(answers_shown_again_were_counted_by_the_session_that_answered_them, async 
     let models = models::FakeModels::catalog();
     *models.model.borrow_mut() = Some("anthropic/claude-sonnet-5-5".into());
     models.signed_in.borrow_mut().insert(kumi_ai::providers::ProviderId::parse("anthropic").unwrap());
-    let h = Harness::with(240, 40, Rc::new(Control::default()), |o| o.models = Some(models));
+    let h = Harness::with(240, 40, Control::with_models(models), |_| {});
     h.start().await;
     h.connect();
     let usage = json!({"inputTokens":9000,"outputTokens":700,"cacheReadTokens":6000,"cacheWriteTokens":0});

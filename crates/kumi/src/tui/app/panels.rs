@@ -7,9 +7,10 @@ use super::super::{
 };
 use super::draw_panel::{say, Line};
 use super::drawing::{sp, st};
+use super::models::Models;
 use super::*;
 use crate::{
-    models::{ChatGptSignIn, LocalStatus, ProviderStatus},
+    models::{LocalStatus, ProviderStatus},
     voice::VoiceChange,
 };
 use base64::Engine;
@@ -744,7 +745,7 @@ impl TuiApp {
         }
     }
     pub(super) fn sign_in(&self, provider: ProviderId, then: Option<Action>) {
-        if self.0.options.models.is_none() {
+        if self.models().is_none() {
             return;
         }
         if provider.row().sign_in == SignIn::ApiKey {
@@ -756,35 +757,40 @@ impl TuiApp {
     }
     /// ChatGPT's sign-in: in this computer's browser, or `by_code`, with a code entered in a browser anywhere.
     pub(super) fn sign_in_chatgpt(&self, by_code: bool, then: Option<Action>) {
-        let Some(models) = self.0.options.models.clone() else {
+        let Some(models) = self.models() else {
             return;
         };
         let abort = Signal::new();
-        let panel = self.open_overlay(ChatGptPanel { url: None, code: None, by_code, abort: abort.clone(), then });
+        let id = {
+            let mut state = self.0.state.borrow_mut();
+            let id = state.next_sign_in;
+            state.next_sign_in += 1;
+            id
+        };
+        let panel = self.open_overlay(ChatGptPanel { id, url: None, code: None, by_code, abort: abort.clone(), then });
         let weak = Rc::downgrade(&self.0);
         let shown = panel.clone();
-        let how = if by_code {
-            let on_code = Rc::new(move |prompt: kumi_ai::auth::openai_codex::DevicePrompt| {
+        // Its code shows on the panel; its address opens in the browser (`sign-in` events with its id).
+        let heard: Rc<dyn Fn(Option<String>, Option<kumi_ai::auth::openai_codex::DevicePrompt>)> = Rc::new(move |url, code| {
+            if let Some(prompt) = code {
                 shown.borrow_mut().code = Some(prompt);
-                if let Some(a) = weak.upgrade() {
-                    a.scheduler.request();
-                }
-            });
-            ChatGptSignIn::Device { signal: abort.clone(), on_code }
-        } else {
-            let on_url = Rc::new(move |url: String| {
+            }
+            if let Some(url) = url {
                 shown.borrow_mut().url = Some(url.clone());
                 if let Some(a) = weak.upgrade() {
                     if let Some(open) = &a.options.open_browser {
                         open(&url);
                     }
-                    a.scheduler.request();
                 }
-            });
-            ChatGptSignIn::Browser { signal: abort.clone(), on_url }
-        };
+            }
+            if let Some(a) = weak.upgrade() {
+                a.scheduler.request();
+            }
+        });
+        self.0.state.borrow_mut().sign_ins.insert(id, heard);
         self.task(move |app| async move {
-            let result = models.sign_in_chatgpt(how).await;
+            let result = models.sign_in_chatgpt(id, by_code).await;
+            app.0.state.borrow_mut().sign_ins.remove(&id);
             match result {
                 Ok(()) => {
                     if app.0.state.borrow_mut().overlays.remove(&panel) {
@@ -832,7 +838,7 @@ impl TuiApp {
         };
         self.0.scheduler.request();
         let name = provider.row().name;
-        let verdict = match self.0.options.models.as_ref().unwrap().save_key(provider, &key, None).await {
+        let verdict = match self.models().unwrap().save_key(provider, &key).await {
             Ok(v) => v,
             Err(error) => {
                 let mut secrets = self.0.state.borrow().secrets.clone();
@@ -877,7 +883,7 @@ impl TuiApp {
         self.0.scheduler.request();
     }
     pub(super) fn offer_fix(&self, kind: FailureKind, provider: Option<&str>) {
-        let Some(models) = &self.0.options.models else {
+        let Some(models) = self.models() else {
             return;
         };
         if !self.0.state.borrow().overlays.is_empty() {
@@ -1005,7 +1011,7 @@ impl TuiApp {
     }
     /// Says which model Kumi chose by itself: the provider's own first choice, or a model on this computer.
     pub(super) fn told_default(&self, chosen: crate::models::DefaultModel) {
-        let Some(models) = &self.0.options.models else { return };
+        let Some(models) = self.models() else { return };
         let model = chosen.model;
         let name = models.provider_name(&model.provider);
         self.notice(
@@ -1022,7 +1028,7 @@ impl TuiApp {
         );
     }
     pub(super) async fn check_model(&self) -> Result<(), RuntimeError> {
-        let Some(models) = &self.0.options.models else {
+        let Some(models) = self.models() else {
             return Ok(());
         };
         if !self.0.state.borrow().overlays.is_empty() || self.0.state.borrow().closing {
@@ -1067,7 +1073,7 @@ impl TuiApp {
         }
         // A saved model the provider's own list no longer shows (retired from a plan's sign-in, say): said once, with the
         // list to choose another from (unless the producer is already typing or talking), before a message fails on it.
-        if let Some(said) = crate::models::missing_model(models.as_ref()).await {
+        if let Some(said) = models.missing().await {
             if self.0.state.borrow().closing {
                 return Ok(());
             }
@@ -1473,7 +1479,7 @@ impl TuiApp {
         Handled::Kept
     }
     pub(super) fn model_label(&self) -> Option<String> {
-        let current = self.0.options.models.as_ref()?.current();
+        let current = self.models()?.current();
         // The fallback, while it answers for the producer's model.
         if let Some(answering) = self.session().answering_fallback() {
             let name = answering.split_once('/').map_or(answering.as_str(), |(_, name)| name).to_string();
@@ -1491,14 +1497,14 @@ impl TuiApp {
         let answering = self.session().answering_fallback();
         let provider = match answering {
             Some(model) => model.split('/').next().map(str::to_string),
-            None => self.0.options.models.as_ref()?.current().provider,
+            None => self.models()?.current().provider,
         }?;
         let window = kumi_ai::providers::usage::nearest(&provider, 80.)?;
         let resets = window.resets_at_ms.map(|at| format!(" · resets {}", reset_words(at, now_ms_f64()))).unwrap_or_default();
         Some((format!("plan {}%{resets}", window.used_percent.round()), window.used_percent >= 95.))
     }
     pub(super) fn tokens_used(&self) -> String {
-        let Some(provider) = self.0.options.models.as_ref().and_then(|m| m.cloud_provider(&m.current().provider?)) else {
+        let Some(provider) = self.models().and_then(|m| m.cloud_provider(&m.current().provider?)) else {
             return String::new();
         };
         let state = self.0.state.borrow();
@@ -1530,7 +1536,7 @@ impl TuiApp {
         self.open_model_list(true).await
     }
     async fn open_model_list(&self, fallback: bool) -> Result<(), RuntimeError> {
-        let Some(models) = self.0.options.models.clone() else {
+        let Some(models) = self.models() else {
             return Ok(());
         };
         let options = if fallback {
@@ -1611,7 +1617,7 @@ impl TuiApp {
     /// Makes `item`'s model the fallback (`"fallback:"` alone clears it; choosing the fallback again in /model
     /// with ctrl+f clears it too), then sends the last message again when it was a usage limit that stopped it.
     async fn choose_fallback(&self, item: PickerItem, resend: bool) -> Result<(), RuntimeError> {
-        let models = self.0.options.models.clone().unwrap();
+        let models = self.models().unwrap();
         let value = item.value.clone().unwrap_or_default();
         if let Some(provider) = value.strip_prefix("signin:").and_then(ProviderId::parse) {
             self.sign_in(provider, Some(self.action(|app| async move { app.open_fallbacks().await })));
@@ -1643,7 +1649,7 @@ impl TuiApp {
         Ok(())
     }
     async fn choose_model_item(&self, item: PickerItem) -> Result<(), RuntimeError> {
-        let models = self.0.options.models.as_ref().unwrap();
+        let models = self.models().unwrap();
         let value = item.value.as_deref().unwrap_or("");
         if let Some(provider) = value.strip_prefix("signin:").and_then(ProviderId::parse) {
             self.sign_in(provider, Some(self.action(|app| async move { app.open_models().await })));
@@ -1698,7 +1704,7 @@ impl TuiApp {
         Ok(())
     }
     pub(super) async fn open_effort(&self) -> Result<(), RuntimeError> {
-        let models = self.0.options.models.as_ref().unwrap();
+        let models = self.models().unwrap();
         let mut current = models.current();
         if current.model.is_none() {
             return self.open_models().await;
@@ -1746,7 +1752,7 @@ impl TuiApp {
             let name = name.clone();
             async move {
                 let effort = item.value.as_deref().and_then(Effort::parse);
-                app.0.options.models.as_ref().unwrap().set_effort(effort).await?;
+                app.models().unwrap().set_effort(effort).await?;
                 app.close_panel();
                 app.notice(
                     &if let Some(e) = effort {
@@ -1762,7 +1768,7 @@ impl TuiApp {
         Ok(())
     }
     pub(super) async fn open_login(&self) -> Result<(), RuntimeError> {
-        let statuses = self.0.options.models.as_ref().unwrap().providers().await?;
+        let statuses = self.models().unwrap().providers().await?;
         let items = statuses
             .iter()
             .map(|p| {
@@ -1789,7 +1795,7 @@ impl TuiApp {
         Ok(())
     }
     pub(super) async fn open_logout(&self) -> Result<(), RuntimeError> {
-        let statuses = self.0.options.models.as_ref().unwrap().providers().await?.into_iter().filter(|p| p.signed_in).collect::<Vec<_>>();
+        let statuses = self.models().unwrap().providers().await?.into_iter().filter(|p| p.signed_in).collect::<Vec<_>>();
         if statuses.is_empty() {
             self.notice("You're not signed in to any provider.", NoticeTone::Info);
             return Ok(());
@@ -1831,7 +1837,7 @@ impl TuiApp {
                     if answer.value.as_deref() != Some("yes") {
                         return Ok(());
                     }
-                    let models = app.0.options.models.as_ref().unwrap();
+                    let models = app.models().unwrap();
                     let removed = models.sign_out(provider).await?;
                     let status = models.providers().await?.into_iter().find(|p| p.id == provider);
                     let still = if status.as_ref().and_then(|p| p.via.as_deref()) == Some("environment") {
@@ -2088,7 +2094,7 @@ enum Listed {
     Unreadable,
 }
 fn read_models(
-    models: Rc<dyn ModelController>,
+    models: Models,
     id: String,
     lists: Rc<RefCell<HashMap<String, Listed>>>,
     update: Rc<dyn Fn()>,
@@ -2370,11 +2376,22 @@ impl Overlay<TuiApp> for AsidePanel {
 /// ChatGPT's sign-in, open over the conversation: in this computer's browser (`url`, once it's known), or `by_code`, with
 /// a code entered in a browser anywhere.
 pub(super) struct ChatGptPanel {
+    /// Its sign-in's id: the session's `sign-in` events name it, and closing the panel stops it.
+    pub id: u32,
     pub url: Option<String>,
     pub code: Option<kumi_ai::auth::openai_codex::DevicePrompt>,
     pub by_code: bool,
     abort: Signal,
     then: Option<Action>,
+}
+impl ChatGptPanel {
+    /// Its sign-in stops: as the panel sees it, and in the session.
+    fn stop(&self, app: &TuiApp) {
+        self.abort.cancel();
+        if let Some(models) = app.models() {
+            models.stop_sign_in(self.id);
+        }
+    }
 }
 impl Overlay<TuiApp> for ChatGptPanel {
     /// c copies the link (or the code); d signs in with a code instead, b with the browser again.
@@ -2400,7 +2417,7 @@ impl Overlay<TuiApp> for ChatGptPanel {
             // No browser here after all, or no code (over SSH, where the browser's link can still be forwarded): the
             // other way, with what was to follow the sign-in, in this one's place.
             let (then, by_code) = (self.then.take(), !self.by_code);
-            self.abort.cancel();
+            self.stop(app);
             app.sign_in_chatgpt(by_code, then);
         }
         Handled::Kept
@@ -2441,8 +2458,8 @@ impl Overlay<TuiApp> for ChatGptPanel {
         .into()
     }
     /// The sign-in under way stops.
-    fn closed(&mut self, _: &TuiApp) {
-        self.abort.cancel();
+    fn closed(&mut self, app: &TuiApp) {
+        self.stop(app);
     }
     fn busy(&self, _: &TuiApp) -> bool {
         true

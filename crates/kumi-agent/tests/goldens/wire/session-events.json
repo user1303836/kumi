@@ -1967,6 +1967,19 @@
     "line": "Fetching the stem model: 12 of 80 MB"
   },
   {
+    "type": "sign-in",
+    "id": 4,
+    "url": "https://auth.openai.com/authorize?state=kumi"
+  },
+  {
+    "type": "sign-in",
+    "id": 5,
+    "code": {
+      "url": "https://auth.openai.com/codex/device",
+      "code": "KUMI-4821"
+    }
+  },
+  {
     "type": "text",
     "text": "Shortened the kick's decay."
   },

@@ -695,7 +695,7 @@ case!(undo_history_and_clipboard, async {
 });
 case!(models_filter_keys_redaction, async {
     let fake = models::FakeModels::catalog();
-    let h = Harness::with(120, 36, Rc::new(Control::default()), |o| o.models = Some(fake.clone()));
+    let h = Harness::with(120, 36, Control::with_models(fake.clone()), |_| {});
     h.start().await;
     h.connect();
     h.has("GPT-6 Astra");
@@ -1005,7 +1005,7 @@ case!(watched_video_and_web_grouping_redaction, async {
 });
 case!(effort_logout_auth_error_resends, async {
     let fake = models::FakeModels::catalog();
-    let h = Harness::with(120, 36, Rc::new(Control::default()), |o| o.models = Some(fake.clone()));
+    let h = Harness::with(120, 36, Control::with_models(fake.clone()), |_| {});
     h.start().await;
     h.type_text("/effort\r").await;
     h.has("How hard GPT-6 Astra thinks · lower answers sooner");
@@ -1025,7 +1025,7 @@ case!(effort_logout_auth_error_resends, async {
     h.close().await;
     let fake = models::FakeModels::catalog();
     *fake.model.borrow_mut() = Some("anthropic/claude-sonnet-5-5".into());
-    let h = Harness::with(120, 36, Rc::new(Control::default()), |o| o.models = Some(fake.clone()));
+    let h = Harness::with(120, 36, Control::with_models(fake.clone()), |_| {});
     h.start().await;
     h.has("Sign in to Anthropic?");
     h.type_text("\x1b").await;

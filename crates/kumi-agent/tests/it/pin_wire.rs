@@ -17,7 +17,7 @@ use kumi_agent::core::{
     loop_run::{LoopState, LoopStatus, LoopStop},
     match_run::{MatchState, MatchStatus, MatchStop},
     palette::{Gathered, PaletteFile, PaletteView},
-    protocol::{op, Capabilities, Op},
+    protocol::{op, Capabilities, Op, Secret},
     session_log::{LogHeader, LogLine, LogRequest, Replay},
 };
 use kumi_listening::{
@@ -790,6 +790,15 @@ fn events() -> Vec<SessionEvent> {
     events.push(SessionEvent::Palette { palette: None });
     events.push(SessionEvent::Aside { id: 2, text: "The kick and the bass share 60 Hz, so".into() });
     events.push(SessionEvent::SlotsProgress { id: 3, line: "Fetching the stem model: 12 of 80 MB".into() });
+    events.push(SessionEvent::SignIn { id: 4, url: Some("https://auth.openai.com/authorize?state=kumi".into()), code: None });
+    events.push(SessionEvent::SignIn {
+        id: 5,
+        url: None,
+        code: Some(kumi_ai::auth::openai_codex::DevicePrompt {
+            url: "https://auth.openai.com/codex/device".into(),
+            code: "KUMI-4821".into(),
+        }),
+    });
     events.extend(
         [
             KernelEvent::Text { text: "Shortened the kick's decay.".into() },
@@ -880,6 +889,7 @@ fn variant(event: &SessionEvent) -> &'static str {
         SessionEvent::Palette { .. } => "Palette",
         SessionEvent::Aside { .. } => "Aside",
         SessionEvent::SlotsProgress { .. } => "SlotsProgress",
+        SessionEvent::SignIn { .. } => "SignIn",
         SessionEvent::Kernel(event) => match event {
             KernelEvent::Text { .. } => "Kernel::Text",
             KernelEvent::ToolInput { .. } => "Kernel::ToolInput",
@@ -898,7 +908,7 @@ fn variant(event: &SessionEvent) -> &'static str {
     }
 }
 
-const VARIANTS: [&str; 48] = [
+const VARIANTS: [&str; 49] = [
     "Focus",
     "Pointed",
     "Change",
@@ -936,6 +946,7 @@ const VARIANTS: [&str; 48] = [
     "Palette",
     "Aside",
     "SlotsProgress",
+    "SignIn",
     "Kernel::Text",
     "Kernel::ToolInput",
     "Kernel::ToolStart",
@@ -1622,6 +1633,21 @@ pub(crate) fn requests() -> Vec<Op> {
         op::Map {}.into(),
         op::Slots { id: 3, words: "listening off".into() }.into(),
         op::StopSlots { id: 3 }.into(),
+        op::Providers {}.into(),
+        op::LocalModels {}.into(),
+        op::ChooseDefault {}.into(),
+        op::Models { provider: "anthropic".into(), refresh: true }.into(),
+        op::ChooseModel { model: "anthropic/claude-sonnet-5-5".into() }.into(),
+        op::SetEffort { effort: Some(kumi_ai::providers::Effort::High) }.into(),
+        op::SetEffort { effort: None }.into(),
+        op::SetFast { on: true }.into(),
+        op::SetFallback { model: Some("openai/gpt-5.5".into()) }.into(),
+        op::SetFallback { model: None }.into(),
+        op::SaveKey { provider: kumi_ai::providers::ProviderId::parse("anthropic").unwrap(), key: Secret("test-key".into()) }.into(),
+        op::SignOut { provider: kumi_ai::providers::ProviderId::parse("openai").unwrap() }.into(),
+        op::SignInChatgpt { id: 4, by_code: false }.into(),
+        op::StopSignIn { id: 4 }.into(),
+        op::MissingModel {}.into(),
     ];
     requests.extend([SetChoice::Open, SetChoice::Copy, SetChoice::Cancel].map(|choice| op::AnswerSet { choice }.into()));
     requests.extend(
@@ -1690,6 +1716,7 @@ fn capabilities_keep_their_wire_shape() {
         reconfigure: true,
         music: true,
         map: true,
+        models: true,
         ..Capabilities::default()
     };
     pinned::<Capabilities>("capabilities.json", &capabilities);

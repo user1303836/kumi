@@ -32,7 +32,7 @@ use std::{
     rc::Rc,
 };
 // What the app's model controls are made of is kumi-ai's, so the session's protocol can name it.
-pub use kumi_ai::control::{ChatGptSignIn, CurrentModel, DefaultModel, LocalStatus, ModelController, ProviderStatus};
+pub use kumi_ai::control::{missing_model, ChatGptSignIn, CurrentModel, DefaultModel, LocalStatus, ModelController, ProviderStatus};
 pub type Changed = Rc<dyn Fn() -> LocalBoxFuture<'static, Result<(), RuntimeError>>>;
 pub struct ModelControlOptions {
     pub store: Rc<dyn CredentialStore>,
@@ -624,24 +624,6 @@ impl ModelControl {
         let tier = self.tier_for(model).await;
         Ok(self.bind(model, None, tier).await?.binding())
     }
-}
-
-/// The saved model, when its provider's own list (the one /model shows, read once a session) no longer shows it:
-/// "ChatGPT no longer offers gpt-5.5 to your sign-in". None while it's listed, for a model `KUMI_MODEL` picks or one on
-/// this computer, and when the list can't be read (no sign-in, no network): then nothing new happens.
-pub async fn missing_model(models: &dyn ModelController) -> Option<String> {
-    let current = models.current();
-    if current.r#where.is_some() {
-        return None;
-    }
-    let (model, provider) = (current.model.filter(|_| !current.pinned)?, current.provider?);
-    ProviderId::parse(&provider)?;
-    let listed = models.models(&provider, false).await.ok()?;
-    if listed.is_empty() || listed.iter().any(|info| info.id == model) {
-        return None;
-    }
-    let shown = model.strip_prefix(&format!("{provider}/")).unwrap_or(&model);
-    Some(format!("{} no longer offers {shown} to your sign-in", models.provider_name(&provider)))
 }
 
 #[async_trait::async_trait(?Send)]
