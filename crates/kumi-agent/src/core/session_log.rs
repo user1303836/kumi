@@ -221,9 +221,19 @@ fn line_of(line: &LogLine) -> Vec<u8> {
 /// How a conversation's log begins when it has none: with the requests and messages the conversation had by then, or as
 /// a copy of the log of the conversation it copies.
 struct Begin {
+    /// How many requests the conversation had (as kept, for one taken up).
     before: u32,
+    /// Its messages by then: its checkpoint as kept when it was taken up, or as it was at a request.
     had: Option<Rc<KernelCheckpoint>>,
     from: Option<String>,
+}
+
+/// What a copy takes of the original's log: its lines up to the end of its last save as the copy began, which is what
+/// the copy's checkpoint holds, from the log begun at `at` (one begun again since is another).
+#[derive(Debug, Clone, Copy)]
+struct Upto {
+    end: u64,
+    at: i64,
 }
 
 /// What the writer is asked, in order.
@@ -234,8 +244,8 @@ enum Job {
     Line(Vec<u8>),
     /// A request's line: a full log begins again with it.
     Request { line: Vec<u8>, begin: Begin },
-    /// The checkpoint was kept: a log waiting for it begins (a copy's from `from`'s).
-    Saved { line: Vec<u8>, from: Option<String> },
+    /// Conversation `id`'s checkpoint was kept: a log waiting for it begins (a copy's from `from`'s).
+    Saved { id: String, line: Vec<u8>, from: Option<String> },
     /// The conversation moved to another place (an unsaved Set's, once the Set was saved).
     Moved { folder: PathBuf },
     /// What's written goes to the disk.
@@ -300,7 +310,8 @@ impl SessionLog {
         let mut jobs = self.jobs.borrow_mut();
         let jobs = jobs.get_or_insert_with(|| {
             let (send, receive) = mpsc::unbounded_channel();
-            tokio::task::spawn_local(write(receive, Writer { redact: self.redact.clone(), cap: self.cap.clone(), log: None }));
+            let kit = Kit { redact: self.redact.clone(), cap: self.cap.clone() };
+            tokio::task::spawn_local(write(receive, Writer { kit, log: None, left: vec![] }));
             send
         });
         let _ = jobs.send(job);
@@ -335,7 +346,9 @@ impl SessionLog {
     }
 
     /// The conversation `id` in `place` goes on from here. Without a log yet, its log begins once it's kept: with the
-    /// `before` requests and the messages `had` it had by then, or (`from`) as a copy of that conversation's log.
+    /// `before` requests and the messages `had` it had by then, or (`from`) as a copy of that conversation's log as it is
+    /// now. One kept with a log that's behind (an earlier Kumi carried the conversation on without it) begins again
+    /// from what's kept.
     pub fn open(&self, place: &str, id: &str, before: u32, had: Option<Rc<KernelCheckpoint>>, from: Option<String>) {
         if self.closed.get() {
             return;
@@ -389,15 +402,15 @@ impl SessionLog {
         }
     }
 
-    /// Conversation `id`'s checkpoint was kept as of `saved_at`, with `turns` requests: a log that waited for it begins (a
-    /// copy's, from the log of `from`, the conversation it copies). Kept after another conversation began, it's that
-    /// one's log no longer. (An id is the conversation's in every place: one that moved since is still the one.)
+    /// Conversation `id`'s checkpoint was kept as of `saved_at`, with `turns` requests: its log says so, and one that
+    /// waited for it begins (a copy's, from the log of `from`, the conversation it copies), the conversation going on or
+    /// one left before its first save landed. (An id is a conversation's in every place: one that moved is still it.)
     pub fn saved(&self, id: &str, saved_at: i64, turns: u32, from: Option<String>) {
-        if !self.open_now() || !self.going.borrow().as_ref().is_some_and(|(_, going)| going == id) {
+        if self.closed.get() {
             return;
         }
         self.said();
-        self.send(Job::Saved { line: line_of(&LogLine::Saved { at: now(), saved_at, turns }), from });
+        self.send(Job::Saved { id: id.to_owned(), line: line_of(&LogLine::Saved { at: now(), saved_at, turns }), from });
         self.send(Job::Sync);
     }
 
@@ -426,18 +439,29 @@ impl SessionLog {
     }
 }
 
-/// The writer beside the session: one job at a time, in the order the session gave them.
-struct Writer {
+/// What every log is written with.
+struct Kit {
     redact: Rc<dyn Fn(&str) -> String>,
     cap: Rc<Cell<u64>>,
-    log: Option<Log>,
 }
 
-/// The log being written.
+/// The writer beside the session: one job at a time, in the order the session gave them.
+struct Writer {
+    kit: Kit,
+    /// The log of the conversation going on.
+    log: Option<Log>,
+    /// The conversations left last, the newest last: a save of one that lands after it was left (a /new straight after
+    /// an answer) still goes in its log, or begins it with the lines that waited for it.
+    left: Vec<Log>,
+}
+
+/// A conversation's log as it's written.
 struct Log {
     folder: PathBuf,
     id: String,
     begin: Begin,
+    /// For a copy, what it takes of the original's log.
+    upto: Option<Upto>,
     state: Written,
     /// A line was left out to keep within the cap: nothing more goes in until a request begins the log again.
     full: bool,
@@ -454,56 +478,8 @@ enum Written {
     Theirs,
 }
 
-impl Log {
-    fn file(&self) -> PathBuf {
-        self.folder.join(log_name(&self.id))
-    }
-}
-
-/// What a log on disk is to this Kumi: its own form (its size, and whether it ends on a line cut short), a later Kumi's,
-/// or none it can read.
-enum Found {
-    Ours { size: u64, torn: bool },
-    Theirs,
-    Unreadable,
-}
-
-async fn found(file: &Path) -> std::io::Result<Found> {
-    let mut handle = tokio::fs::File::open(file).await?;
-    let size = handle.metadata().await?.len();
-    let mut head = Vec::with_capacity(4096);
-    (&mut handle).take(64 * 1024).read_to_end(&mut head).await?;
-    // An empty file is made again; a first line longer than any header this Kumi writes is a later Kumi's.
-    let Some(end) = head.iter().position(|b| *b == b'\n') else {
-        return Ok(if size == 0 { Found::Unreadable } else { Found::Theirs });
-    };
-    // A later form's header may say other things: its version is read first.
-    #[derive(Deserialize)]
-    struct Form {
-        kind: String,
-        #[serde(default)]
-        v: u64,
-    }
-    match serde_json::from_slice::<Form>(&head[..end]) {
-        Ok(form) if form.kind == "header" && form.v > u64::from(LOG_VERSION) => return Ok(Found::Theirs),
-        Ok(form) if form.kind == "header" && form.v >= 1 => {}
-        _ => return Ok(Found::Unreadable),
-    }
-    if !matches!(serde_json::from_slice::<LogLine>(&head[..end]), Ok(LogLine::Header(_))) {
-        return Ok(Found::Unreadable);
-    }
-    handle.seek(std::io::SeekFrom::End(-1)).await?;
-    let mut last = [0u8];
-    handle.read_exact(&mut last).await?;
-    Ok(Found::Ours { size, torn: last[0] != b'\n' })
-}
-
-async fn append(file: &Path, bytes: &[u8]) -> std::io::Result<()> {
-    let mut handle = tokio::fs::OpenOptions::new().append(true).open(file).await?;
-    handle.write_all(bytes).await?;
-    // The write is the system's once it's flushed: a crash of Kumi from here loses none of it.
-    handle.flush().await
-}
+/// The most conversations left that a late save still finds.
+const LEFT: usize = 8;
 
 async fn write(mut jobs: mpsc::UnboundedReceiver<Job>, mut writer: Writer) {
     let mut next = None;
@@ -515,6 +491,7 @@ async fn write(mut jobs: mpsc::UnboundedReceiver<Job>, mut writer: Writer) {
                 None => break,
             },
         };
+        let kit = &writer.kit;
         match job {
             Job::Line(line) => {
                 // Lines given meanwhile go with it, in one write.
@@ -529,36 +506,75 @@ async fn write(mut jobs: mpsc::UnboundedReceiver<Job>, mut writer: Writer) {
                         Err(_) => break,
                     }
                 }
-                writer.put(lines).await;
+                if let Some(log) = writer.log.as_mut() {
+                    log.put(kit, lines).await;
+                }
             }
             Job::Open { folder, id, begin } => {
-                writer.sync().await;
-                writer.log = Some(Log { folder, id, begin, state: Written::Waiting(vec![]), full: false, dirty: false });
-                writer.begin().await;
+                writer.leave().await;
+                // Taken up again soon after it was left: the lines it waits with are its own still, and one written is
+                // read again (another window may have written in it since).
+                let log = match writer.left.iter().position(|log| log.id == id) {
+                    Some(at) => {
+                        let left = writer.left.remove(at);
+                        let from = begin.from.or_else(|| left.begin.from.clone());
+                        Log { folder, begin: Begin { from, ..begin }, ..left }.again_as_left()
+                    }
+                    None => {
+                        let upto = match &begin.from {
+                            Some(from) if is_conversation_id(from) => upto(&folder.join(log_name(from))).await,
+                            _ => None,
+                        };
+                        Log { folder, id, begin, upto, state: Written::Waiting(vec![]), full: false, dirty: false }
+                    }
+                };
+                let kit = &writer.kit;
+                let log = writer.log.insert(log);
+                log.start(kit).await;
             }
             Job::Request { line, begin } => {
-                writer.again(begin).await;
-                writer.put(vec![line]).await;
-            }
-            Job::Saved { line, from } => {
-                if let Some(log) = writer.log.as_mut().filter(|log| matches!(log.state, Written::Waiting(_))) {
-                    if log.begin.from.is_none() {
-                        log.begin.from = from;
-                    }
+                if let Some(log) = writer.log.as_mut() {
+                    log.again(kit, begin).await;
+                    log.put(kit, vec![line]).await;
                 }
-                writer.begin().await;
-                writer.put(vec![line]).await;
             }
-            Job::Moved { folder } => writer.moved(folder).await,
-            Job::Sync => writer.sync().await,
+            Job::Saved { id, line, from } => {
+                let log = match writer.log.as_mut().filter(|log| log.id == id) {
+                    Some(log) => log,
+                    None => match writer.left.iter().position(|log| log.id == id) {
+                        Some(at) => {
+                            let mut log = writer.left.remove(at).again_as_left();
+                            log.saved(kit, line, from).await;
+                            log.sync().await;
+                            writer.left.push(log);
+                            continue;
+                        }
+                        // Not a conversation this run writes.
+                        None => continue,
+                    },
+                };
+                log.saved(kit, line, from).await;
+            }
+            Job::Moved { folder } => {
+                if let Some(log) = writer.log.as_mut() {
+                    log.moved(kit, folder).await;
+                }
+            }
+            Job::Sync => {
+                if let Some(log) = writer.log.as_mut() {
+                    log.sync().await;
+                }
+            }
             Job::Written(done) => {
                 let _ = done.send(());
             }
             Job::Close(done) => {
-                // Its first save may have landed since it was last looked for (the session waits for its saves first).
-                writer.begin().await;
-                writer.sync().await;
-                writer.log = None;
+                // A first save may have landed since its log was last looked for (the session waits for its saves).
+                writer.leave().await;
+                for mut log in std::mem::take(&mut writer.left) {
+                    log.start(&writer.kit).await;
+                    log.sync().await;
+                }
                 let _ = done.send(());
                 break;
             }
@@ -567,53 +583,104 @@ async fn write(mut jobs: mpsc::UnboundedReceiver<Job>, mut writer: Writer) {
 }
 
 impl Writer {
-    /// A log that waited begins, once its conversation is kept: where one is there already (an earlier session's), lines
-    /// go on its end; otherwise it's made.
-    async fn begin(&mut self) {
-        let Some(log) = self.log.as_mut().filter(|log| matches!(log.state, Written::Waiting(_))) else { return };
-        if !tokio::fs::try_exists(log.folder.join(format!("{}.json", log.id))).await.unwrap_or(false) {
+    /// The conversation going on is left: what's written goes to the disk, and one not kept yet keeps its lines waiting
+    /// for its first save, which may still land.
+    async fn leave(&mut self) {
+        let Some(mut log) = self.log.take() else { return };
+        log.start(&self.kit).await;
+        log.sync().await;
+        self.left.push(log);
+        if self.left.len() > LEFT {
+            self.left.remove(0);
+        }
+    }
+}
+
+impl Log {
+    fn file(&self) -> PathBuf {
+        self.folder.join(log_name(&self.id))
+    }
+
+    /// A log left a while ago, written to again: one this run was writing is read again first (its size, how it ends),
+    /// and one still waiting keeps its lines.
+    fn again_as_left(mut self) -> Log {
+        if matches!(self.state, Written::Appending { .. }) {
+            self.state = Written::Waiting(vec![]);
+        }
+        self
+    }
+
+    /// A log that waited begins, once its conversation is kept: one there already (an earlier session's) goes on,
+    /// unless it's behind what's kept; otherwise it's made.
+    async fn start(&mut self, kit: &Kit) {
+        if !matches!(self.state, Written::Waiting(_)) {
             return;
         }
-        let Written::Waiting(waiting) = std::mem::replace(&mut log.state, Written::Theirs) else { return };
-        let file = log.file();
+        if !tokio::fs::try_exists(self.folder.join(format!("{}.json", self.id))).await.unwrap_or(false) {
+            return;
+        }
+        let Written::Waiting(waiting) = std::mem::replace(&mut self.state, Written::Theirs) else { return };
+        let file = self.file();
         match found(&file).await {
-            Ok(Found::Ours { size, torn }) => {
-                if let Some(log) = self.log.as_mut() {
-                    log.state = Written::Appending { size, torn };
+            Ok(Found::Ours { size, torn, before }) => {
+                // Kept since with more than it holds (an earlier Kumi, after a rollback): begun again from what's kept,
+                // so it never skips what happened then.
+                let behind =
+                    self.begin.had.is_some() && known_turns(&file, size, before).await.is_some_and(|known| self.begin.before > known);
+                if behind {
+                    self.make(kit, waiting).await;
+                    return;
                 }
-                self.put(split(waiting)).await;
+                self.state = Written::Appending { size, torn };
+                self.put(kit, split(waiting)).await;
             }
             Ok(Found::Theirs) => {}
-            Ok(Found::Unreadable) | Err(_) => self.make(waiting).await,
+            Ok(Found::Unreadable) => self.make(kit, waiting).await,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => self.make(kit, waiting).await,
+            // Not to be read now (its permissions, a scanner holding it): left as it is, the lines wait for the next save.
+            Err(_) => self.state = Written::Waiting(waiting),
         }
     }
 
-    /// The log made new: its header, what the conversation had (or the log of the one it copies), then `after`.
-    async fn make(&mut self, after: Vec<u8>) {
-        let cap = self.cap.get();
-        let Some(log) = self.log.as_ref() else { return };
+    /// Its checkpoint was kept: one that waited for that begins (a copy's from `from`'s log as it was when the copy
+    /// began, or as it is now for one that's named only now), and its line goes on.
+    async fn saved(&mut self, kit: &Kit, line: Vec<u8>, from: Option<String>) {
+        if matches!(self.state, Written::Waiting(_)) && self.begin.from.is_none() {
+            if let Some(from) = from.filter(|from| is_conversation_id(from)) {
+                self.upto = upto(&self.folder.join(log_name(&from))).await;
+                self.begin.from = Some(from);
+            }
+        }
+        self.start(kit).await;
+        self.put(kit, vec![line]).await;
+    }
+
+    /// The log made new: its header, what the conversation had (or what a copy takes of the original's log), then
+    /// `after`.
+    async fn make(&mut self, kit: &Kit, after: Vec<u8>) {
+        let cap = kit.cap.get();
         let mut header = LogHeader {
             v: LOG_VERSION,
-            id: log.id.clone(),
+            id: self.id.clone(),
             at: now(),
             kumi: kumi_types::version::KUMI_VERSION.into(),
-            before: log.begin.before,
+            before: self.begin.before,
             from: None,
         };
-        let copied = match &log.begin.from {
-            Some(from) if is_conversation_id(from) => copy_of(&log.folder.join(log_name(from)), cap).await,
+        let copied = match (&self.begin.from, self.upto) {
+            (Some(from), Some(upto)) => copy_of(&self.folder.join(log_name(from)), upto).await,
             _ => None,
         };
         let mut had = vec![];
         match copied {
             Some((before, lines)) => {
                 header.before = before;
-                header.from = log.begin.from.clone();
+                header.from = self.begin.from.clone();
                 had.push(lines);
             }
             None => {
-                for message in log.begin.had.iter().flat_map(|kept| &kept.messages) {
-                    had.push(line_of(&LogLine::Message { at: header.at, message: redacted_message(message, self.redact.as_ref()) }));
+                for message in self.begin.had.iter().flat_map(|kept| &kept.messages) {
+                    had.push(line_of(&LogLine::Message { at: header.at, message: redacted_message(message, kit.redact.as_ref()) }));
                 }
             }
         }
@@ -626,27 +693,27 @@ impl Writer {
             }
             bytes.extend(line);
         }
-        let (folder, name) = (log.folder.clone(), log_name(&log.id));
         let text = String::from_utf8(bytes).expect("log lines are JSON");
-        let made = write_privately(&folder, &name, &text).await;
-        let Some(log) = self.log.as_mut() else { return };
-        match made {
+        match write_privately(&self.folder, &log_name(&self.id), &text).await {
             Ok(()) => {
-                log.state = Written::Appending { size: text.len() as u64, torn: false };
-                log.full = full;
-                log.dirty = true;
+                self.state = Written::Appending { size: text.len() as u64, torn: false };
+                self.full = full;
+                self.dirty = true;
             }
             // Kept waiting: the next save tries again.
-            Err(_) => log.state = Written::Waiting(after),
+            Err(_) => self.state = Written::Waiting(after),
         }
     }
 
     /// A full log begins again with the request now made, from what the conversation had by then.
-    async fn again(&mut self, begin: Begin) {
-        let Some(log) = self.log.as_mut().filter(|log| log.full) else { return };
-        log.begin = begin;
-        log.full = false;
-        let made = match &mut log.state {
+    async fn again(&mut self, kit: &Kit, begin: Begin) {
+        if !self.full {
+            return;
+        }
+        self.begin = begin;
+        self.upto = None;
+        self.full = false;
+        let made = match &mut self.state {
             Written::Waiting(waiting) => {
                 waiting.clear();
                 false
@@ -655,21 +722,23 @@ impl Writer {
             Written::Theirs => false,
         };
         if made {
-            self.make(vec![]).await;
+            self.make(kit, vec![]).await;
         }
     }
 
     /// Lines on the log's end, as many as fit within the cap: from the first that doesn't, none until the log begins
     /// again.
-    async fn put(&mut self, lines: Vec<Vec<u8>>) {
-        let cap = self.cap.get();
-        let Some(log) = self.log.as_mut().filter(|log| !log.full) else { return };
-        let (size, torn) = match &mut log.state {
+    async fn put(&mut self, kit: &Kit, lines: Vec<Vec<u8>>) {
+        let cap = kit.cap.get();
+        if self.full {
+            return;
+        }
+        let (size, torn) = match &mut self.state {
             Written::Theirs => return,
             Written::Waiting(waiting) => {
                 for line in lines {
                     if (waiting.len() + line.len()) as u64 > cap {
-                        log.full = true;
+                        self.full = true;
                         return;
                     }
                     waiting.extend(line);
@@ -682,7 +751,7 @@ impl Writer {
         let mut bytes = if torn { vec![b'\n'] } else { vec![] };
         for line in lines {
             if size + (bytes.len() + line.len()) as u64 > cap {
-                log.full = true;
+                self.full = true;
                 break;
             }
             bytes.extend(line);
@@ -690,56 +759,147 @@ impl Writer {
         if bytes.len() <= usize::from(torn) {
             return;
         }
-        let file = log.file();
-        let appended = append(&file, &bytes).await;
-        let Some(log) = self.log.as_mut() else { return };
-        match appended {
+        let file = self.file();
+        match append(&file, &bytes).await {
             Ok(()) => {
-                log.state = Written::Appending { size: size + bytes.len() as u64, torn: false };
-                log.dirty = true;
+                self.state = Written::Appending { size: size + bytes.len() as u64, torn: false };
+                self.dirty = true;
             }
             // Gone from under it: made again from what the conversation had, with these lines.
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => self.make(bytes[usize::from(torn)..].to_vec()).await,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => self.make(kit, bytes[usize::from(torn)..].to_vec()).await,
             // Whatever of it went in may end on a line cut short; its size is read again.
             Err(_) => {
                 let size = tokio::fs::metadata(&file).await.map(|m| m.len()).unwrap_or(size);
-                log.state = Written::Appending { size, torn: true };
-                log.dirty = true;
+                self.state = Written::Appending { size, torn: true };
+                self.dirty = true;
             }
         }
     }
 
-    async fn moved(&mut self, folder: PathBuf) {
-        let Some(log) = self.log.as_mut() else { return };
-        let from = log.file();
-        log.folder = folder;
-        if matches!(log.state, Written::Waiting(_)) {
+    async fn moved(&mut self, kit: &Kit, folder: PathBuf) {
+        let from = self.file();
+        self.folder = folder;
+        if matches!(self.state, Written::Waiting(_)) {
             // Kept there already, it begins there.
-            self.begin().await;
+            self.start(kit).await;
             return;
         }
-        let to = log.file();
+        let to = self.file();
         let mut made = tokio::fs::DirBuilder::new();
         made.recursive(true);
         #[cfg(unix)]
         made.mode(0o700);
-        let moved = made.create(&log.folder).await.is_ok() && tokio::fs::rename(&from, &to).await.is_ok();
+        let moved = made.create(&self.folder).await.is_ok() && tokio::fs::rename(&from, &to).await.is_ok();
         if !moved {
             // Left behind, it goes to its conversation's place with the store's next look (see its trim); lines go on a
             // new one here meanwhile.
-            log.state = Written::Waiting(vec![]);
-            self.begin().await;
+            self.state = Written::Waiting(vec![]);
+            self.start(kit).await;
         }
     }
 
     async fn sync(&mut self) {
-        let Some(log) = self.log.as_mut().filter(|log| log.dirty) else { return };
+        if !self.dirty {
+            return;
+        }
         // Opened to write (nothing's written through it): Windows syncs only a file opened so, not one opened to append.
-        if let Ok(handle) = tokio::fs::OpenOptions::new().write(true).open(log.file()).await {
+        if let Ok(handle) = tokio::fs::OpenOptions::new().write(true).open(self.file()).await {
             let _ = handle.sync_data().await;
         }
-        log.dirty = false;
+        self.dirty = false;
     }
+}
+
+/// What a log on disk is to this Kumi: its own form (its size, whether it ends on a line cut short, and how many requests
+/// its conversation had when it began), a later Kumi's, or none it can read.
+enum Found {
+    Ours { size: u64, torn: bool, before: u32 },
+    Theirs,
+    Unreadable,
+}
+
+/// How a later Kumi's header begins, whatever else it says: its version is read first.
+#[derive(Deserialize)]
+struct Form {
+    kind: String,
+    #[serde(default)]
+    v: u64,
+}
+
+static LATER: std::sync::LazyLock<regex::bytes::Regex> =
+    std::sync::LazyLock::new(|| regex::bytes::Regex::new(r#"^\{"kind":"header","v":([0-9]{1,9})[,}]"#).unwrap());
+
+async fn found(file: &Path) -> std::io::Result<Found> {
+    let mut handle = tokio::fs::File::open(file).await?;
+    let size = handle.metadata().await?.len();
+    let mut head = Vec::with_capacity(4096);
+    (&mut handle).take(64 * 1024).read_to_end(&mut head).await?;
+    let Some(end) = head.iter().position(|b| *b == b'\n') else {
+        // A first line that never ends is most likely cut short (or zeros, after a power cut): made again, unless it
+        // begins as a later Kumi's header.
+        let later = LATER.captures(&head).and_then(|v| std::str::from_utf8(&v[1]).ok()?.parse::<u64>().ok());
+        return Ok(if later.is_some_and(|v| v > u64::from(LOG_VERSION)) { Found::Theirs } else { Found::Unreadable });
+    };
+    match serde_json::from_slice::<Form>(&head[..end]) {
+        Ok(form) if form.kind == "header" && form.v > u64::from(LOG_VERSION) => return Ok(Found::Theirs),
+        Ok(form) if form.kind == "header" && form.v >= 1 => {}
+        _ => return Ok(Found::Unreadable),
+    }
+    let Ok(LogLine::Header(header)) = serde_json::from_slice::<LogLine>(&head[..end]) else { return Ok(Found::Unreadable) };
+    handle.seek(std::io::SeekFrom::End(-1)).await?;
+    let mut last = [0u8];
+    handle.read_exact(&mut last).await?;
+    Ok(Found::Ours { size, torn: last[0] != b'\n', before: header.before })
+}
+
+const SAVED: &[u8] = br#"{"kind":"saved","#;
+const COMPLETED: &[u8] = br#""event":{"type":"turn-complete""#;
+
+/// How many of its conversation's requests a log holds to the end: its last save's count, and an answer's end after it
+/// for each turn it saw end since (those of a turn the checkpoint never kept too, which only make it look less
+/// behind); without a save, its count from when it began, and the ends since. Read from its last MB, or all of it.
+async fn known_turns(file: &Path, size: u64, before: u32) -> Option<u32> {
+    const TAIL: u64 = 1024 * 1024;
+    let mut handle = tokio::fs::File::open(file).await.ok()?;
+    let from = size.saturating_sub(TAIL);
+    handle.seek(std::io::SeekFrom::Start(from)).await.ok()?;
+    let mut bytes = vec![];
+    handle.read_to_end(&mut bytes).await.ok()?;
+    let mut counted = turns_in(&bytes, from > 0);
+    if counted.0.is_none() && from > 0 {
+        let whole = tokio::fs::read(file).await.ok()?;
+        counted = turns_in(&whole, false);
+    }
+    let (saved, completed) = counted;
+    Some(saved.unwrap_or(before) + completed)
+}
+
+/// The last save's count of requests in these lines, and the answers' ends after it (or in all of them, without one).
+/// A first line cut where they begin (`cut`) isn't read.
+fn turns_in(bytes: &[u8], cut: bool) -> (Option<u32>, u32) {
+    let mut lines = bytes.split(|b| *b == b'\n');
+    if cut {
+        lines.next();
+    }
+    let (mut saved, mut completed) = (None, 0);
+    for line in lines {
+        if line.starts_with(SAVED) {
+            if let Ok(LogLine::Saved { turns, .. }) = serde_json::from_slice(line) {
+                saved = Some(turns);
+                completed = 0;
+            }
+        } else if line.windows(COMPLETED.len()).any(|window| window == COMPLETED) {
+            completed += 1;
+        }
+    }
+    (saved, completed)
+}
+
+async fn append(file: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    let mut handle = tokio::fs::OpenOptions::new().append(true).open(file).await?;
+    handle.write_all(bytes).await?;
+    // The write is the system's once it's flushed: a crash of Kumi from here loses none of it.
+    handle.flush().await
 }
 
 /// Bytes of whole lines as lines.
@@ -747,15 +907,35 @@ fn split(bytes: Vec<u8>) -> Vec<Vec<u8>> {
     bytes.split_inclusive(|b| *b == b'\n').map(<[u8]>::to_vec).collect()
 }
 
-/// The lines of the log at `file` after its header, the whole ones, with its count of requests from before it began:
-/// what a copy of its conversation's log begins with. None when it has none this Kumi reads, or one too big to copy.
-async fn copy_of(file: &Path, cap: u64) -> Option<(u32, Vec<u8>)> {
-    if tokio::fs::metadata(file).await.ok()?.len() > cap {
+/// What a copy beginning now would take of the original's log at `file`: up to the end of its last save. None without
+/// a save in it (nothing a copy's checkpoint holds that its own messages don't), or a log this Kumi reads.
+async fn upto(file: &Path) -> Option<Upto> {
+    let bytes = tokio::fs::read(file).await.ok()?;
+    let first = bytes.iter().position(|b| *b == b'\n')?;
+    let LogLine::Header(header) = serde_json::from_slice::<LogLine>(&bytes[..first]).ok()? else { return None };
+    if !(1..=LOG_VERSION).contains(&header.v) {
         return None;
     }
+    let mut end = None;
+    let mut at = first + 1;
+    for line in bytes[first + 1..].split_inclusive(|b| *b == b'\n') {
+        at += line.len();
+        if line.starts_with(SAVED) && line.ends_with(b"\n") {
+            end = Some(at);
+        }
+    }
+    Some(Upto { end: end? as u64, at: header.at })
+}
+
+/// The lines of the original's log at `file` after its header, to `upto`'s end, with its count of requests from before
+/// it began: what a copy's log begins with. None when it's no longer that log (begun again since), or can't be read.
+async fn copy_of(file: &Path, upto: Upto) -> Option<(u32, Vec<u8>)> {
     let bytes = tokio::fs::read(file).await.ok()?;
-    let read = read_log(&bytes)?;
-    let start = bytes.iter().position(|b| *b == b'\n')? + 1;
-    let end = bytes.iter().rposition(|b| *b == b'\n')? + 1;
-    Some((read.header.before, bytes[start..end].to_vec()))
+    let first = bytes.iter().position(|b| *b == b'\n')?;
+    let LogLine::Header(header) = serde_json::from_slice::<LogLine>(&bytes[..first]).ok()? else { return None };
+    let end = usize::try_from(upto.end).ok()?;
+    if header.at != upto.at || end > bytes.len() || end <= first {
+        return None;
+    }
+    Some((header.before, bytes[first + 1..end].to_vec()))
 }

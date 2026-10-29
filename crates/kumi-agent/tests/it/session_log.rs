@@ -302,7 +302,7 @@ async fn a_new_conversations_log_waits_for_its_first_save_and_one_never_kept_lea
         assert!(!file.exists());
         store.save(A, ID, &said("a new song", 9)).await.unwrap();
         log.saved(ID, 9, 1, None);
-        // A save that lands once another conversation began (a /new straight after an answer) isn't this one's.
+        // A save of a conversation this run never wrote is nothing to it.
         log.saved("mv66me0m0other", 10, 4, None);
         log.written().await;
         let read = read(&file);
@@ -310,21 +310,36 @@ async fn a_new_conversations_log_waits_for_its_first_save_and_one_never_kept_lea
         assert_eq!(kinds(&read), ["request", "event", "event", "event", "message", "message", "saved"]);
         assert!(matches!(&read.lines[2], LogLine::Event { event: SessionEvent::Kernel(KernelEvent::Text { text }), .. } if text == "Here's a start."));
         assert!(matches!(read.lines[6], LogLine::Saved { saved_at: 9, turns: 1, .. }));
+        assert!(!log_file(dir.path(), A, "mv66me0m0other").exists());
         // Kept, it's written as it goes: each line is in the file before the session closes.
         log.event(&notice("then"));
         log.written().await;
         assert_eq!(notices(&self::read(&file)), ["then"]);
+        // A conversation left before its first save landed (a /new straight after an answer) keeps its lines for it.
+        const LEFT: &str = "mv66me0m0left1";
+        log.open(A, LEFT, 0, None, None);
+        log.request("sketch some chords", vec![], None, 0, None);
+        log.event(&completed());
+        log.open(A, "mv66me0m0next1", 0, None, None);
+        log.event(&notice("New conversation."));
+        store.save(A, LEFT, &said("sketch some chords", 11)).await.unwrap();
+        log.saved(LEFT, 11, 1, None);
+        log.written().await;
+        let left = self::read(&log_file(dir.path(), A, LEFT));
+        assert_eq!(kinds(&left), ["request", "event", "saved"]);
+        assert!(notices(&left).is_empty());
         // A conversation never kept leaves no log.
         log.open(A, "mv66me0m0never", 0, None, None);
         log.request("just looking", vec![], None, 0, None);
         log.close().await;
         assert!(!log_file(dir.path(), A, "mv66me0m0never").exists());
+        assert!(!log_file(dir.path(), A, "mv66me0m0next1").exists());
     })
     .await;
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn a_log_begins_with_what_its_conversation_had_and_a_copys_with_the_originals() {
+async fn a_log_begins_with_what_its_conversation_had_and_a_copys_with_the_originals_as_the_copy_began() {
     local(async {
         const FORK: &str = "mv66me0m9fork1";
         const WINDOW: &str = "mv66me0m9copy1";
@@ -336,43 +351,127 @@ async fn a_log_begins_with_what_its_conversation_had_and_a_copys_with_the_origin
         // Kept before there were logs: its log begins with its requests and messages.
         log.open(A, ID, 1, had(&first), None);
         log.request("and wider", vec![], None, 1, None);
+        log.event(&completed());
+        log.saved(ID, 8, 2, None);
         log.written().await;
         let original = read(&log_file(dir.path(), A, ID));
         assert_eq!(original.header.before, 1);
-        assert_eq!(kinds(&original), ["message", "message", "request"]);
+        assert_eq!(kinds(&original), ["message", "message", "request", "event", "saved"]);
         assert!(matches!(&original.lines[0], LogLine::Message { message, .. } if *message == first[0]));
-        // Forked: the copy's log begins as the original's is now.
+        // Forked: the copy's log begins as the original's is, to its last save.
         store.create(A, FORK, &said("make the bass wider", 8), None, Some(ID)).await.unwrap();
-        log.open(A, FORK, 1, had(&first), Some(ID.into()));
+        log.open(A, FORK, 2, had(&first), Some(ID.into()));
         log.event(&notice("Forked"));
         log.written().await;
         let fork = read(&log_file(dir.path(), A, FORK));
         assert_eq!((fork.header.id.as_str(), fork.header.before, fork.header.from.as_deref()), (FORK, 1, Some(ID)));
-        assert_eq!(fork.lines[..3], original.lines[..]);
+        assert_eq!(fork.lines[..5], original.lines[..]);
         assert_eq!(notices(&fork), ["Forked"]);
-        // Carried on in a copy because another window had the original: kept by its first request, its log begins then,
-        // from the original's.
-        log.open(A, WINDOW, 1, had(&first), Some(ID.into()));
-        log.request("from here", vec![], None, 1, None);
+        // Carried on in a copy because another window has the original: the copy's log begins with the original's as
+        // it was when the copy began (what its checkpoint holds), not with what that window does after.
+        log.open(A, WINDOW, 2, had(&first), Some(ID.into()));
+        log.written().await;
+        let other = SessionLog::new(dir.path(), Places::LIVE, same());
+        other.open(A, ID, 2, None, None);
+        other.request("in the other window", vec![], None, 2, None);
+        other.written().await;
+        log.request("from here", vec![], None, 2, None);
         store.create(A, WINDOW, &said("make the bass wider", 9), None, Some(ID)).await.unwrap();
-        log.saved(WINDOW, 9, 2, Some(ID.into()));
+        log.saved(WINDOW, 9, 3, Some(ID.into()));
         log.written().await;
         let window = read(&log_file(dir.path(), A, WINDOW));
         assert_eq!((window.header.before, window.header.from.as_deref()), (1, Some(ID)));
-        assert_eq!(kinds(&window), ["message", "message", "request", "request", "saved"]);
+        assert_eq!(kinds(&window), ["message", "message", "request", "event", "saved", "request", "saved"]);
+        let asked: Vec<&str> = window
+            .lines
+            .iter()
+            .filter_map(|line| match line {
+                LogLine::Request(request) => Some(request.text.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(asked, ["and wider", "from here"]);
         // A copy whose original only its first save names (one from a file's, carried on here) begins from that one's.
         const LATER: &str = "mv66me0m9copy2";
-        log.open(A, LATER, 1, had(&first), None);
-        log.request("and here", vec![], None, 1, None);
+        log.open(A, LATER, 2, had(&first), None);
+        log.request("and here", vec![], None, 2, None);
         log.written().await;
         store.create(A, LATER, &said("make the bass wider", 10), None, Some(ID)).await.unwrap();
-        log.saved(LATER, 10, 2, Some(ID.into()));
+        log.saved(LATER, 10, 3, Some(ID.into()));
         log.close().await;
+        other.close().await;
         let later = read(&log_file(dir.path(), A, LATER));
         assert_eq!((later.header.before, later.header.from.as_deref()), (1, Some(ID)));
-        assert_eq!(kinds(&later), ["message", "message", "request", "request", "saved"]);
-        // The original's is as it was.
-        assert_eq!(read(&log_file(dir.path(), A, ID)), original);
+        assert_eq!(kinds(&later), ["message", "message", "request", "event", "saved", "request", "saved"]);
+        // The original's is as it was, and the other window's request after it.
+        let now = read(&log_file(dir.path(), A, ID));
+        assert_eq!(now.lines[..5], original.lines[..]);
+        assert_eq!(kinds(&now), ["message", "message", "request", "event", "saved", "request"]);
+    })
+    .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_log_behind_what_was_kept_begins_again_from_it_and_one_that_cant_be_read_now_is_left_as_it_is() {
+    local(async {
+        let dir = tempfile::tempdir().unwrap();
+        let store = create_conversation_store(dir.path());
+        store.save(A, ID, &said("make the bass wider", 7)).await.unwrap();
+        let file = log_file(dir.path(), A, ID);
+        let first = [json!({"role":"user","content":"make the bass wider"}), json!({"role":"assistant","content":"done"})];
+        let log = SessionLog::new(dir.path(), Places::LIVE, same());
+        log.open(A, ID, 1, had(&first), None);
+        log.request("and wider", vec![], None, 1, None);
+        log.event(&completed());
+        log.saved(ID, 8, 2, None);
+        // A request whose save never made it into the log (Kumi stopped right after): its end is there.
+        log.request("and darker", vec![], None, 2, None);
+        log.event(&completed());
+        log.close().await;
+        // Taken up with three requests kept, as the log holds: it goes on.
+        let next = SessionLog::new(dir.path(), Places::LIVE, same());
+        next.open(A, ID, 3, had(&first), None);
+        next.event(&notice("Continuing."));
+        next.close().await;
+        assert_eq!(notices(&read(&file)), ["Continuing."]);
+        assert_eq!(read(&file).header.before, 1);
+        // An earlier Kumi carried it on to six requests without the log: it begins again from what's kept, with no gap.
+        let kept = [
+            first[0].clone(),
+            first[1].clone(),
+            json!({"role":"user","content":"from 1.24"}),
+            json!({"role":"assistant","content":"done"}),
+        ];
+        let after = SessionLog::new(dir.path(), Places::LIVE, same());
+        after.open(A, ID, 6, had(&kept), None);
+        after.event(&notice("Back again."));
+        after.close().await;
+        let again = read(&file);
+        assert_eq!(again.header.before, 6);
+        assert_eq!(kinds(&again), ["message", "message", "message", "message", "event"]);
+        assert_eq!(notices(&again), ["Back again."]);
+        // Not to be read now (its permissions changed): left as it is, and its lines wait for the next save.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let before = std::fs::read(&file).unwrap();
+            std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o000)).unwrap();
+            // (As root, nothing keeps a file from being read: nothing to see.)
+            if std::fs::read(&file).is_ok() {
+                return;
+            }
+            let locked = SessionLog::new(dir.path(), Places::LIVE, same());
+            locked.open(A, ID, 6, had(&kept), None);
+            locked.request("louder", vec![], None, 6, None);
+            locked.written().await;
+            std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600)).unwrap();
+            assert_eq!(std::fs::read(&file).unwrap(), before);
+            locked.saved(ID, 12, 7, None);
+            locked.close().await;
+            let read = read(&file);
+            assert_eq!(read.lines[..again.lines.len()], again.lines[..]);
+            assert_eq!(kinds(&read)[again.lines.len()..], ["request", "saved"]);
+        }
     })
     .await;
 }
@@ -393,6 +492,21 @@ async fn a_later_kumis_log_is_left_as_it_is() {
         log.close().await;
         assert_eq!(std::fs::read_to_string(&file).unwrap(), theirs);
         assert!(read_log(theirs.as_bytes()).is_none());
+        // A first line that never ends, as a later Kumi's header would begin it: left as it is too.
+        let longer = format!("{{\"kind\":\"header\",\"v\":3,\"notes\":\"{}", "x".repeat(70_000));
+        std::fs::write(&file, &longer).unwrap();
+        let log = SessionLog::new(dir.path(), Places::LIVE, same());
+        log.open(A, ID, 1, None, None);
+        log.event(&notice("mine"));
+        log.close().await;
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), longer);
+        // One that's only damage (zeros, after a power cut) is made again.
+        std::fs::write(&file, [0u8; 300]).unwrap();
+        let log = SessionLog::new(dir.path(), Places::LIVE, same());
+        log.open(A, ID, 1, None, None);
+        log.event(&notice("mine"));
+        log.close().await;
+        assert_eq!(notices(&read(&file)), ["mine"]);
     })
     .await;
 }

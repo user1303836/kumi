@@ -113,3 +113,33 @@ fn a_conversations_log_takes_keys_out_of_its_words_as_the_history_does() {
     assert_eq!(redact(&long), long);
     assert_eq!(redact("none of the tracks"), "none of the tracks");
 }
+#[test]
+fn a_conversations_log_keeps_the_names_its_about_and_still_takes_keys_out() {
+    let redact = log_redactor(vec![]);
+    // A sample's, a preset's, a bounce's and a file's name: joined with `_` or `-`, they're what the conversation is about.
+    for words in [
+        "Load KSHMR_Acoustic_Guitar_Loop_04_Am_100bpm on track 2",
+        "Try the preset Analog_Pad_Warm_Dark_Evolving_02 from Vital",
+        "the bounce is in Night-Drive-Final-Master-2026-10-28-v3",
+        "from ~/Samples/OS_UNM_100_drum_loop_crash_kit_Am_wet.wav",
+    ] {
+        assert_eq!(redact(words), words);
+    }
+    // A key without a known shape is still taken out: letters and digits alone, as a Mistral key, or a Groq key's after
+    // its prefix.
+    assert_eq!(redact("use Zx9qL2mN8pR4tV6wY1aB3cD5eF7gH0jK here"), "use [redacted] here");
+    assert_eq!(redact("gsk_0aB1cD2eF3gH4iJ5kL6mN7oP8qR9sT0uV1wX2yZ3aB4cD5eF6gH"), "gsk_[redacted]");
+    // The input history takes out what it always did, the joined forms too.
+    assert_eq!(history_text("Load KSHMR_Acoustic_Guitar_Loop_04_Am_100bpm on track 2", &[]), "Load [redacted] on track 2");
+}
+#[test]
+fn a_long_run_is_read_once_through() {
+    // Half a million starts a pattern that looked ahead from each would scan to the end from.
+    let long = "a-".repeat(150_000);
+    let began = std::time::Instant::now();
+    assert_eq!(history_text(&long, &[]).len(), 4096);
+    assert_eq!(log_redactor(vec![])(&long), long);
+    let run = format!("{}1", "a".repeat(300_000));
+    assert_eq!(log_redactor(vec![])(&run), "[redacted]");
+    assert!(began.elapsed() < std::time::Duration::from_secs(5), "{:?}", began.elapsed());
+}

@@ -1240,17 +1240,16 @@ impl Session {
         if ours || store.claim(place, id) == Claim::Ours {
             return (id.to_owned(), None);
         }
-        let copy = store.new_id().await;
-        self.notice(format!(
-            "Another Kumi window has this conversation open, so this one carries on in a copy ({copy}); each keeps its own turns."
-        ));
-        (copy, Some(id.to_owned()))
+        (store.new_id().await, Some(id.to_owned()))
     }
-    /// Begin a kept conversation taken up by `take_up`.
+    /// Begin a kept conversation taken up by `take_up`. A copy says so once it's begun, so its log has it.
     fn begin_taken(&self, place: String, (id, from): (String, Option<String>), conversation: &SavedConversation) {
-        self.begin(place, id, Some(conversation), from.as_deref());
+        self.begin(place, id.clone(), Some(conversation), from.as_deref());
         if from.is_some() {
             self.0.state.borrow_mut().copied_from = from;
+            self.notice(format!(
+                "Another Kumi window has this conversation open, so this one carries on in a copy ({id}); each keeps its own turns."
+            ));
         }
     }
     /// The open Set's own conversation, as Kumi opens on it: its place's current one (or a copy, when another Kumi has
