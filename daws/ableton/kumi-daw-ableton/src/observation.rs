@@ -5,7 +5,7 @@ use super::{
     fold::fold_tracks,
     inference::no_access,
     more_changes::{set_meter, set_scale},
-    pins::{pin_context, reference_context},
+    pins::{in_model, pin_context, reference_context, track_now},
     project,
     references::{Moved, Shift},
     remember::{CurrentProject, ExportMark, Remember},
@@ -41,8 +41,8 @@ use std::{
     time::UNIX_EPOCH,
 };
 const MIXER_TRACKS: usize = 64;
-/// The most tracks a message's `@` references make Kumi read the device tree of, to find again a device named from
-/// before Live's references changed: the selected track's first. One past them is told by its name.
+/// The most tracks a message's `@` references make Kumi read the device tree of, to find a device the Set's model
+/// doesn't hold (deeper in its racks, or moved): the selected track's first. One past them is told by its name.
 const REFERENCE_TREES: usize = 4;
 /// The kept devices are reused for this long after they were read whole (or checked by the backstop), and older ones
 /// are read whole again: Live tells of no device renamed or rack edited.
@@ -678,30 +678,27 @@ impl Observer {
                 None
             };
             connection.assert_lease(lease, &signal)?;
-            // What the message names with `@`, each told as a pin is. A device named from before Live's references
-            // changed is found again in its track's tree, read under the track's ref now, for at most REFERENCE_TREES
-            // tracks (the selected one's first).
+            // What the message names with `@`, each told as a pin is, checked against this look's model. A device the
+            // model doesn't hold (deeper in its racks, or moved) is looked for in its track's tree, read under the track's
+            // ref now, for at most REFERENCE_TREES tracks (the selected one's first).
             let named = hints.as_ref().map(|hints| hints.references.as_slice()).unwrap_or_default();
             let mut references: Vec<Value> = Vec::with_capacity(named.len());
             if !named.is_empty() {
                 let model = self.model();
-                let now = connection.epoch.get().map(to_string).unwrap_or_else(|| "undefined".into());
                 let selected_track = selected.as_ref().and_then(|s| s.get("track")).and_then(|t| t.get("name")).and_then(Value::as_str);
-                let mut stale: Vec<(&str, String)> = named
+                let mut unfound: Vec<(&str, String)> = named
                     .iter()
-                    .filter(|reference| reference.node != PinKind::Track && !reference.r#ref.starts_with(&format!("{now}:")))
+                    .filter(|reference| reference.node != PinKind::Track && in_model(&model, reference).is_none())
                     .filter_map(|reference| {
                         let track = reference.track.as_deref()?;
-                        let named = model.tracks_named(track);
-                        let [found] = named.as_slice() else { return None };
-                        Some((track, found.reference.clone()))
+                        Some((track, track_now(&model, &reference.track_ref, track)?.reference.clone()))
                     })
                     .collect();
                 // The selected track's first, each track once.
-                stale.sort_by(|a, b| (Some(a.0) != selected_track, &a.1).cmp(&(Some(b.0) != selected_track, &b.1)));
-                stale.dedup_by(|a, b| a.1 == b.1);
+                unfound.sort_by(|a, b| (Some(a.0) != selected_track, &a.1).cmp(&(Some(b.0) != selected_track, &b.1)));
+                unfound.dedup_by(|a, b| a.1 == b.1);
                 let mut trees: HashMap<String, DeviceTree> = HashMap::new();
-                for (track, track_ref) in stale.into_iter().take(REFERENCE_TREES) {
+                for (track, track_ref) in unfound.into_iter().take(REFERENCE_TREES) {
                     if let Ok(Some(tree)) = views::device_tree(connection.as_ref(), &track_ref, signal.clone()).await {
                         trees.insert(track.to_owned(), tree);
                     }
@@ -710,7 +707,7 @@ impl Observer {
                 let mut book = connection.references.borrow_mut();
                 for reference in named {
                     let tree = reference.track.as_deref().and_then(|track| trees.get(track));
-                    references.push(Value::Object(reference_context(reference, connection.epoch.get(), tree, &model, &mut book)));
+                    references.push(Value::Object(reference_context(reference, tree, &model, &mut book)));
                 }
             }
 
