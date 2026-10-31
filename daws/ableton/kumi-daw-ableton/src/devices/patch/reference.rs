@@ -647,8 +647,88 @@ pub fn learn(c74: &Path) -> Reference {
     Reference { fingerprint: fingerprint(c74), objects, root: c74.to_path_buf() }
 }
 
-/// The installed Max's C74 folder: Live's own Max (the newest Live first), or a Max installed by itself.
+/// The installed Max's C74 folder: the one KUMI_MAX names, else the open Live's own Max (the one a device made now runs
+/// in), else Live's own Max (the newest Live first), or a Max installed by itself.
 pub fn find_c74() -> Option<PathBuf> {
+    chosen_c74(std::env::var_os("KUMI_MAX"), open_live_max, installed_maxes)
+}
+
+/// [`find_c74`]'s choice, each of its places asked only when the one before gives none: what's `named` (a C74 folder,
+/// or a Max holding one), the `open` Live's Max, then the `installed` ones.
+fn chosen_c74(
+    named: Option<std::ffi::OsString>,
+    open: impl FnOnce() -> Option<PathBuf>,
+    installed: impl FnOnce() -> Vec<PathBuf>,
+) -> Option<PathBuf> {
+    if let Some(named) = named.filter(|named| !named.is_empty()) {
+        // The Max named is the one used, or none: never another in its place.
+        return c74_within(Path::new(&named), 4);
+    }
+    open().and_then(|root| c74_within(&root, 4)).or_else(|| installed().into_iter().find_map(|root| c74_within(&root, 4)))
+}
+
+/// The open Live's own Max: from the app `ps` names on a Mac, or the program PowerShell names on Windows.
+fn open_live_max() -> Option<PathBuf> {
+    // A cold PowerShell takes seconds, and one that's slower only means the installed Maxes are looked at instead.
+    let within = std::time::Duration::from_secs(5);
+    if cfg!(target_os = "macos") {
+        live_max_in(&bounded("/bin/ps", &["-axo", "comm="], within)?)
+    } else if cfg!(windows) {
+        use kumi_types::system::{process_env, system_program, SystemProgram};
+        let powershell = system_program(SystemProgram::Powershell, &process_env(), "win32");
+        let path = "Get-Process -Name 'Ableton Live*' -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty Path";
+        windows_live_max(&bounded(&powershell, &["-NoProfile", "-NonInteractive", "-Command", path], within)?)
+    } else {
+        None
+    }
+}
+
+/// The Max of the Live in a `ps -axo comm=` listing: "/Applications/Ableton Live 12 Suite.app/Contents/MacOS/Live" is
+/// that app, and its Max is in its App-Resources.
+fn live_max_in(listing: &str) -> Option<PathBuf> {
+    let open = listing.lines().find_map(crate::app::live_app::live_app_of)?;
+    Some(Path::new(&open.app).join("Contents").join("App-Resources").join("Max"))
+}
+
+/// The Max of the Live whose program is `exe`: "…\Live 12 Suite\Program\Ableton Live 12 Suite.exe" keeps it in
+/// "…\Live 12 Suite\Resources\Max", as an installed Live does.
+fn windows_live_max(exe: &str) -> Option<PathBuf> {
+    let exe = exe.trim();
+    if exe.is_empty() {
+        return None;
+    }
+    Some(Path::new(exe).parent()?.parent()?.join("Resources").join("Max"))
+}
+
+/// What `program` prints, waited for `within`: None when it can't run, fails, or takes longer (it's ended then).
+fn bounded(program: &str, args: &[&str], within: std::time::Duration) -> Option<String> {
+    use std::io::Read;
+    use std::process::{Command, Stdio};
+    let mut child = Command::new(program).args(args).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn().ok()?;
+    // Read beside the wait, so a long listing never fills the pipe and holds the program up.
+    let mut out = child.stdout.take()?;
+    let reading = std::thread::spawn(move || {
+        let mut bytes = Vec::new();
+        out.read_to_end(&mut bytes).map(|_| String::from_utf8_lossy(&bytes).into_owned())
+    });
+    let started = std::time::Instant::now();
+    let done = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status.success(),
+            Ok(None) if started.elapsed() < within => std::thread::sleep(std::time::Duration::from_millis(10)),
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                break false;
+            }
+        }
+    };
+    let text = reading.join().ok()?.ok()?;
+    done.then_some(text)
+}
+
+/// The Maxes installed: Live's own (the newest Live first), then a Max installed by itself.
+fn installed_maxes() -> Vec<PathBuf> {
     let mut roots: Vec<PathBuf> = Vec::new();
     let mut named = |folder: PathBuf, prefix: &str, then: &[&str]| {
         let mut names: Vec<String> = std::fs::read_dir(&folder)
@@ -672,7 +752,7 @@ pub fn find_c74() -> Option<PathBuf> {
         named(PathBuf::from(&program_files).join("Ableton"), "Live", &["Resources", "Max"]);
         named(PathBuf::from(program_files).join("Cycling '74"), "Max", &[]);
     }
-    roots.into_iter().find_map(|root| c74_within(&root, 4))
+    roots
 }
 
 /// A folder named C74 holding Max's reference pages, within `depth` folders of `root`.
@@ -999,6 +1079,47 @@ mod tests {
         let later = std::time::SystemTime::now() + std::time::Duration::from_secs(60);
         std::fs::File::options().write(true).open(&page).unwrap().set_modified(later).unwrap();
         assert_ne!(fingerprint(c74.path()), before);
+    }
+
+    #[test]
+    fn the_max_kumi_max_names_is_learned_else_the_open_lives_else_the_newest_installed() {
+        let root = tempfile::tempdir().unwrap();
+        let max = |folder: &str| {
+            let c74 = root.path().join(folder).join("Max.app").join("Contents").join("Resources").join("C74");
+            std::fs::create_dir_all(c74.join("docs").join("refpages")).unwrap();
+            c74
+        };
+        let (open, newest, named) = (max("Live 12 Suite/Max"), max("Live 12 Beta/Max"), max("Mine"));
+        let open_live = || Some(root.path().join("Live 12 Suite/Max"));
+        let installed = || vec![root.path().join("Live 12 Beta/Max"), root.path().join("Live 12 Suite/Max")];
+        assert_eq!(chosen_c74(None, open_live, installed), Some(open.clone()), "the open Live's, the one a device runs in");
+        assert_eq!(chosen_c74(None, || None, installed), Some(newest), "no Live open: the newest installed, as before");
+        assert_eq!(chosen_c74(Some(named.clone().into()), open_live, installed), Some(named.clone()), "KUMI_MAX's C74");
+        assert_eq!(chosen_c74(Some(root.path().join("Mine/Max.app").into()), open_live, installed), Some(named), "a Max holding one");
+        assert_eq!(chosen_c74(Some(root.path().join("Nothing").into()), open_live, installed), None, "no other in its place");
+        assert_eq!(chosen_c74(Some("".into()), open_live, installed), Some(open), "set empty, as if unset");
+        // Where each system says the open Live is.
+        let listing = "/usr/sbin/cfprefsd\n/Applications/Ableton Live 12 Suite.app/Contents/MacOS/Live\n";
+        assert_eq!(live_max_in(listing), Some(PathBuf::from("/Applications/Ableton Live 12 Suite.app/Contents/App-Resources/Max")));
+        assert_eq!(live_max_in("/usr/sbin/cfprefsd\n"), None);
+        let live = Path::new("Ableton").join("Live 12 Suite");
+        let exe = live.join("Program").join("Ableton Live 12 Suite.exe");
+        assert_eq!(windows_live_max(&format!("{}\r\n", exe.display())), Some(live.join("Resources").join("Max")));
+        assert_eq!(windows_live_max("\r\n"), None, "none open");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_listing_is_waited_for_only_so_long() {
+        let within = std::time::Duration::from_millis(500);
+        assert_eq!(bounded("/bin/echo", &["Live"], within).as_deref(), Some("Live\n"));
+        assert_eq!(bounded("/bin/sh", &["-c", "exit 1"], within), None, "one that fails says nothing");
+        // Longer than a pipe holds: it's read as it comes, so the program isn't held up until its time is over.
+        let long = bounded("/bin/sh", &["-c", "head -c 200000 /dev/zero"], within);
+        assert_eq!(long.map(|text| text.len()), Some(200_000));
+        let started = std::time::Instant::now();
+        assert_eq!(bounded("/bin/sleep", &["10"], within), None);
+        assert!(started.elapsed() < std::time::Duration::from_secs(5), "ended at its bound");
     }
 
     #[test]

@@ -618,6 +618,7 @@ Kumi 把一切都保存在 `~/.kumi` 中。`~/.kumi/settings.json` 包含：
 | `KUMI_RENOISE_PREFS_DIR` | Renoise 的偏好设置：一个 `V<x.y.z>` 文件夹，或包含它们的文件夹 |
 | `KUMI_REMOTE_SCRIPTS_DIR` | Kumi 找不到 Live 的 Remote Scripts 文件夹时，用它指定 |
 | `KUMI_LIVE_EXTENSIONS_DIR` | Kumi 找不到 Live 的 Extensions 文件夹时，指定 `kumi bridge` 放置 Kumi 扩展、`kumi doctor` 查找扩展的位置 |
+| `KUMI_MAX` | Kumi 制作 Max for Live 设备时读取其对象的 Max：它的 `C74` 文件夹（Windows 上是 `resources`），或包含该文件夹的 Max（`Max.app`，或 `Max.exe` 所在的文件夹）。未设置时，用正在打开的 Live 的 Max，其次是最新版 Live 的 Max |
 | `KUMI_BRIDGE_WAIT_SECONDS` | `kumi bridge` 等待 Live 连接的时长；`0` 表示不等待 |
 | `KUMI_NO_UPDATE_CHECK` | 设为任意值即关闭启动时的新版本检查 |
 | `HTTPS_PROXY`、`HTTP_PROXY`、`ALL_PROXY`、`NO_PROXY` | Kumi 经由的代理服务器，以及不经过它的地址（[代理服务器](#代理服务器与学校或公司的网络)） |
