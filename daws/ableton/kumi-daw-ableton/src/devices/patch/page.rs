@@ -66,8 +66,13 @@ impl Element {
     }
 }
 
+/// How deep a page's elements are read inside one another. Max's pages nest a few deep: one deeper isn't Max's, and
+/// what's done with a page (its text, a copy, letting it go) goes as deep as it does.
+const NESTING: usize = 64;
+
 /// A page's top element (its c74object), read as the pages are written: comments and declarations are passed over,
-/// a closing tag nothing opened is too, and what's left open at the end is closed. None for text with no element.
+/// a closing tag nothing opened is too, and what's left open at the end is closed. None for text with no element, or
+/// with elements nested deeper than [`NESTING`].
 pub fn read(text: &str) -> Option<Element> {
     let mut open: Vec<Element> = vec![Element::default()];
     let mut rest = text;
@@ -103,6 +108,8 @@ pub fn read(text: &str) -> Option<Element> {
             let element = element(inside);
             if empty {
                 open.last_mut()?.children.push(Node::Element(element));
+            } else if open.len() > NESTING {
+                return None;
             } else {
                 open.push(element);
             }
@@ -623,6 +630,11 @@ mod tests {
         assert_eq!(read("no element"), None);
         let cdata = read("<a>x <![CDATA[1 < 2 > 0 & y]]> z</a>").unwrap();
         assert_eq!(cdata.text(), "x 1 < 2 > 0 & y z", "a CDATA section is its text as written");
+        // Nested as deep as Kumi reads, and one deeper; and as deep as a page could make it, which isn't read at all.
+        let nested = |depth: usize| format!("{}x{}", "<a>".repeat(depth), "</a>".repeat(depth));
+        assert_eq!(read(&nested(NESTING)).map(|page| page.text()).as_deref(), Some("x"));
+        assert_eq!(read(&nested(NESTING + 1)), None);
+        assert_eq!(read(&"<a>".repeat(100_000)), None);
     }
 
     /// A page written for these tests (not Max's): an object that holds numbers back, its attributes' own attributes
