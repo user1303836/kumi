@@ -294,8 +294,9 @@ impl Session {
             ));
         }
         if let Some(library) = &options.library {
-            tools
-                .extend(library.tools_for(&options.profile, LibraryToolsOptions { on_event: Some(tool_events(&on_event)), resolve: None }));
+            tools.extend(
+                library.tools_for(&options.profile, LibraryToolsOptions { on_event: Some(tool_events(&on_event)), ..Default::default() }),
+            );
         }
         // Reuse the conversation's preset folder and discovery cache. Writing a preset file
         // works away from the DAW; preparing, loading and auditioning it stay in the foreground.

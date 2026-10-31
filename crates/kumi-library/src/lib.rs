@@ -649,6 +649,9 @@ impl Library {
     }
     /// The library's tools in the DAW's words; the DAW's manual only for a DAW whose manual Kumi reads (Live's).
     pub fn tools_for(self: &Rc<Self>, profile: &DawProfile, options: LibraryToolsOptions) -> Vec<Rc<dyn KernelTool>> {
+        // `my_sets` finds the DAW's own projects where Kumi reads its files.
+        let projects = options.projects.or_else(|| profile.id.and_then(|daw| self.options.daws.projects_of(daw)));
+        let options = LibraryToolsOptions { projects, ..options };
         let mut tools = tools::library_tools_for(profile, self.clone(), options.clone());
         if let Some(daw) = profile.id.filter(|_| profile.caps.manual) {
             let manual = self.options.daws.iter().find(|own| own.profile().id == Some(daw)).and_then(|own| {
