@@ -1640,7 +1640,9 @@ mod watch_tests {
         }
     }
 
-    #[tokio::test(flavor = "current_thread")]
+    /// In tokio's time, paused and stepped from one timer to the next, so how many looks the watch takes in 30 ms doesn't
+    /// hang on the computer's clock: Windows' ticks are 15.6 ms, and a busy runner's are later still (#618).
+    #[tokio::test(flavor = "current_thread", start_paused = true)]
     async fn kumi_follows_to_the_daw_opened_once_the_screen_can_close() {
         tokio::task::LocalSet::new().run_until(follow_while_not_connected()).await;
     }
