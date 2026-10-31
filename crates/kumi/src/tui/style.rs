@@ -132,6 +132,10 @@ pub mod palette {
     pub const TECHNIQUE: Rgb = [0xc7, 0xa6, 0xff];
     pub const RECIPE: Rgb = [0xf2, 0xa6, 0xc4];
     pub const LESSON: Rgb = [0xe7, 0xc8, 0x8f];
+    /// Code in answers, by what each run is: keywords, strings and numbers (its comments are faint, the rest bright).
+    pub const CODE_KEYWORD: Rgb = [0x7a, 0xa2, 0xf7];
+    pub const CODE_STRING: Rgb = [0xb8, 0xd4, 0x7e];
+    pub const CODE_NUMBER: Rgb = [0xe4, 0x8e, 0xe0];
 
     /// The palette by name (`palette[name]` in the TypeScript), for colours chosen at run time.
     pub fn named(name: &str) -> Option<Rgb> {
@@ -191,6 +195,10 @@ pub struct Theme {
     pub technique: Rgb,
     pub recipe: Rgb,
     pub lesson: Rgb,
+    /// Code's keywords, strings and numbers.
+    pub code_keyword: Rgb,
+    pub code_string: Rgb,
+    pub code_number: Rgb,
     /// The tint of audio's icons (the other families' tints are the palette's: MIDI's the note's, an instrument's the
     /// lesson's, a plug-in's the technique's).
     pub audio: Rgb,
@@ -198,7 +206,7 @@ pub struct Theme {
 
 impl Theme {
     /// Its colours in the palette's order, then audio's tint.
-    const fn colors(&self) -> [Rgb; 21] {
+    const fn colors(&self) -> [Rgb; 24] {
         [
             self.ground,
             self.surface,
@@ -220,6 +228,9 @@ impl Theme {
             self.technique,
             self.recipe,
             self.lesson,
+            self.code_keyword,
+            self.code_string,
+            self.code_number,
             self.audio,
         ]
     }
@@ -304,12 +315,15 @@ pub const DARK: Theme = Theme {
     technique: palette::TECHNIQUE,
     recipe: palette::RECIPE,
     lesson: palette::LESSON,
+    code_keyword: palette::CODE_KEYWORD,
+    code_string: palette::CODE_STRING,
+    code_number: palette::CODE_NUMBER,
     audio: super::icons::tints::AUDIO,
 };
 
 /// For a light terminal, made for it rather than turned over: dark words on a warm paper white, each step of the greys
 /// as far apart as the dark theme's, words at 4.5:1 or more on every ground as dark's are, and every colour deep enough
-/// to read on white (the accent a deeper mint, the warning amber rather than yellow).
+/// to read on white (the accent a deeper mint, the warning amber rather than yellow, code's colours deeper too).
 pub const LIGHT: Theme = Theme {
     name: "light",
     ground: [0xf7, 0xf7, 0xf4],
@@ -332,6 +346,9 @@ pub const LIGHT: Theme = Theme {
     technique: [0x74, 0x48, 0xc9],
     recipe: [0xb8, 0x45, 0x7a],
     lesson: [0x96, 0x70, 0x1f],
+    code_keyword: [0x3a, 0x4f, 0xb8],
+    code_string: [0x4a, 0x6a, 0x10],
+    code_number: [0x9c, 0x2f, 0x9a],
     audio: [0x1c, 0x80, 0x8c],
 };
 
@@ -339,7 +356,7 @@ pub const LIGHT: Theme = Theme {
 /// sky blue, the warning orange, the error vermilion (a little lighter, to read at 4.5:1), the kinds of memory bluish
 /// green, reddish purple, yellow and
 /// blue, and audio's icons yellow (MIDI's, an instrument's and a plug-in's follow the note, the lesson and the
-/// technique).
+/// technique). Code's numbers are pink, which stays apart from its blue keywords as orchid doesn't.
 pub const COLOR_BLIND: Theme = Theme {
     name: "colorblind",
     selected: [0x1d, 0x32, 0x44],
@@ -353,6 +370,7 @@ pub const COLOR_BLIND: Theme = Theme {
     technique: [0xcc, 0x79, 0xa7],
     recipe: [0xf0, 0xe4, 0x42],
     lesson: [0x4c, 0x8f, 0xd6],
+    code_number: [0xf0, 0xa8, 0xd8],
     audio: [0xf0, 0xe4, 0x42],
     ..DARK
 };
@@ -812,6 +830,28 @@ mod tests {
         }
         // And the steps between the light greys as far apart as dark's (dark's: 1.61 and 1.63).
         assert!(contrast(LIGHT.faint, LIGHT.dim) >= 1.55 && contrast(LIGHT.dim, LIGHT.text) >= 1.55);
+    }
+
+    #[test]
+    fn every_theme_colours_code_apart_and_legible_on_its_band() {
+        // Keywords, strings and numbers are words on the code's band (`raised`, the hardest of the grounds to read on in
+        // both dark and light), beside the code's own bright words and its faint comments: each reads at 4.5:1, and no
+        // two are alike.
+        for theme in THEMES {
+            let code = [theme.code_keyword, theme.code_string, theme.code_number];
+            for color in code {
+                for ground in [theme.ground, theme.surface, theme.raised] {
+                    let reads = contrast(color, ground);
+                    assert!(reads >= 4.5, "{} {color:?} on {ground:?}: {reads:.2}", theme.name);
+                }
+            }
+            let shown = [theme.code_keyword, theme.code_string, theme.code_number, theme.bright, theme.faint];
+            for (at, a) in shown.iter().enumerate() {
+                for b in &shown[at + 1..] {
+                    assert_ne!(a, b, "{}", theme.name);
+                }
+            }
+        }
     }
 
     #[test]

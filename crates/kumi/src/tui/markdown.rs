@@ -1,15 +1,16 @@
-//! Markdown as terminal rows, from pulldown-cmark's events: headings, bold, italic, inline code, fenced code, lists
-//! with hanging indents, quotes, links, rules, and tables laid out to the width (each row as lines of a heading and its
-//! value where the columns won't fit). Single newlines stay line breaks, as in chat, and a blank line is a blank row.
-//! Names like Kick_01_final stay literal, and so does a `*` inside a word (2*3*4). The parser doesn't backtrack: a long
-//! line costs its length, never more.
+//! Markdown as terminal rows, from pulldown-cmark's events: headings, bold, italic, inline code, fenced code (coloured
+//! by the language its fence names, where Kumi knows it), lists with hanging indents, quotes, links, rules, and tables
+//! laid out to the width (each row as lines of a heading and its value where the columns won't fit). Single newlines
+//! stay line breaks, as in chat, and a blank line is a blank row. Names like Kick_01_final stay literal, and so does a
+//! `*` inside a word (2*3*4). The parser doesn't backtrack: a long line costs its length, never more.
 
 use std::cell::Cell;
 use std::ops::Range;
 use std::rc::Rc;
 
-use pulldown_cmark::{Alignment, Event, Options, Parser, Tag, TagEnd};
+use pulldown_cmark::{Alignment, CodeBlockKind, Event, Options, Parser, Tag, TagEnd};
 
+use super::code::{self, Language, Token, Within};
 use super::style::{palette, Rgb, Style};
 use super::width::{graphemes, text_width};
 use super::wrap::{wrap, wrap_carried, Carry, Span};
@@ -219,8 +220,9 @@ pub struct MarkdownCache {
     /// A hash of that much of the text, so a changed text is noticed.
     hash: u64,
     rows: Vec<MarkdownRow>,
-    /// The opening line of the code block the kept rows end inside: the rest is read after it.
-    fence: Option<String>,
+    /// The opening line of the code block the kept rows end inside, and where its next line begins (inside a comment,
+    /// say): the rest is read after it, from there.
+    fence: Option<(String, Within)>,
 }
 
 impl MarkdownCache {
@@ -245,19 +247,20 @@ pub fn render_markdown_with(text: &str, width: i32, base: &Rc<Style>, cache: &mu
         *cache = MarkdownCache { width, ..MarkdownCache::default() };
     }
     // Inside a code block still open, the rest is read after the block's opening line, whose rows went with its first
-    // lines: an open block's lines are drawn once each, as they come.
-    let opener = cache.fence.clone().unwrap_or_default();
+    // lines, and from where its last kept line left it: an open block's lines are drawn once each, as they come.
+    let (opener, within) = cache.fence.clone().unwrap_or_default();
     let rest = &text[cache.settled..];
     let source = if opener.is_empty() { std::borrow::Cow::Borrowed(rest) } else { std::borrow::Cow::Owned(format!("{opener}{rest}")) };
-    let rendered = Render::new(&source, width, base, streaming).run();
+    let rendered = Render { resume: within, ..Render::new(&source, width, base, streaming) }.run();
     // The blocks before the last one that began in the complete lines are done: a later line can't change them. So are
     // the complete lines of a code block still open at the end.
     let complete = source.rfind('\n').map_or(0, |at| at + 1);
     let keep = rendered.tops.iter().rev().find(|top| top.start < complete).map(|last| match &rendered.open {
         Some(open) if open.start == last.start => {
             // (not the blank row after its last newline, which is the next line's to come)
-            let row = open.lines.iter().find(|(start, _)| *start >= complete).map_or(open.end, |(_, row)| *row);
-            (complete, row, Some(open.opener.clone()))
+            let (row, within) =
+                open.lines.iter().find(|(start, ..)| *start >= complete).map_or((open.end, open.after), |(_, row, within)| (*row, *within));
+            (complete, row, Some((open.opener.clone(), within)))
         }
         _ => (last.chunk, last.row, None),
     });
@@ -297,12 +300,14 @@ struct Rendered {
 }
 
 /// A code block at the top level still open at the end: where it begins, its opening line, where each of its lines
-/// begins with the first row it took, and the row after its own.
+/// begins with the first row it took and where its language's reading of it begins, the row after its own, and where
+/// its last line left the reading.
 struct OpenFence {
     start: usize,
     opener: String,
-    lines: Vec<(usize, usize)>,
+    lines: Vec<(usize, usize, Within)>,
     end: usize,
+    after: Within,
 }
 
 /// Whether `line` closes the code block `opener` opened: a run of its fence's mark at least as long, and nothing else.
@@ -335,6 +340,10 @@ struct Render<'a> {
     rule: Rc<Style>,
     dim: Rc<Style>,
     code: Rc<Style>,
+    /// Code's keywords, strings and numbers (its comments are faint).
+    keyword: Rc<Style>,
+    string: Rc<Style>,
+    number: Rc<Style>,
     streaming: bool,
     rows: Vec<MarkdownRow>,
     around: Vec<Around>,
@@ -347,16 +356,20 @@ struct Render<'a> {
     inline: Option<Inline>,
     implicit: bool,
     inline_end: usize,
-    /// The code (or HTML) block being gathered.
+    /// The code (or HTML) block being gathered, the language its fence names, and where its first line's reading
+    /// begins: in plain code, or where the kept lines of a block still open left it (`resume`, for the first block).
     code_text: Option<String>,
+    language: Option<Language>,
+    code_from: Within,
+    resume: Within,
     table: Option<Table>,
     /// The last table drawn, while nothing came after it: its first row, how many rows it took, its rows' leads and
     /// how many rows of cells it has.
     held: Option<(usize, usize, Vec<Span>, usize)>,
     tops: Vec<Top>,
     /// A code block at the top level being drawn: its opening line, and where each of its lines begins with the first
-    /// row it took; kept as `open` when it's still open at the end.
-    fence: Option<(usize, Vec<(usize, usize)>)>,
+    /// row it took and where its reading begins; kept as `open` when it's still open at the end.
+    fence: Option<(usize, Vec<(usize, usize, Within)>)>,
     open: Option<OpenFence>,
     /// How many blocks are open around the next event.
     depth: usize,
@@ -375,6 +388,9 @@ impl<'a> Render<'a> {
             rule: Rc::new(Style::fg(palette::RULE)),
             dim: Rc::new(Style::fg(palette::DIM)),
             code: Rc::new(Style::fg(palette::BRIGHT)),
+            keyword: Rc::new(Style::fg(palette::CODE_KEYWORD)),
+            string: Rc::new(Style::fg(palette::CODE_STRING)),
+            number: Rc::new(Style::fg(palette::CODE_NUMBER)),
             streaming,
             rows: vec![],
             around: vec![],
@@ -384,6 +400,9 @@ impl<'a> Render<'a> {
             implicit: false,
             inline_end: 0,
             code_text: None,
+            language: None,
+            code_from: Within::Code,
+            resume: Within::Code,
             table: None,
             held: None,
             tops: vec![],
@@ -470,7 +489,12 @@ impl<'a> Render<'a> {
             Tag::CodeBlock(kind) => {
                 self.leaf(range.start);
                 self.code_text = Some(String::new());
-                if self.depth == 1 && matches!(kind, pulldown_cmark::CodeBlockKind::Fenced(_)) {
+                self.code_from = std::mem::take(&mut self.resume);
+                self.language = match &kind {
+                    CodeBlockKind::Fenced(info) => Language::named(info),
+                    CodeBlockKind::Indented => None,
+                };
+                if self.depth == 1 && matches!(kind, CodeBlockKind::Fenced(_)) {
                     self.fence = Some((self.line_of(range.start), vec![]));
                 }
             }
@@ -542,7 +566,7 @@ impl<'a> Render<'a> {
             }
             TagEnd::CodeBlock => {
                 let code = self.code_text.take().unwrap_or_default();
-                self.code_rows(&code);
+                let after = self.code_rows(&code);
                 // At the top level and not closed: it runs to the end, and its complete lines are done.
                 if let Some((line, lines)) = self.fence.take() {
                     let opener = &self.text[self.starts[line]..self.starts.get(line + 1).copied().unwrap_or(self.text.len())];
@@ -550,7 +574,7 @@ impl<'a> Render<'a> {
                     let closing = &self.text[self.starts[last]..self.starts.get(last + 1).copied().unwrap_or(self.text.len())];
                     if last == line || !closes(opener, closing) {
                         let end = self.rows.len();
-                        self.open = Some(OpenFence { start: self.starts[line], opener: opener.to_string(), lines, end });
+                        self.open = Some(OpenFence { start: self.starts[line], opener: opener.to_string(), lines, end, after });
                     }
                 }
                 self.after(range.end);
@@ -726,38 +750,80 @@ impl<'a> Render<'a> {
         }
     }
 
-    /// Code on a band, each line split between characters where it's longer than the room: code is never
-    /// word-wrapped, and its rows carry on with nothing between, the spaces being the code's own.
-    fn code_rows(&mut self, code: &str) {
+    /// Code on a band, coloured by its language, each line split between characters where it's longer than the room:
+    /// code is never word-wrapped, and its rows carry on with nothing between, the spaces being the code's own. Where
+    /// its last line leaves the reading: inside a comment, say, for a block still open.
+    fn code_rows(&mut self, code: &str) -> Within {
+        let mut within = self.code_from;
         if code.is_empty() {
-            return;
+            return within;
         }
         let room = (self.width - self.lead_width()).max(1);
         for (index, line) in code.strip_suffix('\n').unwrap_or(code).split('\n').enumerate() {
             // A top-level fenced block's lines follow its opening line one for one.
             if let Some((opener, lines)) = &mut self.fence {
                 if let Some(start) = self.starts.get(*opener + 1 + index) {
-                    lines.push((*start, self.rows.len()));
+                    lines.push((*start, self.rows.len(), within));
                 }
             }
-            let mut pieces = vec![String::new()];
+            let mut pieces: Vec<Vec<Span>> = vec![vec![]];
             let mut used = 0;
-            for grapheme in graphemes(line) {
-                let cells = text_width(grapheme);
-                if used + cells > room && !pieces.last().is_some_and(String::is_empty) {
-                    pieces.push(String::new());
-                    used = 0;
+            for (text, style) in self.colored(line, &mut within) {
+                for grapheme in graphemes(text) {
+                    let cells = text_width(grapheme);
+                    if used + cells > room && !pieces.last().is_some_and(Vec::is_empty) {
+                        pieces.push(vec![]);
+                        used = 0;
+                    }
+                    let piece = pieces.last_mut().expect("a piece");
+                    match piece.last_mut() {
+                        Some(last) if Rc::ptr_eq(&last.style, &style) => last.text.push_str(grapheme),
+                        _ => piece.push(Span::new(grapheme, &style)),
+                    }
+                    used += cells;
                 }
-                pieces.last_mut().expect("a piece").push_str(grapheme);
-                used += cells;
             }
-            for (index, piece) in pieces.into_iter().enumerate() {
+            for (index, mut piece) in pieces.into_iter().enumerate() {
+                if piece.is_empty() {
+                    // An empty line is an empty run of code.
+                    piece.push(Span::new("", &self.code));
+                }
                 let (mut spans, lead) = self.leads();
-                spans.push(Span::new(piece, &self.code));
+                spans.extend(piece);
                 let carry = (index > 0).then_some(Carry { lead, space: false });
                 self.rows.push(MarkdownRow { spans: spans.into(), bg: Some(palette::RAISED), carry });
             }
         }
+        within
+    }
+
+    /// `line`'s pieces in their colours, read from `within` and leaving it where the line does: its language's comments
+    /// (faint), strings, numbers and keywords, and the rest in code's own bright colour.
+    fn colored<'l>(&self, line: &'l str, within: &mut Within) -> Vec<(&'l str, Rc<Style>)> {
+        let Some(language) = self.language else {
+            return vec![(line, self.code.clone())];
+        };
+        let (runs, next) = code::line(language, line, *within);
+        *within = next;
+        let mut pieces = vec![];
+        let mut at = 0;
+        for (range, token) in runs {
+            if range.start > at {
+                pieces.push((&line[at..range.start], self.code.clone()));
+            }
+            let style = match token {
+                Token::Comment => &self.faint,
+                Token::String => &self.string,
+                Token::Number => &self.number,
+                Token::Keyword => &self.keyword,
+            };
+            pieces.push((&line[range.clone()], style.clone()));
+            at = range.end;
+        }
+        if at < line.len() {
+            pieces.push((&line[at..], self.code.clone()));
+        }
+        pieces
     }
 }
 
