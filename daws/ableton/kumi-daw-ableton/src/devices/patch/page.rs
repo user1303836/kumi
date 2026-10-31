@@ -3,6 +3,8 @@
 //! outlet is for, its messages, its attributes and what to see also). A page is read from this machine's Max when
 //! it's asked for; none is carried in Kumi.
 
+use std::path::{Component, Path, PathBuf};
+
 use super::catalog::catalog;
 use super::reference::{atoms, Object, Reference};
 
@@ -286,6 +288,14 @@ fn count(n: usize, what: &str) -> String {
 }
 
 /// What this machine's Max says of the objects boxes' texts name, a page for each.
+/// Where a page kept with the reference is, in its C74 folder: folders and a file within it, never the folder itself or
+/// a way out of it (a reference.json changed since Kumi wrote it, say). None for no page.
+fn within(root: &Path, page: &str) -> Option<PathBuf> {
+    let page = Path::new(page);
+    let inside = page.components().all(|part| matches!(part, Component::Normal(_)));
+    (inside && !page.as_os_str().is_empty()).then(|| root.join(page))
+}
+
 pub fn describe_all(reference: &Reference, texts: &[String]) -> String {
     texts.iter().map(|text| describe(reference, text)).collect::<Vec<_>>().join("\n\n")
 }
@@ -302,10 +312,7 @@ pub fn describe(reference: &Reference, text: &str) -> String {
         return if near.is_empty() { format!("No [{class}] in this Max.") } else { format!("No [{class}] in this Max. Nearest: {names}.") };
     };
     let read_page = |object: &Object| {
-        Some(&object.page)
-            .filter(|path| !path.is_empty())
-            .and_then(|path| std::fs::read_to_string(reference.root.join(path)).ok())
-            .and_then(|text| read(&text))
+        within(&reference.root, &object.page).and_then(|path| std::fs::read_to_string(path).ok()).and_then(|text| read(&text))
     };
     let own = read_page(object);
     // An object with modes ([zl lookup]) has a page for each that this Max writes as its own name (zl.lookup): one whose
@@ -681,6 +688,26 @@ mod tests {
             "boxes": [instance("pipe 100", 2, 1), instance("pipe 0 100", 2, 1), instance("pipe 0 0 100", 3, 2)] } });
         std::fs::write(c74.path().join("help").join("pipe.maxhelp"), help.to_string()).unwrap();
         c74
+    }
+
+    #[test]
+    fn a_kept_page_is_read_from_inside_maxs_folder_alone() {
+        let base = tempfile::tempdir().unwrap();
+        let c74 = base.path().join("C74");
+        let pages = c74.join("docs").join("refpages").join("max-ref");
+        std::fs::create_dir_all(&pages).unwrap();
+        std::fs::write(pages.join("pipe.maxref.xml"), PAGE).unwrap();
+        let outside = base.path().join("outside.maxref.xml");
+        std::fs::write(&outside, PAGE.replace("Hold numbers back", "Read from outside")).unwrap();
+        let mut reference = learn(&c74);
+        assert!(describe(&reference, "pipe").contains("Hold numbers back"), "its own page, as learned");
+        for kept in ["../outside.maxref.xml".to_string(), outside.display().to_string()] {
+            reference.objects.get_mut("pipe").unwrap().page = kept.clone();
+            let told = describe(&reference, "pipe");
+            assert!(!told.contains("Read from outside"), "{kept}: {told}");
+        }
+        assert_eq!(within(&c74, ""), None, "no page");
+        assert_eq!(within(&c74, "docs/x.maxref.xml"), Some(c74.join("docs/x.maxref.xml")));
     }
 
     #[test]
