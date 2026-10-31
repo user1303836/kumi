@@ -526,13 +526,19 @@ fn sources(c74: &Path) -> Sources {
 /// How Kumi learns the reference: a new way is learned anew, as a new Max is.
 const LEARNER: u32 = 10;
 
-/// What the reference is learned from in a Max's C74 folder, and how, as one line: a new Max reads differently.
+/// What the reference is learned from in a Max's C74 folder, and how, as one line: a new Max reads differently. Its
+/// newest file's time is in it, so a Max updated with as many files and bytes as before is learned anew too.
 pub fn fingerprint(c74: &Path) -> String {
     let found = sources(c74);
     let all = found.pages.iter().chain(&found.help).chain(&found.abstractions);
-    let bytes: u64 = all.filter_map(|file| std::fs::metadata(file).ok()).map(|meta| meta.len()).sum();
+    let (mut bytes, mut newest) = (0u64, 0u128);
+    for meta in all.filter_map(|file| std::fs::metadata(file).ok()) {
+        bytes += meta.len();
+        let modified = meta.modified().ok().and_then(|when| when.duration_since(std::time::UNIX_EPOCH).ok());
+        newest = newest.max(modified.map_or(0, |since| since.as_nanos()));
+    }
     format!(
-        "learner {LEARNER}: {} pages, {} help patchers, {} abstractions, {bytes} bytes",
+        "learner {LEARNER}: {} pages, {} help patchers, {} abstractions, {bytes} bytes, newest {newest}",
         found.pages.len(),
         found.help.len(),
         found.abstractions.len()
@@ -977,6 +983,22 @@ mod tests {
         }
         let overflowing = Count::Arguments { plus: usize::MAX - 2, bare: 1 };
         assert_eq!(overflowing.of(&["a".into(), "b".into(), "c".into()]), MOST_PORTS, "a count from a broken help file can't overflow");
+    }
+
+    #[test]
+    fn a_max_updated_with_as_many_files_and_bytes_as_before_is_learned_anew() {
+        let c74 = tempfile::tempdir().unwrap();
+        let pages = c74.path().join("docs").join("refpages").join("max-ref");
+        std::fs::create_dir_all(&pages).unwrap();
+        let page = pages.join("thing.maxref.xml");
+        std::fs::write(&page, r#"<c74object name="thing" module="max"><digest>One</digest></c74object>"#).unwrap();
+        let before = fingerprint(c74.path());
+        assert_eq!(fingerprint(c74.path()), before, "the same Max is the same");
+        // Rewritten by an update to as many bytes, later.
+        std::fs::write(&page, r#"<c74object name="thing" module="max"><digest>Two</digest></c74object>"#).unwrap();
+        let later = std::time::SystemTime::now() + std::time::Duration::from_secs(60);
+        std::fs::File::options().write(true).open(&page).unwrap().set_modified(later).unwrap();
+        assert_ne!(fingerprint(c74.path()), before);
     }
 
     #[test]
