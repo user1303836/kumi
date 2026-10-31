@@ -1337,6 +1337,20 @@ fn copy_saved_at(name: &str, prefix: &str, suffix: &str) -> Option<i64> {
         .ok()
 }
 
+/// Whether a file named `name` is one of Kumi's copies of a project, as `copy_beside` names them (in any case, as a walk
+/// that lowers names gives them): the library leaves them out of the producer's projects. A copy the producer renamed
+/// ("Song (Kumi copy … +0900) final.rpp") is theirs.
+pub fn is_kumi_copy(name: &str) -> bool {
+    const MARK: &str = " (kumi copy ";
+    let lower = name.to_lowercase();
+    let (Some(at), Some(close)) = (lower.rfind(MARK), lower.rfind(')')) else { return false };
+    // After the time, only the project's extension, or none.
+    let extension = &lower[close + 1..];
+    let only_extension = extension.is_empty()
+        || extension.strip_prefix('.').is_some_and(|rest| !rest.is_empty() && rest.chars().all(|c| c.is_ascii_alphanumeric()));
+    close > at && only_extension && copy_saved_at(&lower, &lower[..at + MARK.len()], &lower[close..]).is_some()
+}
+
 /// A copy of the project's saved file beside it, in its own folder (so a REAPER project's media, which it names
 /// relative to that folder, is found from the copy too), named by when it was saved in the producer's local time (with
 /// its offset, so copies made in another time zone still sort by when they were saved): one saved version is copied once
@@ -1641,5 +1655,31 @@ impl<S: RefScheme + 'static> KernelTool for UndoTool<S> {
         // Discard is the own DAWs' (their schema offers it); Live's undo_change never reads it.
         let discard = input.get("discard") == Some(&Value::Bool(true));
         undo_change_with(&self.engine.history, &input, signal, discard).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn kumis_copies_are_known_by_their_names_and_nothing_else_is() {
+        for (name, copy) in [
+            ("Song (Kumi copy 2026-10-20 14.05.31 +0900).rpp", true),
+            ("Song (Kumi copy 2026-10-20 14.05.31).xrns", true),
+            ("Demo (Kumi copy x) (Kumi copy 2026-10-20 14.05.31 -0500).RPP", true),
+            ("song (kumi copy 2026-10-20 14.05.31 +0900).rpp", true),
+            ("SONG (KUMI COPY 2026-10-20 14.05.31 +0900).RPP", true),
+            ("Notes (Kumi copy 2026-10-20 14.05.31 +0900)", true),
+            ("Song (Kumi copy 2026-10-20 14.05.31 +0900) final.rpp", false),
+            ("Song (Kumi copy 2026-10-20 14.05.31) final.rpp", false),
+            ("Song (Kumi copy 2026-10-20 14.05.31 +0900).rpp.part", false),
+            ("Song.rpp", false),
+            ("My (Kumi copy) idea.rpp", false),
+            ("Song (Kumi copy 2026-10-20).rpp", false),
+            ("Song (Kumi copy 2026-10-20 14.05.31 +0900", false),
+        ] {
+            assert_eq!(is_kumi_copy(name), copy, "{name}");
+        }
     }
 }
