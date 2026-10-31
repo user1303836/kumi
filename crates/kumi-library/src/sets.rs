@@ -84,6 +84,9 @@ pub struct SetSummary {
     /// The DAW whose project it is; missing for Live's Sets (never written for them).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub daw: Option<kumi_types::daw::DawId>,
+    /// What saved another DAW's project, with its version ("REAPER 7.82"); Live's is `live`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub made_in: Option<String>,
 }
 static DEVICE_NAMES: LazyLock<std::collections::HashMap<String, String>> =
     LazyLock::new(|| serde_json::from_str(include_str!("device-names.json")).expect("device names"));
