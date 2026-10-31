@@ -1337,12 +1337,18 @@ fn copy_saved_at(name: &str, prefix: &str, suffix: &str) -> Option<i64> {
         .ok()
 }
 
-/// Whether a file named `name` is one of Kumi's copies of a project, as `copy_beside` names them: the library leaves them out
-/// of the producer's projects.
+/// Whether a file named `name` is one of Kumi's copies of a project, as `copy_beside` names them (in any case, as a walk
+/// that lowers names gives them): the library leaves them out of the producer's projects. A copy the producer renamed
+/// ("Song (Kumi copy … +0900) final.rpp") is theirs.
 pub fn is_kumi_copy(name: &str) -> bool {
-    const MARK: &str = " (Kumi copy ";
-    let (Some(at), Some(close)) = (name.rfind(MARK), name.rfind(')')) else { return false };
-    close > at && copy_saved_at(name, &name[..at + MARK.len()], &name[close..]).is_some()
+    const MARK: &str = " (kumi copy ";
+    let lower = name.to_lowercase();
+    let (Some(at), Some(close)) = (lower.rfind(MARK), lower.rfind(')')) else { return false };
+    // After the time, only the project's extension, or none.
+    let extension = &lower[close + 1..];
+    let only_extension = extension.is_empty()
+        || extension.strip_prefix('.').is_some_and(|rest| !rest.is_empty() && rest.chars().all(|c| c.is_ascii_alphanumeric()));
+    close > at && only_extension && copy_saved_at(&lower, &lower[..at + MARK.len()], &lower[close..]).is_some()
 }
 
 /// A copy of the project's saved file beside it, in its own folder (so a REAPER project's media, which it names
@@ -1662,6 +1668,12 @@ mod tests {
             ("Song (Kumi copy 2026-10-20 14.05.31 +0900).rpp", true),
             ("Song (Kumi copy 2026-10-20 14.05.31).xrns", true),
             ("Demo (Kumi copy x) (Kumi copy 2026-10-20 14.05.31 -0500).RPP", true),
+            ("song (kumi copy 2026-10-20 14.05.31 +0900).rpp", true),
+            ("SONG (KUMI COPY 2026-10-20 14.05.31 +0900).RPP", true),
+            ("Notes (Kumi copy 2026-10-20 14.05.31 +0900)", true),
+            ("Song (Kumi copy 2026-10-20 14.05.31 +0900) final.rpp", false),
+            ("Song (Kumi copy 2026-10-20 14.05.31) final.rpp", false),
+            ("Song (Kumi copy 2026-10-20 14.05.31 +0900).rpp.part", false),
             ("Song.rpp", false),
             ("My (Kumi copy) idea.rpp", false),
             ("Song (Kumi copy 2026-10-20).rpp", false),
