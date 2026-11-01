@@ -104,10 +104,10 @@ impl McpHost {
         reference: &str,
         identity: &str,
         context: &LiveOperationContext,
-        _expected_fingerprint: Option<&str>,
+        expected_fingerprint: Option<&str>,
         recovery_record: Option<&TransactionRecord>,
         allow_absent: bool,
-        _expected_notes_revision: Option<&str>,
+        expected_notes_revision: Option<&str>,
     ) -> Result<(), LiveError> {
         let snapshot = self.views.view_for(Some(context), &[json!(reference)], None, &[]).await?;
         // Arrangement clip refs are positional: a clip added or deleted before it moves it to another ref, so it's
@@ -121,9 +121,16 @@ impl McpHost {
         };
         let located = self.clip_row(&snapshot, &at)?;
         // Live's ownership of a made clip (the remote adapter's cleanup token, the Remote Script's ledger row) is keyed
-        // by the ref it was made at, so a delete at any other ref would be refused there: a clip that moved is refused
-        // here, clearly and with nothing sent.
-        if at != reference {
+        // by the ref it was made at, so a delete at any other ref would be refused there. An Arrangement clip moves to
+        // another ref whenever a clip before it on its track is added or removed (Kumi's undo of a later change makes
+        // one again, say): it goes where it is now, by its identity as the producer's own delete would, when it's still
+        // the clip as it was made (its fingerprint at the ref it was made at, and its notes when they were kept). Any
+        // other clip that moved is refused here, clearly and with nothing sent.
+        let moved = at != reference;
+        if moved
+            && !(located.arrangement
+                && self.as_made(&located.clip, reference, &at, expected_fingerprint, expected_notes_revision, context).await?)
+        {
             return Err(LiveError::error(if located.arrangement {
                 "the clip moved since it was made (a clip before it was added or removed): delete it in Live"
             } else {
@@ -131,16 +138,16 @@ impl McpHost {
             }));
         }
         let operation = if located.arrangement { "arrangement.clip.delete" } else { "clip.delete" };
-        let authority = if located.arrangement {
-            self.arrangement_clip_authority(&snapshot, reference)?
-        } else {
-            self.clip_authority(&snapshot, reference)?
-        };
+        let authority =
+            if located.arrangement { self.arrangement_clip_authority(&snapshot, &at)? } else { self.clip_authority(&snapshot, &at)? };
         let mut args = json!({
-        "ref":reference}
+        "ref":at}
         );
         for (k, v) in authority.as_object().unwrap() {
             args[k] = v.clone();
+        }
+        if moved {
+            args["explicitDeletion"] = json!(true);
         }
 
         if let Some(record) = recovery_record {
@@ -154,6 +161,29 @@ impl McpHost {
             return Err(LiveError::error("owned clip cleanup was not confirmed"));
         }
         Ok(())
+    }
+    /// Whether the Arrangement clip `clip`, found at `at`, is as it was made at `made_at`: its fingerprint there (a
+    /// clip moving to another ref changes only its ref), and its notes as they were, when the change kept them. A
+    /// change that kept no fingerprint, or no notes of a MIDI clip, can't say.
+    async fn as_made(
+        &self,
+        clip: &Value,
+        made_at: &str,
+        at: &str,
+        fingerprint: Option<&str>,
+        notes_revision: Option<&str>,
+        context: &LiveOperationContext,
+    ) -> Result<bool, LiveError> {
+        let Some(fingerprint) = fingerprint else { return Ok(false) };
+        let mut then = clip.clone();
+        then["ref"] = json!(made_at);
+        if capture_object_fingerprint(&then)? != fingerprint {
+            return Ok(false);
+        }
+        match notes_revision {
+            Some(revision) => Ok(Self::notes_revision(&self.clip_notes_async(at, Some(context)).await?)? == revision),
+            None => Ok(clip["kind"] != "midi"),
+        }
     }
     pub async fn dispatch_session_capture_tool(
         &self,
