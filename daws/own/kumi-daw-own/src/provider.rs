@@ -28,7 +28,7 @@ use kumi_daw::{
         BridgeCommand, BridgeRollbackStep, BridgeState, DawProvider, DawSession, EnableStep, Installed, RemovedBridge, Toggle, ToggleWords,
         WatchWords,
     },
-    setup::{DawSetup, SetupSession},
+    setup::{DawSetup, Reopens, SetupSession},
 };
 use kumi_library::daws::LibrarySources;
 use kumi_types::{
@@ -85,6 +85,8 @@ pub struct Own {
     /// The DAW's other folders where a copy of Kumi's bridge may be: places for the lifecycle to follow a copy of Kumi's
     /// to, and to take it out of.
     pub elsewhere: fn(&Env) -> Vec<Target>,
+    /// What the DAW whose bridge goes at this target opens by itself as it starts, from its own settings.
+    pub reopens: fn(&Target) -> Reopens,
     /// Why the DAW here can't load the bridge at a path, when it can't (a 32-bit REAPER).
     pub unloadable: fn(&Own, &Env, &Path) -> Option<String>,
     /// Whether this user has used the DAW: it has made its own folder.
@@ -897,6 +899,10 @@ impl DawSetup for OwnSetup {
     async fn install(&self) -> Result<String, String> {
         let seen = self.seen.borrow().clone();
         self.own().install_in(&self.env, seen).map(|put| put.version)
+    }
+    /// The DAW setup saw open is the one that says: another install's settings don't speak for it.
+    fn reopens(&self) -> Reopens {
+        self.seen.borrow().as_ref().map_or(Reopens::Unknown, |target| (self.own.reopens)(target))
     }
     async fn start(&self, app: Option<String>, _set: Option<String>) -> bool {
         // An app setup didn't find ("") is looked for again.

@@ -171,9 +171,14 @@ async fn my_sets(profile: &DawProfile, options: LibraryToolsOptions, access: &Rc
 
 #[tokio::test]
 async fn my_sets_finds_a_daws_own_projects_only_in_it_and_lives_sets_only_in_live() {
+    // (a whole path as this system writes it: Windows resolves "/Music/…" onto a drive, which isn't what's kept, and my_sets
+    // compares a path as resolved)
+    let music = if cfg!(windows) { "C:\\Music" } else { "/Music" };
+    let at = |file: &str| format!("{music}{}{file}", std::path::MAIN_SEPARATOR);
+    let tracker = at("Tracker Song.song");
     let access = Rc::new(Learned(vec![
         entry(
-            "/Music/Night Drive.als",
+            &at("Night Drive.als"),
             SetSummary {
                 name: "Night Drive".into(),
                 tempo: Some(124.),
@@ -183,7 +188,7 @@ async fn my_sets_finds_a_daws_own_projects_only_in_it_and_lives_sets_only_in_liv
             },
         ),
         entry(
-            "/Music/Tracker Song.song",
+            &tracker,
             SetSummary {
                 name: "Tracker Song".into(),
                 tempo: Some(128.),
@@ -196,7 +201,7 @@ async fn my_sets_finds_a_daws_own_projects_only_in_it_and_lives_sets_only_in_liv
                 ..Default::default()
             },
         ),
-        entry("/Music/Other.rpp", SetSummary { name: "Other".into(), daw: Some(DawId::Reaper), ..Default::default() }),
+        entry(&at("Other.rpp"), SetSummary { name: "Other".into(), daw: Some(DawId::Reaper), ..Default::default() }),
     ]));
     let songs = LibraryToolsOptions { projects: Some(&SONG), ..Default::default() };
     let names =
@@ -205,7 +210,7 @@ async fn my_sets_finds_a_daws_own_projects_only_in_it_and_lives_sets_only_in_liv
     let (found, _) = my_sets(&DawProfile::RENOISE, songs.clone(), &access, json!({})).await.unwrap();
     assert_eq!(names(&found), ["Tracker Song"]);
     assert_eq!(found["known"], 1);
-    for name in ["tracker song", "Tracker Song.song", "/Music/Tracker Song.song"] {
+    for name in ["tracker song", "Tracker Song.song", tracker.as_str()] {
         let (song, error) = my_sets(&DawProfile::RENOISE, songs.clone(), &access, json!({"set": name})).await.unwrap();
         assert!(!error, "{name}: {song}");
         assert_eq!(

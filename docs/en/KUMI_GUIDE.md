@@ -265,8 +265,14 @@ its extension (or tool) in place and opens the DAW.
 
 - **The DAW is open:** it loads Kumi's bridge only as it starts, and Kumi never
   quits it for you. Choose **I'll quit it** and quit it yourself (it asks to
-  save first); Kumi puts the bridge in and opens it again. A project or song
-  you saved is in the DAW's list of recent ones.
+  save first); Kumi puts the bridge in and opens it again. What comes back is
+  the DAW's own start-up setting:
+  - REAPER, as it's set at first: every project tab you had open.
+  - REAPER set to open the last project: the project you had in front. Others
+    are in its list of recent projects.
+  - REAPER set to start with a new project: a new project, as you chose. Saved
+    ones are in its list of recent projects.
+  - Renoise: a song you saved is in its list of recent songs.
 - **It isn't installed:** Kumi says where to get it (reaper.fm, renoise.com);
   **Look again** checks once it's there. An older REAPER or Renoise that's open
   is named, and stays open.
@@ -324,8 +330,8 @@ Kumi about this**), Live's own commands and Live's manual.
 
 **Versions.** Each Kumi release ships with an extension and a tool, which
 `kumi update` brings up to date ([updating](#updating-reporting-and-uninstalling)).
-Kumi 1.24.35 to 1.24.41 with REAPER extension 0.1.8, 1.24.10 to 1.24.34 with 0.1.7, 1.24.0 to 1.24.9 with 0.1.6, 1.23.3 with 0.1.5, 1.23.2 with 0.1.4, 1.23.1 with 0.1.3, 1.21.2 to 1.23.0 with 0.1.2, 1.21.0 to 1.21.1 with 0.1.1, 1.20.0 with 0.1.0.
-Kumi 1.24.35 to 1.24.41 with Renoise tool 1.0.7, 1.24.10 to 1.24.34 with 1.0.6, 1.24.0 to 1.24.9 with 1.0.5, 1.23.3 with 1.0.4, 1.23.2 with 1.0.3, 1.23.1 with 1.0.2, 1.21.0 to 1.23.0 with 1.0.1, 1.20.0 with 1.0.0.
+Kumi 1.24.35 to 1.24.42 with REAPER extension 0.1.8, 1.24.10 to 1.24.34 with 0.1.7, 1.24.0 to 1.24.9 with 0.1.6, 1.23.3 with 0.1.5, 1.23.2 with 0.1.4, 1.23.1 with 0.1.3, 1.21.2 to 1.23.0 with 0.1.2, 1.21.0 to 1.21.1 with 0.1.1, 1.20.0 with 0.1.0.
+Kumi 1.24.35 to 1.24.42 with Renoise tool 1.0.7, 1.24.10 to 1.24.34 with 1.0.6, 1.24.0 to 1.24.9 with 1.0.5, 1.23.3 with 1.0.4, 1.23.2 with 1.0.3, 1.23.1 with 1.0.2, 1.21.0 to 1.23.0 with 1.0.1, 1.20.0 with 1.0.0.
 
 ## Working with Kumi
 
