@@ -16,6 +16,9 @@ use kumi_daw_ableton::{
 use kumi_types::contracts::*;
 use kumi_types::errors::RuntimeError;
 use serde_json::{json, Value};
+/// make_device as it was before it opened devices that are already there (#353).
+#[path = "../support/device_from_existing.rs"]
+mod device_from_existing;
 #[path = "../support/plugin_catalog.rs"]
 mod plugin_catalog;
 use std::{cell::Cell, rc::Rc};
@@ -129,7 +132,10 @@ async fn complete_public_tool_catalog_matches_source_versions_capabilities_and_s
             integration.connection.tools().unwrap().refresh(Signal::new()).await.unwrap();
             integration.connection.epoch.set(Some(7.));
             let definitions:Vec<_>=integration.definitions().iter().map(|tool| {
+                // Kumi's deliberate changes since the source, each set aside for its own tool only: the plug-in tool's file
+                // actions, and make_device's from and remove (#353).
                 let (description,schema) = if tool.name()=="plugin" { plugin_catalog::legacy(tool.description(),&json!(tool.input_schema())) }
+                    else if tool.name()=="make_device" { device_from_existing::legacy(tool.description(),&json!(tool.input_schema())) }
                     else { (tool.description().to_string(),json!(tool.input_schema())) };
                 crate::pads_in_order::legacy_json(&json!({"name":tool.name(),"description":description,"inputSchema":schema,"stream":tool.stream(Signal::new(),Rc::new(||{})).is_some()}))
             }).collect();
