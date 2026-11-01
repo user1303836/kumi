@@ -704,7 +704,7 @@ local function on_structural(reason, kind, op, owner, token)
     end
   end
   bump_epoch(reason, true, BREAKS[kind])
-  local placed = op
+  local placed, own = op, false
   -- (what moved, for the places a change keeps: a track's devices, the pool, the instruments; anything not told is a gap)
   if kind == "devices" and token and token.dlog then
     places.note(token.dlog, op)
@@ -712,8 +712,9 @@ local function on_structural(reason, kind, op, owner, token)
     places.note(b.plog, op)
   elseif kind == "instruments" then
     -- (M4 n-devices: Kumi's own load of an instrument file into slot i is told as an insert after it and a remove of it, but
-    -- the slot keeps its instrument (pattern notes keep playing it, measured in 3.5.4): no delete in the places log)
-    local r, own = b.replacing, false
+    -- the slot keeps its instrument (pattern notes keep playing it, measured in 3.5.4): no delete in the places log, and none
+    -- in the journal below)
+    local r = b.replacing
     if r and r.deadline and os.clock() > r.deadline then b.replacing, r = nil, nil end
     if r and op then
       if r.insert and op.type == "insert" and op.index == r.i + 1 then
@@ -735,8 +736,9 @@ local function on_structural(reason, kind, op, owner, token)
     lists.devices, lists.samples, lists.phrases = token.devices, token.samples, token.phrases
     lists.modsets, lists.chains, lists.moddevices, lists.chaindevices = token.modsets, token.chains, token.devices, token.devices
   end
-  -- (n-instruments: the journal's places of instruments and what is in them move with the list's operations)
-  if op and INSTRUMENT_JOURNAL[kind] then
+  -- (n-instruments: the journal's places of instruments and what is in them move with the list's operations; #399 N-S5: not
+  -- Kumi's own load's pair, or its remove would drop the entries of Kumi's changes inside the instrument the slot keeps)
+  if op and INSTRUMENT_JOURNAL[kind] and not own then
     local scope = instrument_scope(kind, token)
     if scope then
       changes.journal_list_event(b.journal, INSTRUMENT_JOURNAL[kind], scope, placed.type, placed.index, placed.index2, song:is_undo_redoing(),
