@@ -99,12 +99,29 @@ fn canonical(value: &Value) -> Value {
         v => v.clone(),
     }
 }
+/// A value with `save` set aside from what a watch says: save_recipe's input, given with what changed since #768, after
+/// the port. Only that key is dropped, and only from a watch's answer (text holding an object that starts with `watched`).
+/// Everything else compares exactly.
+fn without_watch_save(value: &Value) -> Value {
+    match value {
+        Value::Object(map) => Value::Object(map.iter().map(|(key, value)| (key.clone(), without_watch_save(value))).collect()),
+        Value::Array(items) => Value::Array(items.iter().map(without_watch_save).collect()),
+        Value::String(text) if text.starts_with("{\"watched\":") => match serde_json::from_str::<Value>(text) {
+            Ok(Value::Object(mut said)) => {
+                said.shift_remove("save");
+                Value::String(stringify(&Value::Object(said)))
+            }
+            _ => value.clone(),
+        },
+        other => other.clone(),
+    }
+}
 fn normalized(value: &Value) -> String {
     let home = kumi_library::sources::homedir();
     let value = fixture_paths::map_strings(value, &|text| fixture_paths::normalize_root(text, &home, "<home>"));
     let value = FIXTURE_ROOT
         .with(|root| fixture_paths::map_strings(&value, &|text| fixture_paths::normalize_root(text, root.borrow().as_str(), "<fixture>")));
-    let text = stringify(&canonical(&change_pictures::without_change_pictures(&value)));
+    let text = stringify(&canonical(&change_pictures::without_change_pictures(&without_watch_save(&value))));
     let text = regex::Regex::new(r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}").unwrap().replace_all(&text, "<uuid>");
     regex::Regex::new(r"\bc\d+\b").unwrap().replace_all(&text, "<change>").into_owned()
 }
@@ -318,6 +335,12 @@ async fn replay() {
                 json!({"changes":changes,"changesThisTurn":history.changes_this_turn.get(),"refs":book.refs.iter().collect::<Vec<_>>(),"known":book.known.iter().collect::<Vec<_>>(),"names":names,"cursors":book.cursors.iter().collect::<Vec<_>>(),"tempo":observer.tempo.get(),"lease":connection.lease.get(),"found":parameters.fast_found.borrow().iter().collect::<Vec<_>>()})
             };
             let label = format!("{} case {case_index} step {index}", case["label"]);
+            // What the comparison sets aside from a watch's answer: it's there when something changed, and only then.
+            if let Some(text) = value["text"].as_str().filter(|text| text.starts_with("{\"watched\":")) {
+                let said: Value = serde_json::from_str(text).unwrap();
+                let changed = said["changes"].as_array().is_some_and(|changes| !changes.is_empty());
+                assert_eq!(said["save"].is_string(), changed, "{label}: {text}");
+            }
             eq(&value, &case["results"][index]["value"], &label);
             eq(&state, &case["results"][index]["state"], &format!("{label} state"));
         }
@@ -631,6 +654,26 @@ fn oracle_comparisons_set_aside_only_a_change_records_picture() {
     assert_ne!(normalized(&pictured), normalized(&other));
     // and a "picture" that isn't on a change record stays.
     assert_ne!(normalized(&json!({"picture":1})), normalized(&json!({})));
+}
+
+#[test]
+fn oracle_comparisons_set_aside_only_what_a_watch_says_to_save() {
+    let watch = |added: &str, save: bool| {
+        let mut said = json!({"watched":"0 s","changes":[{"added":added}]});
+        if save {
+            said["save"] = json!("save_recipe takes its steps");
+        }
+        json!({"isError":false,"text":stringify(&said)})
+    };
+    // The same watch with and without it compares equal;
+    assert_eq!(normalized(&watch("track", true)), normalized(&watch("track", false)));
+    // any other difference still fails, whether it's there or not;
+    assert_ne!(normalized(&watch("track", true)), normalized(&watch("clip", false)));
+    assert_ne!(normalized(&watch("track", true)), normalized(&watch("clip", true)));
+    // and a "save" in anything but a watch's answer stays.
+    assert_ne!(normalized(&json!({"save":1})), normalized(&json!({})));
+    let answer = |said: Value| json!({"isError":false,"text":stringify(&said)});
+    assert_ne!(normalized(&answer(json!({"made":"Arp","save":1}))), normalized(&answer(json!({"made":"Arp"}))));
 }
 
 /// A bridge that answers each preview and apply as the test says (`answer`), and lists the tools the test names: any other
