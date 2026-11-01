@@ -256,9 +256,6 @@ fn unwritable(folder: &Path, error: &std::io::Error) -> String {
     }
 }
 
-fn io_error(error: std::io::Error) -> RuntimeError {
-    RuntimeError::plain(error.to_string())
-}
 /// The name a device is saved under.
 struct Naming {
     /// The name asked for: a device this conversation made by it is replaced.
@@ -290,8 +287,10 @@ async fn put_new(temporary: &Path, file: &Path) -> std::io::Result<()> {
     match tokio::fs::hard_link(temporary, file).await {
         Ok(()) => Ok(()),
         Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => Err(error),
-        Err(_) if tokio::fs::try_exists(file).await.unwrap_or(true) => Err(std::io::ErrorKind::AlreadyExists.into()),
-        Err(_) => tokio::fs::rename(temporary, file).await,
+        Err(_) => match tokio::fs::try_exists(file).await? {
+            true => Err(std::io::ErrorKind::AlreadyExists.into()),
+            false => tokio::fs::rename(temporary, file).await,
+        },
     }
 }
 
@@ -385,12 +384,9 @@ impl DeviceTool {
             }
         }
         .await;
-        let removed = tokio::fs::remove_file(&temporary).await;
-        if let Err(error) = removed {
-            if error.kind() != std::io::ErrorKind::NotFound {
-                return Err(io_error(error));
-            }
-        }
+        // The temporary file goes as best it can: after a hard link it's still there, and a scanner holding it open (on
+        // Windows) doesn't undo a device that's written.
+        let _ = tokio::fs::remove_file(&temporary).await;
         if let Err(error) = written {
             if error.kind() == std::io::ErrorKind::AlreadyExists {
                 return Ok(Err(ToolResult::error(format!(

@@ -34,6 +34,9 @@ const MOST_BYTES: u64 = 256 * 1024 * 1024;
 /// How many folders and device files of the User Library are looked through for a device by its name (samples and other
 /// files don't count).
 const MOST_LOOKED: usize = 50_000;
+/// How many entries of any kind (samples too) the search reads at most, so a library of millions of files is never
+/// read whole for one name.
+const MOST_ENTRIES: usize = 1_000_000;
 /// The most of a device's patch the answer that opens it says, in characters.
 const MOST_SAID: usize = 60_000;
 /// The most of what a device says it was made from that's passed on, in characters.
@@ -87,9 +90,15 @@ fn find_within(from: &str, user_library: &Path, most: usize) -> Result<PathBuf, 
         return if file.is_file() { Ok(file) } else { Err(format!("from {from}: the User Library has no device there.")) };
     }
     if from.contains(['/', '\\']) || Path::new(from).is_absolute() {
-        let path = Path::new(from);
-        local_path(path).map_err(|why| format!("from {from}: {why}."))?;
-        return if path.is_file() { Ok(path.to_path_buf()) } else { Err(format!("from: there's no device file at {from}.")) };
+        // A path from the home folder, as the producer may say one ("~/Music/…").
+        let home = from.strip_prefix("~/").or_else(|| from.strip_prefix("~\\")).and_then(|rest| Some(home::home_dir()?.join(rest)));
+        let path = home.unwrap_or_else(|| PathBuf::from(from));
+        if local_path(&path).is_err() {
+            return Err(format!(
+                "from {from}: Kumi opens a device by its whole path on this computer, never another machine's or a share's. For one in the User Library (wherever that is), give its item in Live's Browser (user_library/…) or its name."
+            ));
+        }
+        return if path.is_file() { Ok(path) } else { Err(format!("from: there's no device file at {from}.")) };
     }
     // A name: a file's, so nothing a path reads as a drive or a stream ("C:Echo").
     if from.contains(':') {
@@ -129,10 +138,15 @@ fn look_for(folder: &Path, wanted: &str, most: usize) -> (Vec<PathBuf>, bool) {
     let mut found = Vec::new();
     // Each folder to look in, and whether it's in a Presets folder: those go before the rest.
     let mut folders: std::collections::VecDeque<(PathBuf, bool)> = std::collections::VecDeque::from([(folder.to_path_buf(), false)]);
-    let mut looked = 0;
+    let (mut looked, mut read) = (0, 0);
     while let Some((folder, presets)) = folders.pop_front() {
         let mut inside: Vec<(String, PathBuf)> = Vec::new();
         for entry in std::fs::read_dir(&folder).into_iter().flatten().flatten() {
+            read += 1;
+            if read > MOST_ENTRIES {
+                found.sort();
+                return (found, false);
+            }
             let name = entry.file_name().to_string_lossy().into_owned();
             let (inner, device) = match entry.file_type() {
                 Ok(kind) => (kind.is_dir() && !name.starts_with('.'), kind.is_file() && name.to_lowercase().ends_with(".amxd")),
@@ -188,11 +202,11 @@ fn read_limited(path: &Path) -> Result<Vec<u8>, String> {
     let shown = path.to_string_lossy();
     let mut options = std::fs::OpenOptions::new();
     options.read(true);
-    // A pipe named like a device isn't waited on.
+    // A pipe named like a device isn't waited on, and a link isn't followed, as the plug-in tools read a file.
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;
-        options.custom_flags(libc::O_NONBLOCK);
+        options.custom_flags(libc::O_NONBLOCK | libc::O_NOFOLLOW);
     }
     let file = options.open(path).map_err(|error| format!("Kumi couldn't read {shown}: {error}."))?;
     let size = file.metadata().map_err(|error| format!("Kumi couldn't read {shown}: {error}."))?;
@@ -228,7 +242,10 @@ pub fn open(path: &Path, user_library: &Path) -> Result<Original, String> {
     let known_as = path
         .strip_prefix(user_library)
         .ok()
-        .filter(|relative| !relative.as_os_str().is_empty())
+        // Only a place inside it: a path that climbs back out (`..`) is known by its file's name.
+        .filter(|relative| {
+            !relative.as_os_str().is_empty() && relative.components().all(|part| matches!(part, std::path::Component::Normal(_)))
+        })
         .map(|relative| {
             let parts: Vec<String> = relative.components().map(|part| part.as_os_str().to_string_lossy().into_owned()).collect();
             format!("user_library/{}", parts.join("/"))
@@ -1309,6 +1326,22 @@ mod tests {
         for refused in ["C:Echo", "Presets/Echo.amxd", "\\\\host\\share\\Echo.amxd", "user_library/../Echo"] {
             assert!(find_within(refused, library.path(), 1000).is_err(), "{refused}");
         }
+        let share = find_within("\\\\nas\\Music\\User Library\\Echo.amxd", library.path(), 1000).unwrap_err();
+        assert!(share.contains("give its item in Live's Browser (user_library/…) or its name"), "{share}");
+    }
+
+    #[test]
+    fn a_device_is_known_by_its_place_in_the_user_library_else_by_its_files_name() {
+        let root = tempfile::tempdir().unwrap();
+        let library = root.path().join("User Library");
+        std::fs::create_dir_all(library.join("Presets")).unwrap();
+        let device = super::super::amxd::encode_amxd(DeviceType::MidiEffect, &json!({ "patcher": { "boxes": [], "lines": [] } }));
+        std::fs::write(library.join("Presets").join("Echo.amxd"), &device).unwrap();
+        std::fs::write(root.path().join("Outside.amxd"), &device).unwrap();
+        let known = |path: PathBuf| open(&path, &library).unwrap().known_as;
+        assert_eq!(known(library.join("Presets").join("Echo.amxd")), "user_library/Presets/Echo.amxd");
+        assert_eq!(known(root.path().join("Outside.amxd")), "Outside.amxd");
+        assert_eq!(known(library.join("..").join("Outside.amxd")), "Outside.amxd", "a path that climbs back out isn't a place in it");
     }
 
     #[test]

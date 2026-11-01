@@ -1724,3 +1724,31 @@ async fn a_device_is_only_ever_opened_from_this_computer_and_a_name_in_another_c
     let same = std::fs::canonicalize(&file).unwrap() == std::fs::canonicalize(&original).unwrap();
     assert!(!same, "a name in another case is never the original's file, whatever the disk makes of case: {again}");
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_frozen_device_whose_big_file_ten_thousand_boxes_use_opens_and_changes_in_a_moment() {
+    // 10,000 [big] boxes and a frozen-in big.maxpat of one 2 MB box: read once and shared, not 10,000 times (20 GB).
+    // (devices::patch's own test reads a 20 MB one for as many boxes; here what takes the time is the file's size.)
+    let library = tempfile::tempdir().unwrap();
+    let downloads = tempfile::tempdir().unwrap();
+    let mut device = downloaded_echo();
+    let boxes = device["patcher"]["boxes"].as_array_mut().unwrap();
+    for n in 0..10_000 {
+        boxes.push(json!({ "box": { "id": format!("obj-big-{n}"), "maxclass": "newobj", "text": "big", "numinlets": 0, "numoutlets": 0,
+            "patching_rect": [600.0, 20.0 + n as f64 * 30.0, 30.0, 22.0] } }));
+    }
+    let mut main = stringify(&device).into_bytes();
+    main.push(0);
+    let huge = "x".repeat(2 * 1024 * 1024);
+    let big =
+        stringify(&json!({ "patcher": { "boxes": [{ "box": { "id": "obj-1", "maxclass": "comment", "text": huge } }], "lines": [] } }));
+    let path = downloads.path().join("Big Echo.amxd");
+    std::fs::write(&path, frozen("mmmm", &[("JSON", "Big Echo.amxd", 0x11, &main), ("JSON", "big.maxpat", 0, big.as_bytes())])).unwrap();
+    let tool = tool_in(library.path(), Default::default());
+    let started = Instant::now();
+    let opened = call(&tool, json!({ "from": path.to_string_lossy() })).await;
+    assert_eq!(opened["device"], "Big Echo", "{}", opened.to_string().chars().take(300).collect::<String>());
+    let made = call(&tool, json!({ "from": path.to_string_lossy(), "name": "Big Echo Long", "patch": "pipe_4 = [pipe 0 0 900]" })).await;
+    assert_eq!(made["made"], "Big Echo Long", "{}", made.to_string().chars().take(300).collect::<String>());
+    assert!(started.elapsed() < std::time::Duration::from_secs(20), "{:?}", started.elapsed());
+}
