@@ -521,10 +521,10 @@ pub fn check_controller(plugin: &str, bytes: &[u8], template: &[u8]) -> Result<(
     if bytes[..4] != expected || bytes[..8] != template[..8] {
         return Err(error("controller belongs to a different product or schema"));
     }
-    // Validate the known length-prefixed metadata; tuning and editor extensions
-    // remain opaque, rather than replaced by initialized data.
-    custom_values_end(bytes, controller_extension_start(bytes)?, false)?;
-    custom_values_end(template, controller_extension_start(template)?, false)?;
+    // Validate known resource paths in source controllers as well as native
+    // conversions. Tuning and unknown editor extensions remain opaque.
+    custom_values_end(bytes, controller_extension_start(bytes)?, true)?;
+    custom_values_end(template, controller_extension_start(template)?, true)?;
     Ok(())
 }
 
@@ -617,7 +617,7 @@ fn check_resource_path(key: &str, value: &str) -> Result<(), FormatError> {
     if resource
         && (kumi_common::path::network_or_device(value) || kumi_common::path::reserved_device(value) || value.chars().any(char::is_control))
     {
-        return Err(error("native preset resource paths cannot name a network location or device"));
+        return Err(error("preset resource paths cannot name a network location or device"));
     }
     Ok(())
 }
@@ -782,6 +782,53 @@ mod tests {
         assert!(check_resource_path("IRFileName", r"C:\Sounds\Room.wav").is_ok());
         assert!(check_resource_path("IRFileName", "").is_ok());
         assert_eq!(check_resource_path("IRFileName", "NUL").is_err(), cfg!(windows));
+    }
+
+    #[test]
+    fn existing_vst3_resource_paths_are_checked_and_other_controller_bytes_survive_edits() {
+        use crate::plugins::{formats::vstpreset::VstPreset, preset, templates};
+
+        let plugin = "fabfilter-pro-q-4";
+        let template = VstPreset::read(templates::initial(plugin).unwrap()).unwrap();
+        let reference = template.controller().unwrap();
+        let extensions = controller_extensions(reference).unwrap();
+        let opaque = b"unknown private bytes\0\xff";
+        let with_path = |path: &str| {
+            let mut controller = reference[..extensions.start].to_vec();
+            controller.extend_from_slice(b"CuSV\x01\0\0\0\x02\0\0\0");
+            for (key, value) in [("IRFileName", path), ("DESCRIPTION", r"A note about \\host\share, not a resource path")] {
+                for text in [key, value] {
+                    controller.extend_from_slice(&(text.len() as u32).to_le_bytes());
+                    controller.extend_from_slice(text.as_bytes());
+                }
+            }
+            controller.extend_from_slice(opaque);
+            controller.extend_from_slice(&reference[extensions.end..]);
+            let mut source = template.clone();
+            source.chunks.iter_mut().find(|(id, _)| id == "Cont").unwrap().1 = controller;
+            source
+        };
+        let options = preset::WriteOptions {
+            version: structure::builtin(plugin).unwrap().verified.writes[0].version.clone(),
+            name: Some("Checked controller".into()),
+            ..Default::default()
+        };
+        for path in [r"\\host\share\room.wav", r"\??\UNC\host\share\room.wav", "//host/share/room.wav"] {
+            let source = with_path(path);
+            let error = preset::edit(plugin, &source.write(), &options, &[]).unwrap_err();
+            assert!(error.to_string().contains("resource paths"), "{path}: {error}");
+        }
+        if cfg!(windows) {
+            assert!(preset::edit(plugin, &with_path("NUL").write(), &options, &[]).is_err());
+        }
+        let source = with_path(r"C:\Sounds\room.wav");
+        let edited = preset::edit(plugin, &source.write(), &options, &[]).unwrap();
+        assert_eq!(edited.component(), source.component());
+        let before = source.controller().unwrap();
+        let after = edited.controller().unwrap();
+        assert_eq!(&after[controller_name(after).unwrap().end..], &before[controller_name(before).unwrap().end..]);
+        assert!(after.windows(opaque.len()).any(|bytes| bytes == opaque));
+        check_controller(plugin, after, reference).unwrap();
     }
 
     #[test]
