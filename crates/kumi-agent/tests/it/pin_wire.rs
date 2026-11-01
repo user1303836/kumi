@@ -1786,6 +1786,8 @@ pub(crate) fn requests() -> Vec<Op> {
             BodyRequest::Routing { track_ref: "track:2".into() },
             BodyRequest::Mixer { track_ref: Some("track:2".into()) },
             BodyRequest::Mixer { track_ref: None },
+            BodyRequest::Levels { track_ref: Some("track:2".into()) },
+            BodyRequest::Levels { track_ref: None },
         ]
         .map(|request| op::FocusBody { request }.into()),
     );

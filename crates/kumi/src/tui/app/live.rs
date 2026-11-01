@@ -16,7 +16,7 @@ const LEVELS_SOUNDING: Duration = Duration::from_millis(200);
 const LEVELS_QUIET: Duration = Duration::from_secs(1);
 const LEVELS_REFUSED: Duration = Duration::from_secs(5);
 /// Below this a meter draws as silence.
-const LEVELS_SILENT_DB: f64 = -60.0;
+pub(super) const LEVELS_SILENT_DB: f64 = -60.0;
 
 impl TuiApp {
     pub(super) fn read_tree(&self, again: bool) {
