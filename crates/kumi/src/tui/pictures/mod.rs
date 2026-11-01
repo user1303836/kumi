@@ -9,7 +9,7 @@ pub mod raster;
 pub mod scene;
 
 use kumi_types::contracts::ChangePicture;
-use kumi_types::picture::{MixLevels, PictureLine, PictureRoute, PictureValue, RouteChange};
+use kumi_types::picture::{MixLevels, PictureLine, PictureRoute, PictureTrack, PictureValue, RouteChange, TrackMark};
 
 use super::alerts::TerminalProfile;
 use super::style::{palette, ColorDepth, Rgb, Style};
@@ -142,6 +142,112 @@ fn route_line(route: &PictureRoute, cols: usize) -> Vec<Span> {
     fit(line, cols)
 }
 
+/// Whether routes all go into one place from several (tracks routed to one bus, together): drawn as they meet.
+fn fan_in(routes: &[PictureRoute]) -> bool {
+    routes.len() > 1 && routes.iter().all(|route| route.to == routes[0].to && route.from != routes[0].to)
+}
+
+/// Routes from several places into one, joined where they meet:
+///
+/// ```text
+/// Kick  ─┐
+/// Snare ─┼→ Drum Bus
+/// Hats  ─┘
+/// ```
+fn fan_in_lines(routes: &[PictureRoute], cols: usize) -> Vec<Vec<Span>> {
+    let room = cols.saturating_sub(4 + text_width(&routes[0].to) as usize).clamp(4, 24);
+    let names: Vec<String> = routes.iter().map(|route| truncate(&route.from, room as i32)).collect();
+    let wide = names.iter().map(|name| text_width(name) as usize).max().unwrap_or(0);
+    let (last, arrow) = (routes.len() - 1, (routes.len() - 1) / 2);
+    names
+        .iter()
+        .enumerate()
+        .map(|(row, name)| {
+            let join = match (row == arrow, row) {
+                (true, 0) => "┬→ ",
+                (true, at) if at == last => "┴→ ",
+                (true, _) => "┼→ ",
+                (false, 0) => "┐",
+                (false, at) if at == last => "┘",
+                (false, _) => "┤",
+            };
+            let pad = " ".repeat(wide - text_width(name) as usize);
+            let mut line = vec![styled(format!("{name}{pad} "), palette::TEXT), styled(format!("─{join}"), palette::FAINT)];
+            if row == arrow {
+                line.push(styled(routes[0].to.clone(), palette::TEXT));
+            }
+            fit(line, cols)
+        })
+        .collect()
+}
+
+/// The project's tracks in a row, as many as fit around the first one the change made or took away: "Bass · Keys ·
+/// Lead · Pad", the new ones in colour and those taken away faint; then how many it made and took away.
+fn tracks_lines(tracks: &[PictureTrack], more: usize, cols: usize) -> Vec<Vec<Span>> {
+    if tracks.is_empty() {
+        return Vec::new();
+    }
+    let color = |track: &PictureTrack| match track.mark {
+        Some(TrackMark::Made) => palette::ACCENT,
+        Some(TrackMark::Removed) => palette::FAINT,
+        None => palette::DIM,
+    };
+    let names: Vec<String> = tracks.iter().map(|track| truncate(&track.name, 24)).collect();
+    // From the first one marked, out each way while they fit (" · " between, "… · " at a cut end).
+    let cost = |from: usize, to: usize| {
+        names[from..=to].iter().map(|name| text_width(name) as usize).sum::<usize>()
+            + 3 * (to - from)
+            + if from > 0 { 4 } else { 0 }
+            + if to + 1 < names.len() || more > 0 { 4 } else { 0 }
+    };
+    let first = tracks.iter().position(|track| track.mark.is_some()).unwrap_or(0);
+    let (mut from, mut to) = (first, first);
+    loop {
+        let mut grew = false;
+        if to + 1 < names.len() && cost(from, to + 1) <= cols {
+            to += 1;
+            grew = true;
+        }
+        if from > 0 && cost(from - 1, to) <= cols {
+            from -= 1;
+            grew = true;
+        }
+        if !grew {
+            break;
+        }
+    }
+    let mut row = Vec::new();
+    if from > 0 {
+        row.push(styled("… · ", palette::FAINT));
+    }
+    for (offset, name) in names[from..=to].iter().enumerate() {
+        if offset > 0 {
+            row.push(styled(" · ", palette::FAINT));
+        }
+        row.push(styled(name.clone(), color(&tracks[from + offset])));
+    }
+    if to + 1 < names.len() || more > 0 {
+        row.push(styled(" · …", palette::FAINT));
+    }
+    let count = |mark: TrackMark| tracks.iter().filter(|track| track.mark == Some(mark)).count();
+    let plural = |n: usize| format!("{n} track{}", if n == 1 { "" } else { "s" });
+    let mut said = Vec::new();
+    if count(TrackMark::Made) > 0 {
+        said.push(styled(format!("{} new", plural(count(TrackMark::Made))), palette::ACCENT));
+    }
+    if count(TrackMark::Removed) > 0 {
+        if !said.is_empty() {
+            said.push(styled(" · ", palette::FAINT));
+        }
+        said.push(styled(format!("{} taken away", plural(count(TrackMark::Removed))), palette::FAINT));
+    }
+    let mut lines = vec![fit(row, cols)];
+    if !said.is_empty() {
+        lines.push(fit(said, cols));
+    }
+    lines
+}
+
 /// The words of a picture: each value that moved, or what changed in notes and lanes.
 pub fn lines_of(picture: &ChangePicture, cols: usize) -> Vec<Vec<Span>> {
     match picture {
@@ -149,7 +255,19 @@ pub fn lines_of(picture: &ChangePicture, cols: usize) -> Vec<Vec<Span>> {
         | ChangePicture::Eq { values, .. }
         | ChangePicture::Dynamics { values, .. }
         | ChangePicture::Zones { values, .. }
-        | ChangePicture::Items { values, .. } => values.iter().flat_map(|value| value_lines(value, cols)).collect(),
+        | ChangePicture::Items { values, .. }
+        | ChangePicture::Warp { values, .. }
+        | ChangePicture::Wave { values, .. } => values.iter().flat_map(|value| value_lines(value, cols)).collect(),
+        ChangePicture::Marks { before, after, values } if values.is_empty() => {
+            // (without the DAW's words for where they are: which are new, and which went)
+            let new = after.iter().filter(|mark| !before.contains(mark)).map(|mark| (mark, " · new", palette::ACCENT));
+            let gone = before.iter().filter(|mark| !after.contains(mark)).map(|mark| (mark, " · taken away", palette::FAINT));
+            new.chain(gone)
+                .map(|(mark, what, color)| fit(vec![styled(mark.name.clone(), palette::TEXT), styled(what, color)], cols))
+                .collect()
+        }
+        ChangePicture::Marks { values, .. } => values.iter().flat_map(|value| value_lines(value, cols)).collect(),
+        ChangePicture::Tracks { tracks, more } => tracks_lines(tracks, *more, cols),
         ChangePicture::Lines { lines, more } => {
             let mut rows: Vec<Vec<Span>> = lines.iter().flat_map(|line| tracker_lines(line, cols)).collect();
             if *more > 0 {
@@ -160,6 +278,7 @@ pub fn lines_of(picture: &ChangePicture, cols: usize) -> Vec<Vec<Span>> {
             }
             rows
         }
+        ChangePicture::Routes { routes } if fan_in(routes) => fan_in_lines(routes, cols),
         ChangePicture::Routes { routes } => routes
             .iter()
             .flat_map(|route| {
@@ -271,6 +390,7 @@ fn bars_of(picture: &ChangePicture, cols: usize) -> Option<Vec<Vec<Span>>> {
     };
     match picture {
         ChangePicture::Values { values } => Some(value_bars(values, cols)),
+        ChangePicture::Routes { routes } if fan_in(routes) => Some(fan_in_lines(routes, cols)),
         // Each route's ends, then its values as bars under them.
         ChangePicture::Routes { routes } => Some(
             routes
@@ -340,6 +460,23 @@ mod tests {
 
     fn text(rows: &[Vec<Span>]) -> Vec<String> {
         rows.iter().map(|row| row.iter().map(|span| span.text.as_str()).collect()).collect()
+    }
+
+    #[test]
+    fn tracks_are_a_row_around_the_new_ones_and_routes_into_one_place_meet() {
+        let track = |name: &str, mark: Option<TrackMark>| PictureTrack { name: name.into(), color: None, mark };
+        let mut tracks: Vec<PictureTrack> = (1..=12).map(|n| track(&format!("Track {n}"), None)).collect();
+        tracks.insert(9, track("Pad", Some(TrackMark::Made)));
+        let picture = ChangePicture::Tracks { tracks, more: 0 };
+        let rows = text(&draw(&picture, 40, 2, Graphics::Cells, 1, palette::GROUND).lines);
+        assert!(rows[0].starts_with("… · ") && rows[0].contains("Pad") && rows[0].chars().count() <= 40, "{rows:?}");
+        assert_eq!(rows[1], "1 track new");
+        let route = |from: &str| PictureRoute { from: from.into(), to: "Drum Bus".into(), change: RouteChange::Changed, values: vec![] };
+        let picture = ChangePicture::Routes { routes: vec![route("Kick"), route("Snare"), route("Hats")] };
+        let rows = text(&draw(&picture, 40, 2, Graphics::Cells, 1, palette::GROUND).lines);
+        assert_eq!(rows, ["Kick  ─┐", "Snare ─┼→ Drum Bus", "Hats  ─┘"]);
+        let two = ChangePicture::Routes { routes: vec![route("Kick"), route("Snare")] };
+        assert_eq!(text(&lines_of(&two, 40)), ["Kick  ─┬→ Drum Bus", "Snare ─┘"], "in words too");
     }
 
     #[test]

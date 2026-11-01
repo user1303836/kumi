@@ -9,6 +9,7 @@ use super::super::{
     wrap::wrap,
 };
 use super::drawing::{sp, spans, st};
+use super::records::Shown;
 use super::*;
 /// What FOCUS drew: the DAW's word for its body (" · Device"), why the DAW may be stale (" · Live is busy: …"), and the
 /// rows the body took; no rows when FOCUS says only where the producer is.
@@ -1111,23 +1112,46 @@ impl TuiApp {
         if !state_kept.is_empty() && !changes.is_empty() {
             rows.push(TabRow { item: Some("kept end".into()), ..Default::default() });
         }
-        for change in changes.iter().rev() {
+        // A plan's change across several tracks is one entry: its undo takes back each of them, newest first.
+        for shown in super::records::runs(&changes) {
+            let (change, members) = match shown {
+                Shown::One(change) => (change.clone(), None),
+                Shown::Run(run, record) => {
+                    let undoable = super::records::run_undoable(&run);
+                    let titles: Vec<String> = run.iter().map(|change| change.title.clone()).collect();
+                    let ids: Vec<String> = run.iter().rev().map(|change| change.id.clone()).collect();
+                    (record, Some((ids, titles, undoable)))
+                }
+            };
+            let change = &change;
             let (marker, title_style, action) = change_marks(change);
             let lines = wrap(&[sp(&change.title, title_style)], (width - text_width(&action.text) - 3).max(1))
                 .into_iter()
                 .map(|s| s.into_iter().map(|s| s.text).collect::<String>())
                 .collect::<Vec<_>>();
-            let undo = if change.state == ChangeState::Applied {
-                let id = change.id.clone();
-                Some(self.click(move |app| {
-                    let id = id.clone();
-                    app.task(move |app| async move {
-                        app.undo(Some(&id)).await;
-                        Ok(())
-                    });
-                }))
-            } else {
-                None
+            let undo = match &members {
+                Some((ids, _, true)) => {
+                    let (ids, title) = (ids.clone(), change.title.clone());
+                    Some(self.click(move |app| {
+                        let (ids, title) = (ids.clone(), title.clone());
+                        app.task(move |app| async move {
+                            app.undo_run(&ids, &title).await;
+                            Ok(())
+                        });
+                    }))
+                }
+                Some(_) => None,
+                None if change.state == ChangeState::Applied => {
+                    let id = change.id.clone();
+                    Some(self.click(move |app| {
+                        let id = id.clone();
+                        app.task(move |app| async move {
+                            app.undo(Some(&id)).await;
+                            Ok(())
+                        });
+                    }))
+                }
+                None => None,
             };
             // Enter (or a click on the words) opens the change's picture and closes it again; the label undoes it.
             let open = expanded.as_deref() == Some(change.id.as_str());
@@ -1183,6 +1207,11 @@ impl TuiApp {
                     Some((drawn, key)) => {
                         image = key;
                         rows.extend(drawn.rows.into_iter().chain(drawn.lines).map(extra));
+                    }
+                    // A run whose changes draw as more than values: each of them, in words.
+                    None if members.is_some() => {
+                        let titles = members.as_ref().map(|(_, titles, _)| titles.clone()).unwrap_or_default();
+                        rows.extend(titles.into_iter().map(|title| extra(vec![sp(title, st::DIM)])));
                     }
                     // A change from before pictures (or one without its own): its value bar, swatch or notes, as NOW drew them.
                     None => match (self.0.graphics != Graphics::Words).then(|| change_picture(change, cols as i32, self.0.depth)).flatten()

@@ -34,8 +34,9 @@ closes, crashes or is stopped.
   it, or use **Ask Kumi about this** in Live) is pinned for your next messages.
 - **NOW** (middle right): what Kumi is doing, drawn as it happens: a value's
   before and after, an EQ's or a compressor's curve, an automation lane, a new
-  clip's notes, a colour swatch, a device landing in its chain, "▶ Playing from
-  the start marker". While Kumi waits for the model, it
+  clip's notes, a colour swatch, a device landing in its chain, new tracks among
+  the Set's, new locators on the timeline, "▶ Playing from the start marker".
+  While Kumi waits for the model, it
   says why and until when: "retrying in 5s · ChatGPT is busy", "carrying on at
   14:20 (in 2h 13m) · ChatGPT's plan limit", "offline · trying again in 20s"
   (Esc stops any of them). While the model thinks, NOW says for how long
@@ -45,8 +46,13 @@ closes, crashes or is stopped.
   (each with **forget**), then every change, newest first, each with **undo**,
   or **kept** / **no undo** / **check Live** when it can't be undone. A change
   opens to its picture: an EQ's curve, a compressor's, the notes (new ones in
-  colour, gone ones faint), an automation lane, or each value before and after,
-  with what was asked when Live set something else ("asked -2 dB"). **GOAL**
+  colour, gone ones faint), an automation lane (named, on its parameter's
+  range), a route (tracks sent to one bus drawn meeting there), the transport's
+  settings, locators, a clip's warp markers, an audio clip's waveform (the part
+  that plays in colour), or each value before and after, with what was asked
+  when Live set something else ("asked -2 dB"). A plan's change across several
+  tracks ("mute the drums, the bass and the keys") is one entry: its picture
+  shows each track's values, and its undo takes back all of them. **GOAL**
   shows the `/goal` ("No goal yet" until there is one): the goal, its turns done
   and time against the budget (the status line counts the turn under way), the
   last check and what's next; for a sound-match
@@ -532,8 +538,6 @@ light, which some terminals do (mode 2031).
 tabs. Tests replay the renderer's output through a small terminal interpreter,
 which must reproduce the intended frame exactly.
 
-**Not done yet:** a picture in NOW for locators and new tracks; a fan-in or
-sidechain diagram for routing; an overview strip for very long clips; one
-expandable HISTORY entry for a change across many tracks; offering to undo the
-changes that depend on one; marking an entry "undone in Live"; FOCUS through
-macOS Accessibility (the exact control, the clip tab, the Browser item).
+**Not done yet:** offering to undo the changes that depend on one; marking an
+entry "undone in Live"; FOCUS through macOS Accessibility (the exact control,
+the clip tab, the Browser item).

@@ -18,6 +18,7 @@ use kumi_agent::gone_words;
 use kumi_common::js::string::head;
 use kumi_common::time::now_ms;
 use kumi_types::contracts::{ChangePicture, ChangeRecord, ColorChange, DevicePlacement};
+use kumi_types::picture::{PictureTrack, TrackMark};
 use kumi_types::place::IMPORTED;
 use kumi_types::system::{self, Env};
 use kumi_types::{errors::RuntimeError, version::KUMI_VERSION};
@@ -90,6 +91,9 @@ pub fn local_zone() -> FixedOffset {
 pub fn picture_of(change: &ChangeRecord) -> Option<String> {
     // As its saved record keeps it, so a page written in the run that made the change draws what one written after a
     // restart does: a note restated with fewer decimals is the note it was.
+    if let Some(ChangePicture::Tracks { tracks, more }) = &change.picture {
+        return tracks_of(tracks, *more);
+    }
     if let Some(picture) = &change.picture {
         return svg_of(&picture.clone().as_kept());
     }
@@ -142,6 +146,28 @@ fn devices_of(placement: &DevicePlacement) -> Option<String> {
     }
     out.push_str("</div>");
     Some(out)
+}
+
+/// The project's tracks as a line of names, the ones the change made lit and the ones it took away struck out.
+fn tracks_of(tracks: &[PictureTrack], more: usize) -> Option<String> {
+    if tracks.is_empty() {
+        return None;
+    }
+    let mut names: Vec<String> = tracks
+        .iter()
+        .map(|track| {
+            let name = html_text(&track.name);
+            match track.mark {
+                Some(TrackMark::Made) => format!("<strong>{name}</strong>"),
+                Some(TrackMark::Removed) => format!("<s>{name}</s>"),
+                None => name,
+            }
+        })
+        .collect();
+    if more > 0 {
+        names.push("…".into());
+    }
+    Some(format!("<p class=\"chain\">{}</p>", names.join(" <span>·</span> ")))
 }
 
 /// A colour change's before and after, as swatches in their own colours (written as "#rrggbb"; anything else draws none).

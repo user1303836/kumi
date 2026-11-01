@@ -346,15 +346,26 @@ impl Mutations {
         }
         let mut final_summary = kind.summarize(&preview, &args, &known, Some(&result));
         if let Some(asked) = &asked {
-            final_summary.picture = super::changes::pictures::picture(kind, &preview, asked, Some(&result)).or(final_summary.picture);
+            let track = final_summary.track.as_ref().map(|track| track.name.clone());
+            final_summary.picture =
+                super::changes::pictures::picture(kind, &preview, asked, Some(&result), track.as_deref()).or(final_summary.picture);
         }
-        // An automation lane is drawn to its parameter's range and named, as discovery read them.
-        let parameter =
-            args.get("parameterRef").and_then(Value::as_str).and_then(|r| connection.references.borrow().parameters.get(r).cloned());
+        // An automation lane is drawn to its parameter's range and named, as the bridge's preview read them; one from a
+        // bridge that doesn't say, as discovery read them.
+        let unnamed = matches!(&final_summary.picture, Some(ChangePicture::Automation { parameter, .. }) if parameter.is_empty());
+        let parameter = args
+            .get("parameterRef")
+            .and_then(Value::as_str)
+            .filter(|_| unnamed)
+            .and_then(|r| connection.references.borrow().parameters.get(r).cloned());
         if let (Some(parameter), Some(picture)) = (parameter, final_summary.picture.as_mut()) {
             super::changes::pictures::name_lane(picture, &parameter.name, parameter.min, parameter.max);
         }
         let applied = result.get("state").and_then(Value::as_str) == Some("applied");
+        // New tracks, or tracks taken away, among the Set's tracks as the last look read them.
+        if applied && final_summary.picture.is_none() {
+            final_summary.picture = self.tracks_picture(&kind.tool, &args, &preview, &result);
+        }
         // What Live left of what it cut, read now: with it, Kumi's undo makes the clips again, so the change isn't
         // Live's alone to take back. A cut past what the read before explains leaves it to Live.
         let kept = match cutting.filter(|_| applied && preview.get("replacesUnknown") != Some(&json!(true))) {
@@ -409,6 +420,7 @@ impl Mutations {
         history.remember(record.clone(), transaction.into(), restore);
         if applied {
             super::parameters::curve_later(history, kind, args.get("deviceRef"), &record.id, final_summary.picture.as_ref());
+            super::waves::wave_later(history, kind, &preview, &args, &record.id);
         }
         history.made_by(&record.id, &kind.tool);
         if let Some(clip) = args.get("clipRef").and_then(Value::as_str) {
@@ -764,6 +776,43 @@ fn items_of(args: &JsonObject) -> usize {
 fn beats(value: Option<&Value>) -> Option<f64> {
     value.and_then(Value::as_f64).filter(|n| n.is_finite())
 }
+impl Mutations {
+    /// The Set's tracks as the last look read them (with the colours Kumi knows), the ones a change made or took away
+    /// marked: new tracks, a group, a copy, a deleted track and the tracks in it. None for any other change.
+    fn tracks_picture(&self, tool: &str, args: &JsonObject, preview: &JsonObject, result: &JsonObject) -> Option<ChangePicture> {
+        static TRACK: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[0-9]+:track:([0-9]+)$").unwrap());
+        let index = |reference: Option<&Value>| {
+            reference.and_then(Value::as_str).and_then(|reference| TRACK.captures(reference)).and_then(|m| m[1].parse::<usize>().ok())
+        };
+        let new = |row: &Value| Some((index(row.get("ref"))?, row.get("name").and_then(Value::as_str).unwrap_or("New track").to_owned()));
+        let (made, removed): (Vec<(usize, String)>, Vec<usize>) = match (tool, args.get("action").and_then(Value::as_str)) {
+            ("add_tracks_and_scenes" | "group_tracks", _) => {
+                (result.get("created").and_then(Value::as_array).into_iter().flatten().filter_map(new).collect(), vec![])
+            }
+            ("change_structure", Some("duplicate-track")) => (result.get("result").and_then(new).into_iter().collect(), vec![]),
+            ("delete_track", _) => {
+                let at = index(args.get("trackRef"))?;
+                let inside = preview.get("track").and_then(|track| track.get("alsoDeletes")).and_then(Value::as_array).map_or(0, Vec::len);
+                (vec![], (at..=at + inside).collect())
+            }
+            _ => return None,
+        };
+        let model = self.observer.model();
+        let book = self.parameters.history.connection.references.borrow();
+        let mut tracks: Vec<(usize, String, Option<String>)> = model
+            .tracks
+            .iter()
+            .filter_map(|node| {
+                let color = book.known.get(&node.reference).and_then(|track| track.color.clone());
+                Some((index(Some(&json!(node.reference)))?, node.name.clone(), color))
+            })
+            .collect();
+        tracks.sort_by_key(|(at, ..)| *at);
+        let tracks: Vec<(String, Option<String>)> = tracks.into_iter().map(|(_, name, color)| (name, color)).collect();
+        super::changes::pictures::track_list(&tracks, &made, &removed)
+    }
+}
+
 /// What a restructure did to the Set's tracks and scenes, from what it was asked and what Live answered: None when
 /// that can't be told exactly, and every ref is retired instead.
 fn restructure_shift(tool: &str, args: &JsonObject, preview: &JsonObject, result: &JsonObject, created: &[JsonObject]) -> Option<Shift> {

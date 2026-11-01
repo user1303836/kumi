@@ -155,6 +155,7 @@ fn change(id: &str, family: ChangeFamily, title: &str, state: ChangeState, at: i
         note: None,
         at,
         picture: None,
+        batch: None,
     }
 }
 

@@ -620,8 +620,11 @@ fn oracle_comparisons_set_aside_only_a_change_records_picture() {
     let record = |title: &str| json!({"id":"c1","family":"tempo","title":title,"state":"applied","at":1});
     let mut pictured = record("Tempo 120 → 124 BPM");
     pictured["picture"] = json!({"kind":"values","values":[{"name":"Tempo","to":124}]});
-    // The same record with and without its picture compares equal;
+    // The same record with and without its picture (or its plan's run) compares equal;
     assert_eq!(normalized(&json!([pictured.clone()])), normalized(&json!([record("Tempo 120 → 124 BPM")])));
+    let mut batched = record("Tempo 120 → 124 BPM");
+    batched["batch"] = json!("p1:set_tempo");
+    assert_eq!(normalized(&batched), normalized(&record("Tempo 120 → 124 BPM")));
     // any other difference still fails, picture or not;
     let mut other = record("Tempo 120 → 130 BPM");
     other["picture"] = pictured["picture"].clone();

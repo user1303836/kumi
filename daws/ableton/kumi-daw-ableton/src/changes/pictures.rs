@@ -1,19 +1,33 @@
 //! Each change's picture (core's DAW-neutral `ChangePicture`), made from what Live's preview, the change asked
 //! for and Live's answer already hold: the values that moved (what was asked beside what Live set), a channel's
-//! levels, a clip's notes, an automation lane. An equaliser's or a compressor's curve needs the device's other
-//! parameters too: [`curve`] makes it from them once they're read.
+//! levels, a clip's notes, an automation lane, a route, the transport's settings, the Arrangement's locators, a clip's
+//! warp markers. An equaliser's or a compressor's curve needs the device's other parameters too: [`curve`] makes it
+//! from them once they're read.
 
 use super::summaries::{coalesce, label};
 use super::*;
+use crate::more_changes::{bars, span};
 use kumi_types::picture::Dynamics;
 use kumi_types::picture::EqBand;
 use kumi_types::picture::EqShape;
 use kumi_types::picture::MixLevels;
 use kumi_types::picture::MixSend;
+use kumi_types::picture::PictureMark;
+use kumi_types::picture::PictureRoute;
+use kumi_types::picture::PictureTrack;
 use kumi_types::picture::PictureValue;
+use kumi_types::picture::RouteChange;
+use kumi_types::picture::TrackMark;
 
-/// The picture of a change, from its preview, its input and Live's answer (none before it's applied).
-pub(crate) fn picture(kind: &ChangeKind, preview: &JsonObject, input: &JsonObject, applied: Option<&JsonObject>) -> Option<ChangePicture> {
+/// The picture of a change, from its preview, its input and Live's answer (none before it's applied), on its track
+/// (by name, when it's on one).
+pub(crate) fn picture(
+    kind: &ChangeKind,
+    preview: &JsonObject,
+    input: &JsonObject,
+    applied: Option<&JsonObject>,
+    track: Option<&str>,
+) -> Option<ChangePicture> {
     let empty = JsonObject::new();
     let applied = applied.unwrap_or(&empty);
     match kind.tool.as_str() {
@@ -25,9 +39,332 @@ pub(crate) fn picture(kind: &ChangeKind, preview: &JsonObject, input: &JsonObjec
         }
         "write_midi_clip" => new_clip(preview, input),
         "change_notes" | "delete_notes" => edited_notes(kind, preview, input),
-        "set_automation" => automation(preview, input),
+        "set_automation" => automation(preview, input, applied),
+        "set_routing" => routing(preview, input, track),
+        "set_transport" => transport(preview, input),
+        "set_locators" => locators(preview, input),
+        "delete_locator" => deleted_locator(preview),
+        "set_warp_markers" => warp_markers(preview, input, applied),
+        "set_sidechain" => device_input(preview, input, track),
         _ => None,
     }
+}
+
+fn on_off(on: bool) -> String {
+    if on { "on" } else { "off" }.into()
+}
+
+/// A track's input or output that moved, as a route (from where into the track, or from it to where), and its arm and
+/// monitoring as values: on the first route, or alone.
+fn routing(preview: &JsonObject, input: &JsonObject, track: Option<&str>) -> Option<ChangePicture> {
+    let prior = record(preview.get("prior"));
+    let proposed = if preview.get("proposed").is_some_and(Value::is_object) { record(preview.get("proposed")) } else { input };
+    let track = track.unwrap_or("Track");
+    // "Ext. In (1/2)": where, and the channel when it says more.
+    let place = |side: &JsonObject, (kind, sub): (&str, &str)| {
+        let name = label(side.get(kind))?;
+        Some(match label(side.get(sub)).filter(|sub| *sub != name) {
+            Some(sub) => format!("{name} ({sub})"),
+            None => name,
+        })
+    };
+    let mut after = prior.clone();
+    for (key, value) in proposed {
+        after.insert(key.clone(), value.clone());
+    }
+    let mut routes = Vec::new();
+    for (ends, word, into) in [(("inputType", "inputSubRouting"), "Input", true), (("outputType", "outputSubRouting"), "Output", false)] {
+        if !proposed.contains_key(ends.0) && !proposed.contains_key(ends.1) {
+            continue;
+        }
+        let Some(to) = place(&after, ends) else { continue };
+        let value = PictureValue { name: word.into(), from_text: place(prior, ends), to_text: Some(to.clone()), ..Default::default() };
+        let (from, to) = if into { (to, track.to_owned()) } else { (track.to_owned(), to) };
+        routes.push(PictureRoute { from, to, change: RouteChange::Changed, values: vec![value] });
+    }
+    let mut values = Vec::new();
+    if let Some(arm) = proposed.get("arm").and_then(Value::as_bool) {
+        values.push(PictureValue {
+            name: "Arm".into(),
+            from_text: prior.get("arm").and_then(Value::as_bool).map(on_off),
+            to_text: Some(on_off(arm)),
+            ..Default::default()
+        });
+    }
+    if let Some(monitoring) = label(proposed.get("monitoring")) {
+        // Live's states by number: 0 In, 1 Auto, 2 Off.
+        let was = match prior.get("monitoring") {
+            Some(Value::Number(state)) => state.as_f64().and_then(|n| ["In", "Auto", "Off"].get(n as usize).map(|s| s.to_string())),
+            other => label(other).map(|text| capital_first(&text)),
+        };
+        values.push(PictureValue {
+            name: "Monitoring".into(),
+            from_text: was,
+            to_text: Some(capital_first(&monitoring)),
+            ..Default::default()
+        });
+    }
+    match routes.first_mut() {
+        Some(first) => {
+            first.values.extend(values);
+            Some(ChangePicture::Routes { routes })
+        }
+        None => (!values.is_empty()).then_some(ChangePicture::Values { values }),
+    }
+}
+
+/// A device's input or sidechain set from another track: the route from there into the device's track, with what it
+/// listened to before.
+fn device_input(preview: &JsonObject, input: &JsonObject, track: Option<&str>) -> Option<ChangePicture> {
+    let from = label(input.get("routingType"))?;
+    let from = match label(input.get("routingChannel")).filter(|channel| *channel != from) {
+        Some(channel) => format!("{from} ({channel})"),
+        None => from,
+    };
+    let sidechain = input.get("action").and_then(Value::as_str) == Some("sidechain");
+    let prior = record(preview.get("prior"));
+    let value = PictureValue {
+        name: if sidechain { "Sidechain" } else { "Input" }.into(),
+        from_text: label(prior.get("routingType")),
+        to_text: Some(from.clone()),
+        ..Default::default()
+    };
+    let to = track.unwrap_or("Device").to_owned();
+    Some(ChangePicture::Routes { routes: vec![PictureRoute { from, to, change: RouteChange::Changed, values: vec![value] }] })
+}
+
+fn capital_first(text: &str) -> String {
+    let mut chars = text.chars();
+    chars.next().map(|c| c.to_uppercase().collect::<String>() + chars.as_str()).unwrap_or_default()
+}
+
+/// The transport's settings that moved, each before and after: the loop (where, or off), the metronome, punch in and
+/// out, the playhead.
+fn transport(preview: &JsonObject, input: &JsonObject) -> Option<ChangePicture> {
+    let prior = record(preview.get("prior"));
+    let proposed = if preview.get("proposed").is_some_and(Value::is_object) { record(preview.get("proposed")) } else { input };
+    let mut values = Vec::new();
+    let looped = record(prior.get("loop"));
+    if ["loopEnabled", "loopStart", "loopLength"].iter().any(|key| proposed.contains_key(*key)) {
+        let words = |on: bool, start: Option<f64>, length: Option<f64>| match (on, start, length) {
+            (true, Some(start), Some(length)) => format!("{} for {}", bars(start), span(length)),
+            (true, _, _) => "on".to_string(),
+            _ => "off".to_string(),
+        };
+        let (was_on, was_start, was_length) =
+            (looped.get("enabled") == Some(&json!(true)), finite(looped.get("start")), finite(looped.get("length")));
+        let on = proposed.get("loopEnabled").and_then(Value::as_bool).unwrap_or(was_on);
+        let (start, length) = (finite(proposed.get("loopStart")).or(was_start), finite(proposed.get("loopLength")).or(was_length));
+        values.push(PictureValue {
+            name: "Loop".into(),
+            from_text: (!looped.is_empty()).then(|| words(was_on, was_start, was_length)),
+            to_text: Some(words(on, start, length)),
+            ..Default::default()
+        });
+    }
+    for (key, name) in [("metronome", "Metronome"), ("punchIn", "Punch in"), ("punchOut", "Punch out")] {
+        if let Some(on) = proposed.get(key).and_then(Value::as_bool) {
+            let from_text = prior.get(key).and_then(Value::as_bool).map(on_off);
+            values.push(PictureValue { name: name.into(), from_text, to_text: Some(on_off(on)), ..Default::default() });
+        }
+    }
+    if let Some(position) = finite(proposed.get("position")) {
+        values.push(PictureValue {
+            name: "Playhead".into(),
+            from_text: finite(prior.get("position")).map(bars),
+            to_text: Some(bars(position)),
+            ..Default::default()
+        });
+    }
+    (!values.is_empty()).then_some(ChangePicture::Values { values })
+}
+
+/// A locator as Live's preview reads it: its name and where it is, in beats.
+fn mark(row: &Value) -> Option<PictureMark> {
+    let row = record(Some(row));
+    Some(PictureMark { name: label(row.get("name")).unwrap_or_default(), at: finite(coalesce(row.get("position"), row.get("time")))? })
+}
+
+/// The Arrangement's locators before and after two new ones, with where the new ones are.
+fn locators(preview: &JsonObject, input: &JsonObject) -> Option<ChangePicture> {
+    let before: Vec<PictureMark> = array(preview.get("prior")).iter().filter_map(mark).collect();
+    let made: Vec<PictureMark> = if preview.get("proposed").is_some_and(Value::is_array) {
+        array(preview.get("proposed")).iter().filter_map(mark).collect()
+    } else {
+        [("startName", "start"), ("endName", "end")]
+            .iter()
+            .filter_map(|(name, at)| Some(PictureMark { name: label(input.get(*name)).unwrap_or_default(), at: finite(input.get(*at))? }))
+            .collect()
+    };
+    if made.is_empty() {
+        return None;
+    }
+    let values =
+        made.iter().map(|mark| PictureValue { name: mark.name.clone(), to_text: Some(bars(mark.at)), ..Default::default() }).collect();
+    let after = before.iter().cloned().chain(made).collect();
+    Some(ChangePicture::Marks { before, after, values })
+}
+
+/// A locator taken away: where it was.
+fn deleted_locator(preview: &JsonObject) -> Option<ChangePicture> {
+    let gone = mark(coalesce(preview.get("locator"), preview.get("target"))?)?;
+    let value = PictureValue {
+        name: if gone.name.is_empty() { "Locator".into() } else { gone.name.clone() },
+        from_text: Some(bars(gone.at)),
+        to_text: Some("taken away".into()),
+        ..Default::default()
+    };
+    Some(ChangePicture::Marks { before: vec![gone], after: Vec::new(), values: vec![value] })
+}
+
+/// A clip's warp markers before and after one was added, moved or taken away: as Live answered once it's applied, else
+/// as the change will leave them (a new marker holds the moment the clip plays at its beat now, on the line through the
+/// markers either side of it, as Live makes it).
+fn warp_markers(preview: &JsonObject, input: &JsonObject, applied: &JsonObject) -> Option<ChangePicture> {
+    let pairs = warp_pairs;
+    let before = pairs(array(preview.get("markers")));
+    let beat = finite(input.get("beatTime"))?;
+    let action = label(coalesce(preview.get("action"), input.get("action"))).unwrap_or_default();
+    let distance = finite(input.get("distance"));
+    let near = |pairs: &[[f64; 2]]| pairs.iter().position(|pair| (pair[0] - beat).abs() <= 1e-9 * beat.abs().max(1.));
+    let after = if applied.get("markers").is_some_and(Value::is_array) {
+        pairs(array(applied.get("markers")))
+    } else {
+        let mut after = before.clone();
+        match action.as_str() {
+            "add" => after.push([beat, second_at(&before, beat)?]),
+            "move" => {
+                let at = near(&after)?;
+                after[at][0] = beat + distance?;
+            }
+            "delete" => {
+                after.remove(near(&after)?);
+            }
+            _ => return None,
+        }
+        after.sort_by(|a, b| a[0].total_cmp(&b[0]));
+        after
+    };
+    let (from_text, to_text) = match action.as_str() {
+        "add" => (None, Some(format!("new at {}", bars(beat)))),
+        "move" => (Some(bars(beat)), distance.map(|distance| bars(beat + distance))),
+        _ => (Some(bars(beat)), Some("taken away".to_string())),
+    };
+    Some(ChangePicture::Warp {
+        before,
+        after,
+        values: vec![PictureValue { name: "Warp marker".into(), from_text, to_text, ..Default::default() }],
+    })
+}
+
+/// Warp markers as Live reads them, each as `[beat, second]`, in the clip's order.
+fn warp_pairs(rows: &[Value]) -> Vec<[f64; 2]> {
+    let mut pairs: Vec<[f64; 2]> = rows
+        .iter()
+        .filter_map(|row| {
+            let row = record(Some(row));
+            Some([finite(row.get("beatTime"))?, finite(row.get("sampleTime"))?])
+        })
+        .collect();
+    pairs.sort_by(|a, b| a[0].total_cmp(&b[0]));
+    pairs
+}
+
+/// An audio clip's waveform: its sample's `seconds` and `peaks` (as read from its file), the part of the sample it
+/// plays before the change and after (from `sample`, as the preview read the clip, with what the change set laid over
+/// it), and the values that moved. A warped clip's loop is in beats: its warp markers say where those are in the sample.
+pub fn audio_wave(seconds: f64, peaks: Vec<f64>, sample: &JsonObject, proposed: &JsonObject, values: Vec<PictureValue>) -> ChangePicture {
+    let played = |side: &JsonObject| -> Option<[f64; 2]> {
+        let from = finite(side.get("loopStart")).or_else(|| finite(side.get("startMarker")))?;
+        let to = finite(side.get("loopEnd")).or_else(|| finite(side.get("endMarker")))?;
+        if side.get("warping") != Some(&json!(true)) {
+            return Some([from, to]);
+        }
+        let markers = warp_pairs(array(side.get("warpMarkers")));
+        Some([second_at(&markers, from)?, second_at(&markers, to)?])
+    };
+    let mut after = sample.clone();
+    for (key, value) in proposed {
+        after.insert(key.clone(), value.clone());
+    }
+    ChangePicture::Wave { seconds, peaks, before: played(sample), after: played(&after), values }
+}
+
+/// An audio clip's settings that moved, before and after: its gain (in its range), transposition, detune, warping and
+/// warp mode, fades.
+pub fn audio_values(preview: &JsonObject, input: &JsonObject) -> Vec<PictureValue> {
+    let prior = record(preview.get("prior"));
+    let proposed = if preview.get("proposed").is_some_and(Value::is_object) { record(preview.get("proposed")) } else { input };
+    let mut values = Vec::new();
+    let number = |value: Option<&Value>, unit: &str, signed: bool| {
+        finite(value).map(|n| format!("{}{}{unit}", if signed && n > 0. { "+" } else { "" }, format_number(n, None)))
+    };
+    if let Some(gain) = finite(proposed.get("gain")) {
+        let from = finite(prior.get("gain"));
+        values.push(PictureValue { name: "Gain".into(), from, to: Some(gain), min: Some(0.), max: Some(1.), ..Default::default() });
+    }
+    for (key, name, unit) in [("pitchCoarse", "Transpose", " st"), ("pitchFine", "Detune", " ct")] {
+        if proposed.contains_key(key) {
+            let (from_text, to_text) = (number(prior.get(key), unit, true), number(proposed.get(key), unit, true));
+            values.push(PictureValue { name: name.into(), from_text, to_text, ..Default::default() });
+        }
+    }
+    if let Some(on) = proposed.get("warping").and_then(Value::as_bool) {
+        let from_text = prior.get("warping").and_then(Value::as_bool).map(on_off);
+        values.push(PictureValue { name: "Warp".into(), from_text, to_text: Some(on_off(on)), ..Default::default() });
+    }
+    if proposed.contains_key("warpMode") {
+        const MODES: [&str; 7] = ["Beats", "Tones", "Texture", "Re-Pitch", "Complex", "REX", "Complex Pro"];
+        let mode = |value: Option<&Value>| finite(value).and_then(|n| MODES.get(n as usize)).map(|mode| mode.to_string());
+        values.push(PictureValue {
+            name: "Warp mode".into(),
+            from_text: mode(prior.get("warpMode")),
+            to_text: mode(proposed.get("warpMode")),
+            ..Default::default()
+        });
+    }
+    for (key, name) in [("fadeInLength", "Fade in"), ("fadeOutLength", "Fade out")] {
+        if proposed.contains_key(key) {
+            let (from_text, to_text) = (number(prior.get(key), "", false), number(proposed.get(key), "", false));
+            values.push(PictureValue { name: name.into(), from_text, to_text, ..Default::default() });
+        }
+    }
+    values
+}
+
+/// The Set's tracks after a change made some or took some away: `tracks` as they were, in order (each name and
+/// colour), `made` the new ones at their places after it (each place and name), `removed` the places of those taken
+/// away. None when it did neither.
+pub fn track_list(tracks: &[(String, Option<String>)], made: &[(usize, String)], removed: &[usize]) -> Option<ChangePicture> {
+    if made.is_empty() && removed.is_empty() {
+        return None;
+    }
+    let mut list: Vec<PictureTrack> = tracks
+        .iter()
+        .enumerate()
+        .map(|(at, (name, color))| PictureTrack {
+            name: name.clone(),
+            color: color.clone(),
+            mark: removed.contains(&at).then_some(TrackMark::Removed),
+        })
+        .collect();
+    let mut made = made.to_vec();
+    made.sort_by_key(|(at, _)| *at);
+    for (at, name) in made {
+        list.insert(at.min(list.len()), PictureTrack { name, color: None, mark: Some(TrackMark::Made) });
+    }
+    Some(ChangePicture::Tracks { tracks: list, more: 0 })
+}
+
+/// The moment of the sample a clip plays at `beat`, on the line through the warp markers either side of it (or the
+/// nearest two, past them): None with fewer than two.
+fn second_at(markers: &[[f64; 2]], beat: f64) -> Option<f64> {
+    if markers.len() < 2 {
+        return None;
+    }
+    let right = markers.iter().position(|marker| beat <= marker[0]).unwrap_or(markers.len() - 1).max(1);
+    let (left, right) = (markers[right - 1], markers[right]);
+    (right[0] != left[0]).then(|| left[1] + (beat - left[0]) * (right[1] - left[1]) / (right[0] - left[0]))
 }
 
 fn tempo(preview: &JsonObject, input: &JsonObject) -> Option<ChangePicture> {
@@ -212,8 +549,19 @@ fn edited_notes(kind: &ChangeKind, preview: &JsonObject, input: &JsonObject) -> 
     Some(ChangePicture::Notes { length: (end / 4.).ceil().max(1.) * 4., before, after, partial: false })
 }
 
-/// A clip's automation: Live's points before; after, those with what was drawn laid over them (or erased).
-fn automation(preview: &JsonObject, input: &JsonObject) -> Option<ChangePicture> {
+/// A clip's automation: Live's points before; after, as Live read them once it's applied (a bridge that doesn't say
+/// leaves them to be worked out: those with what was drawn laid over them, or erased). Named, on its parameter's range,
+/// as the preview read the parameter.
+fn automation(preview: &JsonObject, input: &JsonObject, applied: &JsonObject) -> Option<ChangePicture> {
+    let mut picture = drawn_automation(preview, input, applied)?;
+    let parameter = record(preview.get("parameter"));
+    if let (Some(name), Some(min), Some(max)) = (label(parameter.get("name")), finite(parameter.get("min")), finite(parameter.get("max"))) {
+        name_lane(&mut picture, &name, min, max);
+    }
+    Some(picture)
+}
+
+fn drawn_automation(preview: &JsonObject, input: &JsonObject, applied: &JsonObject) -> Option<ChangePicture> {
     let points = |items: &[Value]| {
         items
             .iter()
@@ -225,7 +573,12 @@ fn automation(preview: &JsonObject, input: &JsonObject) -> Option<ChangePicture>
     };
     let before = points(array(record(preview.get("current")).get("points")));
     let action = label(coalesce(preview.get("action"), input.get("action"))).unwrap_or_default();
+    let envelope = record(applied.get("envelope"));
     let after = match action.as_str() {
+        "insert" | "insert-step" | "delete-range" | "delete-envelope" if envelope.get("exists") == Some(&json!(false)) => Vec::new(),
+        "insert" | "insert-step" | "delete-range" | "delete-envelope" if envelope.get("points").is_some_and(Value::is_array) => {
+            points(array(envelope.get("points")))
+        }
         "insert" => {
             let drawn = points(array(input.get("points")));
             let (first, last) =
@@ -425,6 +778,11 @@ pub fn dynamics(rows: &[ParameterRow]) -> Option<Dynamics> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A change's picture, on no track.
+    fn picture(kind: &ChangeKind, preview: &JsonObject, input: &JsonObject, applied: Option<&JsonObject>) -> Option<ChangePicture> {
+        super::picture(kind, preview, input, applied, None)
+    }
 
     fn kind(tool: &str) -> &'static ChangeKind {
         CHANGES.iter().find(|kind| kind.tool == tool).unwrap()
@@ -810,5 +1168,130 @@ mod tests {
         assert_eq!(after.volume_text, None);
         assert_eq!(after.sends[0].text, None);
         assert_eq!(after.sends[1].text.as_deref(), Some("-24 dB"));
+    }
+
+    #[test]
+    fn routing_draws_the_route_that_moved_with_arm_and_monitoring() {
+        let preview = object(json!({"trackRef":"1:track:0",
+            "prior":{"outputType":"Main","outputSubRouting":"","arm":false,"monitoring":1},
+            "proposed":{"outputType":"Drum Bus","arm":true,"monitoring":"in"}}));
+        let routed = super::picture(kind("set_routing"), &preview, &object(json!({})), None, Some("Kick")).unwrap();
+        let ChangePicture::Routes { routes } = routed else { panic!() };
+        let [route] = routes.as_slice() else { panic!("{routes:?}") };
+        assert_eq!((route.from.as_str(), route.to.as_str()), ("Kick", "Drum Bus"), "from the track to where it goes now");
+        let said: Vec<(&str, Option<&str>, Option<&str>)> =
+            route.values.iter().map(|v| (v.name.as_str(), v.from_text.as_deref(), v.to_text.as_deref())).collect();
+        assert_eq!(
+            said,
+            [("Output", Some("Main"), Some("Drum Bus")), ("Arm", Some("off"), Some("on")), ("Monitoring", Some("Auto"), Some("In"))]
+        );
+        // An input comes into the track; arming alone is values.
+        let preview = object(json!({"prior":{"inputType":"Ext. In","inputSubRouting":"1"},"proposed":{"inputType":"Resampling"}}));
+        let routed = super::picture(kind("set_routing"), &preview, &object(json!({})), None, Some("Rec")).unwrap();
+        let ChangePicture::Routes { routes } = routed else { panic!() };
+        assert_eq!((routes[0].from.as_str(), routes[0].to.as_str()), ("Resampling", "Rec"));
+        assert_eq!(routes[0].values[0].from_text.as_deref(), Some("Ext. In (1)"));
+        let armed = object(json!({"prior":{"arm":false},"proposed":{"arm":true}}));
+        assert!(matches!(picture(kind("set_routing"), &armed, &object(json!({})), None), Some(ChangePicture::Values { .. })));
+    }
+
+    #[test]
+    fn a_sidechain_is_a_route_into_the_devices_track() {
+        let preview = object(json!({"action":"sidechain","prior":{"routingType":"No Input"}}));
+        let input = object(json!({"deviceRef":"d","action":"sidechain","routingType":"Kick","routingChannel":"Post FX"}));
+        let ChangePicture::Routes { routes } = super::picture(kind("set_sidechain"), &preview, &input, None, Some("Bass")).unwrap() else {
+            panic!()
+        };
+        assert_eq!((routes[0].from.as_str(), routes[0].to.as_str()), ("Kick (Post FX)", "Bass"));
+        assert_eq!((routes[0].values[0].name.as_str(), routes[0].values[0].from_text.as_deref()), ("Sidechain", Some("No Input")));
+    }
+
+    #[test]
+    fn the_transport_draws_each_setting_before_and_after() {
+        let preview = object(json!({"prior":{"position":0,"loop":{"enabled":false,"start":0,"length":16},"metronome":false},
+            "proposed":{"loopEnabled":true,"loopStart":16,"loopLength":16,"metronome":true}}));
+        let ChangePicture::Values { values } = picture(kind("set_transport"), &preview, &object(json!({})), None).unwrap() else {
+            panic!()
+        };
+        let said: Vec<(&str, Option<&str>, Option<&str>)> =
+            values.iter().map(|v| (v.name.as_str(), v.from_text.as_deref(), v.to_text.as_deref())).collect();
+        assert_eq!(said, [("Loop", Some("off"), Some("bar 5 for 4 bars")), ("Metronome", Some("off"), Some("on"))]);
+        let off = object(json!({"prior":{"loop":{"enabled":true,"start":0,"length":16}},"proposed":{"loopEnabled":false}}));
+        let ChangePicture::Values { values } = picture(kind("set_transport"), &off, &object(json!({})), None).unwrap() else { panic!() };
+        assert_eq!((values[0].from_text.as_deref(), values[0].to_text.as_deref()), (Some("bar 1 for 4 bars"), Some("off")));
+    }
+
+    #[test]
+    fn locators_are_drawn_among_the_ones_there_and_a_deleted_one_where_it_was() {
+        let preview = object(json!({"prior":[{"name":"Intro","position":0}],
+            "proposed":[{"name":"Drop","position":64},{"name":"Outro","position":128}]}));
+        let made = picture(kind("set_locators"), &preview, &object(json!({})), None).unwrap();
+        let ChangePicture::Marks { before, after, values } = made else { panic!() };
+        assert_eq!((before.len(), after.len()), (1, 3));
+        assert_eq!(values.iter().map(|v| v.to_text.clone().unwrap()).collect::<Vec<_>>(), ["bar 17", "bar 33"]);
+        let gone = object(json!({"locator":{"name":"Drop","position":64}}));
+        let ChangePicture::Marks { before, after, values } = picture(kind("delete_locator"), &gone, &object(json!({})), None).unwrap()
+        else {
+            panic!()
+        };
+        assert_eq!((before.len(), after.len(), values[0].from_text.as_deref()), (1, 0, Some("bar 17")));
+    }
+
+    #[test]
+    fn warp_markers_draw_as_live_answered_or_as_they_will_be() {
+        let markers = json!([{"beatTime":0,"sampleTime":0},{"beatTime":4,"sampleTime":2},{"beatTime":8,"sampleTime":4}]);
+        let preview = object(json!({"action":"move","markers":markers}));
+        let moved = object(json!({"clipRef":"c","action":"move","beatTime":4,"distance":0.5}));
+        let ChangePicture::Warp { before, after, values } = picture(kind("set_warp_markers"), &preview, &moved, None).unwrap() else {
+            panic!()
+        };
+        assert_eq!(before[1], [4., 2.]);
+        assert_eq!(after[1], [4.5, 2.], "the same moment of the sample, later in the clip");
+        assert_eq!((values[0].from_text.as_deref(), values[0].to_text.as_deref()), (Some("bar 2"), Some("bar 2 beat 1.5")));
+        // A new marker holds the moment the clip plays there now, on the line through its neighbours.
+        let preview = object(json!({"action":"add","markers":markers}));
+        let added = object(json!({"clipRef":"c","action":"add","beatTime":6}));
+        let ChangePicture::Warp { after, .. } = picture(kind("set_warp_markers"), &preview, &added, None).unwrap() else { panic!() };
+        assert_eq!(after, vec![[0., 0.], [4., 2.], [6., 3.], [8., 4.]]);
+        // Once applied, as Live has them.
+        let applied = object(json!({"markers":[{"beatTime":0,"sampleTime":0},{"beatTime":6,"sampleTime":3.1}]}));
+        let ChangePicture::Warp { after, .. } = picture(kind("set_warp_markers"), &preview, &added, Some(&applied)).unwrap() else {
+            panic!()
+        };
+        assert_eq!(after, vec![[0., 0.], [6., 3.1]]);
+    }
+
+    #[test]
+    fn a_lane_is_named_as_the_preview_read_it_and_drawn_as_live_answered() {
+        let preview = object(json!({"action":"insert","current":{"exists":true,"points":[{"time":0,"value":0}]},
+            "parameter":{"name":"Filter Freq","min":20,"max":135}}));
+        let input = object(json!({"action":"insert","points":[{"time":1,"value":60},{"time":3,"value":100}]}));
+        let applied =
+            object(json!({"envelope":{"exists":true,"points":[{"time":0,"value":0},{"time":1,"value":60.2},{"time":3,"value":100}]}}));
+        let drawn = picture(kind("set_automation"), &preview, &input, Some(&applied)).unwrap();
+        let ChangePicture::Automation { parameter, min, max, after, .. } = drawn else { panic!() };
+        assert_eq!((parameter.as_str(), min, max), ("Filter Freq", 20., 135.));
+        assert_eq!(after, vec![[0., 0.], [1., 60.2], [3., 100.]], "Live's points, not the ones asked for");
+        // A lane Live took away is empty after.
+        let gone = object(json!({"envelope":{"exists":false}}));
+        let removed = picture(kind("set_automation"), &preview, &object(json!({"action":"delete-envelope"})), Some(&gone)).unwrap();
+        let ChangePicture::Automation { after, .. } = removed else { panic!() };
+        assert!(after.is_empty());
+    }
+
+    #[test]
+    fn new_tracks_are_lit_among_the_sets_and_deleted_ones_marked() {
+        let tracks = vec![("Drums".to_string(), Some("#ff5a00".to_string())), ("Bass".to_string(), None), ("Keys".to_string(), None)];
+        let made = track_list(&tracks, &[(1, "Pad".into()), (3, "Lead".into())], &[]).unwrap();
+        let ChangePicture::Tracks { tracks: list, .. } = made else { panic!() };
+        let names: Vec<(&str, Option<TrackMark>)> = list.iter().map(|t| (t.name.as_str(), t.mark)).collect();
+        assert_eq!(
+            names,
+            [("Drums", None), ("Pad", Some(TrackMark::Made)), ("Bass", None), ("Lead", Some(TrackMark::Made)), ("Keys", None)]
+        );
+        assert_eq!(list[0].color.as_deref(), Some("#ff5a00"));
+        let ChangePicture::Tracks { tracks: list, .. } = track_list(&tracks, &[], &[1]).unwrap() else { panic!() };
+        assert_eq!(list[1].mark, Some(TrackMark::Removed));
+        assert_eq!(track_list(&tracks, &[], &[]), None);
     }
 }

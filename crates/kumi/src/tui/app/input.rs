@@ -1662,6 +1662,54 @@ impl TuiApp {
         self.0.state.borrow_mut().undoing = false;
         self.0.scheduler.request();
     }
+    /// Undoes a plan's change across several tracks (`ids`, newest first) as one: each of its changes, stopping at one
+    /// Kumi keeps, then says so once.
+    pub(super) async fn undo_run(&self, ids: &[String], title: &str) {
+        if self.0.state.borrow().closing || self.0.state.borrow().undoing {
+            return;
+        }
+        if self.busy() {
+            let words = self.key_words(
+                "app.stop",
+                "Kumi is still working. Press {} to stop it first, then undo.",
+                "Kumi is still working: undo once it's done.",
+            );
+            self.notice(&words, NoticeTone::Info);
+            return;
+        }
+        {
+            let mut state = self.0.state.borrow_mut();
+            state.undoing = true;
+            state.activity = "undoing".into();
+        }
+        self.0.scheduler.request();
+        let mut kept = None;
+        for id in ids {
+            match self.session().op(op::Undo { id: Some(id.clone()) }).await {
+                Ok(Some(change)) if change.state != ChangeState::Undone => {
+                    kept = Some(change);
+                    break;
+                }
+                Ok(_) => {}
+                Err(error) => {
+                    if !self.0.state.borrow().closing {
+                        self.error(&error);
+                    }
+                    self.0.state.borrow_mut().undoing = false;
+                    self.0.scheduler.request();
+                    return;
+                }
+            }
+        }
+        match kept {
+            Some(change) => {
+                self.notice(string::trim(&format!("Kept: {}. {}", change.title, change.note.as_deref().unwrap_or(""))), NoticeTone::Warn)
+            }
+            None => self.notice(&format!("Undid: {title}"), NoticeTone::Info),
+        }
+        self.0.state.borrow_mut().undoing = false;
+        self.0.scheduler.request();
+    }
     pub(super) fn scroll_by(&self, lines: i32) {
         let mut state = self.0.state.borrow_mut();
         let State { view, transcript, .. } = &mut *state;

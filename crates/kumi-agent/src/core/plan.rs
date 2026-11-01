@@ -298,6 +298,8 @@ struct Blocked {
 }
 type Settled = Shared<LocalBoxFuture<'static, Result<Option<Stop>, RuntimeError>>>;
 pub struct Plan<H: PlanHost> {
+    /// Unique in this Kumi: the runs of one kind of change it makes are named by it (`ChangeRecord::batch`).
+    id: u64,
     host: Rc<H>,
     signal: Signal,
     on_start: Option<Rc<dyn Fn()>>,
@@ -312,7 +314,9 @@ pub struct Plan<H: PlanHost> {
 }
 impl<H: PlanHost> Plan<H> {
     pub fn new(host: Rc<H>, signal: Signal, on_start: Option<Rc<dyn Fn()>>) -> Rc<Self> {
+        static PLANS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let this = Rc::new(Self {
+            id: PLANS.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1,
             host,
             signal,
             on_start,
@@ -612,10 +616,7 @@ impl<H: PlanHost> Plan<H> {
                         continue;
                     }
                 };
-                let outcome = self
-                    .host
-                    .change(self.host.batch_kind(batch), self.host.batch_input(batch, &inputs), self.signal.clone(), confirmed)
-                    .await;
+                let outcome = self.change(batch.kind, self.host.batch_kind(batch), self.host.batch_input(batch, &inputs), confirmed).await;
                 let reply = serde_json::from_str::<Value>(&outcome.text).map(|v| row(&v)).unwrap_or_default();
                 if outcome.stops || (outcome.is_error && outcome.missed.unwrap_or(0) == 0) {
                     let error = format!("{} {step}–{}, as one change: {}", batch.what, step + run - 1, outcome.text);
@@ -719,7 +720,7 @@ impl<H: PlanHost> Plan<H> {
                 index += 1;
                 continue;
             }
-            let outcome = self.host.change(kind.unwrap(), input.clone(), self.signal.clone(), confirmed).await;
+            let outcome = self.change(tool.unwrap_or_default(), kind.unwrap(), input.clone(), confirmed).await;
             let reply = serde_json::from_str::<Value>(&outcome.text).map(|v| row(&v)).unwrap_or_default();
             if outcome.stops || (outcome.is_error && outcome.missed.unwrap_or(0) == 0) {
                 let text = reply.get("changed").and_then(Value::as_str).map(|s| format!("{s}: {}", outcome.text)).unwrap_or(outcome.text);
@@ -761,6 +762,20 @@ impl<H: PlanHost> Plan<H> {
             state.done.push(json!(done));
             index += 1;
         }
+    }
+    /// A step's change, each record it makes marked as part of the run of `tool` this plan makes: HISTORY shows such a
+    /// run across several tracks as one entry.
+    async fn change(&self, tool: &str, kind: &'static H::Change, input: JsonObject, confirmed: bool) -> ChangeOutcome {
+        /// Puts back the run marked before, however the step ends (a plan set aside drops it mid-change).
+        struct Marked<'a>(&'a RefCell<Option<String>>, Option<String>);
+        impl Drop for Marked<'_> {
+            fn drop(&mut self) {
+                *self.0.borrow_mut() = self.1.take();
+            }
+        }
+        let batch = &self.host.history().batch;
+        let _marked = Marked(batch, batch.replace(Some(format!("p{}:{tool}", self.id))));
+        self.host.change(kind, input, self.signal.clone(), confirmed).await
     }
     pub async fn result(&self, final_: bool) -> Result<ToolResult, RuntimeError> {
         let stopped = self.pending().await?;
