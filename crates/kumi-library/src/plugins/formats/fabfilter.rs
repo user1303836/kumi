@@ -344,25 +344,37 @@ impl FabFilterPreset {
             Document::Text(source) => {
                 self.check_native_conversion()?;
                 check_controller(&self.plugin, template, template)?;
-                return source.to_controller(template);
+                return replace_controller_credits(template, &source.metadata);
             }
         };
         if is_component(&source.bytes) {
             return Ok(template.into());
         }
         let tail = &source.bytes[source.offset + source.count * 4..];
-        if tail.is_empty() {
-            return Ok(template.into());
-        }
         self.check_native_conversion()?;
         check_controller(&self.plugin, template, template)?;
+        if tail.is_empty() {
+            return if template.starts_with(b"FFed") {
+                Ok(template.into())
+            } else {
+                replace_controller_credits(template, &BTreeMap::new())
+            };
+        }
         if template.starts_with(b"FFed") {
             return Err(error("native extension has no verified legacy controller location"));
         }
         let range = controller_extensions(template)?;
-        custom_values_end(tail, 0, true)?;
+        let source_values_end = custom_values_end(tail, 0, true)?;
         let mut output = template[..range.start].to_vec();
         output.extend_from_slice(tail);
+        if source_values_end == tail.len() {
+            // Metadata-only native presets omit tuning extensions. Keep the
+            // selected version's initialized FFMT/private suffix, which newer
+            // Twin 3 controllers require. An explicit native suffix takes its
+            // place unchanged instead.
+            let template_values_end = custom_values_end(template, range.start, true)?;
+            output.extend_from_slice(&template[template_values_end..range.end]);
+        }
         output.extend_from_slice(&template[range.end..]);
         if output.len() > MAX_DECODED_BYTES {
             return Err(error("converted controller exceeds the size limit"));
@@ -545,41 +557,41 @@ impl TextDocument {
         }
         Ok(bytes)
     }
+}
 
-    fn to_controller(&self, template: &[u8]) -> Result<Vec<u8>, FormatError> {
-        let range = controller_extensions(template)?;
-        let end = custom_values_end(template, range.start, true)?;
-        let mut entries = Vec::new();
-        let mut position = range.start + 12;
-        for _ in 0..le(template, range.start + 8)? {
-            let key = custom_string(template, &mut position)?;
-            let value = custom_string(template, &mut position)?;
-            if !matches!(key, "AUTHOR" | "DESCRIPTION") {
-                entries.push((key, value));
-            }
+fn replace_controller_credits(template: &[u8], metadata: &BTreeMap<String, String>) -> Result<Vec<u8>, FormatError> {
+    let range = controller_extensions(template)?;
+    let end = custom_values_end(template, range.start, true)?;
+    let mut entries = Vec::new();
+    let mut position = range.start + 12;
+    for _ in 0..le(template, range.start + 8)? {
+        let key = custom_string(template, &mut position)?;
+        let value = custom_string(template, &mut position)?;
+        if !matches!(key, "AUTHOR" | "DESCRIPTION") {
+            entries.push((key, value));
         }
-        entries.extend(self.metadata.iter().map(|(key, value)| (key.as_str(), value.as_str())));
-        if entries.len() > MAX_DECODED_ITEMS {
-            return Err(error("converted metadata exceeds the item limit"));
-        }
-        let mut output = template[..range.start].to_vec();
-        output.extend_from_slice(b"CuSV\x01\0\0\0");
-        output.extend_from_slice(&(entries.len() as u32).to_le_bytes());
-        for (key, value) in entries {
-            for text in [key, value] {
-                output.extend_from_slice(&(text.len() as u32).to_le_bytes());
-                output.extend_from_slice(text.as_bytes());
-            }
-        }
-        // Missing source metadata stays missing; it must not acquire the
-        // initialized factory author's identity or description. Other private
-        // controller values, tuning, and editor state remain byte-exact.
-        output.extend_from_slice(&template[end..]);
-        if output.len() > MAX_DECODED_BYTES {
-            return Err(error("converted controller exceeds the size limit"));
-        }
-        Ok(output)
     }
+    entries.extend(metadata.iter().map(|(key, value)| (key.as_str(), value.as_str())));
+    if entries.len() > MAX_DECODED_ITEMS {
+        return Err(error("converted metadata exceeds the item limit"));
+    }
+    let mut output = template[..range.start].to_vec();
+    output.extend_from_slice(b"CuSV\x01\0\0\0");
+    output.extend_from_slice(&(entries.len() as u32).to_le_bytes());
+    for (key, value) in entries {
+        for text in [key, value] {
+            output.extend_from_slice(&(text.len() as u32).to_le_bytes());
+            output.extend_from_slice(text.as_bytes());
+        }
+    }
+    // Missing source metadata stays missing; it must not acquire the
+    // initialized factory author's identity or description. Other private
+    // controller values, tuning, and editor state remain byte-exact.
+    output.extend_from_slice(&template[end..]);
+    if output.len() > MAX_DECODED_BYTES {
+        return Err(error("converted controller exceeds the size limit"));
+    }
+    Ok(output)
 }
 
 /// Controller state carries a product signature even though FFBS does not. Its
@@ -891,6 +903,41 @@ mod tests {
         assert!(custom_values_end(&bytes[..end - 1], 0, false).is_err());
         bytes[12..16].copy_from_slice(&u32::MAX.to_le_bytes());
         assert!(custom_values_end(&bytes, 0, false).is_err());
+    }
+
+    #[test]
+    fn native_metadata_keeps_required_initialized_tuning_unless_the_source_supplies_it() {
+        use crate::plugins::{formats::vstpreset::VstPreset, templates};
+
+        let plugin = "fabfilter-twin-3";
+        let fixture = include_bytes!(concat!(env!("KUMI_WORKSPACE"), "/plugin-formats/fabfilter-twin-3/format-1/fixtures/init.ffp"));
+        let container = VstPreset::read(templates::initial(plugin).unwrap()).unwrap();
+        let controller = container.controller().unwrap();
+        let extensions = controller_extensions(controller).unwrap();
+        let values_end = custom_values_end(controller, extensions.start, true).unwrap();
+        let tuning = &controller[values_end..extensions.end];
+        assert!(tuning.starts_with(b"FFMT"), "this initialized version requires a tuning extension");
+        let native_end = 12 + le(fixture, 8).unwrap() as usize * 4;
+        assert_eq!(custom_values_end(fixture, native_end, true).unwrap(), fixture.len(), "the source has only a metadata extension");
+        for explicit_tuning in [false, true] {
+            let mut bytes = fixture.to_vec();
+            let mut expected_tuning = tuning.to_vec();
+            if explicit_tuning {
+                // The codec treats supplied tuning as opaque. Distinct bytes
+                // ensure this case detects silently keeping the default.
+                *expected_tuning.last_mut().unwrap() ^= 1;
+                bytes.extend_from_slice(&expected_tuning);
+            }
+            let native = FabFilterPreset::read(plugin, &bytes).unwrap();
+            let converted = native.to_controller(controller).unwrap();
+            let range = controller_extensions(&converted).unwrap();
+            let end = custom_values_end(&converted, range.start, true).unwrap();
+            assert_eq!(
+                &converted[end..range.end],
+                expected_tuning,
+                "tuning was dropped, overwritten or duplicated; source supplied it: {explicit_tuning}"
+            );
+        }
     }
 
     #[test]

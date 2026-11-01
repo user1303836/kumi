@@ -141,6 +141,27 @@ fn missing_native_text_metadata_does_not_inherit_the_template_author_or_descript
 }
 
 #[test]
+fn binary_native_without_extensions_clears_template_credits_and_preserves_other_metadata() {
+    let plugin = "fabfilter-twin-3";
+    let format = structure::builtin(plugin).unwrap();
+    let fixture = include_bytes!(concat!(env!("KUMI_WORKSPACE"), "/plugin-formats/fabfilter-twin-3/format-1/fixtures/init.ffp"));
+    let bytes = &fixture[..12 + word(fixture, 8) * 4];
+    let template = VstPreset::read(templates::initial(plugin).unwrap()).unwrap();
+    let mut expected = controller_metadata(template.controller().unwrap());
+    assert!(expected.remove("AUTHOR").is_some(), "the template must exercise factory-author removal");
+    assert!(expected.remove("DESCRIPTION").is_some(), "the template must exercise factory-description removal");
+    assert!(!expected.is_empty(), "the test needs unrelated controller metadata to preserve");
+    let options = WriteOptions {
+        version: format.verified.writes[0].version.clone(),
+        name: Some("Private binary preset".into()),
+        ..Default::default()
+    };
+    let imported = preset::edit(plugin, bytes, &options, &[]).unwrap();
+    assert_eq!(controller_metadata(imported.controller().unwrap()), expected);
+    assert_name(&imported, "Private binary preset");
+}
+
+#[test]
 fn older_fabfilter_templates_keep_their_own_parameter_layout() {
     let plugin = "fabfilter-twin-3";
     let older = templates::initial_for_version(plugin, "3.0.5.0").expect("captured older Twin 3");
