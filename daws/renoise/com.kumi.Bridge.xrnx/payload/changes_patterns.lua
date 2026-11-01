@@ -299,20 +299,11 @@ local notes_ = import("changes_notes")
 -- and the parameter's number.
 local function read_pattern_automation(song, env, p, t)
   local track, pattern_track, out = song:track(t), song:pattern(p):track(t), {}
-  for d = 1, #track.devices do
-    local device = track:device(d)
-    for k = 1, #device.parameters do
-      local parameter = device:parameter(k)
-      if parameter.is_automated then
-        local automation = pattern_track:find_automation(parameter)
-        if automation then
-          local points = {}
-          for i, point in ipairs(automation.points) do points[i] = { time = point.time, value = point.value, scaling = point.scaling } end
-          out[#out + 1] = { device = material_.device_place(env, t, d, device), parameter = k, playmode = automation.playmode, points = points }
-        end
-      end
-    end
-  end
+  rows.each_automation(track, pattern_track, function(d, k, device, _, automation)
+    local points = {}
+    for i, point in ipairs(automation.points) do points[i] = { time = point.time, value = point.value, scaling = point.scaling } end
+    out[#out + 1] = { device = material_.device_place(env, t, d, device), parameter = k, playmode = automation.playmode, points = points }
+  end)
   return out
 end
 

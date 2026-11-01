@@ -172,7 +172,7 @@ end
 
 -- A short fingerprint of cells that two reads of cells nobody touched agree on.
 local function fingerprint(cells)
-  local a, b = 5381, 0
+  local parts = {}
   for _, cell in ipairs(cells) do
     local text
     if cell.kind == "note" then
@@ -180,13 +180,9 @@ local function fingerprint(cells)
     else
       text = table.concat({ cell.line, "e", cell.col, cell.number, cell.amount }, "|")
     end
-    for i = 1, #text do
-      local byte = text:byte(i)
-      a = (a * 33 + byte) % 4294967296
-      b = (b * 65599 + byte) % 4294967296
-    end
+    parts[#parts + 1] = text
   end
-  return string.format("%08x%08x", a, b)
+  return base.hash(table.concat(parts))
 end
 
 -- The instruments note cells play (two hex digits; ".." is none), kept to find each again at Kumi's undo: Renoise renumbers
