@@ -111,7 +111,8 @@
           "Meter Scale": 97,
           "Knee Display Enabled": 98,
           "Show Input Level Meter": 99
-        }
+        },
+        "native_conversion": "named"
       }
     },
     "preset": {

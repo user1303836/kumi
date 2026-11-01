@@ -8,8 +8,10 @@
     "signature": "FC2p",
     "schema": 2,
     "encoding": "binary",
+    "checked": "2026-10-31",
+    "version": "2.2.2.0",
     "conversion": "identity",
-    "evidence": "Official native preset headers were inspected outside the repository. No factory preset content is bundled.",
-    "checks": [{"count":46,"total":46,"schema":2,"prefix_equal":true,"appended_equal_init":true}]
+    "evidence": "Native schemas were inspected outside the repository, converted by the measured slot/name mapping, and loaded through the public VST3 component API into fresh processes. The committed native fixture is synthesized only from initialized component/controller controls; it contains no factory preset content. This records host API conversion proof, with Rust-codec and DAW acceptance tracked separately.",
+    "checks": [{"schema":2,"count":46,"component_count":46,"prefix_within_tolerance":true,"maximum_absolute_error":0.0,"appended_equal_init":true}]
   }
 }

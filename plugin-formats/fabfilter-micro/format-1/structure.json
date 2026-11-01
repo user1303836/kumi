@@ -20,7 +20,8 @@
           "Output Gain": 6,
           "Receive Midi": 7,
           "Bypass": 8
-        }
+        },
+        "native_conversion": "identity"
       }
     },
     "preset": {

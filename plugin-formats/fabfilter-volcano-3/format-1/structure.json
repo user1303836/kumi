@@ -907,7 +907,8 @@
           "Slot 50 Bypassed": 893,
           "Slot 50 Inverted": 894,
           "Slot 50 Target": 895
-        }
+        },
+        "native_conversion": "identity"
       }
     },
     "preset": {

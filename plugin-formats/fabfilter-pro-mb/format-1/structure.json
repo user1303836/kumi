@@ -162,7 +162,8 @@
           "Analyzer Tilt": 148,
           "Analyzer Freeze": 149,
           "Analyzer Side Chain": 150
-        }
+        },
+        "native_conversion": "identity"
       }
     },
     "preset": {

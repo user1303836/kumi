@@ -147,7 +147,8 @@
           "Analyzer Mode": 133,
           "Display Range": 134,
           "Midi State": 135
-        }
+        },
+        "native_conversion": "named"
       }
     },
     "preset": {

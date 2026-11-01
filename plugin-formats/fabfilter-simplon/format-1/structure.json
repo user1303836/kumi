@@ -30,7 +30,8 @@
           "Receive Midi": 16,
           "Correct Gain Behavior": 17,
           "Bypass": 18
-        }
+        },
+        "native_conversion": "identity"
       }
     },
     "preset": {

@@ -42,6 +42,40 @@
           "Sync Mode": 28,
           "Sync Type": 29,
           "Velocity Sensitivity": 30
+        },
+        "native_conversion": "normalized",
+        "native_transforms": {
+          "0": {"minimum":0.0,"maximum":3.0,"steps":3,"title":"Wave Form"},
+          "1": {"minimum":-12.0,"maximum":12.0,"steps":0,"title":"Pitch"},
+          "2": {"minimum":0.0,"maximum":1.0,"steps":0,"title":"Pulse Width"},
+          "3": {"minimum":0.0,"maximum":3.0,"steps":3,"title":"Pulse Width Mod"},
+          "4": {"minimum":0.0,"maximum":3.0,"steps":3,"title":"Scale"},
+          "5": {"minimum":0.0,"maximum":1.0,"steps":0,"title":"Cutoff"},
+          "6": {"minimum":0.0,"maximum":1.0,"steps":0,"title":"Peak"},
+          "7": {"minimum":0.0,"maximum":1.0,"steps":0,"title":"Attack"},
+          "8": {"minimum":0.0,"maximum":1.0,"steps":0,"title":"Decay"},
+          "9": {"minimum":0.0,"maximum":1.0,"steps":0,"title":"Sustain"},
+          "10": {"minimum":0.0,"maximum":1.0,"steps":0,"title":"Release"},
+          "11": {"minimum":0.0,"maximum":1.0,"steps":0,"title":"Hold"},
+          "12": {"minimum":0.0,"maximum":1.0,"steps":0,"title":"MG Wave Form"},
+          "13": {"minimum":0.0,"maximum":1.0,"steps":1,"title":"MG Type"},
+          "14": {"minimum":0.0,"maximum":1.0,"steps":0,"title":"MG Frequency"},
+          "15": {"minimum":0.0,"maximum":1.0,"steps":0,"title":"Oscillator MG"},
+          "16": {"minimum":0.0,"maximum":1.0,"steps":0,"title":"Oscillator EG"},
+          "17": {"minimum":0.0,"maximum":1.0,"steps":1,"title":"Oscillator EG Type"},
+          "18": {"minimum":0.0,"maximum":1.0,"steps":0,"title":"Filter MG"},
+          "19": {"minimum":0.0,"maximum":1.0,"steps":0,"title":"Filter EG"},
+          "20": {"minimum":0.0,"maximum":1.0,"steps":1,"title":"Filter EG Type"},
+          "21": {"minimum":0.0,"maximum":1.0,"steps":0,"title":"Portamento"},
+          "22": {"minimum":0.0,"maximum":1.0,"steps":0,"title":"Noise"},
+          "23": {"minimum":0.0,"maximum":1.0,"steps":1,"title":"NoiseType"},
+          "24": {"minimum":0.0,"maximum":1.0,"steps":0,"title":"Volume"},
+          "25": {"minimum":0.0,"maximum":1.0,"steps":0,"title":"Filter Kbd Track"},
+          "26": {"minimum":0.0,"maximum":1.0,"steps":0,"title":"Filter Velocity"},
+          "27": {"minimum":0.0,"maximum":1.0,"steps":1,"title":"Polyphony"},
+          "28": {"minimum":0.0,"maximum":1.0,"steps":1,"title":"Sync Mode"},
+          "29": {"minimum":0.0,"maximum":10.0,"steps":10,"title":"Sync Type"},
+          "30": {"minimum":0.0,"maximum":1.0,"steps":0,"title":"Velocity Sensitivity"}
         }
       }
     },
@@ -52,7 +86,11 @@
         "magic": "FFPr",
         "schema": 1,
         "encoding": "uncounted",
-        "parameter_count": 31
+        "parameter_count": 31,
+        "uncounted_layouts": {
+          "0": 25,
+          "1": 31
+        }
       }
     }
   },

@@ -43,7 +43,8 @@
           "Loudness Integrated Peak Time Scale": 29,
           "Loudness Recording": 30,
           "Loudness Auto-Reset": 31
-        }
+        },
+        "native_conversion": "identity"
       }
     },
     "preset": {

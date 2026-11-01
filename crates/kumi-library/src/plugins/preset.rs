@@ -158,26 +158,26 @@ pub fn edit(plugin: &str, input: &[u8], options: &WriteOptions, edits: &[Edit]) 
             if let (Some(controller), Some(reference)) = (output.controller(), template.controller()) {
                 fabfilter::check_controller(plugin, controller, reference)?;
             }
+            // Native files can predate controls appended by a newer build. Fill
+            // those from this installed version's template before applying edits.
+            if native {
+                let converted = preset.to_state(template_component)?;
+                if let Some(reference) = template.controller() {
+                    replace_chunk(&mut output, "Cont", preset.to_controller(reference)?);
+                }
+                preset = FabFilterPreset::read(plugin, &converted)?;
+            }
             for change in edits {
                 preset.set(&change.path, &change.value)?;
             }
             if let Some(name) = &options.name {
                 preset.rename(name)?;
             }
-            if native {
-                if let Some(reference) = template.controller() {
-                    replace_chunk(&mut output, "Cont", preset.to_controller(reference)?);
-                }
-            }
             if let (Some(name), Some(controller), Some(reference)) = (&options.name, output.controller(), template.controller()) {
                 let renamed = fabfilter::rename_controller(plugin, controller, reference, name)?;
                 replace_chunk(&mut output, "Cont", renamed);
             }
-            if native {
-                preset.to_state(template_component)?
-            } else {
-                preset.write()?
-            }
+            preset.write()?
         }
         "valhalla" => {
             let mut preset = ValhallaPreset::read(state)?;

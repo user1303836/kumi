@@ -129,6 +129,33 @@ pub fn prepare(input: &Path, library: &Path, name: &str) -> Result<PreparedPrese
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_fabfilter_vst3_template_stages_with_its_kind_and_exact_state() {
+        let temp = tempfile::tempdir().unwrap();
+        let source = temp.path().join("input.vstpreset");
+        let mut effects = 0;
+        let mut instruments = 0;
+        for format in structure::builtins().iter().filter(|format| format.info.family == "fabfilter") {
+            let bytes = kumi_library::plugins::templates::initial(&format.info.plugin).unwrap();
+            std::fs::write(&source, bytes).unwrap();
+            let made = prepare(&source, temp.path(), &format.info.plugin).unwrap();
+            let folder = if format.info.kind == "instrument" {
+                instruments += 1;
+                "Instruments"
+            } else {
+                effects += 1;
+                "Audio Effects"
+            };
+            assert_eq!(made.kind, format.info.kind);
+            assert!(format.has_id(&made.class_id));
+            assert_eq!(made.item, format!("user_library/Kumi/{folder}/{}.vstpreset", made.name));
+            assert_eq!(std::fs::read(&made.file).unwrap(), bytes, "{}: processor/controller state changed", format.info.plugin);
+            assert_eq!(prepare(&source, temp.path(), &format.info.plugin).unwrap().file, made.file);
+        }
+        assert!(effects >= 22 && instruments >= 3, "all 25 current and legacy products must have the correct Live route");
+    }
+
     #[test]
     fn stages_exact_vst3_state_in_the_right_live_folder_and_reuses_only_identical_bytes() {
         let temp = tempfile::tempdir().unwrap();

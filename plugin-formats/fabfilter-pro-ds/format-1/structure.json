@@ -31,7 +31,8 @@
           "Output Level": 17,
           "Output Pan": 18,
           "Bypass": 19
-        }
+        },
+        "native_conversion": "identity"
       }
     },
     "preset": {

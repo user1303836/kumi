@@ -611,7 +611,8 @@
           "Band 22 Spectral Tilt": 597,
           "Band 23 Spectral Tilt": 598,
           "Band 24 Spectral Tilt": 599
-        }
+        },
+        "native_conversion": "named"
       }
     },
     "preset": {

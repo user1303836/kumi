@@ -78,3 +78,16 @@ fn fabfilter_writes_reject_mismatched_classes_and_controllers() {
     controller[..4].copy_from_slice(b"NOPE");
     assert!(preset::edit(plugin, &wrong_controller.write(), &options, &[]).is_err());
 }
+
+#[test]
+fn an_older_native_preset_can_edit_controls_added_by_the_installed_version() {
+    let plugin = "fabfilter-one";
+    let format = structure::builtin(plugin).unwrap();
+    let native = include_bytes!(concat!(env!("KUMI_WORKSPACE"), "/plugin-formats/fabfilter-one/format-1/fixtures/init-v0.ffp"));
+    let path = "parameters/Polyphony";
+    let value = format.structure.field(path).unwrap().range.unwrap()[1];
+    let options = WriteOptions { version: format.verified.writes[0].version.clone(), ..Default::default() };
+    let preset = preset::edit(plugin, native, &options, &[Edit { path: path.into(), value: json!(value) }]).unwrap();
+    let readback = preset::inspect(plugin, &preset.write(), None).unwrap();
+    assert_eq!(readback["data"]["parameters"]["Polyphony"], json!(value));
+}

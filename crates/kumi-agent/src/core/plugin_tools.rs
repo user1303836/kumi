@@ -109,11 +109,11 @@ impl PluginTool {
                     .plugins
                     .iter()
                     .filter(|p| string("role").is_none_or(|r| inventory::matches_role(p, r)))
-                    .filter(|p| string("query").is_none_or(|q| p.name.to_lowercase().contains(&q.to_lowercase())))
+                    .filter(|p| string("query").is_none_or(|q| inventory_query(p, q)))
                     .collect();
                 Ok(
                     json!({"format":"VST3", "plugins":matching.iter().take(limit).collect::<Vec<_>>(), "more":matching.len().saturating_sub(limit),
-                    "unclassified":if string("role").is_some() { found.plugins.iter().filter(|p|p.roles.is_empty()).filter(|p|string("query").is_none_or(|q|p.name.to_lowercase().contains(&q.to_lowercase()))).take(limit.min(20)).map(|p|p.name.as_str()).collect::<Vec<_>>() } else { Vec::new() },
+                    "unclassified":if string("role").is_some() { found.plugins.iter().filter(|p|p.roles.is_empty()).filter(|p|string("query").is_none_or(|q|inventory_query(p,q))).take(limit.min(20)).map(|p|p.name.as_str()).collect::<Vec<_>>() } else { Vec::new() },
                     "warnings":found.warnings, "note":"Presence only; confirm loadability and the exact class/version in the DAW. Unclassified products may still do the requested job: inspect the DAW's browser/parameters before falling back to native devices. No VST2/AU/CLAP scan."}),
                 )
             }
@@ -258,6 +258,13 @@ impl PluginTool {
     }
 }
 
+fn inventory_query(plugin: &inventory::InstalledPlugin, query: &str) -> bool {
+    let query = query.trim().to_lowercase();
+    format!("{} {} {}", plugin.vendor.as_deref().unwrap_or_default(), plugin.name, plugin.plugin.as_deref().unwrap_or_default())
+        .to_lowercase()
+        .contains(&query)
+}
+
 fn local_path(path: &Path) -> Result<(), String> {
     let text = path.to_string_lossy();
     if text.chars().any(char::is_control) || network_or_device(&text) || reserved_device(&text) || !path.is_absolute() {
@@ -355,6 +362,30 @@ impl KernelTool for PluginTool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn installed_search_finds_fabfilter_by_vendor_when_host_names_omit_it() {
+        let temp = tempfile::tempdir().unwrap();
+        let format = structure::builtin("fabfilter-pro-l-2").unwrap();
+        let resources = temp.path().join("Renamed.vst3/Contents/Resources");
+        std::fs::create_dir_all(&resources).unwrap();
+        std::fs::write(
+            resources.join("moduleinfo.json"),
+            serde_json::to_vec(&json!({"Classes":[{
+                "Name":"Pro-L 2", "CID":format.info.ids.vst3[0].id,
+                "Category":"Audio Module Class", "Version":format.verified.writes[0].version
+            }]}))
+            .unwrap(),
+        )
+        .unwrap();
+        let tool = tool(temp.path());
+        for query in ["FabFilter", "FabFilter Pro-L", "fabfilter-pro-l-2", "Pro-L 2"] {
+            let result = tool.run(&input(json!({"action":"installed","query":query,"role":"louder"}))).unwrap();
+            assert_eq!(result["plugins"][0]["plugin"], "fabfilter-pro-l-2", "{query}");
+        }
+        let unrelated = tool.run(&input(json!({"action":"installed","query":"FabFilter","role":"reverb"}))).unwrap();
+        assert!(unrelated["plugins"].as_array().unwrap().is_empty());
+    }
+
     fn input(value: Value) -> JsonObject {
         value.as_object().unwrap().clone()
     }

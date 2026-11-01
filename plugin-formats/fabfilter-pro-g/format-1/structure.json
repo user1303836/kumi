@@ -45,7 +45,8 @@
           "Output Pan": 31,
           "Bypass": 32,
           "Interface: Show Display": 33
-        }
+        },
+        "native_conversion": "identity"
       }
     },
     "preset": {

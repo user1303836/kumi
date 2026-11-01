@@ -1312,7 +1312,8 @@
           "MIDI Source 9 MPE Type": 1298,
           "MIDI Source 10 MPE Type": 1299
         },
-        "parameter_counts": [1288,1300]
+        "parameter_counts": [1288,1300],
+        "native_conversion": "identity"
       }
     },
     "preset": {
