@@ -27,7 +27,7 @@ impl LiveRenderer {
         if rig.ears.is_some() {
             return self.ears_pass(rig, signal).await;
         }
-        let tempo = self.observer.tempo.get().unwrap_or(f64::NAN);
+        let tempo = self.pass_tempo(rig)?;
         let mut lap_at = now_ms();
         let mut laps = vec![];
         let mut lap = |what: &str| {

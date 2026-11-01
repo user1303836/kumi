@@ -38,7 +38,7 @@ use kumi_listening::{
     renderer::{ListenFlag, ListenNow},
     round::Round,
 };
-use kumi_media::audio::{self, matching::Focus, tools::ResolveAudio};
+use kumi_media::audio::{matching::Focus, tools::ResolveAudio};
 use kumi_types::contracts::*;
 use kumi_types::errors::RuntimeError;
 use serde_json::{json, Value};
