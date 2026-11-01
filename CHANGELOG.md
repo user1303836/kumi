@@ -3,6 +3,36 @@
 Kumi's releases. The Ableton bridge (`crates/ableton-mcp-server`) is versioned on its own;
 each Kumi release names the bridge it ships with.
 
+## 1.24.35 — 2026-11-01
+
+Ships with bridge 1.0.101, as 1.24.34 did. Ships with REAPER extension 0.1.8 and Renoise tool 1.0.7,
+which REAPER and Renoise load when they restart; `kumi update` puts them in.
+
+- REAPER and Renoise: a goal's search no longer stops moving a track's other knobs when the DAW
+  refuses one, and hears each generation's trials together.
+- In REAPER, FOCUS's arrange view shows the part of the project REAPER's arrange view shows, as you
+  scroll and zoom, with regions drawn from start to end and a row for each fixed lane.
+- Kumi creates and edits presets for current and legacy FabFilter VST3 plug-ins using built-in
+  formats.
+- Kumi recognizes suitable installed FabFilter processors for mastering, mixing and sound design.
+- Answers from ChatGPT come back sooner: Kumi keeps one connection open while you work and sends only
+  what's new at each step.
+
+Tested with Live 12.4 on macOS. On Windows, installing and updating are tested; using Kumi with Live
+there is still new.
+
+### REAPER extension 0.1.8
+
+- When an action replaces every track in a REAPER project at once, Kumi knows it's still the same
+  project, so what it read stays good.
+
+### Renoise tool 1.0.7
+
+- After Kumi maps a macro, Renoise's own undo of Kumi's earlier changes inside that instrument shows
+  in HISTORY again.
+- Kumi's watch of the Doofers, Splitters and Notepads it changed costs Renoise less: each device is
+  read once a round, a couple at a time.
+
 ## 1.24.34 — 2026-11-01
 
 Ships with bridge 1.0.101, as 1.24.33 did.
