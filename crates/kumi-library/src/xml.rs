@@ -248,10 +248,12 @@ const CHUNK: usize = 256 * 1024;
 /// one this long is a damaged or hostile file's, and reading it again with each piece would cost the square of it.
 const MAX_TAG: usize = 8 * 1024 * 1024;
 
-/// What a stream's pieces scan through: the tag and the character a piece's end cut, kept for the next, and the bounds.
+/// What a stream's pieces scan through: the tag and the character a piece's end cut, kept for the next, the end of a CDATA
+/// section or comment being passed over, and the bounds.
 struct Pieces {
     decoder: Utf8Decoder,
     pending: String,
+    passing: Option<&'static str>,
     read: u64,
     max_bytes: u64,
     signal: Option<Signal>,
@@ -262,6 +264,7 @@ impl Pieces {
         Self {
             decoder: Utf8Decoder::default(),
             pending: String::new(),
+            passing: None,
             read: 0,
             max_bytes: options.max_bytes.unwrap_or(512 * 1024 * 1024),
             signal: options.signal,
@@ -277,8 +280,30 @@ impl Pieces {
         }
         let mut text = std::mem::take(&mut self.pending);
         text.push_str(&self.decoder.write(chunk));
-        let used = scan_tags(&text, handler);
-        text.drain(..used);
+        // A CDATA section or a comment isn't a tag and nothing reads it (a plug-in's state, an impulse: megabytes), so it's
+        // passed over rather than held: only what may be the start of its end stays for the next piece.
+        loop {
+            if let Some(closer) = self.passing {
+                let Some(end) = text.find(closer) else {
+                    let mut keep = text.len().saturating_sub(closer.len() - 1);
+                    while !text.is_char_boundary(keep) {
+                        keep -= 1;
+                    }
+                    text.drain(..keep);
+                    break;
+                };
+                text.drain(..end + closer.len());
+                self.passing = None;
+            }
+            let used = scan_tags(&text, handler);
+            text.drain(..used);
+            let Some((opener, closer)) = [("<![CDATA[", "]]>"), ("<!--", "-->")].into_iter().find(|(opener, _)| text.starts_with(opener))
+            else {
+                break;
+            };
+            text.drain(..opener.len());
+            self.passing = Some(closer);
+        }
         self.pending = text;
         if self.pending.len() > MAX_TAG {
             return Err(XmlError::TagTooLong);

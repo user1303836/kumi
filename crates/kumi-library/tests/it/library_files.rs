@@ -133,6 +133,21 @@ fn a_stream_gives_its_text_whatever_cuts_it_within_the_same_bounds() {
     signal.cancel();
     let stopped = ScanOptions { signal: Some(signal), ..Default::default() };
     assert!(matches!(scan_xml_stream(xml.as_bytes(), &mut Texts::default(), stopped), Err(XmlError::Aborted(_))));
+    // A CDATA section or a comment past a tag's bound, whatever cuts it: nothing holds it, and what follows it reads.
+    for (open, close) in [("<![CDATA[", "]]>"), ("<!--", "-->")] {
+        let long = format!("<A>1</A>{open}{}☺]{close}<B>2</B>", "x]".repeat(5 * 1024 * 1024));
+        for size in [64 * 1024 + 1, 256 * 1024] {
+            let mut texts = Texts::default();
+            scan_xml_stream(Pieces(long.as_bytes(), size), &mut texts, ScanOptions::default()).unwrap();
+            let values: Vec<_> = texts.values.iter().map(|(name, value)| (name.as_str(), value.as_str())).collect();
+            assert_eq!(values, [("A", "1"), ("B", "2")], "{open} {size} bytes at a time");
+        }
+        // The closer cut by every small piece.
+        let short = format!("<A>1</A>{open}abc{close}<B>2</B>");
+        let mut texts = Texts::default();
+        scan_xml_stream(Pieces(short.as_bytes(), 1), &mut texts, ScanOptions::default()).unwrap();
+        assert_eq!(texts.values.len(), 2, "{open}");
+    }
     // Its read ends as the handler says.
     let mut handler = Handler { stop: true, ..Default::default() };
     let first = format!("<First/>{}<Last/>", " ".repeat(700_000));

@@ -129,6 +129,10 @@ const SONG: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
               </Devices>
             </DeviceChain>
           </DooferDevice>
+          <SplitterDevice type="SplitterDevice">
+            <DeviceChain0><Devices><GainerDevice type="GainerDevice"/></Devices></DeviceChain0>
+            <DeviceChain1><Devices><LfoDevice type="LfoDevice"/></Devices></DeviceChain1>
+          </SplitterDevice>
           <AudioPluginDevice type="AudioPluginDevice">
             <SelectedPresetName>Big Room</SelectedPresetName>
             <PluginType>AU</PluginType>
@@ -215,12 +219,13 @@ fn a_song_reads_as_its_tracks_devices_instruments_and_length() {
     assert_eq!(groups, [Some("Inner"), Some("Drums"), Some("Drums"), None, None], "a group comes after its tracks");
     // The mixer isn't listed; a device with the producer's name for it, what's inside it, and a plug-in.
     let devices = &set.tracks[0].devices;
-    assert_eq!(devices.len(), 3);
+    assert_eq!(devices.len(), 4);
     assert_eq!((devices[0].name.as_str(), devices[0].preset.as_deref()), ("Bus Compressor", None), "Init is no preset");
     assert_eq!((devices[1].name.as_str(), devices[1].preset.as_deref()), ("Doofer", Some("Saturation")));
     assert_eq!(devices[1].inside.as_deref(), Some(["Distortion".to_owned(), "Warm".to_owned()].as_slice()));
+    assert_eq!(devices[2].inside.as_deref(), Some(["Gainer".to_owned(), "*LFO".to_owned()].as_slice()), "a Splitter's two chains");
     assert_eq!(
-        (devices[2].name.as_str(), devices[2].plugin.as_deref(), devices[2].preset.as_deref()),
+        (devices[3].name.as_str(), devices[3].plugin.as_deref(), devices[3].preset.as_deref()),
         ("Shimmer", Some("AU"), Some("Big Room")),
         "without its short name, the long one's end"
     );
@@ -263,6 +268,53 @@ fn song_xml_is_found_by_the_archives_directory_however_the_archive_was_written()
     assert_eq!(read(&commented).unwrap().tempo, Some(127.5));
 }
 
+/// What a song's older schemas have: plug-ins in `PluginProperties`, the sequence's patterns directly in it (docs 4–37).
+#[test]
+fn an_older_song_reads_too() {
+    let old = r#"<RenoiseSong doc_version="15"><GlobalSongData><BeatsPerMin>90</BeatsPerMin><LinesPerBeat>4</LinesPerBeat></GlobalSongData>
+      <Instruments><Instrument><Name>Old Synth</Name><PluginProperties><PluginDevice><PluginType>VST</PluginType><PluginDisplayName>VST: Old</PluginDisplayName></PluginDevice></PluginProperties></Instrument></Instruments>
+      <Tracks><SequencerTrack><Name>One</Name></SequencerTrack></Tracks>
+      <PatternPool><Patterns><Pattern><NumberOfLines>16</NumberOfLines></Pattern></Patterns></PatternPool>
+      <PatternSequence><PatternSequence><Pattern>0</Pattern><Pattern>0</Pattern></PatternSequence></PatternSequence></RenoiseSong>"#;
+    let set = read(&archive(&[("Song.xml", old.as_bytes(), true, false)])).unwrap();
+    assert_eq!(set.arrangement_beats, Some(8.), "two 16-line patterns at 4 lines per beat");
+    let instruments = set.instruments.unwrap();
+    assert_eq!((instruments[0].plugin.as_deref(), instruments[0].inside.clone()), (Some("VST"), Some(vec!["Old".to_owned()])));
+    assert_eq!(set.signature, None, "older songs may not say");
+}
+
+/// A plug-in's state and a Convolver's impulse are base64 in CDATA, megabytes of it: passed over, not held.
+#[test]
+fn a_large_plugin_state_doesnt_lose_the_song() {
+    let state = format!("<ParameterChunk><![CDATA[{}]]></ParameterChunk>", "QUJD".repeat(3 * 1024 * 1024));
+    let song = SONG.replace("<PluginType>VST3</PluginType>", &format!("<PluginType>VST3</PluginType>{state}"));
+    assert!(song.len() > 12 * 1024 * 1024);
+    let set = read(&archive(&[("Song.xml", song.as_bytes(), true, false)])).unwrap();
+    assert_eq!(set.tempo, Some(127.5));
+    assert_eq!(set.instruments.unwrap()[1].plugin.as_deref(), Some("VST3"));
+    assert_eq!(set.tracks.len(), 5, "what follows it is read");
+}
+
+#[test]
+fn an_instruments_samples_and_a_chains_devices_are_named_up_to_their_limits() {
+    let samples: String = (0..33).map(|k| format!("<Sample><Name>S{k}</Name></Sample>")).collect();
+    let inside: String = (0..17).map(|_| "<GainerDevice/>".to_owned()).collect();
+    let song = format!(
+        "<RenoiseSong><Instruments><Instrument><Name>Many</Name><Samples>{samples}</Samples></Instrument></Instruments><Tracks><SequencerTrack><Name>T</Name><FilterDevices><Devices><DooferDevice><DeviceChain><Devices>{inside}</Devices></DeviceChain></DooferDevice></Devices></FilterDevices></SequencerTrack></Tracks></RenoiseSong>"
+    );
+    let set = read(&archive(&[("Song.xml", song.as_bytes(), true, false)])).unwrap();
+    assert_eq!(set.instruments.unwrap()[0].inside.as_ref().map(Vec::len), Some(32));
+    assert_eq!(set.tracks[0].devices[0].inside.as_ref().map(Vec::len), Some(16));
+}
+
+/// A damaged or hostile file: a small archive of millions of tracks isn't kept.
+#[test]
+fn a_song_of_more_than_renoise_could_hold_isnt_one() {
+    let tracks = "<SequencerTrack/>".repeat(100_001);
+    let song = format!("<RenoiseSong><Tracks>{tracks}</Tracks></RenoiseSong>");
+    assert_eq!(read(&archive(&[("Song.xml", song.as_bytes(), true, false)])).unwrap_err(), "That isn't a Renoise song.");
+}
+
 #[test]
 fn only_a_songs_archive_reads_and_a_stop_ends_it() {
     let not_one = "That isn't a Renoise song.";
@@ -270,6 +322,15 @@ fn only_a_songs_archive_reads_and_a_stop_ends_it() {
     assert_eq!(read(&[]).unwrap_err(), not_one);
     assert_eq!(read(&archive(&[("Instrument.xml", SONG.as_bytes(), true, false)])).unwrap_err(), not_one, "no Song.xml");
     assert_eq!(read(&archive(&[("Song.xml", b"<LiveSet></LiveSet>", true, false)])).unwrap_err(), not_one, "another document");
+    // Song.xml's central record: its flags say it's encrypted, or its method is one Kumi can't read.
+    let changed = |at: usize, value: u8| {
+        let mut bytes = archive(&[("Song.xml", SONG.as_bytes(), false, false)]);
+        let central = bytes.windows(4).position(|four| four == [0x50, 0x4b, 0x01, 0x02]).unwrap();
+        bytes[central + at] = value;
+        read(&bytes).unwrap_err()
+    };
+    assert_eq!(changed(8, 1), not_one, "encrypted");
+    assert_eq!(changed(10, 12), not_one, "bzip2");
     let home = tempfile::tempdir().unwrap();
     let path = home.path().join("Song.xrns");
     std::fs::write(&path, archive(&[("Song.xml", SONG.as_bytes(), true, false)])).unwrap();
@@ -339,9 +400,12 @@ async fn my_sets_in_renoise_finds_a_song_the_library_learned() {
             assert_eq!(song["instruments"][0], "Bass & Sub: SINE-C1, SINE-C2");
             assert_eq!(song["instruments"][1], "Pads [VST3]: Serum");
             assert_eq!(song["tracks"][0]["devices"][1], "Saturation (Doofer): Distortion, Warm");
-            assert_eq!(song["tracks"][0]["devices"][2], "Big Room (Shimmer) [AU]");
+            assert_eq!(song["tracks"][0]["devices"][3], "Big Room (Shimmer) [AU]");
             assert_eq!(song["tracks"][0]["group"], "Inner");
             assert_eq!(song["tracks"][0].get("clips"), None);
+            assert_eq!(song["tracks"][0].get("kind"), None, "Renoise has no MIDI tracks");
+            assert_eq!(song["tracks"][2]["kind"], "group");
+            assert_eq!(song["returns"][0].get("kind"), None, "it's under returns");
             assert_eq!(song.get("scenes"), None);
             assert_eq!(my_sets(&DawProfile::ABLETON, json!({})).await["known"], 0, "a Renoise song isn't one of Live's Sets");
             library.close().await;

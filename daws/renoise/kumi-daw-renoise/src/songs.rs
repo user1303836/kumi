@@ -36,6 +36,13 @@ fn copy_or_backup(path: &Path) -> bool {
 
 /// The most of a song's samples named under its instrument: enough to find it by one, in a line a model reads.
 const MOST_SAMPLES: usize = 32;
+/// The most of what's inside a Doofer or a Splitter named, as a Live rack's.
+const MOST_INSIDE: usize = 16;
+/// How much a song may hold of what's kept (tracks, devices, instruments, samples named, patterns, sequence slots). Renoise's limits are far
+/// below it (255 instruments, 1000 patterns and slots): more is a damaged or hostile file, whose every read would pay for it.
+const MOST_KEPT: usize = 100_000;
+/// How much of `Song.xml` is read: what's kept is bounded above, and nothing else is held (a plug-in's state, an impulse).
+const MOST_XML: u64 = 4 * 1024 * 1024 * 1024;
 
 /// The end of a zip archive holds where its directory is; its comment, at most this long, may follow.
 const END_RECORD: usize = 22;
@@ -120,7 +127,7 @@ fn read_song(path: &Path, signal: &Signal) -> Result<SetSummary, RuntimeError> {
     file.seek(SeekFrom::Current(skip)).map_err(failed)?;
     let packed = BufReader::new(file).take(u64::from(packed));
     let mut song = Song::default();
-    let options = ScanOptions { signal: Some(signal.clone()), ..Default::default() };
+    let options = ScanOptions { signal: Some(signal.clone()), max_bytes: Some(MOST_XML) };
     let scanned = match method {
         STORED => scan_xml_stream(packed, &mut song, options),
         DEFLATED => scan_xml_stream(DeflateDecoder::new(packed), &mut song, options),
@@ -129,7 +136,7 @@ fn read_song(path: &Path, signal: &Signal) -> Result<SetSummary, RuntimeError> {
     match scanned {
         Err(XmlError::Aborted(_)) => return Err(RuntimeError::Aborted),
         Err(error) => return Err(RuntimeError::plain(error.to_string())),
-        Ok(()) if !song.saw_song => return Err(not_a_song()),
+        Ok(()) if !song.saw_song || song.kept > MOST_KEPT => return Err(not_a_song()),
         Ok(()) => {}
     }
     let name = path.file_stem().map(|stem| stem.to_string_lossy().into_owned()).unwrap_or_default();
@@ -253,6 +260,7 @@ impl ReadDevice {
 struct Song {
     saw_song: bool,
     done: bool,
+    kept: usize,
     /// The elements open below the song, up to one not read ...
     path: Vec<String>,
     /// ... and how deep inside that one the stream is.
@@ -278,7 +286,7 @@ struct ReadInstrument {
 }
 
 /// The most of one value kept: a name, a number.
-const MOST_VALUE: usize = 4096;
+const MOST_VALUE: usize = 1024;
 
 /// Whether the song's element `name` inside `path` is read; all else is passed over whole.
 fn read_inside(path: &[&str], name: &str) -> bool {
@@ -332,6 +340,11 @@ impl TagHandler for Song {
             self.passing = 1;
             return;
         }
+        if matches!(path.as_slice(), ["Instruments"] | ["Tracks"] | ["Tracks", _, "FilterDevices", "Devices"] | ["PatternPool", "Patterns"])
+        {
+            self.kept += 1;
+            self.done |= self.kept > MOST_KEPT;
+        }
         match path.as_slice() {
             ["Instruments"] => self.instruments.push(ReadInstrument::default()),
             ["Tracks"] => {
@@ -348,7 +361,7 @@ impl TagHandler for Song {
                 self.device = Some(ReadDevice { name: device_name(name), ..Default::default() });
             }
             ["Tracks", _, "FilterDevices", "Devices", _, _, "Devices"] => {
-                if let Some(device) = &mut self.device {
+                if let Some(device) = self.device.as_mut().filter(|device| device.inside.len() < MOST_INSIDE) {
                     device.inside.push(device_name(name));
                 }
             }
@@ -410,6 +423,8 @@ impl Song {
                     instrument.sample_count += 1;
                     if instrument.samples.len() < MOST_SAMPLES && !value.is_empty() {
                         instrument.samples.push(value);
+                        self.kept += 1;
+                        self.done |= self.kept > MOST_KEPT;
                     }
                 }
             }
@@ -438,8 +453,10 @@ impl Song {
             }
             (["Tracks", _, "FilterDevices", "Devices", _, _, "Devices", _], "PluginShortDisplayName") => {
                 if let (Some(device), Some(plugin)) = (&mut self.device, named()) {
-                    if let Some(last) = device.inside.last_mut() {
-                        *last = plugin;
+                    if device.inside.len() < MOST_INSIDE {
+                        if let Some(last) = device.inside.last_mut() {
+                            *last = plugin;
+                        }
                     }
                 }
             }
@@ -451,6 +468,8 @@ impl Song {
             ([.., "SequenceEntry"] | ["PatternSequence", "PatternSequence"], "Pattern") => {
                 if let Some(pattern) = number().filter(|pattern| *pattern >= 0.) {
                     self.sequence.push(pattern as usize);
+                    self.kept += 1;
+                    self.done |= self.kept > MOST_KEPT;
                 }
             }
             // All that's read comes before what's after the sequence (the pattern coder's, the mixer's view).

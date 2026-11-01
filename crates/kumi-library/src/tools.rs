@@ -8,7 +8,7 @@ use super::{
         describe_device, describe_track, search_presets, search_sets, LikeSound, PresetHit, PresetQuery, SearchResult, SetQuery, SoundHit,
         SoundIndex, SoundQuery,
     },
-    sets::{Clips, SetSummary, SetTrack},
+    sets::{Clips, SetSummary, SetTrack, TrackKind},
     sources::basename,
     store::unpack_vector,
 };
@@ -545,11 +545,18 @@ impl LibraryTool {
     }
 }
 /// A track of a project: another DAW's says nothing of clips it has none of (a Renoise track never has; "no clips" would
-/// read as an empty track).
+/// read as an empty track), nor that it's a MIDI track or a return, which are Live's words for what it may not be (Renoise
+/// has no MIDI tracks; `returns` says what a send is).
 fn describe_in(set: &SetSummary, track: &SetTrack) -> Value {
     let mut row = describe_track(track);
-    if set.daw.is_some() && track.clips == Clips::default() {
-        row.as_object_mut().unwrap().remove("clips");
+    if set.daw.is_some() {
+        let row = row.as_object_mut().unwrap();
+        if track.clips == Clips::default() {
+            row.remove("clips");
+        }
+        if matches!(track.kind, TrackKind::Midi | TrackKind::Return) {
+            row.remove("kind");
+        }
     }
     row
 }
