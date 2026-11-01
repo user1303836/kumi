@@ -260,6 +260,23 @@ fn every_verified_numeric_interval_has_committed_endpoint_evidence() {
             let bounds = field.range.expect("verified range needs bounds");
             assert!(bounds.iter().all(|n| n.is_finite()) && bounds[0] <= bounds[1]);
             match format.info.family.as_str() {
+                "fabfilter" => {
+                    let record = &evidence["fields"][path];
+                    assert_eq!(endpoint_bounds(record), bounds, "{plugin}/{path}");
+                    assert_eq!(evidence["plugin"], *plugin);
+                    assert!(format.verified.writes.iter().any(|version| evidence["version"] == version.version));
+                    let observations = std::iter::once(record).chain(record["variants"].as_array().into_iter().flatten());
+                    for observed in observations {
+                        let measured = endpoint_bounds(observed);
+                        assert!(bounds[0] >= measured[0] && bounds[1] <= measured[1], "{plugin}/{path}: exceeds a measured version");
+                        assert_eq!(observed["roundtrip"], json!([true, true, true]));
+                        assert_eq!(observed["stored"], observed["reread"], "{plugin}/{path}: stored value changed on reload");
+                    }
+                    let id = record["parameterId"].as_u64().unwrap();
+                    assert!(format.structure.parameters.iter().any(|(name, link)| link.field == *path
+                        && link.status == structure::Status::Verified
+                        && name.ends_with(&format!("[VST3 {id}]"))));
+                }
                 "valhalla" | "minimal-audio" | "pulsar-modular" => {
                     let record = &evidence["fields"][path];
                     assert_eq!(endpoint_bounds(record), bounds, "{plugin}/{path}");

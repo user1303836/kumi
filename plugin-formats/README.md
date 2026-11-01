@@ -20,6 +20,7 @@ belong to their owners.
 | All 10 captured Valhalla DSP products | XML in product-specific VST3 wrappers | Each product's recorded version; native XML conversion preserves its component wrapper and private data. ValhallaDelay BBD mode checked |
 | All 16 captured Minimal Audio products | JUCE binary XML, physical `mapped_value` controls | Each product's recorded version; normalized host values and stored physical values remain distinct |
 | All 13 captured Pulsar Modular products | JUCE binary XML, physical parameter values | Each product's recorded version; stale/unknown parameter IDs rejected |
+| FabFilter: 14 current and 11 legacy VST3 products | `FFBS` or `FabF` component state; binary or text `.ffp` presets | Exact versions and measured parameter ranges are recorded per product. VST3 creation, editing and names use the selected version's initialized state; native `.ffp` conversion has a separate verification gate |
 | Zynaptiq PUNCH 1 and UNMIX DRUMS | Native XML and length-prefixed XML component state | 1.1.1 and 1.3: initialized states, Rust edits, native reload and parameter readback |
 | Superior Drummer 3 | Native brace text and VST3 compatibility wrapper | 3.4.1: new initialized state and verified numeric edits, including attenuation; text and resource paths are read-only, and installed sample libraries remain external |
 | Other catalogued Zynaptiq products | Native XML; known fields and local preset schemas | Native reading, template copies and preset renaming. Unverified numeric fields remain read-only. VST3 state creation remains unavailable where the installed binary could not initialize or class/state identity was not verified |
@@ -31,6 +32,29 @@ tests check that none are omitted and that folder names match product IDs.
 `verified.json` gives exact versions and the checks performed. Runtime readback proves the named controls
 and serialization, not every audible DSP behavior. Unit and integration tests use committed initialized or
 synthetic fixtures; they never require an installed plug-in, a running DAW or a factory library.
+
+### FabFilter coverage
+
+- Current products: Pro-Q 4, Pro-C 3, Pro-L 2, Pro-R 2, Pro-MB, Pro-DS, Pro-G, Saturn 2,
+  Timeless 3, Volcano 3, Twin 3, One, Simplon and Micro.
+- Legacy VST3 products: Pro-Q 1, 2 and 3; Pro-C 1 and 2; Pro-L 1; Pro-R 1; Saturn 1;
+  Timeless 2; Volcano 2; Twin 2. Older products without a VST3 version are outside this catalog.
+- Use `vst3 installed` to find verified installations and `vst3 catalog` to look up exact parameter names,
+  bounds and display mappings. Requests for EQ, limiting, compression, de-essing, gating, filtering,
+  saturation, delay, reverb or synthesis consider the matching installed products.
+- Values are stored VST3 plain values. These are not uniformly normalized or physical units: for example,
+  Pro-Q 4 stores band frequency as log2(Hz). Follow the catalog's mapping instead of sending the displayed
+  number unchanged. Enumerations retain their measured numeric choices and host labels.
+- Preset creation and edits preserve unrelated component bytes, controller metadata, modulation data and
+  host chunks. Older versions use their own templates, including Twin 3's shorter parameter array.
+  Observed version aliases such as `4.13` and `4.1.3.0` identify the same captured release; this does not
+  grant writes to unverified versions.
+- Native `.ffp` files use a separate conversion check. Their signatures, schema versions and parameter
+  counts must match captured layouts. Native values can use a different scale from VST3 state, notably
+  One's normalized parameter array. Unverified conversions are rejected rather than guessed.
+- No FabFilter binary, installer, license or factory preset is bundled. The files under `fixtures/` are
+  initialized states and synthetic test inputs. Existing manufacturer independence and trademark notices
+  above apply to FabFilter as well.
 
 ## Using the built-in tools
 

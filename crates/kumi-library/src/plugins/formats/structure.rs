@@ -5,6 +5,7 @@
 //! folders it ships with (`builtin`), so the reader, a later writer and the tests all run off the same data.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::io::Read;
 use std::sync::LazyLock;
 
 use serde::{Deserialize, Serialize};
@@ -187,6 +188,10 @@ pub struct Structure {
 pub struct VerifiedVersion {
     /// The plug-in's version ("2.1.5").
     pub version: String,
+    /// Other version strings observed in this same release's OS metadata.
+    /// These are product-specific aliases, not a rule for reinterpreting decimals.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub version_aliases: Vec<String>,
     /// The kinds of file checked ("preset", "processor").
     pub files: Vec<String>,
     /// What was done to check it.
@@ -382,7 +387,7 @@ fn resolve_structure(text: &str, depth: usize) -> Result<Value, FormatError> {
         .find(|(plugin, _, _, _)| *plugin == parent)
         .ok_or_else(|| FormatError::new(format!("unknown shared format {parent}")))?
         .2;
-    let mut base = resolve_structure(source, depth + 1)?;
+    let mut base = resolve_structure(&bundled_json(source), depth + 1)?;
     merge_format_patch(&mut base, &patch);
     Ok(base)
 }
@@ -408,14 +413,26 @@ pub fn merge_format_patch(base: &mut Value, patch: &Value) {
     }
 }
 
-// Generated from the readable product folders, with JSON whitespace removed.
+// Generated from readable product folders, compacted and compressed once per
+// source file. The bounded decoder is for our bundled resources, not user files.
 include!(concat!(env!("OUT_DIR"), "/plugin_formats.rs"));
+
+fn bundled_json(bytes: &[u8]) -> String {
+    let mut decoded = Vec::new();
+    flate2::read::ZlibDecoder::new(bytes)
+        .take(super::MAX_DECODED_BYTES as u64 + 1)
+        .read_to_end(&mut decoded)
+        .expect("bundled format decompresses");
+    assert!(decoded.len() <= super::MAX_DECODED_BYTES, "bundled format exceeds its size limit");
+    String::from_utf8(decoded).expect("bundled format is UTF-8")
+}
 
 static BUILTIN: LazyLock<Vec<PluginFormat>> = LazyLock::new(|| {
     BUILTIN_FILES
         .iter()
         .map(|(plugin, info, structure, verified)| {
-            PluginFormat::parse(info, structure, verified).unwrap_or_else(|error| panic!("plugin-formats/{plugin}: {error}"))
+            PluginFormat::parse(&bundled_json(info), &bundled_json(structure), &bundled_json(verified))
+                .unwrap_or_else(|error| panic!("plugin-formats/{plugin}: {error}"))
         })
         .collect()
 });

@@ -7,6 +7,7 @@ use serde_json::{json, Value};
 
 use super::formats::{
     cbor,
+    fabfilter::{self, FabFilterPreset},
     minimal_audio::MinimalAudioPreset,
     ozone12,
     pulsar_modular::PulsarModularPreset,
@@ -58,7 +59,7 @@ pub fn create(plugin: &str, options: &WriteOptions, edits: &[Edit]) -> Result<Vs
         let preset = serum2::SerumPreset::init(options.name.as_deref().unwrap_or("Kumi Init"))?;
         return edit(plugin, &preset.file.write()?, options, edits);
     }
-    let initial = initial(format, &class)?;
+    let initial = initial_version(format, &class, Some(&options.version))?;
     edit(plugin, &initial.write(), options, edits)
 }
 
@@ -75,7 +76,7 @@ pub fn edit(plugin: &str, input: &[u8], options: &WriteOptions, edits: &[Edit]) 
     }
     let source = read_container(input)?;
     let class = class_id(format, options.class_id.as_deref(), source.as_ref())?;
-    let template = initial(format, &class)?;
+    let template = initial_version(format, &class, Some(&options.version))?;
     let template_component = component(&template)?;
     let mut output = source.clone().unwrap_or_else(|| template.clone());
     let state = match &source {
@@ -147,6 +148,36 @@ pub fn edit(plugin: &str, input: &[u8], options: &WriteOptions, edits: &[Edit]) 
             }
             preset.to_vstpreset(&class)?;
             preset.write()?
+        }
+        "fabfilter" => {
+            if native && fabfilter::is_component(state) {
+                return Err(error("FabFilter component bytes require a VST3 container with its processor class ID"));
+            }
+            let mut preset = FabFilterPreset::read(plugin, state)?;
+            preset.check_layout(template_component)?;
+            if let (Some(controller), Some(reference)) = (output.controller(), template.controller()) {
+                fabfilter::check_controller(plugin, controller, reference)?;
+            }
+            for change in edits {
+                preset.set(&change.path, &change.value)?;
+            }
+            if let Some(name) = &options.name {
+                preset.rename(name)?;
+            }
+            if native {
+                if let Some(reference) = template.controller() {
+                    replace_chunk(&mut output, "Cont", preset.to_controller(reference)?);
+                }
+            }
+            if let (Some(name), Some(controller), Some(reference)) = (&options.name, output.controller(), template.controller()) {
+                let renamed = fabfilter::rename_controller(plugin, controller, reference, name)?;
+                replace_chunk(&mut output, "Cont", renamed);
+            }
+            if native {
+                preset.to_state(template_component)?
+            } else {
+                preset.write()?
+            }
         }
         "valhalla" => {
             let mut preset = ValhallaPreset::read(state)?;
@@ -319,6 +350,12 @@ pub fn inspect(plugin: &str, input: &[u8], requested_class: Option<&str>) -> Res
                     json!({"plugin":plugin,"classId":class,"data":{"parameters":parameters,"chain":preset.chain()?.map(|entries| entries.into_iter().map(|entry| entry.name).collect::<Vec<_>>()),"state":node_json(&preset.to_node())}}),
                 );
             }
+        }
+        "fabfilter" => {
+            if source.is_none() && fabfilter::is_component(state) {
+                return Err(error("FabFilter component bytes require a VST3 container with its processor class ID"));
+            }
+            FabFilterPreset::read(plugin, state)?.to_node()
         }
         "valhalla" => {
             let preset = ValhallaPreset::read(state)?;
@@ -548,11 +585,18 @@ fn class_id(format: &PluginFormat, requested: Option<&str>, source: Option<&VstP
 }
 
 fn initial(format: &PluginFormat, class: &str) -> Result<VstPreset, FormatError> {
+    initial_version(format, class, None)
+}
+
+fn initial_version(format: &PluginFormat, class: &str, version: Option<&str>) -> Result<VstPreset, FormatError> {
     let preset = if family(format) == "ozone-12" {
         ozone12::OzoneState::init(class)?.to_vstpreset(class)?
     } else {
         VstPreset::read(
-            templates::initial(&format.info.plugin).ok_or_else(|| error("no verified VST3 init template is available for this product"))?,
+            version
+                .and_then(|version| templates::initial_for_version(&format.info.plugin, version))
+                .or_else(|| templates::initial(&format.info.plugin))
+                .ok_or_else(|| error("no verified VST3 init template is available for this product"))?,
         )?
     };
     if !preset.class_id.eq_ignore_ascii_case(class) {

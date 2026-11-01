@@ -9,6 +9,7 @@
 
 pub mod bounded_json;
 pub mod cbor;
+pub mod fabfilter;
 pub mod juce_xml;
 pub mod minimal_audio;
 pub mod ozone12;

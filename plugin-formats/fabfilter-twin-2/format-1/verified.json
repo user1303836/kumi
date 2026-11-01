@@ -1,0 +1,15 @@
+{
+  "plugin": "fabfilter-twin-2",
+  "format": "format-1",
+  "reads": [{"version":"2.4.1.0","files":["state","vstpreset"],"checked":"2026-10-31","version_aliases":["2.41"],"how":"An isolated host initialized this exact VST3 processor, captured its default component/controller, and restored the component. Every mapped stored float was changed separately through the public VST3 parameter API at normalized endpoints and 0.25, then its captured value was patched into the initial component and reloaded. Saved values and physical plain-value readback matched; legacy enum normalized values may quantize. This records host-API serialization evidence; Kumi Rust-output reload and DAW acceptance are tracked separately. It does not prove every audible DSP behavior."}],
+  "writes": [{"version":"2.4.1.0","files":["state","vstpreset"],"checked":"2026-10-31","version_aliases":["2.41"],"how":"An isolated host initialized this exact VST3 processor, captured its default component/controller, and restored the component. Every mapped stored float was changed separately through the public VST3 parameter API at normalized endpoints and 0.25, then its captured value was patched into the initial component and reloaded. Saved values and physical plain-value readback matched; legacy enum normalized values may quantize. This records host-API serialization evidence; Kumi Rust-output reload and DAW acceptance are tracked separately. It does not prove every audible DSP behavior."}],
+  "checks": [{"path":"parameters/Master Tune","value":-0.5,"host_parameter_id":0,"host_normalized":0.25,"stored_index":0}],
+  "native": {
+    "signature": "FT2i",
+    "schema": 8,
+    "encoding": "binary",
+    "conversion": "identity",
+    "evidence": "Official native preset headers were inspected outside the repository. No factory preset content is bundled.",
+    "checks": [{"count":883,"total":883,"schema":8,"prefix_equal":true,"appended_equal_init":true}]
+  }
+}

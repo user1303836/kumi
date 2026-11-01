@@ -1,0 +1,95 @@
+{
+  "plugin": "fabfilter-pro-ds",
+  "format": "format-1",
+  "about": "Product-specific VST3 component floats, measured from public host APIs. Values are stored VST3 plain values, which need not equal displayed physical units. Component and controller envelopes, unknown float slots and private tails are retained.",
+  "paths": "exact",
+  "files": {
+    "state": {
+      "layers": ["VST3 Comp chunk","FabFilter little-endian component header","stored float32 controls and opaque tail"],
+      "constants": {
+        "magic": "FabF",
+        "schema": 2,
+        "parameter_count": 20,
+        "parameter_indices": {
+          "Mode": 0,
+          "Threshold": 1,
+          "Range": 2,
+          "Band Processing": 3,
+          "Stereo Link": 4,
+          "Stereo Link Mode": 5,
+          "Lookahead": 6,
+          "Lookahead Enabled": 7,
+          "Audition Triggering": 8,
+          "Side Chain Input Signal": 9,
+          "High-Pass Frequency": 10,
+          "Low-Pass Frequency": 11,
+          "Audition Side Chain": 12,
+          "Midi State": 13,
+          "Oversampling": 14,
+          "Input Level": 15,
+          "Input Pan": 16,
+          "Output Level": 17,
+          "Output Pan": 18,
+          "Bypass": 19
+        }
+      }
+    },
+    "preset": {
+      "extension": ".ffp",
+      "layers": ["FabFilter product signature and schema","native binary control document"],
+      "constants": {
+        "magic": "FPSr",
+        "schema": 2,
+        "encoding": "binary",
+        "parameter_count": 20
+      }
+    }
+  },
+  "opaque": ["state"],
+  "fields": {
+    "": {"type":"map","status":"verified"},
+    "parameters": {"type":"map","status":"verified"},
+    "parameters/Mode": {"type":"float","status":"verified","in":["state","preset"],"default":0.0,"range":[0.0,1.0],"range_status":"verified","unit":"stored VST3 plain value","about":"VST3 parameter 0. Host display: 0 = Single Vocal; 0 = Single Vocal; 1 = Allround; 1 = Allround; 1 = Allround.","options":{"0.0":"Single Vocal","1.0":"Allround"}},
+    "parameters/Threshold": {"type":"float","status":"verified","in":["state","preset"],"default":0.4000000059604645,"range":[0.0,1.0],"range_status":"verified","unit":"stored VST3 plain value","about":"VST3 parameter 1. Host display: 0 = -INF dB; 0.25 = -45.00 dB; 0.5 = -30.00 dB; 0.75 = -15.00 dB; 1 = 0.00 dB."},
+    "parameters/Range": {"type":"float","status":"verified","in":["state","preset"],"default":5.999999523162842,"range":[0.0,24.0],"range_status":"verified","unit":"stored VST3 plain value","about":"VST3 parameter 2. Host display: 0 = 0.00 dB; 6 = 6.00 dB; 12 = 12.00 dB; 18 = 18.00 dB; 24 = 24.00 dB."},
+    "parameters/Band Processing": {"type":"float","status":"verified","in":["state","preset"],"default":0.0,"range":[0.0,1.0],"range_status":"verified","unit":"stored VST3 plain value","about":"VST3 parameter 3. Host display: 0 = Wide Band; 0 = Wide Band; 1 = Split Band; 1 = Split Band; 1 = Split Band.","options":{"0.0":"Wide Band","1.0":"Split Band"}},
+    "parameters/Stereo Link": {"type":"float","status":"verified","in":["state","preset"],"default":0.5,"range":[0.0,1.0],"range_status":"verified","unit":"stored VST3 plain value","about":"VST3 parameter 4. Host display: 0 = 0%; 0.25 = 50%; 0.5 = 100%; 0.75 = 100%, 50% Mid-only; 1 = 100%, 100% Mid-only."},
+    "parameters/Stereo Link Mode": {"type":"float","status":"verified","in":["state","preset"],"default":0.0,"range":[0.0,1.0],"range_status":"verified","unit":"stored VST3 plain value","about":"VST3 parameter 5. Host display: 0 = Mid; 0 = Mid; 1 = Side; 1 = Side; 1 = Side.","options":{"0.0":"Mid","1.0":"Side"}},
+    "parameters/Lookahead": {"type":"float","status":"verified","in":["state","preset"],"default":12.0,"range":[0.0,15.0],"range_status":"verified","unit":"stored VST3 plain value","about":"VST3 parameter 6. Host display: 0 = 0.000 ms; 3.75 = 3.750 ms; 7.5 = 7.500 ms; 11.25 = 11.25 ms; 15 = 15.00 ms."},
+    "parameters/Lookahead Enabled": {"type":"float","status":"verified","in":["state","preset"],"default":1.0,"range":[0.0,1.0],"range_status":"verified","unit":"stored VST3 plain value","about":"VST3 parameter 7. Host display: 0 = Disabled; 0 = Disabled; 1 = Enabled; 1 = Enabled; 1 = Enabled.","options":{"0.0":"Disabled","1.0":"Enabled"}},
+    "parameters/Audition Triggering": {"type":"float","status":"verified","in":["state","preset"],"default":0.0,"range":[0.0,1.0],"range_status":"verified","unit":"stored VST3 plain value","about":"VST3 parameter 8. Host display: 0 = Off; 0 = Off; 1 = On; 1 = On; 1 = On.","options":{"0.0":"Off","1.0":"On"}},
+    "parameters/Side Chain Input Signal": {"type":"float","status":"verified","in":["state","preset"],"default":0.0,"range":[0.0,1.0],"range_status":"verified","unit":"stored VST3 plain value","about":"VST3 parameter 9. Host display: 0 = Normal input; 0 = Normal input; 1 = External; 1 = External; 1 = External.","options":{"0.0":"Normal input","1.0":"External"}},
+    "parameters/High-Pass Frequency": {"type":"float","status":"verified","in":["state","preset"],"default":0.5440680384635925,"range":[0.0,1.0],"range_status":"verified","unit":"stored VST3 plain value","about":"VST3 parameter 10. Host display: 0 = 2000.0 Hz; 0.25 = 3556.6 Hz; 0.5 = 6324.6 Hz; 0.75 = 11247 Hz; 1 = 20000 Hz."},
+    "parameters/Low-Pass Frequency": {"type":"float","status":"verified","in":["state","preset"],"default":0.8450983166694641,"range":[0.0,1.0],"range_status":"verified","unit":"stored VST3 plain value","about":"VST3 parameter 11. Host display: 0 = 2000.0 Hz; 0.25 = 3556.6 Hz; 0.5 = 6324.6 Hz; 0.75 = 11247 Hz; 1 = 20000 Hz."},
+    "parameters/Audition Side Chain": {"type":"float","status":"verified","in":["state","preset"],"default":0.0,"range":[0.0,1.0],"range_status":"verified","unit":"stored VST3 plain value","about":"VST3 parameter 12. Host display: 0 = Off; 0 = Off; 1 = On; 1 = On; 1 = On.","options":{"0.0":"Off","1.0":"On"}},
+    "parameters/Midi State": {"type":"float","status":"verified","in":["state","preset"],"default":0.0,"range":[0.0,1.0],"range_status":"verified","unit":"stored VST3 plain value","about":"VST3 parameter 13. Host display: 0 = Enabled; 0 = Enabled; 1 = Disabled; 1 = Disabled; 1 = Disabled.","options":{"0.0":"Enabled","1.0":"Disabled"}},
+    "parameters/Oversampling": {"type":"float","status":"verified","in":["state","preset"],"default":0.0,"range":[0.0,2.0],"range_status":"verified","unit":"stored VST3 plain value","about":"VST3 parameter 14. Host display: 0 = Off; 1 = 2x; 1 = 2x; 2 = 4x; 2 = 4x.","options":{"0.0":"Off","1.0":"2x","2.0":"4x"}},
+    "parameters/Input Level": {"type":"float","status":"verified","in":["state","preset"],"default":0.0,"range":[-1.0,1.0],"range_status":"verified","unit":"stored VST3 plain value","about":"VST3 parameter 15. Host display: -1 = -INF dB; -0.5 = -18.00 dB; 0 = 0.00 dB; 0.5 = +18.00 dB; 1 = +36.00 dB."},
+    "parameters/Input Pan": {"type":"float","status":"verified","in":["state","preset"],"default":0.0,"range":[-1.0,1.0],"range_status":"verified","unit":"stored VST3 plain value","about":"VST3 parameter 16. Host display: -1 = -1.000; -0.5 = -0.500; 0 = 0.000; 0.5 = 0.500; 1 = 1.000."},
+    "parameters/Output Level": {"type":"float","status":"verified","in":["state","preset"],"default":0.0,"range":[-1.0,1.0],"range_status":"verified","unit":"stored VST3 plain value","about":"VST3 parameter 17. Host display: -1 = -INF dB; -0.5 = -18.00 dB; 0 = 0.00 dB; 0.5 = +18.00 dB; 1 = +36.00 dB."},
+    "parameters/Output Pan": {"type":"float","status":"verified","in":["state","preset"],"default":0.0,"range":[-1.0,1.0],"range_status":"verified","unit":"stored VST3 plain value","about":"VST3 parameter 18. Host display: -1 = -1.000; -0.5 = -0.500; 0 = 0.000; 0.5 = 0.500; 1 = 1.000."},
+    "parameters/Bypass": {"type":"float","status":"verified","in":["state","preset"],"default":0.0,"range":[0.0,1.0],"range_status":"verified","unit":"stored VST3 plain value","about":"VST3 parameter 19. Host display: 0 = Not Bypassed; 0 = Not Bypassed; 1 = Bypassed; 1 = Bypassed; 1 = Bypassed.","options":{"0.0":"Not Bypassed","1.0":"Bypassed"}}
+  },
+  "parameters": {
+    "Mode [VST3 0]": {"field":"parameters/Mode","status":"verified","note":"Public VST3 parameter 0 maps to component float slot 0; use stored values, not normalized automation or display text."},
+    "Threshold [VST3 1]": {"field":"parameters/Threshold","status":"verified","note":"Public VST3 parameter 1 maps to component float slot 1; use stored values, not normalized automation or display text."},
+    "Range [VST3 2]": {"field":"parameters/Range","status":"verified","note":"Public VST3 parameter 2 maps to component float slot 2; use stored values, not normalized automation or display text."},
+    "Band Processing [VST3 3]": {"field":"parameters/Band Processing","status":"verified","note":"Public VST3 parameter 3 maps to component float slot 3; use stored values, not normalized automation or display text."},
+    "Stereo Link [VST3 4]": {"field":"parameters/Stereo Link","status":"verified","note":"Public VST3 parameter 4 maps to component float slot 4; use stored values, not normalized automation or display text."},
+    "Stereo Link Mode [VST3 5]": {"field":"parameters/Stereo Link Mode","status":"verified","note":"Public VST3 parameter 5 maps to component float slot 5; use stored values, not normalized automation or display text."},
+    "Lookahead [VST3 6]": {"field":"parameters/Lookahead","status":"verified","note":"Public VST3 parameter 6 maps to component float slot 6; use stored values, not normalized automation or display text."},
+    "Lookahead Enabled [VST3 7]": {"field":"parameters/Lookahead Enabled","status":"verified","note":"Public VST3 parameter 7 maps to component float slot 7; use stored values, not normalized automation or display text."},
+    "Audition Triggering [VST3 8]": {"field":"parameters/Audition Triggering","status":"verified","note":"Public VST3 parameter 8 maps to component float slot 8; use stored values, not normalized automation or display text."},
+    "Side Chain Input Signal [VST3 9]": {"field":"parameters/Side Chain Input Signal","status":"verified","note":"Public VST3 parameter 9 maps to component float slot 9; use stored values, not normalized automation or display text."},
+    "High-Pass Frequency [VST3 10]": {"field":"parameters/High-Pass Frequency","status":"verified","note":"Public VST3 parameter 10 maps to component float slot 10; use stored values, not normalized automation or display text."},
+    "Low-Pass Frequency [VST3 11]": {"field":"parameters/Low-Pass Frequency","status":"verified","note":"Public VST3 parameter 11 maps to component float slot 11; use stored values, not normalized automation or display text."},
+    "Audition Side Chain [VST3 12]": {"field":"parameters/Audition Side Chain","status":"verified","note":"Public VST3 parameter 12 maps to component float slot 12; use stored values, not normalized automation or display text."},
+    "Midi State [VST3 13]": {"field":"parameters/Midi State","status":"verified","note":"Public VST3 parameter 13 maps to component float slot 13; use stored values, not normalized automation or display text."},
+    "Oversampling [VST3 14]": {"field":"parameters/Oversampling","status":"verified","note":"Public VST3 parameter 14 maps to component float slot 14; use stored values, not normalized automation or display text."},
+    "Input Level [VST3 15]": {"field":"parameters/Input Level","status":"verified","note":"Public VST3 parameter 15 maps to component float slot 15; use stored values, not normalized automation or display text."},
+    "Input Pan [VST3 16]": {"field":"parameters/Input Pan","status":"verified","note":"Public VST3 parameter 16 maps to component float slot 16; use stored values, not normalized automation or display text."},
+    "Output Level [VST3 17]": {"field":"parameters/Output Level","status":"verified","note":"Public VST3 parameter 17 maps to component float slot 17; use stored values, not normalized automation or display text."},
+    "Output Pan [VST3 18]": {"field":"parameters/Output Pan","status":"verified","note":"Public VST3 parameter 18 maps to component float slot 18; use stored values, not normalized automation or display text."},
+    "Bypass [VST3 19]": {"field":"parameters/Bypass","status":"verified","note":"Public VST3 parameter 19 maps to component float slot 19; use stored values, not normalized automation or display text."}
+  }
+}

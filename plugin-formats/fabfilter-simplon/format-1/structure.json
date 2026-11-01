@@ -1,0 +1,92 @@
+{
+  "plugin": "fabfilter-simplon",
+  "format": "format-1",
+  "about": "Product-specific VST3 component floats, measured from public host APIs. Values are stored VST3 plain values, which need not equal displayed physical units. Component and controller envelopes, unknown float slots and private tails are retained.",
+  "paths": "exact",
+  "files": {
+    "state": {
+      "layers": ["VST3 Comp chunk","FabFilter little-endian component header","stored float32 controls and opaque tail"],
+      "constants": {
+        "magic": "FabF",
+        "schema": 2,
+        "parameter_count": 19,
+        "parameter_indices": {
+          "Filter Routing": 0,
+          "Filter 1 Freq": 1,
+          "Filter 1 Peak": 2,
+          "Filter 1 Characteristic": 3,
+          "Filter 1 Response": 4,
+          "Filter 1 Slope": 5,
+          "Filter 1 Enabled": 6,
+          "Filter 2 Freq": 7,
+          "Filter 2 Peak": 8,
+          "Filter 2 Characteristic": 9,
+          "Filter 2 Response": 10,
+          "Filter 2 Slope": 11,
+          "Filter 2 Enabled": 12,
+          "Input Level": 13,
+          "Output Level": 14,
+          "Effect Mix": 15,
+          "Receive Midi": 16,
+          "Correct Gain Behavior": 17,
+          "Bypass": 18
+        }
+      }
+    },
+    "preset": {
+      "extension": ".ffp",
+      "layers": ["FabFilter product signature and schema","native binary control document"],
+      "constants": {
+        "magic": "FSim",
+        "schema": 1,
+        "encoding": "binary",
+        "parameter_count": 18
+      }
+    }
+  },
+  "opaque": ["state"],
+  "fields": {
+    "": {"type":"map","status":"verified"},
+    "parameters": {"type":"map","status":"verified"},
+    "parameters/Filter Routing": {"type":"float","status":"verified","in":["state","preset"],"default":0.0,"range":[0.0,1.0],"range_status":"verified","unit":"stored VST3 plain value","about":"VST3 parameter 0. Host display: 0 = Serial; 0 = Serial; 1 = Parallel; 1 = Parallel; 1 = Parallel.","options":{"0.0":"Serial","1.0":"Parallel"}},
+    "parameters/Filter 1 Freq": {"type":"float","status":"verified","in":["state","preset"],"default":0.14744316041469574,"range":[0.0,1.0],"range_status":"verified","unit":"stored VST3 plain value","about":"VST3 parameter 1. Host display: 0 = 4.812 Hz; 0.25 = 53.875 Hz; 0.5 = 603.20 Hz; 0.75 = 6753.6 Hz; 1 = 75616 Hz."},
+    "parameters/Filter 1 Peak": {"type":"float","status":"verified","in":["state","preset"],"default":0.10000000149011612,"range":[0.0,1.0],"range_status":"verified","unit":"stored VST3 plain value","about":"VST3 parameter 2. Host display: 0 = 0.000; 0.25 = 0.250; 0.5 = 0.500; 0.75 = 0.750; 1 = 1.000."},
+    "parameters/Filter 1 Characteristic": {"type":"float","status":"verified","in":["state","preset"],"default":1.0,"range":[0.0,2.0],"range_status":"verified","unit":"stored VST3 plain value","about":"VST3 parameter 3. Host display: 0 = FabFilter One; 1 = Gentle; 1 = Gentle; 2 = Raw; 2 = Raw.","options":{"0.0":"FabFilter One","1.0":"Gentle","2.0":"Raw"}},
+    "parameters/Filter 1 Response": {"type":"float","status":"verified","in":["state","preset"],"default":1.0,"range":[0.0,2.0],"range_status":"verified","unit":"stored VST3 plain value","about":"VST3 parameter 4. Host display: 0 = Low Pass; 1 = High Pass; 1 = High Pass; 2 = Band Pass; 2 = Band Pass.","options":{"0.0":"Low Pass","1.0":"High Pass","2.0":"Band Pass"}},
+    "parameters/Filter 1 Slope": {"type":"float","status":"verified","in":["state","preset"],"default":1.0,"range":[1.0,3.0],"range_status":"verified","unit":"stored VST3 plain value","about":"VST3 parameter 5. Host display: 1 = 12 dB; 2 = 24 dB; 2 = 24 dB; 3 = 48 dB; 3 = 48 dB.","options":{"1.0":"12 dB","2.0":"24 dB","3.0":"48 dB"}},
+    "parameters/Filter 1 Enabled": {"type":"float","status":"verified","in":["state","preset"],"default":1.0,"range":[0.0,1.0],"range_status":"verified","unit":"stored VST3 plain value","about":"VST3 parameter 6. Host display: 0 = Disabled; 0 = Disabled; 1 = Enabled; 1 = Enabled; 1 = Enabled.","options":{"0.0":"Disabled","1.0":"Enabled"}},
+    "parameters/Filter 2 Freq": {"type":"float","status":"verified","in":["state","preset"],"default":0.8623589873313904,"range":[0.0,1.0],"range_status":"verified","unit":"stored VST3 plain value","about":"VST3 parameter 7. Host display: 0 = 4.812 Hz; 0.25 = 53.875 Hz; 0.5 = 603.20 Hz; 0.75 = 6753.6 Hz; 1 = 75616 Hz."},
+    "parameters/Filter 2 Peak": {"type":"float","status":"verified","in":["state","preset"],"default":0.10000000149011612,"range":[0.0,1.0],"range_status":"verified","unit":"stored VST3 plain value","about":"VST3 parameter 8. Host display: 0 = 0.000; 0.25 = 0.250; 0.5 = 0.500; 0.75 = 0.750; 1 = 1.000."},
+    "parameters/Filter 2 Characteristic": {"type":"float","status":"verified","in":["state","preset"],"default":1.0,"range":[0.0,2.0],"range_status":"verified","unit":"stored VST3 plain value","about":"VST3 parameter 9. Host display: 0 = FabFilter One; 1 = Gentle; 1 = Gentle; 2 = Raw; 2 = Raw.","options":{"0.0":"FabFilter One","1.0":"Gentle","2.0":"Raw"}},
+    "parameters/Filter 2 Response": {"type":"float","status":"verified","in":["state","preset"],"default":0.0,"range":[0.0,2.0],"range_status":"verified","unit":"stored VST3 plain value","about":"VST3 parameter 10. Host display: 0 = Low Pass; 1 = High Pass; 1 = High Pass; 2 = Band Pass; 2 = Band Pass.","options":{"0.0":"Low Pass","1.0":"High Pass","2.0":"Band Pass"}},
+    "parameters/Filter 2 Slope": {"type":"float","status":"verified","in":["state","preset"],"default":1.0,"range":[1.0,3.0],"range_status":"verified","unit":"stored VST3 plain value","about":"VST3 parameter 11. Host display: 1 = 12 dB; 2 = 24 dB; 2 = 24 dB; 3 = 48 dB; 3 = 48 dB.","options":{"1.0":"12 dB","2.0":"24 dB","3.0":"48 dB"}},
+    "parameters/Filter 2 Enabled": {"type":"float","status":"verified","in":["state","preset"],"default":1.0,"range":[0.0,1.0],"range_status":"verified","unit":"stored VST3 plain value","about":"VST3 parameter 12. Host display: 0 = Disabled; 0 = Disabled; 1 = Enabled; 1 = Enabled; 1 = Enabled.","options":{"0.0":"Disabled","1.0":"Enabled"}},
+    "parameters/Input Level": {"type":"float","status":"verified","in":["state","preset"],"default":0.0,"range":[-20.0,20.0],"range_status":"verified","unit":"stored VST3 plain value","about":"VST3 parameter 13. Host display: -20 = -20.00 dB; -10 = -10.00 dB; 0 = 0.00 dB; 10 = +10.00 dB; 20 = +20.00 dB."},
+    "parameters/Output Level": {"type":"float","status":"verified","in":["state","preset"],"default":0.0,"range":[-20.0,20.0],"range_status":"verified","unit":"stored VST3 plain value","about":"VST3 parameter 14. Host display: -20 = -20.00 dB; -10 = -10.00 dB; 0 = 0.00 dB; 10 = +10.00 dB; 20 = +20.00 dB."},
+    "parameters/Effect Mix": {"type":"float","status":"verified","in":["state","preset"],"default":1.0,"range":[-1.0,1.0],"range_status":"verified","unit":"stored VST3 plain value","about":"VST3 parameter 15. Host display: -1 = 0.00%; -0.5 = 25.0%; 0 = 50.0%; 0.5 = 75.0%; 1 = 100%."},
+    "parameters/Receive Midi": {"type":"float","status":"verified","in":["state","preset"],"default":0.0,"range":[0.0,1.0],"range_status":"verified","unit":"stored VST3 plain value","about":"VST3 parameter 16. Host display: 0 = Enabled; 0 = Enabled; 1 = Disabled; 1 = Disabled; 1 = Disabled.","options":{"0.0":"Enabled","1.0":"Disabled"}},
+    "parameters/Correct Gain Behavior": {"type":"float","status":"verified","in":["state","preset"],"default":0.0,"range":[0.0,1.0],"range_status":"verified","unit":"stored VST3 plain value","about":"VST3 parameter 17. Host display: 0 = No; 0 = No; 1 = Yes; 1 = Yes; 1 = Yes.","options":{"0.0":"No","1.0":"Yes"}},
+    "parameters/Bypass": {"type":"float","status":"verified","in":["state","preset"],"default":0.0,"range":[0.0,1.0],"range_status":"verified","unit":"stored VST3 plain value","about":"VST3 parameter 18. Host display: 0 = Not Bypassed; 0 = Not Bypassed; 1 = Bypassed; 1 = Bypassed; 1 = Bypassed.","options":{"0.0":"Not Bypassed","1.0":"Bypassed"}}
+  },
+  "parameters": {
+    "Filter Routing [VST3 0]": {"field":"parameters/Filter Routing","status":"verified","note":"Public VST3 parameter 0 maps to component float slot 0; use stored values, not normalized automation or display text."},
+    "Filter 1 Freq [VST3 1]": {"field":"parameters/Filter 1 Freq","status":"verified","note":"Public VST3 parameter 1 maps to component float slot 1; use stored values, not normalized automation or display text."},
+    "Filter 1 Peak [VST3 2]": {"field":"parameters/Filter 1 Peak","status":"verified","note":"Public VST3 parameter 2 maps to component float slot 2; use stored values, not normalized automation or display text."},
+    "Filter 1 Characteristic [VST3 3]": {"field":"parameters/Filter 1 Characteristic","status":"verified","note":"Public VST3 parameter 3 maps to component float slot 3; use stored values, not normalized automation or display text."},
+    "Filter 1 Response [VST3 4]": {"field":"parameters/Filter 1 Response","status":"verified","note":"Public VST3 parameter 4 maps to component float slot 4; use stored values, not normalized automation or display text."},
+    "Filter 1 Slope [VST3 5]": {"field":"parameters/Filter 1 Slope","status":"verified","note":"Public VST3 parameter 5 maps to component float slot 5; use stored values, not normalized automation or display text."},
+    "Filter 1 Enabled [VST3 6]": {"field":"parameters/Filter 1 Enabled","status":"verified","note":"Public VST3 parameter 6 maps to component float slot 6; use stored values, not normalized automation or display text."},
+    "Filter 2 Freq [VST3 7]": {"field":"parameters/Filter 2 Freq","status":"verified","note":"Public VST3 parameter 7 maps to component float slot 7; use stored values, not normalized automation or display text."},
+    "Filter 2 Peak [VST3 8]": {"field":"parameters/Filter 2 Peak","status":"verified","note":"Public VST3 parameter 8 maps to component float slot 8; use stored values, not normalized automation or display text."},
+    "Filter 2 Characteristic [VST3 9]": {"field":"parameters/Filter 2 Characteristic","status":"verified","note":"Public VST3 parameter 9 maps to component float slot 9; use stored values, not normalized automation or display text."},
+    "Filter 2 Response [VST3 10]": {"field":"parameters/Filter 2 Response","status":"verified","note":"Public VST3 parameter 10 maps to component float slot 10; use stored values, not normalized automation or display text."},
+    "Filter 2 Slope [VST3 11]": {"field":"parameters/Filter 2 Slope","status":"verified","note":"Public VST3 parameter 11 maps to component float slot 11; use stored values, not normalized automation or display text."},
+    "Filter 2 Enabled [VST3 12]": {"field":"parameters/Filter 2 Enabled","status":"verified","note":"Public VST3 parameter 12 maps to component float slot 12; use stored values, not normalized automation or display text."},
+    "Input Level [VST3 13]": {"field":"parameters/Input Level","status":"verified","note":"Public VST3 parameter 13 maps to component float slot 13; use stored values, not normalized automation or display text."},
+    "Output Level [VST3 14]": {"field":"parameters/Output Level","status":"verified","note":"Public VST3 parameter 14 maps to component float slot 14; use stored values, not normalized automation or display text."},
+    "Effect Mix [VST3 15]": {"field":"parameters/Effect Mix","status":"verified","note":"Public VST3 parameter 15 maps to component float slot 15; use stored values, not normalized automation or display text."},
+    "Receive Midi [VST3 16]": {"field":"parameters/Receive Midi","status":"verified","note":"Public VST3 parameter 16 maps to component float slot 16; use stored values, not normalized automation or display text."},
+    "Correct Gain Behavior [VST3 17]": {"field":"parameters/Correct Gain Behavior","status":"verified","note":"Public VST3 parameter 17 maps to component float slot 17; use stored values, not normalized automation or display text."},
+    "Bypass [VST3 18]": {"field":"parameters/Bypass","status":"verified","note":"Public VST3 parameter 18 maps to component float slot 18; use stored values, not normalized automation or display text."}
+  }
+}
