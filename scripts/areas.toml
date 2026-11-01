@@ -58,6 +58,11 @@ feeds = ["kumi-agent", "kumi"]
 [reaper-extension]
 paths = ["daws/reaper/reaper-kumi/**", "scripts/build-native-release.py", "scripts/daws.toml"]
 
+# What Kumi reads of REAPER's extension: its change code (Kumi's kinds and their fields are checked against it).
+[reaper-extension-read]
+paths = ["daws/reaper/reaper-kumi/src/changes/**"]
+feeds = ["kumi"]
+
 # What Kumi builds in as data: the standard Max patchers are held to, and the plug-in formats it reads.
 [data]
 paths = ["daws/ableton/max-standard/**", "plugin-formats/**"]
