@@ -326,6 +326,8 @@ const AUTOMATED: &str = "song:pattern(1).number_of_lines = 16 local t = new_trac
 const AIMS_ON: &str = "local out = {} for k, d in ipairs(song:track($t).devices) do local row = d.device_path for _, p in ipairs(d.parameters) do if p.name:find('^Dest') then row = row .. ' ' .. p.name .. '=' .. p.value end end out[k] = row end return out";
 /// An empty instrument with settings of its own, which clear() resets, and a file to load into it (#399 N-S12).
 const KEPT_SLOT: &str = "local f = new_instrument('K xrni', 1) song.selected_instrument_index = f renoise.app():save_instrument('$dir/k.xrni') local i = new_instrument('K slot', 0) local s = song:instrument(i) s.volume = 0.5 s.transpose = 3 s.midi_output_properties.channel = 5 s:macro(1).name = 'Cut' return {i = i}";
+const KEPT_SLOT_MIDDLE: &str = "local f = new_instrument('K xrni', 1) song.selected_instrument_index = f renoise.app():save_instrument('$dir/k.xrni') local i = new_instrument('K slot', 0) local s = song:instrument(i) s.volume = 0.5 s.transpose = 3 s.midi_output_properties.channel = 5 s:macro(1).name = 'Cut' song:insert_instrument_at(i + 1) return {i = i}";
+const KIT_SLOT: &str = "local f = new_instrument('K wav', 1) song:instrument(f):sample(1).sample_buffer:save_as('$dir/k1.wav', 'wav') local i = new_instrument('K slot', 0) local s = song:instrument(i) s.volume = 0.5 s.transpose = 3 return {i = i}";
 const SLOT_SETTINGS: &str = "local s = song:instrument($i) return {s.name, s.volume, s.transpose, s.midi_output_properties.channel, s:macro(1).name, #s.samples, #song.instruments}";
 const PLUGIN: &str = "local i = new_instrument('K plugin', 0) song:instrument(i).plugin_properties:load_plugin('Audio/Generators/AU/aumu:dls :appl') local pp = song:instrument(i).plugin_properties return {i = i, s = not pp.auto_suspend}";
 /// A plug-in with several programs: Dexed, free, if it's installed. Apple's AU instruments have one each.
@@ -468,7 +470,9 @@ static CASES: &[Case] = &[
         .label("notes_write refused after an edit in the same callback as an instrument op")
         .between("song:insert_instrument_at(1) song:pattern(1):track($t):line(7):note_column(1).note_string = 'C-5'")
         .limit("Kumi's undo is meant to refuse: the edit is the producer's, and these steps can't be run past it."),
-    case("instrument_load", KEPT_SLOT, r#"{"path":"$dir/k.xrni","ref":"$E:instrument:$i"}"#, SLOT_SETTINGS).label("instrument_load into a slot with settings").limit("Renoise's own undo of a load into a slot doesn't reach HISTORY (#805)."),
+    case("instrument_load", KEPT_SLOT, r#"{"path":"$dir/k.xrni","ref":"$E:instrument:$i"}"#, SLOT_SETTINGS).label("instrument_load into a slot with settings"),
+    case("instrument_load", KEPT_SLOT_MIDDLE, r#"{"path":"$dir/k.xrni","ref":"$E:instrument:$i"}"#, SLOT_SETTINGS).label("instrument_load into a slot in the middle"),
+    case("instrument_kit", KIT_SLOT, r#"{"ref":"$E:instrument:$i","samples":[{"path":"$dir/k1.wav","name":"K one"}]}"#, "local s = song:instrument($i) return {s.name, s.volume, s.transpose, #s.samples}").label("instrument_kit into a slot with settings"),
     case("chain_set", CHAIN, r#"{"ref":"$E:chain:$i.1","name":"K air"}"#, "return chainnames($i)"),
     case("chaindevice_add", CHAIN, r#"{"ref":"$E:chain:$i.1","path":"Gainer"}"#, "return chainpaths($i, 1)"),
     case("chaindevice_delete", CHAIN_DEVICES, r#"{"ref":"$E:chaindevice:$i.1.2"}"#, "return chainpaths($i, 1)"),

@@ -275,6 +275,7 @@ local function apply(song, env, input, fence, desc)
   }
   if kit.into then
     done.material = { into = places_.place_of(env, "instrument", n), name = was, slot = slot }
+    done.prior, done.journal_applied = { empty = true }, { print = done.applied.print }
   else
     done.material = { made = places_.place_of(env, "instrument", n) }
     done.created = { ref = places_.ref_of(env, "instrument", n), kind = "instrument" }
@@ -328,6 +329,7 @@ end
 base.register({
   kind = "instrument-kit", custom = true, by_place = true,
   preview = preview, apply = apply, restore = restore,
+  reread = places_.reread("instrument"), read = instruments_.slot_read(kit_print), same = base.same_table,
 })
 
 return M
