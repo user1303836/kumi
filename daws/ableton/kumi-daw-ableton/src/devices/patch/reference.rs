@@ -16,6 +16,7 @@ use serde_json::Value;
 
 use super::catalog::catalog;
 use super::page::{self, Element, LOOKS};
+use crate::app::live_app::{OPEN_LIVE_PROGRAM, RUNNING_PROGRAMS};
 
 /// How many of an object's inlets or outlets there are, for the arguments it's given.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -672,12 +673,11 @@ fn open_live_max() -> Option<PathBuf> {
     // A cold PowerShell takes seconds, and one that's slower only means the installed Maxes are looked at instead.
     let within = std::time::Duration::from_secs(5);
     if cfg!(target_os = "macos") {
-        live_max_in(&bounded("/bin/ps", &["-axo", "comm="], within)?)
+        live_max_in(&bounded("/bin/ps", &RUNNING_PROGRAMS, within)?)
     } else if cfg!(windows) {
         use kumi_types::system::{process_env, system_program, SystemProgram};
         let powershell = system_program(SystemProgram::Powershell, &process_env(), "win32");
-        let path = "Get-Process -Name 'Ableton Live*' -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty Path";
-        windows_live_max(&bounded(&powershell, &["-NoProfile", "-NonInteractive", "-Command", path], within)?)
+        windows_live_max(&bounded(&powershell, &["-NoProfile", "-NonInteractive", "-Command", OPEN_LIVE_PROGRAM], within)?)
     } else {
         None
     }
@@ -704,27 +704,37 @@ fn windows_live_max(exe: &str) -> Option<PathBuf> {
 fn bounded(program: &str, args: &[&str], within: std::time::Duration) -> Option<String> {
     use std::io::Read;
     use std::process::{Command, Stdio};
-    let mut child = Command::new(program).args(args).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn().ok()?;
-    // Read beside the wait, so a long listing never fills the pipe and holds the program up.
-    let mut out = child.stdout.take()?;
-    let reading = std::thread::spawn(move || {
-        let mut bytes = Vec::new();
-        out.read_to_end(&mut bytes).map(|_| String::from_utf8_lossy(&bytes).into_owned())
-    });
     let started = std::time::Instant::now();
-    let done = loop {
+    let mut command = Command::new(program);
+    command.args(args).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null());
+    // No console of its own, or a share of the one the screen is drawn on, as every child Kumi hides.
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x0800_0000);
+    }
+    let mut child = command.spawn().ok()?;
+    let mut out = child.stdout.take()?;
+    // Read beside the wait, so a long listing never fills the pipe and holds the program up. The reader sends its text
+    // rather than being joined: a child of the program can hold the pipe long after it's gone, and it ends when the pipe does.
+    let (send, reading) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut bytes = Vec::new();
+        let _ = send.send(out.read_to_end(&mut bytes).map(|_| String::from_utf8_lossy(&bytes).into_owned()));
+    });
+    loop {
         match child.try_wait() {
-            Ok(Some(status)) => break status.success(),
+            Ok(Some(status)) if status.success() => break,
             Ok(None) if started.elapsed() < within => std::thread::sleep(std::time::Duration::from_millis(10)),
+            Ok(Some(_)) => return None,
             _ => {
                 let _ = child.kill();
                 let _ = child.wait();
-                break false;
+                return None;
             }
         }
-    };
-    let text = reading.join().ok()?.ok()?;
-    done.then_some(text)
+    }
+    reading.recv_timeout(within.saturating_sub(started.elapsed())).ok()?.ok()
 }
 
 /// The Maxes installed: Live's own (the newest Live first), then a Max installed by itself.
@@ -1111,15 +1121,19 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_listing_is_waited_for_only_so_long() {
-        let within = std::time::Duration::from_millis(500);
-        assert_eq!(bounded("/bin/echo", &["Live"], within).as_deref(), Some("Live\n"));
-        assert_eq!(bounded("/bin/sh", &["-c", "exit 1"], within), None, "one that fails says nothing");
+        // What should finish has all the time a busy runner could take: it's back as soon as it's done.
+        let plenty = std::time::Duration::from_secs(30);
+        assert_eq!(bounded("/bin/echo", &["Live"], plenty).as_deref(), Some("Live\n"));
+        assert_eq!(bounded("/bin/sh", &["-c", "exit 1"], plenty), None, "one that fails says nothing");
         // Longer than a pipe holds: it's read as it comes, so the program isn't held up until its time is over.
-        let long = bounded("/bin/sh", &["-c", "head -c 200000 /dev/zero"], within);
+        let long = bounded("/bin/sh", &["-c", "head -c 200000 /dev/zero"], plenty);
         assert_eq!(long.map(|text| text.len()), Some(200_000));
-        let started = std::time::Instant::now();
-        assert_eq!(bounded("/bin/sleep", &["10"], within), None);
-        assert!(started.elapsed() < std::time::Duration::from_secs(5), "ended at its bound");
+        // One that takes too long is ended at its bound, and one gone whose child holds the pipe isn't waited for past it.
+        for script in ["sleep 10", "sleep 10 & exit 0", "sleep 10 & sleep 10"] {
+            let started = std::time::Instant::now();
+            assert_eq!(bounded("/bin/sh", &["-c", script], std::time::Duration::from_millis(500)), None, "{script}");
+            assert!(started.elapsed() < std::time::Duration::from_secs(8), "{script}: {:?}", started.elapsed());
+        }
     }
 
     #[test]
