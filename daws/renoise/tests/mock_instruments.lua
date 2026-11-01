@@ -222,10 +222,8 @@ local function each_note(fn)
   end
 end
 
--- (a test's Renoise whose renumbering of notes and 0Z commands tells the patterns' line notifiers, as an edit does: not
--- measured, #361 N-N17)
+-- (renumbering notes and 0Z commands tells the patterns' line notifiers, as an edit does: lab 2026-11-01)
 local function tell_lines(p, t, k)
-  if not M.renumber_touches then return end
   local pattern = M.data.patterns[p]
   local notifiers = {}
   for i, fn in ipairs(pattern.notifiers or {}) do notifiers[i] = fn end
@@ -324,26 +322,31 @@ function M.instrument_list_op(type_, a, b, spec, record)
     if #instruments >= 255 then error("can't have more than 255 instruments in a song", 3) end
     made = M.instrument_data(spec)
     table.insert(instruments, a, made)
-    renumber("insert", a)
+    -- (the list tells first, then the lines Renoise renumbers: lab 2026-11-01)
     M.fire(d.song_fields.instruments_observable, { type = "insert", index = a })
+    renumber("insert", a)
   elseif type_ == "remove" then
     if not instruments[a] then out_of_range("instrument", a) end
     if #instruments == 1 then error("Renoise needs at least one instrument", 3) end
     made = table.remove(instruments, a)
-    renumber("remove", a)
     M.fire(d.song_fields.instruments_observable, { type = "remove", index = a })
+    renumber("remove", a)
   else
     if not instruments[a] or not instruments[b] then out_of_range("instrument", a) end
     if a == b then return end
     instruments[a], instruments[b] = instruments[b], instruments[a]
-    renumber("swap", a, b)
     M.fire(d.song_fields.instruments_observable, { type = "swap", index1 = a, index2 = b })
+    renumber("swap", a, b)
   end
   local selected = d.song_fields.selected_instrument_index
   if selected > #instruments then d.song_fields.selected_instrument_index = #instruments end
   if record then
     local after = notes_snapshot()
+    local function tell_notes() each_note(function(_, _, _, p, t, k) tell_lines(p, t, k) end) end
+    -- (Renoise's undo tells the lines first and then the list, its redo as the first time: lab 2026-11-01)
     M.record(function()
+      notes_restore(before)
+      tell_notes()
       if type_ == "insert" then
         table.remove(instruments, a)
         M.fire(d.song_fields.instruments_observable, { type = "remove", index = a })
@@ -354,7 +357,6 @@ function M.instrument_list_op(type_, a, b, spec, record)
         instruments[a], instruments[b] = instruments[b], instruments[a]
         M.fire(d.song_fields.instruments_observable, { type = "swap", index1 = a, index2 = b })
       end
-      notes_restore(before)
     end, function()
       if type_ == "insert" then
         table.insert(instruments, a, made)
@@ -367,6 +369,7 @@ function M.instrument_list_op(type_, a, b, spec, record)
         M.fire(d.song_fields.instruments_observable, { type = "swap", index1 = a, index2 = b })
       end
       notes_restore(after)
+      tell_notes()
     end)
   end
   return made
@@ -1108,6 +1111,19 @@ local function chain_object(instrument, c)
     if not chain.devices[k] then out_of_range("device", k) end
     return device(chain.devices[k])
   end
+  -- A meta device aims inside its chain: Renoise follows its target made, moved and swapped, and clears the aim as its target
+  -- goes (Dest. Effect counts the chain's devices from 0, the mixer: lab 2026-11-01).
+  local function follow_aims(moved)
+    for _, data in ipairs(chain.devices) do
+      for _, destination in ipairs(M.destinations_of(data)) do
+        if destination.effect.value >= 0 then
+          local place = moved(destination.effect.value + 1)
+          destination.effect.value = place and place - 1 or -1
+          if not place and destination.parameter then destination.parameter.value = -1 end
+        end
+      end
+    end
+  end
   fields.insert_device_at = function(_, path, index)
     if index < 2 or index > #chain.devices + 1 then out_of_range("device", index) end
     if path:find("Missing", 1, true) or not (M.device_catalog or {})[path] then error("std::logic_error: 'unknown device " .. path .. "'", 2) end
@@ -1115,15 +1131,24 @@ local function chain_object(instrument, c)
     for k, template in ipairs((M.device_catalog or {})[path] or {}) do
       data.params[k] = { name = template.name, value = template.value, min = template.min, max = template.max }
     end
+    follow_aims(function(place) return place >= index and place + 1 or place end)
     list_op(chain.devices, chain.devices_observable, "insert", index, nil, data, 1)
     return device(data)
   end
   fields.delete_device_at = function(_, index)
     if index == 1 then error("the mixer device can't be deleted", 2) end
+    follow_aims(function(place)
+      if place == index then return nil end
+      return place > index and place - 1 or place
+    end)
     list_op(chain.devices, chain.devices_observable, "remove", index, nil, nil, 1)
   end
   fields.swap_devices_at = function(_, a, b)
     if a == 1 or b == 1 then error("the mixer device must stay first", 2) end
+    follow_aims(function(place)
+      if place == a then return b end
+      return place == b and a or place
+    end)
     list_op(chain.devices, chain.devices_observable, "swap", a, b, nil, 1)
   end
   fields.__data = chain
@@ -1706,6 +1731,8 @@ function M.app_load_instrument(path, how)
   local instruments = d.instruments
   local old = instruments[i]
   local made = M.instrument_copy(value.instrument)
+  -- (named after the file, whatever it was called: lab)
+  made.name = path:match("([^/\\]+)%.%w+$") or made.name
   -- (into the last instrument, Renoise first adds an empty one after it, and leaves it: lab, 2026-10-20)
   local extra = i == #instruments and M.instrument_data({}) or nil
   local function swap_in()

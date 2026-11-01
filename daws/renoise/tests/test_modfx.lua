@@ -416,21 +416,90 @@ test("modfx: a settings change Renoise refuses part way puts back what it wrote 
   ok(steps() <= before + 1, "at most the one step Renoise made of it")
 end)
 
-test("modfx: a chain or chain device deleted with a meta device's aim comes back saying the aim isn't put back (#361 N-S22)", function()
-  local env, peer, epoch = setup_modfx()
-  mock.device_catalog["Audio/Effects/Native/*LFO"] = { { name = "Dest. Effect", value = -1, min = -1, max = 16 } }
+-- A chain's device (place 2) and an *LFO (place 3) aimed at it, as Renoise has them (lab 2026-11-01).
+local function aimed_chain()
+  local lfo = "Audio/Effects/Native/*LFO"
+  mock.device_catalog[lfo] = { { name = "Dest. Track", value = -1, min = 0, max = 255 }, { name = "Dest. Effect", value = -1, min = 0, max = 255 }, { name = "Dest. Parameter", value = -1, min = 0, max = 255 } }
   local chain = instrument(1).chains[1]
-  chain.devices[3] = { name = "*LFO", path = "Audio/Effects/Native/*LFO", params = { { name = "Dest. Effect", value = 1, min = -1, max = 16 } }, active = true, preset_data = "<lfo/>" }
+  chain.devices[3] = { name = "*LFO", path = lfo, active = true, preset_data = "<lfo/>", params = {
+    { name = "Dest. Track", value = -1, min = 0, max = 255 }, { name = "Dest. Effect", value = 1, min = 0, max = 255 }, { name = "Dest. Parameter", value = 1, min = 0, max = 255 } } }
+  return chain
+end
+
+local function aim_of(chain, d)
+  return chain.devices[d].params[2].value, chain.devices[d].params[3].value
+end
+
+test("modfx: a chain device or a chain deleted with a meta device's aim comes back aimed where it was (#361 N-S22)", function()
+  local env, peer, epoch = setup_modfx()
+  local chain = aimed_chain()
   mock.fire(mock.tool.app_new_document_observable)
-  local lfo = change(peer, "chaindevice-delete", { ref = chaindevice_ref(place(peer), 1, 1, 3) })
-  local back = restore(peer, "chaindevice-delete", lfo)
+  -- The LFO itself: Renoise makes it again aimed at nothing.
+  local record = change(peer, "chaindevice-delete", { ref = chaindevice_ref(place(peer), 1, 1, 3) })
+  local back = restore(peer, "chaindevice-delete", record)
   ok(back.result, json.encode(back.error or {}))
-  ok((back.result.display.note or ""):find("aimed at nothing", 1, true), tostring(back.result.display.note))
-  instrument(1).chains[1].devices[3].params[1].value = 1
+  eq(back.result.display.note, nil, "nothing to say")
+  chain = instrument(1).chains[1]
+  local effect, parameter = aim_of(chain, 3)
+  eq(effect, 1, "aimed at its device again")
+  eq(parameter, 1, "and its parameter")
+  -- What it aims at: Renoise clears the aim as its target goes.
+  record = change(peer, "chaindevice-delete", { ref = chaindevice_ref(place(peer), 1, 1, 2) })
+  chain = instrument(1).chains[1]
+  effect = aim_of(chain, 2)
+  eq(effect, -1, "Renoise cleared it")
+  back = restore(peer, "chaindevice-delete", record)
+  ok(back.result, json.encode(back.error or {}))
+  eq(back.result.display.note, nil)
+  chain = instrument(1).chains[1]
+  effect, parameter = aim_of(chain, 3)
+  eq(effect, 1, "the LFO aims at the device put back")
+  eq(parameter, 1)
+  -- The whole chain.
   local whole = change(peer, "chain-delete", { ref = chain_ref(place(peer), 1, 1) })
   local again = restore(peer, "chain-delete", whole)
   ok(again.result, json.encode(again.error or {}))
-  ok((again.result.display.note or ""):find("aimed at nothing", 1, true), tostring(again.result.display.note))
+  ok(not (again.result.display.note or ""):find("aimed at nothing", 1, true), tostring(again.result.display.note))
+  effect, parameter = aim_of(instrument(1).chains[1], 3)
+  eq(effect, 1, "in the chain made again")
+  eq(parameter, 1)
+end)
+
+test("modfx: a device a meta device moves is no fence: its value moves on its own, and the others' still fence (#361 N-S22)", function()
+  local env, peer, epoch = setup_modfx()
+  local chain = aimed_chain()
+  local gainer = chain.devices[2]
+  gainer.params = { { name = "Moved", value = 0.5, min = 0, max = 1 }, { name = "Knob", value = 0.1, min = 0, max = 4 } }
+  mock.fire(mock.tool.app_new_document_observable)
+  for _, kind_ref in ipairs({ { "chaindevice-delete", chaindevice_ref(place(peer), 1, 1, 2) }, { "chain-delete", chain_ref(place(peer), 1, 1) } }) do
+    local input = { ref = kind_ref[2] }
+    local previewed, epoch_now, layout = preview(peer, kind_ref[1], input)
+    gainer.params[2].value = 0.2 -- (the producer's knob: a change)
+    failure(apply(peer, kind_ref[1], input, "Kumi: x (k1)", previewed.fence, epoch_now, layout), "changed")
+    gainer.params[2].value = 0.1
+  end
+  local input = { ref = chaindevice_ref(place(peer), 1, 1, 2) }
+  local previewed, epoch_now, layout = preview(peer, "chaindevice-delete", input)
+  gainer.params[1].value = 0.75 -- (the LFO: Dest. Parameter 1 is the first, as Renoise moves a Gainer's Gain)
+  local done = apply(peer, "chaindevice-delete", input, "Kumi: x (k1)", previewed.fence, epoch_now, layout)
+  ok(done.result, json.encode(done.error or {}))
+end)
+
+test("modfx: a chain device's aim isn't written into a chain that changed since, and the undo says so (#361 N-S22)", function()
+  local env, peer, epoch = setup_modfx()
+  aimed_chain()
+  mock.fire(mock.tool.app_new_document_observable)
+  local record = change(peer, "chaindevice-delete", { ref = chaindevice_ref(place(peer), 1, 1, 3) })
+  -- The producer's device beside the one it aimed at: the numbers kept could mean another device.
+  mock.device_catalog["Audio/Effects/Native/Gainer"] = {}
+  mock.song:instrument(1):sample_device_chain(1):insert_device_at("Audio/Effects/Native/Gainer", 2)
+  local back = restore(peer, "chaindevice-delete", record)
+  ok(back.result, json.encode(back.error or {}))
+  ok((back.result.display.note or ""):find("aimed at nothing", 1, true), tostring(back.result.display.note))
+  local chain = instrument(1).chains[1]
+  for d = 2, #chain.devices do
+    if chain.devices[d].path:find("LFO", 1, true) then eq((aim_of(chain, d)), -1, "not aimed at another device") end
+  end
 end)
 
 test("modfx: Kumi's undo of a plug-in it added to a sample FX chain refuses once the producer changed its state, and discard deletes it", function()

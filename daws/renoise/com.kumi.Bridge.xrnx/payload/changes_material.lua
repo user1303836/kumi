@@ -478,11 +478,12 @@ function M.content_fence(device, data)
 end
 
 -- A device told apart from another by what it is and how it is set: a state that two reads of a device that nobody touched
--- agree on (its parameters' values, not the preset text, which can be megabytes).
-function M.device_state(device)
+-- agree on (its parameters' values, not the preset text, which can be megabytes). `moving`: the parameters whose values aren't
+-- that, by their numbers: a meta device moves them on its own.
+function M.device_state(device, moving)
   local count = #device.parameters
   local values = {}
-  for k = 1, count do values[k] = format("%.9g|", device:parameter(k).value) end
+  for k = 1, count do values[k] = (moving and moving[k]) and "~|" or format("%.9g|", device:parameter(k).value) end
   return {
     path = device.device_path, display = device.display_name, active = device.is_active, parameters = count,
     state = base.hash(table.concat(values)),
