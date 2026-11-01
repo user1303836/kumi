@@ -1124,7 +1124,7 @@ mod extras {
             done(outcomes, selection(lab).await);
         }
         println!("== edge cases");
-        for name in ["edge changed", "edge copy", "edge alias", "edge group", "edge hidden"] {
+        for name in ["edge changed", "edge copy", "edge alias", "edge group", "edge hidden", "edge later step"] {
             if !wanted(name) {
                 continue;
             }
@@ -1133,7 +1133,8 @@ mod extras {
                 "edge copy" => copy(lab).await,
                 "edge alias" => alias(lab).await,
                 "edge group" => group(lab).await,
-                _ => hidden(lab).await,
+                "edge hidden" => hidden(lab).await,
+                _ => later_step(lab).await,
             };
             done(outcomes, out);
         }
@@ -1349,6 +1350,44 @@ mod extras {
         out.step("refused", said.error && added.is_empty(), short(&said.text, 140));
         out.step("producer's value kept", same(&now, &json!(0.3)), format!("{now}"));
         out.step("edit made", !lab.hooked.armed(), "");
+        out
+    }
+
+    /// #393: the producer clears Kumi's note and types the same one. Renoise's undo and redo of that later step leave the lines
+    /// as Kumi wrote them with nothing left to redo, but it isn't Kumi's step: its undo refuses, and the typed note stays.
+    async fn later_step(lab: &Lab) -> Outcome {
+        let mut out = Outcome::new("edge redo of a later step".into());
+        let Ok(vars) = fresh(lab, "return {t = new_track('K later')}").await else { return out.fail("setup", "") };
+        let write = r#"{"patternRef":"$E:pattern:1","trackRef":"$E:track:$t","lines":[{"line":0,"notes":[{"col":1,"note":"C-4","instrument":0}]}]}"#;
+        let (said, added) = lab.plan(json!([{"tool": "notes_write", "input": input(write, &vars)}])).await;
+        let Some(id) = added.last().map(|row| row.id.clone()) else { return out.fail("apply", short(&said.text, 140)) };
+        let notes = fill_lua("return notes(1, $t, 4)", &vars);
+        let kumis = read(lab, &notes).await;
+        lab.pause().await;
+        let clear = fill_lua("song:pattern(1):track($t):line(1):note_column(1):clear()", &vars);
+        let typed = fill_lua("put(1, $t, 1, 'C-4')", &vars);
+        for edit in [clear, typed] {
+            if let Err(why) = lab.lua(&edit).await {
+                return out.fail("the producer's steps", why);
+            }
+            lab.pause().await;
+        }
+        out.step("reads as Kumi wrote", same(&read(lab, &notes).await, &kumis), "");
+        if let Err(why) = lab.lua("song:undo()").await {
+            return out.fail("daw undo", why);
+        }
+        let undone = lab.wait_state(&id, ChangeState::Undone, TOLD_MS).await;
+        out.step("daw undo told", undone.is_some(), "");
+        lab.pause().await;
+        if let Err(why) = lab.lua("song:redo()").await {
+            return out.fail("daw redo", why);
+        }
+        let unsure = lab.wait_state(&id, ChangeState::Unsure, TOLD_MS).await;
+        let stack = read(lab, "return {song:can_undo(), song:can_redo()}").await;
+        out.step("daw redo unsure", unsure.is_some(), format!("can_undo, can_redo: {stack}"));
+        let refused = lab.undo(&id).await;
+        out.step("refused", refused.error || lab.row(&id).is_some_and(|row| row.state == ChangeState::Kept), short(&refused.text, 100));
+        out.step("typed note kept", same(&read(lab, &notes).await, &kumis), "");
         out
     }
 

@@ -2533,8 +2533,8 @@ test("review MUST 6: Renoise's undo past Kumi's step to an older row insert puts
   eq(bass_column(90, 115), "100:C-4 101:C-4 102:C-4 103:C-4")
 end)
 
--- (#393) Renoise's redo with nothing left to redo after it is a redo of Kumi's step for sure: an undo past it would have left
--- Kumi's step to redo.
+-- (#393) Renoise's redo is of Kumi's step for sure when that step was the newest at the undo and nothing is left to redo after it:
+-- an undo past it would have left Kumi's step to redo.
 test("#393: the producer's redo of Kumi's lines, the newest step: told redone, and Kumi's undo takes them back", function()
   local env, peer = setup(nil, { pattern_lines = 128 })
   local previewed, done = bass_notes(peer, 10, 13, "km6c")
