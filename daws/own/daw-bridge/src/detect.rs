@@ -551,6 +551,8 @@ fn windows_documents() -> Option<PathBuf> {
     struct Guid(u32, u16, u16, [u8; 8]);
     // FOLDERID_Documents: {FDD39AD0-238F-46AF-ADB4-6C85480369C7}.
     const DOCUMENTS: Guid = Guid(0xFDD39AD0, 0x238F, 0x46AF, [0xAD, 0xB4, 0x6C, 0x85, 0x48, 0x03, 0x69, 0xC7]);
+    // KF_FLAG_DONT_VERIFY: where the folder is, whether or not it's there yet. Whoever uses it looks for what's in it.
+    const DONT_VERIFY: u32 = 0x4000;
     #[link(name = "shell32")]
     unsafe extern "system" {
         fn SHGetKnownFolderPath(id: *const Guid, flags: u32, token: *mut c_void, path: *mut *mut u16) -> i32;
@@ -562,7 +564,7 @@ fn windows_documents() -> Option<PathBuf> {
     let mut path: *mut u16 = std::ptr::null_mut();
     // SAFETY: the id and the out pointer live through the call, which sets the pointer to a string it allocates, ended by a
     // zero: it's read up to that zero, and freed as the call asks, whatever the call returned.
-    let result = unsafe { SHGetKnownFolderPath(&DOCUMENTS, 0, std::ptr::null_mut(), &mut path) };
+    let result = unsafe { SHGetKnownFolderPath(&DOCUMENTS, DONT_VERIFY, std::ptr::null_mut(), &mut path) };
     let found = (result == 0 && !path.is_null()).then(|| {
         let length = (0..).take_while(|&at| unsafe { *path.add(at) } != 0).count();
         PathBuf::from(std::ffi::OsString::from_wide(unsafe { std::slice::from_raw_parts(path, length) }))
